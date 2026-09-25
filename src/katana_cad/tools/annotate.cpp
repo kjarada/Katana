@@ -33,9 +33,25 @@ void addAnnotateTools(ToolCatalog& catalog, const Report& report)
         .order = 1,
         .aliases = {"TEXT", "DTEXT", "DT"},
         .shortcut = {},
-        .tip = "Places single-line text: pick the start point, give the height and rotation, "
-               "then type each line; an empty line finishes.",
+        .tip = "Places single-line text: pick the start point (or S, J or P for the style, "
+               "justification and height on paper), give the height and rotation, then type "
+               "each line; an empty line finishes.",
         .make = annotate::makeTextTool,
+    }));
+    // MTEXT's text in one entity. MT and MTEXT alone start the tool; with
+    // arguments they stay the interpreter's MTEXT verb, as TEXT does.
+    report(catalog.add(ToolInfo{
+        .id = "annotate.mtext",
+        .name = "Multiline Text",
+        .category = "Annotate",
+        .group = "Text",
+        .order = 2,
+        .aliases = {"MTEXT", "MT"},
+        .shortcut = {},
+        .tip = "Places one text of several lines, paper-sized in the Standard style unless told "
+               "otherwise: pick the insertion point (or S, J or P), then type each line; an "
+               "empty line finishes.",
+        .make = annotate::makeMultilineTextTool,
     }));
     report(catalog.add(ToolInfo{
         .id = "annotate.dimlinear",

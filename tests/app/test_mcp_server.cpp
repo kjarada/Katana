@@ -398,4 +398,24 @@ TEST_F(McpServer, DimensionStylesAreSetInOneStepAndReadBackAsARecord)
     EXPECT_NE(textOf(info).find("paper=off"), std::string::npos) << textOf(info);
 }
 
+// The line the window's Edit Text sends, sent by an agent: several keys of a
+// text in one TEXTEDIT, its words over two lines, read back by
+// katana_describe_entity with the break written \n.
+TEST_F(McpServer, ATextIsEditedInOneStepAndDescribedWithItsLineBreaks)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands",
+                                 {"TEXTSTYLE NEW Notes paper=3.5", "TEXT 10,20 2.5 old",
+                                  "TEXTEDIT 1 text=\"PIT 12\\nIL 10.50\" style=Notes justify=MC"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    EXPECT_EQ(made["structuredContent"]["status"]["undoSteps"], 3);
+    // Notes is 3.5 mm on paper; at the default 1:1000 that is 3.5 m.
+    const Json described = call("katana_describe_entity", Json{{"id", 1}});
+    EXPECT_NE(textOf(described).find(
+                  "1  Text  layer=0  \"PIT 12\\nIL 10.50\"  height=3.5  style=Notes  justify=MC"),
+              std::string::npos)
+        << textOf(described);
+}
+
 } // namespace

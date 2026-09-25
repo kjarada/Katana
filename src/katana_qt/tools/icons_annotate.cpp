@@ -55,6 +55,17 @@ void paintText(const ToolInk& ink)
     ink.node(4, 21);
 }
 
+void paintMultilineText(const ToolInk& ink)
+{
+    // Text's capital A, smaller, over two lines of text inside the frame of
+    // one block: several lines that are one thing.
+    ink.stroke(rectangle(3, 3, 18, 18), false, 1.1);
+    ink.stroke(polyline({{6, 11}, {9.5, 5}, {13, 11}}), true);
+    ink.line(7.5, 8.8, 11.5, 8.8, true);
+    ink.line(6, 14.5, 18, 14.5, false, 1.4);
+    ink.line(6, 18, 15, 18, false, 1.4);
+}
+
 void paintLinearDimension(const ToolInk& ink)
 {
     // Two points at different heights; the dimension measures only across.
@@ -186,6 +197,8 @@ bool paintAnnotateIcon(std::string_view toolId, const ToolInk& ink)
 {
     if (toolId == "annotate.text") {
         paintText(ink);
+    } else if (toolId == "annotate.mtext") {
+        paintMultilineText(ink);
     } else if (toolId == "annotate.dimlinear") {
         paintLinearDimension(ink);
     } else if (toolId == "annotate.dimaligned") {

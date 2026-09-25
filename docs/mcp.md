@@ -83,7 +83,11 @@ with the verbs the window's managers send (`docs/annotation.md`): `DIMSTYLE
 INFO name` answers one record of every field, the layers that name the style
 and what a dimension of ten reads as, and `DIMSTYLE SET name field value
 [field value ...]` changes several fields as one undo step
-(`McpServer.DimensionStylesAreSetInOneStepAndReadBackAsARecord`).
+(`McpServer.DimensionStylesAreSetInOneStepAndReadBackAsARecord`). A text is
+edited as the window's Edit Text edits it, several keys in one `TEXTEDIT`
+with `\n` for a line break, and `katana_describe_entity` reads it back with
+the break written the same way
+(`McpServer.ATextIsEditedInOneStepAndDescribedWithItsLineBreaks`).
 
 Each tool that runs commands answers with a transcript (`> command`, then what
 it printed and any error or warning) and, to clients of MCP 2025-06-18 or later,

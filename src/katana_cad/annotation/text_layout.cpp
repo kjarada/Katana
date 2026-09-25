@@ -68,6 +68,14 @@ bool isPaperSized(const katana::entity::Model& model, const katana::entity::Text
     return style != nullptr && style->paperHeight > 0.0;
 }
 
+void fitModelHeight(const katana::entity::Model& model, double scale,
+                    katana::entity::TextGeometry& text)
+{
+    if (isPaperSized(model, text)) {
+        text.height = resolveTextStyle(model, text, scale).height;
+    }
+}
+
 Readable readableRotation(double rotation, TextJustify justify)
 {
     const double angle = katana::math::normalizeAngle(rotation);

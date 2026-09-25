@@ -11,6 +11,7 @@
 
 #include "annotation/annotation_managers.hpp"
 #include "annotation/dimension_style_manager.hpp"
+#include "annotation/text_edit_dialog.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/core/text.hpp"
@@ -113,6 +114,7 @@ AnnotationWorkbench::~AnnotationWorkbench()
     // Here, not left to the window's children: the dialogs hold the
     // Document, which goes when the window's members do - before Qt deletes
     // its children (CustomisationWorkbench's destructor says the same).
+    delete textEdit_.data();
     delete dimStyles_.data();
     delete labelStyles_.data();
     delete textStyles_.data();
@@ -144,19 +146,47 @@ TextStyleManagerDialog& AnnotationWorkbench::showTextStyles()
 DimensionStyleManagerDialog& AnnotationWorkbench::showDimensionStyles()
 {
     if (dimStyles_.isNull()) {
-        // Through the runner as it is when a line is run, not as it was when
-        // the dialog was made: the window sets it after building the menus.
-        dimStyles_ = new DimensionStyleManagerDialog(
-            document_,
-            [this](const QString& line) {
-                return run_ ? run_(line)
-                            : VerbOutcome{false, {}, QStringLiteral("no command line to run on")};
-            },
-            &window_);
+        dimStyles_ = new DimensionStyleManagerDialog(document_, lateRunner(), &window_);
         dimStyles_->setModal(false);
     }
     raise(*dimStyles_);
     return *dimStyles_;
+}
+
+CommandRunner AnnotationWorkbench::lateRunner()
+{
+    return [this](const QString& line) {
+        return run_ ? run_(line)
+                    : VerbOutcome{false, {}, QStringLiteral("no command line to run on")};
+    };
+}
+
+QAction* AnnotationWorkbench::addEditTextAction(QMenu& annotateMenu)
+{
+    // Menu letter X: the tools' letters are given as the catalogue fills the
+    // menu, the first letters of words first, and X begins none of their
+    // names (qt_every_shortcut_and_menu_letter_reaches_one_thing_headless).
+    auto* action = new QAction(QStringLiteral("Edit Te&xt..."), &window_);
+    action->setObjectName(QStringLiteral("annotateEditText"));
+    action->setToolTip(QStringLiteral(
+        "Edit the selected text: its words over several lines, style, height on paper, "
+        "justification, rotation and position (TEXTEDIT)"));
+    action->setStatusTip(action->toolTip());
+    action->setData(QStringLiteral("textEditDialog"));
+    QObject::connect(action, &QAction::triggered, &window_, [this] { showTextEdit(); });
+    annotateMenu.addSeparator();
+    annotateMenu.addAction(action);
+    return action;
+}
+
+TextEditDialog& AnnotationWorkbench::showTextEdit()
+{
+    if (textEdit_.isNull()) {
+        textEdit_ = new TextEditDialog(document_, lateRunner(), &window_);
+        textEdit_->setModal(false);
+    }
+    raise(*textEdit_);
+    return *textEdit_;
 }
 
 LabelStyleManagerDialog& AnnotationWorkbench::showLabelStyles()

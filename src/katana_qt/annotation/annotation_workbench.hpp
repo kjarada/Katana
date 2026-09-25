@@ -2,7 +2,8 @@
 
 // The annotation front end in the Format menu (docs/annotation.md, "In the
 // window"): Text Styles..., Label Styles and Rules..., Dimension Styles...,
-// and the plan view's annotation scale on the Format toolbar.
+// the plan view's annotation scale on the Format toolbar, and Annotate >
+// Edit Text....
 //
 // Every one of them is a thin front end over katana_cad and katana_commands:
 // a text style is changed by updateTextStyle, a rule run by
@@ -34,6 +35,7 @@ namespace katana::qt {
 class TextStyleManagerDialog;
 class LabelStyleManagerDialog;
 class DimensionStyleManagerDialog;
+class TextEditDialog;
 
 class AnnotationWorkbench {
   public:
@@ -46,6 +48,12 @@ class AnnotationWorkbench {
     TextStyleManagerDialog& showTextStyles();
     LabelStyleManagerDialog& showLabelStyles();
     DimensionStyleManagerDialog& showDimensionStyles();
+    // Annotate > Edit Text... ("annotateEditText", its data the dialog's name
+    // "textEditDialog"), put at the end of `annotateMenu`: the window fills
+    // that menu with the tools before this workbench exists, so it hands the
+    // menu over here. The dialog edits the one text selected.
+    QAction* addEditTextAction(QMenu& annotateMenu);
+    TextEditDialog& showTextEdit();
     // The Format toolbar's scale box ("annotationScaleCombo").
     [[nodiscard]] QComboBox* scaleBox() const { return scale_; }
 
@@ -60,6 +68,11 @@ class AnnotationWorkbench {
     // The box shows the document's scale; called whenever the document
     // changes, since an undo or an ANNOSCALE typed changes it too.
     void showScale();
+    // What a dialog made here runs its lines through: the runner as it is
+    // when a line is run, not as it was when the dialog was made - the window
+    // sets it after building the menus - and a refusal naming the want of
+    // one without it.
+    [[nodiscard]] CommandRunner lateRunner();
 
     QWidget& window_;
     katana::cad::Document& document_;
@@ -70,6 +83,7 @@ class AnnotationWorkbench {
     QPointer<TextStyleManagerDialog> textStyles_;
     QPointer<LabelStyleManagerDialog> labelStyles_;
     QPointer<DimensionStyleManagerDialog> dimStyles_;
+    QPointer<TextEditDialog> textEdit_;
     CommandRunner run_;
     struct Listener;
     std::unique_ptr<Listener> listener_;
