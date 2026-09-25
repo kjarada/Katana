@@ -426,16 +426,25 @@ Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view l
     return katana::cad::tokenize(line);
 }
 
-CommandInterpreter::ImportArgument CommandInterpreter::importArgument(std::string_view rest)
+Result<CommandInterpreter::ImportArgument> CommandInterpreter::importArgument(std::string_view rest)
 {
-    static constexpr std::string_view kLocal = "LOCAL";
     ImportArgument argument;
     std::string_view text = katana::core::trimmed(rest);
-    if (text.size() > kLocal.size() &&
-        katana::core::equalsIgnoringCase(text.substr(text.size() - kLocal.size()), kLocal) &&
-        katana::core::isAsciiSpace(text[text.size() - kLocal.size() - 1])) {
-        argument.local = true;
-        text = katana::core::trimmed(text.substr(0, text.size() - kLocal.size()));
+    // The last word, after the last blank - unless it holds a quote, when it
+    // is the end of a quoted path ("yard OFFSET=1,2") and names no placement.
+    std::size_t blank = text.size();
+    while (blank > 0 && !katana::core::isAsciiSpace(text[blank - 1])) {
+        --blank;
+    }
+    if (blank > 0 && text.substr(blank).find('"') == std::string_view::npos) {
+        const auto placement = parsePlacementWord(text.substr(blank));
+        if (!placement) {
+            return placement.error();
+        }
+        if (*placement) {
+            argument.placement = **placement;
+            text = katana::core::trimmed(text.substr(0, blank));
+        }
     }
     if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
         text = text.substr(1, text.size() - 2);

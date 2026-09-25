@@ -1256,6 +1256,19 @@ if(TARGET katana)
             "-DFORBID=No importer|Far from|no one to ask"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_local_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ALONGSIDE and OFFSET typed as an agent types them, each moving the
+    # parcels (180,0 to 365,165) as one piece and saying so; a DXF placed
+    # the same way; a raster refusing a placement by name, and a mistyped
+    # offset refused before anything is read.
+    add_test(NAME qt_import_placement_typed_on_the_windows_command_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>RECT 1000,2000 1010,2005|>IMPORT \"${_gis}/parcels.geojson\" ALONGSIDE|>UNDO|>IMPORT ${_gis}/parcels.geojson OFFSET=10,-20.5|>IMPORT \"${PROJECT_SOURCE_DIR}/tests/dxf/data/r2000_site.dxf\" local|>IMPORT ${_gis}/terrain.asc ALONGSIDE|>IMPORT ${_gis}/parcels.geojson OFFSET=ten,0"
+            "-DEXPECT=ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.[\r\n]+Imported [0-9]+ entities from parcels\\.geojson[\r\n]+  extent 1000\\.00,2000\\.00 to 1185\\.00,2165\\.00.*OFFSET: moved as one piece by 10\\.000,-20\\.500\\.[\r\n]+Imported [0-9]+ entities from parcels\\.geojson[\r\n]+  extent 190\\.00,-20\\.50 to 375\\.00,144\\.50.*LOCAL: moved as one piece by [^\r\n]*, so its lower-left corner sits at 0,0\\.[\r\n]+Imported 9 entities from r2000_site\\.dxf.*ALONGSIDE is not supported for rasters and point clouds.*OFFSET= takes the east and north"
+            "-DFORBID=No importer|Far from"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_placement_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # A dialog's line while a tool waits for a point: the CIRCLE is drawn,
     # not taken for the Line's first point, its reply comes back, and the
     # typed points then draw the line as ever - entity 2, from 0,0 to 10,0;
@@ -1272,6 +1285,7 @@ if(TARGET katana)
     set_tests_properties(qt_the_session_verbs_run_on_the_windows_command_line_headless
         qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
         qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless
+        qt_import_placement_typed_on_the_windows_command_line_headless
         qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"

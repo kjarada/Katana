@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "format.hpp"
+#include "import_placement.hpp"
 #include "katana/pointcloud/point_cloud_engine.hpp"
 #include "theme.hpp"
 
@@ -82,9 +83,11 @@ constexpr std::array<std::pair<int, const char*>, 19> kAsprsClasses{{
 
 // ---- vector import --------------------------------------------------------------------------
 
-VectorImportDialog::VectorImportDialog(const interop::SourceDescription& source, QWidget* parent)
+VectorImportDialog::VectorImportDialog(const interop::SourceDescription& source,
+                                       const katana::geometry::Box2& drawing, QWidget* parent)
     : QDialog(parent)
 {
+    setObjectName("vectorImportDialog");
     setWindowTitle("Import Vector Data - " +
                    QString::fromStdWString(source.path.filename().wstring()));
     auto* layout = new QVBoxLayout(this);
@@ -92,6 +95,7 @@ VectorImportDialog::VectorImportDialog(const interop::SourceDescription& source,
 
     auto* form = new QFormLayout();
     sourceLayer_ = new QComboBox(this);
+    sourceLayer_->setObjectName("importSourceLayer");
     // -1 is interop's "every layer", and the one worth defaulting to: a
     // GeoPackage's layers are usually meant to arrive together.
     sourceLayer_->addItem("All layers", -1);
@@ -106,15 +110,21 @@ VectorImportDialog::VectorImportDialog(const interop::SourceDescription& source,
     form->addRow("Source layer:", sourceLayer_);
 
     targetLayer_ = new QLineEdit(this);
+    targetLayer_->setObjectName("importTargetLayer");
     targetLayer_->setPlaceholderText("one Katana layer per source layer");
     targetLayer_->setToolTip("Put every imported entity on this layer. Left empty, each source "
                              "layer - or each DXF layer - becomes a Katana layer of its own.");
     form->addRow("Katana layer:", targetLayer_);
 
     attributes_ = new QCheckBox("Keep feature attributes as entity properties", this);
+    attributes_->setObjectName("importAttributes");
     attributes_->setChecked(interop::VectorImportOptions{}.attributesAsProperties);
     form->addRow(QString(), attributes_);
     layout->addLayout(form);
+    // The file's path is not shown as a line: this dialog's layer and
+    // attribute choices have no IMPORT word, so no line does all it does.
+    placement_ = new ImportPlacementBox(drawing, QString(), this);
+    layout->addWidget(placement_);
     layout->addWidget(okCancel(this, "Import"));
 }
 
