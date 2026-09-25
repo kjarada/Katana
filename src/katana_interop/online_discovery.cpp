@@ -39,6 +39,40 @@ std::string baseOf(const std::string& url)
     return cut == std::string::npos ? url : url.substr(0, cut);
 }
 
+// The URL without the OGC request's own parameters (SERVICE, REQUEST,
+// VERSION and the like) but with everything else: a MapServer's map=, a
+// vendor's own switches, which every request needs. A key parameter stays;
+// the user catalogue's writer moves it to the settings.
+std::string ogcBaseOf(const std::string& url)
+{
+    const std::size_t query = url.find('?');
+    if (query == std::string::npos) {
+        return url;
+    }
+    static const std::set<std::string> kOwn = {"service", "request", "version", "acceptversions",
+                                               "sections", "updatesequence", "acceptformats",
+                                               "layers", "typename", "typenames", "coverage",
+                                               "format", "outputformat"};
+    std::string kept;
+    std::size_t at = query + 1;
+    const std::size_t end = url.find('#', query);
+    const std::string params = url.substr(at, (end == std::string::npos ? url.size() : end) - at);
+    std::size_t start = 0;
+    while (start <= params.size()) {
+        std::size_t stop = params.find('&', start);
+        if (stop == std::string::npos) {
+            stop = params.size();
+        }
+        const std::string pair = params.substr(start, stop - start);
+        const std::string name = lower(pair.substr(0, pair.find('=')));
+        if (!pair.empty() && !kOwn.contains(name)) {
+            kept += (kept.empty() ? "" : "&") + pair;
+        }
+        start = stop + 1;
+    }
+    return kept.empty() ? url.substr(0, query) : url.substr(0, query) + "?" + kept;
+}
+
 std::string hostOf(std::string_view url)
 {
     const std::size_t scheme = url.find("://");
@@ -361,16 +395,16 @@ std::string descriptionUrl(OnlineServiceType type, const std::string& url)
     };
     switch (type) {
     case OnlineServiceType::Wms:
-        return withQuery(base, "SERVICE=WMS&REQUEST=GetCapabilities");
+        return withQuery(ogcBaseOf(url), "SERVICE=WMS&REQUEST=GetCapabilities");
     case OnlineServiceType::Wmts:
         if (lower(base).ends_with(".xml")) {
             return base;
         }
-        return withQuery(base, "SERVICE=WMTS&REQUEST=GetCapabilities&VERSION=1.0.0");
+        return withQuery(ogcBaseOf(url), "SERVICE=WMTS&REQUEST=GetCapabilities&VERSION=1.0.0");
     case OnlineServiceType::Wfs:
-        return withQuery(base, "SERVICE=WFS&REQUEST=GetCapabilities");
+        return withQuery(ogcBaseOf(url), "SERVICE=WFS&REQUEST=GetCapabilities");
     case OnlineServiceType::Wcs:
-        return withQuery(base, "SERVICE=WCS&REQUEST=GetCapabilities&VERSION=1.0.0");
+        return withQuery(ogcBaseOf(url), "SERVICE=WCS&REQUEST=GetCapabilities&VERSION=1.0.0");
     case OnlineServiceType::ArcgisExport:
     case OnlineServiceType::ArcgisExportImage:
     case OnlineServiceType::ArcgisQuery:
@@ -394,7 +428,11 @@ std::string descriptionUrl(OnlineServiceType type, const std::string& url)
 
 std::string customProviderId(std::string_view url)
 {
-    return "custom-" + safeId(hostOf(url), 40);
+    // The host says whose it is; eight hex digits of the address without its
+    // query say which service, so two services of one server are two
+    // providers - one host alone let the second replace the first.
+    return "custom-" + safeId(hostOf(url), 40) + "-" +
+           katana::gis::sha256Hex(baseOf(std::string(url))).substr(0, 8);
 }
 
 Result<OnlineProvider> parseWmsCapabilities(std::string_view xml, const std::string& url)
@@ -417,7 +455,7 @@ Result<OnlineProvider> parseWmsCapabilities(std::string_view xml, const std::str
     service.id = "wms";
     service.title = provider.title + " (WMS)";
     service.type = OnlineServiceType::Wms;
-    service.endpoint = baseOf(url);
+    service.endpoint = ogcBaseOf(url);
     // The GetMap address the service names, which may differ from where its
     // capabilities were found.
     if (const XmlElement* capability = root->child("Capability")) {
@@ -429,7 +467,7 @@ Result<OnlineProvider> parseWmsCapabilities(std::string_view xml, const std::str
                             if (const XmlElement* resource = get->child("OnlineResource")) {
                                 const std::string href = resource->attribute("href");
                                 if (href.starts_with("http")) {
-                                    service.endpoint = baseOf(href);
+                                    service.endpoint = ogcBaseOf(href);
                                 }
                             }
                         }
@@ -521,7 +559,7 @@ Result<OnlineProvider> parseWmtsCapabilities(std::string_view xml, const std::st
     service.id = "wmts";
     service.title = provider.title + " (WMTS)";
     service.type = OnlineServiceType::Wmts;
-    service.endpoint = baseOf(url);
+    service.endpoint = ogcBaseOf(url);
     std::set<std::string> used;
     for (const XmlElement* layerElement : contents->childrenNamed("Layer")) {
         const std::string identifier = layerElement->childText("Identifier");
@@ -628,7 +666,7 @@ Result<OnlineProvider> parseWfsCapabilities(std::string_view xml, const std::str
     service.id = "wfs";
     service.title = provider.title + " (WFS)";
     service.type = OnlineServiceType::Wfs;
-    service.endpoint = baseOf(url);
+    service.endpoint = ogcBaseOf(url);
     std::set<std::string> used;
     if (const XmlElement* list = root->child("FeatureTypeList")) {
         for (const XmlElement* type : list->childrenNamed("FeatureType")) {
@@ -690,7 +728,7 @@ Result<OnlineProvider> parseWcsCapabilities(std::string_view xml, const std::str
     service.id = "wcs";
     service.title = provider.title + " (WCS)";
     service.type = OnlineServiceType::Wcs;
-    service.endpoint = baseOf(url);
+    service.endpoint = ogcBaseOf(url);
     std::set<std::string> used;
     if (const XmlElement* metadata = root->child("ContentMetadata")) {
         for (const XmlElement* brief : metadata->childrenNamed("CoverageOfferingBrief")) {
@@ -778,6 +816,18 @@ Result<OnlineProvider> parseArcgisDescription(std::string_view text, const std::
         layer.kind = OnlineLayerKind::Vector;
         layer.layerName = tail;
         layer.pageSize = pageSize;
+        // The layer's own id field (OBJECTID, FID, OID...), which pages are
+        // ordered and joined by.
+        if (json.contains("objectIdField") && json["objectIdField"].is_string()) {
+            layer.idField = json["objectIdField"].get<std::string>();
+        } else if (json.contains("fields") && json["fields"].is_array()) {
+            for (const Json& field : json["fields"]) {
+                if (field.is_object() && field.value("type", std::string()) == "esriFieldTypeOID") {
+                    layer.idField = field.value("name", std::string());
+                    break;
+                }
+            }
+        }
         applyExtent(layer);
         service.layers.push_back(std::move(layer));
         provider.services.push_back(std::move(service));

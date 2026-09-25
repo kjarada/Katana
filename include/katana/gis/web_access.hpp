@@ -94,6 +94,9 @@ using TransferProgress = std::function<void(std::uint64_t received, std::uint64_
 // any user:password@ removed. For messages and logs; the request itself is
 // sent unredacted.
 [[nodiscard]] std::string redactUrl(std::string_view url);
+// Whether a query parameter of this name holds a secret, by redactUrl's rule
+// (also "api", "subscription-key" and "auth", which services use for keys).
+[[nodiscard]] bool isSecretParameter(std::string_view name);
 
 // Percent-encodes everything outside RFC 3986's unreserved set, for a query
 // parameter's value. A space is %20, never '+', which some servers read

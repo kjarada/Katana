@@ -389,6 +389,15 @@ Result<HttpResponse> httpFetch(const HttpRequest& request, const std::stop_token
     }
 }
 
+bool isSecretParameter(std::string_view name)
+{
+    const std::string folded = katana::core::lowered(name);
+    return folded == "key" || folded == "apikey" || folded == "api_key" || folded == "api" ||
+           folded == "token" || folded == "access_token" || folded == "password" ||
+           folded == "sig" || folded == "signature" || folded == "subscription-key" ||
+           folded == "auth" || folded.ends_with("key") || folded.ends_with("token");
+}
+
 std::string redactUrl(std::string_view url)
 {
     std::string text(url);
@@ -416,10 +425,7 @@ std::string redactUrl(std::string_view url)
         const std::string pair = text.substr(at, end - at);
         const std::size_t equals = pair.find('=');
         const std::string name = katana::core::lowered(pair.substr(0, equals));
-        const bool secret = name == "key" || name == "apikey" || name == "api_key" ||
-                            name == "token" || name == "access_token" || name == "password" ||
-                            name == "sig" || name == "signature" || name.ends_with("key") ||
-                            name.ends_with("token");
+        const bool secret = isSecretParameter(name);
         if (!first) {
             out += '&';
         }

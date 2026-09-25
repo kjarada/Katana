@@ -305,10 +305,17 @@ std::string wfsGetFeatureUrl(const OnlineLayer& layer, const CrsBox& box, const 
 {
     const std::string version = layer.version.empty() ? "2.0.0" : layer.version;
     const bool v2 = version.starts_with("2.");
+    // A swapped (latitude-first) box is named by the URN, which every WFS 2.0
+    // reads in the authority's order; the short EPSG:4326 some servers
+    // (GeoServer) read as longitude first, and the box would land elsewhere.
+    std::string name = crs;
+    if (axisYX && crs.starts_with("EPSG:")) {
+        name = "urn:ogc:def:crs:EPSG::" + crs.substr(5);
+    }
     std::string query = "SERVICE=WFS&VERSION=" + version + "&REQUEST=GetFeature&" +
                         (v2 ? "TYPENAMES=" : "TYPENAME=") + percentEncode(layer.layerName) +
-                        "&SRSNAME=" + percentEncode(crs) + "&BBOX=" + box4(box, axisYX) + "," +
-                        percentEncode(crs);
+                        "&SRSNAME=" + percentEncode(name) + "&BBOX=" + box4(box, axisYX) + "," +
+                        percentEncode(name);
     if (v2) {
         query += "&COUNT=" + std::to_string(count) + "&STARTINDEX=" + std::to_string(startIndex);
     } else {
@@ -341,6 +348,31 @@ std::string nextLink(std::string_view json)
         return {};
     }
     return {};
+}
+
+Result<ItemsPage> readItemsPage(std::string_view json)
+{
+    Json document;
+    try {
+        document = Json::parse(json.begin(), json.end());
+    } catch (const Json::exception& error) {
+        return makeError(ErrorCode::ParseFailure, "the answer is not JSON", error.what());
+    }
+    if (!document.is_object() || !document.contains("features") || !document["features"].is_array()) {
+        return makeError(ErrorCode::ParseFailure, "the answer is not a GeoJSON FeatureCollection");
+    }
+    ItemsPage page;
+    page.features = document["features"].size();
+    if (document.contains("links") && document["links"].is_array()) {
+        for (const Json& link : document["links"]) {
+            if (link.is_object() && link.value("rel", std::string()) == "next" &&
+                link.value("method", std::string("GET")) == "GET") {
+                page.next = link.value("href", std::string());
+                break;
+            }
+        }
+    }
+    return page;
 }
 
 Result<std::uint64_t> countGeoJsonFeatures(std::string_view json)

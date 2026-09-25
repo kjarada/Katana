@@ -13,5 +13,6 @@
   "spatialReference": {
    "wkid": 102100
   }
- }
+ },
+ "objectIdField": "OBJECTID_1"
 }
