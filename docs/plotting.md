@@ -931,6 +931,7 @@ viewport's in the order `preflightChecks()` lists them.
 | `field.empty` | Warning (some Info) | a value the frame prints resolves to nothing: the organisation, a sign-off name, the height datum, the coordinate system... |
 | `logo.missing` | Info | the logo slot is empty |
 | `logo.unreadable` | Warning | the logo named is not in the project or cannot be read |
+| `pagesetup.invalid` | Error | the set's page setup would be refused by a plot: a resolution or line weight scale out of range, or a file-name pattern that cannot be expanded (`validatePageSetup`) |
 | `sheet.duplicate-id` | Error | a sheet has no id, or an earlier sheet's |
 | `sheet.duplicate-name` | Warning | a sheet has an earlier sheet's name, ignoring case and spaces at the ends |
 | `frame.unknown` | Error | the sheet names a frame this build does not have |
@@ -946,6 +947,8 @@ viewport's in the order `preflightChecks()` lists them.
 | `plan.alignment-missing` | Warning | a plan or key plan follows an alignment the drawing does not have |
 | `plan.empty` | Warning | nothing a plan or key plan draws is in its window |
 | `text.too-small` | Warning | drawing text in a plan prints under 1.8 mm at the plan's scale |
+| `grid.invalid` | Error | a plan's coordinate grid cannot be drawn at the window it is drawn at: its lines would be closer than `kGridMinimumSpacingMm` (`planGrid`) |
+| `grid.empty` | Info | a plan's grid interval is wider than its window, so no grid line prints |
 | `section.alignment-missing` | Error | a section has no alignment, or names one the drawing does not have |
 | `section.alignment-invalid` | Error | the alignment cannot be solved |
 | `section.no-stations` | Error | cross sections with no chainage to cut at |
@@ -953,6 +956,8 @@ viewport's in the order `preflightChecks()` lists them.
 | `section.no-surface` | Error | no surface to cut, and for a long section no design profile either |
 | `image.missing` | Error | an image panel names no file, or one the project does not have |
 | `notes.empty` | Info | a notes panel has no text |
+| `legend.empty` | Info | a legend lists nothing: the plans it reads, at its scope, show nothing (`computeLegend`) |
+| `legend.overflow` | Warning | a legend has more entries than fit (`layoutLegend`, the labels measured by Arial's widths) and prints "+N more" |
 | `revisions.empty` | Info | a revision table on a set with no revisions prints its headings alone |
 | `table.overflow` | Warning | a drawing register or revision table has rows that do not fit, laid out as the painter lays it out (`layoutViewportTable`), and prints "+N more" or "+N earlier" |
 | `matchline.dangling` | Warning | a match line or key-plan outline leads to a sheet that no longer exists |
