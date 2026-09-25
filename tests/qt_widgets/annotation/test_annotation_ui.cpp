@@ -101,6 +101,20 @@ int darkPixels(const QImage& image)
     return count;
 }
 
+// Pixels with any visible ink, antialiased edges included: small text is
+// mostly grey edge, and how many of its pixels come out nearly black depends
+// on the platform's fonts (Arial on Windows gave 10 where Linux gave more).
+int inkPixels(const QImage& image)
+{
+    int count = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            count += qGray(image.pixel(x, y)) < 200 ? 1 : 0;
+        }
+    }
+    return count;
+}
+
 Model modelWithStyledText(const char* text, double paperHeight)
 {
     Model model;
@@ -188,6 +202,8 @@ TEST(AnnotationPaint, LabelsArePlacedAndCountedByThePainter)
     point.properties["point"] = std::string("101");
     ASSERT_TRUE(model.entities.add(point).ok());
     const katana::entity::EntityId target = model.entities.nextId() - 1;
+    // The point on its own, for the ink the label adds to it.
+    const int pointInk = inkPixels(paintedOnPaper(model, 500.0, Point2(0, 0)));
     ASSERT_TRUE(model.entities
                     .add(Entity{.geometry = katana::entity::LabelGeometry{
                                     .target = target, .style = "pt", .anchor = Point2(0, 0)}})
@@ -196,7 +212,9 @@ TEST(AnnotationPaint, LabelsArePlacedAndCountedByThePainter)
     const QImage image = paintedOnPaper(model, 500.0, Point2(0, 0), &stats);
     EXPECT_EQ(stats.labelsPlaced, 1u);
     EXPECT_EQ(stats.labelsSuppressed, 0u);
-    EXPECT_GT(darkPixels(image), 10);
+    // "101" at 2.5 mm, 4 px a millimetre: tens of pixels of ink over the
+    // point's own mark, whatever the platform's font.
+    EXPECT_GT(inkPixels(image), pointInk + 20) << "point alone " << pointInk << " px of ink";
 }
 
 TEST(AnnotationManagers, TheTextStyleManagerAppliesAsOneStep)
