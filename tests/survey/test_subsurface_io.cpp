@@ -157,3 +157,140 @@ TEST(SubsurfaceReport, ClearanceAndVerificationReportsNameWhatToDoNext)
     const std::string verification = renderVerificationReport(verifyDetections(*lines));
     EXPECT_NE(verification.find("nothing was verified"), std::string::npos) << verification;
 }
+
+// ---- a schedule in the TfNSW Utility Schema's attribute names ------------------
+
+TEST(SubsurfaceUtilityCsv, ReadsTheTfnswAttributeNames)
+{
+    const auto lines = parseUtilityCsv(
+        "point,easting,northing,surface,AssetIdentifier,AssetTypeCode,AssetFeature,AssetOwner,"
+        "AssetStatus,Size,Configuration,DepthLocation,Depth,QualityLevel,LocateMethod,Notes\n"
+        "1,0,0,,D-1,D,Culvert,Private,Disused,1200 x 900,Single,Top Row Invert,1.5,"
+        "Quality Level A,Potholing,dug 2026/09/20\n"
+        "2,0,5,,D-1,D,Culvert,Private,Disused,1200 x 900,Single,Other,1.4,Unknown,Survey,\n");
+    ASSERT_TRUE(lines.ok()) << lines.error().describe();
+    ASSERT_EQ(lines->size(), 1u);
+    const UtilityLine& culvert = lines->front();
+    EXPECT_EQ(culvert.id, "D-1");
+    EXPECT_EQ(culvert.attributes.type, UtilityType::Stormwater);
+    EXPECT_EQ(culvert.attributes.status, UtilityStatus::Disused);
+    EXPECT_EQ(culvert.attributes.owner, "Private");
+    // 1200 x 900: the larger side, as an inside dimension.
+    EXPECT_DOUBLE_EQ(culvert.attributes.diameter, 1.2);
+    EXPECT_TRUE(culvert.attributes.diameterIsInside);
+    EXPECT_EQ(culvert.attributes.fields.at("AssetFeature"), "Culvert");
+
+    const UtilityVertex& first = culvert.vertices[0];
+    EXPECT_EQ(first.levelReference, LevelReference::Invert);
+    EXPECT_EQ(first.depth, 1.5);
+    EXPECT_FALSE(first.level);
+    EXPECT_EQ(first.claimed, QualityLevel::A);
+    EXPECT_EQ(first.evidence.method, LocationMethod::NonDestructiveExcavation);
+    EXPECT_EQ(first.fields.at("Notes"), "dug 2026/09/20");
+
+    const UtilityVertex& second = culvert.vertices[1];
+    EXPECT_EQ(second.levelReference, LevelReference::Unknown);
+    EXPECT_FALSE(second.claimed); // "Unknown" claims nothing
+    EXPECT_EQ(second.evidence.method, LocationMethod::SurfaceFeature);
+
+    // Cover from a depth alone: to the invert 1.5, less the 1.2 m inside
+    // height, is 0.3 m to the inside top - and says the wall is not in it.
+    // The second vertex's depth is to an unknown point on the culvert.
+    const auto cover = depthOfCover(culvert);
+    ASSERT_TRUE(cover.ok()) << cover.error().describe();
+    ASSERT_TRUE((*cover)[0].cover);
+    EXPECT_NEAR(*(*cover)[0].cover, 0.3, 1e-12);
+    EXPECT_FALSE((*cover)[1].cover);
+    EXPECT_EQ((*cover)[1].note, "the level's place on the service is unknown");
+}
+
+TEST(SubsurfaceUtilityCsv, InsideCoverIsSaidToBeToTheInsideTop)
+{
+    UtilityLine line;
+    line.id = "W";
+    line.attributes.diameter = 0.3;
+    line.attributes.diameterIsInside = true;
+    UtilityVertex a;
+    a.id = "a";
+    a.depth = 1.5;
+    a.levelReference = LevelReference::Invert;
+    a.evidence = {LocationMethod::NonDestructiveExcavation, 0.02, 0.02, true};
+    UtilityVertex b = a;
+    b.id = "b";
+    b.position = {0, 1};
+    line.vertices = {a, b};
+    const auto cover = depthOfCover(line);
+    ASSERT_TRUE(cover.ok());
+    EXPECT_NEAR(*(*cover)[0].cover, 1.2, 1e-12);
+    EXPECT_NE((*cover)[0].note.find("inside top"), std::string::npos) << (*cover)[0].note;
+}
+
+TEST(SubsurfaceUtilityCsv, TheSchemaNamesOfTypesMethodsAndLevelsParse)
+{
+    EXPECT_EQ(parseQualityLevel("Quality Level B"), QualityLevel::B);
+    EXPECT_FALSE(parseQualityLevel("Unknown"));
+    EXPECT_EQ(parseLocationMethod("Electronic Detection"), LocationMethod::ElectromagneticLocation);
+    EXPECT_EQ(parseLocationMethod("Archive Drawings and Plans"), LocationMethod::Records);
+    EXPECT_EQ(parseLocationMethod("Geographic Information System"), LocationMethod::Records);
+    EXPECT_EQ(parseLocationMethod("Unknown"), LocationMethod::Unknown);
+    EXPECT_EQ(maximumQualityLevel(LocationMethod::Unknown), QualityLevel::D);
+    EXPECT_EQ(parseLevelReference("Top of Concrete Encasement"), LevelReference::Top);
+    EXPECT_EQ(parseLevelReference("Plastic Cover Protection Encountered"), LevelReference::Top);
+    EXPECT_EQ(parseLevelReference("Obvert"), LevelReference::Top);
+    EXPECT_EQ(parseLevelReference("Other"), LevelReference::Unknown);
+    EXPECT_EQ(parseUtilityType("Fire Service"), UtilityType::FireService);
+    EXPECT_EQ(parseUtilityType("F"), UtilityType::FireService);
+    EXPECT_EQ(parseUtilityType("ITS"), UtilityType::IntelligentTransport);
+    EXPECT_EQ(parseUtilityType("Petroleum"), UtilityType::Fuel);
+    EXPECT_EQ(parseUtilityType("Not Specified"), UtilityType::Unknown);
+    EXPECT_FALSE(parseUtilityType("X"));
+    EXPECT_EQ(parseUtilityStatus("Disused"), UtilityStatus::Disused);
+}
+
+TEST(SubsurfaceUtilityCsv, AServicesSchemaAttributesMustAgreeAcrossItsRows)
+{
+    const auto lines =
+        parseUtilityCsv("point,easting,northing,method,AssetIdentifier,AssetFeature\n"
+                        "1,0,0,EML,C-1,Pit\n2,0,5,EML,C-1,Pole\n");
+    ASSERT_FALSE(lines.ok());
+    EXPECT_NE(lines.error().message.find("AssetFeature \"Pit\" at line 2 and \"Pole\" here"),
+              std::string::npos)
+        << lines.error().describe();
+    const auto size =
+        parseUtilityCsv("point,easting,northing,method,line,Size\n1,0,0,EML,C,large\n");
+    ASSERT_FALSE(size.ok());
+    EXPECT_NE(size.error().message.find("W x H millimetres"), std::string::npos);
+}
+
+TEST(SubsurfaceReport, AClaimAlongTheWholeAssetIsTestedSegmentBySegment)
+{
+    // Both ends claim and are QL-B; 18 m between them is past the 10 m spacing.
+    auto lines = parseUtilityCsv("line,point,easting,northing,method,h_unc,ql\n"
+                                 "E,1,0,0,GPR,0.2,QL-B\nE,2,18,0,GPR,0.2,QL-B\n");
+    ASSERT_TRUE(lines.ok());
+    const auto report = renderInvestigationReport(*lines);
+    ASSERT_TRUE(report.ok());
+    EXPECT_NE(report->find("E: 18.000 m is claimed better than it grades: 1 -> 2 claimed QL-B, "
+                           "grades QL-C"),
+              std::string::npos)
+        << *report;
+}
+
+TEST(SubsurfaceReport, TheClashSuggestedForADeliverySchema)
+{
+    ClearanceResult result;
+    result.status = ClearanceStatus::Clear;
+    EXPECT_EQ(clashOf(result), Clash::No);
+    result.status = ClearanceStatus::Unconfirmed;
+    EXPECT_EQ(clashOf(result), Clash::Unknown);
+    result.status = ClearanceStatus::WithinTolerance;
+    EXPECT_EQ(clashOf(result), Clash::Soft);
+    result.status = ClearanceStatus::Conflict;
+    result.horizontalGap = 0.1; // apart, but closer than required
+    EXPECT_EQ(clashOf(result), Clash::Soft);
+    result.horizontalGap = -0.2; // overlapping in plan, no levels to separate them
+    EXPECT_EQ(clashOf(result), Clash::Hard);
+    result.verticalGap = 0.1; // overlapping in plan, apart in level
+    EXPECT_EQ(clashOf(result), Clash::Soft);
+    EXPECT_STREQ(toString(Clash::Hard), "Hard");
+}

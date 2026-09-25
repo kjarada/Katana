@@ -1,0 +1,22 @@
+# The same kind of investigation as schedule.csv, with its columns named as the
+# TfNSW Utility Schema and Specification names its attributes, so that it can be
+# both graded (UTILITY REPORT) and checked against the schema (UTILITY CHECK ...
+# SCHEMA <file made by tools/utility_schema_domains.py from your copy>).
+# point, easting, northing, surface, h_unc and v_unc are Katana's own: the schema
+# has no geometry, and a schedule needs it to be graded.
+#
+# Left wrong on purpose, for the check to find:
+#   * E-0001's AssetStatus is "In service", not the listed "In Service";
+#   * W-0001's second point has DateInfoObtained 2026-09-20, not 2026/09/20;
+#   * G-0001 is from the records: no Depth, no UtilityInstallDate - both
+#     mandatory in the schema, and honestly unknown at QL-D;
+#   * the originator columns (TfNSW_ContractOrgCode, TfNSW_ContractOrgName),
+#     which take TfNSW's own organisation codes, are not here at all.
+point,easting,northing,surface,h_unc,v_unc,AssetIdentifier,AssetTypeCode,AssetType,AssetSubtypeCode,AssetSubtype,AssetFeature,AssetOwner,AssetStatus,Capacity,Size,Configuration,Material,Limitation,DepthLocation,Depth,QualityLevel,UtilityInstallDate,SourceofInformation,LocateMethod,DateInfoObtained,Clash,Treatment,tbCoordSys
+W1,334000.000,6250000.000,20.30,0.10,0.35,W-0001,W,Water,POT,Potable,Mains,Private,In Service,Not Applicable,150,Single,DICL - Ductile Iron Cement Lined,None,Top of Pipe,0.95,Quality Level B,1998/06/01,Locator,Electronic Detection,2026/09/20,Unknown,Unknown,GDA2020MGA56
+W2,334008.000,6250000.150,20.25,0.10,0.35,W-0001,W,Water,POT,Potable,Mains,Private,In Service,Not Applicable,150,Single,DICL - Ductile Iron Cement Lined,None,Top of Pipe,1.00,Quality Level B,1998/06/01,Locator,Electronic Detection,2026-09-20,Unknown,Unknown,GDA2020MGA56
+W3,334016.080,6250000.310,20.22,0.02,0.02,W-0001,W,Water,POT,Potable,Mains,Private,In Service,Not Applicable,150,Single,DICL - Ductile Iron Cement Lined,None,Top of Pipe,1.065,Quality Level A,1998/06/01,Locator,Potholing,2026/09/21,Unknown,Unknown,GDA2020MGA56
+E1,334000.000,6250003.000,20.40,0.25,0.45,E-0001,E,Electricity,HV,High Voltage Assets,Conduit (with Cable),Private,In service,11kV,100,2 x 2,PVC - Polyvinylchloride,Concrete Protection Slab,Top of Concrete Encasement,0.70,Quality Level B,2011/02/14,Locator,Ground Penetrating Radar,2026/09/20,Unknown,Unknown,GDA2020MGA56
+E2,334018.000,6250003.100,20.30,0.25,0.45,E-0001,E,Electricity,HV,High Voltage Assets,Conduit (with Cable),Private,In service,11kV,100,2 x 2,PVC - Polyvinylchloride,Concrete Protection Slab,Top of Concrete Encasement,0.75,Quality Level B,2011/02/14,Locator,Ground Penetrating Radar,2026/09/20,Unknown,Unknown,GDA2020MGA56
+G1,334000.000,6250007.000,,,,G-0001,G,Gas,MP,Medium Pressure,Pipe,Private,In Service,210kPa,110,Single,PE - Polyethylene,Trace Wire,Unknown,,Quality Level D,,BYDA,Archive Drawings and Plans,2026/09/19,Unknown,Unknown,GDA2020MGA56
+G2,334040.000,6250007.200,,,,G-0001,G,Gas,MP,Medium Pressure,Pipe,Private,In Service,210kPa,110,Single,PE - Polyethylene,Trace Wire,Unknown,,Quality Level D,,BYDA,Archive Drawings and Plans,2026/09/19,Unknown,Unknown,GDA2020MGA56

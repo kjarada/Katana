@@ -166,6 +166,34 @@ core::Result<std::string> renderInvestigationReport(const std::vector<UtilityLin
             body += "\n";
         }
 
+        // A delivery schema claims one level for a whole asset, so the claim
+        // is tested along it too: a segment between two vertices that both
+        // claim a level is claimed at the weaker of the two.
+        double overClaimedLength = 0.0;
+        std::vector<std::string> overClaimed;
+        for (const GradedSegment& segment : graded->segments) {
+            const auto& from = line.vertices[segment.from].claimed;
+            const auto& to = line.vertices[segment.from + 1].claimed;
+            if (!from || !to || std::min(*from, *to) <= segment.level) {
+                continue;
+            }
+            overClaimedLength += segment.length;
+            if (overClaimed.size() < 3) {
+                overClaimed.push_back(line.vertices[segment.from].id + " -> " +
+                                      line.vertices[segment.from + 1].id + " claimed " +
+                                      toString(std::min(*from, *to)) + ", grades " +
+                                      toString(segment.level));
+            }
+        }
+        if (!overClaimed.empty()) {
+            std::string list;
+            for (const std::string& entry : overClaimed) {
+                list += (list.empty() ? "" : "; ") + entry;
+            }
+            findings.push_back(line.id + ": " + metres(overClaimedLength) +
+                               " m is claimed better than it grades: " + list);
+        }
+
         const std::vector<std::string> missing = missingAttributes(line.attributes);
         if (!missing.empty()) {
             std::string list;
@@ -240,6 +268,24 @@ std::string renderClearanceReport(const DesignAlignment& design,
               metres(requirement.unverifiedMargin) + " m\n";
     report += std::format("Segments: {} conflict, {} unconfirmed, {} within tolerance, {} clear\n",
                           counts[0], counts[1], counts[2], counts[3]);
+    // The worst clash of each service, for a delivery schema's Clash attribute.
+    std::vector<std::pair<std::string, Clash>> clashes;
+    for (const ClearanceResult& result : results) {
+        auto found = std::find_if(clashes.begin(), clashes.end(), [&result](const auto& entry) {
+            return entry.first == result.utilityId;
+        });
+        if (found == clashes.end()) {
+            clashes.emplace_back(result.utilityId, clashOf(result));
+        } else {
+            found->second = std::min(found->second, clashOf(result));
+        }
+    }
+    report += "Suggested Clash attribute:";
+    for (const auto& [service, clash] : clashes) {
+        report +=
+            " " + service + " " + toString(clash) + (&clashes.back().first == &service ? "" : ",");
+    }
+    report += "\n";
     if (order.empty()) {
         return report + "Every segment is clear.\n";
     }

@@ -91,4 +91,21 @@ struct ClearanceResult {
 checkClearance(const DesignAlignment& design, const std::vector<UtilityLine>& utilities,
                const ClearanceRequirement& requirement = {}, const GradingSettings& settings = {});
 
+// The value a delivery schema's Clash attribute should take (TfNSW's is one of
+// No, Hard, Soft, Unknown), worst first. Hard: the service and the works
+// overlap at the drawn position, in plan and, where levels say, in level.
+// Soft: they do not touch but the required clearance is not met, or is met
+// only at the drawn position. Unknown: the service is QL-C or QL-D and near.
+// A SUGGESTION for the attribute, from geometry alone - the schema's clash is
+// the designer's call.
+enum class Clash {
+    Hard,
+    Soft,
+    Unknown,
+    No,
+};
+
+[[nodiscard]] const char* toString(Clash clash); // "Hard", "Soft", "Unknown", "No"
+[[nodiscard]] Clash clashOf(const ClearanceResult& result);
+
 } // namespace katana::survey::subsurface
