@@ -754,8 +754,12 @@ How the harder checks decide:
   - Lines and polylines are clipped against the window itself, not tested by
     their bounding box. A diagonal line whose box covers the window but
     which passes 49.5 m from it is not seen.
-  - A window inside a closed outline or a circle looks at its fill, and
-    counts as showing it.
+  - A window inside a HATCHED closed outline or circle looks at its fill,
+    and counts as showing it. Inside a bare outline - a site boundary, a
+    buffer circle - there is nothing to see, so the plan is empty unless
+    the outline crosses the window.
+  - A dimension is seen by everything it draws (its line, arrows and
+    label, `queryExtents`), not only by the two points it measures.
   - Hidden layers (the view's own and the document's) are left out.
     Alignments count, and so do imagery, point clouds and meshes when the
     caller passes their boxes (`otherContent`).
@@ -848,6 +852,8 @@ is not a whole number of zero or more.
 - After every change to the document, undo and redo included, the checks
   run again once the edits have stopped for 400 ms
   (`SheetChecksDock::schedule`). A drag or a burst of edits costs one run.
+  While the editor is closed, a change only marks the findings out of date;
+  they are checked once it is shown again.
 - **Plot Sheet** and **Plot All** check first. When the sheets being
   plotted have errors, the dock is brought up and the plot's message ends
   "The checks found 1 error on it: the Checks panel lists them". The plot
