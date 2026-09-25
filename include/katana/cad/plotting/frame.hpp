@@ -148,8 +148,10 @@ struct Frame {
 };
 
 // Parses a frame description in the committed format (see the JSON's own
-// "_about"). ParseFailure for text that is not JSON or lacks a required
-// member; InvalidArgument for a size or margin that makes no sheet.
+// "_about"). Besides the measured frame's tokens, a text may name a field as
+// a sheet names it, "REV {revision}", and it is filled like the others.
+// ParseFailure for text that is not JSON or lacks a required member;
+// InvalidArgument for a size or margin that makes no sheet.
 [[nodiscard]] core::Result<Frame> parseFrame(std::string_view json);
 
 // The built-in A3 landscape frame, parsed once on first use from the copy

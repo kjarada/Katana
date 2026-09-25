@@ -14,7 +14,7 @@ namespace katana::cad::plotting {
 
 namespace {
 
-constexpr std::array<std::pair<ViewportKind, std::string_view>, 8> kKindNames{{
+constexpr std::array<std::pair<ViewportKind, std::string_view>, 10> kKindNames{{
     {ViewportKind::Plan, "plan"},
     {ViewportKind::LongSection, "long_section"},
     {ViewportKind::CrossSections, "cross_sections"},
@@ -23,6 +23,8 @@ constexpr std::array<std::pair<ViewportKind, std::string_view>, 8> kKindNames{{
     {ViewportKind::Notes, "notes"},
     {ViewportKind::Image, "image"},
     {ViewportKind::KeyPlan, "key_plan"},
+    {ViewportKind::SheetIndex, "sheet_index"},
+    {ViewportKind::Revisions, "revisions"},
 }};
 
 // The margin all round a sheet with no frame: the single-page plot's default
@@ -254,6 +256,10 @@ std::string automaticTitle(const Viewport& viewport)
         return {};
     case ViewportKind::KeyPlan:
         return "KEY PLAN";
+    case ViewportKind::SheetIndex:
+        return "DRAWING REGISTER";
+    case ViewportKind::Revisions:
+        return "REVISIONS";
     }
     return {};
 }
