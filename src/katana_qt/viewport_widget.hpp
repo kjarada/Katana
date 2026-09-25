@@ -170,9 +170,11 @@ class ViewportWidget final : public QWidget {
     void setGridVisible(bool visible);
     [[nodiscard]] bool gridVisible() const { return gridVisible_; }
     void setSnapEnabled(bool enabled);
-    [[nodiscard]] bool snapEnabled() const { return snapEnabled_; }
+    // The snaps are the document's drafting settings (Document::drafting),
+    // shared by every view and the SNAP verb.
+    [[nodiscard]] bool snapEnabled() const { return document_.drafting().snapEnabled; }
     void setSnapModes(katana::cad::SnapModes modes);
-    [[nodiscard]] katana::cad::SnapModes snapModes() const { return snapModes_; }
+    [[nodiscard]] katana::cad::SnapModes snapModes() const { return document_.drafting().snapModes; }
 
     // Esc: clears typed input first; then ends the running tool (keeping the
     // work tools::escapeKeepsWork says Esc keeps); with no tool running,
@@ -378,8 +380,6 @@ class ViewportWidget final : public QWidget {
     QString trackingLabel_;
 
     bool gridVisible_ = true;
-    bool snapEnabled_ = true;
-    katana::cad::SnapModes snapModes_ = katana::cad::kDefaultSnapModes;
 
     katana::interop::ReferenceData* reference_ = nullptr;
     const std::vector<katana::cad::SceneMesh>* meshes_ = nullptr;

@@ -34,6 +34,7 @@
 #include "tools/tool_menus.hpp"
 #include "sheet_editor.hpp"
 #include "view_workspace.hpp"
+#include "drawing/drawing_ui.hpp"
 
 class QAction;
 class QActionGroup;
@@ -412,6 +413,8 @@ class MainWindow final : public QMainWindow {
     tools::ToolActions toolActions_;
     QAction* selectAction_ = nullptr;
     QMenu* viewMenu_ = nullptr;
+    // The drawing system's dock and drafting toggles (drawing/drawing_ui.hpp).
+    drawing::DrawingUi drawingUi_;
     // The four panels, by the fixed object names a saved layout keys them on:
     // LayersDock, PropertiesDock, CommandLineDock, ReferenceDataDock.
     QDockWidget* layerDock_ = nullptr;

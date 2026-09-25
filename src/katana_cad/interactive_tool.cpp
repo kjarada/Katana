@@ -306,6 +306,7 @@ const BuiltCatalog& builtCatalog()
         tools::addModifyLengthTools(out.catalog, report);
         tools::addPropertyTools(out.catalog, report);
         tools::addSelectTools(out.catalog, report);
+        tools::addModifyVertexTools(out.catalog, report);
         return out;
     }();
     return built;

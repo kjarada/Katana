@@ -111,13 +111,39 @@ cmd::CommandPtr editPolylines(std::vector<EntityId> ids, std::string name, Polyl
         });
 }
 
+cmd::CommandPtr editEachPolyline(std::vector<EntityId> ids, std::string name, PolylineEditOf edit)
+{
+    return std::make_unique<cmd::ChangeSetCommand>(
+        std::move(name),
+        [ids = std::move(ids), edit = std::move(edit)](
+            const cmd::CommandContext& context) -> Result<cmd::ChangeSet> {
+            cmd::ChangeSet changes;
+            for (const EntityId id : ids) {
+                auto entity = applyEdit(context, id, [&](const CurvePolyline2& polyline) {
+                    return edit(context.model, id, polyline);
+                });
+                if (!entity) {
+                    return entity.error();
+                }
+                changes.modify.push_back(std::move(*entity));
+            }
+            return changes;
+        });
+}
+
 std::vector<bool> verticesOnSurveyPoints(const Document& document, const CurvePolyline2& polyline,
                                          double tolerance)
+{
+    return verticesOnSurveyPoints(document.model(), polyline, tolerance);
+}
+
+std::vector<bool> verticesOnSurveyPoints(const katana::entity::Model& model,
+                                         const CurvePolyline2& polyline, double tolerance)
 {
     std::vector<bool> keep(polyline.vertices.size(), false);
     const std::string property = SurveyImportOptions{}.pointNumberProperty;
     std::vector<Point2> marks;
-    document.model().entities.forEach([&](const Entity& entity) {
+    model.entities.forEach([&](const Entity& entity) {
         const auto* point = std::get_if<katana::entity::PointGeometry>(&entity.geometry);
         if (point != nullptr && entity.properties.contains(property)) {
             marks.push_back(point->position);

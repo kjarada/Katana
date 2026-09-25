@@ -196,3 +196,85 @@ within 25 apertures of the cursor, since what they find lies away from the
 geometry that produces it; Extension and Parallel are "somewhere along a
 line" snaps and so rank after Nearest - an endpoint beats them however close
 they are.
+
+## The Vertices tools (Draw > Vertices)
+
+Eighteen catalogue tools in one family (`src/katana_cad/tools/modify_vertex.cpp`,
+registered in `families.hpp` as `addModifyVertexTools`), each named
+"Vertices, <tool>" so the menus gather them into a Vertices submenu of the
+Draw menu (`toolFamily.Draw.Vertices`) and the Draw toolbar into one
+drop-down button. The Vertices panel's toggle is in View > Panels.
+
+| Tool (id, aliases) | Steps | Command |
+|---|---|---|
+| Insert Vertex (`draw.vertex.insert`, `INSERTVERTEX`) | pick the polyline, the new vertex (on an arc it stays on the arc) | `VERTEX_INSERT` |
+| Delete Vertex (`draw.vertex.delete`, `DELETEVERTEX`) | pick the polyline near the vertex | `VERTEX_DELETE` |
+| Move Vertex (`draw.vertex.move`, `MOVEVERTEX`) | pick near the vertex, then a point; `@dx,dy` is from the vertex | `VERTEX_MOVE` |
+| Edit Vertices (`draw.vertex.edit`, `EDITVERTICES`, `VERTEX`) | pick the polyline; it is selected and the Vertices panel opens | - |
+| Straighten (`draw.vertex.straighten`, `STRAIGHTEN`) | pick at one vertex to keep, then the other | `STRAIGHTEN` |
+| Weed (`draw.vertex.weed`, `WEED`, `SIMPLIFY`) | select, the tolerance, keep survey-point vertices Yes/No | `WEED` |
+| Densify (`draw.vertex.densify`, `DENSIFY`) | select, the interval, the chord tolerance for arcs (0 keeps them) | `DENSIFY` |
+| Close or Open (`draw.vertex.close`, `CLOSEOPEN`) | select; each open one closes, each closed one opens | `CLOSE_OPEN` |
+| Change Start Vertex (`draw.vertex.start`, `STARTVERTEX`) | pick a closed polyline at its new start | `START_VERTEX` |
+| Set Vertex Height (`draw.vertex.height`, `VERTEXZ`) | pick near the vertex, the height or None | `VERTEX_Z` |
+| Interpolate Heights (`draw.vertex.interpolate`, `INTERPOLATEZ`) | select | `INTERPOLATE_Z` |
+| Grade Between Vertices (`draw.vertex.grade`, `GRADE`) | pick at one vertex, then the other | `GRADE` |
+| Segment to Arc (`draw.vertex.arc`, `SEGMENTARC`) | pick the segment, a point the arc passes through | `SEGMENT_ARC` |
+| Segment to Line (`draw.vertex.line`, `SEGMENTLINE`) | pick the arc segment | `SEGMENT_LINE` |
+| Fillet Vertex (`draw.vertex.fillet`, `FILLETVERTEX`) | pick the corner, the radius | `FILLET_VERTEX` |
+| Chamfer Vertex (`draw.vertex.chamfer`, `CHAMFERVERTEX`) | pick the corner, two distances | `CHAMFER_VERTEX` |
+| Merge Near Vertices (`draw.vertex.merge`, `MERGEVERTICES`) | select, the tolerance | `MERGE_VERTICES` |
+| Snap Vertices to Grid (`draw.vertex.grid`, `SNAPVERTICES`) | select, the spacing | `SNAP_VERTICES` |
+
+**One state machine, eighteen scripts.** Each tool is a list of steps - pick
+a polyline, pick a point, type a value, select polylines - and a finish that
+builds its ONE command through `cad::editPolyline` over the arithmetic of
+`polyline_vertices.hpp`. So a tool only collects arguments; what an edit
+does is the same whether it comes from a tool, a grip, the panel or a verb.
+A finish that would fail (a radius that does not fit) is refused and the
+tool steps back to that input, keeping the picks before it. Tools that act
+on one pick restart for the next, as Point and Circle do; tools that act
+on a selection take the selection they were started on, and then Enter
+applies them. The values they ask for are remembered for the next use, as a
+CAD program keeps the last fillet radius. A vertex is picked by picking the
+polyline near it (the view picks the entity; the tool takes the nearest
+vertex or segment to the pick), so a pick never needs to land exactly on
+the vertex.
+
+**Weed keeps survey points.** With Yes, a vertex on which a survey point
+sits (a point entity with the survey import's point-number property, within
+0.1 mm) is never weeded: a string's shots are its data.
+
+Icons: `src/katana_qt/tools/icons_drawing.cpp`, one picture - a
+three-vertex polyline - with what each tool does to it in the accent.
+
+Tested in `tests/cad/tools/test_modify_vertex.cpp`, each tool driven as a
+user drives it.
+
+## The Vertices panel
+
+A dock ("VerticesDock", hidden until asked for) holding
+`src/katana_qt/drawing/vertex_panel.*`: the first polyline in the selection
+as a table - index, easting, northing, height, bulge, and the bearing
+(whole-circle, D°MM'SS") and chord distance of the segment that starts at
+each vertex - that follows the selection and the drawing live. Typing into
+a cell is ONE undoable `VERTEX_SET`: a coordinate moves the vertex, a height
+sets it (empty clears it), a bulge reshapes the segment, and a bearing or a
+distance moves the NEXT vertex so that the segment has it, as a traverse
+table is edited. A value that does not parse changes nothing, puts the cell
+back and says why in the panel's title. Insert After and Delete act on the
+current row.
+
+The rows and the cell edits are headless (`include/katana/cad/drawing/vertex_table.hpp`),
+shared with the VERTEX verbs; the distance column is the CHORD's, so a
+distance typed back into an arc segment gives the arc that chord, not a
+longer arc. The dock is made with the drafting toolbar by
+`drawing::installDrawingUi` (`src/katana_qt/drawing/drawing_ui.hpp`), a
+few lines in the window: Ortho (F8), Polar (F10), Tracking (F11), Bearings,
+and toggles for the snaps the drawing system added, each bound to the
+document's drafting settings and re-read on `DocumentChange::Drafting`, so a
+verb that changes a setting checks its button. Edit Vertices shows the dock
+when it starts.
+
+Tested in `tests/cad/drawing/test_vertex_table.cpp` and
+`tests/qt_widgets/drawing/test_vertex_panel.cpp`.
