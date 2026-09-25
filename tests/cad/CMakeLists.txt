@@ -9,6 +9,8 @@ file(GLOB _cad_plotting_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plo
 file(GLOB _cad_survey_job_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test_survey_job*.cpp")
 # The annotation system's tests (docs/annotation.md), globbed as its sources are.
 file(GLOB _cad_annotation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp")
+# The drawing system's tests (docs/drawing.md), globbed as its sources are.
+file(GLOB _cad_drawing_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp")
 
 katana_add_test_suite(cad
     LIBS katana_cad
@@ -18,6 +20,7 @@ katana_add_test_suite(cad
         ${_cad_plotting_tests}
         ${_cad_survey_job_tests}
         ${_cad_annotation_tests}
+        ${_cad_drawing_tests}
 )
 # The Modify > Edit family's tests reach its internal header
 # (tools/modify_edit_support.hpp: EditSession, drawable) the way the family's
