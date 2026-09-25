@@ -117,6 +117,25 @@ std::vector<std::string_view> splitLines(std::string_view text)
     return lines;
 }
 
+std::string unescapeTyped(std::string_view text)
+{
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char next = i + 1 < text.size() ? text[i + 1] : '\0';
+        if (text[i] == '\\' && next == 'n') {
+            out += '\n';
+            ++i;
+        } else if (text[i] == '\\' && next == '\\') {
+            out += '\\';
+            ++i;
+        } else {
+            out += text[i];
+        }
+    }
+    return out;
+}
+
 std::string formatExactReal(double value)
 {
     // 24 is enough for the longest shortest-round-trip double,

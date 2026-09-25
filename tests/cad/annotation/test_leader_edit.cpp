@@ -5,7 +5,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,7 +17,10 @@
 
 using namespace katana::cad;
 using namespace katana::entity;
+using katana::geometry::Arc2;
+using katana::geometry::Circle2;
 using katana::geometry::Point2;
+using katana::geometry::Polyline2;
 using katana::geometry::Segment2;
 namespace ann = katana::cad::annotation;
 namespace cmd = katana::commands;
@@ -151,6 +156,182 @@ TEST(LeaderEdit, APlaceForALeaderIsOnTheEntityOrThereIsNone)
     EXPECT_FALSE(
         ann::leaderPlaceOn(*document.model().entities.find(dimension), 0.25 * katana::math::kPi))
         << "a dimension is annotation, not something to point at";
+
+    // Halfway along an open polyline: (0,0)-(30,0)-(30,40) is 70 long, so 35
+    // along is 5 into segment 1 (40 long), a fraction 5/40 = 0.125: (30,5).
+    const EntityId pipe = add(document, Polyline2{{Point2(0, 0), Point2(30, 0), Point2(30, 40)}});
+    const auto onPipe = ann::leaderPlaceOn(*document.model().entities.find(pipe), 0.0);
+    ASSERT_TRUE(onPipe);
+    EXPECT_EQ(onPipe->point, Point2(30, 5));
+    EXPECT_EQ(onPipe->ref.index, 1u);
+    EXPECT_EQ(onPipe->ref.parameter, 0.125);
+    // An arc's middle: a quarter circle of radius 10 from 0 to 90 degrees is
+    // at 45 degrees, half way along it.
+    const EntityId bend = add(document, Arc2{Point2(0, 0), 10.0, 0.0, 0.5 * katana::math::kPi});
+    const auto onBend = ann::leaderPlaceOn(*document.model().entities.find(bend), 0.0);
+    ASSERT_TRUE(onBend);
+    EXPECT_EQ(onBend->ref.parameter, 0.5);
+    EXPECT_NEAR(onBend->point.x, 10.0 * std::cos(0.25 * katana::math::kPi), 1e-12);
+    EXPECT_NEAR(onBend->point.y, 10.0 * std::sin(0.25 * katana::math::kPi), 1e-12);
+}
+
+TEST(LeaderEdit, APieceWithinTheGeometricToleranceHasNoAlongForLeaderFor)
+{
+    // (0,0)-(1,0)-(1+5e-8,0)-(2+5e-8,0): the half, 1 + 2.5e-8, falls in the
+    // 5e-8 piece, below math::tolerance::kGeometric (1e-6) - no direction,
+    // so no along, as for nearestAnchor. The tip goes to the next piece's
+    // start instead, within 5e-8 of the half.
+    Document document;
+    const double tiny = 5e-8;
+    const EntityId line =
+        add(document,
+            Polyline2{{Point2(0, 0), Point2(1, 0), Point2(1 + tiny, 0), Point2(2 + tiny, 0)}});
+    const auto place = ann::leaderPlaceOn(*document.model().entities.find(line), 0.0);
+    ASSERT_TRUE(place);
+    EXPECT_EQ(place->ref.index, 2u);
+    EXPECT_EQ(place->ref.parameter, 0.0);
+    // Nothing of any length - which the model will not hold, but a caller
+    // may still hand over - is no place at all.
+    Entity dot;
+    dot.id = 99;
+    dot.geometry = Polyline2{{Point2(1, 1), Point2(1, 1)}};
+    EXPECT_FALSE(ann::leaderPlaceOn(dot, 0.0));
+}
+
+TEST(LeaderEdit, LeadersForRefusesNoTargetsAndALengthAngleOrScaleThatIsNoSize)
+{
+    Document document;
+    const EntityId a = add(document, PointGeometry{Point2(0, 0)});
+    ann::LeadersForOptions options;
+    const auto code = [&](std::vector<EntityId> ids, const ann::LeadersForOptions& with,
+                          double scale) {
+        const auto made = ann::leadersFor(document.model(), std::move(ids), with, scale, {});
+        // No code when it was made (ErrorCode{} is InvalidArgument itself).
+        return made.ok() ? std::optional<katana::core::ErrorCode>{} : made.error().code;
+    };
+    EXPECT_EQ(code({}, options, 1000.0), katana::core::ErrorCode::InvalidArgument);
+    for (const double bad : {0.0, -1.0, std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::quiet_NaN()}) {
+        ann::LeadersForOptions length = options;
+        length.length = bad;
+        EXPECT_EQ(code({a}, length, 1000.0), katana::core::ErrorCode::InvalidArgument) << bad;
+    }
+    for (const double bad :
+         {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+        ann::LeadersForOptions angle = options;
+        angle.angle = bad;
+        EXPECT_EQ(code({a}, angle, 1000.0), katana::core::ErrorCode::InvalidArgument) << bad;
+    }
+    EXPECT_EQ(code({a}, options, 0.0), katana::core::ErrorCode::InvalidArgument);
+    EXPECT_EQ(code({a}, options, -1.0), katana::core::ErrorCode::InvalidArgument);
+    EXPECT_EQ(code({a, 999999}, options, 1000.0), katana::core::ErrorCode::NotFound);
+    EXPECT_EQ(code({a}, options, 1000.0), std::nullopt) << "the premise: it can";
+}
+
+TEST(LeaderEdit, AligningRefusesWhatCannotBeAColumnAndIsNoCommandWhenNothingMoves)
+{
+    Document document;
+    const EntityId pit = add(document, PointGeometry{Point2(0, 0)});
+    const EntityId a =
+        add(document, LeaderGeometry{.vertices = {Point2(0, 0), Point2(20, 30)}, .text = "A"});
+    const EntityId b =
+        add(document, LeaderGeometry{.vertices = {Point2(5, 0), Point2(20, 10)}, .text = "B"});
+    const auto code = [&](std::vector<EntityId> ids, std::optional<double> x,
+                          std::optional<double> spacing) {
+        const auto aligned = ann::alignLeaders(document.model(), std::move(ids), x, spacing);
+        return aligned.ok() ? std::optional<katana::core::ErrorCode>{} : aligned.error().code;
+    };
+    EXPECT_EQ(code({}, std::nullopt, std::nullopt), katana::core::ErrorCode::InvalidArgument);
+    EXPECT_EQ(code({pit}, std::nullopt, std::nullopt), katana::core::ErrorCode::InvalidArgument);
+    for (const double bad : {0.0, -1.0, std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::quiet_NaN()}) {
+        EXPECT_EQ(code({a, b}, std::nullopt, bad), katana::core::ErrorCode::InvalidArgument) << bad;
+    }
+    for (const double bad :
+         {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+        EXPECT_EQ(code({a, b}, bad, std::nullopt), katana::core::ErrorCode::InvalidArgument) << bad;
+    }
+    // Finite, yet the lowest of three notes would be stacked past any
+    // number: 30 - 2 x DBL_MAX overflows to minus infinity.
+    const EntityId c =
+        add(document, LeaderGeometry{.vertices = {Point2(9, 0), Point2(20, 20)}, .text = "C"});
+    EXPECT_EQ(code({a, b, c}, std::nullopt, std::numeric_limits<double>::max()),
+              katana::core::ErrorCode::InvalidArgument);
+    // Both already hang at x = 20 and x= keeps each one's height: no command.
+    const auto still = ann::alignLeaders(document.model(), {a, b}, 20.0, std::nullopt);
+    ASSERT_TRUE(still.ok());
+    EXPECT_EQ(still->command, nullptr);
+    EXPECT_EQ(still->count, 2u);
+}
+
+TEST(LeaderEdit, ABalloonAtTheLargestNumberRefusesTheNextRatherThanWrapping)
+{
+    constexpr long long largest = std::numeric_limits<long long>::max();
+    Document document;
+    const EntityId a = add(document, PointGeometry{Point2(0, 0)});
+    const EntityId b = add(document, PointGeometry{Point2(10, 0)});
+    const std::vector<ann::AnchoredPoint> points{ann::AnchoredPoint{Point2(0, 0), AnchorRef{a}},
+                                                 ann::AnchoredPoint{Point2(5, 5), {}}};
+    ann::LeadersForOptions balloons;
+    balloons.balloon = true;
+
+    // One short of the largest: one more fits, two do not.
+    add(document, LeaderGeometry{.vertices = {Point2(50, 0), Point2(55, 5)},
+                                 .text = std::to_string(largest - 1),
+                                 .callout = CalloutShape::Circle});
+    EXPECT_EQ(*ann::nextBalloonNumber(document.model()), largest);
+    auto one = ann::leadersFor(document.model(), {a}, balloons, 1000.0, {});
+    ASSERT_TRUE(one.ok()) << one.error().describe();
+    EXPECT_FALSE(ann::leadersFor(document.model(), {a, b}, balloons, 1000.0, {}).ok());
+    ASSERT_TRUE(document.execute(std::move(one->command)).ok());
+    EXPECT_EQ(leaderOf(document, document.lastCreatedEntities().front()).text,
+              std::to_string(largest));
+
+    // At the largest there is no next: refused, not wrapped to a negative.
+    EXPECT_FALSE(ann::nextBalloonNumber(document.model()).ok());
+    EXPECT_FALSE(ann::newLeader(document.model(), points, {}, true).ok());
+    EXPECT_FALSE(ann::leadersFor(document.model(), {a}, balloons, 1000.0, {}).ok());
+    // A balloon given its note is not numbered, so is made.
+    ann::LeaderChange noted;
+    noted.note = ann::LeaderNote{ann::LeaderNote::Kind::Text, "A"};
+    EXPECT_TRUE(ann::newLeader(document.model(), points, noted, true).ok());
+    // Numbered again from 1, there is a next once more.
+    auto renumbering = ann::renumberBalloons(document.model(), 1, ann::BalloonOrder::Id);
+    ASSERT_TRUE(document.execute(std::move(renumbering.command)).ok());
+    EXPECT_EQ(*ann::nextBalloonNumber(document.model()), 3);
+}
+
+TEST(LeaderEdit, ATipPutOnALotGoesInsideItWhenItIsInside)
+{
+    Document document;
+    // A 10 x 10 lot: inside, the tip points into it - its middle (5,5);
+    // outside, it goes to the nearest place on it, (10,5) half way up the
+    // east side (segment 1).
+    const EntityId lot = add(
+        document, Polyline2{{Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(0, 10)}, true});
+    const Entity& outline = *document.model().entities.find(lot);
+    const auto in = ann::tipPlaceOn(outline, Point2(3, 4));
+    ASSERT_TRUE(in);
+    EXPECT_EQ(in->ref.point, AnchorPoint::Inside);
+    EXPECT_EQ(in->point, Point2(5, 5));
+    const auto out = ann::tipPlaceOn(outline, Point2(14, 5));
+    ASSERT_TRUE(out);
+    EXPECT_EQ(out->ref.point, AnchorPoint::Along);
+    EXPECT_EQ(out->ref.index, 1u);
+    EXPECT_EQ(out->point, Point2(10, 5));
+    // A circle's inside is its centre; an open line has none.
+    const EntityId ring = add(document, Circle2{Point2(20, 20), 4.0});
+    EXPECT_EQ(ann::tipPlaceOn(*document.model().entities.find(ring), Point2(21, 21))->point,
+              Point2(20, 20));
+    const EntityId open = add(document, Polyline2{{Point2(0, 0), Point2(10, 0), Point2(10, 10)}});
+    EXPECT_EQ(ann::tipPlaceOn(*document.model().entities.find(open), Point2(8, 2))->ref.point,
+              AnchorPoint::Along);
+    // A dimension offers no place.
+    DimensionGeometry measured;
+    measured.start = Point2(0, 0);
+    measured.end = Point2(10, 0);
+    const EntityId dimension = add(document, measured);
+    EXPECT_FALSE(ann::tipPlaceOn(*document.model().entities.find(dimension), Point2(5, 1)));
 }
 
 TEST(LeaderEdit, ALabelStyleLendsItsLookUnlessTheChangeGivesOne)
@@ -243,7 +424,7 @@ TEST(LeaderEdit, ANumberedBalloonIsACircleSoItsNumberIsCounted)
     ASSERT_TRUE(first.ok());
     EXPECT_EQ(first->text, "1");
     add(document, *first);
-    EXPECT_EQ(ann::nextBalloonNumber(document.model()), 2);
+    EXPECT_EQ(*ann::nextBalloonNumber(document.model()), 2);
 }
 
 TEST(LeaderEdit, AttachingATipWhereItIsIsNoCommand)

@@ -696,6 +696,39 @@ TEST(LeaderManager, AttachToSelectedPutsTheTipOnTheEntityAndAlongMovesIt)
     EXPECT_EQ(d.leader(leader).tipRef.parameter, 0.75);
 }
 
+TEST(LeaderManager, AttachingATipThatIsInsideALotPointsIntoIt)
+{
+    Drawing d;
+    // A 10 x 10 lot, and a plain leader whose tip (3,4) is inside it: it
+    // goes to the lot's inside, its middle (5,5), as LEADER FOR points into
+    // a lot; one whose tip is outside goes to the nearest place on it.
+    const EntityId lot = d.run("PLINE 0,0 10,0 10,10 0,10 C");
+    const EntityId in = d.run("LEADER 3,4 20,20 text=IN");
+    const EntityId out = d.run("LEADER 14,5 20,5 text=OUT");
+    ASSERT_TRUE(
+        std::get<katana::geometry::Polyline2>(d.document.model().entities.find(lot)->geometry)
+            .closed)
+        << "the premise: a closed lot";
+    LeaderManagerDialog dialog(d.document);
+    d.run("SELECT " + std::to_string(in) + " " + std::to_string(lot));
+    processEvents();
+    ASSERT_EQ(dialog.currentLeader(), in);
+    ASSERT_TRUE(dialog.attachToSelected()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.leader(in).tipRef.entity, lot);
+    EXPECT_EQ(d.leader(in).tipRef.point, katana::entity::AnchorPoint::Inside);
+    EXPECT_EQ(d.leader(in).vertices.front(), Point2(5, 5));
+    processEvents();
+    EXPECT_TRUE(child<QLabel>(dialog, "leaderTarget")->text().endsWith(QStringLiteral("inside it")))
+        << child<QLabel>(dialog, "leaderTarget")->text().toStdString();
+
+    d.run("SELECT " + std::to_string(out) + " " + std::to_string(lot));
+    processEvents();
+    ASSERT_EQ(dialog.currentLeader(), out);
+    ASSERT_TRUE(dialog.attachToSelected()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.leader(out).tipRef.point, katana::entity::AnchorPoint::Along);
+    EXPECT_EQ(d.leader(out).vertices.front(), Point2(10, 5)) << "half way up the east side";
+}
+
 TEST(LeaderManager, AnAttributeIsSetOnTheEntityThroughItsLeader)
 {
     Drawing d;

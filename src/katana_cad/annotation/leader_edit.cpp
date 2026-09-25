@@ -4,11 +4,13 @@
 #include <charconv>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <utility>
 
 #include "katana/cad/survey_coding.hpp"
 #include "katana/commands/change_set.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/annotation.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -107,7 +109,10 @@ std::optional<AnchorRef> naturalAnchor(const Entity& entity, double angle)
         double before = 0.0;
         for (std::size_t i = 0; i + 1 < v.size(); ++i) {
             const double length = v[i].distanceTo(v[i + 1]);
-            if (length > 0.0 && (before + length >= half || i + 2 == v.size())) {
+            // A piece within the geometric tolerance has no "along", as for
+            // nearestAnchor: the half landing in one goes to the next piece.
+            if (!polyline->segment(i).isDegenerate() &&
+                (before + length >= half || i + 2 == v.size())) {
                 ref.index = static_cast<std::uint32_t>(i);
                 ref.parameter = std::clamp((half - before) / length, 0.0, 1.0);
                 return ref;
@@ -283,7 +288,13 @@ Result<LeaderGeometry> newLeader(const Model& model, const std::vector<AnchoredP
     }
     if (balloon) {
         leader.callout = katana::entity::CalloutShape::Circle;
-        leader.text = std::to_string(nextBalloonNumber(model));
+        if (!change.note) {
+            auto number = nextBalloonNumber(model);
+            if (!number) {
+                return number.error();
+            }
+            leader.text = std::to_string(*number);
+        }
     }
     LeaderChange rest = change;
     rest.tip.reset(); // the points are the leader's already
@@ -434,7 +445,23 @@ Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
         return status.error();
     }
     const bool numbered = options.balloon && !options.change.note;
-    long long number = options.balloon ? nextBalloonNumber(model) : 0;
+    long long first = 0;
+    if (numbered) {
+        auto next = nextBalloonNumber(model);
+        if (!next) {
+            return next.error();
+        }
+        first = *next;
+        // Each target may take a number: the last must still be one.
+        if (!targets.empty() &&
+            static_cast<unsigned long long>(targets.size() - 1) >
+                static_cast<unsigned long long>(std::numeric_limits<long long>::max() - first)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "the balloons would be numbered past the largest number there is: "
+                             "BALLOON RENUMBER first",
+                             "from=" + std::to_string(first));
+        }
+    }
     LeadersFor result;
     ChangeSet changes;
     for (const EntityId id : targets) {
@@ -466,7 +493,10 @@ Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
         change.tip.reset();
         change.hang.reset();
         if (numbered) {
-            change.note = LeaderNote{LeaderNote::Kind::Text, std::to_string(number)};
+            // On from the first, by the balloons made so far.
+            change.note =
+                LeaderNote{LeaderNote::Kind::Text,
+                           std::to_string(first + static_cast<long long>(changes.add.size()))};
         }
         if (auto status = applyLeaderChange(model, change, leader); !status) {
             // Checked above for what does not depend on the entity, so this
@@ -476,9 +506,6 @@ Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
                 result.firstSkip = status.error().message + " [" + status.error().context + "]";
             }
             continue;
-        }
-        if (numbered) {
-            ++number;
         }
         Entity entity;
         entity.geometry = std::move(leader);
@@ -506,6 +533,29 @@ std::optional<AnchoredPoint> leaderPlaceOn(const Entity& entity, double angle)
     return AnchoredPoint{*point, *ref};
 }
 
+std::optional<AnchoredPoint> tipPlaceOn(const Entity& entity, const Point2& tip)
+{
+    using katana::geometry::Containment;
+    bool inside = false;
+    if (const auto* outline = std::get_if<katana::geometry::Polyline2>(&entity.geometry)) {
+        inside = outline->closed && outline->vertices.size() >= 3 &&
+                 outline->classify(tip) == Containment::Inside;
+    } else if (const auto* circle = std::get_if<katana::geometry::Circle2>(&entity.geometry)) {
+        inside = circle->classify(tip) == Containment::Inside;
+    }
+    std::optional<AnchorRef> ref;
+    if (inside) {
+        ref = AnchorRef{entity.id, AnchorPoint::Inside};
+    } else {
+        ref = katana::entity::nearestAnchor(entity, tip);
+    }
+    const auto point = ref ? katana::entity::resolveAnchor(entity, *ref) : std::nullopt;
+    if (!point) {
+        return std::nullopt;
+    }
+    return AnchoredPoint{*point, *ref};
+}
+
 Result<LeaderAlignment> alignLeaders(const Model& model, std::vector<EntityId> ids,
                                      std::optional<double> x, std::optional<double> spacing)
 {
@@ -516,8 +566,8 @@ Result<LeaderAlignment> alignLeaders(const Model& model, std::vector<EntityId> i
     if (auto status = requireLeaders(model, ids); !status) {
         return status.error();
     }
-    if (spacing && !(*spacing > 0.0)) {
-        return makeError(ErrorCode::InvalidArgument, "spacing= must be more than zero");
+    if (spacing && !(std::isfinite(*spacing) && *spacing > 0.0)) {
+        return makeError(ErrorCode::InvalidArgument, "spacing= must be a size more than zero");
     }
     if (x && !std::isfinite(*x)) {
         return makeError(ErrorCode::InvalidArgument, "x= must be a number");
@@ -527,6 +577,12 @@ Result<LeaderAlignment> alignLeaders(const Model& model, std::vector<EntityId> i
         return leaderIn(model, a).vertices.back().y > leaderIn(model, b).vertices.back().y;
     });
     const Point2 top = leaderIn(model, ids.front()).vertices.back();
+    // A spacing each finite can still stack the lowest note past any number.
+    if (spacing && !std::isfinite(top.y - static_cast<double>(ids.size() - 1) * *spacing)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "spacing= stacks the notes further than a drawing reaches",
+                         "spacing=" + katana::core::formatExactReal(*spacing));
+    }
     LeaderAlignment alignment;
     alignment.x = x.value_or(top.x);
     alignment.count = ids.size();
@@ -549,7 +605,7 @@ Result<LeaderAlignment> alignLeaders(const Model& model, std::vector<EntityId> i
     return alignment;
 }
 
-BalloonRenumbering renumberBalloons(const Model& model, long long start, BalloonOrder order)
+BalloonRenumbering renumberBalloons(const Model& model, int start, BalloonOrder order)
 {
     std::vector<EntityId> balloons;
     model.entities.forEach([&](const Entity& entity) {
@@ -571,7 +627,8 @@ BalloonRenumbering renumberBalloons(const Model& model, long long start, Balloon
     for (std::size_t k = 0; k < balloons.size(); ++k) {
         Entity changed = *model.entities.find(balloons[k]);
         auto& leader = std::get<LeaderGeometry>(changed.geometry);
-        const std::string number = std::to_string(start + static_cast<long long>(k));
+        const std::string number =
+            std::to_string(static_cast<long long>(start) + static_cast<long long>(k));
         if (leader.text == number) {
             continue;
         }
@@ -585,7 +642,7 @@ BalloonRenumbering renumberBalloons(const Model& model, long long start, Balloon
     return result;
 }
 
-long long nextBalloonNumber(const Model& model)
+Result<long long> nextBalloonNumber(const Model& model)
 {
     long long highest = 0;
     model.entities.forEach([&](const Entity& entity) {
@@ -597,6 +654,12 @@ long long nextBalloonNumber(const Model& model)
         std::from_chars(leader->text.data(), leader->text.data() + leader->text.size(), value);
         highest = std::max(highest, value);
     });
+    if (highest == std::numeric_limits<long long>::max()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the highest balloon is numbered as high as a number goes, so has no "
+                         "next: BALLOON RENUMBER first",
+                         "n=" + std::to_string(highest));
+    }
     return highest + 1;
 }
 

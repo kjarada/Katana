@@ -29,7 +29,8 @@ namespace katana::entity {
 //   Leader     Start (its tip), End (its last vertex)
 //
 // Along's parameter is clamped to [0, 1], so a reference is never resolved
-// off the end of what it names.
+// off the end of what it names; one that is not a number, or is infinite,
+// reads as 0, the start - a stored reference is never refused for it.
 [[nodiscard]] std::optional<katana::geometry::Point2> resolveAnchor(const Entity& entity,
                                                                     const AnchorRef& ref);
 

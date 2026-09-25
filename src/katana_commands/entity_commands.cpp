@@ -355,6 +355,17 @@ CommandPtr copyEntities(std::vector<EntityId> ids, const Vec2& delta)
     return duplicateEach("COPY", std::move(ids), {Mat3::translation(delta)});
 }
 
+CommandPtr duplicateEntities(std::string name, std::vector<EntityId> ids,
+                             std::vector<Mat3> transforms)
+{
+    if (transforms.empty()) {
+        return makeCommand(std::move(name), [](const CommandContext&) -> Result<ChangeSet> {
+            return makeError(ErrorCode::InvalidArgument, "nothing to copy");
+        });
+    }
+    return duplicateEach(std::move(name), std::move(ids), std::move(transforms));
+}
+
 CommandPtr arrayEntities(std::vector<EntityId> ids, int rows, int columns, const Vec2& spacing)
 {
     constexpr int kMaximumCopies = 100000; // guards against a runaway typo, not a design limit
