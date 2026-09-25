@@ -122,6 +122,11 @@ class Exporter {
                 " centreline polylines were not written as strings: the alignments they came "
                 "from wrote them");
         }
+        if (annotations_ != 0) {
+            result_.warnings.push_back(std::to_string(annotations_) +
+                                       " labels and leaders were not exported: the archive has "
+                                       "no annotation drawn for a view");
+        }
         if (dimensions_ != 0) {
             result_.warnings.push_back(std::to_string(dimensions_) +
                                        " dimensions were not written: the 12da format has no "
@@ -455,6 +460,18 @@ class Exporter {
             bool operator()(const katana::entity::DimensionGeometry&) const
             {
                 ++self.dimensions_;
+                return false;
+            }
+            // Labels and leaders are drawn for a view, at a scale the archive
+            // has no place for; counted and said, as a dimension is.
+            bool operator()(const katana::entity::LabelGeometry&) const
+            {
+                ++self.annotations_;
+                return false;
+            }
+            bool operator()(const katana::entity::LeaderGeometry&) const
+            {
+                ++self.annotations_;
                 return false;
             }
         };
@@ -821,6 +838,7 @@ class Exporter {
     ExportOptions options_;
     DomainExport result_;
     std::size_t dimensions_ = 0;
+    std::size_t annotations_ = 0;
     // By alignment name, so the alignment can write what its centreline wore.
     std::map<std::string, const Entity*> centrelines_;
 };

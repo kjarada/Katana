@@ -1,6 +1,7 @@
 #include "katana/entity/geometry_blob.hpp"
 
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <type_traits>
 #include <variant>
@@ -44,6 +45,13 @@ void putU32(std::vector<std::byte>& out, std::uint32_t value)
     }
 }
 
+void putU64(std::vector<std::byte>& out, std::uint64_t value)
+{
+    for (int shift = 0; shift < 64; shift += 8) {
+        out.push_back(static_cast<std::byte>((value >> shift) & 0xFFu));
+    }
+}
+
 void putDouble(std::vector<std::byte>& out, double value)
 {
     // By bit pattern, so the round trip is exact for every value a double can
@@ -80,6 +88,52 @@ void putPoint(std::vector<std::byte>& out, const Point2& point)
     return {};
 }
 
+void putAnchor(std::vector<std::byte>& out, const AnchorRef& ref)
+{
+    putU64(out, ref.entity);
+    putU8(out, static_cast<std::uint8_t>(ref.point));
+    putU32(out, ref.index);
+}
+
+katana::core::Status putPoints(std::vector<std::byte>& out, const std::vector<Point2>& points)
+{
+    if (points.size() > kMaximumVertices) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a geometry has more vertices than the format allows",
+                         std::to_string(points.size()));
+    }
+    putU32(out, static_cast<std::uint32_t>(points.size()));
+    out.reserve(out.size() + points.size() * 16);
+    for (const Point2& point : points) {
+        putPoint(out, point);
+    }
+    return {};
+}
+
+// Whether version 1 can hold `geometry`: every kind it had, with the members
+// added since at their defaults.
+bool fitsVersionOne(const Geometry& geometry)
+{
+    if (const auto* text = std::get_if<TextGeometry>(&geometry)) {
+        return text->style.empty() && text->paperHeight == 0.0 &&
+               text->justify == TextJustify::BottomLeft &&
+               !std::signbit(text->paperHeight);
+    }
+    if (const auto* dimension = std::get_if<DimensionGeometry>(&geometry)) {
+        DimensionGeometry plain;
+        plain.start = dimension->start;
+        plain.end = dimension->end;
+        plain.offset = dimension->offset;
+        plain.textOverride = dimension->textOverride;
+        // Compared by bits for the doubles, so a -0.0 angle is written in the
+        // layout that keeps it.
+        return *dimension == plain && !std::signbit(dimension->angle) &&
+               !std::signbit(dimension->vertex.x) && !std::signbit(dimension->vertex.y);
+    }
+    return !std::holds_alternative<LabelGeometry>(geometry) &&
+           !std::holds_alternative<LeaderGeometry>(geometry);
+}
+
 // ---- reading ---------------------------------------------------------------------
 
 // A cursor that can only move forward and always checks first. Every read goes
@@ -108,6 +162,45 @@ class Reader {
         value = 0;
         for (int shift = 0; shift < 32; shift += 8) {
             value |= static_cast<std::uint32_t>(blob_[at_++]) << shift;
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool readU64(std::uint64_t& value)
+    {
+        if (!has(8)) {
+            return false;
+        }
+        value = 0;
+        for (int shift = 0; shift < 64; shift += 8) {
+            value |= static_cast<std::uint64_t>(blob_[at_++]) << shift;
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool readAnchor(AnchorRef& ref)
+    {
+        std::uint8_t point = 0;
+        if (!readU64(ref.entity) || !readU8(point) || !readU32(ref.index) ||
+            point > static_cast<std::uint8_t>(AnchorPoint::SegmentMid)) {
+            return false;
+        }
+        ref.point = static_cast<AnchorPoint>(point);
+        return true;
+    }
+
+    [[nodiscard]] bool readPoints(std::vector<Point2>& points)
+    {
+        std::uint32_t count = 0;
+        if (!readU32(count) || count > kMaximumVertices ||
+            !has(static_cast<std::size_t>(count) * 16)) {
+            return false;
+        }
+        points.resize(count);
+        for (Point2& point : points) {
+            if (!readPoint(point)) {
+                return false;
+            }
         }
         return true;
     }
@@ -160,12 +253,13 @@ Result<std::vector<std::byte>> geometryToBlob(const Geometry& geometry)
     // Two header bytes plus the largest fixed payload; a polyline grows from
     // here. Reserving keeps a save from reallocating per entity.
     out.reserve(48);
-    putU8(out, kBlobVersion);
+    const bool annotation = !fitsVersionOne(geometry);
+    putU8(out, annotation ? kBlobVersionAnnotation : kBlobVersion);
     putU8(out, static_cast<std::uint8_t>(geometry.index()));
 
     katana::core::Status status;
     std::visit(
-        [&out, &status](const auto& shape) {
+        [&out, &status, annotation](const auto& shape) {
             using Shape = std::decay_t<decltype(shape)>;
             if constexpr (std::is_same_v<Shape, PointGeometry>) {
                 putPoint(out, shape.position);
@@ -198,11 +292,52 @@ Result<std::vector<std::byte>> geometryToBlob(const Geometry& geometry)
                 putDouble(out, shape.height);
                 putDouble(out, shape.rotation);
                 status = putString(out, shape.text);
+                if (status && annotation) {
+                    status = putString(out, shape.style);
+                    putDouble(out, shape.paperHeight);
+                    putU8(out, static_cast<std::uint8_t>(shape.justify));
+                }
             } else if constexpr (std::is_same_v<Shape, DimensionGeometry>) {
                 putPoint(out, shape.start);
                 putPoint(out, shape.end);
                 putDouble(out, shape.offset);
                 status = putString(out, shape.textOverride);
+                if (status && annotation) {
+                    putU8(out, static_cast<std::uint8_t>(shape.kind));
+                    putDouble(out, shape.angle);
+                    putPoint(out, shape.vertex);
+                    putAnchor(out, shape.startRef);
+                    putAnchor(out, shape.endRef);
+                    putAnchor(out, shape.vertexRef);
+                }
+            } else if constexpr (std::is_same_v<Shape, LabelGeometry>) {
+                putU64(out, shape.target);
+                putU32(out, static_cast<std::uint32_t>(shape.part));
+                putPoint(out, shape.anchor);
+                putU8(out, shape.position ? 1u : 0u);
+                if (shape.position) {
+                    putPoint(out, *shape.position);
+                }
+                for (const std::string* text :
+                     {&shape.style, &shape.alignment, &shape.textOverride, &shape.rule}) {
+                    if (status) {
+                        status = putString(out, *text);
+                    }
+                }
+            } else if constexpr (std::is_same_v<Shape, LeaderGeometry>) {
+                status = putPoints(out, shape.vertices);
+                if (status) {
+                    status = putString(out, shape.text);
+                }
+                if (status) {
+                    status = putString(out, shape.style);
+                }
+                putU8(out, static_cast<std::uint8_t>(shape.arrow));
+                putU8(out, static_cast<std::uint8_t>(shape.callout));
+                putDouble(out, shape.paperHeight);
+                putDouble(out, shape.arrowSize);
+                putDouble(out, shape.landing);
+                putAnchor(out, shape.tipRef);
             } else {
                 // Without this, a geometry kind added later fell off the end of
                 // the chain, wrote a two-byte header and no payload, and the
@@ -228,10 +363,11 @@ Result<Geometry> geometryFromBlob(std::span<const std::byte> blob)
     if (!reader.readU8(version) || !reader.readU8(kind)) {
         return truncated();
     }
-    if (version != kBlobVersion) {
+    if (version != kBlobVersion && version != kBlobVersionAnnotation) {
         return makeError(ErrorCode::ParseFailure, "unknown geometry blob version",
                          std::to_string(version));
     }
+    const bool annotation = version == kBlobVersionAnnotation;
 
     Geometry geometry;
     switch (static_cast<EntityType>(kind)) {
@@ -300,6 +436,15 @@ Result<Geometry> geometryFromBlob(std::span<const std::byte> blob)
             !reader.readDouble(text.rotation) || !reader.readString(text.text)) {
             return truncated();
         }
+        if (annotation) {
+            std::uint8_t justify = 0;
+            if (!reader.readString(text.style) || !reader.readDouble(text.paperHeight) ||
+                !reader.readU8(justify) ||
+                justify > static_cast<std::uint8_t>(TextJustify::TopRight)) {
+                return truncated();
+            }
+            text.justify = static_cast<TextJustify>(justify);
+        }
         geometry = std::move(text);
         break;
     }
@@ -309,7 +454,65 @@ Result<Geometry> geometryFromBlob(std::span<const std::byte> blob)
             !reader.readDouble(dimension.offset) || !reader.readString(dimension.textOverride)) {
             return truncated();
         }
+        if (annotation) {
+            std::uint8_t kindByte = 0;
+            if (!reader.readU8(kindByte) ||
+                kindByte > static_cast<std::uint8_t>(DimensionKind::OrdinateY) ||
+                !reader.readDouble(dimension.angle) || !reader.readPoint(dimension.vertex) ||
+                !reader.readAnchor(dimension.startRef) || !reader.readAnchor(dimension.endRef) ||
+                !reader.readAnchor(dimension.vertexRef)) {
+                return truncated();
+            }
+            dimension.kind = static_cast<DimensionKind>(kindByte);
+        }
         geometry = std::move(dimension);
+        break;
+    }
+    case EntityType::Label: {
+        if (!annotation) {
+            return makeError(ErrorCode::ParseFailure, "a label in a version-1 geometry blob");
+        }
+        LabelGeometry label;
+        std::uint32_t part = 0;
+        std::uint8_t hasPosition = 0;
+        if (!reader.readU64(label.target) || !reader.readU32(part) ||
+            !reader.readPoint(label.anchor) || !reader.readU8(hasPosition)) {
+            return truncated();
+        }
+        label.part = static_cast<std::int32_t>(part);
+        if (hasPosition != 0) {
+            Point2 position;
+            if (!reader.readPoint(position)) {
+                return truncated();
+            }
+            label.position = position;
+        }
+        if (!reader.readString(label.style) || !reader.readString(label.alignment) ||
+            !reader.readString(label.textOverride) || !reader.readString(label.rule)) {
+            return truncated();
+        }
+        geometry = std::move(label);
+        break;
+    }
+    case EntityType::Leader: {
+        if (!annotation) {
+            return makeError(ErrorCode::ParseFailure, "a leader in a version-1 geometry blob");
+        }
+        LeaderGeometry leader;
+        std::uint8_t arrow = 0;
+        std::uint8_t callout = 0;
+        if (!reader.readPoints(leader.vertices) || !reader.readString(leader.text) ||
+            !reader.readString(leader.style) || !reader.readU8(arrow) ||
+            !reader.readU8(callout) || !reader.readDouble(leader.paperHeight) ||
+            !reader.readDouble(leader.arrowSize) || !reader.readDouble(leader.landing) ||
+            !reader.readAnchor(leader.tipRef) ||
+            arrow > static_cast<std::uint8_t>(ArrowHead::Dot) ||
+            callout > static_cast<std::uint8_t>(CalloutShape::Circle)) {
+            return truncated();
+        }
+        leader.arrow = static_cast<ArrowHead>(arrow);
+        leader.callout = static_cast<CalloutShape>(callout);
+        geometry = std::move(leader);
         break;
     }
     default:

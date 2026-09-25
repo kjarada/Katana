@@ -4,6 +4,7 @@
 // Everything else (views, renderer, storage, AI) reads or mutates this through
 // the command system.
 
+#include "katana/entity/annotation.hpp"
 #include "katana/entity/entity_database.hpp"
 #include "katana/entity/tables.hpp"
 
@@ -18,6 +19,10 @@ struct Model {
     HatchPatternDatabase hatchPatterns;
     AlignmentDatabase alignments;
     PropertyDatabase properties;
+    // The annotation tables (entity/annotation.hpp, docs/annotation.md).
+    TextStyleDatabase textStyles;
+    LabelStyleDatabase labelStyles;
+    LabelRuleDatabase labelRules;
 
     // Back to the state of a new, empty document. Entity ids are not reused.
     void reset()
@@ -30,6 +35,9 @@ struct Model {
         hatchPatterns.reset();
         alignments.reset();
         properties.reset();
+        textStyles.reset();
+        labelStyles.reset();
+        labelRules.reset();
     }
 
     // Replaces this model's contents with another's, preserving this model's
@@ -50,6 +58,9 @@ struct Model {
         hatchPatterns = std::move(other.hatchPatterns);
         alignments = std::move(other.alignments);
         properties = std::move(other.properties);
+        textStyles = std::move(other.textStyles);
+        labelStyles = std::move(other.labelStyles);
+        labelRules = std::move(other.labelRules);
         entities.adoptContents(std::move(other.entities));
     }
 };

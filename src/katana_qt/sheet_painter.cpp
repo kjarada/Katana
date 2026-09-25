@@ -1118,6 +1118,8 @@ bool SheetPainter::paintPlanViewport(const Viewport& viewport, TextSetter& text,
     plan.pixelsPerMillimetre = paper.ppmm();
     plan.plot = &options_.plot;
     plan.fontFamily = QStringLiteral("Arial");
+    // Paper-sized annotation at this viewport's own scale (docs/annotation.md).
+    plan.annotationScale = at.scale;
     const PlanPaintStats drawn = paintPlan(painter_, source_.plan, frame, plan, cache_.plan());
     stats_.planEntitiesDrawn += drawn.entitiesDrawn;
 

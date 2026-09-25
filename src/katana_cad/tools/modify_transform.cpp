@@ -1856,9 +1856,42 @@ struct Stretcher {
         katana::entity::DimensionGeometry out = dimension;
         out.start = moved(dimension.start);
         out.end = moved(dimension.end);
-        if (out.start.distanceTo(out.end) <= tolerance::kGeometric) {
+        if (dimension.usesVertex()) {
+            out.vertex = moved(dimension.vertex);
+        }
+        if (!katana::entity::validate(out)) {
             return makeError(ErrorCode::InvalidArgument,
                              "stretching would bring the dimension's points together");
+        }
+        return std::optional<Geometry>(std::move(out));
+    }
+
+    // A dragged label's place moves when it is inside; where a label attaches
+    // is its target's business (the associative update).
+    Result<std::optional<Geometry>> operator()(const katana::entity::LabelGeometry& label) const
+    {
+        if (!label.position || !window.contains(*label.position)) {
+            return std::optional<Geometry>();
+        }
+        katana::entity::LabelGeometry out = label;
+        out.position = *label.position + delta;
+        return std::optional<Geometry>(std::move(out));
+    }
+
+    // A leader's vertices inside the window move, as a polyline's do.
+    Result<std::optional<Geometry>> operator()(const katana::entity::LeaderGeometry& leader) const
+    {
+        if (std::ranges::none_of(leader.vertices,
+                                 [&](const Point2& p) { return window.contains(p); })) {
+            return std::optional<Geometry>();
+        }
+        katana::entity::LeaderGeometry out = leader;
+        for (Point2& vertex : out.vertices) {
+            vertex = moved(vertex);
+        }
+        if (!katana::entity::validate(out)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "stretching would bring the leader's points together");
         }
         return std::optional<Geometry>(std::move(out));
     }

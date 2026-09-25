@@ -47,6 +47,12 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/plotting/frame.cpp" PRO
 # be added without editing this list.
 file(GLOB _cad_survey_job_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/survey_job*.cpp")
 target_sources(katana_cad PRIVATE ${_cad_survey_job_sources})
+# The annotation system (include/katana/cad/annotation/, docs/annotation.md):
+# text layout, labels and their placer, leaders, the associative update and
+# auto-labelling. Globbed like the sheets, so its parts can be added and
+# written at the same time without each editing this list.
+file(GLOB _cad_annotation_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp")
+target_sources(katana_cad PRIVATE ${_cad_annotation_sources})
 katana_target_defaults(katana_cad)
 # The scene build's kernels (docs/performance.md, "SIMD: kernels chosen at run
 # time"): lighting, colour and edge fades of dense TINs and meshes.

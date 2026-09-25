@@ -1,5 +1,6 @@
 #include "katana/cad/document.hpp"
 
+#include "katana/cad/annotation/associative.hpp"
 #include "katana/cad/spatial_query.hpp"
 
 #include <algorithm>
@@ -75,6 +76,9 @@ std::uint32_t Document::tablesChanged()
         .hatchPatterns = model_.hatchPatterns.revision(),
         .alignments = model_.alignments.revision(),
         .properties = model_.properties.revision(),
+        .textStyles = model_.textStyles.revision(),
+        .labelStyles = model_.labelStyles.revision(),
+        .labelRules = model_.labelRules.revision(),
     };
     std::uint32_t parts = 0;
     const auto compare = [&](std::uint64_t before, std::uint64_t after, DocumentChange::Part part) {
@@ -89,6 +93,9 @@ std::uint32_t Document::tablesChanged()
     compare(tablesSeen_.hatchPatterns, now.hatchPatterns, DocumentChange::HatchPatterns);
     compare(tablesSeen_.alignments, now.alignments, DocumentChange::Alignments);
     compare(tablesSeen_.properties, now.properties, DocumentChange::PropertyDefinitions);
+    compare(tablesSeen_.textStyles, now.textStyles, DocumentChange::AnnotationStyles);
+    compare(tablesSeen_.labelStyles, now.labelStyles, DocumentChange::AnnotationStyles);
+    compare(tablesSeen_.labelRules, now.labelRules, DocumentChange::AnnotationStyles);
     tablesSeen_ = now;
     return parts;
 }
@@ -194,7 +201,11 @@ void Document::applyToSpatialIndex(const std::vector<katana::entity::ChangeEvent
 
 Status Document::execute(katana::commands::CommandPtr command)
 {
-    return stack_->execute(std::move(command));
+    // Every command carries the associative update with it: the dimensions,
+    // leaders and labels that follow what it changed are moved in the SAME
+    // undo step (annotation/associative.hpp), so one undo puts back the
+    // geometry and everything that followed it.
+    return stack_->execute(annotation::withAssociativeUpdate(std::move(command)));
 }
 
 Status Document::undo()
