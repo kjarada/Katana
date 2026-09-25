@@ -191,6 +191,11 @@ TEST(SheetSelection, ASheetThatIsNotThereOrABackwardRangeIsRefusedSayingWhich)
     EXPECT_EQ(why("99999999999999999999999"),
               "there is no sheet 99999999999999999999999: the set has 5 sheets");
     EXPECT_EQ(why(","), "the selection names no sheet");
+    // A space inside a part is not a separator, and never joins two numbers
+    // into another sheet ("1 3" is not sheet 13).
+    EXPECT_EQ(why("1 3"), "\"1 3\" is neither a sheet number nor a sheet's id");
+    EXPECT_EQ(why("1 - 2 3"), "\"1-2 3\" is neither a sheet number nor a sheet's id");
+    EXPECT_EQ(selected(" 1 - 3 ,\t5 ", set), (std::vector<std::size_t>{0, 1, 2, 4}));
     EXPECT_EQ(parseSheetSelection("", SheetSet{}).error().message, "there are no sheets to plot");
 }
 
