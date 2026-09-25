@@ -226,6 +226,21 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "1  Polyline  layer=0  vertices=4  closed  length=30  area=50"
         FAIL_REGULAR_EXPRESSION "error")
 
+    # An alignment's PIs read back exactly, rewritten as one line, and its
+    # setting-out table a record a station with the key stations named - what
+    # Terrain > Alignment Manager runs and shows (docs/cad.md). R = 50 round
+    # the right angle at (100,0) puts the TC at chainage 50 and the CT at
+    # 50 + 25 pi = 128.540.
+    add_test(NAME cli.align_pis_rewrites_the_pis_and_stations_names_the_key_stations
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "ALIGN NEW road 0,0 100,0 100,100"
+                -c "ALIGN PIS road 0,0 100,0,50 100,100" -c "ALIGN PIS road"
+                -c "ALIGN STATIONS road 1000")
+    set_tests_properties(cli.align_pis_rewrites_the_pis_and_stations_names_the_key_stations
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "pi index=1 x=100 y=0 radius=50 spiral_in=0 spiral_out=0.*station=50[.]000 x=50[.]000 y=0[.]000 direction=0[.]000 azimuth=90[^ ]+ radius=50[.]000 turn=left key=TC.*station=128[.]540 x=100[.]000 y=50[.]000 direction=90[.]000 [^ ]+ radius=straight key=CT.*key=end"
+        FAIL_REGULAR_EXPRESSION "error")
+
     # The help names the customisation's files by what they are, in the words
     # the window uses, and no product: what STYLE's linetype takes and what
     # CUSTOMISE loads.

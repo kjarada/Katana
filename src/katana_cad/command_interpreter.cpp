@@ -1,5 +1,6 @@
 #include "katana/cad/command_interpreter.hpp"
 
+#include "katana/cad/alignment_report.hpp"
 #include "katana/cad/global_modify.hpp"
 #include "katana/core/text.hpp"
 
@@ -109,6 +110,39 @@ Result<katana::geometry::ProfilePVI> parsePVI(const std::string& text)
     }
     return katana::geometry::ProfilePVI{numbers[0], numbers[1],
                                         numbers.size() == 3 ? numbers[2] : 0.0};
+}
+
+// "x,y[,radius[,spiralIn[,spiralOut]]]", as ALIGN PIS takes its PIs - one
+// token per PI, the horizontal counterpart of parsePVI.
+Result<katana::geometry::AlignmentPI> parseAlignmentPI(const std::string& text)
+{
+    const auto malformed = [&text] {
+        return makeError(ErrorCode::InvalidArgument, "a PI is x,y[,radius[,spiralIn[,spiralOut]]]",
+                         text);
+    };
+    std::vector<double> numbers;
+    for (std::size_t start = 0;;) {
+        const std::size_t comma = text.find(',', start);
+        const auto value = parseNumber(std::string_view(text).substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start));
+        if (!value) {
+            return malformed();
+        }
+        numbers.push_back(*value);
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    if (numbers.size() < 2 || numbers.size() > 5) {
+        return malformed();
+    }
+    katana::geometry::AlignmentPI pi{Point2(numbers[0], numbers[1])};
+    double* fields[] = {&pi.radius, &pi.spiralIn, &pi.spiralOut};
+    for (std::size_t i = 2; i < numbers.size(); ++i) {
+        *fields[i - 2] = numbers[i];
+    }
+    return pi;
 }
 
 Result<double> parseNumber(std::string_view text)
@@ -370,7 +404,9 @@ Style     STYLE LIST | SYMBOLS [filter] | NEW name | SET name field value | RENA
           linetype takes a model linetype, a loaded library linestyle or ByLayer (the layer's)
 Purge     PURGE [STYLES|LINETYPES|HATCHES|ALL]   deletes what nothing uses, as one undo step
 Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [spOut]]]
-          SET name index radius [spIn [spOut]] | START name station | STATIONS name interval
+          SET name index radius [spIn [spOut]] | START name station
+          PIS name prints the PIs; PIS name x,y[,r[,in[,out]]] ... replaces them all
+          STATIONS name interval   the setting-out table with the key stations, key=value
           DELETE name.  PI indices count from 0; radius 0 is a kink; spirals in MODEL units
           DESIGN name s,z[,L] s,z[,L] ... defines the design profile (parabolic vertical
           curves, symmetric); PVI name s z [L] appends; PROFILE name prints it with its
@@ -1608,6 +1644,7 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
     const char* const kUsage =
         "ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spiralIn [spiralOut]]]"
         "\n      | SET name index radius [spiralIn [spiralOut]] | START name station"
+        "\n      | PIS name [x,y[,radius[,spiralIn[,spiralOut]]] ...]"
         "\n      | STATIONS name interval | DELETE name     (PI indices count from 0)"
         "\n      | DESIGN name station,elevation[,curveLength] ... (at least two PVIs)"
         "\n      | PVI name station elevation [curveLength] | PROFILE name | CLEARPROFILE name";
@@ -1715,6 +1752,42 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
         return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
                       "alignment " + name + " PI " + args[2] + " updated");
     }
+    if (action == "PIS") {
+        // Alone, what an agent needs to edit an alignment it did not draw:
+        // every PI, exactly, a record each.
+        if (args.size() == 2) {
+            std::string text;
+            const auto& pis = existing->horizontal.pis;
+            for (std::size_t i = 0; i < pis.size(); ++i) {
+                text += (i == 0 ? "" : "\n") + std::string("pi index=") + std::to_string(i) +
+                        " x=" + katana::core::formatExactReal(pis[i].point.x) +
+                        " y=" + katana::core::formatExactReal(pis[i].point.y) +
+                        " radius=" + katana::core::formatExactReal(pis[i].radius) +
+                        " spiral_in=" + katana::core::formatExactReal(pis[i].spiralIn) +
+                        " spiral_out=" + katana::core::formatExactReal(pis[i].spiralOut);
+            }
+            return text;
+        }
+        // With PIs, the whole horizontal definition at once, as DESIGN is
+        // the whole profile: an edit of several PIs - the Alignment Manager's
+        // grid - is one undo step, and the model judges the result whole.
+        if (args.size() < 4) {
+            return usage("ALIGN PIS name x,y[,radius[,spiralIn[,spiralOut]]] ...   at least two;"
+                         " ALIGN PIS name alone prints them");
+        }
+        std::vector<katana::geometry::AlignmentPI> pis;
+        for (std::size_t i = 2; i < args.size(); ++i) {
+            auto pi = parseAlignmentPI(args[i]);
+            if (!pi) {
+                return pi.error();
+            }
+            pis.push_back(*pi);
+        }
+        changed.horizontal.pis = std::move(pis);
+        const std::size_t count = changed.horizontal.pis.size();
+        return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
+                      "alignment " + name + " now has " + std::to_string(count) + " PIs");
+    }
     if (action == "START") {
         if (args.size() < 3) {
             return usage("ALIGN START name station");
@@ -1735,51 +1808,16 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
         if (!interval) {
             return interval.error();
         }
-        if (!(*interval > 0.0)) {
-            return makeError(ErrorCode::InvalidArgument, "the interval must be positive");
-        }
         auto solved = katana::geometry::solveAlignment(existing->horizontal);
         if (!solved) {
             return solved.error();
         }
-        // Every interval station plus every key station, in order, once. A
-        // setting-out table with the TS, SC, CS and ST missing is not one.
-        std::vector<double> stations = solved->keyStations();
-        for (double s = solved->startStation(); s < solved->endStation(); s += *interval) {
-            stations.push_back(s);
+        // The table Terrain > Alignment Manager shows, from the same function.
+        auto stations = settingOutStations(*solved, *interval);
+        if (!stations) {
+            return stations.error();
         }
-        std::sort(stations.begin(), stations.end());
-        stations.erase(std::unique(stations.begin(), stations.end(),
-                                   [](double a, double b) { return std::abs(a - b) < 1e-9; }),
-                       stations.end());
-        if (stations.size() > 100000) {
-            return makeError(ErrorCode::InvalidArgument, "that interval gives too many stations",
-                             std::to_string(stations.size()) + " stations, the limit is 100000");
-        }
-        std::ostringstream out;
-        out << std::fixed;
-        out.precision(3);
-        out << "  station        x             y        direction  radius\n";
-        for (double s : stations) {
-            const auto point = solved->pointAtStation(s);
-            const auto direction = solved->directionAtStation(s);
-            const auto curvature = solved->curvatureAtStation(s);
-            if (!point || !direction || !curvature) {
-                continue;
-            }
-            out << "  " << std::setw(10) << s << "  " << std::setw(12) << point->x << "  "
-                << std::setw(12) << point->y << "  " << std::setw(8)
-                << *direction * katana::math::kRadToDeg << "  ";
-            if (*curvature == 0.0) {
-                out << "straight";
-            } else {
-                out << std::setw(8) << 1.0 / *curvature;
-            }
-            out << "\n";
-        }
-        std::string text = out.str();
-        text.pop_back();
-        return text;
+        return formatSettingOut(*stations);
     }
     if (action == "DESIGN") {
         // The whole profile at once, because a profile with one PVI cannot be
@@ -1846,36 +1884,7 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
         if (!solved) {
             return solved.error();
         }
-        std::ostringstream out;
-        out << std::fixed;
-        out.precision(3);
-        out << "  PVIs:";
-        for (const katana::geometry::ProfilePVI& pvi : existing->vertical->pvis) {
-            out << "  " << pvi.station << " @ " << pvi.elevation;
-            if (pvi.curveLength > 0.0) {
-                out << " L=" << pvi.curveLength;
-            }
-        }
-        out << "\n";
-        for (const katana::geometry::ProfileElement& element : solved->elements()) {
-            out << "  " << (element.kind == katana::geometry::ProfileElementKind::Curve
-                                ? "curve  "
-                                : "tangent")
-                << "  " << std::setw(10) << element.startStation << " to " << std::setw(10)
-                << element.startStation + element.length << "  grade " << std::setw(7)
-                << element.startGrade * 100.0 << "%";
-            if (element.kind == katana::geometry::ProfileElementKind::Curve) {
-                out << " to " << std::setw(7) << element.endGrade * 100.0 << "%";
-            }
-            out << "\n";
-        }
-        for (const katana::geometry::ProfileExtremum& point : solved->highLowPoints()) {
-            out << "  " << (point.high ? "high point" : "low point ") << " at " << point.station
-                << " @ " << point.elevation << "\n";
-        }
-        std::string text = out.str();
-        text.pop_back();
-        return text;
+        return formatProfileReport(*existing->vertical, *solved);
     }
     if (action == "CLEARPROFILE") {
         changed.vertical.reset();

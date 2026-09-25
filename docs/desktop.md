@@ -867,6 +867,15 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
 
 Tested in `tests/qt_widgets/customisation/test_global_modify_dialog.cpp`.
 
+## Terrain > Alignment Manager
+
+The alignments, their PIs, design profiles and setting-out tables, in a
+non-modal dialog the window keeps (`MainWindow::showAlignmentManager`,
+`src/katana_qt/alignment_manager.hpp`): every edit an `ALIGN` line through
+`runVerbLine`, the PI and PVI grids buffers applied by one line each. The
+decisions are in `docs/cad.md`, "The Alignment Manager". The Terrain menu
+opens with it, in an Alignments section, and the toolbar with its button.
+
 ## The rules a dialog or panel follows
 
 Collected here because each was paid for once, and a new manager is where

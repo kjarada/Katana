@@ -21,6 +21,7 @@ katana_add_test_suite(cad
         ${_cad_survey_job_tests}
         ${_cad_annotation_tests}
         ${_cad_utility_tests}
+        test_alignment_report.cpp
 )
 # The sample investigation the utility tests draw and report, the one the
 # cli.utility_* tests and docs/subsurface_utilities.md work by hand.

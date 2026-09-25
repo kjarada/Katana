@@ -16,6 +16,7 @@ add_library(katana_cad STATIC
     survey_import.cpp
     survey_tools.cpp
     parcel.cpp
+    alignment_report.cpp
     plot.cpp
     dimension_draw.cpp
     scene.cpp
