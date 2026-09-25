@@ -1,7 +1,8 @@
 // The sheet editor's Arrange commands (src/katana_qt/plotting/sheet_arrange):
-// the toolbar's Arrange menu, the "Choose paper for this scale" button and
-// the Generate dialog's "Rotate the drawing to fill the sheet", driven by
-// their object names as a person clicks them; each ONE undoable step. A plan
+// the toolbar's Arrange menu, the "Choose paper for this scale" button (its
+// dialog's Apply) and the Generate dialog's "Rotate the drawing to fill the
+// sheet", driven by their object names as a person clicks them; each ONE
+// undoable step. A plan
 // turned to its best fit is painted at 4 px a millimetre and read back, so
 // the rotation the command writes is shown to mean to the painter what it
 // means to the model.
@@ -436,7 +437,13 @@ TEST(SheetArrangeEditor, ChoosePaperPutsTheSheetOnPaperThatHoldsItsPlan)
     ASSERT_NE(button, nullptr);
     EXPECT_TRUE(button->isEnabled());
     const std::size_t before = document.history().undoCount();
+    // The button opens Choose Paper at the scale the plan is drawn at; its
+    // Apply runs SHEET SUGGESTPAPER, whose reply says the paper in its words.
     button->click();
+    katana::qt::test::processEvents();
+    auto* dialog = shown.editor.findChild<QDialog*>(QStringLiteral("sheetSuggestPaperDialog"));
+    ASSERT_NE(dialog, nullptr);
+    dialog->findChild<QPushButton*>(QStringLiteral("sheetSuggestPaperApply"))->click();
     katana::qt::test::processEvents();
     EXPECT_EQ(document.history().undoCount(), before + 1);
     EXPECT_EQ(shown.errors, 0);
@@ -444,7 +451,7 @@ TEST(SheetArrangeEditor, ChoosePaperPutsTheSheetOnPaperThatHoldsItsPlan)
     EXPECT_EQ(sheet.paper, PaperSize::A2);
     EXPECT_TRUE(sheet.landscape);
     EXPECT_EQ(viewportOf(document, "vp1").rect, plotting::tilingArea(sheet));
-    EXPECT_TRUE(shown.messages.back().contains(QStringLiteral("A2 landscape")));
+    EXPECT_TRUE(shown.messages.back().contains(QStringLiteral("paper=A2 orientation=landscape")));
 
     // A sheet with no plan has nothing to choose paper for.
     ASSERT_TRUE(plotting::editSheet(document, 0, [](plotting::Sheet& s) {

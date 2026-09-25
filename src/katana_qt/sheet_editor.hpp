@@ -34,6 +34,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <QImage>
@@ -41,16 +42,19 @@
 #include <QPointF>
 #include <QWidget>
 
+#include "command_runner.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/plotting/layout.hpp"
 #include "katana/cad/plotting/preflight.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
+#include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/cad/plotting/viewport_edits.hpp"
 #include "katana/core/error.hpp"
 #include "plotting/sheet_readout.hpp"
 #include "plotting/sheet_thumbnails.hpp"
 #include "sheet_painter.hpp"
 
+class QDialog;
 class QListWidget;
 class QScrollArea;
 class QLabel;
@@ -60,6 +64,16 @@ namespace katana::qt {
 
 class SheetEditor;
 class SheetChecksDock;
+
+// What the sheet verbs are told that the document does not hold, from what
+// the sheets are drawn from (`source`): the extent GENERATE covers and the
+// surfaces its sections cut, SHEETS CHECK with the painter's knowledge, what
+// a view shows (with its imagery), an automatic section's fit and the set as
+// drawn (plotting::SheetVerbContext). The window's command line and the
+// editor's own lines are given this one, so a line means the same typed or
+// built by a dialog.
+[[nodiscard]] katana::cad::plotting::SheetVerbContext
+sheetVerbContextFor(const katana::cad::Document& document, const std::function<SheetSource()>& source);
 
 // The paper: one sheet, painted and edited.
 class SheetCanvas final : public QWidget {
@@ -270,8 +284,41 @@ class SheetEditor final : public QMainWindow {
     katana::core::Status plotToPdf(const QString& path, bool allSheets);
 
     // The dialogs; each applies what it is given as one step.
+    //
+    // Generate Sheets: every layout and every option GENERATE takes. OK
+    // builds the GENERATE line and runs it (runLine), so the dialog and the
+    // verb cannot come to lay out different sheets. generateSheets runs the
+    // dialog and waits; openGenerateDialog, the toolbar's, opens it and
+    // returns it (object name sheetGenerateDialog), which is how a headless
+    // session and a test fill it. Its fields are listed at buildGenerateDialog.
     void generateSheets();
+    QDialog* openGenerateDialog();
     void editTitleBlock();
+
+    // ---- the lines the editor runs ------------------------------------------------
+    // The window's one executor (MainWindow::runVerbLine, command_runner.hpp).
+    // The editor's dialogs and new panel fields build the verb line a person
+    // would type - GENERATE, VIEW SET, SHEET SUGGESTPAPER, SHEETS SAVE - and
+    // hand it here, so it is echoed in the command log, kept in the history
+    // and undone as a typed line is.
+    void setCommandRunner(CommandRunner run) { run_ = std::move(run); }
+    // `line` through the runner; with none (an editor made without a window,
+    // as the tests make one), through the interpreter's own sheet verbs
+    // (plotting::runSheetVerb) with sheetVerbContextFor this editor's source,
+    // the line and what it replied posted through onMessage as the window's
+    // log would show them. The reply's first line, or the error, goes on the
+    // status bar.
+    VerbOutcome runLine(const QString& line);
+    // Where the window's plan view looks, for Generate Sheets' "The current
+    // plan view"; unset or nothing, and the choice is not offered.
+    std::function<std::optional<katana::geometry::Box2>()> planViewArea;
+    // A headless session (MainWindow::setHeadless): no file dialog and no
+    // question is ever put; the item says instead which verb asks nothing.
+    void setHeadless(bool headless) { headless_ = headless; }
+    [[nodiscard]] bool headless() const { return headless_; }
+    // `text` on the status bar and through onMessage into the window's log,
+    // as an error when `error`: what the editor's menus say.
+    void report(const QString& text, bool error = false);
 
     // ---- the preflight checks (plotting/sheet_checks.hpp) -----------------------------
     // The Checks dock, run again a moment after every change; its findings
@@ -315,8 +362,12 @@ class SheetEditor final : public QMainWindow {
     void buildActions();
     void rebuildList();
     void rebuildProperties();
+    // Generate Sheets built, not yet shown; it deletes itself when closed.
+    QDialog* buildGenerateDialog();
+    // Hidden layers... for the view `id`: the layers it hides, ticked off,
+    // run as VIEW SET id hide= show= for what changed.
+    void chooseHiddenLayers(const std::string& id, const katana::cad::LayerOverrides& hidden);
     void showContextMenu(const QPointF& global, const std::string& viewportId);
-    void report(const QString& text, bool error = false);
     void plotInteractive(bool allSheets);
     // Runs the checks on the sheets a plot takes (the current one, or all),
     // shows the Checks dock when they find an error, and says how many.
@@ -331,6 +382,8 @@ class SheetEditor final : public QMainWindow {
     bool rebuilding_ = false;
     katana::cad::Document::ListenerHandle listener_;
     SheetChecksDock* checks_ = nullptr;
+    CommandRunner run_;
+    bool headless_ = false;
 
     // The Edit and View menus, the sheet list's dragging and thumbnails, the
     // cursor readout (plotting/sheet_editor_editing.cpp).
