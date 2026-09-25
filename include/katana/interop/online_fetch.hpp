@@ -150,6 +150,11 @@ fetchOnlineLayer(const OnlineLayer& layer, const OnlineRequestOptions& options,
 [[nodiscard]] katana::core::Result<std::string> endpointWithKey(const OnlineLayer& layer,
                                                                 const OnlineEnvironment& environment);
 
+// A discovered address with the value of its first secret-looking query
+// parameter (gis::redactUrl's list) replaced by {key}, and that value; the
+// value is empty when there is none.
+[[nodiscard]] std::pair<std::string, std::string> extractKey(const std::string& url);
+
 // ---- the cache ----------------------------------------------------------------------
 
 // A request's answer, from the cache when it holds a fresh one, else from

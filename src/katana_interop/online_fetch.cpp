@@ -1,6 +1,7 @@
 #include "katana/interop/online_fetch.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <format>
@@ -9,6 +10,7 @@
 #include <sstream>
 
 #include "katana/core/text.hpp"
+#include "katana/entity/entity_geometry.hpp"
 #include "katana/interop/online_discovery.hpp"
 
 namespace katana::interop {
@@ -157,6 +159,15 @@ fs::path cachePath(const fs::path& root, const std::string& folder, const std::s
                    const std::string& extension)
 {
     return root / folder / key.substr(0, 2) / (key + extension);
+}
+
+// A finished raster used again is dated now, so the cache's pruning (oldest
+// first) lets go of it last, and it stays fresh while it is in use; it is a
+// product of answers that each keep their own age.
+void touched(const fs::path& path)
+{
+    std::error_code error;
+    fs::last_write_time(path, fs::file_time_type::clock::now(), error);
 }
 
 bool fresh(const fs::path& path, int maxAgeDays, bool offline)
@@ -390,9 +401,11 @@ Result<RasterPlan> tileSources(const OnlineLayer& layer, const Prepared& prepare
             }
             return file.error();
         }
-        if (!looksLikeImage(headOf(*file))) {
+        if (const std::string head = headOf(*file); !looksLikeImage(head)) {
+            std::error_code ignored;
+            fs::remove(*file, ignored);
             return makeError(ErrorCode::FileImportFailure, "the tile service sent something other than an image",
-                             serviceMessage(headOf(*file)));
+                             serviceMessage(head));
         }
         plan.sources.push_back(katana::gis::WarpSource{file->string(), tileBox(set, tiles[i]), "EPSG:3857"});
     }
@@ -503,14 +516,56 @@ Result<RasterPlan> imageSources(const OnlineLayer& layer, const Prepared& prepar
 std::string vsicurl(const std::string& url)
 {
     if (url.starts_with("file://")) {
-        // The path a file URL names, for GDAL to open directly.
-        std::string path = url.substr(7);
+        // The path a file URL names, %XX decoded, for GDAL to open directly.
+        std::string path;
+        const std::string rest = url.substr(7);
+        for (std::size_t i = 0; i < rest.size(); ++i) {
+            if (rest[i] == '%' && i + 2 < rest.size() && std::isxdigit(static_cast<unsigned char>(rest[i + 1])) &&
+                std::isxdigit(static_cast<unsigned char>(rest[i + 2]))) {
+                path.push_back(static_cast<char>(std::stoi(rest.substr(i + 1, 2), nullptr, 16)));
+                i += 2;
+            } else {
+                path.push_back(rest[i]);
+            }
+        }
         if (path.size() > 2 && path[0] == '/' && path[2] == ':') {
             path.erase(path.begin());
         }
         return path;
     }
     return "/vsicurl/" + url;
+}
+
+// Where a STAC asset is, from its href and the address of the document that
+// named it. An absolute http(s) or s3 href is used as it is (s3:// through
+// the bucket's https address); a relative one ("./B04.tif", which static
+// catalogues write) is resolved against the document's folder. A file:// href
+// is honoured only in a document that was itself read from a file: a
+// service's answer cannot make Katana open a file on this computer.
+Result<std::string> assetSource(const std::string& href, const std::string& base)
+{
+    const std::string folded = lower(href.substr(0, 8));
+    if (folded.starts_with("https://") || folded.starts_with("http://") || folded.starts_with("s3://")) {
+        return vsicurl(httpHref(href));
+    }
+    if (folded.starts_with("file://")) {
+        if (!lower(base.substr(0, 7)).starts_with("file://")) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a STAC item from the network names a file on this computer; refused",
+                             href);
+        }
+        return vsicurl(href);
+    }
+    if (href.find("://") != std::string::npos || href.starts_with("/")) {
+        return makeError(ErrorCode::Unsupported, "the STAC asset's address is not one Katana reads", href);
+    }
+    std::string folder = base.substr(0, base.find_first_of("?#"));
+    folder = folder.substr(0, folder.find_last_of('/') + 1);
+    std::string relative = href;
+    while (relative.starts_with("./")) {
+        relative.erase(0, 2);
+    }
+    return vsicurl(folder + relative);
 }
 
 Result<RasterPlan> cogSources(const OnlineLayer& layer, const Prepared& prepared)
@@ -557,6 +612,8 @@ Result<RasterPlan> stacSources(const OnlineLayer& layer, const Prepared& prepare
         }
         auto parsed = parseStacItems(readWhole(*file));
         if (!parsed) {
+            std::error_code ignored;
+            fs::remove(*file, ignored);
             return parsed.error();
         }
         items = std::move(*parsed);
@@ -568,6 +625,8 @@ Result<RasterPlan> stacSources(const OnlineLayer& layer, const Prepared& prepare
         }
         auto parsed = parseStacItems(readWhole(*file));
         if (!parsed) {
+            std::error_code ignored;
+            fs::remove(*file, ignored);
             return parsed.error();
         }
         items = std::move(*parsed);
@@ -593,7 +652,11 @@ Result<RasterPlan> stacSources(const OnlineLayer& layer, const Prepared& prepare
             if (asset == item.assets.end()) {
                 return makeError(ErrorCode::NotFound, "the scene has no '" + layer.asset + "' asset", item.id);
             }
-            plan.sources.push_back(katana::gis::WarpSource{vsicurl(httpHref(asset->second)), std::nullopt, {}});
+            auto source = assetSource(asset->second, prepared.endpoint);
+            if (!source) {
+                return source.error();
+            }
+            plan.sources.push_back(katana::gis::WarpSource{*source, std::nullopt, {}});
             continue;
         }
         std::vector<std::string> bands;
@@ -602,7 +665,11 @@ Result<RasterPlan> stacSources(const OnlineLayer& layer, const Prepared& prepare
             if (asset == item.assets.end()) {
                 return makeError(ErrorCode::NotFound, std::string("the scene has no '") + key + "' band", item.id);
             }
-            bands.push_back(vsicurl(httpHref(asset->second)));
+            auto source = assetSource(asset->second, prepared.endpoint);
+            if (!source) {
+                return source.error();
+            }
+            bands.push_back(*source);
         }
         const fs::path vrt = cachePath(cacheRoot(environment), "products",
                                        katana::gis::sha256Hex("composite\n" + item.id + "\n" + bands[0]), ".vrt");
@@ -610,7 +677,9 @@ Result<RasterPlan> stacSources(const OnlineLayer& layer, const Prepared& prepare
         // the offset of processing baseline 04.00 already removed (measured:
         // Sydney Harbour reads 35 in red on 2026-09-20), so 0..3000 - the
         // usual true-colour stretch - holds dark water to bright roofs.
-        if (auto built = katana::gis::buildTrueColourVrt(bands, 0.0, 3000.0, vrt); !built) {
+        if (auto built = katana::gis::buildTrueColourVrt(bands, 0.0, 3000.0, vrt, environment.userAgent,
+                                                        environment.timeoutSeconds);
+            !built) {
             return built.error();
         }
         plan.sources.push_back(katana::gis::WarpSource{vrt.string(), std::nullopt, {}});
@@ -628,6 +697,9 @@ std::string productKey(const OnlineLayer& layer, const Prepared& prepared,
         << layer.layerName << "\n"
         << layer.asset << "\n"
         << toString(layer.kind) << "\n"
+        << layer.crs << "\n"
+        << layer.version << "\n"
+        << layer.maxZoom << "/" << layer.maxTiles << "/" << layer.maxRequestPixels << "\n"
         << options.targetCrs << "\n"
         << formatNumber(prepared.target.minX) << "," << formatNumber(prepared.target.minY) << ","
         << formatNumber(prepared.target.maxX) << "," << formatNumber(prepared.target.maxY) << "\n"
@@ -745,6 +817,9 @@ Result<OnlineImport> fetchRaster(const OnlineLayer& layer, const OnlineRequestOp
     } else {
         result.stats.productFromCache = true;
         ++result.stats.cacheHits;
+        // Used now: pruning goes oldest-USED first, so a raster a session
+        // is showing is the last thing the cache lets go of.
+        touched(product);
     }
     if (progress) {
         progress(0.97, "Reading the result");
@@ -829,7 +904,13 @@ class PageJoiner {
                 }
             }
         }
-        std::string key;
+        // No id: the attributes AND where the feature is. Attributes alone
+        // took two buildings with the same tags on different pages for one,
+        // and dropped the second.
+        const katana::geometry::Box2 box = katana::entity::boundingBox(entity.geometry);
+        std::string key = std::to_string(entity.geometry.index()) + "|" + formatNumber(box.min.x) +
+                          "," + formatNumber(box.min.y) + "," + formatNumber(box.max.x) + "," +
+                          formatNumber(box.max.y) + "|";
         for (const auto& [name, value] : entity.properties) {
             key += name + "=" + katana::entity::toString(value) + "\x1f";
         }
@@ -899,7 +980,11 @@ Result<OnlineImport> fetchVectors(const OnlineLayer& layer, const OnlineRequestO
             }
             report("Fetching page " + std::to_string(page + 1) + " (" + std::to_string(joiner.size()) +
                    " features)");
-            const std::string url = arcgisQueryUrl(resolved, prepared->lonLat, offset, layer.pageSize);
+            // Ordered by the layer's id field, when it names one, so that no
+            // two pages can overlap or skip under a server that does not
+            // order by itself.
+            const std::string url =
+                arcgisQueryUrl(resolved, prepared->lonLat, offset, layer.pageSize, layer.idField);
             auto file = fetchToCache(makeRequest(url, environment), ".geojson", layer.cacheDays,
                                      environment, result.stats, stop);
             if (!file) {
@@ -972,23 +1057,40 @@ Result<OnlineImport> fetchVectors(const OnlineLayer& layer, const OnlineRequestO
                                  serviceMessage(head));
             }
             ++result.stats.pages;
+            // An empty page comes back as an empty result (importPage); a
+            // page GDAL cannot read is a failure, not the end of the data.
             auto imported = importPage(*file, layer, options);
             if (!imported) {
-                // A page with no feature is a valid, empty FeatureCollection
-                // that GDAL may still decline to call a vector file.
-                if (imported.error().code == ErrorCode::InvalidArgument) {
-                    break;
-                }
+                std::error_code ignored;
+                fs::remove(*file, ignored);
                 return imported.error();
             }
             const std::uint64_t read = imported->featuresRead;
-            joiner.add(std::move(*imported), result.stats);
+            const std::uint64_t added = joiner.add(std::move(*imported), result.stats);
             if (joiner.size() > environment.maxFeatures) {
                 return tooMany();
             }
-            if (!v2 || read < static_cast<std::uint64_t>(layer.pageSize) || read == 0) {
+            if (read == 0) {
                 break;
             }
+            if (!v2) {
+                // WFS 1.x has no paging: MAXFEATURES is all there is.
+                if (read >= static_cast<std::uint64_t>(layer.pageSize)) {
+                    result.warnings.push_back(
+                        "the WFS (version " + layer.version + ") returned its " +
+                        std::to_string(read) +
+                        " feature limit and cannot page, so there may be more; choose a smaller area");
+                }
+                break;
+            }
+            if (added == 0 && page > 0) {
+                result.warnings.push_back(
+                    "the WFS repeated a page instead of moving on; it may not support paging, so "
+                    "some features may be missing - try a smaller area");
+                break;
+            }
+            // A server may cap its pages below COUNT, so a short page is not
+            // the last: the next is asked for until one comes back empty.
             start += read;
         }
         break;
@@ -1006,15 +1108,15 @@ Result<OnlineImport> fetchVectors(const OnlineLayer& layer, const OnlineRequestO
             if (!file) {
                 return file.error();
             }
-            const std::string body = readWhole(*file);
-            auto count = countGeoJsonFeatures(body);
-            if (!count) {
+            // Parsed once, for the count and the next link together.
+            auto state = readItemsPage(readWhole(*file));
+            if (!state) {
                 std::error_code ignored;
                 fs::remove(*file, ignored);
-                return count.error();
+                return state.error();
             }
             ++result.stats.pages;
-            if (*count == 0) {
+            if (state->features == 0) {
                 break;
             }
             auto imported = importPage(*file, layer, options);
@@ -1022,12 +1124,13 @@ Result<OnlineImport> fetchVectors(const OnlineLayer& layer, const OnlineRequestO
                 return imported.error();
             }
             if (joiner.add(std::move(*imported), result.stats) == 0 && page > 0) {
+                result.warnings.push_back("the service repeated a page; paging stopped there");
                 break;
             }
             if (joiner.size() > environment.maxFeatures) {
                 return tooMany();
             }
-            const std::string next = nextLink(body);
+            const std::string next = state->next;
             // Only links to the same service are followed: an answer cannot
             // send the importer somewhere else.
             const auto sameHost = [](const std::string& a, const std::string& b) {
@@ -1111,6 +1214,10 @@ Result<OnlineImport> fetchVectors(const OnlineLayer& layer, const OnlineRequestO
                                    formatNumber(prepared->lonLat.maxY)),
             ".gpkg");
         if (auto cut = katana::gis::clipVectorFile(*file, prepared->lonLat, clipped); !cut) {
+            // Not a vector file - an HTML page where a zip was expected: not
+            // kept for the next run to trip on.
+            std::error_code ignored;
+            fs::remove(*file, ignored);
             return cut.error();
         }
         report("Reading " + layer.title);
@@ -1159,6 +1266,31 @@ std::string onlineUserAgent(std::string_view version)
 {
     return "Katana/" + std::string(version) +
            " (survey and civil-engineering CAD; +https://github.com/kjarada/Katana)";
+}
+
+std::pair<std::string, std::string> extractKey(const std::string& url)
+{
+    const std::size_t query = url.find('?');
+    if (query == std::string::npos) {
+        return {url, {}};
+    }
+    std::size_t at = query + 1;
+    while (at < url.size()) {
+        std::size_t end = url.find('&', at);
+        if (end == std::string::npos) {
+            end = url.size();
+        }
+        const std::size_t equals = url.find('=', at);
+        if (equals != std::string::npos && equals < end &&
+            katana::gis::isSecretParameter(url.substr(at, equals - at))) {
+            const std::string value = url.substr(equals + 1, end - equals - 1);
+            if (!value.empty() && value != "{key}") {
+                return {url.substr(0, equals + 1) + "{key}" + url.substr(end), value};
+            }
+        }
+        at = end + 1;
+    }
+    return {url, {}};
 }
 
 Result<std::string> endpointWithKey(const OnlineLayer& layer, const OnlineEnvironment& environment)
@@ -1306,7 +1438,9 @@ Result<OnlineProvider> discoverOnline(const std::string& url, const OnlineEnviro
 {
     OnlineStats stats;
     const TextFetcher fetch = [&](const std::string& address) {
-        return fetchText(address, environment, stats, stop);
+        // Always fresh: a description is small, discovery is rare, and an
+        // error page kept for a day would make the service look broken.
+        return fetchText(address, environment, stats, stop, 0);
     };
     const auto probe = [&](const std::string& address) -> Result<OnlineProvider> {
         auto raster = katana::gis::probeRaster(vsicurl(address), environment.userAgent,
@@ -1316,10 +1450,13 @@ Result<OnlineProvider> discoverOnline(const std::string& url, const OnlineEnviro
         }
         OnlineProvider provider;
         provider.id = customProviderId(address);
-        std::string name = address.substr(address.find_last_of('/') + 1);
+        // The file's name, never its query: a token there would otherwise
+        // become the title that is shown, saved and given to the raster.
+        const std::string path = address.substr(0, address.find_first_of("?#"));
+        std::string name = path.substr(path.find_last_of('/') + 1);
         provider.title = name;
         provider.group = "Custom";
-        provider.homepage = address.substr(0, address.find_last_of('/') + 1);
+        provider.homepage = path.substr(0, path.find_last_of('/') + 1);
         provider.licence = "not stated by the service - check the publisher's terms";
         provider.attribution = provider.title;
         provider.userDefined = true;

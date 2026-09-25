@@ -83,6 +83,9 @@ class OnlineDataWorkbench {
     // True when `line` is an ONLINE verb, which it then runs, replying to
     // the log; false leaves the line to whoever asked.
     bool runLine(const QString& line);
+    // `line` as the command log may show it: an ONLINE KEY's value replaced
+    // by ***, everything else as typed.
+    [[nodiscard]] static QString loggedLine(const QString& line);
     // Runs one command. An Import starts a background job (and in a headless
     // session waits for it); the others answer at once. Fails only when the
     // command cannot start; how it ended is logged.

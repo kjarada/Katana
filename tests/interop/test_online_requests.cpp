@@ -359,7 +359,8 @@ TEST(OnlineRequests, Wfs20PagesAndFollowsTheAuthoritysAxisOrder)
                                 "ns:parcels");
     EXPECT_EQ(wfsGetFeatureUrl(layer, CrsBox{144.9, -37.9, 145.0, -37.8}, "EPSG:4326", true, 1000, 500),
               "https://wfs.example.org/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature"
-              "&TYPENAMES=ns%3Aparcels&SRSNAME=EPSG%3A4326&BBOX=-37.9,144.9,-37.8,145,EPSG%3A4326"
+              "&TYPENAMES=ns%3Aparcels&SRSNAME=urn%3Aogc%3Adef%3Acrs%3AEPSG%3A%3A4326"
+              "&BBOX=-37.9,144.9,-37.8,145,urn%3Aogc%3Adef%3Acrs%3AEPSG%3A%3A4326"
               "&COUNT=500&STARTINDEX=1000");
     layer.version = "1.1.0";
     const std::string old = wfsGetFeatureUrl(layer, CrsBox{1, 2, 3, 4}, "EPSG:3111", false, 0, 50);

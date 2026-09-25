@@ -62,7 +62,12 @@ A person's own catalogue - `online_sources.json` in Katana's configuration
 folder, or the file `KATANA_ONLINE_CATALOGUE` names - is merged over the
 built-in one by provider id (`interop::mergeCatalogues`): a provider with a
 built-in id replaces it in place, a new one is added. Add Custom Service and
-`ONLINE CUSTOM` write there. `interop::validateCatalogue` names every problem
+`ONLINE CUSTOM` write there, through a temporary file and a rename, and not
+at all when the existing file cannot be read (it would be replaced by the one
+new provider). A discovered provider's id is `custom-`, the host, and eight
+hex digits of the address's SHA-256, so two services of one server are two
+providers. A discovered address's service keeps its vendor parameters
+(MapServer's `map=`) and loses only the OGC request's own. `interop::validateCatalogue` names every problem
 of a catalogue, and `OnlineCatalogue.TheBuiltInCatalogueParsesAndPassesItsOwnValidation`
 runs it on the built-in one.
 
@@ -114,13 +119,19 @@ for byte against the service's specification (`tests/interop/test_online_request
 | `wms` | GetMap 1.3.0 (`CRS=`, the authority's axis order) or 1.1.1 (`SRS=`, x,y) | as export | images |
 | `wcs` | GetCoverage 1.0.0, GeoTIFF, `BBOX` x,y | as export | values |
 | `arcgis-query` | `/<layer>/query` with an envelope in WGS 84, `outFields=*`, `outSR=4326`, `f=geojson` | `resultOffset` advanced by what each page held, until the page is short and `exceededTransferLimit` is false | GeoJSON pages |
-| `wfs` | GetFeature 2.0.0 (`TYPENAMES`, `COUNT`, `STARTINDEX`, `BBOX` in the CRS's axis order with the CRS appended) or 1.1.0 (`MAXFEATURES`, one page) | `STARTINDEX` until a page is short | GML or GeoJSON |
+| `wfs` | GetFeature 2.0.0 (`TYPENAMES`, `COUNT`, `STARTINDEX`, `BBOX` in the CRS's axis order with the CRS appended - as its URN when latitude comes first, which every server reads in that order) or 1.1.0 (`MAXFEATURES`, one page, with a warning when it came back full) | `STARTINDEX` until a page comes back empty, since a server may cap pages below `COUNT` | GML or GeoJSON |
 | `oapif` | `/collections/{id}/items?bbox&limit&f=json`, the bbox in CRS84 | the answer's `next` link, followed only to the same host | GeoJSON pages |
 | `stac` | an Item Search POST (`collections`, `bbox`, `datetime`, `eo:cloud_cover` through the query extension, sorted by cloud) - or, for an item's own URL, the item | the acquisition day that covers the area (tested on a 5 x 5 grid) with the least cloud, the latest on a tie | COGs read over `/vsicurl/`: the `visual` asset, or red, green and blue stretched 0..3000 to bytes |
 | `cog` | `/vsicurl/` of the COG, or of each Copernicus one-degree tile meeting the area (a missing tile, over the sea, is skipped) | GDAL's range requests | values or imagery |
 | `overpass` | a POST of `[out:xml][timeout][maxsize][bbox]; (node[..]; way[..]; relation[..];); (._;>;); out body;` | one request; the area is refused over `maxArea` (25 km2) | OSM XML, read by GDAL's OSM driver |
 | `file` | a download (a zipped shapefile is read as `.shp.zip`) | clipped to the area by `gis::clipVectorFile` before it is read | features |
 | `ckan` | `package_search` with `res_format` of the web-service formats | - | services to add with `ONLINE CUSTOM` |
+
+**A STAC asset's address is resolved, not trusted.** An absolute http(s) or
+s3 href is read over `/vsicurl/`; a relative one is resolved against the
+item's own address; a `file://` href is honoured only in an item that was
+itself read from a file, so a service's answer cannot make Katana open a file
+on the computer it runs on.
 
 **The tag filter cannot escape its statement.** An Overpass filter is
 `key`, `key=value` or `key!=value`, joined by `;`, of letters, digits and
@@ -175,9 +186,11 @@ nothing is truncated silently.
 ## Paging and joining
 
 Pages are joined by `PageJoiner` in `online_fetch.cpp`: a feature a later
-page repeats is dropped, known by the layer's `idField` (`objectid` for an
-ArcGIS query by default, matched without regard to case) or by all its
-attributes; within one page nothing is dropped, because a multi-part feature
+page repeats is dropped, known by the layer's `idField` (for an ArcGIS layer
+its own `objectIdField`, found by discovery, else `objectid`; matched without
+regard to case, and sent as `orderByFields` so pages cannot overlap) or by
+its attributes AND its geometry's type and box - attributes alone took two
+buildings with the same tags for one; within one page nothing is dropped, because a multi-part feature
 arrives as several entities with the same attributes on purpose. A server
 that ignores `resultOffset` repeats its first page; a page that adds nothing
 new ends the loop with a warning, rather than running to the page limit
@@ -198,11 +211,15 @@ ServiceException) is removed rather than cached. An answer is fresh for the
 layer's `cacheDays` - 30 by default, 7 for OpenStreetMap's tiles as its
 policy asks, a day for a STAC search, whose answer changes daily. Finished
 rasters are kept under `products/`, keyed by everything that changes the
-output (the service, the layer, the area in the project's CRS, the CRS, the
-resolution, the dates, the cloud ceiling, the time), so the same import a
+output (the service, its CRS, version and limits, the layer, the area in the
+project's CRS, the CRS, the resolution, the dates, the cloud ceiling, the
+time), dated afresh each time one is used, so the same import a
 second time costs no request at all (`OnlineFetch.TilesAreFetchedMosaickedAndWarpedAndCachedForTheNextTime`).
 The cache is pruned when an import starts, to 90 days and 2 GB, oldest first
-(`interop::pruneCache`).
+(`interop::pruneCache`). Descriptions for discovery are always fetched afresh,
+and an answer that turns out not to be what was asked for - an error page
+where a tile, a zip, a GML page or a STAC search was expected - is removed,
+never kept for the next run to trip on.
 
 ## Licences, attribution and keys
 
@@ -214,11 +231,14 @@ reply to the import (below) carries the same, so the command log shows the
 attribution of everything imported.
 
 The URL recorded is the service's address with any key removed
-(`gis::redactUrl`: `key`, `apikey`, `token`, `access_token`, `sig` and any
-parameter ending in `key` or `token`, and `user:password@`). A key is stored
+(`gis::redactUrl`: `key`, `apikey`, `api`, `token`, `access_token`, `sig`,
+`auth`, `subscription-key` and any parameter ending in `key` or `token`, and
+`user:password@`). The command log shows a typed `ONLINE KEY` with its value
+as `***` (`OnlineDataWorkbench::loggedLine`). A key is stored
 by `ONLINE KEY <name> <value>` or the dialog's Save Key in Katana's settings
 (`online/keys/<name>`), is filled into an endpoint's `{key}` when a request is
-made, and is never written to the project, a log line, an error, a reply or
+made - a key found in a discovered address (a WMTS template's `?api=`) is
+moved to the settings and the address keeps `{key}` (`interop::extractKey`) - and is never written to the project, a log line, an error, a reply or
 a cache file name (`OnlineFetch.AKeyIsSentButNeverRecorded`). No built-in
 provider needs one; the mechanism is for a user catalogue's commercial
 services.
@@ -281,9 +301,11 @@ ONLINE KEY <name> [value]
 
 In the window's command line and in a headless run
 (`katana <project> --command "ONLINE ..." --screenshot out.png`). `crs=` is for
-a project with no coordinate system, which it then sets, so the next import
-agrees with this one; given for a project that has one, and different, it is
-refused. Replies are records, one per line, a word and then `key=value`
+a project with no coordinate system, which it sets when the import succeeds,
+so the next import agrees with this one; given for a project that has one,
+it must be the same system (by EPSG code, however it is spelt) or it is
+refused. An ONLINE line reaches the workbench before a running drawing tool,
+which would otherwise take it for an answer. Replies are records, one per line, a word and then `key=value`
 fields quoted by the Logger's rule (`docs/architecture.md`, "Logging"):
 
 ```

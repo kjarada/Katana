@@ -163,6 +163,8 @@ warpToGeoTiff(const std::vector<WarpSource>& sources, const WarpOptions& options
 // part of each band the warp needs is ever fetched.
 [[nodiscard]] katana::core::Status buildTrueColourVrt(const std::vector<std::string>& bandPaths,
                                                       double low, double high,
-                                                      const std::filesystem::path& output);
+                                                      const std::filesystem::path& output,
+                                                      const std::string& userAgent = {},
+                                                      int timeoutSeconds = 120);
 
 } // namespace katana::gis

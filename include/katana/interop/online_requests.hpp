@@ -107,6 +107,13 @@ struct QueryPage {
 // The href of the link with rel "next" in an OGC API or STAC answer; empty
 // when there is none (the last page).
 [[nodiscard]] std::string nextLink(std::string_view json);
+// A GeoJSON page of an OGC API answer read once: how many features it holds
+// and its "next" link (empty on the last page).
+struct ItemsPage {
+    std::uint64_t features = 0;
+    std::string next;
+};
+[[nodiscard]] katana::core::Result<ItemsPage> readItemsPage(std::string_view json);
 // Features in a GeoJSON FeatureCollection answer (its "features" array).
 [[nodiscard]] katana::core::Result<std::uint64_t> countGeoJsonFeatures(std::string_view json);
 

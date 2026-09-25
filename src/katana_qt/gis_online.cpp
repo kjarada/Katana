@@ -247,6 +247,16 @@ Result<katana::gis::CrsBox> OnlineDataWorkbench::areaOf(const interop::OnlineCom
                                box.max.y + margin};
 }
 
+QString OnlineDataWorkbench::loggedLine(const QString& line)
+{
+    const QStringList words = line.trimmed().split(' ', Qt::SkipEmptyParts);
+    if (words.size() >= 4 && words[0].compare("ONLINE", Qt::CaseInsensitive) == 0 &&
+        words[1].compare("KEY", Qt::CaseInsensitive) == 0) {
+        return words[0] + " " + words[1] + " " + words[2] + " ***";
+    }
+    return line;
+}
+
 bool OnlineDataWorkbench::runLine(const QString& line)
 {
     const QString first = line.trimmed().section(' ', 0, 0);
@@ -382,15 +392,55 @@ Status OnlineDataWorkbench::startDiscovery(const std::string& url)
             interop::OnlineCatalogue user;
             std::error_code error;
             if (std::filesystem::is_regular_file(path, error)) {
-                if (auto parsed = interop::parseCatalogue(readAll(path), true)) {
-                    user = std::move(*parsed);
+                auto parsed = interop::parseCatalogue(readAll(path), true);
+                if (!parsed) {
+                    // Writing now would replace the person's catalogue with
+                    // this one provider.
+                    reply(errorLine(interop::OnlineVerb::Custom,
+                                    "the user catalogue " + path.string() +
+                                        " could not be read, so nothing was added to it: " +
+                                        parsed.error().describe()),
+                          true);
+                    return;
+                }
+                user = std::move(*parsed);
+            }
+            // A key in a discovered address (a WMTS template's ?api=, a
+            // token) goes to the settings, and the address keeps {key}, so
+            // the catalogue on disk never holds it.
+            for (interop::OnlineService& service : found->services) {
+                for (interop::OnlineLayer& layer : service.layers) {
+                    auto [endpoint, secret] = interop::extractKey(layer.endpoint);
+                    if (!secret.empty()) {
+                        layer.endpoint = endpoint;
+                        layer.keyRequired = true;
+                        layer.keyName = found->id;
+                        saveKey(found->id, secret);
+                    }
                 }
             }
             interop::OnlineCatalogue added;
             added.providers.push_back(*found);
             user = interop::mergeCatalogues(std::move(user), added);
             std::filesystem::create_directories(path.parent_path(), error);
-            std::ofstream(path, std::ios::binary | std::ios::trunc) << interop::catalogueToJson(user);
+            const std::filesystem::path partial = path.string() + ".part";
+            {
+                std::ofstream out(partial, std::ios::binary | std::ios::trunc);
+                out << interop::catalogueToJson(user);
+                if (!out) {
+                    reply(errorLine(interop::OnlineVerb::Custom,
+                                    "could not write the user catalogue " + path.string()),
+                          true);
+                    return;
+                }
+            }
+            std::filesystem::rename(partial, path, error);
+            if (error) {
+                reply(errorLine(interop::OnlineVerb::Custom,
+                                "could not write the user catalogue " + path.string()),
+                      true);
+                return;
+            }
             reloadCatalogue();
             reply(interop::formatLayers(*found));
             if (dialog_ != nullptr) {
@@ -423,20 +473,25 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
     // which then becomes the project's, so the next import agrees with this
     // one.
     std::string crs = projectCrs();
+    // Set on the project only when the import succeeds (in its Apply): a
+    // failed or cancelled import changes nothing.
+    std::string crsToSet;
     if (!command.crs.empty()) {
         auto wkt = katana::gis::crsToWkt(command.crs);
         if (!wkt) {
             return wkt.error();
         }
         if (crs.empty()) {
-            katana::storage::ProjectMetadata metadata = services_.document->metadata();
-            metadata.coordinateSystem = command.crs;
-            services_.document->setMetadata(std::move(metadata));
             crs = command.crs;
-            reply("project coordinate_system=" + interop::replyValue(crs) + " set=yes\n");
-        } else if (crs != command.crs) {
-            return makeError(ErrorCode::InvalidCRS,
-                             "the project is in " + crs + "; crs= is for a project that has none");
+            crsToSet = command.crs;
+        } else {
+            // The same system however it is spelt: epsg:7856 is EPSG:7856.
+            const auto given = katana::gis::crsEpsgCode(command.crs);
+            const auto project = katana::gis::crsEpsgCode(crs);
+            if (!given || !project || *given != *project) {
+                return makeError(ErrorCode::InvalidCRS,
+                                 "the project is in " + crs + "; crs= is for a project that has none");
+            }
         }
     }
     if (crs.empty()) {
@@ -471,7 +526,7 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
     JobRunner& runner = JobRunner::of(window_);
     const JobId id = runner.start(
         "Online: " + qs(layer.providerTitle + " - " + layer.title),
-        [this, layer, options, environment, result, targetLayer](JobControl& control)
+        [this, layer, options, environment, result, targetLayer, crsToSet](JobControl& control)
             -> Result<JobRunner::Apply> {
             (void)interop::pruneCache(environment.cacheDirectory, kCacheDays, kCacheBytes);
             auto fetched = interop::fetchOnlineLayer(
@@ -486,7 +541,13 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
                 return fetched.error();
             }
             *result = std::move(*fetched);
-            return JobRunner::Apply([this, layer, result, targetLayer] {
+            return JobRunner::Apply([this, layer, result, targetLayer, crsToSet] {
+                if (!crsToSet.empty() && projectCrs().empty()) {
+                    katana::storage::ProjectMetadata metadata = services_.document->metadata();
+                    metadata.coordinateSystem = crsToSet;
+                    services_.document->setMetadata(std::move(metadata));
+                    reply("project coordinate_system=" + interop::replyValue(crsToSet) + " set=yes\n");
+                }
                 std::size_t added = 0;
                 if (result->raster) {
                     // The pixels go to the reference data; the reply needs only

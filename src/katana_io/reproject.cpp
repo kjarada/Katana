@@ -188,6 +188,15 @@ Result<DatasetHandle> prepareSource(const WarpSource& source, bool elevation,
     if (elevation) {
         arguments.AddString("-b");
         arguments.AddString("1");
+        // An image a service returned for a box may not declare the no-data
+        // it was asked to use (exportImage's noData=-32767): declared here,
+        // so the warp does not blend it into real heights at the edges.
+        int hasNoData = FALSE;
+        dataset->GetRasterBand(1)->GetNoDataValue(&hasNoData);
+        if (hasNoData == FALSE && source.bounds) {
+            arguments.AddString("-a_nodata");
+            arguments.AddString(number(kElevationNoData).c_str());
+        }
     } else {
         GDALRasterBand* first = dataset->GetRasterBand(1);
         const bool paletted = first->GetColorTable() != nullptr;
@@ -627,9 +636,20 @@ Status clipVectorFile(const std::filesystem::path& input, const CrsBox& box,
 }
 
 Status buildTrueColourVrt(const std::vector<std::string>& bandPaths, double low, double high,
-                          const std::filesystem::path& output)
+                          const std::filesystem::path& output, const std::string& userAgent,
+                          int timeoutSeconds)
 {
     detail::ensureGdalRegistered();
+    // The bands are opened over HTTP here, so the warp's limits apply: a
+    // stalled connection must end, and each open is one request, not a
+    // directory listing first.
+    ThreadConfig config;
+    if (!userAgent.empty()) {
+        config.set("GDAL_HTTP_USERAGENT", userAgent);
+    }
+    config.set("GDAL_HTTP_TIMEOUT", std::to_string(std::max(1, timeoutSeconds)));
+    config.set("GDAL_HTTP_CONNECTTIMEOUT", "20");
+    config.set("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR");
     if (bandPaths.size() != 3) {
         return makeError(ErrorCode::InvalidArgument, "a true-colour composite needs three bands",
                          std::to_string(bandPaths.size()));
