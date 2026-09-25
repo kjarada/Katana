@@ -93,7 +93,7 @@ struct CrossSectionRequest {
     std::size_t rows = 4;
     std::size_t columns = 2;
     double scale = 0.0;        // 0: the largest standard scale the widest fits
-    double exaggeration = 0.0; // 0: the largest of 1, 2, 2.5, 4, 5, 8, 10 that
+    double exaggeration = 0.0; // 0: the largest of kSectionExaggerations that
                                // fits the deepest section (1 without surfaces)
     // Surfaces to sample, to centre each section on its ground and choose the
     // exaggeration; without any, each section is centred when it is drawn.

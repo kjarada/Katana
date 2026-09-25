@@ -1037,11 +1037,22 @@ void SheetEditor::rebuildProperties()
         const bool plan = v.kind == ViewportKind::Plan || v.kind == ViewportKind::KeyPlan;
         const bool section = v.kind == ViewportKind::LongSection || v.kind == ViewportKind::CrossSections;
         if (plan || section) {
-            auto* scale = scaleBox(box, plan);
+            auto* scale = scaleBox(box, true);
+            scale->setObjectName(QStringLiteral("sheetViewportScale"));
             if (plan && v.autoScale) {
                 scale->setCurrentIndex(0);
                 const ResolvedViewport resolved = resolvePlanViewport(v, source());
                 scale->setToolTip(QString("Automatic: now %1").arg(scaleLabel(resolved.scale)));
+            } else if (v.autoScale) {
+                // A section fits both its scale and its exaggeration.
+                scale->setCurrentIndex(0);
+                SheetPaintCache cuts;
+                Viewport fitted = v;
+                const plotting::SectionFit fit = resolveSectionViewport(v, source(), cuts);
+                fitted.scale = fit.scale;
+                fitted.verticalExaggeration = fit.exaggeration;
+                scale->setToolTip(
+                    QString("Automatic: now %1").arg(QString::fromStdString(plotting::scaleText(fitted))));
             } else {
                 scale->setCurrentText(scaleLabel(v.scale));
             }
@@ -1089,6 +1100,11 @@ void SheetEditor::rebuildProperties()
         }
         if (section) {
             auto* ve = spin(box, 0.1, 100.0, v.verticalExaggeration, 2, QStringLiteral(" x"));
+            ve->setObjectName(QStringLiteral("sheetViewportExaggeration"));
+            ve->setEnabled(!v.autoScale);
+            if (v.autoScale) {
+                ve->setToolTip(QStringLiteral("Chosen with the automatic scale"));
+            }
             connect(ve, &QDoubleSpinBox::valueChanged, this, [edit](double x) {
                 edit([x](Viewport& e) { e.verticalExaggeration = x; });
             });
@@ -1499,6 +1515,7 @@ Status SheetEditor::addViewport(ViewportKind kind)
         v.rect = freePlace(sheet, 380.0, 110.0);
         v.scale = 500.0;
         v.verticalExaggeration = 10.0;
+        v.autoScale = true; // the scale and exaggeration fitted to what it shows
         v.autoCentre = true;
         if (!alignments.empty()) {
             v.source.alignment = alignments.front();
@@ -1507,6 +1524,7 @@ Status SheetEditor::addViewport(ViewportKind kind)
     case ViewportKind::CrossSections:
         v.rect = freePlace(sheet, 180.0, 110.0);
         v.scale = 200.0;
+        v.autoScale = true;
         v.autoCentre = true;
         v.source.sectionHalfWidth = 20.0;
         if (!alignments.empty()) {
