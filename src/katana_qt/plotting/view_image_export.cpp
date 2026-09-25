@@ -148,6 +148,13 @@ Result<SnapshotRequest> parseSnapshot(const QString& line)
             return refused("not a SNAPSHOT option", raw);
         }
     }
+    // The 3D view is grabbed as it is drawn, on its own ground, so a ground
+    // asked of it would be dropped - it once was, and an opaque image written
+    // for bg=none with nothing said.
+    if (request.view == View::Model3D && request.background != Background::Theme) {
+        return refused("bg= is the plan view's; a 3D view is pictured on its own ground",
+                       request.background == Background::White ? "bg=white" : "bg=none");
+    }
     // Only a PNG, or the clipboard, keeps transparency: a JPEG has none, and
     // the TIFF written here (tiff_writer.hpp) is RGB.
     if (request.background == Background::None && !request.clipboard &&
@@ -236,7 +243,8 @@ ViewImageDialog::ViewImageDialog(ViewImageDialogContext context, QWidget* parent
     // Wide enough for a path and the line it runs to be read whole.
     setMinimumWidth(560);
 
-    path_ = new QLineEdit(context_.suggestedPath, this);
+    suggested_ = context_.suggestedPath;
+    path_ = new QLineEdit(suggested_, this);
     path_->setObjectName("viewImagePath");
     path_->setPlaceholderText("the image to write: .png, .jpg or .tif");
     auto* browseButton = new QPushButton("Browse...", this);
@@ -337,7 +345,10 @@ Result<SnapshotRequest> ViewImageDialog::request() const
     } else {
         request.scale = size_->currentIndex() + 1;
     }
-    request.background = static_cast<Background>(background_->currentIndex());
+    // The ground is the plan view's to choose (parseSnapshot).
+    request.background = request.view == View::Plan
+                             ? static_cast<Background>(background_->currentIndex())
+                             : Background::Theme;
     // The line's own reader is the judge, so the dialog refuses what the verb
     // would: an extension it does not write, a transparent JPEG.
     const auto checked = parseSnapshot(snapshotCommandLine(request));
@@ -352,6 +363,7 @@ void ViewImageDialog::refresh()
     const bool custom = size_->currentIndex() == size_->count() - 1;
     width_->setEnabled(custom);
     height_->setEnabled(custom);
+    background_->setEnabled(view_->currentIndex() == 0);
     const auto made = request();
     command_->setText(made ? snapshotCommandLine(*made) : QString());
     command_->setPlaceholderText(made ? QString()
@@ -360,16 +372,40 @@ void ViewImageDialog::refresh()
     export_->setEnabled(made.ok());
 }
 
-void ViewImageDialog::followFormat()
+namespace {
+
+// `path` with the extension of the format at `index` in viewImageFormat.
+QString inFormat(const QString& path, int index)
 {
     static const char* const kExtensions[] = {"png", "jpg", "tif"};
+    const QFileInfo file(path);
+    const QString stem = file.suffix().isEmpty() ? path : path.chopped(file.suffix().size() + 1);
+    return stem + "." + kExtensions[index];
+}
+
+} // namespace
+
+void ViewImageDialog::followFormat()
+{
     const QString path = path_->text().trimmed();
     if (!path.isEmpty()) {
-        const QFileInfo file(path);
-        const QString stem = file.suffix().isEmpty() ? path : path.chopped(file.suffix().size() + 1);
-        path_->setText(stem + "." + kExtensions[format_->currentIndex()]);
+        // The suggestion in another format is still the suggestion.
+        const bool suggested = path_->text() == suggested_;
+        path_->setText(inFormat(path, format_->currentIndex()));
+        if (suggested) {
+            suggested_ = path_->text();
+        }
     }
     refresh();
+}
+
+void ViewImageDialog::suggestPath(const QString& path)
+{
+    const QString inChosen = inFormat(path, format_->currentIndex());
+    if (path_->text() == suggested_) {
+        path_->setText(inChosen);
+    }
+    suggested_ = inChosen;
 }
 
 void ViewImageDialog::exportImage()
@@ -381,6 +417,13 @@ void ViewImageDialog::exportImage()
     }
     if (!context_.run) {
         status_->setText("nothing here can run a command");
+        return;
+    }
+    // As Plot to PDF asks (PlotDrawingDialog::plot).
+    if (context_.confirmReplace && QFileInfo::exists(made->path) &&
+        !context_.confirmReplace(made->path)) {
+        status_->setText("Not exported: " + QDir::toNativeSeparators(made->path) +
+                         " is there and was kept.");
         return;
     }
     const VerbOutcome outcome = context_.run(snapshotCommandLine(*made));

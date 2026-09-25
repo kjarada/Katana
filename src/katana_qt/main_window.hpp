@@ -290,6 +290,13 @@ class MainWindow final : public QMainWindow {
     void plotToPdf();
     // File > Export View as Image, kept likewise; it runs SNAPSHOT.
     void showViewImageExport();
+    // The two dialogs' files, suggested afresh for the drawing as it is now:
+    // at their first showing, and whenever another drawing is opened or this
+    // one saved somewhere (fileListener_).
+    void suggestPlotFiles();
+    // What the two dialogs ask before writing over a file: the person, in a
+    // box; a headless run writes it, as the verbs do.
+    bool confirmReplaceFile(const QString& title, const QString& path);
     // SNAPSHOT: the active plan view painted afresh at the size asked, or the
     // 3D view grabbed and scaled; written, or put on the clipboard, and a
     // record logged (plotting/view_image_export.hpp).
@@ -491,6 +498,8 @@ class MainWindow final : public QMainWindow {
     katana::core::Logger logger_;
     katana::cad::Document document_{&logger_};
     katana::cad::Document::ListenerHandle documentListener_;
+    // suggestPlotFiles, on a new, opened or saved drawing.
+    katana::cad::Document::ListenerHandle fileListener_;
     katana::cad::CommandInterpreter interpreter_{document_};
 
     ViewWorkspace* views_ = nullptr;
