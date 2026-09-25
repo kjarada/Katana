@@ -70,7 +70,8 @@ an imported one does.
 | surface from drawing | chords with interpolated heights, as breaklines | - | - |
 | move, rotate, scale, mirror | exact (a mirror negates the bulges) | exact (a mirror re-expresses the sweep) | exact |
 | stretch | vertices in the window move, arcs keep their bulge | whole, when its centre is inside | fit (or control) points move, solved again |
-| offset | concentric arcs, mitre or round joins (`geometry::offset`) | refused | refused |
+| offset (the Offset tool and OFFSET) | concentric arcs, mitre or round joins (`geometry::offset`), the side from the nearest piece | refused | refused |
+| explode | a line per straight segment and an arc per arc segment, each with its ends' heights | - | - |
 
 What is not done: trim, extend, break, lengthen and join of a
 `CurvePolyline2` (each still takes `Polyline2` only); the archive IMPORT
