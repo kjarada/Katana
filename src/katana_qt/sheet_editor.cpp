@@ -4,7 +4,9 @@
 #include <array>
 #include <cmath>
 #include <format>
+#include <initializer_list>
 #include <set>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -35,6 +37,7 @@
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QSpinBox>
@@ -47,6 +50,7 @@
 #include <QWheelEvent>
 
 #include "icons.hpp"
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/plotting/generators.hpp"
 #include "katana/cad/plotting/plan_grid.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
@@ -60,6 +64,7 @@
 #include "plotting/sheet_checks.hpp"
 #include "plotting/sheet_list_widget.hpp"
 #include "plotting/sheet_rulers.hpp"
+#include "plotting/sheet_tables.hpp"
 
 namespace katana::qt {
 
@@ -193,7 +198,82 @@ std::vector<std::string> alignmentNames(const katana::cad::Document& document)
     return document.model().alignments.names();
 }
 
+// A number as a verb line takes it: to a millionth, in its shortest form,
+// as the replies write numbers - "24" and "24.5", never "24.500000".
+QString verbNumber(double value)
+{
+    QString text = QString::number(std::round(value * 1e6) / 1e6, 'f', 6);
+    while (text.endsWith('0')) {
+        text.chop(1);
+    }
+    if (text.endsWith('.')) {
+        text.chop(1);
+    }
+    return text == QStringLiteral("-0") ? QStringLiteral("0") : text;
+}
+
+// A value in double quotes, as a verb line groups words: a name or a path
+// may hold spaces. The command line has no way to type a double quote in a
+// value, so the dialogs never offer one.
+QString quoted(const QString& text)
+{
+    return '"' + text + '"';
+}
+
+// "20, 40 60;80" as stations= takes it: "20,40,60,80". Empty when a part is
+// not a number, which the caller says rather than run.
+std::optional<QString> stationList(const QString& typed)
+{
+    QStringList numbers;
+    for (const QString& part : typed.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts)) {
+        bool ok = false;
+        const double value = part.toDouble(&ok);
+        if (!ok || !std::isfinite(value)) {
+            return std::nullopt;
+        }
+        numbers << verbNumber(value);
+    }
+    return numbers.join(',');
+}
+
+// The first line of a reply, for the status bar.
+QString firstLine(const QString& text)
+{
+    return text.section('\n', 0, 0);
+}
+
 } // namespace
+
+plotting::SheetVerbContext sheetVerbContextFor(const katana::cad::Document& document,
+                                               const std::function<SheetSource()>& source)
+{
+    plotting::SheetVerbContext context;
+    const SheetSource drawn = source();
+    // GENERATE lays out what Generate Sheets always covered: everything the
+    // plan view draws, and the visible surfaces for the sections.
+    context.drawingExtent = planDrawnBounds(drawn.plan, {}, {});
+    for (const auto& surface : drawn.surfaces) {
+        if (surface.visible && surface.surface != nullptr) {
+            context.surfaces.push_back({surface.name, surface.surface});
+        }
+    }
+    // The rest ask for the source again when they are called: a verb may
+    // change the set between being given the context and using it.
+    context.check = [&document, source](std::span<const std::size_t> sheets) {
+        return checkSheetsFor(document.sheetSet(), source(), sheets);
+    };
+    context.content = [&document, source](const plotting::Viewport& viewport) {
+        return viewportContent(viewport, source(), document.sheetSet());
+    };
+    context.fitSection = [source](const plotting::Viewport& viewport) {
+        SheetPaintCache cache;
+        return resolveSectionViewport(viewport, source(), cache);
+    };
+    context.drawn = [source](const plotting::SheetSet& set) {
+        return resolvedSheetSet(set, source());
+    };
+    return context;
+}
 
 // ============================================================================
 // SheetCanvas
@@ -1125,6 +1205,37 @@ void SheetEditor::report(const QString& text, bool error)
     }
 }
 
+VerbOutcome SheetEditor::runLine(const QString& line)
+{
+    VerbOutcome outcome;
+    if (run_) {
+        // The window echoes the line and logs the reply itself.
+        outcome = run_(line);
+    } else {
+        if (onMessage) {
+            onMessage("> " + line, false);
+        }
+        const auto tokens = katana::cad::CommandInterpreter::tokenize(line.toStdString());
+        const katana::core::Result<std::string> reply =
+            tokens ? plotting::runSheetVerb(document_, *tokens,
+                                            [this] { return sheetVerbContextFor(document_, source_); })
+                   : katana::core::Result<std::string>(tokens.error());
+        outcome.ok = reply.ok();
+        (outcome.ok ? outcome.reply : outcome.error) =
+            QString::fromStdString(outcome.ok ? *reply : reply.error().describe());
+        if (onMessage) {
+            onMessage(outcome.ok ? outcome.reply : outcome.error, !outcome.ok);
+        }
+    }
+    statusBar()->showMessage(firstLine(outcome.ok ? outcome.reply : outcome.error), 8000);
+    if (!outcome.ok) {
+        // A refused line changed nothing, so nothing redraws the panel: the
+        // field that was typed into shows the stored value again.
+        rebuildProperties();
+    }
+    return outcome;
+}
+
 void SheetEditor::buildActions()
 {
     QToolBar* bar = addToolBar(QStringLiteral("Sheets"));
@@ -1145,7 +1256,8 @@ void SheetEditor::buildActions()
     QAction* generate = bar->addAction(icon(Icon::Properties), QStringLiteral("Generate Sheets..."));
     generate->setObjectName(QStringLiteral("sheetGenerate"));
     generate->setToolTip(QStringLiteral("Lay sheets out for the drawing, an alignment or its sections"));
-    connect(generate, &QAction::triggered, this, [this] { generateSheets(); });
+    // Opened, not waited on: a headless session fills it by its object names.
+    connect(generate, &QAction::triggered, this, [this] { (void)openGenerateDialog(); });
 
     QAction* blank = bar->addAction(icon(Icon::New), QStringLiteral("New Sheet"));
     blank->setObjectName(QStringLiteral("sheetNewSheet"));
@@ -1417,36 +1529,108 @@ void SheetEditor::rebuildProperties()
             });
             form->addRow(QStringLiteral("Alignment"), alignment);
         }
-        if (v.kind == ViewportKind::LongSection || (plan && !v.source.alignment.empty())) {
+        // The fields added for the verbs run the VIEW SET line a person would
+        // type, queued: the line rebuilds this panel, and with it the field
+        // that is still signalling.
+        const auto viewSet = [this, id](const QString& options) {
+            const QString line = QString("VIEW SET %1 %2").arg(QString::fromStdString(id), options);
+            QMetaObject::invokeMethod(this, [this, line] { (void)runLine(line); }, Qt::QueuedConnection);
+        };
+        const bool crossSections = v.kind == ViewportKind::CrossSections;
+        if (v.kind == ViewportKind::LongSection || crossSections ||
+            (plan && !v.source.alignment.empty())) {
             auto* from = spin(box, -1e9, 1e9, v.source.chainageFrom, 3);
             auto* to = spin(box, -1e9, 1e9, v.source.chainageTo, 3);
-            from->setToolTip(QStringLiteral("From equal to To: the whole alignment"));
-            connect(from, &QDoubleSpinBox::valueChanged, this,
-                    [edit](double c) { edit([c](Viewport& e) { e.source.chainageFrom = c; }); });
-            connect(to, &QDoubleSpinBox::valueChanged, this,
-                    [edit](double c) { edit([c](Viewport& e) { e.source.chainageTo = c; }); });
+            from->setObjectName(QStringLiteral("sheetChainageFrom"));
+            to->setObjectName(QStringLiteral("sheetChainageTo"));
+            from->setToolTip(crossSections
+                                 ? QStringLiteral("The chainages cut every interval run from here")
+                                 : QStringLiteral("From equal to To: the whole alignment"));
+            to->setToolTip(crossSections ? QStringLiteral("...to here") : from->toolTip());
+            // What the box shows, rounded: a box left as it was writes nothing.
+            const double shownFrom = from->value();
+            const double shownTo = to->value();
+            connect(from, &QDoubleSpinBox::editingFinished, this, [viewSet, from, shownFrom] {
+                if (from->value() != shownFrom) {
+                    viewSet("from=" + verbNumber(from->value()));
+                }
+            });
+            connect(to, &QDoubleSpinBox::editingFinished, this, [viewSet, to, shownTo] {
+                if (to->value() != shownTo) {
+                    viewSet("to=" + verbNumber(to->value()));
+                }
+            });
             form->addRow(QStringLiteral("Chainage from"), from);
             form->addRow(QStringLiteral("Chainage to"), to);
         }
-        if (v.kind == ViewportKind::CrossSections) {
+        if (crossSections) {
+            // Cut at the chainages listed, or every so many metres from one
+            // chainage to another: the painter cuts the list when there is
+            // one (plotting::viewportStations), so Every clears it, and cuts
+            // an interval only over a range, so Every with none sets the
+            // alignment's whole length.
             QStringList stations;
             for (const double s : v.source.stations) {
                 stations << QString::number(s, 'f', 3);
             }
+            const bool byInterval = v.source.stations.empty() && v.source.sectionInterval > 0.0;
+            auto* atChainages = new QRadioButton(QStringLiteral("At chainages"), box);
+            atChainages->setObjectName(QStringLiteral("sheetSectionsAtChainages"));
+            atChainages->setChecked(!byInterval);
             auto* list = new QLineEdit(stations.join(QStringLiteral(", ")), box);
+            list->setObjectName(QStringLiteral("sheetSectionStations"));
             list->setPlaceholderText(QStringLiteral("e.g. 20, 40, 60"));
-            connect(list, &QLineEdit::editingFinished, this, [edit, list] {
-                std::vector<double> values;
-                for (const QString& part : list->text().split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts)) {
-                    bool ok = false;
-                    const double value = part.toDouble(&ok);
-                    if (ok) {
-                        values.push_back(value);
-                    }
+            list->setEnabled(!byInterval);
+            auto* every = new QRadioButton(QStringLiteral("Every"), box);
+            every->setObjectName(QStringLiteral("sheetSectionsEvery"));
+            every->setChecked(byInterval);
+            auto* interval = spin(box, 0.5, 10000.0, byInterval ? v.source.sectionInterval : 20.0, 2,
+                                  QStringLiteral(" m"));
+            interval->setObjectName(QStringLiteral("sheetSectionInterval"));
+            interval->setEnabled(byInterval);
+            const auto listed = [this, viewSet, list] {
+                const auto typed = stationList(list->text());
+                if (!typed) {
+                    report(QStringLiteral("Chainages are numbers separated by commas: ") + list->text(), true);
+                    return;
                 }
-                edit([values](Viewport& e) { e.source.stations = values; });
+                viewSet("interval=0 stations=" + (typed->isEmpty() ? QStringLiteral("\"\"") : *typed));
+            };
+            connect(list, &QLineEdit::editingFinished, this, [listed, list, text = list->text()] {
+                if (list->text() != text) {
+                    listed();
+                }
             });
-            form->addRow(QStringLiteral("Chainages"), list);
+            connect(atChainages, &QRadioButton::clicked, this, [listed, byInterval] {
+                if (byInterval) {
+                    listed();
+                }
+            });
+            std::optional<std::pair<double, double>> whole;
+            if (const auto* a = document_.model().alignments.find(v.source.alignment)) {
+                if (auto solved = katana::geometry::solveAlignment(a->horizontal)) {
+                    whole = std::pair{solved->startStation(), solved->endStation()};
+                }
+            }
+            const bool ranged = v.source.chainageTo > v.source.chainageFrom;
+            connect(every, &QRadioButton::clicked, this, [viewSet, interval, byInterval, ranged, whole] {
+                if (byInterval) {
+                    return;
+                }
+                QString options = "stations=\"\" interval=" + verbNumber(interval->value());
+                if (!ranged && whole) {
+                    options += " from=" + verbNumber(whole->first) + " to=" + verbNumber(whole->second);
+                }
+                viewSet(options);
+            });
+            const double shownInterval = interval->value();
+            connect(interval, &QDoubleSpinBox::editingFinished, this, [viewSet, interval, shownInterval] {
+                if (interval->value() != shownInterval) {
+                    viewSet("interval=" + verbNumber(interval->value()));
+                }
+            });
+            form->addRow(atChainages, list);
+            form->addRow(every, interval);
             auto* half = spin(box, 0.5, 1000.0, v.source.sectionHalfWidth > 0.0 ? v.source.sectionHalfWidth : 20.0,
                               2, QStringLiteral(" m"));
             connect(half, &QDoubleSpinBox::valueChanged, this, [edit](double w) {
@@ -1487,47 +1671,15 @@ void SheetEditor::rebuildProperties()
                                 },
                                 Qt::QueuedConnection);
                         });
-
+        }
+        // The painter leaves a section's hidden layers out as it does a
+        // plan's (section_painter.cpp), so both offer the list.
+        if (plan || section) {
             auto* layers = new QPushButton(
                 QString("Hidden layers (%1)...").arg(v.hiddenLayers.size()), box);
-            connect(layers, &QPushButton::clicked, this, [this, id, v] {
-                QDialog dialog(this);
-                dialog.setWindowTitle(QStringLiteral("Layers Shown in This View"));
-                auto* l = new QVBoxLayout(&dialog);
-                auto* listWidget = new QListWidget(&dialog);
-                for (const auto& layer : document_.model().layers.all()) {
-                    auto* item = new QListWidgetItem(QString::fromStdString(layer.name), listWidget);
-                    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-                    item->setCheckState(v.hiddenLayers.hidesDirectly(layer.name) ? Qt::Unchecked
-                                                                                 : Qt::Checked);
-                }
-                l->addWidget(listWidget);
-                auto* ok = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-                connect(ok, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-                connect(ok, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-                l->addWidget(ok);
-                if (dialog.exec() != QDialog::Accepted) {
-                    return;
-                }
-                std::vector<std::pair<std::string, bool>> states;
-                for (int i = 0; i < listWidget->count(); ++i) {
-                    states.emplace_back(listWidget->item(i)->text().toStdString(),
-                                        listWidget->item(i)->checkState() != Qt::Checked);
-                }
-                (void)plotting::editViewport(
-                    document_, id,
-                    [&states](Viewport& e) {
-                        for (const auto& [name, hide] : states) {
-                            if (hide) {
-                                e.hiddenLayers.hide(name);
-                            } else {
-                                e.hiddenLayers.show(name);
-                            }
-                        }
-                        return Status{};
-                    },
-                    "VIEWPORT_LAYERS");
-            });
+            layers->setObjectName(QStringLiteral("sheetViewportHiddenLayers"));
+            connect(layers, &QPushButton::clicked, this,
+                    [this, id, hidden = v.hiddenLayers] { chooseHiddenLayers(id, hidden); });
             form->addRow(QString(), layers);
         }
         if (v.kind == ViewportKind::Notes) {
@@ -1560,12 +1712,38 @@ void SheetEditor::rebuildProperties()
             form->addRow(QStringLiteral("Newest revisions"), limit);
         }
         if (v.kind == ViewportKind::Image) {
-            auto* file = new QLineEdit(QString::fromStdString(v.text), box);
+            auto* row = new QWidget(box);
+            auto* rowLayout = new QHBoxLayout(row);
+            rowLayout->setContentsMargins(0, 0, 0, 0);
+            auto* file = new QLineEdit(QString::fromStdString(v.text), row);
+            file->setObjectName(QStringLiteral("sheetImageName"));
             file->setPlaceholderText(QStringLiteral("a file in the project's assets folder"));
             connect(file, &QLineEdit::editingFinished, this, [edit, file] {
                 edit([t = file->text().toStdString()](Viewport& e) { e.text = t; });
             });
-            form->addRow(QStringLiteral("Image"), file);
+            // Another picture: copied into the project's assets as VIEW SET
+            // file= copies it (importImageAsset, up to 32 MB), and named in
+            // the same step.
+            auto* browse = new QPushButton(QStringLiteral("Browse..."), row);
+            browse->setObjectName(QStringLiteral("sheetImageBrowse"));
+            browse->setToolTip(QStringLiteral("Choose the picture: it is copied into the project's assets"));
+            connect(browse, &QPushButton::clicked, this, [this, id, viewSet] {
+                const QString line = QString("VIEW SET %1 file=\"path\"").arg(QString::fromStdString(id));
+                if (headless_) {
+                    report("Browse opens no file dialog in a headless session: type " + line, true);
+                    return;
+                }
+                const QString chosen = QFileDialog::getOpenFileName(
+                    this, QStringLiteral("Picture for the View"),
+                    QString::fromStdString(source().assets.string()),
+                    QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp *.gif)"));
+                if (!chosen.isEmpty()) {
+                    viewSet("file=" + quoted(chosen));
+                }
+            });
+            rowLayout->addWidget(file, 1);
+            rowLayout->addWidget(browse);
+            form->addRow(QStringLiteral("Image"), row);
         }
         if (v.kind == ViewportKind::Legend) {
             addLegendProperties(*form, document_, set, index, v, source(),
@@ -1577,13 +1755,47 @@ void SheetEditor::rebuildProperties()
                 [edit](bool on) { edit([on](Viewport& e) { e.locked = on; }); });
         form->addRow(QString(), locked);
 
-        auto* rectLabel = new QLabel(
-            QString("%1 x %2 mm at %3, %4")
-                .arg(v.rect.width(), 0, 'f', 1).arg(v.rect.height(), 0, 'f', 1)
-                .arg(v.rect.min.x, 0, 'f', 1).arg(v.rect.min.y, 0, 'f', 1),
-            box);
-        form->addRow(QStringLiteral("On the paper"), rectLabel);
+        // Where the view is on the paper, in paper millimetres from its
+        // lower-left corner: typed, as VIEW SET rect= takes it, and refused
+        // as a typed rectangle is when it misses the paper.
+        auto* place = new QGroupBox(QStringLiteral("On the paper"), panel);
+        auto* placeForm = new QFormLayout(place);
+        auto* rx = spin(place, -10000.0, 10000.0, v.rect.min.x, 1, QStringLiteral(" mm"));
+        auto* ry = spin(place, -10000.0, 10000.0, v.rect.min.y, 1, QStringLiteral(" mm"));
+        auto* rw = spin(place, 1.0, 10000.0, v.rect.width(), 1, QStringLiteral(" mm"));
+        auto* rh = spin(place, 1.0, 10000.0, v.rect.height(), 1, QStringLiteral(" mm"));
+        rx->setObjectName(QStringLiteral("sheetViewportX"));
+        ry->setObjectName(QStringLiteral("sheetViewportY"));
+        rw->setObjectName(QStringLiteral("sheetViewportW"));
+        rh->setObjectName(QStringLiteral("sheetViewportH"));
+        rx->setToolTip(QStringLiteral("The left edge, from the paper's left edge"));
+        ry->setToolTip(QStringLiteral("The bottom edge, from the paper's bottom edge"));
+        placeForm->addRow(QStringLiteral("Left"), rx);
+        placeForm->addRow(QStringLiteral("Bottom"), ry);
+        placeForm->addRow(QStringLiteral("Width"), rw);
+        placeForm->addRow(QStringLiteral("Height"), rh);
+        // A box left as it was keeps its exact value, not its rounding to
+        // the tenth it shows; and nothing changed writes nothing.
+        const std::array<double, 4> shown{rx->value(), ry->value(), rw->value(), rh->value()};
+        const std::array<double, 4> exact{v.rect.min.x, v.rect.min.y, v.rect.width(), v.rect.height()};
+        const auto placeView = [viewSet, rx, ry, rw, rh, shown, exact] {
+            const std::array<double, 4> now{rx->value(), ry->value(), rw->value(), rh->value()};
+            if (now == shown) {
+                return;
+            }
+            std::array<double, 4> value{};
+            for (std::size_t i = 0; i < value.size(); ++i) {
+                value[i] = now[i] == shown[i] ? exact[i] : now[i];
+            }
+            viewSet(QString("rect=%1,%2,%3,%4")
+                        .arg(verbNumber(value[0]), verbNumber(value[1]),
+                             verbNumber(value[0] + value[2]), verbNumber(value[1] + value[3])));
+        };
+        for (QDoubleSpinBox* field : {rx, ry, rw, rh}) {
+            connect(field, &QDoubleSpinBox::editingFinished, this, placeView);
+        }
         layout->addWidget(box);
+        layout->addWidget(place);
 
         for (const std::string& problem : canvas_->lastStats().problems) {
             if (problem.starts_with(id + ":")) {
@@ -1721,6 +1933,44 @@ void SheetEditor::rebuildProperties()
     rebuilding_ = true;
     properties_->setWidget(panel);
     rebuilding_ = false;
+}
+
+void SheetEditor::chooseHiddenLayers(const std::string& id, const katana::cad::LayerOverrides& hidden)
+{
+    auto* dialog = new QDialog(this);
+    dialog->setObjectName(QStringLiteral("sheetHiddenLayersDialog"));
+    dialog->setWindowTitle(QStringLiteral("Layers Shown in This View"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    auto* l = new QVBoxLayout(dialog);
+    auto* listWidget = new QListWidget(dialog);
+    listWidget->setObjectName(QStringLiteral("sheetHiddenLayersList"));
+    for (const auto& layer : document_.model().layers.all()) {
+        auto* item = new QListWidgetItem(QString::fromStdString(layer.name), listWidget);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(hidden.hidesDirectly(layer.name) ? Qt::Unchecked : Qt::Checked);
+    }
+    l->addWidget(listWidget);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    buttons->button(QDialogButtonBox::Ok)->setObjectName(QStringLiteral("sheetHiddenLayersOk"));
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    l->addWidget(buttons);
+    // Only what the ticks changed, a layer an option: an entry the view
+    // hides that is no layer of its own (a parent path) is left as it is.
+    connect(dialog, &QDialog::accepted, this, [this, id, hidden, listWidget] {
+        QStringList options;
+        for (int i = 0; i < listWidget->count(); ++i) {
+            const QString name = listWidget->item(i)->text();
+            const bool hide = listWidget->item(i)->checkState() != Qt::Checked;
+            if (hide != hidden.hidesDirectly(name.toStdString())) {
+                options << (hide ? "hide=" : "show=") + quoted(name);
+            }
+        }
+        if (!options.isEmpty()) {
+            (void)runLine(QString("VIEW SET %1 %2").arg(QString::fromStdString(id), options.join(' ')));
+        }
+    });
+    dialog->open();
 }
 
 void SheetEditor::showContextMenu(const QPointF& global, const std::string& viewportId)
@@ -2013,221 +2263,468 @@ void SheetEditor::plotInteractive(bool allSheets)
 
 // ---- Generate Sheets ------------------------------------------------------------------
 
+namespace {
+
+// The layouts, in the dialog's order: the GENERATE kind each runs, and what
+// the list says.
+struct GenerateLayout {
+    const char* kind;
+    const char* text;
+};
+constexpr std::array kGenerateLayouts{
+    GenerateLayout{"fit", "The drawing, fitted (one sheet, or tiles at a set scale)"},
+    GenerateLayout{"grid", "Tiles over the drawing, with a key plan"},
+    GenerateLayout{"strips", "Plan strips along an alignment"},
+    GenerateLayout{"profile", "Plan and profile along an alignment"},
+    GenerateLayout{"sections", "Cross sections along an alignment"},
+    GenerateLayout{"frames", "One sheet per imported plot frame"},
+    GenerateLayout{"register", "Drawing register (cover sheet)"},
+};
+
+// The vertical exaggerations offered for cross sections; Auto fits it to
+// the ground, as an automatic section view does.
+constexpr std::array kExaggerations{1.0, 2.0, 5.0, 10.0, 20.0};
+
+QString areaText(const Box2& box)
+{
+    return QString("%1,%2,%3,%4")
+        .arg(verbNumber(box.min.x), verbNumber(box.min.y), verbNumber(box.max.x), verbNumber(box.max.y));
+}
+
+// A chainage typed in a From or To box: nothing for an empty box (the
+// alignment's end), else the number; an error for anything else.
+katana::core::Result<std::optional<double>> typedChainage(const QLineEdit& edit, const char* what)
+{
+    const QString text = edit.text().trimmed();
+    if (text.isEmpty()) {
+        return std::optional<double>{};
+    }
+    bool ok = false;
+    const double value = text.toDouble(&ok);
+    if (!ok || !std::isfinite(value)) {
+        return katana::core::makeError(katana::core::ErrorCode::ParseFailure,
+                                       std::string(what) + " is a chainage in metres", text.toStdString());
+    }
+    return std::optional<double>(value);
+}
+
+} // namespace
+
 void SheetEditor::generateSheets()
 {
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("Generate Sheets"));
-    dialog.setMinimumWidth(460);
-    auto* layout = new QVBoxLayout(&dialog);
+    buildGenerateDialog()->exec();
+}
+
+QDialog* SheetEditor::openGenerateDialog()
+{
+    QDialog* dialog = buildGenerateDialog();
+    dialog->open();
+    return dialog;
+}
+
+// Object names: the dialog sheetGenerateDialog; sheetGenerateLayout (the
+// kinds, in kGenerateLayouts' order), sheetGeneratePaper,
+// sheetGenerateOrientation, sheetGenerateFrame; sheetGenerateArea (the whole
+// drawing, the current plan view, a window) and the window's
+// sheetGenerateAreaX0, Y0, X1 and Y1; sheetGenerateScale,
+// sheetGenerateAlignment, sheetGenerateFrom, sheetGenerateTo,
+// sheetGenerateOverlap, sheetGenerateKeyPlan; the cross sections
+// sheetGenerateNoSections, sheetGenerateEvery with sheetGenerateInterval,
+// sheetGenerateAtStations with sheetGenerateStations, sheetGenerateHalfWidth,
+// sheetGenerateRows, sheetGenerateColumns and sheetGenerateVe;
+// sheetGenerateModel3d, sheetGenerateLegend, sheetGenerateRotate,
+// sheetGenerateReplace; the line OK runs, sheetGenerateLine; and the buttons
+// sheetGenerateOk and sheetGenerateCancel.
+QDialog* SheetEditor::buildGenerateDialog()
+{
+    auto* dialog = new QDialog(this);
+    dialog->setObjectName(QStringLiteral("sheetGenerateDialog"));
+    dialog->setWindowTitle(QStringLiteral("Generate Sheets"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setMinimumWidth(500);
+    auto* layout = new QVBoxLayout(dialog);
     auto* form = new QFormLayout();
     layout->addLayout(form);
+    const auto named = [](QWidget* widget, const char* name) {
+        widget->setObjectName(QString::fromLatin1(name));
+        return widget;
+    };
 
-    auto* kind = new QComboBox(&dialog);
-    kind->addItems({QStringLiteral("The drawing, fitted (one sheet, or tiles at a set scale)"),
-                    QStringLiteral("Tiles over the drawing, with a key plan"),
-                    QStringLiteral("Plan strips along an alignment"),
-                    QStringLiteral("Plan and profile along an alignment"),
-                    QStringLiteral("Cross sections along an alignment"),
-                    QStringLiteral("One sheet per imported plot frame"),
-                    QStringLiteral("Drawing register (cover sheet)")});
-    kind->setObjectName(QStringLiteral("sheetGenerateLayout"));
-    // The register lists the sheets there are, so it goes in front of them
-    // (plotting::addRegisterSheet) rather than after or instead of them.
-    constexpr int kRegisterLayout = 6;
+    auto* kind = new QComboBox(dialog);
+    for (const GenerateLayout& choice : kGenerateLayouts) {
+        kind->addItem(QString::fromLatin1(choice.text), QString::fromLatin1(choice.kind));
+    }
+    named(kind, "sheetGenerateLayout");
     form->addRow(QStringLiteral("Layout"), kind);
 
-    auto* paper = new QComboBox(&dialog);
+    // The paper, for every layout but the plot frames', which bring their own.
+    auto* paper = new QComboBox(dialog);
     for (const auto p : kPapers) {
         paper->addItem(paperName(p));
     }
     paper->setCurrentIndex(3);
-    form->addRow(QStringLiteral("Paper"), paper);
-    auto* scale = scaleBox(&dialog, true);
-    form->addRow(QStringLiteral("Scale"), scale);
-    auto* alignment = new QComboBox(&dialog);
-    for (const std::string& name : alignmentNames(document_)) {
-        alignment->addItem(QString::fromStdString(name));
+    named(paper, "sheetGeneratePaper");
+    auto* orientation = new QComboBox(dialog);
+    orientation->addItems({QStringLiteral("Landscape"), QStringLiteral("Portrait")});
+    named(orientation, "sheetGenerateOrientation");
+    auto* frame = new QCheckBox(QStringLiteral("Frame and title block"), dialog);
+    frame->setChecked(true);
+    frame->setToolTip(QStringLiteral("A portrait sheet has no frame: the title block is laid out for landscape"));
+    named(frame, "sheetGenerateFrame");
+    auto* paperRow = new QWidget(dialog);
+    auto* paperLayout = new QHBoxLayout(paperRow);
+    paperLayout->setContentsMargins(0, 0, 0, 0);
+    paperLayout->addWidget(paper);
+    paperLayout->addWidget(orientation);
+    paperLayout->addWidget(frame, 1);
+    form->addRow(QStringLiteral("Paper"), paperRow);
+
+    // What a fit or the tiles cover.
+    auto* area = new QComboBox(dialog);
+    area->addItem(QStringLiteral("The whole drawing"), QStringLiteral("drawing"));
+    if (planViewArea) {
+        if (const auto shown = planViewArea(); shown && !shown->empty()) {
+            area->addItem(QStringLiteral("The current plan view"), QStringLiteral("view"));
+        }
     }
+    area->addItem(QStringLiteral("A window"), QStringLiteral("window"));
+    named(area, "sheetGenerateArea");
+    form->addRow(QStringLiteral("Area"), area);
+    Box2 extent = planDrawnBounds(source().plan, {}, {});
+    if (extent.empty()) {
+        extent = Box2(Point2(0.0, 0.0), Point2(100.0, 100.0));
+    }
+    auto* windowRow = new QWidget(dialog);
+    auto* windowLayout = new QHBoxLayout(windowRow);
+    windowLayout->setContentsMargins(0, 0, 0, 0);
+    std::array<QDoubleSpinBox*, 4> corners{};
+    const std::array<double, 4> cornerValues{extent.min.x, extent.min.y, extent.max.x, extent.max.y};
+    const std::array<const char*, 4> cornerNames{"sheetGenerateAreaX0", "sheetGenerateAreaY0",
+                                                 "sheetGenerateAreaX1", "sheetGenerateAreaY1"};
+    const std::array<const char*, 4> cornerTips{"West edge (E)", "South edge (N)", "East edge (E)",
+                                                "North edge (N)"};
+    for (std::size_t i = 0; i < corners.size(); ++i) {
+        corners[i] = spin(windowRow, -1e9, 1e9, std::round(cornerValues[i] * 1000.0) / 1000.0, 3);
+        named(corners[i], cornerNames[i]);
+        corners[i]->setToolTip(QString::fromLatin1(cornerTips[i]));
+        windowLayout->addWidget(corners[i]);
+    }
+    form->addRow(QStringLiteral("Window"), windowRow);
+
+    auto* scale = scaleBox(dialog, true);
+    named(scale, "sheetGenerateScale");
+    form->addRow(QStringLiteral("Scale"), scale);
+    auto* alignment = new QComboBox(dialog);
+    alignment->addItem(QStringLiteral("(none)"), QString());
+    for (const std::string& name : alignmentNames(document_)) {
+        alignment->addItem(QString::fromStdString(name), QString::fromStdString(name));
+    }
+    alignment->setToolTip(QStringLiteral("None: the drawing's only alignment, or for a fit the area"));
+    named(alignment, "sheetGenerateAlignment");
     form->addRow(QStringLiteral("Alignment"), alignment);
-    auto* overlap = spin(&dialog, 0.0, 1000.0, 10.0, 1, QStringLiteral(" m"));
+    auto* from = new QLineEdit(dialog);
+    from->setPlaceholderText(QStringLiteral("the start"));
+    named(from, "sheetGenerateFrom");
+    auto* to = new QLineEdit(dialog);
+    to->setPlaceholderText(QStringLiteral("the end"));
+    named(to, "sheetGenerateTo");
+    auto* rangeRow = new QWidget(dialog);
+    auto* rangeLayout = new QHBoxLayout(rangeRow);
+    rangeLayout->setContentsMargins(0, 0, 0, 0);
+    rangeLayout->addWidget(from);
+    rangeLayout->addWidget(new QLabel(QStringLiteral("to"), rangeRow));
+    rangeLayout->addWidget(to);
+    form->addRow(QStringLiteral("Chainages"), rangeRow);
+    auto* overlap = spin(dialog, 0.0, 1000.0, 10.0, 1, QStringLiteral(" m"));
+    named(overlap, "sheetGenerateOverlap");
     form->addRow(QStringLiteral("Overlap"), overlap);
-    auto* keyPlan = new QCheckBox(QStringLiteral("A key plan sheet first"), &dialog);
+    auto* keyPlan = new QCheckBox(QStringLiteral("A key plan sheet first"), dialog);
     keyPlan->setChecked(true);
+    named(keyPlan, "sheetGenerateKeyPlan");
     form->addRow(QString(), keyPlan);
-    auto* interval = spin(&dialog, 0.5, 10000.0, 20.0, 2, QStringLiteral(" m"));
-    form->addRow(QStringLiteral("Section interval"), interval);
-    auto* halfWidth = spin(&dialog, 0.5, 1000.0, 20.0, 2, QStringLiteral(" m"));
+
+    // Cross sections: after a fit's or a profile's plan, or the whole of a
+    // sections layout; every so many metres or at the chainages listed.
+    auto* noSections = new QRadioButton(QStringLiteral("None"), dialog);
+    named(noSections, "sheetGenerateNoSections");
+    noSections->setChecked(true);
+    auto* every = new QRadioButton(QStringLiteral("Every"), dialog);
+    named(every, "sheetGenerateEvery");
+    auto* atStations = new QRadioButton(QStringLiteral("At chainages"), dialog);
+    named(atStations, "sheetGenerateAtStations");
+    auto* sectionsRow = new QWidget(dialog);
+    auto* sectionsLayout = new QHBoxLayout(sectionsRow);
+    sectionsLayout->setContentsMargins(0, 0, 0, 0);
+    auto* interval = spin(sectionsRow, 0.5, 10000.0, 20.0, 2, QStringLiteral(" m"));
+    named(interval, "sheetGenerateInterval");
+    auto* stations = new QLineEdit(sectionsRow);
+    stations->setPlaceholderText(QStringLiteral("e.g. 20, 40, 60"));
+    named(stations, "sheetGenerateStations");
+    sectionsLayout->addWidget(noSections);
+    sectionsLayout->addWidget(every);
+    sectionsLayout->addWidget(interval);
+    sectionsLayout->addWidget(atStations);
+    sectionsLayout->addWidget(stations, 1);
+    form->addRow(QStringLiteral("Cross sections"), sectionsRow);
+    auto* halfWidth = spin(dialog, 0.5, 1000.0, 20.0, 2, QStringLiteral(" m"));
+    named(halfWidth, "sheetGenerateHalfWidth");
     form->addRow(QStringLiteral("Section half width"), halfWidth);
-    auto* rows = new QSpinBox(&dialog);
+    auto* rows = new QSpinBox(dialog);
     rows->setRange(1, 8);
     rows->setValue(3);
-    auto* columns = new QSpinBox(&dialog);
+    named(rows, "sheetGenerateRows");
+    auto* columns = new QSpinBox(dialog);
     columns->setRange(1, 6);
     columns->setValue(2);
+    named(columns, "sheetGenerateColumns");
     form->addRow(QStringLiteral("Sections down"), rows);
     form->addRow(QStringLiteral("Sections across"), columns);
-    auto* snapshot = new QCheckBox(QStringLiteral("A 3D snapshot beside the plan"), &dialog);
-    auto* legend = new QCheckBox(QStringLiteral("A legend beside the plan"), &dialog);
+    auto* ve = new QComboBox(dialog);
+    ve->addItem(QStringLiteral("Auto"), QStringLiteral("auto"));
+    for (const double x : kExaggerations) {
+        ve->addItem(QString("%1 x").arg(verbNumber(x)), verbNumber(x));
+    }
+    ve->setToolTip(QStringLiteral("Auto: fitted to the ground each section cuts"));
+    named(ve, "sheetGenerateVe");
+    form->addRow(QStringLiteral("Vertical exaggeration"), ve);
+
+    auto* snapshot = new QCheckBox(QStringLiteral("A 3D snapshot beside the plan"), dialog);
+    named(snapshot, "sheetGenerateModel3d");
+    auto* legend = new QCheckBox(QStringLiteral("A legend beside the plan"), dialog);
     legend->setChecked(true);
+    named(legend, "sheetGenerateLegend");
     form->addRow(QString(), snapshot);
     form->addRow(QString(), legend);
-    auto* rotate = new QCheckBox(QStringLiteral("Rotate the drawing to fill the sheet"), &dialog);
-    rotate->setObjectName(QStringLiteral("sheetGenerateRotate"));
+    auto* rotate = new QCheckBox(QStringLiteral("Rotate the drawing to fill the sheet"), dialog);
+    named(rotate, "sheetGenerateRotate");
     rotate->setToolTip(QStringLiteral("Turn the plan when that shows the drawing at a larger scale, "
                                       "or on fewer sheets, and no further than it needs"));
     form->addRow(QString(), rotate);
-    auto* replace = new QCheckBox(QStringLiteral("Replace the sheets there are now"), &dialog);
+    auto* replace = new QCheckBox(QStringLiteral("Replace the sheets there are now"), dialog);
+    named(replace, "sheetGenerateReplace");
     form->addRow(QString(), replace);
 
-    const auto enable = [&] {
-        const int k = kind->currentIndex();
-        const bool along = k >= 2 && k <= 4;
-        alignment->setEnabled(along);
-        overlap->setEnabled(k == 1 || k == 2);
-        keyPlan->setEnabled(k == 1 || k == 2);
-        interval->setEnabled(k == 4);
-        halfWidth->setEnabled(k == 4);
-        rows->setEnabled(k == 4);
-        columns->setEnabled(k == 4);
-        snapshot->setEnabled(k == 0);
-        legend->setEnabled(k == 0);
-        rotate->setEnabled(k == 0);
-        scale->setEnabled(k != 5 && k != kRegisterLayout);
-        replace->setEnabled(k != kRegisterLayout);
-    };
-    connect(kind, &QComboBox::currentIndexChanged, &dialog, enable);
-    enable();
+    // The line OK runs, as it will be typed into the log: what a person
+    // learns the verb from, and what an agent would type instead.
+    auto* lineLabel = new QLabel(dialog);
+    named(lineLabel, "sheetGenerateLine");
+    lineLabel->setWordWrap(true);
+    lineLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    layout->addWidget(lineLabel);
 
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("Generate"));
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    QPushButton* ok = buttons->button(QDialogButtonBox::Ok);
+    ok->setText(QStringLiteral("Generate"));
+    named(ok, "sheetGenerateOk");
+    named(buttons->button(QDialogButtonBox::Cancel), "sheetGenerateCancel");
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
     layout->addWidget(buttons);
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
 
-    plotting::SheetTemplate paperTemplate;
-    paperTemplate.paper = kPapers[static_cast<std::size_t>(paper->currentIndex())];
-    const std::optional<double> fixed = parseScale(scale->currentText());
-    const std::string name = alignment->currentText().toStdString();
-    const SheetSource src = source();
-    const katana::entity::Model& model = document_.model();
+    const auto kindNow = [kind] { return kind->currentData().toString(); };
+    const auto fixedScale = [scale] { return parseScale(scale->currentText()); };
 
-    katana::core::Result<std::vector<Sheet>> sheets = std::vector<Sheet>{};
-    const int k = kind->currentIndex();
-    if (k == kRegisterLayout) {
-        auto added = plotting::addRegisterSheet(document_, paperTemplate);
-        if (!added) {
-            report(QString::fromStdString(added.error().describe()), true);
-            return;
+    // The GENERATE line the choices make, every option the layout takes
+    // written out, so the line says the whole choice; or what is wrong with
+    // them.
+    const auto buildLine = [=, this]() -> katana::core::Result<QString> {
+        const QString k = kindNow();
+        QStringList words{QStringLiteral("GENERATE"), k};
+        const bool frames = k == QLatin1String("frames");
+        const bool alongAlignment =
+            k == QLatin1String("strips") || k == QLatin1String("profile") || k == QLatin1String("sections");
+        const QString aligned = alignment->currentData().toString();
+        if (!frames) {
+            words << "paper=" + paper->currentText();
+            words << (orientation->currentIndex() == 1 ? QStringLiteral("portrait") : QStringLiteral("landscape"));
         }
-        setCurrentSheet(0);
-        canvas_->fitPage();
-        report(QStringLiteral("Added the drawing register as sheet 1."));
-        return;
-    }
-    const auto needAlignment = [&]() -> katana::core::Result<katana::geometry::SolvedAlignment> {
-        const auto* a = model.alignments.find(name);
-        if (a == nullptr) {
-            return katana::core::makeError(katana::core::ErrorCode::NotFound,
-                                           "choose an alignment (define one with ALIGN NEW)");
+        words << QString("frame=%1").arg(frame->isChecked() ? "on" : "off");
+        if (k == QLatin1String("frames") || k == QLatin1String("register")) {
+            return words.join(' ');
         }
-        return katana::geometry::solveAlignment(a->horizontal);
-    };
-    const Box2 extent = planDrawnBounds(src.plan, {}, {});
-    if (k == 0) {
-        plotting::LayoutRequest request;
-        request.planArea = extent;
-        request.scale = fixed.value_or(0.0);
-        request.model3d = snapshot->isChecked();
-        request.legend = legend->isChecked();
-        request.paper = paperTemplate;
-        sheets = rotate->isChecked()
-                     ? plotting::smartLayoutRotated(model, request, drawingContent(src))
-                     : plotting::smartLayout(model, request);
-    } else if (k == 1) {
-        plotting::GridRequest request;
-        request.area = extent;
-        request.scale = fixed.value_or(500.0);
-        request.overlapM = overlap->value();
-        request.keyPlan = keyPlan->isChecked();
-        request.paper = paperTemplate;
-        sheets = plotting::gridSheets(request);
-    } else if (k == 2 && fixed) {
-        auto solved = needAlignment();
-        if (!solved) {
-            sheets = solved.error();
+        const bool fit = k == QLatin1String("fit");
+        if ((fit && aligned.isEmpty()) || k == QLatin1String("grid")) {
+            const QString chosen = area->currentData().toString();
+            if (chosen == QLatin1String("view")) {
+                const auto shown = planViewArea ? planViewArea() : std::nullopt;
+                if (!shown || shown->empty()) {
+                    return katana::core::makeError(katana::core::ErrorCode::InvalidState,
+                                                   "there is no plan view to take the area from");
+                }
+                words << "area=" + areaText(*shown);
+            } else if (chosen == QLatin1String("window")) {
+                const Box2 window(Point2(std::min(corners[0]->value(), corners[2]->value()),
+                                         std::min(corners[1]->value(), corners[3]->value())),
+                                  Point2(std::max(corners[0]->value(), corners[2]->value()),
+                                         std::max(corners[1]->value(), corners[3]->value())));
+                if (!(window.width() > 0.0) || !(window.height() > 0.0)) {
+                    return katana::core::makeError(katana::core::ErrorCode::InvalidArgument,
+                                                   "the window needs a width and a height");
+                }
+                words << "area=" + areaText(window);
+            }
+        }
+        if ((fit || alongAlignment) && !aligned.isEmpty()) {
+            words << "alignment=" + quoted(aligned);
+        }
+        const std::optional<double> fixed = fixedScale();
+        if (k == QLatin1String("grid")) {
+            // Tiles are cut at a fixed scale; Auto is GENERATE grid's own 500.
+            if (fixed) {
+                words << "scale=" + verbNumber(*fixed);
+            }
         } else {
-            plotting::StripRequest request;
-            request.scale = *fixed;
-            request.overlapM = overlap->value();
-            request.keyPlan = keyPlan->isChecked();
-            request.paper = paperTemplate;
-            sheets = plotting::stripSheets(*solved, name, request);
+            words << (fixed ? "scale=" + verbNumber(*fixed) : QStringLiteral("scale=auto"));
         }
-    } else if (k == 2 || k == 3) {
-        plotting::LayoutRequest request;
-        request.alignment = name;
-        request.planAlongAlignment = true;
-        request.longSection = k == 3;
-        request.scale = fixed.value_or(0.0);
-        request.paper = paperTemplate;
-        sheets = plotting::smartLayout(model, request);
-    } else if (k == 4) {
-        auto solved = needAlignment();
-        if (!solved) {
-            sheets = solved.error();
-        } else {
-            plotting::CrossSectionRequest request;
-            request.interval = interval->value();
-            request.halfWidth = halfWidth->value();
-            request.rows = static_cast<std::size_t>(rows->value());
-            request.columns = static_cast<std::size_t>(columns->value());
-            request.scale = fixed.value_or(0.0);
-            for (const auto& surface : src.surfaces) {
-                if (surface.visible && surface.surface != nullptr) {
-                    request.surfaces.push_back({surface.name, surface.surface});
+        const bool fixedStrips = k == QLatin1String("strips") && fixed;
+        if (k == QLatin1String("grid") || fixedStrips) {
+            words << "overlap=" + verbNumber(overlap->value());
+            words << QString("keyplan=%1").arg(keyPlan->isChecked() ? "on" : "off");
+        }
+        if (fixedStrips) {
+            for (const auto& [edit, key] : {std::pair{from, "from"}, std::pair{to, "to"}}) {
+                auto chainage = typedChainage(*edit, key);
+                if (!chainage) {
+                    return chainage.error();
+                }
+                if (*chainage) {
+                    words << QString("%1=%2").arg(QLatin1String(key), verbNumber(**chainage));
                 }
             }
-            request.paper = paperTemplate;
-            sheets = plotting::crossSectionSheets(*solved, name, request);
         }
-    } else {
-        std::vector<std::string> skipped;
-        sheets = plotting::sheetsFromPlotFrames(model, paperTemplate, &skipped);
-        for (const std::string& why : skipped) {
-            report(QString::fromStdString(why), true);
+        const bool withPlan = fit || k == QLatin1String("profile");
+        if (withPlan) {
+            if (every->isChecked()) {
+                words << "interval=" + verbNumber(interval->value())
+                      << "halfwidth=" + verbNumber(halfWidth->value());
+            }
+            words << QString("model3d=%1").arg(snapshot->isChecked() ? "on" : "off");
+            words << QString("legend=%1").arg(legend->isChecked() ? "on" : "off");
         }
+        if (fit && rotate->isChecked() && rotate->isEnabled()) {
+            words << QStringLiteral("rotate=on");
+        }
+        if (k == QLatin1String("sections")) {
+            if (atStations->isChecked()) {
+                const auto list = stationList(stations->text());
+                if (!list || list->isEmpty()) {
+                    return katana::core::makeError(katana::core::ErrorCode::ParseFailure,
+                                                   "list the chainages to cut, separated by commas",
+                                                   stations->text().toStdString());
+                }
+                words << "stations=" + *list;
+            } else {
+                words << "interval=" + verbNumber(interval->value());
+            }
+            words << "halfwidth=" + verbNumber(halfWidth->value())
+                  << QString("rows=%1").arg(rows->value()) << QString("columns=%1").arg(columns->value())
+                  << "ve=" + ve->currentData().toString();
+        }
+        if (replace->isChecked()) {
+            words << QStringLiteral("replace=on");
+        }
+        return words.join(' ');
+    };
+
+    const auto enable = [=, this] {
+        const QString k = kindNow();
+        const bool fit = k == QLatin1String("fit");
+        const bool grid = k == QLatin1String("grid");
+        const bool strips = k == QLatin1String("strips");
+        const bool profile = k == QLatin1String("profile");
+        const bool sections = k == QLatin1String("sections");
+        const bool frames = k == QLatin1String("frames");
+        const bool reg = k == QLatin1String("register");
+        const bool aligned = !alignment->currentData().toString().isEmpty();
+        const bool fixedStrips = strips && fixedScale().has_value();
+        paper->setEnabled(!frames);
+        orientation->setEnabled(!frames);
+        area->setEnabled((fit && !aligned) || grid);
+        const bool window = area->isEnabled() && area->currentData().toString() == QLatin1String("window");
+        for (QDoubleSpinBox* corner : corners) {
+            corner->setEnabled(window);
+        }
+        scale->setEnabled(!frames && !reg);
+        alignment->setEnabled(fit || strips || profile || sections);
+        from->setEnabled(fixedStrips);
+        to->setEnabled(fixedStrips);
+        overlap->setEnabled(grid || fixedStrips);
+        keyPlan->setEnabled(grid || fixedStrips);
+        // None for a plan's sections, At chainages for a sections layout:
+        // a choice the layout does not take is moved off.
+        noSections->setEnabled(fit || profile);
+        every->setEnabled(fit || profile || sections);
+        atStations->setEnabled(sections);
+        if (sections && noSections->isChecked()) {
+            every->setChecked(true);
+        } else if (!sections && atStations->isChecked()) {
+            noSections->setChecked(true);
+        }
+        interval->setEnabled(every->isEnabled() && every->isChecked());
+        stations->setEnabled(sections && atStations->isChecked());
+        halfWidth->setEnabled(sections || ((fit || profile) && every->isChecked()));
+        rows->setEnabled(sections);
+        columns->setEnabled(sections);
+        ve->setEnabled(sections);
+        snapshot->setEnabled(fit || profile);
+        legend->setEnabled(fit || profile);
+        // Only a plan of an area turns; a strip follows its alignment.
+        rotate->setEnabled(fit && !aligned && noSections->isChecked());
+        replace->setEnabled(!reg);
+        const auto line = buildLine();
+        lineLabel->setText(line ? *line : QString::fromStdString(line.error().message));
+        lineLabel->setStyleSheet(line ? QString() : QStringLiteral("color: #d05050;"));
+        ok->setEnabled(line.ok());
+    };
+    // A layout along an alignment starts on the first one; a fit on none,
+    // which is the drawing.
+    connect(kind, &QComboBox::currentIndexChanged, dialog, [=] {
+        const QString k = kindNow();
+        if (k == QLatin1String("fit")) {
+            alignment->setCurrentIndex(0);
+        } else if (alignment->currentIndex() == 0 && alignment->count() > 1 &&
+                   (k == QLatin1String("strips") || k == QLatin1String("profile") ||
+                    k == QLatin1String("sections"))) {
+            alignment->setCurrentIndex(1);
+        }
+        enable();
+    });
+    for (QComboBox* combo : {paper, orientation, area, alignment, ve}) {
+        connect(combo, &QComboBox::currentIndexChanged, dialog, enable);
     }
-    if (!sheets) {
-        report(QString::fromStdString(sheets.error().describe()), true);
-        return;
+    connect(scale, &QComboBox::currentTextChanged, dialog, enable);
+    for (QLineEdit* edit : {from, to, stations}) {
+        connect(edit, &QLineEdit::textChanged, dialog, enable);
     }
-    if (sheets->empty()) {
-        report(QStringLiteral("Nothing to lay out."), true);
-        return;
+    for (QAbstractButton* button : std::initializer_list<QAbstractButton*>{
+             frame, keyPlan, noSections, every, atStations, snapshot, legend, rotate, replace}) {
+        connect(button, &QAbstractButton::toggled, dialog, enable);
     }
-    const std::size_t count = sheets->size();
-    const std::size_t first = replace->isChecked() ? 0 : document_.sheetSet().sheets.size();
-    Status status;
-    if (replace->isChecked()) {
-        status = plotting::editSheetSet(document_, [&sheets](SheetSet& set) {
-            set.sheets.clear();
-            plotting::prepareForAppend(set, *sheets);
-            set.sheets = std::move(*sheets);
-            return Status{};
-        }, "GENERATE_SHEETS");
-    } else {
-        status = plotting::addSheets(document_, std::move(*sheets), "GENERATE_SHEETS");
+    for (QDoubleSpinBox* number : {overlap, interval, halfWidth, corners[0], corners[1], corners[2], corners[3]}) {
+        connect(number, &QDoubleSpinBox::valueChanged, dialog, enable);
     }
-    if (!status) {
-        report(QString::fromStdString(status.error().describe()), true);
-        return;
+    for (QSpinBox* number : {rows, columns}) {
+        connect(number, &QSpinBox::valueChanged, dialog, enable);
     }
-    setCurrentSheet(first);
-    canvas_->fitPage();
-    report(QString("Generated %1 sheet%2.").arg(count).arg(count == 1 ? "" : "s"));
+    enable();
+
+    connect(dialog, &QDialog::accepted, this, [this, buildLine, kindNow, replace] {
+        const auto line = buildLine();
+        if (!line) {
+            report(QString::fromStdString(line.error().describe()), true);
+            return;
+        }
+        // Where the new sheets go: a register in front, the rest after the
+        // sheets there are, or in their place.
+        const bool cover = kindNow() == QLatin1String("register");
+        const std::size_t first =
+            cover || replace->isChecked() ? 0 : document_.sheetSet().sheets.size();
+        if (runLine(*line).ok && first < document_.sheetSet().sheets.size()) {
+            setCurrentSheet(first);
+            canvas_->fitPage();
+        }
+    });
+    return dialog;
 }
 
 // ---- Title Block ----------------------------------------------------------------------

@@ -38,6 +38,7 @@
 #include "katana/cad/plotting/viewport_edits.hpp"
 #include "plotting/sheet_list_widget.hpp"
 #include "plotting/sheet_readout.hpp"
+#include "plotting/sheet_set_menu.hpp"
 #include "plotting/viewport_clipboard.hpp"
 #include "sheet_editor.hpp"
 
@@ -143,6 +144,7 @@ void SheetEditor::setUpEditing()
         return action;
     };
 
+    addSheetSetMenu(*this, document_, *menuBar());
     QMenu* edit = menuBar()->addMenu(QStringLiteral("&Edit"));
     edit->setObjectName(QStringLiteral("sheetEditMenu"));
     connect(make(edit, QStringLiteral("Cu&t"), "sheetCut", QKeySequence::Cut,
