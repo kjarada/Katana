@@ -158,6 +158,8 @@ const ShaderLibrary& compiledHlslShaders()
     return library;
 }
 
+const ShaderLibrary& defaultShaders() { return compiledHlslShaders(); }
+
 katana::core::Status precompileHlslShaders(Expansion expansion)
 {
     for (const Program program : kAllPrograms) {

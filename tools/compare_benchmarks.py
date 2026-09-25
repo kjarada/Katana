@@ -64,12 +64,19 @@ def alternate(rounds, pattern, binaries):
                 times.setdefault((name, entry['run_name']), []).append(entry['real_time'] * scale)
     names = [name for name, _ in binaries]
     benchmarks = sorted({key[1] for key in times})
-    print('%-40s' % 'ms, min / median' + ''.join('%24s' % name for name in names))
+    print('%-40s' % 'min / median' + ''.join('%24s' % name for name in names))
     for benchmark in benchmarks:
         row = '%-40s' % benchmark[:40]
+        # One unit a row, the largest that keeps its fastest sample at 1 or
+        # more: in ms to two places, a sub-microsecond case read 0.00 / 0.00.
+        fastest = min(min(samples) for samples in
+                      (times.get((name, benchmark), []) for name in names) if samples)
+        unit, scale = next((u, f) for u, f in (('ms', 1.0), ('us', 1e3), ('ns', 1e6))
+                           if fastest * f >= 1.0 or u == 'ns')
         for name in names:
             samples = times.get((name, benchmark), [])
-            row += '%24s' % ('%.2f / %.2f' % (min(samples), statistics.median(samples))
+            row += '%24s' % ('%.2f / %.2f %s' % (min(samples) * scale,
+                                                 statistics.median(samples) * scale, unit)
                              if samples else '-')
         print(row)
     print('samples per cell: %d (%d rounds x 3 repetitions)' % (rounds * 3, rounds))

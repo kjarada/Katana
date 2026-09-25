@@ -1,0 +1,18 @@
+{
+ "currentVersion": 10.91,
+ "id": 9,
+ "name": "Lot",
+ "type": "Feature Layer",
+ "geometryType": "esriGeometryPolygon",
+ "maxRecordCount": 2000,
+ "extent": {
+  "xmin": 15695000.0,
+  "ymin": -4520000.0,
+  "xmax": 17104000.0,
+  "ymax": -3275000.0,
+  "spatialReference": {
+   "wkid": 102100
+  }
+ },
+ "objectIdField": "OBJECTID_1"
+}

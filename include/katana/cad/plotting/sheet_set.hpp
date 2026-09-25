@@ -29,6 +29,7 @@
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/frame.hpp"
+#include "katana/cad/plotting/page_setup.hpp"
 #include "katana/core/error.hpp"
 #include "katana/geometry/primitives2d.hpp"
 
@@ -44,6 +45,9 @@ enum class ViewportKind {
     Notes,         // free text
     Image,         // an image from the project's assets
     KeyPlan,       // where the other sheets are: their outlines, numbered
+    SheetIndex,    // the drawing register: every sheet's number, title, scale,
+                   // paper and revision (tables.hpp)
+    Revisions,     // the revision table, newest first (tables.hpp)
 };
 
 [[nodiscard]] std::string_view toString(ViewportKind kind);
@@ -61,6 +65,11 @@ struct ViewportSource {
     friend bool operator==(const ViewportSource&, const ViewportSource&) = default;
 };
 
+// How a plan draws its coordinate grid (plan_grid.hpp): not at all, ticks in
+// from its border, a small cross at every intersection, or light lines right
+// across. Every style but None labels the eastings and northings at the edges.
+enum class GridStyle { None, Ticks, Crosses, Lines };
+
 // A line or outline drawn over a viewport in world coordinates: the match
 // line where the next sheet takes over, or a key plan's sheet outlines.
 struct WorldMark {
@@ -74,6 +83,15 @@ struct WorldMark {
     std::string sheet;
 
     friend bool operator==(const WorldMark&, const WorldMark&) = default;
+};
+
+// What a Legend viewport lists (legend.hpp): what the plans of its own sheet
+// show, what the plans of every sheet show, or everything drawn. Stored by
+// name ("this_sheet", "whole_set", "whole_drawing"), never renamed.
+enum class LegendScope {
+    ThisSheet,
+    WholeSet,
+    WholeDrawing,
 };
 
 struct Viewport {
@@ -102,8 +120,25 @@ struct Viewport {
     bool locked = false; // tiling and snapping leave a locked viewport alone
     std::string text;    // Notes: the text; Image: the asset's file name
     std::vector<WorldMark> marks;
+    // Revisions: only the newest so many; 0 shows every revision.
+    std::size_t revisionLimit = 0;
+    LegendScope legendScope = LegendScope::ThisSheet; // Legend only
+    // A plan's coordinate grid, and its spacing in metres; 0 is automatic: the
+    // round spacing about 50 mm apart on the paper (plan_grid.hpp).
+    GridStyle gridStyle = GridStyle::None;
+    double gridInterval = 0.0;
 
     friend bool operator==(const Viewport&, const Viewport&) = default;
+};
+
+// The scale and centre a plan viewport is drawn at once "auto" is decided:
+// what the legend reads its window from (legend.hpp) and what preflight
+// checks (preflight.hpp), both resolved by the painter's rule.
+struct PlanWindow {
+    double scale = 500.0;
+    geometry::Point2 centre{};
+
+    friend bool operator==(const PlanWindow&, const PlanWindow&) = default;
 };
 
 struct Sheet {
@@ -171,8 +206,13 @@ struct SheetSet {
     // {n:02} the same padded to two digits, {N} the count, {set} the set
     // number. "{n}" by default, as the frame's SHEET No. cell expects.
     std::string numbering = "{n}";
+    // Oldest first, in the order issued: the last is the current revision,
+    // whatever its date or code says (resolveFields, tables.hpp).
     std::vector<Revision> revisions;
     std::vector<Sheet> sheets;
+    // How the set is plotted: the plot style, the resolution, the file
+    // naming (page_setup.hpp).
+    PageSetup pageSetup;
 
     friend bool operator==(const SheetSet&, const SheetSet&) = default;
 };

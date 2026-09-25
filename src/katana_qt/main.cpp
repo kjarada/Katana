@@ -5,6 +5,7 @@
 #include <QComboBox>
 #include <QAction>
 #include <QDialog>
+#include <QDir>
 #include <QDockWidget>
 #include <QFileInfo>
 #include <QLabel>
@@ -19,6 +20,7 @@
 
 #include <cstdio>
 #include <optional>
+#include <thread>
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
@@ -26,8 +28,15 @@
 #include "layer_manager.hpp"
 #include "style_manager.hpp"
 #include "katana/cad/plot.hpp"
+#include "katana/cad/plotting/sheet_json.hpp"
+#include "katana/cad/plotting/sheet_verbs.hpp"
 #include "theme.hpp"
 #include "main_window.hpp"
+#include "plotting/plot_output.hpp"
+#if defined(KATANA_GPU_D3D11)
+#include "gpu/renderer_choice.hpp"
+#include "gpu/shader_compiler.hpp"
+#endif
 
 namespace {
 
@@ -250,7 +259,12 @@ bool fillField(QWidget& dialog, const QString& assignment)
 //   katana [project-directory] [data-file...] --plot out.pdf
 //                 [--fit | --scale N] [--paper A4|A3|A2|A1|A0]
 //                 [--landscape | --portrait] [--dpi N]
-//   katana [project-directory] [data-file...] --plot-sheets out.pdf
+//                 [--plot-style colour|grey|mono] [--line-weight-scale F]
+//   katana [project-directory] [data-file...] [--command TEXT...]
+//                 [--sheets-json out.json|-]
+//                 [--plot-sheets out.pdf|folder [--sheets 1,3-5]
+//                  [--format pdf|pdfs|png|tiff] [--plot-style colour|grey|mono]
+//                  [--dpi N] [--line-weight-scale F]]
 //   katana [project-directory] [data-file...] --screenshot out.png
 //   katana [project-directory] [data-file...] --toggle-layer NAME --screenshot out.png
 //   katana [project-directory] [data-file...] --style-manager --screenshot out.png
@@ -277,7 +291,29 @@ bool fillField(QWidget& dialog, const QString& assignment)
 //
 // --plot-sheets plots every sheet of the project to one PDF, a page a sheet,
 // and exits without showing a window, as --plot does; a project with no
-// sheets plots one fitted to the drawing (MainWindow::plotSheetsToPdf).
+// sheets plots one fitted to the drawing (MainWindow::sheetsToPlot). The
+// switches after it make the request MainWindow::plotSheets carries out
+// (plotting/plot_output.hpp); each one not given comes from the set's page
+// setup, except the format, which is one PDF unless --format says otherwise.
+// --sheets chooses the sheets ("1,3-5", sheet ids); --format pdfs, png or
+// tiff writes a file a sheet into the FOLDER given to --plot-sheets, named by
+// the page setup's pattern; --plot-style prints in colour, greyscale or
+// monochrome (colour, grey, mono); --dpi is the resolution of a raster and
+// of a PDF's 3D snapshot; --line-weight-scale multiplies every line weight
+// (0.1 to 5). Each file written is printed on stdout, a path a line; the
+// summary and any problem go to stderr. --plot takes --plot-style and
+// --line-weight-scale too.
+//
+// --sheets-json writes the project's sheets - every sheet, view, title-block
+// value and revision - as the JSON the project stores them in
+// (docs/plotting.md), and exits without showing a window: the state an agent
+// reads before it changes anything with the sheet verbs. "-" writes it to
+// stdout. Given with --plot-sheets, the JSON is written first. Without
+// --screenshot, the --command lines run before either is written, so
+//   katana project --command "GENERATE grid scale=500" --command SAVE
+//                  --sheets-json - --plot-sheets out.pdf
+// lays out, keeps, reports and plots the sheets in one headless run; a line
+// that is refused fails the run.
 //
 // --toggle-layer flips a layer's visibility box in the layer panel the way a
 // click does, before the screenshot, and fails if the application does not
@@ -357,6 +393,19 @@ bool fillField(QWidget& dialog, const QString& assignment)
 int main(int argc, char* argv[])
 {
     QApplication application(argc, argv);
+#if defined(KATANA_GPU_D3D11)
+    // The HLSL compiled on a worker while the window is built, so the first
+    // GPU 3D view finds its bytecode ready (docs/gpu.md, "Shaders"; the
+    // compile is 110-175 ms) - only when a 3D view would be drawn on the GPU,
+    // so a headless run neither pays for it nor waits for it at exit. The
+    // library caches it for the process and is safe from any thread. Joined
+    // when main returns.
+    std::jthread precompile;
+    if (katana::qt::gpu::chooseRenderer(katana::qt::gpu::currentRendererEnvironment(false, false))
+            .kind == katana::qt::gpu::RendererKind::Gpu) {
+        precompile = std::jthread([] { (void)katana::qt::gpu::precompileHlslShaders(); });
+    }
+#endif
     application.setApplicationName("Katana");
     application.setOrganizationName("Katana");
     application.setApplicationVersion(KATANA_VERSION);
@@ -367,6 +416,14 @@ int main(int argc, char* argv[])
 
     std::optional<QString> plotPath;
     std::optional<QString> sheetsPath;
+    std::optional<QString> sheetsJsonPath;
+    // --plot-sheets' request, beyond the page setup; the style is --plot's
+    // too.
+    std::string sheetsSelection;
+    std::optional<katana::qt::PlotFormat> sheetsFormat;
+    std::optional<katana::cad::PlotColourMode> plotStyle;
+    std::optional<double> lineWeightScale;
+    bool dpiGiven = false;
     std::optional<QString> screenshotPath;
     std::optional<QString> toggleLayer;
     std::vector<std::filesystem::path> customisation;
@@ -395,6 +452,40 @@ int main(int argc, char* argv[])
             plotPath = value();
         } else if (argument == "--plot-sheets") {
             sheetsPath = value();
+        } else if (argument == "--sheets-json") {
+            sheetsJsonPath = value();
+        } else if (argument == "--sheets") {
+            sheetsSelection = value().toStdString();
+        } else if (argument == "--format") {
+            const QString format = value();
+            sheetsFormat = katana::qt::plotFormatFrom(format.toStdString());
+            if (!sheetsFormat) {
+                std::fprintf(stderr, "--format must be one of pdf, pdfs, png, tiff (not '%s')\n",
+                             qPrintable(format));
+                return 2;
+            }
+        } else if (argument == "--plot-style") {
+            const QString style = value();
+            plotStyle = katana::cad::plotColourModeFrom(style.toStdString());
+            if (!plotStyle) {
+                std::fprintf(stderr, "--plot-style must be one of colour, grey, mono (not '%s')\n",
+                             qPrintable(style));
+                return 2;
+            }
+            settings.colourMode = *plotStyle;
+        } else if (argument == "--line-weight-scale") {
+            const QString text = value();
+            bool number = false;
+            const double factor = text.toDouble(&number);
+            if (!number || !(factor >= katana::cad::plotting::kMinimumLineWeightScale &&
+                             factor <= katana::cad::plotting::kMaximumLineWeightScale)) {
+                std::fprintf(stderr, "--line-weight-scale must be a number from %g to %g (not '%s')\n",
+                             katana::cad::plotting::kMinimumLineWeightScale,
+                             katana::cad::plotting::kMaximumLineWeightScale, qPrintable(text));
+                return 2;
+            }
+            lineWeightScale = factor;
+            settings.lineWeightScale = factor;
         } else if (argument == "--screenshot") {
             screenshotPath = value();
         } else if (argument == "--toggle-layer") {
@@ -463,6 +554,7 @@ int main(int argc, char* argv[])
             settings.landscape = false;
         } else if (argument == "--dpi") {
             settings.dpi = value().toDouble();
+            dpiGiven = true;
         } else {
             inputs << argument;
         }
@@ -475,10 +567,15 @@ int main(int argc, char* argv[])
         std::fprintf(stderr, "--plot needs an output path\n");
         return 2;
     }
+    if (sheetsJsonPath.has_value() && sheetsJsonPath->isEmpty()) {
+        std::fprintf(stderr, "--sheets-json needs an output path, or - for stdout\n");
+        return 2;
+    }
+    const bool writesOnly = plotPath.has_value() || sheetsPath.has_value() ||
+                            sheetsJsonPath.has_value();
 
     katana::qt::MainWindow window;
-    window.setHeadless(plotPath.has_value() || sheetsPath.has_value() ||
-                       screenshotPath.has_value());
+    window.setHeadless(writesOnly || screenshotPath.has_value());
     // Before anything is opened, so the first drawing is drawn with it. A
     // --customise on the command line is merged in next, as Format > Load
     // Customisation would, and so is loaded when a project is opened: its
@@ -487,7 +584,7 @@ int main(int argc, char* argv[])
     if (!customisation.empty()) {
         window.applyCustomisation(customisation);
     }
-    if (!plotPath && !sheetsPath && !screenshotPath) {
+    if (!writesOnly && !screenshotPath) {
         window.show();
     }
     for (const QString& input : inputs) {
@@ -495,6 +592,25 @@ int main(int argc, char* argv[])
             window.openProject(input);
         } else {
             window.importPath(input);
+        }
+    }
+    // Without --screenshot the --command lines run here, in order, before
+    // anything is written: lay the sheets out with the sheet verbs, then
+    // --sheets-json or --plot-sheets what they made, in one run. A headless
+    // run stops at the first line that is refused. (With --screenshot they
+    // run among its steps, below.)
+    if (!screenshotPath) {
+        for (const auto& [kind, text] : surveySteps) {
+            if (kind != "--command") {
+                continue;
+            }
+            const bool ran = window.runCommand(text);
+            QApplication::processEvents();
+            QApplication::processEvents();
+            if (!ran && writesOnly) {
+                std::fprintf(stderr, "--command %s was refused\n", qPrintable(text));
+                return 1;
+            }
         }
     }
 
@@ -723,11 +839,61 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    if (sheetsPath) {
-        const auto status = window.plotSheetsToPdf(*sheetsPath);
-        if (!status) {
-            std::fprintf(stderr, "plot failed: %s\n", status.error().describe().c_str());
+    if (sheetsJsonPath) {
+        const katana::cad::Document& document = window.document();
+        if (const auto readable = document.sheetSetStatus(); !readable) {
+            std::fprintf(stderr, "--sheets-json: %s\n", readable.error().describe().c_str());
             return 1;
+        }
+        const katana::cad::plotting::SheetSet& set = document.sheetSet();
+        if (*sheetsJsonPath == "-") {
+            const auto json = katana::cad::plotting::sheetSetToJson(set);
+            if (!json) {
+                std::fprintf(stderr, "--sheets-json: %s\n", json.error().describe().c_str());
+                return 1;
+            }
+            std::fprintf(stdout, "%s\n", json->c_str());
+            std::fflush(stdout);
+        } else {
+            const auto status = katana::cad::plotting::writeSheetSetFile(
+                set, std::filesystem::path(sheetsJsonPath->toStdWString()));
+            if (!status) {
+                std::fprintf(stderr, "--sheets-json: %s\n", status.error().describe().c_str());
+                return 1;
+            }
+            std::fprintf(stderr, "wrote %zu sheet%s to %s\n", set.sheets.size(),
+                         set.sheets.size() == 1 ? "" : "s", qPrintable(*sheetsJsonPath));
+        }
+        if (!sheetsPath && !plotPath) {
+            return 0;
+        }
+    }
+    if (sheetsPath) {
+        const auto set = window.sheetsToPlot();
+        if (!set) {
+            std::fprintf(stderr, "plot failed: %s\n", set.error().describe().c_str());
+            return 1;
+        }
+        katana::qt::PlotRequest request =
+            katana::qt::plotRequestFor(set->pageSetup, *sheetsPath, sheetsSelection);
+        request.format = sheetsFormat.value_or(katana::qt::PlotFormat::Pdf);
+        if (plotStyle) {
+            request.colourMode = *plotStyle;
+        }
+        if (dpiGiven) {
+            request.dpi = settings.dpi;
+        }
+        if (lineWeightScale) {
+            request.lineWeightScale = *lineWeightScale;
+        }
+        const auto result = window.plotSheets(*set, request);
+        if (!result) {
+            std::fprintf(stderr, "plot failed: %s\n", result.error().describe().c_str());
+            return 1;
+        }
+        // What was written, for a script to pick up: one path a line.
+        for (const QString& file : result->files) {
+            std::printf("%s\n", QDir::toNativeSeparators(file).toUtf8().constData());
         }
         return 0;
     }

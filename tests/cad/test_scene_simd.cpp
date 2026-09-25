@@ -360,8 +360,10 @@ TEST(SceneKernels, EdgeFadesEqualTheScalarBlendForEveryChannelPairAndEveryEighth
 
 TEST(SceneKernels, TheBoundsAreTheBoxOfEveryListEvenWhereAnExtremeIsASignedZero)
 {
-    // The scene's bounds visit each vertex once, not once per primitive; the
-    // box must still be DrawList::bounds() to the bit, zeros' signs included.
+    // The scene's bounds are its lists' DrawList::bounds(), which visits each
+    // vertex once, not once per primitive (tests/render/test_draw_list.cpp
+    // holds it to the walk it replaced); the box must be theirs to the bit,
+    // zeros' signs included.
     std::vector<katana::geometry::Point3> vertices = {
         {-0.0, 0.0, -0.0}, {10.0, -0.0, 0.0}, {10.0, 10.0, 5.0}, {0.0, 10.0, -0.0}};
     std::vector<katana::terrain::TinTriangle> triangles = {{0, 1, 2}, {0, 2, 3}};

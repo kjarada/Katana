@@ -58,6 +58,10 @@ namespace ann = katana::cad::annotation;
 
 namespace {
 
+// LABEL LAYOUT's keep-out at most: the plan painter's own bound, so a
+// drawing too large for it is judged the same way on both.
+constexpr std::size_t kLayoutLineworkLimit = 200000;
+
 std::string upperCase(std::string text)
 {
     for (char& c : text) {
@@ -1109,6 +1113,12 @@ CommandInterpreter::Reply CommandInterpreter::label(const Tokens& args)
                 return value.error();
             }
             options.avoidCollisions = *value;
+        }
+        // What the plan view keeps labels out of, over the whole drawing, so
+        // this reply is where a view at this scale puts them.
+        if (options.avoidCollisions) {
+            options.linework = ann::labelKeepOut(model, options.scale, options.measure,
+                                                 kLayoutLineworkLimit);
         }
         const ann::LabelLayout layout = ann::layoutLabels(model, ann::labelEntities(model), options);
         std::ostringstream out;

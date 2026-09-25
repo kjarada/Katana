@@ -1,0 +1,89 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": 1,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       151.205,
+       -33.87
+      ],
+      [
+       151.2055,
+       -33.87
+      ],
+      [
+       151.2055,
+       -33.869499999999995
+      ],
+      [
+       151.205,
+       -33.869499999999995
+      ],
+      [
+       151.205,
+       -33.87
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "objectid": 1,
+    "cadid": 100001,
+    "lotnumber": "1",
+    "planlabel": "DP1000"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 2,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       151.2056,
+       -33.87
+      ],
+      [
+       151.2061,
+       -33.87
+      ],
+      [
+       151.2061,
+       -33.869499999999995
+      ],
+      [
+       151.2056,
+       -33.869499999999995
+      ],
+      [
+       151.2056,
+       -33.87
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "objectid": 2,
+    "cadid": 100002,
+    "lotnumber": "2",
+    "planlabel": "DP1001"
+   }
+  }
+ ],
+ "links": [
+  {
+   "rel": "self",
+   "href": "https://example.invalid/ogc/collections/buildings/items?f=json"
+  },
+  {
+   "rel": "next",
+   "href": "https://example.invalid/ogc/collections/buildings/items?f=json&offset=2"
+  }
+ ]
+}

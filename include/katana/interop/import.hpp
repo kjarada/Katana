@@ -17,6 +17,7 @@
 
 #include "katana/entity/entity.hpp"
 #include "katana/geometry/primitives2d.hpp"
+#include "katana/gis/reproject.hpp"
 #include "katana/interop/reference_data.hpp"
 
 namespace katana::interop {
@@ -66,6 +67,20 @@ struct VectorImportOptions {
     // origin restores precision for downstream editing. Recorded in the result
     // so the same shift can be undone on export.
     std::optional<katana::geometry::Vec2> originShift;
+    // Moves every feature into this CRS (anything gis::crsToWkt reads:
+    // "EPSG:7856", a WKT) before it becomes an entity. Empty, the default,
+    // leaves coordinates as the file has them - a file import never
+    // reprojects (docs/interop.md, "No reprojection"). The online import sets
+    // it, because data a web service chose the CRS of is useless until it is
+    // in the project's (docs/gis_online.md).
+    std::string targetCrs;
+    // The CRS of a layer that declares none, for targetCrs; empty refuses
+    // such a layer rather than guess.
+    std::string assumedSourceCrs;
+    // Keeps only features whose bounding box meets this box, given in the
+    // source's own CRS (so before any reprojection): the online import's area
+    // applied to a file that covers the world (Natural Earth).
+    std::optional<katana::gis::CrsBox> sourceFilter;
 };
 
 // Whether imported data sits so far from the drawing it is joining that the two

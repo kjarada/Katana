@@ -18,10 +18,12 @@ code comments say the same things next to the lines they govern.
   with the software `Rasterizer` into one depth buffer, and the framebuffer's
   bytes are blitted as a `QImage` without a copy. (The tiled viewport this page
   used to describe is gone; the views dock, float and tab.)
-* A GPU renderer is being built against `DrawList` and `Camera`; it replaces
-  the rasteriser and nothing above it. The software rasteriser stays: every
-  pixel it writes can be asserted in a unit test on a machine with no GPU, and
-  it draws the headless screenshots and the CI runs.
+* The GPU renderer (`docs/gpu.md`) draws the same layers through the same
+  camera wherever the renderer rules choose it - Direct3D 11 on Windows,
+  Vulkan on Linux - and replaces the rasteriser and nothing above it. The
+  software rasteriser stays: every pixel it writes can be asserted in a unit
+  test on a machine with no GPU, it draws the headless screenshots and the CI
+  runs, and it is what a view falls back to when its GPU fails.
 
 ## Why the 3D view "looked weird sometimes" (2026-09-24)
 

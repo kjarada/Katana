@@ -1,0 +1,59 @@
+{
+ "currentVersion": 10.91,
+ "serviceDescription": "Cadastral features of New South Wales",
+ "mapName": "NSW Cadastre",
+ "copyrightText": "\u00a9 Spatial Services",
+ "maxRecordCount": 1000,
+ "maxImageWidth": 4096,
+ "maxImageHeight": 4096,
+ "spatialReference": {
+  "wkid": 102100,
+  "latestWkid": 3857
+ },
+ "fullExtent": {
+  "xmin": 15695000.0,
+  "ymin": -4520000.0,
+  "xmax": 17104000.0,
+  "ymax": -3275000.0,
+  "spatialReference": {
+   "wkid": 102100,
+   "latestWkid": 3857
+  }
+ },
+ "layers": [
+  {
+   "id": 0,
+   "name": "Cadastre",
+   "parentLayerId": -1,
+   "subLayerIds": [
+    8,
+    9
+   ],
+   "type": "Group Layer"
+  },
+  {
+   "id": 8,
+   "name": "Plan Extent",
+   "parentLayerId": 0,
+   "subLayerIds": null,
+   "type": "Feature Layer",
+   "geometryType": "esriGeometryPolygon"
+  },
+  {
+   "id": 9,
+   "name": "Lot",
+   "parentLayerId": 0,
+   "subLayerIds": null,
+   "type": "Feature Layer",
+   "geometryType": "esriGeometryPolygon"
+  },
+  {
+   "id": 12,
+   "name": "Lot Labels",
+   "parentLayerId": -1,
+   "subLayerIds": null,
+   "type": "Annotation Layer"
+  }
+ ],
+ "tables": []
+}

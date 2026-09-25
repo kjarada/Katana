@@ -1,5 +1,6 @@
 // Text and dimensions (see families.hpp). The tools themselves are in
-// annotate_text.cpp, annotate_dimension.cpp and annotate_leader.cpp; this file
+// annotate_text.cpp, annotate_dimension.cpp, annotate_dimension_kinds.cpp and
+// annotate_leader.cpp; this file
 // lists them, so the one call toolCatalog() makes keeps every one of them in
 // the link.
 //
@@ -7,28 +8,15 @@
 // DIMALIGNED/DAL, and LEADER with both LEAD (AutoCAD's alias for LEADER) and
 // LE (QLEADER's, the leader most users now reach for). T is left to the
 // command interpreter, where it already means TEXT with its arguments typed on
-// one line, and DIM likewise stays the interpreter's aligned "DIM p p offset".
+// one line, and DIM likewise stays the interpreter's, every kind typed on one
+// line ("DIM p p offset", "DIM RADIUS id at=p").
 //
-// RADIUS, DIAMETER AND ANGULAR DIMENSIONS ARE NOT LISTED, because the entity
-// model cannot carry them: its one dimension, DimensionGeometry, is an aligned
-// dimension between two points. Drawing them as lines and a text would be a
-// dimension in appearance only - a label that stays "R5" when the arc is
-// scaled to R10, ignores the dimension style and is not selectable as a
-// dimension - so they wait for the model to have them. What it would need:
-//
-//   * radius:   the arc's centre, a point on it where the dimension line
-//               meets it, and a leader length or text position; measures the
-//               radius, labelled with an "R" prefix;
-//   * diameter: two diametrically opposite points on the circle (or the
-//               centre and one), measuring their distance, labelled with a
-//               diameter sign;
-//   * angular:  a vertex and a point on each of the two arms (or the two
-//               lines' four points), and the radius of the dimension arc;
-//               measures the angle in the style's angular units and precision.
-//
-// Each is a new appended Geometry alternative (or a kind field and the extra
-// points on DimensionGeometry), with its drawing in dimension_draw.cpp, its
-// wire format in geometry_blob.cpp and the rest of docs/model.md's list.
+// Angular, radius, diameter and ordinate dimensions are AutoCAD's too:
+// DIMANGULAR/DAN, DIMRADIUS/DRA, DIMDIAMETER/DDI and DIMORDINATE/DOR. They
+// waited until the model could carry them (DimensionKind, 2026-09-25): drawn
+// as lines and a text they would have been dimensions in appearance only - a
+// label that stays "R5" when the arc is scaled to R10. Each is the dimension
+// the DIM verb makes (annotate_dimension_kinds.cpp).
 
 #include "annotate_common.hpp"
 #include "families.hpp"
@@ -72,6 +60,52 @@ void addAnnotateTools(ToolCatalog& catalog, const Report& report)
         .tip = "Dimensions the true distance between two points, with the dimension line "
                "parallel to them.",
         .make = annotate::makeAlignedDimensionTool,
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.dimangular",
+        .name = "Angular Dimension",
+        .category = "Annotate",
+        .group = "Dimensions",
+        .order = 3,
+        .aliases = {"DIMANGULAR", "DAN"},
+        .shortcut = {},
+        .tip = "Dimensions the angle between two lines, or at a vertex between two points; the "
+               "arc's place chooses the side measured.",
+        .make = annotate::makeAngularDimensionTool,
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.dimradius",
+        .name = "Radius Dimension",
+        .category = "Annotate",
+        .group = "Dimensions",
+        .order = 4,
+        .aliases = {"DIMRADIUS", "DRA"},
+        .shortcut = {},
+        .tip = "Dimensions the radius of an arc or a circle, and follows it when it is edited.",
+        .make = annotate::makeRadiusDimensionTool,
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.dimdiameter",
+        .name = "Diameter Dimension",
+        .category = "Annotate",
+        .group = "Dimensions",
+        .order = 5,
+        .aliases = {"DIMDIAMETER", "DDI"},
+        .shortcut = {},
+        .tip = "Dimensions the diameter of an arc or a circle, and follows it when it is edited.",
+        .make = annotate::makeDiameterDimensionTool,
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.dimordinate",
+        .name = "Ordinate Dimension",
+        .category = "Annotate",
+        .group = "Dimensions",
+        .order = 6,
+        .aliases = {"DIMORDINATE", "DOR"},
+        .shortcut = {},
+        .tip = "Writes a feature's X or Y from the drawing's origin at the end of a leader; the "
+               "leader's direction chooses which, or type X or Y.",
+        .make = annotate::makeOrdinateDimensionTool,
     }));
     report(catalog.add(ToolInfo{
         .id = "annotate.leader",

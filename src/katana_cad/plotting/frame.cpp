@@ -145,9 +145,30 @@ std::pair<VerticalJustify, HorizontalJustify> justifyOf(std::string_view justify
     return {vertical, horizontal};
 }
 
+// The field name of a {name} placeholder starting at `at` - lower-case
+// letters, digits and underscores, as resolveFields names them - or empty
+// text when there is none there.
+std::string_view placeholderAt(std::string_view text, std::size_t at)
+{
+    if (at >= text.size() || text[at] != '{') {
+        return {};
+    }
+    const auto close = text.find('}', at + 1);
+    if (close == std::string_view::npos || close == at + 1) {
+        return {};
+    }
+    const std::string_view name = text.substr(at + 1, close - at - 1);
+    const bool named = std::all_of(name.begin(), name.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+    });
+    return named ? name : std::string_view{};
+}
+
 // The measured text with its tokens turned into {field} placeholders, and the
 // fields it shows. Fails on a numbered field this build has no name for, so
-// a changed frame is caught by the tests rather than printing a raw token.
+// a changed frame is caught by the tests rather than printing a raw token. A
+// placeholder already in that form, as in a frame written for Katana, is a
+// field too.
 Result<std::string> templateOf(std::string_view raw, std::size_t entityIndex,
                                std::vector<std::string>& fields)
 {
@@ -218,6 +239,18 @@ Result<std::string> templateOf(std::string_view raw, std::size_t entityIndex,
                 const auto close = text.find('>', at);
                 at = close == std::string::npos ? text.size() : close + 1;
             }
+        } else if (text.compare(at, 2, "{{") == 0) {
+            // A literal brace, as expandTemplate reads one: not a field.
+            out += "{{";
+            at += 2;
+        } else if (const std::string_view name = placeholderAt(text, at); !name.empty()) {
+            // A field named as a sheet names it, "REV {revision}": a frame
+            // written for Katana shows it as it is, and the painter fills it.
+            out += '{';
+            out += name;
+            out += '}';
+            fields.emplace_back(name);
+            at += name.size() + 2;
         } else {
             out += text[at];
             ++at;

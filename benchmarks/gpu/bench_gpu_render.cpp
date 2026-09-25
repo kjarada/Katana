@@ -26,8 +26,11 @@
 //                     skipped without it. docs/gpu.md records the owner's
 //                     'Test 4 with Tin.12da'.
 //
-// The GPU cases skip when there is no Direct3D 11 hardware device; WARP is
-// never timed (it is a test device, not a renderer anyone should use).
+// The GPU cases skip when there is no hardware device - Direct3D 11 on
+// Windows, Vulkan on Linux; a software device (WARP, lavapipe) is never
+// timed: it is a test device, not a renderer anyone should use. On Linux,
+// Vulkan needs a platform that can make an instance, so run it on a desktop
+// or under Xvfb: xvfb-run -a katana_gpu_benchmarks.
 
 #include <benchmark/benchmark.h>
 
@@ -36,6 +39,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -45,8 +49,12 @@
 #include <QImage>
 #include <QString>
 
+#include "gpu/gpu_scene.hpp"
 #include "gpu/offscreen_gpu.hpp"
+#include "katana/core/cpu_features.hpp"
+#if defined(KATANA_GPU_D3D11)
 #include "gpu/shader_compiler.hpp"
+#endif
 #include "katana/cad/document.hpp"
 #include "katana/cad/scene.hpp"
 #include "katana/commands/command_stack.hpp"
@@ -391,22 +399,30 @@ BENCHMARK(BM_GpuSceneLinesBy)
     ->UseManualTime()
     ->Unit(benchmark::kMillisecond);
 
-// What a 3D view pays when it starts: a Direct3D 11 device, the render
-// target, and the pipelines. 0: HLSL source, which QRhi compiles for every new
-// device; 1: the default, bytecode compiled once per process
-// (shader_compiler.hpp) - warmed before timing, as a host that precompiles at
-// start-up would have it.
+// What a 3D view pays when it starts: a device, the render target, and the
+// pipelines. 0: HLSL source, which QRhi compiles for every new device
+// (Direct3D 11 only); 1: the default - on Windows bytecode compiled once per
+// process (shader_compiler.hpp), warmed before timing as a host that
+// precompiles at start-up would have it; on Linux the SPIR-V baked at build
+// time.
 void BM_GpuStartUp(benchmark::State& state)
 {
     const bool fromSource = state.range(0) == 0;
     OffscreenOptions options;
     options.device = GpuDevice::Hardware;
+#if defined(KATANA_GPU_D3D11)
     options.shaders = fromSource ? &katana::qt::gpu::runtimeHlslShaders()
                                  : &katana::qt::gpu::compiledHlslShaders();
     if (!fromSource && !katana::qt::gpu::precompileHlslShaders()) {
         state.SkipWithError("the shaders did not compile");
         return;
     }
+#else
+    if (fromSource) {
+        state.SkipWithError("HLSL source is for Direct3D 11; this build draws with Vulkan");
+        return;
+    }
+#endif
     for (auto _ : state) {
         auto gpu = OffscreenGpu::create(kWidth, kHeight, options);
         if (!gpu) {
@@ -420,6 +436,8 @@ BENCHMARK(BM_GpuStartUp)->Arg(0)->Arg(1)->Iterations(5)->UseRealTime()->Unit(
     benchmark::kMillisecond);
 
 // The compile itself, cold: every stage the default expansion draws with.
+// Direct3D 11 only: the Vulkan build compiles its shaders when it is built.
+#if defined(KATANA_GPU_D3D11)
 void BM_GpuShaderCompile(benchmark::State& state)
 {
     using katana::qt::gpu::Program;
@@ -443,6 +461,7 @@ void BM_GpuShaderCompile(benchmark::State& state)
     }
 }
 BENCHMARK(BM_GpuShaderCompile)->Iterations(5)->UseRealTime()->Unit(benchmark::kMillisecond);
+#endif
 
 // Point clouds, which the software path does not draw in 3D at all: n
 // points in random order (a fixed linear congruential sequence, so every run
@@ -543,13 +562,128 @@ bool saveSceneImages()
            fromCpu.copy().save(directory + "/scene_cpu.png");
 }
 
+// ---- packing, on the CPU -------------------------------------------------------------
+//
+// What a scene change costs before anything reaches the GPU: packDrawList
+// turning the draw list's double positions into float offsets from the
+// scene's origin and giving every line its two ends (gpu_scene.hpp). The 3D
+// view does it for each layer it rebuilds, so on a dense TIN every edit pays
+// it. The ground grid, with a line along every triangle edge as a TIN's are
+// drawn: 256 cells is 131k triangles and 197k lines, 724 cells 1.05M and
+// 1.57M. No device is needed. "digest" is FNV-1a over every packed byte, the
+// same at both SIMD levels and in any build of the same packing.
+
+// A packing level, set for one benchmark and put back after it.
+class PackLevel {
+  public:
+    PackLevel(benchmark::State& state, int level)
+    {
+        const auto previous =
+            katana::core::setSimdLevel(static_cast<katana::core::SimdLevel>(level));
+        if (!previous) {
+            state.SkipWithError(previous.error().message.c_str());
+            ok_ = false;
+            return;
+        }
+        previous_ = *previous;
+    }
+    ~PackLevel()
+    {
+        if (ok_) {
+            (void)katana::core::setSimdLevel(previous_);
+        }
+    }
+    PackLevel(const PackLevel&) = delete;
+    PackLevel& operator=(const PackLevel&) = delete;
+    [[nodiscard]] bool ok() const { return ok_; }
+
+  private:
+    bool ok_ = true;
+    katana::core::SimdLevel previous_ = katana::core::SimdLevel::Scalar;
+};
+
+const DrawList& groundWithEdges(int cells)
+{
+    static std::map<int, DrawList> cache;
+    auto [it, inserted] = cache.try_emplace(cells);
+    if (inserted) {
+        DrawList& list = it->second;
+        list = groundGrid(cells);
+        const int side = cells + 1;
+        for (int j = 0; j < cells; ++j) {
+            for (int i = 0; i < cells; ++i) {
+                const auto v0 = static_cast<katana::render::VertexIndex>(j * side + i);
+                list.addLine(v0, v0 + 1);
+                list.addLine(v0, v0 + static_cast<katana::render::VertexIndex>(side));
+                list.addLine(v0, v0 + static_cast<katana::render::VertexIndex>(side) + 1);
+            }
+        }
+    }
+    return it->second;
+}
+
+std::uint64_t digestOf(const katana::qt::gpu::GpuSceneData& scene)
+{
+    std::uint64_t hash = 1469598103934665603ull;
+    const auto mix = [&hash](const void* data, std::size_t bytes) {
+        const auto* p = static_cast<const unsigned char*>(data);
+        for (std::size_t i = 0; i < bytes; ++i) {
+            hash = (hash ^ p[i]) * 1099511628211ull;
+        }
+    };
+    mix(scene.vertices.data(), scene.vertices.size() * sizeof(scene.vertices[0]));
+    mix(scene.triangleIndices.data(), scene.triangleIndices.size() * sizeof(std::uint32_t));
+    mix(scene.lines.data(), scene.lines.size() * sizeof(scene.lines[0]));
+    mix(scene.points.data(), scene.points.size() * sizeof(scene.points[0]));
+    return hash;
+}
+
+void BM_GpuPack(benchmark::State& state, int level)
+{
+    PackLevel scope(state, level);
+    if (!scope.ok()) {
+        return;
+    }
+    const DrawList& list = groundWithEdges(static_cast<int>(state.range(0)));
+    katana::qt::gpu::GpuSceneData packed;
+    for (auto _ : state) {
+        katana::qt::gpu::packDrawList(list, packed);
+        benchmark::DoNotOptimize(packed.vertices.data());
+        benchmark::DoNotOptimize(packed.lines.data());
+    }
+    state.counters["vertices"] = static_cast<double>(packed.vertices.size());
+    state.counters["lines"] = static_cast<double>(packed.lines.size());
+    // Counters are doubles: the low 48 bits of the digest are exact in one.
+    state.counters["digest"] = static_cast<double>(digestOf(packed) & 0xFFFFFFFFFFFFull);
+}
+BENCHMARK_CAPTURE(BM_GpuPack, scalar, 0)->Arg(256)->Arg(724)->Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_GpuPack, avx2, 1)->Arg(256)->Arg(724)->Unit(benchmark::kMillisecond);
+// Lists the size of an entity or selection layer, 4 to 256 vertices: where
+// the kernel's minimum was found (docs/gpu.md, "Packing").
+BENCHMARK_CAPTURE(BM_GpuPack, scalar_small, 0)
+    ->Arg(1)
+    ->Arg(3)
+    ->Arg(7)
+    ->Arg(15)
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_GpuPack, avx2_small, 1)
+    ->Arg(1)
+    ->Arg(3)
+    ->Arg(7)
+    ->Arg(15)
+    ->Unit(benchmark::kMicrosecond);
+
 } // namespace
 
-// QRhi needs a QGuiApplication; offscreen, because a benchmark has no window
-// and raw QRhi on Direct3D 11 renders into textures there all the same.
+// QRhi needs a QGuiApplication. On Windows offscreen, because a benchmark
+// has no window and raw QRhi on Direct3D 11 renders into textures there all
+// the same; on Linux the platform the session has (xcb on a desktop or under
+// Xvfb), because Qt's offscreen platform cannot make a Vulkan instance.
 int main(int argc, char** argv)
 {
+#if defined(KATANA_GPU_D3D11)
     qputenv("QT_QPA_PLATFORM", "offscreen");
+#endif
     QGuiApplication application(argc, argv);
     benchmark::Initialize(&argc, argv);
     if (benchmark::ReportUnrecognizedArguments(argc, argv)) {

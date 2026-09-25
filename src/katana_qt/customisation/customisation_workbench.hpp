@@ -20,6 +20,7 @@
 //   Load Customisation...          the window's actions (services.load...,
 //   Replace Loaded Customisation...  services.replace...)
 //   ---
+//   Global Modify...               formatGlobalModify -> globalModifyDialog
 //   Purge Unused...                formatPurge
 // Each manager's action carries its dialog's object name as its data, which
 // is how the headless --dialog switch finds the dialog an action opened.
@@ -55,6 +56,7 @@ class Document;
 namespace katana::qt {
 
 class DefinitionThumbnails;
+class GlobalModifyDialog;
 class StyleManagerDialog;
 class SurveyCodeManagerDialog;
 class SymbolLibraryDialog;
@@ -104,16 +106,22 @@ class CustomisationWorkbench {
     [[nodiscard]] QAction* symbolLibraryAction() const { return symbolsAction_; }
     [[nodiscard]] QAction* codeManagerAction() const { return codesAction_; }
     [[nodiscard]] QAction* purgeAction() const { return purgeAction_; }
+    [[nodiscard]] QAction* globalModifyAction() const { return globalModifyAction_; }
 
     // Shows the manager, making it the first time, and raises it. What each
     // action does.
     StyleManagerDialog& showStyleManager();
     SymbolLibraryDialog& showSymbolLibrary();
     SurveyCodeManagerDialog& showCodeManager();
+    // Format > Global Modify (global_modify_dialog.hpp): the selection, a
+    // view, layers or the drawing, changed as one undo step. Its View scope
+    // offers the workspace's open views (services.views); none without one.
+    GlobalModifyDialog& showGlobalModify();
     // The managers made so far; null for one never opened.
     [[nodiscard]] StyleManagerDialog* styleManager() const;
     [[nodiscard]] SymbolLibraryDialog* symbolLibrary() const;
     [[nodiscard]] SurveyCodeManagerDialog* codeManager() const;
+    [[nodiscard]] GlobalModifyDialog* globalModify() const;
 
     // Format > Purge Unused: every style, linetype and hatch pattern nothing
     // uses (cad::purgeCommand), keeping the current style, deleted as ONE
@@ -154,9 +162,11 @@ class CustomisationWorkbench {
     QAction* symbolsAction_ = nullptr;
     QAction* codesAction_ = nullptr;
     QAction* purgeAction_ = nullptr;
+    QAction* globalModifyAction_ = nullptr;
     QPointer<StyleManagerDialog> styles_;
     QPointer<SymbolLibraryDialog> symbols_;
     QPointer<SurveyCodeManagerDialog> codes_;
+    QPointer<GlobalModifyDialog> globalModify_;
 };
 
 } // namespace katana::qt

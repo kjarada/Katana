@@ -34,6 +34,14 @@ namespace katana::entity {
     return paperMillimetres * scale / 1000.0;
 }
 
+// The other way: the paper millimetres `modelUnits` are on a sheet at
+// 1 : `scale`. What a size given in model units - a model-unit dimension
+// style's arrow - becomes when an annotation that is sized on paper takes it.
+[[nodiscard]] constexpr double annotationPaperSize(double modelUnits, double scale)
+{
+    return modelUnits * 1000.0 / scale;
+}
+
 // The annotation scale a view uses when nothing has chosen one: 1 : 1000, the
 // scale at which a 2.5 mm paper text is 2.5 model units tall - exactly the
 // default height a TextGeometry has always had - so paper-sized text made in

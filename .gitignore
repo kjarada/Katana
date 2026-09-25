@@ -21,6 +21,12 @@ samples/*/backups/
 # from. The build and the tests read that folder, not this one.
 docs/12d Refrence Files/
 
+# The TfNSW Utility Schema and Specification workbook (DMS-FT-493), under
+# TfNSW's licence: kept on disk, never in the repository. The cli.utility_check
+# tests read it when it is there (src/katana_app/CMakeLists.txt) and are not
+# registered when it is not; tools/utility_schema_domains.py reads any copy.
+docs/TfNSW Reference Files/
+
 # The customisation compiled into the build - linestyles.4d, symbols.4d,
 # survey_codes.mapfile and survey_codes_names.mapfile, read by
 # tools/embed_customisation.py through KATANA_CUSTOMISATION_DIR. Third-party

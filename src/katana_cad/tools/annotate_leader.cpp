@@ -7,29 +7,30 @@
 //   Enter the first line of annotation text             typed, line by line;
 //                                                       an empty line finishes
 //
-// The model has no leader entity, so a leader is what it would be drawn as:
-// the line as a POLYLINE, the arrowhead as its own entity, and each line of
-// the note as a TEXT - added by ONE command, so one undo removes all of it.
-// They are not grouped: moving the line afterwards leaves the text where it
-// was, as it would with an AutoCAD leader exploded.
+// The leader is ONE entity, a LeaderGeometry (docs/annotation.md,
+// "Leaders and callouts"), added by one command: the arrow, the line, the
+// landing and the note are drawn from it at the scale of the view or sheet
+// looking at it, and move, copy and erase together. It is the LEADER verb's
+// entity; the command line adds what the tool does not ask for - a boxed or
+// circled callout, a text style, a tip that follows the entity it points at.
+// (Before annotation had its own entities the tool drew a polyline, an
+// arrowhead and a text per line, which drifted apart when one was moved.)
 //
 // Sizes come from the dimension style the current layer resolves to, as an
-// AutoCAD leader takes DIMASZ, DIMTXT and DIMGAP from its dimension style:
-// the arrowhead is the style's head at arrowSize, the note is textHeight tall
-// and stands textGap off the end of the line. The heads are those
-// dimension_draw.cpp draws, turned into entities: ClosedFilled becomes a
-// CLOSED triangle - an outline, because the model cannot fill a polyline -
-// Open two strokes, Tick one, Dot a circle, None nothing.
+// AutoCAD leader takes DIMASZ and DIMTXT from its dimension style: the arrow
+// is the style's head at arrowSize and the note textHeight tall. A leader's
+// sizes are paper millimetres; a paper-sized style's are taken as they are,
+// and a model-unit style's are what its model size is on paper at the
+// document's annotation scale - the leader is made the size it would have
+// been drawn, and from then on keeps its size on paper as the scale changes.
 //
-// The note follows the last segment: to the right of the end when the line
-// arrives heading right (or straight up or down, within the geometric
-// tolerance), to the left when it arrives heading left, its first line
-// centred on the end. When the last segment is more than 15 degrees off
-// horizontal a horizontal hook line one arrowhead long is added first, as
-// AutoCAD does, so the note never hangs off a slope.
-// Left of the end, each line is right-aligned by its ESTIMATED width
-// (annotate_common.hpp): the model has no font metrics, so the right edge is
-// where a 0.6-aspect font would put it.
+// The note follows the last segment (cad/annotation/leader_draw.cpp): to the
+// right of the end when the line arrives heading right, or straight up or
+// down within the geometric tolerance, to the left when it arrives heading
+// left. When the last segment is more than 15 degrees off horizontal the
+// leader gets a horizontal landing one arrowhead long first, as AutoCAD adds
+// a hook, so the note never hangs off a slope; a leader within 15 degrees of
+// level, or with no note, has none.
 
 #include <cmath>
 #include <optional>
@@ -37,6 +38,8 @@
 #include <vector>
 
 #include "annotate_common.hpp"
+#include "katana/cad/document.hpp"
+#include "katana/entity/annotation.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -44,94 +47,43 @@ namespace katana::cad::tools::annotate {
 
 namespace {
 
-using katana::entity::ArrowHead;
 using katana::entity::DimensionStyle;
-using katana::entity::Geometry;
-using katana::entity::TextGeometry;
-using katana::geometry::Circle2;
+using katana::entity::LeaderGeometry;
 using katana::geometry::Point2;
-using katana::geometry::Polyline2;
-using katana::geometry::Segment2;
 using katana::geometry::Vec2;
 namespace tol = katana::math::tolerance;
 
-// A closed head is three times as long as it is wide, the proportion
-// dimension_draw.cpp draws (kArrowWidthFraction there), so a leader's arrow
-// and a dimension's match.
-constexpr double kArrowWidthFraction = 1.0 / 3.0;
 constexpr double kHookAngle = 15.0 * katana::math::kDegToRad;
 
-// The arrowhead at `tip`, pointing along `along` (a unit vector away from the
-// line), as dimension_draw.cpp's appendArrow shapes it.
-std::optional<Geometry> arrowhead(const Point2& tip, const Vec2& along, const DimensionStyle& style)
+// The leader through `vertices` with note `lines`, sized from `style` at
+// 1 : `scale`. `vertices` has at least two points, none coincident with the
+// next.
+LeaderGeometry leaderFor(std::vector<Point2> vertices, const std::vector<std::string>& lines,
+                         const DimensionStyle& style, double scale)
 {
-    const double size = style.arrowSize;
-    if (!(size > tol::kGeometric)) {
-        return std::nullopt;
-    }
-    const Vec2 normal = along.perpendicular();
-    const Point2 back = tip - along * size;
-    const Vec2 half = normal * (size * kArrowWidthFraction);
-    switch (style.arrowHead) {
-    case ArrowHead::None:
-        return std::nullopt;
-    case ArrowHead::Tick: {
-        const Vec2 direction = (along + normal).normalized();
-        return Geometry{Segment2{tip - direction * (size * 0.5), tip + direction * (size * 0.5)}};
-    }
-    case ArrowHead::Open:
-        return Geometry{Polyline2{{back + half, tip, back - half}, false}};
-    case ArrowHead::ClosedFilled:
-        return Geometry{Polyline2{{tip, back + half, back - half}, true}};
-    case ArrowHead::Dot:
-        return Geometry{Circle2{tip, size * 0.25}};
-    }
-    return std::nullopt;
-}
-
-// Everything a leader through `vertices` with note `lines` is drawn as: the
-// line first, then the arrowhead, then the text. `vertices` has at least two
-// points, none coincident with the next.
-std::vector<Geometry> leaderShapes(std::vector<Point2> vertices,
-                                   const std::vector<std::string>& lines,
-                                   const DimensionStyle& style)
-{
-    std::vector<Geometry> shapes;
+    const auto paper = [&](double size) {
+        return style.paperSized ? size : katana::entity::annotationPaperSize(size, scale);
+    };
+    LeaderGeometry leader;
     const Vec2 last = vertices.back() - vertices[vertices.size() - 2];
-    // Straight up or down goes right, and "straight" is within the geometric
-    // tolerance: a segment typed as @10<270 ends 1.8e-15 left of vertical,
-    // because cos(3 pi / 2) is not 0 in binary, and must not send the note to
-    // the other side from the same segment typed as @10<-90 or @0,-10.
-    const bool rightward = !(last.x < -tol::kGeometric);
-    if (!lines.empty() && style.arrowSize > tol::kGeometric &&
-        std::atan2(std::abs(last.y), std::abs(last.x)) > kHookAngle) {
-        vertices.push_back(vertices.back() + Vec2(rightward ? style.arrowSize : -style.arrowSize, 0.0));
-    }
-    const Point2 landing = vertices.back();
-    const Point2 tip = vertices.front();
-    const Vec2 along = (tip - vertices[1]).normalized();
-    shapes.emplace_back(Polyline2{std::move(vertices), false});
-    if (auto head = arrowhead(tip, along, style)) {
-        shapes.push_back(std::move(*head));
-    }
-
-    const double height = style.textHeight;
-    // The first line's middle is level with the end of the line, as a note
-    // sits on a leader's landing.
-    double baseline = landing.y - height * 0.5;
+    const bool steep = std::atan2(std::abs(last.y), std::abs(last.x)) > kHookAngle;
+    leader.vertices = std::move(vertices);
     for (const std::string& line : lines) {
-        const double x = rightward ? landing.x + style.textGap
-                                   : landing.x - style.textGap - estimatedTextWidth(line, height);
-        shapes.emplace_back(TextGeometry{Point2(x, baseline), line, height, 0.0});
-        baseline -= lineSpacing(height);
+        leader.text += leader.text.empty() ? line : "\n" + line;
     }
-    return shapes;
+    leader.arrow = style.arrowHead;
+    leader.arrowSize = paper(style.arrowSize);
+    leader.paperHeight = paper(style.textHeight);
+    leader.landing = !lines.empty() && steep ? leader.arrowSize : 0.0;
+    return leader;
 }
 
 class LeaderTool final : public InteractiveTool {
   public:
     explicit LeaderTool(const ToolContext& context)
-        : attributes_(context.attributes), style_(styleForNewAnnotation(context))
+        : attributes_(context.attributes), style_(styleForNewAnnotation(context)),
+          scale_(context.document != nullptr ? context.document->annotationScale()
+                                             : katana::entity::kDefaultAnnotationScale)
     {
     }
 
@@ -221,9 +173,7 @@ class LeaderTool final : public InteractiveTool {
             break;
         }
         std::vector<katana::entity::Entity> entities;
-        for (Geometry& shape : leaderShapes(vertices_, lines_, style_)) {
-            entities.push_back(newEntity(std::move(shape), attributes_));
-        }
+        entities.push_back(newEntity(leaderFor(vertices_, lines_, style_, scale_), attributes_));
         const std::size_t count = lines_.size();
         std::string message = count == 0   ? "leader with no text"
                               : count == 1 ? "leader with 1 line of text"
@@ -269,13 +219,13 @@ class LeaderTool final : public InteractiveTool {
                 vertices.push_back(cursor);
             }
             if (vertices.size() >= 2) {
-                feedback.shapes = leaderShapes(std::move(vertices), {}, style_);
+                feedback.shapes.emplace_back(leaderFor(std::move(vertices), {}, style_, scale_));
             }
             feedback.markers.push_back(vertices_.back());
             break;
         }
         case Step::Annotation:
-            feedback.shapes = leaderShapes(vertices_, lines_, style_);
+            feedback.shapes.emplace_back(leaderFor(vertices_, lines_, style_, scale_));
             break;
         }
         return feedback;
@@ -294,6 +244,7 @@ class LeaderTool final : public InteractiveTool {
 
     katana::commands::EntityAttributes attributes_;
     DimensionStyle style_;
+    double scale_;
 
     Step step_ = Step::Tip;
     std::vector<Point2> vertices_;

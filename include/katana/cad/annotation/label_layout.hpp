@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "katana/cad/annotation/drawing.hpp"
+#include "katana/cad/dimension_draw.hpp"
 #include "katana/entity/annotation.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/entity/label_values.hpp"
@@ -123,5 +124,36 @@ labelPiecesOf(const katana::entity::Model& model, const katana::entity::LabelGeo
 // Whether two convex polygons overlap (touching edges count as apart): the
 // separating axis test the placer uses, exposed for its tests.
 [[nodiscard]] bool convexOverlap(const std::vector<Point2>& a, const std::vector<Point2>& b);
+
+// What a note, leader or dimension puts in a label's way, as segments
+// appended to `out` (at most up to `limit` in all): its strokes and outlines,
+// and each text box's four edges and two diagonals - the diagonals so that
+// a label wholly inside a note's box still meets it. The painter adds these
+// to LabelLayoutOptions::linework for the annotation in view, so a label
+// keeps clear of a dimension's figures and a callout's box as well as of the
+// lines; a dimension's text box is its estimated extent (the placer is a
+// judgement of where there is room, not a typesetter).
+void appendKeepOut(const Drawing& drawing, std::vector<katana::geometry::Segment2>& out,
+                   std::size_t limit);
+void appendKeepOut(const DimensionDrawing& dimension, std::vector<katana::geometry::Segment2>& out,
+                   std::size_t limit);
+
+// The straight pieces of a line, polyline, arc or circle (arcs chorded at
+// sixteen a turn: the placer asks only whether a text box crosses the
+// curve, and at a label's size that is the curve), appended to `out` up to
+// `limit`. Nothing for any other kind.
+void appendLinework(const katana::entity::Geometry& geometry,
+                    std::vector<katana::geometry::Segment2>& out, std::size_t limit);
+
+// Everything a label keeps out of in the whole drawing at 1 : `scale`: the
+// linework and the notes', leaders' and dimensions' keep-out of every entity
+// the document draws (isDrawn, no view's layer overrides), labels aside, up
+// to `limit` segments. What a caller with no view (LABEL LAYOUT)
+// passes as LabelLayoutOptions::linework, so the command line places labels
+// where the plan view does; the painter gathers the same for what it has in
+// view as it draws.
+[[nodiscard]] std::vector<katana::geometry::Segment2>
+labelKeepOut(const katana::entity::Model& model, double scale, const TextMeasure& measure,
+             std::size_t limit);
 
 } // namespace katana::cad::annotation

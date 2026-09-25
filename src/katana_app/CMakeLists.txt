@@ -1,14 +1,36 @@
-# Headless command-line front end. Proves the engine is complete without a GUI.
-add_executable(katana_cli main.cpp dxf_verbs.cpp dxf_verbs.hpp)
-katana_target_defaults(katana_cli)
-target_link_libraries(katana_cli PRIVATE katana_cad katana_archive12d katana_dxf)
+# The headless front ends. katana_app is the session they share - a Document,
+# its CommandInterpreter and the verbs above katana_cad (session.hpp) - and the
+# MCP server over it (mcp_server.hpp), so that a line sent by Claude and a line
+# typed at katana_cli run the same code.
+add_library(katana_app STATIC
+    session.cpp session.hpp
+    dxf_verbs.cpp dxf_verbs.hpp
+    utility_verbs.cpp utility_verbs.hpp
+    mcp_server.cpp mcp_server.hpp
+)
+katana_target_defaults(katana_app)
+target_include_directories(katana_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(katana_app PUBLIC katana_cad PRIVATE katana_archive12d katana_dxf)
+find_package(nlohmann_json CONFIG REQUIRED)
+target_link_libraries(katana_app PRIVATE nlohmann_json::nlohmann_json)
 
 # Interoperability is optional: with -DKATANA_BUILD_IO=OFF the CLI still builds
 # and simply has no IMPORT/EXPORT verbs, which is what the sanitizer job needs.
 if(TARGET katana_interop)
-    target_link_libraries(katana_cli PRIVATE katana_interop)
-    target_compile_definitions(katana_cli PRIVATE KATANA_WITH_INTEROP=1)
+    target_link_libraries(katana_app PRIVATE katana_interop)
+    target_compile_definitions(katana_app PRIVATE KATANA_WITH_INTEROP=1)
 endif()
+
+# Headless command-line front end. Proves the engine is complete without a GUI.
+add_executable(katana_cli main.cpp)
+katana_target_defaults(katana_cli)
+target_link_libraries(katana_cli PRIVATE katana_app)
+
+# The same session served to Claude over the Model Context Protocol (docs/mcp.md).
+add_executable(katana_mcp mcp_main.cpp)
+katana_target_defaults(katana_mcp)
+target_link_libraries(katana_mcp PRIVATE katana_app)
+target_compile_definitions(katana_mcp PRIVATE KATANA_VERSION="${PROJECT_VERSION}")
 
 if(KATANA_BUILD_TESTS)
     # End-to-end: draw, save, reopen in a second process, and query.
@@ -194,6 +216,93 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.the_help_names_the_customisation_files_by_what_they_are PROPERTIES
         PASS_REGULAR_EXPRESSION "a loaded library linestyle or ByLayer.*CUSTOMISE \\[REPLACE\\] <file> \\[<file>\\.\\.\\.\\]  load style${_eol} +libraries \\(\\.4d\\) and survey code files \\(\\.mapfile\\)"
         FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)")
+endif()
+
+# The sheet verbs with no window (docs/plotting.md, "Sheets on the command
+# line"): a drawing laid out on a sheet, renamed, the title block filled and
+# the set listed, one fact per line; a refused verb stops the script.
+if(KATANA_BUILD_TESTS)
+    add_test(NAME cli.sheet_verbs_lay_out_edit_and_list_the_sheets
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LINE 0,0 300,100" -c "GENERATE fit"
+                -c "SHEET RENAME 1 SITE PLAN" -c "TITLEBLOCK organisation \"Example Surveys\""
+                -c "SHEETS")
+    add_test(NAME cli.a_refused_sheet_verb_stops_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SHEET NEW PLAN" -c "SHEET REMOVE 2"
+                -c "SHEET NEW NEVER REACHED")
+    set(_eol "[\r\n]+")
+    set_tests_properties(cli.sheet_verbs_lay_out_edit_and_list_the_sheets PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "generated 1 sheet: 1.*renamed sheet 1 id=s1 name=\"SITE PLAN\".*organisation=\"Example Surveys\"${_eol}1 sheet${_eol}sheet 1 id=s1 name=\"SITE PLAN\" paper=A3 orientation=landscape frame=a3_landscape legendblock=on views=1${_eol}  view id=vp1 kind=plan scale=1000 rect=")
+    set_tests_properties(cli.a_refused_sheet_verb_stops_the_script PROPERTIES
+        PASS_REGULAR_EXPRESSION "no sheet 2: the set has 1 sheet"
+        FAIL_REGULAR_EXPRESSION "NEVER REACHED")
+    # A pass expression makes ctest ignore the exit code, so the exit code of
+    # the same refusal is a test of its own: the script must fail.
+    add_test(NAME cli.a_refused_sheet_verb_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SHEET NEW PLAN" -c "SHEET REMOVE 2")
+    set_tests_properties(cli.a_refused_sheet_verb_fails_the_script PROPERTIES WILL_FAIL TRUE)
+endif()
+
+# UTILITY on the sample investigation (samples/utilities, worked by hand in
+# docs/subsurface_utilities.md). E1-3 is a radar pick at 350 mm claimed as
+# QL-B: the report must say so. The pothole W1-X1 checks the detection W1-3:
+# hypot(0.080, 0.060) = 0.100 in plan; top 19.155 against the detection's
+# centre 19.180 + 0.075 = 19.255, so -0.100. The stormwater design crosses
+# W1's W1-2 -> W1-3, a QL-B stretch, clear by 0.372 m vertically at the
+# drawn levels but not across QL-B's 500 mm - within tolerance, not clear.
+if(KATANA_BUILD_TESTS)
+    set(_utilities "${PROJECT_SOURCE_DIR}/samples/utilities")
+    add_test(NAME cli.utility_report_grades_the_sample_and_names_the_over_claim
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY REPORT \"${_utilities}/schedule.csv\" MINCOVER 0.6")
+    add_test(NAME cli.utility_verify_compares_the_pothole_with_its_detection
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY VERIFY \"${_utilities}/schedule.csv\"")
+    add_test(NAME cli.utility_clearance_shows_the_crossing_within_tolerance
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY CLEARANCE \"${_utilities}/schedule.csv\" \"${_utilities}/design.csv\" WIDTH 0.375")
+    add_test(NAME cli.utility_refuses_an_unknown_option
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY REPORT \"${_utilities}/schedule.csv\" MINCOVR 0.6")
+    set_tests_properties(cli.utility_report_grades_the_sample_and_names_the_over_claim PROPERTIES
+        PASS_REGULAR_EXPRESSION "4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C")
+    set_tests_properties(cli.utility_verify_compares_the_pothole_with_its_detection PROPERTIES
+        PASS_REGULAR_EXPRESSION "W1 +W1-3 +W1-X1 +0\\.100 +ok +-0\\.100 +ok")
+    set_tests_properties(cli.utility_clearance_shows_the_crossing_within_tolerance PROPERTIES
+        PASS_REGULAR_EXPRESSION "W1 W1-2 -> W1-3 +QL-B +within tolerance +-0\\.263 +0\\.300 +0\\.372")
+    set_tests_properties(cli.utility_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+
+    # UTILITY CHECK against the real TfNSW Utility Schema, when this checkout
+    # has the owner's copy (it is theirs to keep, not the repository's - see
+    # .gitignore). tools/utility_schema_domains.py makes the schema file, then
+    # the TfNSW-shaped sample is checked; its comments list the mistakes left
+    # in it on purpose, and each must be found. PASS_REGULAR_EXPRESSION
+    # ignores the exit status, which is 1 because there are errors.
+    set(_tfnsw_workbook
+        "${PROJECT_SOURCE_DIR}/docs/TfNSW Reference Files/Utility-Schema-and-Specification-v1.2.xlsx")
+    if(EXISTS "${_tfnsw_workbook}" AND Python3_Interpreter_FOUND)
+        set(_tfnsw_schema "${CMAKE_CURRENT_BINARY_DIR}/tfnsw-utility-schema.csv")
+        add_test(NAME cli.utility_check_schema_from_the_workbook
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/utility_schema_domains.py"
+                    "${_tfnsw_workbook}" "${_tfnsw_schema}")
+        add_test(NAME cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    $<TARGET_FILE:katana_cli>
+                    -c "UTILITY CHECK \"${_utilities}/schedule_tfnsw.csv\" SCHEMA \"${_tfnsw_schema}\"")
+        set_tests_properties(cli.utility_check_schema_from_the_workbook PROPERTIES
+            FIXTURES_SETUP cli_tfnsw_schema
+            PASS_REGULAR_EXPRESSION "43 fields, 25 domains, 1084 values \\(schema version 1\\.2\\)")
+        set_tests_properties(cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong PROPERTIES
+            FIXTURES_REQUIRED cli_tfnsw_schema
+            PASS_REGULAR_EXPRESSION "7 rows, 3 assets \\(AssetIdentifier\\): 7 errors, 2 warnings.*TfNSW_ContractOrgCode is mandatory and has no column.*DateInfoObtained \"2026-09-20\" is not a date.*Depth is empty \\(2 rows.*UtilityInstallDate is empty \\(2 rows.*AssetStatus \"In service\" is listed as \"In Service\"")
+    endif()
 endif()
 
 # A .dxf through the command line both ways, natively - no GDAL, so it runs

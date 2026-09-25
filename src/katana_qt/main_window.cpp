@@ -1,5 +1,10 @@
 #include "main_window.hpp"
 
+#include "katana/core/cpu_features.hpp"
+#if defined(KATANA_HAS_GPU)
+#include "gpu/renderer_choice.hpp"
+#endif
+
 #include "theme.hpp"
 
 #include "icons.hpp"
@@ -8,6 +13,11 @@
 #include "gis_dialogs.hpp"
 #include "jobs.hpp"
 #include "layer_manager.hpp"
+#include "plotting/plot_dialog.hpp"
+#include "plotting/sheet_arrange.hpp"
+#include "plotting/sheet_checks.hpp"
+#include "plotting/sheet_tables.hpp"
+#include "project_crs_dialog.hpp"
 #include "style_manager.hpp"
 
 #include <chrono>
@@ -80,6 +90,37 @@
 #include "katana/storage/project_store.hpp"
 
 namespace katana::qt {
+
+namespace {
+
+// The vector kernels in force, and why when it is not what the processor
+// could run (core::simdSelection).
+QString simdDescription()
+{
+    const katana::core::SimdSelection& simd = katana::core::simdSelection();
+    QString text = QString::fromLatin1(katana::core::toString(simd.active));
+    if (!simd.note.empty()) {
+        text += QString(" (%1)").arg(QString::fromStdString(simd.note));
+    }
+    return text;
+}
+
+// What the renderer rules choose for a 3D view made now, and why
+// (gpu::chooseRenderer).
+QString rendererDescription()
+{
+#if defined(KATANA_HAS_GPU)
+    const auto decision =
+        gpu::chooseRenderer(gpu::currentRendererEnvironment(false, false));
+    return QString("%1 - %2")
+        .arg(QString::fromLatin1(gpu::toString(decision.kind)),
+             QString::fromStdString(decision.reason));
+#else
+    return QStringLiteral("software - the GPU renderer is not built into this copy");
+#endif
+}
+
+} // namespace
 
 namespace cad = katana::cad;
 namespace cmd = katana::commands;
@@ -333,6 +374,37 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                    " has no menu; its tools start from the command line.");
     }
     views_->setReferenceData(&reference_);
+    // GENERATE on the command line lays out what Generate Sheets would: what
+    // the plan view draws, and the visible surfaces for the sections.
+    interpreter_.setSheetContext([this] {
+        cad::plotting::SheetVerbContext context;
+        PlanSource plan = planSourceOf(document_);
+        plan.reference = &reference_;
+        plan.meshes = &sceneMeshes_;
+        context.drawingExtent = planDrawnBounds(plan, {}, {});
+        for (const auto& surface : sceneSurfaces_) {
+            if (surface.visible && surface.surface != nullptr) {
+                context.surfaces.push_back({surface.name, surface.surface});
+            }
+        }
+        // SHEETS CHECK with what the painter knows, as the Checks dock runs
+        // them; and what a view shows for ARRANGE, VIEW FIT and the rest, as
+        // the editor's Arrange menu measures it.
+        context.check = [this](std::span<const std::size_t> sheets) {
+            return checkSheetsFor(document_.sheetSet(), sheetSource(), sheets);
+        };
+        context.content = [this](const cad::plotting::Viewport& viewport) {
+            return viewportContent(viewport, sheetSource(), document_.sheetSet());
+        };
+        context.fitSection = [this](const cad::plotting::Viewport& viewport) {
+            SheetPaintCache cache;
+            return resolveSectionViewport(viewport, sheetSource(), cache);
+        };
+        context.drawn = [this](const cad::plotting::SheetSet& set) {
+            return resolvedSheetSet(set, sheetSource());
+        };
+        return context;
+    });
 
     views_->onPrompt = [this](const QString& prompt) {
         statusBar()->showMessage(prompt);
@@ -461,14 +533,18 @@ void MainWindow::buildActions()
         makeAction(Icon::Plot, "Plot Sheets to P&DF...",
                    "Plot every sheet of the project to one PDF", QKeySequence(), "filePlotSheets");
     connect(plotSheetsAction, &QAction::triggered, this, [this] {
-        const QString path = QFileDialog::getSaveFileName(this, "Plot Sheets to PDF", QString(),
-                                                          "PDF (*.pdf)");
-        if (path.isEmpty()) {
+        // The Plot dialog (plotting/plot_dialog.hpp) over every sheet; the
+        // page setup is kept only for sheets the project has.
+        const auto set = sheetsToPlot();
+        if (!set) {
+            logMessage(QString::fromStdString(set.error().describe()), true);
             return;
         }
-        if (const auto status = plotSheetsToPdf(path); !status) {
-            logMessage(QString::fromStdString(status.error().describe()), true);
-        }
+        plotInteractively(this, *set, 0, true, suggestedPlotFile(document_),
+                          QString::fromStdString(document_.metadata().name),
+                          [this] { return sheetSource(); },
+                          document_.sheetSet().sheets.empty() ? nullptr : &document_,
+                          [this](const QString& text, bool isError) { logMessage(text, isError); });
     });
 
     QAction* customiseAction =
@@ -528,6 +604,16 @@ void MainWindow::buildActions()
     fileMenu->addActions({importAction, exportAction});
     fileMenu->addSeparator();
     fileMenu->addActions({plotAction, sheetsAction, plotSheetsAction});
+    fileMenu->addSeparator();
+    // The project's coordinate system: what online data, reprojection and the
+    // title block need, set in one place (project_crs_dialog.hpp; CRS verb).
+    QAction* crsAction = makeAction(Icon::Properties, "Project &Coordinate System...",
+                                    "Set the coordinate system the project is in (EPSG code, WKT or "
+                                    "PROJ); online data and reprojection need one",
+                                    QKeySequence(), "fileProjectCrs");
+    connect(crsAction, &QAction::triggered, this,
+            [this] { (void)chooseProjectCrs(this, document_); });
+    fileMenu->addAction(crsAction);
     fileMenu->addSeparator();
     QAction* quitAction =
         fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
@@ -790,7 +876,13 @@ void MainWindow::buildActions()
                     QString("<p style='color:%1'>GDAL %2, PDAL %3.</p>")
                         .arg(theme::textMuted().name(),
                              QString::fromStdString(katana::gis::gdalVersion()),
-                             QString::fromStdString(katana::pointcloud::pdalVersion())));
+                             QString::fromStdString(katana::pointcloud::pdalVersion())) +
+                    // What this copy runs on this machine: the vector kernels
+                    // in force (docs/performance.md, "Dispatch") and what
+                    // draws a 3D view (docs/gpu.md, "Fallback") - the first
+                    // two things to know about a report that something is slow.
+                    QString("<p style='color:%1'>Vector kernels: %2. 3D views: %3.</p>")
+                        .arg(theme::textMuted().name(), simdDescription(), rendererDescription()));
         box.exec();
     });
     reference->setObjectName("helpCommandReference");
@@ -854,6 +946,28 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
     gisMenu.addActions({importCloud, exportCloud, copc});
     gisMenu.addSeparator();
     gisMenu.addAction(info);
+    // Online - Web Services: its own section, filled by the workbench.
+    OnlineServices online;
+    online.document = &document_;
+    online.views = views_;
+    online.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                               const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    online.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    online.headless = [this] { return headless_; };
+    online.addRaster = [this](interop::RasterOverlay raster) {
+        const interop::ReferenceId id = reference_.add(std::move(raster));
+        views_->invalidateReferenceCache();
+        refreshReferences();
+        views_->refreshAll();
+        return id;
+    };
+    online.version = KATANA_VERSION;
+    online.chooseProjectCrs = [this](std::optional<std::pair<double, double>> place) {
+        return chooseProjectCrs(this, document_, place);
+    };
+    online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
 
     QToolBar* gisBar = makeToolBar("GIS", Qt::TopToolBarArea);
     gisBar->addActions({importVector, importRaster, importCloud});
@@ -907,6 +1021,7 @@ void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction,
     formatBar->addAction(layersAction);
     format_ = std::make_unique<CustomisationWorkbench>(*this, std::move(services), formatMenu,
                                                        *formatBar);
+    annotation_ = std::make_unique<AnnotationWorkbench>(*this, document_, formatMenu, *formatBar);
 }
 
 void MainWindow::buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& annotateMenu)
@@ -1295,6 +1410,14 @@ void MainWindow::buildStatusBar()
     layerLabel_ = new QLabel(this);
     frameStatsLabel_ = new QLabel(this);
     frameStatsLabel_->setObjectName("FrameStatsLabel");
+    // The project's coordinate system, one click from changing it.
+    crsButton_ = new QToolButton(this);
+    crsButton_->setObjectName("statusProjectCrs");
+    crsButton_->setAutoRaise(true);
+    crsButton_->setToolTip("The project's coordinate system: click to change it");
+    connect(crsButton_, &QToolButton::clicked, this,
+            [this] { (void)chooseProjectCrs(this, document_); });
+    statusBar()->addPermanentWidget(crsButton_);
     statusBar()->addPermanentWidget(frameStatsLabel_);
     statusBar()->addPermanentWidget(layerLabel_);
     statusBar()->addPermanentWidget(snapLabel_);
@@ -1403,6 +1526,9 @@ void MainWindow::refreshAll()
                                                             static_cast<int>(document_.history().undoName().size()))
                              : "&Undo");
     layerLabel_->setText("Layer: " + QString::fromStdString(document_.currentLayer()));
+    if (crsButton_ != nullptr) {
+        crsButton_->setText("CRS: " + projectCrsLabel(document_));
+    }
 }
 
 void MainWindow::refreshTitle()
@@ -1806,6 +1932,7 @@ void MainWindow::logMessage(const QString& text, bool isError)
     const QString line = isError ? "! " + text : text;
     commandLog_->appendPlainText(line);
     if (isError) {
+        ++errorsLogged_;
         statusBar()->showMessage(text, 6000);
     }
     // A headless run has no window to read the log in. Echoed, it is what a
@@ -1815,10 +1942,12 @@ void MainWindow::logMessage(const QString& text, bool isError)
     }
 }
 
-void MainWindow::runCommand(const QString& line)
+bool MainWindow::runCommand(const QString& line)
 {
+    const int errors = errorsLogged_;
     commandInput_->setText(line);
     runCommandLine();
+    return errorsLogged_ == errors;
 }
 
 void MainWindow::runCommandLine()
@@ -1832,7 +1961,14 @@ void MainWindow::runCommandLine()
         views_->pressEnter();
         return;
     }
-    commandLog_->appendPlainText("> " + line);
+    // What is typed is echoed - but an ONLINE KEY's value never is.
+    commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+    // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
+    // workbench's, as the interoperability verbs below are the window's - and
+    // before a running tool, which would take the line for an answer.
+    if (online_ != nullptr && online_->runLine(line)) {
+        return;
+    }
     // While a tool runs, what is typed is its answer - a point, a distance,
     // an option - before it is anything else: Polyline's C closes it, where
     // on its own C would start a Circle.
@@ -1948,6 +2084,49 @@ void MainWindow::runCommandLine()
                            .arg(grouped(cloud.points.size()))
                            .arg(grouped(cloud.sourcePointCount)));
         }
+        return;
+    }
+    // PLOTSHEETS [path] [format=] [style=] [sheets=] [dpi=] [lineweight=]
+    // [folder=] [pattern=]: the sheets plotted as the Plot dialog and
+    // --plot-sheets plot them, the set's page setup filling in what is not
+    // given. Here and not in the interpreter because the painter is Qt; the
+    // line is read by the interpreter's own rules (sheet_verbs.hpp,
+    // parsePlotSheets). Each file written is logged on a line of its own,
+    // file="path", after the summary, for a script to pick up.
+    if (verb == "PLOTSHEETS") {
+        const auto tokens = cad::CommandInterpreter::tokenize(line.toStdString());
+        if (!tokens) {
+            logMessage(QString::fromStdString(tokens.error().describe()), true);
+            return;
+        }
+        // A project with no sheets plots one fitted to the drawing, so
+        // sheets= is read against that one sheet.
+        const auto set = sheetsToPlot();
+        if (!set) {
+            logMessage(QString::fromStdString(set.error().describe()), true);
+            return;
+        }
+        const auto parsed = cad::plotting::parsePlotSheets(
+            *set, std::vector<std::string>(tokens->begin() + 1, tokens->end()));
+        if (!parsed) {
+            logMessage(QString::fromStdString(parsed.error().describe()), true);
+            return;
+        }
+        const PlotRequest request = plotRequestFor(set->pageSetup, *parsed);
+        // What cannot be drawn on a sheet is logged as a problem, and the
+        // files are still written: the line was carried out, not refused, so
+        // those do not count against it (runCommand), as they do not fail
+        // --plot-sheets.
+        const int errorsBefore = errorsLogged_;
+        const auto result = plotSheets(*set, request);
+        if (!result) {
+            logMessage(QString::fromStdString(result.error().describe()), true);
+            return;
+        }
+        for (const QString& file : result->files) {
+            logMessage(QString("file=\"%1\"").arg(QDir::toNativeSeparators(file)));
+        }
+        errorsLogged_ = errorsBefore;
         return;
     }
     // A bare tool word starts the tool, as in any CAD package: an alias
@@ -4516,39 +4695,65 @@ void MainWindow::showSheets()
     sheets_->activateWindow();
 }
 
-katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
+katana::core::Result<cad::plotting::SheetSet> MainWindow::sheetsToPlot()
 {
-    const SheetSource source = sheetSource();
     cad::plotting::SheetSet set = document_.sheetSet();
     if (set.sheets.empty()) {
         // Nothing laid out yet: one sheet fitted to the drawing, for this plot.
         cad::plotting::LayoutRequest request;
-        request.planArea = planDrawnBounds(source.plan, {}, {});
-        auto sheets = cad::plotting::smartLayout(document_.model(), request);
-        if (!sheets) {
-            return sheets.error();
+        request.planArea = planDrawnBounds(sheetSource().plan, {}, {});
+        auto fitted = cad::plotting::smartLayout(document_.model(), request);
+        if (!fitted) {
+            return fitted.error();
         }
-        cad::plotting::prepareForAppend(set, *sheets);
-        set.sheets = std::move(*sheets);
+        cad::plotting::prepareForAppend(set, *fitted);
+        set.sheets = std::move(*fitted);
         logMessage("The project has no sheets: plotting one fitted to the drawing.");
     }
-    SheetPaintCache cache;
-    std::vector<std::string> problems;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = katana::qt::plotSheetsToPdf(path, set, {}, source, 300.0, cache,
-                                                    QString::fromStdString(document_.metadata().name),
-                                                    &problems);
-    QApplication::restoreOverrideCursor();
-    if (!status) {
-        return status;
+    return set;
+}
+
+katana::core::Result<PlotReport> MainWindow::plotSheets(const cad::plotting::SheetSet& set,
+                                                        const PlotRequest& request)
+{
+    PlotRequest titled = request;
+    if (titled.title.isEmpty()) {
+        titled.title = QString::fromStdString(document_.metadata().name);
     }
-    for (const std::string& problem : problems) {
+    // The checks first, on the sheets this plot takes: what they find is
+    // logged, and the plot goes ahead - an error there is paper wasted, not
+    // a file that cannot be written. A selection that does not parse is
+    // left to the plot to refuse, with its own words.
+    if (const auto selected = cad::plotting::parseSheetSelection(titled.sheets, set)) {
+        for (const QString& line : preflightLog(checkSheetsFor(set, sheetSource(), *selected))) {
+            logMessage(line);
+        }
+    }
+    SheetPaintCache cache;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    auto result = katana::qt::plotSheets(set, titled, [this] { return sheetSource(); }, cache);
+    QApplication::restoreOverrideCursor();
+    if (!result) {
+        return result.error();
+    }
+    for (const std::string& problem : result->problems) {
         logMessage(QString::fromStdString(problem), true);
     }
-    logMessage(QString("Plotted %1 sheet%2 to %3.")
-                   .arg(set.sheets.size())
-                   .arg(set.sheets.size() == 1 ? "" : "s")
-                   .arg(path));
+    logMessage(result->summary(titled));
+    return result;
+}
+
+katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
+{
+    const auto set = sheetsToPlot();
+    if (!set) {
+        return set.error();
+    }
+    PlotRequest request = plotRequestFor(set->pageSetup, path);
+    request.format = PlotFormat::Pdf;
+    if (auto result = plotSheets(*set, request); !result) {
+        return result.error();
+    }
     return {};
 }
 

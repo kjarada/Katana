@@ -8,9 +8,13 @@
 //   Specify dimension line location ...  a point; T gives the text; Linear
 //                                        also takes H or V
 //
-// THE MODEL HAS ONE KIND OF DIMENSION: DimensionGeometry is an ALIGNED
-// dimension measuring |end - start|, its dimension line parallel to
-// start->end and displaced by `offset` to its LEFT (negative: to its right).
+// BOTH TOOLS MAKE AN ALIGNED DIMENSION: a DimensionGeometry of the Aligned
+// kind, measuring |end - start|, its dimension line parallel to start->end
+// and displaced by `offset` to its LEFT (negative: to its right). The model
+// has had a Linear kind since 2026-09-25 (DimensionKind; DIM LINEAR makes
+// one), but Linear here stays the projection below: an aligned dimension is
+// what every drawing made before then holds and what the DXF writer exports,
+// and the projection draws the same picture.
 //
 // Aligned maps onto it directly: start and end are the two origins, and the
 // offset is the signed distance of the picked location from the line through
@@ -37,12 +41,13 @@
 // on the stroke or in the gap at its foot, which is how a reader sees what
 // was measured; projecting onto the nearer level instead would leave the
 // farther origin short of its line by the whole difference and DIMEXO,
-// pointing at nothing. The one placement the model cannot draw at all is a
-// dimension line BETWEEN the two levels, whose extension lines would have to
-// leave in opposite directions: that is refused with a sentence rather than
-// drawn wrongly.
+// pointing at nothing. The one placement the projection cannot draw at all
+// is a dimension line BETWEEN the two levels, whose extension lines would
+// have to leave in opposite directions: that is refused with a sentence
+// rather than drawn wrongly (a Linear-kind dimension, DIM LINEAR, draws it).
 //
-// Radius, diameter and angular dimensions are not here: see annotate.cpp.
+// Angular, radius, diameter and ordinate dimensions are in
+// annotate_dimension_kinds.cpp.
 
 #include <algorithm>
 #include <cmath>

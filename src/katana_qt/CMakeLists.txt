@@ -1,4 +1,6 @@
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+# PrintSupport: the sheets are printed as well as plotted to files
+# (plotting/plot_output.hpp, printSheets).
+find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport)
 
 # The desktop application's Import/Export and its Reference Data panel are not
 # optional features, so the module they need is a hard requirement. Failing here
@@ -48,8 +50,14 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     attribute_manager.hpp
     layer_manager.cpp
     layer_manager.hpp
+    project_crs_dialog.cpp
+    project_crs_dialog.hpp
     gis_dialogs.cpp
     gis_dialogs.hpp
+    gis_online.cpp
+    gis_online.hpp
+    gis_online_dialog.cpp
+    gis_online_dialog.hpp
     format.hpp
     icons.cpp
     icons.hpp
@@ -119,7 +127,8 @@ if(WIN32)
                    "${CMAKE_CURRENT_BINARY_DIR}/katana.rc" @ONLY)
     target_sources(katana PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/katana.rc")
 endif()
-target_link_libraries(katana PRIVATE katana_cad katana_interop katana_dxf katana_render Qt6::Widgets)
+target_link_libraries(katana PRIVATE katana_cad katana_interop katana_dxf katana_render Qt6::Widgets
+                                     Qt6::PrintSupport)
 
 # The developer tool that renders the icons to files - see make_icons.cpp for
 # why its output is committed rather than generated during the build. Not part
@@ -138,8 +147,9 @@ target_include_directories(katana_tool_icon_sheet PRIVATE "${CMAKE_CURRENT_SOURC
 target_link_libraries(katana_tool_icon_sheet PRIVATE katana_cad Qt6::Widgets)
 
 # The GPU renderer for the 3D view: a library of its own (gpu/CMakeLists.txt,
-# docs/gpu.md), switched by KATANA_GPU. Not linked into `katana` yet - a later
-# change hosts it inside the 3D view with the software rasteriser as the
-# fallback - so today its tests (tests/gpu) and benchmark (benchmarks/gpu)
-# are what build it.
+# docs/gpu.md), switched by KATANA_GPU. RenderViewWidget hosts it, with the
+# software rasteriser as the fallback, when it is built (KATANA_HAS_GPU).
 add_subdirectory(gpu)
+if(TARGET katana_gpu)
+    target_link_libraries(katana PRIVATE katana_gpu)
+endif()
