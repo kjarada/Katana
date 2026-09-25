@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wfs:WFS_Capabilities version="2.0.0" xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:ows="http://www.opengis.net/ows/1.1">
+  <ows:ServiceIdentification>
+    <ows:Title>Vicmap open data</ows:Title>
+    <ows:Fees>NONE</ows:Fees>
+    <ows:AccessConstraints>Creative Commons Attribution 4.0 International</ows:AccessConstraints>
+  </ows:ServiceIdentification>
+  <FeatureTypeList>
+    <FeatureType>
+      <Name>open-data-platform:vmprop_parcel_mp</Name>
+      <Title>Vicmap Property Parcel</Title>
+      <DefaultCRS>urn:ogc:def:crs:EPSG::7844</DefaultCRS>
+      <ows:WGS84BoundingBox><ows:LowerCorner>140.96 -39.2</ows:LowerCorner><ows:UpperCorner>150.0 -33.98</ows:UpperCorner></ows:WGS84BoundingBox>
+    </FeatureType>
+    <FeatureType>
+      <Name>open-data-platform:vmtrans_road</Name>
+      <Title>Roads</Title>
+      <DefaultCRS>urn:ogc:def:crs:EPSG::3111</DefaultCRS>
+    </FeatureType>
+  </FeatureTypeList>
+</wfs:WFS_Capabilities>

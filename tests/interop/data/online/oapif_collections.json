@@ -1,0 +1,39 @@
+{
+ "links": [],
+ "collections": [
+  {
+   "id": "buildings",
+   "title": "Building outlines",
+   "extent": {
+    "spatial": {
+     "bbox": [
+      [
+       150.5,
+       -34.2,
+       151.5,
+       -33.4
+      ]
+     ]
+    }
+   },
+   "links": []
+  },
+  {
+   "id": "roads",
+   "title": "Road centrelines",
+   "extent": {
+    "spatial": {
+     "bbox": [
+      [
+       150.5,
+       -34.2,
+       151.5,
+       -33.4
+      ]
+     ]
+    }
+   },
+   "links": []
+  }
+ ]
+}

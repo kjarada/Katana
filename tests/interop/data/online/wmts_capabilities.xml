@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Capabilities xmlns="http://www.opengis.net/wmts/1.0" xmlns:ows="http://www.opengis.net/ows/1.1" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.0.0">
+  <ows:ServiceIdentification><ows:Title>NASA Global Imagery Browse Services</ows:Title><ows:AccessConstraints>none</ows:AccessConstraints></ows:ServiceIdentification>
+  <Contents>
+    <Layer>
+      <ows:Title>Corrected Reflectance (True Color, MODIS, Terra)</ows:Title>
+      <ows:WGS84BoundingBox><ows:LowerCorner>-180 -85.051129</ows:LowerCorner><ows:UpperCorner>180 85.051129</ows:UpperCorner></ows:WGS84BoundingBox>
+      <ows:Identifier>MODIS_Terra_CorrectedReflectance_TrueColor</ows:Identifier>
+      <Style isDefault="true"><ows:Identifier>default</ows:Identifier></Style>
+      <Format>image/jpeg</Format>
+      <Dimension><ows:Identifier>Time</ows:Identifier><Default>2026-09-24</Default></Dimension>
+      <TileMatrixSetLink><TileMatrixSet>GoogleMapsCompatible_Level9</TileMatrixSet></TileMatrixSetLink>
+      <ResourceURL format="image/jpeg" resourceType="tile" template="https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{Time}/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.jpg"/>
+    </Layer>
+    <Layer>
+      <ows:Title>Only on a national grid</ows:Title>
+      <ows:Identifier>national_only</ows:Identifier>
+      <TileMatrixSetLink><TileMatrixSet>GDA2020_Lambert</TileMatrixSet></TileMatrixSetLink>
+    </Layer>
+    <TileMatrixSet>
+      <ows:Identifier>GoogleMapsCompatible_Level9</ows:Identifier>
+      <ows:SupportedCRS>urn:ogc:def:crs:EPSG::3857</ows:SupportedCRS>
+      <TileMatrix><ows:Identifier>EPSG:3857:0</ows:Identifier><ScaleDenominator>559082264.0287177563</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>1</MatrixWidth><MatrixHeight>1</MatrixHeight></TileMatrix>
+      <TileMatrix><ows:Identifier>EPSG:3857:1</ows:Identifier><ScaleDenominator>279541132.0143588781</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>2</MatrixWidth><MatrixHeight>2</MatrixHeight></TileMatrix>
+      <TileMatrix><ows:Identifier>EPSG:3857:2</ows:Identifier><ScaleDenominator>139770566.0071794391</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>4</MatrixWidth><MatrixHeight>4</MatrixHeight></TileMatrix>
+      <TileMatrix><ows:Identifier>EPSG:3857:3</ows:Identifier><ScaleDenominator>69885283.0035897195</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>8</MatrixWidth><MatrixHeight>8</MatrixHeight></TileMatrix>
+      <TileMatrix><ows:Identifier>EPSG:3857:4</ows:Identifier><ScaleDenominator>34942641.5017948598</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>16</MatrixWidth><MatrixHeight>16</MatrixHeight></TileMatrix>
+      <TileMatrix><ows:Identifier>EPSG:3857:5</ows:Identifier><ScaleDenominator>17471320.7508974299</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>32</MatrixWidth><MatrixHeight>32</MatrixHeight></TileMatrix>
+      <TileMatrix><ows:Identifier>EPSG:3857:6</ows:Identifier><ScaleDenominator>8735660.3754487149</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>64</MatrixWidth><MatrixHeight>64</MatrixHeight></TileMatrix>
+      <TileMatrix><ows:Identifier>EPSG:3857:7</ows:Identifier><ScaleDenominator>4367830.1877243575</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>128</MatrixWidth><MatrixHeight>128</MatrixHeight></TileMatrix>
+      <TileMatrix><ows:Identifier>EPSG:3857:8</ows:Identifier><ScaleDenominator>2183915.0938621787</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>256</MatrixWidth><MatrixHeight>256</MatrixHeight></TileMatrix>
+      <TileMatrix><ows:Identifier>EPSG:3857:9</ows:Identifier><ScaleDenominator>1091957.5469310894</ScaleDenominator><TopLeftCorner>-20037508.3427892 20037508.3427892</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>512</MatrixWidth><MatrixHeight>512</MatrixHeight></TileMatrix>
+    </TileMatrixSet>
+    <TileMatrixSet>
+      <ows:Identifier>GDA2020_Lambert</ows:Identifier>
+      <ows:SupportedCRS>urn:ogc:def:crs:EPSG::7845</ows:SupportedCRS>
+      <TileMatrix><ows:Identifier>0</ows:Identifier><ScaleDenominator>10000000</ScaleDenominator><TopLeftCorner>-5000000 0</TopLeftCorner><TileWidth>256</TileWidth><TileHeight>256</TileHeight><MatrixWidth>4</MatrixWidth><MatrixHeight>4</MatrixHeight></TileMatrix>
+    </TileMatrixSet>
+  </Contents>
+</Capabilities>
