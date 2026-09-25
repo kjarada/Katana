@@ -17,6 +17,9 @@
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/frame.hpp"
 #include "katana/cad/plotting/key_plan.hpp"
+#include "katana/cad/plotting/legend.hpp"
+#include "katana/cad/plotting/page_setup.hpp"
+#include "katana/cad/plotting/plan_grid.hpp"
 #include "katana/cad/plotting/layout.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/cad/plotting/tables.hpp"
@@ -34,13 +37,16 @@ using Json = nlohmann::json;
 
 namespace {
 
-constexpr std::array<CheckDescription, 26> kChecks{{
+constexpr std::array<CheckDescription, 33> kChecks{{
     // The set's own: what every sheet shares.
     {"field.empty", Severity::Warning,
      "a value the frame prints that resolves to nothing: the organisation, a sign-off name, the "
      "height datum, the coordinate system... listed once for the set"},
     {"logo.missing", Severity::Info, "no logo in the title block's logo slot"},
     {"logo.unreadable", Severity::Warning, "a logo named that is not in the project or cannot be read"},
+    {"pagesetup.invalid", Severity::Error,
+     "a page setup the plot refuses: a resolution or line weight scale out of range, or a file-name "
+     "pattern that cannot be expanded"},
     // Each sheet's own.
     {"sheet.duplicate-id", Severity::Error, "a sheet with no id, or the id of an earlier sheet"},
     {"sheet.duplicate-name", Severity::Warning, "a sheet with the name of an earlier sheet"},
@@ -65,6 +71,9 @@ constexpr std::array<CheckDescription, 26> kChecks{{
      "it draws"},
     {"text.too-small", Severity::Warning,
      "drawing text in a plan that prints smaller than the minimum at the plan's scale"},
+    {"grid.invalid", Severity::Error,
+     "a coordinate grid that cannot be drawn: its lines would print closer than the least spacing"},
+    {"grid.empty", Severity::Info, "a coordinate grid whose interval is wider than the plan's window"},
     {"section.alignment-missing", Severity::Error,
      "a section with no alignment, or naming one the drawing does not have"},
     {"section.alignment-invalid", Severity::Error, "a section of an alignment that cannot be solved"},
@@ -75,6 +84,12 @@ constexpr std::array<CheckDescription, 26> kChecks{{
     {"section.no-surface", Severity::Error, "a section with no surface to cut (nor a design profile)"},
     {"image.missing", Severity::Error, "an image panel naming no file, or one the project does not have"},
     {"notes.empty", Severity::Info, "a notes panel with no text"},
+    {"legend.empty", Severity::Info, "a legend whose plans show nothing, so it lists nothing"},
+    {"legend.overflow", Severity::Warning,
+     "a legend with more entries than fit, which prints \"+N more\" for the rest"},
+    {"revisions.empty", Severity::Info, "a revision table on a set with no revisions"},
+    {"table.overflow", Severity::Warning,
+     "a drawing register or revision table whose rows do not all fit"},
     {"matchline.dangling", Severity::Warning,
      "a match line or key-plan outline leading to a sheet that no longer exists"},
 }};
@@ -721,6 +736,22 @@ void checkPlan(const SheetSet& set, const Viewport& viewport, std::size_t index,
             "Pan the drawing into it (Shift-drag), set its scale and centre to Auto, or show the layers "
             "it hides");
     }
+    // The coordinate grid, worked out as the painter works it out at this
+    // window (plan_grid.hpp).
+    if (viewport.gridStyle != GridStyle::None) {
+        const auto grid = planGrid(viewport, PlanPlacement{at.scale, at.centre});
+        if (!grid) {
+            add(Severity::Error, "grid.invalid", {},
+                std::format("{}'s coordinate grid is not drawn: {}", label, grid.error().message),
+                std::format("Set its grid interval to Auto, or to at least {:.3g} m at {}",
+                            kGridMinimumSpacingMm * at.scale / 1000.0, scaleName(at.scale)));
+        } else if (grid->lines.empty()) {
+            add(Severity::Info, "grid.empty", {},
+                std::format("{}'s coordinate grid, every {:.6g} m, has no line in its window", label,
+                            grid->interval),
+                "Set its grid interval to Auto, or make it smaller");
+        }
+    }
     // A key plan is a small-scale map of where the sheets are: its drawing
     // is faded and its own text is not meant to be read.
     if (content.smallTexts > 0 && viewport.kind != ViewportKind::KeyPlan) {
@@ -1024,8 +1055,42 @@ void checkViewport(const SheetSet& set, std::size_t index, std::size_t position,
         }
         break;
     }
+    case ViewportKind::Legend: {
+        // Gathered and flowed as the painter gathers and flows it (legend.hpp),
+        // the labels measured by Arial's widths as the tables are.
+        LegendOptions gather;
+        gather.index = options.index;
+        if (options.resolvePlan) {
+            gather.window = options.resolvePlan;
+        }
+        const auto legend = computeLegend(model, set, index, viewport.legendScope, gather);
+        if (!legend) {
+            break;
+        }
+        if (legend->entries.empty()) {
+            add(Severity::Info, "legend.empty", std::string(toString(viewport.legendScope)),
+                std::format("{} lists nothing: the plans it reads ({}) show nothing", label,
+                            toString(viewport.legendScope)),
+                "Widen its scope to the whole set or drawing, or remove it");
+            break;
+        }
+        std::vector<double> widths;
+        for (const LegendEntry& entry : legend->entries) {
+            std::string upper = entry.label;
+            std::ranges::transform(upper, upper.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            widths.push_back(estimateTextWidth(upper, 1.8, false) * 0.9);
+        }
+        if (const LegendLayout flowed = layoutLegend(viewport.rect, widths); flowed.more > 0) {
+            add(Severity::Warning, "legend.overflow", {},
+                std::format("{} lists {} of its {} entries: {} do not fit and print as \"+{} more\"",
+                            label, legend->entries.size() - flowed.more, legend->entries.size(),
+                            flowed.more, flowed.more),
+                "Make it larger, or narrow its scope to this sheet");
+        }
+        break;
+    }
     case ViewportKind::Model3D:
-    case ViewportKind::Legend:
         break;
     }
 
@@ -1183,6 +1248,11 @@ std::vector<Finding> checkSheets(const SheetSet& set, const entity::Model& model
     // The set's own findings first: they are about every sheet.
     checkFields(set, context, indices, frames, report);
     checkLogo(set, indices, frames, options, report);
+    if (const core::Status setup = validatePageSetup(set.pageSetup); !setup) {
+        report.add(Severity::Error, "pagesetup.invalid", std::nullopt, {}, {}, {},
+                   std::format("The page setup cannot be plotted: {}", setup.error().message),
+                   "Correct it in the Plot dialog, or with SHEETS PAGESETUP");
+    }
 
     // Where each viewport id is first used, over the whole set.
     std::map<std::string, std::pair<std::size_t, std::size_t>, std::less<>> firstIds;

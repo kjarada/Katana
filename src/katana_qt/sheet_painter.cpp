@@ -121,6 +121,18 @@ QBrush paperFill(const Paper& paper, const QColor& colour)
     return QBrush(plotFill(colour, paper.options().plot));
 }
 
+// A light shading the sheet itself lays under something - a table's
+// highlighted row, a key plan's tinted sheets, a section's cut and fill - as
+// the plot style prints it, but without the rule that prints a near-white
+// pen black: that rule is for the drawing's own white linework, and a pale
+// grey shading is pale on purpose.
+QBrush paperShade(const Paper& paper, const QColor& colour)
+{
+    katana::cad::PlotSettings plot = paper.options().plot;
+    plot.whiteToBlack = false;
+    return QBrush(plotFill(colour, plot));
+}
+
 Point2 rotated(const Point2& v, double radians)
 {
     const double c = std::cos(radians);
@@ -736,7 +748,7 @@ void paintTable(QPainter& painter, const Paper& paper, TextSetter& text,
     // The highlight is a fill like any other, so the plot style prints it
     // (a light grey drops out of a monochrome plot, as a one-ink plotter's
     // would; the row's rules and text still say which it is).
-    const QBrush shade = paperFill(paper, QColor(232, 232, 232));
+    const QBrush shade = paperShade(paper, QColor(232, 232, 232));
     for (const Box2& box : table.shaded) {
         painter.fillRect(paper.at(box), shade);
     }
@@ -778,7 +790,7 @@ class SheetSectionCanvas final : public SectionCanvas {
     {
         return katana::qt::dashedPen(paper_, colour, widthMm, patternMm);
     }
-    QBrush fill(const QColor& colour) const override { return paperFill(paper_, colour); }
+    QBrush fill(const QColor& colour) const override { return paperShade(paper_, colour); }
     double textWidthMm(const QString& line, const SectionTextStyle& style) override
     {
         return text_.widthMm(line, styleOf(style));
@@ -1116,7 +1128,7 @@ void SheetPainter::paintKeyPlan(const Viewport& viewport, const ResolvedViewport
                 ring << paper.at(point);
             }
             painter_.setPen(paperPen(paper, current ? kHereInk : kOutlineInk, current ? 0.5 : 0.35));
-            painter_.setBrush(paperFill(paper, current ? kHereFill : kOutlineFill));
+            painter_.setBrush(paperShade(paper, current ? kHereFill : kOutlineFill));
             painter_.drawPolygon(ring);
         }
     }

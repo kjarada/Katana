@@ -1144,3 +1144,97 @@ TEST(SheetPreflight, ADocumentsSheetsAreCheckedWithItsOwnDrawingAndFields)
     }
     EXPECT_EQ(codes, "field.empty:coordinate_system logo.missing plan.empty ");
 }
+
+// ---- what the other sheet features add ------------------------------------------------
+
+TEST(SheetPreflight, APlansGridIsCheckedAsThePainterWorksItOut)
+{
+    const Model model = drawing();
+    SheetSet set = cleanSet();
+    // Automatic: about 50 mm apart on the paper, lines in the window.
+    set.sheets[0].viewports[0].gridStyle = GridStyle::Ticks;
+    EXPECT_TRUE(withCode(check(set, model), "grid.invalid").empty());
+    EXPECT_TRUE(withCode(check(set, model), "grid.empty").empty());
+    // Every 0.5 m at 1:500 is a line every millimetre: too dense to draw.
+    set.sheets[0].viewports[0].gridInterval = 0.5;
+    auto found = withCode(check(set, model), "grid.invalid");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].severity, Severity::Error);
+    EXPECT_EQ(found[0].viewportId, "vp1");
+    // Every 100 km: no line crosses a 192.5 x 125 m window about (5000, 5000).
+    set.sheets[0].viewports[0].gridInterval = 100000.0;
+    set.sheets[0].viewports[0].centre = Point2(5000.0, 5000.0);
+    found = withCode(check(set, model), "grid.empty");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].severity, Severity::Info);
+}
+
+TEST(SheetPreflight, ALegendThatListsNothingOrTooMuchIsReported)
+{
+    Model model = drawing();
+    SheetSet set = cleanSet();
+    set.sheets[0].viewports[0].rect = Box2(Point2(24.0, 36.0), Point2(300.0, 286.0));
+    set.sheets[0].viewports.push_back(
+        panel("vp2", ViewportKind::Legend, Box2(Point2(305.0, 200.0), Point2(405.0, 280.0)), {}));
+    EXPECT_TRUE(withCode(check(set, model), "legend.empty").empty()) << "the line is listed";
+    EXPECT_TRUE(withCode(check(set, model), "legend.overflow").empty());
+
+    // Many layers, each drawn in the plan, in a legend a row high.
+    for (int i = 0; i < 40; ++i) {
+        katana::entity::Layer layer;
+        layer.name = "LAYER " + std::to_string(i);
+        ASSERT_TRUE(model.layers.add(layer).ok());
+        add(model, Segment2{Point2(i, 5.0), Point2(i, 10.0)}, layer.name);
+    }
+    set.sheets[0].viewports[1].rect = Box2(Point2(305.0, 260.0), Point2(345.0, 280.0));
+    auto found = withCode(check(set, model), "legend.overflow");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].severity, Severity::Warning);
+    EXPECT_EQ(found[0].viewportId, "vp2");
+
+    // Over nothing, its plan shows nothing and it lists nothing.
+    set.sheets[0].viewports[0].centre = Point2(9000.0, 9000.0);
+    found = withCode(check(set, model), "legend.empty");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].subject, "this_sheet");
+}
+
+TEST(SheetPreflight, TablesThatLeaveRowsOutAndAnEmptyRevisionTableAreReported)
+{
+    const Model model = drawing();
+    SheetSet set = cleanSet();
+    Viewport index = panel("vp2", ViewportKind::SheetIndex, Box2(Point2(300.0, 240.0), Point2(400.0, 250.0)), {});
+    Viewport revisions = panel("vp3", ViewportKind::Revisions, Box2(Point2(300.0, 200.0), Point2(400.0, 230.0)), {});
+    set.sheets[0].viewports[0].rect = Box2(Point2(24.0, 36.0), Point2(290.0, 286.0));
+    set.sheets[0].viewports.push_back(index);
+    set.sheets[0].viewports.push_back(revisions);
+    for (int i = 2; i <= 30; ++i) {
+        set.sheets.push_back(sheetOf("s" + std::to_string(i), "SHEET " + std::to_string(i), {}));
+    }
+    PreflightOptions only = knownLogo();
+    only.sheets = {0};
+    auto found = withCode(check(set, model, only), "table.overflow");
+    ASSERT_EQ(found.size(), 1u) << "a register 10 mm high cannot list 30 sheets";
+    EXPECT_EQ(found[0].viewportId, "vp2");
+    EXPECT_TRUE(withCode(check(set, model, only), "revisions.empty").empty());
+
+    set.revisions.clear();
+    found = withCode(check(set, model, only), "revisions.empty");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].viewportId, "vp3");
+}
+
+TEST(SheetPreflight, APageSetupThePlotWouldRefuseIsAnError)
+{
+    const Model model = drawing();
+    SheetSet set = cleanSet();
+    EXPECT_TRUE(withCode(check(set, model), "pagesetup.invalid").empty());
+    set.pageSetup.dpi = 5.0;
+    auto found = withCode(check(set, model), "pagesetup.invalid");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].severity, Severity::Error);
+    EXPECT_FALSE(found[0].sheetIndex.has_value()) << "the set's own";
+    set.pageSetup.dpi = 300.0;
+    set.pageSetup.fileNamePattern = "{nope}";
+    EXPECT_EQ(withCode(check(set, model), "pagesetup.invalid").size(), 1u);
+}
