@@ -11,7 +11,7 @@ done. There is no user guide yet.
 | Document | Covers | Update it when you change |
 |---|---|---|
 | [architecture.md](architecture.md) | the architectural rules and working rules, layering, error handling, numerics, determinism, logging, threading, the performance targets, what old section and phase numbers mean | a rule, a layer (`tools/check_layering.cmake`), `core` (errors, logging, `TaskPool`), `math/numerics.hpp` |
-| [building.md](building.md) | toolchain, presets, `KATANA_*` options, targets, where binaries land, running `katana` and `katana_cli`, the customisation folder, bundling and the runtime deploy | `CMakeLists.txt`, `CMakePresets.json`, `cmake/`, a target or option, `src/katana_app/main.cpp`'s verbs |
+| [building.md](building.md) | toolchain, presets, `KATANA_*` options, targets, where binaries land, running `katana` and `katana_cli`, the customisation folder, bundling and the runtime deploy | `CMakeLists.txt`, `CMakePresets.json`, `cmake/`, a target or option, `src/katana_app/session.cpp`'s verbs |
 | [testing.md](testing.md) | running the tests, each kind of test and how it is registered, the rules that make a test evidence, benchmark practice, the docs test | `tests/CMakeLists.txt`, `tests/support/`, `tools/check_*.cmake`, `tools/check_docs.py`, `tools/compare_benchmarks.py` |
 | [geometry.md](geometry.md) | vectors, matrices, tolerances, 2D primitives and algorithms, spirals, chording, horizontal and vertical alignments | `katana_math`, `katana_geometry` |
 | [model.md](model.md) | entities, layers and the named tables, commands and undo, project storage and its schema | `katana_entity`, `katana_commands`, `katana_storage` |
@@ -27,6 +27,7 @@ done. There is no user guide yet.
 | [desktop.md](desktop.md) | the window: theme, icons, toolbars, the workspace and docks, panels, the managers, the rules a dialog follows | `src/katana_qt` (outside `tools/` and `survey/`) |
 | [tools.md](tools.md) | the interactive drawing tools, their catalogue and the tool host | `src/katana_cad/tools/`, `src/katana_qt/tools/`, `interactive_tool.hpp` |
 | [headless.md](headless.md) | `katana_cli`, the window's headless switches and steps, `check_screenshot.cmake`'s variables | `src/katana_qt/main.cpp`, `tools/check_screenshot.cmake`, `tools/check_plot.cmake` |
+| [mcp.md](mcp.md) | `katana_mcp`, the MCP server that lets Claude run projects in Katana: connecting a client, the tools, what the server adds to the command line | `src/katana_app/mcp_server.cpp`, `src/katana_app/mcp_main.cpp`, a verb in `src/katana_app/session.cpp` |
 | [audit/2026-09-23-defects.md](audit/2026-09-23-defects.md) | the audit's defect register, one ID per defect | mark a defect FIXED in the commit that fixes it (`tools/audit_register.py`) |
 | [audit/2026-09-23-findings.md](audit/2026-09-23-findings.md) | the audit's other findings | - |
 

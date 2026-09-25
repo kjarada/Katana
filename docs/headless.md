@@ -28,6 +28,9 @@ process and check the geometry, to confirm that invalid input fails the
 process (`cli.rejects_bad_input`), and to exercise the survey-code verbs on a
 code file the tests write themselves.
 
+The same session is served to Claude over the Model Context Protocol by
+`katana_mcp` (`docs/mcp.md`).
+
 ## katana with --screenshot and --plot
 
 ```sh
