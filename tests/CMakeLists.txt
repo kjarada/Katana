@@ -1530,6 +1530,49 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/select_by_id_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_select_by_id_selects_and_frames_headless
+# The text and dimension styles in the real window (docs/annotation.md, "In
+# the window"): each dialog builds the verb line and runs it through the
+# window's one executor, so its reply is logged as a typed line's is and one
+# typed UNDO takes its edit back.
+if(TARGET katana)
+    # Format > Dimension Styles...: a style named and made, three fields set
+    # by one Apply and read back by INFO; one UNDO restores all three (the
+    # defaults: 2.5, closed filled, model units - tables.hpp).
+    add_test(NAME qt_the_dimension_styles_manager_runs_its_lines_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatDimensionStyles|dimStyleNewName=site|!dimStyleNew|dimStyleText=3.5|dimStyleHead=Tick|dimStylePaper=on|!dimStyleApply|?dimStylePreview|?dimStyleList|>DIMSTYLE INFO site|>UNDO|>DIMSTYLE INFO site"
+            "-DEXPECT=dimension style site created.*dimension style site updated.*dimStylePreview: a dimension of 10 reads as 10\\.000.*dimStyleList: Standard \\| no layer \\(the default\\) ; site \\| no layer.*name=site text=3\\.5 [^\r\n]*head=Tick [^\r\n]*paper=on.*name=site text=2\\.5 [^\r\n]*head=ClosedFilled [^\r\n]*paper=off"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dimension_styles_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # MT alone starts Multiline Text: at 1:500 the Standard style's 2.5 mm is
+    # 1.25 m, and the two lines are one text (the break written \n by LIST).
+    # Annotate > Edit Text... on a plain text selected: one TEXTEDIT of what
+    # the form changed.
+    add_test(NAME qt_multiline_text_and_edit_text_run_in_the_window_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>ANNOSCALE 500|>MT|>5,5|>|>PIT 12|>IL 10.50|>|>|>TEXT 0,0 2.5 old|>SELECT 2|@annotateEditText|?textEditStatus|textEditText=new words|textEditJustify=MC|!textEditApply|>LIST"
+            "-DEXPECT=textEditStatus: Text 2.*updated text id=2.*1  Text  layer=0  \"PIT 12.nIL 10\\.50\"  height=1\\.25  style=Standard[\r\n]+2  Text  layer=0  \"new words\"  height=2\\.5  justify=MC"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/text_tools_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Format > Label Styles and Rules...: a style named and given its kind,
+    # a rule added with its type, previewed and run as the rule chosen in the
+    # table - one label for the rectangle's area (auto_label.hpp) - and read
+    # back by the verbs.
+    add_test(NAME qt_the_label_style_manager_runs_chosen_rules_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatLabelStyles|!labelStyleDefaults|labelStyleNewName=Lot areas|labelStyleNewKind=area|!labelStyleNew|labelStyleTabs=Auto-Label Rules|labelRuleName=lots|labelRuleStyle=Lot Area|labelRuleType=Polyline|!labelRuleAdd|>RECT 0,0 20,20|labelRuleTable=lots|!labelRulePreview|?labelRuleReport|?labelRuleTable|!labelRuleRun|>AUTOLABEL RULE LIST"
+            "-DEXPECT=created label style name=\"Lot areas\" kind=area.*labelRuleReport: preview created=1 kept=0 removed=0 skipped=0.*labelRuleTable: lots \\| Lot Area \\| \\| \\| Polyline \\| \\| yes \\| 1.*autolabel created=1 kept=0 removed=0 skipped=0.*name=lots style=\"Lot Area\" layer=\"\" code=\"\" type=Polyline labellayer=\"\" enabled=on"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/label_rules_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_dimension_styles_manager_runs_its_lines_headless
+        qt_multiline_text_and_edit_text_run_in_the_window_headless
+        qt_the_label_style_manager_runs_chosen_rules_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

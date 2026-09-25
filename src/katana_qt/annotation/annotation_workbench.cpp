@@ -10,6 +10,8 @@
 #include <QWidget>
 
 #include "annotation/annotation_managers.hpp"
+#include "annotation/dimension_style_manager.hpp"
+#include "annotation/text_edit_dialog.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/core/text.hpp"
@@ -40,8 +42,8 @@ AnnotationWorkbench::AnnotationWorkbench(QWidget& window, katana::cad::Document&
                                          QMenu& menu, QToolBar& toolBar)
     : window_(window), document_(document), listener_(std::make_unique<Listener>())
 {
-    // Menu letters T and E: the Format menu's others are L, Y, B, S, D, R
-    // and P, and a letter that reaches two items reaches neither
+    // Menu letters T, E and I: the Format menu's others are L, Y, B, S, D,
+    // R, G and P, and a letter that reaches two items reaches neither
     // (qt_every_shortcut_and_menu_letter_reaches_one_thing_headless).
     textStylesAction_ = new QAction(QStringLiteral("&Text Styles..."), &window);
     textStylesAction_->setObjectName(QStringLiteral("formatTextStyles"));
@@ -57,11 +59,20 @@ AnnotationWorkbench::AnnotationWorkbench(QWidget& window, katana::cad::Document&
         "drawing by layer, code and kind (LABELSTYLE, AUTOLABEL)"));
     labelStylesAction_->setStatusTip(labelStylesAction_->toolTip());
     labelStylesAction_->setData(QStringLiteral("labelStyleManagerDialog"));
+    dimStylesAction_ = new QAction(QStringLiteral("D&imension Styles..."), &window);
+    dimStylesAction_->setObjectName(QStringLiteral("formatDimensionStyles"));
+    dimStylesAction_->setToolTip(QStringLiteral(
+        "The drawing's dimension styles: text, arrows, extension lines, units and paper sizing, "
+        "and the layers that use each (DIMSTYLE)"));
+    dimStylesAction_->setStatusTip(dimStylesAction_->toolTip());
+    dimStylesAction_->setData(QStringLiteral("dimensionStyleManagerDialog"));
     QObject::connect(textStylesAction_, &QAction::triggered, &window, [this] { showTextStyles(); });
     QObject::connect(labelStylesAction_, &QAction::triggered, &window,
                      [this] { showLabelStyles(); });
+    QObject::connect(dimStylesAction_, &QAction::triggered, &window,
+                     [this] { showDimensionStyles(); });
     menu.addSeparator();
-    menu.addActions({textStylesAction_, labelStylesAction_});
+    menu.addActions({textStylesAction_, labelStylesAction_, dimStylesAction_});
 
     // The plan view's annotation scale, where every drafter looks for it: an
     // editable box of the standard scales on the Format toolbar.
@@ -103,6 +114,8 @@ AnnotationWorkbench::~AnnotationWorkbench()
     // Here, not left to the window's children: the dialogs hold the
     // Document, which goes when the window's members do - before Qt deletes
     // its children (CustomisationWorkbench's destructor says the same).
+    delete textEdit_.data();
+    delete dimStyles_.data();
     delete labelStyles_.data();
     delete textStyles_.data();
 }
@@ -123,17 +136,63 @@ void AnnotationWorkbench::showScale()
 TextStyleManagerDialog& AnnotationWorkbench::showTextStyles()
 {
     if (textStyles_.isNull()) {
-        textStyles_ = new TextStyleManagerDialog(document_, &window_);
+        textStyles_ = new TextStyleManagerDialog(document_, lateRunner(), &window_);
         textStyles_->setModal(false);
     }
     raise(*textStyles_);
     return *textStyles_;
 }
 
+DimensionStyleManagerDialog& AnnotationWorkbench::showDimensionStyles()
+{
+    if (dimStyles_.isNull()) {
+        dimStyles_ = new DimensionStyleManagerDialog(document_, lateRunner(), &window_);
+        dimStyles_->setModal(false);
+    }
+    raise(*dimStyles_);
+    return *dimStyles_;
+}
+
+CommandRunner AnnotationWorkbench::lateRunner()
+{
+    return [this](const QString& line) {
+        return run_ ? run_(line)
+                    : VerbOutcome{false, {}, QStringLiteral("no command line to run on")};
+    };
+}
+
+QAction* AnnotationWorkbench::addEditTextAction(QMenu& annotateMenu)
+{
+    // Menu letter X: the tools' letters are given as the catalogue fills the
+    // menu, the first letters of words first, and X begins none of their
+    // names (qt_every_shortcut_and_menu_letter_reaches_one_thing_headless).
+    auto* action = new QAction(QStringLiteral("Edit Te&xt..."), &window_);
+    action->setObjectName(QStringLiteral("annotateEditText"));
+    action->setToolTip(QStringLiteral(
+        "Edit the selected text: its words over several lines, style, height on paper, "
+        "justification, rotation and position (TEXTEDIT)"));
+    action->setStatusTip(action->toolTip());
+    action->setData(QStringLiteral("textEditDialog"));
+    QObject::connect(action, &QAction::triggered, &window_, [this] { showTextEdit(); });
+    annotateMenu.addSeparator();
+    annotateMenu.addAction(action);
+    return action;
+}
+
+TextEditDialog& AnnotationWorkbench::showTextEdit()
+{
+    if (textEdit_.isNull()) {
+        textEdit_ = new TextEditDialog(document_, lateRunner(), &window_);
+        textEdit_->setModal(false);
+    }
+    raise(*textEdit_);
+    return *textEdit_;
+}
+
 LabelStyleManagerDialog& AnnotationWorkbench::showLabelStyles()
 {
     if (labelStyles_.isNull()) {
-        labelStyles_ = new LabelStyleManagerDialog(document_, &window_);
+        labelStyles_ = new LabelStyleManagerDialog(document_, lateRunner(), &window_);
         labelStyles_->setModal(false);
     }
     raise(*labelStyles_);
