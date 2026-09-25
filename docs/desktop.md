@@ -714,9 +714,9 @@ never reaches into the window for it.
   command line: it reads and clears the field, echoes the line, offers it to
   the workbenches' verbs (`runWorkbenchLine`: `ONLINE`, `UTILITY`), then to a
   running tool (`ViewWorkspace::typeIntoTool`), and hands whatever is left to
-  `dispatchLine` - the view verbs, the window's own (`CUSTOMISE`, `IMPORT`,
-  `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `PLOTSHEETS`), a tool's alias, and
-  the interpreter. `runVerbLine` echoes the line and runs the same
+  `dispatchLine` - the view verbs, the window's own (`SCRIPT`, `CUSTOMISE`,
+  `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `PLOTSHEETS`), a tool's
+  alias, and the interpreter. `runVerbLine` echoes the line and runs the same
   `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
   line is kept in the interpreter's history and undone exactly as a typed one.
 - **Never a running tool's answer.** That step is the only one `runVerbLine`
@@ -767,6 +767,64 @@ Each now reaches the same code on every front end
   cloud refuses it by name. The path and the `LOCAL` are read by
   `CommandInterpreter::importArgument`, as the session reads them; `LOCAL` was
   once taken for part of the path. The import dialogs do not offer it yet.
+
+## Run Script: a katana_cli script in the window
+
+A script is what `katana_cli` runs: a `.kcs` file of commands, one a line,
+UTF-8, a Windows line end taken off, blank lines and lines whose first
+non-blank is `#` skipped. The window runs the same files three ways, all
+through one function, `MainWindow::runScript`
+(`src/katana_qt/script_runner.hpp`):
+
+- **File > Run Script...** (`fileRunScript`) opens a non-modal dialog
+  (`fileRunScriptDialog`) that shows the file's commands with their line
+  numbers and the exact line it will run, and runs nothing itself: Run hands
+  `SCRIPT "<file>" [CONTINUE]` to the one executor. File > Recent Scripts
+  (`fileRecentScripts`, items `recentScript1` to `recentScript8`) runs one
+  again. The list is the person's, kept in the settings; a headless session
+  neither adds to it nor changes it.
+- **`SCRIPT <file> [CONTINUE]`** typed or sent by a dialog. The window's own
+  verb, beside `PLOTSHEETS`: `katana_cli` runs a script given on its command
+  line and `katana_mcp` has `katana_run_script`, so an interpreter verb would
+  add nothing on those two.
+- **`--script FILE`** in a headless run (`docs/headless.md`).
+
+Each line is run by `runVerbLine`, as a dialog's line is: echoed, kept in the
+history, its own undo step as in `katana_cli`, and never a running tool's
+answer - a script names its points (`LINE 0,0 10,0`, not `LINE` and then its
+points). The run stops at the first line refused unless `CONTINUE` (the
+dialog's `scriptContinueOnError`) is given, and ends with a record:
+`script="<file>" lines=N ran=N failed=N`, with `stopped_at=K` (the file's line
+number), `quit_at=K` or `cancelled_at=K` when it ended early, and an error
+naming the line that stopped it. `QUIT` or `EXIT` in a script ends the script,
+as it ends `katana_cli`'s, and never closes the window under the person who
+ran it. A script that runs itself, directly or through another, is refused at
+that line (`qt_a_script_may_not_run_itself_headless`). A long run shows
+`scriptProgress` with Cancel, which stops between two lines; a headless run
+shows nothing.
+
+The line a dialog runs gets back everything its script's lines logged: a
+line run inside another's `runVerbLine` adds what it logged to the outer
+line's capture as well as its own.
+
+**Comments and pasted lines.** A typed line starting with `#` is a note: it
+is echoed and runs nothing, as in a script - unless a tool is waiting for
+typed text, whose answer ("#3 pit") it may be. Several lines pasted on the
+command line (Ctrl+V with line breaks in the clipboard, or a context-menu
+paste and then Enter) run at once as a script that stops at the first
+refused, `script=pasted` in its record; whatever was typed before the paste
+starts the first line. The single-line field used to show the breaks as
+blanks and run the whole as one line of nonsense.
+
+Tested in `tests/qt_widgets/test_script_runner.cpp` (reading, the stopping
+rules, the record, the dialog) and through the real window by
+`qt_script_switch_runs_every_line_of_a_script_headless`,
+`qt_script_switch_stops_at_the_first_refused_line_headless`,
+`qt_typed_script_continue_runs_every_line_headless`,
+`qt_run_script_dialog_runs_the_line_it_shows_headless`,
+`qt_several_lines_on_the_command_line_run_as_a_script_headless` and the two
+batch runs, `qt_script_batch_run_exits_when_the_script_is_done_headless` and
+`qt_script_batch_run_fails_at_a_refused_line_headless`.
 
 ## GIS > Online Data: a workbench of its own
 

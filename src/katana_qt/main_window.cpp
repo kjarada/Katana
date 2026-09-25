@@ -43,6 +43,7 @@
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QInputDialog>
 #include <QPixmap>
 #include <QKeyEvent>
@@ -52,7 +53,9 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QProgressDialog>
 #include <QPushButton>
+#include <QSettings>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QStatusBar>
@@ -478,22 +481,35 @@ void MainWindow::buildActions()
     // ---- File ------------------------------------------------------------------------
     QAction* newAction = makeAction(Icon::New, "&New", "Start a new, empty drawing",
                                     QKeySequence::New, "fileNew");
+    // Every one named, as --action and --trigger find a menu item by its
+    // object name: these six had none, so an agent driving the window could
+    // not reach them.
     QAction* openAction = makeAction(Icon::Open, "&Open Project...", "Open a Katana project directory",
-                                     QKeySequence::Open);
+                                     QKeySequence::Open, "fileOpen");
     QAction* saveAction =
-        makeAction(Icon::Save, "&Save", "Save the project", QKeySequence::Save);
-    QAction* saveAsAction = makeAction(Icon::SaveAs, "Save &As...",
-                                       "Save the project under another name", QKeySequence::SaveAs);
+        makeAction(Icon::Save, "&Save", "Save the project", QKeySequence::Save, "fileSave");
+    QAction* saveAsAction =
+        makeAction(Icon::SaveAs, "Save &As...", "Save the project under another name",
+                   QKeySequence::SaveAs, "fileSaveAs");
     QAction* importAction =
         makeAction(Icon::Import, "&Import...",
                    "Import a drawing, an image or a point cloud (DXF, SHP, GeoTIFF, LAS ...)",
-                   QKeySequence(Qt::CTRL | Qt::Key_I));
+                   QKeySequence(Qt::CTRL | Qt::Key_I), "fileImport");
     QAction* exportAction = makeAction(Icon::Export, "Export &Vector...",
                                        "Export the drawing (DXF, GeoPackage, GeoJSON, SHP ...)",
-                                       QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
+                                       QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E),
+                                       "fileExportVector");
     QAction* plotAction = makeAction(Icon::Plot, "&Plot to PDF...",
                                      "Plot the drawing to a sheet at a standard scale",
-                                     QKeySequence::Print);
+                                     QKeySequence::Print, "filePlot");
+    // A katana_cli script run in the window, a line at a time through the
+    // one executor (script_runner.hpp); the dialog shows what the file holds
+    // and runs the SCRIPT line.
+    QAction* runScriptAction =
+        makeAction(Icon::CommandLine, "&Run Script...",
+                   "Run a script of commands (.kcs), a line at a time, as katana_cli runs it",
+                   QKeySequence(), "fileRunScript");
+    connect(runScriptAction, &QAction::triggered, this, [this] { showRunScript(); });
     connect(newAction, &QAction::triggered, this, [this] { newDocument(); });
     connect(openAction, &QAction::triggered, this, [this] { openDocument(); });
     connect(saveAction, &QAction::triggered, this, [this] { saveDocument(); });
@@ -579,6 +595,11 @@ void MainWindow::buildActions()
     fileMenu->addActions({saveAction, saveAsAction});
     fileMenu->addSeparator();
     fileMenu->addActions({importAction, exportAction});
+    fileMenu->addSeparator();
+    fileMenu->addAction(runScriptAction);
+    recentScriptsMenu_ = fileMenu->addMenu("Rec&ent Scripts");
+    recentScriptsMenu_->setObjectName("fileRecentScripts");
+    refreshRecentScripts();
     fileMenu->addSeparator();
     fileMenu->addActions({plotAction, sheetsAction, plotSheetsAction});
     fileMenu->addSeparator();
@@ -1967,6 +1988,14 @@ void MainWindow::runCommandLine()
         views_->pressEnter();
         return;
     }
+    // Several lines at once - pasted, or a --command holding line breaks -
+    // are a script, run a line at a time and stopping at the first refused
+    // (runPastedLines). A single-line field shows the breaks as blanks, and
+    // the whole was once run as one line of nonsense.
+    if (line.contains('\n') || line.contains('\r')) {
+        runPastedLines(line);
+        return;
+    }
     // What is typed is echoed - but an ONLINE KEY's value never is.
     commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
     // A tool waiting for typed text - a Text's string, a count - takes the
@@ -1974,8 +2003,9 @@ void MainWindow::runCommandLine()
     // (tools::isTransparentCommand): "Utility pit" is a label on a services
     // plan, not a UTILITY line to refuse. Otherwise the workbenches' verbs
     // come before a running tool at a point or a pick, which would take the
-    // line for an answer.
-    if (!views_->toolTakesText() && runWorkbenchLine(line)) {
+    // line for an answer - and so does a '#' comment, as in a katana_cli
+    // script, which a Text's string ("#3 pit") may well start with.
+    if (!views_->toolTakesText() && (isScriptComment(line) || runWorkbenchLine(line))) {
         return;
     }
     // While a tool runs, what is typed is its answer - a point, a distance,
@@ -2016,6 +2046,14 @@ VerbOutcome MainWindow::runVerbLine(const QString& line)
         dispatchLine(trimmed);
     }
     capture_ = outer;
+    // A line run inside another's run - a script's, under the SCRIPT line a
+    // dialog ran - logged into the outer line's reply too: the dialog that
+    // ran the SCRIPT line gets back everything its lines said.
+    if (outer != nullptr) {
+        outer->reply << capture.reply;
+        outer->errors << capture.errors;
+        outer->failed = outer->failed || capture.failed;
+    }
     VerbOutcome outcome;
     // By the errors COUNTED, not the lines captured: PLOTSHEETS logs the
     // problems of a plot it carried out and takes them off the count, and a
@@ -2033,6 +2071,11 @@ CommandRunner MainWindow::commandRunner()
 
 void MainWindow::dispatchLine(const QString& line)
 {
+    // A note, as a katana_cli script has them: a dialog's or a script's line
+    // comes here without passing runCommandLine's check.
+    if (isScriptComment(line)) {
+        return;
+    }
     const QStringList words = line.split(' ', Qt::SkipEmptyParts);
     const QString verb = words.front().toUpper();
     const QString argument = words.size() > 1 ? words[1].toUpper() : QString();
@@ -2054,6 +2097,19 @@ void MainWindow::dispatchLine(const QString& line)
     }
     if (verb == "QUIT" || verb == "EXIT") {
         close();
+        return;
+    }
+    // SCRIPT <file> [CONTINUE]: a katana_cli script, each line run through
+    // the one executor (script_runner.hpp). The window's, as PLOTSHEETS is:
+    // katana_cli runs a script given on its command line, and katana_mcp has
+    // katana_run_script.
+    if (verb == "SCRIPT") {
+        const auto command = parseScriptCommand(line);
+        if (!command) {
+            logMessage(QString::fromStdString(command.error().describe()), true);
+            return;
+        }
+        runScript(command->path, command->continueOnError);
         return;
     }
     // CUSTOMISE [REPLACE] <file>..., as katana_cli has it and for the same
@@ -2278,6 +2334,148 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
     historyCursor_ = static_cast<int>(interpreter_.history().size());
 }
 
+// ---- scripts ----------------------------------------------------------------------------------
+
+namespace {
+
+// The Recent Scripts list, newest first, in the settings as the online keys
+// are: a person's, not a drawing's.
+constexpr const char* kRecentScriptsKey = "scripts/recent";
+// As many as a File menu lists of recent files in most programs.
+constexpr qsizetype kRecentScripts = 8;
+
+} // namespace
+
+void MainWindow::runScript(const QString& path, bool continueOnError)
+{
+    // A script that runs itself, directly or through another, would never
+    // end: refused by the file, as the file is what a person would fix.
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    if (!canonical.isEmpty() && runningScripts_.contains(canonical)) {
+        logMessage("SCRIPT: " + QFileInfo(path).fileName() +
+                       " is already running; a script may not run itself.",
+                   true);
+        return;
+    }
+    const auto lines = readScript(path);
+    if (!lines) {
+        logMessage(QString::fromStdString(lines.error().describe()), true);
+        return;
+    }
+    runningScripts_ << canonical;
+    runLines(*lines, QDir::fromNativeSeparators(path), continueOnError);
+    runningScripts_.removeLast();
+    // A headless run is a test's or an agent's, and leaves a person's list
+    // alone.
+    if (!headless_ && !canonical.isEmpty()) {
+        QSettings settings;
+        QStringList recent = settings.value(kRecentScriptsKey).toStringList();
+        recent.removeAll(canonical);
+        recent.prepend(canonical);
+        settings.setValue(kRecentScriptsKey, recent.mid(0, kRecentScripts));
+        refreshRecentScripts();
+    }
+}
+
+void MainWindow::runPastedLines(const QString& text)
+{
+    const std::vector<ScriptLine> lines = scriptLines(text);
+    if (lines.empty()) {
+        return;
+    }
+    runLines(lines, QString(), false);
+}
+
+void MainWindow::runLines(const std::vector<ScriptLine>& lines, const QString& name,
+                          bool continueOnError)
+{
+    ScriptOptions options;
+    options.continueOnError = continueOnError;
+    // A long script shows how far it has got and can be stopped between two
+    // lines; a short one finishes before the dialog would appear. Never in a
+    // headless run, which has nobody to press Cancel.
+    std::unique_ptr<QProgressDialog> progress;
+    if (!headless_ && lines.size() > 1) {
+        progress = std::make_unique<QProgressDialog>(
+            "Running " + (name.isEmpty() ? QString("the pasted lines") : QFileInfo(name).fileName()) +
+                "...",
+            "Cancel", 0, static_cast<int>(lines.size()), this);
+        progress->setObjectName("scriptProgress");
+        progress->setWindowTitle("Run Script");
+        progress->setWindowModality(Qt::WindowModal);
+        progress->setMinimumDuration(500);
+        options.progress = [&progress](int done, int) {
+            progress->setValue(done);
+            return !progress->wasCanceled();
+        };
+    }
+    const ScriptReport report = runScriptLines(lines, commandRunner(), options);
+    progress.reset();
+    logMessage(formatScriptReport(name, report));
+    const QString shown = name.isEmpty() ? QString("The pasted lines") : QFileInfo(name).fileName();
+    const auto textAt = [&lines](int number) {
+        const auto found = std::ranges::find(lines, number, &ScriptLine::number);
+        return found != lines.end() ? found->text : QString();
+    };
+    if (report.cancelled) {
+        logMessage(QString("%1: cancelled before line %2; the lines from there were not run.")
+                       .arg(shown)
+                       .arg(report.stoppedAt),
+                   true);
+    } else if (report.failed > 0 && !continueOnError) {
+        logMessage(QString("%1 stopped at line %2, which was refused: %3")
+                       .arg(shown)
+                       .arg(report.stoppedAt)
+                       .arg(textAt(report.stoppedAt)),
+                   true);
+    } else if (report.failed > 0) {
+        logMessage(QString("%1: %2 of the %3 lines run were refused.")
+                       .arg(shown)
+                       .arg(report.failed)
+                       .arg(report.ran),
+                   true);
+    }
+}
+
+void MainWindow::showRunScript()
+{
+    if (scriptDialog_ == nullptr) {
+        ScriptDialogContext context;
+        context.run = commandRunner();
+        context.headless = [this] { return headless_; };
+        scriptDialog_ = new ScriptRunDialog(std::move(context), this);
+    }
+    scriptDialog_->show();
+    scriptDialog_->raise();
+    scriptDialog_->activateWindow();
+}
+
+void MainWindow::refreshRecentScripts()
+{
+    recentScriptsMenu_->clear();
+    const QStringList recent = QSettings().value(kRecentScriptsKey).toStringList();
+    // Named by position, so --trigger recentScript1 runs the newest, as a
+    // click on the first item does.
+    for (qsizetype at = 0; at < recent.size() && at < kRecentScripts; ++at) {
+        const QString path = recent[at];
+        QAction* item = recentScriptsMenu_->addAction(
+            QString("&%1 %2").arg(at + 1).arg(QFileInfo(path).fileName()), this,
+            [this, path] { (void)runVerbLine(scriptCommandLine(path, false)); });
+        item->setObjectName(QString("recentScript%1").arg(at + 1));
+        item->setStatusTip("Run " + QDir::toNativeSeparators(path));
+    }
+    if (recent.isEmpty()) {
+        recentScriptsMenu_->addAction("(none)")->setEnabled(false);
+        return;
+    }
+    recentScriptsMenu_->addSeparator();
+    QAction* clear = recentScriptsMenu_->addAction("&Clear the List", this, [this] {
+        QSettings().remove(kRecentScriptsKey);
+        refreshRecentScripts();
+    });
+    clear->setObjectName("recentScriptsClear");
+}
+
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
     if (watched == commandInput_ && event->type() == QEvent::KeyPress) {
@@ -2300,6 +2498,18 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             commandInput_->clear();
             views_->cancel();
             return true;
+        }
+        // Several lines pasted run at once, a line at a time, as pasting a
+        // script into AutoCAD's command line runs it; one line (with or
+        // without its line end) is pasted to be edited, as ever. Whatever
+        // was typed before the paste starts the first line.
+        if (key->matches(QKeySequence::Paste)) {
+            const QString pasted = QApplication::clipboard()->text();
+            if (pasted.trimmed().contains('\n') || pasted.trimmed().contains('\r')) {
+                commandInput_->insert(pasted);
+                runCommandLine();
+                return true;
+            }
         }
     }
     return QMainWindow::eventFilter(watched, event);

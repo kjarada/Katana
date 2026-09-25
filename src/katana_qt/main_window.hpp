@@ -34,6 +34,7 @@
 #include "katana/interop/reference_data.hpp"
 #include "customisation/customisation_workbench.hpp"
 #include "gis_online.hpp"
+#include "script_runner.hpp"
 #include "survey/survey_workbench.hpp"
 #include "survey/utility_workbench.hpp"
 #include "tools/tool_menus.hpp"
@@ -376,15 +377,33 @@ class MainWindow final : public QMainWindow {
     // The ONLINE and UTILITY verbs, run by their workbenches; false leaves the
     // line to whoever asked.
     bool runWorkbenchLine(const QString& line);
-    // Everything a line can be once no tool took it: a view verb, the
-    // window's own verbs (CUSTOMISE, IMPORT, EXPORT, INFO <file>, REFS, COPC,
-    // PLOTSHEETS), a tool's alias, or the interpreter's. Shared by the typed
-    // line and runVerbLine, so the two cannot come to differ.
+    // Everything a line can be once no tool took it: a '#' comment, a view
+    // verb, the window's own verbs (SCRIPT, CUSTOMISE, IMPORT, EXPORT,
+    // INFO <file>, REFS, COPC, PLOTSHEETS), a tool's alias, or the
+    // interpreter's. Shared by the typed line and runVerbLine, so the two
+    // cannot come to differ.
     void dispatchLine(const QString& line);
     // The part of the command line that is the CommandInterpreter's, for a
     // line no tool and no view verb took; `verb` is its first word, upper
     // case.
     void runInterpreterLine(const QString& line, const QString& verb);
+    // SCRIPT <file> [CONTINUE] (script_runner.hpp): the file's lines through
+    // runVerbLine, stopping at the first refused unless `continueOnError`,
+    // and the record the run ends with logged. A script already running is
+    // refused, so one cannot run itself. Remembered in Recent Scripts, except
+    // in a headless session.
+    void runScript(const QString& path, bool continueOnError);
+    // Several lines at once on the command line - pasted - run as a script
+    // that stops at the first refused.
+    void runPastedLines(const QString& text);
+    // What the two share: the progress dialog (not headless), the run, and
+    // the record and the reason it stopped, logged. `name` is the script's
+    // path, empty for pasted lines.
+    void runLines(const std::vector<ScriptLine>& lines, const QString& name, bool continueOnError);
+    // File > Run Script: the dialog, made the first time and kept.
+    void showRunScript();
+    // File > Recent Scripts, rebuilt from the settings.
+    void refreshRecentScripts();
     void logMessage(const QString& text, bool isError = false);
     void addLayer();
     void addChildLayer();
@@ -504,6 +523,13 @@ class MainWindow final : public QMainWindow {
         bool failed = false;
     };
     VerbCapture* capture_ = nullptr;
+    // The scripts running now, outermost first, by canonical path: a SCRIPT
+    // line naming one of them is refused rather than recursing for ever.
+    QStringList runningScripts_;
+    // File > Run Script's dialog, a child of the window; and the Recent
+    // Scripts submenu.
+    ScriptRunDialog* scriptDialog_ = nullptr;
+    QMenu* recentScriptsMenu_ = nullptr;
 };
 
 } // namespace katana::qt

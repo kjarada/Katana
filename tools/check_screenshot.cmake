@@ -128,6 +128,13 @@ if(DEFINED SURVEY_DIALOG)
     endif()
 endif()
 
+# -DSCRIPT=<file.kcs> runs that script (--script), a step before the DRIVE
+# steps, so they can list what it made; a script that stops at a refused line
+# fails the run, which -DREFUSED checks.
+if(DEFINED SCRIPT)
+    list(APPEND extra --script "${SCRIPT}")
+endif()
+
 # -DDRIVE=<step>[|<step>...] drives dialogs and docks step by step, in
 # order, for a paged dialog that has to be filled between presses (the import
 # wizard) or a run that uses several: "@NAME" opens the dialog of action NAME
