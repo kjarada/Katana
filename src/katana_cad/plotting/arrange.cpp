@@ -352,8 +352,10 @@ Box2 clampInto(const Box2& rect, const Box2& box)
 {
     const double width = std::min(rect.width(), box.width());
     const double height = std::min(rect.height(), box.height());
-    const double x = std::clamp(rect.min.x, box.min.x, box.max.x - width);
-    const double y = std::clamp(rect.min.y, box.min.y, box.max.y - height);
+    // std::clamp needs its low end at or below its high end; a rectangle as
+    // wide as the box can leave box.max.x - width a rounding below box.min.x.
+    const double x = std::clamp(rect.min.x, box.min.x, std::max(box.min.x, box.max.x - width));
+    const double y = std::clamp(rect.min.y, box.min.y, std::max(box.min.y, box.max.y - height));
     return Box2(Point2(x, y), Point2(x + width, y + height));
 }
 
@@ -435,9 +437,13 @@ SizeMm sizedAt(const PackItem& item, double factor, double cap)
 }
 
 // Every item placed at `factor`, or nothing when one does not fit.
+// `capByFirst`: the first item is the main view, and no later one may be
+// larger in area than it is placed - how the main view stays the largest
+// when it is packed with the rest.
 std::optional<std::vector<Box2>> packAt(const std::vector<PackItem>& items,
                                         const std::vector<Box2>& taken, const Box2& space,
-                                        double gutter, double factor, double cap)
+                                        double gutter, double factor, double cap,
+                                        bool capByFirst = false)
 {
     std::vector<Box2> rooms{space};
     for (const Box2& box : taken) {
@@ -445,7 +451,10 @@ std::optional<std::vector<Box2>> packAt(const std::vector<PackItem>& items,
     }
     std::vector<Box2> placed;
     for (const PackItem& item : items) {
-        const SizeMm size = sizedAt(item, factor, cap);
+        const double limit = capByFirst && !placed.empty()
+                                 ? placed.front().width() * placed.front().height()
+                                 : cap;
+        const SizeMm size = sizedAt(item, factor, limit);
         const std::optional<Box2> at = placeIn(rooms, size.width, size.height);
         if (!at) {
             return std::nullopt;
@@ -460,11 +469,11 @@ std::optional<std::vector<Box2>> packAt(const std::vector<PackItem>& items,
 // each one's least size.
 std::optional<std::vector<Box2>> packShrinking(const std::vector<PackItem>& items,
                                                const std::vector<Box2>& taken, const Box2& space,
-                                               double gutter, double cap)
+                                               double gutter, double cap, bool capByFirst = false)
 {
     double factor = 1.0;
     for (int step = 0; step < kMostShrinkSteps; ++step) {
-        if (auto placed = packAt(items, taken, space, gutter, factor, cap)) {
+        if (auto placed = packAt(items, taken, space, gutter, factor, cap, capByFirst)) {
             return placed;
         }
         const bool atLeast = std::ranges::all_of(items, [factor](const PackItem& item) {
@@ -553,7 +562,8 @@ bool isPlan(ViewportKind kind)
 
 std::string scaleWords(double scale)
 {
-    return std::format("1:{:g}", scale);
+    // A whole denominator as a scale rule reads it, never 1:1e+06.
+    return scale == std::round(scale) ? std::format("1:{:.0f}", scale) : std::format("1:{}", scale);
 }
 
 // A kind as a message names it.
@@ -703,14 +713,14 @@ std::vector<Point2> drawnOutline(const entity::Model& model, const LayerOverride
             },
             entity.geometry);
     });
-    for (const entity::Alignment& alignment : model.alignments.all()) {
+    model.alignments.forEach([&points](const entity::Alignment& alignment) {
         if (const auto solved = geometry::solveAlignment(alignment.horizontal)) {
             // Chords within kAlignmentChordM of the curve: a hair on paper at
             // any scale a sheet is drawn at.
             const geometry::Polyline2 line = solved->toPolyline(kAlignmentChordM);
             points.insert(points.end(), line.vertices.begin(), line.vertices.end());
         }
-    }
+    });
     std::erase_if(points, [](const Point2& point) { return !point.isFinite(); });
     return geometry::convexHull(std::move(points));
 }
@@ -734,27 +744,32 @@ std::vector<Point2> viewportContent(const entity::Model& model, const Viewport& 
         // The stretch the view shows - the whole alignment for an empty range -
         // at points no more than kAlignmentStepM apart, and every point where
         // one element gives way to the next.
-        double from = std::max(source.chainageFrom, solved->startStation());
-        double to = std::min(source.chainageTo, solved->endStation());
-        if (!(to > from)) {
-            from = solved->startStation();
-            to = solved->endStation();
+        double from = solved->startStation();
+        double to = solved->endStation();
+        if (source.chainageTo > source.chainageFrom) {
+            from = std::max(source.chainageFrom, from);
+            to = std::min(source.chainageTo, to);
         }
-        const auto steps = static_cast<int>(std::clamp(std::ceil((to - from) / kAlignmentStepM),
-                                                       1.0, kMostAlignmentSteps));
-        for (int i = 0; i <= steps; ++i) {
-            if (const auto point = solved->pointAtStation(from + (to - from) * i / steps)) {
-                points.push_back(*point);
-            }
-        }
-        for (const double station : solved->keyStations()) {
-            if (station > from && station < to) {
-                if (const auto point = solved->pointAtStation(station)) {
+        if (to > from) {
+            const auto steps = static_cast<int>(std::clamp(std::ceil((to - from) / kAlignmentStepM),
+                                                           1.0, kMostAlignmentSteps));
+            for (int i = 0; i <= steps; ++i) {
+                if (const auto point = solved->pointAtStation(from + (to - from) * i / steps)) {
                     points.push_back(*point);
                 }
             }
+            for (const double station : solved->keyStations()) {
+                if (station > from && station < to) {
+                    if (const auto point = solved->pointAtStation(station)) {
+                        points.push_back(*point);
+                    }
+                }
+            }
         }
-    } else {
+    }
+    // No alignment, or a range wholly off it, which shows none of it: the
+    // painter then fits the drawing (resolvePlanViewport), and so does this.
+    if (points.empty()) {
         points = drawnOutline(model, viewport.hiddenLayers);
     }
     if (viewport.kind == ViewportKind::KeyPlan) {
@@ -917,8 +932,10 @@ Result<PaperChange> fitPaperToViewport(Sheet& sheet, std::string_view viewportId
 ArrangeResult autoArrange(Sheet& sheet, double gutterMm)
 {
     ArrangeResult result;
-    const Box2 bounds = drawingArea(sheet);
     const Box2 space = tilingArea(sheet).inflated(-gutterMm / 2.0);
+    // Inside the packing space, give or take a rounding: a tiled cell lies
+    // exactly on its edge.
+    const Box2 within = space.inflated(kPaperEpsilon);
     const std::vector<Box2> before = rectsOf(sheet);
     std::vector<Box2> locked;
     std::vector<std::size_t> order;
@@ -947,7 +964,7 @@ ArrangeResult autoArrange(Sheet& sheet, double gutterMm)
         const std::size_t i = order[rank];
         const Viewport& viewport = sheet.viewports[i];
         if (!viewport.rect.empty()) {
-            at[i] = bounds.contains(viewport.rect) ? viewport.rect : clampInto(viewport.rect, space);
+            at[i] = within.contains(viewport.rect) ? viewport.rect : clampInto(viewport.rect, space);
         }
         const Box2& cell = cells[std::min(rank, cells.size() - 1)];
         const SizeMm size = at[i].empty() ? SizeMm{cell.width(), cell.height()}
@@ -974,21 +991,24 @@ ArrangeResult autoArrange(Sheet& sheet, double gutterMm)
 
     // Keep every view that overlaps nothing kept before it - the main view
     // first - and pack the rest into what is left. A main view in the way of
-    // a locked one is packed first, with the rest, so it still gets the
-    // most room.
+    // a locked one, or not placed, is packed first, with the rest, so it
+    // still gets the most room. A view larger than the main one gives way
+    // too: the main view is the largest on the sheet.
     std::vector<Box2> taken = locked;
     std::vector<std::size_t> kept;
     std::vector<std::size_t> displaced;
     const bool mainKept = !at[main].empty() && !overlapsAny(at[main], locked);
+    const double mainArea = mainKept ? areaOf(at[main]) : 0.0;
     for (const std::size_t i : order) {
-        if (mainKept && !at[i].empty() && !overlapsAny(at[i], taken)) {
+        if (mainKept && !at[i].empty() && !overlapsAny(at[i], taken) &&
+            (i == main || areaOf(at[i]) <= mainArea + kPaperEpsilon)) {
             taken.push_back(at[i]);
             kept.push_back(i);
         } else {
             displaced.push_back(i);
         }
     }
-    const double cap = mainKept ? areaOf(at[main]) : 0.0;
+    const double cap = mainArea;
     for (const std::size_t i : kept) {
         sheet.viewports[i].rect = at[i];
     }
@@ -1006,7 +1026,7 @@ ArrangeResult autoArrange(Sheet& sheet, double gutterMm)
         round.push_back(at[main]);
     }
     if (!arranged) {
-        if (auto packed = packShrinking(itemsOf(others), round, space, gutterMm, cap)) {
+        if (auto packed = packShrinking(itemsOf(others), round, space, gutterMm, cap, !mainKept)) {
             place(others, *packed);
             arranged = true;
         }
@@ -1046,17 +1066,27 @@ ArrangeResult autoArrange(Sheet& sheet, double gutterMm)
         }
         for (const std::size_t i : displaced) {
             sheet.viewports[i].rect = at[i].empty() ? before[i] : at[i];
+            // No larger than the main view as it now stands.
+            const Box2& mainRect = sheet.viewports[main].rect;
+            const double limit = i == main ? 0.0 : mainKept ? cap : areaOf(mainRect);
+            bool placed = false;
             double factor = 1.0;
             for (int step = 0; step < kMostShrinkSteps; ++step, factor *= kShrinkStep) {
-                const SizeMm size = sizedAt(items[i], factor, i == main ? 0.0 : cap);
+                const SizeMm size = sizedAt(items[i], factor, limit);
                 if (const auto spot = placeIn(rooms, size.width, size.height)) {
                     sheet.viewports[i].rect = *spot;
                     carve(rooms, spot->inflated(gutterMm));
+                    placed = true;
                     break;
                 }
                 if (size.width <= items[i].least.width && size.height <= items[i].least.height) {
                     break;
                 }
+            }
+            // One with no room stays where it was, and is reported; the
+            // views placed after it keep clear of it rather than land on it.
+            if (!placed && !sheet.viewports[i].rect.empty()) {
+                carve(rooms, sheet.viewports[i].rect.inflated(gutterMm));
             }
         }
     }
@@ -1206,6 +1236,17 @@ Result<std::vector<std::string>> distributeViewports(Sheet& sheet, std::span<con
     }
     const double gap =
         (low(moving.back()) - high(moving.front()) - inside) / static_cast<double>(moving.size() - 1);
+    // Wider together than the room between the first and the last, equal
+    // gaps would be negative: the views pushed into each other. Refused, and
+    // nothing moves.
+    if (gap < -kPaperEpsilon) {
+        return makeError(ErrorCode::InvalidArgument,
+                         std::format("the views between the first and the last are {:.1f} mm {} "
+                                     "together, and there is {:.1f} mm between those two: spaced "
+                                     "out they would overlap; move the outer ones apart first",
+                                     inside, horizontal ? "wide" : "high",
+                                     low(moving.back()) - high(moving.front())));
+    }
     const std::vector<Box2> before = rectsOf(sheet);
     double next = high(moving.front()) + gap;
     for (std::size_t k = 1; k + 1 < moving.size(); ++k) {
