@@ -90,6 +90,16 @@ struct UtilityAttributes {
     // by the schema's own attribute name. Kept so that they can be checked
     // (delivery_schema.hpp) and reported, never dropped.
     std::map<std::string, std::string> fields;
+    // The attributes that ARE interpreted above - the service's id, type,
+    // owner, material, size, status, configuration, description - exactly as
+    // the schedule wrote them, by the header they were written under:
+    // "AssetTypeCode" -> "W", "AssetStatus" -> "In service". Reading turns
+    // "In service" into UtilityStatus::InService; a deliverable written back
+    // out (the IFC export's delivery property set, docs/ifc.md) must carry
+    // the schedule's own value, misspelling and all, or it would quietly
+    // correct what `UTILITY CHECK` reports as wrong. Empty for a line built
+    // in code.
+    std::map<std::string, std::string> written;
 };
 
 // Which part of the service a recorded level is ON. A level without this is
@@ -134,6 +144,11 @@ struct UtilityVertex {
     // (a depth description, the date obtained, a pothole report), by the
     // schema's attribute name.
     std::map<std::string, std::string> fields;
+    // The vertex's interpreted cells - point, coordinates, method, level,
+    // level reference, depth, surface, uncertainties, claimed level, path,
+    // verifies - as written, by header: "LocateMethod" -> "Electronic
+    // Detection". See UtilityAttributes::written for why.
+    std::map<std::string, std::string> written;
 };
 
 // The level of the recorded point on the service: `level`, or else surface

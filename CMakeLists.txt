@@ -99,6 +99,7 @@ set(KATANA_MODULES
     katana_terrain
     katana_archive12d
     katana_dxf
+    katana_ifc
     katana_render
     katana_cad
 )

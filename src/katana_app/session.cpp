@@ -26,6 +26,7 @@
 #include "katana/cad/survey_coding.hpp"
 #include "katana/entity/tables.hpp"
 #include "dxf_verbs.hpp"
+#include "ifc_verbs.hpp"
 #include "utility_verbs.hpp"
 #include "session.hpp"
 
@@ -894,6 +895,16 @@ bool runLine(SessionState& session, const std::string& line)
         return katana::app::runUtilityVerb(
             space == std::string::npos ? std::string_view{} : std::string_view(line).substr(space));
     }
+    // A .ifc is written natively, with or without GDAL (ifc_verbs.hpp).
+    if (upperVerb(line) == "EXPORT") {
+        const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
+        if (const std::optional<bool> handled = katana::app::runIfcVerb(
+                session.document, "EXPORT",
+                space == std::string::npos ? std::string_view{}
+                                           : std::string_view(line).substr(space))) {
+            return *handled;
+        }
+    }
     // A .dxf is read and written natively, with or without GDAL (dxf_verbs.hpp).
     if (const std::string verb = upperVerb(line); verb == "IMPORT" || verb == "EXPORT") {
         const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
@@ -1005,6 +1016,7 @@ std::string Session::helpText()
             "          libraries (.4d) and survey code files (.mapfile), merged\n"
             "          into what is loaded; CUSTOMISE alone reports what is loaded\n";
     text += katana::app::utilityHelpText();
+    text += katana::app::ifcHelpText();
 #if defined(KATANA_WITH_INTEROP)
     text += "Interop   IMPORT <file> [LOCAL] | EXPORT <file> | REFS\n"
             "          vector -> entities; raster and point cloud -> "

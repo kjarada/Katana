@@ -22,6 +22,7 @@ using Row = detail::RawRow;
 
 struct Table {
     std::map<std::string, std::size_t> columns; // canonical name -> field index
+    std::map<std::string, std::string> headers; // canonical name -> the header as written
     std::vector<Row> rows;
 
     // The trimmed cell, or empty when the column is absent.
@@ -30,6 +31,17 @@ struct Table {
         const auto found = columns.find(std::string(name));
         return found == columns.end() ? std::string_view{}
                                       : std::string_view(row.fields[found->second]);
+    }
+
+    // Records `name`'s cell under its header as written, when it has one.
+    void keepWritten(const Row& row, std::string_view name,
+                     std::map<std::string, std::string>& written) const
+    {
+        const std::string_view value = cell(row, name);
+        if (const auto header = headers.find(std::string(name));
+            !value.empty() && header != headers.end()) {
+            written.emplace(header->second, std::string(value));
+        }
     }
 };
 
@@ -63,6 +75,8 @@ core::Result<Table> readTable(std::string_view text, const std::vector<UtilityCs
             return makeError(ErrorCode::ParseFailure,
                              "column \"" + std::string(match->name) + "\" given twice", where);
         }
+        table.headers.emplace(std::string(match->name),
+                              std::string(core::trimmed(raw->header[column])));
     }
     for (const UtilityCsvColumn& column : known) {
         if (column.required && !table.columns.contains(std::string(column.name))) {
@@ -268,6 +282,11 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
 
         UtilityVertex vertex;
         vertex.id = pointId;
+        for (const std::string_view column :
+             {"point", "easting", "northing", "method", "level", "level_ref", "depth", "surface",
+              "h_unc", "v_unc", "ql", "path", "verifies"}) {
+            table->keepWritten(row, column, vertex.written);
+        }
         std::optional<double> northing;
         std::optional<double> easting;
         std::optional<LocationMethod> method;
@@ -321,8 +340,12 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
         // Line attributes: the first row to give one sets it; a later row
         // giving a different one is a contradiction in the schedule.
         auto& sources = attributeSources[lineId];
+        if (inserted) {
+            table->keepWritten(row, "line", line.attributes.written);
+        }
         std::vector<std::string_view> lineColumns{"type", "owner",  "material", "diameter_mm",
                                                   "size", "status", "config",   "description"};
+        const std::size_t interpretedLineColumns = lineColumns.size();
         for (const UtilityCsvColumn& carried : utilityCsvColumns()) {
             if (carried.carried == CarriedOn::Line) {
                 lineColumns.push_back(carried.name);
@@ -332,7 +355,8 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
                 }
             }
         }
-        for (const std::string_view column : lineColumns) {
+        for (std::size_t index = 0; index < lineColumns.size(); ++index) {
+            const std::string_view column = lineColumns[index];
             const std::string_view value = table->cell(row, column);
             if (value.empty()) {
                 continue;
@@ -351,6 +375,9 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
                 continue;
             }
             UtilityAttributes& attributes = line.attributes;
+            if (index < interpretedLineColumns) {
+                table->keepWritten(row, column, attributes.written);
+            }
             if (column == "type") {
                 const auto type = parseUtilityType(value);
                 if (!type) {
