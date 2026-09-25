@@ -464,7 +464,7 @@ currentMap, loaded, LoadMode)` is the rule:
 **Both front ends load through it** (audit QT-21, fixed). The window's
 `MainWindow::applyCustomisation` - behind Format > Load and Replace, the typed
 `CUSTOMISE` and `--customise` - and `katana_cli`'s `CUSTOMISE [REPLACE]
-<file>...` (`runCustomise`, `src/katana_app/main.cpp`) read the files, call
+<file>...` (`runCustomise`, `src/katana_app/session.cpp`) read the files, call
 `mergeCustomisation` with the library and map loaded now and what the files
 brought, install both results
 (a kind the load did not bring comes back as it was, so a symbol file alone
