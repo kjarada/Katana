@@ -186,6 +186,7 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `LAYER LTYPE <layer> <name>` | also takes a library linestyle; refuses `ByLayer`, since a layer is what ByLayer inherits from |
 | `PURGE [STYLES\|LINETYPES\|HATCHES\|ALL]` | deletes what nothing uses as one undo step, keeping the current style |
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
+| `MODIFY [SELECTION\|DRAWING\|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]` (`GM`, `GMODIFY`, `GLOBALMODIFY`) | Global Modify ("Global Modify", below): the entities in a scope and filter, the layers they sit on and the styles they wear, changed as one undo step; `PREVIEW` prints the plan and changes nothing |
 
 Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
 PDAL or the archive and customisation readers: the application's command line
@@ -698,6 +699,59 @@ What follows from that:
 - **`triangle(i)` refuses a face that names a vertex which does not exist**,
   rather than trusting `validate()` to have been called. The scene builder
   is the last thing between a file and a read past the end of a vector.
+
+## Global Modify: a scope, a filter and a change, as one command
+
+The owner asked on 2026-09-25 for "a global modification tool that can act on
+data on a selected view, layers, selected features, etc., that can change
+styles, symbols, layers, colour, etc." - 12d's Change panel, and AutoCAD's
+Quick Select followed by the Properties palette. It is
+`include/katana/cad/global_modify.hpp`, in three plain values, so the
+window's dialog (`docs/desktop.md`, "Global Modify"), the command line's
+`MODIFY` and the tests state a request the same way:
+
+| Part | Type | Says |
+|---|---|---|
+| Where | `ModifyScope` | the selection; what one view draws (its own hidden layers, and optionally only what overlaps its visible area); named layers, with or without their sublayers; or the whole drawing |
+| Which | `ModifyFilter` | types, layer and style patterns, the entity's own colour, a property and its value, a text's words, drawn only - `*` and `?` wildcards, case folded (`matchesPattern`) |
+| What | `GlobalModify` | the entities' own attributes (`EntityModify`: layer, colour, style, shown, properties, text height, the symbol a point draws), the layers they sit on (`LayerModify`) and the styles they wear (`StyleModify`) |
+
+`planGlobalModify` turns them into ONE command (a `commands::Transaction`
+named `GLOBAL_MODIFY`), so one Undo puts back every entity, layer and style
+(Rule 2), and a report, `GlobalModifyPlan`, worked out before anything runs:
+what matched, which entities, layers and styles change, and what is left
+alone and why. `summary()` is what the dialog shows as its preview and
+`MODIFY` prints. Decisions worth knowing:
+
+- **Absent is left alone.** Every field is a `std::optional`; one whose value
+  may be ByLayer is an optional of an optional, the inner nullopt being
+  ByLayer - the reading `Entity::color` already has. Asking for no change at
+  all is refused as a mistake; matching nothing, or matching only what is
+  already as asked, is a plan with no command, so no empty undo step is
+  pushed.
+- **Locked layers.** An entity on a locked layer is counted and left, as
+  Match Properties leaves one - unless the same request unlocks that layer,
+  which is then done first. A lock is done last, after the entities on the
+  layer are changed. Moving onto a locked layer is refused before anything
+  runs; moving onto a layer the drawing lacks makes it, and only when
+  something actually moves.
+- **A symbol goes through a style**, found or made by
+  `cad::assignSymbolToPoints` (`include/katana/cad/symbol_assign.hpp`), because
+  a point carries no symbol of its own. Other entities in scope are counted,
+  not moved; a point given a style and a symbol ends in the symbol's style.
+- **A style is shared.** Changing the styles the matched entities wear
+  redraws everything wearing them, in the scope or not; the plan counts those
+  (`styleReachesOthers`) and the summary says so, so no front end can hide
+  it.
+- **Layer settings** go to the layers the matched entities sit on - or, for a
+  Layers scope, to the scope's layers themselves, entities or not.
+- **One rule for linetype names.** The command line's check that a name is a
+  model linetype or a library linestyle, and not a vertex symbol, moved from
+  the interpreter to `cad::checkLinetypeName`
+  (`include/katana/cad/style_catalogue.hpp`), which Global Modify asks too.
+
+Tested in `tests/cad/customisation/test_global_modify.cpp`, each expectation
+worked out by hand from the drawing its fixture lays out.
 
 ## What the managers stand on
 
