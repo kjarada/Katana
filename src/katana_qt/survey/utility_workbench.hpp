@@ -16,12 +16,13 @@
 //     utilities::drawReplyBounds. Survey data in a real coordinate system
 //     usually lands far from what the view was showing, and left unframed a
 //     successful draw looked like one that did nothing.
-// The dialog's Run goes back through the window (UtilityServices::runCommand),
-// so a line from the dialog is echoed, kept in the history and undone exactly
-// as a typed one; it reaches runLine like any other, which is where its reply
-// is kept for the dialog to show. A TYPED line reaches runLine only when no
-// tool is waiting for typed text: then it is the tool's - a label may read
-// "Utility pit" - where the dialog's line never is.
+// The dialog's Run goes back through the window's one executor
+// (UtilityServices::run, MainWindow::runVerbLine), so a line from the dialog
+// is echoed, kept in the history and undone exactly as a typed one; it reaches
+// runLine like any other, which is where its reply is kept for the dialog to
+// show. A TYPED line reaches runLine only when no tool is waiting for typed
+// text: then it is the tool's - a label may read "Utility pit" - where the
+// dialog's line never is.
 
 #include <QPointer>
 #include <QString>
@@ -31,6 +32,7 @@
 #include <optional>
 #include <string>
 
+#include "command_runner.hpp"
 #include "icons.hpp"
 #include "katana/core/error.hpp"
 #include "survey/utility_dialog.hpp"
@@ -55,10 +57,11 @@ struct UtilityServices {
     std::function<bool()> headless;
     // The window's CommandInterpreter: runs one line, returns its reply.
     std::function<katana::core::Result<std::string>(const std::string& line)> interpret;
-    // The window's command line: `line` echoed in the log and handed back to
-    // runLine, as a typed UTILITY line is - kept in the history by `interpret`
-    // - but never to a running tool, which a typed line may be.
-    std::function<void(const QString& line)> runCommand;
+    // The window's one executor (MainWindow::runVerbLine): `line` echoed in
+    // the log and handed back to runLine, as a typed UTILITY line is - kept in
+    // the history by `interpret` - but never to a running tool, which a typed
+    // line may be.
+    CommandRunner run;
 };
 
 class UtilityWorkbench {
@@ -79,9 +82,10 @@ class UtilityWorkbench {
     // what was drawn in every plan view; false leaves the line to whoever
     // asked.
     bool runLine(const QString& line);
-    // What the dialog's Run does: `line` through the window's command line,
-    // and the reply runLine had for it. InvalidState when the line never
-    // reached runLine.
+    // What the dialog's Run does: `line` through the window's one executor,
+    // and the reply runLine had for it - the interpreter's own, so a refusal
+    // keeps its code and its report. InvalidState when the line never reached
+    // runLine.
     [[nodiscard]] katana::core::Result<std::string> execute(const QString& line);
 
     // The dialog, made the first time it is asked for.

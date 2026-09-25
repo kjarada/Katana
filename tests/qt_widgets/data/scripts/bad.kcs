@@ -1,0 +1,6 @@
+# The second command is refused - a circle needs a positive radius - so a run
+# stops at line 4 unless it was asked to continue, which runs all three and
+# leaves two entities.
+RECT 0,0 10,5
+CIRCLE 0,0 -1
+LINE 0,0 10,0

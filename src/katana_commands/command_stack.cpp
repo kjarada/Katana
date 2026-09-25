@@ -126,6 +126,32 @@ std::string_view CommandStack::redoName() const
     return redoStack_.empty() ? std::string_view{} : redoStack_.back()->name();
 }
 
+namespace {
+
+// The stacks keep their next step at the back, so the history reads from the
+// back.
+std::vector<std::string_view> namesFromTheTop(const std::vector<CommandPtr>& stack)
+{
+    std::vector<std::string_view> names;
+    names.reserve(stack.size());
+    for (auto command = stack.rbegin(); command != stack.rend(); ++command) {
+        names.push_back((*command)->name());
+    }
+    return names;
+}
+
+} // namespace
+
+std::vector<std::string_view> CommandStack::undoNames() const
+{
+    return namesFromTheTop(undoStack_);
+}
+
+std::vector<std::string_view> CommandStack::redoNames() const
+{
+    return namesFromTheTop(redoStack_);
+}
+
 std::vector<katana::entity::EntityId> CommandStack::lastCreatedEntities() const
 {
     return undoStack_.empty() ? std::vector<katana::entity::EntityId>{}

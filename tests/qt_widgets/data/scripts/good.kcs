@@ -1,0 +1,8 @@
+# A script as katana_cli runs it (docs/desktop.md, "Run Script"): a command a
+# line; blank lines and lines starting with # are skipped. Three commands,
+# on lines 4, 6 and 8, make three entities.
+RECT 0,0 10,5
+    # an indented comment is a comment too
+CIRCLE 5,5 2
+
+LINE 0,0 10,0

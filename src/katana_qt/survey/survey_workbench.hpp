@@ -40,6 +40,7 @@
 #include <QPointer>
 #include <QString>
 
+#include "command_runner.hpp"
 #include "icons.hpp"
 
 class QAction;
@@ -83,6 +84,9 @@ struct SurveyServices {
     // under Survey Coding as well: where a surveyor looks for the code
     // library. The same object again.
     QAction* codeManager = nullptr;
+    // The window's one executor (command_runner.hpp), for a dialog that
+    // changes the drawing through a verb line. May be empty (a test).
+    CommandRunner run;
 };
 
 class SurveyWorkbench {
