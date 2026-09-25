@@ -685,6 +685,180 @@ beside the drawing:
 The tests are `tests/qt_widgets/test_sheet_painter.cpp` and
 `test_sheet_editor.cpp`.
 
+## Preflight checks
+
+A plot that comes out with a view under the title block, a plan over empty
+ground or a blank "Surveyed by" wastes the paper and the time of whoever
+reads it. `include/katana/cad/plotting/preflight.hpp` finds such things
+before the plot. `checkSheets(set, model, context, options)` reads the sheet
+set, the drawing and the project's field values and returns a list of
+`Finding`s. It changes nothing and needs no Qt, and the same input gives the
+same findings in the same order.
+
+A finding has:
+- a **severity**. `Error`: the sheet is wasted, because something is not
+  drawn, is cut off or is covered. `Warning`: probably not what was meant.
+  `Info`: worth knowing;
+- a stable **code** (below). Codes are never renamed, so an agent can key on
+  them;
+- where it is: the sheet's position and id, and the viewport's id. A finding
+  about the whole set has no sheet;
+- a **subject**, what else it names: the field, the other viewport of an
+  overlap, the alignment, the sheet a mark leads to;
+- a **message** and a **fix**, in words.
+
+The order is fixed. The set's own findings come first. Then each sheet in
+turn: the sheet's own findings, then its viewports' from back to front, each
+viewport's in the order `preflightChecks()` lists them.
+
+| Code | Severity | Found when |
+|---|---|---|
+| `field.empty` | Warning (some Info) | a value the frame prints resolves to nothing: the organisation, a sign-off name, the height datum, the coordinate system... |
+| `logo.missing` | Info | the logo slot is empty |
+| `logo.unreadable` | Warning | the logo named is not in the project or cannot be read |
+| `sheet.duplicate-id` | Error | a sheet has no id, or an earlier sheet's |
+| `sheet.duplicate-name` | Warning | a sheet has an earlier sheet's name, ignoring case and spaces at the ends |
+| `frame.unknown` | Error | the sheet names a frame this build does not have |
+| `portrait.no-frame` | Warning | a portrait sheet asks for a frame; it prints without one |
+| `sheet.empty` | Warning | a sheet has no views |
+| `viewport.duplicate-id` | Error | a viewport has no id, or one used before in the set |
+| `viewport.unplaced` | Warning | a viewport has no rectangle, so it does not print; nothing more is checked on it |
+| `viewport.outside` | Error or Warning | off the paper or under the title block (Error); past the drawing area into the margin (Warning) |
+| `viewport.overlap` | Warning or Info | a viewport covers part of an earlier one; a panel set wholly inside a view is an inset (Info) |
+| `viewport.too-small` | Info | smaller than its kind's minimum (the tiling table above) |
+| `scale.invalid` | Error | a fixed scale that is not a positive number |
+| `scale.non-standard` | Info | a fixed scale not on `kSheetScales`; the fix names the steps either side |
+| `plan.alignment-missing` | Warning | a plan follows an alignment the drawing does not have |
+| `plan.empty` | Warning | nothing the plan draws is in its window |
+| `text.too-small` | Warning | drawing text in a plan prints under 1.8 mm at the plan's scale |
+| `section.alignment-missing` | Error | a section has no alignment, or names one the drawing does not have |
+| `section.alignment-invalid` | Error | the alignment cannot be solved |
+| `section.no-stations` | Error | cross sections with no chainage to cut at |
+| `section.station-outside` | Error or Warning | a cross section's chainage is off the alignment (Error); a long section's range runs past its end (Warning), or lies wholly off it (Error) |
+| `section.no-surface` | Error | no surface to cut, and for a long section no design profile either |
+| `image.missing` | Error | an image panel names no file, or one the project does not have |
+| `notes.empty` | Info | a notes panel has no text |
+| `matchline.dangling` | Warning | a match line or key-plan outline leads to a sheet that no longer exists |
+
+How the harder checks decide:
+- **Outside.** The limits are the paper, the frame's title-block box and the
+  drawing area (`drawingArea`). They are allowed 0.05 mm, a hand-drawn
+  rectangle's rounding. A viewport filling the drawing area exactly is
+  inside. A frameless sheet has no title block.
+- **Overlap.** Two rectangles overlap when they share more than 0.5 mm on
+  both axes, so views snapped edge to edge do not. The finding goes on the
+  viewport in front and names the one behind.
+- **An empty plan.** The window is the viewport's rectangle at its scale,
+  about its centre, turned by its rotation. So a 100 x 10 m window turned 45
+  degrees sees a point at (30, 30), which the level window misses.
+  - Lines and polylines are clipped against the window itself, not tested by
+    their bounding box. A diagonal line whose box covers the window but
+    which passes 49.5 m from it is not seen.
+  - A window inside a closed outline or a circle looks at its fill, and
+    counts as showing it.
+  - Hidden layers (the view's own and the document's) are left out.
+    Alignments count, and so do imagery, point clouds and meshes when the
+    caller passes their boxes (`otherContent`).
+  - An automatic plan is checked where the painter will draw it:
+    `planWindow` applies the painter's rule to the model, and the editor
+    passes the painter's own `resolvePlanViewport`.
+- **Small text.** A text prints `height x 1000 / scale` mm high. A dimension's
+  text is its style's height. The finding counts every too-small text in
+  the plan's window and gives the smallest. The fix names the largest
+  standard scale at which that text reaches the minimum, and the height text
+  needs at this scale. Example: at 1:500 a 0.5 m text prints 1.0 mm, so the
+  fix is "Plot the view at 1:250 or larger, or make the text at least 0.9 m
+  high". `minimumTextMm` changes the 1.8 mm.
+- **Sections** list their chainages as the painter does: the stations given,
+  else every interval over the range. A cross section is off the alignment
+  when either end of its cut is: `pointAtStationOffset` at plus and minus
+  its half width. The message names up to three such chainages and the
+  alignment's own range.
+- **Blank title-block values** are listed once for the set, not once per
+  sheet, with how many sheets print them blank: "every sheet", or "1 of 2
+  sheets" when one sheet fills the blank itself. A value a sheet sets to
+  nothing is blank on purpose and is not counted. Project lines 3 and 4, the
+  client and the notes may be blank. Project line 2, the set number, the
+  model name and the revision are Info. The rest are Warnings. Only framed
+  sheets count, since a frameless sheet prints no title block.
+- **Match lines.** Marks leading to removed sheets are counted per viewport
+  ("2 match lines and 1 key-plan outline"), and each missing id is named
+  once.
+
+`PreflightOptions` changes what is checked:
+- `sheets`: check only these sheets. The set's own checks then count only
+  these sheets too.
+- `minimumTextMm`, `overlapToleranceMm`, `outsideToleranceMm`: the limits
+  above.
+- `skip`: codes not to report.
+- What the model alone cannot know: `resolvePlan` and `otherContent` (above),
+  `sectionSurfaces` (how many surfaces sections are cut from), `logoReadable`
+  and `assets`. Each one left unset leaves its check out: no surface finding
+  when the surfaces are unknown, no missing-image finding when there is no
+  assets folder to look in.
+- `index`: a spatial index in step with the model, so a plan's window is
+  searched rather than the whole drawing.
+
+For a caller with only a document, `checkDocumentSheets(document)` supplies
+the document's drawing, spatial index, fields, assets folder and whether its
+logo file is there. `findingsOnSheets(findings, indices)` keeps what
+concerns some sheets: their own findings and the set's. `summarize` counts
+each severity. `summaryText` writes the counts ("2 errors, 1 warning, 3
+notes"). `findingLine` writes one finding as a log line:
+
+```
+ERROR viewport.outside [s2/vp3] PLAN 1:500 (vp3) runs 14.6 mm under the title block: the title block covers it. Fix: Drag it back inside the drawing area, or tile the sheet.
+```
+
+`findingsToJson` writes the findings for an agent. Empty members are left
+out. `findingsFromJson` reads them back to the same findings and refuses
+another format, another version, an unknown severity, or a sheet index that
+is not a whole number of zero or more.
+
+```json
+{"format": "katana-sheet-checks", "version": 1,
+ "summary": {"errors": 1, "info": 0, "warnings": 1},
+ "findings": [{"severity": "warning", "code": "field.empty", "subject": "organisation",
+               "message": "Organisation is blank in the title block of every sheet",
+               "fix": "Fill it in on Title Block > Project"},
+              {"severity": "error", "code": "viewport.outside", "sheet_index": 1, "sheet": "s2",
+               "viewport": "vp3", "message": "...", "fix": "..."}]}
+```
+
+**In the editor** (`src/katana_qt/plotting/sheet_checks.hpp`):
+- `preflightOptionsFor(source)` fills the options from the painter's
+  `SheetSource`, and `checkSheetsFor(set, source, sheets)` runs the checks
+  with them. The checks and the painter then agree about what prints empty:
+  - an automatic plan is resolved by `resolvePlanViewport`;
+  - visible imagery, point clouds and meshes are content;
+  - only visible surfaces are cut, so a section over a hidden one is
+    reported;
+  - a logo that did not decode is unreadable.
+- The **Checks** dock (`sheetChecksDock`) lists the last run's findings under
+  the canvas: severity mark, sheet, view, problem and fix, with the code in
+  the tooltip.
+  - Errors come first, then warnings, then notes, each in the checker's
+    order.
+  - Its title and summary line (`sheetChecksSummary`) give the counts.
+  - Double-click a row (or press Enter on it) to go to the finding: its
+    sheet is made current, its viewport selected, and the fix is shown on
+    the status bar (`SheetEditor::showFinding`).
+- The toolbar's **Check Sheets** (`sheetCheck`, `SheetEditor::checkSheets`)
+  checks every sheet at once and shows the dock.
+- After every change to the document, undo and redo included, the checks
+  run again once the edits have stopped for 400 ms
+  (`SheetChecksDock::schedule`). A drag or a burst of edits costs one run.
+- **Plot Sheet** and **Plot All** check first. When the sheets being
+  plotted have errors, the dock is brought up and the plot's message ends
+  "The checks found 1 error on it: the Checks panel lists them". The plot
+  goes ahead anyway, with no dialog in the way.
+- File > Plot Sheets to PDF and `--plot-sheets` log a summary line and each
+  error before plotting (`preflightLog`), and plot.
+
+The tests are `tests/cad/plotting/test_preflight.cpp` (each check with the
+smallest set that trips it and the nearest that does not, the order, the
+options, the JSON) and `tests/qt_widgets/plotting/test_sheet_checks.cpp`.
+
 ## Not yet
 
 - **Change notifications.** A sheet edit notifies the document's listeners
