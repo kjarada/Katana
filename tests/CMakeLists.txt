@@ -1277,3 +1277,25 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# The text and dimension styles in the real window (docs/annotation.md, "In
+# the window"): each dialog builds the verb line and runs it through the
+# window's one executor, so its reply is logged as a typed line's is and one
+# typed UNDO takes its edit back.
+if(TARGET katana)
+    # Format > Dimension Styles...: a style named and made, three fields set
+    # by one Apply and read back by INFO; one UNDO restores all three (the
+    # defaults: 2.5, closed filled, model units - tables.hpp).
+    add_test(NAME qt_the_dimension_styles_manager_runs_its_lines_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatDimensionStyles|dimStyleNewName=site|!dimStyleNew|dimStyleText=3.5|dimStyleHead=Tick|dimStylePaper=on|!dimStyleApply|?dimStylePreview|?dimStyleList|>DIMSTYLE INFO site|>UNDO|>DIMSTYLE INFO site"
+            "-DEXPECT=dimension style site created.*dimension style site updated.*dimStylePreview: a dimension of 10 reads as 10\\.000.*dimStyleList: Standard \\| no layer \\(the default\\) ; site \\| no layer.*name=site text=3\\.5 [^\r\n]*head=Tick [^\r\n]*paper=on.*name=site text=2\\.5 [^\r\n]*head=ClosedFilled [^\r\n]*paper=off"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dimension_styles_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_dimension_styles_manager_runs_its_lines_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

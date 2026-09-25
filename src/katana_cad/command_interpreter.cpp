@@ -1,5 +1,6 @@
 #include "katana/cad/command_interpreter.hpp"
 
+#include "katana/cad/annotation/dimension_style_verbs.hpp"
 #include "katana/cad/global_modify.hpp"
 #include "katana/core/text.hpp"
 
@@ -37,6 +38,7 @@ using katana::entity::EntityId;
 using katana::geometry::Point2;
 using katana::geometry::Vec2;
 namespace cmd = katana::commands;
+namespace ann = katana::cad::annotation;
 
 namespace {
 
@@ -393,7 +395,8 @@ Codes     CODE [property]   apply the loaded survey codes to every entity carryi
           CODE EXPLAIN code   why a code gets what it gets  |  CODE CENSUS [property]   the
           codes this drawing carries  |  MAPFILE LIST [filter] | CHECK   the loaded survey
           codes, one per line, or checked: CHECK fails when a rule has an error
-DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
+DimStyle  DIMSTYLE LIST | INFO name | NEW name [field value ...] | DELETE name
+          DIMSTYLE SET name field value [field value ...]   every pair one undo step
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
           PAPER on|off (sizes in paper mm, drawn at the annotation scale)
           LAYER DIMSTYLE layer style   attaches one
@@ -1410,14 +1413,35 @@ CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
         return text;
     }
 
+    constexpr std::string_view kUsage =
+        "DIMSTYLE LIST | INFO name | NEW name [field value ...] | "
+        "SET name field value [field value ...] | DELETE name";
     if (args.size() < 2) {
-        return usage("DIMSTYLE LIST | NEW name | SET name field value | DELETE name");
+        return usage(kUsage);
     }
     const std::string& name = args[1];
+    // The field/value pairs after the name (annotation/dimension_style_verbs.hpp),
+    // read all or nothing: a line with one bad pair changes nothing.
+    const std::span<const std::string> pairs =
+        std::span<const std::string>(args).subspan(std::min<std::size_t>(args.size(), 2));
 
+    if (action == "INFO") {
+        const katana::entity::DimensionStyle* current = model.dimensionStyles.find(name);
+        if (current == nullptr) {
+            return makeError(ErrorCode::NotFound, "dimension style does not exist", name);
+        }
+        return ann::describeDimensionStyle(model, *current);
+    }
     if (action == "NEW") {
+        // With fields, a copy of another style is ONE step: the window's
+        // Duplicate would otherwise be a NEW and a SET, two undos for one act.
         katana::entity::DimensionStyle created;
         created.name = name;
+        if (!pairs.empty()) {
+            if (auto status = ann::setDimensionStyleFields(created, pairs); !status) {
+                return status.error();
+            }
+        }
         return finish(document_.execute(cmd::createDimensionStyle(std::move(created))),
                       "dimension style " + name + " created");
     }
@@ -1426,8 +1450,8 @@ CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
                       "dimension style " + name + " deleted");
     }
     if (action == "SET") {
-        if (args.size() < 4) {
-            return usage("DIMSTYLE SET name field value\n"
+        if (pairs.empty()) {
+            return usage("DIMSTYLE SET name field value [field value ...]\n"
                          "  fields: TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND"
                          " PREFIX SUFFIX TRIM PAPER");
         }
@@ -1435,83 +1459,16 @@ CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
         if (current == nullptr) {
             return makeError(ErrorCode::NotFound, "dimension style does not exist", name);
         }
+        // Every pair onto one copy, then ONE update: one undo step however many
+        // fields the line sets, as the window's Apply sets them.
         katana::entity::DimensionStyle changed = *current;
-        const std::string field = upper(args[2]);
-        const std::string& value = args[3];
-
-        const auto number = [&value]() { return parseNumber(value); };
-        if (field == "TEXT") {
-            const auto v = number();
-            if (!v) {
-                return v.error();
-            }
-            changed.textHeight = *v;
-        } else if (field == "GAP") {
-            const auto v = number();
-            if (!v) {
-                return v.error();
-            }
-            changed.textGap = *v;
-        } else if (field == "EXTOFF") {
-            const auto v = number();
-            if (!v) {
-                return v.error();
-            }
-            changed.extensionOffset = *v;
-        } else if (field == "EXTBEYOND") {
-            const auto v = number();
-            if (!v) {
-                return v.error();
-            }
-            changed.extensionBeyond = *v;
-        } else if (field == "ARROW") {
-            const auto v = number();
-            if (!v) {
-                return v.error();
-            }
-            changed.arrowSize = *v;
-        } else if (field == "HEAD") {
-            const auto head = katana::entity::arrowHeadFromString(value);
-            if (!head) {
-                return head.error();
-            }
-            changed.arrowHead = *head;
-        } else if (field == "SCALE") {
-            const auto v = number();
-            if (!v) {
-                return v.error();
-            }
-            changed.unitScale = *v;
-        } else if (field == "DECIMALS") {
-            const auto v = number();
-            if (!v) {
-                return v.error();
-            }
-            changed.decimals = static_cast<int>(*v);
-        } else if (field == "ROUND") {
-            const auto v = number();
-            if (!v) {
-                return v.error();
-            }
-            changed.roundTo = *v;
-        } else if (field == "PREFIX") {
-            changed.prefix = value;
-        } else if (field == "SUFFIX") {
-            changed.suffix = value;
-        } else if (field == "TRIM") {
-            const std::string on = upper(value);
-            changed.suppressTrailingZeros = on == "ON" || on == "1" || on == "YES";
-        } else if (field == "PAPER") {
-            const std::string on = upper(value);
-            changed.paperSized = on == "ON" || on == "1" || on == "YES";
-        } else {
-            return makeError(ErrorCode::InvalidArgument, "unknown dimension style field", field);
+        if (auto status = ann::setDimensionStyleFields(changed, pairs); !status) {
+            return status.error();
         }
-
         return finish(document_.execute(cmd::updateDimensionStyle(std::move(changed))),
                       "dimension style " + name + " updated");
     }
-    return usage("DIMSTYLE LIST | NEW name | SET name field value | DELETE name");
+    return usage(kUsage);
 }
 
 CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
