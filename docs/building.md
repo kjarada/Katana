@@ -265,7 +265,7 @@ may not see GDAL, PDAL or the archive readers:
 | `COPC` | yes | no |
 | `CUSTOMISE [REPLACE] <file>...` | yes | yes |
 | `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`, `MAPFILE CHECK` | yes | no: the Survey Code Manager's tabs |
-| `UTILITY REPORT`, `UTILITY VERIFY`, `UTILITY CLEARANCE`, `UTILITY CHECK` (`docs/subsurface_utilities.md`) | yes | no |
+| `UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW` (the interpreter's since 2026-09-25; `docs/subsurface_utilities.md`) | yes | yes |
 | `ZOOM`, `GRID`, `SNAP`, `QUIT` | `QUIT` only | yes |
 | a catalogue tool's alias alone (`L`, `TRIM`, `STRETCH`) | no: "unknown command" where the interpreter has no verb of that name | starts the tool (`docs/tools.md`) |
 
