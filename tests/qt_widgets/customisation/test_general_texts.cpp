@@ -337,9 +337,9 @@ TEST(GeneralTexts, NoFormatMenuItemOrToolbarButtonNamesAnotherProgramInItsTextOr
     for (const QAction* action : bench.bar->actions()) {
         addAction(seen, "toolbar", *action);
     }
-    // The workbench's four, each with its tips, and the window's two.
+    // The workbench's five, each with its tips, and the window's two.
     for (const char* name : {"formatStyles", "formatSymbols", "formatSurveyCodes", "formatPurge",
-                             "loadCustomisation", "replaceCustomisation"}) {
+                             "formatGlobalModify", "loadCustomisation", "replaceCustomisation"}) {
         EXPECT_NE(bench.window.findChild<QAction*>(name), nullptr) << name;
     }
     expectNoneNamesAnotherProgram(seen);

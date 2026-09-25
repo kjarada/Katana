@@ -1,5 +1,8 @@
 #include "katana/cad/command_interpreter.hpp"
 
+#include "katana/cad/global_modify.hpp"
+#include "katana/core/text.hpp"
+
 #include "katana/cad/parcel.hpp"
 #include "katana/cad/purge.hpp"
 #include "katana/cad/style_catalogue.hpp"
@@ -159,7 +162,8 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"O", "OFFSET"},   {"TR", "TRIM"},       {"EX", "EXTEND"},      {"F", "FILLET"},
         {"CHA", "CHAMFER"}, {"U", "UNDO"},       {"LA", "LAYER"},       {"SEL", "SELECT"},
         {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"}, {"PARC", "PARCEL"}, {"ST", "STYLE"},
-        {"RADIATE", "FORWARD"}, {"?", "HELP"},
+        {"RADIATE", "FORWARD"}, {"?", "HELP"}, {"GM", "MODIFY"}, {"GMODIFY", "MODIFY"},
+        {"GLOBALMODIFY", "MODIFY"},
     };
     return table;
 }
@@ -323,12 +327,20 @@ DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
           LAYER DIMSTYLE layer style   attaches one
 Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER   (selection)
+Global    MODIFY [SELECTION|DRAWING|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]
+          global modify, one undo step. WHERE: TYPE=point,line LAYER=pat STYLE=pat|ByLayer
+          COLOUR=#RRGGBB|ByLayer PROP=key[:pat] TEXT=pat DRAWN ('*' '?' wildcards)
+          SET entities: LAYER= COLOUR= STYLE=name|ByLayer VISIBLE=yes|no PROP=key:value
+          UNPROP=key HEIGHT=h SYMBOL=name[@size]   layers: LAYER.COLOUR= LAYER.LTYPE=
+          LAYER.WEIGHT= LAYER.HATCH= LAYER.DIMSTYLE= LAYER.VISIBLE= LAYER.LOCKED=
+          styles worn: STYLE.COLOUR= STYLE.LTYPE= STYLE.WEIGHT= STYLE.HATCH= STYLE.SYMBOL=
+          STYLE.SYMBOLSIZE=   PREVIEW reports what would change and changes nothing
 Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
           PROP RENAME old new   (selection; the type is guessed unless stated)
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
 Inspect   LIST | INFO id | HELP
-Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE ?)";
+Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM ?)";
 }
 
 Result<Point2> CommandInterpreter::parsePoint(const std::string& text)
@@ -396,30 +408,6 @@ std::string restOfLine(const std::vector<std::string>& args, std::size_t from)
         text += (i > from ? " " : "") + args[i];
     }
     return text;
-}
-
-// The one answer to "may a style or a layer be given this linetype name":
-// a model linetype, or a loaded library definition drawn along a line - the
-// same two places the viewport resolves it in (D2). A library linestyle used to
-// be refused here although the model and the viewport both take one (audit
-// CAD-06). A vertex symbol is refused BY NAME, because it is never drawn as
-// a line pattern (D8) and "does not exist" would be untrue.
-katana::core::Status checkLinetypeName(const Document& document, const std::string& name)
-{
-    if (document.model().linetypes.contains(name)) {
-        return {};
-    }
-    if (const katana::entity::LineStyle* definition = document.definitionFor(name);
-        definition != nullptr) {
-        if (definition->atVertices) {
-            return makeError(ErrorCode::InvalidArgument,
-                             "that is a vertex symbol, not a linestyle: give it as the symbol",
-                             name);
-        }
-        return {};
-    }
-    return makeError(ErrorCode::NotFound,
-                     "no linetype of that name is in the drawing or the loaded library", name);
 }
 
 std::string countedNoun(std::size_t count, const char* one, const char* many)
@@ -526,6 +514,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (verb == name) {
             return attributes(verb, args);
         }
+    }
+    if (verb == "MODIFY") {
+        return modify(args);
     }
     if (verb == "SELECT") {
         return select(args);
@@ -2239,6 +2230,295 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
                       "property " + args[1] + " renamed to " + args[2] + " on " + count);
     }
     return usage(kPropUsage);
+}
+
+// ---- global modify ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr const char* kModifyUsage =
+    "MODIFY [SELECTION|DRAWING|LAYERS a,b [ONLY]] [WHERE key=value ...] SET key=value ... "
+    "[PREVIEW]; HELP lists the keys";
+
+std::vector<std::string> splitList(std::string_view text)
+{
+    std::vector<std::string> parts;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t comma = std::min(text.find(',', start), text.size());
+        if (comma > start) {
+            parts.emplace_back(text.substr(start, comma - start));
+        }
+        start = comma + 1;
+    }
+    return parts;
+}
+
+Result<bool> parseYesNo(const std::string& text)
+{
+    const std::string folded = upper(text);
+    if (folded == "YES" || folded == "ON" || folded == "TRUE" || folded == "1") {
+        return true;
+    }
+    if (folded == "NO" || folded == "OFF" || folded == "FALSE" || folded == "0") {
+        return false;
+    }
+    return makeError(ErrorCode::ParseFailure, "expected yes or no", text);
+}
+
+// "#RRGGBB" or ByLayer, as an entity's or a style's colour says it.
+Result<std::optional<katana::entity::Color>> parseColourOrByLayer(const std::string& text)
+{
+    if (upper(text) == "BYLAYER") {
+        return std::optional<katana::entity::Color>{};
+    }
+    auto colour = katana::entity::Color::fromHex(text);
+    if (!colour) {
+        return colour.error();
+    }
+    return std::optional<katana::entity::Color>(*colour);
+}
+
+Result<katana::entity::EntityType> parseTypeName(const std::string& text)
+{
+    // entityTypeFromString takes the enumerator's spelling: title case.
+    std::string name = katana::core::lowered(text);
+    if (!name.empty()) {
+        name.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(name.front())));
+    }
+    return katana::entity::entityTypeFromString(name);
+}
+
+Status parseFilterWord(const std::string& word, ModifyFilter& filter)
+{
+    if (upper(word) == "DRAWN") {
+        filter.drawnOnly = true;
+        return {};
+    }
+    const std::size_t equals = word.find('=');
+    if (equals == std::string::npos) {
+        return makeError(ErrorCode::ParseFailure, "a WHERE condition is key=value", word);
+    }
+    const std::string key = upper(word.substr(0, equals));
+    const std::string value = word.substr(equals + 1);
+    if (key == "TYPE") {
+        for (const std::string& name : splitList(value)) {
+            auto type = parseTypeName(name);
+            if (!type) {
+                return type.error();
+            }
+            filter.types.insert(*type);
+        }
+    } else if (key == "LAYER") {
+        filter.layers = splitList(value);
+    } else if (key == "STYLE") {
+        filter.style = value;
+    } else if (key == "COLOUR" || key == "COLOR") {
+        auto colour = parseColourOrByLayer(value);
+        if (!colour) {
+            return colour.error();
+        }
+        filter.colour = *colour;
+    } else if (key == "PROP") {
+        const std::size_t colon = value.find(':');
+        filter.property = value.substr(0, colon);
+        if (colon != std::string::npos) {
+            filter.propertyValue = value.substr(colon + 1);
+        }
+    } else if (key == "TEXT") {
+        filter.text = value;
+    } else {
+        return makeError(ErrorCode::ParseFailure,
+                         "not a WHERE key: TYPE LAYER STYLE COLOUR PROP TEXT or DRAWN", word);
+    }
+    return {};
+}
+
+Status parseSetWord(const std::string& word, GlobalModify& change)
+{
+    const std::size_t equals = word.find('=');
+    if (equals == std::string::npos) {
+        return makeError(ErrorCode::ParseFailure, "a SET field is key=value", word);
+    }
+    const std::string key = upper(word.substr(0, equals));
+    const std::string value = word.substr(equals + 1);
+    const auto number = [&]() { return parseNumber(value); };
+
+    EntityModify& entities = change.entities;
+    LayerModify& layers = change.layers;
+    StyleModify& styles = change.styles;
+    if (key == "LAYER") {
+        entities.layer = value;
+    } else if (key == "COLOUR" || key == "COLOR") {
+        auto colour = parseColourOrByLayer(value);
+        if (!colour) {
+            return colour.error();
+        }
+        entities.colour = *colour;
+    } else if (key == "STYLE") {
+        entities.style = upper(value) == "BYLAYER" ? std::string() : value;
+    } else if (key == "VISIBLE") {
+        auto on = parseYesNo(value);
+        if (!on) {
+            return on.error();
+        }
+        entities.visible = *on;
+    } else if (key == "PROP") {
+        const std::size_t colon = value.find(':');
+        if (colon == std::string::npos || colon == 0) {
+            return makeError(ErrorCode::ParseFailure, "PROP=key:value", word);
+        }
+        entities.setProperties.emplace_back(value.substr(0, colon),
+                                            parsePropertyValue(value.substr(colon + 1)));
+    } else if (key == "UNPROP") {
+        entities.removeProperties.push_back(value);
+    } else if (key == "HEIGHT") {
+        auto height = number();
+        if (!height) {
+            return height.error();
+        }
+        entities.textHeight = *height;
+    } else if (key == "SYMBOL") {
+        // A library symbol's name may hold spaces ("CULT Bollard"), so it is
+        // quoted: SYMBOL="CULT Bollard@0.5".
+        SymbolModify symbol;
+        const std::size_t at = value.rfind('@');
+        symbol.name = value.substr(0, at);
+        if (at != std::string::npos) {
+            auto size = parseNumber(std::string_view(value).substr(at + 1));
+            if (!size) {
+                return size.error();
+            }
+            symbol.size = *size;
+        }
+        entities.symbol = std::move(symbol);
+    } else if (key == "LAYER.COLOUR" || key == "LAYER.COLOR") {
+        auto colour = katana::entity::Color::fromHex(value);
+        if (!colour) {
+            return colour.error();
+        }
+        layers.colour = *colour;
+    } else if (key == "LAYER.LTYPE" || key == "LAYER.LINETYPE") {
+        layers.linetype = value;
+    } else if (key == "LAYER.WEIGHT") {
+        auto weight = number();
+        if (!weight) {
+            return weight.error();
+        }
+        layers.lineWeight = *weight;
+    } else if (key == "LAYER.HATCH") {
+        layers.hatchPattern = value;
+    } else if (key == "LAYER.DIMSTYLE") {
+        layers.dimensionStyle = value == "-" ? std::string() : value;
+    } else if (key == "LAYER.VISIBLE" || key == "LAYER.LOCKED") {
+        auto on = parseYesNo(value);
+        if (!on) {
+            return on.error();
+        }
+        (key == "LAYER.VISIBLE" ? layers.visible : layers.locked) = *on;
+    } else if (key == "STYLE.COLOUR" || key == "STYLE.COLOR") {
+        auto colour = parseColourOrByLayer(value);
+        if (!colour) {
+            return colour.error();
+        }
+        styles.colour = *colour;
+    } else if (key == "STYLE.LTYPE" || key == "STYLE.LINETYPE") {
+        styles.linetype = value;
+    } else if (key == "STYLE.WEIGHT") {
+        auto weight = number();
+        if (!weight) {
+            return weight.error();
+        }
+        styles.lineWeight = *weight;
+    } else if (key == "STYLE.HATCH") {
+        styles.hatchPattern = value == "-" ? std::string() : value;
+    } else if (key == "STYLE.SYMBOL") {
+        styles.symbol = value == "-" ? std::string() : value;
+    } else if (key == "STYLE.SYMBOLSIZE") {
+        auto size = number();
+        if (!size) {
+            return size.error();
+        }
+        styles.symbolSize = *size;
+    } else {
+        return makeError(ErrorCode::ParseFailure, "not a SET key; HELP lists them", word);
+    }
+    return {};
+}
+
+} // namespace
+
+CommandInterpreter::Reply CommandInterpreter::modify(const Tokens& args)
+{
+    ModifyScope scope;
+    ModifyFilter filter;
+    GlobalModify request;
+    bool preview = false;
+    bool sawSet = false;
+    enum class Part { Scope, Where, Set } part = Part::Scope;
+
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        const std::string& word = args[i];
+        const std::string folded = upper(word);
+        if (folded == "WHERE") {
+            part = Part::Where;
+            continue;
+        }
+        if (folded == "SET") {
+            part = Part::Set;
+            sawSet = true;
+            continue;
+        }
+        if (folded == "PREVIEW") {
+            preview = true;
+            continue;
+        }
+        switch (part) {
+        case Part::Scope:
+            if (folded == "SELECTION" || folded == "SEL") {
+                scope.kind = ScopeKind::Selection;
+            } else if (folded == "DRAWING" || folded == "ALL") {
+                scope.kind = ScopeKind::Drawing;
+            } else if (folded == "LAYERS" || folded == "LAYER") {
+                if (i + 1 >= args.size()) {
+                    return usage(kModifyUsage);
+                }
+                scope.kind = ScopeKind::Layers;
+                scope.layers = splitList(args[++i]);
+            } else if (folded == "ONLY") {
+                scope.sublayers = false;
+            } else {
+                return usage(kModifyUsage);
+            }
+            break;
+        case Part::Where:
+            if (auto status = parseFilterWord(word, filter); !status) {
+                return status.error();
+            }
+            break;
+        case Part::Set:
+            if (auto status = parseSetWord(word, request); !status) {
+                return status.error();
+            }
+            break;
+        }
+    }
+    if (!sawSet) {
+        return usage(kModifyUsage);
+    }
+    if (scope.kind == ScopeKind::Selection && document_.selection().empty()) {
+        return makeError(ErrorCode::InvalidState,
+                         "nothing is selected; SELECT first, or MODIFY DRAWING or MODIFY LAYERS");
+    }
+    auto plan = planGlobalModify(document_, scope, filter, request);
+    if (!plan) {
+        return plan.error();
+    }
+    const std::string summary = plan->summary();
+    if (preview || plan->command == nullptr) {
+        return (preview ? "preview: " : "") + summary;
+    }
+    return finish(document_.execute(std::move(plan->command)), summary + " One UNDO restores it.");
 }
 
 // ---- history / file / inspect -----------------------------------------------------------------

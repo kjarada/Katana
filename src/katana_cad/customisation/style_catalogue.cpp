@@ -426,4 +426,24 @@ std::string freeStyleName(const katana::entity::Model& model, std::string_view b
     return name;
 }
 
+katana::core::Status checkLinetypeName(const Document& document, std::string_view name)
+{
+    using katana::core::ErrorCode;
+    using katana::core::makeError;
+    if (document.model().linetypes.contains(name)) {
+        return {};
+    }
+    if (const LineStyle* definition = document.definitionFor(name); definition != nullptr) {
+        if (definition->atVertices) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "that is a vertex symbol, not a linestyle: give it as the symbol",
+                             std::string(name));
+        }
+        return {};
+    }
+    return makeError(ErrorCode::NotFound,
+                     "no linetype of that name is in the drawing or the loaded library",
+                     std::string(name));
+}
+
 } // namespace katana::cad
