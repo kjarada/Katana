@@ -266,6 +266,7 @@ const std::vector<Icon>& allIcons()
         // Format
         Icon::FormatStyles, Icon::FormatSymbols,
         Icon::FormatSurveyCodes, Icon::Purge,
+        Icon::GlobalModify,
     };
     return icons;
 }
@@ -862,6 +863,18 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.dot(16.5, 19.5, 1.3, true);
         ink.dot(20, 17, 1.3, true);
         ink.dot(20.5, 21, 1.3, true);
+        break;
+    case Icon::GlobalModify:
+        // Three kinds of object - a point, a line, an area - gathered by
+        // the accent bracket, and the accent arrow into the one look every
+        // one of them is given.
+        ink.dot(4.5, 4.5, 1.6);
+        ink.line(2.5, 12, 7.5, 12);
+        ink.stroke(polyline({{2.5, 17}, {7.5, 17}, {7.5, 21.5}, {2.5, 21.5}}, true));
+        ink.stroke(polyline({{10, 2.5}, {12, 2.5}, {12, 21.5}, {10, 21.5}}), true);
+        ink.line(14, 12, 18.5, 12, true);
+        ink.stroke(polyline({{16.2, 9.7}, {18.5, 12}, {16.2, 14.3}}), true);
+        ink.dot(21, 12, 1.9, true);
         break;
     }
     painter.restore();
