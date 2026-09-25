@@ -16,6 +16,8 @@
 //                 with the title-block values this sheet overrides
 //   the toolbar   generate sheets, add a view, tile with a preset, the
 //                 title block and logo, plot the sheet or the whole set
+//   the checks    below: what a plot would get wrong, checked again a moment
+//                 after each change (plotting/sheet_checks.hpp)
 //
 // Every change is ONE undoable step through sheet_commands.hpp, a drag
 // committed on release, so the command stack never fills with the positions a
@@ -26,6 +28,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <QImage>
 #include <QMainWindow>
@@ -34,6 +37,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/plotting/layout.hpp"
+#include "katana/cad/plotting/preflight.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/core/error.hpp"
 #include "sheet_painter.hpp"
@@ -45,6 +49,7 @@ class QLabel;
 namespace katana::qt {
 
 class SheetEditor;
+class SheetChecksDock;
 
 // The paper: one sheet, painted and edited.
 class SheetCanvas final : public QWidget {
@@ -162,12 +167,23 @@ class SheetEditor final : public QMainWindow {
     katana::core::Status addBlankSheet();
     katana::core::Status removeSelectedViewport();
     // Plots the current sheet, or every sheet, to `path`. Problems are
-    // reported through onMessage.
+    // reported through onMessage, and so are the errors the checks find on
+    // the sheets plotted (the Checks dock is shown), which never stop it.
     katana::core::Status plotToPdf(const QString& path, bool allSheets);
 
     // The dialogs; each applies what it is given as one step.
     void generateSheets();
     void editTitleBlock();
+
+    // ---- the preflight checks (plotting/sheet_checks.hpp) -----------------------------
+    // The Checks dock, run again a moment after every change; its findings
+    // are the last run's.
+    [[nodiscard]] SheetChecksDock* checks() const { return checks_; }
+    // Checks every sheet now, lists the findings in the dock and shows it.
+    const std::vector<katana::cad::plotting::Finding>& checkSheets();
+    // Goes to where a finding is: its sheet made current and its viewport
+    // selected, what to do about it on the status bar.
+    void showFinding(const katana::cad::plotting::Finding& finding);
 
     // Messages for the main window's log: the text, and whether it is an error.
     std::function<void(const QString&, bool)> onMessage;
@@ -188,6 +204,7 @@ class SheetEditor final : public QMainWindow {
     QLabel* status_ = nullptr;
     bool rebuilding_ = false;
     katana::cad::Document::ListenerHandle listener_;
+    SheetChecksDock* checks_ = nullptr;
 };
 
 } // namespace katana::qt
