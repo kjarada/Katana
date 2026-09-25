@@ -81,6 +81,11 @@ target_sources(katana PRIVATE ${_katana_tool_ui})
 file(GLOB _katana_customisation_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.hpp")
 target_sources(katana PRIVATE ${_katana_customisation_ui})
+# The sheets' dialogs, panels and output (docs/plotting.md), beside the sheet
+# painter and editor: globbed, one directory, several authors at once.
+file(GLOB _katana_plotting_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.hpp")
+target_sources(katana PRIVATE ${_katana_plotting_ui})
 # One place a version is written: project(Katana VERSION ...). The About box
 # reads it from here and the Windows resource below from the same variable.
 target_compile_definitions(katana PRIVATE KATANA_VERSION="${PROJECT_VERSION}")
