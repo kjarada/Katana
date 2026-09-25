@@ -19,6 +19,7 @@
 #include "katana/cad/scene.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/interop/reference_data.hpp"
+#include "plotting/sheet_tables.hpp"
 #include "sheet_editor.hpp"
 
 namespace katana::qt {
@@ -168,6 +169,17 @@ std::vector<Finding> checkSheetsFor(const plotting::SheetSet& set, const SheetSo
     const katana::entity::Model& model = source.plan.model != nullptr ? *source.plan.model : kNothing;
     if (source.plan.model == nullptr) {
         options.index = nullptr; // an index of some other drawing
+    }
+    // A register is laid out with the scales it prints, as the painter lays it out.
+    const bool registers = std::ranges::any_of(set.sheets, [](const plotting::Sheet& sheet) {
+        return std::ranges::any_of(sheet.viewports, [](const plotting::Viewport& viewport) {
+            return viewport.kind == plotting::ViewportKind::SheetIndex;
+        });
+    });
+    std::optional<plotting::SheetSet> drawn;
+    if (registers) {
+        drawn = resolvedSheetSet(set, source);
+        options.drawnSet = &*drawn;
     }
     return plotting::checkSheets(set, model, source.fields, options);
 }

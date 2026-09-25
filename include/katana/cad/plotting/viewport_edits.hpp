@@ -151,6 +151,11 @@ inline constexpr double kPasteStepMm = 5.0;
 pasteViewports(Document& document, std::size_t sheetIndex, std::vector<Viewport> viewports,
                std::optional<geometry::Point2> offsetMm = std::nullopt,
                std::string stepName = "PASTE_VIEWPORTS");
+// The same on a set, for a caller making it part of a larger step (a paste
+// into a set with no sheets adds the sheet in the same step).
+[[nodiscard]] core::Result<std::vector<std::string>>
+pasteViewports(SheetSet& set, std::size_t sheetIndex, std::vector<Viewport> viewports,
+               std::optional<geometry::Point2> offsetMm = std::nullopt);
 
 // Copies of the viewports `ids` of sheet `sheetIndex` pasted onto the same
 // sheet (one step from the originals, pasteOffset), as one step; returns the

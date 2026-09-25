@@ -35,6 +35,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/preflight.hpp"
+#include "katana/cad/plotting/section_fit.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/cad/section.hpp"
 #include "katana/core/error.hpp"
@@ -64,6 +65,14 @@ struct SheetVerbContext {
     // reference layers and meshes, and a key plan's outlines placed as the
     // painter places them. Not given: viewportContent over the drawing.
     std::function<std::vector<Point2>(const Viewport&)> content;
+    // The scale and exaggeration an automatic section is drawn at, for
+    // ARRANGE MATCHSCALE from one: the painter fits it to the ground it cuts,
+    // which the document does not hold. Not given: its stored ones.
+    std::function<SectionFit(const Viewport&)> fitSection;
+    // The set as the painter draws it, every automatic scale decided, for
+    // SHEET FIELD to print the scale the title block prints. Not given: the
+    // stored scales.
+    std::function<SheetSet(const SheetSet&)> drawn;
 };
 // Called only by the verbs that need it (GENERATE), so a front end may build
 // the context lazily.

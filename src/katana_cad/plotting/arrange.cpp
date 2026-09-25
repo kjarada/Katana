@@ -1290,7 +1290,8 @@ bool hasScale(ViewportKind kind)
 }
 
 Result<std::vector<std::string>> matchScale(SheetSet& set, std::span<const std::string> ids,
-                                            std::string_view fromId, std::optional<double> fromScale)
+                                            std::string_view fromId, std::optional<double> fromScale,
+                                            std::optional<double> fromExaggeration)
 {
     const auto find = [&set](std::string_view id) -> Viewport* {
         for (Sheet& sheet : set.sheets) {
@@ -1315,7 +1316,7 @@ Result<std::vector<std::string>> matchScale(SheetSet& set, std::span<const std::
         return makeError(ErrorCode::InvalidArgument, "the scale must be a positive number");
     }
     const ViewportKind fromKind = from->kind;
-    const double exaggeration = from->verticalExaggeration;
+    const double exaggeration = fromExaggeration.value_or(from->verticalExaggeration);
     std::vector<Viewport*> targets;
     for (const std::string& id : ids) {
         Viewport* viewport = find(id);

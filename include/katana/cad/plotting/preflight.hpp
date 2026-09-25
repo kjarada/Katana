@@ -119,6 +119,11 @@ struct PreflightOptions {
     const geometry::SpatialIndex* index = nullptr;
     // Codes not to report.
     std::set<std::string, std::less<>> skip;
+    // The set as the painter draws it - every automatic scale decided - for
+    // laying a drawing register out as it plots: its SCALE column is part of
+    // what must fit. Null: the set checked, its stored scales. The Qt layer
+    // passes resolvedSheetSet; it must outlive the check.
+    const SheetSet* drawnSet = nullptr;
 };
 
 // Everything that would go wrong plotting `set` (docs/plotting.md lists each

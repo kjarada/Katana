@@ -35,6 +35,11 @@ using plotting::ViewportKind;
 
 namespace {
 
+bool isSectionView(ViewportKind kind)
+{
+    return kind == ViewportKind::LongSection || kind == ViewportKind::CrossSections;
+}
+
 bool isPlan(ViewportKind kind)
 {
     return kind == ViewportKind::Plan || kind == ViewportKind::KeyPlan;
@@ -216,6 +221,11 @@ std::vector<Point2> viewportContent(const Viewport& viewport, const SheetSource&
 
 double drawnScaleOf(const Viewport& viewport, const SheetSource& source, const plotting::SheetSet& set)
 {
+    if (isSectionView(viewport.kind) && viewport.autoScale) {
+        // The scale the section is fitted to, as the painter fits it.
+        SheetPaintCache cache;
+        return resolveSectionViewport(viewport, source, cache).scale;
+    }
     if (isPlan(viewport.kind) && viewport.autoScale) {
         // With the set and its sheet, so an automatic key plan is at the
         // scale it is drawn at: fitted to its outlines, not to the drawing.
@@ -240,8 +250,10 @@ std::vector<std::string> arrangeTargets(const katana::cad::Document& document, c
     if (sheet == nullptr) {
         return {};
     }
-    if (const std::string& selected = editor.canvas()->selected(); !selected.empty()) {
-        return {selected};
+    // The whole selection: a group chosen on the canvas is arranged as a
+    // group, whichever of it is the primary.
+    if (std::vector<std::string> selected = editor.canvas()->selectedIds(); !selected.empty()) {
+        return selected;
     }
     std::vector<std::string> ids;
     for (const Viewport& viewport : sheet->viewports) {
@@ -303,6 +315,12 @@ Result<std::string> distributeSelection(katana::cad::Document& document, SheetEd
         return sheet.error();
     }
     std::vector<std::string> ids = arrangeTargets(document, editor);
+    // A chosen group is spaced as it is; with fewer than three chosen there
+    // is nothing between to space, and the views not chosen are not moved.
+    if (const std::size_t chosen = editor.canvas()->selectedIds().size(); chosen > 0 && chosen < 3) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "choose three views or more to space evenly, or none for every view");
+    }
     if (ids.size() < 3) {
         ids.clear();
         for (const Viewport& viewport : (*sheet)->viewports) {
@@ -333,8 +351,14 @@ Result<std::string> matchSelectionScale(katana::cad::Document& document, SheetEd
         return makeError(ErrorCode::NotFound, "no viewport of that id to take the scale from", fromId);
     }
     const double scale = drawnScaleOf(*from, editor.source(), document.sheetSet());
+    // An automatic section is matched at the exaggeration it is drawn at too.
+    std::optional<double> exaggeration;
+    if (isSectionView(from->kind) && from->autoScale) {
+        SheetPaintCache cache;
+        exaggeration = resolveSectionViewport(*from, editor.source(), cache).exaggeration;
+    }
     const std::vector<std::string> ids = arrangeTargets(document, editor);
-    const auto changed = plotting::matchScale(document, ids, fromId, scale);
+    const auto changed = plotting::matchScale(document, ids, fromId, scale, exaggeration);
     if (!changed) {
         return changed.error();
     }
