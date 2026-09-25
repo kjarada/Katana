@@ -1117,6 +1117,7 @@ bool SheetPainter::paintPlanViewport(const Viewport& viewport, TextSetter& text,
     plan.medium = options_.medium;
     plan.pixelsPerMillimetre = paper.ppmm();
     plan.plot = &options_.plot;
+    plan.rasterDpiCap = options_.rasterDpiCap; // imagery capped as the 3D snapshot is
     plan.fontFamily = QStringLiteral("Arial");
     const PlanPaintStats drawn = paintPlan(painter_, source_.plan, frame, plan, cache_.plan());
     stats_.planEntitiesDrawn += drawn.entitiesDrawn;

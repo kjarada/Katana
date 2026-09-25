@@ -7,16 +7,24 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
+#include <set>
 #include <string>
 
 #include <QByteArray>
 #include <QColor>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
+#include <QMarginsF>
+#include <QPageSize>
 #include <QPainter>
+#include <QPdfWriter>
 #include <QTemporaryDir>
 
 #include "katana/cad/plotting/frame.hpp"
@@ -139,6 +147,56 @@ int colourIn(const QImage& image, Box2 paper, QColor colour)
 }
 
 Box2 box(double x0, double y0, double x1, double y1) { return Box2(Point2(x0, y0), Point2(x1, y1)); }
+
+// A `width` x `height` raster whose pixel (x, y) is `colour(x, y)` (with its
+// alpha), placed by `geotransform`.
+katana::interop::RasterOverlay rasterOf(int width, int height,
+                                        const std::array<double, 6>& geotransform,
+                                        const std::function<QRgb(int, int)>& colour)
+{
+    katana::interop::RasterOverlay raster;
+    raster.name = "ortho";
+    raster.width = width;
+    raster.height = height;
+    raster.rgba.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+    std::size_t at = 0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const QRgb c = colour(x, y);
+            raster.rgba[at++] = static_cast<std::uint8_t>(qRed(c));
+            raster.rgba[at++] = static_cast<std::uint8_t>(qGreen(c));
+            raster.rgba[at++] = static_cast<std::uint8_t>(qBlue(c));
+            raster.rgba[at++] = static_cast<std::uint8_t>(qAlpha(c));
+        }
+    }
+    raster.geotransform = geotransform;
+    raster.hasGeotransform = true;
+    return raster;
+}
+
+// The set's first sheet as a one-page PDF at `dpi`, as plotSheetsToPdf
+// writes it but with the imagery capped at `rasterDpiCap` (0: not capped
+// below the plot's own resolution). Returns the file's size in bytes.
+qint64 sheetPdfBytes(const QString& path, const plotting::SheetSet& set, const SheetSource& source,
+                     double dpi, double rasterDpiCap)
+{
+    const auto& sheet = set.sheets[0];
+    const auto paper = katana::cad::paperDimensions(sheet.paper, sheet.landscape);
+    {
+        QPdfWriter writer(path);
+        writer.setResolution(static_cast<int>(dpi));
+        writer.setPageSize(QPageSize(QSizeF(paper.widthMm, paper.heightMm), QPageSize::Millimeter));
+        writer.setPageMargins(QMarginsF(0.0, 0.0, 0.0, 0.0));
+        QPainter painter(&writer);
+        SheetPaintOptions options;
+        options.pixelsPerMillimetre = dpi / 25.4;
+        options.plot.dpi = dpi;
+        options.rasterDpiCap = rasterDpiCap;
+        SheetPaintCache cache;
+        (void)katana::qt::paintSheet(painter, set, 0, source, options, cache);
+    }
+    return QFileInfo(path).size();
+}
 
 } // namespace
 
@@ -264,6 +322,135 @@ TEST(SheetPainter, ARotatedViewportRunsItsDirectionAcrossThePaper)
     // Centre (200, 175); the 141 m line is 141 mm long, level.
     EXPECT_GT(inkIn(paper, box(140.0, 174.5, 260.0, 175.5)), 100);
     EXPECT_EQ(inkIn(paper, box(190.0, 185.0, 210.0, 240.0)), 0);
+}
+
+TEST(SheetPainter, AnAerialPhotoUnderAPlanViewportPrintsInsideItAndNowhereElse)
+{
+    // A 500 m square photo of 5 m pixels about the origin, all one blue,
+    // under a viewport (100, 100)-(300, 250) at 1 : 1000 about the origin:
+    // the viewport shows 200 x 150 m of it and is filled with it; nothing of
+    // it is printed beside, above or below the viewport, though the photo
+    // runs 150 m past each side. Hidden in the Reference Data panel, it is
+    // not printed at all.
+    const QColor blue(40, 110, 200);
+    katana::interop::ReferenceData reference;
+    const katana::interop::ReferenceId id =
+        reference.add(rasterOf(100, 100, {-250.0, 5.0, 0.0, 250.0, 0.0, -5.0},
+                               [&](int, int) { return blue.rgb(); }));
+    Model model;
+    plotting::SheetSet set;
+    set.sheets.push_back(a3());
+    set.sheets[0].viewports.push_back(planAt(box(100.0, 100.0, 300.0, 250.0), 1000.0, Point2(0.0, 0.0)));
+    SheetSource source;
+    source.plan.model = &model;
+    source.plan.reference = &reference;
+    const QImage paper = painted(set, source);
+    const int inside = 196 * 4 * 146 * 4;
+    EXPECT_GT(colourIn(paper, box(102.0, 102.0, 298.0, 248.0), blue), inside * 95 / 100);
+    EXPECT_EQ(colourIn(paper, box(40.0, 100.0, 99.0, 250.0), blue), 0);
+    EXPECT_EQ(colourIn(paper, box(301.0, 100.0, 380.0, 250.0), blue), 0);
+    EXPECT_EQ(colourIn(paper, box(100.0, 251.0, 300.0, 280.0), blue), 0);
+    EXPECT_EQ(colourIn(paper, box(100.0, 40.0, 300.0, 99.0), blue), 0);
+
+    reference.findRaster(id)->visible = false;
+    EXPECT_EQ(colourIn(painted(set, source, nullptr, false, "_hidden"),
+                       box(102.0, 102.0, 298.0, 248.0), blue),
+              0);
+}
+
+TEST(SheetPainter, ATurnedPhotoInATurnedViewportIsPrintedWhereItsGeotransformPutsIt)
+{
+    // An 80 x 80 image of 0.5 m pixels, transparent but for a red block of
+    // pixels 32..47 each way, turned 30 degrees about its corner at (100,
+    // 50): a step along a row moves 0.5 (cos 30, sin 30), a step down a
+    // column 0.5 (sin 30, -cos 30). The block's middle, pixel corner (40,
+    // 40), is (100, 50) + 20 (1.366, -0.366) = (127.32, 42.68), and the block
+    // is 8 m square. The viewport (100, 100)-(300, 250) at 1 : 1000 about
+    // (110, 40) is turned 0.6 rad, so a model offset d from its centre lands
+    // at the paper's (200, 175) + R(-0.6) d mm: d = (17.32, 2.68) is
+    //   x = 17.32 cos 0.6 + 2.68 sin 0.6 = 14.295 + 1.513 = 15.808
+    //   y = -17.32 sin 0.6 + 2.68 cos 0.6 = -9.780 + 2.212 = -7.568
+    // so the block prints about (215.8, 167.4), 8 mm square turned, and not
+    // about (217.3, 177.7), where an unturned viewport would put it. The
+    // transparent pixels print nothing: all the red there is is the block's
+    // 64 mm^2, 1 024 pixels at 4 px/mm, less what the smoothing at its edge
+    // - a ramp one image pixel, half a millimetre, wide - fades past red.
+    const double turn = katana::math::kPi / 6.0;
+    const double c = std::cos(turn);
+    const double s = std::sin(turn);
+    katana::interop::ReferenceData reference;
+    reference.add(rasterOf(80, 80, {100.0, 0.5 * c, 0.5 * s, 50.0, 0.5 * s, -0.5 * c}, [](int x, int y) {
+        return x >= 32 && x < 48 && y >= 32 && y < 48 ? qRgba(220, 0, 0, 255) : qRgba(0, 0, 0, 0);
+    }));
+    Model model;
+    plotting::SheetSet set;
+    set.sheets.push_back(a3());
+    set.sheets[0].viewports.push_back(
+        planAt(box(100.0, 100.0, 300.0, 250.0), 1000.0, Point2(110.0, 40.0), 0.6));
+    SheetSource source;
+    source.plan.model = &model;
+    source.plan.reference = &reference;
+    const QImage paper = painted(set, source);
+    const QColor red(220, 0, 0);
+    const Point2 d(100.0 + 20.0 * (c + s) - 110.0, 50.0 + 20.0 * (s - c) - 40.0);
+    const Point2 expected(200.0 + d.x * std::cos(0.6) + d.y * std::sin(0.6),
+                          175.0 - d.x * std::sin(0.6) + d.y * std::cos(0.6));
+    ASSERT_NEAR(expected.x, 215.808, 2e-3);
+    ASSERT_NEAR(expected.y, 167.432, 2e-3);
+    // The middle 4 mm of the block - 16 or 17 pixels each way, as the box
+    // falls on the pixel grid - is solid red.
+    EXPECT_GE(colourIn(paper, box(expected.x - 2.0, expected.y - 2.0, expected.x + 2.0, expected.y + 2.0),
+                       red),
+              16 * 16);
+    EXPECT_EQ(colourIn(paper, box(214.3, 174.7, 220.3, 180.7), red), 0);
+    const int total = colourIn(paper, box(100.0, 100.0, 300.0, 250.0), red);
+    EXPECT_GT(total, 1024 * 8 / 10);
+    EXPECT_LT(total, 1024 * 12 / 10);
+}
+
+TEST(SheetPainter, ASheetPdfOverALargePhotoEmbedsOnlyTheViewportAtTheCappedResolution)
+{
+    // A 2000 x 2000 photo of 2 cm pixels, 40 m square, of noise (which no
+    // compression shrinks), filling a 40 mm viewport at 1 : 1000 on a sheet
+    // plotted at 600 dpi: a photo pixel is 0.02 mm of paper, 0.47 of a
+    // device pixel. Not capped below the plot's resolution it is averaged
+    // to the device's, 945 x 945 = 893 000 pixels; capped at 200 dpi (the
+    // default) to 315 x 315 = 99 000, a ninth - and the PDF, which is
+    // almost all image, shrinks with it. plotSheetsToPdf plots with the cap.
+    katana::interop::ReferenceData reference;
+    reference.add(rasterOf(2000, 2000, {-20.0, 0.02, 0.0, 20.0, 0.0, -0.02}, [](int x, int y) {
+        std::uint32_t hash = static_cast<std::uint32_t>(x) * 73856093u ^
+                             static_cast<std::uint32_t>(y) * 19349663u;
+        hash ^= hash >> 13;
+        hash *= 0x5bd1e995u;
+        hash ^= hash >> 15;
+        return qRgb(static_cast<int>(hash & 0xff), static_cast<int>((hash >> 8) & 0xff),
+                    static_cast<int>((hash >> 16) & 0xff));
+    }));
+    Model model;
+    plotting::SheetSet set;
+    set.sheets.push_back(a3());
+    set.sheets[0].viewports.push_back(planAt(box(100.0, 100.0, 140.0, 140.0), 1000.0, Point2(0.0, 0.0)));
+    SheetSource source;
+    source.plan.model = &model;
+    source.plan.reference = &reference;
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const qint64 uncapped = sheetPdfBytes(dir.filePath("uncapped.pdf"), set, source, 600.0, 0.0);
+    const qint64 capped = sheetPdfBytes(dir.filePath("capped.pdf"), set, source, 600.0, 200.0);
+    EXPECT_LT(capped * 4, uncapped) << capped << " bytes capped, " << uncapped << " not";
+
+    const QString path = dir.filePath("plotted.pdf");
+    SheetPaintCache cache;
+    ASSERT_TRUE(katana::qt::plotSheetsToPdf(path, set, {}, source, 600.0, cache).ok());
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::ReadOnly));
+    const QByteArray pdf = file.readAll();
+    EXPECT_TRUE(pdf.contains("/Subtype /Image"));
+    EXPECT_LT(pdf.size() * 4, uncapped) << pdf.size() << " bytes plotted, " << uncapped << " not capped";
+    RecordProperty("uncapped_bytes", static_cast<int>(uncapped));
+    RecordProperty("capped_bytes", static_cast<int>(capped));
+    RecordProperty("plotted_bytes", static_cast<int>(pdf.size()));
 }
 
 TEST(SheetPainter, AnAutomaticScaleIsReportedInTheTitleBlock)
