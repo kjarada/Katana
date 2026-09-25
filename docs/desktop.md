@@ -726,7 +726,11 @@ Investigation Report, Verify Detections Against Exposures, Clearance of
 Proposed Works, Check Against a Delivery Schema (`utilityDraw`,
 `utilityReport`, `utilityVerify`, `utilityClearance`, `utilityCheck`).
 `MainWindow::runCommandLine` hands it any line that starts with `UTILITY`,
-before a running tool can take the line for an answer.
+before a running tool can take the line for an answer - unless that tool is
+waiting for typed text (`ViewWorkspace::toolTakesText`: a Text's string, a
+count), whose answer the whole line is, as it is for a bare `ZOOM`: a label on
+a services plan may well read "Utility pit". `ONLINE` gives way to such a
+tool the same way (`qt_utility_line_leaves_a_text_to_the_tool_headless`).
 
 The verb is the `CommandInterpreter`'s, shared with `katana_cli`; the
 workbench runs it through the window's interpreter and adds the one thing
@@ -750,9 +754,10 @@ flagged alike. The dialog never calls the AS 5488 library. `utilityCommandLine` 
 the fields, tested without a window - writes the `UTILITY` line (a path with
 blanks quoted, a blank option left out, a missing file or a number that does
 not read refused with the field named, and nothing run); `utilityCommand`
-shows that line as it is edited; Run hands it to the window's own command line
+shows that line as it is edited; Run hands it back to the window
 (`UtilityServices::runCommand`), so it is echoed, kept in the history and
-undone exactly as a typed line, and the reply the workbench got for it comes
+undone exactly as a typed line - but never offered to a running tool first,
+since the dialog's line is never a text - and the reply the workbench got for it comes
 back into `utilityOutput`, with Copy and Save As beside it. A headless session
 opens no file dialog: Browse and Save As say so, and a script fills the path
 fields instead. Tested in `tests/qt_widgets/survey/test_utility_dialog.cpp`

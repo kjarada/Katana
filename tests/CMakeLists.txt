@@ -713,8 +713,23 @@ if(TARGET katana)
             "-DEXPECT=utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200[\r\n]+line id=W1 type=water .*FrameStatsLabel: Plan +21 drawn"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_draw_typed_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A tool waiting for a text's string takes the whole typed line, as a
+    # label "Utility pit" on a services plan must be - the UTILITY verb once
+    # took it first and refused it. The dialog's Run, pressed while the Text
+    # tool waits, still draws: its line is never offered to the tool, which
+    # would have made it the text's first line and "Utility pit" its second.
+    add_test(NAME qt_utility_line_leaves_a_text_to_the_tool_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>TEXT|>0,0|>|>|@utilityDraw|utilitySchedule=${_utility_samples}/schedule.csv|!utilityRun|?utilityStatus|>Utility pit|>"
+            "-DEXPECT=utilityStatus: Drawn as one undo step.*1 line of text"
+            "-DFORBID=usage: UTILITY|[0-9]+ lines of text"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_line_text_tool_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_utility_dialog_writes_the_line_headless qt_utility_dialog_headless
         qt_utility_draw_typed_frames_the_views_headless
+        qt_utility_line_leaves_a_text_to_the_tool_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
