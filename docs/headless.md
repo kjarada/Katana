@@ -26,7 +26,10 @@ tool composes with shell pipelines. The `cli.*` tests
 (`src/katana_app/CMakeLists.txt`) use it to draw, save, reopen in a SEPARATE
 process and check the geometry, to confirm that invalid input fails the
 process (`cli.rejects_bad_input`), and to exercise the survey-code verbs on a
-code file the tests write themselves.
+code file the tests write themselves. The sheet verbs (`docs/plotting.md`,
+"Sheets on the command line") are the interpreter's, so they run here too
+(`cli.sheet_verbs_lay_out_edit_and_list_the_sheets`); only `PLOTSHEETS`,
+which paints, needs the window.
 
 ## katana with --screenshot and --plot
 
@@ -61,6 +64,30 @@ drawing fits; `--scale N` plots at 1:N; `--paper` is A0 to A4; `--dpi` sets
 the resolution. The dialog and the switch share `plotDrawingToPdf`, so the
 `qt_plot_headless` test exercises the code the menu does.
 
+**`--plot-sheets out.pdf`** plots every sheet of the project to one PDF, a
+page a sheet, and exits; a project with no sheets plots one fitted to the
+drawing (`docs/plotting.md`). **`--sheets-json out.json`** writes the
+project's sheets as the JSON the project stores them in, and exits; `-`
+writes it to stdout. Given together, the JSON is written first. Without
+`--screenshot`, the `--command` lines run BEFORE either is written, and when
+one of those two is asked for, a line that is refused fails the run (exit 1,
+naming it) and nothing is written. A line that plots with problems (an image
+missing, a section with nothing to cut) still counts as carried out.
+`--sheets-json` is not written by a `--screenshot` run. So one run can lay the
+sheets out with the sheet verbs, keep them, report them and plot them - the
+way an agent drives the sheets (`docs/plotting.md`, "Sheets on the command
+line"):
+
+```sh
+QT_QPA_PLATFORM=offscreen ./build/release/bin/katana.exe <copy-of-project> \
+    --command "GENERATE grid scale=500 keyplan=on" --command SAVE \
+    --sheets-json sheets.json --plot-sheets sheets.pdf
+```
+
+The `qt_sheets_headless` test runs that (`tools/check_sheets_headless.cmake`),
+plots one sheet with the window's `PLOTSHEETS` verb, reads the saved copy back
+with `--sheets-json -`, and checks that a refused line fails the run.
+
 Offscreen Qt has no monospace font, so a screenshot's command log and any
 fixed-pitch text differ from a real display; judge fonts on a real screen.
 
@@ -74,6 +101,8 @@ imported (anything else), in order, before any step runs.
 |---|---|
 | `--screenshot PNG` | grab the target at the end - the window, or the dialog, dock or panel the steps made the target |
 | `--plot PDF` with `--fit`, `--scale N`, `--paper A0..A4`, `--landscape`, `--portrait`, `--dpi N` | plot the drawing to a PDF and exit |
+| `--plot-sheets PDF` | plot every sheet of the project to one PDF and exit |
+| `--sheets-json FILE` | write the project's sheets as JSON (`-`: to stdout) and exit; before `--plot-sheets` when both are given |
 | `--customise FILE...` | load style libraries and survey code files - every path until the next switch - merged into the built-in customisation before anything is drawn |
 | `--action NAME` | trigger the menu item with that object name after the imports, as a click does; repeatable, in order, before the steps |
 | `--select-all` | select every entity on an unlocked layer before the actions run |
@@ -100,7 +129,7 @@ every action, field, button and tab gets one. In a test they are one
 | `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers |
 | `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does |
 | `--press BUTTON` | `!BUTTON` | clicks it; a disabled button fails the run |
-| `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts |
+| `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
 | `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
@@ -119,8 +148,8 @@ what a command REPORTED.
 ## check_screenshot.cmake: the test side
 
 Every `qt_*_headless` test in `tests/CMakeLists.txt` runs
-`tools/check_screenshot.cmake` (or `tools/check_plot.cmake` for the plot)
-with `cmake -P`. The script COPIES the project it is given before opening it,
+`tools/check_screenshot.cmake` (or `tools/check_plot.cmake` for the plot,
+`tools/check_sheets_headless.cmake` for the sheets) with `cmake -P`. The script COPIES the project it is given before opening it,
 runs `katana` with the switches its variables ask for, and checks the result.
 Its variables:
 
