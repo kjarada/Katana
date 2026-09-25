@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <format>
 #include <limits>
 
 #include <QPainter>
@@ -460,7 +461,7 @@ std::size_t paintSection(SectionCanvas& canvas, const Box2& area, const katana::
         key.capMm = 1.5;
         double widest = 0.0;
         for (const auto& surface : section.surfaces) {
-            widest = std::max(widest, canvas.textWidthMm(qText(surface.name), key));
+            widest = std::max(widest, canvas.textWidthMm(qText(surface.name).toUpper(), key));
         }
         const double pitch = 3.2;
         const double count = static_cast<double>(section.surfaces.size());
@@ -476,7 +477,7 @@ std::size_t paintSection(SectionCanvas& canvas, const Box2& area, const katana::
                                   painter.drawLine(canvas.at(Point2(plot.min.x + 1.5, y)),
                                                    canvas.at(Point2(plot.min.x + 7.0, y)));
                                   canvas.text(Point2(plot.min.x + 8.0, y),
-                                              qText(section.surfaces[s].name), line);
+                                              qText(section.surfaces[s].name).toUpper(), line);
                                   y -= pitch;
                               }
                           }});
@@ -786,8 +787,16 @@ SectionPaintResult paintSectionViewport(SectionCanvas& canvas, const Viewport& v
         result.problems.emplace_back("no alignment chosen");
         return result;
     }
+    // A stored scale comes from JSON unchecked: one that is not a positive
+    // number would put every label at infinity.
+    if (!(viewport.scale > 0.0) || !std::isfinite(viewport.scale) ||
+        !std::isfinite(viewport.verticalExaggeration)) {
+        result.problems.push_back(
+            std::format("the scale 1:{} is not a positive number", viewport.scale));
+        return result;
+    }
     SectionAxes axes;
-    axes.scale = viewport.scale > 0.0 ? viewport.scale : 500.0;
+    axes.scale = viewport.scale;
     axes.exaggeration = viewport.verticalExaggeration > 0.0 ? viewport.verticalExaggeration : 1.0;
     axes.centre = viewport.centre;
     axes.autoCentre = viewport.autoCentre;
