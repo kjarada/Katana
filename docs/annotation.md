@@ -278,6 +278,38 @@ An angle is written in DMS, a radius with `R` and a diameter with `Ø`.
 `buildDimension` draws every kind for the painters; the aligned drawing is
 exactly what it was before the kinds (`TheAlignedDrawingIsWhatItWasBeforeTheKinds`).
 
+### Dimension styles
+
+A dimension is drawn in its LAYER's dimension style (`LAYER DIMSTYLE layer
+style`), else `Standard`. `DIMSTYLE` names thirteen fields - `TEXT GAP EXTOFF
+EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM PAPER` - and
+`include/katana/cad/annotation/dimension_style_verbs.hpp` is the one
+statement of each: its name, how its value is read and how it is written
+back. The verb reads its lines with it, `DIMSTYLE INFO` writes its record with
+it, and the window's manager builds its lines with it, so the dialog cannot
+write a line the verb would read differently.
+
+* `DIMSTYLE SET name field value [field value ...]` sets every pair as ONE
+  undo step, all or nothing: one pair that does not read, or a style that
+  fails `validate`, refuses the whole line and changes nothing
+  (`DimstyleSetMany.OneBadPairRefusesTheWholeLineAndChangesNothing`). It took
+  one pair until 2026-09-26, so a dialog's Apply of five fields was five
+  undos.
+* `DIMSTYLE NEW name [field value ...]` takes the same pairs, so a copy of a
+  style is one step. The plan had Duplicate run NEW and then SET; that is two
+  undos for one act, and was rejected.
+* `DIMSTYLE INFO name` is one record: `name=`, every field in lower case,
+  `layers=` (how many layers name the style) and `reads=` (what a dimension
+  of ten units reads as). `DIMSTYLE LIST` keeps its short line a style.
+* `TRIM` and `PAPER` take on/off (yes/no, true/false, 1/0) and nothing else,
+  and `DECIMALS` a whole number: "PAPER of" once turned paper sizing off
+  without a word, and "DECIMALS 2.7" gave two places.
+
+A value that holds a blank is quoted (`PREFIX "L= "`, `SUFFIX ""` for none).
+The interpreter's quotes have no escape, so a prefix or suffix holding a
+double quote cannot be written on a line; the dialog says so rather than send
+a line that sets something else (`cad/annotation/command_words.hpp`).
+
 ## Leaders and callouts
 
 A leader (`LeaderGeometry`) is ONE entity from its arrow to its note: the
@@ -310,7 +342,7 @@ every reply is `key=value` records an agent can read without guessing:
 | `AUTOLABEL RULE ADD \| SET \| DELETE \| LIST`, `RUN`, `PREVIEW`, `CLEAR` | `autolabel created=2 kept=0 removed=0 skipped=0` and `rule=... labels=N` |
 | `DIM LINEAR \| HORIZONTAL \| VERTICAL \| ALIGNED \| ANGULAR \| RADIUS \| DIAMETER \| ORDINATE \| BASELINE \| CONTINUE` | `created dimension id=5 kind=diameter measures=10 text=Ø10.000 associative=yes`, `created dimensions=2 ids=7,8` |
 | `LEADER p p... text= arrow= callout= style= paper= arrowsize= landing=`, `BALLOON` | `created leader id=26 text="PIT 12\nIL 10.50" associative=no` |
-| `DIMSTYLE SET name PAPER on` | the style, `paper-sized` in `DIMSTYLE LIST` |
+| `DIMSTYLE LIST \| INFO name \| NEW name [field value ...] \| SET name field value [field value ...] \| DELETE name` | `dimension style site updated`; `INFO`: `name=site text=3.5 gap=0.625 ... paper=on layers=1 reads=10.000` |
 
 `TS`, `LS`, `MT` and `LE` are aliases. `LABEL` of many entities, `AUTOLABEL
 RUN` and `DIM BASELINE` are each ONE undo step (`ManyLabelsAreOneStep`). A
@@ -327,8 +359,9 @@ session an agent might type:
 
 Format > **Text Styles...** (`formatTextStyles`, the dialog
 `textStyleManagerDialog`) and Format > **Label Styles and Rules...**
-(`formatLabelStyles`, `labelStyleManagerDialog`), and the annotation scale
-box on the Format toolbar (`annotationScaleCombo`), all built by
+(`formatLabelStyles`, `labelStyleManagerDialog`), Format > **Dimension
+Styles...** (`formatDimensionStyles`, `dimensionStyleManagerDialog`), and the
+annotation scale box on the Format toolbar (`annotationScaleCombo`), all built by
 `AnnotationWorkbench` (`src/katana_qt/annotation/annotation_workbench.hpp`)
 so `MainWindow` gains one member. The managers
 (`src/katana_qt/annotation/annotation_managers.hpp`, which lists every
@@ -340,6 +373,30 @@ with Run and Clear, which report what `AUTOLABEL` replies. The dialogs keep
 no copy of the tables: an undo or a verb typed while one is open shows at
 once. The Annotate menu's tools are in `docs/tools.md`; the painting is in
 `docs/plan_view.md`, "Annotation".
+
+The Dimension Styles manager
+(`src/katana_qt/annotation/dimension_style_manager.hpp`, which lists every
+object name) was the first of them to change nothing itself: each button
+builds the `DIMSTYLE` line a person would type and runs it through the
+window's one executor (`docs/desktop.md`, "One executor: the command
+runner"), so it is echoed in the command log, undone as a typed line is, and
+refused in the verb's own words in the dialog's problem line. The list shows
+each style and how many layers name it; New and Duplicate take their name
+from a box beside them (blank: the fresh name its placeholder shows), so no
+question is asked in a box of its own and a headless run can name one. The
+form is grouped Text, Lines and arrows, Units, and Paper-sized; a size is in
+model units or, paper-sized, in millimetres on paper, as the line under the
+form says. Apply sends only the fields the form changed, as one `DIMSTYLE
+SET`, and nothing when none did; Duplicate sends one `DIMSTYLE NEW name
+field value ...` of what the form shows; Delete is refused while a layer
+names the style, naming the layer; Revert drops the edits. Under the form, a
+dimension of ten reads as the formatter `DIMSTYLE LIST` uses says, and a
+sample is drawn by the plan painter (`paintPlanGeometry`) at the drawing's
+annotation scale - the arrowhead choices' pictures too - so what is shown is
+what the plan view draws. The numbers are typed, not spun: a spin box of two
+places showed `Standard`'s 0.625 gap as 0.63, and Apply would have stored it.
+A form's unapplied edits survive a change that leaves their style alone (a
+layer made elsewhere) and give way to one that changes it.
 
 ## Stored with the project
 
@@ -401,10 +458,13 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/cad/annotation/test_auto_label.cpp` | rule matching, one step, re-runs, clearing, chainage rules, the default styles |
 | `tests/cad/annotation/test_dimensions_and_leaders.cpp` | every kind built and drawn, paper-sized styles, chains, leaders and callouts |
 | `tests/cad/annotation/test_annotation_verbs.cpp` | every verb and its reply, undo as one step |
+| `tests/cad/annotation/test_dimstyle_set_many.cpp` | `DIMSTYLE SET` and `NEW` with several pairs as one step, a bad pair refusing the line, `INFO`'s record, the changes between two styles reading back as the second, the words a dialog writes |
 | `tests/cad/annotation/test_export_annotation.cpp` | what a file is handed |
 | `tests/cad/tools/test_annotate.cpp` | the Leader tool's one entity, the Angular, Radius, Diameter and Ordinate Dimension tools |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
 | `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name |
+| `tests/qt_widgets/annotation/test_dimension_style_manager.cpp` | the Dimension Styles manager by object name: every field in one line and one step, New, Duplicate, a refused Delete, the preview and sample, Revert |
+| `qt_the_dimension_styles_manager_runs_its_lines_headless` (`tests/CMakeLists.txt`) | the real window: Format > Dimension Styles..., a style made and applied, undone by one typed UNDO |
 
 ## Not yet
 
