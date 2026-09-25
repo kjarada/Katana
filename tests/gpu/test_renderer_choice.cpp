@@ -87,3 +87,37 @@ TEST(RendererChoice, AnUnknownOverrideIsIgnoredAndSaidSo)
     EXPECT_EQ(decision.kind, RendererKind::Gpu);
     EXPECT_NE(decision.reason.find("vulcan"), std::string::npos) << decision.reason;
 }
+
+// The Vulkan build (Linux) is shown by the X11 and Wayland platforms, and by
+// nothing the Direct3D 11 build is shown by.
+TEST(RendererChoice, TheVulkanBuildIsShownOnXcbAndWaylandOnly)
+{
+    for (const char* platform : {"xcb", "wayland", "XCB"}) {
+        RendererEnvironment environment = desktop();
+        environment.backend = katana::qt::gpu::GpuBackend::Vulkan;
+        environment.platformName = platform;
+        const auto decision = chooseRenderer(environment);
+        EXPECT_EQ(decision.kind, RendererKind::Gpu) << platform;
+        EXPECT_NE(decision.reason.find("Vulkan"), std::string::npos) << decision.reason;
+    }
+    for (const char* platform : {"windows", "offscreen", "minimal", "vnc", "eglfs", ""}) {
+        RendererEnvironment environment = desktop();
+        environment.backend = katana::qt::gpu::GpuBackend::Vulkan;
+        environment.platformName = platform;
+        const auto decision = chooseRenderer(environment);
+        EXPECT_EQ(decision.kind, RendererKind::Software) << platform;
+        EXPECT_NE(decision.reason.find("Vulkan"), std::string::npos) << decision.reason;
+    }
+}
+
+// Only an explicit KATANA_RENDERER=gpu lets the view draw on a software
+// device; the default refuses one, and the software choice never carries it.
+TEST(RendererChoice, OnlyAskingForTheGpuAllowsASoftwareDevice)
+{
+    EXPECT_FALSE(chooseRenderer(desktop()).softwareDeviceAllowed);
+    RendererEnvironment asked = desktop();
+    asked.rendererOverride = "GPU";
+    EXPECT_TRUE(chooseRenderer(asked).softwareDeviceAllowed);
+    asked.platformName = "offscreen";
+    EXPECT_FALSE(chooseRenderer(asked).softwareDeviceAllowed);
+}

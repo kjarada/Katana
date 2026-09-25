@@ -63,6 +63,9 @@ SPECS = [
     "mpfr",
     "libboost-headers",
     "libgl-devel",
+    # Qt declares QVulkanInstance only where vulkan/vulkan.h is; the loader
+    # itself comes with the machine's graphics driver.
+    "libvulkan-headers",
     "gtest",
     "benchmark",
 ]
