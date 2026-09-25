@@ -239,10 +239,13 @@ A modal box in a headless run is a hang until the test's timeout. So
   (`qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless`);
 - the Sheets editor (`SheetEditor::setHeadless`, set by File > Sheets) opens
   no file dialog either: an image view's Browse names `VIEW SET id
-  file="path"`. Its Generate Sheets opens without waiting, so
-  `*fileSheets|@sheetGenerate` fills it by its object names
-  (`qt_generate_sheets_runs_the_line_it_shows_headless`); the dialog goes
-  when it closes, so a step after its OK names a new target (`%sheetToolBar`);
+  file="path"`, and Sheet Set's Save, Load and Append name `SHEETS SAVE`,
+  `LOAD` and `APPEND`; Load's "Replace the sheets?" is never asked. Its
+  Generate Sheets and Page Setup open without waiting, so
+  `*fileSheets|@sheetGenerate` and `@sheetPageSetup` fill them by their
+  object names (`qt_generate_sheets_runs_the_line_it_shows_headless`,
+  `qt_sheet_set_menu_runs_its_lines_headless`); a dialog goes when it
+  closes, so a step after its OK names a new target (`%sheetToolBar`);
 - Edit > Attributes, still `exec()`'d, logs that it is modal and names the
   switch that grabs it (`--attributes`) instead of opening; Format > Layers
   is non-modal and opens as any manager does;

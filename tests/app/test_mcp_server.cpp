@@ -355,6 +355,23 @@ TEST_F(McpServer, TheGenerateLineTheSheetsEditorWritesReachesTheRunCommandsTool)
     EXPECT_NE(textOf(result).find("scale=1250"), std::string::npos) << textOf(result);
 }
 
+// The Sheets editor's Sheet Set menu runs SHEETS lines; an agent appends
+// another set's sheets with the same line, renumbered after these.
+TEST_F(McpServer, TheSheetSetMenusAppendReachesTheRunCommandsTool)
+{
+    initialize();
+    const TempDir dir("sheets-append");
+    const std::string file = "\"" + dir.file("north set.json") + "\"";
+    const Json result = call("katana_run_commands",
+                             Json{{"commands",
+                                   {"SHEET NEW NORTH", "SHEETS SAVE " + file, "SHEET RENAME 1 COVER",
+                                    "SHEETS APPEND " + file, "SHEETS"}}});
+    EXPECT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    EXPECT_NE(textOf(result).find("appended 1 sheet from " + file + ": 2"), std::string::npos)
+        << textOf(result);
+    EXPECT_NE(textOf(result).find("sheet 2 id=s2 name=\"NORTH\""), std::string::npos) << textOf(result);
+}
+
 TEST_F(McpServer, AnOlderClientGetsTheFactsAsTextOnly)
 {
     (void)request("initialize", Json{{"protocolVersion", "2024-11-05"}});

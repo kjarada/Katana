@@ -229,6 +229,25 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 
+    # The Sheets editor's Sheet Set menu in the window: Copy Sheet Set as
+    # JSON runs SHEETS JSON through the window's one executor; Page Setup is
+    # filled and saved by its object names, one step and no plot; Save
+    # Sheet Set As, whose file dialog no headless session can answer, names
+    # its verb; and UNDO takes the page setup back.
+    add_test(NAME qt_sheet_set_menu_runs_its_lines_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SHEET NEW PLAN|*fileSheets|*sheetCopySetJson|@sheetPageSetup|plotColourMode=Greyscale|plotDpi=150|pageSetupFilePerSheet=on|?plotPatternPreview|!pageSetupSave|%sheetToolBar|>SHEETS PAGESETUP|*sheetSaveSet|>UNDO|>SHEETS PAGESETUP"
+            "-DEXPECT=\"format\":\"katana-sheets\".*plotPatternPreview: First file: 01 PLAN\\.pdf.*pagesetup style=greyscale lineweight=1 dpi=150 pattern=\"[^\"]*\" filepersheet=on.*type SHEETS SAVE \"path\" instead.*pagesetup style=colour lineweight=1 dpi=300 pattern=\"[^\"]*\" filepersheet=off"
+            "-DFORBID=Plotted|file="
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/sheet_set_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_sheet_set_menu_runs_its_lines_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+
     # The whole main window, built and painted headlessly: theme, toolbars, every
     # icon, the viewport with the sample in it. See tools/check_screenshot.cmake.
     add_test(NAME qt_screenshot_headless

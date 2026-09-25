@@ -743,7 +743,9 @@ Line waits for its first point.
 The Sheets editor is handed the runner when File > Sheets first opens it
 (`SheetEditor::setCommandRunner`): Generate Sheets, Choose Paper and the view
 fields run their `GENERATE`, `SHEET SUGGESTPAPER` and `VIEW SET` lines
-through it (`docs/plotting.md`, "The sheet editor"). The window's command line
+through it (`docs/plotting.md`, "The sheet editor"), and the Sheet Set menu
+its `SHEETS SAVE`, `LOAD`, `APPEND`, `JSON` and `PAGESETUP` lines ("The Sheet
+Set menu and Page Setup"). The window's command line
 and the editor's lines get the same sheet-verb context,
 `sheetVerbContextFor`, which replaced the window's own copy of it.
 

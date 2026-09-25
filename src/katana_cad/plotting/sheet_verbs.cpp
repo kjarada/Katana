@@ -909,8 +909,8 @@ Result<std::string> sheetsVerb(Document& document, const Words& args,
                                const SheetVerbContextProvider& context)
 {
     constexpr std::string_view kUsage =
-        "SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | CHECK [sheets=] [json] | "
-        "PAGESETUP [option=value ...]";
+        "SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | APPEND path | CHECK [sheets=] [json] "
+        "| PAGESETUP [option=value ...]";
     const std::string action = args.empty() ? "LIST" : upper(args[0]);
     if (action == "LIST") {
         if (args.size() > 1) {
@@ -963,6 +963,38 @@ Result<std::string> sheetsVerb(Document& document, const Words& args,
         }
         return std::format("loaded {} from {}", countOf(count, "sheet", "sheets"),
                            "\"" + args[1] + "\"");
+    }
+    if (action == "APPEND") {
+        // Another set's sheets after these, as one step: renumbered so they
+        // join without clashing (prepareForAppend, which also moves a key
+        // plan's references among them). The file's title block, revisions
+        // and page setup stay behind: they are the set's, and this set keeps
+        // its own.
+        if (args.size() != 2) {
+            return usage(kUsage);
+        }
+        auto loaded = readSheetSetFile(pathFrom(args[1]));
+        if (!loaded) {
+            return loaded.error();
+        }
+        const std::size_t count = loaded->sheets.size();
+        if (count == 0) {
+            return makeError(ErrorCode::InvalidArgument, "the file holds no sheets to append",
+                             "\"" + args[1] + "\"");
+        }
+        const std::size_t first = document.sheetSet().sheets.size();
+        if (const Status status = addSheets(document, std::move(loaded->sheets), "APPEND_SHEETS");
+            !status) {
+            return status.error();
+        }
+        std::string reply = std::format("appended {} from {}: {}", countOf(count, "sheet", "sheets"),
+                                        "\"" + args[1] + "\"",
+                                        count == 1 ? std::to_string(first + 1)
+                                                   : std::format("{} to {}", first + 1, first + count));
+        for (std::size_t i = first; i < first + count; ++i) {
+            reply += "\n" + describeSheet(document.sheetSet(), i);
+        }
+        return reply;
     }
     return usage(kUsage);
 }
@@ -2455,6 +2487,7 @@ options take.
 SHEETS [LIST]                   every sheet and its views
 SHEETS JSON [path]              the set as JSON, printed or written to a file
 SHEETS SAVE path | LOAD path    write the set to a JSON file | replace the set from one
+SHEETS APPEND path              another set's sheets from its JSON file, after these
 SHEETS CHECK [sheets=1,3-5] [json]   the preflight checks: a summary, then a finding a line,
                                 "severity code sheet view message=... fix=..." (- for none)
 SHEETS PAGESETUP [style=colour|grey|mono] [lineweight=f] [dpi=n] [pattern=text]

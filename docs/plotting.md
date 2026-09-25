@@ -699,6 +699,8 @@ beside the drawing:
   (organisation, project lines, client, set number and numbering,
   coordinate system, datum, the five sign-offs, notes, revisions and the
   logo), Fit Page, Plot Sheet, Plot All.
+- **Menus**: Sheet Set (save, load, append, copy as JSON, Page Setup; "The
+  Sheet Set menu and Page Setup"), Edit and View ("Editing on the canvas").
 
 **The editor's lines.** Generate Sheets, Choose Paper and the view fields
 below do not edit the set themselves. Each builds the line a person would
@@ -817,6 +819,7 @@ Only plotting needs the window, because it paints.
 | `SHEETS JSON [path]` | the set's JSON (`sheet_json.hpp`), printed, or written to a file | |
 | `SHEETS SAVE path` | the JSON written to a file | |
 | `SHEETS LOAD path` | the whole set replaced from a JSON file | `LOAD_SHEETS` |
+| `SHEETS APPEND path` | another set's sheets from its JSON file put after these, renumbered (`prepareForAppend`); this set keeps its own title block, revisions and page setup; an empty set is refused ("The Sheet Set menu and Page Setup") | `APPEND_SHEETS` |
 | `SHEETS CHECK [sheets=1,3-5] [json]` | the preflight checks ("Preflight checks"): `checked 2 sheets: 1 error, 3 warnings`, then a finding a line, `severity code sheet view message="..." fix="..." subject="..."` (`checkReplyLine`; `-` for the set or no view); `json` gives `findingsToJson` instead. In the window, with what the painter knows (`SheetVerbContext::check`) | |
 | `SHEETS PAGESETUP [style=colour\|grey\|mono] [lineweight=f] [dpi=n] [pattern=text] [filepersheet=on\|off]` | the set's page setup ("Plot styles and output"), printed as `pagesetup style=... lineweight=... dpi=... pattern="..." filepersheet=...`, or changed; refused whole by `validatePageSetup` | `PAGE_SETUP` |
 | `SHEET NEW [name] [paper=A1] [portrait] [frame=off] [legendblock=off] [at=n]` | a blank sheet, at the end or at position n; no name numbers it | `ADD_SHEET` |
@@ -2085,13 +2088,79 @@ application-modal progress dialog (`plotProgress`) with Cancel, so the
 sheets cannot be edited while they are painted, and the plot paints from a
 copy of the set. The editor's Plot Sheet and Plot All and File > Plot
 Sheets to PDF open the dialog; its "Keep these settings" box stores the
-choice as the page setup. On the command line, `--plot-sheets` takes
+choice as the page setup. Sheet Set > Page Setup changes the page setup
+without plotting ("The Sheet Set menu and Page Setup"). On the command line, `--plot-sheets` takes
 `--sheets`, `--format pdf|pdfs|png|tiff`, `--plot-style colour|grey|mono`,
 `--dpi` and `--line-weight-scale` (`docs/headless.md`).
 
 The tests are `tests/cad/plotting/test_page_setup.cpp`,
 `tests/qt_widgets/plotting/test_plot_style.cpp`, `test_plot_output.cpp` and
 `test_plot_dialog.cpp`.
+
+## The Sheet Set menu and Page Setup
+
+The Sheets editor's first menu, **Sheet Set** (`sheetSetMenu`,
+`src/katana_qt/plotting/sheet_set_menu.hpp`), keeps the whole set in a file
+and changes how it plots without plotting. Each item runs the `SHEETS` line
+a person would type through the editor (`SheetEditor::runLine`; in the
+window, its one executor), so the log shows what to type and each edit is
+one step:
+
+| Item | Object name | The line | Step |
+|---|---|---|---|
+| Save Sheet Set As... | `sheetSaveSet` | `SHEETS SAVE "path"` | |
+| Load Sheet Set... | `sheetLoadSet` | `SHEETS LOAD "path"` | `LOAD_SHEETS` |
+| Append Sheets From File... | `sheetAppendSet` | `SHEETS APPEND "path"` | `APPEND_SHEETS` |
+| Copy Sheet Set as JSON | `sheetCopySetJson` | `SHEETS JSON`, its reply put on the clipboard | |
+| Page Setup... | `sheetPageSetup` | `SHEETS PAGESETUP style= lineweight= dpi= pattern= filepersheet=` | `PAGE_SETUP` |
+
+- **Load asks first** when there are sheets to replace, and says that Undo
+  brings them back ("Replace the 3 sheets there are now? Undo brings them
+  back.", `sheetLoadSetQuestion`); a set with no sheets is not asked about.
+  Stored sheets that cannot be read are named in the question, since
+  `SHEETS LOAD` is the one verb that replaces them.
+- **Append** puts another set's sheets after these as one step
+  (`addSheets`): renumbered as a generator's output is when it joins a set
+  (`prepareForAppend`, which also moves a key plan's references among
+  them), so no id is used twice however often the same file is appended.
+  The file's title block, revisions and page setup stay behind: they belong
+  to its set, and this set keeps its own. An image view's picture is named,
+  not carried, so one from another project's assets is missing until it is
+  copied there; `SHEETS CHECK` says so. An empty set is refused ("the file
+  holds no sheets to append") rather than made a step that changes nothing,
+  and stored sheets that cannot be read are refused as every verb but LOAD
+  refuses them. The editor shows the first appended sheet.
+- **Copy Sheet Set as JSON** is the `SHEETS JSON` reply, the JSON the
+  project keeps (`sheet_json.hpp`), for another program or a message.
+- **A headless session** opens no file dialog and asks nothing: the three
+  file items name their verb instead (`A headless session opens no file
+  dialog: type SHEETS SAVE "path" instead.`).
+
+**Page Setup** (`pageSetupDialog`) is the Plot dialog in its page-setup
+mode (`PlotDialog::Mode::PageSetup`): the plot's colours
+(`plotColourMode`), line weights (`plotLineWeightScale`), resolution
+(`plotDpi`), file-name pattern (`plotPattern`, with the first file's name
+under it) and "A PDF per sheet" (`pageSetupFilePerSheet`), starting from
+the set's page setup; the sheet choice, the output, the file, the folder,
+the printer and Plot are not there. Save (`pageSetupSave`) runs
+`PlotDialog::pageSetupLine`, for example `SHEETS PAGESETUP style=greyscale
+lineweight=0.7 dpi=150 pattern="{n:02} {name}" filepersheet=on`: one step,
+and nothing is plotted. A pattern `validateFileNamePattern` refuses, or one
+holding a double quote (the command line has no way to type one), disables
+Save and says why; a backslash is written `\\` so the verb reads it back as
+itself. Before, the page setup changed only after a plot had run with "Keep
+these settings" ticked. `--dialog sheetPageSetup` finds the dialog by the
+action's data, so a headless session fills and saves it.
+
+The tests are `tests/cad/plotting/test_sheets_append.cpp` (the verb: one
+step, renumbered as `prepareForAppend` renumbers, the set's own title block
+kept, every refusal) and `tests/qt_widgets/plotting/test_sheet_set_menu.cpp`
+(each item by its object name: save and load round trip with the question
+answered and cancelled, append, the clipboard, the page setup saved with no
+plot and refused when it cannot be typed, and the headless session).
+`qt_sheet_set_menu_runs_its_lines_headless` drives the menu in the window,
+and `cli.sheets_append_puts_another_sets_sheets_after_these` the verb in
+`katana_cli`.
 
 ## Editing on the canvas
 
