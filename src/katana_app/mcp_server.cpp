@@ -568,14 +568,18 @@ const std::vector<Tool>& tools()
         list.push_back(Tool{
             "katana_import", "Import a file",
             "Import a file into the drawing: DXF always; with the GIS module also shapefiles, "
-            "GeoJSON, GeoPackage and other vector formats (as entities), and rasters and point "
-            "clouds (as reference layers). local: true imports vector data in the drawing's own "
-            "coordinates rather than reprojecting it.",
+            "GeoJSON, GeoPackage, .12da archives and other vector formats (as entities), and "
+            "rasters and point clouds (as reference layers). local: true moves what a DXF, "
+            "vector file or .12da archive holds as one piece, so that its lower-left corner sits "
+            "at 0,0 instead of at its survey coordinates.",
             objectSchema(
                 Json{{"path", {{"type", "string"}, {"description", "The file to import."}}},
                      {"local",
                       {{"type", "boolean"},
-                       {"description", "Import vector data untransformed (LOCAL)."}}}},
+                       {"description",
+                        "Move the imported data as one piece so its lower-left corner sits at "
+                        "0,0, its shape and dimensions unchanged (IMPORT ... LOCAL). Refused for "
+                        "rasters and point clouds, which are drawn at their own coordinates."}}}},
                 {"path"}),
             hints(false, false, false), [](Session& session, const Json& arguments) {
                 std::string line = "IMPORT " + quoted(requiredString(arguments, "path"));

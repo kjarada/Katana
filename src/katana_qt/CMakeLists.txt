@@ -23,6 +23,7 @@ endif()
 # No Q_OBJECT classes: signals are connected to lambdas, so moc is not needed.
 add_executable(katana WIN32 MACOSX_BUNDLE
     main.cpp
+    command_runner.hpp
     main_window.cpp
     main_window.hpp
     main_window_dxf.cpp

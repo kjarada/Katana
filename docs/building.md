@@ -261,10 +261,11 @@ may not see GDAL, PDAL or the archive readers:
 | Verb | `katana_cli` | the window's command line |
 |---|---|---|
 | the interpreter's verbs (`HELP`) | yes | yes |
-| `IMPORT`, `EXPORT`, `REFS`, `INFO <file>` (the interpreter's `INFO id` describes an entity) | yes (with `KATANA_BUILD_IO`) | yes |
-| `COPC` | yes | no |
-| `CUSTOMISE [REPLACE] <file>...` | yes | yes |
-| `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`, `MAPFILE CHECK` | yes | no: the Survey Code Manager's tabs |
+| `IMPORT <file> [LOCAL]`, `EXPORT`, `REFS`, `INFO <file>` | yes (with `KATANA_BUILD_IO`; a `.dxf` without it) | yes |
+| `INFO <id>` or `INFO #<id>`: an entity, the interpreter's - taken for a file only when a file of that name exists (both took every `INFO` for a file until 2026-09-26) | yes | yes |
+| `COPC <source> <destination.copc.laz>` | yes | yes (since 2026-09-26) |
+| `CUSTOMISE [REPLACE] <file>...`; `CUSTOMISE` alone reports what is loaded and from which files | yes | yes (the report since 2026-09-26) |
+| `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`, `MAPFILE CHECK` (the interpreter's since 2026-09-26; `docs/survey_coding.md`) | yes | yes |
 | `UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW` (the interpreter's since 2026-09-25; `docs/subsurface_utilities.md`) | yes | yes |
 | `ZOOM`, `GRID`, `SNAP`, `QUIT` | `QUIT` only | yes |
 | a catalogue tool's alias alone (`L`, `TRIM`, `STRETCH`) | no: "unknown command" where the interpreter has no verb of that name | starts the tool (`docs/tools.md`) |

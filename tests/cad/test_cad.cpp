@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <utility>
 
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
@@ -765,6 +766,62 @@ TEST(CadInterpreter, SaveAndOpenRoundTripThroughTheCommandLine)
                   ErrorCode::NotFound);
     }
     fs::remove_all(directory.parent_path());
+}
+
+TEST(CadInterpreter, InfoTakesAnIdWrittenPlainOrAsAnAnchoredPointNamesIt)
+{
+    Session s;
+    s.ok("RECT 0,0 10,5");
+    // A 10 x 5 rectangle: perimeter 30, area 50.
+    const std::string plain = s.ok("INFO 1");
+    EXPECT_EQ(plain, "1  Polyline  layer=0  vertices=4  closed  length=30  area=50");
+    EXPECT_EQ(s.ok("INFO #1"), plain);
+    EXPECT_EQ(s.fails("INFO #2"), ErrorCode::NotFound);
+    EXPECT_EQ(s.fails("INFO #"), ErrorCode::ParseFailure);
+    EXPECT_EQ(s.fails("INFO 0"), ErrorCode::ParseFailure);
+    EXPECT_EQ(s.fails("INFO 1 2"), ErrorCode::InvalidArgument);
+}
+
+TEST(CadInterpreter, AnEntityIdIsAPositiveWholeNumberPlainOrAfterAHash)
+{
+    for (const char* word : {"1", "12", "#12", "18446744073709551615"}) {
+        EXPECT_TRUE(CommandInterpreter::isEntityId(word)) << word;
+    }
+    // What a front end must still read as a file: anything else a path can be.
+    for (const char* word : {"", "#", "0", "#0", "-3", "1.5", "12a", "##12", "site.las",
+                             "18446744073709551616"}) {
+        EXPECT_FALSE(CommandInterpreter::isEntityId(word)) << word;
+    }
+}
+
+TEST(CadInterpreter, AnImportArgumentLosesOnePairOfQuotesAndAFinalUnquotedLocal)
+{
+    using Argument = CommandInterpreter::ImportArgument;
+    const auto read = [](std::string_view rest) {
+        const Argument argument = CommandInterpreter::importArgument(rest);
+        return std::pair(argument.path, argument.local);
+    };
+    EXPECT_EQ(read(" site.dxf"), std::pair(std::string("site.dxf"), false));
+    EXPECT_EQ(read(" site.dxf LOCAL"), std::pair(std::string("site.dxf"), true));
+    EXPECT_EQ(read(" site.dxf local "), std::pair(std::string("site.dxf"), true));
+    // What katana_import sends: the path quoted, LOCAL after it. The quotes
+    // were once left on, and every such import looked for "\"C:/a b.geojson\"".
+    EXPECT_EQ(read(" \"C:/Survey Data/parcels.geojson\" LOCAL"),
+              std::pair(std::string("C:/Survey Data/parcels.geojson"), true));
+    EXPECT_EQ(read("\t\"C:/Survey Data/parcels.geojson\"\tLOCAL"),
+              std::pair(std::string("C:/Survey Data/parcels.geojson"), true));
+    // A path with blanks may still be typed bare.
+    EXPECT_EQ(read(" C:/Survey Data/parcels.geojson"),
+              std::pair(std::string("C:/Survey Data/parcels.geojson"), false));
+    // LOCAL inside the quotes is the file's name, and a word ending in LOCAL is
+    // not the keyword.
+    EXPECT_EQ(read(" \"yard LOCAL\""), std::pair(std::string("yard LOCAL"), false));
+    EXPECT_EQ(read(" GLOCAL"), std::pair(std::string("GLOCAL"), false));
+    EXPECT_EQ(read(" LOCAL"), std::pair(std::string("LOCAL"), false));
+    // Nothing: a usage error for the front end to give.
+    EXPECT_EQ(read(""), std::pair(std::string(), false));
+    EXPECT_EQ(read("   "), std::pair(std::string(), false));
+    EXPECT_EQ(read(" \"\" LOCAL"), std::pair(std::string(), true));
 }
 
 TEST(CadInterpreter, KeepsAHistoryAndHasHelp)
