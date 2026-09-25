@@ -712,7 +712,12 @@ TEST(UtilityDialog, TheSourceAndTheScopeControlsGiveTheLineItsServices)
     EXPECT_EQ(command->text(), "UTILITY SCHEDULE \"C:/Deliverables/as built.csv\" VIEW 4 WHERE "
                                "PROP=utility.type:water");
 
-    // Run hands that line to the executor, as for every tab.
+    // Run hands that line to the executor, as for every tab; the status is
+    // read from the reply, here SCHEDULE's own record (HELP UTILITY).
+    bench.executor.reply = std::string(
+        "utilities scheduled path=\"C:/Deliverables/as built.csv\" lines=1 vertices=6\n"
+        "scope=view view=4 area=0,0,40,20 where=\"PROP=utility.type:water\" matched=9 lines=1 "
+        "completed=0 ignored=0\n");
     click(dialog, "utilityRun");
     ASSERT_EQ(bench.executor.lines.size(), 1u);
     EXPECT_EQ(bench.executor.lines.front(), command->text());
@@ -735,6 +740,46 @@ TEST(UtilityDialog, ALayerMadeWhileTheDialogIsOpenIsListedOnceTheEventLoopTurns)
     auto* layers = child<QListWidget>(dialog, "utilityLayers");
     ASSERT_NE(layers, nullptr);
     EXPECT_FALSE(layers->findItems("utilities/gas/QL-D", Qt::MatchExactly).isEmpty());
+}
+
+TEST(UtilityDialog, AScopeThatTakesNoUtilityLineIsSaidSoAndNothingIsSaidRegradedOrWritten)
+{
+    DrawnBench bench;
+    ASSERT_TRUE(bench.interpreter.run("LINE 0,0 10,0").ok());
+    // The real verb behind the dialog, so the status is held to the reply
+    // the verb gives.
+    UtilityDialogContext context = bench.context();
+    std::vector<QString> ran;
+    context.execute = [&bench, &ran](const QString& line) -> Result<std::string> {
+        ran.push_back(line);
+        return bench.interpreter.run(line.toStdString());
+    };
+    UtilityToolsDialog dialog(context);
+    dialog.showTool(UtilityTool::Regrade);
+    dialog.scopeControls().setChoice(katana::qt::ScopeChoice::Drawing);
+    const std::size_t steps = bench.document.history().undoCount();
+    click(dialog, "utilityRun");
+    ASSERT_EQ(ran.size(), 1u);
+    EXPECT_EQ(ran.back(), "UTILITY REGRADE DRAWING");
+    EXPECT_TRUE(text(dialog, "utilityOutput").contains("no utility lines in the scope"))
+        << text(dialog, "utilityOutput").toStdString();
+    // Not "Regraded as one undo step": no step was pushed for Undo to take.
+    EXPECT_EQ(text(dialog, "utilityStatus"),
+              "Nothing in the scope is a utility line: nothing was regraded, and nothing was "
+              "added to the undo history.");
+    EXPECT_EQ(bench.document.history().undoCount(), steps);
+
+    // Not "Written": there is no file.
+    QTemporaryDir folder;
+    ASSERT_TRUE(folder.isValid());
+    const QString out = folder.filePath("out.csv");
+    dialog.showTool(UtilityTool::Schedule);
+    fill(dialog, "utilityScheduleOut", out);
+    click(dialog, "utilityRun");
+    ASSERT_EQ(ran.size(), 2u);
+    EXPECT_EQ(text(dialog, "utilityStatus"),
+              "Nothing in the scope is a utility line: nothing was written.");
+    EXPECT_FALSE(QFile::exists(out));
 }
 
 TEST(UtilityDialog, UseSelectedTakesTheOneSelectedEntityAsTheWorks)

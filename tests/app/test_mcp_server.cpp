@@ -148,6 +148,28 @@ TEST_F(McpServer, EveryToolIsListedWithAnObjectSchema)
     }
 }
 
+// What an agent reads first names every UTILITY action and the scope words
+// they take, so what is drawn can be graded again and written back without
+// asking HELP first.
+TEST_F(McpServer, TheCommandToolNamesEveryUtilityActionAndTheScopeWords)
+{
+    initialize();
+    const Json tools = request("tools/list")["result"]["tools"];
+    std::string description;
+    for (const Json& tool : tools) {
+        if (tool["name"] == "katana_run_commands") {
+            description = tool["description"].get<std::string>();
+        }
+    }
+    ASSERT_FALSE(description.empty());
+    for (const char* word : {"UTILITY REPORT", "VERIFY", "CLEARANCE", "CHECK", "DRAW", "REGRADE",
+                             "SCHEDULE", "HELP UTILITY", "DRAWING", "SELECTION",
+                             "AREA x0,y0,x1,y1", "LAYERS a,b [ONLY]", "WHERE key=value",
+                             "MODIFY"}) {
+        EXPECT_NE(description.find(word), std::string::npos) << word;
+    }
+}
+
 TEST_F(McpServer, AnUnknownToolIsInvalidParams)
 {
     EXPECT_EQ(request("tools/call", Json{{"name", "katana_nothing"}})["error"]["code"], -32602);
