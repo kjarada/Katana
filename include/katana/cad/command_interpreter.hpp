@@ -22,9 +22,11 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/core/error.hpp"
 
 namespace katana::cad {
@@ -41,6 +43,22 @@ class CommandInterpreter {
     [[nodiscard]] const std::vector<std::string>& history() const { return history_; }
 
     [[nodiscard]] static std::string helpText();
+
+    // A line split into words as run() splits it: on whitespace, double
+    // quotes grouping words and removed ("" is an empty word). ParseFailure
+    // for a quote never closed. For a front end's own verbs (PLOTSHEETS), so
+    // they read a line exactly as the interpreter would.
+    [[nodiscard]] static katana::core::Result<std::vector<std::string>>
+    tokenize(std::string_view line);
+
+    // What the sheet verbs (plotting/sheet_verbs.hpp) cannot see in the
+    // Document - the surfaces a cross section samples, the extent the plan
+    // view draws - from the front end that has them. Headless there is none,
+    // and the verbs do without.
+    void setSheetContext(katana::cad::plotting::SheetVerbContextProvider provider)
+    {
+        sheetContext_ = std::move(provider);
+    }
 
     // Forgets the "last point" that relative (@dx,dy) and polar (@d<a) points
     // resolve against. The interpreter cannot see a document being replaced
@@ -78,6 +96,7 @@ class CommandInterpreter {
     Document& document_;
     std::vector<std::string> history_;
     std::optional<katana::geometry::Point2> lastPoint_;
+    katana::cad::plotting::SheetVerbContextProvider sheetContext_;
 };
 
 } // namespace katana::cad

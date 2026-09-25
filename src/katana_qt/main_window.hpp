@@ -12,6 +12,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "icons.hpp"
@@ -115,10 +116,16 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,
                                                         bool fitToDrawing);
-    // Every sheet of the project to one PDF (docs/plotting.md). A project
+    // Every sheet of the project to one PDF (docs/plotting.md), or those at
+    // `sheets` in that order, with 3D snapshots and images at `dpi`. A project
     // with no sheets plots one sheet fitted to the drawing, laid out for this
-    // plot only and not added to the project. Public for --plot-sheets.
-    [[nodiscard]] katana::core::Status plotSheetsToPdf(const QString& path);
+    // plot only and not added to the project. Public for --plot-sheets; the
+    // command line's PLOTSHEETS comes here too.
+    [[nodiscard]] katana::core::Status plotSheetsToPdf(const QString& path,
+                                                       std::span<const std::size_t> sheets = {},
+                                                       double dpi = 300.0);
+    // The drawing, read only: for --sheets-json, which writes its sheets.
+    [[nodiscard]] const katana::cad::Document& document() const { return document_; }
     // What sheets are drawn from: the drawing, this window's surfaces, meshes
     // and reference layers, the set's logo and the project's fields.
     [[nodiscard]] SheetSource sheetSource() const;
@@ -155,8 +162,9 @@ class MainWindow final : public QMainWindow {
     // For the headless --command switch, so a test can set up a drawing -
     // styles, entities, a selection - through the verbs a person types. An
     // empty line is Enter on an empty command line: the running tool's
-    // Enter, or the last tool again.
-    void runCommand(const QString& line);
+    // Enter, or the last tool again. False when the line logged an error, so
+    // a headless run can stop at a command that was refused.
+    bool runCommand(const QString& line);
 
     // Every key sequence the window's actions and menus answer to that two
     // of them share, one line each ("Ctrl+L: formatLayers, Line"); empty
@@ -432,6 +440,7 @@ class MainWindow final : public QMainWindow {
     bool refreshPending_ = false;       // a refreshAll() is queued on the event loop
     bool headless_ = false;
     int historyCursor_ = 0;         // position while browsing command history
+    int errorsLogged_ = 0;          // logMessage's errors so far, for runCommand
 };
 
 } // namespace katana::qt

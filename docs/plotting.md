@@ -685,6 +685,200 @@ beside the drawing:
 The tests are `tests/qt_widgets/test_sheet_painter.cpp` and
 `test_sheet_editor.cpp`.
 
+## Sheets on the command line
+
+Everything the editor does to sheets can be typed. The verbs are in
+`include/katana/cad/plotting/sheet_verbs.hpp`: `runSheetVerb(document,
+words)` runs one line and returns its reply, with no Qt and no window. The
+`CommandInterpreter` hands them on, so they work in three places:
+- the window's command line;
+- `katana_cli` scripts and `-c`;
+- `katana --command`.
+
+A person, a script and an AI agent drive the sheets with the same words.
+Only plotting needs the window, because it paints.
+
+**The words.**
+- Verbs, keys and words are case-insensitive. Separators in a key or field
+  name do not matter: `project_line_1`, `ProjectLine1` and `project1` are one
+  key.
+- A sheet is its number in the set (`3`) or its id (`s3`). A view is its id
+  (`vp7`), unique across the set.
+- Options are `key=value`. A switch is `on` or `off` (`yes`/`no`,
+  `true`/`false` and `1`/`0` also work).
+- Double quotes group words (`""` is an empty value). `\n` in a text is a
+  line break.
+- A scale is `500`, `1:500` or `auto`. A rectangle is `x0,y0,x1,y1` in paper
+  millimetres (either corner first).
+- Words left over after the sheet are the name or the value, so
+  `SHEET RENAME 2 LONG SECTION CH 0 TO 500` needs no quotes.
+
+| Verb | What it does | Undo step |
+|---|---|---|
+| `SHEETS [LIST]` | every sheet: number, id, name, paper, orientation, frame, legend block, its own fields, and each view's id, kind, scale and rectangle | |
+| `SHEETS JSON [path]` | the set's JSON (`sheet_json.hpp`), printed, or written to a file | |
+| `SHEETS SAVE path` | the JSON written to a file | |
+| `SHEETS LOAD path` | the whole set replaced from a JSON file | `LOAD_SHEETS` |
+| `SHEET NEW [name] [paper=A1] [portrait] [frame=off] [legendblock=off] [at=n]` | a blank sheet, at the end or at position n; no name numbers it | `ADD_SHEET` |
+| `SHEET REMOVE n` / `MOVE n to` / `COPY n` | `removeSheet`, `moveSheet`, `duplicateSheet` | `REMOVE_SHEET`, `MOVE_SHEET`, `DUPLICATE_SHEET` |
+| `SHEET RENAME n name` | | `RENAME_SHEET` |
+| `SHEET SET n [paper=] [orientation=] [frame=on\|off] [legendblock=on\|off] [name=]` | the sheet's paper and frame | `EDIT_SHEET` |
+| `SHEET FIELD n field [value]` | the sheet's own value for a field its frame prints (`sheet_number`, `scale`...); `""` clears it; no value prints it, marked `automatic` when the sheet has none | `SET_SHEET_FIELD` |
+| `VIEW ADD n kind [option=value...]` | a view placed as the editor's Add View places one, then given the options | `ADD_VIEWPORT` |
+| `VIEW SET id option=value...` | | `EDIT_VIEWPORT` |
+| `VIEW REMOVE id` | | `REMOVE_VIEWPORT` |
+| `VIEW LIST [n]` | every view, with every option it has | |
+| `TILE n preset` | `tileViewports`, by the preset's id (`sectionR`) or its menu name (`Main and panel right`, no quotes needed) | `TILE_VIEWPORTS` |
+| `GENERATE kind [option=value...] [replace=on]` | a generator's sheets, appended, or in place of every sheet | `GENERATE_SHEETS` |
+| `TITLEBLOCK [LIST]` | every shared title-block value, the logo and the revisions | |
+| `TITLEBLOCK field [value]` | reads or sets one value | `EDIT_TITLE_BLOCK` |
+| `TITLEBLOCK REVISION [LIST]` | the revisions, one a line | |
+| `TITLEBLOCK REVISION ADD code date description [by]` | a revision; a code already used is refused | `ADD_REVISION` |
+| `TITLEBLOCK REVISION REMOVE code` | | `REMOVE_REVISION` |
+| `TITLEBLOCK LOGO path` | `importLogo`; `""` removes the logo | `SET_LOGO` |
+| `HELP SHEETS` | every verb and option (`sheetVerbHelp`) | |
+| `PLOTSHEETS path [sheets=1,3-5] [dpi=300]` | the window only: the sheets, or those chosen, to one PDF | |
+
+**The view kinds** are the stored names (`plan`, `key_plan`, `long_section`,
+`cross_sections`, `model_3d`, `legend`, `notes`, `image`), plus some common
+words: `profile`, `xs`, `sections`, `3d`, `key`. A new view is set up as Add
+View sets one up (`defaultViewport`):
+- On an empty sheet it fills the tiling area. Otherwise it gets its kind's
+  own size, centred.
+- A plan is automatic in scale and centre, with a north arrow and a scale
+  bar.
+- Sections run along the drawing's first alignment. Cross sections are cut
+  half way along it, or half way along the one named by `alignment=`.
+- A key plan outlines the other sheets' plans. Headless, it outlines only
+  the plans at a fixed scale and centre, because where an automatic plan
+  falls is decided when it is drawn.
+- An image view needs `file=path`, which is copied into the project's
+  `assets/` as a logo is (`importImageAsset`, up to 32 MB), or
+  `text=name` for a file already there.
+
+| View option | Views | |
+|---|---|---|
+| `rect=x0,y0,x1,y1` | all | refused when it misses the paper |
+| `scale=500\|1:500\|auto`, `centre=x,y\|auto` | plan, key plan, sections | `auto` sets `autoScale` / `autoCentre` |
+| `rotation=deg` | plan, key plan, 3D | the world direction across the paper, counter-clockwise |
+| `alignment=`, `from=`, `to=` | plan, key plan, sections | the alignment must exist |
+| `stations=a,b,c`, `interval=`, `halfwidth=` | cross sections | |
+| `ve=` | sections | vertical exaggeration |
+| `tilt=deg` | 3D | 1 to 89 |
+| `north=on\|off`, `scalebar=on\|off` | plan, key plan | |
+| `locked=on\|off`, `title=text` | all | an empty title is the automatic one |
+| `text=text` | notes, image | |
+| `hide=layer`, `show=layer`, `hidden=a,b` | all | the view's hidden layers |
+| `file=path` | image | |
+
+An option a kind does not have is refused by name (`scale= is for plan,
+key_plan, long_section and cross_sections views, not legend`). A view's kind
+is fixed: remove it and add another.
+
+**GENERATE** runs a generator and adds its sheets (`addSheets`), or with
+`replace=on` puts them in place of every sheet, as one step:
+
+| Kind | Generator | Options |
+|---|---|---|
+| `fit` | `smartLayout` of the drawing, `area=` or `alignment=` | `scale=auto\|n`, `model3d=on`, `legend=on`, `interval=`, `halfwidth=` |
+| `grid` | `gridSheets` over the drawing or `area=` | `scale=500`, `overlap=m`, `keyplan=on\|off` |
+| `strips` | `stripSheets` at a fixed scale; on `auto`, the whole alignment fitted on one sheet (`smartLayout`) | `alignment=`, `scale=`, `overlap=`, `from=`, `to=`, `keyplan=` |
+| `profile` | `smartLayout`, plan and profile | `alignment=`, `scale=`, `interval=`, `halfwidth=`, `model3d=`, `legend=` |
+| `sections` | `crossSectionSheets` | `alignment=`, `interval=` or `stations=`, `halfwidth=`, `rows=`, `columns=`, `scale=`, `ve=auto\|n` |
+| `frames` | `sheetsFromPlotFrames`, and the frames skipped, with the reason | `frame=on\|off` |
+
+All kinds but `frames` also take `paper=`, `portrait` or `landscape`, and
+`frame=`. `alignment=` may be left out when the drawing has only one. An
+option the kind does not take is refused, and the reply lists the ones it
+does. The document holds neither the surfaces a section samples nor
+the imagery a plan draws, so the front end supplies them
+(`SheetVerbContext`):
+- The window passes everything its plan view draws, as the extent `fit` and
+  `grid` cover, and its visible surfaces for `sections`.
+- Headless, the extent is the drawing's entities, and each section is
+  centred when drawn at an exaggeration of 1.
+- The context is asked for only by the verbs that need it.
+
+**Title-block fields** are the set's shared values (`titleBlockValue`,
+`setTitleBlockValue`):
+- `organisation`, `project1` to `project4`, `client`, `setnumber`;
+- `numbering`, the sheet-number pattern, which must contain `{n}`;
+- `coordsys`, `datum`, `model`, `notes`;
+- `<role>name` and `<role>date` for the locator, surveyor, compiler, reviewer
+  and approver.
+
+The frame's own field names (`project_line_1`, `height_datum`) are accepted
+too. A project line cleared at the end of the list is removed from it, so
+clearing the lines returns the set to its default.
+
+**Replies** are one fact per line, in the `key=value` form the options take,
+so an option an agent reads can be typed back. Text values are in double
+quotes, with a line break written as `\n` (and a typed `\n` in a name, a
+title, a text or a title-block value is read as a line break). The command
+line has no way to type a double quote inside a value, so a value holding
+one is printed as it is and cannot be typed back. What only describes (a
+view's `id=`, `kind=` and `marks=`, a sheet's `views=`) is not an option. Numbers are rounded to a
+millionth and written in their shortest form. For example:
+
+```
+2 sheets
+sheet 1 id=s1 name="PLAN" paper=A3 orientation=landscape frame=a3_landscape legendblock=on views=2
+  view id=vp1 kind=plan scale=500 rect=24,36,409,286
+  view id=vp2 kind=legend rect=176.5,111,256.5,211
+sheet 2 id=s2 name="KEY PLAN" paper=A4 orientation=portrait frame=a3_landscape legendblock=on views=1
+  view id=vp3 kind=key_plan scale=auto rect=11,11,199,286
+```
+
+An edit replies with what it made: `added sheet 3 id=s5 ...`, `generated 7
+sheets: 1 to 7` followed by each sheet, or `view id=vp2 ...` after a `VIEW
+SET`. An error names what was refused and why, with a code an agent can test:
+- `NotFound`: `no sheet 9: the set has 3 sheets`, a view or alignment that
+  does not exist;
+- `ParseFailure`: a number or list that cannot be read;
+- `InvalidArgument`: a value out of range, or an option a kind does not
+  take;
+- `AlreadyExists`: a revision code in use;
+- `Unsupported` (a newer version) or `ParseFailure` (text that is not a
+  set) with "the project's sheets cannot be read": the stored sheets cannot
+  be read. Every verb but `SHEETS LOAD` is then refused, so neither a list
+  shows them as none nor an edit made on nothing replaces them. `SHEETS
+  LOAD` replaces them on purpose, as one step `UNDO` takes back.
+
+**One step each.** Every edit goes through `sheet_commands.hpp`, so it is ONE
+undo step. An edit that is refused, or has one bad option among good ones,
+changes nothing and records nothing: `VIEW SET vp1 scale=100 tilt=45` on a
+plan keeps neither. `VIEW ADD` and `VIEW SET` try every option before an image
+is copied into the project. The same lines give the same set every time.
+
+**The window and the switches.**
+- `PLOTSHEETS path.pdf [sheets=1,3-5] [dpi=300]` is read by the window with
+  the interpreter's tokenizer (`CommandInterpreter::tokenize`) and
+  `parsePlotSheets`. It calls the same `MainWindow::plotSheetsToPdf` as
+  File > Plot Sheets to PDF.
+  - `sheets=` takes numbers, ids, ranges (`2-4`, `s2-s4`) and `all`, in the
+    order given.
+  - `dpi=` is what 3D snapshots and images are rasterised at, 72 to 1200.
+- `katana project --sheets-json out.json` writes the project's sheets and
+  exits; `-` writes them to stdout.
+- Without `--screenshot`, `--command` lines run before `--sheets-json` and
+  `--plot-sheets`, and a refused one fails the run. So an agent can lay out,
+  keep and plot in one headless run (`docs/headless.md`):
+  `katana project --command "GENERATE grid scale=500" --command SAVE
+  --sheets-json - --plot-sheets out.pdf`.
+
+The tests are `tests/cad/plotting/test_sheet_verbs.cpp`, which types lines
+through the interpreter:
+- every verb, with its reply and its errors;
+- each edit undone and redone exactly, one step at a time
+  (`EveryEditIsOneUndoStepThatUndoesExactly`);
+- the JSON saved, loaded and compared whole
+  (`SheetsJsonSaveAndLoadRoundTripTheWholeSet`);
+- the same lines giving the same set (`TheSameLinesMakeTheSameSet`).
+
+`cli.sheet_verbs_lay_out_edit_and_list_the_sheets` runs the verbs in
+`katana_cli`. `qt_sheets_headless` runs them, `PLOTSHEETS` and both switches
+in the window.
+
 ## Not yet
 
 - **Change notifications.** A sheet edit notifies the document's listeners

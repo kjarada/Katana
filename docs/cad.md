@@ -172,6 +172,10 @@ Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 `LT`/`LTYPE`, `DS`, `HA`, `ST`, `AL` and `PARC`. This list lacked the tables
 and civil verbs until the audit of 2026-09-23.
 
+The sheet verbs (`SHEETS`, `SHEET`, `VIEW`, `TILE`, `GENERATE`,
+`TITLEBLOCK`, and `HELP SHEETS`) are handed to `plotting::runSheetVerb`;
+`docs/plotting.md`, "Sheets on the command line", describes them.
+
 Added on 2026-09-23 for the style, linetype and symbol managers (fixing audit
 CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 
