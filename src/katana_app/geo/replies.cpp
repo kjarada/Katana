@@ -2,8 +2,10 @@
 
 #include "replies.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <vector>
@@ -38,6 +40,33 @@ std::string value(std::string_view text)
     // Nothing at all for nothing ("aliases="), so an absent value is not a
     // pair of quotes a reader has to recognise.
     return text.empty() ? std::string() : katana::cad::recordValue(text);
+}
+
+bool lineKeyword(std::string_view word)
+{
+    // Compared lower case (core::lowered): a line reads its words in any case.
+    static constexpr std::string_view kKeywords[] = {
+        // Clauses and flags.
+        "to", "from", "preview", "confirm", "overwrite", "replace", "append", "convex", "holes",
+        "observers", "only", "extents", "drawn",
+        // Words that take a value.
+        "name", "save", "format", "layer", "layers", "with", "by", "minus", "at", "as", "observer",
+        "target", "cell", "where",
+        // Sources, targets and scopes.
+        "file", "raster", "surface", "reference", "report", "selection", "sel", "drawing", "all",
+        "view", "area"};
+    const std::string folded = katana::core::lowered(word);
+    return std::ranges::find(kKeywords, std::string_view(folded)) != std::end(kKeywords);
+}
+
+std::optional<std::string> lineWord(std::string_view text)
+{
+    if (text.find_first_of("\"\r\n") != std::string_view::npos) {
+        return std::nullopt;
+    }
+    const bool quote =
+        text.empty() || text.find_first_of(" \t") != std::string_view::npos || lineKeyword(text);
+    return quote ? "\"" + std::string(text) + "\"" : std::string(text);
 }
 
 std::string fixed3(double number)

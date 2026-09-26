@@ -34,15 +34,16 @@ namespace {
 namespace gp = katana::gis::processing;
 namespace geo = katana::app::geo;
 
-// A word of a line: as it is, or quoted when it holds a blank or is empty.
-// The line has no escape, so a quote or a line break cannot be said at all.
+// A word of a line by the one quoting rule (geo::lineWord): quoted when it
+// holds a blank, is empty or reads as a keyword. The line has no escape, so a
+// quote or a line break cannot be said at all.
 std::string word(const std::string& text, const char* what)
 {
-    if (text.find_first_of("\"\r\n") != std::string::npos) {
+    auto quoted = geo::lineWord(text);
+    if (!quoted) {
         throw ToolRefusal{std::string(what) + " may not contain a double quote or a line break"};
     }
-    const bool blank = text.empty() || text.find_first_of(" \t") != std::string::npos;
-    return blank ? "\"" + text + "\"" : text;
+    return std::move(*quoted);
 }
 
 std::string number(const Json& value)

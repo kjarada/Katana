@@ -327,6 +327,35 @@ TEST_F(GisDissolve, AnInPlaceReplaceRefusesADrawingChangedWhileItRan)
     EXPECT_EQ(entityCount(), before);
 }
 
+TEST(GeoLineWord, ABlankAnEmptyWordAndAKeywordAreQuotedAndAQuoteIsRefused)
+{
+    using katana::app::geo::lineWord;
+    EXPECT_EQ(lineWord("gis/easement"), "gis/easement");
+    EXPECT_EQ(lineWord("set backs"), "\"set backs\"");
+    EXPECT_EQ(lineWord(""), "\"\"");
+    for (const char* keyword : {"preview", "PREVIEW", "Confirm", "to", "FROM", "overwrite",
+                                "replace", "name", "minus", "where", "reference"}) {
+        EXPECT_EQ(lineWord(keyword), "\"" + std::string(keyword) + "\"") << keyword;
+    }
+    EXPECT_FALSE(lineWord("a\"b").has_value());
+    EXPECT_FALSE(lineWord("a\nb").has_value());
+}
+
+TEST_F(GisBuffer, AnOutputNamedLikeAKeywordGoesWhereItSaysOnceQuoted)
+{
+    // TO LAYER preview was refused ("needs the layer's path"), and a dialog
+    // or an agent that wrote a name as it was typed wrote exactly that.
+    // Quoted by the one rule, the name is a name.
+    line(0, 0, 100, 0, "pipes");
+    auto bare = run("GIS BUFFER LAYERS pipes distance=1 TO LAYER preview");
+    EXPECT_FALSE(bare.ok());
+    for (const char* name : {"preview", "CONFIRM", "overwrite", "from"}) {
+        const std::string reply =
+            ok("GIS BUFFER LAYERS pipes distance=1 TO LAYER " + *katana::app::geo::lineWord(name));
+        EXPECT_EQ(on(name).size(), 1u) << reply;
+    }
+}
+
 TEST(GisBufferContract, TheArgumentsTheVerbsBindAreGdals)
 {
     using katana::geo_test::expectArgument;
