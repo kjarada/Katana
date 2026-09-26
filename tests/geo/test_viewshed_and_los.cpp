@@ -171,7 +171,16 @@ TEST(ViewshedContract, TheVerbStillFindsTheArgumentsItBinds)
     using katana::geo_test::expectArgument;
     expectArgument({"raster", "viewshed"}, "input", gp::ArgType::DatasetList, true);
     expectArgument({"raster", "viewshed"}, "position", gp::ArgType::RealList, false);
-    expectArgument({"raster", "viewshed"}, "height", gp::ArgType::Real, false);
+    // The eye height goes as the position's third value (X,Y,H): GDAL 3.13
+    // ignores --height beside a two-value position. The position must still
+    // take three values.
+    const auto viewshed = gp::describe({"raster", "viewshed"});
+    ASSERT_TRUE(viewshed.ok());
+    bool threeValues = false;
+    for (const gp::ArgSpec& arg : viewshed->args) {
+        threeValues = threeValues || (arg.name == "position" && arg.maxCount >= 3);
+    }
+    EXPECT_TRUE(threeValues);
     expectArgument({"raster", "viewshed"}, "target-height", gp::ArgType::Real, false);
     expectArgument({"raster", "viewshed"}, "max-distance", gp::ArgType::Real, false);
     // The curvature the hand-worked shadows switch off.
@@ -217,6 +226,9 @@ TEST_F(Viewshed, OnFlatGroundEveryCellWithinMaxDistanceIsVisible)
     // 1 m cells: the area is the count.
     EXPECT_EQ(summary[0].get("area").value_or(""), std::to_string(*cells) + ".000");
     EXPECT_EQ(reference.rasters().back().name, "flat-viewshed");
+    // Nothing to warn about: the display colours name no no-data entry the
+    // union grid, which has none, would make GDAL say it ignores.
+    EXPECT_TRUE(records(reply, "warning").empty()) << reply;
     EXPECT_EQ(reference.rasters().back().role, katana::interop::RasterRole::Derived);
 }
 
@@ -232,6 +244,32 @@ TEST_F(Viewshed, BehindARidgeTheShadowEndsWhereSimilarTrianglesSay)
         const bool hidden = d >= 21 && d <= 48;
         EXPECT_EQ(view.seen(x, 15.5), std::optional<bool>(!hidden)) << "x = " << x;
     }
+}
+
+TEST_F(Viewshed, TheUnseenCellsAreDrawnClearAndTheSeenTinted)
+{
+    // The overlay drawn over the plan: the cell 30 m out along the
+    // observer's row is hidden behind the wall (21 to 48 m out, as above),
+    // so it must let the ground show through - alpha 0 - and the cell 10 m
+    // out, seen, carries the tint (255, 140, 0) at alpha 150.
+    ran("RASTER VIEWSHED FILE \"" + wall() + "\" OBSERVER 0.5,15.5 curvature=none");
+    ASSERT_FALSE(reference.rasters().empty());
+    const katana::interop::RasterOverlay& overlay = reference.rasters().back();
+    ASSERT_EQ(overlay.rgba.size(), static_cast<std::size_t>(overlay.width) *
+                                       static_cast<std::size_t>(overlay.height) * 4U);
+    const auto pixel = [&](double x, double y) {
+        const auto& gt = overlay.geotransform;
+        const auto column = static_cast<std::size_t>(std::floor((x - gt[0]) / gt[1]));
+        const auto row = static_cast<std::size_t>(std::floor((y - gt[3]) / gt[5]));
+        return (row * static_cast<std::size_t>(overlay.width) + column) * 4U;
+    };
+    const std::size_t hidden = pixel(30.5, 15.5);
+    EXPECT_EQ(overlay.rgba[hidden + 3], 0U);
+    const std::size_t seen = pixel(10.5, 15.5);
+    EXPECT_EQ(overlay.rgba[seen + 0], 255U);
+    EXPECT_EQ(overlay.rgba[seen + 1], 140U);
+    EXPECT_EQ(overlay.rgba[seen + 2], 0U);
+    EXPECT_EQ(overlay.rgba[seen + 3], 150U);
 }
 
 TEST_F(Viewshed, TwoObserversGiveTheUnionOfTheirViewsheds)
@@ -347,6 +385,10 @@ TEST_F(Viewshed, LosOverARasterWallIsBlockedAtTheWall)
     ASSERT_NE(comma, std::string::npos) << reply;
     EXPECT_NEAR(katana::core::parseFiniteDouble(blocked.substr(0, comma)).value_or(0.0), 20.5, 1e-9);
     EXPECT_NEAR(katana::core::parseFiniteDouble(blocked.substr(comma + 1)).value_or(0.0), 15.5, 1e-9);
+    // A computed station is given to the millimetre, as the distances are,
+    // not as the shortest text of a double: a station on terrain.asc was
+    // printed as 149.43965517241378,119.50431034482759.
+    EXPECT_EQ(blocked, "20.500,15.500");
     EXPECT_EQ(sight[0].get("step").value_or(""), "0.5");
     EXPECT_EQ(sight[0].get("distance").value_or(""), "30.000");
     EXPECT_EQ(document.history().undoCount(), 0U);

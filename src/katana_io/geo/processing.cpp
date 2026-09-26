@@ -1046,6 +1046,34 @@ FeatureSet readFeatures(GDALDataset& dataset, std::vector<Diagnostic>& diagnosti
     return set;
 }
 
+// A colour map's picture made in memory says what its bands are. GDAL 3.13's
+// raster color-map leaves every band's colour interpretation Undefined when
+// it writes to MEM (a GTiff output gets red, green, blue and alpha from the
+// driver's own defaults, which is why the command line looks right). Copied
+// on so, the picture reads as three undesignated colour bands and a fourth
+// no reader may take for alpha - it could as well be near infrared - and
+// every cell the map made clear is drawn opaque. Its bands are, by the
+// algorithm's definition, red, green, blue and, with --add-alpha, alpha.
+void stampColourMapBands(const std::vector<std::string>& path, GDALDataset& dataset)
+{
+    if (path != std::vector<std::string>{"raster", "color-map"}) {
+        return;
+    }
+    const int count = dataset.GetRasterCount();
+    if (count != 3 && count != 4) {
+        return;
+    }
+    constexpr GDALColorInterp kRoles[] = {GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand};
+    for (int i = 1; i <= count; ++i) {
+        if (dataset.GetRasterBand(i)->GetColorInterpretation() != GCI_Undefined) {
+            return; // said already: a later GDAL that sets them is taken at its word
+        }
+    }
+    for (int i = 1; i <= count; ++i) {
+        dataset.GetRasterBand(i)->SetColorInterpretation(kRoles[i - 1]);
+    }
+}
+
 // A raster too big for memory, as the tiled GeoTIFF a derived reference
 // raster is kept in: DEFLATE, with the floating-point predictor for
 // floating-point data (docs/geoprocessing.md, "Outputs").
@@ -1695,6 +1723,7 @@ Result<RunOutputs> run(const RunRequest& request, const std::stop_token& stop,
     RunOutputs outputs;
     if (bound.memoryOutput && output.dataset != nullptr) {
         GDALDataset& dataset = *output.dataset;
+        stampColourMapBands(request.path, dataset);
         if (dataset.GetRasterCount() > 0) {
             const std::uint64_t cells = static_cast<std::uint64_t>(dataset.GetRasterXSize()) *
                                         static_cast<std::uint64_t>(dataset.GetRasterYSize()) *

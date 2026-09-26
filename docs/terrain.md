@@ -817,7 +817,10 @@ LOS SURFACE <name> | RASTER <id|name> | FILE <path> OBSERVER x,y TARGET x,y
   visible= distance= observer_z= target_z= clearance= clearance_at=
   blocked_at= blocked_distance= blocked_ground= stations= unknown=`. A
   grazing sight (clearance exactly 0) sees; a station off the ground hides
-  nothing and is counted as unknown, never read as ground at 0. Curvature
+  nothing and is counted as unknown, never read as ground at 0. The ends
+  are echoed as given; a computed station (`clearance_at=`, `blocked_at=`)
+  is given to the millimetre like the distances beside it, since at full
+  precision a station read 149.43965517241378,119.50431034482759. Curvature
   lowers the ground by the coefficient x d^2 / 12 741 994 m, GDAL's rule
   and sphere, so a sight line and a viewshed of the same ground agree.
 - **The hand-worked tests switch curvature off** (`curvature=none`): the
@@ -837,9 +840,49 @@ LOS SURFACE <name> | RASTER <id|name> | FILE <path> OBSERVER x,y TARGET x,y
   hidden from 20 x 5 / (5 - 1.7)). An eye below the wall top sees nothing
   behind it, so no shadow ends; the fixture here puts the eye above a 1 m
   wall, where the shadow's far edge is the similar-triangles value.
+- **The eye height rides in the position, `--position X,Y,H`,** not in
+  `--height`. GDAL 3.13 ignores `--height` beside a two-value position and
+  looks from its default 2 m: measured on the wall fixture, the shadow of
+  the 1 m wall 20 m off ended at 20 x 2 / (2 - 1) = 40 m whether the
+  height asked was 1.5, 1.7, 3 or 100, and at the similar-triangles
+  48.571 m once the height went as H.
+  `Viewshed.BehindARidgeTheShadowEndsWhereSimilarTrianglesSay` failed until
+  it did; the contract test pins that the position still takes three
+  values.
+- **The picture's clear cells are clear.** GDAL 3.13's `raster color-map`
+  writing to memory leaves every band's colour interpretation Undefined
+  (a GeoTIFF output gets red, green, blue, alpha from the driver's
+  defaults, so the command line looks right); copied on, the fourth band
+  read as no alpha and every unseen cell drew opaque black over the
+  ground. The processing adapter now names a color-map output's bands red,
+  green, blue and alpha (`stampColourMapBands`,
+  `src/katana_io/geo/processing.cpp`) - by the algorithm's definition, and
+  only when GDAL named none. Rejected: taking any fourth undesignated band
+  as alpha in the importer, which would make a four-band image's near
+  infrared its transparency. This reaches the shading and slope pictures
+  too. `Viewshed.TheUnseenCellsAreDrawnClearAndTheSeenTinted` checks the
+  pixels.
+- **No `nv` entry in the tint's colour file.** The unioned grid has no
+  no-data value, and an `nv` line made GDAL warn on every run that it
+  ignored it.
 - **The sight line's least clearance is between the ends,** not at them:
   at the observer it is the eye height and at the target the target height
   by definition, and a target on the ground would make every answer 0.
+
+### Tests in the window
+
+The three dialogs are driven through the real window headless by their
+object names (`tests/geo/headless/analysis.cmake`), each reply checked
+against values worked by hand:
+`qt_statistics_by_area_dialog_writes_the_lot_headless` (a 40 x 30 m lot on
+`samples/gis/terrain.asc`: count 1200 / 2.25 = 533.333, and the mean
+27.8048, the coverage-weighted mean worked independently from the text
+grid), `qt_drape_and_sample_dialog_drapes_and_samples_headless` (a string's
+three vertices draped on `plane.asc`, and the Sample tab's 100 + 0.05 x
+12.3 = 100.615 with nothing off the raster) and
+`qt_viewshed_and_line_of_sight_dialog_sees_the_plane_headless` (every one
+of the rising plane's 1200 cells seen from its west edge, one area drawn,
+and a sight line from an eye at 101.725 to ground at 101.975 that clears).
 
 ### Not done
 
