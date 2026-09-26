@@ -388,6 +388,7 @@ GDAL [RUN] <algorithm> [<gdal word>...] [FROM [<arg>] <source>]... [TO [<arg>] <
 <scope>  := SELECTION | DRAWING | VIEW [<id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY],
             then [WHERE key=value ...] - cad::parseScopeWords, the one scope parser
 <target> := LAYER <path> | REFERENCE [<name>] | FILE <path> [FORMAT <driver>]
+            | SELECTION | REPORT (V5: a query's katana_id selected, its rows reported)
 ```
 
 - **The algorithm.** One to three words, by longest match, aliases taken.
@@ -996,7 +997,79 @@ is in its row); `simplify-coverage` stays in the GDAL verb and the toolbox.
 
 ### V5: GIS SQL and katana_gis_query
 
-Not started. `TO SELECTION` and `TO REPORT` have their block in `bindings.cpp`.
+```
+GIS SQL "<select>" [<scope>] [dialect=sqlite|ogrsql]
+        [AS REPORT | AS SELECT | AS LAYER <layer>] [csv=<file>] [OVERWRITE] [PREVIEW]
+```
+
+The drawing queried with SQL through GDAL's `vector sql`
+(`src/katana_app/geo/sql_verbs.cpp`). The window's item is GIS > Analysis -
+GDAL > Query with SQL... (`gisSql`, `src/katana_qt/geo/sql_dialog.hpp`), with
+the tables and their columns listed for the scope and the rows in a grid;
+an agent's is the MCP tool `katana_gis_query` (`docs/mcp.md`).
+
+- **The tables** are drawingDataset's: `points`, `lines`, `polygons`, each
+  with `katana_id`, `layer`, `style`, `colour`, `type` and then the
+  entities' properties as typed columns. The geometry column is `geometry`
+  (`ST_Area(geometry)`). An identifier with a dot is written `[gis.source]`
+  or `"gis.source"`.
+- **SQLite by default**, with Spatialite's `ST_` functions; `dialect=ogrsql`
+  is OGR's own SQL.
+- **A query reads.** Only one SELECT runs: any other statement, and a `;`
+  beginning a second one, is refused before GDAL sees it
+  (`GisSql.ANonSelectStatementIsRefused`). `SPATIALITE_SECURITY` is never
+  set, so Spatialite's file functions are not even there: `BlobToFile` is
+  "no such function", and no file appears (`GisSql.BlobToFileIsRefused`).
+- **AS REPORT** (the default) answers a `column` record per column - its
+  name, its key in the rows and its type, so a reader knows a 7 from a "7" -
+  and a `row` record per row. A null has no cell in its row: said as
+  nothing, not as an empty value. A column name a record cannot hold (a
+  blank, `=`) is keyed with `_` in its place (`count(*) n` is `count(*)_n`).
+  `csv=<file>` writes the rows too.
+- **AS SELECT** makes the entities the `katana_id` column names the
+  selection (`GisSql.AsSelectSelectsTheReturnedIds`).
+- **AS LAYER <layer>** draws the geometry the rows return, as one undo step
+  (`GisSql.AsLayerCreatesOneUndoStep`).
+- **AS is TO.** `AS SELECT` is the target parser's `TO SELECTION`, and
+  `TO REPORT`, `TO SELECTION` are now the GDAL verb's too: the V5 block of
+  `bindings.cpp` applies them through `vector::reportRecords` and
+  `vector::selectFeatures`, so `GDAL vector sql ... FROM DRAWING TO REPORT`
+  answers the same records (`GisSql.TheGdalVerbReportsAndSelectsToo`).
+
+```
+column name=owner key=owner type=string
+column name=area key=area type=real
+row owner=Jones area=600
+row owner=Smith area=4000
+output arg=output kind=vector target=report rows=2
+sql dialect=sqlite tables=polygons rows=2
+```
+
+**One line, whoever writes it.** A line cannot carry a double quote inside a
+quoted word, so the dialog and `katana_gis_query` write a statement through
+`vector::sqlForLine`: line breaks become blanks, and SQLite's
+`"identifiers"` become `[identifiers]`, which SQLite reads alike. A double
+quote inside a `'...'` literal, or any in OGR SQL, cannot be written, and is
+refused naming why.
+
+**katana_gis_query** builds `GIS SQL "<sql>" <scope> dialect=<d>` - the
+scope `drawing` unless it says otherwise, since a question of the drawing is
+the usual one - runs it through the Session and reads the records back:
+`{columns, column_types, rows, matched, used}`, each cell typed by its
+column (`GisQueryMcp.GisQueryReturnsRowsAsJson`, driving the MCP server as a
+client does). Its test is in `tests/geo`, beside the verb's, rather than
+in `tests/app/test_mcp_server.cpp`, which every lane would otherwise append
+to.
+
+**Tests.** `tests/geo/test_sql_verb.cpp`, by hand: a 50 x 40 lot's
+`ST_Area` is 2000 and its 1 m inward buffer's 48 x 38 = 1824; Smith's two
+lots sum to 4000 and Jones's to 600. The dialog:
+`tests/qt_widgets/geo/test_sql_dialog.cpp`; katana_cli:
+`cli.gis_sql_counts_and_sums_the_area_of_two_lots`.
+
+**Not done.** Spatialite over the MEM tables has no spatial index, so a
+spatial join of many thousands of features is slow; materialising to a
+GeoPackage first is the plan's answer when it is measured to matter.
 
 ### I0: One GIS executor: IMPORT, EXPORT, INFO, REFS, COPC
 

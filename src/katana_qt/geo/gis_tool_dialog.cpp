@@ -358,9 +358,11 @@ void GisToolDialog::showOutcome(const VerbOutcome& outcome)
     }
     if (!outcome.ok) {
         setStatus(outcome.error.section('\n', 0, 0), true);
+        replied(QString());
         return;
     }
     setStatus(summary(outcome.reply), false);
+    replied(outcome.reply);
 }
 
 QString GisToolDialog::summary(const QString& reply) const

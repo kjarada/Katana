@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <utility>
 #include <variant>
 
@@ -110,14 +112,13 @@ Result<VerbWords> readVerbWords(const Tokens& tokens, std::size_t begin, std::si
             }
             continue;
         }
-        if (folded == "TO") {
+        if (!folded.empty() && listed(rules.targetWords, folded)) {
             if (!rules.target) {
-                return makeError(ErrorCode::InvalidArgument, "TO is not a word of this verb: " +
-                                                                 rules.usage,
-                                 word);
+                return makeError(ErrorCode::InvalidArgument,
+                                 folded + " is not a word of this verb: " + rules.usage, word);
             }
             if (out.target) {
-                return makeError(ErrorCode::InvalidArgument, "one TO per line", word);
+                return makeError(ErrorCode::InvalidArgument, "one " + folded + " per line", word);
             }
             std::size_t at = i + 1;
             auto target = parseTarget(clause, at);
@@ -538,6 +539,238 @@ std::optional<katana::entity::PropertyValue> propertyOf(const gp::FieldValue& va
             }
         },
         value);
+}
+
+// ---- rows: what a query or an overlay reports --------------------------------------------------
+
+std::string cellText(const gp::FieldValue& value)
+{
+    return textOf(value);
+}
+
+std::string rowKey(std::string_view name)
+{
+    std::string key(name);
+    for (char& c : key) {
+        if (c == ' ' || c == '\t' || c == '=' || c == '"') {
+            c = '_';
+        }
+    }
+    return key.empty() ? std::string("_") : key;
+}
+
+std::vector<Row> rowsOf(const gp::FeatureTable& table, const RowOptions& options)
+{
+    std::vector<Row> rows;
+    for (const gp::Feature& feature : table.features) {
+        Row row;
+        for (std::size_t f = 0; f < table.fields.size() && f < feature.values.size(); ++f) {
+            if (std::holds_alternative<std::monostate>(feature.values[f])) {
+                continue;
+            }
+            std::string key = rowKey(table.fields[f].name);
+            if (options.entityKeys) {
+                key = key == "katana_id" ? "entity" : key == "gis.with" ? "with" : key;
+            }
+            row.cells.emplace_back(std::move(key), cellText(feature.values[f]));
+        }
+        if (options.measures) {
+            const auto has = [&feature](katana::gis::GeometryKind kind) {
+                return std::ranges::any_of(feature.parts, [kind](const katana::gis::VectorGeometry& part) {
+                    return part.kind == kind;
+                });
+            };
+            if (has(katana::gis::GeometryKind::Polygon)) {
+                row.cells.emplace_back("area", fixed3(featureArea(feature)));
+            } else if (has(katana::gis::GeometryKind::LineString)) {
+                row.cells.emplace_back("length", fixed3(featureLength(feature)));
+            }
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+std::string rowRecord(const Row& row)
+{
+    std::string record = "row";
+    for (const auto& [key, text] : row.cells) {
+        record += " " + key + "=" + value(text);
+    }
+    return record;
+}
+
+std::vector<std::string> columnRecords(const gp::FeatureTable& table)
+{
+    std::vector<std::string> records;
+    for (const gp::FieldDef& field : table.fields) {
+        std::string type = "string";
+        switch (field.type) {
+        case gp::FieldType::Boolean:
+            type = "boolean";
+            break;
+        case gp::FieldType::Integer64:
+            type = "integer";
+            break;
+        case gp::FieldType::Real:
+            type = "real";
+            break;
+        case gp::FieldType::Date:
+            type = "date";
+            break;
+        case gp::FieldType::DateTime:
+            type = "datetime";
+            break;
+        case gp::FieldType::String:
+            break;
+        }
+        records.push_back("column name=" + value(field.name) + " key=" + value(rowKey(field.name)) +
+                          " type=" + type);
+    }
+    return records;
+}
+
+namespace {
+
+std::string csvCell(const std::string& text)
+{
+    if (text.find_first_of(",\"\r\n") == std::string::npos) {
+        return text;
+    }
+    std::string quoted = "\"";
+    for (const char c : text) {
+        quoted += c == '"' ? std::string("\"\"") : std::string(1, c);
+    }
+    return quoted + "\"";
+}
+
+} // namespace
+
+katana::core::Status writeCsv(const std::string& path, const std::vector<Row>& rows,
+                              const std::vector<std::string>& given)
+{
+    std::vector<std::string> columns = given;
+    if (columns.empty()) {
+        for (const Row& row : rows) {
+            for (const auto& [key, text] : row.cells) {
+                if (std::ranges::find(columns, key) == columns.end()) {
+                    columns.push_back(key);
+                }
+            }
+        }
+    }
+    std::ofstream out(std::filesystem::path(std::u8string(path.begin(), path.end())),
+                      std::ios::binary | std::ios::trunc);
+    if (!out) {
+        return makeError(ErrorCode::FileExportFailure, "cannot write the rows", path);
+    }
+    std::string header;
+    for (const std::string& column : columns) {
+        header += (header.empty() ? "" : ",") + csvCell(column);
+    }
+    out << header << "\n";
+    for (const Row& row : rows) {
+        std::string line;
+        for (std::size_t c = 0; c < columns.size(); ++c) {
+            std::string cell;
+            for (const auto& [key, text] : row.cells) {
+                cell = key == columns[c] ? text : cell;
+            }
+            line += (c == 0 ? "" : ",") + csvCell(cell);
+        }
+        out << line << "\n";
+    }
+    if (!out) {
+        return makeError(ErrorCode::FileExportFailure, "cannot write the rows", path);
+    }
+    return {};
+}
+
+std::vector<std::string> reportRecords(const gp::FeatureSet& set, std::string_view arg)
+{
+    std::vector<std::string> records;
+    std::size_t count = 0;
+    for (const gp::FeatureTable& table : set.tables) {
+        const std::vector<std::string> columns = columnRecords(table);
+        records.insert(records.end(), columns.begin(), columns.end());
+        for (const Row& row : rowsOf(table)) {
+            records.push_back(rowRecord(row));
+            ++count;
+        }
+    }
+    records.push_back("output arg=" + value(arg) + " kind=vector target=report rows=" +
+                      std::to_string(count));
+    return records;
+}
+
+Result<std::string> selectFeatures(Context& context, const gp::FeatureSet& set, std::string_view arg)
+{
+    bool hasIds = false;
+    std::vector<EntityId> present;
+    std::size_t missing = 0;
+    for (const gp::FeatureTable& table : set.tables) {
+        if (!fieldIndex(table, "katana_id")) {
+            continue;
+        }
+        hasIds = true;
+        for (const gp::Feature& feature : table.features) {
+            const auto id = featureId(table, feature);
+            if (id && context.document.model().entities.contains(*id)) {
+                if (std::ranges::find(present, *id) == present.end()) {
+                    present.push_back(*id);
+                }
+            } else {
+                ++missing;
+            }
+        }
+    }
+    if (!hasIds && !set.tables.empty()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a selection is made from the katana_id column: the result has none; "
+                         "SELECT katana_id FROM ...");
+    }
+    context.document.selection().set(present);
+    context.document.notifySelectionChanged();
+    return "output arg=" + value(arg) + " kind=vector target=selection selected=" +
+           std::to_string(present.size()) + " missing=" + std::to_string(missing);
+}
+
+Result<std::string> sqlForLine(std::string_view sql, bool sqlite)
+{
+    std::string out;
+    bool literal = false;
+    bool identifier = false;
+    for (char c : sql) {
+        c = c == '\r' || c == '\n' || c == '\t' ? ' ' : c; // a line has one line
+        if (identifier) {
+            out += c == '"' ? ']' : c;
+            identifier = c != '"';
+            continue;
+        }
+        if (c == '\'') {
+            literal = !literal;
+        } else if (c == '"') {
+            if (!sqlite) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "OGR SQL's double-quoted identifiers cannot be carried by a "
+                                 "command line; the sqlite dialect takes [brackets]");
+            }
+            if (literal) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "a double quote inside a '...' literal cannot be carried by a "
+                                 "command line");
+            }
+            out += '[';
+            identifier = true;
+            continue;
+        }
+        out += c;
+    }
+    if (identifier) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a double-quoted identifier in the statement is not closed");
+    }
+    return std::string(katana::core::trimmed(out));
 }
 
 // ---- reshaping entities in place ---------------------------------------------------------------

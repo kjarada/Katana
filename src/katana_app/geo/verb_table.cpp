@@ -36,6 +36,8 @@ namespace katana::app::geo {
                                                                 const Tokens& tokens,
                                                                 std::string_view line);
 // ---- V5: GIS SQL ----
+[[nodiscard]] katana::core::Result<Prepared> prepareGisSql(Context& context, const Tokens& tokens,
+                                                           std::string_view line);
 // ---- I0: IMPORT, EXPORT, INFO, REFS, COPC ----
 // ---- I1: vector fidelity (no verb of its own) ----
 // ---- I2: FORMATS ----
@@ -108,6 +110,12 @@ const std::vector<VerbEntry>& verbTable()
              "          [merge=longest-border|max-area|min-area|min-index] REPLACE [PREVIEW]\n"
              "          moves the boundaries so they match (enclosed gaps only)"});
         // ---- V5: GIS SQL ----
+        rows.push_back(
+            {"GIS", "SQL", &prepareGisSql,
+             "GIS SQL \"<select>\" [<scope>] [dialect=sqlite|ogrsql] [AS REPORT | AS SELECT |\n"
+             "          AS LAYER <layer>] [csv=<file>] [OVERWRITE] [PREVIEW]  the scope queried\n"
+             "          as tables points, lines, polygons (katana_id, layer, style, colour,\n"
+             "          type, then the properties); SQLite with Spatialite by default"});
         // ---- I0: IMPORT, EXPORT, INFO, REFS, COPC ----
         // ---- I2: FORMATS ----
         // ---- I3: IMPORT options ----

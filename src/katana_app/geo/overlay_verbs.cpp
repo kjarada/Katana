@@ -24,7 +24,6 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <map>
 #include <memory>
 #include <set>
@@ -154,114 +153,6 @@ gp::FeatureTable renamed(const gp::FeatureTable& table)
         out.features.push_back(std::move(copy));
     }
     return out;
-}
-
-std::string cellText(const gp::FieldValue& value)
-{
-    if (const auto* text = std::get_if<std::string>(&value)) {
-        return *text;
-    }
-    if (const auto* whole = std::get_if<std::int64_t>(&value)) {
-        return std::to_string(*whole);
-    }
-    if (const auto* real = std::get_if<double>(&value)) {
-        return katana::core::formatExactReal(*real);
-    }
-    if (const auto* flag = std::get_if<bool>(&value)) {
-        return *flag ? "true" : "false";
-    }
-    return {};
-}
-
-// One row per piece: which entities it came from, what it carries, and its
-// area or length.
-struct Row {
-    std::vector<std::pair<std::string, std::string>> cells;
-};
-
-std::vector<Row> rowsOf(const gp::FeatureTable& table)
-{
-    std::vector<Row> rows;
-    for (const gp::Feature& feature : table.features) {
-        Row row;
-        for (std::size_t f = 0; f < table.fields.size() && f < feature.values.size(); ++f) {
-            const std::string& name = table.fields[f].name;
-            const std::string key = name == "katana_id" ? "entity" : name == "gis.with" ? "with" : name;
-            row.cells.emplace_back(key, cellText(feature.values[f]));
-        }
-        const double area = vec::featureArea(feature);
-        const bool polygon = std::ranges::any_of(feature.parts, [](const katana::gis::VectorGeometry& part) {
-            return part.kind == GeometryKind::Polygon;
-        });
-        if (polygon) {
-            row.cells.emplace_back("area", fixed3(area));
-        } else if (std::ranges::any_of(feature.parts, [](const katana::gis::VectorGeometry& part) {
-                       return part.kind == GeometryKind::LineString;
-                   })) {
-            row.cells.emplace_back("length", fixed3(vec::featureLength(feature)));
-        }
-        rows.push_back(std::move(row));
-    }
-    return rows;
-}
-
-std::string rowRecord(const Row& row)
-{
-    std::string record = "row";
-    for (const auto& [key, text] : row.cells) {
-        record += " " + key + "=" + value(text);
-    }
-    return record;
-}
-
-std::string csvCell(const std::string& text)
-{
-    if (text.find_first_of(",\"\r\n") == std::string::npos) {
-        return text;
-    }
-    std::string quoted = "\"";
-    for (const char c : text) {
-        quoted += c == '"' ? std::string("\"\"") : std::string(1, c);
-    }
-    return quoted + "\"";
-}
-
-// The rows as CSV, the columns in first-seen order.
-katana::core::Status writeCsv(const std::string& path, const std::vector<Row>& rows)
-{
-    std::vector<std::string> columns;
-    for (const Row& row : rows) {
-        for (const auto& [key, text] : row.cells) {
-            if (std::ranges::find(columns, key) == columns.end()) {
-                columns.push_back(key);
-            }
-        }
-    }
-    std::ofstream out(std::filesystem::path(std::u8string(path.begin(), path.end())),
-                      std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return makeError(ErrorCode::FileExportFailure, "cannot write the rows", path);
-    }
-    std::string header;
-    for (const std::string& column : columns) {
-        header += (header.empty() ? "" : ",") + csvCell(column);
-    }
-    out << header << "\n";
-    for (const Row& row : rows) {
-        std::string line;
-        for (std::size_t c = 0; c < columns.size(); ++c) {
-            std::string cell;
-            for (const auto& [key, text] : row.cells) {
-                cell = key == columns[c] ? text : cell;
-            }
-            line += (c == 0 ? "" : ",") + csvCell(cell);
-        }
-        out << line << "\n";
-    }
-    if (!out) {
-        return makeError(ErrorCode::FileExportFailure, "cannot write the rows", path);
-    }
-    return {};
 }
 
 // Where the overlay comes from: a second scope, or a file read on the worker.
@@ -533,8 +424,10 @@ Result<Prepared> prepareOverlay(Context& context, const Tokens& tokens, std::str
         }
         result = vec::withoutEmpty(std::move(result));
         const vec::Measures measures = vec::measure(result);
-        auto rows = std::make_shared<const std::vector<Row>>(
-            result.tables.empty() ? std::vector<Row>{} : rowsOf(result.tables.front()));
+        auto rows = std::make_shared<const std::vector<vec::Row>>(
+            result.tables.empty()
+                ? std::vector<vec::Row>{}
+                : vec::rowsOf(result.tables.front(), vec::RowOptions{true, true}));
         const std::string summary = settings + " features=" + std::to_string(measures.features) +
                                     " area=" + fixed3(measures.area) +
                                     " length=" + fixed3(measures.length) +
@@ -544,7 +437,7 @@ Result<Prepared> prepareOverlay(Context& context, const Tokens& tokens, std::str
         return Apply([kept, rows, target, csv, summary, records, warnings, seconds,
                       commandName](Context& ctx) -> Result<std::string> {
             if (!csv.empty()) {
-                if (auto written = writeCsv(csv, *rows); !written) {
+                if (auto written = vec::writeCsv(csv, *rows); !written) {
                     return written.error();
                 }
             }
@@ -566,8 +459,8 @@ Result<Prepared> prepareOverlay(Context& context, const Tokens& tokens, std::str
             std::vector<std::string> reply{vec::gisRecord("overlay", seconds)};
             reply.insert(reply.end(), records.begin(), records.end());
             reply.push_back(vec::outputRecord(target, applied));
-            for (const Row& row : *rows) {
-                reply.push_back(rowRecord(row));
+            for (const vec::Row& row : *rows) {
+                reply.push_back(vec::rowRecord(row));
             }
             reply.push_back(summary);
             for (const std::string& warning : made->warnings) {
