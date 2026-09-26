@@ -1,0 +1,735 @@
+{
+ "tools": [
+  {
+   "id": "T01",
+   "tool": "UTILITY REPORT / VERIFY / CLEARANCE / CHECK (Survey > Subsurface Utilities: Report, Verify, Clearance, Check tabs)",
+   "surfaces": "window: utility dialog tabs plus typed UTILITY; cli: UTILITY verb; mcp: katana_run_commands only",
+   "actsOn": "A schedule CSV file only, plus design.csv and schema.csv. Never the drawing, not even the services UTILITY DRAW put there.",
+   "missing": "window: no scope and no filter (the dialog has only file fields and refuses a line without a schedule); cli: no scope and no filter, file only; mcp: no scope and no filter, and no structured tool",
+   "evidence": "src/katana_cad/utilities/utility_verbs.cpp:81-92 readSchedule is the only source; report 165-183, verify 185-195, clearance 197-234 (design only from parseDesignCsv at 215), check 236-262 (checkDelivery over the raw file text at 253). src/katana_qt/survey/utility_dialog.cpp:125-131: utilityCommandLine requires a schedule file. src/katana_qt/survey/utility_dialog.hpp:26-47: the objectName list has no scope controls. src/katana_cad/utilities/utility_drawing.cpp:119-147: the points UTILITY DRAW writes lack the horizontal and vertical uncertainty, the depth and each segment's path evidence (UtilityVertex and PositionEvidence in utility_network.hpp:115-137 and quality_level.hpp:104-109), so a drawn service cannot be graded again as it stands.",
+   "proposal": "Keep the file as one source and add the drawing as a second (CLAUDE.md 1.1). Grammar: UTILITY REPORT|VERIFY|CHECK [<schedule.csv> | <scope> [WHERE ...]] ... ; no file means the shared scope clause, defaulting to SELECTION. Examples: 'UTILITY REPORT LAYERS utilities', 'UTILITY REPORT VIEW WHERE PROP=utility.type:water'. (1) New cad::utilities::utilityLinesFrom(document, ids) rebuilds sub::UtilityLine from the matched entities that carry utility.line: points are the vertices, in order; polylines carry the attributes. Matched entities that are not drawn services are counted and named. (2) UTILITY DRAW first writes what a regrade needs: utility.h_uncertainty, utility.v_uncertainty, utility.depth, utility.path (evidence of the segment that starts at this vertex) and utility.seq (vertex order). The acceptance test is that REPORT on the drawn services equals REPORT on the file they were drawn from. (3) CLEARANCE takes DESIGN <file.csv> | DESIGN <id> | DESIGN <scope>; a polyline's vertices, with levels from entity::heightsOf, become the DesignAlignment. (4) CHECK uses a new checkDelivery overload over rows (column to value), built from the utility.field.* properties plus the interpreted keys mapped back to schema attribute names. (5) The reply starts 'matched=N services=M not_utilities=K', and an empty scope is reported, not refused. (6) Window: the dialog gets a Source choice (utilitySourceFile, utilitySourceDrawing) and the shared ScopeFilterWidget (utilityScope), and still only builds the line. (7) MCP: through the verb; optionally the shared scope/where JSON (T27).",
+   "files": [
+    "src/katana_cad/utilities/utility_verbs.cpp",
+    "src/katana_cad/utilities/utility_source.cpp (new)",
+    "include/katana/cad/utilities/utility_source.hpp (new)",
+    "src/katana_cad/utilities/utility_drawing.cpp",
+    "include/katana/cad/utilities/utility_drawing.hpp",
+    "include/katana/survey/subsurface/delivery_schema.hpp",
+    "src/katana_survey/subsurface_delivery_schema.cpp",
+    "src/katana_qt/survey/utility_dialog.cpp",
+    "src/katana_qt/survey/utility_dialog.hpp",
+    "tests/cad/utilities/test_utility_verbs.cpp",
+    "tests/cad/utilities/test_utility_drawing.cpp",
+    "tests/qt_widgets/survey/test_utility_dialog.cpp",
+    "docs/subsurface_utilities.md"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T02",
+   "tool": "UTILITY DRAW (draw again, or regrade, what is already drawn)",
+   "surfaces": "window: dialog Draw tab plus typed; cli; mcp via run_commands",
+   "actsOn": "A schedule file, turned into new entities. Services already in the drawing cannot be regraded or redrawn after an edit. LAYER takes a prefix only.",
+   "missing": "window, cli and mcp: no drawing source (a scope), and no replacement of what the scope took",
+   "evidence": "src/katana_cad/utilities/utility_verbs.cpp:268-296. include/katana/cad/utilities/utility_drawing.hpp: utilityDrawCommand only adds entities and reuses layers.",
+   "proposal": "'UTILITY DRAW <scope> [WHERE ...] REGRADE [SPACING m] [MINCOVER m]' rebuilds UtilityLines from the matched drawn services (utility_source from T01) and replaces those entities in one undo step (delete what matched, add the new drawing). The file form is unchanged. The reply is the same 'utilities drawn ...' record, preceded by 'matched=N'.",
+   "files": [
+    "src/katana_cad/utilities/utility_verbs.cpp",
+    "src/katana_cad/utilities/utility_drawing.cpp",
+    "include/katana/cad/utilities/utility_drawing.hpp"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T03",
+   "tool": "SELECT verb (also Edit > Select All, which runs SELECT ALL)",
+   "surfaces": "window: typed plus Select All; cli; mcp: run_commands only",
+   "actsOn": "ALL | NONE | ids | LAYER name (exact, no sublayers) | TYPE name. One criterion, the document rule, and it always replaces the selection.",
+   "missing": "window, cli and mcp: VIEW, AREA (so no headless window select), LAYERS a,b with or without sublayers, the WHERE filter (style, colour, property=value, text, drawn), and ADD/REMOVE; the reply does not say what was left out. mcp: no katana_select tool.",
+   "evidence": "src/katana_cad/command_interpreter.cpp:1269-1336 uses its own SelectionFilter (1278-1316) and kNoLayerOverrides (1283); help text at 358. src/katana_qt/main_window.cpp:1799-1802: selectAll runs 'SELECT ALL'. include/katana/cad/selection.hpp:19-28: SelectionFilter is a second, smaller filter type.",
+   "proposal": "'SELECT [ADD|REMOVE] <scope> [WHERE ...]' goes through the shared parser and matchEntities, then the document's isSelectable rule. What that rule leaves out is counted: '12 matched, 10 selected, 2 on locked or hidden layers'. Compatibility: SELECT LAYER x means LAYERS x ONLY, SELECT TYPE t means DRAWING WHERE TYPE=t, SELECT ALL means DRAWING. SelectionFilter stays for viewport picks only. This verb matters most: every selection verb and tool can reach any scope through it before gaining its own clause.",
+   "files": [
+    "src/katana_cad/command_interpreter.cpp"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T04",
+   "tool": "LIST and INFO verbs, the Inquiry List tool, MCP katana_list_entities / katana_describe_entity",
+   "surfaces": "window: typed plus the List tool; cli; mcp: katana_list_entities (no arguments), katana_describe_entity (one id)",
+   "actsOn": "LIST: every entity, no filter. INFO: one id. List tool: picks, or All.",
+   "missing": "window: no scope and no filter on the verb; the tool has no View, Layers or Where. cli: no scope and no filter. mcp: no scope or where arguments, and no structured result.",
+   "evidence": "src/katana_cad/command_interpreter.cpp:2765-2798 (2794 lists the whole drawing; 2769-2771 takes one id); help at 407. src/katana_cad/tools/inquiry.cpp:523-560 (prompt at 532). src/katana_app/mcp_server.cpp:546-551 (objectSchema(Json::object()) sends 'LIST') and 553-567.",
+   "proposal": "'LIST [<scope>] [WHERE ...] [COUNT]': the default stays DRAWING for compatibility; the first line is 'matched=N of=M'; COUNT gives counts per type and per layer. 'INFO id [id...] | INFO <scope> [WHERE]' describes each (after P1 routes INFO <id>). The List tool uses the shared selection step (T08). MCP is in T27.",
+   "files": [
+    "src/katana_cad/command_interpreter.cpp",
+    "src/katana_cad/tools/inquiry.cpp"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T05",
+   "tool": "MOVE COPY ROTATE SCALE MIRROR ARRAY ERASE verbs",
+   "surfaces": "window: typed (menu Erase runs ERASE); cli; mcp: run_commands",
+   "actsOn": "The selection only (requireSelection).",
+   "missing": "window, cli and mcp: every scope and every filter; today the only route is SELECT first, and SELECT lacks view, area and where",
+   "evidence": "src/katana_cad/command_interpreter.cpp:1076-1082: transform() calls requireSelection and takes document_.selection().ids(). Help at 352 says '(act on the selection)'.",
+   "proposal": "An optional scope clause before the arguments: 'MOVE [<scope>] [WHERE ...] dx,dy', 'ERASE LAYERS temp WHERE TYPE=text'. The shared parser returns the words it did not consume, and the default stays SELECTION, so every existing script still works. Entities on locked layers are counted and left, as Global Modify leaves them (a DRAWING scope can include them, unlike a selection). The reply is 'N matched, N moved; K on locked layers left'. One undo step.",
+   "files": [
+    "src/katana_cad/command_interpreter.cpp"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T06",
+   "tool": "CHLAYER, COLOR, STYLE APPLY, PROP LIST|SET|DELETE|RENAME",
+   "surfaces": "window: typed, and used by the ui-gap P2 context menu; cli; mcp: run_commands",
+   "actsOn": "The selection only.",
+   "missing": "window, cli and mcp: every scope and every filter. These verbs also run a second code path beside MODIFY's planGlobalModify, which handles locked layers and reports differently.",
+   "evidence": "src/katana_cad/command_interpreter.cpp:2326-2420: attributes() calls requireSelection (2329-2332). STYLE APPLY at 819-834 uses the selection. Help at 394 and 398-399.",
+   "proposal": "Each verb accepts the scope clause. CHLAYER, COLOR, STYLE APPLY, PROP SET and PROP DELETE become planGlobalModify requests (SET LAYER=, COLOUR=, STYLE=, PROP=, UNPROP=), so they report and skip locked layers exactly as MODIFY does. PROP RENAME needs EntityModify.renameProperties, an extension of the shared mechanism (T30 package). 'PROP LIST <scope>' lists the properties of what matched.",
+   "files": [
+    "src/katana_cad/command_interpreter.cpp"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T07",
+   "tool": "MODIFY verb and the Format > Global Modify dialog (the reference implementation)",
+   "surfaces": "window: dialog plus typed MODIFY; cli: MODIFY; mcp: run_commands only",
+   "actsOn": "Dialog: selection, view (optionally only what is on screen), layers or drawing, plus the full filter. Verb: SELECTION, DRAWING or LAYERS only.",
+   "missing": "cli and mcp: VIEW is not applicable headless; AREA is missing. window: the dialog executes the plan itself rather than building the MODIFY line, so the change is not echoed and logged the way a typed command is (CLAUDE.md section 1). mcp: no structured modify tool.",
+   "evidence": "src/katana_cad/command_interpreter.cpp:2422-2424 (usage) and 2660-2676 (scope words: no VIEW, no AREA). src/katana_qt/customisation/global_modify_dialog.cpp:1149-1160: the dialog calls planGlobalModify and executes the command directly.",
+   "proposal": "This is the scope-core agent's work, already in progress, and is listed only so the packages below can rely on it. MODIFY takes the shared clause, including VIEW (supplied by the window) and AREA. The dialog builds 'MODIFY ... [PREVIEW]' and runs it through the CommandRunner. Select Matches runs 'SELECT <the same clause>'.",
+   "files": [
+    "src/katana_cad/command_interpreter.cpp (modify())",
+    "src/katana_qt/customisation/global_modify_dialog.cpp"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T08",
+   "tool": "The interactive tools' selection step: Move, Copy, Rotate, Scale, Mirror, Array, Erase, Stretch window, List, Reverse, Match Properties targets, Join, Explode",
+   "surfaces": "window only; Stretch, Join, Explode, Reverse and Match Properties have no verb at all",
+   "actsOn": "Picks plus the document selection plus [All], by the document rule. Join and Explode take picks and the selection only, with no All.",
+   "missing": "window: View (layers the view hides are still taken), Layers, Where and a typed area. cli and mcp: Explode, Join and Reverse have no verbs.",
+   "evidence": "include/katana/cad/interactive_tool.hpp:92-102: ToolContext has no view. src/katana_qt/tools/tool_host.cpp:135-139 builds the context. src/katana_cad/tools/modify_transform.cpp:241-244 (prompt '... or [All]') and 280-296, where All carries the comment 'ToolContext carries no view ... outstanding'; 2115-2116 Stretch has the same gap. src/katana_cad/tools/everyday_support.cpp:135-150 (SelectionStep::all, same comment). Prompts: inquiry.cpp:532, modify_length.cpp:518, modify_properties.cpp:80, modify_edit_join.cpp:231 and 373.",
+   "proposal": "ToolContext gains 'const LayerOverrides* view' and 'std::optional<Box2> visibleArea', which ToolHost::make fills from the active plan view. One ScopeSelectionStep in everyday_support replaces SelectionTool's All, SelectionStep::all and the Join/Explode picking. Its options are [All/View/Layers/Where/Previous]; typed 'Layers survey/*,kerb ONLY' and 'Where TYPE=point PROP=code:TREE' go through the shared scope parser, resolve through matchEntities plus isSelectable, and the step's message says 'N matched'. Stretch's window honours the view. Headless verbs 'EXPLODE|REVERSE [<scope>] [WHERE]' and 'JOIN [<scope>] [WHERE] [tolerance=]' are extracted from the tool engines, so cli and mcp have them.",
+   "files": [
+    "include/katana/cad/interactive_tool.hpp",
+    "src/katana_cad/tools/everyday_support.cpp",
+    "src/katana_cad/tools/everyday_support.hpp",
+    "src/katana_cad/tools/modify_transform.cpp",
+    "src/katana_cad/tools/inquiry.cpp",
+    "src/katana_cad/tools/modify_length.cpp",
+    "src/katana_cad/tools/modify_properties.cpp",
+    "src/katana_cad/tools/modify_edit_join.cpp",
+    "src/katana_qt/tools/tool_host.cpp",
+    "src/katana_qt/tools/tool_host.hpp"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T09",
+   "tool": "Quick Select and Select Similar",
+   "surfaces": "window only (tools); no verb",
+   "actsOn": "Quick Select: a kind, a layer pattern, one condition, and Drawing or Selection. Select Similar: the whole drawing, matched against the seed.",
+   "missing": "window: View, Layers with or without sublayers, AREA, and the style, colour, text and drawn filters. This is a second scope and filter implementation. cli and mcp: no equivalent until SELECT gains WHERE (T03).",
+   "evidence": "src/katana_cad/tools/select_tools.cpp:240-270: matchesWildcard, a third wildcard matcher beside cad::matchesPattern (customisation/global_modify.cpp:364) and entity::globMatches (src/katana_entity/annotation.cpp:301). 272-380: its own Condition and meets(). 400: 'Look in [Drawing/Selection]'. 50-60: selectableWhere with kNoLayerOverrides.",
+   "proposal": "Quick Select becomes a front end to the shared mechanism: its questions build a ModifyScope and a ModifyFilter. Its numeric and not-equal comparisons (< > <= >= <>) move into ModifyFilter (T30), so SELECT, LIST and MODIFY gain them too, and matchesWildcard is deleted. Select Similar builds a ModifyFilter from the seed (types, layer, style, colour) and searches a scope the person chooses (default Drawing; options View and Layers). No new verb: the typed form is 'SELECT <scope> WHERE ...'.",
+   "files": [
+    "src/katana_cad/tools/select_tools.cpp"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T10",
+   "tool": "AREA verb, Survey > Area of Selection, the Inquiry Area tool's [Object]",
+   "surfaces": "window: menu, tool and typed; cli; mcp: run_commands",
+   "actsOn": "Ids, or the selection; the tool measures one object.",
+   "missing": "window, cli and mcp: every scope and filter, for example the total area of every lot polyline on the lots layer within the view",
+   "evidence": "src/katana_cad/command_interpreter.cpp:2094-2112; help at 388-389. src/katana_qt/survey/survey_workbench.cpp:218-233. src/katana_cad/tools/inquiry.cpp:154-161 and 195.",
+   "proposal": "'AREA [id...] | AREA <scope> [WHERE ...]'. computeArea already skips anything without an area and gives the reason (include/katana/cad/survey_tools.hpp:210-221). Keyword clash: the verb AREA and the scope keyword 'AREA x0,y0,x1,y1' would give 'AREA AREA 0,0,100,100'; give the scope keyword the alias WINDOW and document the choice. An empty scope reports '0 matched'; today computeArea refuses an empty list, so the verb must catch that first. Window: Area of Selection runs 'AREA SELECTION' through the runner when something is selected, and otherwise opens a small dialog with the ScopeFilterWidget.",
+   "files": [
+    "src/katana_cad/command_interpreter.cpp",
+    "src/katana_qt/survey/survey_workbench.cpp"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T11",
+   "tool": "PARCEL (report, LEGAL, LABEL) and the ui-gap P4 Parcel Report dialog",
+   "surfaces": "window: typed, and P4's dialog (being added); cli; mcp: run_commands",
+   "actsOn": "One closed polyline id (P4: an id, or the one selected polyline).",
+   "missing": "window, cli and mcp: every scope and filter; a subdivision's lots cannot be reported in one step",
+   "evidence": "src/katana_cad/command_interpreter.cpp:1935-2011 (one id, 1941-1950); help at 380-381. ui-gap-plan.json P4: the parcel field or useSelection.",
+   "proposal": "'PARCEL <id> | PARCEL <scope> [WHERE] [LEGAL [name]|LABEL h]' gives a report per matched closed polyline plus totals, and lists what it skipped and why. LABEL labels them all in one undo step. P4's dialog offers the parcel field or the ScopeFilterWidget: one parcel shows its courses; several show a summary table.",
+   "files": [
+    "src/katana_cad/command_interpreter.cpp",
+    "src/katana_qt/survey/survey_parcel_dialog.cpp (P4, after it merges)"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T12",
+   "tool": "CODE, CODE CENSUS, Survey > Apply Survey Codes, and the Code Manager's Apply tab",
+   "surfaces": "window: the action (selection if any, else all) and the Code Manager (Selection or Every coded entity); cli: CODE (whole drawing only); mcp: run_commands",
+   "actsOn": "window: the selection or the whole drawing. cli: always the whole drawing, and the selection is ignored.",
+   "missing": "cli: even the selection; window, cli and mcp: view, layers, area and the filter. The library already takes ids.",
+   "evidence": "src/katana_app/session.cpp:345-386: runCode never sets options.ids (369). src/katana_qt/main_window.cpp:2544-2558. src/katana_qt/customisation/code_manager_tabs.cpp:389-391 and 460-466. include/katana/cad/survey_coding.hpp:61-62 has an ids option. ui-gap P1 moves CODE into include/katana/cad/survey_code_verbs.hpp.",
+   "proposal": "'CODE [<scope>] [WHERE ...] [property]' defaults to DRAWING for compatibility; 'CODE CENSUS [<scope>] ...' likewise. matchEntities gives SurveyCodingOptions::ids. The Code Manager's Apply tab replaces its radio buttons with the ScopeFilterWidget and runs the CODE line (with a PREVIEW form). The window action runs 'CODE SELECTION' or 'CODE DRAWING' through the runner.",
+   "files": [
+    "src/katana_cad/customisation/survey_code_verbs.cpp (from P1)",
+    "include/katana/cad/survey_code_verbs.hpp (from P1)",
+    "src/katana_qt/customisation/code_manager_tabs.cpp",
+    "src/katana_qt/customisation/code_manager.hpp",
+    "src/katana_qt/main_window.cpp (applySurveyCodes body)"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T13",
+   "tool": "Linework: strings from coded points (the Code Manager's Linework tab)",
+   "surfaces": "window only; no verb, so cli and mcp cannot run it",
+   "actsOn": "The selection, or every coded point.",
+   "missing": "cli and mcp: the whole tool; window: view, layers, area and the filter",
+   "evidence": "src/katana_qt/customisation/code_manager_tabs.cpp:628 (the Selection radio), 764-770 (options.ids = the selection) and 795. include/katana/cad/linework.hpp:160-190 (LineworkOptions: ids, property, order). No LINEWORK verb exists anywhere in the interpreter or the session.",
+   "proposal": "A new verb in survey_code_verbs.cpp: 'LINEWORK [<scope>] [WHERE] [property=] [order=number|entity] [keeppoints=on|off] [chord=mm] [PREVIEW]', one undo step, with the report as key=value records. The tab gets the ScopeFilterWidget and builds the line.",
+   "files": [
+    "src/katana_cad/customisation/survey_code_verbs.cpp",
+    "src/katana_qt/customisation/code_manager_tabs.cpp"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T14",
+   "tool": "LABEL (create, LIST, DELETE) and the ui-gap P7 Label Objects tool and Edit Label",
+   "surfaces": "window: typed, plus P7 (being added); cli; mcp: run_commands",
+   "actsOn": "Create: ids, SELECTION or ALIGN name. LIST: every label, or given ids. DELETE: ids.",
+   "missing": "window, cli and mcp: every scope and filter, for example labelling every TREE point on the survey layers within a view",
+   "evidence": "src/katana_cad/annotation/annotation_verbs.cpp:1038-1075 (LIST and DELETE) and 1216-1250 (SELECTION at 1237); help at 598-600. ui-gap P7: the tool uses the pre-selection only.",
+   "proposal": "'LABEL style= [part= layer= text=] <scope> [WHERE ...]'. The verb's own key=value options go before the clause, because WHERE's STYLE= key clashes with LABEL's style= (see the parser rule in PK-S). 'LABEL LIST|DELETE <scope> [WHERE]'. P7's tool uses T08's selection step.",
+   "files": [
+    "src/katana_cad/annotation/annotation_verbs.cpp",
+    "src/katana_cad/tools/annotate_label.cpp (P7, after it merges)"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T15",
+   "tool": "AUTOLABEL RUN / PREVIEW / CLEAR, its rule matching, and the ui-gap P14 rules tab",
+   "surfaces": "window: the label style manager's Rules tab (calls ann::autoLabel directly) plus typed; cli; mcp: run_commands",
+   "actsOn": "Every entity that matches an enabled rule's layer, code and type globs, across the whole drawing.",
+   "missing": "window, cli and mcp: a scope (only this view, these layers, the selection). The rule matching is a second filter implementation.",
+   "evidence": "src/katana_cad/annotation/annotation_verbs.cpp:1335-1360 (autoLabel(model, rules) at 1337, clearAutoLabels at 1357). src/katana_cad/annotation/auto_label.cpp:81-110 ruleMatches. include/katana/entity/annotation.hpp:212-229 (LabelRule fields) and 240-242 globMatches. src/katana_qt/annotation/annotation_managers.cpp:731 and 755 (all rules, run directly, not through the verb).",
+   "proposal": "'AUTOLABEL RUN|PREVIEW|CLEAR [rule...] [<scope>] [WHERE]'. autoLabel gets an ids restriction: labels on targets outside the scope are counted as kept. ruleMatches builds a ModifyFilter from the rule (layer: a layer pattern with sublayers; type: types; code: a new CODE= filter key that uses codePropertyCandidates, added to the shared filter in PK-S) instead of matching globs itself. No storage change. P14's Run and Preview get the ScopeFilterWidget as 'Label within'.",
+   "files": [
+    "src/katana_cad/annotation/annotation_verbs.cpp",
+    "src/katana_cad/annotation/auto_label.cpp",
+    "include/katana/cad/annotation/auto_label.hpp",
+    "src/katana_qt/annotation/annotation_managers.cpp (P14, after it merges)"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T16",
+   "tool": "LABEL LAYOUT and the ui-gap P7 Label Layout Report",
+   "surfaces": "window: typed, plus P7's report; cli; mcp: run_commands",
+   "actsOn": "Every label, with the keep-out computed from the whole drawing.",
+   "missing": "window, cli and mcp: a scope (a view's labels, an area) and the filter",
+   "evidence": "src/katana_cad/annotation/annotation_verbs.cpp:1096-1146 (labelEntities(model) at 1123).",
+   "proposal": "'LABEL LAYOUT [<scope>] [WHERE] [scale=] [collisions=]' lays out the labels the scope matches, with the keep-out drawn from the same scope's linework. VIEW means the labels that view shows, at its scale. P7's report dialog gets the widget.",
+   "files": [
+    "src/katana_cad/annotation/annotation_verbs.cpp",
+    "src/katana_qt/annotation/label_layout_report.cpp (P7)"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T17",
+   "tool": "TEXTEDIT and the ui-gap P6 Edit Text",
+   "surfaces": "window: typed, plus P6's dialog (one text); cli; mcp: run_commands",
+   "actsOn": "One text id.",
+   "missing": "window, cli and mcp: bulk changes (restyle, justify, paper height, rotation, find and replace) over a scope; MODIFY covers only the height",
+   "evidence": "src/katana_cad/annotation/annotation_verbs.cpp:881-888 (usage 'TEXTEDIT id ...'). include/katana/cad/global_modify.hpp EntityModify: textHeight is its only text field.",
+   "proposal": "'TEXTEDIT <id> | TEXTEDIT <opts> <scope> [WHERE]', with opts style= paper= justify= rotation= height= and replace=old:new applied to each matched text. One undo step; the reply is 'N matched, K not text'. P6's dialog applies to every selected text when there are several.",
+   "files": [
+    "src/katana_cad/annotation/annotation_verbs.cpp"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T18",
+   "tool": "DIM verbs and dimension tools",
+   "surfaces": "window: tools plus typed; cli; mcp",
+   "actsOn": "Picked points, or one or two entity ids.",
+   "missing": "window, cli and mcp: bulk dimensioning of a scope (every segment of the matched polylines, every circle's radius)",
+   "evidence": "src/katana_cad/annotation/annotation_verbs.cpp:604-607 (help) and dimension() from 1368.",
+   "proposal": "Low priority: 'DIM ALIGNED|RADIUS|DIAMETER offset=mm <scope> [WHERE]' makes one dimension per matched segment or circle, in one step. The point-picked kinds (LINEAR, ANGULAR, ORDINATE, BASELINE, CONTINUE, LEADER, BALLOON) stay exempt: they read no drawing data by scope.",
+   "files": [
+    "src/katana_cad/annotation/annotation_verbs.cpp"
+   ],
+   "value": "low"
+  },
+  {
+   "id": "T19",
+   "tool": "EXPORT (GDAL vector, DXF, 12da): File > Export, GIS > Export Vector, and MCP katana_export",
+   "surfaces": "window: typed EXPORT exports the whole drawing; the menu asks Yes/No 'only the N selected?' for DXF and 12da and shows a 'selected only' checkbox for GDAL. cli: EXPORT, whole drawing. mcp: katana_export takes a path only.",
+   "actsOn": "window: the whole drawing, or the selection. cli and mcp: always the whole drawing.",
+   "missing": "window: view, layers with or without sublayers, area and the filter; the dialog exports itself rather than building a verb line. cli and mcp: even the selection, plus everything the window lacks.",
+   "evidence": "src/katana_app/session.cpp:723-745 (exportVector(model, target) with no options). src/katana_app/dxf_verbs.cpp:75-86. src/katana_qt/main_window.cpp:2052-2066 (exportDrawingTo(path, {})) and 3086-3138 (the question box at 3117). src/katana_qt/gis_dialogs.cpp:278-283. src/katana_app/mcp_server.cpp:589-599. The exporters already take ids: include/katana/interop/export.hpp:19-24, include/katana/interop/archive12d.hpp:74-76, include/katana/dxf/writer.hpp:62-66.",
+   "proposal": "'EXPORT <file> [<scope>] [WHERE ...]', with the clause after the (quoted) path, resolved through matchEntities into options.entities for DXF, 12da and GDAL. 12da surfaces go only with DRAWING. The reply is 'matched=N exported=N'. Window: the ScopeFilterWidget replaces both the checkbox and the question box; the dialog builds the EXPORT line and runs it through the runner. MCP katana_export gains the scope/where JSON (T27).",
+   "files": [
+    "src/katana_app/session.cpp",
+    "src/katana_app/dxf_verbs.cpp",
+    "src/katana_app/dxf_verbs.hpp",
+    "src/katana_qt/main_window.cpp (EXPORT branch, exportVectorFile)",
+    "src/katana_qt/gis_dialogs.cpp",
+    "src/katana_qt/gis_dialogs.hpp"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T20",
+   "tool": "Survey > Export Survey Points, Point Report, and the Point Manager dock",
+   "surfaces": "window only; no verb, so cli and mcp have none of it",
+   "actsOn": "Export and Report: all survey points, or the selected ones. Point Manager: every survey point, with a text filter.",
+   "missing": "cli and mcp: all three tools; window: view, layers, area and the shared filter",
+   "evidence": "src/katana_qt/survey/survey_points_ui.cpp:156-157 ('All survey points' / 'Selected survey points'), 391 (the dock takes drawingSurveyPoints, the whole drawing) and 570-573 (the report takes the selection or all). include/katana/cad/survey_points.hpp:63-69 surveyPointsAmong(ids).",
+   "proposal": "New verbs. 'POINTS LIST|REPORT [<scope>] [WHERE]' lives in cad and uses surveyPointsAmong on the matched ids. 'POINTS EXPORT <file> [<scope>] [WHERE] [format options]' lives in session.cpp plus the window's dispatch, because the delimited writer is in surveyio, which cad may not see. The export and report dialogs use the ScopeFilterWidget and build these lines; the dock gets the widget above its table.",
+   "files": [
+    "src/katana_qt/survey/survey_points_ui.cpp",
+    "src/katana_qt/survey/survey_points_ui.hpp",
+    "src/katana_cad/customisation/survey_point_verbs.cpp (new)",
+    "include/katana/cad/survey_point_verbs.hpp (new)",
+    "src/katana_app/session.cpp (POINTS EXPORT)"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T21",
+   "tool": "Terrain > Surface From Drawing",
+   "surfaces": "window only; cli and mcp hold no surfaces at all",
+   "actsOn": "Every drawn point and polyline, by the document rule, with no choice.",
+   "missing": "window: every scope and filter (for example ground shots on the survey layers, leaving out tree and structure codes); cli and mcp: the whole tool",
+   "evidence": "src/katana_qt/main_window.cpp:4083-4185: forEach over the whole model, isDrawn with kNoLayerOverrides at 4103.",
+   "proposal": "Move the input builder into cad (cad::surfaceInputFromDrawing(document, ids, options); cad may see terrain). Give the window a verb 'SURFACE DRAWING [<scope>] [WHERE] [name=]', driven by a small dialog (Terrain > Surface From Drawing...) with the widget. cli and mcp need a session surface store first; say so. The ui-gap plan already records terrain verbs as a separate product gap.",
+   "files": [
+    "src/katana_cad/terrain_input.cpp (new)",
+    "include/katana/cad/terrain_input.hpp (new)",
+    "src/katana_qt/main_window.cpp (buildSurfaceFromDrawing, dispatch)",
+    "src/katana_qt/terrain_surface_dialog.cpp (new)",
+    "src/katana_qt/terrain_surface_dialog.hpp (new)"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T22",
+   "tool": "Terrain > Surface From Raster and Surface From Point Cloud",
+   "surfaces": "window only",
+   "actsOn": "A whole reference raster or point cloud, thinned to the 400,000-point cap.",
+   "missing": "window: AREA and VIEW (a window read at full resolution). Layers and the filter do not apply to reference data. cli and mcp: none, as in T21.",
+   "evidence": "src/katana_qt/main_window.cpp:3969-4081. include/katana/interop/terrain_io.hpp:29-35: RasterElevationOptions has no window.",
+   "proposal": "Add RasterElevationOptions.window (a Box2) and a clip for clouds. Window verbs 'SURFACE RASTER <name> [AREA x0,y0,x1,y1|VIEW]' and 'SURFACE CLOUD <name> [AREA|VIEW]' use only the area part of the shared scope; LAYERS and WHERE are refused by name as not applicable.",
+   "files": [
+    "include/katana/interop/terrain_io.hpp",
+    "src/katana_interop/terrain_io.cpp",
+    "src/katana_qt/main_window.cpp (buildSurfaceFromRaster/PointCloud)"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T23",
+   "tool": "Sheets GENERATE fit|grid and the ui-gap P9 Generate Sheets dialog",
+   "surfaces": "window: the Sheets editor's Generate plus typed; cli; mcp: run_commands",
+   "actsOn": "area=x0,y0,x1,y1, or the whole drawn extent (the window uses planDrawnBounds of everything).",
+   "missing": "window, cli and mcp: framing by SELECTION, VIEW, LAYERS or WHERE. P9 plans its own area combo (Whole drawing / Current plan view / Window), which would be a second scope UI.",
+   "evidence": "src/katana_cad/plotting/sheet_verbs.cpp:1829-1836 (keys) and 1975-1998 (generateArea). src/katana_qt/sheet_editor.cpp:2138: planDrawnBounds of the whole plan. ui-gap-plan.json P9: sheetGenerateArea.",
+   "proposal": "'GENERATE fit|grid [<scope>] [WHERE]': the laid-out area is the bounds of what the scope takes (VIEW: the view's visible area; AREA equals today's area=, which stays as an alias). With LAYERS, the generated plan viewports also hide the other layers, the one part of a scope a viewport can express, and the reply says so. P9's dialog uses the ScopeFilterWidget instead of its combo.",
+   "files": [
+    "src/katana_cad/plotting/sheet_verbs.cpp (generate part)",
+    "src/katana_qt/sheet_editor.cpp (P9, after it merges)"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T24",
+   "tool": "File > Plot to PDF, --plot, and the ui-gap P17 PLOT and SNAPSHOT verbs",
+   "surfaces": "window: dialog, --plot and (P17) PLOT and SNAPSHOT; cli and mcp: none",
+   "actsOn": "The active plan view, fitted to the whole drawing or centred on the view.",
+   "missing": "window: framing a selection, layers, an area or a filtered set; P17's planned verb has fit|scale only",
+   "evidence": "src/katana_qt/main_window.cpp:4598-4616 (fittedPlot of the drawing). ui-gap-plan.json P17: the PLOT grammar.",
+   "proposal": "'PLOT \"out.pdf\" [<scope>] [WHERE] ...' fits the frame to what the scope takes (VIEW: its visible area; LAYERS: the other layers are also hidden in the plot). SNAPSHOT takes the same clause. A filter narrows only the frame until the painter can take an entity mask; state that in the docs.",
+   "files": [
+    "src/katana_qt/plotting/plot_drawing_dialog.cpp (P17)",
+    "src/katana_qt/plotting/view_image_export.cpp (P17)",
+    "src/katana_qt/main_window.cpp (PLOT/SNAPSHOT branch)"
+   ],
+   "value": "low"
+  },
+  {
+   "id": "T25",
+   "tool": "ZOOM (a window verb)",
+   "surfaces": "window only",
+   "actsOn": "The drawing's extents.",
+   "missing": "window: zoom to a scope, the typed equivalent of Global Modify's Select Matches framing",
+   "evidence": "src/katana_qt/main_window.cpp:1986-1989.",
+   "proposal": "'ZOOM [<scope>] [WHERE]' frames the bounds of what matched in the active plan view; a bare ZOOM is unchanged.",
+   "files": [
+    "src/katana_qt/main_window.cpp (ZOOM branch)"
+   ],
+   "value": "low"
+  },
+  {
+   "id": "T26",
+   "tool": "ONLINE IMPORT area= and the ui-gap P19 Online Data dialog",
+   "surfaces": "window only (typed plus dialog); not cli or mcp",
+   "actsOn": "area=view|drawing|selection|box|lonlat, which is its own scope grammar with its own view-extent maths.",
+   "missing": "window: LAYERS and WHERE extents. It is a second scope implementation.",
+   "evidence": "src/katana_interop/online_verbs.cpp:125-127. include/katana/interop/online_verbs.hpp:41 (OnlineAreaKind). src/katana_qt/gis_online.cpp:205-240: its own View box, which ignores rotation, and its own loop over the selection.",
+   "proposal": "area= resolves through the shared scope resolution: the view's visibleWorldBounds, and the bounds of matchEntities for SELECTION, LAYERS and WHERE. The area= words stay as aliases, and the dialog's area control becomes the widget.",
+   "files": [
+    "src/katana_interop/online_verbs.cpp",
+    "include/katana/interop/online_verbs.hpp",
+    "src/katana_qt/gis_online.cpp",
+    "src/katana_qt/gis_online_dialog.cpp (P19)"
+   ],
+   "value": "low"
+  },
+  {
+   "id": "T27",
+   "tool": "MCP entity tools (katana_list_entities, katana_describe_entity, katana_export, katana_status) and the missing katana_select / katana_modify",
+   "surfaces": "mcp",
+   "actsOn": "The whole drawing, one id, and the whole drawing.",
+   "missing": "mcp: scope and where arguments, structured results, and tools to select and modify by scope. VIEW must be refused headless in favour of AREA.",
+   "evidence": "src/katana_app/mcp_server.cpp:546-551 (no arguments, sends 'LIST'), 553-567 (one integer id), 589-599 (path only) and 286-309 (statusOf).",
+   "proposal": "Shared JSON schema fragments: 'scope' {kind: selection|drawing|layers|area, layers[], sublayers, area[x0,y0,x1,y1]} and 'where' {types[], layers[], style, colour, property, value, text, drawn}, with one scopeClause(Json) that writes the verb grammar. katana_list_entities(scope, where, limit) returns structured {matched, entities[{id, type, layer, style, colour, properties}]}. katana_describe_entity takes ids[]. katana_export(path, scope, where). New katana_select(scope, where, mode) and katana_modify(scope, where, set{}, preview), which return the plan's counts (matched, changed, locked, layersChanged, stylesChanged). Every tool runs through verb lines.",
+   "files": [
+    "src/katana_app/mcp_server.cpp",
+    "docs/mcp.md",
+    "tests/app/test_mcp_server.cpp"
+   ],
+   "value": "high"
+  },
+  {
+   "id": "T28",
+   "tool": "Attribute Manager, the Layer Manager's 'move selected entities to this layer', and the Symbol Library's 'assign to selection'",
+   "surfaces": "window only; the verbs PROP, CHLAYER and MODIFY SET SYMBOL cover cli and mcp once T06 lands",
+   "actsOn": "The selection only; the edits are executed directly.",
+   "missing": "window: every scope and filter; the edits also bypass the verb line",
+   "evidence": "src/katana_qt/attribute_manager.hpp:13-15 ('It acts on the SELECTION'); attribute_manager.cpp:73-77 executes directly. src/katana_qt/layer_manager.cpp:711-730. src/katana_qt/customisation/symbol_library.cpp:932.",
+   "proposal": "Each gets the ScopeFilterWidget (default Selection) and builds PROP, CHLAYER or 'MODIFY ... SET SYMBOL=' lines through the runner.",
+   "files": [
+    "src/katana_qt/attribute_manager.cpp",
+    "src/katana_qt/attribute_manager.hpp",
+    "src/katana_qt/layer_manager.cpp",
+    "src/katana_qt/customisation/symbol_library.cpp"
+   ],
+   "value": "low"
+  },
+  {
+   "id": "T29",
+   "tool": "Edit verbs OFFSET, TRIM, EXTEND, FILLET, CHAMFER, and INVERSE line-id",
+   "surfaces": "window: tools plus typed; cli; mcp",
+   "actsOn": "Entity ids.",
+   "missing": "window, cli and mcp: cutters and boundaries from a scope, OFFSET over many entities, and INVERSE as a table over many lines",
+   "evidence": "src/katana_cad/command_interpreter.cpp:1170-1265 and 2015-2045.",
+   "proposal": "Low priority: 'TRIM|EXTEND id pick <scope-of-cutters>', 'OFFSET <scope> distance LEFT|RIGHT', and 'INVERSE <scope>', which lists each matched line's bearing and distance (PARCEL covers polygons). FILLET and CHAMFER are pairwise and stay exempt.",
+   "files": [
+    "src/katana_cad/command_interpreter.cpp"
+   ],
+   "value": "low"
+  },
+  {
+   "id": "T30",
+   "tool": "Duplicated filter mechanisms: three wildcard matchers, SelectionFilter, the LabelRule matcher, Quick Select's Condition",
+   "surfaces": "all three (internal)",
+   "actsOn": "n/a",
+   "missing": "CLAUDE.md 1.1 'never write a second scope or filter implementation'. The shared filter also lacks property comparisons, not-equal and CODE=, and EntityModify lacks renameProperties.",
+   "evidence": "src/katana_cad/customisation/global_modify.cpp:364 matchesPattern. src/katana_entity/annotation.cpp:301 globMatches. src/katana_cad/tools/select_tools.cpp:242 matchesWildcard. include/katana/cad/selection.hpp:19-28. src/katana_cad/annotation/auto_label.cpp:81-110.",
+   "proposal": "One wildcard matcher in core/text.hpp, which all three callers use. ModifyFilter gains PROP comparisons (key<v, key>=v, key<>v), CODE= (the field code found through codePropertyCandidates) and, optionally, NOT. EntityModify gains renameProperties. SelectionFilter stays for viewport picks only. The shared parser must return the words it did not consume, and WHERE must end at a terminator the verb names (SET for MODIFY) or at the end of the line. One reply helper, scopeSummary(matched, total, leftOut), so every verb says 'N matched' the same way.",
+   "files": [
+    "include/katana/cad/global_modify.hpp",
+    "src/katana_cad/customisation/global_modify.cpp",
+    "include/katana/cad/scope_verbs.hpp",
+    "include/katana/core/text.hpp",
+    "src/katana_core/text.cpp",
+    "src/katana_entity/annotation.cpp",
+    "include/katana/entity/annotation.hpp"
+   ],
+   "value": "medium"
+  },
+  {
+   "id": "T31",
+   "tool": "The smart legend's scope",
+   "surfaces": "window, cli and mcp (sheet legend viewports)",
+   "actsOn": "The drawn entities inside the plan viewports' rotated windows.",
+   "missing": "a filter (leave out types or layers). The rotated window cannot be expressed with ModifyScope's Box2.",
+   "evidence": "include/katana/cad/plotting/legend.hpp:35-38.",
+   "proposal": "Low priority: a Legend viewport may carry a WHERE (a ModifyFilter) that narrows what it lists. The rotated window stays the legend's own unless the shared scope gains a polygon area.",
+   "files": [
+    "src/katana_cad/plotting/legend.cpp",
+    "include/katana/cad/plotting/legend.hpp"
+   ],
+   "value": "low"
+  },
+  {
+   "id": "T32",
+   "tool": "The Divide and Measure tools (points along objects)",
+   "surfaces": "window only (tools); no verb",
+   "actsOn": "One picked object per run.",
+   "missing": "window: many objects at once; cli and mcp: the whole tool",
+   "evidence": "src/katana_cad/tools/draw_divide.cpp:297-301: registered as tools only; the interpreter has no DIVIDE or MEASURE verb.",
+   "proposal": "'DIVIDE <scope> [WHERE] n' and 'MEASURE <scope> [WHERE] length' place points along every matched object in one undo step, extracted from the tool engine. The tools gain the scoped selection step.",
+   "files": [
+    "src/katana_cad/tools/draw_divide.cpp"
+   ],
+   "value": "low"
+  }
+ ],
+ "packages": [
+  {
+   "name": "PK1 Utilities act on the drawing (the owner's explicit request)",
+   "toolIds": [
+    "T01",
+    "T02"
+   ],
+   "design": "First, check branch utility-scope-core (worktree C:/GitHubProjects/Katana-wt/uscope-core). At this audit it sits at 8cd6a7a with no changes, so it is unclear whether the scope-core agent also covers the utilities; do not duplicate its work. Order: (a) UTILITY DRAW writes the round-trip keys (utility.seq, h_uncertainty, v_uncertainty, depth, path). (b) New utility_source.cpp: utilityLinesFrom(document, ids) turns matched entities into UtilityLines. The property test is that REPORT, VERIFY and CHECK on the drawn services give the same result as on the source CSV. (c) utility_verbs.cpp: each form accepts a file or the shared scope clause. CLEARANCE also takes DESIGN <id|scope>, and a checkDelivery row overload feeds CHECK. (d) The dialog gets the Source radio and the ScopeFilterWidget and still only builds the line; utility_workbench keeps framing DRAW. (e) REGRADE replaces what matched in one undo step. Replies begin 'matched=N'; an empty scope is reported, not refused. Tests: tests/cad/utilities (globbed) and test_utility_dialog.cpp. Documentation: docs/subsurface_utilities.md. Needs the shared parser and widget from the scope-core work. Shared hotspot: src/katana_cad/CMakeLists.txt:60 lists the utilities sources explicitly, so +utility_source.cpp there.",
+   "files": [
+    "src/katana_cad/utilities/utility_verbs.cpp",
+    "src/katana_cad/utilities/utility_source.cpp",
+    "include/katana/cad/utilities/utility_source.hpp",
+    "src/katana_cad/utilities/utility_drawing.cpp",
+    "include/katana/cad/utilities/utility_drawing.hpp",
+    "include/katana/survey/subsurface/delivery_schema.hpp",
+    "src/katana_survey/subsurface_delivery_schema.cpp",
+    "src/katana_qt/survey/utility_dialog.cpp",
+    "src/katana_qt/survey/utility_dialog.hpp",
+    "src/katana_qt/survey/utility_workbench.cpp",
+    "tests/cad/utilities/test_utility_verbs.cpp",
+    "tests/cad/utilities/test_utility_drawing.cpp",
+    "tests/cad/utilities/test_utility_source.cpp",
+    "tests/qt_widgets/survey/test_utility_dialog.cpp",
+    "docs/subsurface_utilities.md"
+   ]
+  },
+  {
+   "name": "PK2 Interpreter verbs on a scope: SELECT, LIST, INFO, the transforms, the attribute verbs, AREA, PARCEL and the edit verbs",
+   "toolIds": [
+    "T03",
+    "T04",
+    "T05",
+    "T06",
+    "T10",
+    "T11",
+    "T29"
+   ],
+   "design": "PK2 is the single owner of command_interpreter.cpp for this programme. Each verb calls the shared parser, takes the words it leaves, resolves them through matchEntities, and puts a 'matched=' record first in its reply. Compatibility defaults: SELECT LAYER x means LAYERS x ONLY, SELECT ALL means DRAWING, LIST defaults to DRAWING, and the transform and attribute verbs default to SELECTION, so no script changes meaning. SELECT keeps isSelectable and counts what that rule leaves out. The transforms leave locked layers and say so. CHLAYER, COLOR, STYLE APPLY and PROP SET/DELETE are re-expressed as planGlobalModify requests, removing their second code path. PROP RENAME waits for PK-S's renameProperties. The AREA verb must decide the clash with the AREA scope keyword (use the WINDOW alias) and must turn an empty scope into '0 matched' before calling computeArea, which refuses an empty list. PARCEL loops over the matched polylines; LABEL for all of them is one step. The survey_workbench Area-of-Selection window change (T10) lives in PK8. Tests go in a new tests/cad/customisation/test_scoped_verbs.cpp (globbed), which avoids the test_cad.cpp hotspot the ui lanes touch, plus cli.* tests. Hotspots: the cli.* tests in src/katana_app/CMakeLists.txt, and the one dispatch line each for PK4's EXPLODE/JOIN/REVERSE/DIVIDE/MEASURE and PK8's POINTS in run(), which PK2 adds on request. Documentation: docs/cad.md.",
+   "files": [
+    "src/katana_cad/command_interpreter.cpp",
+    "include/katana/cad/command_interpreter.hpp",
+    "tests/cad/customisation/test_scoped_verbs.cpp",
+    "docs/cad.md"
+   ]
+  },
+  {
+   "name": "PK-S Extensions to the shared mechanism (for the scope-core owner; gates parts of PK4 and PK6)",
+   "toolIds": [
+    "T30",
+    "T07",
+    "T31"
+   ],
+   "design": "Hand this to the agent building cad::ModifyScope, ModifyFilter, scope_verbs.hpp and the ScopeFilterWidget, or run it straight after that work lands; these are that agent's files. (1) The parser contract: it returns the words it did not consume, and WHERE ends at a terminator the caller names (SET for MODIFY) or at the end of the line. Verbs whose own options are key=value (LABEL, AUTOLABEL, TEXTEDIT, DIM, GENERATE, PLOT) put those options BEFORE the clause, because WHERE's STYLE= would otherwise swallow LABEL's style=. The scope keyword AREA gets the alias WINDOW for the AREA verb's sake. VIEW comes from a view provider the window sets on the interpreter and is refused headless. (2) One wildcard matcher in core/text.hpp; cad::matchesPattern, entity::globMatches and the tools' matchesWildcard all call it. (3) ModifyFilter gains property comparisons (< > <= >= <>) for Quick Select and CODE= for AUTOLABEL rules and Quick Select. (4) EntityModify gains renameProperties, for PROP RENAME. (5) A scopeSummary helper, so every verb and dialog words 'N matched (of M); K left out because ...' the same way. (6) Confirm T07: MODIFY has VIEW and AREA, and Global Modify runs its line through the runner. (7) Optional: a polygon area, for the legend's rotated windows. Tests go beside the existing global_modify tests.",
+   "files": [
+    "include/katana/cad/global_modify.hpp",
+    "src/katana_cad/customisation/global_modify.cpp",
+    "include/katana/cad/scope_verbs.hpp",
+    "include/katana/core/text.hpp",
+    "src/katana_core/text.cpp",
+    "src/katana_entity/annotation.cpp",
+    "include/katana/entity/annotation.hpp",
+    "src/katana_cad/plotting/legend.cpp",
+    "include/katana/cad/plotting/legend.hpp"
+   ]
+  },
+  {
+   "name": "PK3 MCP: scope and where on the entity tools, plus katana_select and katana_modify",
+   "toolIds": [
+    "T27"
+   ],
+   "design": "Add JSON schema fragments kScopeSchema and kWhereSchema, and one scopeClause(const Json&) that produces the verb grammar; VIEW is refused with 'use area'. katana_list_entities(scope, where, limit) runs 'LIST <clause>' and returns structured records (parse the LIST reply, or add a JSON form 'LIST ... JSON' in PK2). katana_describe_entity takes ids[]. katana_export(path, scope, where). New katana_select(scope, where, mode: replace|add|remove) and katana_modify(scope, where, set{...}, preview), whose structured output mirrors GlobalModifyPlan. Every tool runs through session verb lines, never a second path. Depends on PK2 (SELECT and LIST) and PK5 (EXPORT). Coordinate with ui-gap P16, which edits statusOf in the same file (merge after the ui lanes). Tests: tests/app/test_mcp_server.cpp; documentation: docs/mcp.md.",
+   "files": [
+    "src/katana_app/mcp_server.cpp",
+    "docs/mcp.md",
+    "tests/app/test_mcp_server.cpp"
+   ]
+  },
+  {
+   "name": "PK4 Interactive tools: the view in ToolContext and one scoped selection step; headless EXPLODE, JOIN, REVERSE, DIVIDE and MEASURE",
+   "toolIds": [
+    "T08",
+    "T09",
+    "T32"
+   ],
+   "design": "(1) ToolContext gains view (LayerOverrides*) and visibleArea, and ToolHost::make fills them from the active plan view. This closes the 'outstanding' comments at modify_transform.cpp:290, 2115 and everyday_support.cpp:142. (2) One ScopeSelectionStep in everyday_support with options [All/View/Layers/Where/Previous], parsed by the shared parser and resolved by matchEntities plus isSelectable. SelectionTool, SelectionStep, Join and Explode use it, so the tools built on them (Move, Copy, Rotate, Scale, Mirror, Array, Erase, List, Reverse, Match Properties) have it too; Stretch's window honours the view. (3) Quick Select is rebuilt on ModifyScope and ModifyFilter and matchesWildcard is deleted; the numeric part waits for PK-S. Select Similar searches a chosen scope. (4) Headless engines are extracted from modify_edit_join.cpp, modify_length.cpp and draw_divide.cpp into a new tools/scoped_edit_verbs.cpp (globbed), exposing EXPLODE, JOIN, REVERSE, DIVIDE and MEASURE with the scope clause. PK2 adds one dispatch line in command_interpreter.cpp for them. After P7 merges, P7's annotate_label.cpp adopts the step (a small follow-up in PK6). Tests: tests/cad/tools/*.cpp (globbed); documentation: docs/tools.md.",
+   "files": [
+    "include/katana/cad/interactive_tool.hpp",
+    "src/katana_cad/tools/everyday_support.cpp",
+    "src/katana_cad/tools/everyday_support.hpp",
+    "src/katana_cad/tools/modify_transform.cpp",
+    "src/katana_cad/tools/select_tools.cpp",
+    "src/katana_cad/tools/inquiry.cpp",
+    "src/katana_cad/tools/modify_length.cpp",
+    "src/katana_cad/tools/modify_properties.cpp",
+    "src/katana_cad/tools/modify_edit_join.cpp",
+    "src/katana_cad/tools/draw_divide.cpp",
+    "src/katana_cad/tools/scoped_edit_verbs.cpp",
+    "src/katana_qt/tools/tool_host.cpp",
+    "src/katana_qt/tools/tool_host.hpp",
+    "tests/cad/tools/test_scoped_selection.cpp",
+    "docs/tools.md"
+   ]
+  },
+  {
+   "name": "PK5 Export on a scope (DXF, 12da, GDAL vector) and the POINTS EXPORT verb",
+   "toolIds": [
+    "T19",
+    "T20"
+   ],
+   "design": "'EXPORT <file> [<scope>] [WHERE]': session.cpp exportPath and dxf_verbs.cpp exportDxf resolve matchEntities into options.entities, which all three exporters already accept. 12da surfaces go only with DRAWING. The window's EXPORT branch gets the same. File > Export and GIS > Export Vector replace the Yes/No box and the 'selected only' checkbox with the ScopeFilterWidget, build the EXPORT line and run it through the runner. The same package adds 'POINTS EXPORT <file> [<scope>] [WHERE] [format opts]' in session.cpp and the window dispatch, because the delimited writer is surveyio, which cad may not see. PK8's export dialog builds this line. Wait for ui-gap P12, which owns gis_dialogs.cpp and main_window_dxf.cpp. Hotspot: main_window.cpp needs exact edits in the EXPORT/POINTS dispatch branch and in exportVectorFile. Tests: tests/app/test_session.cpp plus cli.* tests; documentation: docs/interop.md.",
+   "files": [
+    "src/katana_app/session.cpp",
+    "src/katana_app/dxf_verbs.cpp",
+    "src/katana_app/dxf_verbs.hpp",
+    "src/katana_qt/gis_dialogs.cpp",
+    "src/katana_qt/gis_dialogs.hpp",
+    "tests/app/test_session.cpp",
+    "docs/interop.md"
+   ]
+  },
+  {
+   "name": "PK6 Survey codes and linework on a scope (CODE, CODE CENSUS, a new LINEWORK verb)",
+   "toolIds": [
+    "T12",
+    "T13"
+   ],
+   "design": "Builds on ui-gap P1's survey_code_verbs.cpp, so merge P1 first. 'CODE [<scope>] [WHERE] [property] [PREVIEW]' and 'CODE CENSUS [<scope>] ...' fill SurveyCodingOptions::ids from matchEntities; the default stays DRAWING. New 'LINEWORK [<scope>] [WHERE] [property=] [order=] [keeppoints=] [chord=mm] [PREVIEW]' over processLinework, one undo step, with the report as key=value records. The Code Manager's Apply and Linework tabs replace the Selection/All radios with the ScopeFilterWidget and run the lines through CustomisationContext::run (from P1). The window's Survey > Apply Survey Codes runs 'CODE SELECTION' or 'CODE DRAWING' through the runner (an exact edit in main_window.cpp applySurveyCodes). Tests: tests/cad/customisation/test_survey_code_verbs.cpp and a linework verb test (globbed); documentation: docs/survey_coding.md.",
+   "files": [
+    "src/katana_cad/customisation/survey_code_verbs.cpp",
+    "include/katana/cad/survey_code_verbs.hpp",
+    "src/katana_qt/customisation/code_manager_tabs.cpp",
+    "src/katana_qt/customisation/code_manager.hpp",
+    "src/katana_qt/customisation/code_manager.cpp",
+    "tests/cad/customisation/test_survey_code_verbs.cpp",
+    "tests/cad/customisation/test_linework_verb.cpp",
+    "docs/survey_coding.md"
+   ]
+  },
+  {
+   "name": "PK7 Annotation on a scope: LABEL, AUTOLABEL, LABEL LAYOUT, bulk TEXTEDIT, and optional bulk DIM",
+   "toolIds": [
+    "T14",
+    "T15",
+    "T16",
+    "T17",
+    "T18"
+   ],
+   "design": "In annotation_verbs.cpp the verb's own key=value options precede the scope clause (the PK-S rule). LABEL creation, LIST and DELETE take the clause. AUTOLABEL RUN, PREVIEW and CLEAR take [rule...] then the clause; autoLabel and clearAutoLabels gain an ids restriction (targets outside the scope are reported as kept). ruleMatches builds a ModifyFilter from the rule's layer, type and code (CODE= from PK-S) instead of calling globMatches: no storage schema change, and the second filter is gone. LABEL LAYOUT takes a scope; for VIEW its keep-out comes from the same scope. TEXTEDIT <opts> <scope> applies to every matched text, with replace=old:new, in one step. Optional: DIM ALIGNED|RADIUS|DIAMETER over a scope. Window: after P14 merges, annotation_managers.cpp's Run and Preview get the widget as 'Label within' through AnnotationWorkbench::commandRunner. After P7 merges, label_layout_report.cpp gets the widget and annotate_label.cpp adopts PK4's step. Tests: tests/cad/annotation/*.cpp (globbed); documentation: docs/annotation.md.",
+   "files": [
+    "src/katana_cad/annotation/annotation_verbs.cpp",
+    "src/katana_cad/annotation/auto_label.cpp",
+    "include/katana/cad/annotation/auto_label.hpp",
+    "src/katana_qt/annotation/annotation_managers.cpp",
+    "src/katana_qt/annotation/label_layout_report.cpp",
+    "src/katana_cad/tools/annotate_label.cpp",
+    "tests/cad/annotation/test_scoped_labels.cpp",
+    "docs/annotation.md"
+   ]
+  },
+  {
+   "name": "PK8 Survey windows on a scope: point export, report and manager, Area, and Parcel Report",
+   "toolIds": [
+    "T20",
+    "T10",
+    "T11"
+   ],
+   "design": "New cad verbs 'POINTS LIST|REPORT [<scope>] [WHERE]' in customisation/survey_point_verbs.cpp (globbed), using surveyPointsAmong on the matched ids; PK2 adds one dispatch line. The Export Survey Points dialog and the Point Report replace 'All/Selected' with the ScopeFilterWidget and build POINTS EXPORT (the verb from PK5) or POINTS REPORT lines through SurveyServices::run (from P1). The Point Manager dock gets the widget above its table. Survey > Area of Selection runs 'AREA SELECTION', or opens a small dialog with the widget and runs 'AREA <clause>'. After P4 merges, the Parcel Report dialog offers the parcel field or the widget and runs 'PARCEL <clause> ...'. Hotspot: survey_workbench.cpp, whose Survey menu P4 also edits, so land this after the ui lanes. Tests: tests/qt_widgets/survey/*.cpp and tests/cad/customisation/test_survey_point_verbs.cpp; documentation: docs/survey.md.",
+   "files": [
+    "src/katana_cad/customisation/survey_point_verbs.cpp",
+    "include/katana/cad/survey_point_verbs.hpp",
+    "src/katana_qt/survey/survey_points_ui.cpp",
+    "src/katana_qt/survey/survey_points_ui.hpp",
+    "src/katana_qt/survey/survey_workbench.cpp",
+    "src/katana_qt/survey/survey_parcel_dialog.cpp",
+    "tests/cad/customisation/test_survey_point_verbs.cpp",
+    "tests/qt_widgets/survey/test_survey_point_scope.cpp",
+    "docs/survey.md"
+   ]
+  },
+  {
+   "name": "PK9 Terrain from a scope: Surface From Drawing, and a window on Raster and Cloud surfaces",
+   "toolIds": [
+    "T21",
+    "T22"
+   ],
+   "design": "Move the drawing-to-TIN input builder out of main_window.cpp into cad (cad::surfaceInputFromDrawing(document, ids); cad may see terrain), with tests for nulls breaking breaklines and hidden layers being left out. Add RasterElevationOptions.window and a cloud clip, so an AREA or VIEW is read at full resolution under the cap. New window verbs 'SURFACE DRAWING [<scope>] [WHERE] [name=]', 'SURFACE RASTER <name> [AREA|VIEW]' and 'SURFACE CLOUD <name> [AREA|VIEW]' in the window dispatch; the Terrain menu items open a small dialog with the widget and run the line. Say plainly that cli and mcp are still missing, because the session has no surface store; the ui-gap plan records terrain verbs as a separate product gap. Hotspots: main_window.cpp (the buildSurfaceFrom* bodies and one dispatch branch) and the katana_cad and katana_qt CMake source lists for the new files. Documentation: docs/terrain.md.",
+   "files": [
+    "src/katana_cad/terrain_input.cpp",
+    "include/katana/cad/terrain_input.hpp",
+    "include/katana/interop/terrain_io.hpp",
+    "src/katana_interop/terrain_io.cpp",
+    "src/katana_qt/terrain_surface_dialog.cpp",
+    "src/katana_qt/terrain_surface_dialog.hpp",
+    "tests/cad/test_terrain_input.cpp",
+    "docs/terrain.md"
+   ]
+  },
+  {
+   "name": "PK10 Framing from a scope: GENERATE fit|grid, PLOT, SNAPSHOT and ZOOM",
+   "toolIds": [
+    "T23",
+    "T24",
+    "T25"
+   ],
+   "design": "In sheet_verbs.cpp, generateArea takes the shared clause: the bounds of the matched set, or the view's visible area through SheetVerbContext's view provider; area= stays as an alias. With LAYERS, the generated plan viewports hide the other layers, and the reply says so. After ui-gap P9 merges, its sheetGenerateArea combo becomes the ScopeFilterWidget. After P17 merges, PLOT and SNAPSHOT take the clause to fit the frame, with LAYERS also hiding the other layers in the plot, and the dialogs use the widget. The window's ZOOM takes the clause. A filter narrows only the frame until the painter can take an entity mask; state that in docs/plotting.md. Hotspot: main_window.cpp, the ZOOM, PLOT and SNAPSHOT dispatch branches. Tests: tests/cad/plotting/test_generate_scope.cpp (globbed), plus an extension of tools/check_plot.cmake.",
+   "files": [
+    "src/katana_cad/plotting/sheet_verbs.cpp",
+    "include/katana/cad/plotting/sheet_verbs.hpp",
+    "src/katana_qt/sheet_editor.cpp",
+    "src/katana_qt/plotting/plot_drawing_dialog.cpp",
+    "src/katana_qt/plotting/view_image_export.cpp",
+    "tests/cad/plotting/test_generate_scope.cpp",
+    "docs/plotting.md"
+   ]
+  },
+  {
+   "name": "PK11 Window editors on a scope: Attribute Manager, the Layer Manager's move-to-layer, Symbol Library assign",
+   "toolIds": [
+    "T28"
+   ],
+   "design": "Each editor gets the ScopeFilterWidget (default Selection) and stops executing commands itself. The Attribute Manager shows the properties of what the scope takes (where values differ, it says so, as it does now) and runs 'PROP SET|DELETE|RENAME <clause> ...'. The Layer Manager's move runs 'CHLAYER <clause> name'. Symbol assignment runs 'MODIFY <clause> SET SYMBOL=\"name@size\"'. Needs PK2's verbs and the runner from P1. Tests in tests/qt_widgets; documentation in docs/desktop.md.",
+   "files": [
+    "src/katana_qt/attribute_manager.cpp",
+    "src/katana_qt/attribute_manager.hpp",
+    "src/katana_qt/layer_manager.cpp",
+    "src/katana_qt/customisation/symbol_library.cpp",
+    "tests/qt_widgets/test_editor_scope.cpp"
+   ]
+  },
+  {
+   "name": "PK12 ONLINE IMPORT area through the shared scope",
+   "toolIds": [
+    "T26"
+   ],
+   "design": "OnlineAreaKind's view, drawing, selection and box resolve through the shared scope resolution (the view's visibleWorldBounds, and the bounds of matchEntities for SELECTION, LAYERS and WHERE); 'area=view|drawing|selection|x0,...' stay as aliases, and LAYERS and WHERE extents become possible. This deletes gis_online.cpp's own view-box maths, which ignores rotation, and its own selection loop. After ui-gap P19 merges, the Online Data dialog's area control becomes the widget. Tests: extend tests/qt_widgets/test_gis_online.cpp and the online_verbs parse tests; documentation: docs/gis_online.md.",
+   "files": [
+    "src/katana_interop/online_verbs.cpp",
+    "include/katana/interop/online_verbs.hpp",
+    "src/katana_qt/gis_online.cpp",
+    "src/katana_qt/gis_online_dialog.cpp",
+    "docs/gis_online.md"
+   ]
+  }
+ ],
+ "summary": "Read-only audit of main at 8cd6a7a, plus the 19 ui-gap designs in ui-gap-plan.json and the ui-lane-a work in progress. Nothing was edited, built or committed.\n\n**The finding.** Only MODIFY and the Global Modify dialog act on a scope and a filter today, and even they fall short:\n- The MODIFY verb has no VIEW or AREA (command_interpreter.cpp:2660-2676).\n- The dialog executes the plan itself instead of building the verb line (global_modify_dialog.cpp:1149-1160).\n\nEvery other tool falls into one of three kinds:\n- **Selection only:** MOVE, COPY, ROTATE, SCALE, MIRROR, ARRAY, ERASE, CHLAYER, COLOR, STYLE APPLY, PROP, the Attribute Manager and the Layer Manager's move.\n- **One id only:** PARCEL, INFO, TEXTEDIT, OFFSET, TRIM, EXTEND.\n- **Whole drawing only:** LIST, CLI CODE (it ignores even the selection), EXPORT on the CLI and MCP, AUTOLABEL, LABEL LAYOUT, Surface From Drawing and GENERATE.\n\n**Utility tools, the user's own example.** UTILITY REPORT, VERIFY, CLEARANCE and CHECK read only a CSV schedule (utility_verbs.cpp:81-92), and the dialog cannot even build a line without one. The drawn services also cannot be graded again as they stand: UTILITY DRAW does not write the horizontal and vertical uncertainties, the depth or each segment's path evidence (utility_drawing.cpp:119-147). So a drawing source first needs those properties written back, with a round-trip test that REPORT on the drawing equals REPORT on the file.\n\n**MCP.** Of the 12 tools, katana_list_entities takes no arguments, katana_describe_entity takes one id and katana_export takes a path. There is no select or modify tool with a scope.\n\n**Window-only tools with no verb** (so the CLI and MCP miss them entirely):\n- Linework\n- Export Survey Points, Point Report, Point Manager\n- Quick Select, Select Similar\n- Explode, Join, Reverse, Divide, Measure\n- Surface From Drawing, Surface From Raster, Surface From Point Cloud\n\n**The interactive tools cannot see the view.** ToolContext carries no view (interactive_tool.hpp:92-102; tool_host.cpp:135). The code itself flags this as outstanding at modify_transform.cpp:290 and 2115 and everyday_support.cpp:142. So a tool's \"All\" takes layers the view hides, and no tool offers View, Layers or Where.\n\n**Second scope or filter implementations** that CLAUDE.md 1.1 forbids:\n- Quick Select's own Condition and wildcard (select_tools.cpp:240-380).\n- The label rules' glob matcher (auto_label.cpp:81-110; annotation.cpp:301).\n- A third wildcard matcher beside cad::matchesPattern (global_modify.cpp:364).\n- SelectionFilter (selection.hpp:19-28).\n- ONLINE IMPORT's own `area=` grammar, whose view box ignores rotation (gis_online.cpp:205-240).\n- P9's planned \"Whole drawing / Current view / Window\" combo.\n\n**ui-gap packages that act on drawing data:**\n- **Need the shared widget and clause:** P4 Parcel Report, P7 Label Objects and Label Layout Report, P9 Generate, P14 AUTOLABEL run, P17 PLOT and SNAPSHOT, P19 Online area.\n- **Exempt:** P2's context menu, which acts on the selection by nature and gains scope through the verbs it runs. P16 STATUS, which is a summary. P3, P5, P6's single text, P8, P10, P11, P12, P13, P15 and P18, which are tables, point-picked or not about entities.\n\n**Also exempt, with the reason:**\n- Table verbs (LAYER, LINETYPE, HATCH, STYLE NEW/SET, DIMSTYLE, TEXTSTYLE, LABELSTYLE, PURGE, CRS, ALIGN).\n- Point-driven creation (the draw verbs, point-picked DIM kinds, LEADER, BALLOON, FORWARD).\n- File-driven work (IMPORT, survey import, traverse, level book).\n- Sheet-level work (SHEET, PLOTSHEETS, SHEETS CHECK).\n- The Properties panel, which edits the selection; Global Modify is its scope-wide twin.\n\n**Grammar risks the shared parser must settle before the packages start:**\n- **WHERE against key=value options.** WHERE's `STYLE=` collides with LABEL's `style=`. The parser should return the words it did not use and end WHERE at a terminator or the end of the line, with a verb's own options placed before the clause.\n- **The AREA verb against the AREA scope keyword.** Give the scope keyword the alias WINDOW.\n- **SELECT LAYER** must keep meaning the exact layer, so it maps to `LAYERS x ONLY`.\n- **SELECT on a scope** must still apply the selectable rule and count locked or hidden entities it leaves out.\n- **An empty scope** is reported, not refused. Today AREA's computeArea refuses an empty list.\n\n**Packages**, in order of user value, with disjoint file sets:\n- **PK1** utilities act on the drawing.\n- **PK2** the interpreter verbs (SELECT, LIST, INFO, transforms, attribute verbs, AREA, PARCEL). It is the single owner of command_interpreter.cpp.\n- **PK-S** extensions to the shared mechanism, for the scope-core owner: property comparisons, CODE=, renameProperties, one wildcard matcher, the parser contract and one reply helper. It gates Quick Select, PROP RENAME and the label-rule matcher.\n- **PK3** MCP scope and where, plus katana_select and katana_modify.\n- **PK4** interactive tools: the view in ToolContext, one scoped selection step, and headless EXPLODE, JOIN, REVERSE, DIVIDE and MEASURE.\n- **PK5** EXPORT and POINTS EXPORT.\n- **PK6** CODE and a new LINEWORK verb.\n- **PK7** annotation.\n- **PK8** survey windows.\n- **PK9** terrain.\n- **PK10** framing: GENERATE, PLOT, SNAPSHOT, ZOOM.\n- **PK11** window editors.\n- **PK12** Online Data's area.\n\n**Sequencing:**\n- **After ui lanes merge:** PK5 needs P12's gis_dialogs.cpp. PK6 builds on P1's survey_code_verbs.cpp. PK7 needs P7 and P14's Qt files. PK8 needs P4. PK10 needs P9 and P17. PK12 needs P19. PK3 also waits for P16.\n- **Shared hotspots:** main_window.cpp (small exact edits in PK5, PK6, PK9 and PK10), the cli.* test list in src/katana_app/CMakeLists.txt, and src/katana_cad/CMakeLists.txt:60 for the new utility_source.cpp.\n\n**Open question:** branch utility-scope-core (worktree Katana-wt/uscope-core) had no changes at this audit. Before starting PK1, check whether the scope-core agent is already taking the utility tools."
+}

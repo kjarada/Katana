@@ -1,0 +1,138 @@
+gdal		container		0	Main gdal entry point.
+gdal convert	==hide==|translate	leaf		0	Convert a dataset (shortcut for 'gdal raster convert' or 'gdal vector convert').
+gdal dataset		container		0	Commands to manage datasets.
+gdal dataset check		leaf		0	Check whether there are errors when reading the content of a dataset.
+gdal dataset copy	cp	leaf		0	Copy files of a dataset.
+gdal dataset delete	rm|remove	leaf		0	Delete dataset(s).
+gdal dataset identify		leaf		0	Identify driver opening dataset(s).
+gdal dataset rename	ren|mv	leaf		0	Rename files of a dataset.
+gdal driver		container		0	Command for driver specific operations.
+gdal driver cog		container		0	Command for COG driver specific operations.
+gdal driver cog validate		leaf		0	Validate if a TIFF file is a Cloud Optimized GeoTIFF
+gdal driver gpkg		container		0	Command for GPKG driver specific operations.
+gdal driver gpkg repack		leaf		0	Repack/vacuum in-place a GeoPackage dataset
+gdal driver gpkg validate		leaf		0	Validate conformance of a GeoPackage dataset against the GeoPackage specification
+gdal driver gti		container		0	Command for GTI driver specific operations.
+gdal driver gti create		leaf		0	Create an index of raster datasets compatible of the GDAL Tile Index (GTI) driver.
+gdal driver openfilegdb		container		0	Command for OpenFileGDB driver specific operations.
+gdal driver openfilegdb repack		leaf		0	Repack a FileGeoDatabase dataset
+gdal driver parquet		container		0	Command for Parquet driver specific operations.
+gdal driver parquet create-metadata-file		leaf		0	Create the _metadata file for a partitioned Parquet dataset
+gdal driver pdf		container		0	Command for PDF driver specific operations.
+gdal driver pdf list-layers		leaf		0	List layers of a PDF dataset
+gdal driver rpftoc		container		0	Command for RPFTOC driver specific operations.
+gdal driver rpftoc create		leaf		0	Create a A.TOC index from CADRG frames.
+gdal info		leaf		0	Return information on a dataset (shortcut for 'gdal raster info' or 'gdal vector info').
+gdal mdim		container		0	Multidimensional commands.
+gdal mdim convert		leaf		0	Convert a multidimensional dataset.
+gdal mdim info		leaf		0	Return information on a multidimensional dataset.
+gdal mdim mosaic		leaf		0	Build a mosaic, either virtual (VRT) or materialized, from multidimensional datasets.
+gdal pipeline	==hide==|+pipeline|+gdal=pipeline	leaf		1	Process a dataset applying several steps.
+gdal raster		container		0	Raster commands.
+gdal raster as-features		leaf		0	Create features from pixels of a raster dataset
+gdal raster aspect		leaf		1	Generate an aspect map
+gdal raster blend		leaf		1	Blend/compose two raster datasets
+gdal raster calc		leaf		1	Perform raster algebra
+gdal raster clean-collar		leaf		0	Clean the collar of a raster dataset, removing noise.
+gdal raster clip		leaf		1	Clip a raster dataset.
+gdal raster color-map		leaf		1	Generate a RGB or RGBA dataset from a single band, using a color map
+gdal raster compare		leaf		1	Compare two raster datasets.
+gdal raster contour		leaf		0	Creates a vector contour from a raster elevation model (DEM).
+gdal raster convert	==hide==|translate	leaf		1	Convert a raster dataset.
+gdal raster create		leaf		1	Create a new raster dataset.
+gdal raster edit		leaf		0	Edit a raster dataset.
+gdal raster fill-nodata		leaf		1	Fill nodata raster regions by interpolation from edges.
+gdal raster footprint		leaf		0	Compute the footprint of a raster dataset.
+gdal raster hillshade		leaf		1	Generate a shaded relief map
+gdal raster index		leaf		0	Create a vector index of raster datasets.
+gdal raster info		leaf		1	Return information on a raster dataset.
+gdal raster mosaic		leaf		1	Build a mosaic, either virtual (VRT) or materialized.
+gdal raster neighbors	neighbours	leaf		1	Compute the value of each pixel from its neighbors (focal statistics)
+gdal raster nodata-to-alpha		leaf		1	Replace nodata value(s) with an alpha band.
+gdal raster overview		container		1	Manage overviews of a raster dataset.
+gdal raster overview add		leaf		1	Adding overviews.
+gdal raster overview delete		leaf		0	Deleting overviews.
+gdal raster overview refresh		leaf		0	Refresh overviews.
+gdal raster pansharpen		leaf		1	Perform a pansharpen operation.
+gdal raster pipeline	==hide==|+pipeline|+gdal=pipeline	leaf		1	Process a raster dataset applying several steps.
+gdal raster pixel-info		leaf		0	Return information on a pixel of a raster dataset.
+gdal raster polygonize		leaf		0	Create a polygon feature dataset from a raster band.
+gdal raster proximity		leaf		1	Produces a raster proximity map.
+gdal raster reclassify		leaf		1	Reclassify values in a raster dataset
+gdal raster reproject	==hide==|warp	leaf		1	Reproject a raster dataset.
+gdal raster resize		leaf		1	Resize a raster dataset without changing the georeferenced extents.
+gdal raster rgb-to-palette		leaf		1	Convert a RGB image into a pseudo-color / paletted image.
+gdal raster roughness		leaf		1	Generate a roughness map
+gdal raster scale		leaf		1	Scale the values of the bands of a raster dataset.
+gdal raster select		leaf		1	Select a subset of bands from a raster dataset.
+gdal raster set-type		leaf		1	Modify the data type of bands of a raster dataset.
+gdal raster sieve		leaf		1	Remove small polygons from a raster dataset.
+gdal raster slope		leaf		1	Generate a slope map
+gdal raster stack		leaf		1	Combine together input bands into a multi-band output, either virtual (VRT) or materialized.
+gdal raster tile		leaf		1	Generate tiles in separate files from a raster dataset.
+gdal raster tpi		leaf		1	Generate a Topographic Position Index (TPI) map
+gdal raster tri		leaf		1	Generate a Terrain Ruggedness Index (TRI) map
+gdal raster unscale		leaf		1	Convert scaled values of a raster dataset into unscaled values.
+gdal raster update		leaf		1	Update the destination raster with the content of the input one.
+gdal raster viewshed		leaf		1	Compute the viewshed of a raster dataset.
+gdal raster zonal-stats		leaf		0	Calculate raster zonal statistics
+gdal vector		container		0	Vector commands.
+gdal vector buffer		leaf		1	Compute a buffer around geometries of a vector dataset.
+gdal vector check-coverage		leaf		1	Check a polygon coverage for validity
+gdal vector check-geometry		leaf		1	Check a dataset for invalid geometries
+gdal vector clean-coverage		leaf		1	Alter polygon boundaries to make shared edges identical, removing gaps and overlaps
+gdal vector clip		leaf		1	Clip a vector dataset.
+gdal vector combine		leaf		1	Combine features into collections
+gdal vector concat		leaf		1	Concatenate vector datasets.
+gdal vector concave-hull		leaf		1	Compute the concave hull of geometries of a vector dataset.
+gdal vector convert	==hide==|translate	leaf		1	Convert a vector dataset.
+gdal vector convex-hull		leaf		1	Compute the convex hull of geometries of a vector dataset.
+gdal vector create		leaf		1	Create a vector dataset.
+gdal vector dissolve		leaf		1	Dissolves multipart features
+gdal vector edit		leaf		1	Edit metadata of a vector dataset.
+gdal vector explode-collections		leaf		1	Explode geometries of type collection of a vector dataset.
+gdal vector export-schema		leaf		1	Export the OGR_SCHEMA from a vector dataset.
+gdal vector filter		leaf		1	Filter a vector dataset.
+gdal vector grid		container		0	Create a regular grid from scattered points.
+gdal vector grid average		leaf		0	Create a regular grid from scattered points using moving average interpolation.
+gdal vector grid average-distance		leaf		0	Create a regular grid from scattered points using the average distance between the grid node (center of the search ellipse) and all of the data points in the search ellipse.
+gdal vector grid average-distance-points		leaf		0	Create a regular grid from scattered points using the average distance between the data points in the search ellipse.
+gdal vector grid count		leaf		0	Create a regular grid from scattered points using the number of points in the search ellipse.
+gdal vector grid invdist		leaf		0	Create a regular grid from scattered points using weighted inverse distance interpolation.
+gdal vector grid invdistnn		leaf		0	Create a regular grid from scattered points using weighted inverse distance interpolation nearest neighbour.
+gdal vector grid linear		leaf		0	Create a regular grid from scattered points using linear/barycentric interpolation.
+gdal vector grid maximum		leaf		0	Create a regular grid from scattered points using the maximum value in the search ellipse.
+gdal vector grid minimum		leaf		0	Create a regular grid from scattered points using the minimum value in the search ellipse.
+gdal vector grid nearest		leaf		0	Create a regular grid from scattered points using nearest neighbor interpolation.
+gdal vector grid range		leaf		0	Create a regular grid from scattered points using the difference between the minimum and maximum values in the search ellipse.
+gdal vector index		leaf		0	Create a vector index of vector datasets.
+gdal vector info		leaf		1	Return information on a vector dataset.
+gdal vector layer-algebra		leaf		0	Perform algebraic operation between 2 layers.
+gdal vector make-point		leaf		1	Create point geometries from attribute fields
+gdal vector make-valid		leaf		1	Fix validity of geometries of a vector dataset.
+gdal vector partition		leaf		1	Partition a vector dataset into multiple files.
+gdal vector pipeline	==hide==|+pipeline|+gdal=pipeline	leaf		1	Process a vector dataset applying several steps.
+gdal vector rasterize		leaf		0	Burns vector geometries into a raster.
+gdal vector rename-layer		leaf		1	Rename layer(s) of a vector dataset.
+gdal vector reproject		leaf		1	Reproject a vector dataset.
+gdal vector segmentize		leaf		1	Segmentize geometries of a vector dataset.
+gdal vector select		leaf		1	Select a subset of fields from a vector dataset.
+gdal vector set-field-type		leaf		1	Modify the type of a field of a vector dataset.
+gdal vector set-geom-type	==hide==|set-type	leaf		1	Modify the geometry type of a vector dataset.
+gdal vector simplify		leaf		1	Simplify geometries of a vector dataset.
+gdal vector simplify-coverage		leaf		1	Simplify shared boundaries of a polygonal vector dataset.
+gdal vector sort		leaf		1	Spatially order the features in a layer
+gdal vector sql		leaf		1	Apply SQL statement(s) to a dataset.
+gdal vector swap-xy		leaf		1	Swap X and Y coordinates of geometries of a vector dataset.
+gdal vector update		leaf		1	Update an existing vector dataset with an input vector dataset.
+gdal vsi		container		0	GDAL Virtual System Interface (VSI) commands.
+gdal vsi copy	cp	leaf		0	Copy files located on GDAL Virtual System Interface (VSI).
+gdal vsi delete	rm|rmdir|del	leaf		0	Delete files located on GDAL Virtual System Interface (VSI).
+gdal vsi list	ls	leaf		0	List files of one of the GDAL Virtual System Interface (VSI).
+gdal vsi move	mv|ren|rename	leaf		0	Move/rename a file/directory located on GDAL Virtual System Interface (VSI).
+gdal vsi sozip		container		0	Seek-optimized ZIP (SOZIP) commands.
+gdal vsi sozip create		leaf		0	Create a Seek-optimized ZIP (SOZIP) file.
+gdal vsi sozip list		leaf		0	List content of a ZIP file, with SOZIP related information.
+gdal vsi sozip optimize		leaf		0	Create a Seek-optimized ZIP (SOZIP) file from a regular ZIP file.
+gdal vsi sozip validate		leaf		0	Validate a ZIP file, possibly using SOZIP optimization.
+gdal vsi sync		leaf		0	Synchronize source and target file/directory located on GDAL Virtual System Interface (VSI).
