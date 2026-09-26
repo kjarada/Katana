@@ -176,7 +176,19 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
 
 ### T0: katana_terrain_list
 
-Not started.
+| Tool | Arguments | Structured content |
+|---|---|---|
+| `katana_terrain_list` | `{}` | `{surfaces: [{name, triangles, points, bounds: [x0, y0, x1, y1], zmin, zmax, plan_area, source}], rasters: [{id, name, role, width, height, cell, crs, nodata, source, derived_from}]}` |
+
+It runs `SURFACE LIST JSON` through the Session, as the command line would,
+and hands its JSON back: the surfaces a terrain verb reads as `SURFACE
+<name>` and the rasters it reads as `RASTER <id|name>` (`docs/terrain.md`,
+"Surfaces on every front end"). A raster's `cell` is null unless its cells
+are square and unrotated; `nodata` is null until the reference-layer work
+reads it. Read-only and idempotent. Surfaces are made with `SURFACE FROM`
+through `katana_run_commands`, or by `katana_gdal_run` with `output:
+{surface}`. `McpServer.TerrainListGivesTheSessionsSurfacesAndRasters` pins
+it.
 
 ### V5: katana_gis_query
 

@@ -1246,6 +1246,20 @@ Terrain submenus are made only when an item is added, so no empty heading
 shows. F0 adds none: the GDAL verb's item is the toolbox, X1's. It is on the
 command line and on `runVerbLine` until then.
 
+**The terrain dialogs** (Terrain > Surface From, GIS > Export Surface as DEM,
+and the Terrain > Analysis items) share
+`src/katana_qt/geo/terrain_dialog_support.hpp`. Each writes its line into a
+read-only `<d>Command` field and Run hands it to `runVerbLine`. `TerrainRun`
+shows the reply in `<d>Reply`: at once when the line answered at once (a
+refusal, a PREVIEW, a headless run), else when the job whose id the reply
+named ends. A dialog is a child of the window, which destroys the workbench
+before its children, so a dialog never calls into the workbench as it goes:
+what a finished listener reaches is held weakly instead of the listener
+being taken back. The three Surface From items open one dialog,
+`surfaceFromDialog`, on their own source, and GIS > Export Surface as DEM
+opens `surfaceRasterDialog`; both are made on first use and kept, as the
+Alignment Manager is (`docs/terrain.md`, "Surfaces on every front end").
+
 **One store of surfaces.** The window's surfaces are a
 `terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the
 store the headless session has too, so `SURFACE <name>` finds the same

@@ -652,8 +652,34 @@ Not started.
 
 ### T0: Terrain session: one surface store and SURFACE verbs on every front end
 
-Not started. The store is F0's (`terrain::SurfaceStore`); `TO SURFACE` has
-its block in `bindings.cpp`.
+Built: `SURFACE LIST | INFO | REMOVE | FROM | EXPORT`
+(`src/katana_app/geo/surface_verbs.cpp`, its helpers in
+`src/katana_app/geo/terrain_verbs.hpp`), `TO SURFACE` in `bindings.cpp`'s T0
+block, `katana_terrain_list` (`docs/mcp.md`), and the window's Terrain >
+Surface From and GIS > Export Surface as DEM, which build SURFACE lines
+(`src/katana_qt/surface_raster_dialog.hpp`, with
+`src/katana_qt/geo/terrain_dialog_support.hpp` for what the terrain dialogs
+share). The rules that make survey points and breaklines of drawing data
+moved to `cad::geo::surfaceInput`. `docs/terrain.md`, "Surfaces on every
+front end", has the grammar, the records and the decisions.
+
+Where it differs from the plan:
+
+- `SURFACE FROM <scope>` takes the scope as FROM does
+  (`FROM DRAWING WHERE DRAWN`, `FROM LAYERS ground`); the plan's `SURFACE FROM
+  DRAWING [<scope>]` is also read. `FROM FILE <path>` reads a DEM that is not
+  a reference raster.
+- A heightless entity is left out, not put on the datum as the window did;
+  the comparison with the old code is on levelled data, and on the site plan
+  sample the test shows the difference.
+- The DEM is written through GDAL's `raster convert`, not through
+  `GdalDataset::writeRaster`, which is left as it was for its other callers.
+- One Surface From dialog for the three items, named by the `<d>` rule
+  (`surfaceFromScope`).
+- `GeoServices` gained `views` (the scope controls' View choice) and
+  `GeoWorkbench::window`, the parent the packages' dialogs are made under.
+- TO SURFACE triangulates in its apply, since the GDAL verb's work ends with
+  the run; SURFACE FROM triangulates in its work.
 
 ### T1: CONTOUR from a surface or an elevation raster
 
