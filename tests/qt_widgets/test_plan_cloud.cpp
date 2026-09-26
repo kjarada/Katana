@@ -183,8 +183,10 @@ TEST(PlanPainterCloud, FloatOffsetsMoveAFewPointsOnPixelEdgesByOnePixelAndNoneFu
 
 TEST(PlanPainterCloud, AFrameIsTheSameAtBothSimdLevels)
 {
-    if (katana::core::detectedSimdLevel() < SimdLevel::Avx2) {
-        GTEST_SKIP() << "this processor has no AVX2: only the scalar path can run here";
+    // The kernel level is AVX2 on x86-64 or NEON on 64-bit ARM.
+    const SimdLevel kernel = katana::core::detectedSimdLevel();
+    if (kernel == SimdLevel::Scalar) {
+        GTEST_SKIP() << "no SIMD kernels run on this processor: only the scalar path can run here";
     }
     katana::interop::ReferenceData reference;
     (void)reference.add(cloudOf(PointColorMode::Elevation));
@@ -193,7 +195,7 @@ TEST(PlanPainterCloud, AFrameIsTheSameAtBothSimdLevels)
     PlanPaintOptions options;
     options.cloudPointBudget = 120'000;
     QImage images[2];
-    const SimdLevel levels[2] = {SimdLevel::Scalar, SimdLevel::Avx2};
+    const SimdLevel levels[2] = {SimdLevel::Scalar, kernel};
     for (int i = 0; i < 2; ++i) {
         const LevelScope scope(levels[i]);
         ASSERT_TRUE(scope.ok());

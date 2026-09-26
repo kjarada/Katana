@@ -16,5 +16,7 @@ add_library(katana_geometry STATIC
     point_splat.cpp
 )
 katana_target_defaults(katana_geometry)
-katana_add_simd_sources(katana_geometry AVX2 simd/points_avx2.cpp simd/splat_avx2.cpp)
+katana_add_simd_sources(katana_geometry
+    AVX2 simd/points_avx2.cpp simd/splat_avx2.cpp
+    NEON simd/points_neon.cpp simd/splat_neon.cpp)
 target_link_libraries(katana_geometry PUBLIC katana_math)
