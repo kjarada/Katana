@@ -211,21 +211,6 @@ Result<std::string> keepInPlace(Context& context, const std::filesystem::path& f
            " persisted=" + (persisted ? "yes" : "no");
 }
 
-Result<katana::gis::RasterInfo> rasterInfoOf(const gp::DatasetValue& dataset)
-{
-    if (const auto* grid = std::get_if<gp::RasterGrid>(&dataset)) {
-        return grid->info;
-    }
-    if (const auto* path = std::get_if<gp::DatasetPath>(&dataset)) {
-        auto opened = katana::gis::GdalDataset::open(pathOfUtf8(path->path));
-        if (!opened) {
-            return opened.error();
-        }
-        return (*opened)->rasterInfo();
-    }
-    return makeError(ErrorCode::InvalidArgument, "a feature set is not a raster");
-}
-
 katana::core::Status moveFile(const std::filesystem::path& from, const std::filesystem::path& to)
 {
     std::error_code error;

@@ -66,6 +66,7 @@
 #include "katana/interop/terrain_io.hpp"
 #include "katana/math/summation.hpp"
 #include "replies.hpp"
+#include "terrain_verbs.hpp"
 #include "verb_table.hpp"
 
 namespace katana::app::geo {

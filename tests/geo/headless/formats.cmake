@@ -29,7 +29,7 @@ add_test(NAME qt_import_of_a_zip_opens_the_one_dataset_inside_headless
         "-DAPP=$<TARGET_FILE:katana>"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>IMPORT \"${_formats_headless}/lots.zip\"|>LIST"
-        "-DEXPECT=Imported 3 entities from lots\\.zip.*Polyline  layer=lots [^\r\n]*area=2000"
+        "-DEXPECT=imported file=\"?[^ \"]*/lots\\.zip\"? kind=vector entities=3 .*Polyline  layer=lots [^\r\n]*area=2000"
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/formats_zip_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 set_tests_properties(qt_the_formats_dialog_shows_the_formats_line_it_runs_headless

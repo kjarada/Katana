@@ -14,7 +14,7 @@ add_test(NAME cli.raster_clip_of_the_plane_to_an_area_is_twenty_by_fifteen
             -c "RASTER CLIP FILE \"${_dem_data}/plane.asc\" AREA 0,0,20,15 NAME west"
             -c "REFS")
 set_tests_properties(cli.raster_clip_of_the_plane_to_an_area_is_twenty_by_fifteen PROPERTIES
-    PASS_REGULAR_EXPRESSION "clip algorithm=\"raster clip\" by=area area=0,0,20,15 seconds=[0-9.]+.*input arg=input source=file .*output arg=output kind=raster target=reference id=1 name=west raster=20x15.*west  20x15 px"
+    PASS_REGULAR_EXPRESSION "clip algorithm=\"raster clip\" by=area area=0,0,20,15 seconds=[0-9.]+.*input arg=input source=file .*output arg=output kind=raster target=reference id=1 name=west raster=20x15.*reference id=1 kind=raster name=west width=20 height=15 "
     FAIL_REGULAR_EXPRESSION "error")
 
 # Every cell of the plane holds a value, so its footprint is its extent: a

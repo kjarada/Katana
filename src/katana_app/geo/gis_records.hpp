@@ -23,8 +23,7 @@ namespace katana::app::geo {
 [[nodiscard]] std::string referenceRecord(const katana::interop::RasterOverlay& raster);
 [[nodiscard]] std::string referenceRecord(const katana::interop::PointCloudLayer& cloud);
 
-// One named surface.
-[[nodiscard]] std::string surfaceRecord(const katana::terrain::NamedSurface& surface);
+// One named surface: surfaceRecord, terrain_verbs.hpp's.
 
 // A record as a JSON object: {"record": kind, field: value ...}. A field is
 // a number when its text is one, true or false for yes and no, bounds a list

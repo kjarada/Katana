@@ -17,7 +17,7 @@ add_test(NAME cli.export_of_a_projected_drawing_to_kml_is_in_longitude_and_latit
             -c "EXPORT \"${_fidelity_out}/peg.kml\""
             -c "IMPORT \"${_fidelity_out}/peg.kml\"" -c "LIST")
 set_tests_properties(cli.export_of_a_projected_drawing_to_kml_is_in_longitude_and_latitude PROPERTIES
-    PASS_REGULAR_EXPRESSION "exported 1 features \\(LIBKML\\).*converted from GDA94 / MGA zone 56 \\(EPSG:28356\\) to longitude and latitude.*Point  layer=0  at 330000,6250000.*Point  layer=0  at 151\\.161906846,-33\\.876653623"
+    PASS_REGULAR_EXPRESSION "exported file=\"[^\"]*/peg\\.kml\" kind=vector driver=LIBKML features=1 .*converted from GDA94 / MGA zone 56 \\(EPSG:28356\\) to longitude and latitude.*Point  layer=0  at 330000,6250000.*Point  layer=0  at 151\\.161906846,-33\\.876653623"
     FAIL_REGULAR_EXPRESSION "error")
 
 # Without a project coordinate system there is nothing to convert from: the
@@ -39,5 +39,5 @@ add_test(NAME cli.a_lot_with_a_hole_is_exported_as_one_polygon_with_the_projects
             -c "IMPORT \"${_fidelity_data}/lot_with_hole.geojson\""
             -c "EXPORT \"${_fidelity_out}/lot.gpkg\"" -c "INFO \"${_fidelity_out}/lot.gpkg\"")
 set_tests_properties(cli.a_lot_with_a_hole_is_exported_as_one_polygon_with_the_projects_crs PROPERTIES
-    PASS_REGULAR_EXPRESSION "imported 2 entities.*exported 1 features \\(GPKG\\).*Coordinate system: GDA94 / MGA zone 56 \\(EPSG:28356\\).*katana: 1 feature, Polygon"
+    PASS_REGULAR_EXPRESSION "imported file=[^\r\n]* entities=2 layers=1 features=1 .*exported file=\"[^\"]*/lot\\.gpkg\" kind=vector driver=GPKG features=1 .*layer name=katana features=1 geometry=Polygon crs=\"GDA94 / MGA zone 56 \\(EPSG:28356\\)\""
     FAIL_REGULAR_EXPRESSION "error")

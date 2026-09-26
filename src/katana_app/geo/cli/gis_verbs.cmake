@@ -48,7 +48,7 @@ add_test(NAME cli.gis_an_archives_surfaces_are_kept_for_the_verbs_after_it
             -c "IMPORT \"${_gis_verbs_archives}/multiple_tins.12da\""
             -c "GDAL raster hillshade FROM SURFACE \"TIN SOUTH WEST\" CELL 10 TO REFERENCE shade")
 set_tests_properties(cli.gis_an_archives_surfaces_are_kept_for_the_verbs_after_it PROPERTIES
-    PASS_REGULAR_EXPRESSION "imported file=\"?[^ ]*/multiple_tins\\.12da\"? kind=archive entities=0 alignments=0 surfaces=4 .*surface name=\"TIN SOUTH WEST\" triangles=8 points=9 bounds=554000,6883000,554100,6883100 zmin=10 zmax=12\\.5 .*input arg=input source=surface name=\"TIN SOUTH WEST\".*output arg=output kind=raster target=reference id=1 name=shade "
+    PASS_REGULAR_EXPRESSION "imported file=\"?[^ ]*/multiple_tins\\.12da\"? kind=archive entities=0 alignments=0 surfaces=4 .*surface name=\"TIN SOUTH WEST\" triangles=8 points=9 bounds=554000\\.000,6883000\\.000,554100\\.000,6883100\\.000 zmin=10\\.000 zmax=12\\.500 .*input arg=input source=surface name=\"TIN SOUTH WEST\".*output arg=output kind=raster target=reference id=1 name=shade "
     FAIL_REGULAR_EXPRESSION "error|holds no surfaces")
 
 # The same IMPORT line the window runs in
@@ -61,5 +61,5 @@ add_test(NAME cli.gis_import_line_gives_the_records_the_window_gives
             -c "RECT 1000,2000 1010,2005"
             -c "IMPORT \"${_gis_verbs_samples}/parcels.geojson\" ALONGSIDE")
 set_tests_properties(cli.gis_import_line_gives_the_records_the_window_gives PROPERTIES
-    PASS_REGULAR_EXPRESSION "imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 layers=1 features=9 skipped=0 bounds=1000,2000,1185,2165 crs=\"[^\"]*EPSG:32630[^\"]*\"[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.\""
+    PASS_REGULAR_EXPRESSION "imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 layers=1 features=8 skipped=0 bounds=1000,2000,1185,2165 crs=\"[^\"]*EPSG:32630[^\"]*\"[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.\""
     FAIL_REGULAR_EXPRESSION "error")

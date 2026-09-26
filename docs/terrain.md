@@ -313,6 +313,17 @@ height= cell= file=` records, the rasters a terrain verb reads as `RASTER
 <id|name>`; `SURFACE LIST JSON` is what `katana_terrain_list` hands an agent
 (`docs/mcp.md`).
 
+- **One surface record.** IMPORT of an archive lists its surfaces with the
+  same `surface` record as SURFACE LIST, written once in `surface_verbs.cpp`,
+  with heights and bounds to the millimetre. The IMPORT lane and the terrain
+  lane each wrote one, one to three decimals and one exact. Once merged they
+  were two definitions of one function, and every program that linked
+  `katana_app` failed. The exact one was dropped: on a text grid, which GDAL
+  reads as Float32, it writes the height 24.892 as `24.892000198364258`,
+  noise from the storage type and not a measurement. The same merge left two
+  `rasterInfoOf`; the one kept is `terrain_steps.cpp`'s, which also carries a
+  grid's no-data value.
+
 - **A raster is read at its true values.** `readRasterElevations` reads the
   band from its file through GDAL, never the 8-bit display copy a reference
   raster holds (audit QT-23), on the stride that keeps the extent under the
