@@ -18,6 +18,11 @@ namespace katana::app::geo {
 // ---- T6: RASTER GRID ----
 // ---- T7: RASTER MOSAIC, CLIP, FILL, FOOTPRINT, REPROJECT, DIFFERENCE ----
 // ---- V1: GIS BUFFER, GIS DISSOLVE ----
+[[nodiscard]] katana::core::Result<Prepared> prepareGisBuffer(Context& context, const Tokens& tokens,
+                                                              std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareGisDissolve(Context& context,
+                                                                const Tokens& tokens,
+                                                                std::string_view line);
 // ---- V2: GIS OVERLAY ----
 // ---- V3: GIS HULL, GIS CLIP ----
 // ---- V4: GIS CHECK, GIS REPAIR, GIS COVERAGE ----
@@ -55,6 +60,17 @@ const std::vector<VerbEntry>& verbTable()
         // ---- T6: RASTER GRID ----
         // ---- T7: RASTER MOSAIC, CLIP, FILL, FOOTPRINT, REPROJECT, DIFFERENCE ----
         // ---- V1: GIS BUFFER, GIS DISSOLVE ----
+        rows.push_back(
+            {"GIS", "BUFFER", &prepareGisBuffer,
+             "GIS BUFFER [<scope>] distance=<m>|distance=prop:<key> [side=both|left|right]\n"
+             "          [caps=round|flat|square] [joins=round|mitre|bevel] [dissolve[=k1,k2]]\n"
+             "          [TO LAYER <path>] [PREVIEW]  areas around what the scope takes (default\n"
+             "          layer gis/buffer); a negative distance shrinks an area (a setback)"});
+        rows.push_back(
+            {"GIS", "DISSOLVE", &prepareGisDissolve,
+             "GIS DISSOLVE [<scope>] [by=k1,k2] [keep=identical] [TO LAYER <path>] [REPLACE]\n"
+             "          [PREVIEW]  areas merged by their properties (default layer gis/dissolve);\n"
+             "          REPLACE deletes the areas merged, in the same step"});
         // ---- V2: GIS OVERLAY ----
         // ---- V3: GIS HULL, GIS CLIP ----
         // ---- V4: GIS CHECK, GIS REPAIR, GIS COVERAGE ----

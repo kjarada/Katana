@@ -17,6 +17,13 @@
 
 #include "geo/geo_workbench.hpp"
 
+#include <utility>
+
+// ---- V1: GIS > Analysis - GDAL > Buffer, Dissolve ----
+#include "geo/buffer_dialog.hpp"
+#include "geo/dissolve_dialog.hpp"
+#include "geo/gis_tool_dialog.hpp"
+
 namespace katana::qt {
 
 void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
@@ -28,6 +35,18 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     // ---- X2: the toolbox's pipeline tab (no item of its own) ----
     // ---- I2: GIS > Processing - GDAL > Formats ----
     // ---- V1: GIS > Analysis - GDAL > Buffer, Dissolve ----
+    addGisToolAction(menus, workbench, "Analysis - GDAL", Icon::Processing, "&Buffer...",
+                     "Areas around what the scope takes: easements, setbacks (negative), "
+                     "corridors, clearance zones - GIS BUFFER",
+                     "gisBuffer", [](GisDialogContext context, QWidget* parent) {
+                         return new GisBufferDialog(std::move(context), parent);
+                     });
+    addGisToolAction(menus, workbench, "Analysis - GDAL", Icon::Processing, "Di&ssolve...",
+                     "Merge areas whose properties agree - superlots by owner, one clearance "
+                     "zone - GIS DISSOLVE",
+                     "gisDissolve", [](GisDialogContext context, QWidget* parent) {
+                         return new GisDissolveDialog(std::move(context), parent);
+                     });
     // ---- V2: GIS > Analysis - GDAL > Overlay ----
     // ---- V3: GIS > Analysis - GDAL > Hull, Clip ----
     // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----

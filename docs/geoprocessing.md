@@ -686,7 +686,127 @@ Not started.
 
 ### V1: GIS BUFFER and GIS DISSOLVE
 
-Not started.
+```
+GIS BUFFER [<scope>] distance=<m>|distance=prop:<key> [side=both|left|right]
+           [caps=round|flat|square] [joins=round|mitre|bevel] [dissolve[=k1,k2]]
+           [TO LAYER <path>] [PREVIEW]
+GIS DISSOLVE [<scope>] [by=k1,k2] [keep=identical] [TO LAYER <path>] [REPLACE] [PREVIEW]
+```
+
+Easements, setbacks, corridors and clearance zones around what the scope
+takes, and areas merged by what their properties say
+(`src/katana_app/geo/buffer_verbs.cpp`). The window's items are GIS >
+Analysis - GDAL > Buffer... and Dissolve... (`gisBuffer`, `gisDissolve`;
+`src/katana_qt/geo/buffer_dialog.hpp`, `dissolve_dialog.hpp`). An agent
+types the same lines through `katana_run_commands`.
+
+**BUFFER** runs `vector buffer` on the scope's feature set.
+
+- **The distance** is one length for all, or `distance=prop:<key>`: each
+  entity by the number its own property holds (a clearance by voltage). The
+  entities are grouped by value and each group is one run. An entity whose
+  property gives no number, or 0, is skipped and counted
+  (`skipped.no_distance=`).
+- **Negative** sets an area in: a 3 m mitred setback of a 20 x 40 lot is 14 x
+  34 (`GisBuffer.AMinusThreeMetreMitreSetbackOfATwentyByFortyLotIs14By34`).
+  GEOS buffers a line or a point inwards to nothing; that is counted
+  (`empty=`), never drawn (`GisBuffer.ALineBufferedInwardsIsNothingAndSaysSo`).
+- **One side** of a line is `side=left|right`, walking along it: left of a
+  west-to-east line is north (`GisBuffer.LeftOfAWestToEastLineIsNorth`).
+- **Arcs.** GDAL's default of 8 segments a quadrant strays 0.096 m from a 5 m
+  arc. The quadrant's segments are the fewest whose chords keep within the
+  1 mm curve tolerance the bindings chord with, by the one sagitta rule
+  (`geometry::sagittaChordCount`); the reply says how many
+  (`quadrant_segments=`).
+- **A round buffer of a point is a circle.** Drawn as one - a `Circle2` of
+  the distance's radius, exactly, with the point's properties - rather than
+  as chords (`GisBuffer.ARoundPointBufferIsAnExactCircle`: pi x 25 m2).
+- **dissolve** merges the results: `DISSOLVE` all of them, `dissolve=k1,k2`
+  those whose properties agree. It is DISSOLVE's own chain below.
+- **The result** is closed polylines on `gis/buffer` (or TO LAYER), holes
+  tagged as every result's are, with the source's properties, `gis.op` and
+  `gis.source`. `vector buffer` drops Z: a buffer is in plan.
+
+**DISSOLVE** merges the areas in the scope.
+
+- **`vector dissolve` alone does not group.** It unions only the parts within
+  each feature (measured). So merging by a property is `vector combine
+  --group-by` and then `vector dissolve`; the combine's geometry collection
+  comes back as the feature's parts.
+- **Areas only.** Closed polylines and circles (drawingDataset's areas, with
+  their tagged holes); the points and lines a scope takes are left as they
+  are, and a warning says how many.
+- **`keep=identical`** keeps each property the whole group holds alike
+  (`--add-extra-fields=always-identical`); the rest are left behind
+  (`GisDissolve.KeepIdenticalKeepsOnlySharedValues`).
+- **`REPLACE`** deletes every area that went in - the joined holes too - in
+  the same undo step as the result
+  (`GisDissolve.ReplaceDeletesTheSourcesInTheSameUndoStep`). It is an
+  in-place apply, so it compares those areas with the copies taken at
+  prepare and refuses when one changed while the job ran
+  (`GisDissolve.AnInPlaceReplaceRefusesADrawingChangedWhileItRan`). A
+  dissolve's result carries no `katana_id` of a source, which is why the
+  verb deletes what its scope took rather than what `resultCommand`'s
+  `deleteSources` would find.
+
+**Replies.**
+
+```
+gis op=buffer seconds=0.004 cancelled=no
+scope arg=input scope=drawing matched=1 used=1 points=0 lines=1 polygons=0
+output arg=output kind=vector target=layer layer=gis/buffer created=1 updated=0 deleted=0 skipped=0
+buffer distance=1 side=both caps=flat joins=round quadrant_segments=18 dissolve=no groups=1 features=1 circles=0 area=200.000 empty=0
+dissolve by=owner keep=identical areas=4 replace=no groups=2 area=8000.000
+```
+
+The first three are the GDAL verb's own records (the `gis` record is the
+`gdal` one of a curated verb); the last says what was made and measures it:
+the replies carry the area, not the entities, which would go stale. A scope
+that took nothing answers `ran=no` and runs nothing; PREVIEW answers `gis
+op=buffer preview=yes`, the scope record and `preview valid=yes changed=no`.
+
+**What the vector verbs share** (`src/katana_app/geo/vector_support.hpp`),
+written here for BUFFER and DISSOLVE and used by every vector verb after them:
+
+- **Their own words are read as MODIFY reads SET and PREVIEW**: taken out of
+  the line wherever they stand, and the rest handed to the one scope parser.
+  So `GIS BUFFER DRAWING WHERE TYPE=line distance=1` works: the filter ends
+  where its conditions do
+  (`GisBuffer.OptionsAfterAWhereFilterAreTheVerbsOwn`).
+- **The result's layer is `TO LAYER <path>`**, the one target parser's word,
+  not the plan's `layer=`. `LAYER=` is a WHERE key: after a filter,
+  `layer=gis/easement` would silently be read as "on layers named
+  gis/easement" and match nothing. An option key is never a WHERE key.
+- One run of a vector algorithm on a feature set (`vector::runVector`), the
+  measures (`vector::measure`), a result of several tables made one
+  (`vector::mergedTable`), and one step executed and framed
+  (`vector::executeStep`).
+
+**The dialogs' frame** (`src/katana_qt/geo/gis_tool_dialog.hpp`) is shared
+by every GIS analysis and check dialog: the scope controls
+(`ScopeFilterWidget`), the dialog's fields, `<d>Command`, `<d>Preview`,
+`<d>Run`, `<d>Status`, `<d>Reply`. Run hands the line to the window's one
+executor. Interactively the runner answers `job id=<n> ... state=started`
+and the dialog shows the job's reply when the workbench says it ended
+(`qt_widgets.GisBufferDialog.AnInteractiveRunShowsItsJobsReplyWhenItEnds`);
+headless it is there when Run returns (`qt_gis_buffer_dialog_headless`,
+`qt_gis_dissolve_dialog_headless`). The scope's View choice lists the
+window's views: `GeoServices` carries no view list, so the frame asks the
+window's workspace (its one `ViewWorkspace` child) - a service to move into
+`GeoServices` when a second lane needs it.
+
+**Tests.** `tests/geo/test_buffer_and_dissolve.cpp`, every value by hand: a
+100 m line 1 m either side with flat ends, 200 m2; the 14 x 34 setback,
+476 m2; clearances of 1 and 3 m on 100 m lines, 200 and 600 m2; a 5 m circle,
+78.540 m2; two crossing strips dissolved, 400 - 4 = 396 m2; two 50 x 40 lots
+merged, 4000 m2. `GisBufferContract.TheArgumentsTheVerbsBindAreGdals` pins
+`vector buffer`, `combine` and `dissolve`. The dialogs:
+`tests/qt_widgets/geo/test_buffer_dialog.cpp`; katana_cli:
+`cli.gis_buffer_of_a_drawn_line_creates_two_hundred_square_metres`,
+`cli.gis_dissolve_of_two_adjacent_lots_is_one_area_of_four_thousand_square_metres`.
+
+**Not done.** Lines are not dissolved (merged into multi-lines): the verb
+merges areas. The distance cannot come from an expression, only a property.
 
 ### V2: GIS OVERLAY: polygon booleans between two scopes
 
