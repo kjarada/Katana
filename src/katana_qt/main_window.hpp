@@ -51,6 +51,7 @@
 // Whole, not declared: selectById_ is destroyed wherever the window is.
 #include "select_by_id_dialog.hpp"
 #include "sheet_editor.hpp"
+#include "surface_raster_dialog.hpp"
 #include "view_workspace.hpp"
 
 class QAction;
@@ -273,12 +274,15 @@ class MainWindow final : public QMainWindow {
     void refreshViewMenu();
 
     // ---- terrain, 3D and sections (PLAN.MD Phases 14, 15, 21) -------------
-    void buildSurfaceFromPointCloud();
-    void buildSurfaceFromRaster();
-    void buildSurfaceFromDrawing();
+    // Terrain > Surface From Point Cloud, Raster and Drawing: the Surface
+    // From dialog (surface_raster_dialog.hpp) on that source, Reference
+    // Data's chosen cloud or raster first. It builds a SURFACE FROM line and
+    // runs it through runVerbLine.
+    void showSurfaceFrom(SurfaceFromKind kind);
     void addSurface(std::string name, katana::terrain::TinSurface surface);
     // sceneSurfaces_ made again from surfaceStore_ when it has changed, each
-    // surface keeping how it was shown.
+    // surface keeping how it was shown. A surface the store gained is shown
+    // in a 3D view, framed: one the user cannot see is not obviously made.
     void syncSceneSurfaces();
     // Session data like a surface: not an entity, not undoable, and drawn in
     // 3D with its footprint in plan.
@@ -413,6 +417,8 @@ class MainWindow final : public QMainWindow {
     // dialog for its kind, import with the choices.
     void importWithOptions(const QString& path);
     void exportPointCloud();
+    // GIS > Export Surface as DEM: the dialog that builds a SURFACE EXPORT
+    // line (surface_raster_dialog.hpp).
     void exportSurfaceAsDem();
     // GIS > Convert Point Cloud to COPC: asks for the two files, then runs the
     // COPC line they make through runVerbLine, and offers to import the
@@ -426,7 +432,6 @@ class MainWindow final : public QMainWindow {
     // The reference layer selected in the panel, or the only one of its kind
     // when the panel has no selection; nullptr, having said why, otherwise.
     [[nodiscard]] const katana::interop::PointCloudLayer* chooseReferenceCloud(const QString& title);
-    [[nodiscard]] const katana::interop::RasterOverlay* chooseReferenceRaster(const QString& title);
     // Drops the rasters and point clouds, with the drawing they were loaded
     // beside (audit QT-17): File > New and Open must not leave the previous
     // drawing's orthophoto behind the next one.
@@ -633,6 +638,10 @@ class MainWindow final : public QMainWindow {
     // Declared after the Document, the surfaces and the reference data, which
     // its context holds, so that it goes before them.
     std::unique_ptr<GeoWorkbench> geo_;
+    // Terrain > Surface From and GIS > Export Surface as DEM, children of the
+    // window made on first use and kept, non-modal.
+    SurfaceFromDialog* surfaceFrom_ = nullptr;
+    SurfaceRasterDialog* surfaceExport_ = nullptr;
 
     bool refreshingLayers_ = false;     // suppresses cellChanged while rebuilding
     bool refreshingReferences_ = false; // ditto, for the reference table

@@ -495,7 +495,10 @@ if(TARGET katana)
     # the 400 000-point cap), and linear interpolation cannot leave the range
     # of its vertices, so the surface's range is exactly the grid's. The old
     # command rebuilt heights from 8-bit display greys between two numbers it
-    # asked for - a question that hangs a headless run (audit QT-23).
+    # asked for - a question that hangs a headless run (audit QT-23). The item
+    # opens the Surface From dialog on the raster, and its Run runs the
+    # SURFACE FROM line (docs/terrain.md, "Surfaces on every front end"),
+    # whose surface record says the range as zmin and zmax.
     set(_gis "${PROJECT_SOURCE_DIR}/samples/gis")
     set(_qt_env "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen")
     add_test(NAME qt_surface_from_raster_headless
@@ -503,35 +506,36 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DIMPORT=${_gis}/terrain.asc"
-            "-DACTIONS=surfaceFromRaster"
-            "-DEXPECT=elevation 24\\.892 to 38\\.819"
+            "-DDRIVE=@surfaceFromRaster|!surfaceFromRun"
+            "-DEXPECT=zmin=24\\.892 zmax=38\\.819"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_from_raster_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Surface From Point Cloud on the sample scan, which is classified: `pdal
     # info --stats --enumerate Classification` lists classes 2, 3, 5 and 6,
     # and filters.range on Classification[2:2] keeps 29 512 of its 40 000
     # points. The surface must be built from those ground returns and say so
-    # (audit QT-10) - any grouping separator, since the log is localised.
+    # (audit QT-10): the input record's points, ground=yes and excluded.
     add_test(NAME qt_surface_from_cloud_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DIMPORT=${_gis}/survey_scan.las"
-            "-DACTIONS=surfaceFromPointCloud"
-            "-DEXPECT=Using the 29[^0-9]?512 ground points \\(ASPRS class 2\\); 10[^0-9]?488 other"
+            "-DDRIVE=@surfaceFromPointCloud|!surfaceFromRun"
+            "-DEXPECT=input arg=input source=cloud name=survey_scan id=[0-9]+ points=29512 ground=yes excluded=10488 classes=2"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_from_cloud_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # File > New takes the imported raster with the drawing (audit QT-17):
     # afterwards there is no raster for Surface From Raster to use. Before
     # the fix the orthophoto of the discarded drawing stayed behind the new
-    # one, and this built a surface from it.
+    # one, and this built a surface from it. SURFACE LIST lists the rasters a
+    # surface can be made from.
     add_test(NAME qt_new_drops_reference_data_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DIMPORT=${_gis}/terrain.asc"
-            "-DACTIONS=fileNew,surfaceFromRaster"
-            "-DEXPECT=No raster is loaded"
+            "-DDRIVE=*fileNew|<SURFACE LIST"
+            "-DEXPECT=listed surfaces=0 rasters=0"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/new_drops_reference_data_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # GIS > Dataset Information and the import dialog, described by GDAL and

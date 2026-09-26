@@ -10,6 +10,9 @@
 namespace katana::app::geo {
 
 // ---- T0: Terrain session: SURFACE LIST, INFO, REMOVE, FROM, EXPORT ----
+// surface_verbs.cpp (terrain_verbs.hpp).
+katana::core::Result<Prepared> prepareSurface(Context& context, const Tokens& tokens,
+                                              std::string_view line);
 // ---- T1: CONTOUR ----
 // ---- T2: RASTER SHADE ----
 // ---- T3: RASTER SLOPE, RASTER ASPECT ----
@@ -47,6 +50,15 @@ const std::vector<VerbEntry>& verbTable()
              "          SURFACE <name> [CELL <m>] or FILE <path>; TO takes LAYER <path>,\n"
              "          REFERENCE [<name>] or FILE <path> [FORMAT <driver>]"});
         // ---- T0: Terrain session ----
+        rows.push_back(
+            {"SURFACE", "", &prepareSurface,
+             "SURFACE LIST [JSON] | INFO <name> | REMOVE <name>  the session's surfaces\n"
+             "          SURFACE FROM RASTER <id|name> | FILE <path> [max=<points>]\n"
+             "          [AREA x0,y0,x1,y1] | CLOUD <id|name> [classes=2,...] | <scope>\n"
+             "          [NAME <n>]  triangulate a surface from a DEM's true values, a\n"
+             "          cloud's ground or the drawing's levelled points and lines\n"
+             "          SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog]\n"
+             "          [co=K=V]... [OVERWRITE]  write it as a DEM (tiled, compressed)"});
         // ---- T1: CONTOUR ----
         // ---- T2: RASTER SHADE ----
         // ---- T3: RASTER SLOPE, RASTER ASPECT ----

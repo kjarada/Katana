@@ -3,10 +3,13 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 #include <system_error>
+#include <utility>
 
 #include "katana/core/text.hpp"
 #include "katana/gis/gdal_adapter.hpp"
+#include "katana/gis/processing.hpp"
 #include "katana/interop/geo/raster_products.hpp"
 
 namespace katana::interop {
@@ -28,6 +31,47 @@ std::uint64_t samplesFor(int width, int height, std::int64_t stride)
 {
     return static_cast<std::uint64_t>(samplesAlong(width, stride)) *
            static_cast<std::uint64_t>(samplesAlong(height, stride));
+}
+
+std::string utf8Of(const std::filesystem::path& path)
+{
+    const std::u8string text = path.generic_u8string();
+    return std::string(text.begin(), text.end());
+}
+
+std::filesystem::path pathOf(const std::string& utf8)
+{
+    return std::filesystem::path(std::u8string(utf8.begin(), utf8.end()));
+}
+
+// The window `area` of the raster at `path`, cut by GDAL into a file of its
+// own in the temporary folder: the reader then samples the cut as a whole,
+// so the stride is chosen for the site and not for the sheet. Each call has
+// its own file (the bridge names them), which the caller removes.
+Result<std::filesystem::path> cutWindow(const std::filesystem::path& path,
+                                        const katana::geometry::Box2& area)
+{
+    namespace gp = katana::gis::processing;
+    gp::RunRequest clip;
+    clip.path = {"raster", "clip"};
+    clip.values.emplace_back("input", gp::DatasetValue(gp::DatasetPath{utf8Of(path), {}, {}}));
+    const auto real = [](double value) { return katana::core::formatExactReal(value); };
+    clip.tokens = {"--bbox=" + real(area.min.x) + "," + real(area.min.y) + "," +
+                       real(area.max.x) + "," + real(area.max.y),
+                   // A window reaching past the raster takes what is there;
+                   // the rest reads as no-data and is left out, counted.
+                   "--allow-bbox-outside-source"};
+    // Every cell to a file: the cut of a large DEM is as large as the site,
+    // and the reader streams a file a row at a time.
+    clip.maxMemoryCells = 0;
+    auto cut = gp::run(clip);
+    if (!cut) {
+        return makeError(cut.error().code, cut.error().message, path.string());
+    }
+    if (!cut->file) {
+        return makeError(ErrorCode::Internal, "GDAL's clip kept no raster", path.string());
+    }
+    return pathOf(*cut->file);
 }
 
 } // namespace
@@ -116,6 +160,25 @@ Result<RasterElevations> readRasterElevations(const std::filesystem::path& path,
                          "requested " + std::to_string(options.band) + " of " +
                              std::to_string(info->bandCount) + " in " + path.string());
     }
+    if (options.area) {
+        const katana::geometry::Box2& area = *options.area;
+        if (area.empty() || !(area.width() > 0.0) || !(area.height() > 0.0)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "the window of a raster to read needs a width and a height",
+                             path.string());
+        }
+        dataset->reset(); // the cut opens the file itself
+        auto cut = cutWindow(path, area);
+        if (!cut) {
+            return cut.error();
+        }
+        RasterElevationOptions whole = options;
+        whole.area.reset();
+        auto read = readRasterElevations(*cut, whole);
+        std::error_code removed;
+        std::filesystem::remove(*cut, removed);
+        return read;
+    }
 
     const int stride = strideForCap(info->width, info->height, options.maxPoints);
     auto samples = (*dataset)->readBandSampled(options.band, stride);
@@ -187,12 +250,33 @@ CloudSurfacePoints surfacePoints(const PointCloudLayer& cloud)
     return result;
 }
 
+CloudSurfacePoints surfacePoints(const PointCloudLayer& cloud,
+                                 const std::vector<std::uint8_t>& classes)
+{
+    if (classes.empty()) {
+        return surfacePoints(cloud);
+    }
+    const std::set<std::uint8_t> wanted(classes.begin(), classes.end());
+    CloudSurfacePoints result;
+    result.groundOnly = wanted == std::set<std::uint8_t>{kAsprsGround};
+    for (const auto& point : cloud.points) {
+        if (wanted.contains(point.classification)) {
+            result.points.emplace_back(point.x, point.y, point.z);
+        } else {
+            ++result.excluded;
+        }
+    }
+    return result;
+}
+
 // ---- surface -> DEM -----------------------------------------------------------
 
 Result<SurfaceRasterResult> exportSurfaceRaster(const katana::terrain::TinSurface& surface,
                                                 const std::filesystem::path& path,
-                                                const SurfaceRasterOptions& options)
+                                                const SurfaceRasterOptions& options,
+                                                const std::stop_token& stop)
 {
+    namespace gp = katana::gis::processing;
     if (surface.empty()) {
         return makeError(ErrorCode::InvalidArgument, "the surface has no triangles to export",
                          path.string());
@@ -202,14 +286,24 @@ Result<SurfaceRasterResult> exportSurfaceRaster(const katana::terrain::TinSurfac
                          "the cell size must be a positive, finite length",
                          katana::core::formatExactReal(options.cellSize));
     }
+    if (options.dataType != "Float32" && options.dataType != "Float64") {
+        return makeError(ErrorCode::InvalidArgument, "a DEM is written as Float32 or Float64",
+                         options.dataType);
+    }
 
-    std::string driver = options.driver;
+    std::string driver = options.cog ? std::string("COG") : options.driver;
     if (driver.empty()) {
         auto inferred = katana::gis::GdalDataset::rasterDriverForPath(path);
         if (!inferred.ok()) {
             return inferred.error();
         }
         driver = *inferred;
+    }
+    std::error_code existsError;
+    if (!options.overwrite && std::filesystem::exists(path, existsError)) {
+        return makeError(ErrorCode::AlreadyExists,
+                         "a file is already there; replacing it has to be asked for",
+                         path.string());
     }
 
     // The one sampler (geo::surfaceGrid), so a DEM written here and the grid
@@ -223,21 +317,50 @@ Result<SurfaceRasterResult> exportSurfaceRaster(const katana::terrain::TinSurfac
     result.rows = grid->info.height;
     result.noDataValue = geo::kGridNoData;
     result.driver = driver;
+    result.dataType = options.dataType;
     result.geotransform = grid->info.geotransform;
     const std::vector<double>& values = grid->bands.front();
     result.cellsWithData = static_cast<std::uint64_t>(
         std::ranges::count_if(values, [](double value) { return value != geo::kGridNoData; }));
+    // The grid is made in the type asked for, so GDAL rounds each double to
+    // the nearest Float32 once, as it fills the grid, and the file holds that.
+    grid->dataType = options.dataType;
+    grid->info.projectionWkt = options.projectionWkt;
 
-    katana::gis::RasterExportOptions raster;
-    raster.width = result.columns;
-    raster.height = result.rows;
-    raster.driver = driver;
-    raster.projectionWkt = options.projectionWkt;
-    raster.geotransform = result.geotransform;
-    raster.noDataValue = geo::kGridNoData;
-    const auto written = katana::gis::GdalDataset::writeRaster(path, raster, values);
-    if (!written.ok()) {
-        return written.error();
+    // Katana's defaults for the driver, then the caller's options over them
+    // by key: a DEM is read a window at a time, so tiled, and floating-point
+    // heights compress better with the floating-point predictor.
+    std::vector<std::pair<std::string, std::string>> creation;
+    if (driver == "GTiff") {
+        creation = {{"TILED", "YES"}, {"COMPRESS", "DEFLATE"}, {"PREDICTOR", "3"}};
+    } else if (driver == "COG") {
+        creation = {{"COMPRESS", "DEFLATE"}, {"PREDICTOR", "YES"}};
+    }
+    for (const std::string& option : options.creationOptions) {
+        const std::size_t equals = option.find('=');
+        if (equals == std::string::npos || equals == 0) {
+            return makeError(ErrorCode::InvalidArgument, "a creation option is KEY=VALUE", option);
+        }
+        const std::string key = katana::core::lowered(option.substr(0, equals));
+        std::erase_if(creation, [&](const std::pair<std::string, std::string>& kept) {
+            return katana::core::lowered(kept.first) == key;
+        });
+        creation.emplace_back(option.substr(0, equals), option.substr(equals + 1));
+    }
+
+    gp::RunRequest request;
+    request.path = {"raster", "convert"};
+    request.values.emplace_back("input", gp::DatasetValue(std::move(*grid)));
+    request.outputTo = gp::OutputTo::File;
+    request.outputPath = utf8Of(path);
+    request.outputFormat = driver;
+    for (const auto& [key, value] : creation) {
+        request.creationOptions.push_back(key + "=" + value);
+    }
+    request.overwrite = options.overwrite;
+    auto written = gp::run(request, stop);
+    if (!written) {
+        return makeError(written.error().code, written.error().message, path.string());
     }
     return result;
 }
