@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -28,14 +29,23 @@ enum class SourceKind { Unknown, Vector, Raster, PointCloud, Archive12d };
 
 [[nodiscard]] const char* toString(SourceKind kind);
 
-// Classifies by extension alone - no file is opened. Used to route a path to
-// the right importer and to build file dialog filters. An extension GDAL and
-// PDAL both claim (there are a few) resolves to the more specific of the two.
+// Which importer a path goes to (docs/interop.md, "Formats"). A .12da archive
+// and a point cloud are known by their extensions (.12da, .las ...). Anything
+// else is routed by what it HOLDS, found by GDAL (gis::identifyContent) when
+// the path can be looked at - a local file or folder, a /vsi path: a
+// GeoPackage of raster tiles is a Raster, a .zip of a shapefile Vector, a
+// file with an unknown extension whatever GDAL finds in it. A path that
+// cannot be looked at (not written yet, or a URL, whose look costs a round
+// trip) is routed by its name, from GDAL's registry of extensions.
 [[nodiscard]] SourceKind kindForPath(const std::filesystem::path& path);
 
-// Extensions offered in the open dialog, without the leading dot.
+// Extensions offered in the open dialog, without the leading dot. The vector
+// and raster ones are those of GDAL's readers (gis::readableExtensions), so
+// they are what this build of GDAL opens; the archives are those whose
+// inside is opened (.zip, .tar, .tgz, .gz).
 [[nodiscard]] std::vector<std::string> vectorExtensions();
 [[nodiscard]] std::vector<std::string> rasterExtensions();
+[[nodiscard]] std::vector<std::string> archiveExtensions();
 [[nodiscard]] std::vector<std::string> pointCloudExtensions();
 
 // ---- vector ---------------------------------------------------------------
@@ -59,9 +69,16 @@ struct VectorImportOptions {
     std::string layerAttribute = "layer";
     // -1 imports every layer in the dataset.
     int sourceLayerIndex = -1;
+    // 0 imports them all; otherwise at most this many of the file's features.
     std::uint64_t maxFeatures = 0;
-    // Copy feature attributes onto the entities as string properties.
+    // Copy feature attributes onto the entities as properties, typed as the
+    // file types them: integers, reals, booleans, text, and dates as ISO
+    // 8601 text.
     bool attributesAsProperties = true;
+    // A curve that is one arc or one circle becomes an Arc or a Circle; any
+    // other curve (a line of several arcs) is chords, none further than this
+    // from the curve, in the file's units - the 1 mm sagitta EXPORT uses.
+    double curveTolerance = 0.001;
     // Subtracted from every coordinate. Survey data often sits at coordinates
     // where a double has only ~0.1 mm of resolution left; shifting to a local
     // origin restores precision for downstream editing. Recorded in the result
@@ -118,12 +135,15 @@ struct VectorImportResult {
     std::vector<std::string> layersNeeded;
 
     katana::geometry::Box2 bounds;
-    std::uint64_t featuresRead = 0;
-    std::uint64_t featuresSkipped = 0;
+    std::uint64_t featuresRead = 0;    // the file's features read (and in the area)
+    std::uint64_t featuresSkipped = 0; // of those, the ones no entity came of
+    // Geometries left out, by what they were: "tin", "polyhedral surface",
+    // "unsupported <GDAL's type>".
+    std::map<std::string, std::uint64_t> skipped;
     std::string projectionWkt;
     // Non-fatal problems: unsupported geometry types, empty geometries,
-    // attributes that could not be represented. Never silently dropped
-    // (PLAN.MD section 36).
+    // attributes that could not be represented, and GDAL's own warnings.
+    // Never silently dropped (PLAN.MD section 36).
     std::vector<std::string> warnings;
 };
 

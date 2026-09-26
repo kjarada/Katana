@@ -15,7 +15,7 @@
 //     closed polylines are NOT holes - a building inside a lot is not a hole
 //     in the lot - only a ring tagged `source.ring=hole` (what IMPORT writes)
 //     or `gis.ring=hole` (what a result writes) joins the exterior it lies in,
-//     the one with its `gis.part` when it has one;
+//     the one with its `gis.part` (`source.part`, IMPORT's) when it has one;
 //   - arcs and circles are chords within curveTolerance (the export's 1 mm
 //     sagitta by default);
 //   - Z only when every vertex has a height (absent is not zero); with
@@ -40,6 +40,7 @@
 
 #include <cstddef>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -61,6 +62,18 @@ struct DrawingDatasetOptions {
     bool requireHeights = false;
     bool closedAsPolygons = true;
     std::string crsWkt; // the project's coordinate system; empty for none
+    // Every feature in ONE table, `tableName`, whatever its kind: a file's
+    // layer that holds points, lines and areas together (EXPORT). Its kind
+    // is theirs when they share one, else Unknown.
+    bool oneTable = false;
+    std::string tableName = "features";
+    // `style`, `colour` and `type` after `katana_id` and `layer`: what an
+    // algorithm's result is filtered and styled by. EXPORT leaves them out -
+    // a file handed to someone else carries each entity's id and layer, as it
+    // always has, and the drawing's styling stays the drawing's.
+    bool styleFields = true;
+    // The entities' properties as fields, after those.
+    bool properties = true;
 };
 
 struct DrawingDatasetStats {
@@ -122,5 +135,42 @@ resultCommand(const katana::entity::Model& model, const katana::gis::processing:
 // result does not turn back into properties: katana_id, layer, style,
 // colour, type.
 [[nodiscard]] bool isBookkeepingField(const std::string& name);
+
+// One feature geometry as the entity geometries it becomes: the ONE way a
+// feature becomes entities, for a result (resultCommand) and for IMPORT
+// alike (docs/interop.md, "Conversion").
+//   - a point is a point;
+//   - a line of two points is a Line, a longer one a polyline, closed when
+//     it ends where it began at the same height (a DXF circle and a closed
+//     LWPOLYLINE arrive so);
+//   - a curve that is one arc is an Arc, and one that is a whole circle a
+//     Circle; any other curve is chords within `curveTolerance`, by the rule
+//     EXPORT makes its chords by, and counted;
+//   - an area is its rings, each a closed polyline, `ring` saying which is
+//     the exterior and which a hole (a circle alone is a Circle).
+// Consecutive repeated points are dropped (a zero-length segment is one the
+// model refuses), and a height that goes with one is counted as lost.
+struct FeaturePiece {
+    katana::entity::Geometry geometry;
+    // One per vertex; an arc's two ends; a circle's one.
+    std::vector<std::optional<double>> heights;
+    std::optional<std::string> ring; // "exterior" or "hole", for an area's rings
+};
+
+struct FeaturePieceOptions {
+    // Subtracted from every coordinate: IMPORT's local origin.
+    std::optional<katana::geometry::Vec2> originShift;
+    double curveTolerance = 0.001;
+};
+
+struct FeaturePieceCounts {
+    std::size_t degenerate = 0;  // geometries with too few distinct points to draw
+    std::size_t heightsLost = 0; // points dropped on the one before them in plan, at another height
+    std::size_t curvesMadeChords = 0;
+};
+
+[[nodiscard]] std::vector<FeaturePiece> featurePieces(const katana::gis::VectorGeometry& geometry,
+                                                      const FeaturePieceOptions& options,
+                                                      FeaturePieceCounts& counts);
 
 } // namespace katana::interop::geo

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -122,8 +123,16 @@ bool applyHeights(std::vector<GeoPoint>& points, const std::vector<std::optional
     return true;
 }
 
+// Entities that went in plan although they have heights, and why: said, since
+// their heights then travel only as the elevation fields.
+struct HeightNotes {
+    std::size_t partial = 0;     // heights at only some vertices
+    std::size_t slopingArcs = 0; // an arc whose two ends differ
+};
+
 // The shape of `entity`, or the reason it has none.
-std::variant<Shape, std::string> shapeOf(const Entity& entity, const DrawingDatasetOptions& options)
+std::variant<Shape, std::string> shapeOf(const Entity& entity, const DrawingDatasetOptions& options,
+                                         HeightNotes& notes)
 {
     Shape shape;
     shape.entity = &entity;
@@ -150,6 +159,8 @@ std::variant<Shape, std::string> shapeOf(const Entity& entity, const DrawingData
                 const auto ends = katana::entity::heightsOf(props, 2);
                 if (ends[0] && ends[1] && *ends[0] == *ends[1]) {
                     heights.assign(shape.points.size(), ends[0]);
+                } else if (ends[0] || ends[1]) {
+                    ++notes.slopingArcs;
                 }
             } else if constexpr (std::is_same_v<Held, katana::geometry::Polyline2>) {
                 shape.points = planPoints(held.vertices);
@@ -202,6 +213,9 @@ std::variant<Shape, std::string> shapeOf(const Entity& entity, const DrawingData
     if (options.requireHeights && !shape.hasZ) {
         return std::string("heightless");
     }
+    if (!shape.hasZ && std::ranges::any_of(heights, [](const auto& z) { return z.has_value(); })) {
+        ++notes.partial;
+    }
     shape.isHole = shape.kind == GeometryKind::Polygon && taggedHole(entity);
     return shape;
 }
@@ -216,9 +230,22 @@ katana::geometry::Polyline2 ringOf(const std::vector<GeoPoint>& points)
     return ring;
 }
 
-// Tagged holes join the area they lie in: the one whose gis.part they share
-// when there is such an area around them, else the smallest around them. A
-// hole with no area around it stays an area of its own, and says so.
+// Which polygon a ring came from: gis.part, which a result writes (the
+// exterior's id), or source.part, which IMPORT writes (the file's feature).
+std::optional<std::string> partOf(const Entity& entity)
+{
+    if (auto part = tagOf(entity, "gis.part")) {
+        return part;
+    }
+    return tagOf(entity, "source.part");
+}
+
+// Tagged holes join the area they lie in: the one whose part they share
+// when there is such an area around them, else the smallest around them, and
+// of equals the one made nearest before the hole - the same file imported
+// twice gives two exteriors equal in everything but their ids, and each hole
+// was made just after its own. A hole with no area around it stays an area
+// of its own, and says so.
 void joinHoles(std::vector<Shape>& shapes, DrawingDatasetStats& stats)
 {
     std::vector<std::size_t> areas;
@@ -237,7 +264,12 @@ void joinHoles(std::vector<Shape>& shapes, DrawingDatasetStats& stats)
         if (!hole.isHole) {
             continue;
         }
-        const std::optional<std::string> part = tagOf(*hole.entity, "gis.part");
+        const std::optional<std::string> part = partOf(*hole.entity);
+        const EntityId holeId = hole.entity->id;
+        // Made before the hole, and how long before: the nearer the better.
+        const auto before = [holeId](EntityId id) {
+            return id < holeId ? holeId - id : std::numeric_limits<EntityId>::max();
+        };
         std::optional<std::size_t> best;
         bool bestSharesPart = false;
         double bestArea = 0.0;
@@ -248,10 +280,15 @@ void joinHoles(std::vector<Shape>& shapes, DrawingDatasetStats& stats)
             if (!inside) {
                 continue;
             }
-            const bool sharesPart = part && tagOf(*shapes[areas[a]].entity, "gis.part") == part;
+            const bool sharesPart = part && partOf(*shapes[areas[a]].entity) == part;
             const double area = rings[a].area();
-            if (!best || (sharesPart && !bestSharesPart) ||
-                (sharesPart == bestSharesPart && area < bestArea)) {
+            const bool better =
+                !best || (sharesPart && !bestSharesPart) ||
+                (sharesPart == bestSharesPart &&
+                 (area < bestArea ||
+                  (area == bestArea && before(shapes[areas[a]].entity->id) <
+                                           before(shapes[areas[*best]].entity->id))));
+            if (better) {
                 best = a;
                 bestSharesPart = sharesPart;
                 bestArea = area;
@@ -314,15 +351,22 @@ gp::FeatureTable tableOf(const std::string& name, GeometryKind kind,
     table.name = name;
     table.kind = kind;
     table.crsWkt = options.crsWkt;
+    // The bookkeeping written: katana_id and layer always, style, colour and
+    // type unless the caller leaves them out.
+    const std::size_t leading = options.styleFields ? kBookkeeping.size() : 2;
     // The properties' fields: typed when every entity agrees, text when not.
     std::map<std::string, gp::FieldType> types;
     std::set<std::string> mixed;
     std::size_t dropped = 0;
     for (const Shape* shape : shapes) {
+        if (!options.properties) {
+            break;
+        }
         for (const auto& [key, value] : shape->entity->properties) {
-            if (std::ranges::any_of(kBookkeeping, [&](const char* field) {
-                    return katana::core::equalsIgnoringCase(key, field);
-                })) {
+            if (std::any_of(kBookkeeping.begin(), kBookkeeping.begin() + leading,
+                            [&](const char* field) {
+                                return katana::core::equalsIgnoringCase(key, field);
+                            })) {
                 ++dropped;
                 continue;
             }
@@ -339,16 +383,20 @@ gp::FeatureTable tableOf(const std::string& name, GeometryKind kind,
                                  name + "; it is text there");
     }
     if (dropped != 0) {
-        stats.warnings.push_back(
-            std::to_string(dropped) +
-            " property values named like the fields katana_id, layer, style, colour or type were "
-            "left out of " + name);
+        std::string fields;
+        for (std::size_t f = 0; f < leading; ++f) {
+            fields += (f == 0 ? "" : f + 1 == leading ? " or " : ", ") + std::string(kBookkeeping[f]);
+        }
+        stats.warnings.push_back(std::to_string(dropped) +
+                                 " property values named like the fields " + fields +
+                                 " were left out of " + name);
     }
-    table.fields = {{"katana_id", gp::FieldType::Integer64},
-                    {"layer", gp::FieldType::String},
-                    {"style", gp::FieldType::String},
-                    {"colour", gp::FieldType::String},
-                    {"type", gp::FieldType::String}};
+    table.fields = {{"katana_id", gp::FieldType::Integer64}, {"layer", gp::FieldType::String}};
+    if (options.styleFields) {
+        table.fields.push_back({"style", gp::FieldType::String});
+        table.fields.push_back({"colour", gp::FieldType::String});
+        table.fields.push_back({"type", gp::FieldType::String});
+    }
     for (const auto& [key, type] : types) {
         table.fields.push_back({key, type});
     }
@@ -356,7 +404,7 @@ gp::FeatureTable tableOf(const std::string& name, GeometryKind kind,
         const Entity& entity = *shape->entity;
         gp::Feature feature;
         VectorGeometry geometry;
-        geometry.kind = kind;
+        geometry.kind = shape->kind;
         geometry.parts.push_back(shape->points);
         for (const auto& hole : shape->holes) {
             geometry.parts.push_back(hole);
@@ -366,9 +414,13 @@ gp::FeatureTable tableOf(const std::string& name, GeometryKind kind,
         feature.parts.push_back(std::move(geometry));
         feature.values.emplace_back(static_cast<std::int64_t>(entity.id));
         feature.values.emplace_back(entity.layer);
-        feature.values.emplace_back(entity.style.empty() ? std::string("ByLayer") : entity.style);
-        feature.values.emplace_back(entity.color ? entity.color->toHex() : std::string("ByLayer"));
-        feature.values.emplace_back(lowerType(entity));
+        if (options.styleFields) {
+            feature.values.emplace_back(entity.style.empty() ? std::string("ByLayer")
+                                                             : entity.style);
+            feature.values.emplace_back(entity.color ? entity.color->toHex()
+                                                     : std::string("ByLayer"));
+            feature.values.emplace_back(lowerType(entity));
+        }
         for (const auto& [key, type] : types) {
             const auto found = entity.properties.find(key);
             feature.values.push_back(found == entity.properties.end()
@@ -419,49 +471,154 @@ bool hasKatanaId(const gp::FeatureTable& table)
                                [](const gp::FieldDef& field) { return field.name == "katana_id"; });
 }
 
+// A vertex on its way to an entity: where it is, and its height if it has one.
+struct Vertex {
+    Point2 at;
+    std::optional<double> z;
+};
+
+// A part's points as the vertices of the line it becomes, its arcs made chords
+// by the rule EXPORT makes them by (curve_chords.hpp). A level arc's chords
+// carry its height; a sloping one's inner chord points carry none, since a
+// height between an arc's ends would be invented.
+std::vector<Vertex> verticesOf(const std::vector<GeoPoint>& source,
+                               const std::vector<std::size_t>* arcs, bool hasZ,
+                               const FeaturePieceOptions& options, FeaturePieceCounts& counts)
+{
+    const auto shifted = [&options](const GeoPoint& raw) {
+        return options.originShift ? Point2(raw.x - options.originShift->x,
+                                            raw.y - options.originShift->y)
+                                   : Point2(raw.x, raw.y);
+    };
+    const auto heightOf = [hasZ](const GeoPoint& raw) {
+        return hasZ && std::isfinite(raw.z) ? std::optional<double>(raw.z) : std::nullopt;
+    };
+    std::vector<Vertex> out;
+    out.reserve(source.size());
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        const bool arcHere = arcs != nullptr && std::ranges::find(*arcs, i) != arcs->end() &&
+                             i + 2 < source.size();
+        if (!arcHere) {
+            out.push_back({shifted(source[i]), heightOf(source[i])});
+            continue;
+        }
+        const Point2 start = shifted(source[i]);
+        const Point2 end = shifted(source[i + 2]);
+        const auto arc = katana::geometry::Arc2::throughPoints(start, shifted(source[i + 1]), end);
+        const std::optional<double> z0 = heightOf(source[i]);
+        const std::optional<double> z1 = heightOf(source[i + 2]);
+        out.push_back({start, z0});
+        if (arc) {
+            ++counts.curvesMadeChords;
+            const int chords = detail::chordCount(arc->radius, arc->sweep, options.curveTolerance);
+            const std::optional<double> inner = z0 && z1 && *z0 == *z1 ? z0 : std::nullopt;
+            for (int k = 1; k < chords; ++k) {
+                out.push_back({arc->pointAt(static_cast<double>(k) / static_cast<double>(chords)),
+                               inner});
+            }
+        }
+        // The end is the next arc's start or the next straight run's first
+        // point, taken as the loop reaches it.
+        i += 1;
+    }
+    return out;
+}
+
 // Consecutive repeats dropped, as IMPORT drops them: a zero-length segment is
-// one the model refuses.
+// one the model refuses. A repeat at another height takes that height with it.
 struct Vertices {
     std::vector<Point2> points;
     std::vector<std::optional<double>> heights;
 };
 
-Vertices distinct(const std::vector<GeoPoint>& source, bool hasZ)
+Vertices distinct(const std::vector<Vertex>& source, FeaturePieceCounts& counts)
 {
     Vertices out;
-    for (const GeoPoint& raw : source) {
-        if (!std::isfinite(raw.x) || !std::isfinite(raw.y)) {
+    out.points.reserve(source.size());
+    out.heights.reserve(source.size());
+    for (const Vertex& vertex : source) {
+        if (!std::isfinite(vertex.at.x) || !std::isfinite(vertex.at.y)) {
             continue;
         }
-        const Point2 point(raw.x, raw.y);
-        if (!out.points.empty() && out.points.back() == point) {
+        if (!out.points.empty() && out.points.back() == vertex.at) {
+            counts.heightsLost += vertex.z != out.heights.back() ? 1u : 0u;
             continue;
         }
-        out.points.push_back(point);
-        out.heights.push_back(hasZ && std::isfinite(raw.z) ? std::optional<double>(raw.z)
-                                                           : std::nullopt);
+        out.points.push_back(vertex.at);
+        out.heights.push_back(vertex.z);
     }
     return out;
 }
 
-struct Piece {
-    katana::entity::Geometry geometry;
-    std::vector<std::optional<double>> heights;
-    std::optional<std::string> ring; // "exterior" or "hole" for a polygon with holes
-};
-
-// One simple geometry as entity geometries: a point, a line or polyline, or
-// a polygon's rings as closed polylines.
-std::vector<Piece> piecesOf(const VectorGeometry& geometry, std::size_t& degenerate)
+const std::vector<std::size_t>* arcsOfPart(const VectorGeometry& geometry, std::size_t part)
 {
-    std::vector<Piece> pieces;
+    return part < geometry.arcs.size() && !geometry.arcs[part].empty() ? &geometry.arcs[part]
+                                                                       : nullptr;
+}
+
+// A part that is one arc and nothing else: its start, middle and end.
+bool isOneArc(const VectorGeometry& geometry, std::size_t part)
+{
+    const auto* arcs = arcsOfPart(geometry, part);
+    return arcs != nullptr && arcs->size() == 1 && arcs->front() == 0 &&
+           part < geometry.parts.size() && geometry.parts[part].size() == 3;
+}
+
+// The circle a CircularString of three points is when it ends where it began:
+// its middle point is the far side, so the centre is halfway to it.
+std::optional<katana::geometry::Circle2> wholeCircle(const Point2& start, const Point2& far)
+{
+    const double radius = std::hypot(far.x - start.x, far.y - start.y) / 2.0;
+    if (!(radius > 0.0) || !std::isfinite(radius)) {
+        return std::nullopt;
+    }
+    return katana::geometry::Circle2{Point2((start.x + far.x) / 2.0, (start.y + far.y) / 2.0),
+                                     radius};
+}
+
+// One arc part as an Arc or a Circle entity; nullopt when its points are in a
+// line, which then goes as the straight line it is.
+std::optional<FeaturePiece> arcPiece(const VectorGeometry& geometry, std::size_t part,
+                                     const FeaturePieceOptions& options)
+{
+    const auto& points = geometry.parts[part];
+    const auto at = [&options](const GeoPoint& raw) {
+        return options.originShift ? Point2(raw.x - options.originShift->x,
+                                            raw.y - options.originShift->y)
+                                   : Point2(raw.x, raw.y);
+    };
+    const auto z = [&geometry](const GeoPoint& raw) {
+        return geometry.hasZ && std::isfinite(raw.z) ? std::optional<double>(raw.z)
+                                                     : std::nullopt;
+    };
+    const Point2 start = at(points[0]);
+    const Point2 end = at(points[2]);
+    if (start == end) {
+        if (const auto circle = wholeCircle(start, at(points[1]))) {
+            return FeaturePiece{*circle, {z(points[0])}, std::nullopt};
+        }
+        return std::nullopt;
+    }
+    if (const auto arc = katana::geometry::Arc2::throughPoints(start, at(points[1]), end)) {
+        return FeaturePiece{*arc, {z(points[0]), z(points[2])}, std::nullopt};
+    }
+    return std::nullopt;
+}
+
+std::vector<FeaturePiece> piecesOf(const VectorGeometry& geometry,
+                                   const FeaturePieceOptions& options, FeaturePieceCounts& counts)
+{
+    std::vector<FeaturePiece> pieces;
+    const auto verticesOfPart = [&](std::size_t part) {
+        return verticesOf(part < geometry.parts.size() ? geometry.parts[part]
+                                                       : std::vector<GeoPoint>{},
+                          arcsOfPart(geometry, part), geometry.hasZ, options, counts);
+    };
     switch (geometry.kind) {
     case GeometryKind::Point: {
-        const Vertices vertices = distinct(geometry.parts.empty() ? std::vector<GeoPoint>{}
-                                                                  : geometry.parts.front(),
-                                           geometry.hasZ);
+        const Vertices vertices = distinct(verticesOfPart(0), counts);
         if (vertices.points.empty()) {
-            ++degenerate;
+            ++counts.degenerate;
             break;
         }
         pieces.push_back({katana::entity::PointGeometry{vertices.points.front()},
@@ -470,11 +627,23 @@ std::vector<Piece> piecesOf(const VectorGeometry& geometry, std::size_t& degener
         break;
     }
     case GeometryKind::LineString: {
-        Vertices vertices = distinct(geometry.parts.empty() ? std::vector<GeoPoint>{}
-                                                            : geometry.parts.front(),
-                                     geometry.hasZ);
-        // A line that ends where it began, at the same height, is a closed
-        // one: IMPORT's rule.
+        if (isOneArc(geometry, 0)) {
+            if (auto piece = arcPiece(geometry, 0, options)) {
+                pieces.push_back(std::move(*piece));
+                break;
+            }
+        }
+        Vertices vertices = distinct(verticesOfPart(0), counts);
+        // A line that ends where it began is a closed one. GDAL reads a DXF
+        // CIRCLE, and a closed LWPOLYLINE, as a line string that repeats its
+        // first point, and taken as it came a circle was an OPEN polyline with
+        // a seam: no area, no hatch, and Explode or Offset treating it as a
+        // path with two ends. As a polygon ring does, the repeat becomes the
+        // `closed` flag. Four points at least: three with the ends equal are a
+        // line there and back, which encloses nothing. The ends must meet in
+        // height too (both absent, or equal): a ramp or helix that comes back
+        // over its start a level higher is an open string, and closing it
+        // would throw away its top height.
         bool closed = false;
         if (vertices.points.size() >= 4 && vertices.points.front() == vertices.points.back() &&
             vertices.heights.front() == vertices.heights.back()) {
@@ -483,9 +652,11 @@ std::vector<Piece> piecesOf(const VectorGeometry& geometry, std::size_t& degener
             closed = true;
         }
         if (vertices.points.size() < 2) {
-            ++degenerate;
+            ++counts.degenerate;
             break;
         }
+        // Two points is a line in every CAD program; anything longer is a
+        // polyline. A two-point polyline would be unfilletable and odd to edit.
         if (vertices.points.size() == 2 && !closed) {
             pieces.push_back({katana::geometry::Segment2{vertices.points[0], vertices.points[1]},
                               vertices.heights,
@@ -499,16 +670,27 @@ std::vector<Piece> piecesOf(const VectorGeometry& geometry, std::size_t& degener
         break;
     }
     case GeometryKind::Polygon: {
-        const bool withHoles = geometry.parts.size() > 1;
+        // A circle, whole, and nothing cut out of it: the Circle it was.
+        if (geometry.parts.size() == 1 && isOneArc(geometry, 0)) {
+            if (auto piece = arcPiece(geometry, 0, options);
+                piece && std::holds_alternative<katana::geometry::Circle2>(piece->geometry)) {
+                piece->ring = "exterior";
+                pieces.push_back(std::move(*piece));
+                break;
+            }
+        }
         for (std::size_t r = 0; r < geometry.parts.size(); ++r) {
-            Vertices vertices = distinct(geometry.parts[r], geometry.hasZ);
+            Vertices vertices = distinct(verticesOfPart(r), counts);
+            // A closed ring repeats its first point; the Polyline2 `closed`
+            // flag expresses that instead.
             if (vertices.points.size() > 1 && vertices.points.front() == vertices.points.back()) {
                 vertices.points.pop_back();
+                counts.heightsLost += vertices.heights.back() != vertices.heights.front() ? 1u : 0u;
                 vertices.heights.pop_back();
             }
             if (vertices.points.size() < 3) {
                 if (r == 0) {
-                    ++degenerate;
+                    ++counts.degenerate;
                     return {};
                 }
                 continue;
@@ -516,14 +698,13 @@ std::vector<Piece> piecesOf(const VectorGeometry& geometry, std::size_t& degener
             katana::geometry::Polyline2 ring;
             ring.vertices = std::move(vertices.points);
             ring.closed = true;
-            pieces.push_back({std::move(ring), vertices.heights,
-                              withHoles ? std::optional<std::string>(r == 0 ? "exterior" : "hole")
-                                        : std::nullopt});
+            pieces.push_back({std::move(ring), std::move(vertices.heights),
+                              std::string(r == 0 ? "exterior" : "hole")});
         }
         break;
     }
     case GeometryKind::Unknown:
-        ++degenerate;
+        ++counts.degenerate;
         break;
     }
     return pieces;
@@ -561,7 +742,7 @@ Result<ResultPlan> createPlan(const katana::entity::Model& model, const gp::Feat
     // cost only the hint: drawingDataset checks that a hole lies inside the
     // area its part names before it joins them.
     const EntityId firstId = model.entities.nextId();
-    std::size_t degenerate = 0;
+    FeaturePieceCounts counts;
     for (const gp::FeatureTable& table : set.tables) {
         if (table.features.empty()) {
             continue;
@@ -600,13 +781,15 @@ Result<ResultPlan> createPlan(const katana::entity::Model& model, const gp::Feat
             }
             for (const VectorGeometry& part : feature.parts) {
                 const std::size_t exterior = entities.size();
-                std::vector<Piece> pieces = piecesOf(part, degenerate);
-                for (Piece& piece : pieces) {
+                // The rings are tagged only where there are holes to join.
+                const bool withHoles = part.kind == GeometryKind::Polygon && part.parts.size() > 1;
+                std::vector<FeaturePiece> pieces = piecesOf(part, {}, counts);
+                for (FeaturePiece& piece : pieces) {
                     Entity entity;
                     entity.geometry = std::move(piece.geometry);
                     entity.layer = layer;
                     entity.properties = properties;
-                    if (piece.ring) {
+                    if (withHoles && piece.ring) {
                         entity.properties["gis.ring"] = *piece.ring;
                         entity.properties["gis.part"] =
                             static_cast<std::int64_t>(firstId + exterior);
@@ -617,12 +800,12 @@ Result<ResultPlan> createPlan(const katana::entity::Model& model, const gp::Feat
             }
         }
     }
-    if (degenerate != 0) {
-        plan.warnings.push_back(std::to_string(degenerate) +
+    if (counts.degenerate != 0) {
+        plan.warnings.push_back(std::to_string(counts.degenerate) +
                                 " result geometries had too few distinct points to draw and were "
                                 "left out");
     }
-    plan.skipped = degenerate;
+    plan.skipped = counts.degenerate;
     plan.created = entities.size();
     if (!entities.empty()) {
         transaction->add(cmd::createEntities(std::move(entities)));
@@ -657,7 +840,8 @@ Result<ResultPlan> inPlacePlan(const katana::entity::Model& model, const gp::Fea
     ResultPlan plan;
     auto transaction = std::make_unique<cmd::Transaction>(
         options.commandName.empty() ? std::string("GDAL") : options.commandName);
-    std::size_t missing = 0, several = 0, degenerate = 0;
+    std::size_t missing = 0, several = 0;
+    FeaturePieceCounts counts;
     for (const gp::FeatureTable& table : set.tables) {
         if (table.features.empty()) {
             continue;
@@ -680,7 +864,7 @@ Result<ResultPlan> inPlacePlan(const katana::entity::Model& model, const gp::Fea
                     ++several;
                     continue;
                 }
-                std::vector<Piece> pieces = piecesOf(feature.parts.front(), degenerate);
+                std::vector<FeaturePiece> pieces = piecesOf(feature.parts.front(), {}, counts);
                 if (pieces.size() != 1) {
                     continue;
                 }
@@ -718,7 +902,7 @@ Result<ResultPlan> inPlacePlan(const katana::entity::Model& model, const gp::Fea
                                 " results of several parts cannot replace one entity and were "
                                 "left out");
     }
-    plan.skipped = missing + several + degenerate;
+    plan.skipped = missing + several + counts.degenerate;
     if (transaction->size() != 0) {
         plan.command = std::move(transaction);
     }
@@ -745,13 +929,14 @@ Result<DrawingDataset> drawingDataset(const katana::entity::Model& model,
     stats.matched = ids.size();
     std::vector<Shape> shapes;
     shapes.reserve(ids.size());
+    HeightNotes notes;
     for (const EntityId id : ids) {
         const Entity* entity = model.entities.find(id);
         if (entity == nullptr) {
             ++stats.skipped["missing"];
             continue;
         }
-        auto shape = shapeOf(*entity, options);
+        auto shape = shapeOf(*entity, options, notes);
         if (const auto* reason = std::get_if<std::string>(&shape)) {
             ++stats.skipped[*reason];
             continue;
@@ -780,6 +965,35 @@ Result<DrawingDataset> drawingDataset(const katana::entity::Model& model,
     stats.lines = lines.size();
     stats.polygons = polygons.size();
     stats.used += points.size() + lines.size() + polygons.size();
+    if (notes.partial > 0) {
+        stats.warnings.push_back(
+            std::to_string(notes.partial) +
+            " entities have heights at only some of their vertices and were written in plan, "
+            "their heights kept as attributes: a 3D geometry needs a height at every vertex");
+    }
+    if (notes.slopingArcs > 0) {
+        stats.warnings.push_back(
+            std::to_string(notes.slopingArcs) +
+            " arcs have different heights at their two ends and were written in plan, their "
+            "heights kept as attributes: a height between the ends of an arc is not recorded");
+    }
+    if (options.oneTable) {
+        std::vector<const Shape*> all;
+        for (const Shape& shape : shapes) {
+            if (shape.kind != GeometryKind::Unknown) {
+                all.push_back(&shape);
+            }
+        }
+        if (!all.empty()) {
+            const GeometryKind first = all.front()->kind;
+            const bool uniform = std::ranges::all_of(
+                all, [first](const Shape* shape) { return shape->kind == first; });
+            result.set.tables.push_back(tableOf(options.tableName,
+                                                uniform ? first : GeometryKind::Unknown, all,
+                                                options, stats));
+        }
+        return result;
+    }
     if (!points.empty()) {
         result.set.tables.push_back(tableOf("points", GeometryKind::Point, points, options, stats));
     }
@@ -791,6 +1005,13 @@ Result<DrawingDataset> drawingDataset(const katana::entity::Model& model,
             tableOf("polygons", GeometryKind::Polygon, polygons, options, stats));
     }
     return result;
+}
+
+std::vector<FeaturePiece> featurePieces(const katana::gis::VectorGeometry& geometry,
+                                        const FeaturePieceOptions& options,
+                                        FeaturePieceCounts& counts)
+{
+    return piecesOf(geometry, options, counts);
 }
 
 Result<ResultPlan> resultCommand(const katana::entity::Model& model, const gp::FeatureSet& set,

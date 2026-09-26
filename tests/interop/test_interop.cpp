@@ -956,13 +956,14 @@ Entity heightedPoint(double x, double y, std::optional<double> z)
 }
 
 // The imported entity that came from model entity `id`, found by the
-// katana_id attribute the export writes.
+// katana_id attribute the export writes. An Integer64 field, read back as an
+// integer since the import keeps field types (docs/interop.md, "Fidelity").
 const Entity* byKatanaId(const VectorImportResult& read, katana::entity::EntityId id)
 {
     for (const Entity& entity : read.entities) {
         const auto found = entity.properties.find("katana_id");
         if (found != entity.properties.end() &&
-            std::get<std::string>(found->second) == std::to_string(id)) {
+            found->second == katana::entity::PropertyValue(static_cast<std::int64_t>(id))) {
             return &entity;
         }
     }
