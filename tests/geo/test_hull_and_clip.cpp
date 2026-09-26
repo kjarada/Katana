@@ -156,6 +156,73 @@ TEST_F(GisClip, InPlaceWhatIsOutsideGoesAndWhatIsInsideStaysAsItWasInOneStep)
     EXPECT_TRUE(document.model().entities.contains(outside));
 }
 
+TEST_F(GisClip, AnAreaWhollyOutsideGoesWithItsHolesInOneStep)
+{
+    // A lot with a courtyard cut out of it (an area and its hole are
+    // entities of their own, joined by the gis.ring tag), far from the site:
+    // clipped in place, the lot is outside, and so is its hole - left
+    // behind, the hole would become an area of its own the next time the
+    // layer is read.
+    const EntityId lot = rect(100, 100, 200, 200, "lots");
+    const EntityId hole = rect(140, 140, 160, 160, "lots",
+                               katana::entity::PropertyMap{{"gis.ring", std::string("hole")}});
+    const EntityId kept = rect(10, 10, 20, 20, "lots");
+    rect(0, 0, 50, 50, "site");
+    const std::string reply = ok("GIS CLIP LAYERS lots BY LAYERS site REPLACE");
+    EXPECT_FALSE(document.model().entities.contains(lot));
+    EXPECT_FALSE(document.model().entities.contains(hole));
+    EXPECT_TRUE(document.model().entities.contains(kept));
+    EXPECT_EQ(record(reply, "clip")->get("outside"), "1") << reply;
+    EXPECT_EQ(record(reply, "output")->get("deleted"), "2") << reply;
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_TRUE(document.model().entities.contains(lot));
+    EXPECT_TRUE(document.model().entities.contains(hole));
+}
+
+TEST_F(GisClip, AnInPlaceClipRefusesADrawingChangedWhileItRan)
+{
+    // Prepared, then the pipe moves before the apply: cutting it now would
+    // write over the move, so the apply refuses and changes nothing.
+    const EntityId pipe = line(0, 0, 100, 0, "pipes");
+    rect(10, -5, 40, 5, "site");
+    auto prepared =
+        katana::app::geo::prepare(context, "GIS CLIP LAYERS pipes BY LAYERS site REPLACE");
+    ASSERT_TRUE(prepared.ok()) << prepared.error().describe();
+    auto apply = prepared->work({}, {});
+    ASSERT_TRUE(apply.ok()) << apply.error().describe();
+    ASSERT_TRUE(
+        document.execute(katana::commands::moveEntities({pipe}, katana::math::Vec2(1.0, 0.0)))
+            .ok());
+    const Entity moved = *document.model().entities.find(pipe);
+    auto applied = (*apply)(context);
+    ASSERT_FALSE(applied.ok());
+    EXPECT_EQ(applied.error().code, ErrorCode::InvalidState);
+    EXPECT_EQ(*document.model().entities.find(pipe), moved);
+}
+
+TEST_F(GisClip, AHoleMovedWhileItRanIsNotDeletedWithItsArea)
+{
+    // The hole is deleted with its area, so an edit to the hole while the
+    // job ran is a changed drawing too.
+    rect(100, 100, 200, 200, "lots");
+    const EntityId hole = rect(140, 140, 160, 160, "lots",
+                               katana::entity::PropertyMap{{"gis.ring", std::string("hole")}});
+    rect(0, 0, 50, 50, "site");
+    auto prepared =
+        katana::app::geo::prepare(context, "GIS CLIP LAYERS lots BY LAYERS site REPLACE");
+    ASSERT_TRUE(prepared.ok()) << prepared.error().describe();
+    auto apply = prepared->work({}, {});
+    ASSERT_TRUE(apply.ok()) << apply.error().describe();
+    ASSERT_TRUE(
+        document.execute(katana::commands::moveEntities({hole}, katana::math::Vec2(1.0, 0.0)))
+            .ok());
+    const std::size_t before = entityCount();
+    auto applied = (*apply)(context);
+    ASSERT_FALSE(applied.ok());
+    EXPECT_EQ(applied.error().code, ErrorCode::InvalidState);
+    EXPECT_EQ(entityCount(), before);
+}
+
 TEST_F(GisClip, AFileBoundaryWorksLikeADrawnOne)
 {
     // The corridor of lots.geojson runs from x = -10 to 110: a line from

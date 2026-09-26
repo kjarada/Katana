@@ -405,8 +405,15 @@ polyline, an arc or a circle where the feature's curve is one
   and associations (`DrawingDataset.UpdateGeometryKeepsTheEntitysId`).
 - **SetProperties.** It writes the fields as properties, prefixed, on the
   entity each `katana_id` names.
-- **REPLACE (`deleteSources`).** It deletes the source entities, in the same
-  step (`DrawingDataset.ReplaceDeletesTheSourcesInTheSameStep`).
+- **REPLACE is the verb's own.** `resultCommand` deletes nothing. A verb
+  that replaces adds the deletion to the same step: GIS DISSOLVE deletes
+  the areas its scope took, GIS CLIP what fell outside. A feature carries
+  only its area's `katana_id`, so the holes an area took in are listed in
+  `DrawingDataset::holes`, and a verb that deletes an area deletes them
+  with it. `ResultOptions::deleteSources` - delete what each feature's
+  `katana_id` names - was removed: no verb used it, and it could not find
+  the holes, which never reach the features as ids. A second REPLACE beside
+  the verbs' own would have kept that defect alive.
 - **Nothing to do.** A result of nothing is no command: the command stack
   refuses an empty transaction, and nothing changed.
 
@@ -1194,8 +1201,7 @@ types the same lines through `katana_run_commands`.
   prepare and refuses when one changed while the job ran
   (`GisDissolve.AnInPlaceReplaceRefusesADrawingChangedWhileItRan`). A
   dissolve's result carries no `katana_id` of a source, which is why the
-  verb deletes what its scope took rather than what `resultCommand`'s
-  `deleteSources` would find.
+  verb deletes what its scope took.
 
 **Replies.**
 
@@ -1373,8 +1379,17 @@ bounds (measured), and gives each piece a feature of its own.
   (`GisClip.APartSplitIntoTwoKeepsTheIdOnTheLargerAndReportsTheOther`); one
   wholly outside is deleted; one wholly inside is not touched - no rewrite of
   its vertices (`GisClip.InPlaceWhatIsOutsideGoesAndWhatIsInsideStaysAsItWasInOneStep`).
-  All in one undo step, after the entities are compared with the copies
-  taken at prepare. It is REPAIR's reshape (`vector::reshapeCommand`).
+  An area wholly outside goes with the holes it took in
+  (`DrawingDataset::holes`); left behind, a hole would be read as an area of
+  its own the next time its layer is read. `outside=` counts areas and
+  lines, `deleted=` entities, holes included
+  (`GisClip.AnAreaWhollyOutsideGoesWithItsHolesInOneStep`).
+  All in one undo step, after the entities - the holes of the areas too -
+  are compared with the copies taken at prepare, and refused when one
+  changed while the job ran
+  (`GisClip.AnInPlaceClipRefusesADrawingChangedWhileItRan`,
+  `GisClip.AHoleMovedWhileItRanIsNotDeletedWithItsArea`). It is REPAIR's
+  reshape (`vector::reshapeCommand`).
 - A curve cut in place becomes the chords of what is left: GDAL clips
   lines, and an arc's remainder is drawn as a polyline.
 
@@ -1481,7 +1496,8 @@ so:
 - it closes **enclosed** gaps only. A sliver open to the outside of the
   fabric is not a gap to GEOS and stays (measured on GDAL 3.13.2).
 
-It applies as REPAIR does - in place, split parts made, compared first - and
+It applies as REPAIR does - in place, split parts made, compared first
+(`GisCheck.CleanRefusesADrawingChangedWhileItRan`) - and
 changes only the areas whose ring came back different: clean-coverage
 rewrites every ring's start and direction, so "changed" is judged by the
 ring (`vector::sameRing`), not the vertex list.

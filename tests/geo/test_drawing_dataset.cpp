@@ -446,27 +446,6 @@ TEST(DrawingDataset, AResultWithoutKatanaIdCannotChangeEntitiesInPlace)
     EXPECT_EQ(plan.error().code, katana::core::ErrorCode::InvalidArgument);
 }
 
-TEST(DrawingDataset, ReplaceDeletesTheSourcesInTheSameStep)
-{
-    katana::cad::Document document;
-    const auto ids = draw(document, {square(0, 0, 10)});
-    auto dataset = igeo::drawingDataset(document.model(), ids);
-    ASSERT_TRUE(dataset.ok());
-    igeo::ResultOptions options;
-    options.targetLayer = "gis/replaced";
-    options.deleteSources = true;
-    auto plan = igeo::resultCommand(document.model(), dataset->set, options);
-    ASSERT_TRUE(plan.ok());
-    EXPECT_EQ(plan->created, 1u);
-    EXPECT_EQ(plan->deleted, 1u);
-    ASSERT_TRUE(document.execute(std::move(plan->command)).ok());
-    EXPECT_FALSE(document.model().entities.contains(ids.front()));
-    EXPECT_EQ(document.model().entities.size(), 1u);
-    ASSERT_TRUE(document.undo().ok());
-    EXPECT_TRUE(document.model().entities.contains(ids.front()));
-    EXPECT_EQ(document.model().entities.size(), 1u);
-}
-
 TEST(DrawingDataset, AResultOfNothingChangesNothing)
 {
     katana::cad::Document document;
