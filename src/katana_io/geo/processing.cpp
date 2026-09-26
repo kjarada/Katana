@@ -1157,6 +1157,32 @@ Result<GDALArgDatasetValue> datasetValue(const GDALAlgorithmArg& arg, const Data
     return GDALArgDatasetValue(*staged);
 }
 
+// The argument that names the layer of the dataset `dataset` gives: GDAL's
+// <name>-layer (vector clip's --like-layer, layer-algebra's --method-layer,
+// zonal-stats' --zones-layer), else --input-layer for the input - or for the
+// one vector dataset, as raster pixel-info's --input-layer is its
+// position-dataset's. Setting --input-layer for every dataset gave vector
+// clip's input the layer FROM like FILE ... LAYER named (review finding;
+// "Cannot find source layer").
+GDALAlgorithmArg* layerArgOf(GDALAlgorithm& algorithm, const GDALAlgorithmArg& dataset)
+{
+    if (GDALAlgorithmArg* own = algorithm.GetArg(dataset.GetName() + "-layer")) {
+        return own;
+    }
+    GDALAlgorithmArg* input = algorithm.GetArg("input-layer");
+    if (input == nullptr || dataset.GetName() == "input") {
+        return input;
+    }
+    std::size_t vectors = 0;
+    for (const auto& other : algorithm.GetArgs()) {
+        if (isDatasetArg(*other) && !other->IsOutput() &&
+            (other->GetDatasetType() & GDAL_OF_VECTOR) != 0) {
+            ++vectors;
+        }
+    }
+    return vectors == 1 && (dataset.GetDatasetType() & GDAL_OF_VECTOR) != 0 ? input : nullptr;
+}
+
 Status bindValue(GDALAlgorithm& algorithm, const std::string& name, const ArgValue& value,
                  Binding& bound, const ErrorCollector& errors)
 {
@@ -1222,10 +1248,15 @@ Status bindValue(GDALAlgorithm& algorithm, const std::string& name, const ArgVal
                 }
             }
             if (!path->layer.empty()) {
-                GDALAlgorithmArg* layer = algorithm.GetArg("input-layer");
-                if (layer == nullptr || !layer->Set(std::vector<std::string>{path->layer})) {
+                GDALAlgorithmArg* layer = layerArgOf(algorithm, *arg);
+                const bool set =
+                    layer != nullptr && (layer->GetType() == GAAT_STRING
+                                             ? layer->Set(path->layer)
+                                             : layer->Set(std::vector<std::string>{path->layer}));
+                if (!set) {
                     return makeError(ErrorCode::InvalidArgument,
-                                     algorithm.GetName() + " takes no input layer");
+                                     algorithm.GetName() + " takes no layer for " + arg->GetName(),
+                                     arg->GetName());
                 }
             }
         }
@@ -1275,6 +1306,34 @@ Error classified(const ErrorCollector& errors, const Binding& bound, ErrorCode o
                          failure->message);
     }
     return makeError(otherwise, failure->message);
+}
+
+// The files a pipeline's steps read, named in its text rather than bound to
+// a dataset argument: every word that is not an option, outside the steps
+// that write (a sidecar beside what a run writes is part of what it wrote).
+// A word that names no plain file is passed over by the guard.
+void watchPipelineInputs(std::string_view pipeline, SidecarGuard& sidecars)
+{
+    std::string step;
+    for (const detail::PipelineWord& word : detail::pipelineWords(pipeline)) {
+        if (word.step) {
+            step = katana::core::lowered(word.text);
+            continue;
+        }
+        const bool writes = step == "write" || step == "update" || step == "materialize" ||
+                            step == "tile" || step == "partition";
+        if (writes) {
+            continue;
+        }
+        const std::size_t equals = word.text.find('=');
+        const std::string name =
+            word.text.starts_with('-')
+                ? (equals == std::string::npos ? std::string() : word.text.substr(equals + 1))
+                : word.text;
+        if (!name.empty()) {
+            sidecars.watch(name);
+        }
+    }
 }
 
 void watchInputs(GDALAlgorithm& algorithm, SidecarGuard& sidecars)
@@ -1350,11 +1409,21 @@ Status bind(const RunRequest& request, Binding& bound, const ErrorCollector& err
     if (output != nullptr && !tailNamesOutput && !output->IsExplicitlySet()) {
         // An info-like algorithm whose output is optional prints to
         // output-string by default, and is left to.
+        // A pipeline's steps are its argument when it was one quoted word,
+        // else the tail's words: "read x ! info" given word by word was
+        // bound MEM and refused ("Should be one among 'json', 'text'").
         GDALAlgorithmArg* steps = pipeline ? alg.GetArg("pipeline") : nullptr;
+        std::string stepText;
+        if (steps != nullptr && steps->GetType() == GAAT_STRING && steps->IsExplicitlySet()) {
+            stepText = steps->Get<std::string>();
+        } else {
+            for (const std::string& word : tail.positional) {
+                stepText += word + ' ';
+            }
+        }
         const bool printsByDefault =
             !output->IsRequired() && alg.GetArg("output-string") != nullptr &&
-            (steps == nullptr || steps->GetType() != GAAT_STRING ||
-             pipelinePrints(steps->Get<std::string>()));
+            (steps == nullptr || steps->GetType() != GAAT_STRING || pipelinePrints(stepText));
         if (request.outputTo == OutputTo::Memory && !printsByDefault) {
             if (GDALAlgorithmArg* format = alg.GetArg("output-format");
                 format != nullptr && !tail.given.contains(format->GetName()) && !format->Set("MEM")) {
@@ -1414,6 +1483,20 @@ Status bind(const RunRequest& request, Binding& bound, const ErrorCollector& err
         bound.outputExisted = std::filesystem::exists(pathOf(bound.outputFile), error);
     }
     watchInputs(alg, sidecars);
+    if (pipeline) {
+        std::string text;
+        for (const auto& [name, value] : request.values) {
+            const auto* scalar = std::get_if<Scalar>(&value);
+            const auto* words = scalar != nullptr ? std::get_if<std::string>(scalar) : nullptr;
+            if (name == "pipeline" && words != nullptr) {
+                text += *words + ' ';
+            }
+        }
+        for (const std::string& token : request.tokens) {
+            text += token + ' ';
+        }
+        watchPipelineInputs(text, sidecars);
+    }
     return {};
 }
 
