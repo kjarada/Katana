@@ -281,6 +281,12 @@ class Document {
     // nothing changes; setting the value it already has is no step at all.
     [[nodiscard]] katana::core::Status setCoordinateSystem(std::string_view text,
                                                            std::string stepName = "SET_CRS");
+    // The same change as a command, for a step that does more besides - an
+    // IMPORT that adopts the file's coordinate system with its entities is
+    // ONE undo step (docs/interop.md, "Import options"). Null when the
+    // system is already `text`'s; InvalidCRS as setCoordinateSystem.
+    [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+    coordinateSystemCommand(std::string_view text, std::string stepName = "SET_CRS");
 
     // ---- sheets (docs/plotting.md) -------------------------------------------
     //

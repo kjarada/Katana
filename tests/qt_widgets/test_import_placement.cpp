@@ -175,9 +175,12 @@ TEST(VectorImportDialog, TheGisImportHasThePlacementGroupAndNamesItsFields)
     source.driver = "GeoJSON";
     source.vectorLayers.push_back({"parcels", 4, "Polygon", ""});
     katana::qt::VectorImportDialog dialog(source, Box2{});
-    ASSERT_NE(child<QWidget>(dialog, "importSourceLayer"), nullptr);
-    ASSERT_NE(child<QWidget>(dialog, "importTargetLayer"), nullptr);
-    ASSERT_NE(child<QWidget>(dialog, "importAttributes"), nullptr);
+    // The fields' names follow every GIS dialog's <d><Field> rule since the
+    // dialog came to build IMPORT lines (docs/interop.md, "Import options"):
+    // they were importSourceLayer, importTargetLayer and importAttributes.
+    ASSERT_NE(child<QWidget>(dialog, "vectorImportLayers"), nullptr);
+    ASSERT_NE(child<QWidget>(dialog, "vectorImportTarget"), nullptr);
+    ASSERT_NE(child<QWidget>(dialog, "vectorImportAttributes"), nullptr);
     EXPECT_EQ(dialog.placementBox().placement(), ImportPlacement{});
     child<QRadioButton>(dialog, "importPlacementLocal")->click();
     EXPECT_EQ(dialog.placementBox().placement().mode, ImportPlacementMode::Local);

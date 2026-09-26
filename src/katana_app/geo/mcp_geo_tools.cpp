@@ -143,57 +143,9 @@ std::string sourceWords(const Json& source, const std::string& arg)
         }
         return words;
     }
-    katana::cad::ScopeWords scope;
     const std::string kind = source["scope"].is_string() ? source["scope"].get<std::string>() : "";
-    if (kind == "selection") {
-        scope.source = katana::cad::ScopeSource::Selection;
-    } else if (kind == "drawing") {
-        scope.source = katana::cad::ScopeSource::Drawing;
-    } else if (kind == "area") {
-        const Json& area = argument(source, "area");
-        if (!area.is_array() || area.size() != 4 ||
-            !std::ranges::all_of(area, [](const Json& n) { return n.is_number(); })) {
-            throw ToolRefusal{"scope area needs \"area\": [x0, y0, x1, y1]"};
-        }
-        scope.source = katana::cad::ScopeSource::Area;
-        const double x0 = area[0].get<double>(), y0 = area[1].get<double>();
-        const double x1 = area[2].get<double>(), y1 = area[3].get<double>();
-        scope.area = katana::geometry::Box2(katana::geometry::Point2(std::min(x0, x1), std::min(y0, y1)),
-                                            katana::geometry::Point2(std::max(x0, x1), std::max(y0, y1)));
-    } else if (kind == "layers") {
-        const Json& layers = argument(source, "layers");
-        if (!layers.is_array() || layers.empty() ||
-            !std::ranges::all_of(layers, [](const Json& l) { return l.is_string(); })) {
-            throw ToolRefusal{"scope layers needs \"layers\": [\"a\", \"b\"]"};
-        }
-        scope.source = katana::cad::ScopeSource::Layers;
-        for (const Json& layer : layers) {
-            scope.layers.push_back(layer.get<std::string>());
-        }
-        scope.sublayers = !optionalBool(source, "only", false);
-    } else {
-        throw ToolRefusal{"\"scope\" is selection, drawing, area or layers (VIEW is the window's)"};
-    }
-    if (const Json& where = argument(source, "where"); !where.is_null()) {
-        if (!where.is_array()) {
-            throw ToolRefusal{"\"where\" is a list of conditions: [\"TYPE=polyline\"]"};
-        }
-        for (const Json& condition : where) {
-            if (!condition.is_string()) {
-                throw ToolRefusal{"each \"where\" condition is a string"};
-            }
-            if (auto status = katana::cad::parseWhereCondition(condition.get<std::string>(),
-                                                               scope.filter);
-                !status) {
-                throw ToolRefusal{status.error().describe()};
-            }
-        }
-    }
-    auto words = katana::cad::formatScopeWords(scope);
-    if (!words) {
-        throw ToolRefusal{words.error().describe()};
-    }
-    return *words;
+    return scopeWordsOf(kind, argument(source, "area"), argument(source, "layers"),
+                        optionalBool(source, "only", false), argument(source, "where"));
 }
 
 // The arguments as GDAL's own --name=value words.

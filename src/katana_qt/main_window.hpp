@@ -185,6 +185,11 @@ class MainWindow final : public QMainWindow {
     // logged, for a file that cannot be described or has no such dialog. For
     // --import-options.
     [[nodiscard]] std::unique_ptr<QDialog> makeImportOptions(const QString& path);
+    // File > Export Vector's dialog (VectorExportDialog, one per window) for
+    // `path`, shown, with the scope set as the menu sets it: what File >
+    // Export Vector opens once its file dialog has answered. For
+    // --export-options, since a headless run opens no file dialog.
+    QDialog* showExportOptions(const QString& path);
     // Triggers the menu item whose object name is `name`, exactly as a click
     // does. For the headless --action switch, so that a menu command is run
     // by a test through the same QAction a person clicks. NotFound for an
@@ -379,38 +384,15 @@ class MainWindow final : public QMainWindow {
     // loaded. A warning; the project opens all the same.
     void reportMissingCustomisation();
     void reportCustomisationCoverage();
-    // The GIS menu's import dialogs' choices, which have no IMPORT words yet
-    // (docs/interop.md, "Not done"); File > Import, a path on the command line
-    // and a typed IMPORT are the executor's (geo/import_verb.cpp).
-    // `placement` is where the data lands, as importPath says; Keep asks when
-    // it is far from the drawing (decideImportPlacement, import_placement.hpp).
-    void importVectorFile(const std::filesystem::path& path,
-                          katana::interop::VectorImportOptions options = {},
-                          const katana::cad::ImportPlacement& placement = {});
     // File > Import's step for a DXF or a .12da archive, whose only choice
     // is where it lands (ImportPlacementDialog), and then the IMPORT line
     // it makes, through runVerbLine.
     void importWithPlacement(const QString& path);
-    void importRasterFile(const std::filesystem::path& path,
-                          katana::interop::RasterImportOptions options = {});
-    void importPointCloudFile(const std::filesystem::path& path,
-                              katana::interop::PointCloudImportOptions options = {});
     void exportVectorFile();
-    // Writes the drawing, or `options.entities` of it, to `path`: a vector
-    // format by extension, or a 12d archive - the Export Vector dialog's
-    // choices, which have no EXPORT words yet; a typed EXPORT is the
-    // executor's (geo/export_verb.cpp). Reports into the log; false when it
-    // failed, which has been reported too.
-    bool exportDrawingTo(const std::filesystem::path& path,
-                         katana::interop::VectorExportOptions options);
     // decideImportPlacement for this window: where data read at `incoming`
     // lands in the drawing as it is now, asked or logged.
     [[nodiscard]] PlacementDecision placeImport(const katana::cad::ImportPlacement& placement,
                                                 const katana::geometry::Box2& incoming);
-    // A .dxf written natively rather than through GDAL (main_window_dxf.cpp),
-    // with the dialog's entities, layers and origin shift.
-    bool exportDxfFile(const std::filesystem::path& path,
-                       const katana::interop::VectorExportOptions& options);
 
     // ---- GIS menu: GDAL and PDAL (PLAN.MD Phases 17 and 20) ---------------
     // The imports ask for a file of their kind, describe it, and offer its

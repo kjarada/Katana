@@ -43,11 +43,38 @@ struct VectorExportOptions {
     // true curve. Stated explicitly rather than hidden, because it is a lossy
     // conversion and the user is entitled to choose its accuracy.
     double curveTolerance = 0.001;
+
+    // ---- EXPORT's options (docs/interop.md, "Export options") ----
+    // The coordinate system the file is written in (anything gis::crsToWkt
+    // reads): the coordinates, in projectionWkt's system, are moved into it
+    // on the way out. Empty writes them as they are. InvalidCRS when it is
+    // set and projectionWkt is empty: there is nothing to move from.
+    std::string targetCrs;
+    // One file layer per drawing layer, named after it, in the order the
+    // layers are first met (split=layer). Refused for a format of points and
+    // lines only (GPX), whose layers are its own.
+    bool splitByLayer = false;
+    // The layers added to the file when it exists (a GeoPackage), not the
+    // file replaced (gis::VectorExportOptions::append).
+    bool append = false;
+    // The driver's own options, KEY=VALUE (co=, lco=). The caller checks
+    // them against the driver's lists (gis::checkOptions).
+    std::vector<std::string> creationOptions;
+    std::vector<std::string> layerCreationOptions;
+    // A text entity written as a point at its insertion point, with fields
+    // text, text_height (model units) and text_rotation (degrees,
+    // anticlockwise) and an OGR_STYLE LABEL that KML, DXF and MapInfo draw
+    // (text=points). Off, text is left out and counted, as it always was.
+    bool textAsPoints = false;
 };
 
 struct VectorExportResult {
     std::uint64_t featuresWritten = 0;
     std::uint64_t entitiesSkipped = 0;
+    // Text entities written as points (textAsPoints).
+    std::uint64_t textsWritten = 0;
+    // The file's layers this export wrote, in order.
+    std::vector<std::string> layers;
     std::string driver;
     std::vector<std::string> warnings;
 };

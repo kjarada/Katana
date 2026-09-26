@@ -242,10 +242,18 @@ const std::vector<VerbEntry>& verbTable()
              "IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]  a drawing (.dxf), vector data or\n"
              "          a .12da archive as entities, a raster or a point cloud as a reference\n"
              "          layer, by its extension; LOCAL puts its lower-left corner at 0,0,\n"
-             "          ALONGSIDE on the drawing's, OFFSET moves it by dE east and dN north"});
+             "          ALONGSIDE on the drawing's, OFFSET moves it by dE east and dN north\n"
+             "          vector data: [layers=a,b] [where=\"...\"] [sql=\"...\"] [dialect=ogrsql|sqlite]\n"
+             "          [<scope> [clip]] [fields=a,b] [attributes=no] [target=<layer>] [max=N]\n"
+             "          [oo=K=V]... ; every kind: [crs=project|adopt] [srs=<code>] [PREVIEW];\n"
+             "          a raster: [band=N] [subdataset=N|name] [maxpixels=N] [name=<n>];\n"
+             "          a point cloud: [budget=N] [class=N] [resolution=<m>] [name=<n>]"});
         rows.push_back({"EXPORT", "", &prepareExport,
-                        "EXPORT <file>  the drawing, by extension (.dxf, .12da with the surfaces,\n"
-                        "          GeoPackage, GeoJSON, shapefile ...)"});
+                        "EXPORT <file> [<scope>]  the drawing, or what the scope takes of it, by\n"
+                        "          extension (.dxf, .12da with the surfaces, GeoPackage, GeoJSON,\n"
+                        "          shapefile ...); GDAL's formats also [layername=<n> | split=layer]\n"
+                        "          [append] [crs=project|native|<code>] [co=K=V]... [lco=K=V]...\n"
+                        "          [text=points|skip] [curve=<m>] [properties=yes|no]; [PREVIEW]"});
         rows.push_back({"INFO", "", &prepareInfo,
                         "INFO <file|folder|url> [JSON] [STATS] [CHECK] [LAYER <name>]  what a\n"
                         "          GIS file, a folder or a point cloud holds, without importing it:\n"

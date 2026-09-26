@@ -67,6 +67,16 @@ struct LineOutcome {
 [[nodiscard]] std::string requiredString(const Json& arguments, const char* name);
 [[nodiscard]] bool optionalBool(const Json& arguments, const char* name, bool fallback);
 
+// A scope as the one grammar's words (cad::formatScopeWords), from a tool's
+// JSON: `kind` selection, drawing, area (with `area` [x0, y0, x1, y1]) or
+// layers (with `layers` ["a", "b"] and `only`), and `where` a list of
+// conditions ["TYPE=polyline", "PROP=owner:Smith*"] (null for none). VIEW is
+// the window's and is refused. ToolRefusal naming what is wrong. The ONE
+// reading of a scope in JSON: katana_gdal_run's sources, katana_gis_query,
+// katana_import and katana_export all say a scope through it.
+[[nodiscard]] std::string scopeWordsOf(const std::string& kind, const Json& area,
+                                       const Json& layers, bool only, const Json& where);
+
 // The geoprocessing tools (geo/mcp_geo_tools.cpp): katana_gdal_catalogue,
 // katana_gdal_describe, katana_gdal_run, and the lanes' after them.
 [[nodiscard]] std::vector<Tool> geoTools();

@@ -3712,150 +3712,6 @@ void MainWindow::importFile()
                            ") are read too.");
 }
 
-void MainWindow::importVectorFile(const std::filesystem::path& path,
-                                  interop::VectorImportOptions options,
-                                  const cad::ImportPlacement& placement)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto imported = interop::importVector(path, options);
-    QApplication::restoreOverrideCursor();
-    if (!imported.ok()) {
-        logMessage(QString::fromStdString(imported.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(imported.error().describe()));
-        return;
-    }
-
-    // Where it lands, chosen or asked BEFORE anything is added. A move is
-    // read again with the shift rather than made afterwards - the same
-    // choices, the layers, the target, the attributes, with the shift added -
-    // so the one reader applies the one shift to everything, as katana_cli
-    // does.
-    const PlacementDecision placed = placeImport(placement, imported->bounds);
-    if (placed.cancelled) {
-        logMessage("Import cancelled.");
-        return;
-    }
-    if (placed.shift) {
-        options.originShift = placed.shift;
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        imported = interop::importVector(path, options);
-        QApplication::restoreOverrideCursor();
-        if (!imported.ok()) {
-            logMessage(QString::fromStdString(imported.error().describe()), true);
-            return;
-        }
-    }
-
-    // Layers must exist before the entities that reference them, and the whole
-    // import has to be ONE undo step - a user who imports a shapefile by
-    // mistake expects a single Ctrl+Z to remove it, not one per layer.
-    auto transaction = std::make_unique<cmd::Transaction>("IMPORT");
-    for (const std::string& name : imported->layersNeeded) {
-        if (!document_.model().layers.contains(name)) {
-            Layer layer;
-            layer.name = name;
-            transaction->add(cmd::createLayer(layer));
-        }
-    }
-    const std::size_t created = imported->entities.size();
-    const auto importedBounds = imported->bounds;
-    if (created != 0) {
-        transaction->add(cmd::createEntities(std::move(imported->entities)));
-    }
-
-    // A file with nothing the drawing can hold - every feature skipped, say -
-    // leaves the transaction empty, and the stack refuses an empty one as a
-    // command that changes nothing. That is not a failed import: the file was
-    // read, and its warnings below say why nothing came of it.
-    if (transaction->size() != 0) {
-        const auto status = document_.execute(std::move(transaction));
-        if (!status) {
-            logMessage(QString::fromStdString(status.error().describe()), true);
-            warnUser("Import failed", QString::fromStdString(status.error().describe()));
-            return;
-        }
-    }
-
-    logMessage("Imported " + grouped(created) + " entities from " + fromPath(path.filename()));
-    if (!importedBounds.empty()) {
-        logMessage(QString("  extent %1,%2 to %3,%4")
-                       .arg(importedBounds.min.x, 0, 'f', 2)
-                       .arg(importedBounds.min.y, 0, 'f', 2)
-                       .arg(importedBounds.max.x, 0, 'f', 2)
-                       .arg(importedBounds.max.y, 0, 'f', 2));
-    }
-    for (const std::string& warning : imported->warnings) {
-        logMessage("  " + QString::fromStdString(warning));
-    }
-    if (!imported->projectionWkt.empty()) {
-        logMessage("  coordinates were imported unchanged; the file declares its own CRS");
-    }
-    views_->zoomExtentsAll();
-}
-
-void MainWindow::importRasterFile(const std::filesystem::path& path,
-                                  interop::RasterImportOptions options)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto raster = interop::importRaster(path, options);
-    QApplication::restoreOverrideCursor();
-
-    if (!raster.ok()) {
-        logMessage(QString::fromStdString(raster.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(raster.error().describe()));
-        return;
-    }
-
-    const bool georeferenced = raster->hasGeotransform;
-    const int pixelWidth = raster->width;
-    const int pixelHeight = raster->height;
-    reference_.add(std::move(*raster));
-    views_->invalidateReferenceCache();
-    refreshReferences();
-
-    logMessage("Imported raster " + fromPath(path.filename()) + " (" +
-               QString::number(pixelWidth) + " x " + QString::number(pixelHeight) + " px)");
-    if (!georeferenced) {
-        // Placing it at the origin is a guess, and the user has to know that.
-        logMessage("  this file carries no georeferencing; it is placed at the origin at "
-                   "one model unit per pixel",
-                   true);
-    }
-    views_->zoomExtentsAll();
-}
-
-void MainWindow::importPointCloudFile(const std::filesystem::path& path,
-                                      interop::PointCloudImportOptions options)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto cloud = interop::importPointCloud(path, options);
-    QApplication::restoreOverrideCursor();
-
-    if (!cloud.ok()) {
-        logMessage(QString::fromStdString(cloud.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(cloud.error().describe()));
-        return;
-    }
-
-    const std::size_t shown = cloud->points.size();
-    const std::uint64_t total = cloud->sourcePointCount;
-    const bool decimated = cloud->isDecimated();
-    reference_.add(std::move(*cloud));
-    views_->invalidateReferenceCache();
-    refreshReferences();
-
-    QString message = "Imported point cloud " + fromPath(path.filename()) + " (" +
-                      grouped(shown) + " points";
-    if (decimated) {
-        message += " sampled from " + grouped(total);
-    }
-    logMessage(message + ")");
-    views_->zoomExtentsAll();
-}
-
 void MainWindow::exportVectorFile()
 {
     if (document_.model().entities.empty() && document_.model().alignments.empty() &&
@@ -3891,98 +3747,48 @@ void MainWindow::exportVectorFile()
         pattern >= 0 && chosenFilter.endsWith(')') && QFileInfo(selected).suffix().isEmpty()) {
         selected += '.' + chosenFilter.mid(pattern + 3).chopped(1);
     }
-
-    const std::filesystem::path path = toPath(selected);
-    interop::VectorExportOptions options;
-    if (interop::kindForPath(path) == interop::SourceKind::Archive12d ||
-        katana::dxf::isDxfPath(path)) {
-        // A 12d archive has none of the GDAL formats' choices - it keeps arcs
-        // as arcs and every property - and nor has the native DXF writer, so
-        // the only question is how much.
-        if (!document_.selection().empty()) {
-            const auto answer = QMessageBox::question(
-                this, "Export",
-                "Export only the " + QString::number(document_.selection().size()) +
-                    " selected entities?\n\nNo exports the whole drawing.",
-                QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-            if (answer == QMessageBox::Cancel) {
-                return;
-            }
-            if (answer == QMessageBox::Yes) {
-                options.entities = document_.selection().ids();
-            }
-        }
-    } else {
-        VectorExportDialog dialog(chosenFilter, document_.selection().size(), this);
-        if (dialog.exec() != QDialog::Accepted) {
-            logMessage("Export cancelled.");
-            return;
-        }
-        dialog.apply(options);
-        if (dialog.selectedOnly()) {
-            options.entities = document_.selection().ids();
-        }
-    }
-    (void)exportDrawingTo(path, std::move(options));
+    (void)showExportOptions(selected);
 }
 
-bool MainWindow::exportDrawingTo(const std::filesystem::path& path,
-                                 interop::VectorExportOptions options)
+QDialog* MainWindow::showExportOptions(const QString& selected)
 {
-    if (katana::dxf::isDxfPath(path)) {
-        return exportDxfFile(path, options);
-    }
-    if (interop::kindForPath(path) == interop::SourceKind::Archive12d) {
-        // A 12d archive carries what the other formats cannot: the alignments
-        // and the surfaces of the session go with the drawing.
-        std::vector<katana::archive12d::ExportSurface> surfaces;
-        if (options.entities.empty()) {
-            for (const auto& item : sceneSurfaces_) {
-                surfaces.push_back({item.name, item.surface});
-            }
+    // The Export Vector dialog (gis_export_dialog.hpp): its scope and
+    // options are the EXPORT line it shows, and Run hands that line to the
+    // one executor, as if typed (docs/interop.md, "Export options"). One per
+    // window, made the first time and kept, as every GIS dialog is.
+    // Found by its name, as addGisToolAction finds a GIS dialog: the class
+    // has no Q_OBJECT for findChild to cast by.
+    auto* dialog = dynamic_cast<VectorExportDialog*>(findChild<QDialog*>("vectorExportDialog"));
+    if (dialog == nullptr) {
+        GisDialogContext context;
+        context.run = commandRunner();
+        context.document = &document_;
+        context.headless = [this] { return headless_; };
+        if (views_ != nullptr) {
+            context.views = [this] { return scopeFilterViews(views_->viewSet()); };
         }
-        interop::Archive12dExportOptions archiveOptions;
-        archiveOptions.entities = options.entities;
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        auto archive = interop::exportArchive12d(document_.model(), surfaces, path, archiveOptions);
-        QApplication::restoreOverrideCursor();
-        if (!archive.ok()) {
-            logMessage(QString::fromStdString(archive.error().describe()), true);
-            warnUser("Export failed", QString::fromStdString(archive.error().describe()));
-            return false;
+        dialog = new VectorExportDialog(std::move(context), this);
+        if (geo_ != nullptr) {
+            QPointer<VectorExportDialog> guard(dialog);
+            (void)geo_->addFinishedListener([guard](JobId id, const VerbOutcome& outcome) {
+                if (guard != nullptr) {
+                    guard->jobFinished(id, outcome);
+                }
+            });
         }
-        logMessage(QString("Exported %1 entities, %2 alignments and %3 surfaces to %4 (12d archive)")
-                       .arg(grouped(archive->entitiesWritten))
-                       .arg(grouped(archive->alignmentsWritten))
-                       .arg(grouped(archive->surfacesWritten))
-                       .arg(fromPath(path.filename())));
-        for (const std::string& warning : archive->warnings) {
-            logMessage("  " + QString::fromStdString(warning));
-        }
-        return true;
     }
-    // The project's coordinate system goes into the file, and is what a KML
-    // or GPX is converted to longitude and latitude from (docs/interop.md,
-    // "Fidelity").
-    if (options.projectionWkt.empty()) {
-        options.projectionWkt = document_.metadata().coordinateSystem;
+    dialog->reload();
+    dialog->setFile(QDir::fromNativeSeparators(selected));
+    // What is selected is what is usually meant, when there is a selection;
+    // else the whole drawing.
+    if (ScopeFilterWidget* scope = dialog->scopeControls()) {
+        scope->setChoice(document_.selection().empty() ? ScopeChoice::Drawing
+                                                       : ScopeChoice::Selection);
     }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto result = interop::exportVector(document_.model(), path, options);
-    QApplication::restoreOverrideCursor();
-
-    if (!result.ok()) {
-        logMessage(QString::fromStdString(result.error().describe()), true);
-        warnUser("Export failed", QString::fromStdString(result.error().describe()));
-        return false;
-    }
-
-    logMessage("Exported " + grouped(result->featuresWritten) + " features to " +
-               fromPath(path.filename()) + " (" + QString::fromStdString(result->driver) + ")");
-    for (const std::string& warning : result->warnings) {
-        logMessage("  " + QString::fromStdString(warning));
-    }
-    return true;
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
+    return dialog;
 }
 
 void MainWindow::refreshReferences()
@@ -4303,9 +4109,24 @@ std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
         return nullptr;
     }
     switch (description->kind) {
-    case interop::SourceKind::Vector:
-        return std::make_unique<VectorImportDialog>(*description,
-                                                    document_.model().entities.bounds(), this);
+    case interop::SourceKind::Vector: {
+        // Preview runs its line through the one executor and waits for the
+        // job, as every GIS dialog does; the scope offers this drawing's
+        // layers and the workspace's views.
+        GisDialogContext context;
+        context.run = commandRunner();
+        context.await = [this](const VerbOutcome& started,
+                               std::function<void(const VerbOutcome&)> done) {
+            return awaitJob(started, std::move(done));
+        };
+        context.document = &document_;
+        context.headless = [this] { return headless_; };
+        if (views_ != nullptr) {
+            context.views = [this] { return scopeFilterViews(views_->viewSet()); };
+        }
+        return std::make_unique<VectorImportDialog>(
+            *description, document_.model().entities.bounds(), std::move(context), this);
+    }
     case interop::SourceKind::Raster:
         return std::make_unique<RasterImportDialog>(*description, this);
     case interop::SourceKind::PointCloud:
@@ -4337,16 +4158,24 @@ void MainWindow::importWithOptions(const QString& path)
     }
     // Routed by the dialog the file got, which was routed by what the file
     // IS - a .las chosen through Import Vector's "All files" still arrives
-    // as a point cloud. The vector dialog's layer and attribute choices have
-    // no IMPORT word yet, so it imports itself; the move it makes is logged.
+    // as a point cloud. Each dialog's choices are the IMPORT line it shows,
+    // run through the one executor as if typed: echoed, logged, one undo step
+    // (docs/interop.md, "Import options").
+    katana::core::Result<QString> line =
+        katana::core::makeError(katana::core::ErrorCode::InvalidArgument, "no import line");
     if (const auto* vector = dynamic_cast<const VectorImportDialog*>(dialog.get())) {
         vector->placementBox().remember();
-        importVectorFile(file, vector->options(), vector->placementBox().placement());
+        line = vector->command();
     } else if (const auto* raster = dynamic_cast<const RasterImportDialog*>(dialog.get())) {
-        importRasterFile(file, raster->options());
+        line = raster->command();
     } else if (const auto* cloud = dynamic_cast<const PointCloudImportDialog*>(dialog.get())) {
-        importPointCloudFile(file, cloud->options());
+        line = cloud->command();
     }
+    if (!line) {
+        logMessage(QString::fromStdString(line.error().describe()), true);
+        return;
+    }
+    (void)runVerbLine(*line);
 }
 
 void MainWindow::importVectorWithOptions()
