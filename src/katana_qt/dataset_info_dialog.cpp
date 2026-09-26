@@ -17,6 +17,7 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -119,6 +120,7 @@ DatasetInfoDialog::DatasetInfoDialog(const QString& path, DatasetInfoRunner runn
     reply_ = new QLabel(this);
     reply_->setObjectName(QStringLiteral("datasetInfoReply"));
     reply_->setWordWrap(true);
+    reply_->setTextFormat(Qt::PlainText); // GDAL's words, never markup
     reply_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     layout->addWidget(reply_);
 
@@ -197,9 +199,16 @@ void DatasetInfoDialog::showRecords(const VerbOutcome& outcome)
                               field(record, "type") + (subtype.isEmpty() ? "" : " (" + subtype + ")"),
                               field(record, "width")});
         } else if (record.kind == "band") {
-            addRow(*bands_, {field(record, "band"), field(record, "type"), field(record, "nodata"),
-                             field(record, "min"), field(record, "max"), field(record, "mean"),
-                             field(record, "stddev"), field(record, "overviews")});
+            const QString band = field(record, "band");
+            QStringList numbers{field(record, "min"), field(record, "max"), field(record, "mean"),
+                                field(record, "stddev")};
+            if (std::ranges::any_of(numbers, [](const QString& one) { return !one.isEmpty(); })) {
+                statistics_[band] = numbers;
+            } else if (const auto kept = statistics_.find(band); kept != statistics_.end()) {
+                numbers = kept->second;
+            }
+            addRow(*bands_, {band, field(record, "type"), field(record, "nodata"), numbers[0],
+                             numbers[1], numbers[2], numbers[3], field(record, "overviews")});
         } else if (record.kind == "check" || record.kind == "problem") {
             checked << readable(record);
         } else if (record.kind != "overview") {

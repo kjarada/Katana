@@ -98,6 +98,7 @@ QLabel* summaryLabel(const interop::SourceDescription& source, QWidget* parent)
     auto* label = new QLabel(QString::fromStdString(interop::formatDescription(source)).trimmed(),
                              parent);
     label->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    label->setTextFormat(Qt::PlainText); // the file's own words, never markup
     label->setTextInteractionFlags(Qt::TextSelectableByMouse);
     label->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
     label->setWordWrap(false);
@@ -279,6 +280,9 @@ VectorImportDialog::VectorImportDialog(const interop::SourceDescription& source,
     matchCount_ = new QLabel(this);
     matchCount_->setObjectName("vectorImportMatchCount");
     matchCount_->setWordWrap(true);
+    // GDAL's words, shown as they are: read as rich text, a "<code>" in a
+    // message was taken for a tag and vanished.
+    matchCount_->setTextFormat(Qt::PlainText);
     preview_ = new QPushButton("Preview", this);
     preview_->setObjectName("vectorImportPreview");
     preview_->setAutoDefault(false);
@@ -667,6 +671,7 @@ PointCloudImportDialog::PointCloudImportDialog(const interop::SourceDescription&
                  resolutionRow);
 
     estimate_ = new QLabel(this);
+    estimate_->setTextFormat(Qt::PlainText);
     estimate_->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
     form->addRow(QString(), estimate_);
     layout->addLayout(form);

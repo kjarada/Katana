@@ -26,8 +26,10 @@
 
 #include <QDialog>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
+#include <map>
 
 #include "command_runner.hpp"
 
@@ -73,6 +75,10 @@ class DatasetInfoDialog final : public QDialog {
     QString path_;
     DatasetInfoRunner runner_;
     bool described_ = false;
+    // Each band's min, max, mean and stddev once STATS has read them: a
+    // later reply (CHECK, the plain INFO) gives none, and the file is the
+    // same, so they are kept rather than blanked.
+    std::map<QString, QStringList> statistics_;
     QTabWidget* tabs_ = nullptr;
     QPlainTextEdit* summary_ = nullptr;
     QTableWidget* fields_ = nullptr;

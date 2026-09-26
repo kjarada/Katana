@@ -4268,6 +4268,11 @@ void MainWindow::importWithOptions(const QString& path)
         logMessage("Import cancelled.");
         return;
     }
+    finishImport(*dialog);
+}
+
+void MainWindow::finishImport(const QDialog& dialog)
+{
     // Routed by the dialog the file got, which was routed by what the file
     // IS - a .las chosen through Import Vector's "All files" still arrives
     // as a point cloud. Each dialog's choices are the IMPORT line it shows,
@@ -4275,12 +4280,12 @@ void MainWindow::importWithOptions(const QString& path)
     // (docs/interop.md, "Import options").
     katana::core::Result<QString> line =
         katana::core::makeError(katana::core::ErrorCode::InvalidArgument, "no import line");
-    if (const auto* vector = dynamic_cast<const VectorImportDialog*>(dialog.get())) {
+    if (const auto* vector = dynamic_cast<const VectorImportDialog*>(&dialog)) {
         vector->placementBox().remember();
         line = vector->command();
-    } else if (const auto* raster = dynamic_cast<const RasterImportDialog*>(dialog.get())) {
+    } else if (const auto* raster = dynamic_cast<const RasterImportDialog*>(&dialog)) {
         line = raster->command();
-    } else if (const auto* cloud = dynamic_cast<const PointCloudImportDialog*>(dialog.get())) {
+    } else if (const auto* cloud = dynamic_cast<const PointCloudImportDialog*>(&dialog)) {
         line = cloud->command();
     }
     if (!line) {

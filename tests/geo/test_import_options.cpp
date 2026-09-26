@@ -454,6 +454,21 @@ TEST_F(ImportOptions, ASubdatasetOfAFileWithNoneIsRefused)
     EXPECT_NE(refused.error().message.find("no subdatasets"), std::string::npos);
 }
 
+TEST_F(ImportOptions, ABudgetWithAClassIsSizedToThePointsOfThatClass)
+{
+    // samples/gis/survey_scan.las: 40000 points, 29512 of class 2 (counted
+    // from the file's point records, format 7, byte 16). The step was sized
+    // to the whole file, 40000 / 1000 = 40, and applied after the class
+    // filter: ceil(29512 / 40) = 738 of the 1000 asked. Sized to the class
+    // as that first read measures it, 738 x 40 = 29520 points, the step is
+    // ceil(29520 / 1000) = 30: ceil(29512 / 30) = 984, within the budget.
+    const std::string reply =
+        ok("IMPORT " + quoted(kSamples + "/survey_scan.las") + " budget=1000 class=2 name=ground");
+    ASSERT_EQ(reference.pointClouds().size(), 1u) << reply;
+    EXPECT_EQ(reference.pointClouds().front().points.size(), 984u) << reply;
+    EXPECT_EQ(reference.pointClouds().front().decimationStep, 30u);
+}
+
 TEST_F(ImportOptions, AnOptionOfAnotherKindOfDataIsRefusedByName)
 {
     const auto band = run("IMPORT " + kLots + " band=1");
