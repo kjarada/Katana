@@ -916,4 +916,25 @@ TEST_F(McpServer, AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster)
     EXPECT_NE(rasters[0]["derived_from"].get<std::string>().find("RASTER SHADE"),
               std::string::npos);
 }
+
+// T3: slope classes through the command tool, one undo step. terrain.asc's
+// heights span 24.892 to 38.819 on 1.5 m cells, so Horn's gradient, a
+// weighted difference of at most 4 x 13.927 m over 8 x 1.5 m, is at most
+// 4.64 along each axis: under 657 % however it falls. A break at 1000 puts
+// all 120 x 90 cells of 2.25 m2 in [0, 1000): 24 300 m2.
+TEST_F(McpServer, SlopeClassesMadeThroughTheCommandToolAreOneUndoStep)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"RASTER SLOPE FILE \"" + terrain + "\" classes=1000"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::string reply = made["structuredContent"]["commands"][0]["output"].get<std::string>();
+    EXPECT_NE(reply.find("class name=0-1000 from=0 to=1000 unit=percent area=24300.000"),
+              std::string::npos)
+        << reply;
+    const Json undone = call("katana_run_commands", Json{{"commands", {"UNDO", "LIST"}}});
+    ASSERT_FALSE(undone["isError"].get<bool>()) << textOf(undone);
+    EXPECT_NE(textOf(undone).find("0 entities"), std::string::npos) << textOf(undone);
+}
 #endif

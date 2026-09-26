@@ -227,4 +227,12 @@ bindAreas(Context& context, const katana::cad::ScopeWords& scope, std::string_vi
                                                           std::string_view line);
 [[nodiscard]] std::string shadeUsage();
 
+// ---- T3: RASTER SLOPE, RASTER ASPECT (slope_verbs.cpp) ----
+[[nodiscard]] katana::core::Result<Prepared> prepareSlope(Context& context, const Tokens& tokens,
+                                                          std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareAspect(Context& context, const Tokens& tokens,
+                                                           std::string_view line);
+[[nodiscard]] std::string slopeUsage();
+[[nodiscard]] std::string aspectUsage();
+
 } // namespace katana::app::geo

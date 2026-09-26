@@ -727,7 +727,24 @@ Where it differs from the plan:
 
 ### T3: Slope and aspect with slope-class areas
 
-Not started.
+Built: `RASTER SLOPE` and `RASTER ASPECT` (`src/katana_app/geo/slope_verbs.cpp`)
+and Terrain > Analysis > Slope and Aspect (`terrainSlope`,
+`slopeAnalysisDialog`, `src/katana_qt/geo/slope_analysis_dialog.hpp`).
+`docs/terrain.md`, "Slope and aspect", has the grammar, the records and the
+decisions. The slope raster goes through F0's `applyOutputs` (TO
+REFERENCE), the class areas through `resultCommand` (one undo step). No MCP
+tool: `katana_run_commands` runs the line (`docs/mcp.md`).
+
+Where it differs from the plan:
+
+- The class breaks begin at 0 and end open, not at the data's range: a
+  slope is never below 0, and neither end then needs a pass over the data.
+- The slope raster keeps the values; its display copy is a coloured picture
+  of them.
+- With a scope, the class areas are cut to the shapes exactly (`vector
+  clip`), since GDAL's raster clip keeps every cell a shape touches.
+- The dialog has a `slopeClip` box that turns the scope on, and a
+  `slopeName`.
 
 ### T4: Statistics by area, sampling and drape
 

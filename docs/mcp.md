@@ -211,6 +211,14 @@ picture. The picture is a derived reference raster, which
 `McpServer.AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster` pins
 it.
 
+### T3: RASTER SLOPE and RASTER ASPECT through katana_run_commands
+
+The same again: the lines run through `katana_run_commands`, and the reply's
+`class name= from= to= unit= area= polygons=` records are the per-class area
+report an agent reads; the areas are one undo step (`UNDO` takes them all).
+The slope raster is listed by `katana_terrain_list` like any derived raster.
+`McpServer.SlopeClassesMadeThroughTheCommandToolAreOneUndoStep` pins it.
+
 ### V5: katana_gis_query
 
 Not started.
