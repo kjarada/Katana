@@ -262,3 +262,32 @@ still being brought up to this standard are named in the script's
 
 Run it alone with `python tools/check_docs.py` from the checkout root; it
 prints each broken reference with its file and line.
+
+## Not done: sixteen tests that fail in the Linux cloud container
+
+Measured on 2026-09-26 in the Linux container (GCC 16, Qt 6.11.2 from
+conda-forge, offscreen), on an unchanged build of `main` (b749688) as well as
+on the branch that found them, so none is a regression of either. They pass on
+the owner's Windows machine, where the suite is normally run.
+
+- **Four headless reports** - `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`,
+  `qt_drawing_summary_and_status_json_describe_the_drawing_headless`,
+  `qt_plot_and_view_image_dialogs_run_their_verbs_headless`,
+  `qt_every_view_menu_item_is_named_and_its_values_are_typed_headless`: their
+  `-DEXPECT=` wants two report lines next to each other, and Linux's offscreen
+  plugin prints "This plugin does not support propagateSizeHints()" between
+  them whenever a window's minimum size changes (a dialog shown, views
+  arranged). The fix is in the checks, not the program: `.*` between the lines
+  those checks pair, or `check_screenshot.cmake` dropping that plugin's
+  "does not support" lines before it matches.
+- **Three Windows paths** - `qt_widgets.ScriptRunner.TheLineItWritesIsTheLineItReads`,
+  `qt_widgets.PlotDrawing.TheLineItWritesIsTheLineItReads`,
+  `qt_widgets.Snapshot.TheLineItWritesIsTheLineItReads` write and read a line
+  naming `C:\...`, whose backslashes mean something else on Linux.
+- **One file dialog** - `qt_widgets.SheetViewOptions.AnImageViewsPictureIsChosenAndCopiedInOneStep`
+  answers `QFileDialog::getOpenFileName` by finding the modal `QFileDialog`
+  widget; this Qt shows a native dialog there, which is no widget, so the test
+  waits until ctest's timeout.
+- **Eight GPU desktop cases** - the `gpu.GpuSceneView.OnTheDesktop...` and
+  `qt_widgets_gpu.RenderViewGpu.OnTheDesktop...` cases, which need Xvfb and
+  Mesa's lavapipe (`docs/gpu.md`); not diagnosed further.
