@@ -217,6 +217,17 @@ what such an algorithm writes is the change asked for.
 `GdalRun.ARunOnAUserFileLeavesNoSidecarBesideIt` and
 `GdalRun.ASidecarAlreadyBesideAFileIsReadAndLeftAsItWas` pin both halves.
 
+A pipeline names its inputs in its text, not in a dataset argument, so they
+were not watched: `raster pipeline "read a.asc ! info --stats"` left
+`a.asc.aux.xml` behind (review finding). Every word of a pipeline that is
+not an option, and every option's value, is now watched, outside the steps
+that write (`write`, `update`, `materialize`, `tile`, `partition`); a word
+that names no plain file is passed over
+(`GdalRun.APipelinesReadStepLeavesNoSidecarBesideItsFile`). The same test
+found that a pipeline ending in `info`, given word by word rather than
+quoted, was bound a MEM output and refused: whether a pipeline prints is now
+read from its words when it is not one quoted argument.
+
 ## Safety
 
 Every leaf is Safe or Confirm (`src/katana_io/geo/policy.cpp`).
@@ -385,7 +396,16 @@ lines, polylines and areas with their properties.
   cells. The sampling is work, so it runs on the worker, from the shared
   immutable surface prepare copied a pointer to.
 - **`FILE <path> [LAYER <name>]`** binds the path as it is: a /vsi path or a
-  URL passes through.
+  URL passes through. LAYER names the layer of the dataset the FROM binds:
+  GDAL's `<arg>-layer` where the algorithm has one (vector clip's
+  `--like-layer`, layer-algebra's `--method-layer`, zonal-stats'
+  `--zones-layer`), else `--input-layer` for `input`, or for the one vector
+  dataset (raster pixel-info's `position-dataset`). A dataset with no layer
+  argument of its own refuses LAYER, naming it. Before, every LAYER set
+  `--input-layer`, so `GDAL vector clip FROM input FILE pts.gpkg FROM like
+  FILE areas.gpkg LAYER m` looked for `m` in the points and failed ("Cannot
+  find source layer 'm'";
+  `GdalRun.AFileSourcesLayerIsTheLayerOfItsOwnDataset`).
 
 ### Derived rasters
 
