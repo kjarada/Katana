@@ -72,6 +72,17 @@ frozen: it installs whatever the rolling distribution has that day, so a
 Windows release records the compiler's version in its log (the "Toolchain"
 step).
 
+### Tests on the machine the package is for
+
+Before packaging, some jobs build the tests and run a part of them there
+(the `verify` column of the workflow's matrix), because those runners are the
+only places the code in question meets real hardware:
+
+| Job | Runs | Why |
+|---|---|---|
+| macOS arm64 | `gpu.` and `simd_` | the Metal renderer against the software one on the runner's GPU, and the NEON kernels against the scalar references |
+| Linux ARM64, Windows ARM64 | `simd_` | the NEON kernels at both levels, natively (built on x86-64 they run only under qemu, `docs/building.md`) |
+
 ### The smoke test
 
 Each package is unpacked into a fresh directory and run from there, as a
