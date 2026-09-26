@@ -1246,6 +1246,19 @@ Terrain submenus are made only when an item is added, so no empty heading
 shows. F0 adds none: the GDAL verb's item is the toolbox, X1's. It is on the
 command line and on `runVerbLine` until then.
 
+**The geoprocessing dialogs build lines.** Terrain > DEM > Grid Points to DEM
+(`gridDemDialog`) and the dialogs after it do no work of their own: each
+writes the line its fields describe into its Command field and hands it to
+`GeoServices::run`, the window's one executor. `GeoRunPanel`
+(`src/katana_qt/geo/geo_dialog_support.hpp`) is the Command, Preview, Run and
+Reply they share: an interactive run answers `job id=<n> ... state=started`,
+so the panel shows "running" and takes the reply from the workbench's
+finished listeners when the job ends; a headless run's reply is the runner's
+own. A dialog is kept once made, a child of the window, so `--dialog` finds it
+by the name its action carries. Their scope and filter controls are Global
+Modify's (`ScopeFilterWidget`), given the window's views through
+`GeoServices::views`.
+
 **One store of surfaces.** The window's surfaces are a
 `terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the
 store the headless session has too, so `SURFACE <name>` finds the same

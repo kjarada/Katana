@@ -678,7 +678,24 @@ Not started.
 
 ### T6: RASTER GRID: survey points to a DEM
 
-Not started. `DrawingDatasetOptions::requireHeights` is its binding.
+Built: `RASTER GRID` (`src/katana_app/geo/grid_verbs.cpp`), recorded in
+`docs/terrain.md`, "Gridding points to a DEM". It grids the points a scope
+takes with `vector grid <method>`, heights from the geometry
+(`DrawingDatasetOptions::requireHeights`) or a property (`--zfield`), and
+keeps the DEM as a derived reference raster. Window: Terrain > DEM > Grid
+Points to DEM (`gridDemDialog`). katana_cli and katana_mcp: the verb, through
+the session (`katana_run_commands`). Its contract test pins `vector grid
+linear`'s `input`, `output` (a name only, which the bridge stages),
+`extent`, `resolution`, `size`, `zfield`, `nodata`, `input-layer` and
+`radius`, and `invdist`'s `power`.
+
+Where it differs from the plan: the extent is grown outwards to whole cells
+(GDAL stretches the cells to fit an extent, measured), and `TO SURFACE`
+waits for T0's block in the bindings, so the dialog's `gridToSurface` is
+not offered yet. The shared pieces of the DEM verbs are
+`src/katana_app/geo/dem_support.hpp`, and of their dialogs
+`src/katana_qt/geo/geo_dialog_support.hpp`; `GeoServices::views` is new, so
+a dialog's scope offers the window's views.
 
 ### T7: DEM tools: mosaic, clip, fill, footprint, reproject, difference
 

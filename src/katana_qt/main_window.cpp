@@ -1121,6 +1121,7 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
         views_->refreshAll();
     };
     geo.run = commandRunner();
+    geo.views = views_;
     geo.makeAction = [this](Icon icon, const QString& text, const QString& tip,
                             const QKeySequence& shortcut, const QString& name) {
         return makeAction(icon, text, tip, shortcut, name);
