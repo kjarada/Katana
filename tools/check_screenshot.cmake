@@ -90,7 +90,8 @@ if(DEFINED ACTIONS)
     endforeach()
 endif()
 # -DDATASET_INFO=<file> and -DIMPORT_OPTIONS=<file> grab GIS > Dataset
-# Information and the GIS menu's import dialog for that file.
+# Information and the GIS menu's import dialog for that file; with -DDRIVE,
+# the dialog the steps start on.
 if(DEFINED DATASET_INFO)
     list(APPEND extra --dataset-info "${DATASET_INFO}")
 endif()
@@ -144,7 +145,8 @@ endif()
 # an empty command line (--enter), "<TEXT" runs TEXT through the window's one
 # executor as a dialog does (--run-line), "?WIDGET" prints what the target's WIDGET
 # shows, or whether the window's action of that name is checked (--report),"*NAME" triggers the menu item NAME in its turn
-# (--trigger), "!BUTTON" presses a button, and anything else is a FIELD=TEXT
+# (--trigger), "!BUTTON" presses a button, "^FILE" opens File > Export
+# Vector's dialog for FILE (--export-options), and anything else is a FIELD=TEXT
 # fill. '|' between steps, for FILL's reason.
 if(DEFINED DRIVE)
     string(REPLACE "|" ";" _steps "${DRIVE}")
@@ -171,6 +173,10 @@ if(DEFINED DRIVE)
             list(APPEND extra --trigger "${_rest}")
         elseif(_sigil STREQUAL "!")
             list(APPEND extra --press "${_rest}")
+        elseif(_sigil STREQUAL "^")
+            # File > Export Vector's dialog for that file, in its turn: the
+            # menu's file dialog is not opened headless.
+            list(APPEND extra --export-options "${_rest}")
         else()
             list(APPEND extra --fill "${_step}")
         endif()

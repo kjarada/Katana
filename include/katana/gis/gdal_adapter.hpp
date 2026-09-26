@@ -146,6 +146,18 @@ struct VectorReadOptions {
     // layer cannot make them by the rule EXPORT uses: katana_io sees only
     // core, not geometry.
     bool keepArcs = false;
+    // OGR's attribute filter (OGRLayer::SetAttributeFilter): the WHERE clause
+    // of an OGR SQL statement, "kind = 'lot'", read by the driver - which
+    // may hand it to the database it reads, a GeoPackage's SQLite. Empty
+    // reads every feature. IMPORT's where= (docs/interop.md, "Import options").
+    std::string attributeFilter;
+    // Only the features whose geometry meets this box - minX, minY, maxX,
+    // maxY in the layer's own coordinates - by OGRLayer::SetSpatialFilterRect,
+    // so a driver with a spatial index (GeoPackage, FlatGeobuf, a shapefile's
+    // .qix) reads only those rather than every feature being read and then
+    // thrown away. GDAL's test is the envelope's: a feature whose box meets
+    // the box is kept. IMPORT's scope.
+    std::optional<std::array<double, 4>> spatialFilter;
 };
 
 // What a read could not carry, said rather than dropped.
@@ -204,6 +216,11 @@ struct VectorExportOptions {
     // here wins.
     std::vector<std::string> creationOptions;
     std::vector<std::string> layerCreationOptions;
+    // Add the tables as new layers of the file at `path` when there is one
+    // (a GeoPackage of several layers, written one EXPORT at a time) rather
+    // than replacing it; a file that is not there is created. EXPORT's
+    // append (docs/interop.md, "Export options").
+    bool append = false;
 };
 
 // ---- dataset --------------------------------------------------------------
@@ -264,6 +281,12 @@ class GdalDataset {
     // otherwise, and the palette for paletted rasters. Pixels equal to the
     // band's no-data value become transparent.
     [[nodiscard]] katana::core::Result<RasterImage> readImage(int maxPixels) const;
+    // The same with `band` (1-based) alone, shown as grey stretched over its
+    // own range - or through its colour table when it has one - whatever
+    // the file says its bands are: IMPORT's band=, for a multispectral
+    // image's near infrared or a stack of grids. 0 is readImage(maxPixels).
+    // InvalidArgument naming the count for a band the file does not have.
+    [[nodiscard]] katana::core::Result<RasterImage> readImage(int maxPixels, int band) const;
 
     [[nodiscard]] katana::core::Result<std::vector<VectorLayerInfo>> vectorLayers() const;
 
@@ -277,6 +300,18 @@ class GdalDataset {
     [[nodiscard]] katana::core::Result<processing::FeatureTable>
     readTable(int layerIndex, const VectorReadOptions& options = {},
               VectorReadReport* report = nullptr) const;
+
+    // The rows of an SQL statement run on the dataset (GDALDataset::
+    // ExecuteSQL) as a typed table, as readTable reads a layer: `dialect`
+    // is "OGRSQL", "SQLITE" or "" for the driver's own (a GeoPackage's is
+    // SQLite). options.spatialFilter is handed to ExecuteSQL as its spatial
+    // filter, options.attributeFilter set on the result. InvalidArgument,
+    // with GDAL's message, for a statement GDAL refuses, and for one that
+    // gives no rows as a layer (an UPDATE): IMPORT reads, it never writes to
+    // the file it imports. IMPORT's sql= (docs/interop.md, "Import options").
+    [[nodiscard]] katana::core::Result<processing::FeatureTable>
+    readSql(const std::string& statement, const std::string& dialect,
+            const VectorReadOptions& options = {}, VectorReadReport* report = nullptr) const;
 
     // Features of one layer, with every value as text. maxFeatures == 0 reads
     // them all. Geometries are flattened: a MultiPolygon feature yields one
@@ -299,7 +334,14 @@ class GdalDataset {
                                                           const std::vector<VectorFeature>& features,
                                                           const VectorExportOptions& options);
 
-    // Typed tables to a file, a layer per table, replacing the file. A
+    // Typed tables to a file, a layer per table, replacing the file - or,
+    // with options.append, added to it: refused, before anything is written,
+    // with InvalidArgument for a layer name the file has already and
+    // Unsupported for a format that adds no layers to a file, and on a
+    // failure part-way the layers this call made are deleted, the file's own
+    // left as they were. A table's field named OGR_STYLE is also each
+    // feature's OGR style string (a text's LABEL), which KML, DXF and
+    // MapInfo draw by. A
     // single table's layer is named `options.layerName` (when given), several
     // are named after their tables. Fields keep their types where the format
     // has them, and the next type it has where it does not (an Integer64 that

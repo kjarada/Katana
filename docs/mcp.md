@@ -67,8 +67,8 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_save_project` | save in place, or as a project at `path` | `SAVE` / `SAVE "<path>"` |
 | `katana_list_entities` | every entity with its id, layer and measurements | `LIST` |
 | `katana_describe_entity` | one entity in full | `INFO #<id>` |
-| `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
-| `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; `structuredContent.records` holds the `exported` record and any `warning` | `EXPORT "<path>"` |
+| `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; the options of "I3 and I4" below (layers, where, sql, a scope, clip, fields, crs, a raster's band, a cloud's budget, preview ...); `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
+| `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
@@ -108,6 +108,14 @@ it printed and any error or warning) and, to clients of MCP 2025-06-18 or later,
 the same as structured content: each command's `ok`, `output` and `messages`,
 and `status`, the drawing's state after the call. `isError` is true when a
 command failed, so the model sees the failure and the reason.
+
+An argument a tool does not declare is refused before anything runs, naming
+it and the arguments the tool takes. Every schema says
+`additionalProperties: false`, but a client need not check it, and the
+server used to ignore such an argument: `{"split": true}` given to
+`katana_export` (whose word is `split_by_layer`) wrote one layer where the
+agent had asked for one per drawing layer, and said nothing
+(`McpServer.AnArgumentTheToolDoesNotDeclareIsRefusedByNameAndNothingRuns`).
 
 The help (`katana://help`) and the status (`katana://status`) are also
 resources, for a client that attaches context rather than calling tools. The
@@ -306,7 +314,55 @@ refused. `McpServer.FormatsReturnsStructuredDrivers` pins it, and
 
 ### I3 and I4: katana_import and katana_export options
 
-Not started.
+`katana_import` takes IMPORT's options (`docs/interop.md`, "Import
+options") as arguments and builds the line a person would type, run through
+the Session like any other; the structured reply's `commands` shows it.
+
+| Argument | Word |
+|---|---|
+| `layers` [names] | `layers=a,b` |
+| `where` | `where="..."` (OGR SQL WHERE, applied by the driver) |
+| `sql`, `dialect` | `sql="SELECT ..."`, `dialect=ogrsql\|sqlite` |
+| `scope` (selection, drawing, area, layers), `area` [x0, y0, x1, y1], `scope_layers`, `only`, `scope_where` [conditions] | the shared scope words; `area` alone is `AREA` |
+| `clip` | `clip` |
+| `fields` [names], `attributes: false` | `fields=a,b`, `attributes=no` |
+| `target_layer`, `max_features` | `target=`, `max=` |
+| `open_options` ["KEY=VALUE"] | `oo=KEY=VALUE` each, checked against the driver's list |
+| `crs` (project, adopt), `source_crs` | `crs=`, `srs=` |
+| `band`, `subdataset`, `max_pixels`, `name` | a raster's `band=`, `subdataset=`, `maxpixels=`, `name=` |
+| `budget`, `classes`, `resolution`, `name` | a cloud's `budget=`, `class=`, `resolution=`, `name=` |
+| `preview` | `PREVIEW`: the `import ... preview=yes features= of=` record, nothing imported |
+
+- The scope's own conditions are `scope_where`, not `where`: `where` is the
+  file's attribute filter, which the plan's contract named first.
+- A value holding a double quote or a line break is refused: no line can
+  carry one (in SQLite, write an identifier as `[name]`).
+- The scope in JSON is read by the one reader, `mcp::scopeWordsOf`, which
+  `katana_gdal_run` and `katana_gis_query` now share.
+
+`McpServer.ImportTakesItsFilterScopeAndPreviewArgumentsAsTheWordsAPersonTypes`
+pins the lines and records.
+
+`katana_export` takes EXPORT's scope and options (`docs/interop.md`,
+"Export options") likewise:
+
+| Argument | Word |
+|---|---|
+| `scope` (selection, drawing, area, layers), `area`, `layers`, `only`, `where` [conditions] | the shared scope words; none is the whole drawing |
+| `layer_name` | `layername=` |
+| `split_by_layer` | `split=layer` |
+| `append` | `append` |
+| `crs` (project, native, a code) | `crs=` |
+| `creation_options`, `layer_creation_options` ["KEY=VALUE"] | `co=`, `lco=` each, checked against the driver's lists |
+| `text` (points, skip) | `text=` |
+| `curve`, `properties` | `curve=`, `properties=yes\|no` |
+| `preview` | `PREVIEW`: the `export ... preview=yes entities=` record, nothing written |
+
+Here `layers` and `where` are the scope's (katana_export has no file to
+filter); `structuredContent.records[0]` is still the `exported` record, the
+`scope` record after it.
+`McpServer.ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes` pins
+them.
 
 ## What the server adds to the command line
 
