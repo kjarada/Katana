@@ -54,7 +54,7 @@ A reference raster says what it is to the drawing - imagery, elevation, or a
 product derived by a geoprocessing run (`RasterOverlay::role`), and for the
 last the line that made it (`RasterOverlay::derivation`).
 
-The GIS analysis and check verbs - `GIS BUFFER`, `DISSOLVE`, `CHECK`,
+The GIS analysis and check verbs - `GIS BUFFER`, `DISSOLVE`, `OVERLAY`, `CHECK`,
 `REPAIR` and `COVERAGE` - read the drawing through the same conversion and
 apply what they make through `geo::resultCommand` as one undo step; they are
 `docs/geoprocessing.md`'s "V1" onwards.

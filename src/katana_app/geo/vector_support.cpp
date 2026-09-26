@@ -154,6 +154,7 @@ Result<VerbWords> readVerbWords(const Tokens& tokens, std::size_t begin, std::si
                          scope[at]);
     }
     out.scope = std::move(parsed).value();
+    out.scopeGiven = !scope.empty();
     return out;
 }
 
