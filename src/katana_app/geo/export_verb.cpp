@@ -460,7 +460,7 @@ Result<Prepared> prepareExport(Context& context, const Tokens& tokens, std::stri
         }
         auto records = write(kind, *snapshot, (*staged)->writeTo(), file);
         if (!records) {
-            return records.error();
+            return (*staged)->asTarget(records.error());
         }
         if (stop.stop_requested()) {
             return makeError(ErrorCode::InvalidState, "cancelled");
