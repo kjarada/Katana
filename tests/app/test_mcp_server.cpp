@@ -240,6 +240,18 @@ TEST_F(McpServer, NewAndOpenRefuseToDiscardUnsavedChangesUnlessToldTo)
     EXPECT_EQ(call("katana_status")["structuredContent"]["entities"], 0);
 }
 
+TEST_F(McpServer, OpeningAPolylineIsAnEditNotADiscardOfTheDrawing)
+{
+    // OPEN SELECTION (and OPEN #id) opens polylines (docs/drawing.md): it
+    // keeps the drawing, so the unsaved-changes guard NEW and OPEN of a
+    // project are held to does not refuse it.
+    initialize();
+    const Json result = call(
+        "katana_run_commands", Json{{"commands", {"RECT 0,0 30,20", "SELECT ALL", "OPEN SELECTION"}}});
+    EXPECT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 1);
+}
+
 TEST_F(McpServer, AProjectSavedByOneSessionOpensInAnother)
 {
     const TempDir dir("save-open");

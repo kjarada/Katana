@@ -47,7 +47,14 @@ point (a comma, or the `@` of relative input) is a point - `x,y`, `@dx,dy`,
 so "12.5" reaches a Circle's radius rather than being refused as a malformed
 point, and a clicked point and a typed one are the same input. The command
 interpreter still has its own point parser with the same grammar; folding it
-onto `parsePointInput` is a follow-up.
+onto `parsePointInput` is a follow-up. `parsePointInput` itself now
+delegates to the drawing system's `parsePrecisePoint`, so a DMS angle or a
+quadrant bearing may follow the `<` of polar input, and the router has an
+overload taking the document's drafting settings and the cursor, which the
+tool host uses: `<angle` and `=distance` lock the next points, `x,y,z`
+reaches a tool's `InteractiveTool::point3d`, and a number a tool refuses at
+a point prompt is direct distance entry (`docs/drawing.md`, "Precision
+input").
 
 **Icons live with their family** (`src/katana_qt/tools/icons_<family>.cpp`,
 by tool id), drawn to icons.cpp's conventions: a 24-unit grid, a 1.7-unit
@@ -141,7 +148,13 @@ the highest balloon, the newest hand-placed label's style. Each of these
 tools is tested against the verb line that makes the same entities.
 
 The sixth family in `families.hpp`, Inquiry (Distance, Area, ID Point, Angle,
-List), is listed and empty. The Survey menu's tools (`docs/survey.md`) are
+List), is listed and empty. The drawing system added Draw > Vertices
+(`modify_vertex.cpp`, eighteen tools gathered into a Vertices submenu of
+Draw by their "Vertices, <tool>" names) and the professional draw tools
+(`draw_professional.cpp`: 3D Polyline, Construction Line, Ray, Double Line,
+Freehand Sketch, Revision Cloud, Spline, the Ellipse submenu, Circle Tangent
+Tangent Tangent and Arc Start End Direction); `docs/drawing.md` has their
+tables. The Survey menu's tools (`docs/survey.md`) are
 dialogs, not catalogue tools.
 
 **One command per tool session.** A tool that completes returns ONE command,

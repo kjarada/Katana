@@ -98,6 +98,7 @@
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/dxf/reader.hpp"
+#include "katana/entity/curve_pieces.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/customisation_report.hpp"
@@ -384,6 +385,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                        cad::DocumentChange::Metadata)) {
             suggestPlotFiles();
         }
+        if (change.has(cad::DocumentChange::Drafting)) {
+            syncSnapActions();
+        }
     });
     refreshAll();
     views_->stopTool();
@@ -391,6 +395,28 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // What View > Reset Window Layout goes back to: this window as built.
     defaultLayout_ = saveState(kLayoutVersion);
     logMessage("Katana ready. Type HELP for the command list.");
+}
+
+// The object snap's items show the document's drafting settings, which the
+// drafting toolbar and the SNAP verb set too (docs/drawing.md). Blocked, so
+// showing a setting does not set it again from inside the notification.
+void MainWindow::syncSnapActions()
+{
+    if (snapAction_ != nullptr) {
+        const QSignalBlocker block(snapAction_);
+        snapAction_->setChecked(views_->snapEnabled());
+    }
+    for (QAction* each : findChildren<QAction*>()) {
+        if (!each->objectName().startsWith("viewSnapMode")) {
+            continue;
+        }
+        const auto mode = each->data();
+        if (!mode.isValid()) {
+            continue;
+        }
+        const QSignalBlocker block(each);
+        each->setChecked((views_->snapModes() & mode.toUInt()) != 0);
+    }
 }
 
 // ---- construction -----------------------------------------------------------------------
@@ -867,6 +893,7 @@ void MainWindow::buildActions()
         // viewSnapModeEndpoint ... viewSnapModeGrid: what --trigger reaches
         // it by, and what SNAP <mode> ON|OFF sets (dispatchLine).
         action->setObjectName(QString("viewSnapMode") + cad::toString(mode));
+        action->setData(static_cast<uint>(static_cast<cad::SnapModes>(mode)));
         action->setCheckable(true);
         action->setChecked(cad::hasMode(views_->snapModes(), mode));
         connect(action, &QAction::toggled, this, [this, mode](bool on) {
@@ -1247,6 +1274,9 @@ void MainWindow::startTool(const std::string& id)
 
 void MainWindow::showRunningTool(const std::string& id)
 {
+    if (id == "draw.vertex.edit") {
+        drawingUi_.showVertices(); // the polyline it picks is shown there
+    }
     toolActions_.setActive(id);
     selectAction_->setChecked(id.empty());
     // The prompt belongs in the command line, where the answer is typed;
@@ -1676,10 +1706,12 @@ void MainWindow::buildDocks()
     QMenu* panels = viewMenu_->addMenu("&Panels");
     panels->setObjectName("viewPanels");
     panels->setIcon(katana::qt::icon(Icon::Panels));
-    panels->menuAction()->setStatusTip("Show or hide the panels: Layers, Properties, Command Line "
-                                       "and Reference Data");
+    panels->menuAction()->setStatusTip("Show or hide the panels: Layers, Properties, Command Line, "
+                                       "Reference Data and Vertices");
     panels->addActions({layerDock->toggleViewAction(), propertyDock->toggleViewAction(),
                         commandDock->toggleViewAction(), referenceDock_->toggleViewAction()});
+    drawingUi_ = drawing::installDrawingUi(*this, document_, panels,
+                                           findChild<QMenu*>("drawMenu"));
 
     // Opening sizes. Left to itself Qt gives each dock its size hint, which
     // for a text log is a third of the window - so the drawing, which is the
@@ -2808,6 +2840,15 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
         logMessage(QString("grid=%1").arg(*on ? "on" : "off"));
         return;
     }
+    // SNAP with the drafting verb's options (modes=, add=, remove=) is the
+    // interpreter's (docs/drawing.md); the window keeps SNAP [ON|OFF] and
+    // SNAP <mode> [ON|OFF] as its shorthand for View > Snap Modes.
+    if ((verb == "SNAP" || verb == "OSNAP") &&
+        std::any_of(words.begin() + 1, words.end(),
+                    [](const QString& word) { return word.contains('='); })) {
+        runInterpreterLine(line, verb);
+        return;
+    }
     if (verb == "SNAP" || verb == "OSNAP") {
         // SNAP <mode> [ON|OFF]: one of View > Snap Modes, by its name there.
         const QString mode = argument == "CENTRE" ? QString("CENTER") : argument;
@@ -2832,7 +2873,9 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
             words.size() <= 2 ? onOff(argument, snapAction_->isChecked()) : std::nullopt;
         if (!on) {
             logMessage("usage: SNAP [ON|OFF] | SNAP <mode> [ON|OFF]   modes: Endpoint, Midpoint, "
-                       "Center, Intersection, Perpendicular, Tangent, Nearest, Grid",
+                       "Center, Intersection, Perpendicular, Tangent, Nearest, Grid | "
+                       "SNAP [on|off] [modes=a,b|all|none] [add=a,b] [remove=a,b] for every "
+                       "mode (HELP)",
                        true);
             return;
         }
@@ -3121,7 +3164,9 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
 
 void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
 {
-    const bool replacesDocument = verb == "NEW" || verb == "OPEN";
+    // Not an OPEN of polylines (OPEN #12, OPEN SELECTION): that is an edit.
+    const bool replacesDocument =
+        katana::cad::CommandInterpreter::replacesDocument(line.toStdString());
     if (replacesDocument && !confirmDiscard()) {
         return;
     }
@@ -3146,7 +3191,7 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
         clearSceneData();
         views_->zoomExtentsAll();
     }
-    if (verb == "OPEN") {
+    if (replacesDocument && verb == "OPEN") {
         reportMissingCustomisation();
     }
     historyCursor_ = static_cast<int>(interpreter_.history().size());
@@ -5467,6 +5512,37 @@ void MainWindow::buildSurfaceFromDrawing()
             // Closing only makes sense for a ring that lost none of its vertices.
             breakline.closed = polyline->closed && whole;
             flush();
+        } else if (const auto* curved =
+                       std::get_if<katana::geometry::CurvePolyline2>(&entity.geometry)) {
+            // A 3D string with arcs holds its heights itself; its arcs go in
+            // as chords at the drawing tolerance, each chord point at the
+            // height interpolated along its segment (docs/drawing.md).
+            withElevation += curved->hasHeights() ? 1 : 0;
+            katana::terrain::Breakline breakline;
+            bool whole = true;
+            auto walk = curved->tessellateWithHeights(katana::geometry::kCurveChordTolerance);
+            if (curved->closed && walk.size() > 1) {
+                walk.pop_back();
+            }
+            for (const auto& step : walk) {
+                const auto z = curved->hasHeights() ? step.height : std::optional<double>(0.0);
+                if (!z) {
+                    ++withoutHeight;
+                    whole = false;
+                    if (breakline.vertices.size() >= 2) {
+                        input.breaklines.push_back(breakline);
+                    }
+                    breakline.vertices.clear();
+                    continue;
+                }
+                const katana::geometry::Point3 p(step.position.x, step.position.y, *z);
+                breakline.vertices.push_back(p);
+                input.points.push_back(p);
+            }
+            breakline.closed = curved->closed && whole;
+            if (breakline.vertices.size() >= 2) {
+                input.breaklines.push_back(breakline);
+            }
         }
     });
     if (withoutHeight != 0) {
@@ -5521,8 +5597,13 @@ void MainWindow::cutSectionAlongSelection()
     } else if (const auto* polyline =
                    std::get_if<katana::geometry::Polyline2>(&entity->geometry)) {
         alignment = *polyline;
+    } else if (std::holds_alternative<katana::geometry::CurvePolyline2>(entity->geometry) ||
+               std::holds_alternative<katana::geometry::Spline2>(entity->geometry)) {
+        // Along the curve's chords within a millimetre (entity::linework),
+        // which a section's chainage cannot tell from the curve.
+        alignment.vertices = katana::entity::linework(entity->geometry);
     } else {
-        logMessage("A section must be cut along a line or a polyline.", true);
+        logMessage("A section must be cut along a line, a polyline or a spline.", true);
         return;
     }
 

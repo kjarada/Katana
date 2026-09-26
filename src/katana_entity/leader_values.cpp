@@ -79,14 +79,15 @@ std::optional<double> fractionAlong(const AnchorRef& place)
 // The segment of a polyline `place` is on and how far along it, nullopt for
 // a place not on the line (Inside). The last vertex of an open polyline is
 // the END of its last segment; every other vertex starts the segment after it.
-std::optional<std::pair<std::size_t, double>> segmentAlong(const Polyline2& polyline,
+// By the vertex count and closure alone, so a curve polyline's segments are
+// found by the same rule.
+std::optional<std::pair<std::size_t, double>> segmentAlong(std::size_t n, bool closed,
                                                            const AnchorRef& place)
 {
-    const std::size_t n = polyline.vertices.size();
     if (n < 2) {
         return std::nullopt;
     }
-    const std::size_t segments = polyline.closed ? n : n - 1;
+    const std::size_t segments = closed ? n : n - 1;
     const auto atVertex = [&](std::size_t i) -> std::optional<std::pair<std::size_t, double>> {
         if (i >= n) {
             return std::nullopt;
@@ -214,7 +215,7 @@ LabelValues anchorValues(const Entity& target, const AnchorRef& ref, const Point
     } else if (const auto* polyline = std::get_if<Polyline2>(&geometry)) {
         const auto& v = polyline->vertices;
         const auto z = heightsOf(target.properties, v.size());
-        if (const auto piece = segmentAlong(*polyline, place)) {
+        if (const auto piece = segmentAlong(v.size(), polyline->closed, place)) {
             const auto [i, t] = *piece;
             const std::size_t j = (i + 1) % v.size();
             detail::addSegmentValues(values, v[i], v[j], i, z[i], z[j]);
@@ -237,6 +238,48 @@ LabelValues anchorValues(const Entity& target, const AnchorRef& ref, const Point
         if (polyline->closed && v.size() >= 3) {
             put(values, "area", LabelQuantity::Area, polyline->area());
             put(values, "perimeter", LabelQuantity::Length, polyline->perimeter());
+        }
+    } else if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&geometry)) {
+        // As a polyline, its heights its vertices' own; an arc segment gives
+        // an arc's values, a straight one a segment's.
+        const auto& v = curve->vertices;
+        if (const auto piece = segmentAlong(v.size(), curve->closed, place)) {
+            const auto [i, t] = *piece;
+            const std::size_t j = curve->segmentEnd(i);
+            const auto shape = curve->segment(i);
+            if (const auto* arcShape = std::get_if<Arc2>(&shape)) {
+                detail::addArcValues(values, *arcShape);
+                put(values, "segment", LabelQuantity::Integer, static_cast<double>(i + 1));
+            } else {
+                detail::addSegmentValues(values, v[i].position, v[j].position, i, v[i].height,
+                                         v[j].height);
+            }
+            const double station = curve->stationOfVertex(i) + t * curve->segmentLength(i);
+            put(values, "chainage", LabelQuantity::Chainage, station);
+            putLevel(values, heightBetween(v[i].height, v[j].height, t));
+        } else if (!v.empty() && std::all_of(v.begin(), v.end(), [&](const auto& vertex) {
+                       return vertex.height && v.front().height &&
+                              *vertex.height == *v.front().height;
+                   })) {
+            putLevel(values, v.front().height);
+        }
+        put(values, "length", LabelQuantity::Length, curve->length());
+        put(values, "vertices", LabelQuantity::Integer, static_cast<double>(v.size()));
+        if (curve->closed && v.size() >= 3) {
+            put(values, "area", LabelQuantity::Area, curve->area());
+            put(values, "perimeter", LabelQuantity::Length, curve->length());
+        }
+    } else if (const auto* ellipse = std::get_if<katana::geometry::Ellipse2>(&geometry)) {
+        put(values, "length", LabelQuantity::Length, ellipse->length());
+        if (ellipse->isFull()) {
+            put(values, "perimeter", LabelQuantity::Length, ellipse->length());
+            put(values, "area", LabelQuantity::Area,
+                katana::math::kPi * ellipse->majorRadius() * ellipse->minorRadius());
+        }
+        putLevel(values, heightsOf(target.properties, 1).front());
+    } else if (const auto* spline = std::get_if<katana::geometry::Spline2>(&geometry)) {
+        if (spline->checkStructure()) {
+            put(values, "length", LabelQuantity::Length, spline->length());
         }
     } else if (const auto* dimension = std::get_if<DimensionGeometry>(&geometry)) {
         if (dimension->kind == DimensionKind::Angular) {

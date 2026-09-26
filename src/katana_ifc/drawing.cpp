@@ -341,6 +341,131 @@ class DrawingWriter {
                              Args().ref(list).raw("(IFCARCINDEX((1,2,3)))").boolean(false));
     }
 
+    // A curve polyline as ONE IfcIndexedPolyCurve: an IfcLineIndex per
+    // straight segment and an IfcArcIndex through the true midpoint of each
+    // arc, so its arcs stay arcs. The midpoints follow the vertices in the
+    // point list; a midpoint's height is its ends' mean, the height halfway
+    // along the segment by the rule the 3D view uses (heightAtStation).
+    // 0 with fewer than two vertices.
+    Id curvePolyline(const geometry::CurvePolyline2& shape, bool in3d)
+    {
+        if (shape.vertices.size() < 2) {
+            return 0;
+        }
+        std::vector<std::string> coordinates;
+        const auto add = [&](const Point2& p, double z) {
+            if (in3d) {
+                const Vec3 at = b_.local(Vec3(p.x, p.y, z));
+                coordinates.push_back(listOf({stepReal(at.x), stepReal(at.y), stepReal(at.z)}));
+            } else {
+                const Vec2 at = b_.local(p);
+                coordinates.push_back(listOf({stepReal(at.x), stepReal(at.y)}));
+            }
+            return std::to_string(coordinates.size()); // IFC indices count from 1
+        };
+        const auto heightOf = [&](std::size_t vertex) {
+            return in3d ? *shape.vertices[vertex].height : 0.0;
+        };
+        std::vector<std::string> vertexIndex;
+        for (std::size_t i = 0; i < shape.vertices.size(); ++i) {
+            vertexIndex.push_back(add(shape.vertices[i].position, heightOf(i)));
+        }
+        std::vector<std::string> segments;
+        for (std::size_t i = 0; i < shape.segmentCount(); ++i) {
+            const std::size_t end = shape.segmentEnd(i);
+            const auto piece = shape.segment(i);
+            if (const auto* arcPiece = std::get_if<geometry::Arc2>(&piece)) {
+                const std::string middle =
+                    add(arcPiece->midpoint(), (heightOf(i) + heightOf(end)) * 0.5);
+                segments.push_back("IFCARCINDEX((" + vertexIndex[i] + "," + middle + "," +
+                                   vertexIndex[end] + "))");
+            } else {
+                segments.push_back("IFCLINEINDEX((" + vertexIndex[i] + "," + vertexIndex[end] +
+                                   "))");
+            }
+        }
+        const Id list =
+            b_.file().add(in3d ? "IfcCartesianPointList3D" : "IfcCartesianPointList2D",
+                          Args().raw(listOf(coordinates)).null());
+        return b_.file().add("IfcIndexedPolyCurve",
+                             Args().ref(list).raw(listOf(segments)).boolean(false));
+    }
+
+    // An ellipse as IfcEllipse, its placement's x axis along the major axis;
+    // an elliptical arc as that ellipse trimmed by parameter. IFC's conic
+    // parameter is the eccentric anomaly in the file's plane angle unit
+    // (radians, builder.cpp), which is exactly Ellipse2's startParameter
+    // and sweep, so the trim needs no conversion.
+    Id ellipse(const geometry::Ellipse2& shape, std::optional<double> height)
+    {
+        const double length = shape.majorAxis.length();
+        const double ux = shape.majorAxis.x / length;
+        const double uy = shape.majorAxis.y / length;
+        Id placement = 0;
+        if (height) {
+            const Id centre = b_.point(Vec3(shape.center.x, shape.center.y, *height));
+            placement = b_.file().add("IfcAxis2Placement3D",
+                                      Args().ref(centre).null().ref(b_.direction(ux, uy, 0.0)));
+        } else {
+            placement = b_.file().add(
+                "IfcAxis2Placement2D",
+                Args().ref(b_.point(Vec2(shape.center.x, shape.center.y))).ref(b_.direction(ux, uy)));
+        }
+        const Id basis = b_.file().add(
+            "IfcEllipse", Args().ref(placement).real(shape.majorRadius()).real(shape.minorRadius()));
+        if (shape.isFull()) {
+            return basis;
+        }
+        return b_.file().add(
+            "IfcTrimmedCurve",
+            Args()
+                .ref(basis)
+                // Each in [0, 2 pi): with the sense true, an end below the
+                // start runs through the parameter 0.
+                .raw("(IFCPARAMETERVALUE(" + stepReal(math::normalizeAngle(shape.startParameter)) + "))")
+                .raw("(IFCPARAMETERVALUE(" + stepReal(math::normalizeAngle(shape.endParameter())) + "))")
+                .boolean(true)
+                .enumeration("PARAMETER"));
+    }
+
+    // A spline as IfcBSplineCurveWithKnots - IfcRationalBSplineCurveWithKnots
+    // when it has weights - from its control points and knots, the knots
+    // written as IFC asks: each distinct value once, with its multiplicity.
+    // Its fit points are how it was drawn, not what it is, and IFC has no
+    // place for them.
+    Id spline(const geometry::Spline2& shape)
+    {
+        std::vector<Id> points;
+        for (const Point2& p : shape.controlPoints) {
+            points.push_back(b_.point(Vec2(p.x, p.y)));
+        }
+        std::vector<std::string> multiplicities;
+        std::vector<double> knots;
+        for (std::size_t i = 0; i < shape.knots.size();) {
+            std::size_t j = i;
+            while (j < shape.knots.size() && shape.knots[j] == shape.knots[i]) {
+                ++j;
+            }
+            multiplicities.push_back(std::to_string(j - i));
+            knots.push_back(shape.knots[i]);
+            i = j;
+        }
+        Args args;
+        args.integer(shape.degree)
+            .refs(points)
+            .enumeration("UNSPECIFIED")
+            .raw(".F.")
+            .raw(".U.")
+            .raw(listOf(multiplicities))
+            .reals(knots)
+            .enumeration("UNSPECIFIED");
+        if (shape.weights.empty()) {
+            return b_.file().add("IfcBSplineCurveWithKnots", args);
+        }
+        args.reals(shape.weights);
+        return b_.file().add("IfcRationalBSplineCurveWithKnots", args);
+    }
+
     Id circle(const geometry::Circle2& shape, std::optional<double> height)
     {
         Id placement = 0;
@@ -492,6 +617,23 @@ class DrawingWriter {
                         drawn.items.push_back(textAt(shape.vertices.back(), 0.0, shape.text));
                     }
                     drawn.type = "Annotation2D";
+                } else if constexpr (std::is_same_v<T, geometry::CurvePolyline2>) {
+                    // Its heights are its vertices' own, not the elevation
+                    // properties a Polyline2 keeps them in.
+                    drawn.in3d = !shape.vertices.empty() &&
+                                 std::all_of(shape.vertices.begin(), shape.vertices.end(),
+                                             [](const geometry::CurveVertex& vertex) {
+                                                 return vertex.height.has_value();
+                                             });
+                    if (const Id id = curvePolyline(shape, drawn.in3d)) {
+                        drawn.items.push_back(id);
+                    }
+                } else if constexpr (std::is_same_v<T, geometry::Ellipse2>) {
+                    const auto height = uniformHeight(entity::heightsOf(entity.properties, 1));
+                    drawn.in3d = height.has_value();
+                    drawn.items.push_back(ellipse(shape, height));
+                } else if constexpr (std::is_same_v<T, geometry::Spline2>) {
+                    drawn.items.push_back(spline(shape));
                 } else {
                     static_assert(std::is_same_v<T, entity::LabelGeometry>);
                 }
@@ -645,12 +787,18 @@ class DrawingWriter {
 
         if (ifcClass.predefinedType == "CONTOURLINE") {
             PropertyList contour;
+            // A curve polyline's heights are its vertices' own.
+            const auto* curve = std::get_if<geometry::CurvePolyline2>(&entity.geometry);
             contour.length("ContourValue",
-                           uniformHeight(entity::heightsOf(
-                               entity.properties,
-                               std::holds_alternative<geometry::Polyline2>(entity.geometry)
-                                   ? std::get<geometry::Polyline2>(entity.geometry).vertices.size()
-                                   : 2)));
+                           uniformHeight(
+                               curve != nullptr
+                                   ? curve->heights()
+                                   : entity::heightsOf(
+                                         entity.properties,
+                                         std::holds_alternative<geometry::Polyline2>(entity.geometry)
+                                             ? std::get<geometry::Polyline2>(entity.geometry)
+                                                   .vertices.size()
+                                             : 2)));
             b_.defines(key + "/contour",
                        b_.propertySet(key + "/contour", "Pset_AnnotationContourLine", contour),
                        {product});
@@ -686,11 +834,12 @@ class DrawingWriter {
     // utility.* properties are the drawing's documented record
     // (docs/subsurface_utilities.md, "What the grading found is on the
     // entities"; cad/utilities/utility_drawing.hpp, which this layer cannot
-    // see). A run is a polyline, or a line an EXPLODE made of one, which
+    // see). A run is a polyline (a curve polyline when it has arcs), or a line an EXPLODE made of one, which
     // keeps its properties; a located point is a point.
     [[nodiscard]] static bool isDrawnRun(const Entity& entity)
     {
         return (std::holds_alternative<geometry::Polyline2>(entity.geometry) ||
+                std::holds_alternative<geometry::CurvePolyline2>(entity.geometry) ||
                 std::holds_alternative<geometry::Segment2>(entity.geometry)) &&
                !text(entity.properties, "utility.line").empty() &&
                !text(entity.properties, "utility.type").empty();
@@ -836,6 +985,10 @@ class DrawingWriter {
         const auto near = [&](Point2 vertex) { return (vertex - at).length() < 0.01; };
         if (const auto* polyline = std::get_if<geometry::Polyline2>(&run.geometry)) {
             return std::any_of(polyline->vertices.begin(), polyline->vertices.end(), near);
+        }
+        if (const auto* curve = std::get_if<geometry::CurvePolyline2>(&run.geometry)) {
+            return std::any_of(curve->vertices.begin(), curve->vertices.end(),
+                               [&](const geometry::CurveVertex& vertex) { return near(vertex.position); });
         }
         const auto& segment = std::get<geometry::Segment2>(run.geometry);
         return near(segment.start) || near(segment.end);

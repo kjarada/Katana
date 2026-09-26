@@ -10,6 +10,8 @@ katana_add_test_suite(geometry
         test_alignment.cpp
         test_profile.cpp
         test_editing.cpp
+        test_curves2d.cpp
+        test_polyline_vertices.cpp
         test_mesh.cpp
         test_point_batch.cpp
         test_point_splat.cpp
