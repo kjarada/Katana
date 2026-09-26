@@ -11,6 +11,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QDir>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -162,7 +163,8 @@ TEST(ScriptRunner, TheScriptVerbRefusesNoFileAndAWordItDoesNotKnow)
 
 TEST(ScriptRunner, TheLineItWritesIsTheLineItReads)
 {
-    const QString line = katana::qt::scriptCommandLine("C:\\my scripts\\site.kcs", true);
+    const QString line =
+        katana::qt::scriptCommandLine(QDir::toNativeSeparators("C:/my scripts/site.kcs"), true);
     EXPECT_EQ(line, "SCRIPT \"C:/my scripts/site.kcs\" CONTINUE");
     const auto command = katana::qt::parseScriptCommand(line);
     ASSERT_TRUE(command.ok());

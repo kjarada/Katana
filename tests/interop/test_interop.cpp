@@ -18,6 +18,7 @@
 
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/gis/formats.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
@@ -96,7 +97,12 @@ TEST(InteropRouting, ExtensionsAreClassified)
     EXPECT_EQ(kindForPath("terrain.asc"), SourceKind::Raster);
     EXPECT_EQ(kindForPath("scan.las"), SourceKind::PointCloud);
     EXPECT_EQ(kindForPath("scan.laz"), SourceKind::PointCloud);
-    EXPECT_EQ(kindForPath("drawing.dwg"), SourceKind::Unknown);
+    // A .dwg is read only by GDAL's CAD driver (libopencad), which some
+    // builds have (conda-forge's) and others lack (MSYS2's); the routing
+    // follows GDAL's registry, so what it says follows the driver.
+    EXPECT_EQ(kindForPath("drawing.dwg"),
+              katana::gis::findFormat("CAD") != nullptr ? SourceKind::Vector : SourceKind::Unknown);
+    EXPECT_EQ(kindForPath("drawing.nosuchformat"), SourceKind::Unknown);
     EXPECT_EQ(kindForPath("noextension"), SourceKind::Unknown);
 
     // GDAL and PDAL both claim .ply. In a survey tool it is a point cloud, and

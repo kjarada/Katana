@@ -7,6 +7,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QLabel>
@@ -92,7 +93,7 @@ TEST(PlotDrawing, WhatTheGrammarDoesNotTakeIsRefusedByItsWord)
 TEST(PlotDrawing, TheLineItWritesIsTheLineItReads)
 {
     PlotDrawingRequest request;
-    request.path = "C:\\plots\\site plan.pdf";
+    request.path = QDir::toNativeSeparators("C:/plots/site plan.pdf");
     request.fit = false;
     request.settings.paper = PaperSize::A2;
     request.settings.landscape = false;
