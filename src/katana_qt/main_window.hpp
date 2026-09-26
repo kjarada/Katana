@@ -84,12 +84,13 @@ class MainWindow final : public QMainWindow {
 
     // Opens a project given on the command line.
     void openProject(const QString& directory);
-    // Imports a data file given on the command line, routed by its extension
-    // exactly as File > Import does. With a `placement` - a typed IMPORT
-    // <file> LOCAL, ALONGSIDE or OFFSET=dE,dN - vector data, a .12da archive
-    // or a DXF is moved as one piece (cad/import_placement.hpp), and nobody
-    // is asked where to put it; a raster or a point cloud refuses it by name,
-    // being reference data drawn at its own coordinates.
+    // Imports a data file given on the command line: the IMPORT line File >
+    // Import would make, run through the one executor (runVerbLine), so it is
+    // logged, and undone, as if typed. With a `placement` - LOCAL, ALONGSIDE
+    // or OFFSET=dE,dN - vector data, a .12da archive or a DXF is moved as one
+    // piece (cad/import_placement.hpp), and nobody is asked where to put it;
+    // a raster or a point cloud refuses it by name, being reference data
+    // drawn at its own coordinates.
     void importPath(const QString& path, const katana::cad::ImportPlacement& placement = {});
     // Plots the drawing to `path` on the active plan viewport. With
     // `fitToDrawing` the scale is the first standard one the drawing fits at
@@ -168,9 +169,15 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] std::unique_ptr<AttributeManagerDialog> makeAttributeManager();
     [[nodiscard]] std::unique_ptr<LayerManagerDialog> makeLayerManager();
     // GIS > Dataset Information for `path`, built but not shown, as the
-    // managers above; nullptr when the file cannot be described, which has
-    // been logged. For the headless --dataset-info switch.
+    // managers above: it runs its INFO lines through runVerbLine. Headless,
+    // nullptr when the file could not be described, which has been logged.
+    // For the headless --dataset-info switch.
     [[nodiscard]] std::unique_ptr<DatasetInfoDialog> makeDatasetInfo(const QString& path);
+    // When `started` - what runVerbLine returned - says a geoprocessing job
+    // was started and it is still running: `done` is called with the job's
+    // outcome when it ends, and true returned. False otherwise: `started`
+    // is the answer. How a dialog hears what its line did.
+    bool awaitJob(const VerbOutcome& started, std::function<void(const VerbOutcome&)> done);
     // The GIS menu's import dialog for `path`'s kind of data - vector, raster
     // or point cloud, or for a DXF or a .12da the placement step File >
     // Import asks (ImportPlacementDialog) - built but not shown. nullptr,
@@ -368,15 +375,14 @@ class MainWindow final : public QMainWindow {
     // loaded. A warning; the project opens all the same.
     void reportMissingCustomisation();
     void reportCustomisationCoverage();
-    // The options are the GIS menu's dialogs' choices; File > Import and a
-    // path on the command line take the defaults. `placement` is where the
-    // data lands, as importPath says; Keep asks when it is far from the
-    // drawing (decideImportPlacement, import_placement.hpp).
+    // The GIS menu's import dialogs' choices, which have no IMPORT words yet
+    // (docs/interop.md, "Not done"); File > Import, a path on the command line
+    // and a typed IMPORT are the executor's (geo/import_verb.cpp).
+    // `placement` is where the data lands, as importPath says; Keep asks when
+    // it is far from the drawing (decideImportPlacement, import_placement.hpp).
     void importVectorFile(const std::filesystem::path& path,
                           katana::interop::VectorImportOptions options = {},
                           const katana::cad::ImportPlacement& placement = {});
-    void importArchive12dFile(const std::filesystem::path& path,
-                              const katana::cad::ImportPlacement& placement = {});
     // File > Import's step for a DXF or a .12da archive, whose only choice
     // is where it lands (ImportPlacementDialog), and then the IMPORT line
     // it makes, through runVerbLine.
@@ -387,19 +393,18 @@ class MainWindow final : public QMainWindow {
                               katana::interop::PointCloudImportOptions options = {});
     void exportVectorFile();
     // Writes the drawing, or `options.entities` of it, to `path`: a vector
-    // format by extension, or a 12d archive. Reports into the log; false when
-    // it failed, which has been reported too.
+    // format by extension, or a 12d archive - the Export Vector dialog's
+    // choices, which have no EXPORT words yet; a typed EXPORT is the
+    // executor's (geo/export_verb.cpp). Reports into the log; false when it
+    // failed, which has been reported too.
     bool exportDrawingTo(const std::filesystem::path& path,
                          katana::interop::VectorExportOptions options);
-    // A .dxf, read and written natively rather than through GDAL
-    // (main_window_dxf.cpp). The export honours the options' entities,
-    // layers and origin shift; the rest are GDAL's.
-    void importDxfFile(const std::filesystem::path& path,
-                       const katana::cad::ImportPlacement& placement = {});
     // decideImportPlacement for this window: where data read at `incoming`
     // lands in the drawing as it is now, asked or logged.
     [[nodiscard]] PlacementDecision placeImport(const katana::cad::ImportPlacement& placement,
                                                 const katana::geometry::Box2& incoming);
+    // A .dxf written natively rather than through GDAL (main_window_dxf.cpp),
+    // with the dialog's entities, layers and origin shift.
     bool exportDxfFile(const std::filesystem::path& path,
                        const katana::interop::VectorExportOptions& options);
 
@@ -415,13 +420,9 @@ class MainWindow final : public QMainWindow {
     void exportPointCloud();
     void exportSurfaceAsDem();
     // GIS > Convert Point Cloud to COPC: asks for the two files, then runs the
-    // COPC line they make through runVerbLine, and offers to import the
-    // result.
+    // COPC line they make through runVerbLine - a job - and when it has
+    // converted, offers to import the result.
     void convertPointCloudToCopc();
-    // COPC <source> <destination>, typed or from the menu item: converts,
-    // asks nothing, and logs the result and the IMPORT line that reads it.
-    void convertPointCloudToCopc(const std::filesystem::path& source,
-                                 const std::filesystem::path& destination);
     void showDatasetInformation();
     // The reference layer selected in the panel, or the only one of its kind
     // when the panel has no selection; nullptr, having said why, otherwise.
@@ -438,6 +439,18 @@ class MainWindow final : public QMainWindow {
     void removeSelectedReference();
     void zoomToSelectedReference();
     void onReferenceCellChanged(int row, int column);
+    // The Reference Data panel's: the layer selected in it, and its opacity
+    // or colouring shown in the panel's controls without running a line.
+    [[nodiscard]] std::optional<katana::interop::ReferenceId> selectedReference() const;
+    void showSelectedReferenceDisplay();
+    // REFS <action> <selected id> [words], through runVerbLine; refused, and
+    // said, when nothing is selected.
+    VerbOutcome runReferenceLine(const QString& action, const QString& words = {});
+    // Before a save: the project records the reference layers as they are
+    // (geo::recordReferences). After an open: they are read again (REFS
+    // RESTORE), when it records any.
+    void recordReferences();
+    void restoreReferences();
 
     // Returns false when the user cancels (unsaved changes).
     [[nodiscard]] bool confirmDiscard();
@@ -577,6 +590,8 @@ class MainWindow final : public QMainWindow {
     std::vector<katana::cad::SceneMesh> sceneMeshes_;
     QTreeWidget* layerTree_ = nullptr;
     QTableWidget* referenceTable_ = nullptr;
+    QComboBox* referenceOpacity_ = nullptr;
+    QComboBox* referenceColour_ = nullptr;
     QTableWidget* propertyTable_ = nullptr;
     QPlainTextEdit* commandLog_ = nullptr;
     QLineEdit* commandInput_ = nullptr;

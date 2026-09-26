@@ -350,7 +350,7 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 | Point Cloud - PDAL | Import Point Cloud... | `importPointCloud` with a budget, an ASPRS class, and a COPC resolution when the file is COPC |
 | | Export Point Cloud... | `exportPointCloud` - LAS or LAZ |
 | | Convert Point Cloud to COPC... | `PointCloudEngine::convertToCopc` - every point, then an offer to import it |
-| | Dataset Information... | `describeSource` + `formatDescription`, the gdalinfo / pdal info a person needs first |
+| | Dataset Information... | the `INFO` lines, through the window's one executor: `describeSource`'s records and GDAL's JSON, the gdalinfo / pdal info a person needs first ("Dataset information", below) |
 | Online - Web Services | Online Data... | `interop::fetchOnlineLayer`: imagery, elevation and features from public web services, warped or reprojected into the project's CRS and taken in through `importRaster` and `importVector`; the `ONLINE` verbs do the same (`docs/gis_online.md`) |
 
 Decisions, and what was rejected:
@@ -370,10 +370,11 @@ Decisions, and what was rejected:
   dialog, and the dialog offers the layers THIS GeoPackage has and a COPC
   level of detail only when the file IS COPC - the engine refuses the question
   of any other file, so offering it would be offering a failure.
-* **One wording.** `formatDescription` is shown by Dataset Information, above
-  every import dialog's options, by the Reference Data panel's Info button,
-  and by the `INFO` verb of both command lines, so a file cannot be described
-  two ways.
+* **One description.** `describeSource` is read by the import dialogs, whose
+  `formatDescription` text stands above their options, and by the `INFO`
+  verb of every front end, whose records Dataset Information and the
+  Reference Data panel's Info button show ("Dataset information", below), so
+  a file cannot be described two ways.
 * **A point cloud's export says when it is a sample.** A budgeted import holds
   one point in N; Export Point Cloud asks before writing a sample as though it
   were the survey, and points at Convert to COPC for the whole file.
@@ -472,14 +473,17 @@ On every surface:
   `IMPORT "<file>" <word>` line it makes through the window's one executor;
   GIS > Import Vector Data given a DXF or a .12da does the same. The vector
   dialog imports itself - its layer and attribute choices have no `IMPORT`
-  word - and logs the move it makes. The three importers decide where the
-  data goes in one place, `decideImportPlacement`
-  (`src/katana_qt/import_placement.hpp`), which asks the far-apart question
-  for Keep and, in a headless session, keeps the coordinates and says why.
-  A headless File > Import opens no file dialog: it names the verb.
+  word - and logs the move it makes. An `IMPORT` line that keeps the data's
+  coordinates asks the far-apart question through the executor's
+  `Context::farApart` (below, "IMPORT, EXPORT, INFO, REFS and COPC on every
+  front end"); the vector dialog's own import asks it through
+  `decideImportPlacement` (`src/katana_qt/import_placement.hpp`). Both show
+  the one question box, `askFarApart`. A headless window asks nothing and
+  keeps the coordinates. A headless File > Import opens no file dialog: it
+  names the verb.
 - **katana_cli**: `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, the move
-  printed after the "imported" line; the DXF import too, in a build without
-  GDAL. Giving katana_cli `LOCAL` alone and leaving the rest for later was
+  said by the `placed` record after the `imported` one; the DXF import too,
+  in a build without GDAL. Giving katana_cli `LOCAL` alone and leaving the rest for later was
   considered and rejected, because a verb the window types and the CLI does
   not is the gap this work closes.
 - **katana_mcp**: `katana_import` takes `placement` (`keep`, `local`,
@@ -494,6 +498,320 @@ Tests: `ImportPlacement.*` and `CadInterpreter.AnImportArgument*`
 
 Not done: the vector dialog's source layer, target layer and attributes have
 no `IMPORT` word, so that one dialog imports without a line to log.
+
+## IMPORT, EXPORT, INFO, REFS and COPC on every front end
+
+Until 2026-09-26 these verbs were written twice: once in `session.cpp`,
+printing prose to stdout for `katana_cli` and `katana_mcp`, and again in
+`MainWindow::dispatchLine`, logging other prose in the window. The two had
+drifted - the window framed and asked, the CLI kept no surfaces - and neither
+reply could be read by a program. They are now verbs of the one
+geoprocessing executor (`src/katana_app/geo/`, `docs/geoprocessing.md`, "The
+executor"), a file each: `import_verb.cpp`, `export_verb.cpp`,
+`info_verb.cpp`, `refs_verb.cpp`, `copc_verb.cpp`. The session runs them
+inline; the window's geo workbench runs them as background jobs, with
+progress and Cancel in the status bar, and a headless window waits for them.
+
+```
+IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]
+EXPORT <file>
+INFO <file>                (INFO <id> stays the interpreter's: an entity)
+REFS [LIST]
+COPC <source> <destination.copc.laz>
+```
+
+### Replies
+
+Records, one per line, as every geoprocessing verb replies
+(`src/katana_app/import_records.hpp`, `src/katana_app/geo/gis_records.hpp`):
+
+```
+imported file=<path> kind=vector entities=9 layers=1 features=9 skipped=0 bounds=x0,y0,x1,y1 crs="..."
+imported file=<path> kind=dxf format="DXF R2000" entities=9 layers=3 linetypes=2 bounds=...
+imported file=<path> kind=archive entities= alignments= surfaces= meshes= clouds= layers= styles= encoding= version= member= bounds=
+imported file=<path> kind=raster            (then its reference record)
+imported file=<path> kind=pointcloud        (then its reference record)
+placed placement=local|alongside|offset east=<dE> north=<dN> text="LOCAL: moved as one piece by ..."
+tally element=<what> read=<n> imported=<n>
+surface name= triangles= points= bounds= zmin= zmax= source=
+reference id= kind=raster name= width= height= bounds= georeferenced= visible= opacity= role= file=
+reference id= kind=pointcloud name= points= source_points= bounds= visible= color= file=
+meshes count= triangles= held=yes|no
+references rasters=<n> clouds=<n>
+exported file=<path> kind=vector driver=GPKG features= skipped=
+exported file=<path> kind=dxf driver=DXF format="DXF R2000" entities= skipped= layers= bytes=
+exported file=<path> kind=archive driver=12da entities= skipped= alignments= surfaces= bytes=
+converted source=<path> file=<path> format=copc
+warning text="..."
+```
+
+- **`east` and `north` are the move**, what was added to every coordinate as
+  `OFFSET=dE,dN` gives it, and empty when nothing moved (`ALONGSIDE` into an
+  empty drawing). The readers subtract an origin shift; the record says the
+  move, which is what a person reads the sentence for.
+- **`features`** counts what the reader read, a multi-part feature once per
+  part - the sample's spoil heaps, one MultiPolygon, are two.
+- **The DXF records are the same in every build.** The DXF steps live in
+  `src/katana_app/dxf_verbs.hpp`, split as the executor runs a line (a pure
+  read or write, then the apply), and a build without GDAL runs them back to
+  back through `runDxfVerb`. One DXF import, one DXF export, one reply.
+- **This changed the replies.** `imported 9 entities from parcels.geojson`
+  and `  extent 0,0 to 185,165` became the records above; the `cli.*`,
+  `Session.*`, `GeoSession.*` and window checks that read the prose were
+  rewritten for the records, and only for them - every number they expect
+  is the one they expected before. Anyone scripting against the prose has to
+  change; an agent reading `structuredContent` no longer parses text at all.
+  `INFO`'s records are below ("Dataset information").
+
+### Decisions
+
+- **The window keeps what only it does, through the executor's context**
+  (`geo::Context`), not a second implementation:
+  - `farApart` is asked, on the GUI thread, when an `IMPORT` that keeps its
+    coordinates lands far from the drawing: Shift Alongside, Keep or Cancel
+    (`askFarApart`). Shift Alongside reads the file again with the shift, in
+    the apply, as a typed `ALONGSIDE` would have. A session, and a headless
+    window, have nobody to ask: the data keeps its coordinates and a
+    `warning` record says what to type instead. The headless window used to
+    log that as an error, which failed a `--command` import the CLI ran
+    without complaint; it is the CLI's warning now.
+  - `imported` shows what only a window can: a 12d archive's meshes, and the
+    3D view for new surfaces or meshes. A session counts the meshes and says
+    it holds none (`meshes ... held=no`).
+  - `frame` frames what the import added; `changed` redraws the reference
+    layers and surfaces.
+- **A 12d archive's surfaces go into the session's store**
+  (`terrain::SurfaceStore`), in the CLI and MCP too, where the session once
+  said it held none. A geoprocessing line then finds them by name
+  (`GDAL raster hillshade FROM SURFACE "TIN SOUTH WEST" ...`), and `EXPORT
+  <file>.12da` writes them back, as the window's export always did. A name
+  already taken is "name (2)".
+- **`INFO <id>` is left to the interpreter by the executor itself.** The verb
+  table's rows gained `takes` (`geo::takesInfo`): `INFO 12` is the entity
+  unless a file of that name exists, `INFO #12` always is.
+- **EXPORT and COPC write beside their target, and the apply moves the file
+  into place** (`src/katana_app/geo/staged_files.hpp`). A job's work may not
+  change what a person can see, and a cancelled job never applies
+  (`src/katana_qt/jobs.hpp`), but the writers - GDAL's, the DXF and archive
+  writers, PDAL's COPC - cannot be stopped part way. Written straight to the
+  target, a cancel after the write would report a cancel that did not
+  happen. So the work writes into a folder of its own beside the target, and
+  the apply renames what it wrote into place; a job dropped after its write
+  takes the folder with it. Rejected: a scratch folder elsewhere (the move
+  would be a copy across volumes), and a scratch NAME beside the target (a
+  shapefile is several files named by its stem, a writer takes its driver
+  from the extension, and a `.12daz` names its member after the file).
+- **EXPORT writes a copy of the drawing**, taken when the line is prepared,
+  so the window stays live while a large drawing is written. The copy's
+  entity observer is cleared: a copy must never report to the Document.
+- **Cancel lands at the end of a read or a write.** The readers and writers
+  take no stop token; a cancelled `IMPORT` imports nothing and a cancelled
+  `EXPORT` or `COPC` writes nothing, but each stops only when its read or
+  write ends. The status bar shows them as busy, with no measure.
+- **Where the verbs are said.** HELP, the window's Command Reference and
+  `katana_help` list them from the executor's table; the session's own
+  "Interop" help block is gone, and so are the window's copies in
+  `dispatchLine` and its archive and DXF importers.
+
+Tests: `GisVerbs.*`, `GisSession.*` and `GisRecords.*`
+(`tests/geo/test_gis_verbs.cpp`), `McpServer.ImportReturnsStructuredRecords`,
+the `cli.gis_*` checks (`src/katana_app/geo/cli/gis_verbs.cmake`), the
+window's `qt_gis_*_headless` (`tests/geo/headless/gis_verbs.cmake`) - of
+which `qt_gis_import_line_gives_the_sessions_records_headless` expects the
+very records `cli.gis_import_line_gives_the_records_the_window_gives` does -
+and `qt_widgets.GisVerbsWindow.*`, where a cancelled import imports nothing
+and a cancelled export leaves an empty folder.
+
+Not done:
+
+- The GIS menu's import dialogs - a vector file's layers, target and
+  attributes, a raster's display resolution and name, a cloud's budget, class
+  and COPC resolution - have no `IMPORT` words yet, so they import through
+  `interop` directly (`MainWindow::importWithOptions`). The Export Vector
+  dialog's selection, layer name, curve tolerance and properties likewise
+  (`MainWindow::exportDrawingTo`). They are the import and export options
+  packages of `docs/geoprocessing.md`.
+- `EXPORT` replaces a file of the same name, as it always has; it takes no
+  scope or filter yet (`docs/geoprocessing.md`, I4).
+- A process that dies mid-write leaves its `.katana-staging-<pid>-<n>`
+  folder beside the target.
+
+## Dataset information
+
+```
+INFO <file|folder|url> [JSON] [STATS] [CHECK] [LAYER <name>]
+```
+
+What a file holds, read without importing it, as records an agent can act
+on - which field to filter on, which band, which layer - or as GDAL's own
+JSON:
+
+```
+dataset file=<path> kind=raster|vector|raster,vector|pointcloud|folder driver=AAIGrid crs="WGS 84 / UTM zone 30N (EPSG:32630)"
+raster width=120 height=90 bands=1 georeferenced=yes cell=1.5,1.5 bounds=-5,-5,175,130
+band band=1 type=Float32 nodata=-9999 min= max= mean= stddev= color=Undefined overviews=0
+overview band=1 index=1 width= height=
+subdataset index=1 name="NETCDF:..." description="..."
+layer name=lots features=3 geometry=Polygon crs="..." bounds=-10,0,110,40 fields=2
+field layer=lots name=kind type=String subtype= width= precision=
+pointcloud points=40000 bounds=... zmin= zmax= color=no copc=no
+found file=<path> driver=GeoJSON has_crs=yes            (a folder: one per dataset)
+check code=0 problems=0                                  (CHECK)
+problem text="..."
+```
+
+- **One reading.** `interop::describeSource` describes a GDAL dataset from
+  GDAL's own `raster info` and `vector info` JSON, run through the
+  geoprocessing bridge, and keeps that JSON beside the description. The
+  records are read from it and `INFO ... JSON` gives it back as it is
+  (`{"path", "raster", "vector", "multidim"}`, GDAL's key order kept), so the
+  two cannot disagree. The adapter's own reading of a dataset for this was
+  replaced: two readers of one file would drift. The import dialogs and
+  `formatDescription` read the same description.
+- **Both readers are asked.** One file can hold rasters and vector layers (a
+  GeoPackage), so `raster info` and `vector info` are both run; what
+  neither reads is refused in the words of the reader its kind suggests.
+  `mdim info` is asked, for JSON, of the multidimensional formats this GDAL
+  has (netCDF, HDF4, HDF5, GRIB, BAG, S-102, S-104, S-111, Zarr, CPHD),
+  since it fails for every classic raster.
+- **Absent is not zero.** A band's statistics are empty until computed;
+  `STATS` computes them from every pixel. GDAL's JSON prints them to three
+  decimals, so the `STATISTICS_` metadata beside them, 14 significant
+  digits, is read first (measured: `"mean":30.341` against
+  `STATISTICS_MEAN 30.341263614231` for the sample terrain). The bridge puts
+  back whatever `.aux.xml` the computation would have left beside the file
+  (`docs/geoprocessing.md`, "Sidecars"), so `STATS` writes nothing there.
+- **CHECK** is GDAL's `dataset check`: every value read, its return code and
+  what failed, as `problem` records. A file GDAL cannot open at all fails
+  the line instead.
+- **A folder** is GDAL's `dataset identify`, recursive and detailed, and the
+  point clouds in it, which GDAL does not read (PDAL describes them). An
+  OpenFileGDB `.gdb` is a folder that GDAL opens as one dataset, and it is
+  described as one.
+- **/vsi paths and URLs** are GDAL's to find: `describeSource` no longer
+  refuses `/vsizip/a.zip/b.geojson` as a missing file before GDAL is asked,
+  and INFO reads any format GDAL reads (`DescribeOptions::anyFormat`), where
+  an import dialog asks only of what Katana imports.
+- **The path**, as INFO has always read it, is one quoted word or the
+  unquoted words before the first keyword; a quoted path followed by a word
+  INFO does not know is refused.
+
+**GIS > Dataset Information** (`datasetInfoDialog`, and the Reference Data
+panel's Info button) builds `INFO "<file>"` and `INFO "<file>" JSON` and runs
+them through the window's one executor, then shows the records: the Summary
+(`datasetInfoSummary`), the Fields (`datasetInfoFields`) and Bands
+(`datasetInfoBands`) tables, and GDAL's JSON indented (`datasetInfoJson`,
+`datasetInfoCopyJson`). Compute Statistics (`datasetInfoStats`) and Check
+(`datasetInfoCheck`) run `INFO ... STATS` and `INFO ... CHECK`;
+`datasetInfoCommand` shows the line last run and `datasetInfoReply` what it
+said. INFO runs as a background job in the window, so the dialog is told when
+the job ends (`MainWindow::awaitJob`, which reads the `job id=<n> ...
+state=started` record the line answered with). MCP: `katana_dataset_info`
+(`docs/mcp.md`).
+
+Tests: `InfoVerb.*` (`tests/geo/test_info_verb.cpp`) - the terrain's
+statistics against the grid's own values read from the text, within the
+half ulp of Float32 GDAL reads it as, and no sidecar; typed GeoJSON fields;
+a folder; CHECK; a `/vsizip` path; a netCDF's multidimensional JSON;
+`DatasetInfo.TheFieldsAndBandsAreReadFromGdalsOwnDescription` and
+`DatasetInfo.AVsiPathIsGdalsToFindAndIsDescribed`;
+`McpServer.DatasetInfoReturnsRecordsAndGdalsJson`; `cli.info_*`;
+`qt_widgets.DatasetInfoDialog.*`;
+`qt_info_typed_and_run_as_a_dialog_runs_it_gives_the_records_headless` and
+`qt_dataset_info_headless`.
+
+Not done: INFO says nothing of a raster's metadata domains or histogram
+(GDAL's JSON has them, under `JSON`), and lists a folder's datasets without
+describing each.
+
+## Reference layers
+
+```
+REFS [LIST] [JSON]
+REFS SHOW|HIDE|REMOVE|INFO <ref>
+REFS OPACITY <ref> <0..1>                     (a raster's)
+REFS COLOR <ref> elevation|intensity|classification|rgb|flat   (a point cloud's; COLOUR too)
+REFS RENAME <ref> <name>
+REFS OVERVIEWS <ref> [levels=2,4,8] CONFIRM   (a raster's)
+REFS RESTORE
+<ref> := a layer's id, or its name in any case
+```
+
+```
+reference id=1 kind=raster name=terrain width=120 height=90 bounds=... georeferenced=yes visible=yes opacity=1 role=imagery display=plain file=...
+reference id=2 kind=pointcloud name=scan points=40000 source_points=40000 bounds=... visible=yes color=elevation file=...
+missing name=ortho kind=raster file=...
+references rasters=1 clouds=1 missing=0
+removed id=2 kind=pointcloud name=scan
+source file=... url=... licence=... attribution=... crs=...        (INFO)
+derivation line="GDAL raster hillshade ..."                        (INFO of a derived raster)
+overviews id=1 file=.../terrain.asc.ovr count=2 levels=2,4         (then an overview record each)
+restored layers=2 missing=0                                        (RESTORE)
+```
+
+- **The project keeps them.** The header of `reference_data.hpp` always said
+  the project records each layer's source and display settings and reads
+  the pixels again on opening; nothing did. Now a save records every layer
+  (`interop::referenceRecords`: kind, name, source, visibility, a raster's
+  opacity, role, display style, derivation, web source and licence and the
+  display copy's size, a cloud's colouring, point size and the points it
+  held), and opening the project runs `REFS RESTORE`, which reads each
+  layer again from its source through the one executor - a job in the
+  window - with its recorded name and settings. A cloud that came in with
+  a 12d archive is read again from the archive. How the records are kept
+  is `docs/model.md`'s ("Metadata a newer build wrote"): a key, not a
+  schema change.
+- **Taken at the save.** A layer imported, hidden or restyled does not by
+  itself make the drawing ask to be saved: reference data was session data,
+  and File > New after an import still simply drops it (audit QT-17). Both
+  front ends record the layers where they record the customisation, before
+  a save that has somewhere to go (`geo::recordReferences`). `NEW` and
+  `OPEN` in `katana_cli` and `katana_mcp` now let the layers and surfaces go
+  with their drawing, as the window's always did.
+- **A missing file is warned of, not fatal.** The drawing opens; the
+  restore says which source is gone and keeps that layer's record, listed as
+  `missing`, so the next save does not drop a layer because a drive was not
+  connected that day. `REFS REMOVE <name>` lets it go.
+- **Overviews only when told.** `REFS OVERVIEWS` runs GDAL's `raster
+  overview add --external` on the raster's file, writing `<file>.ovr` beside
+  it - which Katana otherwise never does to a person's file
+  (`docs/geoprocessing.md`, "Safety") - so the line must say `CONFIRM`,
+  `katana_references` must be given `confirm: true`, and the window asks
+  (headless, nobody can, so its line goes without and is refused, saying
+  what it would write). The overviews make GDAL's reads of a large raster
+  faster; the display copy is not re-read at view resolution.
+- **By id or by name.** A name several layers share is refused, naming
+  their ids.
+
+**The window.** The Reference Data panel builds REFS lines and runs them
+through the window's one executor, each logged as typed: the list
+(`referenceList`, its check boxes `REFS SHOW|HIDE`), Show (`referenceShow`),
+Hide (`referenceHide`), Information (`referenceInfo`: `REFS INFO`, then the
+Dataset Information dialog on the layer's file), Build Overviews
+(`referenceOverviews`), Remove (`referenceRemove`), and below the list the
+selected layer's Opacity (`referenceOpacity`) and Colour
+(`referenceColour`). The per-row controls it had were replaced by these: a
+control in a cell has no name a test or an agent can reach, and a line's
+reply rebuilds the table the cell is in.
+
+**MCP**: `katana_references` (`docs/mcp.md`).
+
+Tests: `RefsVerbs.*` and `RefsSession.ASavedProjectReopensWithItsReferenceRasters`
+(`tests/geo/test_refs_verbs.cpp`) - visibility round trip, opacity bounds,
+colour, rename and remove by name, JSON and INFO, overviews built only with
+CONFIRM (120 x 90 halved is 60 x 45, quartered 30 x 23 - GDAL rounds up),
+every display setting through a record, a derived raster's line kept, a
+missing source kept for the next save, an archive's clouds read again;
+`ProjectStoreRoundTrip.TheReferenceLayersAProjectRecordsRoundTripAsTheyWere`
+and `...FromBeforeReferenceLayersWereRecordedOpensWithNone`; `cli.refs_*`;
+`McpServer.ReferencesActsOnALayerByIdOrNameAndListsThemAfter`;
+`qt_reference_dock_builds_refs_lines_headless`.
+
+Not done: a project records each source by its absolute path, so a project
+moved to another machine finds only what is at the same place (a missing
+one is warned of and kept); the display copy is one decimated read, not
+re-read at view resolution; a web layer whose cached file is gone is not
+fetched again (`ONLINE IMPORT` does).
 
 ## The 12d Archive format (.12da, .12daz)
 
