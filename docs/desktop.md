@@ -1215,6 +1215,92 @@ workbench - one executor, so no path exists in the dialog that an agent cannot
 take on the command line. The download runs as a background job with its
 progress and Cancel in the status bar; the entities arrive as one command.
 
+## File > Import IFC and Export IFC
+
+IFC 4.3 both ways (`docs/ifc.md`) has two entries of its own in File,
+`fileImportIfc` ("Import IFC...") and `fileExportIfc` ("Export IFC..."), beside
+Import and Export Vector rather than inside them: what an IFC exchange chooses
+- which of the drawing's objects go, an AS 5488 utility schedule and the
+delivery schema it was written to, a project's classification rules - has no
+place in the generic dialogs. Each opens a dialog (`IfcImportDialog`,
+`IfcExportDialog`, `src/katana_qt/ifc_dialogs.hpp`) that the window makes on
+first use and keeps: non-modal, a File field with a Browse button rather than a
+file dialog asked up front, and every control named in the header, so that a
+headless run drives it (`--dialog fileExportIfc`, `--fill`, `--press`) and
+Browse, headless, says to type the path instead of opening a box.
+
+**The dialogs write lines, and do nothing else** - the pattern of the
+Subsurface Utilities dialog below. Every choice either offers is a word of the
+verb: `EXPORT <file.ifc> ... [NOENTITIES] [SELECTED] [NOALIGNMENTS]
+[NOSURFACES] [PREVIEW]` and `IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS]
+[NOELEMENTS] [NOSURFACES] [TOLERANCE <m>] [TAKECRS | KEEPCRS]`, with `INFO`
+and `IFC RULES` (`docs/ifc.md`, "Using it"). A dialog writes the line its
+fields mean (`ifc::formatExportLine`, `ifc::formatImportLine`), shows it as it
+is edited in `ifcExportCommand` and `ifcImportCommand`, and hands it to the
+window's command line through its context's `runLine`
+(`MainWindow::runIfcCommand`, `src/katana_qt/main_window_ifc.cpp`), which
+echoes it as typed and runs it by `MainWindow::runIfcLine` - the code a typed
+line runs, which reads it with the grammar `katana_cli` reads it with
+(`include/katana/ifc/front_end.hpp`). So there is nothing a dialog can do that
+a typed line, a script or an agent cannot, and the reply - key=value records
+- is the same whoever asked. The alternative, a dialog calling the export
+function itself with options no line could say, was what these dialogs first
+did; it was rejected because a person could then do what an agent could not,
+and a dialog's action would be neither echoed nor logged as a typed one is.
+
+The export dialog's table, `ifcExportClasses`, previews the file: for each
+layer, service, alignment and surface, how many objects become which IFC
+class, in which system, and why ("rule kerb", "a graded segment: type water",
+"a label: labels are not exported"). Preview runs the dialog's own line with
+`PREVIEW` added, and fills the table from the reply's object records
+(`ifc::readExportObjects`, the one reader of what `ifc::formatExportReply`
+writes): the writer's own account (`ifc::IfcExport::tally`), made by writing
+the file in memory, never a second guess at the mapping, and the same rows an
+agent asking `PREVIEW` reads. A class that is wrong for a project's layers is
+put right with a rules file, which Save Default Rules starts from the defaults
+(`IFC RULES <file.csv>`). The table is the preview of the choices when
+Preview was pressed: changing any of them but the file's name clears it, and
+the dialog reads the window's counts again (`IfcExportDialog::refresh`) as the
+drawing changes and before each preview and export, so "Selected entities
+only" with nothing selected is refused rather than writing the whole drawing -
+as `EXPORT ... SELECTED` is.
+
+A .ifc reaches the same line from everywhere else a path enters: File > Import
+and its IFC filter and a path given to the window run `IMPORT "<file>"`, the
+typed `IMPORT`, `EXPORT` and `INFO` are split by the shared grammar before the
+window's generic one takes the rest of the line as a path, the GIS imports'
+"All files" and GIS > Dataset Information describe it
+(`MainWindow::describeIfcFile`, `INFO`'s reply), and `--import-options` builds
+the import dialog. Choosing IFC in Export Vector's file dialog opens the
+export dialog with the file filled. The Command Reference lists the window's
+own verbs after the interpreter's.
+
+An import asks what the DXF import asks - a file far from the drawing is
+shifted alongside or kept - weighing everything it brings against everything
+the drawing holds, alignments and the session's surfaces too. When the file
+names an EPSG code and the project has none, `TAKECRS` takes it and `KEEPCRS`
+does not; the import dialog always says one (its "Take the file's coordinate
+system"), File > Import and a path given to the window, which say neither,
+ask the person there, and a typed `IMPORT` or a headless session asks no one
+and says how (`CRS SET`) - `MainWindow::IfcLineFrom` names who ran the line.
+The change is its own undoable step, after the import's. Declining the
+far-apart question cancels the import (`CommandRejected`), which the dialog
+says as a cancel, not a failure. Data shifted or moved to the origin is in no
+system, and takes none. Terrain comes in as surfaces of the session
+(`MainWindow::addSurface`), which the export also writes out - the one
+exchange that carries the 3D view's surfaces both ways besides the .12da
+archive.
+
+`qt_widgets.IfcExportDialog.TheLineCarriesEveryChoiceAsTheVerbReadsIt`,
+`qt_widgets.IfcExportDialog.PreviewShowsTheWritersAccountClassByClass` and the
+rest of `qt_widgets.IfcExportDialog.*` and `qt_widgets.IfcImportDialog.*`
+drive the dialogs against a command line that records their lines and answers
+as the verb does; the `qt_ifc_*_headless` checks (`tests/CMakeLists.txt`)
+drive each way in through the real window - the two dialogs, whose echoed
+lines they read, the typed verbs, a path given to the window,
+`--import-options`, Dataset Information, a file far from the drawing's
+alignment, a missing file, and surfaces out and back.
+
 ## Survey > Subsurface Utilities (AS 5488): the same pattern, one verb
 
 The AS 5488 tools (`docs/subsurface_utilities.md`) are `UtilityWorkbench`

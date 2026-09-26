@@ -191,7 +191,12 @@ dialog or widget, a fill of a choice the dialog does not offer, a press of a
 disabled button - ends the run with exit 1 and a sentence on stderr, never a
 crash and never a silent no-op. The names a dialog's fields carry are listed
 in its header (`survey/survey_dialogs.hpp`, `survey_import_wizard.hpp`,
-`survey_points_ui.hpp`, the managers' own).
+`survey_points_ui.hpp`, `src/katana_qt/ifc_dialogs.hpp`, the managers' own).
+File > Export IFC, for one, is `@fileExportIfc|ifcExportFile=out.ifc|!ifcExportPreview|?ifcExportClasses|!ifcExportExport`:
+the preview's table printed, then the file written
+(`qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless`). The
+IFC dialogs, which run lines, echo each on stderr as "> <line>" before its
+reply (`MainWindow::runIfcCommand`), so a test reads which line a press ran.
 
 A headless run echoes its command log to stderr, which is where a test reads
 what a command REPORTED.

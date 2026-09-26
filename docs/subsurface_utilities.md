@@ -133,6 +133,13 @@ column with its unit in its name, because a diameter in a utility schedule is
 millimetres by habit and metres everywhere else in this program. An empty
 cell is "not recorded", never zero.
 
+What is interpreted is also kept as it was written, under the header it was
+written under (`UtilityAttributes::written`, `UtilityVertex::written`):
+"In service" is `UtilityStatus::InService` to the grading, and still "In
+service" to a deliverable written back out - the IFC export's delivery
+property set (`docs/ifc.md`) carries the schedule's own values, so it cannot
+quietly correct what `CHECK` reports as wrong.
+
 `samples/utilities/schedule.csv` and `samples/utilities/design.csv` are a
 worked example: a water main verified by a pothole, an electricity duct bank
 with one weak radar pick, a telecommunications run between pits and a gas
@@ -144,6 +151,13 @@ katana_cli -c "UTILITY VERIFY samples/utilities/schedule.csv"
 katana_cli -c "UTILITY CLEARANCE samples/utilities/schedule.csv samples/utilities/design.csv WIDTH 0.375"
 katana_cli -c "UTILITY DRAW samples/utilities/schedule.csv" -c "LAYER LIST"
 ```
+
+An investigation is delivered as IFC 4.3 with `EXPORT <file.ifc> UTILITIES
+<schedule.csv> [SCHEMA <schema.csv>]`: each service an
+`IfcDistributionSystem`, each graded segment the pipe, cable or conduit
+element its type and feature make it, carrying its quality level, and each
+located point an `IfcAnnotation` carrying its evidence (`docs/ifc.md`,
+"Subsurface utilities").
 
 ## UTILITY on the command line
 
@@ -472,6 +486,11 @@ from the staleness above
 (`UtilityData.WhatTheScheduleSaidItDidNotKnowIsKeptSoTheDrawingMeetsTheSameSchema`,
 `SubsurfaceScheduleWriter.CellsTheReaderReadsAsNotRecordedAreWrittenAsTheScheduleWroteThem`).
 
+A drawn plan exported to IFC (`EXPORT <file.ifc>`, File > Export IFC) goes
+out by service, not by layer: each run the class the schedule's own export
+gives it, each point a survey annotation, one system a service, each
+classified by its quality level (`docs/ifc.md`, "Subsurface utilities").
+
 ## The TfNSW Utility Schema and Specification
 
 TfNSW's Utility Schema and Specification (DMS-FT-493, v1.2, December 2022) is
@@ -581,7 +600,9 @@ works are a design file, a line or polyline in the drawing (its `#id`, or Use
 Selected, at a level or its own heights) or one of the drawing's alignments.
 `VIEW` typed in the window works too, since the window answers it; a script
 run by `katana_cli` gives `AREA` instead. `docs/desktop.md` ("Survey >
-Subsurface Utilities") describes how it is built.
+Subsurface Utilities") describes how it is built. File > Export IFC takes a schedule and its delivery
+schema too, and its preview shows each service's graded segments by the class
+they are written as (`docs/ifc.md`, "In the window").
 
 ## Not done
 

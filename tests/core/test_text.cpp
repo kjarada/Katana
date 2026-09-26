@@ -114,3 +114,43 @@ TEST(CoreText, ExactRealTextReadsBackAsTheSameDouble)
         EXPECT_EQ(*back, value);
     }
 }
+
+// ---- key=value replies ------------------------------------------------------------
+
+// Whatever a text holds - blanks, '=', quotes, backslashes, a line break -
+// replyQuoted writes it on one line and readReplyRecord gives it back.
+TEST(ReplyRecord, AQuotedValueReadsBackAsTheTextItWas)
+{
+    const std::string awkward = "layer Survey/Kerb = \"a\" \\ b\nnext";
+    const std::string line = "ifc object from=" + katana::core::replyQuoted(awkward) + " count=2";
+    EXPECT_EQ(line.find('\n'), std::string::npos);
+    const auto record = katana::core::readReplyRecord(line);
+    ASSERT_TRUE(record);
+    EXPECT_EQ(record->words, (std::vector<std::string>{"ifc", "object"}));
+    ASSERT_EQ(record->fields.size(), 2u);
+    EXPECT_EQ(record->value("from"), awkward);
+    EXPECT_EQ(record->value("count"), "2");
+    EXPECT_EQ(record->value("absent"), std::nullopt);
+}
+
+// The words before the fields, fields in order, an empty value kept as
+// empty - absent is not empty.
+TEST(ReplyRecord, WordsComeFirstAndAnEmptyValueIsKept)
+{
+    const auto record = katana::core::readReplyRecord("  line id=W1 system= why=\"\"  ");
+    ASSERT_TRUE(record);
+    EXPECT_EQ(record->words, (std::vector<std::string>{"line"}));
+    EXPECT_EQ(record->value("id"), "W1");
+    EXPECT_EQ(record->value("system"), "");
+    EXPECT_EQ(record->value("why"), "");
+}
+
+// What is not a record is refused rather than half read.
+TEST(ReplyRecord, ALineThatIsNotARecordIsRefused)
+{
+    EXPECT_FALSE(katana::core::readReplyRecord(""));
+    EXPECT_FALSE(katana::core::readReplyRecord("   "));
+    EXPECT_FALSE(katana::core::readReplyRecord("ifc why=\"never closed"));
+    EXPECT_FALSE(katana::core::readReplyRecord("ifc count=1 stray"));
+    EXPECT_FALSE(katana::core::readReplyRecord("ifc =1"));
+}

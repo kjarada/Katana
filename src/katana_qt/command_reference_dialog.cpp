@@ -151,6 +151,11 @@ Import    IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]   a drawing, vector d
           drawing's, OFFSET by dE east and dN north (GIS > Import Vector Data, Placement)
 Export    EXPORT <file>   the drawing, by extension (DXF, GeoPackage, GeoJSON, SHP, .12da)
 Info      INFO <file>   describe a data file through GDAL or PDAL (INFO id: an entity)
+IFC       IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS] [NOELEMENTS] [NOSURFACES]
+          [TOLERANCE <m>] [TAKECRS | KEEPCRS] | EXPORT <file.ifc> [UTILITIES <schedule.csv>]
+          [SCHEMA <schema.csv>] [RULES <rules.csv>] [SPACING <m>] [NODRAWING] [NOENTITIES]
+          [SELECTED] [NOALIGNMENTS] [NOSURFACES] [PREVIEW] | INFO <file.ifc> |
+          IFC RULES <file.csv>   IFC 4.3 (File > Import IFC, Export IFC; docs/ifc.md)
 Refs      REFS   the reference layers: rasters and point clouds
 COPC      COPC <source> <destination.copc.laz>   convert a point cloud to COPC
 Customise CUSTOMISE [REPLACE] <file> [<file>...]   load style libraries (.4d) and survey
@@ -171,7 +176,8 @@ View      ZOOM (Z)   the drawing's extents | GRID [ON|OFF] | SNAP [ON|OFF] (OSNA
           Exaggeration); alone, the factor now
 Online    ONLINE PROVIDERS | LAYERS | INFO | IMPORT | CUSTOM | KEY   online data (GIS >
           Online Data); the usage of each is under Online data
-Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK|DRAW   subsurface utilities (HELP UTILITY)
+Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK|DRAW|REGRADE|SCHEDULE   subsurface
+          utilities, on a schedule or what is drawn (HELP UTILITY)
 Quit      QUIT | EXIT   close the window; in a script, end the script
 Tools     a bare tool word typed here starts the tool: LINE, L, C, TR, or an id such as
           draw.circle.ttr; with arguments it is the interpreter's (LINE 0,0 10,0), and so

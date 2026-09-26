@@ -747,3 +747,44 @@ TEST_F(McpServer, AnAgentEditsAHatchPatternAndMakesAStyleThatUsesIt)
     const Json refused = call("katana_run_commands", Json{{"commands", {"HATCH DELETE brick"}}});
     EXPECT_TRUE(refused["isError"].get<bool>()) << "a style still hatches with it";
 }
+
+// IFC through the one door an agent has: the lines File > Export IFC and
+// Import IFC write (docs/ifc.md), each answered in key=value records the
+// agent can read - the preview's objects, the file written, the file read.
+TEST_F(McpServer, AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines)
+{
+    initialize();
+    const TempDir dir("ifc");
+    const std::string file = dir.file("site plan.ifc");
+    const Json exported =
+        call("katana_run_commands",
+             Json{{"commands",
+                   {"LAYER NEW Survey/Kerb", "LAYER SET Survey/Kerb", "PL 0,0 10,0 20,5",
+                    "EXPORT \"" + file + "\" PREVIEW", "EXPORT \"" + file + "\" NOSURFACES",
+                    "INFO \"" + file + "\"", "IFC RULES \"" + dir.file("rules.csv") + "\""}}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    const std::string text = textOf(exported);
+    EXPECT_NE(text.find("ifc previewed file=\"site plan.ifc\" schema=IFC4X3_ADD2"),
+              std::string::npos)
+        << text;
+    EXPECT_NE(text.find("object from=\"layer Survey/Kerb\" count=1 class=\"IfcKerb\""),
+              std::string::npos);
+    EXPECT_NE(text.find("ifc exported file=\"site plan.ifc\""), std::string::npos);
+    EXPECT_NE(text.find("ifc described file=\"site plan.ifc\" schema=IFC4X3_ADD2 crs=\"\" "
+                        "entities=1"),
+              std::string::npos);
+    EXPECT_NE(text.find("ifc rules file=\"rules.csv\" rules="), std::string::npos);
+    EXPECT_TRUE(std::filesystem::exists(dir.file("rules.csv")));
+
+    ASSERT_FALSE(
+        call("katana_new_project", Json{{"discard_unsaved_changes", true}})["isError"].get<bool>());
+    const Json imported =
+        call("katana_run_commands",
+             Json{{"commands", {"IMPORT \"" + file + "\" NOALIGNMENTS KEEPCRS"}}});
+    ASSERT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    EXPECT_NE(textOf(imported).find("ifc imported file=\"site plan.ifc\" schema=IFC4X3_ADD2 "
+                                    "crs=\"\" entities=1 alignments=0"),
+              std::string::npos)
+        << textOf(imported);
+    EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 1);
+}

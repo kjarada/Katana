@@ -281,6 +281,9 @@ the interpreter's help says that `PLOTSHEETS` is the window's alone. Both read a
 path and `LOCAL` with `CommandInterpreter::importArgument`, and hand `INFO`
 with an entity id (`CommandInterpreter::isEntityId`, a whole number or `#n`)
 to the interpreter unless a file of that name exists.
+Both front ends add IFC's `IMPORT`, `EXPORT` and `INFO` of a .ifc and
+`IFC RULES`, with one grammar and one set of replies
+(`include/katana/ifc/front_end.hpp`, `docs/ifc.md`).
 
 In the application a typed line is routed before the interpreter sees it
 (`docs/tools.md`, "The tool host"): while a tool runs, the whole line is that tool's
