@@ -897,4 +897,23 @@ TEST_F(McpServer, ContoursOfASurfaceAreDrawnThroughTheCommandTool)
     EXPECT_NE(reply.find("contours method=tin cell= levels=14 "), std::string::npos) << reply;
     EXPECT_NE(reply.find("layer=terrain/contours"), std::string::npos) << reply;
 }
+
+// T2: a shading is a derived reference raster, which katana_terrain_list
+// then lists with the line that made it.
+TEST_F(McpServer, AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json shaded = call("katana_run_commands",
+                             Json{{"commands", {"RASTER SHADE FILE \"" + terrain + "\""}}});
+    ASSERT_FALSE(shaded["isError"].get<bool>()) << textOf(shaded);
+    const Json listed = call("katana_terrain_list");
+    ASSERT_FALSE(listed["isError"].get<bool>()) << textOf(listed);
+    const Json& rasters = listed["structuredContent"]["rasters"];
+    ASSERT_EQ(rasters.size(), 1U) << rasters.dump();
+    EXPECT_EQ(rasters[0]["name"], "terrain-hillshade");
+    EXPECT_EQ(rasters[0]["role"], "derived");
+    EXPECT_NE(rasters[0]["derived_from"].get<std::string>().find("RASTER SHADE"),
+              std::string::npos);
+}
 #endif

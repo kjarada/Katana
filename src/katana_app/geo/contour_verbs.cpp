@@ -156,45 +156,11 @@ double levelsBetween(double low, double high, double interval, double base)
     return std::floor((high - base) / interval) - std::ceil((low - base) / interval) + 1.0;
 }
 
-// The least and greatest values of a raster, on a stride that reads about a
-// million of its cells: what the level count is judged by before GDAL is
-// asked for millions of lines. A sample's range is within the whole's, so a
-// count over it that is already too many is certainly too many.
-std::optional<std::pair<double, double>> sampledRange(const gp::DatasetValue& dataset)
-{
-    const auto* file = std::get_if<gp::DatasetPath>(&dataset);
-    if (file == nullptr) {
-        return std::nullopt;
-    }
-    auto opened = katana::gis::GdalDataset::open(
-        std::filesystem::path(std::u8string(file->path.begin(), file->path.end())));
-    if (!opened) {
-        return std::nullopt;
-    }
-    auto info = (*opened)->rasterInfo();
-    if (!info) {
-        return std::nullopt;
-    }
-    const double cells = static_cast<double>(info->width) * static_cast<double>(info->height);
-    const int stride = std::max(1, static_cast<int>(std::ceil(std::sqrt(cells / 1.0e6))));
-    auto samples = (*opened)->readBandSampled(1, stride);
-    if (!samples) {
-        return std::nullopt;
-    }
-    double low = std::numeric_limits<double>::infinity();
-    double high = -low;
-    for (const double sample : samples->values) {
-        if (!std::isfinite(sample) || (samples->noDataValue && sample == *samples->noDataValue)) {
-            continue;
-        }
-        low = std::min(low, sample);
-        high = std::max(high, sample);
-    }
-    if (!(low <= high)) {
-        return std::nullopt;
-    }
-    return std::pair{low, high};
-}
+// A raster's values read on a stride of about a million cells: what the
+// level count is judged by before GDAL is asked for millions of lines. A
+// sample's range is within the whole's, so a count over it that is already
+// too many is certainly too many.
+constexpr std::size_t kLevelCountSamples = 1'000'000;
 
 katana::core::Error tooManyLevels(double levels)
 {
@@ -275,9 +241,13 @@ Result<Traced> traceRaster(const gp::DatasetValue& input, const ContourWords& wo
             return smoothed.error();
         }
     }
-    if (const auto range = sampledRange(chain.current())) {
+    auto range = valueRange(chain.current(), kLevelCountSamples);
+    if (!range) {
+        return range.error();
+    }
+    if (*range) {
         const double levels =
-            levelsBetween(range->first, range->second, *words.interval, words.base);
+            levelsBetween((*range)->first, (*range)->second, *words.interval, words.base);
         if (levels > static_cast<double>(katana::terrain::kMaxContourLevels)) {
             return tooManyLevels(levels);
         }

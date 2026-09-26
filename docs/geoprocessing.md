@@ -325,7 +325,8 @@ raster with `role` Derived and `derivation` - the line that made it. A name
 already taken becomes `<name>-2`, `-3` ...
 (`GeoExecutor.ARasterResultBecomesADerivedReferenceRaster`). `RasterOverlay`
 gained `role`, `facts`, `derivation` and `displayStyle`; F0 fills the role
-and the derivation, T2 draws the display styles, and D2 persists them.
+and the derivation, T2 sets the display style of the pictures it renders
+(the style is rendered into them), and D2 persists them.
 
 ## The executor
 
@@ -706,7 +707,23 @@ Where it differs from the plan:
 
 ### T2: Terrain shading: hillshade, colour relief, slope shading
 
-Not started. `RasterOverlay::displayStyle` is declared for it.
+Built: `RASTER SHADE` (`src/katana_app/geo/shade_verbs.cpp`), the ramps in
+`include/katana/interop/geo/colour_ramps.hpp`, and Terrain > Analysis >
+Terrain Shading (`terrainShading`, `terrainShadingDialog`,
+`src/katana_qt/geo/terrain_shading_dialog.hpp`). `docs/terrain.md`,
+"Shading", has the grammar, the records and the decisions. The picture is a
+derived reference raster through F0's `applyOutputs` (TO REFERENCE), its
+`displayStyle` set after. No MCP tool: `katana_run_commands` runs the line,
+and `katana_terrain_list` lists the picture with its derivation.
+
+Where it differs from the plan:
+
+- The styles are rendered into the picture, not drawn from the elevation
+  raster at draw time; `displayStyle` names the picture.
+- Every style ends as RGBA, a hillshade included, so the reader does not
+  stretch it.
+- Slope shading is in degrees; the diverging ramp is symmetric about zero
+  unless `range=` says; a `grey` ramp colours `plain`.
 
 ### T3: Slope and aspect with slope-class areas
 

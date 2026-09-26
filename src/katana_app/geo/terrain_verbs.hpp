@@ -134,6 +134,10 @@ class RasterChain {
     // goes. InvalidState before any step.
     [[nodiscard]] katana::core::Result<std::filesystem::path>
     keep(const std::filesystem::path& destination);
+    // `text` written to a file `name` of the chain's own, removed with it:
+    // a colour map a step reads by name.
+    [[nodiscard]] katana::core::Result<std::filesystem::path> write(const std::string& name,
+                                                                    const std::string& text);
 
     // GDAL's warnings of every step, in order.
     std::vector<katana::gis::processing::Diagnostic> warnings;
@@ -154,6 +158,14 @@ rasterInfoOf(const katana::gis::processing::DatasetValue& dataset);
 
 // The ground a raster covers: the box of its four corners.
 [[nodiscard]] katana::geometry::Box2 rasterExtent(const katana::gis::RasterInfo& info);
+
+// The least and greatest values of band 1, no-data and non-finite cells left
+// out; nothing when no cell has a value. Every cell is read when
+// `maxSamples` is 0 (one row at a time from a file); else a stride keeps the
+// read to about that many, and the range is the sample's - within the
+// whole's.
+[[nodiscard]] katana::core::Result<std::optional<std::pair<double, double>>>
+valueRange(const katana::gis::processing::DatasetValue& dataset, std::size_t maxSamples = 0);
 
 // The raster an analysis verb reads (CONTOUR, RASTER SHADE, RASTER SLOPE),
 // read by the one source parser: RASTER <id|name> or FILE <path> as FROM
@@ -209,5 +221,10 @@ bindAreas(Context& context, const katana::cad::ScopeWords& scope, std::string_vi
 [[nodiscard]] katana::core::Result<Prepared> prepareContour(Context& context, const Tokens& tokens,
                                                             std::string_view line);
 [[nodiscard]] std::string contourUsage();
+
+// ---- T2: RASTER SHADE (shade_verbs.cpp) ----
+[[nodiscard]] katana::core::Result<Prepared> prepareShade(Context& context, const Tokens& tokens,
+                                                          std::string_view line);
+[[nodiscard]] std::string shadeUsage();
 
 } // namespace katana::app::geo
