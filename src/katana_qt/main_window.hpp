@@ -384,21 +384,10 @@ class MainWindow final : public QMainWindow {
     // it makes, through runVerbLine.
     void importWithPlacement(const QString& path);
     void exportVectorFile();
-    // Writes the drawing, or `options.entities` of it, to `path`: a vector
-    // format by extension, or a 12d archive - the Export Vector dialog's
-    // choices, which have no EXPORT words yet; a typed EXPORT is the
-    // executor's (geo/export_verb.cpp). Reports into the log; false when it
-    // failed, which has been reported too.
-    bool exportDrawingTo(const std::filesystem::path& path,
-                         katana::interop::VectorExportOptions options);
     // decideImportPlacement for this window: where data read at `incoming`
     // lands in the drawing as it is now, asked or logged.
     [[nodiscard]] PlacementDecision placeImport(const katana::cad::ImportPlacement& placement,
                                                 const katana::geometry::Box2& incoming);
-    // A .dxf written natively rather than through GDAL (main_window_dxf.cpp),
-    // with the dialog's entities, layers and origin shift.
-    bool exportDxfFile(const std::filesystem::path& path,
-                       const katana::interop::VectorExportOptions& options);
 
     // ---- GIS menu: GDAL and PDAL (PLAN.MD Phases 17 and 20) ---------------
     // The imports ask for a file of their kind, describe it, and offer its

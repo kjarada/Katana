@@ -216,6 +216,11 @@ struct VectorExportOptions {
     // here wins.
     std::vector<std::string> creationOptions;
     std::vector<std::string> layerCreationOptions;
+    // Add the tables as new layers of the file at `path` when there is one
+    // (a GeoPackage of several layers, written one EXPORT at a time) rather
+    // than replacing it; a file that is not there is created. EXPORT's
+    // append (docs/interop.md, "Export options").
+    bool append = false;
 };
 
 // ---- dataset --------------------------------------------------------------
@@ -329,7 +334,14 @@ class GdalDataset {
                                                           const std::vector<VectorFeature>& features,
                                                           const VectorExportOptions& options);
 
-    // Typed tables to a file, a layer per table, replacing the file. A
+    // Typed tables to a file, a layer per table, replacing the file - or,
+    // with options.append, added to it: refused, before anything is written,
+    // with InvalidArgument for a layer name the file has already and
+    // Unsupported for a format that adds no layers to a file, and on a
+    // failure part-way the layers this call made are deleted, the file's own
+    // left as they were. A table's field named OGR_STYLE is also each
+    // feature's OGR style string (a text's LABEL), which KML, DXF and
+    // MapInfo draw by. A
     // single table's layer is named `options.layerName` (when given), several
     // are named after their tables. Fields keep their types where the format
     // has them, and the next type it has where it does not (an Integer64 that

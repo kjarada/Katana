@@ -3,13 +3,18 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <numbers>
+#include <string>
 #include <variant>
 
+#include "katana/core/text.hpp"
 #include "katana/gis/formats.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/gis/processing.hpp"
 #include "katana/interop/geo/drawing_dataset.hpp"
 #include "katana/pointcloud/point_cloud_engine.hpp"
+#include "table_reprojection.hpp"
 
 namespace katana::interop {
 namespace {
@@ -21,6 +26,109 @@ using katana::core::makeError;
 using katana::core::Result;
 using katana::core::Status;
 using katana::entity::Entity;
+
+// The index of the field `name` in `table`, added as `type` when it has none:
+// every feature already there gets no value for it.
+std::size_t fieldOf(gp::FeatureTable& table, const std::string& name, gp::FieldType type)
+{
+    for (std::size_t f = 0; f < table.fields.size(); ++f) {
+        if (table.fields[f].name == name) {
+            return f;
+        }
+    }
+    table.fields.push_back(gp::FieldDef{name, type});
+    for (gp::Feature& feature : table.features) {
+        feature.values.resize(table.fields.size());
+    }
+    return table.fields.size() - 1;
+}
+
+// An OGR style string's text parameter: double-quoted, a quote or a
+// backslash in it escaped (GDAL's OGR Feature Style specification).
+std::string styleText(const std::string& text)
+{
+    std::string quoted = "\"";
+    for (const char c : text) {
+        if (c == '"' || c == '\\') {
+            quoted += '\\';
+        }
+        quoted += c == '\n' ? ' ' : c;
+    }
+    return quoted + "\"";
+}
+
+// The text entities of `ids` as points in `set` (VectorExportOptions::
+// textAsPoints): in its one table, or its points table, made when there is
+// none. Each carries its text, height and rotation as fields and as the
+// LABEL of its OGR style. The count written.
+std::size_t addTexts(const katana::entity::Model& model,
+                     const std::vector<katana::entity::EntityId>& ids, const std::string& name,
+                     bool oneTable, const std::string& crs, gp::FeatureSet& set)
+{
+    std::size_t written = 0;
+    for (const katana::entity::EntityId id : ids) {
+        const Entity* entity = model.entities.find(id);
+        const auto* text = entity != nullptr
+                               ? std::get_if<katana::entity::TextGeometry>(&entity->geometry)
+                               : nullptr;
+        if (text == nullptr) {
+            continue;
+        }
+        gp::FeatureTable* table = nullptr;
+        for (gp::FeatureTable& each : set.tables) {
+            if (oneTable || each.kind == katana::gis::GeometryKind::Point) {
+                table = &each;
+                break;
+            }
+        }
+        if (table == nullptr) {
+            gp::FeatureTable made;
+            made.name = oneTable ? name : std::string("points");
+            made.kind = katana::gis::GeometryKind::Point;
+            made.crsWkt = crs;
+            made.fields = {gp::FieldDef{"katana_id", gp::FieldType::Integer64},
+                           gp::FieldDef{"layer", gp::FieldType::String}};
+            set.tables.push_back(std::move(made));
+            table = &set.tables.back();
+        }
+        const bool hadOthers = std::ranges::any_of(table->features, [](const gp::Feature& f) {
+            return !f.parts.empty() && f.parts.front().kind != katana::gis::GeometryKind::Point;
+        });
+        table->kind = hadOthers || (table->kind != katana::gis::GeometryKind::Point &&
+                                    !table->features.empty())
+                          ? katana::gis::GeometryKind::Unknown
+                          : katana::gis::GeometryKind::Point;
+        const std::size_t textField = fieldOf(*table, "text", gp::FieldType::String);
+        const std::size_t heightField = fieldOf(*table, "text_height", gp::FieldType::Real);
+        const std::size_t rotationField = fieldOf(*table, "text_rotation", gp::FieldType::Real);
+        const std::size_t styleField = fieldOf(*table, "OGR_STYLE", gp::FieldType::String);
+        gp::Feature feature;
+        katana::gis::VectorGeometry point;
+        point.kind = katana::gis::GeometryKind::Point;
+        point.parts = {{katana::gis::GeoPoint{text->position.x, text->position.y, 0.0}}};
+        feature.parts.push_back(std::move(point));
+        feature.values.resize(table->fields.size());
+        for (std::size_t f = 0; f < table->fields.size(); ++f) {
+            if (table->fields[f].name == "katana_id") {
+                feature.values[f] = static_cast<std::int64_t>(entity->id);
+            } else if (table->fields[f].name == "layer") {
+                feature.values[f] = entity->layer;
+            }
+        }
+        // Degrees anticlockwise, as OGR's LABEL angle and every GIS reads
+        // one; the entity keeps radians.
+        const double degrees = text->rotation * 180.0 / std::numbers::pi;
+        feature.values[textField] = text->text;
+        feature.values[heightField] = text->height;
+        feature.values[rotationField] = degrees;
+        feature.values[styleField] = "LABEL(t:" + styleText(text->text) +
+                                     ",s:" + katana::core::formatExactReal(text->height) +
+                                     "g,a:" + katana::core::formatExactReal(degrees) + ")";
+        table->features.push_back(std::move(feature));
+        ++written;
+    }
+    return written;
+}
 
 } // namespace
 
@@ -79,6 +187,47 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
         });
     }
 
+    // GPX holds a layer of points and one of lines, and no areas: a closed
+    // shape goes to it as the closed line around it.
+    const bool noAreas = katana::gis::driverHoldsNoAreas(driver);
+    if (options.splitByLayer && noAreas) {
+        return makeError(ErrorCode::Unsupported,
+                         driver + " has layers of its own (waypoints, routes, tracks), not one "
+                                  "per drawing layer",
+                         path.string());
+    }
+    if (!options.targetCrs.empty() && options.projectionWkt.empty()) {
+        return makeError(ErrorCode::InvalidCRS,
+                         "the drawing is in no coordinate system Katana was told of, so it "
+                         "cannot be moved into " + options.targetCrs +
+                             ": set the project's (CRS SET <code>) first",
+                         path.string());
+    }
+
+    // What goes to one file layer: every entity, or those of one drawing
+    // layer each (split=layer), in the order the layers are first met.
+    struct Group {
+        std::string name;
+        std::vector<katana::entity::EntityId> ids;
+    };
+    std::vector<Group> groups;
+    if (options.splitByLayer) {
+        for (const katana::entity::EntityId id : ids) {
+            const Entity* entity = model.entities.find(id);
+            const std::string layer = entity != nullptr ? entity->layer : std::string();
+            auto group = std::ranges::find_if(groups, [&layer](const Group& g) {
+                return g.name == layer;
+            });
+            if (group == groups.end()) {
+                groups.push_back(Group{layer, {}});
+                group = groups.end() - 1;
+            }
+            group->ids.push_back(id);
+        }
+    } else {
+        groups.push_back(Group{options.layerName, ids});
+    }
+
     // The ONE conversion of entities to features (drawing_dataset.hpp): the
     // one EXPORT and every algorithm read the drawing through, so a lot with
     // a hole is written as one polygon with a hole - 9600 m2, not a lot of
@@ -88,18 +237,40 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
     conversion.crsWkt = options.projectionWkt;
     conversion.styleFields = false;
     conversion.properties = options.propertiesAsAttributes;
-    // GPX holds a layer of points and one of lines, and no areas: a closed
-    // shape goes to it as the closed line around it.
-    const bool noAreas = katana::gis::driverHoldsNoAreas(driver);
     conversion.closedAsPolygons = !noAreas;
     conversion.oneTable = !noAreas;
-    conversion.tableName = options.layerName;
-    auto dataset = geo::drawingDataset(model, ids, conversion);
-    if (!dataset) {
-        return dataset.error();
+    geo::DrawingDatasetStats stats;
+    gp::FeatureSet set;
+    for (const Group& group : groups) {
+        conversion.tableName = group.name;
+        auto dataset = geo::drawingDataset(model, group.ids, conversion);
+        if (!dataset) {
+            return dataset.error();
+        }
+        if (options.textAsPoints) {
+            const std::size_t texts = addTexts(model, group.ids, group.name, conversion.oneTable,
+                                               conversion.crsWkt, dataset->set);
+            result.textsWritten += texts;
+            auto& skippedText = dataset->stats.skipped["text"];
+            skippedText -= std::min(skippedText, texts);
+            if (skippedText == 0) {
+                dataset->stats.skipped.erase("text");
+            }
+        }
+        const geo::DrawingDatasetStats& one = dataset->stats;
+        stats.matched += one.matched;
+        stats.used += one.used;
+        stats.points += one.points;
+        stats.lines += one.lines;
+        stats.polygons += one.polygons;
+        for (const auto& [reason, count] : one.skipped) {
+            stats.skipped[reason] += count;
+        }
+        stats.warnings.insert(stats.warnings.end(), one.warnings.begin(), one.warnings.end());
+        for (gp::FeatureTable& table : dataset->set.tables) {
+            set.tables.push_back(std::move(table));
+        }
     }
-    const geo::DrawingDatasetStats& stats = dataset->stats;
-    gp::FeatureSet& set = dataset->set;
     const auto skippedAs = [&stats](const char* reason) -> std::size_t {
         const auto found = stats.skipped.find(reason);
         return found == stats.skipped.end() ? 0 : found->second;
@@ -218,10 +389,37 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
         }
     }
 
+    // crs=<code>: moved on the way out, and the file says the system it is
+    // now in.
+    std::string writtenCrs = options.projectionWkt;
+    if (!options.targetCrs.empty()) {
+        auto target = katana::gis::crsToWkt(options.targetCrs);
+        if (!target) {
+            return target.error();
+        }
+        for (gp::FeatureTable& table : set.tables) {
+            const std::string& from = table.crsWkt.empty() ? options.projectionWkt : table.crsWkt;
+            if (auto moved = detail::reprojectTable(table, from, options.targetCrs); !moved) {
+                return moved.error();
+            }
+            table.crsWkt = *target;
+        }
+        writtenCrs = *target;
+    }
+
     katana::gis::VectorExportOptions gdalOptions;
     gdalOptions.driver = driver;
-    gdalOptions.layerName = options.layerName;
-    gdalOptions.projectionWkt = options.projectionWkt;
+    // One layer per drawing layer is named after it, whatever layerName says.
+    gdalOptions.layerName = options.splitByLayer ? std::string() : options.layerName;
+    gdalOptions.projectionWkt = writtenCrs;
+    gdalOptions.creationOptions = options.creationOptions;
+    gdalOptions.layerCreationOptions = options.layerCreationOptions;
+    gdalOptions.append = options.append;
+    for (const gp::FeatureTable& table : set.tables) {
+        result.layers.push_back(set.tables.size() == 1 && !gdalOptions.layerName.empty()
+                                    ? gdalOptions.layerName
+                                    : table.name);
+    }
 
     auto written = katana::gis::GdalDataset::writeTables(path, set, gdalOptions);
     if (!written.ok()) {

@@ -68,7 +68,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_list_entities` | every entity with its id, layer and measurements | `LIST` |
 | `katana_describe_entity` | one entity in full | `INFO #<id>` |
 | `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; the options of "I3 and I4" below (layers, where, sql, a scope, clip, fields, crs, a raster's band, a cloud's budget, preview ...); `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
-| `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; `structuredContent.records` holds the `exported` record and any `warning` | `EXPORT "<path>"` |
+| `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
@@ -334,6 +334,27 @@ the Session like any other; the structured reply's `commands` shows it.
 
 `McpServer.ImportTakesItsFilterScopeAndPreviewArgumentsAsTheWordsAPersonTypes`
 pins the lines and records.
+
+`katana_export` takes EXPORT's scope and options (`docs/interop.md`,
+"Export options") likewise:
+
+| Argument | Word |
+|---|---|
+| `scope` (selection, drawing, area, layers), `area`, `layers`, `only`, `where` [conditions] | the shared scope words; none is the whole drawing |
+| `layer_name` | `layername=` |
+| `split_by_layer` | `split=layer` |
+| `append` | `append` |
+| `crs` (project, native, a code) | `crs=` |
+| `creation_options`, `layer_creation_options` ["KEY=VALUE"] | `co=`, `lco=` each, checked against the driver's lists |
+| `text` (points, skip) | `text=` |
+| `curve`, `properties` | `curve=`, `properties=yes\|no` |
+| `preview` | `PREVIEW`: the `export ... preview=yes entities=` record, nothing written |
+
+Here `layers` and `where` are the scope's (katana_export has no file to
+filter); `structuredContent.records[0]` is still the `exported` record, the
+`scope` record after it.
+`McpServer.ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes` pins
+them.
 
 ## What the server adds to the command line
 

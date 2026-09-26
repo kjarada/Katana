@@ -1486,7 +1486,33 @@ detail had none). Tests: `tests/geo/test_import_options.cpp`,
 
 ### I4: EXPORT on the shared scope and filter
 
-Not started. Its dialog is `gis_export_dialog`.
+Built (`docs/interop.md`, "Export options"). `EXPORT` keeps its I0 row; its
+words are read by `prepareExport` in `src/katana_app/geo/export_verb.cpp`
+through `vector::readVerbWords` and the one scope parser, with `co=` and
+`lco=` taken out first (repeatable). What the others build on:
+
+- **`interop::VectorExportOptions`** gained `targetCrs`, `splitByLayer`,
+  `append`, `creationOptions`, `layerCreationOptions` and `textAsPoints`;
+  **`gis::VectorExportOptions::append`** adds layers to an existing file.
+- **A table's `OGR_STYLE` field** is also written as each feature's style
+  string (`GdalDataset::writeTables`), for any verb that wants labels drawn.
+- **`src/katana_interop/table_reprojection.hpp`**: the one move of a feature
+  table between coordinate systems, for IMPORT's `crs=project` and EXPORT's
+  `crs=<code>`.
+
+Deviations from the plan: `layername=` for the plan's `layer=`, since an
+option key may not be a WHERE key; the DXF scope goes through a pruned copy
+of the drawing rather than the DXF writer's entity list (the copy is already
+made for the worker, and the archive writer takes the same route); GeoJSON's
+default is longitude and latitude (RFC 7946), `crs=native` keeping the
+project's. The Export Vector dialog is the GIS frame's (`vectorExport`),
+opened by File > Export Vector after its file dialog, so `--dialog` does not
+reach it headless - the widget tests drive it by object name, and the
+`EXPORT` line is the headless path. Tests:
+`tests/geo/test_export_options.cpp`,
+`tests/qt_widgets/geo/test_export_dialog.cpp`,
+`src/katana_app/geo/cli/export_options.cmake`, and
+`McpServer.ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes`.
 
 ### D1: INFO as structured data, STATS, CHECK
 

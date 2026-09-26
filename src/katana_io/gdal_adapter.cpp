@@ -1964,13 +1964,47 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
     }
     const CPLStringList datasetOptions = mergedOptions(katanaDataset, options.creationOptions);
 
-    // Most drivers refuse to overwrite. Remove an existing file first so that
-    // re-exporting to the same name behaves the way a user expects a Save As to.
-    std::error_code removeError;
-    std::filesystem::remove(path, removeError);
-
-    GDALDataset* dataset =
-        driver->Create(path.string().c_str(), 0, 0, 0, GDT_Unknown, datasetOptions.List());
+    std::error_code existsError;
+    const bool appending = options.append && std::filesystem::exists(path, existsError);
+    GDALDataset* dataset = nullptr;
+    // The layers this call made, so a failed append takes away only those.
+    std::vector<std::string> made;
+    if (appending) {
+        // The file as it is, opened to be added to: its own layers stay.
+        dataset = static_cast<GDALDataset*>(GDALOpenEx(path.string().c_str(),
+                                                       GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr,
+                                                       nullptr, nullptr));
+        if (dataset == nullptr) {
+            return makeError(ErrorCode::FileExportFailure,
+                             "GDAL could not open '" + path.string() + "' to add to it",
+                             lastGdalError());
+        }
+        if (dataset->TestCapability(ODsCCreateLayer) == 0) {
+            GDALClose(dataset);
+            return makeError(ErrorCode::Unsupported,
+                             driverName + " adds no layer to a file that exists: write a new "
+                                          "file, or a GeoPackage",
+                             path.string());
+        }
+        for (std::size_t t = 0; t < tables->tables.size(); ++t) {
+            const std::string name = layerNameFor(*tables, t, options);
+            if (dataset->GetLayerByName(name.c_str()) != nullptr) {
+                GDALClose(dataset);
+                return makeError(ErrorCode::InvalidArgument,
+                                 "the file has a layer '" + name +
+                                     "' already: name the new one with layername=",
+                                 path.string());
+            }
+        }
+    } else {
+        // Most drivers refuse to overwrite. Remove an existing file first so
+        // that re-exporting to the same name behaves the way a user expects a
+        // Save As to.
+        std::error_code removeError;
+        std::filesystem::remove(path, removeError);
+        dataset = driver->Create(path.string().c_str(), 0, 0, 0, GDT_Unknown,
+                                 datasetOptions.List());
+    }
     if (dataset == nullptr) {
         return makeError(ErrorCode::FileExportFailure,
                          "GDAL could not create '" + path.string() + "'", lastGdalError());
@@ -1980,8 +2014,22 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
     // files, and leaving a truncated set behind invites someone to open it and
     // believe it. Every failure below unwinds through this, which closes the
     // dataset and asks the DRIVER to delete it - the driver knows about the
-    // sidecar files, std::filesystem::remove would only take the .shp.
-    const auto abandon = [&driver, &path](GDALDataset* handle, Error error) {
+    // sidecar files, std::filesystem::remove would only take the .shp. An
+    // append deletes the layers it made and leaves the file's own.
+    const auto abandon = [&driver, &path, appending, &made](GDALDataset* handle, Error error) {
+        if (appending) {
+            for (const std::string& name : made) {
+                for (int i = handle->GetLayerCount() - 1; i >= 0; --i) {
+                    OGRLayer* layer = handle->GetLayer(i);
+                    if (layer != nullptr && name == layer->GetName()) {
+                        (void)handle->DeleteLayer(i);
+                        break;
+                    }
+                }
+            }
+            GDALClose(handle);
+            return error;
+        }
         GDALClose(handle);
         discardOutput(*driver, path);
         return error;
@@ -1993,6 +2041,7 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
         OGRLayer* layer = nullptr;
         std::vector<int> fieldIndex; // per table field; -1 when the layer has none for it
         int altitudeIndex = -1;
+        int styleField = -1; // the table's OGR_STYLE field, when it has one
     };
     std::vector<Written> written(tables->tables.size());
     for (std::size_t t = 0; t < tables->tables.size(); ++t) {
@@ -2008,8 +2057,14 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
                                               "GDAL could not create the vector layer",
                                               lastGdalError()));
         }
+        made.push_back(layer->GetName());
         Written& out = written[t];
         out.layer = layer;
+        for (std::size_t f = 0; f < table.fields.size(); ++f) {
+            if (table.fields[f].name == "OGR_STYLE") {
+                out.styleField = static_cast<int>(f);
+            }
+        }
         // Some formats have a FIXED set of fields and refuse any other: a DXF
         // layer has Layer, Linetype, Text and a few more, and CreateField fails
         // on everything else. That used to abort the whole export - so DXF, the
@@ -2119,6 +2174,14 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
             if (out.altitudeIndex >= 0 && geometry->Is3D() != 0) {
                 feature->SetField(out.altitudeIndex, "absolute");
             }
+            if (out.styleField >= 0 &&
+                static_cast<std::size_t>(out.styleField) < source.values.size()) {
+                if (const auto* style =
+                        std::get_if<std::string>(&source.values[static_cast<std::size_t>(
+                            out.styleField)])) {
+                    feature->SetStyleString(style->c_str());
+                }
+            }
             const std::size_t before = errors.size();
             const OGRErr status = out.layer->CreateFeature(feature);
             OGRFeature::DestroyFeature(feature);
@@ -2150,7 +2213,9 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
     // export reported success over a truncated file.
     if (GDALClose(dataset) != CE_None) {
         const std::string message = lastGdalError();
-        discardOutput(*driver, path);
+        if (!appending) {
+            discardOutput(*driver, path);
+        }
         return makeError(ErrorCode::FileExportFailure,
                          "GDAL could not finish writing '" + path.string() + "'", message);
     }
