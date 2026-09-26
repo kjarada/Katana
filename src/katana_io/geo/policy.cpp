@@ -160,6 +160,101 @@ bool listed(const std::array<std::string_view, N>& table, std::string_view path)
     return std::ranges::find(table, path) != table.end();
 }
 
+// The steps GDAL 3.13's three pipelines offer (their usage's
+// pipeline_algorithms), judged by hand as the leaves are. Only `update`
+// writes into a dataset that already exists - "Update the destination raster
+// with the content of the input one", the vector one likewise - so it is
+// Confirm, as `raster update` and `vector update` are. `edit` and `overview`
+// are Confirm as leaves, which change the dataset they open, but as steps
+// they change the piped dataset only, which the pipeline then writes where it
+// is told (a new output, or OVERWRITE's business). `external` is refused
+// outright (checkTokens). A step in neither list is Confirm until someone
+// judges it; the contract test lists every one GDAL offers.
+constexpr std::array<std::string_view, 1> kConfirmSteps{"update"};
+constexpr std::array<std::string_view, 70> kSafeSteps{
+    "as-features",
+    "aspect",
+    "blend",
+    "buffer",
+    "calc",
+    "check-coverage",
+    "check-geometry",
+    "clean-coverage",
+    "clip",
+    "color-map",
+    "combine",
+    "compare",
+    "concat",
+    "concave-hull",
+    "contour",
+    "convex-hull",
+    "create",
+    "dissolve",
+    "edit",
+    "explode-collections",
+    "export-schema",
+    "fill-nodata",
+    "filter",
+    "footprint",
+    "grid",
+    "hillshade",
+    "info",
+    "limit",
+    "make-point",
+    "make-valid",
+    "materialize",
+    "mosaic",
+    "neighbors",
+    "nodata-to-alpha",
+    "overview",
+    "pansharpen",
+    "partition",
+    "pixel-info",
+    "polygonize",
+    "proximity",
+    "rasterize",
+    "read",
+    "reclassify",
+    "rename-layer",
+    "reproject",
+    "resize",
+    "rgb-to-palette",
+    "roughness",
+    "scale",
+    "segmentize",
+    "select",
+    "set-field-type",
+    "set-geom-type",
+    "set-type",
+    "sieve",
+    "simplify",
+    "simplify-coverage",
+    "slope",
+    "sort",
+    "sql",
+    "stack",
+    "swap-xy",
+    "tee",
+    "tile",
+    "tpi",
+    "tri",
+    "unscale",
+    "viewshed",
+    "write",
+    "zonal-stats",
+};
+
+// Options that let GDAL change a dataset that is already there rather than
+// write a new one: replace it (--overwrite, --overwrite-layer), add to it
+// (--append, --upsert, --update; rasterize's --add burns into the raster
+// the output names, measured: its checksum changed with no --update; tile's
+// --resume writes the missing tiles into a tile set already there). They
+// need OVERWRITE on the line. Found by listing every boolean argument of
+// every GDAL 3.13 algorithm and step (gdal --json-usage) and reading the
+// description of each whose name suggested it.
+constexpr std::array<std::string_view, 7> kChangesExisting{
+    "--overwrite", "--overwrite-layer", "--append", "--update", "--upsert", "--add", "--resume"};
+
 // Words that would print instead of run, or reach past the algorithm:
 // --config is how GDAL_ENABLE_EXTERNAL (programs run by a pipeline) and
 // SPATIALITE_SECURITY (Spatialite's file functions) would be switched on.
@@ -195,16 +290,19 @@ Policy classify(const std::vector<std::string>& path, const GDALAlgorithm& algor
     return Policy::Confirm;
 }
 
-bool hasExternalStep(std::string_view pipeline)
+std::vector<PipelineWord> pipelineWords(std::string_view pipeline)
 {
     // A step begins the text, and follows each '!' and each '[' that opens a
     // nested pipeline; its first word is its name.
+    std::vector<PipelineWord> words;
     bool stepStart = true;
+    bool first = true;
     std::size_t i = 0;
     while (i < pipeline.size()) {
         const char c = pipeline[i];
         if (c == '!' || c == '[') {
             stepStart = true;
+            first = false;
             ++i;
             continue;
         }
@@ -213,15 +311,29 @@ bool hasExternalStep(std::string_view pipeline)
             continue;
         }
         const std::size_t end = pipeline.find_first_of(" \t\r\n![]", i);
-        const std::string_view word =
+        std::string_view word =
             pipeline.substr(i, end == std::string_view::npos ? std::string_view::npos : end - i);
-        if (stepStart && katana::core::lowered(word) == "external") {
-            return true;
-        }
-        stepStart = false;
         i = end == std::string_view::npos ? pipeline.size() : end;
+        // The pipeline given by name, as one word: --pipeline=read x ! ...
+        constexpr std::string_view named = "--pipeline=";
+        if (katana::core::lowered(word.substr(0, named.size())) == named) {
+            word.remove_prefix(named.size());
+            if (word.empty()) {
+                continue;
+            }
+        }
+        words.push_back(
+            PipelineWord{std::string(word), stepStart && !word.starts_with('-'), first});
+        stepStart = stepStart && word.starts_with('-');
     }
-    return false;
+    return words;
+}
+
+bool hasExternalStep(std::string_view pipeline)
+{
+    return std::ranges::any_of(pipelineWords(pipeline), [](const PipelineWord& word) {
+        return word.step && katana::core::lowered(word.text) == "external";
+    });
 }
 
 bool isPipeline(const std::vector<std::string>& path)
@@ -230,6 +342,127 @@ bool isPipeline(const std::vector<std::string>& path)
 }
 
 } // namespace detail
+
+Policy stepPolicy(std::string_view step, std::string& reason)
+{
+    const std::string name = katana::core::lowered(step);
+    if (name == "external") {
+        reason = "refused";
+        return Policy::Confirm;
+    }
+    if (listed(kConfirmSteps, name)) {
+        reason = "listed";
+        return Policy::Confirm;
+    }
+    if (listed(kSafeSteps, name)) {
+        reason = "listed";
+        return Policy::Safe;
+    }
+    reason = "unclassified";
+    return Policy::Confirm;
+}
+
+namespace {
+
+// The tail as one text, the way GDAL's pipeline argument reads it: words
+// given one by one, or quoted as one.
+std::string pipelineText(const std::vector<std::string>& tokens)
+{
+    std::string joined;
+    for (const std::string& token : tokens) {
+        joined += token + ' ';
+    }
+    return joined;
+}
+
+bool changesExisting(std::string_view word)
+{
+    const std::string name = katana::core::lowered(word.substr(0, word.find('=')));
+    return listed(kChangesExisting, name);
+}
+
+} // namespace
+
+TailEffects tailEffects(const std::vector<std::string>& path,
+                        const std::vector<std::string>& tokens)
+{
+    TailEffects effects;
+    if (!detail::isPipeline(path)) {
+        const auto found = std::ranges::find_if(
+            tokens, [](const std::string& token) { return changesExisting(token); });
+        if (found != tokens.end()) {
+            effects.overwriteWord = *found;
+        }
+        return effects;
+    }
+    // Every word of a pipeline, however it was quoted: a pipeline given as
+    // one quoted text is still steps and options to GDAL.
+    for (const detail::PipelineWord& word : detail::pipelineWords(pipelineText(tokens))) {
+        if (effects.overwriteWord.empty() && changesExisting(word.text)) {
+            effects.overwriteWord = word.text;
+        }
+        if (!word.step || !effects.confirmStep.empty()) {
+            continue;
+        }
+        std::string reason;
+        const Policy policy = stepPolicy(word.text, reason);
+        // The text's first word may be a value of an option before the
+        // pipeline (--output-format GTiff read ...), which GDAL refuses by
+        // itself if it is no step; only a step after '!' or '[' that no one
+        // has judged is taken as one GDAL may have added.
+        if (policy == Policy::Confirm && !(reason == "unclassified" && word.first)) {
+            effects.confirmStep = katana::core::lowered(word.text);
+        }
+    }
+    return effects;
+}
+
+bool readsHeights(const std::vector<std::string>& path, const std::vector<std::string>& tokens)
+{
+    const auto has = [](const std::vector<std::string>& words, std::string_view option) {
+        return std::ranges::any_of(words, [option](const std::string& word) {
+            return katana::core::lowered(word.substr(0, word.find('='))) == option;
+        });
+    };
+    // The grids that interpolate or summarise a value read it from Z unless
+    // --zfield names a field; count and the two average-distance grids read
+    // positions only. Rasterize reads Z with --3d.
+    const auto gridReadsZ = [&](std::string_view method, const std::vector<std::string>& words) {
+        const bool positionsOnly = method == "count" || method == "average-distance" ||
+                                   method == "average-distance-points";
+        return !positionsOnly && !has(words, "--zfield");
+    };
+    if (path.size() == 3 && path[0] == "vector" && path[1] == "grid") {
+        return gridReadsZ(path[2], tokens);
+    }
+    if (path == std::vector<std::string>{"vector", "rasterize"}) {
+        return has(tokens, "--3d");
+    }
+    if (!detail::isPipeline(path)) {
+        return false;
+    }
+    // A pipeline reads heights when one of its steps does: each step's words
+    // are judged on their own.
+    const std::vector<detail::PipelineWord> words = detail::pipelineWords(pipelineText(tokens));
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        if (!words[i].step) {
+            continue;
+        }
+        const std::string step = katana::core::lowered(words[i].text);
+        std::vector<std::string> own;
+        std::size_t j = i + 1;
+        for (; j < words.size() && !words[j].step; ++j) {
+            own.push_back(words[j].text);
+        }
+        if (step == "grid" && !own.empty() && gridReadsZ(katana::core::lowered(own.front()), own)) {
+            return true;
+        }
+        if (step == "rasterize" && has(own, "--3d")) {
+            return true;
+        }
+    }
+    return false;
+}
 
 Status checkTokens(const std::vector<std::string>& path, const std::vector<std::string>& tokens)
 {

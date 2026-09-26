@@ -240,14 +240,6 @@ std::string rewritten(const gp::AlgorithmSpec& spec, const std::string& word, bo
     return arg != nullptr ? "--" + arg->name + word.substr(equals) : word;
 }
 
-// The tail's options that change a file already there: they need OVERWRITE.
-bool changesExisting(const std::string& word)
-{
-    const std::string name = katana::core::lowered(word.substr(0, word.find('=')));
-    return name == "--overwrite" || name == "--overwrite-layer" || name == "--append" ||
-           name == "--update" || name == "--upsert";
-}
-
 // The long names the tail's options name outright (--input, -i).
 std::set<std::string> namedInTail(const gp::AlgorithmSpec& spec, const std::vector<std::string>& tail)
 {
@@ -377,13 +369,22 @@ Result<Prepared> runLine(Context& context, const Tokens& tokens, std::size_t at,
                              " changes or removes data that already exists; add CONFIRM to run it",
                          gp::pathText(*path));
     }
-    for (const std::string& word : tail) {
-        if (changesExisting(word) && !overwrite) {
-            return makeError(ErrorCode::InvalidArgument,
-                             word + " changes a dataset that already exists; add OVERWRITE to "
-                                    "the line to allow it",
-                             word);
-        }
+    // What GDAL's own words change, a pipeline's steps and options included
+    // however the pipeline was quoted: the algorithm's policy alone would let
+    // "pipeline read a ! update b" write into b.
+    const gp::TailEffects effects = gp::tailEffects(*path, tail);
+    if (!effects.confirmStep.empty() && !confirm) {
+        return makeError(ErrorCode::Unsupported,
+                         "the pipeline step " + effects.confirmStep +
+                             " changes data that already exists; add CONFIRM to run it",
+                         effects.confirmStep);
+    }
+    if (!effects.overwriteWord.empty() && !overwrite) {
+        return makeError(ErrorCode::InvalidArgument,
+                         effects.overwriteWord +
+                             " changes a dataset that already exists; add OVERWRITE to the line "
+                             "to allow it",
+                         effects.overwriteWord);
     }
 
     // Each FROM to its dataset argument: named, or the first required input
@@ -512,6 +513,9 @@ Result<Prepared> runLine(Context& context, const Tokens& tokens, std::size_t at,
         if (from.source.kind == Source::Kind::Drawing) {
             igeo::DrawingDatasetOptions options;
             options.crsWkt = projectCrs(context);
+            // An algorithm that reads Z is given only what has a height at
+            // every vertex: GDAL reads a missing one as 0.
+            options.requireHeights = gp::readsHeights(*path, tail);
             auto drawing = bindDrawing(context, from.source.scope, options);
             if (!drawing) {
                 return drawing.error();
