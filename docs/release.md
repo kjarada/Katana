@@ -30,7 +30,7 @@ packages, starts each one from its unpacked archive, and publishes them.
 | `Katana-X.Y.Z-win64.zip` | Windows x86-64: unzip anywhere, run `bin/katana.exe` |
 | `Katana-X.Y.Z-win64.exe` | the same tree as an installer (NSIS), with an uninstaller |
 | `Katana-X.Y.Z-linux-x86_64.tar.gz` | Linux x86-64, glibc 2.28 or later: unpack, run `bin/katana` |
-| `Katana-X.Y.Z-macos-arm64.tar.gz` | macOS 13.3 or later on Apple silicon: unpack, run `bin/katana` |
+| `Katana-X.Y.Z-macos-arm64.tar.gz` | macOS 13 or later on Apple silicon: unpack, run `bin/katana` |
 | `SHA256SUMS.txt` | the SHA-256 of each file above |
 
 Each archive holds `bin/katana`, `bin/katana_cli` and `bin/katana_mcp`, the
@@ -170,16 +170,23 @@ on Linux) before any Mac was involved: 21 of 872 translation units failed.
   GPU renderer, which the macOS build does not have, reads them.
 * Two missing standard includes (`<span>`, `<numbers>`) that libstdc++ had
   supplied through other headers.
+* Four thresholds and helpers read only by the AVX2 kernels' call sites
+  (`kValidateMinimum`, `kProjectMinimum`, `kTransformBatchMinimum`,
+  `kernelParams`) went unused on arm64, which has no kernels; they are
+  `[[maybe_unused]]`. A GCC build with `KATANA_SIMD_KERNELS=OFF` failed on
+  `kernelParams` the same way.
 
 `katana` is no longer a `MACOSX_BUNDLE`: on macOS it is `bin/katana`, as on
 Linux, so the headless checks, the tests and the package find it where they
 find it everywhere else.
 
-The minimum is macOS 13.3 (`CMAKE_OSX_DEPLOYMENT_TARGET` in
-`cmake/toolchains/katana-macos.cmake`): the first whose libc++ availability
-markup allows floating-point `std::to_chars` and `std::from_chars`. The markup
-is checked when compiling even though the libc++ that runs is the packaged
-one.
+The minimum is macOS 13 (`CMAKE_OSX_DEPLOYMENT_TARGET` in
+`cmake/toolchains/katana-macos.cmake`), the oldest Qt 6.11 supports. libc++'s
+availability markup is switched off (`_LIBCPP_DISABLE_AVAILABILITY`): it
+refuses what the deployment target's SYSTEM libc++ lacks - the first CI build
+stopped at floating-point `std::from_chars`, "introduced in macOS 26.0" - but
+the programs load the libc++ the package carries, never the system's. This is
+conda-forge's documented remedy for the same situation.
 
 The GPU renderer is not built on macOS (`src/katana_qt/gpu/CMakeLists.txt`:
 its shaders exist for Direct3D 11 and Vulkan only); the 3D view uses the

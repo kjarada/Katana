@@ -20,7 +20,7 @@ namespace {
 // BM_ProjectToPixels (bench_simd.cpp) and the kernel allowed from one point:
 // at 4 points a call it already beats the loop (0.21 against 0.23 ms per
 // 65,536 points), at 8 by 1.3x, on the splat's 512-point blocks by 2.5x.
-constexpr std::size_t kProjectMinimum = 4;
+[[maybe_unused]] constexpr std::size_t kProjectMinimum = 4; // unread without the kernels
 
 // Points projected at a time into a buffer on the stack: 4 KB of pixel
 // coordinates, which stay in L1 between the projection and the scatter.

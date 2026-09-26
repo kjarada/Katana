@@ -25,7 +25,7 @@ constexpr std::size_t kSniffBytes = 4096;
 // measured slower than the byte loop up to about 24 bytes and at most 15 ns
 // faster up to 63: not worth a second tail path, so a name or a label takes
 // the loop and pays no call.
-constexpr std::size_t kValidateMinimum = 64;
+[[maybe_unused]] constexpr std::size_t kValidateMinimum = 64; // unread without the kernels (arm64)
 
 // Windows-1252 differs from Latin-1 only in 0x80-0x9F. Source: the Unicode
 // Consortium's mapping table for CP1252 (MAPPINGS/VENDORS/MICSFT/WINDOWS/

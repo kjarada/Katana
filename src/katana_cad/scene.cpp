@@ -484,10 +484,10 @@ Rgba elevationRampColor(double t)
 namespace {
 
 // What the kernels are handed: the scalar code's constants, laid out as
-// the kParam* indices of simd/scene_kernels.hpp say.
-[[nodiscard]] std::array<double, simd::kParamCount> kernelParams(const Lift& lift,
-                                                                 const Light& light,
-                                                                 const Ramp& ramp)
+// the kParam* indices of simd/scene_kernels.hpp say. Unused where the
+// kernels are not built (arm64, KATANA_SIMD_KERNELS=OFF).
+[[maybe_unused, nodiscard]] std::array<double, simd::kParamCount>
+kernelParams(const Lift& lift, const Light& light, const Ramp& ramp)
 {
     std::array<double, simd::kParamCount> params{};
     params[simd::kParamLiftFactor] = lift.factor;
