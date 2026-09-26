@@ -425,13 +425,14 @@ ToolActions fillToolMenus(const cad::ToolCatalog& catalog, const ToolMenuTargets
 
         bool firstGroup = true;
         for (const auto& group : groupsOf(tools)) {
-            if (!firstGroup) {
-                if (menu != nullptr) {
-                    menu->addSeparator();
-                }
-                if (bar != nullptr) {
-                    bar->addSeparator();
-                }
+            // A menu titles every group, the first too, so a long one reads
+            // as its parts (Transform, Edit); a toolbar has no room for words
+            // and parts its groups with a line.
+            if (menu != nullptr) {
+                menu->addSection(qs(group.front()->group));
+            }
+            if (!firstGroup && bar != nullptr) {
+                bar->addSeparator();
             }
             firstGroup = false;
 
@@ -486,6 +487,17 @@ ToolActions fillToolMenus(const cad::ToolCatalog& catalog, const ToolMenuTargets
                 // toolbar shows of it.
                 action->setText(qs(parts->second));
                 family->addAction(action);
+            }
+            // The family's own line in the status bar says what is inside:
+            // "Circle: Center, Radius / 2 Points / 3 Points / Tan, Tan,
+            // Radius" - slashes, since a variant's name holds commas and a
+            // menu's report (--report) parts its items with semicolons.
+            for (const auto& [name, family] : familyMenus) {
+                QStringList variants;
+                for (const QAction* variant : family->actions()) {
+                    variants << QString(variant->text()).remove('&');
+                }
+                family->menuAction()->setStatusTip(qs(name) + ": " + variants.join(" / "));
             }
         }
     }

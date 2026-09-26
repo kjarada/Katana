@@ -1299,8 +1299,7 @@ void ViewportWidget::drawPrompt(QPainter& painter) const
     const QString text = QString("%1: %2  %3_").arg(QString::fromStdString(tools_.info()->name),
                                                     QString::fromStdString(tools_.prompt()),
                                                     typed_);
-    QFont font("Segoe UI");
-    font.setPixelSize(12);
+    const QFont font = theme::overlayFont(12);
     painter.setFont(font);
     const QFontMetrics metrics(font);
     const int pad = 4;
@@ -1345,7 +1344,7 @@ void ViewportWidget::drawSnapMarker(QPainter& painter) const
         break;
     }
     }
-    painter.setFont(QFont("Segoe UI", 8));
+    painter.setFont(theme::overlayFont(11));
     painter.drawText(p + QPointF(r + 4, -r - 2), cad::toString(activeSnap_->mode));
 }
 

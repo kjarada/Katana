@@ -8,6 +8,7 @@
 
 #include "katana/cad/parcel.hpp"
 #include "katana/cad/project_crs.hpp"
+#include "katana/cad/property_outline.hpp"
 #include "katana/cad/purge.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_code_verbs.hpp"
@@ -471,6 +472,8 @@ Scope     MODIFY and the UTILITY verbs: SELECTION | DRAWING | VIEW [id] [EXTENTS
           STYLE.SYMBOLSIZE=   PREVIEW reports what would change and changes nothing
 Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
           PROP RENAME old new   (selection; the type is guessed unless stated)
+          PROP TREE [scope] [WHERE k=v ...] [UNDER path] [FROM n] [LIMIT n]   the
+          properties as the tree their '/' names make, one level a reply (UNDER vertex/3)
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
 Inspect   LIST | INFO id (or #id) | STATUS [JSON] (the drawing at a glance) | HELP
@@ -2478,6 +2481,12 @@ CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)
 CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb,
                                                          const Tokens& args)
 {
+    // PROP TREE reads, and takes a scope as every reading verb does
+    // (property_outline.hpp), so it is answered before the selection is
+    // required: PROP TREE DRAWING needs none.
+    if (verb == "PROP" && !args.empty() && upper(args[0]) == "TREE") {
+        return propertyTreeReply(document_, Tokens(args.begin() + 1, args.end()), scopeViews_);
+    }
     if (auto selected = requireSelection(); !selected) {
         return selected;
     }
@@ -2509,7 +2518,8 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
     // bare `PROP key value` could not be extended without becoming
     // ambiguous, since a property may be named DELETE.
     static constexpr const char* kPropUsage =
-        "PROP LIST | SET key value [text|integer|real|boolean] | DELETE key | RENAME old new";
+        "PROP LIST | SET key value [text|integer|real|boolean] | DELETE key | RENAME old new | "
+        "TREE [scope] [UNDER path] [FROM n] [LIMIT n]";
     const std::string action = args.empty() ? std::string("LIST") : upper(args[0]);
 
     if (action == "LIST") {
