@@ -15,6 +15,8 @@
 // INFO <id> stays the interpreter's - an entity - unless a file of that name
 // exists; INFO #<id> is always the entity (takesInfo).
 
+#include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -302,10 +304,17 @@ std::vector<std::string> folderRecords(const std::filesystem::path& folder, cons
             files.push_back(std::move(record));
         }
     }
+    // GDAL and the folder walk list files in the order the file system
+    // gives them - by name on NTFS, by hash on ext4 - and a reply must not
+    // change with the machine: each list is sorted by file name, GDAL's
+    // datasets first and then the clouds PDAL reads.
+    std::ranges::sort(files);
+    const std::size_t gdalFiles = files.size();
     for (const interop::SourceDescription& cloud : found.clouds) {
         files.push_back("found file=" + value(pathText(cloud.path)) +
                         " driver=" + value(cloud.driver) + " has_crs=" + yesNo(!cloud.crs.empty()));
     }
+    std::sort(files.begin() + static_cast<std::ptrdiff_t>(gdalFiles), files.end());
     std::vector<std::string> records{"dataset file=" + value(pathText(folder)) +
                                      " kind=folder driver= crs= datasets=" +
                                      std::to_string(files.size())};

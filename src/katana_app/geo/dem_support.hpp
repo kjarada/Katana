@@ -89,10 +89,7 @@ readBandOne(const katana::gis::processing::DatasetValue& dataset);
 keepInPlace(Context& context, const std::filesystem::path& file, const std::string& name,
             const std::string& derivation, bool persisted, std::string_view arg = "output");
 
-// The georeferencing of a raster dataset, read without its values: a grid's
-// own, a file's opened for this read alone.
-[[nodiscard]] katana::core::Result<katana::gis::RasterInfo>
-rasterInfoOf(const katana::gis::processing::DatasetValue& dataset);
+// rasterInfoOf, the facts of a raster dataset, is terrain_verbs.hpp's.
 
 // `from` renamed to `to`, or copied and removed when they are on different
 // volumes; the folder made. FileExportFailure naming `to`.

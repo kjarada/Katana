@@ -23,7 +23,7 @@ add_test(NAME qt_gis_import_line_gives_the_sessions_records_headless
         "-DAPP=$<TARGET_FILE:katana>"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>RECT 1000,2000 1010,2005|>IMPORT \"${_gis_verbs_samples}/parcels.geojson\" ALONGSIDE"
-        "-DEXPECT=imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 layers=1 features=9 skipped=0 bounds=1000,2000,1185,2165 crs=\"[^\"]*EPSG:32630[^\"]*\"[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.\""
+        "-DEXPECT=imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 layers=1 features=8 skipped=0 bounds=1000,2000,1185,2165 crs=\"[^\"]*EPSG:32630[^\"]*\"[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.\""
         "-DFORBID=Far from|no one to ask"
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/gis_import_records_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")

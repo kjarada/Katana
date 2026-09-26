@@ -27,6 +27,7 @@
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/import.hpp"
+#include "terrain_verbs.hpp"
 #include "verb_table.hpp"
 
 namespace katana::app::geo {
