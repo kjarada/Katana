@@ -70,14 +70,23 @@ COMMON_SPECS = [
     "benchmark",
 ]
 
+def is_arm64() -> bool:
+    import platform
+    return platform.machine().lower() in ("aarch64", "arm64")
+
+
+# conda-forge names its Linux compilers and sysroots by target: linux-64 for
+# x86-64, linux-aarch64 for 64-bit ARM, each built to run on that machine.
+_LINUX_TARGET = "linux-aarch64" if is_arm64() else "linux-64"
+
 LINUX_SPECS = [
-    "gxx_linux-64 16.2.*",
-    "gcc_linux-64 16.2.*",
+    f"gxx_{_LINUX_TARGET} 16.2.*",
+    f"gcc_{_LINUX_TARGET} 16.2.*",
     # The C library the programs are linked against, and so the oldest one they
     # run on: glibc 2.28 is Debian 10, Ubuntu 20.04 and RHEL 8. Left free, the
     # solver takes the newest sysroot (2.39 here), and a release built on
     # Ubuntu 24.04 would refuse to start on anything older.
-    "sysroot_linux-64 2.28.*",
+    f"sysroot_{_LINUX_TARGET} 2.28.*",
     "libgl-devel",
     # Qt declares QVulkanInstance only where vulkan/vulkan.h is; the loader
     # itself comes with the machine's graphics driver.
@@ -99,7 +108,12 @@ def is_macos() -> bool:
 SPECS = COMMON_SPECS + (MACOS_SPECS if is_macos() else LINUX_SPECS)
 
 # The C++ compiler the toolchain files (cmake/toolchains/) expect in bin/.
-COMPILER = "arm64-apple-darwin20.0.0-clang++" if is_macos() else "x86_64-conda-linux-gnu-g++"
+if is_macos():
+    COMPILER = "arm64-apple-darwin20.0.0-clang++"
+elif is_arm64():
+    COMPILER = "aarch64-conda-linux-gnu-g++"
+else:
+    COMPILER = "x86_64-conda-linux-gnu-g++"
 
 # py-rattler's API has changed between releases; this is the one the script
 # is written against.

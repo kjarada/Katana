@@ -1,10 +1,10 @@
-# Builds Katana for Windows, Linux and macOS, proves each package starts on
-# its own, and publishes the three as a GitHub release (docs/release.md).
+# Builds Katana for Windows (x86-64, ARM64), Linux (x86-64, ARM64) and macOS
+# (Apple silicon), proves each package starts on its own, signs what can be
+# signed, and publishes them as a GitHub release (docs/release.md).
 #
-#   push a tag vX.Y.Z               build, then publish release vX.Y.Z
-#   Actions > Release > Run         build; with a tag given, publish it too
-#   a pull request touching the     build only, so a change to the build or
-#   build or packaging              the packaging is proven before it merges
+# It runs only when started by hand: Actions > Release > Run workflow. With a
+# tag (vX.Y.Z, matching project(Katana VERSION)) it publishes that release;
+# without one it builds and tests the packages and publishes nothing.
 #
 # Each job runs the same commands a person runs on that platform
 # (docs/building.md); nothing here is a second way of building.
@@ -12,26 +12,23 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
-  pull_request:
-    paths:
-      - ".github/workflows/release.yml"
-      - "CMakeLists.txt"
-      - "CMakePresets.json"
-      - "cmake/**"
-      - "tools/setup_linux_toolchain.py"
   workflow_dispatch:
     inputs:
       tag:
         description: "Release tag to publish, vX.Y.Z matching project(Katana VERSION). Empty: build only."
         required: false
         default: ""
+  # TEMPORARY, until this file is on main: GitHub offers "Run workflow" only
+  # for a workflow on the default branch, so the pull request that adds it is
+  # built this way. Removed before it merges.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: read
 
-# A newer push waits for the running build rather than cancelling it: the
+# A newer run waits for the running one rather than cancelling it: the
 # Windows build is most of an hour, and a cancelled one proves nothing.
 concurrency:
   group: release-${{ github.ref }}
@@ -55,9 +52,7 @@ jobs:
         run: |
           version=$(sed -n 's/^project(Katana VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           test -n "$version" || { echo "::error::no project(Katana VERSION ...) in CMakeLists.txt"; exit 1; }
-          tag=""
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tag="$GITHUB_REF_NAME"; fi
-          if [ -n "$INPUT_TAG" ]; then tag="$INPUT_TAG"; fi
+          tag="$INPUT_TAG"
           if [ -n "$tag" ] && [ "$tag" != "v$version" ]; then
             echo "::error::tag $tag does not match project(Katana VERSION $version); expected v$version"
             exit 1
@@ -67,50 +62,87 @@ jobs:
           echo "Katana $version${tag:+, publishing $tag}"
 
   windows:
-    name: Windows x86-64
+    name: ${{ matrix.name }}
     needs: version
-    runs-on: windows-2025
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # MSYS2 UCRT64 and GCC, as on the owner's machine (docs/building.md).
+          - name: Windows x86-64
+            runner: windows-2025
+            msystem: UCRT64
+            compiler: g++.exe
+            packages: gcc:p nsis:p
+            package: win64
+          # MSYS2 has no GCC for ARM64; its CLANGARM64 environment is clang
+          # and libc++, built for ARM64 Windows.
+          - name: Windows ARM64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+            compiler: clang++.exe
+            packages: clang:p
+            package: win-arm64
+    env:
+      HAS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     defaults:
       run:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
-      # The toolchain of docs/building.md, "Toolchain": MSYS2 UCRT64.
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
+          msystem: ${{ matrix.msystem }}
           update: true
           install: unzip
           pacboy: >-
-            gcc:p cmake:p ninja:p python:p nsis:p
+            ${{ matrix.packages }} cmake:p ninja:p python:p
             qt6-base:p qt6-tools:p cgal:p eigen3:p boost:p gmp:p mpfr:p
             proj:p gdal:p pdal:p nlohmann-json:p sqlite3:p
       - name: Toolchain
         run: |
-          g++ --version | head -1
+          "${{ matrix.compiler }}" --version | head -1
           cmake --version | head -1
-      # The release preset, with the compiler and prefix wherever the action
-      # installed MSYS2 (the preset names C:/msys64, a developer's default).
+      # The release preset, with the compiler and prefix of the environment
+      # the action installed (the preset names C:/msys64/ucrt64, a
+      # developer's default).
       - name: Configure
         run: |
-          ucrt=$(cygpath -m /ucrt64)
+          prefix=$(cygpath -m "$MINGW_PREFIX")
           cmake --preset release \
-            -DCMAKE_CXX_COMPILER="$ucrt/bin/g++.exe" -DCMAKE_PREFIX_PATH="$ucrt" \
+            -DCMAKE_CXX_COMPILER="$prefix/bin/${{ matrix.compiler }}" -DCMAKE_PREFIX_PATH="$prefix" \
             -DKATANA_BUILD_TESTS=OFF -DKATANA_BUILD_BENCHMARKS=OFF
       - name: Build
         run: cmake --build build/release --parallel
+      # Signing as the publisher (cmake/KatanaSign.cmake) when the repository
+      # holds a code-signing certificate: WINDOWS_CERTIFICATE (the .pfx,
+      # base64) and WINDOWS_CERTIFICATE_PASSWORD.
+      - name: Signing certificate
+        if: env.HAS_CERTIFICATE == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          pacman -S --noconfirm --needed "$MINGW_PACKAGE_PREFIX-osslsigncode"
+          echo "$CERTIFICATE" | base64 -d > "$RUNNER_TEMP/katana.pfx"
+          echo "KATANA_SIGN_PFX=$(cygpath -m "$RUNNER_TEMP/katana.pfx")" >> "$GITHUB_ENV"
+          echo "KATANA_SIGN_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
       - name: Package
         run: cmake --build build/release --target package
       # The zip is what a user downloads: unpacked with nothing of MSYS2 on
-      # PATH, the command line must draw and save a drawing and the window
-      # must build itself headless.
+      # PATH, the command line must draw and save a drawing, read a CRS from
+      # PROJ's database, import through PDAL and GDAL, and the window must
+      # build itself headless.
       - name: Smoke test the package
+        timeout-minutes: 15
         run: |
           set -eux
+          package="Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}"
           rm -rf smoke && mkdir smoke
-          unzip -q "build/release/Katana-${{ needs.version.outputs.version }}-win64.zip" -d smoke
-          root="smoke/Katana-${{ needs.version.outputs.version }}-win64"
+          unzip -q "build/release/$package.zip" -d smoke
+          root="smoke/$package"
           cp -r samples/site_plan smoke/project
           export PATH=/c/Windows/System32:/c/Windows:/usr/bin
           "$root/bin/katana_cli.exe" -c "RECT 0,0 30,20" -c "SAVE smoke/rect.katana"
@@ -123,15 +155,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: screenshot-win64
+          name: screenshot-${{ matrix.package }}
           path: smoke/window.png
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
-          name: katana-windows
+          name: katana-${{ matrix.package }}
           path: |
-            build/release/Katana-*-win64.zip
-            build/release/Katana-*-win64.exe
+            build/release/Katana-*-${{ matrix.package }}.zip
+            build/release/Katana-*-${{ matrix.package }}.exe
           if-no-files-found: error
 
   unix:
@@ -146,13 +178,18 @@ jobs:
           - name: Linux x86-64
             runner: ubuntu-24.04
             preset: linux-release
-            artifact: katana-linux
             package: linux-x86_64
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            preset: linux-release
+            package: linux-aarch64
           - name: macOS arm64
             runner: macos-15
             preset: macos-release
-            artifact: katana-macos
             package: macos-arm64
+    env:
+      HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
     steps:
       - uses: actions/checkout@v4
       - run: echo "KATANA_TOOLCHAIN=$HOME/katana-toolchain" >> "$GITHUB_ENV"
@@ -180,14 +217,53 @@ jobs:
         run: cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=OFF -DKATANA_BUILD_BENCHMARKS=OFF
       - name: Build
         run: cmake --build build/${{ matrix.preset }} --parallel
+      # A Developer ID for the publisher, when the repository holds one:
+      # MACOS_CERTIFICATE (the .p12, base64), MACOS_CERTIFICATE_PASSWORD and
+      # MACOS_SIGN_IDENTITY ("Developer ID Application: <name> (<team>)").
+      # Imported into a keychain of the run's own (cmake/KatanaSign.cmake).
+      - name: Signing identity
+        if: runner.os == 'macOS' && env.HAS_CERTIFICATE == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          keychain="$RUNNER_TEMP/katana.keychain-db"
+          keychain_password=$(uuidgen)
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/katana.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/katana.p12" -P "$PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain"
+          security list-keychain -d user -s "$keychain"
+          echo "KATANA_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
       - name: Package
         run: cmake --build build/${{ matrix.preset }} --target package
+      # Apple's notary service checks the signed programs and records them,
+      # so Gatekeeper opens them without a warning. APPLE_ID,
+      # APPLE_APP_PASSWORD (an app-specific password) and APPLE_TEAM_ID.
+      - name: Notarise
+        if: runner.os == 'macOS' && env.HAS_CERTIFICATE == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          package="Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}"
+          mkdir -p notarise
+          tar -xzf "build/${{ matrix.preset }}/$package.tar.gz" -C notarise
+          ditto -c -k --keepParent "notarise/$package" notarise.zip
+          xcrun notarytool submit notarise.zip --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
       # What every Linux desktop has and a CI image may not: the graphics
       # driver's GL and EGL loaders, which the package leaves to the system
       # (docs/release.md).
       - name: System libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends libegl1 libgl1 libopengl0 libfontconfig1
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libopengl0 libfontconfig1
       # The tarball is what a user downloads, so it is tested with the
       # toolchain prefix moved out of reach: anything the package failed to
       # carry fails to load here rather than on the user's machine.
@@ -223,7 +299,7 @@ jobs:
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: katana-${{ matrix.package }}
           path: build/${{ matrix.preset }}/Katana-*-${{ matrix.package }}.tar.gz
           if-no-files-found: error
 
@@ -234,6 +310,8 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      HAS_GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -243,6 +321,22 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: sha256sum Katana-* | tee SHA256SUMS.txt
+      # Every file signed with the publisher's OpenPGP key, when the
+      # repository holds it (GPG_PRIVATE_KEY, armoured, and GPG_PASSPHRASE):
+      # a .asc beside each, checked with `gpg --verify` (docs/release.md).
+      - name: OpenPGP signatures
+        if: env.HAS_GPG_KEY == 'true'
+        working-directory: dist
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          for file in Katana-* SHA256SUMS.txt; do
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+              --armor --detach-sign "$file"
+          done
+          gpg --armor --export > katana-signing-key.asc
       # A release that already exists (a re-run) gets its files replaced, so
       # publishing is safe to repeat.
       - name: Release
