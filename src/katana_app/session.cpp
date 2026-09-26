@@ -639,7 +639,12 @@ bool exportPath(katana::cad::Document& document, const std::string& text)
         }
         return true;
     }
-    auto result = interop::exportVector(document.model(), target);
+    // The project's coordinate system goes into the file, and is what a KML
+    // or GPX is converted to longitude and latitude from (docs/interop.md,
+    // "Fidelity").
+    interop::VectorExportOptions options;
+    options.projectionWkt = document.metadata().coordinateSystem;
+    auto result = interop::exportVector(document.model(), target, options);
     if (!result) {
         std::cerr << "error: " << result.error().describe() << '\n';
         return false;

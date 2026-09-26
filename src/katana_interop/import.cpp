@@ -7,22 +7,24 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <string>
+#include <variant>
 
 #include "katana/core/text.hpp"
+#include "katana/entity/entity_geometry.hpp"
+#include "katana/gis/processing.hpp"
+#include "katana/interop/geo/drawing_dataset.hpp"
 
 namespace katana::interop {
 namespace {
 
+namespace geo = katana::interop::geo;
+namespace gp = katana::gis::processing;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
 using katana::entity::Entity;
-using katana::geometry::Box2;
-using katana::geometry::Point2;
-using katana::geometry::Polyline2;
-using katana::geometry::Segment2;
-using katana::geometry::Vec2;
 
 std::string lowerExtension(const std::filesystem::path& path)
 {
@@ -61,60 +63,78 @@ std::string sanitizeLayerName(std::string name)
     return name.substr(first, last - first + 1);
 }
 
-Point2 shifted(const katana::gis::GeoPoint& point, const std::optional<Vec2>& origin)
+// A field's value as a property: absent is no property, not an empty one.
+std::optional<katana::entity::PropertyValue> propertyOf(const gp::FieldValue& value)
 {
-    if (origin.has_value()) {
-        return Point2(point.x - origin->x, point.y - origin->y);
-    }
-    return Point2(point.x, point.y);
+    return std::visit(
+        [](const auto& held) -> std::optional<katana::entity::PropertyValue> {
+            using Held = std::decay_t<decltype(held)>;
+            if constexpr (std::is_same_v<Held, std::monostate>) {
+                return std::nullopt;
+            } else {
+                return katana::entity::PropertyValue(held);
+            }
+        },
+        value);
 }
 
-// A vertex's height: the file's Z when its geometry has one and it is finite,
-// otherwise none. Never 0.0 for "none" - absent is not zero.
-std::optional<double> heightOf(const katana::gis::GeoPoint& raw, bool hasZ)
+// The box around a feature's points, in the file's own coordinates: what the
+// online import's area is tested against.
+katana::gis::CrsBox boxOf(const gp::Feature& feature)
 {
-    return hasZ && std::isfinite(raw.z) ? std::optional<double>(raw.z) : std::nullopt;
-}
-
-// A string's vertices in plan with their heights, parallel.
-struct Vertices {
-    std::vector<Point2> points;
-    std::vector<std::optional<double>> heights;
-    // Duplicates dropped whose height differed from the vertex kept.
-    std::size_t heightsLost = 0;
-};
-
-// Drops consecutive duplicates, which shapefiles are full of and which would
-// make a zero-length segment the model then rejects. A duplicate in plan can
-// still differ in height - a vertical step in a 3D string - and that height
-// is the one thing lost here, so it is counted for the warning.
-Vertices distinctVertices(const std::vector<katana::gis::GeoPoint>& source, bool hasZ,
-                          const std::optional<Vec2>& origin)
-{
-    Vertices out;
-    out.points.reserve(source.size());
-    out.heights.reserve(source.size());
-    for (const katana::gis::GeoPoint& raw : source) {
-        if (!std::isfinite(raw.x) || !std::isfinite(raw.y)) {
-            continue;
+    katana::gis::CrsBox box{std::numeric_limits<double>::infinity(),
+                            std::numeric_limits<double>::infinity(),
+                            -std::numeric_limits<double>::infinity(),
+                            -std::numeric_limits<double>::infinity()};
+    for (const katana::gis::VectorGeometry& part : feature.parts) {
+        for (const auto& ring : part.parts) {
+            for (const katana::gis::GeoPoint& point : ring) {
+                box.minX = std::min(box.minX, point.x);
+                box.minY = std::min(box.minY, point.y);
+                box.maxX = std::max(box.maxX, point.x);
+                box.maxY = std::max(box.maxY, point.y);
+            }
         }
-        const Point2 point = shifted(raw, origin);
-        const std::optional<double> z = heightOf(raw, hasZ);
-        if (!out.points.empty() && out.points.back() == point) {
-            out.heightsLost += z != out.heights.back() ? 1u : 0u;
-            continue;
-        }
-        out.points.push_back(point);
-        out.heights.push_back(z);
     }
-    return out;
+    return box;
 }
 
-void copyAttributes(const katana::gis::VectorFeature& feature, Entity& entity)
+// Every part of every feature moved from one CRS to another, by the one
+// reprojection (gis::reprojectFeatures), heights untouched. An arc's three
+// points move with the rest; a conformal projection keeps an arc that small
+// round to far below a millimetre, and no web service sends arcs.
+katana::core::Status reprojectTable(gp::FeatureTable& table, const std::string& from,
+                                    const std::string& to)
 {
-    for (const auto& [key, value] : feature.attributes) {
-        entity.properties.emplace(key, value);
+    std::vector<katana::gis::VectorFeature> geometries;
+    for (const gp::Feature& feature : table.features) {
+        for (const katana::gis::VectorGeometry& part : feature.parts) {
+            geometries.push_back(katana::gis::VectorFeature{part, {}});
+        }
     }
+    if (geometries.empty()) {
+        return {};
+    }
+    auto moved = katana::gis::reprojectFeatures(std::move(geometries), from, to);
+    if (!moved) {
+        return moved.error();
+    }
+    std::size_t next = 0;
+    for (gp::Feature& feature : table.features) {
+        for (katana::gis::VectorGeometry& part : feature.parts) {
+            part = std::move((*moved)[next++].geometry);
+        }
+    }
+    return {};
+}
+
+// "1 TIN", "3 polyhedral surfaces": what a read left out, for a warning.
+std::string skippedGeometry(const std::string& what, std::uint64_t count)
+{
+    if (what == "tin") {
+        return std::to_string(count) + (count == 1 ? " TIN" : " TINs");
+    }
+    return std::to_string(count) + " " + what + (count == 1 ? "" : " geometries");
 }
 
 } // namespace
@@ -180,9 +200,24 @@ SourceKind kindForPath(const std::filesystem::path& path)
 Result<VectorImportResult> importVector(const std::filesystem::path& path,
                                         const VectorImportOptions& options)
 {
+    if (!(options.curveTolerance > 0.0) || !std::isfinite(options.curveTolerance)) {
+        return makeError(ErrorCode::InvalidArgument, "the curve tolerance must be positive",
+                         katana::core::formatExactReal(options.curveTolerance));
+    }
     auto dataset = katana::gis::GdalDataset::open(path);
     if (!dataset.ok()) {
         return dataset.error();
+    }
+    // A CSV's geometry columns (WKT, or X, Y and Z) are its geometry, not
+    // fields as well: kept, each entity would carry its own coordinates as a
+    // property that goes stale the moment it is moved. Z is a height when the
+    // file says X and Y are coordinates (its .csvt, as EXPORT writes one).
+    if ((*dataset)->driverName() == "CSV") {
+        dataset = katana::gis::GdalDataset::open(path, {"KEEP_GEOM_COLUMNS=NO",
+                                                        "Z_POSSIBLE_NAMES=Z"});
+        if (!dataset.ok()) {
+            return dataset.error();
+        }
     }
     if (!(*dataset)->hasVector()) {
         return makeError(ErrorCode::InvalidArgument, "file holds no vector layers",
@@ -222,8 +257,10 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
 
     const std::string sourceName = path.filename().string();
     std::uint64_t remaining = options.maxFeatures;
-    std::size_t heightsLost = 0;
     std::size_t heightAttributesReplaced = 0;
+    geo::FeaturePieceCounts counts;
+    std::map<std::string, std::uint64_t> skippedGeometries;
+    const geo::FeaturePieceOptions pieceOptions{options.originShift, options.curveTolerance};
 
     // A source's Z becomes the heights every other part of Katana reads
     // (entity.hpp). A feature without one gets no height property at all.
@@ -233,8 +270,10 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
             // A 2D feature's "elevation" attribute that is a number IS its
             // height: it is how exportVector writes the heights a 2D layer
             // cannot hold in its geometry (a shapefile mixing entities with
-            // and without them), so a round trip keeps them. Attributes arrive
-            // as text; the list form, "elevations", is text anyway.
+            // and without them), so a round trip keeps them. A typed field
+            // arrives as a number already; a format without types (a CSV
+            // without its .csvt) gives text, read here. The list form,
+            // "elevations", is text anyway.
             const auto found = entity.properties.find(katana::entity::kElevationProperty);
             if (found != entity.properties.end()) {
                 if (const auto* text = std::get_if<std::string>(&found->second)) {
@@ -269,30 +308,33 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                                       "the first layer; coordinates are imported unchanged");
         }
 
-        auto features = (*dataset)->readFeatures(index, remaining);
-        if (!features.ok()) {
-            return features.error();
+        // The one read (gdal_adapter.hpp): typed fields, and curves kept as
+        // arcs for featurePieces to make Katana's arcs and circles of.
+        katana::gis::VectorReadOptions readOptions;
+        readOptions.maxFeatures = remaining;
+        readOptions.keepArcs = true;
+        katana::gis::VectorReadReport report;
+        auto table = (*dataset)->readTable(index, readOptions, &report);
+        if (!table.ok()) {
+            return table.error();
+        }
+        for (const auto& [what, count] : report.skipped) {
+            if (what != "no geometry") {
+                skippedGeometries[what] += count;
+            }
+        }
+        for (std::string& warning : report.warnings) {
+            result.warnings.push_back(std::move(warning));
         }
         if (options.sourceFilter) {
             const katana::gis::CrsBox& area = *options.sourceFilter;
-            std::erase_if(*features, [&](const katana::gis::VectorFeature& feature) {
-                katana::gis::CrsBox box{std::numeric_limits<double>::infinity(),
-                                        std::numeric_limits<double>::infinity(),
-                                        -std::numeric_limits<double>::infinity(),
-                                        -std::numeric_limits<double>::infinity()};
-                for (const auto& part : feature.geometry.parts) {
-                    for (const katana::gis::GeoPoint& point : part) {
-                        box.minX = std::min(box.minX, point.x);
-                        box.minY = std::min(box.minY, point.y);
-                        box.maxX = std::max(box.maxX, point.x);
-                        box.maxY = std::max(box.maxY, point.y);
-                    }
-                }
+            std::erase_if(table->features, [&](const gp::Feature& feature) {
+                const katana::gis::CrsBox box = boxOf(feature);
                 return box.maxX < area.minX || box.minX > area.maxX || box.maxY < area.minY ||
                        box.minY > area.maxY;
             });
         }
-        if (!options.targetCrs.empty() && !features->empty()) {
+        if (!options.targetCrs.empty() && !table->features.empty()) {
             const std::string& source =
                 info.projectionWkt.empty() ? options.assumedSourceCrs : info.projectionWkt;
             if (source.empty()) {
@@ -301,183 +343,107 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                                  "into the project's",
                                  info.name);
             }
-            auto moved = katana::gis::reprojectFeatures(std::move(*features), source,
-                                                        options.targetCrs);
-            if (!moved) {
+            if (auto moved = reprojectTable(*table, source, options.targetCrs); !moved) {
                 return moved.error();
             }
-            *features = std::move(*moved);
         }
 
-        for (const katana::gis::VectorFeature& feature : *features) {
+        // The field that names each entity's layer: `layer` by default, which
+        // is what Katana's own exports write and, matched case-insensitively,
+        // DXF's `Layer` too.
+        std::optional<std::size_t> layerField;
+        if (options.targetLayer.empty() && !options.layerAttribute.empty()) {
+            for (std::size_t f = 0; f < table->fields.size(); ++f) {
+                if (katana::core::equalsIgnoringCase(table->fields[f].name,
+                                                     options.layerAttribute)) {
+                    layerField = f;
+                    break;
+                }
+            }
+        }
+
+        std::uint64_t number = 0;
+        for (const gp::Feature& feature : table->features) {
             ++result.featuresRead;
+            ++number;
 
             // The layer THIS feature belongs on: its own layer attribute when
             // it has one and the caller has not said "put everything here".
             std::string entityLayer = targetLayer;
-            if (options.targetLayer.empty() && !options.layerAttribute.empty()) {
-                for (const auto& [name, value] : feature.attributes) {
-                    if (katana::core::equalsIgnoringCase(name, options.layerAttribute)) {
-                        const std::string named = sanitizeLayerName(value);
-                        // sanitizeLayerName turns a blank into "IMPORT"; a
-                        // blank attribute means "no layer given", not that.
-                        if (value.find_first_not_of(" \t\r\n") != std::string::npos) {
-                            entityLayer = named;
-                        }
-                        break;
+            if (layerField && *layerField < feature.values.size()) {
+                if (const auto value = propertyOf(feature.values[*layerField])) {
+                    const std::string named = katana::entity::toString(*value);
+                    // sanitizeLayerName turns a blank into "IMPORT"; a blank
+                    // attribute means "no layer given", not that.
+                    if (named.find_first_not_of(" \t\r\n") != std::string::npos) {
+                        entityLayer = sanitizeLayerName(named);
                     }
                 }
-            }
-            if (!contains(result.layersNeeded, entityLayer)) {
-                result.layersNeeded.push_back(entityLayer);
             }
 
-            auto makeEntity = [&](katana::entity::Geometry geometry,
-                                  const std::vector<std::optional<double>>& heights) {
-                Entity entity;
-                entity.geometry = std::move(geometry);
-                entity.layer = entityLayer;
-                if (options.attributesAsProperties) {
-                    copyAttributes(feature, entity);
+            katana::entity::PropertyMap properties;
+            if (options.attributesAsProperties) {
+                for (std::size_t f = 0; f < table->fields.size() && f < feature.values.size();
+                     ++f) {
+                    if (auto value = propertyOf(feature.values[f])) {
+                        properties.emplace(table->fields[f].name, std::move(*value));
+                    }
                 }
-                applyHeights(entity, heights);
-                entity.metadata.emplace("source.file", sourceName);
-                entity.metadata.emplace("source.layer", info.name);
-                result.entities.push_back(std::move(entity));
-            };
-
-            switch (feature.geometry.kind) {
-            case katana::gis::GeometryKind::Point: {
-                if (feature.geometry.parts.empty() || feature.geometry.parts.front().empty()) {
-                    ++result.featuresSkipped;
-                    break;
-                }
-                const katana::gis::GeoPoint& raw = feature.geometry.parts.front().front();
-                const Point2 position = shifted(raw, options.originShift);
-                if (!std::isfinite(position.x) || !std::isfinite(position.y)) {
-                    ++result.featuresSkipped;
-                    break;
-                }
-                result.bounds.expand(position);
-                makeEntity(katana::entity::PointGeometry{position},
-                           {heightOf(raw, feature.geometry.hasZ)});
-                break;
             }
-            case katana::gis::GeometryKind::LineString: {
-                Vertices vertices = distinctVertices(feature.geometry.parts.front(),
-                                                     feature.geometry.hasZ, options.originShift);
-                heightsLost += vertices.heightsLost;
-                std::vector<Point2>& points = vertices.points;
-                // A line that ends where it began is a closed one. GDAL reads a
-                // DXF CIRCLE, and a closed LWPOLYLINE, as a line string that
-                // repeats its first point, and taken as it came a circle was
-                // an OPEN polyline with a seam: no area, no hatch, and
-                // Explode or Offset treating it as a path with two ends. As a
-                // polygon ring does, the repeat becomes the `closed` flag.
-                // Four points at least: three with the ends equal are a line
-                // there and back, which encloses nothing. The ends must meet
-                // in height too (both absent, or equal): a ramp or helix that
-                // comes back over its start a level higher is an open string,
-                // and closing it would throw away its top height. So this rule
-                // never drops a height, and a closed DXF shape, whose ends are
-                // at one height, still closes.
-                bool closed = false;
-                if (points.size() >= 4 && points.front() == points.back() &&
-                    vertices.heights.front() == vertices.heights.back()) {
-                    points.pop_back();
-                    vertices.heights.pop_back();
-                    closed = true;
-                }
-                if (points.size() < 2) {
-                    ++result.featuresSkipped;
-                    break;
-                }
-                for (const Point2& point : points) {
-                    result.bounds.expand(point);
-                }
-                // Two points is a line in every CAD program; anything longer is
-                // a polyline. Importing a two-point line as a polyline would
-                // make it unfilletable and odd to edit.
-                if (points.size() == 2) {
-                    makeEntity(Segment2{points.front(), points.back()}, vertices.heights);
-                } else {
-                    Polyline2 polyline;
-                    polyline.vertices = points;
-                    polyline.closed = closed;
-                    makeEntity(std::move(polyline), vertices.heights);
-                }
-                break;
-            }
-            case katana::gis::GeometryKind::Polygon: {
-                // The entity model has no polygon-with-holes type, so each ring
-                // becomes its own closed polyline. The ring's role is recorded
-                // in metadata so the information is not simply lost.
-                bool wroteAnyRing = false;
-                for (std::size_t ring = 0; ring < feature.geometry.parts.size(); ++ring) {
-                    Vertices vertices = distinctVertices(feature.geometry.parts[ring],
-                                                         feature.geometry.hasZ,
-                                                         options.originShift);
-                    heightsLost += vertices.heightsLost;
-                    std::vector<Point2>& points = vertices.points;
-                    // A closed ring repeats its first point; the Polyline2
-                    // `closed` flag expresses that instead.
-                    if (points.size() > 1 && points.front() == points.back()) {
-                        points.pop_back();
-                        heightsLost +=
-                            vertices.heights.back() != vertices.heights.front() ? 1u : 0u;
-                        vertices.heights.pop_back();
-                    }
-                    if (points.size() < 3) {
-                        continue;
-                    }
-                    for (const Point2& point : points) {
-                        result.bounds.expand(point);
-                    }
-                    Polyline2 polyline;
-                    polyline.vertices = std::move(points);
-                    polyline.closed = true;
 
+            // Which feature a ring came from, so a hole joins its own exterior
+            // when the drawing is read as features again (drawing_dataset.hpp):
+            // the file, the layer, the feature and the part.
+            const std::string featureKey =
+                sourceName + "|" + info.name + "#" + std::to_string(number);
+            bool wroteAny = false;
+            for (std::size_t p = 0; p < feature.parts.size(); ++p) {
+                std::vector<geo::FeaturePiece> pieces =
+                    geo::featurePieces(feature.parts[p], pieceOptions, counts);
+                for (geo::FeaturePiece& piece : pieces) {
                     Entity entity;
-                    entity.geometry = std::move(polyline);
+                    entity.geometry = std::move(piece.geometry);
                     entity.layer = entityLayer;
-                    if (options.attributesAsProperties) {
-                        copyAttributes(feature, entity);
-                    }
-                    applyHeights(entity, vertices.heights);
+                    entity.properties = properties;
+                    applyHeights(entity, piece.heights);
                     entity.metadata.emplace("source.file", sourceName);
                     entity.metadata.emplace("source.layer", info.name);
-                    entity.metadata.emplace("source.ring",
-                                            std::string(ring == 0 ? "exterior" : "hole"));
+                    if (piece.ring) {
+                        // The entity model has no polygon-with-holes type, so
+                        // each ring is its own closed polyline, and its role
+                        // is recorded so the area can be put together again.
+                        entity.metadata.emplace("source.ring", *piece.ring);
+                        entity.metadata.emplace("source.part",
+                                                featureKey + "." + std::to_string(p + 1));
+                    }
+                    result.bounds.expand(katana::entity::boundingBox(entity.geometry));
+                    if (!contains(result.layersNeeded, entityLayer)) {
+                        result.layersNeeded.push_back(entityLayer);
+                    }
                     result.entities.push_back(std::move(entity));
-                    wroteAnyRing = true;
+                    wroteAny = true;
                 }
-                if (!wroteAnyRing) {
-                    ++result.featuresSkipped;
-                }
-                break;
             }
-            case katana::gis::GeometryKind::Unknown:
+            if (!wroteAny) {
                 ++result.featuresSkipped;
-                break;
-            }
-
-            if (options.maxFeatures != 0 && result.featuresRead >= options.maxFeatures) {
-                break;
             }
         }
 
         if (options.maxFeatures != 0) {
-            if (result.featuresRead >= options.maxFeatures) {
+            if (report.featuresRead >= remaining) {
                 if (index < lastLayer) {
                     result.warnings.push_back(
                         "the feature limit was reached; later layers were not read");
                 }
                 break;
             }
-            remaining = options.maxFeatures - result.featuresRead;
+            remaining -= report.featuresRead;
         }
     }
 
+    for (const auto& [what, count] : skippedGeometries) {
+        result.skipped[what] += count;
+    }
     if (result.entities.empty()) {
         return makeError(ErrorCode::InvalidArgument,
                          "no geometry in this file could be imported",
@@ -486,11 +452,26 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
     }
     if (result.featuresSkipped > 0) {
         result.warnings.push_back(std::to_string(result.featuresSkipped) +
-                                  " features were skipped: empty or degenerate geometry");
+                                  " features were skipped: empty or degenerate geometry, or only "
+                                  "geometry Katana has no entity for");
     }
-    if (heightsLost > 0) {
+    for (const auto& [what, count] : skippedGeometries) {
         result.warnings.push_back(
-            std::to_string(heightsLost) +
+            skippedGeometry(what, count) + " left out: " +
+            (what == "tin" || what == "polyhedral surface"
+                 ? std::string("Katana has no entity that is a surface of faces")
+                 : std::string("Katana has no entity for it")));
+    }
+    if (counts.curvesMadeChords > 0) {
+        result.warnings.push_back(
+            std::to_string(counts.curvesMadeChords) +
+            " arcs within curves that are not one arc or circle were made chords within " +
+            katana::core::formatExactReal(options.curveTolerance) +
+            " units: Katana has no entity for a line of several arcs");
+    }
+    if (counts.heightsLost > 0) {
+        result.warnings.push_back(
+            std::to_string(counts.heightsLost) +
             " vertices were dropped for standing on the vertex before them in plan, and their "
             "different heights went with them: a vertical step cannot be drawn in plan");
     }
