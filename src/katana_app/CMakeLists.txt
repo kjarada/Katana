@@ -874,3 +874,22 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "considered=2 placed=1 displaced=0 suppressed=1 orphaned=0[\r\n]+label=3 piece=0 [^\r\n]*[\r\n]+label=4 piece=0 suppressed=yes.*updated label id=4.*considered=2 placed=2 displaced=1 suppressed=0 orphaned=0")
 endif()
+
+# The properties as a tree, one level a line (property_outline.hpp; the
+# Properties panel reads the same outline). A point given two vertices'
+# attributes and a group: the top level has the group, its own value and the
+# vertex branch; UNDER vertex lists vertex 2 before vertex 10 (numbers, not
+# text); DRAWING with a second point says where the two differ.
+if(KATANA_BUILD_TESTS)
+    add_test(NAME cli.prop_tree_reads_the_attributes_one_level_at_a_time
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "POINT 0,0" -c "SELECT 1"
+                -c "PROP SET vertex/10/QL C" -c "PROP SET vertex/2/QL A"
+                -c "PROP SET Asset/Owner Council" -c "PROP SET code KERB"
+                -c "PROP TREE" -c "PROP TREE UNDER vertex"
+                -c "POINT 5,5" -c "SELECT 2" -c "PROP SET code POLE" -c "PROP TREE DRAWING")
+    set_tests_properties(cli.prop_tree_reads_the_attributes_one_level_at_a_time PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "scope=selection matched=1 under=\"\" entries=3 from=0 shown=3[\r\n]+path=Asset children=1 values=1[\r\n]+path=code value=KERB type=text[\r\n]+path=vertex children=2 values=2[\r\n]+scope=selection matched=1 under=vertex entries=2 from=0 shown=2[\r\n]+path=vertex/2 children=1 values=1[\r\n]+path=vertex/10 children=1 values=1.*scope=drawing matched=2 under=\"\" entries=3 from=0 shown=3[\r\n]+path=Asset children=1 values=1[\r\n]+path=code varies=yes holders=2"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()

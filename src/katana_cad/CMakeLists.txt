@@ -26,6 +26,7 @@ add_library(katana_cad STATIC
     layer_overrides.cpp
     view_set.cpp
     scope_verbs.cpp
+    property_outline.cpp
 )
 # The interactive tools (include/katana/cad/interactive_tool.hpp) are globbed:
 # each family is written by its own author, often at the same time as the
