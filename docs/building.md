@@ -140,6 +140,24 @@ too, since 2026-09-26 ("Bundling"). The customisation compiled in from
 `resources/customisation/` is third-party material kept out of the
 repository - the tests that need it skip without it, on every platform.
 
+## Windows on ARM64
+
+MSYS2's CLANGARM64 environment has the same libraries for ARM64 Windows,
+with clang and libc++ (it has no GCC for ARM64). The `release` preset works
+with its compiler named on the command line, as the release workflow does:
+
+```sh
+cmake --preset release -DCMAKE_CXX_COMPILER=C:/msys64/clangarm64/bin/clang++.exe \
+      -DCMAKE_PREFIX_PATH=C:/msys64/clangarm64
+```
+
+## Linux on ARM64
+
+`tools/setup_linux_toolchain.py` run on an ARM64 machine installs
+conda-forge's `linux-aarch64` GCC 16.2, sysroot and libraries, and
+`cmake/toolchains/katana-linux.cmake` picks the `aarch64-conda-linux-gnu`
+compilers by the host's processor; the `linux-*` presets are the same.
+
 ## macOS
 
 Katana builds on macOS on Apple silicon with the same script and the same
@@ -463,7 +481,7 @@ possible as a packaging project of its own.
 
 ## Continuous integration
 
-`.github/workflows/release.yml` builds and packages Windows, Linux and macOS
-on a pull request that changes the build, and publishes a GitHub release on a
-`v*` tag (`docs/release.md`). It does not run the tests: there is no CI for
+`.github/workflows/release.yml`, started by hand, builds and packages Windows
+and Linux on x86-64 and ARM64 and macOS on Apple silicon, and publishes a
+GitHub release when given a tag (`docs/release.md`). It does not run the tests: there is no CI for
 the suite (audit BLD-01, OPEN), and `ctest`, run by hand, is the whole gate.
