@@ -4159,17 +4159,9 @@ std::unique_ptr<DatasetInfoDialog> MainWindow::makeDatasetInfo(const QString& pa
 
 bool MainWindow::awaitJob(const VerbOutcome& started, std::function<void(const VerbOutcome&)> done)
 {
-    // The job a line started says so in its reply, as a record:
-    // job id=<n> title="..." state=started (geo/geo_workbench.hpp).
-    std::optional<JobId> job;
-    for (const katana::app::geo::Record& record :
-         katana::app::geo::parseRecords(started.reply.toStdString())) {
-        if (record.kind == "job" && record.get("state") == std::optional<std::string>("started")) {
-            if (const auto id = katana::core::parseInteger(record.get("id").value_or(""))) {
-                job = static_cast<JobId>(*id);
-            }
-        }
-    }
+    // The job a line started says so in its reply, as a record
+    // (startedJob, geo/geo_workbench.hpp).
+    const std::optional<JobId> job = startedJob(started.reply);
     if (!job || geo_ == nullptr || !JobRunner::of(*this).isActive(*job)) {
         return false;
     }

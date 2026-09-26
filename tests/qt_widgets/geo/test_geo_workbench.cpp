@@ -135,4 +135,24 @@ TEST(GeoWorkbench, AnInteractiveRunSaysItStartedAndACancelAppliesNothing)
     EXPECT_FALSE(window.document.model().layers.contains("gis/buffer"));
 }
 
+// The one reader of the record an interactive run logs reads the one
+// writer's line back, on whichever line of a reply it stands - the dialogs
+// and the window's awaitJob each had their own pattern - and a title with a
+// quote in it, which the writer now escapes as any record's value.
+TEST(GeoWorkbench, TheStartedRecordReadsBackAsItsJob)
+{
+    using katana::qt::startedJob;
+    using katana::qt::startedRecord;
+    EXPECT_EQ(startedRecord(7, "GDAL vector buffer"),
+              "job id=7 title=\"GDAL vector buffer\" state=started");
+    EXPECT_EQ(startedJob(startedRecord(7, "GDAL vector buffer")), std::optional<JobId>(7));
+    EXPECT_EQ(startedJob(startedRecord(12, "EXPORT \"a b\".gpkg")), std::optional<JobId>(12));
+    EXPECT_EQ(startedJob("scope scope=drawing matched=1\n" + startedRecord(3, "x")),
+              std::optional<JobId>(3));
+    // A reply that started none - a headless run's records - is no job.
+    EXPECT_EQ(startedJob("gdal algorithm=\"vector buffer\" seconds=0.001"), std::nullopt);
+    EXPECT_EQ(startedJob("job id=4 title=x state=finished"), std::nullopt);
+    EXPECT_EQ(startedJob(""), std::nullopt);
+}
+
 } // namespace

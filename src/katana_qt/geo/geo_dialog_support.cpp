@@ -9,7 +9,6 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -71,18 +70,6 @@ Result<QString> lineWord(const QString& text, const QString& field)
                              .toStdString());
     }
     return QString::fromStdString(*word);
-}
-
-std::optional<JobId> startedJob(const QString& reply)
-{
-    static const QRegularExpression started(
-        QStringLiteral("^job id=(\\d+) title=\".*\" state=started$"),
-        QRegularExpression::MultilineOption);
-    const QRegularExpressionMatch match = started.match(reply);
-    if (!match.hasMatch()) {
-        return std::nullopt;
-    }
-    return match.captured(1).toULongLong();
 }
 
 QString firstRecord(const QString& reply, const QString& kind)

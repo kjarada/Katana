@@ -81,10 +81,6 @@ struct GeoDialogContext {
 // which no word of a line can carry, and for an empty word.
 [[nodiscard]] katana::core::Result<QString> lineWord(const QString& text, const QString& field);
 
-// The job a runner's reply says it started: `job id=<n> title="..."
-// state=started`, the executor's answer to an interactive run.
-[[nodiscard]] std::optional<JobId> startedJob(const QString& reply);
-
 // A reply's lines that are records of `kind` ("output", "scope" ...): what a
 // dialog reads its status from.
 [[nodiscard]] QString firstRecord(const QString& reply, const QString& kind);

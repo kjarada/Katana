@@ -7,7 +7,12 @@
 #include <QMenu>
 
 #include <memory>
+#include <optional>
+#include <string>
 #include <utility>
+
+#include "geo/replies.hpp"
+#include "katana/core/text.hpp"
 
 namespace katana::qt {
 
@@ -127,9 +132,7 @@ bool GeoWorkbench::runLine(const QString& line)
         // Nobody to wait for a result, and the next line may read it.
         runner.waitFor(id);
     } else {
-        services_.log("job id=" + QString::number(id) + " title=\"" + qs(prepared->title) +
-                          "\" state=started",
-                      false);
+        services_.log(startedRecord(id, qs(prepared->title)), false);
     }
     return true;
 }
@@ -161,6 +164,28 @@ void GeoMenus::addToTerrain(const QString& title, const QString& name, QAction* 
         menu->setObjectName(name);
     }
     menu->addAction(action);
+}
+
+QString startedRecord(JobId id, const QString& title)
+{
+    return "job id=" + QString::number(id) +
+           " title=" + QString::fromStdString(katana::app::geo::value(title.toStdString())) +
+           " state=started";
+}
+
+std::optional<JobId> startedJob(const QString& reply)
+{
+    for (const katana::app::geo::Record& record :
+         katana::app::geo::parseRecords(reply.toStdString())) {
+        if (record.kind != "job" || record.get("state") != std::optional<std::string>("started")) {
+            continue;
+        }
+        if (const auto id = katana::core::parseInteger(record.get("id").value_or(""));
+            id && *id > 0) {
+            return static_cast<JobId>(*id);
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace katana::qt
