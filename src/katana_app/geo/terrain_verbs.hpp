@@ -209,6 +209,10 @@ bindAreas(Context& context, const katana::cad::ScopeWords& scope, std::string_vi
 // The areas as one WKT MULTIPOLYGON, for GDAL's --geometry.
 [[nodiscard]] std::string areasWkt(const std::vector<katana::interop::geo::ContourBoundary>& areas);
 
+// What a derived raster is named after: a surface's name, a file's stem, a
+// reference raster's name ("terrain" -> "terrain-slope", "terrain-viewshed").
+[[nodiscard]] std::string sourceName(const Context& context, const Source& source);
+
 // A number as GDAL's command line takes it, exactly: "0.5", "-12.25".
 [[nodiscard]] std::string gdalNumber(double value);
 

@@ -1102,4 +1102,22 @@ TEST_F(McpServer, StatisticsByAreaThroughTheCommandToolAreWrittenOnTheLot)
     EXPECT_NE(reply.find("zone entity=1 count=533.33"), std::string::npos) << reply;
     EXPECT_NE(reply.find("target=in-place created=0 updated=1"), std::string::npos) << reply;
 }
+
+// T5: a sight line through the command tool. Two points a metre apart on
+// terrain.asc (1.5 m cells, heights changing by centimetres over a cell):
+// the eye 1.7 m up sees ground a metre off, whatever the slope between.
+TEST_F(McpServer, ALineOfSightThroughTheCommandToolSaysWhetherTheTargetIsSeen)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json looked = call("katana_run_commands",
+                             Json{{"commands", {"LOS FILE \"" + terrain +
+                                                "\" OBSERVER 50,50 TARGET 51,50"}}});
+    ASSERT_FALSE(looked["isError"].get<bool>()) << textOf(looked);
+    const std::string reply =
+        looked["structuredContent"]["commands"][0]["output"].get<std::string>();
+    EXPECT_NE(reply.find("sight visible=yes observer=50,50 target=51,50 distance=1.000"),
+              std::string::npos)
+        << reply;
+}
 #endif
