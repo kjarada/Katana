@@ -398,9 +398,11 @@ Result<Prepared> restore(Context& context, const Tokens& tokens)
         return makeError(ErrorCode::InvalidArgument, "usage: REFS RESTORE");
     }
     const std::vector<std::string> records = context.document.metadata().referenceLayers;
+    const std::optional<std::filesystem::path> project = context.document.projectDirectory();
     Prepared prepared;
     prepared.title = "REFS RESTORE";
-    prepared.work = [records](const std::stop_token& stop, const Progress& progress) -> Result<Apply> {
+    prepared.work = [records, project](const std::stop_token& stop,
+                                       const Progress& progress) -> Result<Apply> {
         auto read = std::make_shared<std::vector<Restored>>();
         for (std::size_t k = 0; k < records.size(); ++k) {
             if (stop.stop_requested()) {
@@ -410,7 +412,7 @@ Result<Prepared> restore(Context& context, const Tokens& tokens)
             auto source = interop::parseReferenceRecord(records[k]);
             if (!source) {
                 one.why = source.error().describe();
-            } else if (auto layer = interop::readReference(*source)) {
+            } else if (auto layer = interop::readReference(*source, project)) {
                 one.layer = std::move(layer).value();
             } else {
                 one.why = layer.error().describe();
