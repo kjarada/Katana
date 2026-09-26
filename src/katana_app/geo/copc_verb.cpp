@@ -50,7 +50,7 @@ Result<Prepared> prepareCopc(Context&, const Tokens& tokens, std::string_view)
         if (auto converted =
                 katana::pointcloud::PointCloudEngine{}.convertToCopc(source, (*staged)->writeTo());
             !converted) {
-            return converted.error();
+            return (*staged)->asTarget(converted.error());
         }
         if (stop.stop_requested()) {
             return makeError(ErrorCode::InvalidState, "cancelled");
