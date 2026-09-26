@@ -602,6 +602,13 @@ its names and shapes except here:
   `tableName`, `styleFields` and `properties`; `interop::geo::featurePieces`;
   `VectorGeometry::arcs`; `GdalDataset::readTable` and `writeTables`, over
   the `processing::FeatureTable` of this contract.
+- I2 added, all source-compatible: `include/katana/gis/formats.hpp`
+  (`gis::formats`, `findFormat`, `formatOptions`, `readableExtensions`,
+  `vectorSaveChoices`, `vectorWriterFor`, `isVirtualPath`, `isRemotePath`,
+  `identifyContent`); `interop::archiveExtensions`; a `gis::writeZip` of
+  several members. `GdalDataset::open` takes `/vsi` paths, URLs and
+  archives; `vectorDriverForPath` is `vectorWriterFor`, so a `.kml` is
+  LIBKML's. `interop::kindForPath` routes by content where it can look.
 - `RasterOverlay::facts` is declared, not yet filled (D2).
 
 ## Contract tests
@@ -738,7 +745,15 @@ which EXPORT now passes on every front end. Tests:
 
 ### I2: Every driver: FORMATS
 
-Not started.
+Built (`docs/interop.md`, "Formats"): the formats come from GDAL's driver
+manager with a small curated overlay (`gis/formats.hpp`), a file is routed
+by what it holds, an archive by its inside, and `/vsi` paths and URLs open.
+`FORMATS` is the verb table's I2 row (`src/katana_app/geo/formats_verbs.cpp`);
+it answers at prepare, as `GDAL LIST` does. `katana_formats` and
+`katana://formats` share its records; GIS > Processing - GDAL > Formats...
+is the I2 block of `menu_table.cpp`. Tests: `tests/geo/test_formats.cpp`,
+`tests/qt_widgets/geo/test_formats_dialog.cpp`,
+`src/katana_app/geo/cli/formats.cmake`, `tests/geo/headless/formats.cmake`.
 
 ### I3: IMPORT options
 
