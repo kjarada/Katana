@@ -652,6 +652,245 @@ area= polygons=` per class and a `legend value= r= g= b=` per class colour.
 - **Aspect classes** (north-facing, ...): the aspect raster is there for
   them; a class grammar for directions is not.
 
+## Statistics by area
+
+RASTER ZONAL (`src/katana_app/geo/zonal_verbs.cpp`) measures a surface or an
+elevation raster inside each closed shape a scope takes and writes the
+results on the shapes themselves. The window's Terrain > Analysis >
+Statistics by Area (`zonalStatsDialog`) only builds its line:
+
+```
+RASTER ZONAL SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
+             [<scope>] [stats=mean,min,max,count,sum] [prefix=zone]
+             [pixels=fractional|centre|all-touched] [csv=<file>] [OVERWRITE] [PREVIEW]
+```
+
+The reply: `gis op=zonal`, the `input` record, `scope arg=zones ...`, `zones
+used= skipped.open= skipped.points=`, the in-place `output ... updated=`
+record, one `zone entity=<id> <stat>=<value> ...` per zone (a statistic
+with no number has no field), and `zonal stats= prefix= pixels= zones=`.
+
+- **GDAL computes them:** `raster zonal-stats`, exactextract's method. The
+  zones are handed over as one table carrying `katana_id` only, which is how
+  each result finds its entity again.
+- **Fractional by default.** A cell counts by the part of it the shape
+  covers, so `count` is an area in cells: a 40 x 30 m lot on 1.5 m cells
+  counts 1200 / 2.25 = 533.333 wherever it lies, and a mean is weighted by
+  those parts (on a plane it is the plane at the shape's centroid).
+  `centre` takes a cell whose centre is inside (GDAL's `default`),
+  `all-touched` every cell the shape touches.
+- **Only closed shapes are zones.** Closed polylines and circles, a tagged
+  hole joined to its area (the one drawing-to-features conversion). Open
+  lines and points bound no area: GDAL logs "Non-polygonal geometry" for one
+  and the other zones came back with zero counts (the investigators'
+  finding), so they are left out before GDAL sees them, counted and warned
+  of.
+- **Written in place, one undo step.** `<prefix>_<stat>` properties
+  (`zone_mean`, `zone_count` ...) through the one result writer
+  (`ResultMode::SetProperties`). Before it writes, the apply compares the
+  zones with the copies taken when the line was prepared: a zone edited
+  while the job ran is refused ("the drawing changed while the job ran"),
+  never written over.
+- **Absent is not zero.** A zone off the raster has a count of 0 and no
+  mean; the non-finite number GDAL gives becomes no property, and a
+  `<prefix>_<stat>` an earlier run left on the zone is removed in the same
+  step - it was the number of somewhere else.
+- `csv=` writes the zone rows as well, and replaces a file only with
+  `OVERWRITE`.
+
+### Decided
+
+- **The statistics are the single-number ones.** GDAL's list-valued
+  statistics (`values`, `frac`, `unique`, `coverage`) and the weighted ones
+  (they need a second raster) have no single property to become.
+- **Properties, not a new layer.** The lot is what the question is about;
+  a copy of it carrying the numbers would go stale when the lot is edited,
+  and a property is what a label, a WHERE filter and a report already read.
+- **`centre` rather than GDAL's `default`**, so the word says which cells.
+
+### Not done
+
+- **No CRS check** between the raster and the drawing's shapes, as for
+  CONTOUR and RASTER SLOPE.
+
+## Sampling and drape
+
+RASTER SAMPLE reports the height of the ground at points, and DRAPE gives
+it to the drawing's points and vertices (`src/katana_app/geo/drape_verbs.cpp`).
+The window's Terrain > Analysis > Drape and Sample Heights (`drapeDialog`,
+tabs Drape and Sample) only builds their lines:
+
+```
+RASTER SAMPLE SURFACE <name> | RASTER <id|name> | FILE <path> [AT x,y]...
+              [<scope>] [method=bilinear|nearest|cubic|cubicspline] [PREVIEW]
+DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
+      [method=bilinear|nearest|cubic|cubicspline] [PREVIEW]
+```
+
+- **The ground is read at full precision.** A surface on its own triangles
+  (`TinSurface::elevationAt`), exactly - never through a grid of it; a
+  raster's file through GDAL's own interpolation
+  (`GDALRasterInterpolateAtPoint`, `include/katana/gis/raster_sampling.hpp`),
+  bilinear unless `method=` says. Bilinear on a plane is the plane, which
+  is what `DrapeAndSample.SampleOnAPlaneIsExactWithBilinear` holds it to.
+  `method=` with a surface is refused, as is `CELL`.
+- **Off the ground there is no height.** A point off the raster, or one
+  whose interpolation window touches a no-data cell, has none: a sample
+  says `ground=no` (no `z`), and a drape leaves the vertex heightless and
+  counts it (`off=`, `entities_off=`).
+- **RASTER SAMPLE** reads the points given `AT`, and the point entities the
+  scope takes (the selection when there is neither), one `sample [entity=]
+  at=x,y z=` record each, then `samples method= count= on= off=`. It
+  changes nothing.
+- **DRAPE** sets the heights of the points, lines and polylines the scope
+  takes: a point at its position, a line at its ends, a polyline at every
+  vertex. What has no vertices a height belongs to (an arc, a circle, a
+  text) is left and counted by type. The heights are computed on the job's
+  worker (`cad::geo::drapeHeights`, `include/katana/cad/geo/drape.hpp`,
+  given the ground as a callback so katana_cad never sees GDAL) and written
+  on the GUI thread by one command (`cad::geo::drapeCommand`, through
+  `entity::setHeights`): one undo step, after the entities are compared with
+  their copies from prepare. A second drape on the same ground changes
+  nothing and pushes no step.
+- **A picked point is a typed point.** The dialog's Pick
+  (`GeoServices::pickPoint`, `src/katana_qt/geo/point_pick.hpp`) takes the
+  next left click in a plan view and writes it into the line as `AT x,y`.
+
+### Decided
+
+- **A vertex off the ground loses its old height.** The drape defines the
+  heights of what it takes; a height kept from before would be another
+  surface's, mixed in silently. Rejected: keeping it, which draws a string
+  half on the ground and half at heights no one can trace.
+- **GDAL interpolates, not Katana.** The raster is GDAL's to read; a second
+  bilinear of Katana's would be a second definition of "the height between
+  cells" to keep in step with the rest of the GDAL verbs.
+- **The pick is an event filter, not a catalogue tool.** A tool runs in one
+  view's tool host and ends in a command; a pick is any view's next click
+  and changes nothing.
+
+### Not done
+
+- **The pick does not snap.** It takes the click where it is; snapping is
+  the running tool's, and a pick is no tool.
+
+## Viewshed and line of sight
+
+RASTER VIEWSHED says what can be seen from observers over a surface or an
+elevation raster; LOS says whether one point can be seen from another
+(`src/katana_app/geo/viewshed_verbs.cpp`). The window's Terrain > Analysis >
+Viewshed and Line of Sight (`viewshedDialog`, tabs Viewshed and Line of
+Sight) only builds their lines:
+
+```
+RASTER VIEWSHED SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
+                (OBSERVER x,y)... | OBSERVERS [<scope>] [height=1.7] [target=0]
+                [max=<m>] [curvature=<k>|none] [areas=<layer>] [NAME <n>] [PREVIEW]
+LOS SURFACE <name> | RASTER <id|name> | FILE <path> OBSERVER x,y TARGET x,y
+    [height=1.7] [target=0] [curvature=<k>|none] [step=<m>]
+    [method=bilinear|nearest|cubic|cubicspline] [PREVIEW]
+```
+
+- **GDAL computes a viewshed,** `raster viewshed` from one `--position`.
+  Several observers - typed, picked, or the point entities a scope takes
+  after `OBSERVERS` (at most 100: each is a whole run) - are run one at a
+  time and unioned here, cell by cell on the raster's grid: GDAL's
+  cumulative mode refuses a position (the investigators' finding), and a
+  count of observers is not the union a person asks for.
+- **The options.** `height=` is the eye above the ground (1.7, a person
+  standing), `target=` how high above the ground a cell counts as seen,
+  `max=` how far to look (GDAL then also cuts its grid to that reach), and
+  `curvature=` GDAL's curvature-and-refraction coefficient, 0.85714 unless
+  given (`none` is 0). Katana passes every one of them explicitly, so a
+  changed default in GDAL cannot change a result.
+- **What is kept.** A derived reference raster holding 1 where some
+  observer sees the cell and 0 elsewhere, named `<source>-viewshed` unless
+  `NAME` says; its display copy is tinted orange where seen and clear
+  elsewhere. `areas=<layer>` draws the seen regions as closed polylines
+  (GDAL's `raster polygonize`), one undo step. The reply has an `observer
+  at= [entity=] visible_cells=` per observer and `viewshed observers=
+  height= target= max= curvature= visible_cells= area=`.
+- **A sight line is native** (`include/katana/terrain/line_of_sight.hpp`):
+  no algorithm of GDAL's answers one line with its clearance. It walks from
+  the eye to the aim at stations `step=` apart - half a raster cell, or
+  every 10 cm on a surface, which is read exactly - and reports `sight
+  visible= distance= observer_z= target_z= clearance= clearance_at=
+  blocked_at= blocked_distance= blocked_ground= stations= unknown=`. A
+  grazing sight (clearance exactly 0) sees; a station off the ground hides
+  nothing and is counted as unknown, never read as ground at 0. The ends
+  are echoed as given; a computed station (`clearance_at=`, `blocked_at=`)
+  is given to the millimetre like the distances beside it, since at full
+  precision a station read 149.43965517241378,119.50431034482759. Curvature
+  lowers the ground by the coefficient x d^2 / 12 741 994 m, GDAL's rule
+  and sphere, so a sight line and a viewshed of the same ground agree.
+- **The hand-worked tests switch curvature off** (`curvature=none`): the
+  shadow behind a wall is then similar triangles exactly. A 1 m wall 20 m
+  from a 1.7 m eye hides the flat ground from 21 to 48 m out and not from
+  49 m, since the grazing sight meets the ground at 20 x 1.7 / 0.7 =
+  48.571 m.
+
+### Decided
+
+- **The observers' union is Katana's, on the grid.** Each run's grid is a
+  window of the input's, so the union is a lookup, not a resampling.
+- **The kept raster is the answer, 1 and 0,** not GDAL's 255 and 0: it is
+  what another verb reads (RASTER ZONAL of it counts the seen cells of a
+  lot), and its picture is a separate tinted copy.
+- **Rejected: the fixture of the plan** (a 5 m wall, the observer at 1.7 m,
+  hidden from 20 x 5 / (5 - 1.7)). An eye below the wall top sees nothing
+  behind it, so no shadow ends; the fixture here puts the eye above a 1 m
+  wall, where the shadow's far edge is the similar-triangles value.
+- **The eye height rides in the position, `--position X,Y,H`,** not in
+  `--height`. GDAL 3.13 ignores `--height` beside a two-value position and
+  looks from its default 2 m: measured on the wall fixture, the shadow of
+  the 1 m wall 20 m off ended at 20 x 2 / (2 - 1) = 40 m whether the
+  height asked was 1.5, 1.7, 3 or 100, and at the similar-triangles
+  48.571 m once the height went as H.
+  `Viewshed.BehindARidgeTheShadowEndsWhereSimilarTrianglesSay` failed until
+  it did; the contract test pins that the position still takes three
+  values.
+- **The picture's clear cells are clear.** GDAL 3.13's `raster color-map`
+  writing to memory leaves every band's colour interpretation Undefined
+  (a GeoTIFF output gets red, green, blue, alpha from the driver's
+  defaults, so the command line looks right); copied on, the fourth band
+  read as no alpha and every unseen cell drew opaque black over the
+  ground. The processing adapter now names a color-map output's bands red,
+  green, blue and alpha (`stampColourMapBands`,
+  `src/katana_io/geo/processing.cpp`) - by the algorithm's definition, and
+  only when GDAL named none. Rejected: taking any fourth undesignated band
+  as alpha in the importer, which would make a four-band image's near
+  infrared its transparency. This reaches the shading and slope pictures
+  too. `Viewshed.TheUnseenCellsAreDrawnClearAndTheSeenTinted` checks the
+  pixels.
+- **No `nv` entry in the tint's colour file.** The unioned grid has no
+  no-data value, and an `nv` line made GDAL warn on every run that it
+  ignored it.
+- **The sight line's least clearance is between the ends,** not at them:
+  at the observer it is the eye height and at the target the target height
+  by definition, and a target on the ground would make every answer 0.
+
+### Tests in the window
+
+The three dialogs are driven through the real window headless by their
+object names (`tests/geo/headless/analysis.cmake`), each reply checked
+against values worked by hand:
+`qt_statistics_by_area_dialog_writes_the_lot_headless` (a 40 x 30 m lot on
+`samples/gis/terrain.asc`: count 1200 / 2.25 = 533.333, and the mean
+27.8048, the coverage-weighted mean worked independently from the text
+grid), `qt_drape_and_sample_dialog_drapes_and_samples_headless` (a string's
+three vertices draped on `plane.asc`, and the Sample tab's 100 + 0.05 x
+12.3 = 100.615 with nothing off the raster) and
+`qt_viewshed_and_line_of_sight_dialog_sees_the_plane_headless` (every one
+of the rising plane's 1200 cells seen from its west edge, one area drawn,
+and a sight line from an eye at 101.725 to ground at 101.975 that clears).
+
+### Not done
+
+- **Observer heights from the entities.** `height=` is one height above
+  the ground for every observer; a mast of its own height per point is not
+  read.
+- **The pick does not snap** (as for the drape).
+
 ## Background jobs
 
 Long computations no longer run on the GUI thread behind a wait cursor.

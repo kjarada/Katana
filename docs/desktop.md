@@ -1314,6 +1314,30 @@ dialog through `showTerrainDialog` (made on first use under the window, so
   name, and - with `slopeClip` - the shared scope controls (`slopeScope`,
   the closed shapes the analysis is kept inside) (`docs/terrain.md`, "Slope
   and aspect").
+- `terrainZonal` "Statistics by Area..." opens `zonalStatsDialog`, which
+  writes a RASTER ZONAL line: the source, the zones (the shared scope
+  controls, `zonalScope`; the selection at first), the statistics ticked,
+  the property prefix, how cells count, and a CSV file with its Replace box
+  (`docs/terrain.md`, "Statistics by area").
+- `terrainDrape` "Drape and Sample Heights..." opens `drapeDialog`, two
+  tabs: Drape writes a DRAPE line (the ground, how a raster is read between
+  cells - off for a surface - and the shared scope controls, `drapeScope`),
+  and Sample a RASTER SAMPLE line of the points listed, typed or picked in
+  a plan view (`samplePick`, through `GeoServices::pickPoint`: the next
+  left click; Esc or a right click cancels) (`docs/terrain.md`, "Sampling
+  and drape").
+- `terrainViewshed` "Viewshed and Line of Sight..." opens `viewshedDialog`,
+  two tabs: Viewshed writes a RASTER VIEWSHED line (the ground, observers
+  typed or picked - or, with `viewshedUseScope`, the points the shared
+  scope controls take - the eye and target heights, how far to look, the
+  curvature, a layer for the visible area and the raster's name), and Line
+  of Sight a LOS line (the two ends, each typed or picked, and the heights)
+  (`docs/terrain.md`, "Viewshed and line of sight").
+- The three are driven by object name through the real window headless,
+  filled, run and their replies read (`tests/geo/headless/analysis.cmake`;
+  `docs/terrain.md`, "Viewshed and line of sight", "Tests in the window").
+  The pick buttons are not: a pick waits for a click in a plan view, which
+  a headless drive does not make, so the points are typed.
 
 **One store of surfaces.** The window's surfaces are a
 `terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the
