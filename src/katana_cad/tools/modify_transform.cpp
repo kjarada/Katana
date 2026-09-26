@@ -123,43 +123,6 @@ constexpr std::string_view kNoDirection =
     "a typed distance goes towards the cursor: move the cursor off the base point first, "
     "or type @dx,dy";
 
-// Copies of `ids`, one set per transform, as ONE command: Copy to several
-// places, Rotate and Scale with their Copy option, and the polar array all
-// come to this. The same construction as duplicateEach in entity_commands.cpp,
-// which is private there; a copy keeps everything but its id, which the model
-// assigns.
-cmd::CommandPtr duplicated(std::string name, std::vector<EntityId> ids,
-                           std::vector<Mat3> transforms)
-{
-    return std::make_unique<cmd::ChangeSetCommand>(
-        std::move(name),
-        [ids = std::move(ids), transforms = std::move(transforms)](
-            const cmd::CommandContext& context) -> Result<cmd::ChangeSet> {
-            if (ids.empty() || transforms.empty()) {
-                return makeError(ErrorCode::InvalidArgument, "nothing to copy");
-            }
-            cmd::ChangeSet changes;
-            for (const Mat3& transform : transforms) {
-                for (const EntityId id : ids) {
-                    const Entity* source = context.model.entities.find(id);
-                    if (source == nullptr) {
-                        return makeError(ErrorCode::NotFound, "entity does not exist",
-                                         "id=" + std::to_string(id));
-                    }
-                    auto geometry = katana::entity::transformed(source->geometry, transform);
-                    if (!geometry) {
-                        return makeError(geometry.error().code, geometry.error().message,
-                                         "id=" + std::to_string(id));
-                    }
-                    Entity copy = *source;
-                    copy.geometry = std::move(*geometry);
-                    changes.add.push_back(std::move(copy));
-                }
-            }
-            return changes;
-        });
-}
-
 // The selection's geometry through each transform, into the rubber band, up to
 // the preview limit.
 void addTransformed(ToolFeedback& feedback, const Document* document,
@@ -716,7 +679,7 @@ class CopyTool final : public SelectionTool {
         }
         const std::string copies =
             std::to_string(offsets.size()) + (offsets.size() == 1 ? " copy" : " copies");
-        return ToolStep::done(duplicated("COPY", ids(), std::move(transforms)),
+        return ToolStep::done(cmd::duplicateEntities("COPY", ids(), std::move(transforms)),
                               copies + " of " + counted(ids().size()));
     }
 
@@ -937,9 +900,9 @@ class RotateTool final : public SelectionTool {
                 "a rotation of 0 degrees, or of whole turns, changes nothing");
         }
         const State& now = state_.now;
-        auto command = now.copy
-                           ? duplicated("ROTATE", ids(), {Mat3::rotationAbout(now.base, radians)})
-                           : cmd::rotateEntities(ids(), now.base, radians);
+        auto command = now.copy ? cmd::duplicateEntities("ROTATE", ids(),
+                                                         {Mat3::rotationAbout(now.base, radians)})
+                                : cmd::rotateEntities(ids(), now.base, radians);
         const std::string what = now.copy ? " copied and rotated" : " rotated";
         return ToolStep::done(std::move(command), counted(ids().size()) + what);
     }
@@ -1169,9 +1132,10 @@ class ScaleTool final : public SelectionTool {
             return ToolStep::rejected("a scale factor of 1 changes nothing");
         }
         const State& now = state_.now;
-        auto command =
-            now.copy ? duplicated("SCALE", ids(), {Mat3::scalingAbout(now.base, factor, factor)})
-                     : cmd::scaleEntities(ids(), now.base, factor);
+        auto command = now.copy
+                           ? cmd::duplicateEntities("SCALE", ids(),
+                                                    {Mat3::scalingAbout(now.base, factor, factor)})
+                           : cmd::scaleEntities(ids(), now.base, factor);
         const std::string what = now.copy ? " copied and scaled" : " scaled";
         return ToolStep::done(std::move(command), counted(ids().size()) + what);
     }
@@ -1720,7 +1684,7 @@ class ArrayPolarTool final : public SelectionTool {
     ToolStep finish(bool rotate)
     {
         const State& now = state_.now;
-        return ToolStep::done(duplicated("ARRAY", ids(), items(now.fill, rotate)),
+        return ToolStep::done(cmd::duplicateEntities("ARRAY", ids(), items(now.fill, rotate)),
                               "polar array of " + std::to_string(now.count) + " items of " +
                                   counted(ids().size()));
     }

@@ -17,6 +17,7 @@
 #include "katana/entity/annotation.hpp"
 #include "katana/entity/dimension_text.hpp"
 #include "katana/entity/entity_geometry.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/tables.hpp"
 #include "katana/entity/text_block.hpp"
 
@@ -1059,7 +1060,12 @@ void Writer::writeLeader(const Entity& entity, const katana::entity::LeaderGeome
         end = end + Vec2(sign * katana::entity::annotationModelSize(leader.landing, scale), 0.0);
         line(entity, v.back(), end);
     }
-    if (leader.text.empty()) {
+    // A smart leader's note is read off its target (docs/annotation.md,
+    // "Smart leaders"). This layer cannot see survey coding, so a {code}
+    // field is absent here; a front end hands the drawn leader instead
+    // (ExportOptions::drawn), which has it.
+    const std::string text = katana::entity::leaderNote(model_, leader);
+    if (text.empty()) {
         return;
     }
     double paper = leader.paperHeight;
@@ -1069,7 +1075,7 @@ void Writer::writeLeader(const Entity& entity, const katana::entity::LeaderGeome
         paper = style != nullptr && style->paperHeight > 0.0 ? style->paperHeight : 2.5;
     }
     katana::entity::TextGeometry note;
-    note.text = leader.text;
+    note.text = text;
     note.height = katana::entity::annotationModelSize(paper, scale);
     note.position = end + Vec2(sign * 0.5 * note.height, 0.0);
     note.justify = sign > 0.0 ? katana::entity::TextJustify::MiddleLeft

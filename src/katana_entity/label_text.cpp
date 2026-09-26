@@ -1,5 +1,6 @@
 #include "katana/entity/label_text.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <optional>
@@ -387,7 +388,10 @@ std::vector<std::string_view> labelValueNames(LabelKind kind)
     return {};
 }
 
-Status checkLabelTemplate(std::string_view templateText, LabelKind kind)
+Status
+checkTemplate(std::string_view templateText,
+              const std::function<std::optional<LabelQuantity>(std::string_view)>& quantityOfName,
+              const std::function<std::string(std::string_view)>& unknownValue)
 {
     std::string problem;
     for (const std::string_view line : textLines(templateText)) {
@@ -413,12 +417,11 @@ Status checkLabelTemplate(std::string_view templateText, LabelKind kind)
                     }
                     return;
                 }
-                if (!kindHas(kind, field.name)) {
-                    problem = "a " + std::string(toString(kind)) + " label has no value '" +
-                              std::string(field.name) + "'";
+                const auto quantity = quantityOfName(field.name);
+                if (!quantity) {
+                    problem = unknownValue(field.name);
                     return;
                 }
-                const auto quantity = quantityOf(field.name, kind);
                 std::string why;
                 if (!apply(LabelValue{*quantity, 0.0, {}}, field.steps, &why)) {
                     problem = "{" + std::string(inside) + "}: " + why;
@@ -435,6 +438,42 @@ Status checkLabelTemplate(std::string_view templateText, LabelKind kind)
         }
     }
     return {};
+}
+
+Status checkLabelTemplate(std::string_view templateText, LabelKind kind)
+{
+    return checkTemplate(
+        templateText,
+        [kind](std::string_view name) -> std::optional<LabelQuantity> {
+            if (!kindHas(kind, name)) {
+                return std::nullopt;
+            }
+            return quantityOf(name, kind);
+        },
+        [kind](std::string_view name) {
+            return "a " + std::string(toString(kind)) + " label has no value '" +
+                   std::string(name) + "'";
+        });
+}
+
+std::vector<std::string> templateFields(std::string_view templateText)
+{
+    std::vector<std::string> names;
+    for (const std::string_view line : textLines(templateText)) {
+        std::vector<std::string> found;
+        const bool balanced = walk(
+            line, [](std::string_view) {},
+            [&](std::string_view inside) { found.emplace_back(parseField(inside).name); });
+        if (!balanced) {
+            return {};
+        }
+        for (std::string& name : found) {
+            if (!name.empty() && std::find(names.begin(), names.end(), name) == names.end()) {
+                names.push_back(std::move(name));
+            }
+        }
+    }
+    return names;
 }
 
 std::string formatLabel(std::string_view templateText, const LabelValues& values)
@@ -469,6 +508,11 @@ std::string formatLabel(std::string_view templateText, const LabelValues& values
         anyLine = true;
     }
     return result;
+}
+
+std::string formatValue(const LabelValue& value)
+{
+    return apply(value, {}, nullptr).value_or("?");
 }
 
 std::string formatFixed(double value, int decimals)
