@@ -67,6 +67,11 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     // letter shared in one menu, and GeoMenus.EveryItemTheLanesAddHasALetterOfItsOwn
     // an item with none.
     const QString kAnalysis = "A&nalysis";
+    const QString kAnalysisTip =
+        "Contours, shading, slope, statistics by area, drape and viewshed of a surface or an "
+        "elevation raster";
+    const QString kDemTip = "Grid survey points to a DEM, and mosaic, clip, fill, footprint, "
+                            "reproject or difference DEMs";
     (void)menus;
     (void)workbench;
     // ---- F0: GDAL algorithm bridge: no item; the typed GDAL line (X1 is its menu item) ----
@@ -166,7 +171,8 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new ContoursDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", contours);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", Icon::Processing, kAnalysisTip,
+                           contours);
     }
     // ---- T2: Terrain > Analysis > Terrain Shading ----
     {
@@ -182,7 +188,8 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new TerrainShadingDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", shading);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", Icon::Processing, kAnalysisTip,
+                           shading);
     }
     // ---- T3: Terrain > Analysis > Slope ----
     {
@@ -198,7 +205,7 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new SlopeAnalysisDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", slope);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", Icon::Processing, kAnalysisTip, slope);
     }
     // ---- T4: Terrain > Analysis > Statistics by Area, Drape and Sample Heights ----
     {
@@ -214,7 +221,7 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new ZonalStatsDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", zonal);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", Icon::Processing, kAnalysisTip, zonal);
         QAction* drape = workbench.services().makeAction(
             Icon::Processing, "&Drape and Sample Heights...",
             "Give points and line vertices the height of a surface or an elevation raster, or "
@@ -227,7 +234,7 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new DrapeDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", drape);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", Icon::Processing, kAnalysisTip, drape);
     }
     // ---- T5: Terrain > Analysis > Viewshed and Line of Sight ----
     {
@@ -243,7 +250,8 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new ViewshedDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", viewshed);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", Icon::Processing, kAnalysisTip,
+                           viewshed);
     }
     // ---- T6: Terrain > DEM > Grid from Points ----
     {
@@ -257,7 +265,7 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
         // D&EM: D is Surface From Drawing's and M Alignment Manager's in the
         // Terrain menu, and a letter shared in one menu is refused by
         // qt_every_shortcut_and_menu_letter_reaches_one_thing_headless.
-        menus.addToTerrain("D&EM", "terrainDemMenu", grid);
+        menus.addToTerrain("D&EM", "terrainDemMenu", Icon::ExportDem, kDemTip, grid);
         QObject::connect(grid, &QAction::triggered, grid, [&workbench, grid] {
             if (auto* window = qobject_cast<QWidget*>(grid->parent())) {
                 showGridDemDialog(workbench, *window);
@@ -272,7 +280,7 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
             "(RASTER MOSAIC, CLIP, FILL, REPROJECT, FOOTPRINT, DIFFERENCE)",
             {}, "terrainDemTools");
         tools->setData(QString("demToolsDialog"));
-        menus.addToTerrain("D&EM", "terrainDemMenu", tools);
+        menus.addToTerrain("D&EM", "terrainDemMenu", Icon::ExportDem, kDemTip, tools);
         QObject::connect(tools, &QAction::triggered, tools, [&workbench, tools] {
             if (auto* window = qobject_cast<QWidget*>(tools->parent())) {
                 showDemToolsDialog(workbench, *window);
