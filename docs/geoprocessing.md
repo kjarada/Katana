@@ -336,7 +336,8 @@ raster with `role` Derived and `derivation` - the line that made it. A name
 already taken becomes `<name>-2`, `-3` ...
 (`GeoExecutor.ARasterResultBecomesADerivedReferenceRaster`). `RasterOverlay`
 gained `role`, `facts`, `derivation` and `displayStyle`; F0 fills the role
-and the derivation, T2 draws the display styles, and D2 persists them.
+and the derivation, T2 sets the display style of the pictures it renders
+(the style is rendered into them), and D2 persists them.
 
 ## The executor
 
@@ -676,20 +677,98 @@ Not started.
 
 ### T0: Terrain session: one surface store and SURFACE verbs on every front end
 
-Not started. The store is F0's (`terrain::SurfaceStore`); `TO SURFACE` has
-its block in `bindings.cpp`.
+Built: `SURFACE LIST | INFO | REMOVE | FROM | EXPORT`
+(`src/katana_app/geo/surface_verbs.cpp`, its helpers in
+`src/katana_app/geo/terrain_verbs.hpp`), `TO SURFACE` in `bindings.cpp`'s T0
+block, `katana_terrain_list` (`docs/mcp.md`), and the window's Terrain >
+Surface From and GIS > Export Surface as DEM, which build SURFACE lines
+(`src/katana_qt/surface_raster_dialog.hpp`, with
+`src/katana_qt/geo/terrain_dialog_support.hpp` for what the terrain dialogs
+share). The rules that make survey points and breaklines of drawing data
+moved to `cad::geo::surfaceInput`. `docs/terrain.md`, "Surfaces on every
+front end", has the grammar, the records and the decisions.
+
+Where it differs from the plan:
+
+- `SURFACE FROM <scope>` takes the scope as FROM does
+  (`FROM DRAWING WHERE DRAWN`, `FROM LAYERS ground`); the plan's `SURFACE FROM
+  DRAWING [<scope>]` is also read. `FROM FILE <path>` reads a DEM that is not
+  a reference raster.
+- A heightless entity is left out, not put on the datum as the window did;
+  the comparison with the old code is on levelled data, and on the site plan
+  sample the test shows the difference.
+- The DEM is written through GDAL's `raster convert`, not through
+  `GdalDataset::writeRaster`, which is left as it was for its other callers.
+- One Surface From dialog for the three items, named by the `<d>` rule
+  (`surfaceFromScope`).
+- `GeoServices` gained `views` (the scope controls' View choice) and
+  `GeoWorkbench::window`, the parent the packages' dialogs are made under.
+- TO SURFACE triangulates in its apply, since the GDAL verb's work ends with
+  the run; SURFACE FROM triangulates in its work.
 
 ### T1: CONTOUR from a surface or an elevation raster
 
-Not started.
+Built: `CONTOUR` (`src/katana_app/geo/contour_verbs.cpp`), its conversion,
+clip and command in `include/katana/interop/geo/contour_entities.hpp`, and
+Terrain > Analysis > Contours (`terrainContours`, `contoursDialog`,
+`src/katana_qt/geo/contours_dialog.hpp`). `docs/terrain.md`, "Contours", has
+the grammar, the records and the decisions. What T1 to T3 share - a raster
+handed from one GDAL step to the next (`RasterChain`), the source reader
+(`bindTerrainSource`) and the areas a scope's closed shapes make
+(`bindAreas`) - is in `src/katana_app/geo/terrain_steps.cpp`, declared in
+`terrain_verbs.hpp`; the dialogs' shared pieces are in
+`terrain_dialog_support.hpp`. No MCP tool: `katana_run_commands` runs the
+line (`docs/mcp.md`).
+
+Where it differs from the plan:
+
+- Both engines' lines are cut at the boundary by one clipper
+  (`clipContours`); a raster is cut by GDAL to the areas' box first, not by
+  the boundary itself, whose no-data edge would end its contours short.
+- The dialog has a `contourClip` box that turns the scope on.
+- The raster engine refuses more than the tracer's 100 000 levels too,
+  judged on a strided sample before GDAL runs.
 
 ### T2: Terrain shading: hillshade, colour relief, slope shading
 
-Not started. `RasterOverlay::displayStyle` is declared for it.
+Built: `RASTER SHADE` (`src/katana_app/geo/shade_verbs.cpp`), the ramps in
+`include/katana/interop/geo/colour_ramps.hpp`, and Terrain > Analysis >
+Terrain Shading (`terrainShading`, `terrainShadingDialog`,
+`src/katana_qt/geo/terrain_shading_dialog.hpp`). `docs/terrain.md`,
+"Shading", has the grammar, the records and the decisions. The picture is a
+derived reference raster through F0's `applyOutputs` (TO REFERENCE), its
+`displayStyle` set after. No MCP tool: `katana_run_commands` runs the line,
+and `katana_terrain_list` lists the picture with its derivation.
+
+Where it differs from the plan:
+
+- The styles are rendered into the picture, not drawn from the elevation
+  raster at draw time; `displayStyle` names the picture.
+- Every style ends as RGBA, a hillshade included, so the reader does not
+  stretch it.
+- Slope shading is in degrees; the diverging ramp is symmetric about zero
+  unless `range=` says; a `grey` ramp colours `plain`.
 
 ### T3: Slope and aspect with slope-class areas
 
-Not started.
+Built: `RASTER SLOPE` and `RASTER ASPECT` (`src/katana_app/geo/slope_verbs.cpp`)
+and Terrain > Analysis > Slope and Aspect (`terrainSlope`,
+`slopeAnalysisDialog`, `src/katana_qt/geo/slope_analysis_dialog.hpp`).
+`docs/terrain.md`, "Slope and aspect", has the grammar, the records and the
+decisions. The slope raster goes through F0's `applyOutputs` (TO
+REFERENCE), the class areas through `resultCommand` (one undo step). No MCP
+tool: `katana_run_commands` runs the line (`docs/mcp.md`).
+
+Where it differs from the plan:
+
+- The class breaks begin at 0 and end open, not at the data's range: a
+  slope is never below 0, and neither end then needs a pass over the data.
+- The slope raster keeps the values; its display copy is a coloured picture
+  of them.
+- With a scope, the class areas are cut to the shapes exactly (`vector
+  clip`), since GDAL's raster clip keeps every cell a shape touches.
+- The dialog has a `slopeClip` box that turns the scope on, and a
+  `slopeName`.
 
 ### T4: Statistics by area, sampling and drape
 

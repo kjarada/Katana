@@ -28,6 +28,7 @@
 #include <memory>
 
 #include "command_runner.hpp"
+#include "customisation/scope_filter_widget.hpp"
 #include "geo/geo_verbs.hpp"
 #include "icons.hpp"
 #include "jobs.hpp"
@@ -56,6 +57,9 @@ struct GeoServices {
     std::function<void()> changed;
     // The window's one executor, for the dialogs the lanes add.
     CommandRunner run;
+    // The workspace's open views, for a dialog's scope controls (VIEW <id>).
+    // May be empty: the View choice then names no view a line can carry.
+    std::function<std::vector<ScopeFilterView>()> views;
     // A job ended: its id and what it logged. May be empty.
     std::function<void(JobId, const VerbOutcome&)> finished;
     std::function<QAction*(Icon icon, const QString& text, const QString& tip,
@@ -84,6 +88,9 @@ class GeoWorkbench {
 
     [[nodiscard]] katana::app::geo::Context& context() { return context_; }
     [[nodiscard]] const GeoServices& services() const { return services_; }
+    // The window the packages' dialogs are children of, so --dialog finds
+    // them by object name.
+    [[nodiscard]] QMainWindow& window() const { return window_; }
 
   private:
     void notify(JobId id, const VerbOutcome& outcome);
