@@ -43,16 +43,6 @@ std::string referenceRecord(const katana::interop::PointCloudLayer& cloud)
            " file=" + value(pathText(cloud.source));
 }
 
-std::string surfaceRecord(const katana::terrain::NamedSurface& surface)
-{
-    const katana::terrain::TinSurface& tin = *surface.surface;
-    return "surface name=" + value(surface.name) +
-           " triangles=" + std::to_string(tin.triangleCount()) +
-           " points=" + std::to_string(tin.vertexCount()) + " bounds=" + boundsText(tin.bounds()) +
-           " zmin=" + recordNumber(tin.minElevation()) + " zmax=" + recordNumber(tin.maxElevation()) +
-           " source=" + value(surface.source);
-}
-
 nlohmann::json recordJson(const Record& record)
 {
     // The fields that are words whatever they hold.

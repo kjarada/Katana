@@ -32,7 +32,7 @@ add_test(NAME cli.import_of_a_zipped_shapefile_by_vsizip
             -c "EXPORT \"${_formats_out}/lots.shp.zip\"" -c "UNDO"
             -c "IMPORT \"/vsizip/${_formats_out}/lots.shp.zip/katana.shp\"" -c "LIST")
 set_tests_properties(cli.import_of_a_zipped_shapefile_by_vsizip PROPERTIES
-    PASS_REGULAR_EXPRESSION "exported 3 features \\(ESRI Shapefile\\).*imported 3 entities from katana\\.shp.*3 entities.*area=2000.*area=2000.*area=480"
+    PASS_REGULAR_EXPRESSION "exported file=\"[^\"]*/lots\\.shp\\.zip\" kind=vector driver=\"ESRI Shapefile\" features=3 .*imported file=\"/vsizip/[^\"]*/lots\\.shp\\.zip/katana\\.shp\" kind=vector entities=3 .*3 entities.*area=2000.*area=2000.*area=480"
     FAIL_REGULAR_EXPRESSION "error")
 
 # A plain .zip, which GDAL does not open as it is, is imported by the one
@@ -45,5 +45,5 @@ add_test(NAME cli.import_of_a_zip_opens_the_one_dataset_inside
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli> -c "IMPORT \"${_formats_out}/lots.zip\"" -c "LIST")
 set_tests_properties(cli.import_of_a_zip_opens_the_one_dataset_inside PROPERTIES
-    PASS_REGULAR_EXPRESSION "imported 3 entities from lots\\.zip.*3 entities.*Polyline  layer=lots [^\r\n]*area=2000"
+    PASS_REGULAR_EXPRESSION "imported file=\"[^\"]*/lots\\.zip\" kind=vector entities=3 .*3 entities.*Polyline  layer=lots [^\r\n]*area=2000"
     FAIL_REGULAR_EXPRESSION "error")

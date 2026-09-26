@@ -204,9 +204,11 @@ TEST_F(GisVerbs, ImportOfAnArchiveAddsItsSurfacesToTheStore)
     EXPECT_EQ(field(surfaces[0], "name"), "TIN SOUTH WEST");
     EXPECT_EQ(field(surfaces[0], "triangles"), "8");
     EXPECT_EQ(field(surfaces[0], "points"), "9");
-    EXPECT_EQ(field(surfaces[0], "bounds"), "554000,6883000,554100,6883100");
-    EXPECT_EQ(field(surfaces[0], "zmin"), "10");
-    EXPECT_EQ(field(surfaces[0], "zmax"), "12.5");
+    // The surface record is SURFACE LIST's, to the millimetre (docs/terrain.md,
+    // "One surface record").
+    EXPECT_EQ(field(surfaces[0], "bounds"), "554000.000,6883000.000,554100.000,6883100.000");
+    EXPECT_EQ(field(surfaces[0], "zmin"), "10.000");
+    EXPECT_EQ(field(surfaces[0], "zmax"), "12.500");
 
     // And a geoprocessing line finds it by name.
     auto bound = run("GDAL raster hillshade FROM SURFACE \"TIN SOUTH WEST\" CELL 10 PREVIEW");
