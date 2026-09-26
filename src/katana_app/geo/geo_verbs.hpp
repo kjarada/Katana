@@ -29,6 +29,9 @@
 #include <string>
 #include <string_view>
 
+#include <vector>
+
+#include "katana/archive12d/domain.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/error.hpp"
@@ -37,6 +40,19 @@
 #include "katana/terrain/surface_store.hpp"
 
 namespace katana::app::geo {
+
+// The answer to the window's question when an IMPORT that keeps its own
+// coordinates lands far from the drawing (docs/interop.md, "Placing an
+// import"): keep them, move the data alongside the drawing, or import nothing.
+enum class FarApartChoice { Keep, Alongside, Cancel };
+
+// What an IMPORT brought that only a front end with 3D views shows: a 12d
+// archive's meshes, which only the window keeps, and how many surfaces it
+// added to the store.
+struct ImportShown {
+    std::vector<katana::archive12d::ImportedMesh> meshes;
+    std::size_t surfaces = 0;
+};
 
 // What a geoprocessing line runs against: the front end's drawing, its
 // interpreter (whose scope context answers VIEW in the window and refuses it
@@ -52,6 +68,18 @@ struct Context {
     std::function<void(const katana::geometry::Box2&)> frame{};
     // Optional: the reference rasters or the surfaces changed.
     std::function<void()> changed{};
+    // Optional, the window's: asked on the calling thread, with the advice,
+    // when an IMPORT that keeps its own coordinates lands far from the
+    // drawing. Absent - a session, a headless window - the data keeps its
+    // coordinates and the reply warns.
+    std::function<FarApartChoice(const katana::geometry::Box2& drawing,
+                                 const katana::geometry::Box2& incoming,
+                                 const std::string& advice)>
+        farApart{};
+    // Optional, the window's: shows what an IMPORT brought beyond the
+    // drawing, the reference data and the surfaces. Absent, a 12d archive's
+    // meshes are counted and said to be held nowhere.
+    std::function<void(ImportShown&&)> imported{};
 };
 
 using Progress = std::function<void(double)>;
