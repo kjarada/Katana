@@ -22,7 +22,16 @@ whose branch was merged first so that no kind byte could mean two things
 (`docs/model.md`). All three are written in version 2 of the geometry blob
 (`include/katana/entity/geometry_blob.hpp` has the layouts;
 `GeometryBlobWireFormat.ACurvePolylinesLayoutIsPinned` pins the polyline's
-against bytes written by hand).
+against bytes written by hand, and the ellipse's and spline's beside it).
+They hold no anchor, so the smart leaders' version 3 never has cause to be
+written for them; a reader takes them in version 2 or 3 alike.
+
+They raised the project schema to 12 (`docs/model.md`, "The tables, and the
+migration that made each"), with no table change: a build that predates them
+refuses such a project up front as one written by a newer Katana, instead of
+opening it and failing entity by entity with "unknown geometry kind in
+blob". The branch that added them left the schema at 11; the bump came with
+the merge into main.
 
 ### Which kind a polyline is
 
@@ -399,4 +408,84 @@ buttons follow; they are settings, not drawing edits, so not undo steps.
 `PLINE` is the drawing system's in every form, the plain `PLINE p p
 [CLOSE]` included, so that every one replies with the id of what it made.
 
+Only an `OPEN` of a project replaces the drawing. Which one a line is,
+`CommandInterpreter::replacesDocument` says, and every front end asks it:
+the window before its "discard the drawing?" question and its reset of the
+backdrop and views, the session before its missing-customisation check,
+`katana_mcp` before its unsaved-changes guard. Before the merge each of them
+took any `OPEN` for a project's, so `OPEN #12` in the window asked to
+discard the drawing and then zoomed to its extents, and through `katana_mcp`
+it was refused for unsaved changes.
+
 Tested in `tests/cad/drawing/test_drawing_verbs.cpp`.
+
+## The merge into main
+
+The drawing system was written on its own branch from main at 88b046b; main
+gained smart leaders, the one scope grammar, the utility tools on scope, the
+one executor for dialog lines and IFC 4.3 meanwhile, all written before these
+kinds existed. The merge (2026-09-26) made each of them take the new kinds
+or refuse them by name, never pass over them
+(`tests/cad/drawing/test_new_kinds_in_main.cpp`, the IFC and scope-widget
+tests named below):
+
+| Where | What a curve polyline, ellipse or spline now does |
+|---|---|
+| anchors (`entity/anchor.hpp`) | a curve polyline offers Along (on an arc segment, the fraction of its sweep - ON the arc) and Inside when closed; an ellipse Along (the fraction of its sweep of eccentric anomaly) and Inside when whole; a spline only its Start and End - its parameter is not its length, so no fraction of it would stay where a note was put |
+| smart leaders' values (`leader_values.cpp`) | a curve polyline gives a segment's or an arc's values where the tip is, chainage along it, level from its vertices' heights, length, vertices, and area and perimeter when closed; an ellipse its length, and area and perimeter when whole; a spline its length |
+| LEADER FOR and Attach (`leader_edit.cpp`), the Leader tool's pick | inside a closed curve polyline or a whole ellipse, else halfway along; a spline at its start; the tool's tip can be put on a curve polyline and an ellipse |
+| `#id@x,y`, `#id.alongN:t` | as a polyline for a curve polyline; a spline refused, saying to use its start or end |
+| labels (`label_values.cpp`) | a curve polyline takes Segment labels (an arc segment as an arc), Arc labels on its arc segments, and an Area label when closed - its area exact |
+| snaps that name a point (`snapAnchor`) | a curve polyline's vertices and segment middles, an ellipse's centre and ends, a spline's ends |
+| `#12` with no part (`defaultAnchor`) | a curve polyline's or a spline's start, an ellipse's centre |
+| the label keep-out (`labelKeepOut`) | a curve polyline's sides and chorded arcs; an ellipse's and a spline's chords of a 256th of their extent |
+| `AREA` | a closed curve polyline and a whole ellipse, exactly |
+| `PARCEL` and Survey > Parcel Report | a curve polyline refused as "a parcel with arc courses is not reported yet" (below) |
+| `TYPE=` in the one scope grammar, `SELECT TYPE` | the names in any case (`entityTypeFromString`); `TYPE=CurvePolyline` was refused, title-cased to `Curvepolyline` |
+| the "Only those that match" type boxes (`ScopeFilterWidget`) | a box for every kind, counted off the variant; the list stopped at Dimension |
+| the utilities (`utility_data.cpp`) | a service run given an arc is still its line's run; a design centre line may be a curve polyline, chorded within a millimetre with its vertices' heights |
+| IFC export (`katana_ifc/drawing.cpp`, `classification.cpp`) | a curve polyline one `IfcIndexedPolyCurve` with an `IfcArcIndex` through each arc's true middle; an ellipse `IfcEllipse`, trimmed by parameter for an arc; a spline `IfcBSplineCurveWithKnots` (rational with weights); a curve polyline or spline on a kerb, pipe or fence layer is that element; a rules file may name the three kinds |
+| Cut Section along the selection | along a curve polyline's or a spline's chords |
+| Alignment Manager, PIs from the selection | a curve polyline refused: its vertices are tangent points, not PIs |
+
+## Not done
+
+**The one scope and filter (the contributors' contract, section 1.1).** The drawing verbs
+predate the shared grammar and take `target = id | SELECTION` only - not
+`VIEW`, `DRAWING`, `AREA x0,y0,x1,y1`, `LAYERS a,b [ONLY]` or `WHERE`:
+`WEED`, `DENSIFY`, `CLOSE`, `OPEN` and `VERTEXZ ... INTERPOLATE`, which act
+on whole polylines and so should take a scope. Their window tools (Draw >
+Vertices: Weed, Densify, Close or Open, Interpolate Heights, Merge Near
+Vertices, Snap Vertices to Grid) act on what is picked or selected, with no
+"Apply to" / "Only those that match" controls (`ScopeFilterWidget`), and none
+says what its scope took. `VERTEX`, `STRAIGHTEN`, `STARTVERTEX`, `VERTEXZ id
+N` and `VERTEXZ id GRADE` name vertices of ONE polyline, where a scope has
+nothing to choose. The retrofit is to read the target with
+`parseScopeWords` / `resolveScope` and filter to polylines.
+
+**The three surfaces (the contributors' contract, section 1).**
+
+- The Vertices panel (`src/katana_qt/drawing/vertex_panel.cpp`) executes
+  `cad::editPolyline` commands itself; it does not build `VERTEX SET` /
+  `VERTEX INSERT` / `VERTEX DELETE` lines and hand them to
+  `MainWindow::runVerbLine`, so its edits are not logged as lines.
+- Grip drags and Delete on hot grips (`grip_controller.cpp`) execute
+  `gripDragCommand` / `deleteHotVertices` directly; a vertex grip's drag is
+  `VERTEX MOVE`, but the other handles (an arc segment's middle, a centre,
+  a quadrant, a spline's fit points) have no verb.
+- The drafting toolbar sets `Document::drafting()` itself rather than
+  running `ORTHO`, `POLAR`, `TRACKING`, `ANGLES` and `SNAP` lines.
+- No verb at all, so no `katana_cli` or `katana_mcp` path: Fillet Vertex,
+  Chamfer Vertex, Merge Near Vertices, Snap Vertices to Grid, Freehand
+  Sketch, Revision Cloud.
+
+**The merge's own.**
+
+- `PARCEL` refuses a lot with arc courses rather than chording it: a legal
+  description's arc course is radius, arc length and chord, which
+  `parcelReport` does not yet write.
+- A leader can be put along a curve polyline or an ellipse, not a spline.
+- The IFC import still reads an `IfcIndexedPolyCurve`'s arcs as chords into
+  a `Polyline2`; it makes none of the three kinds.
+- The Alignment Manager cannot take PIs from a curve polyline (the tangent
+  points of its arcs are not PIs); it says so.

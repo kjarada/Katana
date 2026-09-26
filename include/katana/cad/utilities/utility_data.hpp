@@ -132,9 +132,11 @@ planUtilityRegrade(const katana::entity::Model& model, const UtilityData& data,
 
 // ---- the design CLEARANCE is measured against ----------------------------------------------
 
-// Proposed works drawn as an entity: a line or a polyline (a closed one
-// returns to its start). Levels: `level` at every vertex when given; else the
-// entity's own heights (entity::heightsOf), where it has them; else none.
+// Proposed works drawn as an entity: a line, a polyline (a closed one
+// returns to its start) or a curve polyline (its arcs as chords within a
+// millimetre). Levels: `level` at every vertex when given; else the
+// entity's own heights (entity::heightsOf, or a curve polyline's vertices,
+// interpolated along a segment), where it has them; else none.
 // The id is "#<entity id>". InvalidArgument for any other kind of entity.
 [[nodiscard]] katana::core::Result<katana::survey::subsurface::DesignAlignment>
 designFromEntity(const katana::entity::Entity& entity, std::optional<double> level);

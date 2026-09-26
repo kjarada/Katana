@@ -935,6 +935,13 @@ void AlignmentManagerDialog::Impl::useSelection()
             vertices = {line->start, line->end};
         } else if (const auto* polyline = std::get_if<geo::Polyline2>(&entity->geometry)) {
             vertices = polyline->vertices;
+        } else if (std::holds_alternative<geo::CurvePolyline2>(entity->geometry)) {
+            // Its vertices are the arcs' tangent points, not intersection
+            // points: taken as PIs they would lay a different road.
+            setStatus(QStringLiteral("The selected polyline has arcs: its vertices are tangent "
+                                     "points, not PIs. Type the PIs, or straighten it first."),
+                      true);
+            return;
         }
     }
     if (vertices.size() < 2) {

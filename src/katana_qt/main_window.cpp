@@ -93,6 +93,7 @@
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/dxf/reader.hpp"
+#include "katana/entity/curve_pieces.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/customisation_report.hpp"
@@ -2947,7 +2948,9 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
 
 void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
 {
-    const bool replacesDocument = verb == "NEW" || verb == "OPEN";
+    // Not an OPEN of polylines (OPEN #12, OPEN SELECTION): that is an edit.
+    const bool replacesDocument =
+        katana::cad::CommandInterpreter::replacesDocument(line.toStdString());
     if (replacesDocument && !confirmDiscard()) {
         return;
     }
@@ -2972,7 +2975,7 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
         clearSceneData();
         views_->zoomExtentsAll();
     }
-    if (verb == "OPEN") {
+    if (replacesDocument && verb == "OPEN") {
         reportMissingCustomisation();
     }
     historyCursor_ = static_cast<int>(interpreter_.history().size());
@@ -5319,8 +5322,13 @@ void MainWindow::cutSectionAlongSelection()
     } else if (const auto* polyline =
                    std::get_if<katana::geometry::Polyline2>(&entity->geometry)) {
         alignment = *polyline;
+    } else if (std::holds_alternative<katana::geometry::CurvePolyline2>(entity->geometry) ||
+               std::holds_alternative<katana::geometry::Spline2>(entity->geometry)) {
+        // Along the curve's chords within a millimetre (entity::linework),
+        // which a section's chainage cannot tell from the curve.
+        alignment.vertices = katana::entity::linework(entity->geometry);
     } else {
-        logMessage("A section must be cut along a line or a polyline.", true);
+        logMessage("A section must be cut along a line, a polyline or a spline.", true);
         return;
     }
 
