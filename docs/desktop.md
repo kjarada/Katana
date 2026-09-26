@@ -1215,6 +1215,52 @@ workbench - one executor, so no path exists in the dialog that an agent cannot
 take on the command line. The download runs as a background job with its
 progress and Cancel in the status bar; the entities arrive as one command.
 
+## Geoprocessing jobs: GDAL on the window's command line
+
+The geoprocessing verbs (`docs/geoprocessing.md`) - GDAL, and the families
+the geoprocessing packages add - are `GeoWorkbench`
+(`src/katana_qt/geo/geo_workbench.hpp`), built as the online and utility
+workbenches are. `MainWindow::buildGisActions` hands it the window's
+document, interpreter, reference rasters and surfaces. `runWorkbenchLine`
+asks it before the online and utility workbenches, so a typed line and a
+dialog's line through `runVerbLine` reach the same executor `katana_cli` and
+`katana_mcp` run. The window links `katana_app` for it: the window never has
+a second implementation of a session verb.
+
+- **Prepared on the GUI thread.** The line is read, its scope resolved and
+  what the run needs copied there. What answers at once - LIST, HELP, a
+  PREVIEW, a refusal - is logged there.
+- **Run as a job.** Anything that runs is a background job (`jobs.hpp`), with
+  progress and Cancel in the status bar. The job's Apply runs the executor's
+  apply, as one undo step.
+- **Headless, the line waits for its job,** so what it did is logged, and
+  captured by `runVerbLine`, before the next line.
+- **Interactively it logs `job id=<n> title="..." state=started`,** and when
+  the job ends it tells `GeoServices::finished` and any listener a dialog
+  added (`GeoWorkbench::addFinishedListener`). A cancelled job applies
+  nothing, whenever the cancel arrived.
+
+Its menu items come from one table with a block per package
+(`src/katana_qt/geo/menu_table.cpp`, `GeoMenus`). The GIS sections and the
+Terrain submenus are made only when an item is added, so no empty heading
+shows. F0 adds none: the GDAL verb's item is the toolbox, X1's. It is on the
+command line and on `runVerbLine` until then.
+
+**One store of surfaces.** The window's surfaces are a
+`terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the
+store the headless session has too, so `SURFACE <name>` finds the same
+surface on every front end. `MainWindow::syncSceneSurfaces` rebuilds the
+views' list from it whenever its revision moves, keeping how each was shown.
+Surfaces are shared and immutable, so a job may read one while the views
+draw it. The store keeps names unique: a second surface of a name is
+"name (2)".
+
+**The GIS menu's option dialogs are one file each** - `gis_import_dialogs`,
+`gis_export_dialog`, `surface_raster_dialog`, `dataset_info_dialog`, with
+their shared OK/Cancel row in `gis_dialog_support.hpp` - split from one
+`gis_dialogs` file without a change in behaviour, since four geoprocessing
+packages each extend one of them.
+
 ## Survey > Subsurface Utilities (AS 5488): the same pattern, one verb
 
 The AS 5488 tools (`docs/subsurface_utilities.md`) are `UtilityWorkbench`

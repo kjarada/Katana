@@ -30,11 +30,13 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/log.hpp"
+#include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_builder.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "customisation/customisation_workbench.hpp"
+#include "geo/geo_workbench.hpp"
 #include "gis_online.hpp"
 #include "keyboard_shortcuts_dialog.hpp"
 #include "script_runner.hpp"
@@ -275,6 +277,9 @@ class MainWindow final : public QMainWindow {
     void buildSurfaceFromRaster();
     void buildSurfaceFromDrawing();
     void addSurface(std::string name, katana::terrain::TinSurface surface);
+    // sceneSurfaces_ made again from surfaceStore_ when it has changed, each
+    // surface keeping how it was shown.
+    void syncSceneSurfaces();
     // Session data like a surface: not an entity, not undoable, and drawn in
     // 3D with its footprint in plan.
     void addMesh(std::string name, katana::geometry::TriangleMesh mesh,
@@ -457,8 +462,8 @@ class MainWindow final : public QMainWindow {
     // at its prompt: each typed in turn, blank lines left out, so none of
     // them is run as a command.
     void typeLinesIntoTool(const QString& text);
-    // The ONLINE and UTILITY verbs, run by their workbenches; false leaves the
-    // line to whoever asked.
+    // The geoprocessing verbs (GDAL ...), the ONLINE and the UTILITY verbs,
+    // run by their workbenches; false leaves the line to whoever asked.
     bool runWorkbenchLine(const QString& line);
     // Who a line came from. Only a person's typed line starts a tool by a
     // bare word; a script's, a paste's or a dialog's is the interpreter's, as
@@ -559,11 +564,14 @@ class MainWindow final : public QMainWindow {
     // imported point clouds, rasters and drawing geometry, and owned here for
     // the same reason reference data is: katana_cad must stay free of GDAL and
     // PDAL so it still builds with -DKATANA_BUILD_IO=OFF.
-    // unique_ptr, NOT a vector of values: sceneSurfaces_ holds raw pointers
-    // into this store, and a vector of values would move every surface - and
-    // dangle every one of those pointers - the moment it reallocated.
-    std::vector<std::unique_ptr<katana::terrain::TinSurface>> surfaceStore_;
+    // The one store of named surfaces (terrain/surface_store.hpp) that the
+    // geoprocessing verbs' SURFACE <name> reads too; each surface is shared
+    // and immutable, so sceneSurfaces_ may point into it and a background
+    // job may read one while the views draw it. sceneSurfaces_ is rebuilt
+    // from the store whenever its revision moves (syncSceneSurfaces).
+    katana::terrain::SurfaceStore surfaceStore_;
     std::vector<katana::cad::SceneSurface> sceneSurfaces_;
+    std::uint64_t sceneSurfacesRevision_ = 0;
     // Meshes (12d trimeshes), held the same way and for the same reasons.
     std::vector<std::unique_ptr<katana::geometry::TriangleMesh>> meshStore_;
     std::vector<katana::cad::SceneMesh> sceneMeshes_;
@@ -620,6 +628,11 @@ class MainWindow final : public QMainWindow {
     // Document so that katana_cad stays free of GDAL and PDAL, which is what
     // lets it build with -DKATANA_BUILD_IO=OFF for the sanitizer job.
     katana::interop::ReferenceData reference_;
+    // The geoprocessing verbs (geo/geo_workbench.hpp): GDAL and the families
+    // after it, run by the executor katana_cli shares, as background jobs.
+    // Declared after the Document, the surfaces and the reference data, which
+    // its context holds, so that it goes before them.
+    std::unique_ptr<GeoWorkbench> geo_;
 
     bool refreshingLayers_ = false;     // suppresses cellChanged while rebuilding
     bool refreshingReferences_ = false; // ditto, for the reference table

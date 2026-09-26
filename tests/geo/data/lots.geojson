@@ -1,0 +1,13 @@
+{
+  "type": "FeatureCollection",
+  "name": "lots",
+  "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::28356" } },
+  "features": [
+    { "type": "Feature", "properties": { "kind": "lot", "name": "A" },
+      "geometry": { "type": "Polygon", "coordinates": [ [ [0, 0], [50, 0], [50, 40], [0, 40], [0, 0] ] ] } },
+    { "type": "Feature", "properties": { "kind": "lot", "name": "B" },
+      "geometry": { "type": "Polygon", "coordinates": [ [ [50, 0], [100, 0], [100, 40], [50, 40], [50, 0] ] ] } },
+    { "type": "Feature", "properties": { "kind": "corridor", "name": "C" },
+      "geometry": { "type": "Polygon", "coordinates": [ [ [-10, 18], [110, 18], [110, 22], [-10, 22], [-10, 18] ] ] } }
+  ]
+}

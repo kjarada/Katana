@@ -747,3 +747,106 @@ TEST_F(McpServer, AnAgentEditsAHatchPatternAndMakesAStyleThatUsesIt)
     const Json refused = call("katana_run_commands", Json{{"commands", {"HATCH DELETE brick"}}});
     EXPECT_TRUE(refused["isError"].get<bool>()) << "a style still hatches with it";
 }
+
+#if defined(KATANA_TEST_WITH_INTEROP)
+// ---- the geoprocessing tools (docs/mcp.md, "Geoprocessing tools") ---------------------------
+
+TEST_F(McpServer, GdalCatalogueListsHillshade)
+{
+    initialize();
+    const Json result = call("katana_gdal_catalogue", Json{{"filter", "hillshade"}, {"schemas", true}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& algorithms = result["structuredContent"]["algorithms"];
+    ASSERT_EQ(algorithms.size(), 1U) << algorithms.dump();
+    EXPECT_EQ(algorithms[0]["name"], "raster hillshade");
+    EXPECT_EQ(algorithms[0]["path"], Json({"raster", "hillshade"}));
+    EXPECT_EQ(algorithms[0]["policy"], "safe");
+    // One algorithm: few enough for its schema to come with it.
+    EXPECT_TRUE(algorithms[0]["arguments_schema"]["properties"].contains("zfactor"));
+    EXPECT_TRUE(result["structuredContent"]["gdal_version"].get<std::string>().starts_with("3."));
+    // A group lists its members and no schemas past 20 of them.
+    const Json raster = call("katana_gdal_catalogue", Json{{"filter", "raster"}, {"schemas", true}});
+    EXPECT_GT(raster["structuredContent"]["algorithms"].size(), 20U);
+    EXPECT_FALSE(raster["structuredContent"]["algorithms"][0].contains("arguments_schema"));
+}
+
+TEST_F(McpServer, GdalDescribeGivesASchemaWithBounds)
+{
+    initialize();
+    const Json result = call("katana_gdal_describe", Json{{"algorithm", "raster hillshade"}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& described = result["structuredContent"];
+    const Json& altitude = described["arguments_schema"]["properties"]["altitude"];
+    EXPECT_EQ(altitude["minimum"], 0.0);
+    EXPECT_EQ(altitude["maximum"], 90.0);
+    EXPECT_EQ(described["arguments_schema"]["properties"]["zfactor"]["exclusiveMinimum"], 0.0);
+    bool found = false;
+    for (const Json& arg : described["arguments"]) {
+        if (arg["name"] == "input") {
+            found = true;
+            EXPECT_EQ(arg["dataset"]["kinds"], Json({"raster"}));
+            EXPECT_EQ(arg["dataset"]["sources"], Json({"raster", "surface", "file"}));
+        }
+    }
+    EXPECT_TRUE(found);
+    // An alias is taken, as GDAL LIST names it.
+    const Json warp = call("katana_gdal_describe", Json{{"algorithm", "raster warp"}});
+    EXPECT_EQ(warp["structuredContent"]["algorithm"]["name"], "raster reproject");
+}
+
+TEST_F(McpServer, GdalRunBuildsTheLineAndReturnsOutputs)
+{
+    initialize();
+    (void)call("katana_run_commands", Json{{"commands", {"LINE 0,0 100,0", "TEXT 5,5 2.5 \"LOT 7\""}}});
+    const Json result = call(
+        "katana_gdal_run",
+        Json{{"algorithm", "vector buffer"},
+             {"arguments", {{"distance", 1}, {"endcap-style", "flat"}}},
+             {"inputs", {{"input", {{"scope", "drawing"}, {"where", {"TYPE=line"}}}}}},
+             {"output", {{"layer", "gis/easement"}}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& run = result["structuredContent"];
+    EXPECT_EQ(run["line"], "GDAL vector buffer --distance=1 --endcap-style=flat FROM input DRAWING "
+                           "WHERE TYPE=line TO LAYER gis/easement");
+    EXPECT_TRUE(textOf(result).starts_with("> GDAL vector buffer"));
+    ASSERT_EQ(run["scope"].size(), 1U);
+    EXPECT_EQ(run["scope"][0]["matched"], 1);
+    EXPECT_EQ(run["scope"][0]["used"], 1);
+    ASSERT_EQ(run["outputs"].size(), 1U);
+    EXPECT_EQ(run["outputs"][0]["kind"], "vector");
+    EXPECT_EQ(run["outputs"][0]["layer"], "gis/easement");
+    EXPECT_EQ(run["outputs"][0]["created"], 1);
+    EXPECT_EQ(run["cancelled"], false);
+    const Json listed = call("katana_list_entities");
+    EXPECT_NE(textOf(listed).find("layer=gis/easement  vertices=4  closed  length=204  area=200"),
+              std::string::npos)
+        << textOf(listed);
+}
+
+TEST_F(McpServer, GdalRunRefusesAConfirmAlgorithmWithoutConfirm)
+{
+    initialize();
+    const TempDir folder("gdal-confirm");
+    const std::string doomed = folder.file("doomed.txt");
+    std::ofstream(doomed) << "x";
+    const Json refused =
+        call("katana_gdal_run", Json{{"algorithm", "vsi delete"}, {"tokens", {doomed}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("confirm"), std::string::npos) << textOf(refused);
+    EXPECT_TRUE(std::filesystem::exists(doomed));
+    const Json confirmed = call("katana_gdal_run", Json{{"algorithm", "vsi delete"},
+                                                        {"tokens", {doomed}},
+                                                        {"confirm", true}});
+    EXPECT_FALSE(confirmed["isError"].get<bool>()) << textOf(confirmed);
+    EXPECT_FALSE(std::filesystem::exists(doomed));
+}
+
+TEST_F(McpServer, GdalRunRefusesAnArgumentTheAlgorithmHasNot)
+{
+    initialize();
+    const Json refused = call("katana_gdal_run", Json{{"algorithm", "raster hillshade"},
+                                                      {"arguments", {{"no-such", 1}}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("no-such"), std::string::npos);
+}
+#endif

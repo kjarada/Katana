@@ -31,6 +31,7 @@
 #include "session.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
+#include "geo/geo_verbs.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/export.hpp"
@@ -340,6 +341,9 @@ std::string placementKeyword(const katana::cad::ImportPlacement& placement)
 // front ends own the interoperability, and both front ends offer the same verbs.
 struct InteropState {
     katana::interop::ReferenceData reference;
+    // The session's named surfaces (terrain/surface_store.hpp): what a
+    // geoprocessing line's SURFACE <name> finds.
+    katana::terrain::SurfaceStore surfaces;
 };
 
 // IMPORT <file> LOCAL | ALONGSIDE | OFFSET=dE,dN moves the data as one piece:
@@ -743,6 +747,9 @@ struct SessionState {
     std::vector<std::string> customisationMissingAtOpen{};
 #if defined(KATANA_WITH_INTEROP)
     InteropState interop;
+    // The geoprocessing executor's view of this session (geo/geo_verbs.hpp):
+    // its drawing, interpreter, reference rasters and surfaces.
+    katana::app::geo::Context* geo = nullptr;
 #endif
 };
 
@@ -826,6 +833,19 @@ bool runLine(SessionState& session, const std::string& line)
         }
     }
 #if defined(KATANA_WITH_INTEROP)
+    // The geoprocessing verbs (GDAL and the families after it) run through the
+    // one executor, inline: a session has nobody to wait for a job.
+    if (session.geo != nullptr && katana::app::geo::handles(line)) {
+        const auto reply = katana::app::geo::runNow(*session.geo, line);
+        if (!reply) {
+            std::cerr << "error: " << reply.error().describe() << '\n';
+            return false;
+        }
+        if (!reply->empty()) {
+            std::cout << *reply << '\n';
+        }
+        return true;
+    }
     // Interoperability verbs are handled before the interpreter sees the line,
     // because they live above katana_cad rather than inside it.
     if (const std::optional<bool> handled =
@@ -893,7 +913,12 @@ struct Session::State {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
 #if defined(KATANA_WITH_INTEROP)
-    SessionState session{document, interpreter, {}, {}, {}};
+    SessionState session{document, interpreter, {}, {}, {}, nullptr};
+    // Derived rasters of a drawing with no project go to a folder of this
+    // process's own, so two sessions never write over each other's.
+    katana::app::geo::Context geo{document, interpreter, session.interop.reference,
+                                  session.interop.surfaces,
+                                  katana::app::geo::defaultScratch(), {}, {}};
 #else
     SessionState session{document, interpreter, {}, {}};
 #endif
@@ -901,6 +926,9 @@ struct Session::State {
 
 Session::Session(const char* executable) : state_(std::make_unique<State>())
 {
+#if defined(KATANA_WITH_INTEROP)
+    state_->session.geo = &state_->geo;
+#endif
     state_->interpreter.setColourLookup(colourOf);
     if (executable != nullptr) {
         loadDefaultCustomisation(state_->document, executable, state_->session.customisation);
@@ -947,6 +975,7 @@ std::string Session::helpText()
             "          (INFO <id> describes an entity, when no file has that name)\n"
             "          COPC <source> <destination.copc.laz>  rewrite a point "
             "cloud as COPC\n";
+    text += katana::app::geo::helpText();
 #else
     text += "Interop   IMPORT <file.dxf> [LOCAL | ALONGSIDE | OFFSET=dE,dN] | EXPORT <file.dxf>\n"
             "          (this build has no GDAL: DXF only)\n";

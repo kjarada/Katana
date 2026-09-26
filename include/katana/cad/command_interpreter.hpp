@@ -99,6 +99,10 @@ class CommandInterpreter {
     // and its visible area. Headless there is none, and VIEW is refused in
     // favour of AREA.
     void setScopeContext(ScopeViewProvider provider) { scopeViews_ = std::move(provider); }
+    // What VIEW is answered by, for a front end's own verbs that take the
+    // shared scope (the geoprocessing verbs above katana_cad): empty
+    // headless, so VIEW is refused there exactly as MODIFY refuses it.
+    [[nodiscard]] const ScopeViewProvider& scopeContext() const { return scopeViews_; }
 
     // Forgets the "last point" that relative (@dx,dy) and polar (@d<a) points
     // resolve against. The interpreter cannot see a document being replaced

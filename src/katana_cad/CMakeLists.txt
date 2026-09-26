@@ -63,6 +63,12 @@ target_sources(katana_cad PRIVATE ${_cad_annotation_sources})
 # katana_survey's grading, so the window, katana_cli and katana_mcp share them.
 target_sources(katana_cad PRIVATE utilities/utility_drawing.cpp utilities/utility_data.cpp
                                   utilities/utility_verbs.cpp)
+# The geoprocessing packages' domain edits that need no GDAL - a surface
+# built from the drawing, a drape (include/katana/cad/geo/,
+# docs/geoprocessing.md): globbed, so the packages add files without editing
+# this list. Empty until one does.
+file(GLOB _cad_geo_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp")
+target_sources(katana_cad PRIVATE ${_cad_geo_sources})
 katana_target_defaults(katana_cad)
 # The scene build's kernels (docs/performance.md, "SIMD: kernels chosen at run
 # time"): lighting, colour and edge fades of dense TINs and meshes.
