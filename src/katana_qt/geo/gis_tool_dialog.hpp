@@ -156,10 +156,12 @@ class GisToolDialog : public QDialog {
     [[nodiscard]] const GisDialogContext& context() const { return context_; }
     [[nodiscard]] bool documentAlive() const;
 
+    // What <d>Status says; an error is shown as one.
+    void setStatus(const QString& text, bool isError);
+
   private:
     void runLine(const QString& line);
     void showOutcome(const VerbOutcome& outcome);
-    void setStatus(const QString& text, bool isError);
 
     QString name_;
     GisDialogContext context_;

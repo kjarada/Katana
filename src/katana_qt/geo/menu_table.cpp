@@ -23,6 +23,8 @@
 #include "geo/buffer_dialog.hpp"
 #include "geo/dissolve_dialog.hpp"
 #include "geo/gis_tool_dialog.hpp"
+// ---- V2: GIS > Analysis - GDAL > Overlay ----
+#include "geo/overlay_dialog.hpp"
 // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
 #include "geo/coverage_dialog.hpp"
 #include "geo/geometry_check_dialog.hpp"
@@ -51,6 +53,12 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                          return new GisDissolveDialog(std::move(context), parent);
                      });
     // ---- V2: GIS > Analysis - GDAL > Overlay ----
+    addGisToolAction(menus, workbench, "Analysis - GDAL", Icon::Processing, "Ov&erlay...",
+                     "Intersection, difference, union and the rest between two scopes, or a "
+                     "scope and a file - easement area per lot, pipe length per lot - GIS OVERLAY",
+                     "gisOverlay", [](GisDialogContext context, QWidget* parent) {
+                         return new GisOverlayDialog(std::move(context), parent);
+                     });
     // ---- V3: GIS > Analysis - GDAL > Hull, Clip ----
     // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
     addGisToolAction(menus, workbench, "Check - GDAL", Icon::Processing, "Check &Geometry...",

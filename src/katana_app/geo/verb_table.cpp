@@ -24,6 +24,8 @@ namespace katana::app::geo {
                                                                 const Tokens& tokens,
                                                                 std::string_view line);
 // ---- V2: GIS OVERLAY ----
+[[nodiscard]] katana::core::Result<Prepared> prepareGisOverlay(Context& context, const Tokens& tokens,
+                                                               std::string_view line);
 // ---- V3: GIS HULL, GIS CLIP ----
 // ---- V4: GIS CHECK, GIS REPAIR, GIS COVERAGE ----
 [[nodiscard]] katana::core::Result<Prepared> prepareGisCheck(Context& context, const Tokens& tokens,
@@ -79,6 +81,13 @@ const std::vector<VerbEntry>& verbTable()
              "          [PREVIEW]  areas merged by their properties (default layer gis/dissolve);\n"
              "          REPLACE deletes the areas merged, in the same step"});
         // ---- V2: GIS OVERLAY ----
+        rows.push_back(
+            {"GIS", "OVERLAY", &prepareGisOverlay,
+             "GIS OVERLAY intersection|difference|union|symdifference|identity|update|clip\n"
+             "          <scope> WITH (<scope> | FILE <path> [LAYER <name>] [where=\"<sql>\"])\n"
+             "          [keep=a,b|all|none] [keepwith=a,b|all|none] [TO LAYER <path>]\n"
+             "          [csv=<file>] [OVERWRITE] [PREVIEW]  polygon booleans between two scopes\n"
+             "          (default layer gis/overlay): a row per piece with its area or length"});
         // ---- V3: GIS HULL, GIS CLIP ----
         // ---- V4: GIS CHECK, GIS REPAIR, GIS COVERAGE ----
         rows.push_back(
