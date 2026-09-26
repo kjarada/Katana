@@ -31,9 +31,11 @@ on:
 permissions:
   contents: read
 
+# A newer push waits for the running build rather than cancelling it: the
+# Windows build is most of an hour, and a cancelled one proves nothing.
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   version:
@@ -119,6 +121,12 @@ jobs:
           QT_QPA_PLATFORM=offscreen timeout 300 "$root/bin/katana.exe" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot-win64
+          path: smoke/window.png
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
         with:
           name: katana-windows
           path: |
@@ -183,7 +191,10 @@ jobs:
       # The tarball is what a user downloads, so it is tested with the
       # toolchain prefix moved out of reach: anything the package failed to
       # carry fails to load here rather than on the user's machine.
+      # macOS has no timeout(1); the step's own limit stands in for it, so a
+      # window that waits on a dialog fails the job instead of holding it.
       - name: Smoke test the package
+        timeout-minutes: 15
         run: |
           set -eux
           package="Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}"
@@ -201,8 +212,15 @@ jobs:
           grep -q "EPSG:32630" smoke/info.txt
           # PDAL and GDAL's vector drivers.
           "$root/bin/katana_cli" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
-          QT_QPA_PLATFORM=offscreen timeout 300 "$root/bin/katana" smoke/project --screenshot smoke/window.png
+          QT_QPA_PLATFORM=offscreen "$root/bin/katana" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
+      # What the window drew, to look at; not part of the release.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot-${{ matrix.package }}
+          path: smoke/window.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -219,6 +237,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: katana-*
           path: dist
           merge-multiple: true
       - name: Checksums

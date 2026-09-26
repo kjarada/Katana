@@ -79,7 +79,9 @@ user would run it:
 * `katana <project> --screenshot out.png`, offscreen, must write the window's
   picture - Qt, its platform plugin and the whole start-up.
 
-On Linux and macOS the toolchain prefix is MOVED AWAY for the test, so that a
+Each run keeps the window's picture as an artifact, `screenshot-<platform>`, to
+look at; it is not published. On Linux and macOS the toolchain prefix is
+MOVED AWAY for the test, so that a
 library the package failed to carry fails to load there rather than on a
 user's machine. On Windows `PATH` is cut to the Windows directories.
 
