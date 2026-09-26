@@ -1326,6 +1326,13 @@ dialog through `showTerrainDialog` (made on first use under the window, so
   a plan view (`samplePick`, through `GeoServices::pickPoint`: the next
   left click; Esc or a right click cancels) (`docs/terrain.md`, "Sampling
   and drape").
+- `terrainViewshed` "Viewshed and Line of Sight..." opens `viewshedDialog`,
+  two tabs: Viewshed writes a RASTER VIEWSHED line (the ground, observers
+  typed or picked - or, with `viewshedUseScope`, the points the shared
+  scope controls take - the eye and target heights, how far to look, the
+  curvature, a layer for the visible area and the raster's name), and Line
+  of Sight a LOS line (the two ends, each typed or picked, and the heights)
+  (`docs/terrain.md`, "Viewshed and line of sight").
 
 **One store of surfaces.** The window's surfaces are a
 `terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the

@@ -37,6 +37,8 @@
 // ---- T4: Terrain > Analysis > Statistics by Area, Drape and Sample Heights ----
 #include "geo/drape_dialog.hpp"
 #include "geo/zonal_stats_dialog.hpp"
+// ---- T5: Terrain > Analysis > Viewshed and Line of Sight ----
+#include "geo/viewshed_dialog.hpp"
 
 #include <utility>
 
@@ -221,7 +223,22 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
         });
         menus.addToTerrain("Analysis", "terrainAnalysisMenu", drape);
     }
-    // ---- T5: Terrain > Analysis > Viewshed ----
+    // ---- T5: Terrain > Analysis > Viewshed and Line of Sight ----
+    {
+        QAction* viewshed = workbench.services().makeAction(
+            Icon::Processing, "Viewshed and Line of Sight...",
+            "What can be seen from observers over a surface or an elevation raster, and whether "
+            "one point can be seen from another (RASTER VIEWSHED, LOS)",
+            {}, "terrainViewshed");
+        viewshed->setData("viewshedDialog");
+        QObject::connect(viewshed, &QAction::triggered, &workbench.window(), [&workbench] {
+            (void)showTerrainDialog(workbench, "viewshedDialog",
+                                    [](TerrainDialogContext context, QWidget* parent) -> QDialog* {
+                                        return new ViewshedDialog(std::move(context), parent);
+                                    });
+        });
+        menus.addToTerrain("Analysis", "terrainAnalysisMenu", viewshed);
+    }
     // ---- T6: Terrain > DEM > Grid from Points ----
     {
         QAction* grid = workbench.services().makeAction(

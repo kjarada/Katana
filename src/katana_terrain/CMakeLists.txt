@@ -16,6 +16,8 @@ add_library(katana_terrain STATIC
     super_surface.cpp
     # The named surfaces a session keeps (docs/geoprocessing.md).
     surface_store.cpp
+    # A sight line over the ground, for the LOS verb (docs/terrain.md).
+    line_of_sight.cpp
 )
 katana_target_defaults(katana_terrain)
 target_link_libraries(katana_terrain PUBLIC katana_geometry PRIVATE CGAL::CGAL)
