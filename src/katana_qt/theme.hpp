@@ -14,8 +14,13 @@
 // - which are content, not chrome.)
 
 #include <QColor>
+#include <QFont>
+
+#include <optional>
+#include <string_view>
 
 class QApplication;
+class QStyle;
 
 namespace katana::qt::theme {
 
@@ -40,8 +45,52 @@ namespace katana::qt::theme {
 [[nodiscard]] QColor accentText(); // text drawn on the accent
 [[nodiscard]] QColor error();
 
+// ---- text -------------------------------------------------------------------------------
+//
+// Fonts are tokens too. The command line named "Consolas" and the view's
+// prompt and snap tag "Segoe UI", literals that are Windows' fonts and a
+// substitute's anywhere else, at sizes that ignored the platform's and any
+// person's choice. Now the chrome is the platform's UI face (Segoe UI on
+// Windows) at one size a person can change (View > Text Size), and every
+// other font is worked out from it, so the command line and the overlays grow
+// with the menus.
+
+// How large the window's text is, in steps from the platform's own size.
+enum class TextSize { Small, Standard, Large, ExtraLarge };
+
+// "small", "standard", "large", "extra-large": how a setting stores it.
+[[nodiscard]] std::string_view toString(TextSize size);
+[[nodiscard]] std::optional<TextSize> textSizeFrom(std::string_view text);
+// The points a size adds to the platform's: -1, 0, +2, +4. Two points a step
+// above Standard, because one (9 to 10 pt) is a difference few people see.
+[[nodiscard]] int textSizeSteps(TextSize size);
+
+// The chrome's font: the platform's UI face at the chosen size.
+[[nodiscard]] QFont uiFont();
+// The command line and the logs: fixed pitch - a column of coordinates reads
+// down only in one - at the chrome's size plus `larger` points. The first
+// family the machine has of Cascadia Mono, Consolas, DejaVu Sans Mono,
+// Liberation Mono and Menlo, else the platform's fixed font.
+[[nodiscard]] QFont monospaceFont(double larger = 0.0);
+// Text drawn over a view - a tool's prompt, a snap's name - in the chrome's
+// face, `pixels` high at Standard and scaled with the chosen size.
+[[nodiscard]] QFont overlayFont(int pixels);
+
+// The size chosen, Standard until setTextSize.
+[[nodiscard]] TextSize textSize();
+// Sets the application font to `size`: every widget without a font of its
+// own follows at once; one with its own (the command line) is the owner's to
+// set again from monospaceFont().
+void setTextSize(QApplication& application, TextSize size);
+
 // Applies the Fusion style, the palette and the stylesheet. Call once, after
 // constructing the QApplication and before creating any window.
 void apply(QApplication& application);
+
+// The two halves of apply's look, for a test to put on one widget without
+// changing the whole application's: the style (Fusion, drawing menu section
+// titles and scrolling choice lists; the caller owns it) and the stylesheet.
+[[nodiscard]] QStyle* makeStyle();
+[[nodiscard]] QString styleSheet();
 
 } // namespace katana::qt::theme

@@ -98,7 +98,7 @@ QLineEdit* commandField(const QString& name, QWidget* parent)
     field->setToolTip(QStringLiteral(
         "The command this runs, exactly as it could be typed on the command line, given to "
         "katana_cli or sent by an agent"));
-    field->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    field->setFont(katana::qt::theme::monospaceFont());
     return field;
 }
 
@@ -677,7 +677,7 @@ IfcImportDialog::IfcImportDialog(IfcImportContext context, QWidget* parent)
     summary_->setPlaceholderText(
         QStringLiteral("What the file holds - its schema, coordinate system, classes, alignments "
                        "and surfaces - shown by Describe."));
-    summary_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    summary_->setFont(katana::qt::theme::monospaceFont());
     layout->addWidget(summary_, 1);
 
     auto* options = new QFormLayout();

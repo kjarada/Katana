@@ -88,6 +88,18 @@ working directory (a mistyped shell `2>1` makes the first), it once answered
 The tool's description of `local` said it imported "in the drawing's own
 coordinates rather than reprojecting"; it moves the data, and says so.
 
+An entity's attributes are read a level at a time through
+`katana_run_commands` with `PROP TREE` (`docs/cad.md`, "Properties as a tree:
+PROP TREE"): `katana_describe_entity` sends `INFO`, which prints every
+property, and a surveyed string with thirty attributes on each of a
+thousand vertices is thirty thousand lines of it. `PROP TREE`, on the
+selection or any scope, answers the top of the tree - `Asset`,
+`vertex` with how many names and values are beneath each - and `PROP TREE
+UNDER vertex/3` one vertex's, in pages (`FROM`, `LIMIT`), as the window's
+Properties panel reads them. No tool of its own was added: the verb's
+records are already the structured answer, and a tool would be a second
+spelling of it.
+
 The annotation styles are read and changed through `katana_run_commands`
 with the verbs the window's managers send (`docs/annotation.md`): `DIMSTYLE
 INFO name` answers one record of every field, the layers that name the style
