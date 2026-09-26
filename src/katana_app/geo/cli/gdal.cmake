@@ -37,3 +37,13 @@ add_test(NAME cli.gdal_refuses_the_config_token
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli> -c "GDAL raster hillshade --config GDAL_ENABLE_EXTERNAL=YES")
 set_tests_properties(cli.gdal_refuses_the_config_token PROPERTIES WILL_FAIL TRUE)
+
+# HELP typed as a line names the geo executor's families too (IMPORT and its
+# options, RASTER GRID, the GDAL verb), as the window's HELP does
+# (docs/geoprocessing.md, "The verb table").
+add_test(NAME cli.help_typed_as_a_line_names_the_geo_families
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "HELP")
+set_tests_properties(cli.help_typed_as_a_line_names_the_geo_families PROPERTIES
+    PASS_REGULAR_EXPRESSION "Geo       GDAL VERSION .*RASTER GRID \\[<scope>\\]"
+    FAIL_REGULAR_EXPRESSION "error: ")
