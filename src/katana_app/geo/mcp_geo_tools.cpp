@@ -658,6 +658,9 @@ ToolReply references(Session& session, const Json& arguments)
 
 } // namespace
 
+// ---- V5: katana_gis_query (sql_mcp.cpp) ----
+[[nodiscard]] Tool gisQueryTool();
+
 std::vector<Tool> geoTools()
 {
     std::vector<Tool> tools;
@@ -744,6 +747,7 @@ std::vector<Tool> geoTools()
         "derived), size, square cell, coordinate system, file and the line that derived it.",
         objectSchema(Json::object()), hints(true, false, true), terrainList});
     // ---- V5: katana_gis_query ----
+    tools.push_back(gisQueryTool());
     // ---- I2: katana_formats ----
     // Read-only, as katana_gdal_catalogue is: it reads the registry through
     // the verb's own chooser and records (formats_verbs.hpp), so the tool,

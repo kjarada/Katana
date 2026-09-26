@@ -415,6 +415,7 @@ GDAL [RUN] <algorithm> [<gdal word>...] [FROM [<arg>] <source>]... [TO [<arg>] <
 <scope>  := SELECTION | DRAWING | VIEW [<id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY],
             then [WHERE key=value ...] - cad::parseScopeWords, the one scope parser
 <target> := LAYER <path> | REFERENCE [<name>] | FILE <path> [FORMAT <driver>]
+            | SELECTION | REPORT (V5: a query's katana_id selected, its rows reported)
 ```
 
 - **The algorithm.** One to three words, by longest match, aliases taken.
@@ -947,23 +948,449 @@ Where it differs from the plan:
 
 ### V1: GIS BUFFER and GIS DISSOLVE
 
-Not started.
+```
+GIS BUFFER [<scope>] distance=<m>|distance=prop:<key> [side=both|left|right]
+           [caps=round|flat|square] [joins=round|mitre|bevel] [dissolve[=k1,k2]]
+           [TO LAYER <path>] [PREVIEW]
+GIS DISSOLVE [<scope>] [by=k1,k2] [keep=identical] [TO LAYER <path>] [REPLACE] [PREVIEW]
+```
+
+Easements, setbacks, corridors and clearance zones around what the scope
+takes, and areas merged by what their properties say
+(`src/katana_app/geo/buffer_verbs.cpp`). The window's items are GIS >
+Analysis - GDAL > Buffer... and Dissolve... (`gisBuffer`, `gisDissolve`;
+`src/katana_qt/geo/buffer_dialog.hpp`, `dissolve_dialog.hpp`). An agent
+types the same lines through `katana_run_commands`.
+
+**BUFFER** runs `vector buffer` on the scope's feature set.
+
+- **The distance** is one length for all, or `distance=prop:<key>`: each
+  entity by the number its own property holds (a clearance by voltage). The
+  entities are grouped by value and each group is one run. An entity whose
+  property gives no number, or 0, is skipped and counted
+  (`skipped.no_distance=`).
+- **Negative** sets an area in: a 3 m mitred setback of a 20 x 40 lot is 14 x
+  34 (`GisBuffer.AMinusThreeMetreMitreSetbackOfATwentyByFortyLotIs14By34`).
+  GEOS buffers a line or a point inwards to nothing; that is counted
+  (`empty=`), never drawn (`GisBuffer.ALineBufferedInwardsIsNothingAndSaysSo`).
+- **One side** of a line is `side=left|right`, walking along it: left of a
+  west-to-east line is north (`GisBuffer.LeftOfAWestToEastLineIsNorth`).
+- **Arcs.** GDAL's default of 8 segments a quadrant strays 0.096 m from a 5 m
+  arc. The quadrant's segments are the fewest whose chords keep within the
+  1 mm curve tolerance the bindings chord with, by the one sagitta rule
+  (`geometry::sagittaChordCount`); the reply says how many
+  (`quadrant_segments=`).
+- **A round buffer of a point is a circle.** Drawn as one - a `Circle2` of
+  the distance's radius, exactly, with the point's properties - rather than
+  as chords (`GisBuffer.ARoundPointBufferIsAnExactCircle`: pi x 25 m2).
+- **dissolve** merges the results: `DISSOLVE` all of them, `dissolve=k1,k2`
+  those whose properties agree. It is DISSOLVE's own chain below.
+- **The result** is closed polylines on `gis/buffer` (or TO LAYER), holes
+  tagged as every result's are, with the source's properties, `gis.op` and
+  `gis.source`. `vector buffer` drops Z: a buffer is in plan.
+
+**DISSOLVE** merges the areas in the scope.
+
+- **`vector dissolve` alone does not group.** It unions only the parts within
+  each feature (measured). So merging by a property is `vector combine
+  --group-by` and then `vector dissolve`; the combine's geometry collection
+  comes back as the feature's parts.
+- **Areas only.** Closed polylines and circles (drawingDataset's areas, with
+  their tagged holes); the points and lines a scope takes are left as they
+  are, and a warning says how many.
+- **`keep=identical`** keeps each property the whole group holds alike
+  (`--add-extra-fields=always-identical`); the rest are left behind
+  (`GisDissolve.KeepIdenticalKeepsOnlySharedValues`).
+- **`REPLACE`** deletes every area that went in - the joined holes too - in
+  the same undo step as the result
+  (`GisDissolve.ReplaceDeletesTheSourcesInTheSameUndoStep`). It is an
+  in-place apply, so it compares those areas with the copies taken at
+  prepare and refuses when one changed while the job ran
+  (`GisDissolve.AnInPlaceReplaceRefusesADrawingChangedWhileItRan`). A
+  dissolve's result carries no `katana_id` of a source, which is why the
+  verb deletes what its scope took rather than what `resultCommand`'s
+  `deleteSources` would find.
+
+**Replies.**
+
+```
+gis op=buffer seconds=0.004 cancelled=no
+scope arg=input scope=drawing matched=1 used=1 points=0 lines=1 polygons=0
+output arg=output kind=vector target=layer layer=gis/buffer created=1 updated=0 deleted=0 skipped=0
+buffer distance=1 side=both caps=flat joins=round quadrant_segments=18 dissolve=no groups=1 features=1 circles=0 area=200.000 empty=0
+dissolve by=owner keep=identical areas=4 replace=no groups=2 area=8000.000
+```
+
+The first three are the GDAL verb's own records (the `gis` record is the
+`gdal` one of a curated verb); the last says what was made and measures it:
+the replies carry the area, not the entities, which would go stale. A scope
+that took nothing answers `ran=no` and runs nothing; PREVIEW answers `gis
+op=buffer preview=yes`, the scope record and `preview valid=yes changed=no`.
+
+**What the vector verbs share** (`src/katana_app/geo/vector_support.hpp`),
+written here for BUFFER and DISSOLVE and used by every vector verb after them:
+
+- **Their own words are read as MODIFY reads SET and PREVIEW**: taken out of
+  the line wherever they stand, and the rest handed to the one scope parser.
+  So `GIS BUFFER DRAWING WHERE TYPE=line distance=1` works: the filter ends
+  where its conditions do
+  (`GisBuffer.OptionsAfterAWhereFilterAreTheVerbsOwn`).
+- **The result's layer is `TO LAYER <path>`**, the one target parser's word,
+  not the plan's `layer=`. `LAYER=` is a WHERE key: after a filter,
+  `layer=gis/easement` would silently be read as "on layers named
+  gis/easement" and match nothing. An option key is never a WHERE key.
+- One run of a vector algorithm on a feature set (`vector::runVector`), the
+  measures (`vector::measure`), a result of several tables made one
+  (`vector::mergedTable`), and one step executed and framed
+  (`vector::executeStep`).
+
+**The dialogs' frame** (`src/katana_qt/geo/gis_tool_dialog.hpp`) is shared
+by every GIS analysis and check dialog: the scope controls
+(`ScopeFilterWidget`), the dialog's fields, `<d>Command`, `<d>Preview`,
+`<d>Run`, `<d>Status`, `<d>Reply`. Run hands the line to the window's one
+executor. Interactively the runner answers `job id=<n> ... state=started`
+and the dialog shows the job's reply when the workbench says it ended
+(`qt_widgets.GisBufferDialog.AnInteractiveRunShowsItsJobsReplyWhenItEnds`);
+headless it is there when Run returns (`qt_gis_buffer_dialog_headless`,
+`qt_gis_dissolve_dialog_headless`). The scope's View choice lists the
+window's views, from `GeoServices::views` - the workspace, as every other
+workbench of the window is given it. (Built alone, this lane found the
+workspace as the window's one `ViewWorkspace` child; the terrain lane and the
+toolbox lane each added a views service, and when the lanes were merged the
+workspace pointer, the form the window's other services structs already had,
+became the one.)
+
+**Tests.** `tests/geo/test_buffer_and_dissolve.cpp`, every value by hand: a
+100 m line 1 m either side with flat ends, 200 m2; the 14 x 34 setback,
+476 m2; clearances of 1 and 3 m on 100 m lines, 200 and 600 m2; a 5 m circle,
+78.540 m2; two crossing strips dissolved, 400 - 4 = 396 m2; two 50 x 40 lots
+merged, 4000 m2. `GisBufferContract.TheArgumentsTheVerbsBindAreGdals` pins
+`vector buffer`, `combine` and `dissolve`. The dialogs:
+`tests/qt_widgets/geo/test_buffer_dialog.cpp`; katana_cli:
+`cli.gis_buffer_of_a_drawn_line_creates_two_hundred_square_metres`,
+`cli.gis_dissolve_of_two_adjacent_lots_is_one_area_of_four_thousand_square_metres`.
+
+**Not done.** Lines are not dissolved (merged into multi-lines): the verb
+merges areas. The distance cannot come from an expression, only a property.
 
 ### V2: GIS OVERLAY: polygon booleans between two scopes
 
-Not started.
+```
+GIS OVERLAY intersection|difference|union|symdifference|identity|update|clip
+    <scope> WITH (<scope> | FILE <path> [LAYER <name>] [where="<sql>"])
+    [keep=a,b|all|none] [keepwith=a,b|all|none] [TO LAYER <path>]
+    [csv=<file>] [OVERWRITE] [PREVIEW]
+```
+
+The union, intersection and difference `geometry/polygon.hpp` says Katana
+does not provide, through GDAL's `vector layer-algebra`
+(`src/katana_app/geo/overlay_verbs.cpp`): easement area per lot, net
+developable area, lots split by a zone, pipe length per lot. The window's
+item is GIS > Analysis - GDAL > Overlay... (`gisOverlay`,
+`src/katana_qt/geo/overlay_dialog.hpp`).
+
+- **Two scopes, one parser.** The subject's words end at WITH, which is no
+  scope word, and the overlay's begin after it; both are read by the one
+  scope parser. The overlay may instead be a file, read on the worker
+  through GDAL's own `vector filter` (its LAYER, and `where=` as GDAL's SQL).
+- **Operations.** Katana's words are GDAL's but for difference (`erase`) and
+  symdifference (`sym-difference`); GDAL's own are taken too.
+- **One layer at a time.** layer-algebra reads one input layer and one
+  method layer ("Cannot get input layer ''" for a dataset of several;
+  measured), so each of the subject's tables is a run of its own and the
+  overlay is its areas. union, symdifference and update give back the
+  overlay's pieces the subject misses, which a second run would repeat: they
+  take the subject's areas only, and say how many lines and points they left
+  out.
+- **Lines against areas.** A line comes back cut at the areas' edges, which
+  is how `GisOverlay.ALineAgainstLotsGivesItsLengthPerLot` measures a 100 m
+  pipe as 50 + 50.
+- **Properties.** GDAL names what it carries `input_<field>` and
+  `method_<field>`. A name only one side has is given back as it was
+  (`owner`); one both sides have keeps GDAL's prefix (`input_name`,
+  `method_name`). The subject's `katana_id` becomes `gis.source` and the
+  overlay's `gis.with`, so each piece says which two entities it came from;
+  the drawing's bookkeeping fields are dropped. `keep=` and `keepwith=`
+  choose the fields (GDAL's `--input-field`, `--method-field`); `katana_id`
+  is always carried.
+- **Rows.** One `row` record per piece: `entity=`, `with=`, what it carries,
+  and its `area=` or `length=`. `csv=<file>` writes them too; a file already
+  there is replaced only with OVERWRITE.
+
+```
+row entity=1 input_kind=lot input_name=A owner=Smith with=3 method_kind=corridor method_name=C area=200.000
+overlay operation=intersection features=2 area=400.000 length=0.000
+```
+
+A second scope that takes nothing is reported (`scope arg=method ...
+matched=0`, `ran=no`; `GisOverlay.AnEmptySecondScopeIsReported`).
+
+**The dialog** has two sets of the scope controls: the frame's for the
+subject (`gisOverlayScope`, ...) and a second for the overlay
+(`gisOverlayWithScope`, `gisOverlayWithScopeDrawing`, ...) - the plan named
+them `gisOverlaySubject` and `gisOverlayWith`, but the shared widget names
+itself `<prefix>Scope`, so the subject keeps the frame's name every dialog
+has. `gisOverlayWithSourceFile` chooses a file instead.
+
+**Tests.** `tests/geo/test_overlay_verb.cpp`, on `tests/geo/data/lots.geojson`
+drawn, by hand: a 4 m corridor over each 50 m lot, 200 m2; each lot less it,
+1800 m2; the union, 2000 + 2000 + 480 - 400 = 4080 m2; identity keeps the
+lots' 4000 m2; the file's corridor cuts as the drawn one does.
+`GisOverlayContract.TheArgumentsTheVerbBindsAreGdals` pins the operations and
+fields. The dialog: `tests/qt_widgets/geo/test_overlay_dialog.cpp`;
+katana_cli:
+`cli.gis_overlay_of_a_corridor_on_two_lots_gives_two_hundred_square_metres_each`,
+`cli.gis_overlay_with_a_file_reads_its_corridor`.
+
+**Not done.** A file's coordinate system is not compared with the
+project's: the bridge has no equivalence test yet (text comparison of WKT
+is wrong), so a file in another CRS is overlaid as it is.
 
 ### V3: GIS HULL and GIS CLIP
 
-Not started.
+```
+GIS HULL [<scope>] [convex | concave=<0..1>] [holes] [TO LAYER <path>] [PREVIEW]
+GIS CLIP [<scope>] BY (<scope> | FILE <path> [LAYER <name>] [where="<sql>"])
+         [TO LAYER <path> | REPLACE] [PREVIEW]
+```
+
+The boundary around what the scope takes, and what it takes cut to a
+boundary (`src/katana_app/geo/hull_clip_verbs.cpp`). The window's items are
+GIS > Analysis - GDAL > Boundary Around Features... and Clip to Boundary...
+(`gisHull`, `gisClip`; `src/katana_qt/geo/hull_dialog.hpp`, `clip_dialog.hpp`).
+
+**HULL** takes every point and vertex of the scope (curves as their chords),
+once each.
+
+- **Convex** - the default - is Katana's own `geometry::convexHull`: GDAL
+  would add nothing. The corners and centre of a square give the square,
+  its centre inside (`GisHull.ConvexHullOfTheCornersAndCentreOfASquareIsTheSquare`).
+- **`concave=<ratio>`** is GDAL's `vector concave-hull` of all the points
+  as ONE multipoint - GDAL hulls each feature, and a hull per point is no
+  boundary. GEOS's ratio runs from 0, the tightest, to 1, the convex hull;
+  `holes` lets it leave a gap inside. On a 1 m grid over an L of 36 m2 the
+  convex hull is 68 m2 and a ratio of 0.1 gives 36.5 m2: the L and the half
+  square the hull cuts across its inner corner
+  (`GisHull.ConcaveHullOfAnLShapedPointSetIsSmallerThanItsConvexHull`).
+- Fewer than three points, or all in a line, bound no area: nothing is drawn,
+  and a warning says why.
+
+**CLIP** runs `vector clip --like`, the boundary bound as the like dataset:
+the second scope's areas, or a file with GDAL's own `--like-layer` and
+`--like-where`. It clips to the like dataset's geometries, not only their
+bounds (measured), and gives each piece a feature of its own.
+
+- **Drawn beside** (the default, or TO LAYER): the pieces on `gis/clip`, the
+  entities left whole (`GisClip.ClipOfALineByABoxHasHandComputedLength`).
+- **REPLACE, in place**: an entity cut keeps its id on its largest piece and
+  the rest are made beside it, as copies, reported by `split` records
+  (`GisClip.APartSplitIntoTwoKeepsTheIdOnTheLargerAndReportsTheOther`); one
+  wholly outside is deleted; one wholly inside is not touched - no rewrite of
+  its vertices (`GisClip.InPlaceWhatIsOutsideGoesAndWhatIsInsideStaysAsItWasInOneStep`).
+  All in one undo step, after the entities are compared with the copies
+  taken at prepare. It is REPAIR's reshape (`vector::reshapeCommand`).
+- A curve cut in place becomes the chords of what is left: GDAL clips
+  lines, and an arc's remainder is drawn as a polyline.
+
+```
+hull kind=concave ratio=0.1 holes=no points=57 area=36.500
+clip mode=replace features=3 whole=1 cut=1 outside=1 area=0.000 length=30.000
+```
+
+**Tests.** `tests/geo/test_hull_and_clip.cpp`, by hand as above, and a pipe
+through boxes at 10..40 and 60..95 keeping its id on the 35 m piece;
+`GisHullClipContract.TheArgumentsTheVerbsBindAreGdals` pins concave-hull and
+clip. The dialogs: `tests/qt_widgets/geo/test_hull_and_clip_dialogs.cpp`;
+katana_cli: `cli.gis_hull_of_a_squares_corners_and_centre_is_the_square`,
+`cli.gis_clip_in_place_leaves_thirty_metres_of_the_line`.
+
+**Not done.** The concave boundary as the edge of SURFACE FROM DRAWING is a
+follow-up once this and T0 are both on main (it crosses the two lanes).
 
 ### V4: GIS CHECK, REPAIR and COVERAGE
 
-Not started.
+```
+GIS CHECK [<scope>] [markers=<layer>] [PREVIEW]
+GIS REPAIR [<scope>] [method=linework|structure] [PREVIEW]
+GIS COVERAGE CHECK [<scope>] [gap=<m>] [markers=<layer>] [PREVIEW]
+GIS COVERAGE CLEAN [<scope>] [gap=<m>] [snap=<m>]
+                   [merge=longest-border|max-area|min-area|min-index] REPLACE [PREVIEW]
+```
+
+Invalid geometry in imported data, and the gaps and overlaps of a
+subdivision or a cadastral fabric (`src/katana_app/geo/check_verbs.cpp`).
+The window's items are GIS > Check - GDAL > Check Geometry..., Repair
+Geometry... and Gaps and Overlaps... (`gisCheck`, `gisRepair`, `gisCoverage`;
+`src/katana_qt/geo/geometry_check_dialog.hpp`, `coverage_dialog.hpp`), whose
+`<d>Problems` table lists the problem records of the last reply.
+
+**CHECK** runs `vector check-geometry` on the scope's lines and areas (a
+point cannot be invalid). It gives one problem record at each place GDAL
+found a defect, with GDAL's reason and the entity, which it carries back as
+`katana_id` (`--include-field`):
+
+```
+problem kind=self-intersection entity=7 at=35,5 reason=Self-intersection
+check features=2 problems=1 entities=1
+```
+
+The bow-tie (30,0) (40,10) (40,0) (30,10) crosses itself where x - 30 = y
+and 40 - x = y: at (35,5) (`GisCheck.ABowTieSelfIntersectsAt35Comma5`). A
+check changes nothing - unless `markers=<layer>` asks for a point at each
+problem. Those replace the markers the last check left on that layer (tagged
+`gis.marker=check`), in one step, the way AUTOLABEL replaces its rule's
+labels: a rerun never piles markers up, and a clean rerun clears them
+(`GisCheck.MarkersAreReplacedOnRerun`).
+
+**REPAIR** runs `vector make-valid` and changes only what came back
+different; a valid area is not even rewritten.
+
+- **In place.** The entity's geometry is replaced (`setEntityGeometry`), so
+  its id - and every label and association on it - is kept
+  (`GisCheck.RepairKeepsTheId`). An area keeps the way round it ran.
+- **Split.** A result of several parts - the bow-tie's two triangles of
+  25 m2 - keeps the id on the largest and makes the rest as copies of the
+  entity (layer, style, colour, properties) with `gis.source`; the reply
+  says which (`split entity=7 parts=2 kept=7 created=12`;
+  `GisCheck.RepairOfTheBowTieGivesTwoTrianglesOf25SquareMetresEach`).
+- **Holes.** An area is one ring, and its holes are entities of their own.
+  A result whose holes differ from the area's cannot be written on the
+  area, so it is left as it was, and said.
+- **Checked first.** It is an in-place apply: the entities are compared with
+  the copies taken at prepare, and a drawing changed while the job ran is
+  refused (`GisCheck.RepairRefusesADrawingChangedWhileItRan`).
+
+**COVERAGE CHECK** runs `vector check-coverage` on the scope's areas.
+
+- **Areas only.** check-coverage refuses mixed geometry (measured), so the
+  scope's points and lines are left out, counted (`ignored=`) and said
+  (`GisCheck.MixedGeometryInScopeIsFilteredAndCounted`).
+- **Joined back by order.** check-coverage carries no field, but with
+  `--include-valid` it gives one result per area, in order: that is how an
+  edge is joined to its entity.
+- **What an edge is.** GDAL says only that an edge is invalid. The verb says
+  why, from where the middles of the edge's segments lie against the other
+  areas: strictly inside one is an `overlap`; outside all and within `gap=`
+  of one is a `gap`; otherwise the edge lies on a neighbour's without
+  sharing its vertices, a `mismatch`
+  (`GisCheck.OverlappingLotsReportTheirOverlapEdges`,
+  `GisCheck.AnEnclosedGapNarrowerThanGapIsReported`).
+- `markers=<layer>` draws each bad edge as a polyline, replacing the last
+  run's (`gis.marker=coverage`).
+
+```
+problem kind=overlap entity=1 at=50,20 length=40.000 reason="the area overlaps a neighbour along this edge"
+coverage mode=check gap=0.05 areas=4 ignored=0 problems=2 entities=2 overlaps=0 gaps=2 mismatches=0
+```
+
+**COVERAGE CLEAN** runs `vector clean-coverage`, which moves boundaries so
+the areas meet. Legally surveyed boundaries must not be adjusted silently,
+so:
+
+- **it needs REPLACE**, and says why without it
+  (`GisCheck.CleanWithoutReplaceIsRefused`);
+- every clean that moves a boundary warns so, and one UNDO puts them all
+  back (`GisCheck.CleanClosesAnEnclosedGapAndOneUndoRestoresIt`: 12000 -
+  0.8 m2 becomes 12000);
+- it closes **enclosed** gaps only. A sliver open to the outside of the
+  fabric is not a gap to GEOS and stays (measured on GDAL 3.13.2).
+
+It applies as REPAIR does - in place, split parts made, compared first - and
+changes only the areas whose ring came back different: clean-coverage
+rewrites every ring's start and direction, so "changed" is judged by the
+ring (`vector::sameRing`), not the vertex list.
+
+**Shared** (`vector_support.hpp`): `reshapeCommand` is the in-place apply
+REPAIR, CLEAN and the clip of V3 use - the largest part on the id, the rest
+as copies - and `replaceMarkers` the markers' rerun rule.
+
+**Tests.** `tests/geo/test_check_verbs.cpp` (the bow-tie, the lots
+overlapping by a metre, four lots about a 0.02 m enclosed gap);
+`GisCheckContract.TheArgumentsTheVerbsBindAreGdals` pins check-geometry,
+make-valid, check-coverage and clean-coverage. The dialogs:
+`tests/qt_widgets/geo/test_check_dialogs.cpp`; the window:
+`qt_gis_check_dialog_headless`; katana_cli:
+`cli.gis_check_finds_the_bow_ties_crossing_at_35_5`,
+`cli.gis_repair_makes_the_bow_tie_two_triangles_of_25_square_metres`.
+
+**Not done.** A problem is not yet selectable from the table (the entity id
+is in its row); `simplify-coverage` stays in the GDAL verb and the toolbox.
 
 ### V5: GIS SQL and katana_gis_query
 
-Not started. `TO SELECTION` and `TO REPORT` have their block in `bindings.cpp`.
+```
+GIS SQL "<select>" [<scope>] [dialect=sqlite|ogrsql]
+        [AS REPORT | AS SELECT | AS LAYER <layer>] [csv=<file>] [OVERWRITE] [PREVIEW]
+```
+
+The drawing queried with SQL through GDAL's `vector sql`
+(`src/katana_app/geo/sql_verbs.cpp`). The window's item is GIS > Analysis -
+GDAL > Query with SQL... (`gisSql`, `src/katana_qt/geo/sql_dialog.hpp`), with
+the tables and their columns listed for the scope and the rows in a grid;
+an agent's is the MCP tool `katana_gis_query` (`docs/mcp.md`).
+
+- **The tables** are drawingDataset's: `points`, `lines`, `polygons`, each
+  with `katana_id`, `layer`, `style`, `colour`, `type` and then the
+  entities' properties as typed columns. The geometry column is `geometry`
+  (`ST_Area(geometry)`). An identifier with a dot is written `[gis.source]`
+  or `"gis.source"`.
+- **SQLite by default**, with Spatialite's `ST_` functions; `dialect=ogrsql`
+  is OGR's own SQL.
+- **A query reads.** Only one SELECT runs: any other statement, and a `;`
+  beginning a second one, is refused before GDAL sees it
+  (`GisSql.ANonSelectStatementIsRefused`). `SPATIALITE_SECURITY` is never
+  set, so Spatialite's file functions are not even there: `BlobToFile` is
+  "no such function", and no file appears (`GisSql.BlobToFileIsRefused`).
+- **AS REPORT** (the default) answers a `column` record per column - its
+  name, its key in the rows and its type, so a reader knows a 7 from a "7" -
+  and a `row` record per row. A null has no cell in its row: said as
+  nothing, not as an empty value. A column name a record cannot hold (a
+  blank, `=`) is keyed with `_` in its place (`count(*) n` is `count(*)_n`).
+  `csv=<file>` writes the rows too.
+- **AS SELECT** makes the entities the `katana_id` column names the
+  selection (`GisSql.AsSelectSelectsTheReturnedIds`).
+- **AS LAYER <layer>** draws the geometry the rows return, as one undo step
+  (`GisSql.AsLayerCreatesOneUndoStep`).
+- **AS is TO.** `AS SELECT` is the target parser's `TO SELECTION`, and
+  `TO REPORT`, `TO SELECTION` are now the GDAL verb's too: the V5 block of
+  `bindings.cpp` applies them through `vector::reportRecords` and
+  `vector::selectFeatures`, so `GDAL vector sql ... FROM DRAWING TO REPORT`
+  answers the same records (`GisSql.TheGdalVerbReportsAndSelectsToo`).
+
+```
+column name=owner key=owner type=string
+column name=area key=area type=real
+row owner=Jones area=600
+row owner=Smith area=4000
+output arg=output kind=vector target=report rows=2
+sql dialect=sqlite tables=polygons rows=2
+```
+
+**One line, whoever writes it.** A line cannot carry a double quote inside a
+quoted word, so the dialog and `katana_gis_query` write a statement through
+`vector::sqlForLine`: line breaks become blanks, and SQLite's
+`"identifiers"` become `[identifiers]`, which SQLite reads alike. A double
+quote inside a `'...'` literal, or any in OGR SQL, cannot be written, and is
+refused naming why.
+
+**katana_gis_query** builds `GIS SQL "<sql>" <scope> dialect=<d>` - the
+scope `drawing` unless it says otherwise, since a question of the drawing is
+the usual one - runs it through the Session and reads the records back:
+`{columns, column_types, rows, matched, used}`, each cell typed by its
+column (`GisQueryMcp.GisQueryReturnsRowsAsJson`, driving the MCP server as a
+client does). Its test is in `tests/geo`, beside the verb's, rather than
+in `tests/app/test_mcp_server.cpp`, which every lane would otherwise append
+to.
+
+**Tests.** `tests/geo/test_sql_verb.cpp`, by hand: a 50 x 40 lot's
+`ST_Area` is 2000 and its 1 m inward buffer's 48 x 38 = 1824; Smith's two
+lots sum to 4000 and Jones's to 600. The dialog:
+`tests/qt_widgets/geo/test_sql_dialog.cpp`; katana_cli:
+`cli.gis_sql_counts_and_sums_the_area_of_two_lots`.
+
+**Not done.** Spatialite over the MEM tables has no spatial index, so a
+spatial join of many thousands of features is slow; materialising to a
+GeoPackage first is the plan's answer when it is measured to matter.
 
 ### I0: One GIS executor: IMPORT, EXPORT, INFO, REFS, COPC
 

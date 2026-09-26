@@ -223,7 +223,23 @@ The slope raster is listed by `katana_terrain_list` like any derived raster.
 
 ### V5: katana_gis_query
 
-Not started.
+| Tool | In | Out |
+|---|---|---|
+| `katana_gis_query` | `{sql, scope?, area?, layers?, only?, where?, dialect?}`: one SELECT; the scope `drawing` (the default), `selection`, `area` or `layers`, with the shared filter; `sqlite` (the default, Spatialite's `ST_` functions) or `ogrsql` | `{ok, line, columns, column_types, rows: [{column: value}], matched, used}` |
+
+An agent's question of the drawing in one call - "the easement area per
+owner" - answered as typed JSON (`src/katana_app/geo/sql_mcp.cpp`,
+`docs/geoprocessing.md` "V5"). It builds the line a person would type,
+`GIS SQL "<sql>" <scope> dialect=<d>`, runs it through the Session, and reads
+the `column` and `row` records back: each cell is typed by its column's type
+(`integer` and `real` as numbers, `boolean` as true or false), and a column a
+row has no cell for is null. The tables are `points`, `lines` and `polygons`
+with `katana_id`, `layer`, `style`, `colour`, `type` and every property; the
+geometry column is `geometry`. Only a SELECT runs, and it changes nothing
+(read-only hint). A double-quoted identifier is written as a
+`[bracketed]` one, which SQLite reads alike and a command line can carry.
+`GisQueryMcp.GisQueryReturnsRowsAsJson` and
+`GisQueryMcp.AStatementThatIsNotASelectIsRefused` (in `tests/geo`) pin it.
 
 ### I2: katana_formats
 
