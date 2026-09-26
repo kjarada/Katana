@@ -61,3 +61,18 @@ set_tests_properties(qt_gis_verbs_folder
     PROPERTIES ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
     TIMEOUT 180)
+
+# GIS > Export Point Cloud's line, run as the item runs it (runVerbLine): the
+# sample scan's 40 000 points (`pdal info`) written to a LAZ as a job the run
+# waits for; the item itself, headless, points at this line instead of
+# opening a file dialog.
+add_test(NAME qt_gis_export_point_cloud_line_writes_the_cloud_headless
+    COMMAND ${CMAKE_COMMAND}
+        "-DAPP=$<TARGET_FILE:katana>"
+        "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+        "-DDRIVE=>IMPORT \"${_gis_verbs_samples}/survey_scan.las\"|<EXPORT \"${_gis_verbs_out}/qt scan.laz\" CLOUD 1|*exportPointCloud"
+        "-DEXPECT=--run-line EXPORT [^\r\n]*: ok=yes[\r\n]+  reply: exported file=\"[^\"]*/qt scan\\.laz\" kind=cloud format=laz cloud=survey_scan id=1 points=40000 source_points=40000 sample=no.*type EXPORT <file\\.las\\|\\.laz> CLOUD 1 instead"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/gis_export_point_cloud_headless.png"
+        -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+set_tests_properties(qt_gis_export_point_cloud_line_writes_the_cloud_headless PROPERTIES
+    FIXTURES_REQUIRED qt_gis_verbs)

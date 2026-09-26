@@ -124,6 +124,8 @@ TEST_F(GeoVerbUsage, EveryFormTheHelpGivesIsAccepted)
         "RASTER REPROJECT RASTER plane like=plane from=EPSG:28356 PREVIEW",
         "RASTER DIFFERENCE RASTER plane MINUS SURFACE ground CELL 1 LAYERS boundary "
         "resampling=bilinear TO SURFACE difference",
+        // EXPORT of a reference cloud.
+        "EXPORT " + at("scan.laz") + " CLOUD scan PREVIEW",
     };
     for (const std::string& line : lines) {
         accepted(line);

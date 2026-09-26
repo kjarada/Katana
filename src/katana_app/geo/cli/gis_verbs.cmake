@@ -63,3 +63,19 @@ add_test(NAME cli.gis_import_line_gives_the_records_the_window_gives
 set_tests_properties(cli.gis_import_line_gives_the_records_the_window_gives PROPERTIES
     PASS_REGULAR_EXPRESSION "imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 layers=1 features=8 skipped=0 bounds=1000,2000,1185,2165 crs=\"[^\"]*EPSG:32630[^\"]*\"[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.\""
     FAIL_REGULAR_EXPRESSION "error")
+
+# A reference point cloud written out as it is held (GIS > Export Point Cloud
+# runs this line): the whole scan, 40 000 points, then a budgeted import's
+# sample, which the reply says is one; INFO reads the LAZ back.
+add_test(NAME cli.gis_export_writes_a_reference_cloud_and_says_when_it_is_a_sample
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "IMPORT \"${_gis_verbs_samples}/survey_scan.las\""
+            -c "EXPORT \"${_gis_verbs_out}/scan.las\" CLOUD survey_scan"
+            -c "INFO \"${_gis_verbs_out}/scan.las\"" -c "NEW"
+            -c "IMPORT \"${_gis_verbs_samples}/survey_scan.las\" budget=10000"
+            -c "EXPORT \"${_gis_verbs_out}/scan sample.laz\"")
+set_tests_properties(cli.gis_export_writes_a_reference_cloud_and_says_when_it_is_a_sample PROPERTIES
+    FIXTURES_REQUIRED cli_gis_verbs
+    PASS_REGULAR_EXPRESSION "exported file=\"[^\"]*/scan\\.las\" kind=cloud format=las cloud=survey_scan id=1 points=40000 source_points=40000 sample=no.*pointcloud points=40000 .*exported file=\"[^\"]*/scan sample\\.laz\" kind=cloud format=laz cloud=survey_scan id=[0-9]+ points=[0-9]+ source_points=40000 sample=yes[\r\n]+warning text=\"the cloud holds a sample"
+    FAIL_REGULAR_EXPRESSION "error")
