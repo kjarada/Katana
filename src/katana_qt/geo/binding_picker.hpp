@@ -32,6 +32,7 @@
 //                     <prefix>Layers, <prefix>TypePoint ...)
 
 #include <QString>
+#include <QStringList>
 #include <QWidget>
 
 #include <functional>
@@ -41,13 +42,16 @@
 
 class QComboBox;
 class QLineEdit;
+class QListWidget;
 class QPushButton;
 class QStackedWidget;
 
 namespace katana::qt {
 
-// The kinds a picker offers, as bits.
+// The kinds a picker offers, as bits; BindNone is an optional dataset left
+// out.
 enum BindingKind : unsigned {
+    BindNone = 0,
     BindDrawing = 1,
     BindRaster = 2,
     BindSurface = 4,
@@ -73,8 +77,10 @@ class BindingPicker final : public QWidget {
     [[nodiscard]] BindingKind kind() const;
     // Chooses `kind` when the picker offers it; false when it does not.
     bool setKind(BindingKind kind);
+    // For an optional dataset: offers "Not given" first, and chooses it.
+    void setOptional();
     // The words of the source clause, or why the controls say none, naming
-    // the field.
+    // the field; empty for an optional dataset not given.
     [[nodiscard]] katana::core::Result<QString> words() const;
     // Refills the reference rasters, the surfaces and the scope's layers and
     // views, keeping what is chosen.
@@ -97,6 +103,30 @@ class BindingPicker final : public QWidget {
     QLineEdit* cell_ = nullptr;
     QLineEdit* file_ = nullptr;
     QPushButton* browse_ = nullptr;
+};
+
+// Several datasets for one argument - a mosaic's tiles, raster calc's
+// inputs: a picker, and the list its Add builds. With nothing listed, the
+// picker's own dataset is the one. Object names: the picker's, and
+// <prefix><listName> (the list), <prefix>Add, <prefix>Remove.
+class BindingList final : public QWidget {
+  public:
+    BindingList(const QString& prefix, unsigned kinds, GeoDialogContext context,
+                const QString& listName = "List", QWidget* parent = nullptr);
+
+    std::function<void()> onChanged{};
+
+    [[nodiscard]] BindingPicker& picker() const { return *picker_; }
+    // The source clauses, in order: the list's, or the picker's alone.
+    [[nodiscard]] katana::core::Result<QStringList> words() const;
+    // The picker's dataset added to the list; false, `why` set, when the
+    // picker says none.
+    bool add(QString* why = nullptr);
+    void reload() { picker_->reload(); }
+
+  private:
+    BindingPicker* picker_ = nullptr;
+    QListWidget* list_ = nullptr;
 };
 
 } // namespace katana::qt

@@ -127,14 +127,13 @@ class DemToolsDialog final : public QDialog {
 
   private:
     void refresh();
-    void addTile();
 
     GeoDialogContext context_;
     QTabWidget* tabs_ = nullptr;
     std::array<BindingPicker*, kDemToolCount> sources_{};
     std::array<GeoRunPanel*, kDemToolCount> panels_{};
     std::array<QLineEdit*, kDemToolCount> names_{};
-    QListWidget* tiles_ = nullptr;
+    BindingList* mosaicTiles_ = nullptr;
     QComboBox* resolution_ = nullptr;
     QLineEdit* save_ = nullptr;
     QRadioButton* clipByArea_ = nullptr;
