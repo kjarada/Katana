@@ -921,7 +921,14 @@ warning text="..."
 - **Where the verbs are said.** HELP, the window's Command Reference and
   `katana_help` list them from the executor's table; the session's own
   "Interop" help block is gone, and so are the window's copies in
-  `dispatchLine` and its archive and DXF importers.
+  `dispatchLine` and its archive and DXF importers. HELP (or `?`) alone,
+  typed as a session line - `katana_cli -c HELP`, or `HELP` among
+  `katana_run_commands` - is `Session::helpText`, the text `katana_help`
+  and `--help` give. It used to reach the interpreter, whose HELP knows
+  neither the executor's verbs nor CUSTOMISE and IFC, which are the
+  session's (`cli.help_typed_as_a_line_is_the_whole_session_help`,
+  `McpServer.HelpSentAsACommandIsTheWholeSessionHelp`). With a word,
+  `HELP SHEETS` and `HELP UTILITY` stay the interpreter's.
 
 Tests: `GisVerbs.*`, `GisSession.*` and `GisRecords.*`
 (`tests/geo/test_gis_verbs.cpp`), `McpServer.ImportReturnsStructuredRecords`,
