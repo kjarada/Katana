@@ -550,6 +550,41 @@ TEST_F(GeoExecutor, ACancelledRunChangesNothing)
     EXPECT_FALSE(document.model().layers.contains("gis/buffer"));
 }
 
+TEST_F(GeoExecutor, ACancelledRunLeavesTheFileItWouldHaveReplacedAsItWas)
+{
+    // OVERWRITE let GDAL write over the file from the start, so a run
+    // cancelled part way left a partial file where the original had been.
+    const std::string out = scratch.file("shade.tif");
+    ASSERT_TRUE(run("GDAL raster hillshade \"" + kData + "/plane.asc\" \"" + out + "\"").ok());
+    const std::string before = bytesOf(out);
+    ASSERT_FALSE(before.empty());
+    auto prepared = geo::prepare(context, "GDAL raster hillshade --zfactor=3 FROM FILE \"" + kData +
+                                              "/plane.asc\" TO FILE \"" + out + "\" OVERWRITE");
+    ASSERT_TRUE(prepared.ok()) << prepared.error().describe();
+    std::stop_source stop;
+    bool reported = false;
+    auto apply = prepared->work(stop.get_token(), [&](double) {
+        reported = true;
+        stop.request_stop();
+    });
+    ASSERT_TRUE(reported) << "the run never reported progress, so it was never stopped part way";
+    ASSERT_FALSE(apply.ok());
+    EXPECT_EQ(apply.error().message, "cancelled");
+    EXPECT_EQ(bytesOf(out), before);
+    // Nothing is left beside it either.
+    std::size_t files = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(scratch.path())) {
+        files += entry.path().filename().string().starts_with(".katana-staging") ? 1u : 0u;
+    }
+    EXPECT_EQ(files, 0u);
+    // Run to its end, it replaces the file, and the reply names it.
+    auto replaced = run("GDAL raster hillshade --zfactor=3 FROM FILE \"" + kData +
+                        "/plane.asc\" TO FILE \"" + out + "\" OVERWRITE");
+    ASSERT_TRUE(replaced.ok()) << replaced.error().describe();
+    EXPECT_NE(bytesOf(out), before);
+    EXPECT_NE(replaced->find("file=" + out), std::string::npos) << *replaced;
+}
+
 TEST_F(GeoExecutor, TheWorkReadsOnlyWhatPrepareCopied)
 {
     // The work runs on another thread in the window; what it reads was
