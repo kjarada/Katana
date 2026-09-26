@@ -341,6 +341,14 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "a loaded library linestyle or ByLayer.*CUSTOMISE \\[REPLACE\\] <file> \\[<file>\\.\\.\\.\\]  load style${_eol} +libraries \\(\\.4d\\) and survey code files \\(\\.mapfile\\)"
         FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)")
 
+    # LIST takes no words: LIST LAYER x once listed the whole drawing, as
+    # though it had filtered it. Refused with its usage; LIST alone lists.
+    add_test(NAME cli.list_refuses_words_it_does_not_take
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LINE 0,0 10,0" -c "LIST" -c "LIST LAYER 0")
+    set_tests_properties(cli.list_refuses_words_it_does_not_take PROPERTIES
+        PASS_REGULAR_EXPRESSION "1 entities.*error: InvalidArgument: usage: LIST [(]every entity; INFO id describes one[)]")
+
     # HELP typed as a line is the session's whole help, as --help and
     # katana_help are: CUSTOMISE, IFC and the window-only verbs are
     # the session's, not the interpreter's, and were missing from it. ? is
