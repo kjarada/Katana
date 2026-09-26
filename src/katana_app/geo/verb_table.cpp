@@ -28,7 +28,21 @@ katana::core::Result<Prepared> prepareSlope(Context& context, const Tokens& toke
 katana::core::Result<Prepared> prepareAspect(Context& context, const Tokens& tokens,
                                              std::string_view line);
 // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
+// zonal_verbs.cpp, drape_verbs.cpp (analysis_support.hpp).
+[[nodiscard]] katana::core::Result<Prepared> prepareRasterZonal(Context& context, const Tokens& tokens,
+                                                                std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareRasterSample(Context& context,
+                                                                 const Tokens& tokens,
+                                                                 std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareDrape(Context& context, const Tokens& tokens,
+                                                          std::string_view line);
 // ---- T5: RASTER VIEWSHED, LOS ----
+// viewshed_verbs.cpp (analysis_support.hpp, terrain/line_of_sight.hpp).
+[[nodiscard]] katana::core::Result<Prepared>
+prepareRasterViewshed(Context& context, const Tokens& tokens, std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareLineOfSight(Context& context,
+                                                                const Tokens& tokens,
+                                                                std::string_view line);
 // ---- T6: RASTER GRID ----
 // grid_verbs.cpp: surveyed points to a DEM.
 [[nodiscard]] katana::core::Result<Prepared> prepareRasterGrid(Context& context, const Tokens& tokens,
@@ -140,7 +154,39 @@ const std::vector<VerbEntry>& verbTable()
              "          [NAME <n>] [<scope>] [PREVIEW]  the direction the ground faces,\n"
              "          degrees clockwise from north, as a reference raster"});
         // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
+        rows.push_back(
+            {"RASTER", "ZONAL", &prepareRasterZonal,
+             "RASTER ZONAL SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path> [<scope>]\n"
+             "          [stats=mean,min,max,count,sum] [prefix=zone]\n"
+             "          [pixels=fractional|centre|all-touched] [csv=<file>] [OVERWRITE] [PREVIEW]\n"
+             "          a raster's statistics inside each closed shape the scope takes, written\n"
+             "          on the shapes as <prefix>_<stat> properties (one undo step)"});
+        rows.push_back(
+            {"RASTER", "SAMPLE", &prepareRasterSample,
+             "RASTER SAMPLE SURFACE <name> | RASTER <id|name> | FILE <path> [AT x,y]...\n"
+             "          [<scope>] [method=bilinear|nearest|cubic|cubicspline] [PREVIEW]  the\n"
+             "          height of the ground at points; off it, ground=no, never 0"});
+        rows.push_back(
+            {"DRAPE", "", &prepareDrape,
+             "DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]\n"
+             "          [method=bilinear|nearest|cubic|cubicspline] [PREVIEW]  the points,\n"
+             "          lines and polylines the scope takes given the ground's height at every\n"
+             "          vertex (one undo step); a vertex off the ground is left heightless"});
         // ---- T5: RASTER VIEWSHED, LOS ----
+        rows.push_back(
+            {"RASTER", "VIEWSHED", &prepareRasterViewshed,
+             "RASTER VIEWSHED SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>\n"
+             "          (OBSERVER x,y)... | OBSERVERS [<scope>] [height=1.7] [target=0] [max=<m>]\n"
+             "          [curvature=<k>|none] [areas=<layer>] [NAME <n>] [PREVIEW]  what the\n"
+             "          observers see, unioned, as a tinted reference raster; areas= draws the\n"
+             "          visible area and the reply measures it"});
+        rows.push_back(
+            {"LOS", "", &prepareLineOfSight,
+             "LOS SURFACE <name> | RASTER <id|name> | FILE <path> OBSERVER x,y TARGET x,y\n"
+             "          [height=1.7] [target=0] [curvature=<k>|none] [step=<m>]\n"
+             "          [method=bilinear|nearest|cubic|cubicspline] [PREVIEW]  whether the\n"
+             "          target is seen, where the ground first hides it, and the least\n"
+             "          clearance of the sight line"});
         // ---- T6: RASTER GRID ----
         rows.push_back(
             {"RASTER", "GRID", &prepareRasterGrid,

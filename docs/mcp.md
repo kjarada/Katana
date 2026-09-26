@@ -229,6 +229,26 @@ report an agent reads; the areas are one undo step (`UNDO` takes them all).
 The slope raster is listed by `katana_terrain_list` like any derived raster.
 `McpServer.SlopeClassesMadeThroughTheCommandToolAreOneUndoStep` pins it.
 
+### T4: RASTER ZONAL, RASTER SAMPLE and DRAPE through katana_run_commands
+
+No tool of their own, as the plan gives them none: the lines run through
+`katana_run_commands`, and their replies are the records an agent reads -
+`zone entity=<id> mean= count= ...` per zone, `sample at=x,y z=` (or
+`ground=no`, never 0) per point, and the drape's `drape method= entities=
+vertices= off=`. ZONAL and DRAPE change the drawing in place, one undo step
+each. `McpServer.StatisticsByAreaThroughTheCommandToolAreWrittenOnTheLot`
+pins it.
+
+### T5: RASTER VIEWSHED and LOS through katana_run_commands
+
+The same: the lines run through `katana_run_commands`. The viewshed's
+reply carries `observer at= visible_cells=` per observer and the summary's
+`visible_cells=` and `area=`, and the viewshed itself is a derived raster
+`katana_terrain_list` lists; LOS answers with one `sight visible= ...
+clearance= blocked_at=` record.
+`McpServer.ALineOfSightThroughTheCommandToolSaysWhetherTheTargetIsSeen`
+pins it.
+
 ### V5: katana_gis_query
 
 | Tool | In | Out |

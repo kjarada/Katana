@@ -29,6 +29,7 @@
 
 #include "command_runner.hpp"
 #include "geo/geo_verbs.hpp"
+#include "geo/point_pick.hpp"
 #include "icons.hpp"
 #include "jobs.hpp"
 #include "katana/geometry/primitives2d.hpp"
@@ -63,6 +64,11 @@ struct GeoServices {
     // The workspace's views, for a dialog's scope and filter controls (the
     // View choice). May be null.
     ViewWorkspace* views = nullptr;
+    // A point picked in a plan view, for a dialog's line (point_pick.hpp):
+    // the sample points, a viewshed's observers, a sight line's ends. Left
+    // empty, the workbench picks through `views` (planPointPicker); with no
+    // views either, it stays empty and the dialogs offer no Pick.
+    PointPicker pickPoint;
     std::function<QAction*(Icon icon, const QString& text, const QString& tip,
                            const QKeySequence& shortcut, const QString& objectName)>
         makeAction;

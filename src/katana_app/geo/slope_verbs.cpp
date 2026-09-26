@@ -85,11 +85,6 @@ std::string utf8Of(const std::filesystem::path& path)
     return std::string(text.begin(), text.end());
 }
 
-std::filesystem::path pathOf(const std::string& utf8)
-{
-    return std::filesystem::path(std::u8string(utf8.begin(), utf8.end()));
-}
-
 struct SlopeWords {
     bool aspect = false;
     std::string unit = "percent";
@@ -515,27 +510,6 @@ Result<Analysed> analyse(const gp::DatasetValue& input, const SlopeWords& words,
         result.warnings.push_back(warning.message);
     }
     return result;
-}
-
-std::string sourceName(const Context& context, const Source& source)
-{
-    switch (source.kind) {
-    case Source::Kind::Surface:
-        return source.surface;
-    case Source::Kind::File:
-        return pathOf(source.path).stem().string();
-    case Source::Kind::Raster:
-        for (const katana::interop::RasterOverlay& raster : context.reference.rasters()) {
-            if (std::to_string(raster.id) == source.raster ||
-                katana::core::equalsIgnoringCase(raster.name, source.raster)) {
-                return raster.name;
-            }
-        }
-        return source.raster;
-    case Source::Kind::Drawing:
-        break;
-    }
-    return "raster";
 }
 
 Result<Prepared> prepareSlopeOrAspect(Context& context, const Tokens& tokens,
