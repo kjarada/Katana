@@ -242,8 +242,48 @@ Every leaf is Safe or Confirm (`src/katana_io/geo/policy.cpp`).
   or in a pipeline string, nested in `[ ]` too
   (`GdalPolicy.APipelineStepNamedExternalIsRefusedWhereverItStands`).
 - **Replacing a file.** `TO FILE` never replaces a file without `OVERWRITE`,
-  and the tail's `--overwrite`, `--overwrite-layer`, `--append`, `--update`
-  and `--upsert` need `OVERWRITE` too: each changes a file already there.
+  and the tail's `--overwrite`, `--overwrite-layer`, `--append`, `--update`,
+  `--upsert`, `--add` and `--resume` need `OVERWRITE` too: each changes a
+  dataset already there. `--add` (vector rasterize) burns into the raster
+  the output names with no `--update` - measured with `gdal vector
+  rasterize`, the file's checksum changed - and `--resume` (raster tile)
+  writes into a tile set already there. The list came from every boolean
+  argument of every GDAL 3.13 algorithm and pipeline step (`gdal
+  --json-usage`), each whose name suggested it read by its description
+  (`GdalPolicy.RasterizeAddAndTileResumeChangeAnExistingDataset`).
+- **A pipeline is judged by its steps and its words, however it is quoted.**
+  The three pipeline algorithms are Safe as leaves, but a pipeline's steps
+  can do what a Confirm leaf does: `read a ! update b` writes into `b`, and
+  `"read a ! write --overwrite b"`, quoted as one word, replaced `b` while
+  the tail check saw only the one word (review finding, reproduced with
+  katana_cli: the file's checksum changed). `tailEffects` reads the pipeline
+  word by word - words given one by one, one quoted text, `--pipeline=...`,
+  nested `[ ]` steps - and gives the step that needs `CONFIRM` and the word
+  that needs `OVERWRITE`; the verb and `katana_gdal_run` both ask it
+  (`GeoExecutor.APipelineUpdateStepNeedsConfirmQuotedOrNot`,
+  `GeoExecutor.AQuotedPipelineThatOverwritesAFileNeedsOverwrite`,
+  `McpServer.GdalRunRefusesAPipelineThatChangesExistingDataUnlessToldTo`).
+- **Steps are judged as leaves are.** Of the steps GDAL 3.13's pipelines
+  offer, only `update` writes into a dataset already there, so it is Confirm
+  as `raster update` and `vector update` are. `edit` and `overview` are
+  Confirm as leaves but not as steps: a step changes the piped dataset,
+  which the pipeline then writes where it is told. A step in neither list is
+  Confirm until judged, and `GdalPolicy.EveryStepGdalsPipelinesOfferIsJudged`
+  names any a GDAL upgrade adds. The text's first word is the exception: it
+  may be the value of an option before the pipeline (`--output-format GTiff
+  read ...`), which GDAL refuses by itself if it is no step.
+  - *Rejected:* asking GDAL. The pipeline algorithm parses its steps only
+    when it runs, and its usage JSON does not say which step opens its
+    output for update, so the table is the judgement, as it is for leaves.
+  - *Rejected:* mapping a step to the leaf of the same name. That would make
+    `edit` Confirm, wrongly, and say nothing of a step with no leaf.
+- **A pipeline that ends in `update` names its output there,** as one ending
+  in `write` does. Bound a second output by the run, GDAL refused every such
+  pipeline ("update: Positional values starting at 'b.tif' are not
+  expected"), so a confirmed update could not run at all.
+- **MCP.** `katana_gdal_run` takes `confirm` for a Confirm leaf or an
+  `update` step, and `overwrite` for GDAL's own words above; `output`'s
+  `overwrite` still covers the file `TO` names.
 
 ## Bindings
 
@@ -285,6 +325,20 @@ asked (`properties`).
   goes in plan with its heights in the elevation fields, and a warning
   counts them. With `requireHeights`, a heightless entity is left out and
   counted.
+- **What reads Z is given heights only.** A table with one heighted feature
+  is three-dimensional, and GDAL reads a feature in it with no Z as z = 0.
+  So the GDAL verb sets `requireHeights` when its run reads Z
+  (`processing::readsHeights`): a vector grid that makes values - every
+  method but `count`, `average-distance` and `average-distance-points` -
+  unless `--zfield` names a field; `vector rasterize --3d`; a pipeline with
+  such a step. Before, a heightless point was a 0 in the grid
+  (`GridVerb.TheGdalVerbLeavesAHeightlessPointOutOfAGridThatReadsZ`: every
+  surveyed height 10, the cell by the heightless point 0). Other algorithms
+  keep a heightless entity, because they read positions only.
+  - *Rejected:* leaving heightless entities out of every GDAL run. A buffer
+    of a line with no heights is a buffer all the same.
+  - *Not judged:* `vector sql` can read Z in its SQL; the verb cannot see
+    that, so a heightless feature reaches it as GDAL gives it.
 - **What has no feature.** Text, dimensions, labels and leaders are left
   out and counted by kind; the counts are the scope record's `skipped.*`.
 - **CRS.** The project's coordinate system (the document's
@@ -1635,6 +1689,18 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
 
 ## Not done
 
+- **The toolbox's Pipeline tab has no Confirm or Overwrite box.** A pipeline
+  with an `update` step, or with `--overwrite` in its text, is refused
+  there with the verb's message naming CONFIRM or OVERWRITE; it runs typed
+  on the command line, through `katana_cli`, or `katana_gdal_run` with
+  `confirm` / `overwrite`. The Algorithm tab's boxes judge the leaf's policy
+  only, which for a pipeline is Safe.
+- **A tile set is rewritten in place.** `raster tile` into a folder that
+  already holds tiles rewrites them with no `--overwrite` (GDAL checks
+  nothing there; measured, the tile's time changed). `TO FILE <folder>`
+  needs OVERWRITE as any existing target does, but a folder named in GDAL's
+  own words is not checked, since which word is the output is known by
+  name (`argumentsGiven`), not by value.
 - **`VIEW` in a headless session** is refused naming `AREA`, as MODIFY
   refuses it.
 - **A picked point does not snap.** `GeoServices::pickPoint` takes the

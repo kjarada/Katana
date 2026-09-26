@@ -11,6 +11,7 @@
 #include <sstream>
 #include <stop_token>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -215,6 +216,32 @@ TEST_F(GridVerb, AHeightlessPointIsExcludedAndCountedNotReadAsZero)
     EXPECT_EQ(scope->get("used"), "121");
     EXPECT_EQ(scope->get("skipped.heightless"), "1");
     EXPECT_NEAR(valueAt(52.5, 47.5), 107.625, 1e-9);
+}
+
+TEST_F(GridVerb, TheGdalVerbLeavesAHeightlessPointOutOfAGridThatReadsZ)
+{
+    // Three points at z = 10 and one with no height at (10, 10). Every
+    // surveyed height is 10, so every cell of a nearest-neighbour grid is 10;
+    // the heightless point, read as z = 0, made the cell nearest it 0.
+    draw({spot(0, 0, 10.0), spot(10, 0, 10.0), spot(0, 10, 10.0), spot(10, 10, std::nullopt)});
+    auto reply = run("GDAL vector grid nearest --extent 0,0,10,10 --size 2,2 FROM DRAWING");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    const auto records = geo::parseRecords(*reply);
+    const geo::Record* scope = record(records, "scope");
+    ASSERT_NE(scope, nullptr) << *reply;
+    EXPECT_EQ(scope->get("used"), "3");
+    EXPECT_EQ(scope->get("skipped.heightless"), "1");
+    for (const auto& [x, y] :
+         {std::pair{2.5, 2.5}, std::pair{7.5, 2.5}, std::pair{2.5, 7.5}, std::pair{7.5, 7.5}}) {
+        EXPECT_EQ(valueAt(x, y), 10.0) << x << "," << y;
+    }
+    // Buffering reads no Z: the heightless point is given to it.
+    auto buffered = run("GDAL vector buffer --distance 1 FROM DRAWING");
+    ASSERT_TRUE(buffered.ok()) << buffered.error().describe();
+    const auto bufferRecords = geo::parseRecords(*buffered);
+    const geo::Record* taken = record(bufferRecords, "scope");
+    ASSERT_NE(taken, nullptr);
+    EXPECT_EQ(taken->get("used"), "4");
 }
 
 TEST_F(GridVerb, ZFromAPropertyIsUsed)

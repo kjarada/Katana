@@ -402,6 +402,7 @@ ToolReply run(Session& session, const Json& arguments)
                                       "with \"confirm\": true"};
     }
     std::string line = "GDAL " + algorithm;
+    std::vector<std::string> gdalWords;
     if (const Json& tokens = argument(arguments, "tokens"); !tokens.is_null()) {
         if (!tokens.is_array()) {
             throw ToolRefusal{"\"tokens\" is a list of GDAL's own words"};
@@ -410,8 +411,17 @@ ToolReply run(Session& session, const Json& arguments)
             if (!token.is_string()) {
                 throw ToolRefusal{"each of \"tokens\" is a string"};
             }
+            gdalWords.push_back(token.get<std::string>());
             line += " " + word(token.get<std::string>(), "a GDAL word");
         }
+    }
+    // A pipeline's `update` step is said here as a Confirm algorithm is; the
+    // line refuses it too, and so does every other way a line is run.
+    if (const std::string step = gp::tailEffects(spec.info.path, gdalWords).confirmStep;
+        !step.empty() && !confirm) {
+        throw ToolRefusal{"the pipeline step " + step +
+                          " changes data that already exists; it "
+                          "runs only with \"confirm\": true"};
     }
     line += argumentWords(spec, argument(arguments, "arguments"));
     if (const Json& inputs = argument(arguments, "inputs"); !inputs.is_null()) {
@@ -430,6 +440,12 @@ ToolReply run(Session& session, const Json& arguments)
     }
     if (const Json& output = argument(arguments, "output"); !output.is_null()) {
         line += " " + targetWords(output);
+        if (optionalBool(arguments, "overwrite", false) &&
+            !optionalBool(output, "overwrite", false)) {
+            line += " OVERWRITE";
+        }
+    } else if (optionalBool(arguments, "overwrite", false)) {
+        line += " OVERWRITE";
     }
     if (confirm) {
         line += " CONFIRM";
@@ -682,7 +698,14 @@ std::vector<Tool> geoTools()
                                    "path, format?, overwrite?} | {surface: name}."}}},
                  {"confirm",
                   {{"type", "boolean"},
-                   {"description", "Required true for an algorithm whose policy is confirm."}}},
+                   {"description", "Required true for an algorithm whose policy is confirm, and "
+                                   "for a pipeline with an update step."}}},
+                 {"overwrite",
+                  {{"type", "boolean"},
+                   {"description", "Required true when GDAL's own words change a dataset that "
+                                   "already exists (--overwrite, --overwrite-layer, --append, "
+                                   "--update, --upsert, --add, --resume), in a pipeline too; "
+                                   "the same as output's overwrite for a file TO names."}}},
                  {"preview",
                   {{"type", "boolean"},
                    {"description", "Check and report the sources, run nothing (default "

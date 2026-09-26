@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -1049,6 +1051,54 @@ TEST_F(McpServer, GdalRunRefusesAConfirmAlgorithmWithoutConfirm)
                                                         {"confirm", true}});
     EXPECT_FALSE(confirmed["isError"].get<bool>()) << textOf(confirmed);
     EXPECT_FALSE(std::filesystem::exists(doomed));
+}
+
+TEST_F(McpServer, GdalRunRefusesAPipelineThatChangesExistingDataUnlessToldTo)
+{
+    initialize();
+    const TempDir folder("gdal-pipeline");
+    const std::string source = folder.file("a.tif");
+    const std::string victim = folder.file("b.tif");
+    for (const auto& [file, burn] : {std::pair{source, "7"}, std::pair{victim, "1"}}) {
+        const Json made =
+            call("katana_gdal_run",
+                 Json{{"algorithm", "raster create"},
+                      {"tokens", {"--size", "3,3", "--bbox", "0,0,3,3", "--burn", burn, file}}});
+        ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    }
+    const auto bytes = [](const std::string& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    };
+    const std::string before = bytes(victim);
+
+    // An update step, as one quoted word: confirm.
+    const Json update =
+        call("katana_gdal_run", Json{{"algorithm", "raster pipeline"},
+                                     {"tokens", {"read " + source + " ! update " + victim}}});
+    EXPECT_TRUE(update["isError"].get<bool>());
+    EXPECT_NE(textOf(update).find("confirm"), std::string::npos) << textOf(update);
+    EXPECT_EQ(bytes(victim), before);
+    // --overwrite inside the pipeline: overwrite.
+    const Json replace = call(
+        "katana_gdal_run", Json{{"algorithm", "pipeline"},
+                                {"tokens", {"read " + source + " ! write --overwrite " + victim}}});
+    EXPECT_TRUE(replace["isError"].get<bool>());
+    EXPECT_NE(textOf(replace).find("OVERWRITE"), std::string::npos) << textOf(replace);
+    EXPECT_EQ(bytes(victim), before);
+
+    const Json confirmed =
+        call("katana_gdal_run", Json{{"algorithm", "raster pipeline"},
+                                     {"tokens", {"read " + source + " ! update " + victim}},
+                                     {"confirm", true}});
+    EXPECT_FALSE(confirmed["isError"].get<bool>()) << textOf(confirmed);
+    const std::string updated = bytes(victim);
+    EXPECT_NE(updated, before);
+    const Json replaced = call(
+        "katana_gdal_run", Json{{"algorithm", "pipeline"},
+                                {"tokens", {"read " + source + " ! write --overwrite " + victim}},
+                                {"overwrite", true}});
+    EXPECT_FALSE(replaced["isError"].get<bool>()) << textOf(replaced);
 }
 
 TEST_F(McpServer, GdalRunRefusesAnArgumentTheAlgorithmHasNot)
