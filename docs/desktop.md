@@ -1292,7 +1292,13 @@ Alignment Manager is (`docs/terrain.md`, "Surfaces on every front end").
 
 **Terrain > Analysis** holds the terrain analysis items, each opening its
 dialog through `showTerrainDialog` (made on first use under the window, so
-`--dialog <item>` finds it by the name the action carries as its data):
+`--dialog <item>` finds it by the name the action carries as its data).
+The submenu is A&nalysis (A is Cut Section Along Alignment's) and its items
+take C, H, S, A, D and V, so each is reached from the keyboard; they had no
+letters, and `GeoMenus.EveryItemTheLanesAddHasALetterOfItsOwn` now fails an
+item the GIS or Terrain lanes add without one, as
+`qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` fails a
+letter shared in one menu:
 
 - `terrainContours` "Contours..." opens `contoursDialog`, which writes a
   CONTOUR line: the source (a surface or a reference raster), the interval,
