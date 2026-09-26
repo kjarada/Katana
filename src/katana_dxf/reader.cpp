@@ -1340,7 +1340,10 @@ void Reader::convertEllipse(const Record& record, Sink& sink)
         exact.center = Point2(cx, cy);
         exact.majorAxis = majorAxis;
         exact.ratio = std::min(ratio, 1.0);
-        exact.startParameter = normal.z > 0.0 ? start : -(start + sweep);
+        // In [0, 2 pi), as the file's own parameters are: a mirror's
+        // -(start + sweep) is the same place a turn on.
+        exact.startParameter =
+            katana::math::normalizeAngle(normal.z > 0.0 ? start : -(start + sweep));
         exact.sweep = full ? kTwoPi : sweep;
         Entity entity;
         entity.geometry = exact;
@@ -1499,8 +1502,10 @@ void Reader::emitPolyline(std::vector<Vertex> vertices, bool closed, bool threeD
         for (std::size_t i = 0; i < vertexTotal; ++i) {
             katana::geometry::CurveVertex vertex;
             vertex.position = frame.apply(Point2(vertices[i].x, vertices[i].y));
+            // + 0.0: a straight segment's 0 mirrored stays 0, not -0, which
+            // VERTEX LIST would print as a bulge.
             vertex.bulge = std::isfinite(vertices[i].bulge)
-                               ? (mirrored ? -vertices[i].bulge : vertices[i].bulge)
+                               ? (mirrored ? -vertices[i].bulge + 0.0 : vertices[i].bulge)
                                : 0.0;
             if (!extended.empty()) {
                 vertex.height = extended[i];
@@ -2132,7 +2137,7 @@ std::optional<Geometry> placeGeometry(const Geometry& geometry, const Affine& tr
                 for (auto& vertex : out.vertices) {
                     vertex.position = t.apply(vertex.position);
                     if (t.determinant() < 0.0) {
-                        vertex.bulge = -vertex.bulge;
+                        vertex.bulge = -vertex.bulge + 0.0; // never -0
                     }
                 }
                 return Geometry{std::move(out)};
@@ -2150,7 +2155,8 @@ std::optional<Geometry> placeGeometry(const Geometry& geometry, const Affine& tr
                 out.center = t.apply(ellipse.center);
                 out.majorAxis = t.linear(ellipse.majorAxis);
                 if (t.determinant() < 0.0) {
-                    out.startParameter = -(ellipse.startParameter + ellipse.sweep);
+                    out.startParameter =
+                        katana::math::normalizeAngle(-(ellipse.startParameter + ellipse.sweep));
                 }
                 return Geometry{out};
             }

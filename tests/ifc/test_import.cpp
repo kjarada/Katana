@@ -296,6 +296,68 @@ TEST(IfcImport, AnExportReadBackIsTheDrawingItWas)
     EXPECT_EQ(text->layer, "Survey/Text");
 }
 
+// The drawing system's curves (docs/drawing.md) written by the export come
+// back as linework on the same curves: an elliptical arc as the arc, not the
+// whole ellipse it is trimmed from; a rational spline, not a point at 0,0.
+TEST(IfcImport, AnExportedEllipticalArcAndSplineReadBackOnTheirCurves)
+{
+    Model model = scenario();
+    // Semi-axes 4 east and 2, from eccentric anomaly 5.5 for 2 radians -
+    // through the parameter 0, so the file's trim end is below its start.
+    const katana::geometry::Ellipse2 arc{Point2{334020.0, 6250020.0},
+                                         katana::geometry::Vec2(4.0, 0.0), 0.5, 5.5, 2.0};
+    Entity ellipse;
+    ellipse.geometry = arc;
+    ellipse.layer = "Survey/Detail";
+    ASSERT_TRUE(model.entities.add(ellipse).ok());
+    katana::geometry::Spline2 curve;
+    curve.degree = 2;
+    curve.controlPoints = {Point2{334020.0, 6250040.0}, Point2{334025.0, 6250045.0},
+                           Point2{334030.0, 6250040.0}};
+    curve.knots = {0.0, 0.0, 0.0, 1.0, 1.0, 1.0};
+    curve.weights = {1.0, 0.5, 1.0};
+    Entity spline;
+    spline.geometry = curve;
+    spline.layer = "Survey/Curve";
+    ASSERT_TRUE(model.entities.add(spline).ok());
+
+    const auto imported = read(exportedScenario(model));
+    const Entity* ellipseBack = nullptr;
+    const Entity* splineBack = nullptr;
+    for (const Entity& entity : imported.entities) {
+        if (entity.layer == "Survey/Detail") {
+            ellipseBack = &entity;
+        } else if (entity.layer == "Survey/Curve") {
+            splineBack = &entity;
+        }
+    }
+    ASSERT_NE(ellipseBack, nullptr);
+    ASSERT_NE(splineBack, nullptr);
+
+    const auto* arcBack = std::get_if<Polyline2>(&ellipseBack->geometry);
+    ASSERT_NE(arcBack, nullptr);
+    EXPECT_FALSE(arcBack->closed) << "the arc came back as the whole ellipse";
+    ASSERT_GE(arcBack->vertices.size(), 3u);
+    EXPECT_NEAR(arcBack->vertices.front().distanceTo(arc.startPoint()), 0.0, 1e-6);
+    EXPECT_NEAR(arcBack->vertices.back().distanceTo(arc.endPoint()), 0.0, 1e-6);
+    for (const Point2& p : arcBack->vertices) {
+        EXPECT_NEAR(arc.distanceTo(p), 0.0, 1e-6) << "a vertex off the ellipse";
+    }
+
+    const auto* splineLine = std::get_if<Polyline2>(&splineBack->geometry);
+    ASSERT_NE(splineLine, nullptr) << "the spline did not come back as linework";
+    ASSERT_GE(splineLine->vertices.size(), 3u);
+    // Clamped: it starts and ends on its end control points.
+    EXPECT_NEAR(splineLine->vertices.front().distanceTo(curve.controlPoints.front()), 0.0, 1e-6);
+    EXPECT_NEAR(splineLine->vertices.back().distanceTo(curve.controlPoints.back()), 0.0, 1e-6);
+    for (const Point2& p : splineLine->vertices) {
+        // Spline2::distanceTo measures to its own chords, to a tenth of
+        // kCurveChordTolerance (curves2d.hpp): the bound on a vertex ON it.
+        EXPECT_LE(curve.distanceTo(p), 0.1 * katana::geometry::kCurveChordTolerance + 1e-9)
+            << "a vertex off the spline";
+    }
+}
+
 // ---- other writers' files -----------------------------------------------------------
 
 TEST(IfcImport, LengthsComeInAsMetresWhateverTheFilesUnitAndPlacementsAreFollowed)

@@ -421,6 +421,26 @@ TEST(DxfReaderR2000, AnObjectCoordinateSystemFacingDownMirrorsCirclesAndArcs)
     EXPECT_NEAR(arc.endPoint().y, 0.0, 1e-12);
 }
 
+TEST(DxfReaderR2000, AMirroredLwPolylinesStraightSegmentsKeepABulgeOfPlusZero)
+{
+    // Extrusion (0,0,-1) mirrors the polyline, so each bulge changes sign:
+    // the arc's 1 becomes -1, and a straight segment's 0 stays 0 - not -0,
+    // which VERTEX LIST would print as "bulge=-0".
+    const std::string text = "0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n8\n0\n90\n3\n70\n0\n"
+                             "10\n0\n20\n0\n42\n1\n10\n10\n20\n0\n10\n10\n20\n10\n"
+                             "210\n0\n220\n0\n230\n-1\n0\nENDSEC\n0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok()) << imported.error().describe();
+    const auto polylines = ofKind<katana::geometry::CurvePolyline2>(*imported);
+    ASSERT_EQ(polylines.size(), 1u);
+    const auto& polyline = std::get<katana::geometry::CurvePolyline2>(polylines[0]->geometry);
+    ASSERT_EQ(polyline.vertices.size(), 3u);
+    EXPECT_EQ(polyline.vertices[0].bulge, -1.0);
+    EXPECT_EQ(polyline.vertices[1].bulge, 0.0);
+    EXPECT_FALSE(std::signbit(polyline.vertices[1].bulge));
+    EXPECT_FALSE(std::signbit(polyline.vertices[2].bulge));
+}
+
 TEST(DxfReaderR2000, ADimensionIsItsPictureOnTheDimensionsLayer)
 {
     const auto imported = load("r2000_site.dxf");
