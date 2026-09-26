@@ -3747,7 +3747,11 @@ void MainWindow::exportVectorFile()
         pattern >= 0 && chosenFilter.endsWith(')') && QFileInfo(selected).suffix().isEmpty()) {
         selected += '.' + chosenFilter.mid(pattern + 3).chopped(1);
     }
+    (void)showExportOptions(selected);
+}
 
+QDialog* MainWindow::showExportOptions(const QString& selected)
+{
     // The Export Vector dialog (gis_export_dialog.hpp): its scope and
     // options are the EXPORT line it shows, and Run hands that line to the
     // one executor, as if typed (docs/interop.md, "Export options"). One per
@@ -3784,6 +3788,7 @@ void MainWindow::exportVectorFile()
     dialog->show();
     dialog->raise();
     dialog->activateWindow();
+    return dialog;
 }
 
 void MainWindow::refreshReferences()
