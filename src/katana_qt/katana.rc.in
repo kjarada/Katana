@@ -8,8 +8,9 @@
 // The version block is what the file's Properties > Details tab shows, what an
 // installer compares to decide whether to replace a file, and what a crash
 // report names. The company is KATANA_PUBLISHER (root CMakeLists.txt), the
-name the packages are signed under. The numbers come from project(Katana VERSION ...) in the root
-// CMakeLists.txt, so there is one place a version is ever written.
+// name the packages are signed under. The numbers come from
+// project(Katana VERSION ...) in the root CMakeLists.txt, so there is one
+// place a version is ever written.
 
 #include <winver.h>
 
