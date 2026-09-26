@@ -2679,6 +2679,18 @@ void MainWindow::runTypedLine(const QString& line)
 
 bool MainWindow::runWorkbenchLine(const QString& line)
 {
+    // A .ifc's IMPORT, EXPORT and INFO, and IFC RULES, are IFC's grammar
+    // before anything else, as in the session (session.cpp): the geo
+    // executor below takes IMPORT, EXPORT and INFO of every other file, and
+    // would read an IFC line's options as a path or GDAL's options.
+    if (const QStringList words = line.split(' ', Qt::SkipEmptyParts); !words.isEmpty()) {
+        const QString verb = words.front().toUpper();
+        if ((verb == "IMPORT" || verb == "EXPORT" || verb == "INFO" || verb == "IFC") &&
+            runIfcLine(verb, line.mid(line.indexOf(words.front()) + words.front().size()))
+                .has_value()) {
+            return true;
+        }
+    }
     // GDAL and the geoprocessing families after it: the executor katana_cli
     // and katana_mcp share, run here as background jobs.
     if (geo_ != nullptr && geo_->runLine(line)) {
