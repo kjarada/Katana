@@ -516,6 +516,93 @@ TEST(DxfWriter, ALevelOfExactlyZeroComesBackAsZeroNotAsNoLevel)
     EXPECT_EQ(katana::entity::heightsOf(e[7].properties, 1)[0], 0.0);
 }
 
+// ---- the drawing system's kinds (docs/drawing.md) ------------------------------------------
+
+TEST(DxfWriter, ACurvePolylineGoesOutWithItsBulgesAndComesBackTheSame)
+{
+    using katana::geometry::CurvePolyline2;
+    katana::entity::Model model;
+    CurvePolyline2 shape =
+        CurvePolyline2::fromPoints({Point2(0.0, 0.0), Point2(10.0, 0.0), Point2(20.0, 10.0)});
+    shape.vertices[1].bulge = std::tan(kPi / 8.0);
+    add(model, shape);
+    CurvePolyline2 closed =
+        CurvePolyline2::fromPoints({Point2(0.0, 0.0), Point2(4.0, 0.0), Point2(4.0, 4.0)});
+    closed.closed = true;
+    closed.vertices[2].bulge = -0.5; // the closing segment
+    add(model, closed);
+    const std::string text = written(model);
+    EXPECT_EQ(records(text, "LWPOLYLINE"), 2u);
+    const auto back = dxf::readDxf(text);
+    ASSERT_TRUE(back.ok());
+    const auto curved = ofKind<CurvePolyline2>(*back);
+    ASSERT_EQ(curved.size(), 2u);
+    const auto& first = std::get<CurvePolyline2>(curved[0]->geometry);
+    ASSERT_EQ(first.vertices.size(), 3u);
+    EXPECT_FALSE(first.closed);
+    EXPECT_NEAR(first.vertices[1].bulge, std::tan(kPi / 8.0), 1e-12);
+    EXPECT_DOUBLE_EQ(first.vertices[0].bulge, 0.0);
+    const auto& second = std::get<CurvePolyline2>(curved[1]->geometry);
+    EXPECT_TRUE(second.closed);
+    EXPECT_NEAR(second.vertices[2].bulge, -0.5, 1e-12);
+    EXPECT_NEAR(second.length(), closed.length(), 1e-9);
+}
+
+TEST(DxfWriter, AnEllipseAndAnEllipticalArcComeBackAsEllipses)
+{
+    using katana::geometry::Ellipse2;
+    katana::entity::Model model;
+    Ellipse2 full;
+    full.center = Point2(100.0, 50.0);
+    full.majorAxis = katana::geometry::Vec2(6.0, 8.0);
+    full.ratio = 0.4;
+    add(model, full);
+    Ellipse2 arc = full;
+    arc.startParameter = 0.5;
+    arc.sweep = 2.0;
+    add(model, arc);
+    const std::string text = written(model);
+    EXPECT_EQ(records(text, "ELLIPSE"), 2u);
+    const auto back = dxf::readDxf(text);
+    ASSERT_TRUE(back.ok());
+    const auto ellipses = ofKind<Ellipse2>(*back);
+    ASSERT_EQ(ellipses.size(), 2u);
+    const auto& a = std::get<Ellipse2>(ellipses[0]->geometry);
+    EXPECT_EQ(a.center, full.center);
+    EXPECT_NEAR(a.majorAxis.x, 6.0, 1e-12);
+    EXPECT_NEAR(a.majorAxis.y, 8.0, 1e-12);
+    EXPECT_NEAR(a.ratio, 0.4, 1e-12);
+    EXPECT_TRUE(a.isFull());
+    const auto& b = std::get<Ellipse2>(ellipses[1]->geometry);
+    EXPECT_NEAR(b.startParameter, 0.5, 1e-12);
+    EXPECT_NEAR(b.sweep, 2.0, 1e-12);
+}
+
+TEST(DxfWriter, ASplineComesBackWithItsControlPointsKnotsAndFitPoints)
+{
+    using katana::geometry::Spline2;
+    katana::entity::Model model;
+    auto spline = Spline2::throughPoints({Point2(0.0, 0.0), Point2(5.0, 5.0), Point2(10.0, 0.0),
+                                          Point2(15.0, 5.0)});
+    ASSERT_TRUE(spline.ok());
+    add(model, *spline);
+    const std::string text = written(model);
+    EXPECT_EQ(records(text, "SPLINE"), 1u);
+    const auto back = dxf::readDxf(text);
+    ASSERT_TRUE(back.ok());
+    const auto splines = ofKind<Spline2>(*back);
+    ASSERT_EQ(splines.size(), 1u);
+    const auto& read = std::get<Spline2>(splines[0]->geometry);
+    EXPECT_EQ(read.degree, spline->degree);
+    ASSERT_EQ(read.controlPoints.size(), spline->controlPoints.size());
+    for (std::size_t i = 0; i < read.controlPoints.size(); ++i) {
+        EXPECT_NEAR(read.controlPoints[i].distanceTo(spline->controlPoints[i]), 0.0, 1e-12);
+    }
+    ASSERT_EQ(read.knots.size(), spline->knots.size());
+    EXPECT_EQ(read.fitPoints.size(), 4u);
+    EXPECT_NEAR(read.length(), spline->length(), 1e-9);
+}
+
 // ---- annotation (docs/annotation.md, "Exchange") ---------------------------------------
 
 namespace {

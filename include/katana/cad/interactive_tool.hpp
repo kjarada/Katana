@@ -122,6 +122,10 @@ class InteractiveTool {
     // tool whose annotation follows its points keeps the reference.
     [[nodiscard]] virtual ToolStep anchoredPoint(const katana::geometry::Point2& at,
                                                  const katana::entity::AnchorRef& anchor);
+    // A point with a height: typed as x,y,z, or snapped to a point that has
+    // one. The default drops the height and takes the point, so only a tool
+    // that draws in 3D (Polyline 3D, Point) overrides it.
+    [[nodiscard]] virtual ToolStep point3d(const katana::geometry::Point2& at, double z);
     [[nodiscard]] virtual ToolStep entity(katana::entity::EntityId id,
                                           const katana::geometry::Point2& at);
     // Typed text that is not a point (routeTypedInput decides): a distance, an
@@ -169,6 +173,20 @@ parsePointInput(std::string_view text, std::optional<katana::geometry::Point2> l
 [[nodiscard]] ToolStep routeSnappedPoint(InteractiveTool& tool, const Document& document,
                                          const katana::geometry::Point2& at,
                                          const std::optional<SnapResult>& snap);
+
+// routeTypedInput with the drafting aids (drawing/drafting.hpp), as the plan view
+// and the command line route it:
+//   <angle         locks the direction of the next points (< alone clears)
+//   =distance      locks their distance (= alone clears)
+//   x,y,z          a point with a height (InteractiveTool::point3d)
+//   a number       the tool's value first (a radius, a count); if the tool
+//                  refuses it at a point prompt, DIRECT DISTANCE ENTRY - the
+//                  point that far from the last one towards `cursor`
+// Points parse with the drafting settings' angle convention, so a bearing
+// or a DMS angle can follow the < of polar input.
+[[nodiscard]] ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text,
+                                       DraftingSettings& drafting,
+                                       std::optional<katana::geometry::Point2> cursor);
 
 // ---- The catalogue -----------------------------------------------------------------
 

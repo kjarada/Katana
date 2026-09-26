@@ -48,6 +48,23 @@ namespace detail {
     if (const auto* arc = std::get_if<katana::geometry::Arc2>(&entity.geometry)) {
         return arc->circle().boundingBox();
     }
+    // The same for the drawing system's kinds: each arc segment of a curve
+    // polyline offers its centre, and an elliptical arc offers the ellipse's.
+    if (const auto* curved = std::get_if<katana::geometry::CurvePolyline2>(&entity.geometry)) {
+        katana::geometry::Box2 box = curved->boundingBox();
+        for (std::size_t i = 0; i < curved->segmentCount(); ++i) {
+            if (const auto piece = curved->segment(i);
+                const auto* segmentArc = std::get_if<katana::geometry::Arc2>(&piece)) {
+                box.expand(segmentArc->circle().boundingBox());
+            }
+        }
+        return box;
+    }
+    if (const auto* ellipse = std::get_if<katana::geometry::Ellipse2>(&entity.geometry)) {
+        katana::geometry::Ellipse2 whole = *ellipse;
+        whole.sweep = katana::math::kTwoPi;
+        return whole.boundingBox();
+    }
     if (const auto* dimension =
             std::get_if<katana::entity::DimensionGeometry>(&entity.geometry)) {
         // A dimension DRAWS far outside what it measures: the label, the
