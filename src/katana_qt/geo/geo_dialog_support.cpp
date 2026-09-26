@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "geo/geo_workbench.hpp"
+#include "geo/replies.hpp"
 #include "theme.hpp"
 #include "view_workspace.hpp"
 
@@ -61,13 +62,15 @@ Result<QString> lineWord(const QString& text, const QString& field)
     if (text.isEmpty()) {
         return makeError(ErrorCode::InvalidArgument, (field + " is empty").toStdString());
     }
-    if (text.contains('"')) {
+    // The one quoting rule (geo::lineWord): a keyword as a name is quoted too.
+    const auto word = katana::app::geo::lineWord(text.toStdString());
+    if (!word) {
         return makeError(ErrorCode::InvalidArgument,
-                         (field + " holds a double quote, which a command line cannot carry")
+                         (field + " holds a double quote or a line break, which a command line "
+                                  "cannot carry")
                              .toStdString());
     }
-    const bool blank = std::any_of(text.begin(), text.end(), [](QChar c) { return c.isSpace(); });
-    return blank ? "\"" + text + "\"" : text;
+    return QString::fromStdString(*word);
 }
 
 std::optional<JobId> startedJob(const QString& reply)

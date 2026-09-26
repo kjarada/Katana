@@ -316,6 +316,18 @@ TEST_F(DemVerbs, CellsOutsideABoundaryHoldNoValueWhenTheRasterHasNoNoData)
     }
 }
 
+TEST_F(DemVerbs, AReferenceNamedPreviewIsMadeNotPreviewedOnceQuoted)
+{
+    // TO REFERENCE PREVIEW read PREVIEW as the flag: nothing was made, and
+    // the reply said so as a preview. Quoted, it is the name.
+    const std::string clip = "RASTER CLIP FILE \"" + kPlane + "\" AREA 0,0,20,15 TO REFERENCE ";
+    EXPECT_NE(ok(clip + "PREVIEW").find("preview=yes"), std::string::npos);
+    EXPECT_TRUE(reference.rasters().empty());
+    const std::string reply = ok(clip + *geo::lineWord("PREVIEW"));
+    EXPECT_EQ(record(reply, "output")->get("name"), "PREVIEW") << reply;
+    EXPECT_EQ(reference.rasters().size(), 1u);
+}
+
 TEST_F(DemVerbs, AScopeWithNoClosedBoundaryIsReportedAndNothingRuns)
 {
     ASSERT_TRUE(interpreter.run("LINE 0,0 40,30").ok());
