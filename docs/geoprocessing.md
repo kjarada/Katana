@@ -262,6 +262,14 @@ Every leaf is Safe or Confirm (`src/katana_io/geo/policy.cpp`).
   argument of every GDAL 3.13 algorithm and pipeline step (`gdal
   --json-usage`), each whose name suggested it read by its description
   (`GdalPolicy.RasterizeAddAndTileResumeChangeAnExistingDataset`).
+- **A replaced file survives a cancel.** A file `TO FILE` names is written
+  into a staging folder beside it and put in place by the apply
+  (`StagedFiles`, as EXPORT's is). With `OVERWRITE`, GDAL wrote over the
+  file from the start, so a run cancelled part way left an empty or partial
+  file where the original had been (review finding;
+  `GeoExecutor.ACancelledRunLeavesTheFileItWouldHaveReplacedAsItWas`: the
+  original's bytes are there after the cancel). A file GDAL's own words
+  name is GDAL's to write where they say ("Not done").
 - **A pipeline is judged by its steps and its words, however it is quoted.**
   The three pipeline algorithms are Safe as leaves, but a pipeline's steps
   can do what a Confirm leaf does: `read a ! update b` writes into `b`, and
@@ -683,9 +691,11 @@ each extend one of them.
 - **A surface is sampled on the worker.** `bindRaster` hands back a
   `DeferredDataset`, made on the worker, rather than the grid itself: a 25M
   cell sampling is work, and the surface is shared and immutable.
-- **A raster result is spilled, never held.** For a reference target the run
-  asks for `maxMemoryCells = 0`: the result is written once, where it is
-  kept, as it is kept.
+- **A raster result is spilled, never kept in a `std::vector`.** For a
+  reference target the run asks for `maxMemoryCells = 0`: the result is
+  written once, where it is kept, as it is kept. It is still built whole in
+  GDAL's MEM driver first and copied out ("Not done"): the review found the
+  earlier wording, "never held", claimed more than the code does.
 - **Which word names the output is read from GDAL's declarations**
   (`argumentsGiven`), in GDAL's order, without opening anything. Asking GDAL
   to parse the words would open the datasets they name - a URL, on the GUI
@@ -1740,6 +1750,23 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
   on the command line, through `katana_cli`, or `katana_gdal_run` with
   `confirm` / `overwrite`. The Algorithm tab's boxes judge the leaf's policy
   only, which for a pipeline is Safe.
+- **A reference raster is built in memory first.** Every raster result a
+  run keeps as a reference is written by the algorithm into a MEM dataset
+  and then copied to its tiled GeoTIFF (`spill`), so a result bigger than
+  memory fails where writing straight to the file would not (review
+  finding). Deferred: writing a raster-only output straight to the GeoTIFF
+  is a change to how every algorithm's output is bound (its format, its
+  creation options, the colour-map band roles stamped after the run), and
+  it has no test that can tell the two apart short of a result larger than
+  a test machine's memory or a peak-memory measure, which the benchmarks
+  (`benchmarks/bench_*.cpp`) are the place for, in Release, before and
+  after.
+- **A file GDAL's own words name is not cancel-safe.** `TO FILE` is staged
+  and survives a cancel; `GDAL raster hillshade a.tif b.tif --overwrite`
+  (the output in GDAL's words) is written by GDAL where it says, and a
+  cancel part way leaves `b.tif` partial. Katana knows which word is the
+  output by name, not by value (`argumentsGiven`), so it cannot redirect
+  it.
 - **A tile set is rewritten in place.** `raster tile` into a folder that
   already holds tiles rewrites them with no `--overwrite` (GDAL checks
   nothing there; measured, the tile's time changed). `TO FILE <folder>`
