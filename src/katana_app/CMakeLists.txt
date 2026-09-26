@@ -657,6 +657,47 @@ if(KATANA_BUILD_TESTS)
     endif()
 endif()
 
+# UTILITY DRAW of what an import left in the drawing (docs/subsurface_utilities.md,
+# "Services from surveyed and imported geometry"). located_services.geojson is
+# the sample investigation as a GIS delivers it - plan strings, points shot on
+# the ground, the services' and the points' attributes under the GIS's own
+# names - and FIELDS reads those as the schedule's columns. It must draw what
+# schedule.csv draws: W1 as worked by hand in the doc, and a report of 4
+# lines and 14 vertices naming E1-3's over-claim.
+if(KATANA_BUILD_TESTS AND TARGET katana_interop)
+    set(_eol "[\r\n]+")
+    set(_utilities "${PROJECT_SOURCE_DIR}/samples/utilities")
+    set(_located_fields "line=ASSET_ID,point=PT_ID,type=ASSET_TYPE,owner=OWNER,material=MATERIAL,diameter_mm=DIA_MM,status=STATUS,config=CONFIG,description=DESC,method=METHOD,h_unc=H_UNC,v_unc=V_UNC,ql=QL,level=LEVEL,level_ref=LEVEL_REF,path=PATH,verifies=VERIFIES")
+    add_test(NAME cli.utility_draw_takes_the_services_an_import_left_in_the_drawing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "IMPORT \"${_utilities}/located_services.geojson\""
+                -c "UTILITY DRAW DRAWING FIELDS ${_located_fields}"
+                -c "UTILITY REPORT LAYERS utilities MINCOVER 0.6")
+    set_tests_properties(cli.utility_draw_takes_the_services_an_import_left_in_the_drawing
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200${_eol}scope=drawing matched=18 lines=4 points=14 loose=0 drawn=0 ignored=0${_eol}line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502 ql_d=0\\.000.*scope=layers layers=utilities sublayers=yes matched=21 lines=4 completed=0 ignored=0${_eol}AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C"
+        FAIL_REGULAR_EXPRESSION "error")
+    # Nothing says how W1's first vertex was located: the draw is refused by
+    # that vertex, nothing is drawn, and the script fails.
+    add_test(NAME cli.utility_draw_of_geometry_with_no_method_is_refused_by_the_vertex
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "IMPORT \"${_utilities}/located_services.geojson\""
+                -c "UTILITY DRAW DRAWING FIELDS line=ASSET_ID,point=PT_ID" -c "LAYER LIST")
+    set_tests_properties(cli.utility_draw_of_geometry_with_no_method_is_refused_by_the_vertex
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "line W1: vertex W1-1 \\(#[0-9]+\\) says no method it was located by; give METHOD"
+        FAIL_REGULAR_EXPRESSION "utilities drawn|utilities/water")
+    add_test(NAME cli.utility_draw_of_geometry_refused_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "IMPORT \"${_utilities}/located_services.geojson\""
+                -c "UTILITY DRAW DRAWING FIELDS line=ASSET_ID,point=PT_ID")
+    set_tests_properties(cli.utility_draw_of_geometry_refused_fails_the_script PROPERTIES
+        WILL_FAIL TRUE)
+endif()
+
 # A .ifc through the command line both ways (docs/ifc.md). samples/ifc/
 # scenario.txt draws MC01 and a kerb, a fence, a pit, a point and a text;
 # with the sample schedule, the export holds the alignment, 4 services of 10

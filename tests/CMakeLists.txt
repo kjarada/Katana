@@ -860,6 +860,29 @@ if(TARGET katana)
             "-DEXPECT=utilityCommand: UTILITY REGRADE DRAWING[\r\n]+.*utilityStatus: Nothing needed regrading.*utilityOutput: utilities regraded changed=0 lines=4 vertices=14 segments=10 entities=21 layers=[0-9]+ bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200 scope=drawing matched=21 lines=4 completed=0 ignored=0 line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502.*FrameStatsLabel: Plan +21 drawn"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_regrade_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Draw from what an import left in the drawing (docs/subsurface_utilities.md,
+    # "Services from surveyed and imported geometry"): the sample
+    # investigation as a GIS delivers it, imported by a typed IMPORT, then the
+    # Draw tab on what is drawn, its Fields reading the GIS's own attribute
+    # names as the schedule's columns. It draws what schedule.csv draws - the
+    # hand-worked figures of qt_utility_dialog_headless above - and the record
+    # of what the scope took follows the draw's: the 4 strings and 14 points
+    # the import made (cli.utility_draw_takes_the_services_an_import_left_in_the_drawing).
+    # The plan view is framed on the 18 imported and the 21 drawn.
+    if(TARGET katana_interop)
+        add_test(NAME qt_utility_dialog_draws_what_an_import_left_headless
+            COMMAND ${CMAKE_COMMAND}
+                "-DAPP=$<TARGET_FILE:katana>"
+                "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+                "-DDRIVE=>IMPORT \"${_utility_samples}/located_services.geojson\"|@utilityDraw|!utilitySourceDrawing|utilityFields=line=ASSET_ID,point=PT_ID,type=ASSET_TYPE,owner=OWNER,material=MATERIAL,diameter_mm=DIA_MM,status=STATUS,config=CONFIG,description=DESC,method=METHOD,h_unc=H_UNC,v_unc=V_UNC,ql=QL,level=LEVEL,level_ref=LEVEL_REF,path=PATH,verifies=VERIFIES|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput|?FrameStatsLabel"
+                "-DEXPECT=utilityCommand: UTILITY DRAW DRAWING FIELDS line=ASSET_ID,point=PT_ID,[^\r\n]*verifies=VERIFIES[\r\n]+.*utilityStatus: Drawn as one undo step.*utilityOutput: utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200 scope=drawing matched=18 lines=4 points=14 loose=0 drawn=0 ignored=0 line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502 ql_d=0\\.000.*FrameStatsLabel: Plan +39 drawn"
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_import_headless.png"
+                -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+        set_tests_properties(qt_utility_dialog_draws_what_an_import_left_headless
+            PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+            TIMEOUT 180)
+    endif()
     # The drawing written back as a schedule from the Schedule tab, and that
     # schedule read by a typed REPORT as the sample is: 4 lines, 14 vertices,
     # and the over-claim the sample carries.

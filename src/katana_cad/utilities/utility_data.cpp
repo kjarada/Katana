@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -12,6 +13,8 @@
 #include <utility>
 #include <variant>
 
+#include "katana/cad/survey_coding.hpp"
+#include "katana/cad/survey_import.hpp"
 #include "katana/commands/change_set.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -20,6 +23,7 @@
 #include "katana/geometry/alignment.hpp"
 #include "katana/geometry/chording.hpp"
 #include "katana/geometry/profile.hpp"
+#include "katana/math/numerics.hpp"
 #include "katana/survey/subsurface/utility_csv.hpp"
 
 namespace katana::cad::utilities {
@@ -114,9 +118,15 @@ const PropertyValue* valueOf(const Entity& entity, std::string_view key)
 struct PointReader {
     const std::string& line;
     const Entity& point;
+    // What to call it instead, when what is read is not a drawn point: the
+    // line entity a service was read from ("polyline (#12)").
+    std::string label{};
 
     [[nodiscard]] std::string name() const
     {
+        if (!label.empty()) {
+            return label;
+        }
         const PropertyValue* vertex = valueOf(point, keys::kVertex);
         return "point " + (vertex ? katana::entity::toString(*vertex) + " " : std::string()) + "(#" +
                std::to_string(point.id) + ")";
@@ -379,17 +389,6 @@ Result<sub::UtilityVertex> readVertex(const PointReader& reader)
     return vertex;
 }
 
-std::optional<sub::PathEvidence> parsePath(std::string_view text)
-{
-    for (const sub::PathEvidence evidence :
-         {sub::PathEvidence::Detected, sub::PathEvidence::Exposed, sub::PathEvidence::Assumed}) {
-        if (katana::core::equalsIgnoringCase(text, sub::toString(evidence))) {
-            return evidence;
-        }
-    }
-    return std::nullopt;
-}
-
 Result<DrawnService> readService(const std::string& id, const std::vector<const Entity*>& points)
 {
     // Their places along the line; a tie is broken by id only to name both.
@@ -469,7 +468,7 @@ Result<DrawnService> readService(const std::string& id, const std::vector<const 
         for (std::size_t i = 0; i + 1 < paths.size(); ++i) {
             sub::PathEvidence evidence = sub::PathEvidence::Detected;
             if (paths[i]) {
-                const auto parsed = parsePath(*paths[i]);
+                const auto parsed = sub::parsePathEvidence(*paths[i]);
                 if (!parsed) {
                     return PointReader{id, *places[i].second}.refuse(
                         "has " + std::string(keys::kPath) + " \"" + *paths[i] +
@@ -644,6 +643,579 @@ std::string utilityDataKeys(const UtilityData& data)
     return " lines=" + std::to_string(data.services.size()) +
            " completed=" + std::to_string(data.completed) +
            " ignored=" + std::to_string(data.ignored);
+}
+
+// ---- services from surveyed or imported geometry -----------------------------------------
+
+std::string_view geometryHeightsWord(GeometryHeights heights)
+{
+    switch (heights) {
+    case GeometryHeights::Surface:
+        return "surface";
+    case GeometryHeights::Service:
+        return "service";
+    case GeometryHeights::Unused:
+        return "none";
+    }
+    return "surface";
+}
+
+std::optional<GeometryHeights> parseGeometryHeights(std::string_view text)
+{
+    for (const GeometryHeights heights :
+         {GeometryHeights::Surface, GeometryHeights::Service, GeometryHeights::Unused}) {
+        if (katana::core::equalsIgnoringCase(katana::core::trimmed(text),
+                                             geometryHeightsWord(heights))) {
+            return heights;
+        }
+    }
+    return std::nullopt;
+}
+
+namespace {
+
+// What a line entity may say of the service it is.
+constexpr std::array kServiceKeys{keys::kType,        keys::kOwner,          keys::kMaterial,
+                                  keys::kDiameter,    keys::kDiameterInside, keys::kConfiguration,
+                                  keys::kDescription, keys::kStatus};
+// What it may say of every vertex of it.
+constexpr std::array kLineVertexKeys{keys::kMethod,
+                                     keys::kHorizontalUncertainty,
+                                     keys::kVerticalUncertainty,
+                                     keys::kLevelReference,
+                                     keys::kClaimed,
+                                     keys::kPath,
+                                     keys::kDepth};
+// What a point on a vertex may say of that vertex: its whole row but the
+// line's attributes, which are the line's to say.
+constexpr std::array kPointVertexKeys{keys::kMethod,
+                                      keys::kLevel,
+                                      keys::kDepth,
+                                      keys::kSurfaceLevel,
+                                      keys::kLevelReference,
+                                      keys::kHorizontalUncertainty,
+                                      keys::kVerticalUncertainty,
+                                      keys::kClaimed,
+                                      keys::kVerifies,
+                                      keys::kPath};
+
+// The key a schedule column is drawn as (utility_drawing.hpp, keys), for a
+// field FIELDS reads as that column. Empty for "line" and "point", which are
+// the ids, not properties.
+struct FieldColumn {
+    std::string column; // the schedule's name for it
+    std::string key;
+    std::string property; // the entity's property it is read from
+};
+
+Result<std::vector<FieldColumn>>
+fieldColumns(const std::vector<std::pair<std::string, std::string>>& fields)
+{
+    static const std::map<std::string_view, std::string_view> kKeyOf{
+        {"line", ""},
+        {"point", ""},
+        {"method", keys::kMethod},
+        {"level", keys::kLevel},
+        {"level_ref", keys::kLevelReference},
+        {"depth", keys::kDepth},
+        {"surface", keys::kSurfaceLevel},
+        {"h_unc", keys::kHorizontalUncertainty},
+        {"v_unc", keys::kVerticalUncertainty},
+        {"ql", keys::kClaimed},
+        {"path", keys::kPath},
+        {"verifies", keys::kVerifies},
+        {"type", keys::kType},
+        {"owner", keys::kOwner},
+        {"material", keys::kMaterial},
+        {"diameter_mm", keys::kDiameter},
+        {"status", keys::kStatus},
+        {"config", keys::kConfiguration},
+        {"description", keys::kDescription}};
+    std::vector<FieldColumn> out;
+    for (const auto& [name, property] : fields) {
+        const sub::UtilityCsvColumn* column = sub::utilityCsvColumnNamed(name);
+        if (column == nullptr) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "FIELDS: " + name + " is not a column of a utility schedule");
+        }
+        std::string key;
+        if (column->carried != sub::CarriedOn::Interpreted) {
+            key = std::string(keys::kFieldPrefix) + std::string(column->name);
+        } else if (const auto found = kKeyOf.find(column->name); found != kKeyOf.end()) {
+            key = std::string(found->second);
+        } else {
+            return makeError(ErrorCode::InvalidArgument,
+                             "FIELDS: " + std::string(column->name) +
+                                 (column->name == "size"
+                                      ? " is read from a schedule only; give the diameter as "
+                                        "diameter_mm"
+                                      : " is where the geometry is, not a field"));
+        }
+        if (property.empty()) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "FIELDS: " + std::string(column->name) + " names no property");
+        }
+        if (std::ranges::any_of(
+                out, [column](const FieldColumn& taken) { return taken.column == column->name; })) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "FIELDS: " + std::string(column->name) + " given twice");
+        }
+        out.push_back({std::string(column->name), std::move(key), property});
+    }
+    return out;
+}
+
+// `entity` as the reader reads it: its fields under the keys of their
+// columns, where it has no utility.* property of its own there, and its ids
+// in `line` and `point` when a field names them.
+struct EntityView {
+    Entity entity;
+    std::string line;
+    std::string point;
+};
+
+EntityView viewOf(const Entity& entity, const std::vector<FieldColumn>& fields)
+{
+    EntityView view{entity, {}, {}};
+    for (const FieldColumn& field : fields) {
+        const PropertyValue* value = valueOf(entity, field.property);
+        if (value == nullptr) {
+            continue;
+        }
+        const std::string text(katana::core::trimmed(katana::entity::toString(*value)));
+        if (field.column == "line" || field.column == "point") {
+            (field.column == "line" ? view.line : view.point) = text;
+            continue;
+        }
+        if (text.empty() || view.entity.properties.contains(field.key)) {
+            continue;
+        }
+        PropertyValue read = *value;
+        // A schedule's diameter is millimetres; the drawing's is metres.
+        if (field.column == "diameter_mm") {
+            if (const auto millimetres = katana::core::parseFiniteDouble(text)) {
+                read = *millimetres / 1000.0;
+            }
+        }
+        view.entity.properties.insert_or_assign(field.key, std::move(read));
+    }
+    return view;
+}
+
+bool hasLine(const Entity& entity)
+{
+    const PropertyValue* line = valueOf(entity, keys::kLine);
+    return line != nullptr && !katana::entity::toString(*line).empty();
+}
+
+// The entity's name: its code, as survey coding finds one, a coded survey's
+// string name or a .12da archive string's. Empty when it has none.
+std::string nameOf(const Entity& entity)
+{
+    for (const std::string& candidate : codePropertyCandidates()) {
+        if (const std::string* code = surveyCodeOf(entity, candidate)) {
+            const std::string_view name = katana::core::trimmed(*code);
+            if (!name.empty()) {
+                return std::string(name);
+            }
+        }
+    }
+    return {};
+}
+
+// "polyline (#12)", "line (#7)": the entity a service is read from, as a
+// refusal names it.
+std::string sourceLabel(const Entity& entity)
+{
+    return katana::core::lowered(katana::entity::toString(entity.type())) + " (#" +
+           std::to_string(entity.id) + ")";
+}
+
+// The vertices of a line entity that can be a service: a line, or an open
+// polyline. Empty for anything else.
+std::vector<katana::geometry::Point2> runVertices(const Entity& entity)
+{
+    if (const auto* segment = std::get_if<katana::geometry::Segment2>(&entity.geometry)) {
+        return {segment->start, segment->end};
+    }
+    if (const auto* polyline = std::get_if<katana::geometry::Polyline2>(&entity.geometry);
+        polyline != nullptr && !polyline->closed) {
+        return polyline->vertices;
+    }
+    return {};
+}
+
+void copyKeys(const Entity& from, std::span<const std::string_view> keysToCopy, PropertyMap& into)
+{
+    for (const std::string_view key : keysToCopy) {
+        if (const PropertyValue* value = valueOf(from, key)) {
+            into.insert_or_assign(std::string(key), *value);
+        }
+    }
+}
+
+// A delivery schema's fields on `from`: the line's (`line`) or a vertex's.
+void copyFields(const Entity& from, bool line, PropertyMap& into)
+{
+    for (const auto& [key, value] : from.properties) {
+        if (key.starts_with(keys::kFieldPrefix) &&
+            isLineField(std::string_view(key).substr(keys::kFieldPrefix.size())) == line) {
+            into.insert_or_assign(key, value);
+        }
+    }
+}
+
+// What the verb's options say, as the properties a drawn point would carry.
+PropertyMap serviceDefaults(const GeometryServiceOptions& options)
+{
+    PropertyMap properties;
+    const auto text = [&properties](std::string_view key, std::string value) {
+        if (!value.empty()) {
+            properties.insert_or_assign(std::string(key), std::move(value));
+        }
+    };
+    if (options.type) {
+        text(keys::kType, std::string(utilityTypeWord(*options.type)));
+    }
+    text(keys::kOwner, options.owner);
+    text(keys::kMaterial, options.material);
+    if (options.diameter) {
+        properties.insert_or_assign(std::string(keys::kDiameter), *options.diameter);
+    }
+    if (options.status) {
+        text(keys::kStatus, sub::toString(*options.status));
+    }
+    return properties;
+}
+
+PropertyMap vertexDefaults(const GeometryServiceOptions& options)
+{
+    PropertyMap properties;
+    if (options.method) {
+        properties.insert_or_assign(std::string(keys::kMethod),
+                                    std::string(sub::toString(*options.method)));
+    }
+    if (options.horizontalUncertainty) {
+        properties.insert_or_assign(std::string(keys::kHorizontalUncertainty),
+                                    *options.horizontalUncertainty);
+    }
+    if (options.verticalUncertainty) {
+        properties.insert_or_assign(std::string(keys::kVerticalUncertainty),
+                                    *options.verticalUncertainty);
+    }
+    if (options.levelReference) {
+        properties.insert_or_assign(std::string(keys::kLevelReference),
+                                    std::string(sub::toString(*options.levelReference)));
+    }
+    if (options.path) {
+        properties.insert_or_assign(std::string(keys::kPath),
+                                    std::string(sub::toString(*options.path)));
+    }
+    return properties;
+}
+
+// What an entity's keys::kHeights says, refused by `reader` when it says
+// something else.
+Result<std::optional<GeometryHeights>> heightsSaidBy(const PointReader& reader)
+{
+    const auto word = reader.text(keys::kHeights);
+    if (!word) {
+        return std::optional<GeometryHeights>{};
+    }
+    const auto heights = parseGeometryHeights(*word);
+    if (!heights) {
+        return reader.refuse("has " + std::string(keys::kHeights) + " \"" + *word +
+                             "\", which is not surface, service or none");
+    }
+    return std::optional(*heights);
+}
+
+// What the line entity says for the service and each of its vertices, read
+// as a drawn point's would be so that a value that does not read is refused
+// by the entity it is on, before a point of the service names it.
+katana::core::Status checkLineSays(const std::string& line, const Entity& source,
+                                   const PropertyMap& service, const PropertyMap& vertex)
+{
+    Entity probe;
+    probe.id = source.id;
+    probe.geometry = katana::entity::PointGeometry{};
+    probe.properties = service;
+    for (const auto& [key, value] : vertex) {
+        probe.properties.insert_or_assign(key, value);
+    }
+    // What only a vertex has, so that readVertex reads the rest.
+    probe.properties.insert_or_assign(std::string(keys::kVertex), std::string("-"));
+    probe.properties.try_emplace(std::string(keys::kMethod),
+                                 std::string(sub::toString(sub::LocationMethod::Records)));
+    const PointReader reader{line, probe, sourceLabel(source)};
+    if (auto attributes = readAttributes(reader); !attributes) {
+        return attributes.error();
+    }
+    if (auto read = readVertex(reader); !read) {
+        return read.error();
+    }
+    if (const auto path = reader.text(keys::kPath); path && !sub::parsePathEvidence(*path)) {
+        return reader.refuse("has " + std::string(keys::kPath) + " \"" + *path +
+                             "\", which is not detected, exposed or assumed");
+    }
+    return {};
+}
+
+} // namespace
+
+Result<GeometryServices> readGeometryServices(const Model& model, std::span<const EntityId> matched,
+                                              const GeometryServiceOptions& options)
+{
+    // Every line drawn, and every entity a line was drawn from.
+    std::set<std::string, std::less<>> linesDrawn;
+    std::set<std::string, std::less<>> sourcesDrawn;
+    model.entities.forEach([&linesDrawn, &sourcesDrawn](const Entity& entity) {
+        if (!hasLine(entity)) {
+            return;
+        }
+        linesDrawn.insert(katana::entity::toString(*valueOf(entity, keys::kLine)));
+        if (const PropertyValue* source = valueOf(entity, keys::kSource)) {
+            sourcesDrawn.insert(katana::entity::toString(*source));
+        }
+    });
+
+    const auto fields = fieldColumns(options.fields);
+    if (!fields) {
+        return fields.error();
+    }
+    GeometryServices out;
+    // Each entity taken, as read through the fields: an id's view stays where
+    // it is, since the lists below point into it.
+    std::map<EntityId, EntityView> views;
+    std::vector<const EntityView*> runs;   // to be drawn
+    std::vector<const Entity*> before;     // drawn from before: their points are not loose
+    std::vector<const EntityView*> points; // that may be on a vertex
+    for (const EntityId id : matched) {
+        const Entity* entity = model.entities.find(id);
+        if (entity == nullptr || views.contains(id)) {
+            continue;
+        }
+        if (hasLine(*entity)) {
+            ++out.drawn;
+            continue;
+        }
+        if (isStrayVertex(*entity)) {
+            return strayRefusal(*entity, {});
+        }
+        if (entity->type() == EntityType::Point) {
+            points.push_back(&views.emplace(id, viewOf(*entity, *fields)).first->second);
+        } else if (runVertices(*entity).size() < 2) {
+            ++out.ignored;
+        } else if (sourcesDrawn.contains("#" + std::to_string(id))) {
+            ++out.drawn;
+            before.push_back(entity);
+        } else {
+            runs.push_back(&views.emplace(id, viewOf(*entity, *fields)).first->second);
+        }
+    }
+    std::ranges::sort(runs, {}, [](const EntityView* view) { return view->entity.id; });
+
+    // The points on a place, for each vertex: sorted by x, a window each.
+    const auto at = [](const EntityView* point) {
+        return std::get<katana::entity::PointGeometry>(point->entity.geometry).position;
+    };
+    std::ranges::sort(points, [&at](const EntityView* a, const EntityView* b) {
+        return at(a).x != at(b).x ? at(a).x < at(b).x : a->entity.id < b->entity.id;
+    });
+    constexpr double kSameMark = katana::math::tolerance::kCoordinate;
+    const auto pointsOn = [&points, &at](katana::geometry::Point2 place) {
+        std::vector<const EntityView*> on;
+        auto first = std::ranges::lower_bound(points, place.x - kSameMark, {},
+                                              [&at](const EntityView* p) { return at(p).x; });
+        for (; first != points.end() && at(*first).x <= place.x + kSameMark; ++first) {
+            if (katana::math::distance(at(*first), place) < kSameMark) {
+                on.push_back(*first);
+            }
+        }
+        return on;
+    };
+    // A run's name: the field that names it, else its code.
+    const auto nameOfRun = [](const EntityView* run) {
+        return run->line.empty() ? nameOf(run->entity) : run->line;
+    };
+
+    // Each run's id: its name, told apart from another of the same name.
+    std::map<std::string, std::size_t, std::less<>> named;
+    for (const EntityView* view : runs) {
+        if (const std::string name = nameOfRun(view); !name.empty()) {
+            ++named[name];
+        }
+    }
+    std::set<std::string, std::less<>> ids;
+    std::set<EntityId> used;
+    for (const EntityView* view : runs) {
+        const Entity* run = &view->entity;
+        const std::string name = nameOfRun(view);
+        const std::string own = "#" + std::to_string(run->id);
+        const std::string id = name.empty()                                   ? own
+                               : named[name] > 1 || linesDrawn.contains(name) ? name + own
+                                                                              : name;
+        if (linesDrawn.contains(id) || !ids.insert(id).second) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "the service read from " + sourceLabel(*run) + " would be line " + id +
+                                 ", which is " +
+                                 (linesDrawn.contains(id) ? "drawn already" : "another's too") +
+                                 "; name it apart (its code)");
+        }
+
+        PropertyMap service = serviceDefaults(options);
+        copyKeys(*run, kServiceKeys, service);
+        copyFields(*run, true, service);
+        service.try_emplace(std::string(keys::kType),
+                            std::string(utilityTypeWord(sub::UtilityType::Unknown)));
+        PropertyMap lineVertex = vertexDefaults(options);
+        copyKeys(*run, kLineVertexKeys, lineVertex);
+        if (auto status = checkLineSays(id, *run, service, lineVertex); !status) {
+            return status.error();
+        }
+        auto lineHeights = heightsSaidBy(PointReader{id, *run, sourceLabel(*run)});
+        if (!lineHeights) {
+            return lineHeights.error();
+        }
+
+        const std::vector<katana::geometry::Point2> vertices = runVertices(*run);
+        const std::vector<std::optional<double>> heights =
+            katana::entity::heightsOf(run->properties, vertices.size());
+        std::vector<Entity> row(vertices.size());
+        for (std::size_t i = 0; i < vertices.size(); ++i) {
+            const std::vector<const EntityView*> on = pointsOn(vertices[i]);
+            if (on.size() > 1) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "line " + id + ": vertex " + std::to_string(i + 1) + " of " +
+                                     sourceLabel(*run) + " has two points on it, #" +
+                                     std::to_string(on[0]->entity.id) + " and #" +
+                                     std::to_string(on[1]->entity.id) +
+                                     "; take the one that is not the survey's out of the scope");
+            }
+            const EntityView* onVertex = on.empty() ? nullptr : on.front();
+            const Entity* point = onVertex != nullptr ? &onVertex->entity : nullptr;
+            Entity& vertex = row[i];
+            vertex.id = point != nullptr ? point->id : run->id;
+            vertex.geometry = katana::entity::PointGeometry{vertices[i]};
+            vertex.properties = service;
+            for (const auto& [key, value] : lineVertex) {
+                vertex.properties.insert_or_assign(key, value);
+            }
+
+            // The height, and what it is the height of.
+            std::optional<double> height = heights[i];
+            std::optional<GeometryHeights> meaning = *lineHeights;
+            if (point != nullptr) {
+                if (!height) {
+                    height = katana::entity::heightsOf(point->properties, 1).front();
+                }
+                auto pointHeights = heightsSaidBy(PointReader{id, *point});
+                if (!pointHeights) {
+                    return pointHeights.error();
+                }
+                meaning = pointHeights->has_value() ? *pointHeights : meaning;
+            }
+            if (height) {
+                switch (meaning.value_or(options.heights)) {
+                case GeometryHeights::Surface:
+                    vertex.properties.insert_or_assign(std::string(keys::kSurfaceLevel), *height);
+                    break;
+                case GeometryHeights::Service:
+                    vertex.properties.insert_or_assign(std::string(keys::kLevel), *height);
+                    break;
+                case GeometryHeights::Unused:
+                    break;
+                }
+            }
+
+            std::string vertexId = id + "-" + std::to_string(i + 1);
+            if (point != nullptr) {
+                copyKeys(*point, kPointVertexKeys, vertex.properties);
+                copyFields(*point, false, vertex.properties);
+                if (!onVertex->point.empty()) {
+                    vertexId = onVertex->point;
+                } else if (const PropertyValue* number =
+                               valueOf(*point, SurveyImportOptions{}.pointNumberProperty)) {
+                    if (const std::string text = katana::entity::toString(*number);
+                        !katana::core::trimmed(text).empty()) {
+                        vertexId = std::string(katana::core::trimmed(text));
+                    }
+                }
+                used.insert(point->id);
+            }
+            vertex.properties.insert_or_assign(std::string(keys::kLine), id);
+            vertex.properties.insert_or_assign(std::string(keys::kVertex), vertexId);
+            vertex.properties.insert_or_assign(std::string(keys::kOrder),
+                                               static_cast<std::int64_t>(i + 1));
+            if (!vertex.properties.contains(keys::kMethod)) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "line " + id + ": vertex " + vertexId +
+                                     (point != nullptr ? " (#" + std::to_string(point->id) + ")"
+                                                       : std::string()) +
+                                     " says no method it was located by; give METHOD, or " +
+                                     std::string(keys::kMethod) + " on its point or on " +
+                                     sourceLabel(*run));
+            }
+        }
+        std::vector<const Entity*> members;
+        for (const Entity& vertex : row) {
+            members.push_back(&vertex);
+        }
+        auto read = readService(id, members);
+        if (!read) {
+            return read.error();
+        }
+        out.lines.push_back(std::move(read->line));
+        out.sources.push_back(run->id);
+    }
+
+    // A point of a service drawn before is that service's, not loose.
+    std::set<EntityId> drawnPoints;
+    for (const Entity* run : before) {
+        for (const katana::geometry::Point2 vertex : runVertices(*run)) {
+            for (const EntityView* point : pointsOn(vertex)) {
+                if (!used.contains(point->entity.id)) {
+                    drawnPoints.insert(point->entity.id);
+                }
+            }
+        }
+    }
+    out.points = used.size();
+    out.drawn += drawnPoints.size();
+    out.loose = points.size() - used.size() - drawnPoints.size();
+    return out;
+}
+
+std::string geometryServiceKeys(const GeometryServices& services)
+{
+    return " lines=" + std::to_string(services.lines.size()) +
+           " points=" + std::to_string(services.points) +
+           " loose=" + std::to_string(services.loose) + " drawn=" + std::to_string(services.drawn) +
+           " ignored=" + std::to_string(services.ignored);
+}
+
+Result<UtilityDrawing> drawGeometryServices(const GeometryServices& services,
+                                            const UtilityDrawOptions& options)
+{
+    auto drawing = drawUtilities(services.lines, options);
+    if (!drawing) {
+        return drawing.error();
+    }
+    std::map<std::string, std::string, std::less<>> sourceOf;
+    for (std::size_t i = 0; i < services.lines.size(); ++i) {
+        sourceOf.emplace(services.lines[i].id, "#" + std::to_string(services.sources[i]));
+    }
+    for (Entity& entity : drawing->entities) {
+        const PropertyValue* line = valueOf(entity, keys::kLine);
+        if (entity.type() != EntityType::Point || line == nullptr) {
+            continue;
+        }
+        if (const auto found = sourceOf.find(katana::entity::toString(*line));
+            found != sourceOf.end()) {
+            entity.properties.insert_or_assign(std::string(keys::kSource), found->second);
+        }
+    }
+    return drawing;
 }
 
 Result<UtilityRegrade> planUtilityRegrade(const Model& model, const UtilityData& data,
