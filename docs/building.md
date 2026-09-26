@@ -140,6 +140,45 @@ too, since 2026-09-26 ("Bundling"). The customisation compiled in from
 `resources/customisation/` is third-party material kept out of the
 repository - the tests that need it skip without it, on every platform.
 
+### Cross-building for Linux aarch64 (the NEON kernels)
+
+There is no preset for it: it exists to run the NEON kernels' tests on an
+x86-64 machine, under qemu (`docs/performance.md`, "SIMD: NEON on 64-bit
+ARM"). The recipe used on 2026-09-26, with py-rattler as
+`tools/setup_linux_toolchain.py` uses it and the same `SNAPSHOT`:
+
+1. **The compiler**, which runs on x86-64: solve `gxx_linux-aarch64 16.2.*`,
+   `gcc_linux-aarch64 16.2.*` and `sysroot_linux-aarch64 2.28.*` for the
+   platforms `linux-64` and `noarch` (they are cross compilers, so they live
+   in `linux-64`) into a prefix of their own, say `/opt/katana-cross`.
+2. **The libraries**, for aarch64: solve the script's `COMMON_SPECS` without
+   the tools, plus `libstdcxx 16.*`, `libgcc 16.*`, `sysroot_linux-aarch64
+   2.28.*`, `libgl-devel` and `libvulkan-headers`, for `linux-aarch64` and
+   `noarch`, with virtual packages given by hand (`__unix`, `__linux`,
+   `__glibc` 2.28, `__archspec` aarch64 - `VirtualPackage.detect()` would
+   describe the x86-64 host), into `/opt/katana-aarch64`, installed with
+   `platform=Platform("linux-aarch64")`.
+3. **qemu**: `apt-get install qemu-user`.
+4. **A toolchain file** setting `CMAKE_SYSTEM_NAME Linux`,
+   `CMAKE_SYSTEM_PROCESSOR aarch64`, the compilers
+   `/opt/katana-cross/bin/aarch64-conda-linux-gnu-gcc` and `-g++`,
+   `CMAKE_SYSROOT /opt/katana-cross/aarch64-conda-linux-gnu/sysroot`,
+   `CMAKE_FIND_ROOT_PATH /opt/katana-aarch64` (programs NEVER, the rest
+   ONLY), that prefix first in `CMAKE_PREFIX_PATH`, `-L` and
+   `-Wl,-rpath-link` to its `lib/` in the exe and shared linker flags, its
+   `lib/` as `CMAKE_BUILD_RPATH`, `KATANA_FIND_TEST_FRAMEWORKS ON`, and
+   `CMAKE_CROSSCOMPILING_EMULATOR` `qemu-aarch64;-L;<the sysroot>`, which
+   ctest and gtest discovery then run every test executable through.
+5. `cmake -S . -B build/aarch64 -G Ninja -DCMAKE_BUILD_TYPE=Release
+   -DCMAKE_TOOLCHAIN_FILE=<that file> -DKATANA_BUILD_QT_APP=OFF
+   -DKATANA_BUILD_IO=OFF -DKATANA_BUILD_BENCHMARKS=OFF`, build, and
+   `ctest --test-dir build/aarch64 -R "^simd_"`.
+
+The `cli.*` tests fail there: they start `katana_cli` through
+`cmake -E env`, which the emulator does not wrap. Qt and GDAL were not
+cross-built; the aarch64 Qt is in the prefix, but `katana_gpu` would also
+need the host's `qsb` (`QT_HOST_PATH`), which was not tried.
+
 ## macOS
 
 Katana builds on macOS on Apple silicon with the same script and the same

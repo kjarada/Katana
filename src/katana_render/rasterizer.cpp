@@ -10,7 +10,7 @@
 #include "katana/core/cpu_features.hpp"
 #include "katana/core/task_pool.hpp"
 
-#if defined(KATANA_HAVE_AVX2_KERNELS)
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
 #include "simd/raster_kernels.hpp"
 #endif
 
@@ -146,7 +146,9 @@ namespace {
 // call is the whole cost. Ranges are 4096 vertices but for a list's last, so
 // this only decides small lists. Measured, the kernel took 12% off the
 // 'Test 4' archive frame and stayed inside the A/A spread elsewhere
-// (docs/performance.md, "SIMD: the software rasteriser").
+// (docs/performance.md, "SIMD: the software rasteriser"). The NEON kernel
+// also takes four a step, so the same minimum is four of its steps; it was
+// kept on that reasoning, not measured on ARM.
 [[maybe_unused]] constexpr std::size_t kTransformBatchMinimum = 16; // unread without the kernels
 
 } // namespace
@@ -185,13 +187,19 @@ void Rasterizer::transformVertices(const DrawList& list, const Camera& camera,
         }
     };
 
-#if defined(KATANA_HAVE_AVX2_KERNELS)
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
     // The kernel reads positions as packed doubles and writes both vertex
     // arrays as five 32-bit words a vertex, in these orders.
     static_assert(sizeof(Point3) == 3 * sizeof(double));
     static_assert(sizeof(ClipVertex) == 5 * sizeof(float) && offsetof(ClipVertex, color) == 16);
     static_assert(sizeof(ScreenVertex) == 5 * sizeof(float) && offsetof(ScreenVertex, color) == 16);
+#if defined(KATANA_HAVE_AVX2_KERNELS)
     const bool batched = katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
+    const auto transformBatch = katana_avx2_transform_vertices;
+#else
+    const bool batched = katana::core::activeSimdLevel() == katana::core::SimdLevel::Neon;
+    const auto transformBatch = katana_neon_transform_vertices;
+#endif
     const std::array<double, 16> matrix = mvp.data;
 #endif
 
@@ -200,12 +208,12 @@ void Rasterizer::transformVertices(const DrawList& list, const Camera& camera,
     const std::size_t count = list.positions.size();
     pool.parallelRanges(0, count, 4096, [&](std::size_t lo, std::size_t hi) {
         std::size_t i = lo;
-#if defined(KATANA_HAVE_AVX2_KERNELS)
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
         if (batched && hi - lo >= kTransformBatchMinimum) {
             const std::size_t whole = (hi - lo) / 4 * 4;
             const std::size_t colorCount =
                 list.colors.size() > lo ? list.colors.size() - lo : std::size_t{0};
-            katana_avx2_transform_vertices(
+            transformBatch(
                 matrix.data(), &list.positions[lo].x, whole,
                 colorCount > 0 ? list.colors.data() + lo : nullptr, colorCount, width, height,
                 reinterpret_cast<float*>(clip_.data() + lo), clipCodes_.data() + lo,
@@ -752,7 +760,8 @@ struct EdgeSetup {
 
 // True when every pixel centre of the rectangle passes the float test: every
 // edge function is above M at all four corners.
-// Used only by the AVX2 path: [[maybe_unused]] keeps a build without kernels warning-free.
+// Used only by the kernel paths (AVX2 or NEON): [[maybe_unused]] keeps a build without kernels
+// warning-free.
 [[nodiscard, maybe_unused]] bool coversAll(const EdgeSetup& e, int minX, int maxX, int minY, int maxY)
 {
     if (!e.usable) {
@@ -924,19 +933,22 @@ namespace {
 // Where a triangle's box in a tile holds fewer pixels than this, the fill
 // visits every pixel of the box, as it always did. From here it first bounds
 // each row to the pixels that can be inside (rowSpans) and, on AVX2, shades
-// them eight at a time. A dense TIN framed whole is fractions of a pixel a
-// triangle, where the double setup is pure cost: with no cutoff the framed
-// 1.05M-triangle grid took 23% longer, and at 16 the 131k one, whose
+// them eight at a time (four on NEON). A dense TIN framed whole is fractions
+// of a pixel a triangle, where the double setup is pure cost: with no cutoff
+// the framed 1.05M-triangle grid took 23% longer, and at 16 the 131k one, whose
 // triangles are a few pixels, 4% longer. At 64 neither moved outside the A/A
 // spread, and a surface seen from inside it, or a line across the view - both
 // hundreds of pixels a box - kept nearly all of the gain (docs/performance.md,
-// "SIMD: the software rasteriser").
+// "SIMD: the software rasteriser"). The cutoff also applies at the scalar level
+// and on NEON, where it was not measured: the setup it avoids is the same
+// double arithmetic whichever level shades.
 constexpr long kBoundedFillMinimumPixels = 64;
 
 // One pixel of the fill, (x + 0.5, py), of triangle t: true when it was
 // written. The reference every fast path reproduces bit for bit - the AVX2
-// kernel lane by lane (src/katana_render/simd/raster_avx2.cpp). A template only
-// so that it can take the class's private ScreenTriangle.
+// and NEON kernels lane by lane (src/katana_render/simd/raster_avx2.cpp,
+// raster_neon.cpp). A template only so that it can take the class's private
+// ScreenTriangle.
 template <class Triangle>
 [[gnu::always_inline]] inline bool shadePixel(const Triangle& t, float invArea, int x, float py,
                                               Rgba* row, float* depthRow, bool depthWrite)
@@ -998,7 +1010,8 @@ template <class Triangle>
 // A box of kBoundedFillMinimumPixels or more: each row bounded to the pixels
 // that can be inside first (rowSpans, which every pixel shadePixel would
 // accept passes), then those shaded - eight at a time with the AVX2 kernel,
-// which skips the edge tests where the whole box is inside, or one at a time.
+// four with the NEON one, which skip the edge tests where the whole box is
+// inside, or one at a time.
 // Out of line so that none of this weighs on the loop for small boxes, which
 // is what a dense TIN is made of. Returns the pixels written.
 template <class Triangle>
@@ -1015,6 +1028,13 @@ template <class Triangle>
 #if defined(KATANA_HAVE_AVX2_KERNELS)
     if (kernel) {
         return katana_avx2_shade_rows(t.x, invArea, spans.data(), minY, maxY - minY + 1,
+                                      coversAll(edges, minX, maxX, minY, maxY) ? 1 : 0,
+                                      depthWrite ? 1 : 0, colorBase, depthBase,
+                                      static_cast<std::size_t>(stride));
+    }
+#elif defined(KATANA_HAVE_NEON_KERNELS)
+    if (kernel) {
+        return katana_neon_shade_rows(t.x, invArea, spans.data(), minY, maxY - minY + 1,
                                       coversAll(edges, minX, maxX, minY, maxY) ? 1 : 0,
                                       depthWrite ? 1 : 0, colorBase, depthBase,
                                       static_cast<std::size_t>(stride));
@@ -1048,14 +1068,18 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
     const int stride = target.width();
     const bool depthWrite = options.depthWrite;
 
-#if defined(KATANA_HAVE_AVX2_KERNELS)
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
     // The kernel reads a ScreenTriangle as 16 32-bit words (raster_kernels.hpp).
     static_assert(offsetof(ScreenTriangle, y) == 3 * sizeof(float) &&
                   offsetof(ScreenTriangle, z) == 6 * sizeof(float) &&
                   offsetof(ScreenTriangle, invW) == 9 * sizeof(float) &&
                   offsetof(ScreenTriangle, color) == 12 * sizeof(float) &&
                   offsetof(ScreenTriangle, depthBias) == 15 * sizeof(float));
+#if defined(KATANA_HAVE_AVX2_KERNELS)
     const bool kernel = katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
+#else
+    const bool kernel = katana::core::activeSimdLevel() == katana::core::SimdLevel::Neon;
+#endif
 #else
     const bool kernel = false;
 #endif

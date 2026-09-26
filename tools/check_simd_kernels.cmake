@@ -2,7 +2,8 @@
 #
 #   cmake -DKATANA_ROOT=<source dir> -P tools/check_simd_kernels.cmake
 #       Sources. Every src/**/*_avx2.cpp includes only <immintrin.h>,
-#       <cstddef>, <cstdint> and a *_kernels.hpp beside it; that header includes
+#       <cstddef>, <cstdint> and a *_kernels.hpp beside it, and every
+#       src/**/*_neon.cpp the same with <arm_neon.h>; that header includes
 #       only <cstddef>/<cstdint> and holds declarations only (no braces but
 #       extern "C" and namespace blocks), so nothing from it can be emitted as
 #       AVX2 code. And no build file turns on OpenMP threading, nor does any
@@ -11,15 +12,24 @@
 #
 #   cmake -DOBJECTS=<a|b|...> -DNM=<nm> -DOBJDUMP=<objdump> -P tools/check_simd_kernels.cmake
 #       Objects: what the compiler really produced for each kernel file.
-#       - Every code symbol visible to the linker is a katana_avx2_ entry. Any
-#         other is an out-of-line copy of some inline function (a COMDAT), and
-#         the linker may give THAT copy to baseline code: the inline-copy hazard.
-#       - No static-initialiser section (.ctors / .init_array): an initialiser
-#         in a kernel file runs at program start on every machine, AVX2 or not.
+#       - Every code symbol visible to the linker is a katana_avx2_ entry (in
+#         an *_avx2.cpp object) or a katana_neon_ one (in an *_neon.cpp
+#         object). Any other is an out-of-line copy of some inline function (a
+#         COMDAT), and the linker may give THAT copy to baseline code: the
+#         inline-copy hazard.
+#       - No static-initialiser section (.ctors / .init_array / Mach-O's
+#         __mod_init_func): an initialiser in a kernel file runs at program
+#         start on every machine, AVX2 or not.
 #       - No fused multiply-add instruction: the kernels promise results equal
-#         to their scalar references, which multiply and then add.
+#         to their scalar references, which multiply and then add. On x86-64
+#         that is any VFMADD/VFMSUB/VFNMADD/VFNMSUB; on AArch64 the vector
+#         FMLA/FMLS and the scalar FMADD/FMSUB/FNMADD/FNMSUB - baseline
+#         instructions there, which the compiler would use in ordinary code
+#         as readily as in a kernel if -ffp-contract=off were ever lost.
 #       Each object must also define at least one entry, so an empty or
-#       mis-built object cannot pass by having nothing in it.
+#       mis-built object cannot pass by having nothing in it. NM and OBJDUMP
+#       must be the target's tools (a cross build's aarch64 objdump), which
+#       the simd_kernel_objects test takes from CMAKE_NM and CMAKE_OBJDUMP.
 
 set(_violations "")
 
@@ -37,6 +47,13 @@ if(DEFINED OBJECTS)
             list(APPEND _violations "${_name}: object not built")
             continue()
         endif()
+        # The entry prefix the object's own file name promises: a NEON object
+        # exporting a katana_avx2_ entry is as wrong as one exporting a COMDAT.
+        if(_name MATCHES "_neon\\.cpp\\.(o|obj)$")
+            set(_prefix "katana_neon_")
+        else()
+            set(_prefix "katana_avx2_")
+        endif()
 
         execute_process(COMMAND "${NM}" --defined-only "${_object}"
             OUTPUT_VARIABLE _symbols RESULT_VARIABLE _nm_result ERROR_VARIABLE _nm_error)
@@ -51,32 +68,36 @@ if(DEFINED OBJECTS)
             # can see; lower-case t is local and cannot be shared.
             if(_line MATCHES "^[0-9a-fA-F]+ ([TW]) (.+)$")
                 set(_symbol "${CMAKE_MATCH_2}")
-                if(_symbol MATCHES "^katana_avx2_[a-z0-9_]+$")
+                # Mach-O prefixes every C symbol with an underscore.
+                string(REGEX REPLACE "^_(katana_)" "\\1" _symbol "${_symbol}")
+                if(_symbol MATCHES "^${_prefix}[a-z0-9_]+$")
                     math(EXPR _entries "${_entries} + 1")
                 else()
                     list(APPEND _violations
-                        "${_name}: defines '${_symbol}' with external linkage - only katana_avx2_ entries may be visible (inline-copy hazard)")
+                        "${_name}: defines '${_symbol}' with external linkage - only ${_prefix} entries may be visible (inline-copy hazard)")
                 endif()
             endif()
         endforeach()
         if(_entries EQUAL 0)
-            list(APPEND _violations "${_name}: defines no katana_avx2_ entry")
+            list(APPEND _violations "${_name}: defines no ${_prefix} entry")
         endif()
 
         execute_process(COMMAND "${OBJDUMP}" -h "${_object}"
             OUTPUT_VARIABLE _sections RESULT_VARIABLE _h_result)
         if(NOT _h_result EQUAL 0)
             list(APPEND _violations "${_name}: objdump -h failed")
-        elseif(_sections MATCHES "[ \t](\\.ctors|\\.init_array)")
+        elseif(_sections MATCHES "[ \t](\\.ctors|\\.init_array|__mod_init_func)")
             list(APPEND _violations
-                "${_name}: has a static initialiser (${CMAKE_MATCH_1}) - it would run AVX2 code at start-up on every machine")
+                "${_name}: has a static initialiser (${CMAKE_MATCH_1}) - it would run kernel code at start-up on every machine")
         endif()
 
         execute_process(COMMAND "${OBJDUMP}" -d --no-show-raw-insn "${_object}"
             OUTPUT_VARIABLE _code RESULT_VARIABLE _d_result)
         if(NOT _d_result EQUAL 0)
             list(APPEND _violations "${_name}: objdump -d failed")
-        elseif(_code MATCHES "[ \t](vf(n)?m(add|sub)[0-9a-z]*)")
+        # LLVM's objdump on Mach-O prints the arrangement as a suffix
+        # (fmla.2d); GNU's puts it on the operands (fmla v0.2d, ...).
+        elseif(_code MATCHES "[ \t](vf(n)?m(add|sub)[0-9a-z]*|fml[as](l2?)?|f(n)?m(add|sub))([.][0-9a-z]+)?[ \t\n]")
             list(APPEND _violations
                 "${_name}: contains ${CMAKE_MATCH_1} - a fused multiply-add rounds once where the scalar reference rounds twice")
         endif()
@@ -94,18 +115,26 @@ if(NOT KATANA_ROOT)
     message(FATAL_ERROR "Pass -DKATANA_ROOT=<source dir>, or -DOBJECTS=... to check objects")
 endif()
 
-set(_allowed_system "immintrin.h;cstddef;cstdint")
-
-file(GLOB_RECURSE _kernels "${KATANA_ROOT}/src/*_avx2.cpp")
+file(GLOB_RECURSE _kernels "${KATANA_ROOT}/src/*_avx2.cpp" "${KATANA_ROOT}/src/*_neon.cpp")
 foreach(_kernel IN LISTS _kernels)
     file(RELATIVE_PATH _rel "${KATANA_ROOT}" "${_kernel}")
     get_filename_component(_dir "${_kernel}" DIRECTORY)
+    # Each kernel set's own intrinsics header, and only its own: an AVX2 file
+    # including <arm_neon.h> would not build where it is compiled anyway, but
+    # a NEON file including <immintrin.h> is a mistake the ARM build alone
+    # would find.
+    if(_kernel MATCHES "_neon\\.cpp$")
+        set(_intrinsics "arm_neon.h")
+    else()
+        set(_intrinsics "immintrin.h")
+    endif()
+    set(_allowed_system "${_intrinsics};cstddef;cstdint")
     file(STRINGS "${_kernel}" _includes REGEX "^[ \t]*#[ \t]*include")
     foreach(_line IN LISTS _includes)
         if(_line MATCHES "#[ \t]*include[ \t]*<([^>]+)>")
             list(FIND _allowed_system "${CMAKE_MATCH_1}" _index)
             if(_index EQUAL -1)
-                list(APPEND _violations "${_rel}: includes <${CMAKE_MATCH_1}> - a kernel file may include only <immintrin.h>, <cstddef> and <cstdint>")
+                list(APPEND _violations "${_rel}: includes <${CMAKE_MATCH_1}> - a kernel file may include only <${_intrinsics}>, <cstddef> and <cstdint>")
             endif()
         elseif(_line MATCHES "#[ \t]*include[ \t]*\"([A-Za-z0-9_]+_kernels\\.hpp)\"")
             set(_header "${_dir}/${CMAKE_MATCH_1}")
@@ -128,7 +157,7 @@ foreach(_kernel IN LISTS _kernels)
                 endif()
             endforeach()
         else()
-            list(APPEND _violations "${_rel}: '${_line}' - a kernel file may include only <immintrin.h>, <cstddef>, <cstdint> and its *_kernels.hpp")
+            list(APPEND _violations "${_rel}: '${_line}' - a kernel file may include only <${_intrinsics}>, <cstddef>, <cstdint> and its *_kernels.hpp")
         endif()
     endforeach()
 endforeach()
