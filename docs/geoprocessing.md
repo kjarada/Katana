@@ -810,7 +810,76 @@ merges areas. The distance cannot come from an expression, only a property.
 
 ### V2: GIS OVERLAY: polygon booleans between two scopes
 
-Not started.
+```
+GIS OVERLAY intersection|difference|union|symdifference|identity|update|clip
+    <scope> WITH (<scope> | FILE <path> [LAYER <name>] [where="<sql>"])
+    [keep=a,b|all|none] [keepwith=a,b|all|none] [TO LAYER <path>]
+    [csv=<file>] [OVERWRITE] [PREVIEW]
+```
+
+The union, intersection and difference `geometry/polygon.hpp` says Katana
+does not provide, through GDAL's `vector layer-algebra`
+(`src/katana_app/geo/overlay_verbs.cpp`): easement area per lot, net
+developable area, lots split by a zone, pipe length per lot. The window's
+item is GIS > Analysis - GDAL > Overlay... (`gisOverlay`,
+`src/katana_qt/geo/overlay_dialog.hpp`).
+
+- **Two scopes, one parser.** The subject's words end at WITH, which is no
+  scope word, and the overlay's begin after it; both are read by the one
+  scope parser. The overlay may instead be a file, read on the worker
+  through GDAL's own `vector filter` (its LAYER, and `where=` as GDAL's SQL).
+- **Operations.** Katana's words are GDAL's but for difference (`erase`) and
+  symdifference (`sym-difference`); GDAL's own are taken too.
+- **One layer at a time.** layer-algebra reads one input layer and one
+  method layer ("Cannot get input layer ''" for a dataset of several;
+  measured), so each of the subject's tables is a run of its own and the
+  overlay is its areas. union, symdifference and update give back the
+  overlay's pieces the subject misses, which a second run would repeat: they
+  take the subject's areas only, and say how many lines and points they left
+  out.
+- **Lines against areas.** A line comes back cut at the areas' edges, which
+  is how `GisOverlay.ALineAgainstLotsGivesItsLengthPerLot` measures a 100 m
+  pipe as 50 + 50.
+- **Properties.** GDAL names what it carries `input_<field>` and
+  `method_<field>`. A name only one side has is given back as it was
+  (`owner`); one both sides have keeps GDAL's prefix (`input_name`,
+  `method_name`). The subject's `katana_id` becomes `gis.source` and the
+  overlay's `gis.with`, so each piece says which two entities it came from;
+  the drawing's bookkeeping fields are dropped. `keep=` and `keepwith=`
+  choose the fields (GDAL's `--input-field`, `--method-field`); `katana_id`
+  is always carried.
+- **Rows.** One `row` record per piece: `entity=`, `with=`, what it carries,
+  and its `area=` or `length=`. `csv=<file>` writes them too; a file already
+  there is replaced only with OVERWRITE.
+
+```
+row entity=1 input_kind=lot input_name=A owner=Smith with=3 method_kind=corridor method_name=C area=200.000
+overlay operation=intersection features=2 area=400.000 length=0.000
+```
+
+A second scope that takes nothing is reported (`scope arg=method ...
+matched=0`, `ran=no`; `GisOverlay.AnEmptySecondScopeIsReported`).
+
+**The dialog** has two sets of the scope controls: the frame's for the
+subject (`gisOverlayScope`, ...) and a second for the overlay
+(`gisOverlayWithScope`, `gisOverlayWithScopeDrawing`, ...) - the plan named
+them `gisOverlaySubject` and `gisOverlayWith`, but the shared widget names
+itself `<prefix>Scope`, so the subject keeps the frame's name every dialog
+has. `gisOverlayWithSourceFile` chooses a file instead.
+
+**Tests.** `tests/geo/test_overlay_verb.cpp`, on `tests/geo/data/lots.geojson`
+drawn, by hand: a 4 m corridor over each 50 m lot, 200 m2; each lot less it,
+1800 m2; the union, 2000 + 2000 + 480 - 400 = 4080 m2; identity keeps the
+lots' 4000 m2; the file's corridor cuts as the drawn one does.
+`GisOverlayContract.TheArgumentsTheVerbBindsAreGdals` pins the operations and
+fields. The dialog: `tests/qt_widgets/geo/test_overlay_dialog.cpp`;
+katana_cli:
+`cli.gis_overlay_of_a_corridor_on_two_lots_gives_two_hundred_square_metres_each`,
+`cli.gis_overlay_with_a_file_reads_its_corridor`.
+
+**Not done.** A file's coordinate system is not compared with the
+project's: the bridge has no equivalence test yet (text comparison of WKT
+is wrong), so a file in another CRS is overlaid as it is.
 
 ### V3: GIS HULL and GIS CLIP
 

@@ -50,6 +50,9 @@ struct WordRules {
 
 struct VerbWords {
     katana::cad::ScopeWords scope;
+    // Whether any scope or filter word was given: none reads as SELECTION,
+    // which a second clause (OVERLAY's WITH) must tell from no scope at all.
+    bool scopeGiven = false;
     // By lower-case key, the value as typed.
     std::map<std::string, std::string> options;
     // Upper case.
