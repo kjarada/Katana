@@ -19,6 +19,7 @@
 #include "katana/core/text.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "katana/terrain/surface_store.hpp"
+#include "view_workspace.hpp"
 
 namespace katana::qt {
 
@@ -50,7 +51,10 @@ TerrainDialogContext terrainDialogContext(GeoWorkbench& workbench)
     context.reference = services.reference;
     context.surfaces = services.surfaces;
     context.document = services.document;
-    context.views = services.views;
+    if (services.views != nullptr) {
+        ViewWorkspace* views = services.views;
+        context.views = [views] { return scopeFilterViews(views->viewSet()); };
+    }
     context.listen = [&workbench](std::function<void(JobId, const VerbOutcome&)> listener) {
         (void)workbench.addFinishedListener(std::move(listener));
     };
