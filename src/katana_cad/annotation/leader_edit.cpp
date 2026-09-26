@@ -574,10 +574,24 @@ std::optional<AnchoredPoint> tipPlaceOn(const Entity& entity, const Point2& tip)
         inside = curve->closed && curve->vertices.size() >= 3 &&
                  curve->toPolyline(katana::geometry::kCurveChordTolerance).classify(tip) ==
                      Containment::Inside;
+    } else if (const auto* ellipse = std::get_if<katana::geometry::Ellipse2>(&entity.geometry)) {
+        // Inside a whole ellipse: (u/a)^2 + (v/b)^2 < 1 in its own axes.
+        const double a = ellipse->majorRadius();
+        const double b = ellipse->minorRadius();
+        if (ellipse->isFull() && a > 0.0 && b > 0.0) {
+            const katana::geometry::Vec2 d = tip - ellipse->center;
+            const double u = d.dot(ellipse->majorAxis) / a;
+            const double v = d.dot(ellipse->majorAxis.perpendicular()) / a;
+            inside = (u / a) * (u / a) + (v / b) * (v / b) < 1.0;
+        }
     }
     std::optional<AnchorRef> ref;
     if (inside) {
         ref = AnchorRef{entity.id, AnchorPoint::Inside};
+    } else if (std::holds_alternative<katana::geometry::Spline2>(entity.geometry)) {
+        // No place along a spline (entity::nearestAnchor): its start, as
+        // LEADER FOR puts one.
+        ref = AnchorRef{entity.id, AnchorPoint::Start};
     } else {
         ref = katana::entity::nearestAnchor(entity, tip);
     }

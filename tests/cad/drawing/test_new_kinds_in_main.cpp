@@ -160,6 +160,22 @@ TEST(NewKindsInMain, LeadersForAndAttachPutTheTipInsideAClosedCurvePolyline)
     const auto attached = annotation::tipPlaceOn(d.entity(id), Point2(12, 5));
     ASSERT_TRUE(attached.has_value());
     EXPECT_EQ(attached->ref.point, AnchorPoint::Inside) << "(12,5) is inside the curved side";
+
+    // A whole ellipse, semi-axes 4 east and 2: (3,1) is inside (9/16 + 1/4
+    // < 1), (3,1.5) outside (9/16 + 9/16 > 1).
+    const EntityId ellipse = d.add(Ellipse2{Point2(0, 0), Vec2(4, 0), 0.5, 0.0, 2.0 * kPi});
+    const auto in = annotation::tipPlaceOn(d.entity(ellipse), Point2(3, 1));
+    ASSERT_TRUE(in.has_value());
+    EXPECT_EQ(in->ref.point, AnchorPoint::Inside);
+    const auto out = annotation::tipPlaceOn(d.entity(ellipse), Point2(3, 1.5));
+    ASSERT_TRUE(out.has_value());
+    EXPECT_EQ(out->ref.point, AnchorPoint::Along);
+
+    const EntityId spline =
+        d.add(*katana::geometry::Spline2::throughPoints({Point2(0, 0), Point2(5, 3), Point2(10, 0)}, 3));
+    const auto start = annotation::tipPlaceOn(d.entity(spline), Point2(5, 3));
+    ASSERT_TRUE(start.has_value()) << "Attach refused a spline";
+    EXPECT_EQ(start->ref.point, AnchorPoint::Start);
 }
 
 // ---- labels -----------------------------------------------------------------------------------
