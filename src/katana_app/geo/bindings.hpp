@@ -115,6 +115,15 @@ using DeferredDataset = std::function<katana::core::Result<katana::gis::processi
 // The project's coordinate system, for the tables a scope becomes.
 [[nodiscard]] std::string projectCrs(const Context& context);
 
+// When `data`'s coordinate system is known to differ from the project's
+// (gis::sameCrs; nothing when either is unknown), the text a warning says:
+// "<what> is in <X>, not the project's <Y>: <consequence>". Coordinates
+// drawn as they come would not register against the rest of the drawing.
+[[nodiscard]] std::optional<std::string> crsDiffers(const std::string& data,
+                                                    const std::string& project,
+                                                    std::string_view what,
+                                                    std::string_view consequence);
+
 // Where a derived raster goes: the project's cache, or the scratch folder
 // (persisted=no) when the drawing has no project.
 [[nodiscard]] std::filesystem::path derivedFolder(const Context& context);

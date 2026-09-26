@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <numbers>
 #include <string>
@@ -101,6 +102,50 @@ TEST_F(ExportOptions, ExportWritesTheProjectCrs)
     ASSERT_TRUE(layers.ok());
     ASSERT_EQ(layers->size(), 1u);
     EXPECT_EQ(katana::gis::crsEpsgCode(layers->front().projectionWkt), std::optional<int>(7856));
+}
+
+TEST_F(ExportOptions, AKmlSaysItIsInLongitudeAndLatitudeNotTheProjects)
+{
+    // The writer converts a KML to WGS 84 whatever the drawing is in; the
+    // reply named the project's system, which the file is not in.
+    add(katana::entity::PointGeometry{{330000.0, 6250000.0}}, "pegs");
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:28356").ok());
+    const std::string reply = ok("EXPORT " + quoted(file("pegs.kml")));
+    const auto exported = record(reply, "exported");
+    ASSERT_TRUE(exported.has_value()) << reply;
+    EXPECT_NE(exported->get("crs").value_or("").find("EPSG:4326"), std::string::npos) << reply;
+}
+
+TEST_F(ExportOptions, EntitiesImportedMovedGoOutInNoCoordinateSystem)
+{
+    // Imported LOCAL, the lot is moved to 0,0: its coordinates are in
+    // neither its file's system nor the project's, and a GeoPackage that
+    // claimed the project's put it off the coast of Africa.
+    const std::string lot = file("lot.geojson");
+    {
+        std::ofstream out(lot);
+        out << R"({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:EPSG::28356"}},)"
+            << R"("features":[{"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[330000,6250000]}}]})";
+    }
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:28356").ok());
+    ok("IMPORT " + quoted(lot) + " LOCAL");
+    const std::string out = file("moved.gpkg");
+    const std::string reply = ok("EXPORT " + quoted(out));
+    const auto exported = record(reply, "exported");
+    ASSERT_TRUE(exported.has_value()) << reply;
+    EXPECT_EQ(exported->get("crs").value_or("<none>"), "") << reply;
+    EXPECT_NE(reply.find("imported moved from their file's coordinates"), std::string::npos)
+        << reply;
+    auto dataset = katana::gis::GdalDataset::open(out);
+    ASSERT_TRUE(dataset.ok());
+    const auto layers = (*dataset)->vectorLayers();
+    ASSERT_TRUE(layers.ok());
+    ASSERT_EQ(layers->size(), 1u);
+    EXPECT_TRUE(layers->front().projectionWkt.empty());
+    // Nor can they be converted into another system.
+    const auto refused = run("EXPORT " + quoted(file("moved.kml")));
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, katana::core::ErrorCode::InvalidCRS);
 }
 
 TEST_F(ExportOptions, ExportOfLayersOnlyWritesThoseLayers)

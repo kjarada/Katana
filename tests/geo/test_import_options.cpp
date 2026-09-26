@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <numbers>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -294,6 +295,79 @@ TEST_F(ImportOptions, SrsAssumesACrsForAFileWithout)
     const std::string file = write("pegs.csv", "WKT,name\n\"POINT (330000 6250000)\",P1\n");
     const std::string reply = ok("IMPORT " + quoted(file) + " srs=EPSG:28356");
     EXPECT_NE(value(reply, "imported", "crs").find("EPSG:28356"), std::string::npos) << reply;
+}
+
+TEST_F(ImportOptions, SrsSaysWhatAGeoJsonWithoutACrsMemberIsIn)
+{
+    // GDAL declares a GeoJSON without a crs member WGS 84 (RFC 7946), so
+    // srs= - read only for a file that declares nothing - never applied, and
+    // crs=project moved MGA metres as degrees. The point is in the
+    // project's own system, so it stays exactly where it is.
+    const std::string file =
+        write("pegs.geojson",
+              R"({"type":"FeatureCollection","features":[{"type":"Feature","properties":{},)"
+              R"("geometry":{"type":"Point","coordinates":[330000,6250000]}}]})");
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:28356").ok());
+    const std::string reply = ok("IMPORT " + quoted(file) + " srs=EPSG:28356 crs=project");
+    const auto points = on("pegs");
+    ASSERT_EQ(points.size(), 1u) << reply;
+    const auto* point = std::get_if<katana::entity::PointGeometry>(&points.front().geometry);
+    ASSERT_NE(point, nullptr);
+    // No move at all: an identity, to a micrometre.
+    EXPECT_NEAR(point->position.x, 330000.0, 1e-6);
+    EXPECT_NEAR(point->position.y, 6250000.0, 1e-6);
+    // Without crs=project, srs= is what the reply says the file is in.
+    const std::string kept = ok("IMPORT " + quoted(file) + " srs=EPSG:28356");
+    EXPECT_NE(value(kept, "imported", "crs").find("EPSG:28356"), std::string::npos) << kept;
+    // A file that declares another system is read as srs= says, and said.
+    const std::string said = ok("IMPORT " + kLots + " srs=EPSG:7856");
+    EXPECT_NE(said.find("declares GDA94 / MGA zone 56 (EPSG:28356); srs= says it is in "
+                        "GDA2020 / MGA zone 56 (EPSG:7856)"),
+              std::string::npos)
+        << said;
+}
+
+TEST_F(ImportOptions, AFileInAnotherCrsThanTheProjectsIsSaidToBe)
+{
+    // A peg in EPSG:28356 drawn unmoved into an EPSG:7856 project lies
+    // about 1.5 m from where the project's system puts it (GDA94 to
+    // GDA2020), and nothing said so.
+    const std::string file = write(
+        "site.geojson",
+        R"({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:EPSG::28356"}},)"
+        R"("features":[{"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[330000,6250000]}}]})");
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:7856").ok());
+    const std::string unmoved = ok("IMPORT " + quoted(file));
+    EXPECT_NE(unmoved.find("warning text=\"the file is in GDA94 / MGA zone 56 (EPSG:28356), not "
+                           "the project's GDA2020 / MGA zone 56 (EPSG:7856)"),
+              std::string::npos)
+        << unmoved;
+    // Moved into it, or in the project's own, nothing is said.
+    const std::string moved = ok("IMPORT " + quoted(file) + " crs=project target=moved");
+    EXPECT_EQ(moved.find("not the project's"), std::string::npos) << moved;
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:28356").ok());
+    const std::string same = ok("IMPORT " + quoted(file) + " target=same");
+    EXPECT_EQ(same.find("not the project's"), std::string::npos) << same;
+}
+
+TEST_F(ImportOptions, CrsProjectRefusesWhenTheProjectsCrsChangedWhileTheImportRan)
+{
+    const std::string file = write(
+        "site.geojson",
+        R"({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:EPSG::28356"}},)"
+        R"("features":[{"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[330000,6250000]}}]})");
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:7856").ok());
+    auto prepared = katana::app::geo::prepare(context, "IMPORT " + quoted(file) + " crs=project");
+    ASSERT_TRUE(prepared.ok()) << prepared.error().describe();
+    ASSERT_TRUE(prepared->work);
+    auto apply = prepared->work(std::stop_token{}, {});
+    ASSERT_TRUE(apply.ok()) << apply.error().describe();
+    // CRS SET while the worker read: the data is in the old system.
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:4326").ok());
+    auto applied = (*apply)(context);
+    ASSERT_FALSE(applied.ok());
+    EXPECT_EQ(applied.error().code, ErrorCode::InvalidState);
+    EXPECT_EQ(entityCount(), 0u);
 }
 
 TEST_F(ImportOptions, AdoptSetsTheProjectCrsOnlyWhenItHasNone)

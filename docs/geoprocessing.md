@@ -353,7 +353,27 @@ asked (`properties`).
 - **What has no feature.** Text, dimensions, labels and leaders are left
   out and counted by kind; the counts are the scope record's `skipped.*`.
 - **CRS.** The project's coordinate system (the document's
-  `coordinateSystem`) is set on every table.
+  `coordinateSystem`) is set on every table - unless an entity in it was
+  imported moved from its file's coordinates (LOCAL, ALONGSIDE, OFFSET=;
+  metadata `source.shift`), which is in no known system: then no table
+  claims one, and a warning says why (`docs/interop.md`, "Placing an
+  import").
+- **Coordinate systems are compared by GDAL, not by their text**
+  (`gis::sameCrs`, `OGRSpatialReference::IsSame`, a geographic 3D system
+  demoted to its 2D one): a .prj's naming and EPSG's definition of one
+  system are the same system, and "unknown" (either empty or unreadable)
+  is never "different". The plan's risk list asked for this; nothing
+  compared systems before the review.
+- **A result in another system than the project's is said.** A result
+  drawn TO LAYER, or kept as a reference raster, whose system is known to
+  differ from the project's is drawn at its own coordinates, and the reply
+  says so in a warning naming both: `GDAL vector reproject
+  --output-crs=EPSG:4326 ... TO LAYER` drew degrees among MGA metres with
+  nothing said (review finding;
+  `GeoExecutor.AResultInAnotherCrsThanTheProjectsIsSaidToBe`). Drawing it
+  is still what was asked; the curated raster tools that hand drawing
+  points to GDAL as the raster's coordinates (RASTER VIEWSHED, SAMPLE,
+  DRAPE, LOS) refuse instead (`docs/terrain.md`).
 
 ### Features to the drawing
 

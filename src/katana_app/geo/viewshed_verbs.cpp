@@ -50,6 +50,7 @@
 #include "katana/core/text.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/gis/gdal_adapter.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/terrain/line_of_sight.hpp"
 #include "replies.hpp"
@@ -413,6 +414,18 @@ Result<Prepared> prepareRasterViewshed(Context& context, const Tokens& tokens, s
         if (!facts) {
             return facts.error();
         }
+        // The observers are the drawing's points, handed to GDAL as the
+        // raster's coordinates: in another system they stand somewhere
+        // else, and the result was stamped with the project's system
+        // whatever the raster's was (review finding). Refused when both are
+        // known and differ, as the design has the curated raster tools do.
+        if (katana::gis::sameCrs(facts->projectionWkt, crs) == std::optional<bool>(false)) {
+            return makeError(ErrorCode::InvalidCRS,
+                             "the raster is in " + katana::gis::describeCrs(facts->projectionWkt) +
+                                 " and the drawing in " + katana::gis::describeCrs(crs) +
+                                 ": the observers would stand somewhere else; RASTER REPROJECT "
+                                 "the raster into the project's first");
+        }
         const katana::geometry::Box2 extent = rasterExtent(*facts);
         for (const Observer& observer : observers) {
             if (!(observer.at.x >= extent.min.x && observer.at.x <= extent.max.x &&
@@ -480,7 +493,9 @@ Result<Prepared> prepareRasterViewshed(Context& context, const Tokens& tokens, s
                 " visible_cells=" + std::to_string(seen->cells));
             runs.push_back(std::move(seen).value());
         }
-        viewed->grid = unionOf(runs, crs.empty() ? facts->projectionWkt : crs);
+        // The raster's own system: the one GDAL computed in, the project's
+        // only for a raster that declares none.
+        viewed->grid = unionOf(runs, facts->projectionWkt.empty() ? crs : facts->projectionWkt);
         const auto& gt = viewed->grid.info.geotransform;
         const double cellArea = std::abs(gt[1] * gt[5] - gt[2] * gt[4]);
         for (const double cell : viewed->grid.bands.front()) {

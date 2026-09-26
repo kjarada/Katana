@@ -151,10 +151,9 @@ Result<std::string> write(Kind kind, const Snapshot& snapshot, const std::filesy
         for (const std::string& layer : written->layers) {
             layers += (layers.empty() ? "" : ",") + layer;
         }
-        std::string crs = snapshot.projectionWkt;
-        if (!options.targetCrs.empty()) {
-            crs = katana::gis::crsToWkt(options.targetCrs).valueOr(options.targetCrs);
-        }
+        // What the file says it is in, which is not always the project's:
+        // a KML is in longitude and latitude, a LOCAL import in none.
+        const std::string crs = written->projectionWkt;
         reply = "exported file=" + recordText(pathText(named)) +
                 " kind=vector driver=" + recordText(written->driver) +
                 " features=" + std::to_string(written->featuresWritten) +

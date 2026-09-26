@@ -35,6 +35,10 @@ struct Ground {
     // input arg=input source=surface name=ground read=triangles, or the
     // shared input record of a raster or file.
     std::string record;
+    // The project's coordinate system when the line was prepared: a raster
+    // known to be in another is refused when it is opened, since the
+    // drawing's points would be read at the wrong place in it.
+    std::string projectCrs;
 };
 
 // SURFACE <name> | RASTER <id|name> | FILE <path> at `at`, leaving `at` after
@@ -55,7 +59,8 @@ struct OpenGround {
 
 // A surface read on its triangles (TinSurface::elevationAt); a raster
 // through gis::RasterSampler with `method`. What RasterSampler::open
-// refuses.
+// refuses, and InvalidCRS for a raster in another coordinate system than
+// the project's (gis::sameCrs).
 [[nodiscard]] katana::core::Result<OpenGround> openGround(const Ground& ground,
                                                           katana::gis::Resampling method);
 

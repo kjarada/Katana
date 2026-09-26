@@ -77,6 +77,10 @@ struct VectorExportResult {
     std::vector<std::string> layers;
     std::string driver;
     std::vector<std::string> warnings;
+    // The coordinate system the file's coordinates are in: the project's,
+    // crs=<code>'s, WGS 84 for KML, KMZ and GPX, which hold nothing else, or
+    // none (empty) for entities IMPORT moved from their file's coordinates.
+    std::string projectionWkt;
 };
 
 // Entity types with no vector-format counterpart (text, dimensions) are skipped
