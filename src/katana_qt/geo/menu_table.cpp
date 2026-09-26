@@ -34,6 +34,9 @@
 #include "geo/terrain_shading_dialog.hpp"
 // ---- T3: Terrain > Analysis > Slope ----
 #include "geo/slope_analysis_dialog.hpp"
+// ---- T4: Terrain > Analysis > Statistics by Area, Drape and Sample Heights ----
+#include "geo/drape_dialog.hpp"
+#include "geo/zonal_stats_dialog.hpp"
 
 #include <utility>
 
@@ -189,7 +192,35 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
         });
         menus.addToTerrain("Analysis", "terrainAnalysisMenu", slope);
     }
-    // ---- T4: Terrain > Analysis > Zonal Statistics, Drape ----
+    // ---- T4: Terrain > Analysis > Statistics by Area, Drape and Sample Heights ----
+    {
+        QAction* zonal = workbench.services().makeAction(
+            Icon::Processing, "Statistics by Area...",
+            "The mean, range, count and more of a surface or an elevation raster inside each "
+            "closed shape, written on the shapes as properties (RASTER ZONAL)",
+            {}, "terrainZonal");
+        zonal->setData("zonalStatsDialog");
+        QObject::connect(zonal, &QAction::triggered, &workbench.window(), [&workbench] {
+            (void)showTerrainDialog(workbench, "zonalStatsDialog",
+                                    [](TerrainDialogContext context, QWidget* parent) -> QDialog* {
+                                        return new ZonalStatsDialog(std::move(context), parent);
+                                    });
+        });
+        menus.addToTerrain("Analysis", "terrainAnalysisMenu", zonal);
+        QAction* drape = workbench.services().makeAction(
+            Icon::Processing, "Drape and Sample Heights...",
+            "Give points and line vertices the height of a surface or an elevation raster, or "
+            "read the height at points (DRAPE, RASTER SAMPLE)",
+            {}, "terrainDrape");
+        drape->setData("drapeDialog");
+        QObject::connect(drape, &QAction::triggered, &workbench.window(), [&workbench] {
+            (void)showTerrainDialog(workbench, "drapeDialog",
+                                    [](TerrainDialogContext context, QWidget* parent) -> QDialog* {
+                                        return new DrapeDialog(std::move(context), parent);
+                                    });
+        });
+        menus.addToTerrain("Analysis", "terrainAnalysisMenu", drape);
+    }
     // ---- T5: Terrain > Analysis > Viewshed ----
     // ---- T6: Terrain > DEM > Grid from Points ----
     {
