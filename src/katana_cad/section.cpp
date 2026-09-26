@@ -1,5 +1,7 @@
 #include "katana/cad/section.hpp"
 
+#include "katana/entity/curve_pieces.hpp"
+
 #include <utility>
 
 #include <algorithm>
@@ -322,10 +324,19 @@ Result<Section> extractSection(const Polyline2& alignment,
         katana::geometry::IntersectionResult hit;
         const auto visit = [&](const Entity& entity) {
             const auto* polyline = std::get_if<Polyline2>(&entity.geometry);
+            // The drawing system's kinds cross the section through their
+            // pieces (entity/curve_pieces.hpp): a curve polyline's segments
+            // and arcs exactly, an ellipse's and a spline's chords to a
+            // millimetre - a curve this code did not know of would otherwise
+            // be missing from the section with nothing to say so.
+            const bool pieced =
+                std::holds_alternative<katana::geometry::CurvePolyline2>(entity.geometry) ||
+                std::holds_alternative<katana::geometry::Ellipse2>(entity.geometry) ||
+                std::holds_alternative<katana::geometry::Spline2>(entity.geometry);
             // Text, points and dimensions carry no plan curve and cross
             // nothing (appendCrossings); leaving them out here also spares
             // them the box computation.
-            if (polyline == nullptr && !std::holds_alternative<Segment2>(entity.geometry) &&
+            if (polyline == nullptr && !pieced && !std::holds_alternative<Segment2>(entity.geometry) &&
                 !std::holds_alternative<katana::geometry::Circle2>(entity.geometry) &&
                 !std::holds_alternative<katana::geometry::Arc2>(entity.geometry)) {
                 return;
@@ -340,11 +351,29 @@ Result<Section> extractSection(const Polyline2& alignment,
             if (!extent.intersects(reach)) {
                 return;
             }
+            const std::vector<katana::geometry::Curve2> pieces =
+                pieced ? katana::entity::curvePieces(entity.geometry) : std::vector<katana::geometry::Curve2>{};
             for (std::size_t s = 0; s < cleaned.segmentCount(); ++s) {
                 if (!extent.intersects(alongBoxes[s])) {
                     continue;
                 }
                 const Segment2 along = cleaned.segment(s);
+                if (pieced) {
+                    for (const auto& piece : pieces) {
+                        if (!katana::geometry::boundingBox(piece).intersects(alongBoxes[s])) {
+                            continue;
+                        }
+                        const auto crossing = katana::geometry::intersect(
+                            katana::geometry::Curve2{along}, piece);
+                        if (crossing.kind != katana::geometry::IntersectionKind::Points) {
+                            continue;
+                        }
+                        for (std::size_t k = 0; k < crossing.count; ++k) {
+                            record(entity, s, along, crossing.points[k]);
+                        }
+                    }
+                    continue;
+                }
                 if (polyline != nullptr) {
                     // A long alignment's box covers most of the drawing, so
                     // for it the box test rejects little. The sharper test:

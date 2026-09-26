@@ -199,9 +199,12 @@ class ViewWorkspace final : public QMainWindow {
     void setGridVisible(bool visible);
     [[nodiscard]] bool gridVisible() const { return gridVisible_; }
     void setSnapEnabled(bool enabled);
-    [[nodiscard]] bool snapEnabled() const { return snapEnabled_; }
+    // The document's drafting settings hold both (docs/drawing.md): the
+    // drafting toolbar and SNAP set the same ones, so the views keep no copy
+    // that could overwrite them.
+    [[nodiscard]] bool snapEnabled() const { return document_.drafting().snapEnabled; }
     void setSnapModes(katana::cad::SnapModes modes);
-    [[nodiscard]] katana::cad::SnapModes snapModes() const { return snapModes_; }
+    [[nodiscard]] katana::cad::SnapModes snapModes() const { return document_.drafting().snapModes; }
     // Esc: the plan views running a tool (or holding typed input for one)
     // cancel it; when none is, every plan view cancels (clears its box and
     // the selection).
@@ -345,8 +348,6 @@ class ViewWorkspace final : public QMainWindow {
     // of them repeats; "" until one has run.
     std::string lastToolId_;
     bool gridVisible_ = true;
-    bool snapEnabled_ = true;
-    katana::cad::SnapModes snapModes_ = katana::cad::kDefaultSnapModes;
 };
 
 } // namespace katana::qt

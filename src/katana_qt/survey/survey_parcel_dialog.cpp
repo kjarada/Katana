@@ -205,7 +205,13 @@ Result<std::string> SurveyParcelDialog::compute()
     if (entity == nullptr) {
         return makeError(ErrorCode::NotFound, "no entity with that id", std::to_string(*id));
     }
-    // The verb's own refusal, in its own words.
+    // The verb's own refusals, in its own words.
+    if (std::holds_alternative<katana::geometry::CurvePolyline2>(entity->geometry)) {
+        return makeError(ErrorCode::Unsupported,
+                         "a parcel with arc courses is not reported yet; its courses are "
+                         "bearings and distances of straight sides",
+                         std::to_string(*id));
+    }
     const auto* boundary = std::get_if<katana::geometry::Polyline2>(&entity->geometry);
     if (boundary == nullptr) {
         return makeError(ErrorCode::InvalidGeometry, "a parcel must be a closed polyline",

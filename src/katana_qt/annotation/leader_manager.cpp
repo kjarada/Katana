@@ -792,7 +792,8 @@ void LeaderManagerDialog::showForm(const LeaderGeometry& shape)
     } else {
         const katana::entity::Entity* on = document_.model().entities.find(shape.tipRef.entity);
         const bool polyline =
-            on != nullptr && std::holds_alternative<katana::geometry::Polyline2>(on->geometry);
+            on != nullptr && (std::holds_alternative<katana::geometry::Polyline2>(on->geometry) ||
+                              std::holds_alternative<katana::geometry::CurvePolyline2>(on->geometry));
         target_->setText((on != nullptr ? QString::fromUtf8(katana::entity::toString(on->type()))
                                         : QStringLiteral("a gone entity")) +
                          QStringLiteral(" ") + QString::number(shape.tipRef.entity) +
@@ -999,7 +1000,11 @@ ann::LeaderChange LeaderManagerDialog::formChange() const
         const katana::entity::Entity* on = document_.model().entities.find(ref.entity);
         // A circle's turn is [0, 1), as the verb's along reads it: a whole
         // turn is where it starts.
-        if (on != nullptr && std::holds_alternative<katana::geometry::Circle2>(on->geometry) &&
+        const auto* ellipse =
+            on != nullptr ? std::get_if<katana::geometry::Ellipse2>(&on->geometry) : nullptr;
+        if (on != nullptr &&
+            (std::holds_alternative<katana::geometry::Circle2>(on->geometry) ||
+             (ellipse != nullptr && ellipse->isFull())) &&
             ref.parameter == 1.0) {
             ref.parameter = 0.0;
         }

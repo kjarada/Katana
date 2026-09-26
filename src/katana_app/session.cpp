@@ -884,7 +884,7 @@ bool runLine(SessionState& session, const std::string& line)
     if (!reply->empty()) {
         std::cout << *reply << '\n';
     }
-    if (verb == "OPEN") {
+    if (verb == "OPEN" && katana::cad::CommandInterpreter::replacesDocument(line)) {
         // A warning, not a refusal: the drawing opens and draws, but what a
         // missing file defined draws as a plain line.
         const std::vector<std::string> missing = katana::cad::customisationNotLoaded(
