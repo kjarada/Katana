@@ -185,6 +185,11 @@ class MainWindow final : public QMainWindow {
     // logged, for a file that cannot be described or has no such dialog. For
     // --import-options.
     [[nodiscard]] std::unique_ptr<QDialog> makeImportOptions(const QString& path);
+    // File > Export Vector's dialog (VectorExportDialog, one per window) for
+    // `path`, shown, with the scope set as the menu sets it: what File >
+    // Export Vector opens once its file dialog has answered. For
+    // --export-options, since a headless run opens no file dialog.
+    QDialog* showExportOptions(const QString& path);
     // Triggers the menu item whose object name is `name`, exactly as a click
     // does. For the headless --action switch, so that a menu command is run
     // by a test through the same QAction a person clicks. NotFound for an

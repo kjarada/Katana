@@ -109,6 +109,14 @@ the same as structured content: each command's `ok`, `output` and `messages`,
 and `status`, the drawing's state after the call. `isError` is true when a
 command failed, so the model sees the failure and the reason.
 
+An argument a tool does not declare is refused before anything runs, naming
+it and the arguments the tool takes. Every schema says
+`additionalProperties: false`, but a client need not check it, and the
+server used to ignore such an argument: `{"split": true}` given to
+`katana_export` (whose word is `split_by_layer`) wrote one layer where the
+agent had asked for one per drawing layer, and said nothing
+(`McpServer.AnArgumentTheToolDoesNotDeclareIsRefusedByNameAndNothingRuns`).
+
 The help (`katana://help`) and the status (`katana://status`) are also
 resources, for a client that attaches context rather than calling tools. The
 status - the tool's text and structured content, and the resource - is the
