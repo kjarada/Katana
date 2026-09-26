@@ -144,6 +144,15 @@ Result<SightWords> sightWords(const vec::VerbWords& words)
     return sight;
 }
 
+// A station of a sight line: a place computed along it, so to the
+// millimetre like the distances beside it (fixed3), where a point the user
+// gave is echoed exactly (pointText). At full precision a station read
+// 149.43965517241378,119.50431034482759.
+std::string stationText(const Point2& point)
+{
+    return fixed3(point.x) + "," + fixed3(point.y);
+}
+
 struct Observer {
     Point2 at;
     std::optional<katana::entity::EntityId> entity;
@@ -435,9 +444,13 @@ Result<Prepared> prepareRasterViewshed(Context& context, const Tokens& tokens, s
             request.path = {"raster", "viewshed"};
             // Its own copy of the input: never a dataset shared between runs.
             request.values.emplace_back("input", gp::ArgValue(*input));
-            request.values.emplace_back(
-                "position", gp::ArgValue(gp::Scalar(std::vector<double>{observer.at.x, observer.at.y})));
-            request.values.emplace_back("height", gp::ArgValue(gp::Scalar(options.height)));
+            // The eye height rides as the position's third value, X,Y,H:
+            // GDAL 3.13 ignores --height beside a two-value position and
+            // looks from its default 2 m instead (a 1 m wall 20 m off then
+            // shadows to 20 x 2 / 1 = 40 m whatever height= said; measured).
+            request.values.emplace_back("position",
+                                        gp::ArgValue(gp::Scalar(std::vector<double>{
+                                            observer.at.x, observer.at.y, options.height})));
             request.values.emplace_back("target-height", gp::ArgValue(gp::Scalar(options.target)));
             request.values.emplace_back("curvature-coefficient",
                                         gp::ArgValue(gp::Scalar(options.curvature)));
@@ -510,8 +523,10 @@ Result<Prepared> prepareRasterViewshed(Context& context, const Tokens& tokens, s
             }
             viewed->areas = std::move(seen);
         }
-        // The display copy: seen cells tinted, the rest clear.
-        auto colours = chain.write("colours.txt", "1 255 140 0 150\n0 0 0 0 0\nnv 0 0 0 0\n");
+        // The display copy: seen cells tinted, the rest clear. No "nv"
+        // entry: the union grid has no no-data value, and GDAL warns on
+        // every run that it ignores one.
+        auto colours = chain.write("colours.txt", "1 255 140 0 150\n0 0 0 0 0\n");
         if (!colours) {
             return colours.error();
         }
@@ -716,11 +731,11 @@ Result<Prepared> prepareLineOfSight(Context& context, const Tokens& tokens, std:
                              " target_z=" + fixed3(line->targetZ);
         if (line->clearance) {
             record += " clearance=" + fixed3(*line->clearance) +
-                      " clearance_at=" + an::pointText(*line->clearanceAt) +
+                      " clearance_at=" + stationText(*line->clearanceAt) +
                       " clearance_distance=" + fixed3(*line->clearanceDistance);
         }
         if (line->blockedAt) {
-            record += " blocked_at=" + an::pointText(*line->blockedAt) +
+            record += " blocked_at=" + stationText(*line->blockedAt) +
                       " blocked_distance=" + fixed3(*line->blockedDistance) +
                       " blocked_ground=" + fixed3(*line->blockedGround);
         }

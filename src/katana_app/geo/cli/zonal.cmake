@@ -6,13 +6,15 @@ set(_zonal_data "${PROJECT_SOURCE_DIR}/tests/geo/data")
 # tests/geo/data/plane.asc is z = 100 + 0.05 x at the centres of its 1 m
 # cells. A lot drawn from (10,5) to (30,25) covers columns 10 to 29 and 20
 # rows whole: 400 cells, a count of exactly 400, written on the lot (entity
-# 1) in place.
+# 1) in place. The mean is the plane at the mean of the centres 10.5 ..
+# 29.5, x = 20: 100 + 0.05 x 20 = 101, which the reply writes as "101"
+# (within the Float32 reading's 4e-6 either side).
 add_test(NAME cli.raster_zonal_writes_properties_on_a_drawn_lot
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli> -c "RECT 10,5 30,25"
             -c "RASTER ZONAL FILE \"${_zonal_data}/plane.asc\" DRAWING stats=count,mean")
 set_tests_properties(cli.raster_zonal_writes_properties_on_a_drawn_lot PROPERTIES
-    PASS_REGULAR_EXPRESSION "gis op=zonal seconds=[0-9.]+ cancelled=no.*zones used=1 skipped.open=0 skipped.points=0.*output arg=output kind=vector target=in-place created=0 updated=1 deleted=0 skipped=0.*zone entity=1 count=400 mean=10[01]\\.[0-9]+.*zonal stats=count,mean prefix=zone pixels=fractional zones=1"
+    PASS_REGULAR_EXPRESSION "gis op=zonal seconds=[0-9.]+ cancelled=no.*zones used=1 skipped.open=0 skipped.points=0.*output arg=output kind=vector target=in-place created=0 updated=1 deleted=0 skipped=0.*zone entity=1 count=400 mean=(101|101\\.00000[0-9]*|100\\.99999[0-9]*)[\r\n].*zonal stats=count,mean prefix=zone pixels=fractional zones=1"
     FAIL_REGULAR_EXPRESSION "error")
 
 # Bilinear on the plane is the plane: 100 + 0.05 x 12.3 = 100.615 (read as
