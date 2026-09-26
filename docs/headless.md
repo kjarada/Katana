@@ -167,7 +167,7 @@ every action, field, button and tab gets one. In a test they are one
 
 | Switch | `-DDRIVE` step | What it does |
 |---|---|---|
-| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`, `dimensionStyleManagerDialog`; Annotate > Edit Text carries `textEditDialog`; File > Project Coordinate System carries `projectCrsDialog`; the seven Subsurface Utilities items all carry `utilityDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
+| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`, `dimensionStyleManagerDialog`; Annotate > Edit Text carries `textEditDialog`; File > Project Coordinate System carries `projectCrsDialog`; the Annotate menu's `annotateLeaders`, `annotateLeadersForSelection` and `annotateArrangeLeaders` all carry `leaderManagerDialog`; the seven Subsurface Utilities items all carry `utilityDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
 | `--survey-dock ACTION` | `#ACTION` | shows the dock that action shows and makes it the target; at the end its status line is printed |
 | `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers |
 | `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does |
@@ -192,7 +192,12 @@ dialog or widget, a fill of a choice the dialog does not offer, a press of a
 disabled button - ends the run with exit 1 and a sentence on stderr, never a
 crash and never a silent no-op. The names a dialog's fields carry are listed
 in its header (`survey/survey_dialogs.hpp`, `survey_import_wizard.hpp`,
-`survey_points_ui.hpp`, the managers' own).
+`survey_points_ui.hpp`, `src/katana_qt/ifc_dialogs.hpp`, the managers' own).
+File > Export IFC, for one, is `@fileExportIfc|ifcExportFile=out.ifc|!ifcExportPreview|?ifcExportClasses|!ifcExportExport`:
+the preview's table printed, then the file written
+(`qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless`). The
+IFC dialogs, which run lines, echo each on stderr as "> <line>" before its
+reply (`MainWindow::runIfcCommand`), so a test reads which line a press ran.
 
 A headless run echoes its command log to stderr, which is where a test reads
 what a command REPORTED.

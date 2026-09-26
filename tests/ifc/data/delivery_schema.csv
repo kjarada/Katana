@@ -1,0 +1,31 @@
+kind,attribute,value,detail,label
+schema,Utility Delivery Schema,1.2,,
+identifier,AssetIdentifier,,,
+parent,AssetTypeCode,,,
+field,AssetIdentifier,Text,Yes,Asset Identifier
+field,AssetTypeCode,Domain List: Asset Type Code,Yes,Asset Type Code
+field,AssetOwner,Domain List: Asset Owner,Yes,Asset Owner
+field,AssetStatus,Domain List: Asset Status,Yes,Asset Status
+field,Size,Domain List: Size,Yes,Size
+field,Material,Text,No,Material
+field,QualityLevel,Domain List: Quality Level,Yes,Quality Level
+field,LocateMethod,Domain List: Locate Method,Yes,Locate Method
+field,Depth,Real Number,Yes,Depth
+field,DateInfoObtained,Date (YYYY/MM/DD),Yes,Date Information Obtained
+domain,AssetTypeCode,W,,
+domain,AssetTypeCode,E,,
+domain,AssetTypeCode,G,,
+domain,AssetOwner,Private,,
+domain,AssetStatus,In Service,,
+domain,AssetStatus,Disused,,
+domain,Size,100,,
+domain,Size,150,,
+open,Size,,,
+domain,QualityLevel,Quality Level A,,
+domain,QualityLevel,Quality Level B,,
+domain,QualityLevel,Quality Level C,,
+domain,QualityLevel,Quality Level D,,
+domain,LocateMethod,Electronic Detection,,
+domain,LocateMethod,Ground Penetrating Radar,,
+domain,LocateMethod,Potholing,,
+domain,LocateMethod,Archive Drawings and Plans,,

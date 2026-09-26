@@ -41,7 +41,8 @@ the variant index. The last two, and the text style, justification and paper
 height of a text and the kinds of a dimension, came with the annotation
 system on 2026-09-25 (`docs/annotation.md`): a label stores WHAT it labels and
 in which label style, never its text, and a leader is one entity from its
-arrow to its note. Using a variant rather
+arrow to its note - a smart one's note read off the entity its tip is on
+(`docs/annotation.md`, "Smart leaders"). Using a variant rather
 than an inheritance hierarchy keeps entities copyable values, makes exhaustive
 handling a compile-time property, and means the database owns its entities
 outright. **The order is load-bearing** - see "Adding a geometry kind" below.
@@ -143,6 +144,14 @@ are stable identifiers meant to become the vocabulary of the structured applicat
 API (Rule 2); the layer-tree and table commands are named in CamelCase
 (`CreateLinetype`), which is an inconsistency to settle before that API is
 written, not a second convention to follow.
+
+`COPY`, `ARRAY` and a `MIRROR` that keeps the original make each copy refer to
+the copy of what the original referred to, when that was copied in the same
+set: a leader's tip, a dimension's points, a label's target
+(`entity_commands.cpp`, `duplicateEach`; `docs/annotation.md`,
+"Associativity"). The copies' ids are known before they are added, since an
+add is given the next id in the order the change set lists them
+(`EntityDatabase::add`), and a redo puts each back under the id it had.
 
 ## Storage
 

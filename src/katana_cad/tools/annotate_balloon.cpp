@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "annotate_common.hpp"
-#include "katana/cad/annotation/leader_build.hpp"
+#include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/annotation.hpp"
@@ -49,7 +49,7 @@ class BalloonTool final : public InteractiveTool {
     {
         switch (asking_) {
         case Asking::Number:
-            return "Enter the balloon's number <" + number() + ">";
+            return "Enter the balloon's number <" + number().value_or(std::string("?")) + ">";
         case Asking::Style:
             return "Enter text style name <" +
                    style_.value_or(std::string(katana::entity::kDefaultTextStyleName)) + ">";
@@ -155,6 +155,10 @@ class BalloonTool final : public InteractiveTool {
         if (vertices_.size() < 2) {
             return ToolStep::rejected("a balloon needs a second point, where its circle sits");
         }
+        if (!number()) {
+            return ToolStep::rejected("the highest balloon is numbered as high as a number goes, so "
+                                      "has no next: type N and give one, or BALLOON RENUMBER first");
+        }
         const LeaderGeometry balloon = balloonThrough(vertices_);
         std::vector<katana::entity::Entity> entities;
         entities.push_back(newEntity(balloon, attributes_));
@@ -218,14 +222,18 @@ class BalloonTool final : public InteractiveTool {
         return ToolStep::next();
     }
 
-    // What Number was told, else the drawing's next.
-    [[nodiscard]] std::string number() const
+    // What Number was told, else the drawing's next by the verb's own rule;
+    // nullopt only when the drawing's highest balloon has no next.
+    [[nodiscard]] std::optional<std::string> number() const
     {
         if (number_) {
             return *number_;
         }
-        return document_ != nullptr ? katana::cad::annotation::nextBalloonNumber(document_->model())
-                                    : std::string("1");
+        if (document_ == nullptr) {
+            return std::string("1");
+        }
+        const auto next = katana::cad::annotation::nextBalloonNumber(document_->model());
+        return next ? std::optional<std::string>(std::to_string(*next)) : std::nullopt;
     }
 
     // The verb's balloon: a leader with the entity's default sizes, a circle
@@ -237,7 +245,7 @@ class BalloonTool final : public InteractiveTool {
         balloon.vertices = std::move(vertices);
         balloon.tipRef = tipRef_;
         balloon.callout = katana::entity::CalloutShape::Circle;
-        balloon.text = number();
+        balloon.text = number().value_or(std::string());
         balloon.style = style_.value_or(std::string());
         balloon.paperHeight = paper_.value_or(LeaderGeometry{}.paperHeight);
         return balloon;

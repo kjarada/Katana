@@ -53,6 +53,7 @@
 #include <QDialogButtonBox>
 #include <QFileInfo>
 #include <QDoubleSpinBox>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QCheckBox>
@@ -100,10 +101,17 @@
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/customisation_report.hpp"
+#include "katana/archive12d/domain.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
-#include "katana/archive12d/domain.hpp"
+#include "katana/commands/entity_commands.hpp"
+#include "katana/dxf/reader.hpp"
+#include "katana/entity/anchor.hpp"
+#include "katana/entity/entity_geometry.hpp"
+#include "katana/entity/leader_values.hpp"
+#include "katana/geometry/alignment.hpp"
 #include "katana/gis/gdal_adapter.hpp"
+#include "katana/ifc/export.hpp"
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/dataset_info.hpp"
 #include "katana/interop/export.hpp"
@@ -297,10 +305,25 @@ std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::
         }
         Rows operator()(const katana::entity::LeaderGeometry& g) const
         {
-            return {{"Tip", point(g.vertices.front())},
-                    {"Vertices", QString::number(g.vertices.size())},
-                    {"Text", QString::fromStdString(g.text)},
-                    {"Callout", QString::fromUtf8(katana::entity::toString(g.callout))}};
+            // The note as it is drawn: a smart leader's is read off the
+            // entity its tip is on (docs/annotation.md, "Smart leaders").
+            Rows rows = {{"Tip", point(g.vertices.front())},
+                         {"Vertices", QString::number(g.vertices.size())},
+                         {"Text", QString::fromStdString(katana::entity::leaderNote(
+                                      model, g, katana::cad::codePropertyCandidates()))}};
+            if (g.fields) {
+                rows.push_back({"Template", QString::fromStdString(g.text)});
+            }
+            if (!g.labelStyle.empty()) {
+                rows.push_back({"Label style", QString::fromStdString(g.labelStyle)});
+            }
+            if (g.tipRef.associated()) {
+                rows.push_back(
+                    {"On", QString::number(g.tipRef.entity) + " (" +
+                               QString::fromStdString(katana::entity::describe(g.tipRef)) + ")"});
+            }
+            rows.push_back({"Callout", QString::fromUtf8(katana::entity::toString(g.callout))});
+            return rows;
         }
     };
     return std::visit(Visitor{model}, geometry);
@@ -520,10 +543,10 @@ void MainWindow::buildActions()
                    QKeySequence::SaveAs, "fileSaveAs");
     QAction* importAction =
         makeAction(Icon::Import, "&Import...",
-                   "Import a drawing, an image or a point cloud (DXF, SHP, GeoTIFF, LAS ...)",
+                   "Import a drawing, an image or a point cloud (DXF, IFC, SHP, GeoTIFF, LAS ...)",
                    QKeySequence(Qt::CTRL | Qt::Key_I), "fileImport");
     QAction* exportAction = makeAction(Icon::Export, "Export &Vector...",
-                                       "Export the drawing (DXF, GeoPackage, GeoJSON, SHP ...)",
+                                       "Export the drawing (DXF, IFC, GeoPackage, GeoJSON, SHP ...)",
                                        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E),
                                        "fileExportVector");
     QAction* plotAction = makeAction(Icon::Plot, "&Plot to PDF...",
@@ -553,6 +576,21 @@ void MainWindow::buildActions()
     connect(importAction, &QAction::triggered, this, [this] { importFile(); });
     connect(exportAction, &QAction::triggered, this, [this] { exportVectorFile(); });
     connect(plotAction, &QAction::triggered, this, [this] { plotToPdf(); });
+    // IFC 4.3 both ways (docs/ifc.md), each a dialog of its own: what an IFC
+    // exchange chooses - which objects, a utility schedule and its schema,
+    // a project's classification rules - has no place in the generic ones.
+    QAction* importIfcAction =
+        makeAction(Icon::Import, "Import I&FC...",
+                   "Import an IFC file: alignments as PIs and PVIs, elements and annotations with "
+                   "their property sets, terrain as surfaces",
+                   QKeySequence(), "fileImportIfc");
+    QAction* exportIfcAction = makeAction(
+        Icon::Export, "&Export IFC...",
+        "Export IFC 4.3: alignments, the drawing by class and an AS 5488 utility investigation, "
+        "with a preview of the class each object becomes",
+        QKeySequence(), "fileExportIfc");
+    connect(importIfcAction, &QAction::triggered, this, [this] { showIfcImport(); });
+    connect(exportIfcAction, &QAction::triggered, this, [this] { showIfcExport(); });
     QAction* sheetsAction =
         makeAction(Icon::Plot, "S&heets...",
                    "Lay the drawing out on sheets with a title block, and plot them",
@@ -630,10 +668,11 @@ void MainWindow::buildActions()
     fileMenu->addSeparator();
     fileMenu->addActions({saveAction, saveAsAction});
     fileMenu->addSeparator();
-    fileMenu->addActions({importAction, exportAction, exportImageAction});
+    fileMenu->addActions(
+        {importAction, exportAction, importIfcAction, exportIfcAction, exportImageAction});
     fileMenu->addSeparator();
     fileMenu->addAction(runScriptAction);
-    recentScriptsMenu_ = fileMenu->addMenu("Rec&ent Scripts");
+    recentScriptsMenu_ = fileMenu->addMenu("Recen&t Scripts");
     recentScriptsMenu_->setObjectName("fileRecentScripts");
     refreshRecentScripts();
     fileMenu->addSeparator();
@@ -888,6 +927,9 @@ void MainWindow::buildActions()
     // Annotate > Edit Label... and Label Layout Report..., after the
     // catalogue's tools: the annotation workbench's, which Format made.
     annotation_->addLabelActions(*annotateMenu);
+    // The Leaders manager's entries under the Annotate tools, made by the
+    // annotation workbench buildFormatActions has just built.
+    annotation_->addLeaderActions(*annotateMenu);
 
     // ---- Survey ------------------------------------------------------------------------
     buildSurveyActions(*surveyMenu, customiseAction, replaceCustomisationAction, codeAction);
@@ -1993,6 +2035,11 @@ void MainWindow::refreshAll()
     if (crsButton_ != nullptr) {
         crsButton_->setText("CRS: " + projectCrsLabel(document_));
     }
+    // File > Export IFC, open beside the drawing: its counts and selection
+    // follow the drawing, as the panels do.
+    if (!ifcExport_.isNull() && ifcExport_->isVisible()) {
+        ifcExport_->refresh();
+    }
 }
 
 void MainWindow::refreshHistoryMenus()
@@ -2857,7 +2904,14 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
     // executor katana_cli and katana_mcp run (src/katana_app/geo), which the
     // geo workbench runs as jobs (runWorkbenchLine). INFO <id> is left to the
     // interpreter by the executor itself (geo::takesInfo).
-
+    //
+    // A .ifc takes the verbs' options exactly as katana_cli reads them
+    // (ifc/front_end.hpp), so its line is split by that grammar before the
+    // generic one takes the rest as a path; IFC RULES is IFC's alone.
+    if ((verb == "IMPORT" || verb == "EXPORT" || verb == "INFO" || verb == "IFC") &&
+        runIfcLine(verb, line.mid(words.front().size())).has_value()) {
+        return;
+    }
     // PLOTSHEETS [path] [format=] [style=] [sheets=] [dpi=] [lineweight=]
     // [folder=] [pattern=]: the sheets plotted as the Plot dialog and
     // --plot-sheets plot them, the set's page setup filling in what is not
@@ -3355,16 +3409,28 @@ QString importFilter()
     const QString cloud = patternsFor(interop::pointCloudExtensions());
     const QString archive = patternsFor(interop::archive12dExtensions());
     const QString zipped = patternsFor(interop::archiveExtensions());
-    return "All supported (" + vector + ' ' + archive + ' ' + raster + ' ' + cloud + ' ' + zipped +
-           ");;" + "Vector (" + vector + ");;" + "12d Archive (" + archive + ");;" + "Raster (" +
-           raster + ");;" + "Point cloud (" + cloud + ");;" + "Zipped GIS data (" + zipped +
-           ");;" + "All files (*)";
+    return "All supported (" + vector + " *.ifc " + archive + ' ' + raster + ' ' + cloud + ' ' +
+           zipped + ");;" + "Vector (" + vector + ");;" + "IFC (*.ifc);;" + "12d Archive (" +
+           archive + ");;" + "Raster (" + raster + ");;" + "Point cloud (" + cloud + ");;" +
+           "Zipped GIS data (" + zipped + ");;" + "All files (*)";
 }
 
 } // namespace
 
 void MainWindow::importPath(const QString& path, const cad::ImportPlacement& placement)
 {
+    const std::filesystem::path file = toPath(path);
+    if (katana::ifc::isIfcPath(file)) {
+        // As the line it is: echoed, and answered as a typed one is.
+        katana::ifc::ImportArguments arguments;
+        arguments.path = path.toStdString();
+        if (const auto line = katana::ifc::formatImportLine(arguments)) {
+            (void)runIfcCommand(QString::fromStdString(*line), IfcLineFrom::Menu);
+        } else {
+            logMessage(QString::fromStdString(line.error().describe()), true);
+        }
+        return;
+    }
     // The line a person would type, through the one executor: what it read
     // and where it put it are logged as records, and it is one undo step.
     (void)runVerbLine(importLine(QDir::fromNativeSeparators(path), placement));
@@ -3693,6 +3759,16 @@ void MainWindow::importFile()
     // else keeps the quick path, the GIS menu's imports being the considered
     // one (docs/interop.md, "Placing an import").
     const std::filesystem::path path = toPath(selected);
+    if (katana::ifc::isIfcPath(path)) {
+        katana::ifc::ImportArguments arguments;
+        arguments.path = selected.toStdString();
+        if (const auto line = katana::ifc::formatImportLine(arguments)) {
+            (void)runIfcCommand(QString::fromStdString(*line), IfcLineFrom::Menu);
+        } else {
+            logMessage(QString::fromStdString(line.error().describe()), true);
+        }
+        return;
+    }
     const interop::SourceKind kind = interop::kindForPath(path);
     if (katana::dxf::isDxfPath(path) || kind == interop::SourceKind::Archive12d) {
         importWithPlacement(selected);
@@ -3734,7 +3810,7 @@ void MainWindow::exportVectorFile()
         filters << (QString::fromStdString(format.description) + " (*." +
                     QString::fromStdString(format.extension) + ")");
     }
-    filters << "12d Archive (*.12da)" << "12d Archive, zipped (*.12daz)";
+    filters << "12d Archive (*.12da)" << "12d Archive, zipped (*.12daz)" << "IFC 4.3 (*.ifc)";
     QString chosenFilter;
     QString selected = QFileDialog::getSaveFileName(this, "Export", QString(),
                                                     filters.join(";;"), &chosenFilter);
@@ -3746,6 +3822,12 @@ void MainWindow::exportVectorFile()
     if (const qsizetype pattern = chosenFilter.lastIndexOf("(*.");
         pattern >= 0 && chosenFilter.endsWith(')') && QFileInfo(selected).suffix().isEmpty()) {
         selected += '.' + chosenFilter.mid(pattern + 3).chopped(1);
+    }
+    // IFC has choices of its own - a utility schedule, rules, which objects
+    // go - so its dialog takes the file from here.
+    if (katana::ifc::isIfcPath(toPath(selected))) {
+        showIfcExport(selected);
+        return;
     }
     (void)showExportOptions(selected);
 }
@@ -4095,6 +4177,20 @@ bool MainWindow::awaitJob(const VerbOutcome& started, std::function<void(const V
 
 std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
 {
+    if (katana::ifc::isIfcPath(toPath(path))) {
+        // Described first, as the GIS files are: a file that cannot be read
+        // has no dialog, and says why.
+        auto described = describeIfcFile(toPath(path));
+        if (!described) {
+            logMessage(QString::fromStdString(described.error().describe()), true);
+            warnUser("Import", QString::fromStdString(described.error().describe()));
+            return nullptr;
+        }
+        auto dialog = std::make_unique<IfcImportDialog>(ifcImportContext(), this);
+        dialog->setFile(path);
+        dialog->setSummary(*described);
+        return dialog;
+    }
     // A DXF or a .12da has one option, where it lands; GDAL is not asked.
     const std::filesystem::path file = toPath(path);
     if (katana::dxf::isDxfPath(file) ||
@@ -4146,6 +4242,10 @@ void MainWindow::importWithOptions(const QString& path)
     if (katana::dxf::isDxfPath(file) ||
         interop::kindForPath(file) == interop::SourceKind::Archive12d) {
         importWithPlacement(path);
+        return;
+    }
+    if (katana::ifc::isIfcPath(toPath(path))) {
+        showIfcImport(path); // IFC's own options, non-modally
         return;
     }
     auto dialog = makeImportOptions(path);

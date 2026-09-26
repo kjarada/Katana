@@ -85,6 +85,12 @@ Status validateResultingEntity(const Model& model, const Entity& entity)
         return makeError(ErrorCode::NotFound, "label style does not exist",
                          "label style=" + label->style + " " + idContext(entity.id));
     }
+    if (const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
+        leader != nullptr && !leader->labelStyle.empty() &&
+        !model.labelStyles.contains(leader->labelStyle)) {
+        return makeError(ErrorCode::NotFound, "label style does not exist",
+                         "label style=" + leader->labelStyle + " " + idContext(entity.id));
+    }
     for (const auto& [key, value] : entity.properties) {
         if (auto status = model.properties.validate(key, value); !status) {
             return status;

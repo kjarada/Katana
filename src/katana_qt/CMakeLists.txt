@@ -10,6 +10,12 @@ if(NOT TARGET katana_interop)
         "The Katana desktop application requires katana_interop; configure with -DKATANA_BUILD_IO=ON "
         "or turn the Qt app off with -DKATANA_BUILD_QT_APP=OFF")
 endif()
+# File > Import IFC and Export IFC are the application's too (docs/ifc.md).
+if(NOT TARGET katana_ifc)
+    message(FATAL_ERROR
+        "The Katana desktop application requires katana_ifc; leave it in KATANA_MODULE_FILTER "
+        "or turn the Qt app off with -DKATANA_BUILD_QT_APP=OFF")
+endif()
 
 # The target is `katana` and the file is katana.exe: this IS the product, and
 # "katana_qt_app" was a name for the people building it. The directory keeps
@@ -28,6 +34,9 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     command_runner.hpp
     main_window.cpp
     main_window.hpp
+    main_window_ifc.cpp
+    ifc_dialogs.cpp
+    ifc_dialogs.hpp
     viewport_widget.cpp
     plan_painter.cpp
     plan_painter.hpp
@@ -154,7 +163,8 @@ endif()
 # katana_app: the session's verbs above katana_cad that the window runs too -
 # the geoprocessing executor above all (src/katana_app/geo), so the window
 # never has a second implementation of a verb katana_cli has.
-target_link_libraries(katana PRIVATE katana_cad katana_interop katana_dxf katana_render katana_app
+target_link_libraries(katana PRIVATE katana_cad katana_interop katana_dxf katana_ifc katana_render
+                                     katana_app
                                      Qt6::Widgets Qt6::PrintSupport)
 
 # The developer tool that renders the icons to files - see make_icons.cpp for

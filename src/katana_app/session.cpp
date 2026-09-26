@@ -28,6 +28,7 @@
 #include "katana/core/text.hpp"
 #include "katana/entity/tables.hpp"
 #include "dxf_verbs.hpp"
+#include "ifc_verbs.hpp"
 #include "import_records.hpp"
 #include "session.hpp"
 
@@ -390,6 +391,20 @@ bool runLine(SessionState& session, const std::string& line)
         return runCustomise(session.document, session.customisation,
                             session.customisationMissingAtOpen, paths, replace);
     }
+    // A .ifc is read, written and described natively, with or without GDAL
+    // (ifc_verbs.hpp). The rest of the line goes as it is, not through
+    // argumentOf: the IFC grammar reads its own quotes, and a line may quote
+    // more than one path.
+    if (const std::string verb = upperVerb(line);
+        verb == "IMPORT" || verb == "EXPORT" || verb == "INFO" || verb == "IFC") {
+        const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
+        if (const std::optional<bool> handled = katana::app::runIfcVerb(
+                session.document, verb,
+                space == std::string::npos ? std::string_view{}
+                                           : std::string_view(line).substr(space))) {
+            return *handled;
+        }
+    }
 #if defined(KATANA_WITH_INTEROP)
     // IMPORT, EXPORT, INFO <file>, REFS, COPC, GDAL and the families after
     // them run through the one executor the window runs them through, inline:
@@ -565,6 +580,7 @@ std::string Session::helpText()
             "Customise CUSTOMISE [REPLACE] <file> [<file>...]  load style\n"
             "          libraries (.4d) and survey code files (.mapfile), merged\n"
             "          into what is loaded; CUSTOMISE alone reports what is loaded\n";
+    text += katana::app::ifcHelpText();
 #if defined(KATANA_WITH_INTEROP)
     // IMPORT, EXPORT, INFO <file>, REFS and COPC are the executor's, so its
     // table says them, as it does in the window's HELP.

@@ -71,12 +71,15 @@ undo step; they are `docs/geoprocessing.md`'s "V1" onwards.
 | 12d Archive | .12da and .12daz in and out — every element of the format; see below |
 | Where | a file, a folder GDAL reads (a `.gdb`), a `/vsi` path, a URL, a `.zip`, `.tar`, `.tgz` or `.gz` by what is inside it |
 
-Not supported: **DWG, IFC**, and **ECW and E57**. The MSYS2 toolchain has no
-ECW SDK, so GDAL has no ECW reader and `.ecw` is not offered at all now that
-the extensions come from GDAL's registry (it was offered until 2026-09-26);
-PDAL has no E57 plugin here, so a `.e57` fails to open with PDAL's own error.
-LandXML SURVEY data - points and observations - is read by the survey data
-exchange (`docs/survey.md`), not here.
+IFC is not here: `katana_ifc` reads and writes it natively, with no GDAL
+(`docs/ifc.md`), and every front end routes a `.ifc` to it before any of
+these. Not supported: **DWG** where GDAL has no CAD driver, and **ECW and
+E57**. The MSYS2 toolchain has no ECW SDK, so GDAL has no ECW reader and
+`.ecw` is not offered at all now that the extensions come from GDAL's
+registry (it was offered until 2026-09-26); PDAL has no E57 plugin here, so
+a `.e57` fails to open with PDAL's own error. LandXML SURVEY data - points
+and observations - is read by the survey data exchange (`docs/survey.md`),
+not here.
 
 ## Two kinds of imported data
 

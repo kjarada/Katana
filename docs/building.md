@@ -153,7 +153,7 @@ Every `KATANA_*` cache variable, with its default:
 | `KATANA_BUILD_TESTS` | `ON` | the test suites, the headless checks and the `layering` and `docs` tests |
 | `KATANA_BUILD_BENCHMARKS` | `ON` | `katana_benchmarks` and `run-benchmarks` |
 | `KATANA_BUILD_QT_APP` | `ON` | the desktop application `katana` and `katana_qt_widget_tests` |
-| `KATANA_BUILD_IO` | `ON` | `katana_io` and `katana_interop`, the GDAL and PDAL modules; OFF also needs `KATANA_BUILD_QT_APP=OFF`, since the application links interop, and gives a `katana_cli` without IMPORT and EXPORT |
+| `KATANA_BUILD_IO` | `ON` | `katana_io` and `katana_interop`, the GDAL and PDAL modules; OFF also needs `KATANA_BUILD_QT_APP=OFF`, since the application links interop, and gives a `katana_cli` whose IMPORT and EXPORT take only the native formats, .dxf and .ifc |
 | `KATANA_WARNINGS_AS_ERRORS` | `ON` | `-Werror` |
 | `KATANA_ENABLE_SANITIZERS` | `OFF` | ASan and UBSan where the toolchain has them; on MinGW, which ships no libsanitizer, UBSan in trap mode, so undefined behaviour aborts the test that caused it |
 | `KATANA_ENABLE_CLANG_TIDY` | `OFF` | clang-tidy during compilation |
@@ -267,6 +267,7 @@ may not see GDAL, PDAL or the archive readers:
 | `GDAL VERSION`, `LIST`, `HELP`, and `GDAL <algorithm> ... [FROM ...] [TO ...]`: any of GDAL's algorithms, run by the one geoprocessing executor (`docs/geoprocessing.md`) | yes (with `KATANA_BUILD_IO`) | yes, as a background job |
 | `CUSTOMISE [REPLACE] <file>...`; `CUSTOMISE` alone reports what is loaded and from which files | yes | yes (the report since 2026-09-26) |
 | `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`, `MAPFILE CHECK` (the interpreter's since 2026-09-26; `docs/survey_coding.md`) | yes | yes |
+| `IMPORT <file.ifc>`, `EXPORT <file.ifc>`, `INFO <file.ifc>`, `IFC RULES` (`docs/ifc.md`) | yes, with or without `KATANA_BUILD_IO` | yes, with the same options, and File > Import IFC / Export IFC, which run these lines |
 | `UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW` (the interpreter's since 2026-09-25; `docs/subsurface_utilities.md`) | yes | yes |
 | `ZOOM`, `GRID`, `SNAP`, `QUIT` | `QUIT` only | yes |
 | a catalogue tool's alias alone (`L`, `TRIM`, `STRETCH`) | no: "unknown command" where the interpreter has no verb of that name | starts the tool (`docs/tools.md`) |
