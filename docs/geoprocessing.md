@@ -622,8 +622,11 @@ steps with no name use the bound input and the run's output.
 
 One record per line: a word saying what it is, then `key=value` fields in a
 fixed order. A value holding a blank, a quote or an `=` is quoted
-(`cad::recordValue`); an empty one is bare (`aliases=`). Errors go to
-stderr as `error: <Code>: <message>`.
+(`cad::recordValue`); an empty one is bare (`aliases=`). A measure to the
+millimetre (`geo::fixed3`) that rounds to nothing has no sign: a surface of
+a raster less its own surface said `zmin=-0.000`
+(`GisRecords.AValueThatRoundsToZeroHasNoSign`). Errors go to stderr as
+`error: <Code>: <message>`.
 
 ```
 gdal algorithm="vector buffer" policy=safe seconds=0.003 cancelled=no

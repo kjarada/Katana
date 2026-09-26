@@ -613,6 +613,17 @@ TEST(GisRecords, AKindIsEveryWordBeforeTheFirstKeyAndANumberListIsAnArray)
     EXPECT_EQ(records[3].kind, "3 entities");
 }
 
+// A value that rounds to nothing at three decimals prints without a sign:
+// RASTER DIFFERENCE of a raster and its own surface gave zmin=-0.000.
+TEST(GisRecords, AValueThatRoundsToZeroHasNoSign)
+{
+    EXPECT_EQ(geo::fixed3(-0.0), "0.000");
+    EXPECT_EQ(geo::fixed3(-1e-7), "0.000");
+    EXPECT_EQ(geo::fixed3(-0.0004), "0.000");
+    EXPECT_EQ(geo::fixed3(-0.0006), "-0.001");
+    EXPECT_EQ(geo::fixed3(1.25), "1.250");
+}
+
 // ---- through a Session, as katana_cli and katana_mcp run it ----------------------------------
 
 // std::cout and std::cerr swapped for strings while it lives.
