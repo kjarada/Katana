@@ -150,7 +150,9 @@ jobs:
           "$root/bin/katana_cli.exe" -c "INFO samples/gis/terrain.asc" | tee smoke/info.txt
           grep -q "EPSG:32630" smoke/info.txt
           "$root/bin/katana_cli.exe" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
-          QT_QPA_PLATFORM=offscreen timeout 300 "$root/bin/katana.exe" smoke/project --screenshot smoke/window.png
+          # /usr/bin's timeout, by path: with PATH cut to the Windows
+          # directories, `timeout` is Windows' own TIMEOUT.EXE, a pause.
+          QT_QPA_PLATFORM=offscreen /usr/bin/timeout 300 "$root/bin/katana.exe" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
       - uses: actions/upload-artifact@v4
         if: always()
