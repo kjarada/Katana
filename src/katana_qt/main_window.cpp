@@ -14,6 +14,7 @@
 #include "customisation/drawing_summary_dialog.hpp"
 #include "format.hpp"
 #include "dataset_info_dialog.hpp"
+#include "geo/references.hpp"
 #include "geo/replies.hpp"
 #include "gis_export_dialog.hpp"
 #include "gis_import_dialogs.hpp"
@@ -1699,6 +1700,13 @@ void MainWindow::buildDocks()
 
 void MainWindow::buildReferenceDock()
 {
+    // The Reference Data panel builds REFS lines and runs them through the
+    // window's one executor (docs/interop.md, "Reference layers"), as a
+    // person or an agent would type them: each is logged, and does what
+    // katana_cli's does. Object names: referenceList, referenceShow,
+    // referenceHide, referenceRemove, referenceInfo, referenceOverviews,
+    // referenceOpacity, referenceColour; ReferenceImportButton and
+    // ReferenceZoomButton.
     auto* dock = new QDockWidget("Reference Data", this);
     dock->setObjectName("ReferenceDataDock");
     referenceDock_ = dock;
@@ -1711,13 +1719,25 @@ void MainWindow::buildReferenceDock()
                   "Import a drawing, an image or a point cloud, as File > Import does.");
     auto* zoomButton = panelTool(panel, Icon::ZoomTo, "ReferenceZoomButton", "Zoom To",
                                  "Frame the selected reference layer in every plan view.");
-    auto* infoButton = panelTool(panel, Icon::DatasetInfo, "ReferenceInfoButton", "Information",
-                                 "What the selected layer's file holds, as GDAL or PDAL reads it.");
-    auto* removeButton = panelTool(panel, Icon::Erase, "ReferenceRemoveButton", "Remove",
-                                   "Remove the selected reference layer. The file is not touched.");
-    layout->addLayout(toolRow({importButton, zoomButton, infoButton, removeButton}));
+    auto* showButton = panelTool(panel, Icon::Layers, "referenceShow", "Show",
+                                 "Show the selected reference layer (REFS SHOW).");
+    auto* hideButton = panelTool(panel, Icon::ViewLayersFiltered, "referenceHide", "Hide",
+                                 "Hide the selected reference layer (REFS HIDE).");
+    auto* infoButton = panelTool(panel, Icon::DatasetInfo, "referenceInfo", "Information",
+                                 "The selected layer's source and display (REFS INFO), and what its "
+                                 "file holds, as GDAL or PDAL reads it.");
+    auto* overviewsButton = panelTool(
+        panel, Icon::Processing, "referenceOverviews", "Build Overviews",
+        "Build overviews for the selected raster, written beside its file as .ovr (REFS "
+        "OVERVIEWS ... CONFIRM), so it is read quickly at every scale.");
+    auto* removeButton = panelTool(panel, Icon::Erase, "referenceRemove", "Remove",
+                                   "Remove the selected reference layer (REFS REMOVE). The file "
+                                   "is not touched.");
+    layout->addLayout(toolRow({importButton, zoomButton, showButton, hideButton, infoButton,
+                               overviewsButton, removeButton}));
 
-    referenceTable_ = new QTableWidget(0, 4, panel);
+    referenceTable_ = new QTableWidget(0, kRefColumns, panel);
+    referenceTable_->setObjectName("referenceList");
     referenceTable_->setHorizontalHeaderLabels({"Name", "Type", "Detail", "Display"});
     referenceTable_->horizontalHeader()->setStretchLastSection(true);
     referenceTable_->verticalHeader()->setVisible(false);
@@ -1725,37 +1745,99 @@ void MainWindow::buildReferenceDock()
     referenceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     layout->addWidget(referenceTable_);
 
+    // How the selected layer is drawn: a raster's opacity, a cloud's colour.
+    auto* display = new QHBoxLayout();
+    referenceOpacity_ = new QComboBox(panel);
+    referenceOpacity_->setObjectName("referenceOpacity");
+    referenceOpacity_->addItems({"100%", "75%", "50%", "25%"});
+    referenceOpacity_->setToolTip("How much of the selected raster shows (REFS OPACITY)");
+    referenceColour_ = new QComboBox(panel);
+    referenceColour_->setObjectName("referenceColour");
+    using Mode = katana::interop::PointColorMode;
+    for (const Mode mode : {Mode::Elevation, Mode::Intensity, Mode::Classification,
+                            Mode::SourceColor, Mode::Flat}) {
+        referenceColour_->addItem(katana::interop::toString(mode),
+                                  QString::fromLatin1(katana::interop::toWord(mode)));
+    }
+    referenceColour_->setToolTip("How the selected point cloud is coloured (REFS COLOR)");
+    display->addWidget(new QLabel("Opacity", panel));
+    display->addWidget(referenceOpacity_);
+    display->addWidget(new QLabel("Colour", panel));
+    display->addWidget(referenceColour_, 1);
+    layout->addLayout(display);
+
     dock->setWidget(panel);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
 
     connect(importButton, &QToolButton::clicked, this, [this] { importFile(); });
     connect(zoomButton, &QToolButton::clicked, this, [this] { zoomToSelectedReference(); });
+    connect(showButton, &QToolButton::clicked, this, [this] { runReferenceLine("SHOW"); });
+    connect(hideButton, &QToolButton::clicked, this, [this] { runReferenceLine("HIDE"); });
     connect(removeButton, &QToolButton::clicked, this, [this] { removeSelectedReference(); });
-    // What the selected layer's SOURCE holds - which, for a cloud, is the
-    // whole file and not the sample the panel shows.
+    // The layer's own facts, then what its SOURCE holds - which, for a
+    // cloud, is the whole file and not the sample the panel shows.
     connect(infoButton, &QToolButton::clicked, this, [this] {
-        const int row = referenceTable_->currentRow();
-        const QTableWidgetItem* item = row < 0 ? nullptr : referenceTable_->item(row, kRefName);
-        if (item == nullptr) {
+        const std::optional<katana::interop::ReferenceId> id = selectedReference();
+        if (!id) {
             logMessage("Select a reference layer first.", true);
             return;
         }
-        const auto id =
-            static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
         std::filesystem::path source;
-        if (const auto* raster = reference_.findRaster(id)) {
+        if (const auto* raster = reference_.findRaster(*id)) {
             source = raster->source;
-        } else if (const auto* cloud = reference_.findPointCloud(id)) {
+        } else if (const auto* cloud = reference_.findPointCloud(*id)) {
             source = cloud->source;
+        }
+        if (!runReferenceLine("INFO").ok) {
+            return;
         }
         if (auto dialog = makeDatasetInfo(fromPath(source))) {
             dialog->exec();
         }
     });
+    connect(overviewsButton, &QToolButton::clicked, this, [this] {
+        const std::optional<katana::interop::ReferenceId> id = selectedReference();
+        const auto* raster = id ? reference_.findRaster(*id) : nullptr;
+        if (raster == nullptr) {
+            logMessage("Select a raster first: overviews are a raster's.", true);
+            return;
+        }
+        // Writing beside a person's file is asked for: CONFIRM is the
+        // answer. A headless run has nobody to ask, so its line goes without
+        // it, and the verb says what it would write.
+        std::filesystem::path ovr = raster->source;
+        ovr += ".ovr";
+        const bool confirmed =
+            !headless_ && QMessageBox::question(this, "Build Overviews",
+                                                "Write the overviews of '" +
+                                                    QString::fromStdString(raster->name) +
+                                                    "' beside its file, as\n" + fromPath(ovr) +
+                                                    "?") == QMessageBox::Yes;
+        if (!headless_ && !confirmed) {
+            return;
+        }
+        (void)runReferenceLine("OVERVIEWS", confirmed ? QStringLiteral("CONFIRM") : QString());
+    });
+    connect(referenceOpacity_, &QComboBox::currentIndexChanged, this, [this](int chosen) {
+        if (refreshingReferences_) {
+            return;
+        }
+        static constexpr const char* kValues[] = {"1", "0.75", "0.5", "0.25"};
+        (void)runReferenceLine("OPACITY", QString::fromLatin1(kValues[std::clamp(chosen, 0, 3)]));
+    });
+    connect(referenceColour_, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (refreshingReferences_) {
+            return;
+        }
+        (void)runReferenceLine("COLOR", referenceColour_->currentData().toString());
+    });
     connect(referenceTable_, &QTableWidget::cellChanged, this,
             [this](int row, int column) { onReferenceCellChanged(row, column); });
     connect(referenceTable_, &QTableWidget::cellDoubleClicked, this,
             [this](int, int) { zoomToSelectedReference(); });
+    connect(referenceTable_, &QTableWidget::itemSelectionChanged, this,
+            [this] { showSelectedReferenceDisplay(); });
+    showSelectedReferenceDisplay();
 }
 
 void MainWindow::buildStatusBar()
@@ -2382,6 +2464,7 @@ void MainWindow::openProject(const QString& directory)
     logMessage("Opened " + directory + " (" +
                QString::number(document_.model().entities.size()) + " entities).");
     reportMissingCustomisation();
+    restoreReferences();
 }
 
 bool MainWindow::saveDocument()
@@ -2390,6 +2473,7 @@ bool MainWindow::saveDocument()
         return saveDocumentAs();
     }
     recordCustomisation();
+    recordReferences();
     const auto status = document_.save();
     if (!status) {
         warnUser("Save Failed", QString::fromStdString(status.error().describe()));
@@ -2413,6 +2497,7 @@ bool MainWindow::saveDocumentAs()
         target += ".katana";
     }
     recordCustomisation();
+    recordReferences();
     const auto status = document_.saveAs(toPath(target));
     if (!status) {
         warnUser("Save Failed", QString::fromStdString(status.error().describe()));
@@ -2871,6 +2956,7 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
     if (verb == "SAVE" &&
         katana::cad::typedSaveHasDestination(line.toStdString(), document_.hasProject())) {
         recordCustomisation();
+        recordReferences();
     }
     const auto reply = interpreter_.run(line.toStdString());
     if (!reply) {
@@ -2887,6 +2973,7 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
     }
     if (verb == "OPEN") {
         reportMissingCustomisation();
+        restoreReferences();
     }
     historyCursor_ = static_cast<int>(interpreter_.history().size());
 }
@@ -3871,28 +3958,29 @@ void MainWindow::refreshReferences()
     if (referenceTable_ == nullptr) {
         return;
     }
+    // Kept across the rebuild, so a line run on the selected layer leaves it
+    // selected for the next.
+    const std::optional<katana::interop::ReferenceId> kept = selectedReference();
     refreshingReferences_ = true;
     referenceTable_->setRowCount(0);
 
     const auto addRow = [this](katana::interop::ReferenceId id, const QString& name, bool visible,
-                               const QString& type, const QString& detail) {
+                               const QString& type, const QString& detail, const QString& shown) {
         const int row = referenceTable_->rowCount();
         referenceTable_->insertRow(row);
 
         auto* nameItem = new QTableWidgetItem(name);
-        nameItem->setFlags(nameItem->flags() | Qt::ItemIsUserCheckable);
+        nameItem->setFlags((nameItem->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
         nameItem->setCheckState(visible ? Qt::Checked : Qt::Unchecked);
         nameItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(id));
         referenceTable_->setItem(row, kRefName, nameItem);
 
-        auto* typeItem = new QTableWidgetItem(type);
-        typeItem->setFlags(typeItem->flags() & ~Qt::ItemIsEditable);
-        referenceTable_->setItem(row, kRefType, typeItem);
-
-        auto* detailItem = new QTableWidgetItem(detail);
-        detailItem->setFlags(detailItem->flags() & ~Qt::ItemIsEditable);
-        referenceTable_->setItem(row, kRefDetail, detailItem);
-        return row;
+        for (const auto& [column, text] : {std::pair(kRefType, type), std::pair(kRefDetail, detail),
+                                           std::pair(kRefDisplay, shown)}) {
+            auto* item = new QTableWidgetItem(text);
+            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            referenceTable_->setItem(row, column, item);
+        }
     };
 
     for (const katana::interop::RasterOverlay& raster : reference_.rasters()) {
@@ -3901,54 +3989,88 @@ void MainWindow::refreshReferences()
         if (!raster.hasGeotransform) {
             detail += "  (not georeferenced)";
         }
-        const int row = addRow(raster.id, QString::fromStdString(raster.name), raster.visible,
-                               "Raster", detail);
-
-        auto* opacity = new QComboBox(referenceTable_);
-        opacity->addItems({"100%", "75%", "50%", "25%"});
-        const int index = raster.opacity > 0.875   ? 0
-                          : raster.opacity > 0.625 ? 1
-                          : raster.opacity > 0.375 ? 2
-                                                   : 3;
-        opacity->setCurrentIndex(index);
-        const katana::interop::ReferenceId id = raster.id;
-        connect(opacity, &QComboBox::currentIndexChanged, this, [this, id](int chosen) {
-            if (auto* target = reference_.findRaster(id)) {
-                static constexpr double kValues[] = {1.0, 0.75, 0.5, 0.25};
-                target->opacity = kValues[std::clamp(chosen, 0, 3)];
-                views_->repaintViews();
-            }
-        });
-        referenceTable_->setCellWidget(row, kRefDisplay, opacity);
+        addRow(raster.id, QString::fromStdString(raster.name), raster.visible, "Raster", detail,
+               QString::number(qRound(raster.opacity * 100.0)) + "%");
     }
-
     for (const katana::interop::PointCloudLayer& cloud : reference_.pointClouds()) {
         QString detail = grouped(cloud.points.size()) + " pts";
         if (cloud.isDecimated()) {
             detail += " of " + grouped(cloud.sourcePointCount);
         }
-        const int row = addRow(cloud.id, QString::fromStdString(cloud.name), cloud.visible,
-                               "Point cloud", detail);
-
-        auto* mode = new QComboBox(referenceTable_);
-        using Mode = katana::interop::PointColorMode;
-        for (const Mode value : {Mode::Elevation, Mode::Intensity, Mode::Classification,
-                                 Mode::SourceColor, Mode::Flat}) {
-            mode->addItem(katana::interop::toString(value), static_cast<int>(value));
+        addRow(cloud.id, QString::fromStdString(cloud.name), cloud.visible, "Point cloud", detail,
+               katana::interop::toString(cloud.colorMode));
+    }
+    for (int row = 0; kept && row < referenceTable_->rowCount(); ++row) {
+        if (referenceTable_->item(row, kRefName)->data(Qt::UserRole).toULongLong() == *kept) {
+            referenceTable_->selectRow(row);
         }
-        mode->setCurrentIndex(static_cast<int>(cloud.colorMode));
-        const katana::interop::ReferenceId id = cloud.id;
-        connect(mode, &QComboBox::currentIndexChanged, this, [this, id](int chosen) {
-            if (auto* target = reference_.findPointCloud(id)) {
-                target->colorMode = static_cast<katana::interop::PointColorMode>(chosen);
-                views_->invalidateReferenceCache();
-            }
-        });
-        referenceTable_->setCellWidget(row, kRefDisplay, mode);
     }
 
     referenceTable_->resizeColumnsToContents();
     refreshingReferences_ = false;
+    showSelectedReferenceDisplay();
+}
+
+std::optional<katana::interop::ReferenceId> MainWindow::selectedReference() const
+{
+    const int row = referenceTable_ != nullptr ? referenceTable_->currentRow() : -1;
+    const QTableWidgetItem* item = row < 0 ? nullptr : referenceTable_->item(row, kRefName);
+    if (item == nullptr) {
+        return std::nullopt;
+    }
+    return static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
+}
+
+void MainWindow::showSelectedReferenceDisplay()
+{
+    if (referenceOpacity_ == nullptr || referenceColour_ == nullptr) {
+        return;
+    }
+    // Set from the layer, not a choice: no line is run for it.
+    const bool wasRefreshing = std::exchange(refreshingReferences_, true);
+    const std::optional<katana::interop::ReferenceId> id = selectedReference();
+    const auto* raster = id ? reference_.findRaster(*id) : nullptr;
+    const auto* cloud = id ? reference_.findPointCloud(*id) : nullptr;
+    referenceOpacity_->setEnabled(raster != nullptr);
+    referenceColour_->setEnabled(cloud != nullptr);
+    if (raster != nullptr) {
+        referenceOpacity_->setCurrentIndex(raster->opacity > 0.875   ? 0
+                                           : raster->opacity > 0.625 ? 1
+                                           : raster->opacity > 0.375 ? 2
+                                                                     : 3);
+    }
+    if (cloud != nullptr) {
+        referenceColour_->setCurrentIndex(
+            referenceColour_->findData(QString::fromLatin1(katana::interop::toWord(cloud->colorMode))));
+    }
+    refreshingReferences_ = wasRefreshing;
+}
+
+VerbOutcome MainWindow::runReferenceLine(const QString& action, const QString& words)
+{
+    const std::optional<katana::interop::ReferenceId> id = selectedReference();
+    if (!id) {
+        logMessage("Select a reference layer first.", true);
+        return {false, {}, "no reference layer is selected"};
+    }
+    return runVerbLine("REFS " + action + " " + QString::number(*id) +
+                       (words.isEmpty() ? QString() : " " + words));
+}
+
+void MainWindow::recordReferences()
+{
+    if (geo_ != nullptr) {
+        katana::app::geo::recordReferences(geo_->context());
+    }
+}
+
+void MainWindow::restoreReferences()
+{
+    // The layers the project records, read again through the one executor
+    // (REFS RESTORE), so what was restored, and what was missing, is logged.
+    if (geo_ != nullptr && katana::app::geo::recordsReferences(geo_->context())) {
+        (void)runVerbLine(QStringLiteral("REFS RESTORE"));
+    }
 }
 
 void MainWindow::onReferenceCellChanged(int row, int column)
@@ -3961,31 +4083,18 @@ void MainWindow::onReferenceCellChanged(int row, int column)
         return;
     }
     const auto id = static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
-    const bool visible = item->checkState() == Qt::Checked;
-    if (auto* raster = reference_.findRaster(id)) {
-        raster->visible = visible;
-    } else if (auto* cloud = reference_.findPointCloud(id)) {
-        cloud->visible = visible;
-    }
-    views_->repaintViews();
+    const QString line = QString("REFS %1 %2")
+                             .arg(item->checkState() == Qt::Checked ? "SHOW" : "HIDE")
+                             .arg(id);
+    // Run once the table has finished with the click: the line's reply
+    // rebuilds the table, and with it the item this signal came from.
+    QMetaObject::invokeMethod(this, [this, line] { (void)runVerbLine(line); },
+                              Qt::QueuedConnection);
 }
 
 void MainWindow::removeSelectedReference()
 {
-    const int row = referenceTable_ != nullptr ? referenceTable_->currentRow() : -1;
-    if (row < 0) {
-        return;
-    }
-    const QTableWidgetItem* item = referenceTable_->item(row, kRefName);
-    if (item == nullptr) {
-        return;
-    }
-    const auto id = static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
-    if (reference_.remove(id)) {
-        logMessage("Removed reference layer " + item->text());
-        views_->invalidateReferenceCache();
-        refreshReferences();
-    }
+    (void)runReferenceLine("REMOVE");
 }
 
 void MainWindow::zoomToSelectedReference()

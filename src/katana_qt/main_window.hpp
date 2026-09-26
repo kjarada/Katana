@@ -439,6 +439,18 @@ class MainWindow final : public QMainWindow {
     void removeSelectedReference();
     void zoomToSelectedReference();
     void onReferenceCellChanged(int row, int column);
+    // The Reference Data panel's: the layer selected in it, and its opacity
+    // or colouring shown in the panel's controls without running a line.
+    [[nodiscard]] std::optional<katana::interop::ReferenceId> selectedReference() const;
+    void showSelectedReferenceDisplay();
+    // REFS <action> <selected id> [words], through runVerbLine; refused, and
+    // said, when nothing is selected.
+    VerbOutcome runReferenceLine(const QString& action, const QString& words = {});
+    // Before a save: the project records the reference layers as they are
+    // (geo::recordReferences). After an open: they are read again (REFS
+    // RESTORE), when it records any.
+    void recordReferences();
+    void restoreReferences();
 
     // Returns false when the user cancels (unsaved changes).
     [[nodiscard]] bool confirmDiscard();
@@ -578,6 +590,8 @@ class MainWindow final : public QMainWindow {
     std::vector<katana::cad::SceneMesh> sceneMeshes_;
     QTreeWidget* layerTree_ = nullptr;
     QTableWidget* referenceTable_ = nullptr;
+    QComboBox* referenceOpacity_ = nullptr;
+    QComboBox* referenceColour_ = nullptr;
     QTableWidget* propertyTable_ = nullptr;
     QPlainTextEdit* commandLog_ = nullptr;
     QLineEdit* commandInput_ = nullptr;

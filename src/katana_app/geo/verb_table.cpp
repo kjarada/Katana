@@ -76,8 +76,14 @@ const std::vector<VerbEntry>& verbTable()
                         "          JSON; STATS the bands' statistics, CHECK every value read\n"
                         "          (INFO <id> describes an entity, when no file has that name)",
                         &takesInfo});
-        rows.push_back({"REFS", "", &prepareRefs,
-                        "REFS [LIST]  the reference layers: rasters and point clouds"});
+        rows.push_back(
+            {"REFS", "", &prepareRefs,
+             "REFS [LIST] [JSON] | SHOW|HIDE|REMOVE|INFO <ref> | OPACITY <ref> <0..1>\n"
+             "          | COLOR <ref> elevation|intensity|classification|rgb|flat\n"
+             "          | RENAME <ref> <name> | OVERVIEWS <ref> [levels=2,4,8] CONFIRM | RESTORE\n"
+             "          the reference layers - rasters and point clouds - by id or name; the\n"
+             "          project records their sources and display, and RESTORE (on OPEN)\n"
+             "          reads them again"});
         rows.push_back({"COPC", "", &prepareCopc,
                         "COPC <source> <destination.copc.laz>  a point cloud rewritten as COPC,\n"
                         "          every point kept"});

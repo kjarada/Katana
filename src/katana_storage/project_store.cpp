@@ -387,6 +387,7 @@ Result<PropertyType> propertyTypeFromString(const std::string& text)
 constexpr std::string_view kMetadataKeys[] = {
     "name",        "description",  "linear_unit",         "coordinate_system", "created_utc",
     "modified_utc", "application_version", "next_entity_id", "customisation",
+    "reference_layers",
 };
 
 [[nodiscard]] bool isMetadataKey(std::string_view key)
@@ -406,6 +407,15 @@ Status validateMetadata(const ProjectMetadata& metadata)
                              "a customisation entry must be a file name: not empty, and with no "
                              "line break or path separator",
                              "customisation=\"" + name + "\"");
+        }
+    }
+    // A reference layer's record is one line of the key (see ProjectMetadata):
+    // an empty one, or one that would split, would not read back as itself.
+    for (const std::string& record : metadata.referenceLayers) {
+        if (record.empty() || record.find_first_of("\n\r") != std::string::npos) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a reference layer's record must be one line, not empty",
+                             "reference_layers=\"" + record + "\"");
         }
     }
     for (const auto& [key, value] : metadata.unknownKeys) {
@@ -1011,6 +1021,10 @@ Status writeMetadata(SqliteDatabase& database, const ProjectContents& contents)
     for (const std::string& name : m.customisation) {
         customisation += (customisation.empty() ? "" : "\n") + name;
     }
+    std::string referenceLayers;
+    for (const std::string& record : m.referenceLayers) {
+        referenceLayers += (referenceLayers.empty() ? "" : "\n") + record;
+    }
     const std::pair<std::string_view, std::string> rows[] = {
         {"name", m.name},
         {"description", m.description},
@@ -1021,6 +1035,7 @@ Status writeMetadata(SqliteDatabase& database, const ProjectContents& contents)
         {"application_version", m.applicationVersion},
         {"next_entity_id", std::to_string(contents.nextEntityId)},
         {"customisation", std::move(customisation)},
+        {"reference_layers", std::move(referenceLayers)},
     };
     // One row per key the reader knows: a key added to one list and not the
     // other would be read back as unknown, or never written.
@@ -1997,6 +2012,14 @@ Result<ProjectContents> ProjectStore::load()
             while (start < value.size()) {
                 const std::size_t end = std::min(value.find('\n', start), value.size());
                 m.customisation.push_back(value.substr(start, end - start));
+                start = end + 1;
+            }
+        } else if (key == "reference_layers") {
+            m.referenceLayers.clear();
+            std::size_t start = 0;
+            while (start < value.size()) {
+                const std::size_t end = std::min(value.find('\n', start), value.size());
+                m.referenceLayers.push_back(value.substr(start, end - start));
                 start = end + 1;
             }
         } else {

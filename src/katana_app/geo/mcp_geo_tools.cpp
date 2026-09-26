@@ -541,6 +541,89 @@ ToolReply datasetInfo(Session& session, const Json& arguments)
     return ToolReply{text, result, !outcome.ok};
 }
 
+// ---- D2: katana_references ----
+
+// A REFS line built from the action, run through the Session, and the
+// reference layers after it as structured content: what an agent needs to
+// act on a layer by its id, and to see that the action took.
+ToolReply references(Session& session, const Json& arguments)
+{
+    const Json& chosen = argument(arguments, "action");
+    const std::string action =
+        chosen.is_null() ? std::string("list")
+                         : (chosen.is_string() ? chosen.get<std::string>() : std::string("?"));
+    const auto reference = [&arguments]() -> std::string {
+        const Json& id = argument(arguments, "id");
+        if (id.is_number_integer() && id.get<long long>() > 0) {
+            return std::to_string(id.get<long long>());
+        }
+        if (id.is_string() && !id.get<std::string>().empty()) {
+            return word(id.get<std::string>(), "a layer's name");
+        }
+        throw ToolRefusal{"\"id\" is a reference layer's id, or its name"};
+    };
+    const auto valueWord = [&arguments](const char* what) -> std::string {
+        const Json& given = argument(arguments, "value");
+        if (given.is_number()) {
+            return number(given);
+        }
+        if (given.is_string() && !given.get<std::string>().empty()) {
+            return word(given.get<std::string>(), what);
+        }
+        throw ToolRefusal{std::string("\"value\" is ") + what};
+    };
+    std::string line;
+    if (action == "list") {
+        line = "REFS LIST";
+    } else if (action == "show" || action == "hide" || action == "remove" || action == "info") {
+        // The verb's words are read in any case (Tokens::is).
+        line = "REFS " + action + " " + reference();
+    } else if (action == "opacity") {
+        line = "REFS OPACITY " + reference() + " " + valueWord("an opacity from 0 to 1");
+    } else if (action == "color") {
+        line = "REFS COLOR " + reference() + " " +
+               valueWord("elevation, intensity, classification, rgb or flat");
+    } else if (action == "rename") {
+        line = "REFS RENAME " + reference() + " " + valueWord("the new name");
+    } else if (action == "overviews") {
+        // Writes beside the raster's file: only when the agent says so.
+        if (!optionalBool(arguments, "confirm", false)) {
+            throw ToolRefusal{"overviews are written beside the raster's file (.ovr); they are "
+                              "built only with \"confirm\": true"};
+        }
+        line = "REFS OVERVIEWS " + reference();
+        if (const Json& levels = argument(arguments, "value"); !levels.is_null()) {
+            line += " levels=" + valueWord("the levels, e.g. \"2,4,8\"");
+        }
+        line += " CONFIRM";
+    } else if (action == "restore") {
+        line = "REFS RESTORE";
+    } else {
+        throw ToolRefusal{"\"action\" is list, show, hide, remove, info, opacity, color, rename, "
+                          "overviews or restore"};
+    }
+    const LineOutcome outcome = runCaptured(session, line);
+    std::string text = "> " + line;
+    if (!outcome.output.empty()) {
+        text += "\n" + outcome.output;
+    }
+    if (!outcome.messages.empty()) {
+        text += "\n" + outcome.messages;
+    }
+    Json result{{"ok", outcome.ok}, {"line", line}, {"records", geo::recordsJson(outcome.output)}};
+    if (!outcome.messages.empty()) {
+        result["messages"] = outcome.messages;
+    }
+    // The layers as they are now, whatever the action was.
+    const LineOutcome listed = runCaptured(session, "REFS JSON");
+    const Json layers = Json::parse(listed.output, nullptr, false);
+    if (listed.ok && !layers.is_discarded()) {
+        result["references"] = layers.value("references", Json::array());
+        result["missing"] = layers.value("missing", Json::array());
+    }
+    return ToolReply{text, result, !outcome.ok};
+}
+
 } // namespace
 
 std::vector<Tool> geoTools()
@@ -649,6 +732,35 @@ std::vector<Tool> geoTools()
             {"path"}),
         hints(true, false, true, true), datasetInfo});
     // ---- D2: katana_references ----
+    tools.push_back(Tool{
+        "katana_references", "Reference layers",
+        "The reference layers the drawing is worked on top of - rasters and point clouds - "
+        "listed, or one acted on by its id (or name): show, hide, remove, info, opacity (value "
+        "0 to 1, a raster's), color (value elevation, intensity, classification, rgb or flat, a "
+        "point cloud's), rename (value the new name), overviews (writes .ovr overviews beside "
+        "the raster's file; value the levels, e.g. \"2,4,8\"; only with confirm: true), or "
+        "restore (read again the layers the project records, as opening it does). The project "
+        "records each layer's source and display when it is saved. Returns the action's "
+        "records and the layers after it, each with its id; missing lists the layers the "
+        "project names whose files could not be read.",
+        objectSchema(
+            Json{{"action",
+                  {{"type", "string"},
+                   {"enum", {"list", "show", "hide", "remove", "info", "opacity", "color",
+                             "rename", "overviews", "restore"}},
+                   {"description", "What to do; list by default."}}},
+                 {"id",
+                  {{"type", {"integer", "string"}},
+                   {"description", "The layer's id, as the list gives it, or its name."}}},
+                 {"value",
+                  {{"type", {"number", "string"}},
+                   {"description", "The opacity, the colouring, the new name, or the overview "
+                                   "levels."}}},
+                 {"confirm",
+                  {{"type", "boolean"},
+                   {"description", "Required true for overviews, which write beside the "
+                                   "raster's file."}}}}),
+        hints(false, true, false), references});
     return tools;
 }
 

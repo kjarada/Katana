@@ -133,7 +133,7 @@ TEST(GisVerbsWindow, RefsAnswersAtOnceWithoutAJob)
     ASSERT_TRUE(window.workbench->runLine("REFS"));
     EXPECT_EQ(window.workbench->lastJob(), katana::qt::kNoJob);
     ASSERT_EQ(window.logged.size(), 1);
-    EXPECT_EQ(window.logged.front(), "references rasters=0 clouds=0");
+    EXPECT_EQ(window.logged.front(), "references rasters=0 clouds=0 missing=0");
 }
 
 TEST(GisVerbsWindow, InfoOfAnEntityIsLeftToTheWindow)

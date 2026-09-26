@@ -473,5 +473,7 @@ published shapes.
   window's one executor echoes a dialog's line: the dialog hands the
   workbench a parsed command, which predates the executor. The replies are
   logged.
-- Reference rasters are session data (`docs/interop.md`), so an online raster
-  is not reopened with the project; its record is in the reply and the log.
+- An online raster is reopened with the project from the file it was cached
+  in (`docs/interop.md`, "Reference layers"), with its web source, licence
+  and attribution; a cached file that is gone is warned of, not fetched
+  again - `ONLINE IMPORT` fetches it.
