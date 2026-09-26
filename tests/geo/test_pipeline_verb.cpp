@@ -79,6 +79,21 @@ TEST_F(PipelineVerb, APipelineEndingInWriteKeepsItsRasterAsAReference)
     EXPECT_EQ(reference.rasters().size(), 1u);
 }
 
+// FROM without an argument's name binds the pipeline's one input, which is
+// optional (its read step may name a file): it was refused as "no required
+// dataset left", and docs/geoprocessing.md's own example with it failed.
+// The same three bands as the named FROM above.
+TEST_F(PipelineVerb, AnUnnamedFromBindsThePipelinesOneInput)
+{
+    const std::string reply = ok("GDAL pipeline \"read ! contour --interval 0.5 ! buffer 0.1 ! "
+                                 "write\" FROM FILE \"" +
+                                 kPlane + "\" TO LAYER gis/bands");
+    EXPECT_NE(reply.find("input arg=input source=file"), std::string::npos) << reply;
+    EXPECT_NE(reply.find("output arg=output kind=vector target=layer layer=gis/bands created=3"),
+              std::string::npos)
+        << reply;
+}
+
 TEST_F(PipelineVerb, APipelineEndingInInfoPrints)
 {
     const std::string reply = ok("GDAL pipeline \"read ! info\" FROM input FILE \"" + kPlane + "\"");

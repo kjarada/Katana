@@ -184,6 +184,34 @@ TEST_F(GeoExecutor, GdalHelpJsonCarriesTheArgumentsSchema)
     EXPECT_TRUE(described["gdal_usage"].is_object());
 }
 
+// inputs_schema offers an argument only the sources it reads (its kinds, as
+// GDAL declares them): hillshade's raster input no drawing scope, buffer's
+// vector input no raster or surface; a file is offered to both.
+TEST_F(GeoExecutor, TheInputsSchemaOffersOnlyTheSourcesAnArgumentReads)
+{
+    const auto properties = [&](const std::string& algorithm) {
+        auto reply = run("GDAL HELP " + algorithm + " JSON");
+        EXPECT_TRUE(reply.ok());
+        return reply ? nlohmann::json::parse(
+                           *reply)["inputs_schema"]["properties"]["input"]["properties"]
+                     : nlohmann::json();
+    };
+    const auto raster = properties("raster hillshade");
+    for (const char* key : {"raster", "surface", "cell", "file", "layer"}) {
+        EXPECT_TRUE(raster.contains(key)) << key;
+    }
+    for (const char* key : {"scope", "area", "layers", "only", "where"}) {
+        EXPECT_FALSE(raster.contains(key)) << key;
+    }
+    const auto vector = properties("vector buffer");
+    for (const char* key : {"scope", "area", "layers", "only", "where", "file", "layer"}) {
+        EXPECT_TRUE(vector.contains(key)) << key;
+    }
+    for (const char* key : {"raster", "surface", "cell"}) {
+        EXPECT_FALSE(vector.contains(key)) << key;
+    }
+}
+
 TEST_F(GeoExecutor, GdalRunSaysWhatTheScopeTook)
 {
     type("LINE 0,0 100,0");
@@ -487,6 +515,33 @@ TEST_F(GeoExecutor, AnInputGivenTwiceIsRefused)
     ASSERT_FALSE(reply.ok());
     EXPECT_EQ(reply.error().code, ErrorCode::InvalidArgument);
     EXPECT_NE(reply.error().message.find("twice"), std::string::npos) << reply.error().message;
+}
+
+// A source of a kind the argument does not read is refused as the line is
+// read, before GDAL is given anything: hillshade's input reads rasters
+// (GDAL HELP says kinds=raster), so the drawing is refused, previewed or
+// run, and nothing is drawn or kept; buffer's reads vectors, so a raster is
+// refused. GDAL itself answered the first only "Unable to fetch band #1",
+// from the worker.
+TEST_F(GeoExecutor, ASourceOfAKindTheArgumentDoesNotReadIsRefusedBeforeItRuns)
+{
+    type("RECT 0,0 10,10");
+    ASSERT_TRUE(run("IMPORT \"" + kData + "/plane.asc\"").ok());
+    const std::size_t steps = document.history().undoCount();
+    for (const std::string line :
+         {"GDAL raster hillshade FROM DRAWING", "GDAL raster hillshade FROM DRAWING PREVIEW",
+          "GDAL raster hillshade FROM input LAYERS 0 TO REFERENCE shade",
+          "GDAL vector buffer --distance=1 FROM RASTER plane",
+          "GDAL vector buffer --distance=1 FROM input SURFACE nothing"}) {
+        auto reply = run(line);
+        ASSERT_FALSE(reply.ok()) << line;
+        EXPECT_EQ(reply.error().code, ErrorCode::InvalidArgument) << line;
+        EXPECT_EQ(reply.error().context, "input") << line;
+        EXPECT_NE(reply.error().message.find("; it takes "), std::string::npos)
+            << reply.error().message;
+    }
+    EXPECT_EQ(document.history().undoCount(), steps);
+    EXPECT_EQ(reference.rasters().size(), 1u);
 }
 
 TEST_F(GeoExecutor, FromNamesOnlyAnInputDataset)
