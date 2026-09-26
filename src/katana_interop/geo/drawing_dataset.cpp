@@ -246,7 +246,8 @@ std::optional<std::string> partOf(const Entity& entity)
 // twice gives two exteriors equal in everything but their ids, and each hole
 // was made just after its own. A hole with no area around it stays an area
 // of its own, and says so.
-void joinHoles(std::vector<Shape>& shapes, DrawingDatasetStats& stats)
+void joinHoles(std::vector<Shape>& shapes, DrawingDatasetStats& stats,
+               std::map<EntityId, std::vector<EntityId>>& joined)
 {
     std::vector<std::size_t> areas;
     for (std::size_t i = 0; i < shapes.size(); ++i) {
@@ -302,6 +303,7 @@ void joinHoles(std::vector<Shape>& shapes, DrawingDatasetStats& stats)
         Shape& area = shapes[areas[*best]];
         area.holes.push_back(hole.points);
         area.holesHaveZ = area.holesHaveZ && hole.hasZ;
+        joined[area.entity->id].push_back(holeId);
         hole.kind = GeometryKind::Unknown; // taken into its area
         ++stats.used;
     }
@@ -985,7 +987,7 @@ Result<DrawingDataset> drawingDataset(const katana::entity::Model& model,
         }
         shapes.push_back(std::move(std::get<Shape>(shape)));
     }
-    joinHoles(shapes, stats);
+    joinHoles(shapes, stats, result.holes);
 
     for (const Shape& shape : shapes) {
         stats.shifted +=
@@ -1073,32 +1075,8 @@ std::vector<FeaturePiece> featurePieces(const katana::gis::VectorGeometry& geome
 Result<ResultPlan> resultCommand(const katana::entity::Model& model, const gp::FeatureSet& set,
                                  const ResultOptions& options)
 {
-    auto plan = options.mode == ResultMode::Create ? createPlan(model, set, options)
-                                                   : inPlacePlan(model, set, options);
-    if (!plan || !options.deleteSources) {
-        return plan;
-    }
-    std::vector<EntityId> sources;
-    for (const gp::FeatureTable& table : set.tables) {
-        for (const gp::Feature& feature : table.features) {
-            const auto id = sourceOf(table, feature);
-            if (id && model.entities.contains(*id) && std::ranges::find(sources, *id) == sources.end()) {
-                sources.push_back(*id);
-            }
-        }
-    }
-    if (sources.empty()) {
-        return plan;
-    }
-    auto transaction = std::make_unique<cmd::Transaction>(
-        options.commandName.empty() ? std::string("GDAL") : options.commandName);
-    if (plan->command) {
-        transaction->add(std::move(plan->command));
-    }
-    plan->deleted = sources.size();
-    transaction->add(cmd::deleteEntities(std::move(sources)));
-    plan->command = std::move(transaction);
-    return plan;
+    return options.mode == ResultMode::Create ? createPlan(model, set, options)
+                                              : inPlacePlan(model, set, options);
 }
 
 } // namespace katana::interop::geo
