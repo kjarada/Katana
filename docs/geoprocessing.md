@@ -1453,7 +1453,36 @@ is the I2 block of `menu_table.cpp`. Tests: `tests/geo/test_formats.cpp`,
 
 ### I3: IMPORT options
 
-Not started. Its dialog is `gis_import_dialogs`.
+Built (`docs/interop.md`, "Import options"). `IMPORT` keeps its I0 row; its
+words are read by `prepareImport` in `src/katana_app/geo/import_verb.cpp`,
+the option words by `vector::readVerbWords` - the one reader of a line's
+own words and its scope - with `oo=` taken out first, since it may be given
+more than once. What the others build on:
+
+- **`gis::checkOptions`** (`include/katana/gis/formats.hpp`): KEY=VALUE
+  options checked against a driver's open, creation or layer-creation list.
+  I4's `co=` and `lco=` use it.
+- **`gis::VectorReadOptions::attributeFilter` and `spatialFilter`, and
+  `GdalDataset::readSql`**: filters and statements handed to the driver.
+- **`Document::coordinateSystemCommand`**: the project's CRS as a command,
+  for a step that changes it with other things (`crs=adopt`).
+- **`GisDialogContext::await`**: a modal dialog's way to hear its job end
+  (the import dialogs' Preview), beside the workbench listener a non-modal
+  GIS dialog uses. It was added to the existing context rather than making
+  a fourth (see "Not done", three dialog contexts).
+- **`mcp::scopeWordsOf`** (`src/katana_app/mcp_tools.hpp`): a scope in a
+  tool's JSON as the grammar's words. `katana_gdal_run`'s sources and
+  `katana_gis_query` each read it in their own copy; both now call this,
+  and `katana_import` does.
+
+A deviation from the plan's grammar: `class=` takes one class, since the
+point cloud reader filters by one, and a list is refused rather than read as
+its first. Added beyond it: `attributes=no` (the dialog's "keep attributes"
+box had no word) and `resolution=` (the cloud dialog's COPC level of
+detail had none). Tests: `tests/geo/test_import_options.cpp`,
+`tests/qt_widgets/geo/test_import_dialogs.cpp`,
+`src/katana_app/geo/cli/import_options.cmake`, and
+`McpServer.ImportTakesItsFilterScopeAndPreviewArgumentsAsTheWordsAPersonTypes`.
 
 ### I4: EXPORT on the shared scope and filter
 
