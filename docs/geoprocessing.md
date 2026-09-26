@@ -410,8 +410,9 @@ polyline, an arc or a circle where the feature's curve is one
   the areas its scope took, GIS CLIP what fell outside. A feature carries
   only its area's `katana_id`, so the holes an area took in are listed in
   `DrawingDataset::holes`, and a verb that deletes an area deletes them
-  with it. `ResultOptions::deleteSources` - delete what each feature's
-  `katana_id` names - was removed: no verb used it, and it could not find
+  with it. The option `deleteSources` of `ResultOptions` - delete what
+  each feature's `katana_id` names - was removed: no verb used it, and it
+  could not find
   the holes, which never reach the features as ids. A second REPLACE beside
   the verbs' own would have kept that defect alive.
 - **Nothing to do.** A result of nothing is no command: the command stack
