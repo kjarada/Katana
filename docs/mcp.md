@@ -170,7 +170,9 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
   - each input becomes a FROM clause; a source is `{scope: "selection" |
     "drawing" | "area" | "layers", area?, layers?, only?, where?}`, written
     by the shared `cad::formatScopeWords`, or `{raster}`, `{surface, cell?}`,
-    `{file, layer?}`;
+    `{file, layer?}`; `{where}` without `scope` is the selection, filtered,
+    as `WHERE` alone reads on the command line, and is written `SELECTION
+    WHERE ...` (so is `katana_export`'s `where` without `scope`);
   - `output` becomes the TO clause: `{layer}`, `{reference}`,
     `{file, format?, overwrite?}` or `{surface}`.
 

@@ -622,6 +622,40 @@ TEST_F(McpServer, ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes)
     EXPECT_NE(textOf(refused).find("NOPE"), std::string::npos) << textOf(refused);
 }
 
+// "where" without "scope" filters the selection, as WHERE alone does on the
+// command line - the one scope parser's rule - on katana_export and on a
+// katana_gdal_run input alike; it was refused here and taken there. Two
+// lines drawn, one selected: one line is exported, one buffered.
+TEST_F(McpServer, WhereWithoutAScopeFiltersTheSelectionAsTheLineDoes)
+{
+    initialize();
+    (void)call("katana_run_commands", Json{{"commands",
+                                            {"LINE 0,0 10,0", "LINE 0,5 10,5", "RECT 20,0 30,10",
+                                             "SELECT NONE", "SELECT 1"}}});
+    const TempDir dir("where alone");
+    const std::string out = dir.file("lines.geojson");
+    const Json exported = call("katana_export", Json{{"path", out}, {"where", Json{"TYPE=line"}}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    EXPECT_EQ(exported["structuredContent"]["commands"][0]["command"],
+              "EXPORT \"" + out + "\" SELECTION WHERE TYPE=line");
+    EXPECT_EQ(exported["structuredContent"]["records"][0]["features"], 1)
+        << exported["structuredContent"]["records"].dump();
+
+    const Json buffered =
+        call("katana_gdal_run", Json{{"algorithm", "vector buffer"},
+                                     {"arguments", {{"distance", 1}}},
+                                     {"inputs", {{"input", {{"where", {"TYPE=line"}}}}}},
+                                     {"output", {{"layer", "gis/b"}}}});
+    ASSERT_FALSE(buffered["isError"].get<bool>()) << textOf(buffered);
+    EXPECT_EQ(buffered["structuredContent"]["line"],
+              "GDAL vector buffer --distance=1 FROM input SELECTION WHERE TYPE=line TO LAYER "
+              "gis/b");
+    EXPECT_EQ(buffered["structuredContent"]["scope"][0]["matched"], 1);
+
+    const Json layersAlone = call("katana_export", Json{{"path", out}, {"layers", Json{"0"}}});
+    EXPECT_TRUE(layersAlone["isError"].get<bool>()) << textOf(layersAlone);
+}
+
 TEST_F(McpServer, AnArgumentTheToolDoesNotDeclareIsRefusedByNameAndNothingRuns)
 {
     // "split" is not katana_export's word ("split_by_layer" is). Ignored, the

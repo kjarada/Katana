@@ -53,3 +53,17 @@ add_test(NAME cli.export_split_and_append_build_one_geopackage
 set_tests_properties(cli.export_split_and_append_build_one_geopackage PROPERTIES
     PASS_REGULAR_EXPRESSION "layers=lots,roads.*layers=pegs [^\r\n]*append=yes.*layer name=(lots|roads|pegs) .*layer name=(lots|roads|pegs) .*layer name=(lots|roads|pegs) "
     FAIL_REGULAR_EXPRESSION "error")
+
+# No scope word is the whole drawing; WHERE alone is the one scope parser's
+# rule, MODIFY's - the selection, filtered - and DRAWING WHERE filters the
+# drawing. Two lines, one of them selected: WHERE TYPE=line takes one, DRAWING
+# WHERE TYPE=line two, and the scope record says which it took.
+add_test(NAME cli.export_where_alone_filters_the_selection_and_drawing_where_the_drawing
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli> -c "LINE 0,0 10,0" -c "LINE 0,5 10,5" -c "SELECT NONE"
+            -c "SELECT 1"
+            -c "EXPORT \"${_export_options_out}/where.geojson\" WHERE TYPE=line PREVIEW"
+            -c "EXPORT \"${_export_options_out}/where.geojson\" DRAWING WHERE TYPE=line PREVIEW")
+set_tests_properties(cli.export_where_alone_filters_the_selection_and_drawing_where_the_drawing PROPERTIES
+    PASS_REGULAR_EXPRESSION "preview=yes entities=1[\r\n]+scope scope=selection where=\"TYPE=line\" matched=1.*preview=yes entities=2[\r\n]+scope scope=drawing where=\"TYPE=line\" matched=2"
+    FAIL_REGULAR_EXPRESSION "error")
