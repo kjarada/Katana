@@ -222,12 +222,8 @@ GridDemDialog::GridDemDialog(GeoDialogContext context, QWidget* parent)
                   "NAME: the reference raster's name; a name taken becomes <name>-2");
     toSurface_ = new QCheckBox("Keep as a named surface (TO SURFACE)", this);
     toSurface_->setObjectName("gridToSurface");
-    // TO SURFACE is answered by the terrain session's surface store (its block
-    // in the executor's bindings); until that is built the executor refuses
-    // it, so it is not offered here either.
-    toSurface_->setEnabled(false);
-    toSurface_->setToolTip("A raster result kept as a surface arrives with the terrain session "
-                           "(SURFACE verbs); the DEM is kept as a reference raster meanwhile");
+    toSurface_->setToolTip("TO SURFACE: keep the grid as a named surface (SURFACE LIST) instead "
+                           "of a reference raster, named by Name (dem when blank)");
 
     auto* options = new QGroupBox("Grid", this);
     options->setObjectName("gridOptions");
@@ -342,7 +338,7 @@ GridDemForm GridDemDialog::form() const
     form.power = power_->isEnabled() ? power_->text() : QString();
     form.radius = radius_->isEnabled() ? radius_->text() : QString();
     form.name = name_->text();
-    form.toSurface = toSurface_->isEnabled() && toSurface_->isChecked();
+    form.toSurface = toSurface_->isChecked();
     return form;
 }
 

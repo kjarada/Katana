@@ -5,6 +5,7 @@
 // worked by hand from tests/geo/data/plane.asc: 40 x 30 cells of 1 m from
 // (0,0), z = 100 + 0.05x at the cell centres, read by GDAL as Float32.
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -286,6 +287,35 @@ TEST_F(DemVerbs, ClipToADrawnBoundaryKeepsTheCellsInsideIt)
     EXPECT_NEAR(clipped.values.front(), 100.525, 7.6e-6); // Float32 near 100: ulp 7.6e-6
 }
 
+TEST_F(DemVerbs, CellsOutsideABoundaryHoldNoValueWhenTheRasterHasNoNoData)
+{
+    // plane.asc declares no no-data value. GDAL's raster clip keeps every
+    // cell a boundary touches (the rule SlopeVerbs.AScopeKeepsTheAnalysis
+    // InsideItsClosedShapes counts by hand: 66 of 11 x 11). A right triangle
+    // with legs of 20.25 m from the origin touches cell (i, j) when its
+    // lower-left corner is inside, i + j < 20.25: i + j <= 20, 21 + 20 + ...
+    // + 1 = 231 cells, no corner on the edge. The cells of its box outside
+    // it hold no value - not 0, which read as a height of 0 m.
+    ASSERT_TRUE(interpreter.run("PLINE 0,0 20.25,0 0,20.25 C").ok());
+    ok("RASTER CLIP FILE \"" + kPlane + "\" DRAWING NAME tri");
+    const geo::BandValues clipped = band(reference.rasters().back().source);
+    const auto holding = std::ranges::count_if(
+        clipped.values, [&](double cell) { return geo::holdsValue(clipped, cell); });
+    EXPECT_EQ(holding, 231);
+    for (int row = 0; row < clipped.height; ++row) {
+        for (int column = 0; column < clipped.width; ++column) {
+            const double cell =
+                clipped.values[static_cast<std::size_t>(row) * clipped.width + column];
+            const double x = clipped.geotransform[0] + (column + 0.5) * clipped.geotransform[1];
+            const double y = clipped.geotransform[3] + (row + 0.5) * clipped.geotransform[5];
+            if (geo::holdsValue(clipped, cell)) {
+                // The plane: 100 + 0.05 x (plane.asc), Float32 near 100.
+                EXPECT_NEAR(cell, 100.0 + x / 20.0, 7.6e-6) << x << "," << y;
+            }
+        }
+    }
+}
+
 TEST_F(DemVerbs, AScopeWithNoClosedBoundaryIsReportedAndNothingRuns)
 {
     ASSERT_TRUE(interpreter.run("LINE 0,0 40,30").ok());
@@ -456,6 +486,27 @@ TEST_F(DemVerbs, ItsFillVolumeIsPoint3TimesTheArea)
     EXPECT_EQ(record(reversed, "difference")->get("net"), "-360.000");
 }
 
+TEST_F(DemVerbs, MinusBetweenTheRastersSaysWhichIsTakenFromWhich)
+{
+    // The design's grammar: DIFFERENCE <source> MINUS <source>. With or
+    // without the word it is the first minus the second: 0.3 m over 1200
+    // m2 is 360 m3 of fill.
+    writePlane(at("raised.tif"), [](double value, int, int) { return value + 0.3; });
+    const std::string raised = "FILE \"" + at("raised.tif") + "\"";
+    const std::string plane = "FILE \"" + kPlane + "\"";
+    const std::string reply = ok("RASTER DIFFERENCE " + raised + " MINUS " + plane);
+    EXPECT_EQ(record(reply, "difference")->get("fill"), "360.000") << reply;
+    EXPECT_EQ(record(reply, "difference")->get("cut"), "0.000");
+    for (const std::string& line : {"RASTER DIFFERENCE MINUS " + raised + " " + plane,
+                                    "RASTER DIFFERENCE " + raised + " " + plane + " MINUS",
+                                    "RASTER DIFFERENCE " + raised + " MINUS MINUS " + plane,
+                                    "RASTER CLIP " + raised + " MINUS AREA 0,0,1,1"}) {
+        auto refused = run(line);
+        ASSERT_FALSE(refused.ok()) << line;
+        EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument) << line;
+    }
+}
+
 TEST_F(DemVerbs, AScopeLimitsTheDifferenceToItsBoundaries)
 {
     // A 10 x 10 m rectangle: 100 cells of 0.3 m, 30 m3.
@@ -468,6 +519,23 @@ TEST_F(DemVerbs, AScopeLimitsTheDifferenceToItsBoundaries)
     EXPECT_EQ(difference->get("cells"), "100");
     EXPECT_EQ(difference->get("fill"), "30.000");
     EXPECT_TRUE(record(reply, "scope").has_value());
+}
+
+TEST_F(DemVerbs, ABoundaryOnRastersWithNoNoDataSumsOnlyTheCellsInsideIt)
+{
+    // Neither raster declares a no-data value. The triangle of the clip test
+    // above touches 231 cells of 0.3 m: 231 m2 and 69.3 m3 of fill. The
+    // cells of its box outside it are no part of the difference, not cells
+    // of 0.
+    writePlane(at("raised.tif"), [](double value, int, int) { return value + 0.3; });
+    ASSERT_TRUE(interpreter.run("PLINE 0,0 20.25,0 0,20.25 C").ok());
+    const std::string reply =
+        ok("RASTER DIFFERENCE FILE \"" + at("raised.tif") + "\" FILE \"" + kPlane + "\" DRAWING");
+    const auto difference = record(reply, "difference");
+    ASSERT_TRUE(difference) << reply;
+    EXPECT_EQ(difference->get("cells"), "231") << reply;
+    EXPECT_EQ(difference->get("area"), "231.000");
+    EXPECT_EQ(difference->get("fill"), "69.300");
 }
 
 TEST_F(DemVerbs, ASecondRasterOnAnotherGridIsAlignedToTheFirst)
