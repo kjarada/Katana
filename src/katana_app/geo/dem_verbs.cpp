@@ -9,7 +9,7 @@
 //   RASTER FOOTPRINT <raster>                 [TO LAYER <path> | TO FILE <path>]
 //   RASTER REPROJECT <raster> [crs=<crs> | like=<raster id|name>] [from=<crs>]
 //                    [resampling=<method>] [cell=<m>]
-//   RASTER DIFFERENCE <raster> <raster> [<scope>] [resampling=<method>]
+//   RASTER DIFFERENCE <raster> [MINUS] <raster> [<scope>] [resampling=<method>]
 //   and on each: [NAME <name>] [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>]]
 //                [OVERWRITE] [PREVIEW]
 //
@@ -29,8 +29,10 @@
 //     keyword, not save=: an option's value is one unquoted word, and a path
 //     may hold blanks.
 //   - CLIP's AREA is the box itself; any other scope clips to the closed
-//     boundaries it takes (GDAL's cutline: a cell is kept when its centre is
-//     inside).
+//     boundaries it takes (GDAL's raster clip keeps every cell a boundary
+//     touches, not only those whose centre is inside), and the cells outside
+//     them hold no value even when the raster declares no no-data value
+//     (withNoData).
 //   - REPROJECT refuses a raster with no coordinate system rather than
 //     reprojecting from nowhere: GDAL does so without a word (measured: a
 //     plane with no CRS "reprojected" to EPSG:28356 came back unchanged).
@@ -46,6 +48,8 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -91,11 +95,15 @@ struct DemGrammar {
     bool takesScope = false;
     bool takesSurface = true;
     bool takesSave = false;
+    // MINUS between the two rasters: DIFFERENCE's word for which is taken
+    // from which, optional as the design's contract gives it.
+    bool takesMinus = false;
 };
 
 // A DEM verb's line, read.
 struct DemLine {
     std::map<std::string, std::string> options;
+    bool minus = false; // MINUS was given (and a second raster must follow)
     std::vector<Source> sources;
     std::optional<katana::cad::ScopeWords> scope;
     std::optional<Target> target;
@@ -164,6 +172,14 @@ Result<DemLine> readLine(const Tokens& tokens, const DemGrammar& grammar)
                 return target.error();
             }
             line.target = std::move(target).value();
+        } else if (grammar.takesMinus && rest.is(at, "MINUS")) {
+            // Only between the first raster and the second, once.
+            if (line.sources.size() != 1 || line.minus) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 verb + " takes MINUS once, between the two rasters", rest[at]);
+            }
+            line.minus = true;
+            ++at;
         } else if (rest.is(at, "PREVIEW")) {
             line.preview = true;
             ++at;
@@ -345,13 +361,83 @@ Status materialise(const std::vector<Bound>& bound, gp::RunRequest& run)
 
 // A check of the materialised request, on the worker, before the run.
 using PreRun = std::function<Status(const gp::RunRequest& run)>;
+// A change to the materialised request on the worker, before the run and
+// never for a PREVIEW: the intermediate files it made, removed after the run.
+using BeforeRun = std::function<Result<std::vector<std::string>>(gp::RunRequest& run,
+                                                                 const std::stop_token& stop)>;
+
+// Removes a run's intermediate files.
+void removeFiles(const std::vector<std::string>& files)
+{
+    std::error_code error;
+    for (const std::string& file : files) {
+        std::filesystem::remove(pathOfUtf8(file), error);
+    }
+}
+
+// One raster run on the worker whose raster result is wanted as a dataset:
+// kept in memory, or in a file in `folder` when it is large.
+Result<gp::DatasetValue> intermediate(gp::RunRequest run, const std::filesystem::path& folder,
+                                      const std::stop_token& stop, std::vector<std::string>& files)
+{
+    run.outputTo = gp::OutputTo::Memory;
+    run.spillDirectory = utf8OfPath(folder);
+    auto outputs = gp::run(run, stop, {});
+    if (!outputs) {
+        return outputs.error();
+    }
+    if (outputs->raster) {
+        return gp::DatasetValue(std::move(*outputs->raster));
+    }
+    if (outputs->file) {
+        files.push_back(*outputs->file);
+        return gp::DatasetValue(gp::DatasetPath{*outputs->file, {}, {}});
+    }
+    return makeError(ErrorCode::CommandRejected, gp::pathText(run.path) + " made no raster");
+}
+
+// `dataset` as GDAL's cutline must be given it: with a no-data value. A
+// raster clipped to boundaries (`raster clip --like`) has the cells of its
+// box outside them set to the source's no-data value - and to 0 when it
+// declares none, which then read as heights of 0 m (a sample of 0, a
+// difference summed over all 441 cells of a box whose triangle touches
+// 231). One that declares
+// none is copied with no-data NaN: `raster calc`'s builtin sum of it alone
+// (the value itself; this GDAL has no other dialect) into Float64, which
+// holds every value of every integer or float band exactly. A grid is given
+// NaN as it is. The files made are added to `files`.
+Result<gp::DatasetValue> withNoData(gp::DatasetValue dataset, const std::filesystem::path& folder,
+                                    const std::stop_token& stop, std::vector<std::string>& files)
+{
+    auto info = rasterInfoOf(dataset);
+    if (!info) {
+        return info.error();
+    }
+    if (info->noDataValue) {
+        return dataset;
+    }
+    if (auto* grid = std::get_if<gp::RasterGrid>(&dataset)) {
+        if (grid->dataType != "Float32" && grid->dataType != "Float64") {
+            grid->dataType = "Float64";
+        }
+        grid->noData.assign(grid->bands.size(), std::numeric_limits<double>::quiet_NaN());
+        grid->info.noDataValue = std::numeric_limits<double>::quiet_NaN();
+        return dataset;
+    }
+    gp::RunRequest copy;
+    copy.path = {"raster", "calc"};
+    copy.tokens = {"--dialect=builtin", "--calc=sum", "--nodata=nan", "--output-data-type=Float64"};
+    copy.values.emplace_back("input",
+                             gp::ArgValue(std::vector<gp::DatasetValue>{std::move(dataset)}));
+    return intermediate(std::move(copy), folder, stop, files);
+}
 
 // The phases of a verb of one run: PREVIEW validates it here; otherwise the
 // work makes its datasets, runs it and hands the outputs to applyOutputs,
 // the head record first.
 Result<Prepared> oneRun(std::string title, gp::RunRequest request, std::vector<Bound> bound,
                         ApplyRequest apply, std::string head, std::vector<std::string> records,
-                        bool preview, PreRun check = {})
+                        bool preview, PreRun check = {}, BeforeRun before = {})
 {
     if (preview) {
         gp::RunRequest trial = request;
@@ -372,7 +458,7 @@ Result<Prepared> oneRun(std::string title, gp::RunRequest request, std::vector<B
     }
     Prepared prepared;
     prepared.title = std::move(title);
-    prepared.work = [request, bound, apply, head, records, check](
+    prepared.work = [request, bound, apply, head, records, check, before](
                         const std::stop_token& stop, const Progress& progress) -> Result<Apply> {
         gp::RunRequest run = request;
         if (auto made = materialise(bound, run); !made) {
@@ -383,7 +469,16 @@ Result<Prepared> oneRun(std::string title, gp::RunRequest request, std::vector<B
                 return checked.error();
             }
         }
+        std::vector<std::string> intermediates;
+        if (before) {
+            auto made = before(run, stop);
+            if (!made) {
+                return made.error();
+            }
+            intermediates = std::move(made).value();
+        }
         auto outputs = gp::run(run, stop, progress);
+        removeFiles(intermediates);
         if (!outputs) {
             return outputs.error();
         }
@@ -667,6 +762,7 @@ Result<Prepared> prepareClip(Context& context, const Tokens& tokens, std::string
     std::string head = "clip algorithm=\"raster clip\"";
 
     const katana::cad::ScopeWords& scope = *line->scope;
+    BeforeRun before;
     if (scope.source == katana::cad::ScopeSource::Area) {
         // AREA is the box itself; a filter would pick boundaries, which a
         // box has none of.
@@ -704,9 +800,31 @@ Result<Prepared> prepareClip(Context& context, const Tokens& tokens, std::string
         auto set = std::make_shared<const gp::FeatureSet>(std::move(boundaries));
         args.push_back(
             {"like", false, {[set]() -> Result<gp::DatasetValue> { return gp::DatasetValue(*set); }}});
+        // Outside the boundaries is no value, whether or not the raster
+        // declares one (withNoData).
+        const std::filesystem::path scratch = context.scratch;
+        before = [scratch](gp::RunRequest& run,
+                           const std::stop_token& stop) -> Result<std::vector<std::string>> {
+            std::vector<std::string> files;
+            for (auto& [name, value] : run.values) {
+                auto* inputs = std::get_if<std::vector<gp::DatasetValue>>(&value);
+                if (name != "input" || inputs == nullptr) {
+                    continue;
+                }
+                for (gp::DatasetValue& input : *inputs) {
+                    auto given = withNoData(std::move(input), scratch, stop, files);
+                    if (!given) {
+                        removeFiles(files);
+                        return given.error();
+                    }
+                    input = std::move(given).value();
+                }
+            }
+            return files;
+        };
     }
-    return oneRun("RASTER CLIP", std::move(request), std::move(args), std::move(apply).value(), head,
-                  std::move(records), line->preview);
+    return oneRun("RASTER CLIP", std::move(request), std::move(args), std::move(apply).value(),
+                  head, std::move(records), line->preview, {}, std::move(before));
 }
 
 // ---- FILL -----------------------------------------------------------------------------------
@@ -965,27 +1083,6 @@ bool sameGrid(const katana::gis::RasterInfo& a, const katana::gis::RasterInfo& b
            a.projectionWkt == b.projectionWkt;
 }
 
-// One raster run on the worker whose raster result is wanted as a dataset:
-// kept in memory, or in a file in `folder` when it is large.
-Result<gp::DatasetValue> intermediate(gp::RunRequest run, const std::filesystem::path& folder,
-                                      const std::stop_token& stop, std::vector<std::string>& files)
-{
-    run.outputTo = gp::OutputTo::Memory;
-    run.spillDirectory = utf8OfPath(folder);
-    auto outputs = gp::run(run, stop, {});
-    if (!outputs) {
-        return outputs.error();
-    }
-    if (outputs->raster) {
-        return gp::DatasetValue(std::move(*outputs->raster));
-    }
-    if (outputs->file) {
-        files.push_back(*outputs->file);
-        return gp::DatasetValue(gp::DatasetPath{*outputs->file, {}, {}});
-    }
-    return makeError(ErrorCode::CommandRejected, gp::pathText(run.path) + " made no raster");
-}
-
 struct Volumes {
     std::size_t cells = 0;
     double cut = 0.0, fill = 0.0, area = 0.0;
@@ -1027,7 +1124,8 @@ std::string cellText(const std::array<double, 6>& geotransform)
 
 Result<Prepared> prepareDifference(Context& context, const Tokens& tokens, std::string_view text)
 {
-    const DemGrammar grammar{"RASTER DIFFERENCE", kDifferenceOptions, 2, 2, true, true};
+    const DemGrammar grammar{
+        "RASTER DIFFERENCE", kDifferenceOptions, 2, 2, true, true, false, true};
     auto line = readLine(tokens, grammar);
     if (!line) {
         return line.error();
@@ -1201,6 +1299,14 @@ Result<Prepared> prepareDifference(Context& context, const Tokens& tokens, std::
                 return makeError(ErrorCode::CommandRejected, "raster calc made no raster");
             }
             intermediates.push_back(*outputs->file);
+            // Outside the boundaries is no value, whether or not the
+            // difference declares one (withNoData).
+            auto whole = withNoData(gp::DatasetValue(gp::DatasetPath{*outputs->file, {}, {}}),
+                                    scratch, stop, intermediates);
+            if (!whole) {
+                tidy();
+                return whole.error();
+            }
             gp::RunRequest clip;
             clip.path = {"raster", "clip"};
             clip.outputTo = request.outputTo;
@@ -1210,8 +1316,7 @@ Result<Prepared> prepareDifference(Context& context, const Tokens& tokens, std::
             clip.maxMemoryCells = 0;
             clip.spillDirectory = keptSpill;
             clip.values.emplace_back(
-                "input", gp::ArgValue(std::vector<gp::DatasetValue>{
-                             gp::DatasetValue(gp::DatasetPath{*outputs->file, {}, {}})}));
+                "input", gp::ArgValue(std::vector<gp::DatasetValue>{std::move(whole).value()}));
             clip.values.emplace_back("like", gp::ArgValue(gp::DatasetValue(*boundaries)));
             const double seconds = outputs->seconds;
             outputs = gp::run(clip, stop, {});

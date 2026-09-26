@@ -1182,9 +1182,14 @@ raster named `dem`, or NAME's name.
 - **What the scope took is said**, in the scope record every geoprocessing
   verb gives; a scope that takes nothing, or only heightless points, answers
   `ran=no` and nothing runs.
-- **TO SURFACE** is the terrain session's: until its store takes a raster
-  result, the executor refuses it after the run, and the dialog does not
-  offer it.
+- **TO SURFACE** keeps the grid as a named surface of the terrain
+  session's store, sampled from its cells (the reply's `sampled` and
+  `surface` records). The dialog's `gridToSurface` box writes it, named by
+  the Name field (`dem` when blank)
+  (`GridDemDialog.KeepAsASurfaceWritesToSurfaceWithTheName`). The box was
+  left disabled, with a tooltip saying the store could not take a raster
+  result, after the store came to take one; HELP did not list the target.
+  Both are corrected.
 
 The reply:
 
@@ -1228,7 +1233,7 @@ RASTER CLIP <raster> AREA x0,y0,x1,y1 | <scope>
 RASTER FILL <raster> [distance=<cells>] [smoothing=<n>] [strategy=invdist|nearest]
 RASTER FOOTPRINT <raster> [TO LAYER <path> | TO FILE <path>]
 RASTER REPROJECT <raster> [crs=<crs> | like=<raster>] [from=<crs>] [resampling=<method>] [cell=<m>]
-RASTER DIFFERENCE <raster> <raster> [<scope>] [resampling=<method>]
+RASTER DIFFERENCE <raster> [MINUS] <raster> [<scope>] [resampling=<method>]
   and on each: [NAME <name>] [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>]]
                [OVERWRITE] [PREVIEW]
 
@@ -1253,8 +1258,21 @@ derived reference raster (`mosaic`, `clip`, `filled`, `reprojected`,
   no tile and is refused. Tiles whose bands differ in colour interpretation
   are refused in GDAL's words ("heterogeneous band color interpretation").
 - **CLIP's AREA is the box itself.** Any other scope clips to the closed
-  boundaries it takes (GDAL's cutline: a cell stays when its centre is
-  inside); points and open lines bound nothing, and a scope with no closed
+  boundaries it takes. GDAL's raster clip keeps every cell a boundary
+  touches, not only those whose centre is inside (a triangle with legs of
+  20.25 m keeps 231 cells, i + j <= 20, where the centre rule gives 210;
+  this said "centre" until a hand count caught it). The cells of the box
+  outside the boundaries hold no value. GDAL sets them to the raster's
+  no-data value, and to 0 when it declares none, which then read as ground
+  at 0 m (a sample of 0, a difference summed over the whole box). A raster
+  that declares none is first copied with no-data NaN, into Float64, which
+  holds every integer or float value exactly (`withNoData`: `raster calc`'s
+  builtin `sum` of it alone, since this GDAL has no other dialect; a grid
+  in memory is given NaN as it is)
+  (`DemVerbs.CellsOutsideABoundaryHoldNoValueWhenTheRasterHasNoNoData`).
+  Setting no-data on the source was rejected: it is the person's file. A
+  sentinel such as -9999 was rejected: it is a value a band could hold, and
+  NaN is none. Points and open lines bound nothing, and a scope with no closed
   boundary answers `ran=no`. `AREA ... WHERE` is refused: a box has no
   boundaries to filter. The boundaries carry the project's coordinate system
   and GDAL brings them into the raster's; when either has none they are taken
@@ -1268,7 +1286,12 @@ derived reference raster (`mosaic`, `clip`, `filled`, `reprojected`,
   it is. With no `crs=` the target is the project's coordinate system, and a
   drawing with none refuses, naming `crs=` and `like=`. `like=<raster>` is a
   reference raster whose grid - system, extent, cells - the result takes.
-- **DIFFERENCE is the first minus the second.** Positive is fill (the first
+- **DIFFERENCE is the first minus the second**, with or without `MINUS`
+  between them. The design's contract gives `DIFFERENCE <source> MINUS
+  <source>`; the verb was built without the word and refused it. It is
+  optional, not required, so lines already written keep working, and it is
+  taken only between the two rasters, once
+  (`DemVerbs.MinusBetweenTheRastersSaysWhichIsTakenFromWhich`). Positive is fill (the first
   above the second: design above ground), negative is cut. The second is
   aligned to the first's grid only when the grids differ, by `raster
   reproject` with the first's extent, size and system said outright
@@ -1278,7 +1301,10 @@ derived reference raster (`mosaic`, `clip`, `filled`, `reprojected`,
   with a system and the other without is refused: there is nothing to align
   by. The subtraction is `raster calc`'s builtin `diff` (this GDAL has
   neither muparser nor ExprTk). An optional scope clips the difference to its
-  closed boundaries before it is summed. The volumes are the cells' depths
+  closed boundaries before it is summed, as CLIP does - the cells outside
+  them no part of it even when neither raster declares a no-data value
+  (`DemVerbs.ABoundaryOnRastersWithNoNoDataSumsOnlyTheCellsInsideIt`: 231
+  cells, not the 441 of the box). The volumes are the cells' depths
   summed with `math::CompensatedSum`, times the cell's area, and labelled
   with the method: `method=grid label="grid method, cell 1 m"`.
 

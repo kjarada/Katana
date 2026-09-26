@@ -144,6 +144,25 @@ TEST(GridDemDialog, TheFieldsBuildTheLineRunHandsTheRunner)
     EXPECT_EQ(runner.lines.back(), command->text() + " PREVIEW");
 }
 
+TEST(GridDemDialog, KeepAsASurfaceWritesToSurfaceWithTheName)
+{
+    // TO SURFACE works on every front end (RASTER GRID ... TO SURFACE g), so
+    // the window offers it: the box was disabled, and a line with it could
+    // not be built there.
+    StubRunner runner;
+    GridDemDialog dialog(runner.context());
+    child<QRadioButton>(dialog, "gridScopeDrawing")->click();
+    child<QLineEdit>(dialog, "gridCell")->setText("5");
+    auto* keep = child<QCheckBox>(dialog, "gridToSurface");
+    ASSERT_TRUE(keep->isEnabled());
+    keep->click();
+    auto* command = child<QLineEdit>(dialog, "gridCommand");
+    EXPECT_EQ(command->text(), "RASTER GRID DRAWING method=linear cell=5 TO SURFACE dem");
+    child<QLineEdit>(dialog, "gridName")->setText("ground");
+    EXPECT_EQ(command->text(),
+              "RASTER GRID DRAWING method=linear cell=5 NAME ground TO SURFACE ground");
+}
+
 TEST(GridDemDialog, PowerIsOfferedOnlyToAMethodThatTakesIt)
 {
     StubRunner runner;
