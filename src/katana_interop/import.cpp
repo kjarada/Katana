@@ -9,10 +9,12 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <system_error>
 #include <variant>
 
 #include "katana/core/text.hpp"
 #include "katana/entity/entity_geometry.hpp"
+#include "katana/gis/formats.hpp"
 #include "katana/gis/processing.hpp"
 #include "katana/interop/geo/drawing_dataset.hpp"
 
@@ -38,6 +40,53 @@ std::string lowerExtension(const std::filesystem::path& path)
 bool contains(const std::vector<std::string>& values, const std::string& value)
 {
     return std::find(values.begin(), values.end(), value) != values.end();
+}
+
+// The extensions GDAL reads data of one kind from, less those another
+// importer takes by its extension first (kindForPath): PDAL's point clouds -
+// GDAL claims .e57 for the images inside one - and the .12da archives.
+std::vector<std::string> gdalExtensions(katana::gis::DataKind kind)
+{
+    std::vector<std::string> extensions;
+    for (std::string& extension : katana::gis::readableExtensions(kind)) {
+        if (!contains(pointCloudExtensions(), extension) &&
+            !contains(archive12dExtensions(), extension)) {
+            extensions.push_back(std::move(extension));
+        }
+    }
+    return extensions;
+}
+
+// Where a name alone must decide - a URL, a file not written yet - an
+// extension only raster readers claim is a raster, one only vector readers
+// claim is vector data. One claimed by both is vector data (a GeoPackage's
+// features are drawing data, its tiles a backdrop), except for the formats
+// that are chiefly imagery or grids.
+SourceKind kindByExtension(const std::string& extension)
+{
+    if (extension.empty()) {
+        return SourceKind::Unknown;
+    }
+    constexpr const char* kChieflyRaster[] = {"mbtiles", "pdf", "jp2", "j2k", "nc",
+                                              "pix",     "fits", "bag"};
+    bool raster = false;
+    bool vector = false;
+    for (const katana::gis::Format& format : katana::gis::formats()) {
+        if (contains(format.extensions, extension)) {
+            raster = raster || format.readRaster;
+            vector = vector || format.readVector;
+        }
+    }
+    if (raster && vector) {
+        return std::ranges::any_of(kChieflyRaster,
+                                   [&extension](const char* name) { return extension == name; })
+                   ? SourceKind::Raster
+                   : SourceKind::Vector;
+    }
+    if (raster) {
+        return SourceKind::Raster;
+    }
+    return vector ? SourceKind::Vector : SourceKind::Unknown;
 }
 
 // Converts a source layer name into something usable as a Katana layer name.
@@ -158,13 +207,17 @@ const char* toString(SourceKind kind)
 
 std::vector<std::string> vectorExtensions()
 {
-    return {"shp", "geojson", "json", "gpkg", "kml", "gml", "dxf", "tab", "sqlite"};
+    return gdalExtensions(katana::gis::DataKind::Vector);
 }
 
 std::vector<std::string> rasterExtensions()
 {
-    return {"tif", "tiff", "geotiff", "img", "vrt", "png", "jpg", "jpeg", "asc", "dem", "bil",
-            "ecw", "jp2"};
+    return gdalExtensions(katana::gis::DataKind::Raster);
+}
+
+std::vector<std::string> archiveExtensions()
+{
+    return {"zip", "tar", "tgz", "gz"};
 }
 
 std::vector<std::string> pointCloudExtensions()
@@ -175,24 +228,38 @@ std::vector<std::string> pointCloudExtensions()
 SourceKind kindForPath(const std::filesystem::path& path)
 {
     const std::string extension = lowerExtension(path);
-    if (extension.empty()) {
-        return SourceKind::Unknown;
-    }
     if (contains(archive12dExtensions(), extension)) {
         return SourceKind::Archive12d;
     }
-    // Point cloud first: PDAL and GDAL both claim .ply, and a .ply in a survey
-    // context is a point cloud far more often than it is a vector layer.
+    // Point cloud first: PDAL and GDAL both claim .e57 (GDAL, the images in
+    // one), and a .ply in a survey context is a point cloud far more often
+    // than it is anything else.
     if (contains(pointCloudExtensions(), extension)) {
         return SourceKind::PointCloud;
     }
-    if (contains(rasterExtensions(), extension)) {
-        return SourceKind::Raster;
+    // What the file holds, where GDAL can look at it: a GeoPackage of raster
+    // tiles is a raster, a .zip of a shapefile vector data, a file whose
+    // extension no reader claims whatever GDAL finds in it. A web address is
+    // looked at only when its name says nothing: a look costs a round trip.
+    const bool remote = katana::gis::isRemotePath(path);
+    const SourceKind named = kindByExtension(extension);
+    std::error_code ignored;
+    const bool local = !remote && (katana::gis::isVirtualPath(path) ||
+                                   std::filesystem::exists(path, ignored));
+    if (local || (remote && named == SourceKind::Unknown)) {
+        if (const auto content = katana::gis::identifyContent(path); content.ok()) {
+            if (content->raster != content->vector) {
+                return content->raster ? SourceKind::Raster : SourceKind::Vector;
+            }
+            if (content->raster) {
+                // Both: the name's leaning, vector data where it has none.
+                return named == SourceKind::Raster ? SourceKind::Raster : SourceKind::Vector;
+            }
+        }
     }
-    if (contains(vectorExtensions(), extension)) {
-        return SourceKind::Vector;
-    }
-    return SourceKind::Unknown;
+    // A file not there yet, or one GDAL cannot open: by its name, so the
+    // import that follows fails with GDAL's own reason, not "no importer".
+    return named;
 }
 
 // ---- vector ---------------------------------------------------------------
@@ -294,8 +361,23 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
         katana::entity::setHeights(entity.properties, heights);
     };
 
+    // GDAL reads a GPX as five layers, two of which - route_points and
+    // track_points - are the vertices of its routes and tracks again, one
+    // point each: imported with the rest, every line came with a point on
+    // each of its vertices. They are left out of a whole-file import, and
+    // said; named by index, either is imported as asked.
+    const bool gpx = (*dataset)->driverName() == "GPX";
+    std::vector<std::string> restated;
+
     for (int index = firstLayer; index <= lastLayer; ++index) {
         const auto& info = (*layers)[static_cast<std::size_t>(index)];
+        if (gpx && options.sourceLayerIndex < 0 &&
+            (info.name == "route_points" || info.name == "track_points")) {
+            if (info.featureCount > 0) {
+                restated.push_back(info.name);
+            }
+            continue;
+        }
 
         const std::string targetLayer =
             options.targetLayer.empty()
@@ -480,6 +562,12 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
             std::to_string(heightAttributesReplaced) +
             " features had an attribute named \"elevation\" or \"elevations\", which is "
             "where Katana keeps a height; the geometry's own Z replaced it");
+    }
+    for (const std::string& name : restated) {
+        result.warnings.push_back(
+            "GPX layer '" + name + "' left out: its points are the vertices of the file's " +
+            (name == "route_points" ? "routes" : "tracks") +
+            " again, one point each; import that layer by its index for them");
     }
     return result;
 }

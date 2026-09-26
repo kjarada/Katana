@@ -124,24 +124,44 @@ katana::core::Result<std::string> readZipMember(const std::filesystem::path& arc
 katana::core::Status writeZip(const std::filesystem::path& archive, std::string_view memberName,
                               std::string_view bytes)
 {
-    if (memberName.empty() || memberName.find_first_of("\\:") != std::string_view::npos ||
-        memberName.front() == '/' || memberName.find("..") != std::string_view::npos) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "a member name must be a plain relative path", std::string(memberName));
+    const ZipContent member{memberName, bytes};
+    return writeZip(archive, std::span<const ZipContent>(&member, 1));
+}
+
+katana::core::Status writeZip(const std::filesystem::path& archive,
+                              std::span<const ZipContent> members)
+{
+    if (members.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "an archive needs a member to hold",
+                         archive.string());
+    }
+    for (const ZipContent& member : members) {
+        const std::string_view name = member.name;
+        if (name.empty() || name.find_first_of("\\:") != std::string_view::npos ||
+            name.front() == '/' || name.find("..") != std::string_view::npos) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a member name must be a plain relative path", std::string(name));
+        }
     }
     std::filesystem::path temporary = archive;
     temporary += ".writing";
     std::error_code error;
-    std::filesystem::remove(temporary, error); // vsizip can create an archive, not update one
+    // vsizip adds to an archive that exists, which a leftover would be.
+    std::filesystem::remove(temporary, error);
 
-    {
+    // One member at a time, each closed before the next is opened: what
+    // vsizip writes, adding each to the archive the first one created.
+    for (const ZipContent& member : members) {
         const QuietErrors quiet;
         VSILFILE* file =
-            VSIFOpenL((vsiRoot(temporary) + "/" + std::string(memberName)).c_str(), "wb");
+            VSIFOpenL((vsiRoot(temporary) + "/" + std::string(member.name)).c_str(), "wb");
         if (file == nullptr) {
+            const std::string reason = withReason(archive.string());
+            std::filesystem::remove(temporary, error);
             return makeError(ErrorCode::FileExportFailure, "the archive could not be created",
-                             withReason(archive.string()));
+                             reason);
         }
+        const std::string_view bytes = member.bytes;
         const std::size_t written =
             bytes.empty() ? 0 : VSIFWriteL(bytes.data(), 1, bytes.size(), file);
         // The central directory is written on close, so a failed close is a

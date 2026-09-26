@@ -71,6 +71,9 @@ struct FormatChoice {
     std::string extension; // without the dot
 };
 
+// Every vector format this GDAL writes, from its registry, the common ones
+// first; each extension is written by the driver EXPORT picks for it
+// (gis::vectorSaveChoices, docs/interop.md "Formats").
 [[nodiscard]] std::vector<FormatChoice> vectorExportFormats();
 // What exportSurfaceRaster (terrain_io.hpp) writes: GeoTIFF, Esri ASCII grid,
 // Erdas Imagine.

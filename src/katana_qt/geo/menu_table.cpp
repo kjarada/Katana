@@ -15,6 +15,7 @@
 // Each item opens its dialog, which builds the line and runs it through the
 // window's one executor (GeoServices::run).
 
+#include "geo/formats_dialog.hpp"
 #include "geo/geo_workbench.hpp"
 
 namespace katana::qt {
@@ -27,6 +28,7 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     // ---- X1: GIS > Processing - GDAL > GDAL Toolbox ----
     // ---- X2: the toolbox's pipeline tab (no item of its own) ----
     // ---- I2: GIS > Processing - GDAL > Formats ----
+    addFormatsItem(menus, workbench);
     // ---- V1: GIS > Analysis - GDAL > Buffer, Dissolve ----
     // ---- V2: GIS > Analysis - GDAL > Overlay ----
     // ---- V3: GIS > Analysis - GDAL > Hull, Clip ----

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <variant>
 
+#include "katana/gis/formats.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/gis/processing.hpp"
 #include "katana/interop/geo/drawing_dataset.hpp"
@@ -25,10 +26,14 @@ using katana::entity::Entity;
 
 std::vector<FormatChoice> vectorExportFormats()
 {
-    return {
-        {"ESRI Shapefile", "shp"}, {"GeoJSON", "geojson"}, {"GeoPackage", "gpkg"},
-        {"Google Earth KML", "kml"}, {"AutoCAD DXF", "dxf"}, {"GML", "gml"},
-    };
+    // Every writer of vector layers this GDAL has, the common ones first
+    // (gis::vectorSaveChoices): six hand-picked entries used to hide
+    // FlatGeobuf, GeoParquet, KMZ, GPX and CSV, which EXPORT could write.
+    std::vector<FormatChoice> choices;
+    for (const katana::gis::SaveChoice& choice : katana::gis::vectorSaveChoices()) {
+        choices.push_back(FormatChoice{choice.description, choice.extension});
+    }
+    return choices;
 }
 
 Result<VectorExportResult> exportVector(const katana::entity::Model& model,

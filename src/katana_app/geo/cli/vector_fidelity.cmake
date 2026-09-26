@@ -8,14 +8,16 @@ file(MAKE_DIRECTORY "${_fidelity_out}")
 # The project's coordinate system reaches the file: a KML is converted to
 # longitude and latitude from it, and read back there, beside the point it
 # came from. PROJ's own cs2cs puts
-# 330000,6250000 in EPSG:28356 at 151.161906846,-33.876653623.
+# 330000,6250000 in EPSG:28356 at 151.161906846,-33.876653623. The .kml is
+# written by LIBKML, GDAL's own choice for the name (docs/interop.md,
+# "Formats"), where a hand-kept table named the older KML driver.
 add_test(NAME cli.export_of_a_projected_drawing_to_kml_is_in_longitude_and_latitude
     COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
             $<TARGET_FILE:katana_cli> -c "CRS SET EPSG:28356" -c "POINT 330000,6250000"
             -c "EXPORT \"${_fidelity_out}/peg.kml\""
             -c "IMPORT \"${_fidelity_out}/peg.kml\"" -c "LIST")
 set_tests_properties(cli.export_of_a_projected_drawing_to_kml_is_in_longitude_and_latitude PROPERTIES
-    PASS_REGULAR_EXPRESSION "exported 1 features \\(KML\\).*converted from GDA94 / MGA zone 56 \\(EPSG:28356\\) to longitude and latitude.*Point  layer=0  at 330000,6250000.*Point  layer=0  at 151\\.161906846,-33\\.876653623"
+    PASS_REGULAR_EXPRESSION "exported 1 features \\(LIBKML\\).*converted from GDA94 / MGA zone 56 \\(EPSG:28356\\) to longitude and latitude.*Point  layer=0  at 330000,6250000.*Point  layer=0  at 151\\.161906846,-33\\.876653623"
     FAIL_REGULAR_EXPRESSION "error")
 
 # Without a project coordinate system there is nothing to convert from: the

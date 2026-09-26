@@ -305,7 +305,9 @@ TEST(VectorFidelity, AKmlKeepsItsHeightsAndInventsNone)
     // its altitude, so the export says "absolute" for a heighted feature, and
     // the import takes an altitude as a height only when it says so.
     // GDAL's KMZ writer (LIBKML) gives a 2D coordinate an altitude of 0,
-    // which only the mode keeps from reading as a height.
+    // which only the mode keeps from reading as a height. A .kml is written
+    // by LIBKML too, GDAL's own choice for the name (docs/interop.md,
+    // "Formats"); the older KML driver, named, is kept to its word as well.
     const TempDir dir("kml-heights");
     Entity surveyed;
     surveyed.geometry = katana::entity::PointGeometry{Point2(330000.0, 6250000.0)};
@@ -313,8 +315,10 @@ TEST(VectorFidelity, AKmlKeepsItsHeightsAndInventsNone)
     Entity planOnly;
     planOnly.geometry = katana::entity::PointGeometry{Point2(330010.0, 6250000.0)};
     const Model model = modelWith({surveyed, planOnly});
-    for (const auto& [file, driver] : {std::pair<std::string, std::string>{"heights.kml", ""},
-                                       std::pair<std::string, std::string>{"heights.kmz", "LIBKML"}}) {
+    for (const auto& [file, driver] :
+         {std::pair<std::string, std::string>{"heights.kml", ""},
+          std::pair<std::string, std::string>{"heights.kmz", ""},
+          std::pair<std::string, std::string>{"heights-kml-driver.kml", "KML"}}) {
         SCOPED_TRACE(file);
         interop::VectorExportOptions options;
         options.projectionWkt = kMga56;

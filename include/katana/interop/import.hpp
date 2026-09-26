@@ -29,14 +29,23 @@ enum class SourceKind { Unknown, Vector, Raster, PointCloud, Archive12d };
 
 [[nodiscard]] const char* toString(SourceKind kind);
 
-// Classifies by extension alone - no file is opened. Used to route a path to
-// the right importer and to build file dialog filters. An extension GDAL and
-// PDAL both claim (there are a few) resolves to the more specific of the two.
+// Which importer a path goes to (docs/interop.md, "Formats"). A .12da archive
+// and a point cloud are known by their extensions (.12da, .las ...). Anything
+// else is routed by what it HOLDS, found by GDAL (gis::identifyContent) when
+// the path can be looked at - a local file or folder, a /vsi path: a
+// GeoPackage of raster tiles is a Raster, a .zip of a shapefile Vector, a
+// file with an unknown extension whatever GDAL finds in it. A path that
+// cannot be looked at (not written yet, or a URL, whose look costs a round
+// trip) is routed by its name, from GDAL's registry of extensions.
 [[nodiscard]] SourceKind kindForPath(const std::filesystem::path& path);
 
-// Extensions offered in the open dialog, without the leading dot.
+// Extensions offered in the open dialog, without the leading dot. The vector
+// and raster ones are those of GDAL's readers (gis::readableExtensions), so
+// they are what this build of GDAL opens; the archives are those whose
+// inside is opened (.zip, .tar, .tgz, .gz).
 [[nodiscard]] std::vector<std::string> vectorExtensions();
 [[nodiscard]] std::vector<std::string> rasterExtensions();
+[[nodiscard]] std::vector<std::string> archiveExtensions();
 [[nodiscard]] std::vector<std::string> pointCloudExtensions();
 
 // ---- vector ---------------------------------------------------------------

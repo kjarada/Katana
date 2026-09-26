@@ -584,11 +584,18 @@ struct Resource {
     const char* mimeType;
 };
 
-constexpr std::array<Resource, 2> kResources{{
-    {"katana://help", "Katana command reference", "Every command and its syntax.", "text/plain"},
-    {"katana://status", "Drawing status", "The live drawing's state, as katana_status reports it.",
-     "application/json"},
-}};
+constexpr std::array kResources{
+    Resource{"katana://help", "Katana command reference", "Every command and its syntax.",
+             "text/plain"},
+    Resource{"katana://status", "Drawing status",
+             "The live drawing's state, as katana_status reports it.", "application/json"},
+#if defined(KATANA_WITH_INTEROP)
+    // FORMATS JSON (docs/interop.md, "Formats"), as katana_formats lists it.
+    Resource{"katana://formats", "GDAL formats",
+             "The formats this build of GDAL reads and writes: driver, kinds, extensions, /vsi.",
+             "application/json"},
+#endif
+};
 
 // ---- JSON-RPC -----------------------------------------------------------------------
 
@@ -821,6 +828,16 @@ std::optional<std::string> Server::handle(std::string_view message)
             } else if (uri == "katana://status") {
                 text = statusOf(session_).dump(2);
                 mimeType = "application/json";
+#if defined(KATANA_WITH_INTEROP)
+            } else if (uri == "katana://formats") {
+                // The verb's own JSON, so the resource is what FORMATS says.
+                const LineOutcome formats = runCaptured(session_, "FORMATS JSON");
+                if (!formats.ok) {
+                    return errorReply(id, {kInternalError, formats.messages});
+                }
+                text = formats.output;
+                mimeType = "application/json";
+#endif
             } else {
                 // -32002 is MCP's "resource not found".
                 return errorReply(id, {-32002, "no resource " + uri});

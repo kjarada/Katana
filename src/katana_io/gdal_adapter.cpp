@@ -37,7 +37,9 @@
 
 #include "cpl_error_collector.hpp"
 #include "gdal_registry.hpp"
+#include "geo/formats_detail.hpp"
 #include "katana/core/text.hpp"
+#include "katana/gis/formats.hpp"
 #include "katana/gis/processing.hpp"
 #include "katana/gis/reproject.hpp"
 #include "ogr_detail.hpp"
@@ -179,16 +181,6 @@ std::string lowerExtension(const std::filesystem::path& path)
 struct DriverForExtension {
     const char* extension;
     const char* driver;
-};
-
-// Only formats that are actually writable and that a survey or CAD user would
-// reasonably ask for. An extension absent from this table is rejected by name
-// rather than guessed at.
-constexpr DriverForExtension kVectorDrivers[] = {
-    {"shp", "ESRI Shapefile"}, {"geojson", "GeoJSON"}, {"json", "GeoJSON"},
-    {"gpkg", "GPKG"},          {"kml", "KML"},         {"gml", "GML"},
-    {"dxf", "DXF"},            {"csv", "CSV"},         {"sqlite", "SQLite"},
-    {"tab", "MapInfo File"},
 };
 
 // The raster formats a DEM is written in: the three every GIS and every
@@ -868,8 +860,11 @@ Result<std::unique_ptr<GdalDataset>> GdalDataset::open(const std::filesystem::pa
 {
     ensureRegistered();
 
+    // A local file that is not there is said so plainly. A /vsi path, a URL
+    // or a connection string is no file on this disk, and whether it exists
+    // is GDAL's to find out: std::filesystem::exists refused every one.
     std::error_code existsError;
-    if (!std::filesystem::exists(path, existsError)) {
+    if (!isVirtualPath(path) && !std::filesystem::exists(path, existsError)) {
         return makeError(ErrorCode::NotFound, "file does not exist", path.string());
     }
 
@@ -877,12 +872,29 @@ Result<std::unique_ptr<GdalDataset>> GdalDataset::open(const std::filesystem::pa
     for (const std::string& option : openOptions) {
         options.AddString(option.c_str());
     }
-    void* handle = GDALOpenEx(path.string().c_str(),
-                              GDAL_OF_READONLY | GDAL_OF_RASTER | GDAL_OF_VECTOR, nullptr,
-                              options.List(), nullptr);
+    // The path as it is, then - for an archive GDAL does not open as it is,
+    // a .zip of a shapefile - its inside (formats_detail.hpp). The first
+    // failure's message is the one worth reporting.
+    const detail::OpenNames names = detail::openNames(path);
+    void* handle = nullptr;
+    std::string failure;
+    for (const std::string& name : names.names) {
+        CPLErrorReset();
+        handle = GDALOpenEx(name.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER | GDAL_OF_VECTOR,
+                            nullptr, options.List(), nullptr);
+        if (handle != nullptr) {
+            break;
+        }
+        if (failure.empty()) {
+            failure = lastGdalError();
+        }
+    }
     if (handle == nullptr) {
+        if (!names.ambiguity.empty()) {
+            return makeError(ErrorCode::InvalidArgument, names.ambiguity, path.string());
+        }
         return makeError(ErrorCode::FileImportFailure,
-                         "GDAL could not open '" + path.string() + "'", lastGdalError());
+                         "GDAL could not open '" + path.string() + "'", failure);
     }
     // Private constructor, so make_unique is not available here.
     std::unique_ptr<GdalDataset> dataset(new GdalDataset());
@@ -1264,27 +1276,11 @@ Result<std::vector<VectorFeature>> GdalDataset::readFeatures(int layerIndex,
 
 Result<std::string> GdalDataset::vectorDriverForPath(const std::filesystem::path& path)
 {
-    ensureRegistered();
-    const std::string extension = lowerExtension(path);
-    if (extension.empty()) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "cannot choose a vector driver: the path has no extension",
-                         path.string());
-    }
-    for (const DriverForExtension& entry : kVectorDrivers) {
-        if (extension == entry.extension) {
-            if (GetGDALDriverManager()->GetDriverByName(entry.driver) == nullptr) {
-                return makeError(ErrorCode::Unsupported,
-                                 std::string("this GDAL build has no '") + entry.driver +
-                                     "' driver",
-                                 path.string());
-            }
-            return std::string(entry.driver);
-        }
-    }
-    return makeError(ErrorCode::Unsupported, "no vector driver is registered for '." + extension +
-                                                 "'",
-                     path.string());
+    // GDAL's registry, and its own choice among the writers that claim a
+    // name, with Katana's overlay (formats.hpp): the hand-kept table of ten
+    // extensions this replaced could not write a FlatGeobuf, a GeoParquet,
+    // a KMZ or a GPX that GDAL has writers for.
+    return vectorWriterFor(path);
 }
 
 Result<std::string> GdalDataset::rasterDriverForPath(const std::filesystem::path& path)
@@ -1480,6 +1476,11 @@ OgrField ogrFieldFor(const gp::FieldDef& field, const gp::FeatureTable& table, s
     const char* subTypes = driver.GetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES);
     const bool anyType = types == nullptr || *types == '\0';
     const auto has = [&](std::string_view name) { return anyType || listed(types, name); };
+    // KML's schema has no 64-bit integer (OGC KML 2.2, 9.5: a SimpleField is
+    // int, uint, short, ushort, float, double, bool or string), and LIBKML,
+    // which declares Integer64 all the same, writes one as a string: a count
+    // came back "3". So for it an Integer64 goes as an int where it fits.
+    const bool integer64AsText = std::string_view(driver.GetDescription()) == "LIBKML";
     switch (field.type) {
     case gp::FieldType::Boolean:
         if (has("Integer")) {
@@ -1487,7 +1488,7 @@ OgrField ogrFieldFor(const gp::FieldDef& field, const gp::FeatureTable& table, s
         }
         break;
     case gp::FieldType::Integer64: {
-        if (has("Integer64")) {
+        if (has("Integer64") && !integer64AsText) {
             return {OFTInteger64, OFSTNone};
         }
         const bool fits = std::ranges::all_of(table.features, [&](const gp::Feature& feature) {
@@ -1765,6 +1766,10 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
         }
     }
     if (driverHoldsOnlyLonLat(driverName)) {
+        // Said in the format's name: LIBKML, which writes a .kml and a .kmz
+        // (formats.hpp), is the name of GDAL's library, not of what a person
+        // asked for.
+        const std::string format = driverName == "LIBKML" ? std::string("KML") : driverName;
         converted = set;
         tables = &converted;
         for (std::size_t t = 0; t < converted.tables.size(); ++t) {
@@ -1772,10 +1777,10 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
             if (references[t] == nullptr) {
                 return makeError(
                     ErrorCode::InvalidCRS,
-                    driverName + " holds longitude and latitude on WGS 84 and nothing else, and "
-                                 "these coordinates are in no coordinate system Katana was told "
-                                 "of, so they cannot be converted: set the project's coordinate "
-                                 "system (CRS SET <code>) and export again",
+                    format + " holds longitude and latitude on WGS 84 and nothing else, and "
+                             "these coordinates are in no coordinate system Katana was told "
+                             "of, so they cannot be converted: set the project's coordinate "
+                             "system (CRS SET <code>) and export again",
                     path.string());
             }
             if (!isLonLat(*references[t])) {
@@ -1785,7 +1790,7 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
                 }
                 report.warnings.push_back("coordinates were converted from " + describeCrs(crs) +
                                           " to longitude and latitude on WGS 84 (EPSG:4326), the "
-                                          "only coordinates " + driverName + " holds");
+                                          "only coordinates " + format + " holds");
             }
             references[t] = std::make_unique<OGRSpatialReference>();
             references[t]->SetWellKnownGeogCS("WGS84");

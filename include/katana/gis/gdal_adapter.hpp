@@ -189,8 +189,9 @@ struct RasterExportOptions {
 };
 
 struct VectorExportOptions {
-    // Empty means "infer from the path's extension" - .shp, .geojson, .gpkg,
-    // .kml, .gml, .dxf. An explicit name overrides the extension.
+    // Empty means "the writer for the path's name" (vectorDriverForPath):
+    // .shp, .geojson, .gpkg, .kml and .kmz (LIBKML), .fgb, .parquet, .gpx,
+    // .shp.zip ... An explicit name overrides it.
     std::string driver;
     std::string layerName = "katana";
     // The coordinate system of a table that names none. A format that holds
@@ -217,8 +218,14 @@ struct FeatureSet;
 
 class GdalDataset {
   public:
-    // Opens a raster or vector dataset. Returns InvalidArgument when GDAL
-    // cannot open the path, with GDAL's own message as context.
+    // Opens a raster or vector dataset: a file, a folder GDAL reads (a file
+    // geodatabase), a /vsi path, a URL, or a driver's connection string
+    // (formats.hpp, isVirtualPath). An archive GDAL does not open as it is -
+    // a .zip of a shapefile, a .tar.gz of a GeoTIFF - is opened by its
+    // inside: as a folder, or its one dataset. NotFound for a local path that
+    // does not exist; FileImportFailure, with GDAL's own message as context,
+    // when GDAL cannot open it; InvalidArgument, naming them, for an archive
+    // of several datasets.
     [[nodiscard]] static katana::core::Result<std::unique_ptr<GdalDataset>>
     open(const std::filesystem::path& path);
     // The same with the driver's open options, KEY=VALUE.
@@ -313,15 +320,19 @@ class GdalDataset {
     writeTables(const std::filesystem::path& path, const processing::FeatureSet& set,
                 const VectorExportOptions& options);
 
-    // The driver GDAL would use for this path, or an error naming the extension
-    // when none is registered for it. Exposed so a UI can reject an unsupported
-    // extension before the user fills in a whole export dialog.
+    // The driver a vector path is written with - gis::vectorWriterFor, from
+    // GDAL's registry and its own choice for the name (formats.hpp) - or an
+    // error naming the extension when no writer claims it. Exposed so a UI
+    // can reject an unsupported extension before the user fills in a whole
+    // export dialog.
     [[nodiscard]] static katana::core::Result<std::string>
     vectorDriverForPath(const std::filesystem::path& path);
 
     // The same for a raster written by writeRaster: .tif/.tiff -> GTiff,
     // .asc -> AAIGrid, .img -> HFA. Unsupported, naming the extension, for
-    // anything else.
+    // anything else. Kept a table on purpose, not the registry: writeRaster
+    // writes a DEM's Float64 heights, and most raster writers GDAL has (PNG,
+    // JPEG, GIF) hold 8- or 16-bit integers.
     [[nodiscard]] static katana::core::Result<std::string>
     rasterDriverForPath(const std::filesystem::path& path);
 
