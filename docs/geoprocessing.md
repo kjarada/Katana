@@ -818,7 +818,112 @@ Not started.
 
 ### V4: GIS CHECK, REPAIR and COVERAGE
 
-Not started.
+```
+GIS CHECK [<scope>] [markers=<layer>] [PREVIEW]
+GIS REPAIR [<scope>] [method=linework|structure] [PREVIEW]
+GIS COVERAGE CHECK [<scope>] [gap=<m>] [markers=<layer>] [PREVIEW]
+GIS COVERAGE CLEAN [<scope>] [gap=<m>] [snap=<m>]
+                   [merge=longest-border|max-area|min-area|min-index] REPLACE [PREVIEW]
+```
+
+Invalid geometry in imported data, and the gaps and overlaps of a
+subdivision or a cadastral fabric (`src/katana_app/geo/check_verbs.cpp`).
+The window's items are GIS > Check - GDAL > Check Geometry..., Repair
+Geometry... and Gaps and Overlaps... (`gisCheck`, `gisRepair`, `gisCoverage`;
+`src/katana_qt/geo/geometry_check_dialog.hpp`, `coverage_dialog.hpp`), whose
+`<d>Problems` table lists the problem records of the last reply.
+
+**CHECK** runs `vector check-geometry` on the scope's lines and areas (a
+point cannot be invalid). It gives one problem record at each place GDAL
+found a defect, with GDAL's reason and the entity, which it carries back as
+`katana_id` (`--include-field`):
+
+```
+problem kind=self-intersection entity=7 at=35,5 reason=Self-intersection
+check features=2 problems=1 entities=1
+```
+
+The bow-tie (30,0) (40,10) (40,0) (30,10) crosses itself where x - 30 = y
+and 40 - x = y: at (35,5) (`GisCheck.ABowTieSelfIntersectsAt35Comma5`). A
+check changes nothing - unless `markers=<layer>` asks for a point at each
+problem. Those replace the markers the last check left on that layer (tagged
+`gis.marker=check`), in one step, the way AUTOLABEL replaces its rule's
+labels: a rerun never piles markers up, and a clean rerun clears them
+(`GisCheck.MarkersAreReplacedOnRerun`).
+
+**REPAIR** runs `vector make-valid` and changes only what came back
+different; a valid area is not even rewritten.
+
+- **In place.** The entity's geometry is replaced (`setEntityGeometry`), so
+  its id - and every label and association on it - is kept
+  (`GisCheck.RepairKeepsTheId`). An area keeps the way round it ran.
+- **Split.** A result of several parts - the bow-tie's two triangles of
+  25 m2 - keeps the id on the largest and makes the rest as copies of the
+  entity (layer, style, colour, properties) with `gis.source`; the reply
+  says which (`split entity=7 parts=2 kept=7 created=12`;
+  `GisCheck.RepairOfTheBowTieGivesTwoTrianglesOf25SquareMetresEach`).
+- **Holes.** An area is one ring, and its holes are entities of their own.
+  A result whose holes differ from the area's cannot be written on the
+  area, so it is left as it was, and said.
+- **Checked first.** It is an in-place apply: the entities are compared with
+  the copies taken at prepare, and a drawing changed while the job ran is
+  refused (`GisCheck.RepairRefusesADrawingChangedWhileItRan`).
+
+**COVERAGE CHECK** runs `vector check-coverage` on the scope's areas.
+
+- **Areas only.** check-coverage refuses mixed geometry (measured), so the
+  scope's points and lines are left out, counted (`ignored=`) and said
+  (`GisCheck.MixedGeometryInScopeIsFilteredAndCounted`).
+- **Joined back by order.** check-coverage carries no field, but with
+  `--include-valid` it gives one result per area, in order: that is how an
+  edge is joined to its entity.
+- **What an edge is.** GDAL says only that an edge is invalid. The verb says
+  why, from where the middles of the edge's segments lie against the other
+  areas: strictly inside one is an `overlap`; outside all and within `gap=`
+  of one is a `gap`; otherwise the edge lies on a neighbour's without
+  sharing its vertices, a `mismatch`
+  (`GisCheck.OverlappingLotsReportTheirOverlapEdges`,
+  `GisCheck.AnEnclosedGapNarrowerThanGapIsReported`).
+- `markers=<layer>` draws each bad edge as a polyline, replacing the last
+  run's (`gis.marker=coverage`).
+
+```
+problem kind=overlap entity=1 at=50,20 length=40.000 reason="the area overlaps a neighbour along this edge"
+coverage mode=check gap=0.05 areas=4 ignored=0 problems=2 entities=2 overlaps=0 gaps=2 mismatches=0
+```
+
+**COVERAGE CLEAN** runs `vector clean-coverage`, which moves boundaries so
+the areas meet. Legally surveyed boundaries must not be adjusted silently,
+so:
+
+- **it needs REPLACE**, and says why without it
+  (`GisCheck.CleanWithoutReplaceIsRefused`);
+- every clean that moves a boundary warns so, and one UNDO puts them all
+  back (`GisCheck.CleanClosesAnEnclosedGapAndOneUndoRestoresIt`: 12000 -
+  0.8 m2 becomes 12000);
+- it closes **enclosed** gaps only. A sliver open to the outside of the
+  fabric is not a gap to GEOS and stays (measured on GDAL 3.13.2).
+
+It applies as REPAIR does - in place, split parts made, compared first - and
+changes only the areas whose ring came back different: clean-coverage
+rewrites every ring's start and direction, so "changed" is judged by the
+ring (`vector::sameRing`), not the vertex list.
+
+**Shared** (`vector_support.hpp`): `reshapeCommand` is the in-place apply
+REPAIR, CLEAN and the clip of V3 use - the largest part on the id, the rest
+as copies - and `replaceMarkers` the markers' rerun rule.
+
+**Tests.** `tests/geo/test_check_verbs.cpp` (the bow-tie, the lots
+overlapping by a metre, four lots about a 0.02 m enclosed gap);
+`GisCheckContract.TheArgumentsTheVerbsBindAreGdals` pins check-geometry,
+make-valid, check-coverage and clean-coverage. The dialogs:
+`tests/qt_widgets/geo/test_check_dialogs.cpp`; the window:
+`qt_gis_check_dialog_headless`; katana_cli:
+`cli.gis_check_finds_the_bow_ties_crossing_at_35_5`,
+`cli.gis_repair_makes_the_bow_tie_two_triangles_of_25_square_metres`.
+
+**Not done.** A problem is not yet selectable from the table (the entity id
+is in its row); `simplify-coverage` stays in the GDAL verb and the toolbox.
 
 ### V5: GIS SQL and katana_gis_query
 

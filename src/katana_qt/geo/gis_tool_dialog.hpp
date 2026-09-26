@@ -34,6 +34,9 @@
 //   <d>Status    what happened last
 //   <d>Reply     the reply records, or why the line was refused (read-only)
 //   <d>Close     close
+// and a check's dialog (Check Geometry, Gaps and Overlaps) also
+//   <d>Problems  the problem records of the last reply as a table: kind,
+//                entity, where, length, reason
 
 #include <QDialog>
 #include <QPointer>
@@ -55,6 +58,8 @@ class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
 class QShowEvent;
+class QTableWidget;
+class QVBoxLayout;
 
 namespace katana::cad {
 class Document;
@@ -127,6 +132,8 @@ class GisToolDialog : public QDialog {
     virtual void reload();
     [[nodiscard]] QString replyText() const;
     [[nodiscard]] QString statusText() const;
+    // The <d>Problems table; null for a dialog that shows none.
+    [[nodiscard]] QTableWidget* problems() const { return problems_; }
 
   protected:
     void showEvent(QShowEvent* event) override;
@@ -144,6 +151,8 @@ class GisToolDialog : public QDialog {
     void refreshCommand();
     // What a reply says, in a sentence for <d>Status; a dialog may say more.
     [[nodiscard]] virtual QString summary(const QString& reply) const;
+    // Adds <d>Problems below the fields: a check's dialog.
+    void addProblemsTable();
     [[nodiscard]] const GisDialogContext& context() const { return context_; }
     [[nodiscard]] bool documentAlive() const;
 
@@ -156,11 +165,13 @@ class GisToolDialog : public QDialog {
     GisDialogContext context_;
     ScopeFilterWidget* scope_ = nullptr;
     QFormLayout* fields_ = nullptr;
+    QVBoxLayout* right_ = nullptr;
     QLineEdit* command_ = nullptr;
     QPushButton* preview_ = nullptr;
     QPushButton* run_ = nullptr;
     QLabel* status_ = nullptr;
     QPlainTextEdit* reply_ = nullptr;
+    QTableWidget* problems_ = nullptr;
     JobId pending_ = kNoJob;
     // Last, so it goes first: no delivery reaches a half-destroyed dialog.
     std::unique_ptr<DocumentWatcher> watcher_;

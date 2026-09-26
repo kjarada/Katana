@@ -23,6 +23,9 @@
 #include "geo/buffer_dialog.hpp"
 #include "geo/dissolve_dialog.hpp"
 #include "geo/gis_tool_dialog.hpp"
+// ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
+#include "geo/coverage_dialog.hpp"
+#include "geo/geometry_check_dialog.hpp"
 
 namespace katana::qt {
 
@@ -50,6 +53,24 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     // ---- V2: GIS > Analysis - GDAL > Overlay ----
     // ---- V3: GIS > Analysis - GDAL > Hull, Clip ----
     // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
+    addGisToolAction(menus, workbench, "Check - GDAL", Icon::Processing, "Check &Geometry...",
+                     "Invalid lines and areas - self-intersections and the like - each where it "
+                     "is, optionally marked on a layer - GIS CHECK",
+                     "gisCheck", [](GisDialogContext context, QWidget* parent) {
+                         return new GisCheckDialog(std::move(context), parent);
+                     });
+    addGisToolAction(menus, workbench, "Check - GDAL", Icon::Processing, "Repair Geo&metry...",
+                     "Make invalid areas valid in place, ids kept; a bow-tie becomes its two "
+                     "triangles - GIS REPAIR",
+                     "gisRepair", [](GisDialogContext context, QWidget* parent) {
+                         return new GisRepairDialog(std::move(context), parent);
+                     });
+    addGisToolAction(menus, workbench, "Check - GDAL", Icon::Processing, "Gaps &and Overlaps...",
+                     "Overlaps, enclosed gaps and edges that do not match between areas - and "
+                     "cleaning them, only when asked - GIS COVERAGE",
+                     "gisCoverage", [](GisDialogContext context, QWidget* parent) {
+                         return new GisCoverageDialog(std::move(context), parent);
+                     });
     // ---- V5: GIS > Analysis - GDAL > Query with SQL ----
     // ---- T1: Terrain > Analysis > Contours ----
     // ---- T2: Terrain > Analysis > Terrain Shading ----

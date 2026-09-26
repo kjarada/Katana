@@ -12,6 +12,7 @@
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/entity_geometry.hpp"
+#include "katana/math/numerics.hpp"
 #include "replies.hpp"
 
 namespace katana::app::geo::vector {
@@ -474,7 +475,8 @@ Result<std::vector<EntityId>> executeStep(Context& context, katana::commands::Co
 
 std::string outputRecord(std::string_view layer, const Applied& applied)
 {
-    return "output arg=output kind=vector target=layer layer=" + value(layer) +
+    return "output arg=output kind=vector " +
+           (layer.empty() ? std::string("target=in-place") : "target=layer layer=" + value(layer)) +
            " created=" + std::to_string(applied.created) +
            " updated=" + std::to_string(applied.updated) +
            " deleted=" + std::to_string(applied.deleted) +
@@ -535,6 +537,334 @@ std::optional<katana::entity::PropertyValue> propertyOf(const gp::FieldValue& va
             }
         },
         value);
+}
+
+// ---- reshaping entities in place ---------------------------------------------------------------
+
+namespace {
+
+using katana::gis::GeoPoint;
+using katana::gis::GeometryKind;
+using katana::gis::VectorGeometry;
+
+// A ring without the repeat of its first point GDAL closes it with.
+std::vector<GeoPoint> openRing(const std::vector<GeoPoint>& ring)
+{
+    std::vector<GeoPoint> points = ring;
+    if (points.size() > 1 && points.front().x == points.back().x &&
+        points.front().y == points.back().y) {
+        points.pop_back();
+    }
+    return points;
+}
+
+// Coordinates pass through GDAL's MEM datasets as doubles, so a vertex an
+// algorithm left alone comes back bit for bit; the tolerance is the model's
+// geometric one, for the arithmetic of one that was moved and put back.
+bool samePoint(const GeoPoint& a, const GeoPoint& b)
+{
+    return std::abs(a.x - b.x) <= katana::math::tolerance::kGeometric &&
+           std::abs(a.y - b.y) <= katana::math::tolerance::kGeometric;
+}
+
+bool sameHoles(const std::vector<std::vector<GeoPoint>>& before,
+               const std::vector<std::vector<GeoPoint>>& after)
+{
+    if (before.size() != after.size()) {
+        return false;
+    }
+    std::vector<bool> used(after.size(), false);
+    for (const auto& hole : before) {
+        bool found = false;
+        for (std::size_t h = 0; h < after.size() && !found; ++h) {
+            if (!used[h] && sameRing(hole, after[h])) {
+                used[h] = true;
+                found = true;
+            }
+        }
+        if (!found) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<std::vector<GeoPoint>> holesOf(const VectorGeometry& polygon)
+{
+    return polygon.parts.size() > 1
+               ? std::vector<std::vector<GeoPoint>>(polygon.parts.begin() + 1, polygon.parts.end())
+               : std::vector<std::vector<GeoPoint>>{};
+}
+
+double signedRingArea(const std::vector<GeoPoint>& ring)
+{
+    katana::geometry::Polyline2 line;
+    line.closed = true;
+    for (const GeoPoint& point : openRing(ring)) {
+        line.vertices.emplace_back(point.x, point.y);
+    }
+    return line.signedArea();
+}
+
+std::vector<std::optional<double>> heightsOf(const std::vector<GeoPoint>& points, bool hasZ)
+{
+    std::vector<std::optional<double>> heights;
+    for (const GeoPoint& point : points) {
+        heights.push_back(hasZ && std::isfinite(point.z) ? std::optional<double>(point.z)
+                                                         : std::nullopt);
+    }
+    return heights;
+}
+
+// A part as a copy of `from`: a ring as a closed polyline, a line as a line
+// or polyline.
+katana::entity::Entity copyWith(const katana::entity::Entity& from, const std::vector<GeoPoint>& points,
+                                bool ring, bool hasZ)
+{
+    katana::entity::Entity made = from;
+    made.id = katana::entity::kInvalidEntityId;
+    const std::vector<GeoPoint> used = ring ? openRing(points) : points;
+    if (!ring && used.size() == 2) {
+        made.geometry = katana::geometry::Segment2{{used[0].x, used[0].y}, {used[1].x, used[1].y}};
+    } else {
+        katana::geometry::Polyline2 line;
+        line.closed = ring;
+        for (const GeoPoint& point : used) {
+            line.vertices.emplace_back(point.x, point.y);
+        }
+        made.geometry = std::move(line);
+    }
+    katana::entity::setHeights(made.properties, heightsOf(used, hasZ));
+    return made;
+}
+
+} // namespace
+
+std::map<EntityId, const gp::Feature*> featuresById(const gp::FeatureSet& set)
+{
+    std::map<EntityId, const gp::Feature*> byId;
+    for (const gp::FeatureTable& table : set.tables) {
+        for (const gp::Feature& feature : table.features) {
+            if (const auto id = featureId(table, feature)) {
+                byId.emplace(*id, &feature);
+            }
+        }
+    }
+    return byId;
+}
+
+bool sameRing(const std::vector<GeoPoint>& a, const std::vector<GeoPoint>& b)
+{
+    const std::vector<GeoPoint> first = openRing(a);
+    const std::vector<GeoPoint> second = openRing(b);
+    if (first.size() != second.size()) {
+        return false;
+    }
+    const std::size_t n = first.size();
+    for (std::size_t start = 0; start < n; ++start) {
+        if (!samePoint(first[0], second[start])) {
+            continue;
+        }
+        bool forward = true;
+        bool backward = true;
+        for (std::size_t i = 0; i < n && (forward || backward); ++i) {
+            forward = forward && samePoint(first[i], second[(start + i) % n]);
+            backward = backward && samePoint(first[i], second[(start + n - i) % n]);
+        }
+        if (forward || backward) {
+            return true;
+        }
+    }
+    return n == 0;
+}
+
+bool sameShape(const gp::Feature& before, const gp::Feature& after)
+{
+    if (before.parts.size() != after.parts.size()) {
+        return false;
+    }
+    for (std::size_t p = 0; p < before.parts.size(); ++p) {
+        const VectorGeometry& was = before.parts[p];
+        const VectorGeometry& now = after.parts[p];
+        if (was.kind != now.kind || was.parts.empty() != now.parts.empty()) {
+            return false;
+        }
+        if (was.parts.empty()) {
+            continue;
+        }
+        if (was.kind == GeometryKind::Polygon) {
+            if (!sameRing(was.parts.front(), now.parts.front()) ||
+                !sameHoles(holesOf(was), holesOf(now))) {
+                return false;
+            }
+            continue;
+        }
+        const auto& line = was.parts.front();
+        const auto& other = now.parts.front();
+        if (line.size() != other.size()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < line.size(); ++i) {
+            if (!samePoint(line[i], other[i])) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+Result<Reshape> reshapeCommand(const katana::entity::Model& model,
+                               const std::vector<Reshaped>& reshaped, const std::string& op,
+                               const std::string& commandName)
+{
+    Reshape out;
+    gp::FeatureSet updates;
+    gp::FeatureTable& table = updates.tables.emplace_back();
+    table.name = "reshaped";
+    table.fields = {{"katana_id", gp::FieldType::Integer64}};
+    std::vector<katana::entity::Entity> made;
+    // The id the first made entity will have (ids are monotonic and the
+    // command makes them in order), so a part's rings name their exterior.
+    const EntityId firstId = model.entities.nextId();
+    std::size_t emptied = 0, holesChanged = 0, missing = 0, flattened = 0;
+    for (const Reshaped& one : reshaped) {
+        const katana::entity::Entity* entity = model.entities.find(one.id);
+        if (entity == nullptr) {
+            ++missing;
+            continue;
+        }
+        const GeometryKind kind =
+            one.before.parts.empty() ? GeometryKind::Unknown : one.before.parts.front().kind;
+        std::vector<const VectorGeometry*> parts;
+        for (const VectorGeometry& part : one.parts) {
+            if (part.kind == kind && !emptyGeometry(part)) {
+                parts.push_back(&part);
+            }
+        }
+        if (parts.empty()) {
+            ++emptied;
+            continue;
+        }
+        const auto size = [kind](const VectorGeometry* part) {
+            return kind == GeometryKind::Polygon ? geometryArea(*part) : geometryLength(*part);
+        };
+        std::size_t best = 0;
+        for (std::size_t p = 1; p < parts.size(); ++p) {
+            best = size(parts[p]) > size(parts[best]) ? p : best;
+        }
+        VectorGeometry kept = *parts[best];
+        if (kind == GeometryKind::Polygon) {
+            // An area is one ring and its holes entities of their own, which
+            // stay: a result that changed the holes cannot be written on it.
+            if (!sameHoles(holesOf(one.before.parts.front()), holesOf(kept))) {
+                ++holesChanged;
+                continue;
+            }
+            kept.parts.resize(1);
+            const auto* ring = std::get_if<katana::geometry::Polyline2>(&entity->geometry);
+            const double was = ring != nullptr ? ring->signedArea() : 1.0;
+            if ((was < 0.0) != (signedRingArea(kept.parts.front()) < 0.0)) {
+                std::ranges::reverse(kept.parts.front());
+            }
+        }
+        const bool hadHeights = std::ranges::any_of(one.before.parts, [](const VectorGeometry& part) {
+            return part.hasZ;
+        });
+        flattened += hadHeights && !kept.hasZ ? 1u : 0u;
+        gp::Feature feature;
+        feature.parts.push_back(std::move(kept));
+        feature.values.emplace_back(static_cast<std::int64_t>(one.id));
+        table.features.push_back(std::move(feature));
+        if (parts.size() == 1) {
+            continue;
+        }
+        Split split;
+        split.id = one.id;
+        split.parts = parts.size();
+        for (std::size_t p = 0; p < parts.size(); ++p) {
+            if (p == best) {
+                continue;
+            }
+            const VectorGeometry& part = *parts[p];
+            const std::size_t exterior = made.size();
+            for (std::size_t r = 0; r < part.parts.size(); ++r) {
+                katana::entity::Entity copy =
+                    copyWith(*entity, part.parts[r], kind == GeometryKind::Polygon, part.hasZ);
+                if (part.parts.size() > 1) {
+                    copy.properties["gis.ring"] = std::string(r == 0 ? "exterior" : "hole");
+                    copy.properties["gis.part"] = static_cast<std::int64_t>(firstId + exterior);
+                }
+                copy.properties["gis.op"] = op;
+                copy.properties["gis.source"] = static_cast<std::int64_t>(one.id);
+                made.push_back(std::move(copy));
+                ++split.made;
+                if (kind != GeometryKind::Polygon) {
+                    break; // a line has one part
+                }
+            }
+        }
+        out.splits.push_back(split);
+    }
+    igeo::ResultOptions options;
+    options.mode = igeo::ResultMode::UpdateGeometry;
+    options.commandName = commandName;
+    auto plan = igeo::resultCommand(model, updates, options);
+    if (!plan) {
+        return plan.error();
+    }
+    out.updated = plan->updated;
+    out.created = made.size();
+    out.left = emptied + holesChanged + missing + plan->skipped;
+    for (std::string& warning : plan->warnings) {
+        out.warnings.push_back(std::move(warning));
+    }
+    if (emptied != 0) {
+        out.warnings.push_back(std::to_string(emptied) +
+                               " entities came back with nothing of their kind and were left as "
+                               "they were");
+    }
+    if (holesChanged != 0) {
+        out.warnings.push_back(std::to_string(holesChanged) +
+                               " areas came back with other holes; an area and its holes are "
+                               "entities of their own, so they were left as they were");
+    }
+    if (missing != 0) {
+        out.warnings.push_back(std::to_string(missing) +
+                               " results name an entity the drawing no longer has");
+    }
+    if (flattened != 0) {
+        out.warnings.push_back(std::to_string(flattened) +
+                               " entities came back without heights and are now in plan");
+    }
+    if (!plan->command && made.empty()) {
+        return out;
+    }
+    auto transaction = std::make_unique<cmd::Transaction>(commandName);
+    if (plan->command) {
+        transaction->add(std::move(plan->command));
+    }
+    if (!made.empty()) {
+        transaction->add(cmd::createEntities(std::move(made)));
+    }
+    out.command = std::move(transaction);
+    return out;
+}
+
+std::vector<std::string> splitRecords(const std::vector<Split>& splits,
+                                      const std::vector<EntityId>& created)
+{
+    std::vector<std::string> records;
+    std::size_t at = 0;
+    for (const Split& split : splits) {
+        std::string ids;
+        for (std::size_t i = 0; i < split.made && at < created.size(); ++i, ++at) {
+            ids += (ids.empty() ? "" : ",") + std::to_string(created[at]);
+        }
+        records.push_back("split entity=" + std::to_string(split.id) +
+                          " parts=" + std::to_string(split.parts) + " kept=" +
+                          std::to_string(split.id) + " created=" + ids);
+    }
+    return records;
 }
 
 katana::commands::CommandPtr replaceMarkers(const katana::entity::Model& model,

@@ -12,7 +12,9 @@
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QHeaderView>
 #include <QRegularExpression>
+#include <QTableWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -20,6 +22,7 @@
 
 #include "customisation/document_watcher.hpp"
 #include "geo/geo_workbench.hpp"
+#include "geo/replies.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
 #include "theme.hpp"
@@ -152,10 +155,10 @@ GisToolDialog::GisToolDialog(const QString& name, const QString& title, GisDialo
     if (scope_ != nullptr) {
         middle->addWidget(scope_, 2);
     }
-    auto* right = new QVBoxLayout;
-    right->addWidget(fieldsBox);
-    right->addStretch(1);
-    middle->addLayout(right, 3);
+    right_ = new QVBoxLayout;
+    right_->addWidget(fieldsBox);
+    right_->addStretch(1);
+    middle->addLayout(right_, 3);
     auto* commandForm = new QFormLayout;
     commandForm->addRow("Command:", command_);
     auto* runRow = new QHBoxLayout;
@@ -252,6 +255,20 @@ void GisToolDialog::refreshCommand()
     preview_->setEnabled(line.ok());
 }
 
+void GisToolDialog::addProblemsTable()
+{
+    problems_ = new QTableWidget(0, 5, this);
+    problems_->setObjectName(name_ + "Problems");
+    problems_->setHorizontalHeaderLabels({"Kind", "Entity", "At", "Length", "Reason"});
+    problems_->horizontalHeader()->setStretchLastSection(true);
+    problems_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    problems_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    problems_->setToolTip("The problem records of the last reply, one a row");
+    problems_->setMinimumHeight(160);
+    // Above the stretch, under the fields.
+    right_->insertWidget(right_->count() - 1, problems_, 1);
+}
+
 QString GisToolDialog::replyText() const
 {
     return reply_->toPlainText();
@@ -323,6 +340,22 @@ void GisToolDialog::showOutcome(const VerbOutcome& outcome)
         text.chop(1);
     }
     reply_->setPlainText(text);
+    if (problems_ != nullptr) {
+        problems_->setRowCount(0);
+        for (const auto& record : katana::app::geo::parseRecords(outcome.reply.toStdString())) {
+            if (record.kind != "problem") {
+                continue;
+            }
+            const int row = problems_->rowCount();
+            problems_->insertRow(row);
+            int column = 0;
+            for (const char* key : {"kind", "entity", "at", "length", "reason"}) {
+                problems_->setItem(row, column++,
+                                   new QTableWidgetItem(QString::fromStdString(
+                                       record.get(key).value_or(std::string()))));
+            }
+        }
+    }
     if (!outcome.ok) {
         setStatus(outcome.error.section('\n', 0, 0), true);
         return;
