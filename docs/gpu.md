@@ -144,7 +144,12 @@ order the profile ranked them (2026-09-25):
    origin lane, each fail that test and the hand-worked one after it. The
    kernel has no minimum length: a probe build with the minimum at 1 packed
    four vertices as fast as the loop (minimums 64 against 67 ns; in the A/A
-   copy 66 against 68).
+   copy 66 against 68). On 64-bit ARM the same step is `simd/pack_neon.cpp`:
+   LD3 splits two vertices' doubles into x, y and z registers, FCVTN rounds
+   them to float, and ST4 interleaves them with the colour words into four
+   whole vertices. It is held to the loop by the same test, run under
+   qemu-aarch64 (`docs/performance.md`, "SIMD: NEON on 64-bit ARM"); its
+   any-length rule is the AVX2 kernel's, not measured on ARM.
 
 `tools/compare_benchmarks.py --alternate 7 BM_GpuPack before=... after=...
 after_again=...`, on the cloud container's 4-core Xeon at 2.10 GHz. `before`

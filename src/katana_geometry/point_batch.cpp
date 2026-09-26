@@ -23,18 +23,23 @@ static_assert(std::is_standard_layout_v<Vec3> && sizeof(Vec3) == 3 * sizeof(doub
               offsetof(Vec3, x) == 0 && offsetof(Vec3, y) == sizeof(double) &&
               offsetof(Vec3, z) == 2 * sizeof(double));
 
-#if defined(KATANA_HAVE_AVX2_KERNELS)
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
 
 // Below this a transform kernel spends its time in its scalar tail, and the
 // dispatch is pure cost. (Bounds have their own, measured, minimum in the
 // header: kBoundsBatchMinimum. Transforms have no caller yet to measure the
-// break-even for; 8 is two kernel steps.)
+// break-even for; 8 is two kernel steps - of the NEON kernels too, which take
+// the same four points a step, in registers of two.)
 constexpr std::size_t kTransformMinimum = 8;
 
-[[nodiscard]] bool avx2Active()
-{
-    return katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
-}
+// The one kernel set this build has: AVX2 on x86-64, NEON on 64-bit ARM.
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+constexpr auto kKernelLevel = katana::core::SimdLevel::Avx2;
+#else
+constexpr auto kKernelLevel = katana::core::SimdLevel::Neon;
+#endif
+
+[[nodiscard]] bool kernelActive() { return katana::core::activeSimdLevel() == kKernelLevel; }
 
 // Where a coordinate's extreme is zero, WHICH zero the sequential loop kept
 // depends on the order it met them: expand() keeps its running value unless the
@@ -60,15 +65,19 @@ void settleZero(double& extreme, const double* coordinates, std::size_t stride, 
     }
 }
 
-#endif // KATANA_HAVE_AVX2_KERNELS
+#endif // KATANA_HAVE_AVX2_KERNELS || KATANA_HAVE_NEON_KERNELS
 
 } // namespace
 
 void transformPoints(const Mat4& m, std::span<Vec3> points)
 {
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
+    if (points.size() >= kTransformMinimum && kernelActive()) {
 #if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (points.size() >= kTransformMinimum && avx2Active()) {
         katana_avx2_transform_points3(m.data.data(), &points.data()->x, points.size());
+#else
+        katana_neon_transform_points3(m.data.data(), &points.data()->x, points.size());
+#endif
         return;
     }
 #endif
@@ -79,9 +88,13 @@ void transformPoints(const Mat4& m, std::span<Vec3> points)
 
 void transformPoints(const Mat3& m, std::span<Point2> points)
 {
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
+    if (points.size() >= kTransformMinimum && kernelActive()) {
 #if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (points.size() >= kTransformMinimum && avx2Active()) {
         katana_avx2_transform_points2(m.data.data(), &points.data()->x, points.size());
+#else
+        katana_neon_transform_points2(m.data.data(), &points.data()->x, points.size());
+#endif
         return;
     }
 #endif
@@ -93,11 +106,15 @@ void transformPoints(const Mat3& m, std::span<Point2> points)
 Box2 detail::boundsOfBatch(std::span<const Point2> points)
 {
     Box2 box;
-#if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (avx2Active()) {
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
+    if (kernelActive()) {
         const double* xy = &points.data()->x;
         double out[4];
+#if defined(KATANA_HAVE_AVX2_KERNELS)
         katana_avx2_bounds2(xy, points.size(), out);
+#else
+        katana_neon_bounds2(xy, points.size(), out);
+#endif
         for (int k = 0; k < 4; ++k) {
             settleZero(out[k], xy + (k % 2), 2, points.size());
         }
@@ -115,11 +132,15 @@ Box2 detail::boundsOfBatch(std::span<const Point2> points)
 AABB detail::boundsOfBatch(std::span<const Vec3> points)
 {
     AABB box;
-#if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (avx2Active()) {
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
+    if (kernelActive()) {
         const double* xyz = &points.data()->x;
         double out[6];
+#if defined(KATANA_HAVE_AVX2_KERNELS)
         katana_avx2_bounds3(xyz, points.size(), out);
+#else
+        katana_neon_bounds3(xyz, points.size(), out);
+#endif
         for (int k = 0; k < 6; ++k) {
             settleZero(out[k], xyz + (k % 3), 3, points.size());
         }

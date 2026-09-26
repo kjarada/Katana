@@ -63,18 +63,25 @@ template <typename T> void grow(std::vector<T>& list, std::size_t extra)
     }
 }
 
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
+// The one kernel set this build has: AVX2 on x86-64, NEON on 64-bit ARM.
 #if defined(KATANA_HAVE_AVX2_KERNELS)
-[[nodiscard]] bool avx2Active()
-{
-    return katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
-}
+constexpr auto kKernelLevel = katana::core::SimdLevel::Avx2;
+#else
+constexpr auto kKernelLevel = katana::core::SimdLevel::Neon;
+#endif
+
+[[nodiscard]] bool kernelActive() { return katana::core::activeSimdLevel() == kKernelLevel; }
 
 // Below these the scalar loop is as quick as the kernel with its setup, so
 // small surfaces, meshes and fades take it at every level. Measured with the
 // thresholds at 1 (BM_SceneKernelBreakEven*, BM_SceneFadeEdges/1-4 in
 // benchmarks/bench_scene.cpp; docs/performance.md): a surface of 4 to 25
 // vertices was within the noise either way, a mesh of 2 faces and a fade of
-// 10 edge vertices already 2.5x and 3x quicker by kernel.
+// 10 edge vertices already 2.5x and 3x quicker by kernel. The NEON kernels
+// keep the same numbers unmeasured: each is a whole number of their steps
+// (two vertices or faces, four colours), and the set-up they repay - the
+// parameter block, the call - is the same whichever kernel follows.
 constexpr std::size_t kSurfaceKernelMinimum = 16; // vertices
 constexpr std::size_t kMeshKernelMinimum = 2;     // faces
 constexpr std::size_t kFadeKernelMinimum = 8;     // edge vertices
@@ -485,7 +492,8 @@ namespace {
 
 // What the kernels are handed: the scalar code's constants, laid out as
 // the kParam* indices of simd/scene_kernels.hpp say. Unused where the
-// kernels are not built (arm64, KATANA_SIMD_KERNELS=OFF).
+// kernels are not built (KATANA_SIMD_KERNELS=OFF, or a processor with neither
+// kernel set).
 [[maybe_unused, nodiscard]] std::array<double, simd::kParamCount>
 kernelParams(const Lift& lift, const Light& light, const Ramp& ramp)
 {
@@ -552,15 +560,24 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
     out.colors.resize(base + count);
     Vec3* const positions = out.positions.data() + base;
     Rgba* const colors = out.colors.data() + base;
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
+    if (count >= kSurfaceKernelMinimum && kernelActive()) {
 #if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (count >= kSurfaceKernelMinimum && avx2Active()) {
+        const auto sceneLift = katana_avx2_scene_lift;
+        const auto surfaceNormals = katana_avx2_scene_surface_normals;
+        const auto surfaceVertices = katana_avx2_scene_surface_vertices;
+#else
+        const auto sceneLift = katana_neon_scene_lift;
+        const auto surfaceNormals = katana_neon_scene_surface_normals;
+        const auto surfaceVertices = katana_neon_scene_surface_vertices;
+#endif
         const auto params = kernelParams(lift, light, ramp);
         scratch.lifted.resize(4 * count);
-        katana_avx2_scene_lift(&vertices.data()->x, count, params.data(), scratch.lifted.data());
+        sceneLift(&vertices.data()->x, count, params.data(), scratch.lifted.data());
         if (smooth) {
             scratch.summed.assign(4 * count, 0.0);
-            katana_avx2_scene_surface_normals(scratch.lifted.data(), triangles.data()->data(),
-                                              triangles.size(), scratch.summed.data());
+            surfaceNormals(scratch.lifted.data(), triangles.data()->data(), triangles.size(),
+                           scratch.summed.data());
         }
         // The ramp's degenerate case (one elevation) is one colour: flat.
         const bool ramped = !wire && item.coloring == SurfaceColoring::Elevation &&
@@ -568,10 +585,8 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
         const Rgba flat = wire ? wireColor
                                : (item.coloring == SurfaceColoring::Elevation ? ramp.at(ramp.low)
                                                                               : item.flatColor);
-        katana_avx2_scene_surface_vertices(scratch.lifted.data(), count,
-                                           smooth ? scratch.summed.data() : nullptr,
-                                           params.data(), flat, ramped ? 1 : 0, &positions->x,
-                                           colors);
+        surfaceVertices(scratch.lifted.data(), count, smooth ? scratch.summed.data() : nullptr,
+                        params.data(), flat, ramped ? 1 : 0, &positions->x, colors);
     } else
 #endif
     {
@@ -782,9 +797,14 @@ void SceneBuilder::appendMeshes(const std::vector<SceneMesh>& meshes, const Scen
     grow(out.positions, vertexCount);
     grow(out.colors, vertexCount);
     grow(out.triangles, triangleCount);
-#if defined(KATANA_HAVE_AVX2_KERNELS)
-    const bool kernels = avx2Active();
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
+    const bool kernels = kernelActive();
     const auto params = kernelParams(lift, light, Ramp{});
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+    const auto meshFaces = katana_avx2_scene_mesh_faces;
+#else
+    const auto meshFaces = katana_neon_scene_mesh_faces;
+#endif
 #endif
 
     for (const SceneMesh& item : meshes) {
@@ -801,7 +821,7 @@ void SceneBuilder::appendMeshes(const std::vector<SceneMesh>& meshes, const Scen
             shaded ? katana::render::rgba(40, 40, 45) : katana::render::rgba(190, 190, 190);
         const float bias = shaded ? options.edgeDepthBias : 0.0f;
 
-#if defined(KATANA_HAVE_AVX2_KERNELS)
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
         // Shaded without edges - how a mesh is drawn unless asked otherwise -
         // is three private vertices and a triangle a face: the kernel's shape.
         // It takes each run of faces that name real vertices; a face that
@@ -827,11 +847,9 @@ void SceneBuilder::appendMeshes(const std::vector<SceneMesh>& meshes, const Scen
                 const std::size_t first = out.positions.size();
                 out.positions.resize(first + 3 * run);
                 out.colors.resize(first + 3 * run);
-                katana_avx2_scene_mesh_faces(&mesh.vertices.data()->x, points,
-                                             mesh.faces.data()->data(), f, run, params.data(),
-                                             item.faceColors.data(), item.faceColors.size(),
-                                             item.flatColor, &out.positions[first].x,
-                                             &out.colors[first]);
+                meshFaces(&mesh.vertices.data()->x, points, mesh.faces.data()->data(), f, run,
+                          params.data(), item.faceColors.data(), item.faceColors.size(),
+                          item.flatColor, &out.positions[first].x, &out.colors[first]);
                 const std::size_t triangle = out.triangles.size();
                 out.triangles.resize(triangle + run);
                 for (std::size_t k = 0; k < run; ++k) {
@@ -1376,14 +1394,18 @@ bool SceneBuilder::fadeEdges(SceneLayers& layers, const katana::render::Camera& 
         if (strength != run.applied) {
             const std::size_t end = std::min<std::size_t>(run.first + run.count,
                                                           layers.edges.colors.size());
-#if defined(KATANA_HAVE_AVX2_KERNELS)
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
             if (end >= run.first + kFadeKernelMinimum && end <= layers.edgeBase.size() &&
-                end <= layers.edgeInk.size() && avx2Active()) {
+                end <= layers.edgeInk.size() && kernelActive()) {
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+                const auto fade = katana_avx2_scene_fade;
+#else
+                const auto fade = katana_neon_scene_fade;
+#endif
                 // strength is a whole number of eighths (above), exactly.
-                katana_avx2_scene_fade(layers.edgeBase.data() + run.first,
-                                       layers.edgeInk.data() + run.first, end - run.first,
-                                       static_cast<int>(strength * 8.0f),
-                                       layers.edges.colors.data() + run.first);
+                fade(layers.edgeBase.data() + run.first, layers.edgeInk.data() + run.first,
+                     end - run.first, static_cast<int>(strength * 8.0f),
+                     layers.edges.colors.data() + run.first);
                 run.applied = strength;
                 any = any || strength > 0.0f;
                 continue;
