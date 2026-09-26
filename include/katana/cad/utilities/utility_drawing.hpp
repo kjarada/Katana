@@ -137,6 +137,18 @@ inline constexpr std::string_view kFieldPrefix = "utility.field.";
 // point. Nothing is graded from them: they are what UTILITY SCHEDULE and
 // CHECK of the drawing write back, while they still read as the value held.
 inline constexpr std::string_view kRecordedPrefix = "utility.recorded.";
+// On a point UTILITY DRAW made from geometry in the drawing (utility_data.hpp,
+// readGeometryServices): the entity its line was read from, "#<entity id>".
+// What says that entity is drawn already, so a draw of the same scope again
+// draws only what is new. Provenance, not the schedule: no schedule column
+// carries it, and REGRADE keeps it on the point as it keeps a person's own.
+inline constexpr std::string_view kSource = "utility.source";
+// On geometry a service is drawn from, never on a drawn point: what the
+// heights of a line entity (every vertex) or a point (its vertex) are the
+// heights of - "surface", "service" or "none" (GeometryHeights). A string
+// shot on the ground marks whose potholes were shot on the pipe says it on
+// those points.
+inline constexpr std::string_view kHeights = "utility.heights";
 } // namespace keys
 
 // "water", "electricity", "telecommunications", "gas", "recycled-water",
