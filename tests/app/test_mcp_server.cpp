@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -441,6 +442,104 @@ TEST_F(McpServer, ImportLocalMovesAQuotedPathsDataToTheOrigin)
     EXPECT_FALSE(moved["isError"].get<bool>()) << textOf(moved);
     EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.x, 190.0);
     EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.y, -20.5);
+}
+
+TEST_F(McpServer, ImportReturnsStructuredRecords)
+{
+    // The reply's records as objects, numbers as numbers: an agent reads the
+    // entities that came in, the move LOCAL made and the reference layer's
+    // id without reading text. parcels.geojson: 8 features, the spoil heaps
+    // a MultiPolygon of two, so 9 entities; its lower-left corner (180, 0)
+    // moved to 0,0. terrain.asc: 120 x 90 cells.
+    initialize();
+    const std::string parcels =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "parcels.geojson").generic_string();
+    const Json imported = call("katana_import", Json{{"path", parcels}, {"placement", "local"}});
+    ASSERT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    const Json records = imported["structuredContent"]["records"];
+    ASSERT_GE(records.size(), 2u) << records.dump();
+    EXPECT_EQ(records[0]["record"], "imported");
+    EXPECT_EQ(records[0]["kind"], "vector");
+    EXPECT_EQ(records[0]["entities"], 9);
+    EXPECT_EQ(records[0]["bounds"], (Json{0.0, 0.0, 185.0, 165.0}));
+    EXPECT_EQ(records[1]["record"], "placed");
+    EXPECT_EQ(records[1]["placement"], "local");
+    EXPECT_EQ(records[1]["east"], -180);
+    EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 9);
+
+    const Json raster = call(
+        "katana_import",
+        Json{{"path", (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string()}});
+    ASSERT_FALSE(raster["isError"].get<bool>()) << textOf(raster);
+    const Json layer = raster["structuredContent"]["records"][1];
+    EXPECT_EQ(layer["record"], "reference");
+    EXPECT_EQ(layer["id"], 1);
+    EXPECT_EQ(layer["kind"], "raster");
+    EXPECT_EQ(layer["width"], 120);
+    EXPECT_EQ(layer["height"], 90);
+
+    // EXPORT the same way: what was written, as numbers.
+    const TempDir dir("export records");
+    const Json exported = call("katana_export", Json{{"path", dir.file("parcels.gpkg")}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    const Json written = exported["structuredContent"]["records"][0];
+    EXPECT_EQ(written["record"], "exported");
+    EXPECT_EQ(written["driver"], "GPKG");
+    EXPECT_EQ(written["features"], 9);
+}
+
+TEST_F(McpServer, DatasetInfoReturnsRecordsAndGdalsJson)
+{
+    // terrain.asc's header: 120 x 90 cells of 1.5 from (-5, -5), no-data
+    // -9999. The tool changes nothing and reads only the file.
+    initialize();
+    const std::string terrain =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string();
+    const Json described =
+        call("katana_dataset_info", Json{{"path", terrain}, {"json", true}, {"check", true}});
+    ASSERT_FALSE(described["isError"].get<bool>()) << textOf(described);
+    const Json& content = described["structuredContent"];
+    EXPECT_EQ(content["line"], "INFO \"" + terrain + "\" CHECK");
+    std::map<std::string, Json> first;
+    for (const Json& record : content["records"]) {
+        first.emplace(record["record"].get<std::string>(), record);
+    }
+    EXPECT_EQ(first["dataset"]["driver"], "AAIGrid");
+    EXPECT_EQ(first["raster"]["width"], 120);
+    EXPECT_EQ(first["raster"]["bounds"], (Json{-5.0, -5.0, 175.0, 130.0}));
+    EXPECT_EQ(first["band"]["nodata"], -9999);
+    EXPECT_EQ(first["check"]["code"], 0);
+    EXPECT_EQ(content["gdal"]["raster"]["driverShortName"], "AAIGrid");
+    EXPECT_EQ(session.document().model().entities.size(), 0u);
+}
+
+TEST_F(McpServer, ReferencesActsOnALayerByIdOrNameAndListsThemAfter)
+{
+    initialize();
+    const std::string terrain =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string();
+    ASSERT_FALSE(call("katana_import", Json{{"path", terrain}})["isError"].get<bool>());
+
+    const Json hidden = call("katana_references", Json{{"action", "hide"}, {"id", 1}});
+    ASSERT_FALSE(hidden["isError"].get<bool>()) << textOf(hidden);
+    EXPECT_EQ(hidden["structuredContent"]["line"], "REFS hide 1");
+    EXPECT_EQ(hidden["structuredContent"]["records"][0]["visible"], false);
+    ASSERT_EQ(hidden["structuredContent"]["references"].size(), 1u);
+    EXPECT_EQ(hidden["structuredContent"]["references"][0]["name"], "terrain");
+
+    const Json faded =
+        call("katana_references", Json{{"action", "opacity"}, {"id", "terrain"}, {"value", 0.25}});
+    ASSERT_FALSE(faded["isError"].get<bool>()) << textOf(faded);
+    EXPECT_EQ(faded["structuredContent"]["references"][0]["opacity"], 0.25);
+
+    // Overviews write beside the raster's file: refused unless confirmed.
+    const Json refused = call("katana_references", Json{{"action", "overviews"}, {"id", 1}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("confirm"), std::string::npos) << textOf(refused);
+
+    const Json listed = call("katana_references");
+    EXPECT_EQ(listed["structuredContent"]["line"], "REFS LIST");
+    EXPECT_EQ(listed["structuredContent"]["references"][0]["id"], 1);
 }
 #endif
 
