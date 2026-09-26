@@ -175,7 +175,8 @@ QDockWidget* openSurveyDock(katana::qt::MainWindow& window, const QString& name)
 }
 
 // --fill FIELD=TEXT. False, said on stderr, for a field the dialog does not
-// have or a value it cannot take - a test that fills nothing must not pass.
+// have, one that is disabled, or a value it cannot take - a test that fills
+// nothing must not pass.
 bool fillField(QWidget& dialog, const QString& assignment)
 {
     const qsizetype equals = assignment.indexOf('=');
@@ -186,6 +187,14 @@ bool fillField(QWidget& dialog, const QString& assignment)
     const QString name = assignment.left(equals);
     QString text = assignment.mid(equals + 1);
     auto* widget = dialog.findChild<QWidget*>(name);
+    // A person cannot type into a disabled field, and what it holds is not
+    // read into the line (gridToSurface was disabled and --fill filled it,
+    // silently): refused, as --press refuses a disabled button.
+    if (widget != nullptr && !widget->isEnabled()) {
+        std::fprintf(stderr, "--fill: %s's field %s is disabled\n", qPrintable(dialog.objectName()),
+                     qPrintable(name));
+        return false;
+    }
     if (auto* line = qobject_cast<QLineEdit*>(widget)) {
         line->setText(text);
         return true;

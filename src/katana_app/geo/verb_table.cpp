@@ -193,8 +193,9 @@ const std::vector<VerbEntry>& verbTable()
              "RASTER GRID [<scope>] [method=linear|invdist|invdistnn|nearest|average|...]\n"
              "          [cell=<m> | size=<columns>x<rows>] [z=geometry|<property>]\n"
              "          [extent=scope|x0,y0,x1,y1] [power=<p>] [radius=<m>] [NAME <name>]\n"
-             "          [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>]] [OVERWRITE]\n"
-             "          [PREVIEW]  the points in scope (and line vertices) gridded into a DEM;\n"
+             "          [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>] |\n"
+             "          TO SURFACE <name>] [OVERWRITE] [PREVIEW]  the points in scope (and line\n"
+             "          vertices) gridded into a DEM;\n"
              "          heightless entities are left out and counted, never read as 0"});
         // ---- T7: RASTER MOSAIC, CLIP, FILL, FOOTPRINT, REPROJECT, DIFFERENCE ----
         // <raster> := RASTER <id|name> | SURFACE <name> [CELL <m>] | FILE <path>; each
@@ -223,7 +224,8 @@ const std::vector<VerbEntry>& verbTable()
              "          or another raster's grid"});
         rows.push_back(
             {"RASTER", "DIFFERENCE", &prepareRasterDifference,
-             "RASTER DIFFERENCE <raster> <raster> [<scope>] [resampling=<method>]  the first\n"
+             "RASTER DIFFERENCE <raster> [MINUS] <raster> [<scope>] [resampling=<method>]  the "
+             "first\n"
              "          minus the second, aligned to the first; cut and fill volumes (grid\n"
              "          method) within the scope's closed boundaries"});
         // ---- V1: GIS BUFFER, GIS DISSOLVE ----

@@ -38,7 +38,7 @@
 //   gridRadius      the search radius, metres (radius=; methods that take one)
 //   gridName        the reference raster's name (NAME)
 //   gridToSurface   keep the grid as a named surface instead (TO SURFACE),
-//                   offered once the surface store takes a raster result
+//                   named by gridName
 //   gridCommand, gridPreview, gridRun, gridStatus, gridReply   (GeoRunPanel)
 
 #include <QDialog>
