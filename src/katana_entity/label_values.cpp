@@ -233,21 +233,48 @@ std::vector<LabelPiece> chainagePieces(const Alignment& alignment, const LabelSt
     return pieces;
 }
 
+// The segments of a curve polyline a label of `kind` labels: every one for
+// a segment label (an arc segment as an arc, a straight one as a segment),
+// the arc segments for an arc label; only `part` when it names one.
+std::vector<std::size_t> curveSegmentsLabelled(const katana::geometry::CurvePolyline2& curve,
+                                               LabelKind kind, std::int32_t part)
+{
+    std::vector<std::size_t> out;
+    for (std::size_t i = 0; i < curve.segmentCount(); ++i) {
+        if ((part >= 0 && static_cast<std::size_t>(part) != i) ||
+            (kind == LabelKind::Arc && !curve.isArc(i)) ||
+            curve.segmentLength(i) <= tol::kGeometric) {
+            continue;
+        }
+        out.push_back(i);
+    }
+    return out;
+}
+
 } // namespace
 
 bool labels(LabelKind kind, const Geometry& geometry)
 {
+    // A curve polyline (docs/drawing.md) is labelled as a polyline is - its
+    // arc segments as arcs - so a lot drawn with a curved frontage, or read
+    // from DXF with bulges, labels as a straight one did.
+    const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&geometry);
     switch (kind) {
     case LabelKind::Point:
         return std::holds_alternative<PointGeometry>(geometry);
     case LabelKind::Segment:
         return std::holds_alternative<Segment2>(geometry) ||
-               std::holds_alternative<Polyline2>(geometry);
+               std::holds_alternative<Polyline2>(geometry) ||
+               (curve != nullptr && curve->segmentCount() > 0);
     case LabelKind::Arc:
-        return std::holds_alternative<Arc2>(geometry) || std::holds_alternative<Circle2>(geometry);
+        return std::holds_alternative<Arc2>(geometry) || std::holds_alternative<Circle2>(geometry) ||
+               (curve != nullptr && curve->hasArcs());
     case LabelKind::Area:
         if (const auto* polyline = std::get_if<Polyline2>(&geometry)) {
             return polyline->closed && polyline->vertices.size() >= 3;
+        }
+        if (curve != nullptr) {
+            return curve->closed && curve->vertices.size() >= 3;
         }
         return std::holds_alternative<Circle2>(geometry);
     case LabelKind::Chainage:
@@ -271,6 +298,34 @@ std::vector<LabelPiece> labelPiecesFor(const Model& model, const Entity& target,
             pointPiece(target, std::get<PointGeometry>(target.geometry).position, codes));
         break;
     case LabelKind::Segment:
+    case LabelKind::Arc:
+        if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&target.geometry)) {
+            const auto& v = curve->vertices;
+            for (const std::size_t i : curveSegmentsLabelled(*curve, style.kind, part)) {
+                const std::size_t j = curve->segmentEnd(i);
+                const auto piece = curve->segment(i);
+                if (const auto* arc = std::get_if<Arc2>(&piece)) {
+                    pieces.push_back(arcPiece(target, *arc, codes));
+                } else {
+                    pieces.push_back(segmentPiece(target, v[i].position, v[j].position, i,
+                                                  v[i].height, v[j].height, codes));
+                }
+            }
+            break;
+        }
+        if (style.kind == LabelKind::Arc) {
+            if (const auto* arc = std::get_if<Arc2>(&target.geometry)) {
+                pieces.push_back(arcPiece(target, *arc, codes));
+            } else {
+                const auto& circle = std::get<Circle2>(target.geometry);
+                // A circle is labelled at its top, as a full-turn arc from north.
+                pieces.push_back(arcPiece(
+                    target, Arc2{circle.center, circle.radius, -0.5 * katana::math::kPi,
+                                 katana::math::kTwoPi},
+                    codes));
+            }
+            break;
+        }
         if (const auto* line = std::get_if<Segment2>(&target.geometry)) {
             const auto z = heightsOf(target.properties, 2);
             pieces.push_back(segmentPiece(target, line->start, line->end, 0, z[0], z[1], codes));
@@ -291,22 +346,17 @@ std::vector<LabelPiece> labelPiecesFor(const Model& model, const Entity& target,
             }
         }
         break;
-    case LabelKind::Arc:
-        if (const auto* arc = std::get_if<Arc2>(&target.geometry)) {
-            pieces.push_back(arcPiece(target, *arc, codes));
-        } else {
-            const auto& circle = std::get<Circle2>(target.geometry);
-            // A circle is labelled at its top, as a full-turn arc from north.
-            pieces.push_back(arcPiece(
-                target, Arc2{circle.center, circle.radius, -0.5 * katana::math::kPi,
-                             katana::math::kTwoPi},
-                codes));
-        }
-        break;
     case LabelKind::Area:
         if (const auto* polyline = std::get_if<Polyline2>(&target.geometry)) {
             pieces.push_back(areaPiece(target, insidePoint(*polyline), polyline->area(),
                                        polyline->length(), codes));
+        } else if (const auto* curve =
+                       std::get_if<katana::geometry::CurvePolyline2>(&target.geometry)) {
+            // The area and perimeter exact, arcs included; only where the
+            // label stands comes from the chords.
+            pieces.push_back(areaPiece(
+                target, insidePoint(curve->toPolyline(katana::geometry::kCurveChordTolerance)),
+                curve->area(), curve->length(), codes));
         } else {
             const auto& circle = std::get<Circle2>(target.geometry);
             pieces.push_back(
@@ -354,6 +404,17 @@ std::optional<Point2> labelAnchor(const Model& model, const LabelGeometry& label
         return std::nullopt;
     }
     const Geometry& geometry = target->geometry;
+    if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&geometry)) {
+        if (style.kind == LabelKind::Area) {
+            return insidePoint(curve->toPolyline(katana::geometry::kCurveChordTolerance));
+        }
+        const auto segments = curveSegmentsLabelled(*curve, style.kind, label.part);
+        if (segments.empty()) {
+            return std::nullopt;
+        }
+        return std::visit([](const auto& piece) { return piece.pointAt(0.5); },
+                          curve->segment(segments.front()));
+    }
     switch (style.kind) {
     case LabelKind::Point:
         return std::get<PointGeometry>(geometry).position;

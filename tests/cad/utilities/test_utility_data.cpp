@@ -612,6 +612,31 @@ TEST(UtilityData, RegradeFollowsAnEditedTypeToItsLayers)
     EXPECT_TRUE(session.document.model().layers.contains("utilities/sewer/points"));
 }
 
+TEST(UtilityData, ARunGivenAnArcIsStillItsLinesRunAndARegradeDrawsItAgain)
+{
+    // A run with an arc is stored as a curve polyline (docs/drawing.md,
+    // "Which kind a polyline is"). Still its line's run: were it not, a
+    // regrade would draw the line's runs again beside it.
+    Session session;
+    session.ok("UTILITY DRAW " + sample("schedule.csv"));
+    EntityId run = 0;
+    session.document.model().entities.forEach([&run](const Entity& entity) {
+        const auto line = entity.properties.find(std::string(keys::kLine));
+        if (run == 0 && entity.type() == EntityType::Polyline && line != entity.properties.end() &&
+            katana::entity::toString(line->second) == "W1") {
+            run = entity.id;
+        }
+    });
+    ASSERT_NE(run, 0u);
+    session.ok("VERTEX SET " + std::to_string(run) + " 0 bulge=0.1");
+    ASSERT_EQ(session.document.model().entities.find(run)->type(), EntityType::CurvePolyline);
+
+    session.ok("UTILITY REGRADE DRAWING");
+    EXPECT_EQ(drawing(session.document), drawnFrom(sample("schedule.csv")))
+        << "the arced run was left beside the runs drawn again";
+    EXPECT_EQ(session.document.model().entities.find(run), nullptr);
+}
+
 TEST(UtilityData, RegradeOfWhatNobodyEditedChangesNothingAndPushesNoStep)
 {
     Session session;
@@ -885,8 +910,10 @@ TEST(UtilityData, AnEntityDrawnAsTheDesignIsTheDesignFilesCentreLine)
     drawn.geometry = katana::geometry::Circle2{Point2(0, 0), 5.0};
     const auto circle = designFromEntity(drawn, std::nullopt);
     ASSERT_FALSE(circle.ok());
-    EXPECT_EQ(circle.error().message, "entity #7 is circle; the design centre line is a line or "
-                                      "a polyline");
+    // What is accepted, named: a curve polyline too, since the drawing
+    // system (docs/drawing.md, "The merge into main").
+    EXPECT_EQ(circle.error().message, "entity #7 is circle; the design centre line is a line, a "
+                                      "polyline or a curve polyline");
 }
 
 TEST(UtilityData, ClearanceTakesTheDesignFromAnEntityOrAnAlignment)

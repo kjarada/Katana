@@ -556,7 +556,11 @@ Result<UtilityData> readUtilityData(const Model& model, std::span<const EntityId
         Members& members = byLine[katana::entity::toString(*line)];
         if (entity.type() == EntityType::Point) {
             members.points.push_back(&entity);
-        } else if (entity.type() == EntityType::Polyline) {
+        } else if (entity.type() == EntityType::Polyline ||
+                   entity.type() == EntityType::CurvePolyline) {
+            // A run filleted or given an arc is stored as a curve polyline
+            // (docs/drawing.md) and is still the line's run: left out, a
+            // regrade would draw the run again beside it.
             members.runs.push_back(entity.id);
         }
     });
@@ -794,11 +798,28 @@ Result<sub::DesignAlignment> designFromEntity(const Entity& entity, std::optiona
         if (polyline->closed && points.size() >= 2) {
             points.push_back(points.front());
         }
+    } else if (const auto* curve =
+                   std::get_if<katana::geometry::CurvePolyline2>(&entity.geometry)) {
+        // A centre line with arcs - drawn so, or read from DXF with bulges -
+        // as chords within a millimetre, each with the height its vertices
+        // give it, interpolated along a segment.
+        sub::DesignAlignment design;
+        design.id = "#" + std::to_string(entity.id);
+        for (const auto& point : curve->tessellateWithHeights(katana::geometry::kCurveChordTolerance)) {
+            design.vertices.push_back(
+                {{point.position.y, point.position.x}, level ? level : point.height});
+        }
+        if (design.vertices.size() < 2) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "entity #" + std::to_string(entity.id) +
+                                 " has fewer than two vertices");
+        }
+        return design;
     } else {
         return makeError(ErrorCode::InvalidArgument,
                          "entity #" + std::to_string(entity.id) + " is " +
                              katana::core::lowered(katana::entity::toString(entity.type())) +
-                             "; the design centre line is a line or a polyline");
+                             "; the design centre line is a line, a polyline or a curve polyline");
     }
     if (points.size() < 2) {
         return makeError(ErrorCode::InvalidArgument,

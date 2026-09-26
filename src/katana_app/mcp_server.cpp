@@ -23,6 +23,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/import_placement.hpp"
@@ -161,7 +162,8 @@ Batch runLines(Session& session, const std::vector<std::string>& lines, const Ru
             // would leave the server running with nothing to serve.
             result.skipped = true;
             result.messages = "QUIT is not a command here: the MCP client ends the session.";
-        } else if ((verb == "NEW" || verb == "OPEN") && session.document().isModified() &&
+        } else if (katana::cad::CommandInterpreter::replacesDocument(line) &&
+                   session.document().isModified() &&
                    !options.discardUnsavedChanges) {
             // The interpreter replaces the drawing without asking, as a typed
             // NEW always has. A model is not a person looking at the window,

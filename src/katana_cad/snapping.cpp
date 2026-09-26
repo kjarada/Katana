@@ -592,7 +592,20 @@ std::optional<katana::entity::AnchorRef> snapAnchor(const katana::entity::Model&
         for (std::uint32_t i = 0; i < polyline->segmentCount(); ++i) {
             name(AnchorPoint::SegmentMid, i);
         }
-    } else if (std::holds_alternative<katana::entity::LeaderGeometry>(geometry)) {
+    } else if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&geometry)) {
+        // As a polyline: its segment middles are ON its arcs (resolveAnchor).
+        for (std::uint32_t i = 0; i < curve->vertices.size(); ++i) {
+            name(AnchorPoint::Vertex, i);
+        }
+        for (std::uint32_t i = 0; i < curve->segmentCount(); ++i) {
+            name(AnchorPoint::SegmentMid, i);
+        }
+    } else if (std::holds_alternative<katana::geometry::Ellipse2>(geometry)) {
+        name(AnchorPoint::Centre);
+        name(AnchorPoint::Start);
+        name(AnchorPoint::End);
+    } else if (std::holds_alternative<katana::geometry::Spline2>(geometry) ||
+               std::holds_alternative<katana::entity::LeaderGeometry>(geometry)) {
         name(AnchorPoint::Start);
         name(AnchorPoint::End);
     } else {

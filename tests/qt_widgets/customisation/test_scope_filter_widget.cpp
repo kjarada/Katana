@@ -206,6 +206,32 @@ TEST(ScopeFilterWidget, EveryControlCarriesTheNameItsDialogGivesIt)
     }
 }
 
+TEST(ScopeFilterWidget, EveryGeometryKindHasATypeBoxAndSaysItsNameInTheWordsTheGrammarReads)
+{
+    // The boxes are counted off the variant: the list once stopped at
+    // Dimension, so a label, a leader and the drawing system's curve
+    // polyline, ellipse and spline could be filtered by TYPE= but not here.
+    Bench bench;
+    ScopeFilterWidget& widget = bench.widget;
+    for (const char* part : {"TypeLabel", "TypeLeader", "TypeCurvePolyline", "TypeEllipse",
+                             "TypeSpline"}) {
+        EXPECT_NE(widget.findChild<QCheckBox*>(QStringLiteral("gm") + part), nullptr) << part;
+    }
+    press(widget, "gmScopeDrawing");
+    tick(widget, "gmTypeCurvePolyline");
+    tick(widget, "gmTypeSpline");
+    const std::string said = words(widget);
+    EXPECT_EQ(said, "DRAWING WHERE TYPE=curvepolyline,spline");
+    const auto tokens = CommandInterpreter::tokenize(said);
+    ASSERT_TRUE(tokens.ok());
+    std::size_t at = 0;
+    const auto read = katana::cad::parseScopeWords(*tokens, at);
+    ASSERT_TRUE(read.ok()) << said << ": " << read.error().describe();
+    const auto filter = widget.filter();
+    ASSERT_TRUE(filter.ok());
+    EXPECT_EQ(read->filter.types, filter->types) << "the words read back as the boxes say";
+}
+
 TEST(ScopeFilterWidget, OnlyTheChosenScopesOwnControlsAreLive)
 {
     Bench bench;

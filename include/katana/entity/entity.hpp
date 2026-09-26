@@ -43,6 +43,7 @@ enum class EntityType {
 };
 
 [[nodiscard]] std::string_view toString(EntityType type);
+// The kind named by toString's name, in any case ("curvepolyline", "LINE").
 [[nodiscard]] katana::core::Result<EntityType> entityTypeFromString(std::string_view name);
 
 // True when `text` is well-formed UTF-8. Defined in core (text_encoding.hpp),

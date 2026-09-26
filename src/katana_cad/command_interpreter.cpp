@@ -703,6 +703,20 @@ katana::core::Result<std::string> purgeTables(Document& document,
 
 } // namespace
 
+bool CommandInterpreter::replacesDocument(std::string_view line)
+{
+    const auto tokens = tokenize(line);
+    if (!tokens || tokens->empty()) {
+        return false;
+    }
+    std::string verb = upper(tokens->front());
+    if (const auto alias = aliases().find(verb); alias != aliases().end()) {
+        verb = alias->second;
+    }
+    const Tokens args(tokens->begin() + 1, tokens->end());
+    return verb == "NEW" || (verb == "OPEN" && !isDrawingVerb(verb, args));
+}
+
 CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
 {
     auto tokens = tokenize(line);
@@ -1484,16 +1498,7 @@ CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
         filter.layer = args[1];
         collect(filter);
     } else if (mode == "TYPE" && args.size() == 2) {
-        // entityTypeFromString expects the spelling of the enumerator, so the
-        // name is title cased. An empty argument has no first character to
-        // keep: begin() + 1 would then be past end() and the range would be
-        // inverted, so it is left alone and rejected below by name.
-        std::string name = upper(args[1]);
-        if (!name.empty()) {
-            std::transform(name.begin() + 1, name.end(), name.begin() + 1,
-                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        }
-        const auto type = katana::entity::entityTypeFromString(name);
+        const auto type = katana::entity::entityTypeFromString(args[1]);
         if (!type) {
             return type.error();
         }
@@ -2135,6 +2140,14 @@ CommandInterpreter::Reply CommandInterpreter::parcel(const Tokens& args)
     const Entity* entity = model.entities.find(*id);
     if (entity == nullptr) {
         return makeError(ErrorCode::NotFound, "no entity with that id", args[0]);
+    }
+    if (std::holds_alternative<katana::geometry::CurvePolyline2>(entity->geometry)) {
+        // Not chorded behind the surveyor's back: a legal description's arc
+        // course is radius, arc and chord, which parcelReport does not write.
+        return makeError(ErrorCode::Unsupported,
+                         "a parcel with arc courses is not reported yet; its courses are "
+                         "bearings and distances of straight sides",
+                         args[0]);
     }
     const auto* boundary = std::get_if<katana::geometry::Polyline2>(&entity->geometry);
     if (boundary == nullptr) {
