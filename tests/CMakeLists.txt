@@ -557,9 +557,43 @@ if(TARGET katana)
             "-DIMPORT_OPTIONS=${_gis}/survey_scan.las"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_options_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The vector import dialog, driven by its fields' names: where= goes to
+    # GDAL and Preview counts without importing. tests/geo/data/lots.geojson
+    # by hand: A and B are kind=lot, C kind=corridor - two of three match.
+    add_test(NAME qt_vector_import_dialog_previews_its_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DIMPORT_OPTIONS=${PROJECT_SOURCE_DIR}/tests/geo/data/lots.geojson"
+            "-DDRIVE=vectorImportWhere=kind = 'lot'|?vectorImportCommand|!vectorImportPreview|?vectorImportMatchCount"
+            "-DEXPECT=vectorImportCommand: IMPORT \"[^\"]*lots\\.geojson\" where=\"kind = 'lot'\".*vectorImportMatchCount: 2 of 3 features match; 2 entities would be imported"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/vector_import_dialog_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # File > Export Vector's dialog, opened for a file as the menu opens it
+    # once its file dialog has answered (^FILE), over a drawing the command
+    # line made: layer "other" holds lots A and B alone, so the filter takes
+    # two, Preview writes nothing and Run writes those two under the name
+    # given.
+    add_test(NAME qt_vector_export_dialog_writes_what_its_filter_takes_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>IMPORT \"${PROJECT_SOURCE_DIR}/tests/geo/data/lots.geojson\" crs=adopt|>LAYER NEW other|>IMPORT \"${PROJECT_SOURCE_DIR}/tests/geo/data/lots.geojson\" target=other where=\"kind = 'lot'\"|^${CMAKE_CURRENT_BINARY_DIR}/vector_export_dialog_headless.gpkg|vectorExportFilterLayer=other|vectorExportLayerName=lots_only|?vectorExportCommand|!vectorExportPreview|?vectorExportStatus|!vectorExportRun|?vectorExportStatus|>INFO \"${CMAKE_CURRENT_BINARY_DIR}/vector_export_dialog_headless.gpkg\""
+            "-DEXPECT=vectorExportCommand: EXPORT \"[^\"]*vector_export_dialog_headless\\.gpkg\" DRAWING WHERE LAYER=other layername=lots_only.*vectorExportStatus: Preview: 2 entities would be written; nothing was\\..*vectorExportStatus: Wrote 2 features to .*layer name=lots_only features=2 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/vector_export_dialog_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Removed first, so a file an earlier run left cannot stand in for the
+    # one this run's Run writes and INFO reads back.
+    set_tests_properties(qt_vector_export_dialog_writes_what_its_filter_takes_headless PROPERTIES
+        FIXTURES_REQUIRED vector_export_dialog_clean)
+    add_test(NAME qt_vector_export_dialog_clean
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_CURRENT_BINARY_DIR}/vector_export_dialog_headless.gpkg")
+    set_tests_properties(qt_vector_export_dialog_clean PROPERTIES FIXTURES_SETUP vector_export_dialog_clean)
     set_tests_properties(qt_surface_from_raster_headless qt_surface_from_cloud_headless
                          qt_new_drops_reference_data_headless
                          qt_dataset_info_headless qt_import_options_headless
+                         qt_vector_import_dialog_previews_its_line_headless
+                         qt_vector_export_dialog_writes_what_its_filter_takes_headless
         PROPERTIES ENVIRONMENT_MODIFICATION "${_qt_env}" TIMEOUT 180)
 
     # The layer manager (PLAN.MD 20.2 slice 6) over the sample project, whose

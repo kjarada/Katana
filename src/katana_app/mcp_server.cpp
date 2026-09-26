@@ -1158,6 +1158,32 @@ Json objectSchema(Json properties, std::vector<std::string> required)
     return schema;
 }
 
+namespace {
+
+// Every schema says additionalProperties: false, but a client need not check
+// it: an argument the tool does not take (a misspelt "split" for
+// "split_by_layer") was ignored, and the call ran without the option asked
+// for. Refused here, naming it and the arguments there are.
+void refuseUndeclared(const Tool& tool, const Json& arguments)
+{
+    const Json& properties = tool.inputSchema["properties"];
+    for (const auto& given : arguments.items()) {
+        if (properties.is_object() && properties.contains(given.key())) {
+            continue;
+        }
+        std::string known;
+        if (properties.is_object()) {
+            for (const auto& declared : properties.items()) {
+                known += (known.empty() ? "" : ", ") + declared.key();
+            }
+        }
+        throw ToolRefusal{std::string(tool.name) + " takes no argument \"" + given.key() + "\"" +
+                          (known.empty() ? std::string(": it takes none") : "; it takes " + known)};
+    }
+}
+
+} // namespace
+
 Json hints(bool readOnly, bool destructive, bool idempotent, bool openWorld)
 {
     Json annotations{{"readOnlyHint", readOnly}, {"openWorldHint", openWorld}};
@@ -1277,6 +1303,7 @@ std::optional<std::string> Server::handle(std::string_view message)
                                        : Json::object();
             ToolReply result;
             try {
+                refuseUndeclared(*tool, arguments);
                 result = tool->call(session_, arguments);
             } catch (const ToolRefusal& refusal) {
                 result = {"error: " + refusal.message, nullptr, true};

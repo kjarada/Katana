@@ -570,6 +570,30 @@ TEST_F(McpServer, ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes)
     EXPECT_NE(textOf(refused).find("NOPE"), std::string::npos) << textOf(refused);
 }
 
+TEST_F(McpServer, AnArgumentTheToolDoesNotDeclareIsRefusedByNameAndNothingRuns)
+{
+    // "split" is not katana_export's word ("split_by_layer" is). Ignored, the
+    // call wrote one layer where the agent asked for one per drawing layer.
+    initialize();
+    const std::string lots =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "../../tests/geo/data/lots.geojson")
+            .lexically_normal()
+            .generic_string();
+    ASSERT_FALSE(call("katana_import", Json{{"path", lots}})["isError"].get<bool>());
+    const TempDir dir("undeclared argument");
+    const std::string out = dir.file("lots.gpkg");
+    const Json refused = call("katana_export", Json{{"path", out}, {"split", true}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("katana_export takes no argument \"split\""), std::string::npos)
+        << textOf(refused);
+    EXPECT_NE(textOf(refused).find("split_by_layer"), std::string::npos) << textOf(refused);
+    EXPECT_FALSE(std::filesystem::exists(out));
+    // A tool that takes no arguments refuses any, saying so.
+    const Json none = call("katana_status", Json{{"verbose", true}});
+    EXPECT_TRUE(none["isError"].get<bool>());
+    EXPECT_NE(textOf(none).find("it takes none"), std::string::npos) << textOf(none);
+}
+
 TEST_F(McpServer, DatasetInfoReturnsRecordsAndGdalsJson)
 {
     // terrain.asc's header: 120 x 90 cells of 1.5 from (-5, -5), no-data
