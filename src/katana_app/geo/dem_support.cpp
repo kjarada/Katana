@@ -6,6 +6,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <variant>
 
@@ -178,7 +179,7 @@ double cellArea(const std::array<double, 6>& geotransform)
 
 Result<std::string> keepInPlace(Context& context, const std::filesystem::path& file,
                                 const std::string& name, const std::string& derivation,
-                                std::string_view arg)
+                                bool persisted, std::string_view arg)
 {
     const auto taken = [&](const std::string& candidate) {
         return std::ranges::any_of(context.reference.rasters(),
@@ -206,7 +207,41 @@ Result<std::string> keepInPlace(Context& context, const std::filesystem::path& f
     }
     return "output arg=" + value(arg) + " kind=raster target=reference id=" + std::to_string(id) +
            " name=" + value(unique) + " raster=" + std::to_string(width) + "x" +
-           std::to_string(height) + " file=" + value(utf8OfPath(file)) + " persisted=yes";
+           std::to_string(height) + " file=" + value(utf8OfPath(file)) +
+           " persisted=" + (persisted ? "yes" : "no");
+}
+
+Result<katana::gis::RasterInfo> rasterInfoOf(const gp::DatasetValue& dataset)
+{
+    if (const auto* grid = std::get_if<gp::RasterGrid>(&dataset)) {
+        return grid->info;
+    }
+    if (const auto* path = std::get_if<gp::DatasetPath>(&dataset)) {
+        auto opened = katana::gis::GdalDataset::open(pathOfUtf8(path->path));
+        if (!opened) {
+            return opened.error();
+        }
+        return (*opened)->rasterInfo();
+    }
+    return makeError(ErrorCode::InvalidArgument, "a feature set is not a raster");
+}
+
+katana::core::Status moveFile(const std::filesystem::path& from, const std::filesystem::path& to)
+{
+    std::error_code error;
+    std::filesystem::create_directories(to.parent_path(), error);
+    std::filesystem::rename(from, to, error);
+    if (!error) {
+        return {};
+    }
+    error.clear();
+    std::filesystem::copy_file(from, to, std::filesystem::copy_options::overwrite_existing, error);
+    if (error) {
+        return makeError(ErrorCode::FileExportFailure, "could not keep the file: " + error.message(),
+                         utf8OfPath(to));
+    }
+    std::filesystem::remove(from, error);
+    return {};
 }
 
 } // namespace katana::app::geo

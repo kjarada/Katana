@@ -470,10 +470,11 @@ A/A spreads in any run.
 
 ## DEMs from GDAL
 
-DEMs are made through GDAL's algorithms, on the one geoprocessing executor
-(`docs/geoprocessing.md`): `RASTER GRID` makes one from surveyed points. The
-results are reference rasters (derived, with the line that made them as their
-derivation) or files. The DEM verbs share `src/katana_app/geo/dem_support.hpp`:
+DEMs are made and worked on through GDAL's algorithms, on the one
+geoprocessing executor (`docs/geoprocessing.md`): `RASTER GRID` makes one from
+surveyed points, and the DEM tools mosaic, clip, fill, trace, reproject and
+difference them. The results are reference rasters (derived, with the line
+that made them as their derivation), files, or closed polylines on a layer. The DEM verbs share `src/katana_app/geo/dem_support.hpp`:
 a curated verb's own `key=value` options read wherever they stand, band 1 read
 at full precision, a cell's area, and a raster written where a line said kept
 in place.
@@ -564,3 +565,109 @@ output is Float64; 1e-9). Inverse distance with a radius of 8 m on a 10 m
 lattice takes the four points round each 10 m cell's centre, 7.07 m away,
 equally weighted, and the mean of a plane at four symmetric corners is the
 plane at the centre: 107.75 at (55, 45).
+
+### The DEM tools
+
+```
+RASTER MOSAIC <raster> [<raster>...] [resolution=same|highest|lowest|average|<x>,<y>] [SAVE <file>]
+RASTER CLIP <raster> AREA x0,y0,x1,y1 | <scope>
+RASTER FILL <raster> [distance=<cells>] [smoothing=<n>] [strategy=invdist|nearest]
+RASTER FOOTPRINT <raster> [TO LAYER <path> | TO FILE <path>]
+RASTER REPROJECT <raster> [crs=<crs> | like=<raster>] [from=<crs>] [resampling=<method>] [cell=<m>]
+RASTER DIFFERENCE <raster> <raster> [<scope>] [resampling=<method>]
+  and on each: [NAME <name>] [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>]]
+               [OVERWRITE] [PREVIEW]
+
+<raster> := RASTER <id|name> | SURFACE <name> [CELL <m>] | FILE <path>
+```
+
+`src/katana_app/geo/dem_verbs.cpp`, on GDAL's `raster mosaic`, `clip`,
+`fill-nodata`, `footprint`, `reproject` and `calc`. A raster result is a
+derived reference raster (`mosaic`, `clip`, `filled`, `reprojected`,
+`difference`, or NAME's name); the footprint is closed polylines on
+`gis/footprint`, one undo step.
+
+- **MOSAIC is a VRT.** The tiles are read where they are, so a mosaic of a
+  hundred tiles costs a small file, kept in the derived folder with the
+  tiles' absolute paths. `SAVE <file>` writes the mosaic out as a file of its
+  own (GeoTIFF for `.tif`) and keeps that file as the reference raster. A
+  keyword rather than `save=`: an option's value is one unquoted word, and a
+  path may hold blanks. A `FILE` source may be a folder - every file in it
+  GDAL reads as a raster, so a `.prj` or a note is no tile - or a pattern
+  (`tiles/*.tif`); either is expanded on the worker, in name order, so the
+  mosaic is the same whatever order the file system lists them. A surface is
+  no tile and is refused. Tiles whose bands differ in colour interpretation
+  are refused in GDAL's words ("heterogeneous band color interpretation").
+- **CLIP's AREA is the box itself.** Any other scope clips to the closed
+  boundaries it takes (GDAL's cutline: a cell stays when its centre is
+  inside); points and open lines bound nothing, and a scope with no closed
+  boundary answers `ran=no`. `AREA ... WHERE` is refused: a box has no
+  boundaries to filter. The boundaries carry the project's coordinate system
+  and GDAL brings them into the raster's; when either has none they are taken
+  to agree.
+- **FILL counts.** The reply says how many cells were empty, how many were
+  filled and how many are left; a raster with none empty answers `ran=no` and
+  makes nothing.
+- **REPROJECT refuses a raster that says nothing of where it is.** GDAL
+  reprojects it from nowhere without a word (measured: the plane with no CRS
+  "reprojected" to EPSG:28356 came back unchanged). `from=<crs>` says where
+  it is. With no `crs=` the target is the project's coordinate system, and a
+  drawing with none refuses, naming `crs=` and `like=`. `like=<raster>` is a
+  reference raster whose grid - system, extent, cells - the result takes.
+- **DIFFERENCE is the first minus the second.** Positive is fill (the first
+  above the second: design above ground), negative is cut. The second is
+  aligned to the first's grid only when the grids differ, by `raster
+  reproject` with the first's extent, size and system said outright
+  (bilinear unless `resampling=` says otherwise): GDAL's `--like` says the
+  same in one word but is ignored, without a word, when the rasters have no
+  CRS (measured: a 2 m grid "aligned" to a 1 m one stayed 2 m). One raster
+  with a system and the other without is refused: there is nothing to align
+  by. The subtraction is `raster calc`'s builtin `diff` (this GDAL has
+  neither muparser nor ExprTk). An optional scope clips the difference to its
+  closed boundaries before it is summed. The volumes are the cells' depths
+  summed with `math::CompensatedSum`, times the cell's area, and labelled
+  with the method: `method=grid label="grid method, cell 1 m"`.
+
+A difference's reply:
+
+```
+difference algorithm="raster calc" aligned=yes cell=1 cells=1200 area=1200.000 cut=0.000 fill=360.000 net=360.000 method=grid label="grid method, cell 1 m" seconds=0.021
+input arg=first source=file file=raised.tif
+input arg=second source=file file=plane.asc
+output arg=output kind=raster target=reference id=1 name=difference raster=40x30 file="..." persisted=no
+```
+
+**The window.** Terrain > DEM > DEM Tools (`terrainDemTools`) opens
+`demToolsDialog` (`src/katana_qt/geo/dem_tools_dialog.hpp`), a tab per tool.
+Each tab's raster comes from a binding picker (`binding_picker.hpp`: a
+reference raster, a surface and its cell, or a file); CLIP's boundaries and
+DIFFERENCE's limit are Global Modify's scope and filter controls. The lines
+are made by `demToolCommandLine`, a pure function, and run through the
+window's one executor. When a job ends the pickers reload, so what one tool
+made is offered to the next.
+
+**Tests.** `tests/geo/test_dem_verbs.cpp` (the executor, a Session and the
+MCP server), `tests/qt_widgets/geo/test_dem_tools_dialog.cpp`,
+`cli.raster_*` (`src/katana_app/geo/cli/dem.cmake`) and
+`qt_dem_tools_clip_then_footprint_through_the_dialog_headless`
+(`tests/geo/headless/dem.cmake`). The values, by hand, on plane.asc (40 x 30
+cells of 1 m, z = 100 + 0.05x, read as Float32):
+
+- the halves of the plane mosaicked again are the whole: GDAL's `raster
+  compare` returns 0;
+- AREA 0,0,20,15 on 1 m cells: 20 x 15;
+- a 3 x 3 hole filled: every filled cell lies between the plane's values on
+  the one-cell ring round the hole, 100.925 and 101.125 - an inverse-distance
+  mean has positive weights, so it lies between the values it weighs; its
+  weights are not symmetric, so the centre is not exact (measured 0.049 m
+  off);
+- the footprint of a full raster is its extent: 0,0 - 40,30, 1200 m2;
+- reprojected into its own system, a raster keeps its grid and every value;
+- the plane raised 0.3 m minus the plane: 0.3 in every cell, to an ulp of
+  100 (1.4e-14; the raised copy is written from the very values GDAL reads),
+  and 0.3 x 1200 = 360 m3 of fill; the other way round, 360 m3 of cut; within
+  a 10 x 10 m rectangle, 30 m3;
+- a second raster on 2 m cells aligned to the first's 1 m grid by bilinear
+  interpolation, which reproduces a linear function exactly between the
+  centres it interpolates: -0.3 in every cell with 2 m centres on both
+  sides, to 1e-9.
