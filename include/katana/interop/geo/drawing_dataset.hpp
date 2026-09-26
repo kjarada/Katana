@@ -36,7 +36,9 @@
 //   UpdateGeometry  the geometry of the entity each katana_id names; its id,
 //                   and so its labels and associations, are kept.
 //   SetProperties   the fields as properties of the entity each katana_id names.
-//   deleteSources   the entities the features came from are deleted (REPLACE).
+//   A REPLACE is the verb's own: it deletes what its scope took (GIS
+//   DISSOLVE) or what fell outside (GIS CLIP), the holes an area took in
+//   (DrawingDataset::holes) with it, in the same step as this command.
 
 #include <cstddef>
 #include <map>
@@ -91,6 +93,11 @@ struct DrawingDatasetStats {
 struct DrawingDataset {
     katana::gis::processing::FeatureSet set;
     DrawingDatasetStats stats;
+    // The hole entities each area took in, by the area's id, in the order
+    // they were joined. A feature carries only its area's katana_id, so an
+    // in-place verb that deletes an area (GIS CLIP REPLACE) finds its holes
+    // here: left behind, a hole would be read as an area of its own.
+    std::map<katana::entity::EntityId, std::vector<katana::entity::EntityId>> holes;
 };
 
 // The entities `ids` names, in that order, as tables. An id the model does
@@ -111,8 +118,6 @@ struct ResultOptions {
     // Put before each field's name when it becomes a property ("zone." ->
     // zone.mean); empty for none.
     std::string propertyPrefix;
-    // Delete the entities the features came from (gis.source): REPLACE.
-    bool deleteSources = false;
     // The transaction's name: the verb line, so the history says what ran.
     std::string commandName;
 };
@@ -121,6 +126,8 @@ struct ResultPlan {
     // nullptr when there is nothing to do: an empty transaction is refused
     // by the command stack, and a result of nothing changes nothing.
     katana::commands::CommandPtr command;
+    // deleted stays 0: resultCommand deletes nothing (a verb's REPLACE
+    // counts its own); the GDAL verb's output record still says it.
     std::size_t created = 0, updated = 0, deleted = 0, skipped = 0;
     std::vector<std::string> layers;   // the layers written to, in first-use order
     std::vector<std::string> warnings; // what could not be carried, said

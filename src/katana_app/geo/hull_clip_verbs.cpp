@@ -421,9 +421,17 @@ Result<Prepared> prepareClip(Context& context, const Tokens& tokens, std::string
     }
 
     const auto input = std::make_shared<const gp::FeatureSet>(subject->dataset.set);
+    // An area wholly outside goes with the holes it took in, so they are
+    // compared at apply too: deleting a hole moved while the job ran would
+    // lose the move.
+    const auto holes = std::make_shared<const std::map<EntityId, std::vector<EntityId>>>(
+        replace ? subject->dataset.holes : std::map<EntityId, std::vector<EntityId>>{});
     std::vector<EntityId> ids;
     for (const auto& [id, feature] : vec::featuresById(*input)) {
         ids.push_back(id);
+        if (const auto found = holes->find(id); found != holes->end()) {
+            ids.insert(ids.end(), found->second.begin(), found->second.end());
+        }
     }
     const auto copies = std::make_shared<const std::vector<katana::entity::Entity>>(
         replace ? vec::copiesOf(context.document, ids) : std::vector<katana::entity::Entity>{});
@@ -431,8 +439,9 @@ Result<Prepared> prepareClip(Context& context, const Tokens& tokens, std::string
     const std::string commandName(katana::core::trimmed(line));
     Prepared prepared;
     prepared.title = "GIS CLIP";
-    prepared.work = [input, boundary, replace, copies, target, settings, records, commandName](
-                        const std::stop_token& stop, const Progress& progress) -> Result<Apply> {
+    prepared.work = [input, boundary, replace, copies, holes, target, settings, records,
+                     commandName](const std::stop_token& stop,
+                                  const Progress& progress) -> Result<Apply> {
         const Clock::time_point start = Clock::now();
         std::vector<std::string> warnings;
         gp::RunRequest request;
@@ -469,21 +478,25 @@ Result<Prepared> prepareClip(Context& context, const Tokens& tokens, std::string
         std::size_t whole = 0;
         std::vector<vec::Reshaped> cut;
         std::vector<EntityId> gone;
+        std::size_t outside = 0;
         for (const auto& [id, was] : before) {
             const auto found = pieces.find(id);
             if (found == pieces.end()) {
+                ++outside;
                 gone.push_back(id);
+                if (const auto joined = holes->find(id); joined != holes->end()) {
+                    gone.insert(gone.end(), joined->second.begin(), joined->second.end());
+                }
             } else if (vec::sameShape(*was, found->second)) {
                 ++whole;
             } else {
                 cut.push_back(vec::Reshaped{id, found->second.parts, *was});
             }
         }
-        const std::string summary = settings + " whole=" + std::to_string(whole) +
-                                    " cut=" + std::to_string(cut.size()) +
-                                    " outside=" + std::to_string(gone.size()) +
-                                    " area=" + fixed3(measures.area) +
-                                    " length=" + fixed3(measures.length);
+        const std::string summary =
+            settings + " whole=" + std::to_string(whole) + " cut=" + std::to_string(cut.size()) +
+            " outside=" + std::to_string(outside) + " area=" + fixed3(measures.area) +
+            " length=" + fixed3(measures.length);
         const double seconds = secondsSince(start);
         auto kept = std::make_shared<const gp::FeatureSet>(std::move(clipped));
         auto cuts = std::make_shared<const std::vector<vec::Reshaped>>(std::move(cut));

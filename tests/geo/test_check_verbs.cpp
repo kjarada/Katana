@@ -253,6 +253,28 @@ TEST_F(GisCheck, CleanClosesAnEnclosedGapAndOneUndoRestoresIt)
     EXPECT_EQ(problems(ok("GIS COVERAGE CHECK LAYERS lots gap=0.05")).size(), 2u);
 }
 
+TEST_F(GisCheck, CleanRefusesADrawingChangedWhileItRan)
+{
+    // Prepared, then lot L moves before the apply: writing the cleaned
+    // boundaries now would undo the move, so the apply refuses and changes
+    // nothing.
+    gapFixture();
+    const EntityId left = on("lots").front().id;
+    auto prepared =
+        katana::app::geo::prepare(context, "GIS COVERAGE CLEAN LAYERS lots gap=0.05 REPLACE");
+    ASSERT_TRUE(prepared.ok()) << prepared.error().describe();
+    auto apply = prepared->work({}, {});
+    ASSERT_TRUE(apply.ok()) << apply.error().describe();
+    ASSERT_TRUE(
+        document.execute(katana::commands::moveEntities({left}, katana::math::Vec2(0.0, 1.0)))
+            .ok());
+    const std::vector<Entity> moved = on("lots");
+    auto applied = (*apply)(context);
+    ASSERT_FALSE(applied.ok());
+    EXPECT_EQ(applied.error().code, ErrorCode::InvalidState);
+    EXPECT_EQ(on("lots"), moved);
+}
+
 TEST_F(GisCheck, MixedGeometryInScopeIsFilteredAndCounted)
 {
     // check-coverage refuses anything but areas: the line and the point are
