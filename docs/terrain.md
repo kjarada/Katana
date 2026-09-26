@@ -565,6 +565,82 @@ record of the reference raster, `saved file=` with `save=`, then one
 - **A legend on the sheet.** The legend is in the reply (and the dialog's);
   placing it on a sheet is the plotting legend's work.
 
+## Slope and aspect
+
+RASTER SLOPE and RASTER ASPECT (`src/katana_app/geo/slope_verbs.cpp`) keep
+the slope or the aspect of a surface or an elevation raster as a derived
+reference raster, and RASTER SLOPE draws slope classes as areas. The
+window's Terrain > Analysis > Slope and Aspect (`slopeAnalysisDialog`) only
+builds their lines:
+
+```
+RASTER SLOPE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
+             [unit=percent|degree] [classes=<b1>,<b2>,...] [areas=terrain/slope]
+             [min_area=<m2>] [NAME <n>] [<scope>] [PREVIEW]
+RASTER ASPECT <source> [NAME <n>] [<scope>] [PREVIEW]
+```
+
+The reply: the `input` record, the scope's (`scope arg=area ...`, `areas
+used= skipped.open= skipped.points=`), `slope unit= method=horn raster=WxH
+cell=` (or `aspect convention=azimuth flat=nodata ...`), `sieved min_area=
+cells=` with `min_area=`, the reference raster's `output` record, then with
+classes `output arg=areas ... created=`, one `class name= from= to= unit=
+area= polygons=` per class and a `legend value= r= g= b=` per class colour.
+
+- **GDAL computes them:** `raster slope` and `raster aspect`, Horn's 3 x 3
+  window, the edges interpolated by GDAL's own edge rule (a corner of a
+  plane reads half its gradient: 2.5 % on the 5 % fixture). Aspect is
+  degrees clockwise from north; flat ground has none (no-data).
+- **The raster kept is the values,** at full precision, so another verb reads
+  it as `RASTER <id>` (zonal statistics of slope, contours of it); its
+  display copy is replaced by a coloured picture of the same grid - by class
+  when there are classes, else the slope ramp over the slope's range, and
+  aspect's eight compass colours round the circle, north at both ends - so
+  it is not drawn as a grey stretch of its values.
+- **Percent by default,** as grades are read in civil design (a 1:4 batter
+  is 25 %); `unit=degree` for degrees.
+- **Classes.** `classes=5,10,25` makes [0,5), [5,10), [10,25) and 25 and up,
+  named `0-5`, `5-10`, `10-25`, `25+`. GDAL's `raster reclassify` sorts the
+  cells (to Int16: its UInt8 cannot hold the -9999 no-data), `raster sieve`
+  merges regions under `min_area` - converted to whole cells, rounded up -
+  into their largest neighbour, and `raster polygonize` draws each region.
+  Each is a closed polyline on `<areas>/<class>` (holes tagged, as every
+  result's are), with `slope_class`, `slope_from`, `slope_to` (none on the
+  open top class: absent is not zero) and `slope_unit`, through F0's
+  `resultCommand`: one undo step. The class record's `area` sums the
+  regions' areas, holes taken out.
+- **A scope keeps the analysis inside its closed shapes.** The raster is cut
+  to their box, a cell wider and within the raster, so the slope at the
+  boundary is Horn's on real ground and not an edge rule; the slope is then
+  cut to the shapes by GDAL's `raster clip --geometry`, which keeps every
+  cell a shape touches; and the class areas, whole cells, are cut to the
+  shapes exactly by `vector clip`, so each class's area is its area inside
+  them and the classes add up to the shapes
+  (`SlopeVerbs.AScopeKeepsTheAnalysisInsideItsClosedShapes`: 52.531 m2, the
+  triangle's, where the touched cells are 66). A scope with no closed shape
+  makes nothing and says so.
+
+### Decided
+
+- **The first class begins at 0, not -inf.** No slope is below 0, and a
+  class bounded by -inf took in the -9999 no-data GDAL gives a cell it
+  cannot compute (the investigators' finding); 0 needs no pass over the data
+  to find its least value. The top class is open (`inf]`) for the same
+  reason: no pass over the data to find its greatest.
+- **Values kept, picture drawn.** RASTER SHADE's slope style keeps a picture;
+  RASTER SLOPE keeps the numbers, which analysis needs, and draws a picture
+  of them.
+- **The class areas are cut exactly, the picture is not.** A picture of
+  cells is cells; an area report and the drawn areas are measured, and a
+  staircase along a lot boundary would overstate every class there.
+
+### Not done
+
+- **A CRS check** between the raster and the drawing's shapes, as for
+  CONTOUR.
+- **Aspect classes** (north-facing, ...): the aspect raster is there for
+  them; a class grammar for directions is not.
+
 ## Background jobs
 
 Long computations no longer run on the GUI thread behind a wait cursor.
