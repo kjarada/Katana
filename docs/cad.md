@@ -182,6 +182,13 @@ annotation, utility and survey-code families below. Aliases include
 `LT`/`LTYPE`, `DS`, `HA`, `ST`, `AL` and `PARC`. This list lacked the tables
 and civil verbs until the audit of 2026-09-23.
 
+`LIST` takes no words. It listed the whole drawing whatever followed it, so
+`LIST LAYER x` read as a filter it was not - a headless test of the contours
+dialog used it as one - and it now refuses them with its usage
+(`cli.list_refuses_words_it_does_not_take`). Giving it the shared scope
+(`LIST [<scope>]`, "Scope and filter" below) is the fuller answer and is not
+done: `LIST` is among the verbs that still act on their own arguments.
+
 The sheet verbs (`SHEETS`, `SHEET`, `VIEW`, `TILE`, `GENERATE`,
 `TITLEBLOCK`, and `HELP SHEETS`) are handed to `plotting::runSheetVerb`;
 `docs/plotting.md`, "Sheets on the command line", describes them.
