@@ -3,10 +3,14 @@
 // raster, cut it to the drawing's areas and hand it from one GDAL algorithm
 // to the next here, so each verb is its own words and records only.
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -163,6 +167,21 @@ Result<std::filesystem::path> RasterChain::keep(const std::filesystem::path& des
     return target;
 }
 
+Result<std::filesystem::path> RasterChain::write(const std::string& name, const std::string& text)
+{
+    std::error_code error;
+    std::filesystem::create_directories(folder_, error);
+    const std::filesystem::path file = folder_ / name;
+    std::ofstream stream(file, std::ios::binary | std::ios::trunc);
+    stream << text;
+    stream.close();
+    if (!stream) {
+        return makeError(ErrorCode::FileExportFailure, "could not write the chain's file",
+                         utf8Of(file));
+    }
+    return file;
+}
+
 // ---- facts, sources, areas ---------------------------------------------------------------
 
 Result<katana::gis::RasterInfo> rasterInfoOf(const gp::DatasetValue& dataset)
@@ -206,6 +225,53 @@ katana::geometry::Box2 rasterExtent(const katana::gis::RasterInfo& info)
                                             gt[3] + column * gt[4] + row * gt[5]));
     }
     return box;
+}
+
+Result<std::optional<std::pair<double, double>>> valueRange(const gp::DatasetValue& dataset,
+                                                           std::size_t maxSamples)
+{
+    double low = std::numeric_limits<double>::infinity();
+    double high = -low;
+    const auto take = [&](const std::vector<double>& values, const std::optional<double>& noData) {
+        for (const double value : values) {
+            if (!std::isfinite(value) || (noData && value == *noData)) {
+                continue;
+            }
+            low = std::min(low, value);
+            high = std::max(high, value);
+        }
+    };
+    if (const auto* grid = std::get_if<gp::RasterGrid>(&dataset)) {
+        if (!grid->bands.empty()) {
+            take(grid->bands.front(), grid->noData.empty() ? std::nullopt : grid->noData.front());
+        }
+    } else if (const auto* file = std::get_if<gp::DatasetPath>(&dataset)) {
+        auto opened = katana::gis::GdalDataset::open(pathOf(file->path));
+        if (!opened) {
+            return opened.error();
+        }
+        auto info = (*opened)->rasterInfo();
+        if (!info) {
+            return info.error();
+        }
+        const double cells = static_cast<double>(info->width) * static_cast<double>(info->height);
+        const int stride =
+            maxSamples == 0
+                ? 1
+                : std::max(1, static_cast<int>(std::ceil(
+                                  std::sqrt(cells / static_cast<double>(maxSamples)))));
+        auto samples = (*opened)->readBandSampled(1, stride);
+        if (!samples) {
+            return samples.error();
+        }
+        take(samples->values, samples->noDataValue);
+    } else {
+        return makeError(ErrorCode::InvalidArgument, "features are no raster");
+    }
+    if (!(low <= high)) {
+        return std::optional<std::pair<double, double>>{};
+    }
+    return std::optional<std::pair<double, double>>{std::pair{low, high}};
 }
 
 Result<TerrainSource> bindTerrainSource(Context& context, const Tokens& tokens, std::size_t& at,

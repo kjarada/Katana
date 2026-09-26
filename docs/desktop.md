@@ -1271,6 +1271,12 @@ dialog through `showTerrainDialog` (made on first use under the window, so
   (`contourClip`) - the shared scope controls (`contourScope`, the closed
   shapes the contours are kept inside; the selection at first)
   (`docs/terrain.md`, "Contours").
+- `terrainShading` "Terrain Shading..." opens `terrainShadingDialog`, which
+  writes a RASTER SHADE line: the source, the style, the light (for the
+  hillshade styles only: the light's controls are off for the others), the
+  ramp (a built-in or a colour-map file typed in) and its range, the
+  reference raster's name, and a GeoTIFF to save the picture to
+  (`docs/terrain.md`, "Shading").
 
 **One store of surfaces.** The window's surfaces are a
 `terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the
