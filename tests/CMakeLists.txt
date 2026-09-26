@@ -1223,7 +1223,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=%drawMenu|?drawMenu"
-            "-DEXPECT=drawMenu: Draw: Point .*; Arc ; Divide .*; Measure "
+            "-DEXPECT=drawMenu: Draw: Point .*; Arc ; .*Divide .*; Measure "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/draw_menu_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_the_modify_menu_offers_lengthen_reverse_and_match_properties_headless

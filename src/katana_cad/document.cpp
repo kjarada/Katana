@@ -228,6 +228,8 @@ void Document::notifySelectionChanged()
     notify(DocumentChange::Selection);
 }
 
+void Document::notifyDraftingChanged() { notify(DocumentChange::Drafting); }
+
 Status Document::setCurrentLayer(const std::string& name)
 {
     const katana::entity::Layer* layer = model_.layers.find(name);

@@ -1089,6 +1089,57 @@ void SceneBuilder::emitEntities(const Document& document,
                     // The line; the arrow and the note are paper-sized.
                     own.clear();
                     emitPath(shape.vertices, false, color, width, nullptr);
+                } else if constexpr (std::is_same_v<Shape, katana::geometry::CurvePolyline2>) {
+                    // The heights are the geometry's own, one per vertex; each
+                    // chord point of an arc takes the height interpolated by
+                    // length along its segment, so a 3D string with arcs rises
+                    // smoothly round them.
+                    own.clear();
+                    chord_.clear();
+                    for (std::size_t i = 0; i < shape.segmentCount(); ++i) {
+                        const auto& from = shape.vertices[i];
+                        const auto& to = shape.vertices[shape.segmentEnd(i)];
+                        std::vector<Point2> piece{from.position, to.position};
+                        if (const auto arc = katana::geometry::arcFromBulge(
+                                from.position, to.position, from.bulge)) {
+                            piece = chordArc(*arc, options.chordTolerance);
+                        }
+                        for (std::size_t k = chord_.empty() ? 0 : 1; k < piece.size(); ++k) {
+                            chord_.push_back(piece[k]);
+                            if (heights.usesOwnHeights()) {
+                                const double t = static_cast<double>(k) /
+                                                 static_cast<double>(piece.size() - 1);
+                                own.push_back(from.height && to.height
+                                                  ? std::optional<double>(*from.height +
+                                                                          (*to.height - *from.height) * t)
+                                                  : std::nullopt);
+                            }
+                        }
+                    }
+                    if (shape.closed && chord_.size() > 1) {
+                        chord_.pop_back();
+                        if (!own.empty()) {
+                            own.pop_back();
+                        }
+                    }
+                    if (shape.segmentCount() == 0 && !shape.vertices.empty()) {
+                        chord_ = {shape.vertices.front().position};
+                        if (heights.usesOwnHeights()) {
+                            own = {shape.vertices.front().height};
+                        }
+                    }
+                    emitPath(chord_, shape.closed, color, width, linetype);
+                } else if constexpr (std::is_same_v<Shape, katana::geometry::Ellipse2>) {
+                    own.clear();
+                    chord_ = shape.tessellate(options.chordTolerance);
+                    if (shape.isFull() && chord_.size() > 1) {
+                        chord_.pop_back();
+                    }
+                    emitPath(chord_, shape.isFull(), color, width, linetype);
+                } else if constexpr (std::is_same_v<Shape, katana::geometry::Spline2>) {
+                    own.clear();
+                    chord_ = shape.tessellate(options.chordTolerance);
+                    emitPath(chord_, false, color, width, linetype);
                 } else {
                     static_assert(false, "emitEntities has no case for this geometry kind");
                 }

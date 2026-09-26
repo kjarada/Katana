@@ -2,6 +2,7 @@
 
 #include <bit>
 #include <cmath>
+#include <limits>
 #include <cstring>
 #include <type_traits>
 #include <variant>
@@ -133,8 +134,10 @@ bool fitsVersionOne(const Geometry& geometry)
         return *dimension == plain && !std::signbit(dimension->angle) &&
                !std::signbit(dimension->vertex.x) && !std::signbit(dimension->vertex.y);
     }
-    return !std::holds_alternative<LabelGeometry>(geometry) &&
-           !std::holds_alternative<LeaderGeometry>(geometry);
+    // Every kind appended after Dimension is version 2's (the drawing
+    // system's CurvePolyline, Ellipse and Spline as well as the annotation
+    // system's Label and Leader): a version-1 reader knows none of them.
+    return geometry.index() <= static_cast<std::size_t>(EntityType::Dimension);
 }
 
 // Whether version 2 can hold an anchor: one of the points it had, and no
@@ -377,6 +380,50 @@ Result<std::vector<std::byte>> geometryToBlob(const Geometry& geometry)
                     putU8(out, shape.fields ? 1u : 0u);
                     status = putString(out, shape.labelStyle);
                 }
+            } else if constexpr (std::is_same_v<Shape, katana::geometry::CurvePolyline2>) {
+                // 32 bytes a vertex: x, y, bulge, height - a NaN height for
+                // "not surveyed", which validation keeps from meaning anything
+                // else (a height must be finite).
+                if (shape.vertices.size() > kMaximumVertices) {
+                    status = makeError(ErrorCode::InvalidArgument,
+                                       "polyline has more vertices than the format allows",
+                                       std::to_string(shape.vertices.size()));
+                    return;
+                }
+                putU32(out, static_cast<std::uint32_t>(shape.vertices.size()));
+                putU8(out, shape.closed ? 1u : 0u);
+                out.reserve(out.size() + shape.vertices.size() * 32);
+                for (const auto& vertex : shape.vertices) {
+                    putPoint(out, vertex.position);
+                    putDouble(out, vertex.bulge);
+                    putDouble(out, vertex.height ? *vertex.height
+                                                 : std::numeric_limits<double>::quiet_NaN());
+                }
+            } else if constexpr (std::is_same_v<Shape, katana::geometry::Ellipse2>) {
+                putPoint(out, shape.center);
+                putPoint(out, shape.majorAxis);
+                putDouble(out, shape.ratio);
+                putDouble(out, shape.startParameter);
+                putDouble(out, shape.sweep);
+            } else if constexpr (std::is_same_v<Shape, katana::geometry::Spline2>) {
+                if (shape.degree < 0 || shape.degree > 255 ||
+                    shape.knots.size() > kMaximumVertices ||
+                    shape.weights.size() > kMaximumVertices) {
+                    status = makeError(ErrorCode::InvalidArgument,
+                                       "spline is larger than the format allows");
+                    return;
+                }
+                putU8(out, static_cast<std::uint8_t>(shape.degree));
+                status = putPoints(out, shape.controlPoints);
+                for (const auto* list : {&shape.knots, &shape.weights}) {
+                    putU32(out, static_cast<std::uint32_t>(list->size()));
+                    for (const double value : *list) {
+                        putDouble(out, value);
+                    }
+                }
+                if (status) {
+                    status = putPoints(out, shape.fitPoints);
+                }
             } else {
                 // Without this, a geometry kind added later fell off the end of
                 // the chain, wrote a two-byte header and no payload, and the
@@ -560,6 +607,81 @@ Result<Geometry> geometryFromBlob(std::span<const std::byte> blob)
         leader.arrow = static_cast<ArrowHead>(arrow);
         leader.callout = static_cast<CalloutShape>(callout);
         geometry = std::move(leader);
+        break;
+    }
+    case EntityType::CurvePolyline: {
+        if (!annotation) {
+            return makeError(ErrorCode::ParseFailure,
+                             "a curve polyline in a version-1 geometry blob");
+        }
+        std::uint32_t count = 0;
+        std::uint8_t closed = 0;
+        if (!reader.readU32(count) || !reader.readU8(closed)) {
+            return truncated();
+        }
+        if (count > kMaximumVertices) {
+            return makeError(ErrorCode::ParseFailure, "polyline vertex count is implausible",
+                             std::to_string(count));
+        }
+        if (!reader.has(static_cast<std::size_t>(count) * 32)) {
+            return truncated();
+        }
+        katana::geometry::CurvePolyline2 polyline;
+        polyline.closed = closed != 0;
+        polyline.vertices.resize(count);
+        for (auto& vertex : polyline.vertices) {
+            double height = 0.0;
+            if (!reader.readPoint(vertex.position) || !reader.readDouble(vertex.bulge) ||
+                !reader.readDouble(height)) {
+                return truncated();
+            }
+            if (!std::isnan(height)) {
+                vertex.height = height;
+            }
+        }
+        geometry = std::move(polyline);
+        break;
+    }
+    case EntityType::Ellipse: {
+        if (!annotation) {
+            return makeError(ErrorCode::ParseFailure, "an ellipse in a version-1 geometry blob");
+        }
+        katana::geometry::Ellipse2 ellipse;
+        if (!reader.readPoint(ellipse.center) || !reader.readPoint(ellipse.majorAxis) ||
+            !reader.readDouble(ellipse.ratio) || !reader.readDouble(ellipse.startParameter) ||
+            !reader.readDouble(ellipse.sweep)) {
+            return truncated();
+        }
+        geometry = ellipse;
+        break;
+    }
+    case EntityType::Spline: {
+        if (!annotation) {
+            return makeError(ErrorCode::ParseFailure, "a spline in a version-1 geometry blob");
+        }
+        katana::geometry::Spline2 spline;
+        std::uint8_t degree = 0;
+        if (!reader.readU8(degree) || !reader.readPoints(spline.controlPoints)) {
+            return truncated();
+        }
+        spline.degree = degree;
+        for (auto* list : {&spline.knots, &spline.weights}) {
+            std::uint32_t count = 0;
+            if (!reader.readU32(count) || count > kMaximumVertices ||
+                !reader.has(static_cast<std::size_t>(count) * 8)) {
+                return truncated();
+            }
+            list->resize(count);
+            for (double& value : *list) {
+                if (!reader.readDouble(value)) {
+                    return truncated();
+                }
+            }
+        }
+        if (!reader.readPoints(spline.fitPoints)) {
+            return truncated();
+        }
+        geometry = std::move(spline);
         break;
     }
     default:

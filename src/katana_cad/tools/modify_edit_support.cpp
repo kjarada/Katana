@@ -90,6 +90,14 @@ std::string kindName(const Geometry& geometry)
         return "label";
     case katana::entity::EntityType::Leader:
         return "leader";
+    case katana::entity::EntityType::CurvePolyline:
+        return std::get<katana::geometry::CurvePolyline2>(geometry).closed ? "closed polyline"
+                                                                            : "polyline";
+    case katana::entity::EntityType::Ellipse:
+        return std::get<katana::geometry::Ellipse2>(geometry).isFull() ? "ellipse"
+                                                                        : "elliptical arc";
+    case katana::entity::EntityType::Spline:
+        return "spline";
     }
     return "object";
 }
@@ -198,6 +206,20 @@ std::optional<double> interpolated(std::optional<double> a, std::optional<double
 
 std::optional<double> heightAt(const Entity& original, const Point2& p)
 {
+    if (const auto* curved = std::get_if<katana::geometry::CurvePolyline2>(&original.geometry)) {
+        // Its heights are its vertices' own (docs/drawing.md).
+        const auto nearest = curved->nearest(p);
+        if (!nearest || nearest->distance > tol::kGeometric) {
+            return std::nullopt;
+        }
+        const std::size_t i = nearest->segment;
+        const std::size_t next = curved->segmentEnd(i);
+        const double length = curved->segmentLength(i);
+        const double t = length > 0.0 ? (nearest->station - curved->stationOfVertex(i)) / length : 0.0;
+        return interpolated(curved->vertices[i].height, curved->vertices[next].height, t,
+                            p.distanceTo(curved->vertices[i].position) <= tol::kGeometric,
+                            p.distanceTo(curved->vertices[next].position) <= tol::kGeometric);
+    }
     const std::size_t count = heightVertices(original.geometry).size();
     if (count == 0) {
         return std::nullopt;
@@ -269,6 +291,18 @@ void appendEdges(const Geometry& geometry, std::vector<Curve2>& out)
             if (!polyline->segment(i).isDegenerate()) {
                 out.emplace_back(polyline->segment(i));
             }
+        }
+        return;
+    }
+    if (const auto* curved = std::get_if<katana::geometry::CurvePolyline2>(&geometry)) {
+        for (const auto& piece : curved->segments()) {
+            std::visit(
+                [&out](const auto& s) {
+                    if (s.length() > tol::kGeometric) {
+                        out.emplace_back(s);
+                    }
+                },
+                piece);
         }
         return;
     }

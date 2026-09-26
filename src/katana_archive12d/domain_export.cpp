@@ -474,6 +474,63 @@ class Exporter {
                 ++self.annotations_;
                 return false;
             }
+            // A polyline with arcs is a super string with arc segments - the
+            // archive's own form of it - and its heights, the geometry's own,
+            // one a vertex (a null where it has none).
+            bool operator()(const katana::geometry::CurvePolyline2& polyline) const
+            {
+                VertexString string;
+                string.header = self.headerFor(entity, Breakline::Line);
+                string.closed = polyline.closed;
+                for (const auto& vertex : polyline.vertices) {
+                    string.vertices.push_back(self.vertex(vertex.position, vertex.height));
+                }
+                if (polyline.hasArcs()) {
+                    for (std::size_t i = 0; i < polyline.segmentCount(); ++i) {
+                        Segment segment;
+                        if (const auto arc = katana::geometry::arcFromBulge(
+                                polyline.vertices[i].position,
+                                polyline.vertices[polyline.segmentEnd(i)].position,
+                                polyline.vertices[i].bulge)) {
+                            segment.kind = SegmentKind::Arc;
+                            // Counter-clockwise is a NEGATIVE radius in the
+                            // archive, whose positive turns right (as Arc2's).
+                            segment.radius = arc->sweep > 0.0 ? -arc->radius : arc->radius;
+                            segment.major = std::fabs(arc->sweep) > kPi;
+                        }
+                        string.segments.push_back(std::move(segment));
+                    }
+                }
+                self.finish(entity, std::move(string));
+                return true;
+            }
+            // No ellipse or spline in the archive: the chords of one, as a
+            // line, at the drawing tolerance.
+            bool operator()(const katana::geometry::Ellipse2& ellipse) const
+            {
+                return chords(ellipse.tessellate(katana::geometry::kCurveChordTolerance),
+                              ellipse.isFull());
+            }
+            bool operator()(const katana::geometry::Spline2& spline) const
+            {
+                return chords(spline.tessellate(katana::geometry::kCurveChordTolerance),
+                              spline.isClosedShape());
+            }
+            bool chords(std::vector<Point2> points, bool shut) const
+            {
+                VertexString string;
+                string.header = self.headerFor(entity, Breakline::Line);
+                if (shut && points.size() > 3) {
+                    points.pop_back();
+                    string.closed = true;
+                }
+                const auto height = heightsOf(entity, 1)[0];
+                for (const Point2& p : points) {
+                    string.vertices.push_back(self.vertex(p, height));
+                }
+                self.finish(entity, std::move(string));
+                return true;
+            }
         };
         return std::visit(Visitor{*this, entity}, entity.geometry);
     }

@@ -64,6 +64,16 @@ namespace katana::entity {
 // smart leader - so every other annotation is still written in version 2
 // byte for byte, and an older build refuses exactly the entities it could
 // not read correctly, each as an unknown version.
+//
+// The drawing system's kinds (docs/drawing.md) are version-2 kinds too, with
+// no change to any existing layout: CurvePolyline (u32 count, u8 closed, then
+// x, y, bulge, height per vertex, a NaN height for none), Ellipse (centre,
+// major axis, ratio, start, sweep) and Spline (u8 degree, control points,
+// knots, weights, fit points - each list u32-counted). They hold no anchor,
+// so version 3 never has cause to be written for them; a reader takes them
+// in version 2 or 3 alike. A build that predates them refuses them as an
+// unknown kind, and the project's schema 12 (docs/storage.md) says so before
+// any blob is read.
 inline constexpr std::uint8_t kBlobVersion = 1;
 inline constexpr std::uint8_t kBlobVersionAnnotation = 2;
 inline constexpr std::uint8_t kBlobVersionSmartLeader = 3;

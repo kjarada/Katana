@@ -125,6 +125,12 @@ target_sources(katana PRIVATE ${_katana_plotting_ui})
 file(GLOB _katana_annotation_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.hpp")
 target_sources(katana PRIVATE ${_katana_annotation_ui})
+# The drawing system's front end (docs/drawing.md): the grips' gesture, the
+# Vertices panel and the drafting settings bar, thin over katana_cad's
+# drawing code. Globbed, one directory, like the sheets and annotation.
+file(GLOB _katana_drawing_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.hpp")
+target_sources(katana PRIVATE ${_katana_drawing_ui})
 # One place a version is written: project(Katana VERSION ...). The About box
 # reads it from here and the Windows resource below from the same variable.
 target_compile_definitions(katana PRIVATE KATANA_VERSION="${PROJECT_VERSION}")

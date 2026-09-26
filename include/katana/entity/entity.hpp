@@ -16,6 +16,7 @@
 
 #include "katana/core/error.hpp"
 #include "katana/core/text_encoding.hpp"
+#include "katana/geometry/curves2d.hpp"
 #include "katana/geometry/primitives2d.hpp"
 
 namespace katana::entity {
@@ -24,7 +25,22 @@ using EntityId = std::uint64_t;
 inline constexpr EntityId kInvalidEntityId = 0;
 
 // Order matches the alternatives of Geometry.
-enum class EntityType { Point, Line, Arc, Polyline, Circle, Text, Dimension, Label, Leader };
+enum class EntityType {
+    Point,
+    Line,
+    Arc,
+    Polyline,
+    Circle,
+    Text,
+    Dimension,
+    Label,
+    Leader,
+    // The drawing system's kinds (docs/drawing.md), appended after the
+    // annotation system's Label and Leader so the kind bytes never collide.
+    CurvePolyline,
+    Ellipse,
+    Spline,
+};
 
 [[nodiscard]] std::string_view toString(EntityType type);
 [[nodiscard]] katana::core::Result<EntityType> entityTypeFromString(std::string_view name);
@@ -317,7 +333,11 @@ struct LeaderGeometry {
 using Geometry =
     std::variant<PointGeometry, katana::geometry::Segment2, katana::geometry::Arc2,
                  katana::geometry::Polyline2, katana::geometry::Circle2, TextGeometry,
-                 DimensionGeometry, LabelGeometry, LeaderGeometry>;
+                 DimensionGeometry, LabelGeometry, LeaderGeometry,
+                 // 9, 10, 11: a polyline with arc segments and heights, the
+                 // ellipse and elliptical arc, the spline (curves2d.hpp).
+                 katana::geometry::CurvePolyline2, katana::geometry::Ellipse2,
+                 katana::geometry::Spline2>;
 
 [[nodiscard]] constexpr EntityType typeOf(const Geometry& geometry)
 {
@@ -341,7 +361,7 @@ using Geometry =
 //    because the compiler cannot help with them.
 //
 // This assert exists so that step 3 is not something you have to remember.
-static_assert(std::variant_size_v<Geometry> == 9,
+static_assert(std::variant_size_v<Geometry> == 12,
               "A geometry kind was added or removed. See docs/model.md for every place that "
               "must change - several of them fail SILENTLY, not at compile time. Update this "
               "count once you have been through the list.");
