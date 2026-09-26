@@ -238,9 +238,16 @@ DemToolsDialog::DemToolsDialog(GeoDialogContext context, QWidget* parent)
             break;
         }
         case DemTool::Clip: {
-            grid->addRow(note("The raster cut to a box, or to the closed boundaries a scope takes "
-                              "(a cell is kept when its centre is inside).",
-                              options));
+            // GDAL's raster clip keeps every cell a boundary touches, not only
+            // those whose centre is inside (docs/terrain.md, "The DEM tools":
+            // 231 cells of a triangle where the centre rule gives 210); this
+            // said "centre" until a hand count caught it.
+            QLabel* rule = note("The raster cut to a box, or to the closed boundaries a scope "
+                                "takes: every cell a boundary touches is kept, and the box's "
+                                "other cells hold no value.",
+                                options);
+            rule->setObjectName("demClipNote");
+            grid->addRow(rule);
             clipByArea_ = new QRadioButton("To a box:", options);
             clipByArea_->setObjectName("demClipByArea");
             clipByArea_->setChecked(true);

@@ -147,6 +147,19 @@ TEST(DemToolsDialog, AClipTabBuildsItsLineAndRunHandsTheRunnerExactlyThat)
     EXPECT_EQ(child<QPlainTextEdit>(dialog, "demClipReply")->toPlainText(), "ok");
 }
 
+// The Clip tab says the rule GDAL's clip keeps: every cell a boundary
+// touches (DemVerbs' triangle keeps 231 cells, the centre rule 210). It said
+// a cell was kept when its centre was inside.
+TEST(DemToolsDialog, TheClipTabSaysEveryCellABoundaryTouchesIsKept)
+{
+    StubRunner runner;
+    DemToolsDialog dialog(runner.context());
+    dialog.showTool(DemTool::Clip);
+    const QString rule = child<QLabel>(dialog, "demClipNote")->text();
+    EXPECT_TRUE(rule.contains("every cell a boundary touches")) << rule.toStdString();
+    EXPECT_FALSE(rule.contains("centre")) << rule.toStdString();
+}
+
 TEST(DemToolsDialog, TheMosaicsTilesAreAddedFromItsPickerOrThePickerIsTheOne)
 {
     StubRunner runner;
