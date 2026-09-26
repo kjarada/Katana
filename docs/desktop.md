@@ -1251,8 +1251,11 @@ tree, and for the algorithm chosen a form made at run time from the arguments
 GDAL declares - its bounds on the spin boxes, its choices in the lists, the
 Advanced ones folded away - a picker for each dataset it reads (the drawing's
 scope and filter, a reference raster, a surface, a file), where the output
-goes, and Confirm for an algorithm that changes existing data. It writes the
-GDAL line and runs it through the one executor, as the dialogs below do.
+goes, and Confirm for an algorithm that changes existing data. Its Pipeline
+tab chains GDAL's pipeline steps - only those that read what the pipeline
+makes at that point - and shows the pipeline's text, which may be edited and
+is read back into steps. It writes the GDAL line and runs it through the one
+executor, as the dialogs below do.
 
 **The geoprocessing dialogs build lines.** Terrain > DEM > Grid Points to DEM
 (`gridDemDialog`), Terrain > DEM > DEM Tools (`demToolsDialog`, a tab per

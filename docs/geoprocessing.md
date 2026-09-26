@@ -102,7 +102,9 @@ rename, reorganize". The contract tests (below) are what notice when it does.
 - **The output.** It goes to memory (`--output-format MEM`, an empty name),
   unless the tail names it or the request asks for a file. An info-like
   algorithm whose output is optional and which prints (`raster pixel-info`)
-  is left to print. The output's reference is taken before `Finalize()`,
+  is left to print; a pipeline prints only when its last step does (`info`,
+  `compare`, `export-schema`: "Pipelines" below). The output's reference is
+  taken before `Finalize()`,
   which drops the algorithm's own; taken after, it is null.
 - **Reading an output back.** A raster becomes a `RasterGrid` (Float64
   values, GDAL's data type named), and a vector a `FeatureSet` of typed
@@ -690,7 +692,55 @@ with flat caps from the toolbox, 200 m2 by hand).
 
 ### X2: Toolbox pipeline tab
 
-Not started.
+Built: the GDAL Toolbox's Pipeline tab (`src/katana_qt/geo/pipeline_builder.hpp`).
+Its CLI and MCP surfaces are the GDAL verb's: it writes
+`GDAL pipeline "read ! <step> ... ! write" FROM input <source> TO <target>`.
+
+#### Pipelines
+
+- **The steps are GDAL's own.** The pipeline's usage lists its steps
+  (`pipeline_algorithms`); each offered is the catalogue algorithm under
+  raster or vector of that name, whose form (`ArgumentForm`, restricted to
+  the arguments a step takes) edits it. `read` and `write` are the
+  pipeline's ends, bound by FROM and TO; `external` runs a program and `tee`
+  is a pipeline of its own, so neither is offered, and a text naming
+  external is refused as the verb refuses it.
+- **A step is offered only where it reads what the pipeline makes.** After a
+  raster, raster steps; after `contour` or `polygonize`, vector steps; a
+  file may be either until a step says. So a mixed raster-to-vector pipeline
+  is built step by step, and the output offers a layer or a reference raster
+  as the last step makes one.
+- **The text is shown and may be edited.** An edit is read back into steps
+  (`parsePipeline`): options as `--name=value`, `--name value`, `-n value`,
+  flags, and values by position in GDAL's order, each checked by the step's
+  form. A text that cannot be read into steps still runs as typed, and the
+  status says why the steps did not follow.
+- **A value with a blank cannot be carried.** The pipeline is one quoted
+  word on the line, and a line has no quote inside a quoted word.
+- **A recipe is the line in a script** (`gdalPipelineSave` adds it to a
+  `.kcs`; File > Run Script replays it), not a `.gdalg.json`, which cannot
+  hold a dataset bound from the drawing (see "Decisions").
+- **GDAL's usage JSON is not JSON.** It writes a default of Infinity (vector
+  grid's radius) bare; the step list is read after such numbers are made
+  null.
+
+A pipeline ending in `write` now binds its output as any run's (the bridge,
+"The output"): before, a pipeline to a layer or a reference raster failed
+with "write: Positional arguments starting at 'OUTPUT' have not been
+specified", because a pipeline has an `output-string` - for the steps that
+print - and the bridge took that to mean it prints. It prints only when its
+last step is `info`, `compare` or `export-schema`, the steps GDAL declares
+with an output-string (`PipelineContract.TheStepsThatPrintAreTheOnesGdalDeclaresSo`
+names any it adds; `PipelineVerb.*` fail without the fix).
+
+Tests: `tests/qt_widgets/geo/test_pipeline_builder.cpp`,
+`tests/geo/test_pipeline_verb.cpp`,
+`cli.gdal_pipeline_contours_then_buffer_from_a_raster_to_a_layer`
+(`src/katana_app/geo/cli/pipeline.cmake`) and
+`qt_gdal_toolbox_pipeline_tab_runs_its_steps_headless`
+(`tests/geo/headless/pipeline.cmake`). By hand: plane.asc spans
+100.025 .. 101.975, so contours every 0.5 m are 100.5, 101.0 and 101.5, each
+buffered into one area: three.
 
 ### T0: Terrain session: one surface store and SURFACE verbs on every front end
 
@@ -818,8 +868,6 @@ Not started. `RasterOverlay::facts` is declared for it.
 
 ## Not done
 
-- **The toolbox builds no pipeline yet.** A pipeline is typed:
-  `GDAL pipeline "read ! ... ! write" FROM ... TO ...`.
 - **`VIEW` in a headless session** is refused naming `AREA`, as MODIFY
   refuses it.
 - **No point is picked in the plan view.** The plan gave `GeoServices` a

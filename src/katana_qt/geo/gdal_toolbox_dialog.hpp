@@ -27,7 +27,8 @@
 // Object names (tests/qt_widgets/geo/test_gdal_toolbox.cpp; the headless
 // --dialog gdalToolbox, --fill and --press):
 //   gdalToolboxDialog       the dialog; GIS > GDAL Toolbox (gdalToolbox)
-//   gdalToolboxTabs         Algorithm (and Pipeline, the pipeline builder's)
+//   gdalToolboxTabs         Algorithm, and Pipeline (pipeline_builder.hpp: its
+//                           object names are there)
 //   gdalToolboxSearch       the search; the best match is chosen as it is typed
 //                           (an algorithm named exactly so, else the first shown)
 //   gdalToolboxTree         the catalogue; a row's text is the algorithm's last word
@@ -79,6 +80,7 @@ namespace katana::qt {
 
 class ArgumentForm;
 class DocumentWatcher;
+class PipelineBuilder;
 
 // What the Algorithm tab's fields hold.
 struct GdalToolboxForm {
@@ -129,6 +131,7 @@ class GdalToolboxDialog final : public QDialog {
     [[nodiscard]] GeoRunPanel& runPanel() const { return *panel_; }
     [[nodiscard]] ArgumentForm& arguments() const { return *arguments_; }
     [[nodiscard]] QTabWidget& tabs() const { return *tabs_; }
+    [[nodiscard]] PipelineBuilder& pipeline() const { return *pipeline_; }
     [[nodiscard]] const GeoDialogContext& context() const { return context_; }
     // Remembers the algorithm chosen, per user, to choose it again next time
     // (the window's dialog does; a test's does not).
@@ -169,6 +172,7 @@ class GdalToolboxDialog final : public QDialog {
     QCheckBox* overwrite_ = nullptr;
     QCheckBox* confirm_ = nullptr;
     GeoRunPanel* panel_ = nullptr;
+    PipelineBuilder* pipeline_ = nullptr;
     katana::gis::processing::AlgorithmSpec spec_;
     std::vector<InputRow> inputs_;
     // The output kind chosen last, whose default name a new kind replaces.

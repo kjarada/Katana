@@ -31,6 +31,7 @@
 #include "customisation/document_watcher.hpp"
 #include "geo/argument_form.hpp"
 #include "geo/geo_workbench.hpp"
+#include "geo/pipeline_builder.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
 
@@ -263,6 +264,9 @@ GdalToolboxDialog::GdalToolboxDialog(GeoDialogContext context, QWidget* parent)
     pageLayout->addWidget(splitter, 3);
     pageLayout->addWidget(panel_, 1);
     tabs_->addTab(page, "Algorithm");
+    // Several algorithms chained in one run (pipeline_builder.hpp).
+    pipeline_ = new PipelineBuilder(context_, tabs_);
+    tabs_->addTab(pipeline_, "Pipeline");
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(tabs_);
 
@@ -598,6 +602,7 @@ void GdalToolboxDialog::reload()
             row.picker->reload();
         }
     }
+    pipeline_->reload();
     refresh();
 }
 
