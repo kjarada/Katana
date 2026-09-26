@@ -774,6 +774,80 @@ DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
 - **The pick does not snap.** It takes the click where it is; snapping is
   the running tool's, and a pick is no tool.
 
+## Viewshed and line of sight
+
+RASTER VIEWSHED says what can be seen from observers over a surface or an
+elevation raster; LOS says whether one point can be seen from another
+(`src/katana_app/geo/viewshed_verbs.cpp`). The window's Terrain > Analysis >
+Viewshed and Line of Sight (`viewshedDialog`, tabs Viewshed and Line of
+Sight) only builds their lines:
+
+```
+RASTER VIEWSHED SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
+                (OBSERVER x,y)... | OBSERVERS [<scope>] [height=1.7] [target=0]
+                [max=<m>] [curvature=<k>|none] [areas=<layer>] [NAME <n>] [PREVIEW]
+LOS SURFACE <name> | RASTER <id|name> | FILE <path> OBSERVER x,y TARGET x,y
+    [height=1.7] [target=0] [curvature=<k>|none] [step=<m>]
+    [method=bilinear|nearest|cubic|cubicspline] [PREVIEW]
+```
+
+- **GDAL computes a viewshed,** `raster viewshed` from one `--position`.
+  Several observers - typed, picked, or the point entities a scope takes
+  after `OBSERVERS` (at most 100: each is a whole run) - are run one at a
+  time and unioned here, cell by cell on the raster's grid: GDAL's
+  cumulative mode refuses a position (the investigators' finding), and a
+  count of observers is not the union a person asks for.
+- **The options.** `height=` is the eye above the ground (1.7, a person
+  standing), `target=` how high above the ground a cell counts as seen,
+  `max=` how far to look (GDAL then also cuts its grid to that reach), and
+  `curvature=` GDAL's curvature-and-refraction coefficient, 0.85714 unless
+  given (`none` is 0). Katana passes every one of them explicitly, so a
+  changed default in GDAL cannot change a result.
+- **What is kept.** A derived reference raster holding 1 where some
+  observer sees the cell and 0 elsewhere, named `<source>-viewshed` unless
+  `NAME` says; its display copy is tinted orange where seen and clear
+  elsewhere. `areas=<layer>` draws the seen regions as closed polylines
+  (GDAL's `raster polygonize`), one undo step. The reply has an `observer
+  at= [entity=] visible_cells=` per observer and `viewshed observers=
+  height= target= max= curvature= visible_cells= area=`.
+- **A sight line is native** (`include/katana/terrain/line_of_sight.hpp`):
+  no algorithm of GDAL's answers one line with its clearance. It walks from
+  the eye to the aim at stations `step=` apart - half a raster cell, or
+  every 10 cm on a surface, which is read exactly - and reports `sight
+  visible= distance= observer_z= target_z= clearance= clearance_at=
+  blocked_at= blocked_distance= blocked_ground= stations= unknown=`. A
+  grazing sight (clearance exactly 0) sees; a station off the ground hides
+  nothing and is counted as unknown, never read as ground at 0. Curvature
+  lowers the ground by the coefficient x d^2 / 12 741 994 m, GDAL's rule
+  and sphere, so a sight line and a viewshed of the same ground agree.
+- **The hand-worked tests switch curvature off** (`curvature=none`): the
+  shadow behind a wall is then similar triangles exactly. A 1 m wall 20 m
+  from a 1.7 m eye hides the flat ground from 21 to 48 m out and not from
+  49 m, since the grazing sight meets the ground at 20 x 1.7 / 0.7 =
+  48.571 m.
+
+### Decided
+
+- **The observers' union is Katana's, on the grid.** Each run's grid is a
+  window of the input's, so the union is a lookup, not a resampling.
+- **The kept raster is the answer, 1 and 0,** not GDAL's 255 and 0: it is
+  what another verb reads (RASTER ZONAL of it counts the seen cells of a
+  lot), and its picture is a separate tinted copy.
+- **Rejected: the fixture of the plan** (a 5 m wall, the observer at 1.7 m,
+  hidden from 20 x 5 / (5 - 1.7)). An eye below the wall top sees nothing
+  behind it, so no shadow ends; the fixture here puts the eye above a 1 m
+  wall, where the shadow's far edge is the similar-triangles value.
+- **The sight line's least clearance is between the ends,** not at them:
+  at the observer it is the eye height and at the target the target height
+  by definition, and a target on the ground would make every answer 0.
+
+### Not done
+
+- **Observer heights from the entities.** `height=` is one height above
+  the ground for every observer; a mast of its own height per point is not
+  read.
+- **The pick does not snap** (as for the drape).
+
 ## Background jobs
 
 Long computations no longer run on the GUI thread behind a wait cursor.

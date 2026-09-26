@@ -231,6 +231,16 @@ vertices= off=`. ZONAL and DRAPE change the drawing in place, one undo step
 each. `McpServer.StatisticsByAreaThroughTheCommandToolAreWrittenOnTheLot`
 pins it.
 
+### T5: RASTER VIEWSHED and LOS through katana_run_commands
+
+The same: the lines run through `katana_run_commands`. The viewshed's
+reply carries `observer at= visible_cells=` per observer and the summary's
+`visible_cells=` and `area=`, and the viewshed itself is a derived raster
+`katana_terrain_list` lists; LOS answers with one `sight visible= ...
+clearance= blocked_at=` record.
+`McpServer.ALineOfSightThroughTheCommandToolSaysWhetherTheTargetIsSeen`
+pins it.
+
 ### V5: katana_gis_query
 
 | Tool | In | Out |
