@@ -1524,3 +1524,16 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
 - **Measuring the apply.** The cost of creating entities in an apply is not
   yet measured for large results; the benchmark the plan names for it is not
   written. Nothing is promised for a result of millions of features.
+- **Three dialog contexts where one would do.** The lanes built their
+  dialogs side by side, and each gave its dialogs a context of what the
+  window lends them: `GeoDialogContext` (`geo_dialog_support.hpp`, the
+  toolbox and the DEM dialogs), `TerrainDialogContext`
+  (`terrain_dialog_support.hpp`, Surface From and the terrain analysis
+  dialogs) and `GisDialogContext` (`gis_tool_dialog.hpp`, the vector
+  dialogs). They hold the same things - the executor, `headless`, the
+  document, the views and a job listener - and differ only in the listener's
+  lifetime (a token the dialog drops, or never taken back). When wave 1 was
+  merged, the views they are given were made one `GeoServices::views` (the
+  workspace), but the three structs remain; folding them into one, with the
+  token listener, touches every GDAL dialog and its tests, and is left to
+  the review that follows the merge rather than done inside it.
