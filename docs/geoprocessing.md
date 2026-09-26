@@ -227,8 +227,8 @@ Every leaf is Safe or Confirm (`src/katana_io/geo/policy.cpp`).
   "unclassified" until someone judges it, and
   `GdalPolicy.UnclassifiedLeavesNeedConfirmAndAreNamed` names every one.
 - **Running one.** A Confirm algorithm runs only when the line says
-  `CONFIRM`, or an MCP call passes `confirm: true`. The toolbox's Confirm box
-  (X1) will be the window's way.
+  `CONFIRM`, or an MCP call passes `confirm: true`. In the window it is the
+  toolbox's Confirm box, without which it writes no line.
 - **Refused words.** `--config`, `--help`, `-h`, `--help-doc`,
   `--json-usage`, `--progress`, `--quiet` and `-q` are refused
   (`checkTokens`), and so is a pipeline step called `external`, in the words
@@ -479,8 +479,8 @@ time and never written by hand:
 - `inputsSchema` is the schema of its `inputs`, a Source object per input
   dataset.
 
-`GDAL HELP ... JSON`, `katana_gdal_describe` and the toolbox (X1) read the
-same functions.
+`GDAL HELP ... JSON` and `katana_gdal_describe` read the same functions, and
+the toolbox's forms the specs they are made from.
 
 ## The window
 
@@ -644,7 +644,49 @@ tools are in `docs/mcp.md`.
 
 ### X1: GIS > GDAL Toolbox window
 
-Not started.
+Built: GIS > Processing - GDAL > GDAL Toolbox (`gdalToolbox`, opening
+`gdalToolboxDialog`; `src/katana_qt/geo/gdal_toolbox_dialog.hpp`), the GDAL
+verb's menu item. It runs nothing itself: it writes the GDAL line its fields
+describe and hands it to the window's one executor, so its CLI and MCP
+surfaces are the verb's and `katana_gdal_run`'s.
+
+- **The catalogue** is a tree, group then algorithm, filtered by a search
+  over paths, aliases and descriptions; the algorithm named exactly as typed,
+  else the first shown, is chosen as the search is typed. A Confirm
+  algorithm says "confirm" beside it.
+- **The form is GDAL's declaration** (`argument_form.hpp`), read when the
+  algorithm is chosen: a check box, a choice of GDAL's choices, a spin box
+  carrying GDAL's bounds, a comma-separated line for a list. A number starts
+  "not given" unless GDAL has a default; only what differs from GDAL's
+  default is written. An exclusive bound is refused at its end value when the
+  line is written (`contour --interval=0`), so nothing runs. Base arguments
+  show and the rest fold away (`gdalToolboxAdvanced`). One given of an
+  exclusion group disables the others; a dependent argument waits for what it
+  depends on. What the executor refuses (`--quiet`) is not offered, nor what
+  the output's target says (`--output-format`, `--overwrite`, `--append`,
+  `--update`, `--overwrite-layer`, `--upsert`).
+- **Datasets are bound by pickers** (`binding_picker.hpp`), each offering only
+  what can be one: the drawing by Global Modify's own scope and filter
+  controls (for a vector), a reference raster or a surface (for a raster), or
+  a file. An optional input is "Not given" until it is; an argument that takes
+  several datasets gets a list. The first required input is bound by a FROM
+  without its name, as the verb binds it; every other names its argument.
+- **The output** goes where its kinds allow: a layer (vector), a reference
+  raster (raster), a file with its format and OVERWRITE; a surface is listed
+  and not offered until the terrain session's store takes a raster result.
+- **Confirm** shows only for a Confirm algorithm, and the line waits for it.
+- **Help** opens GDAL's page for the algorithm; headless it is said, not
+  opened.
+- **The algorithm last chosen** is remembered per user (QSettings) and
+  chosen again; a store that cannot be read is no algorithm.
+
+`gdalToolboxLine` is the pure function the line comes from. Tests:
+`tests/qt_widgets/geo/test_gdal_toolbox.cpp` (the search, the form's bounds
+and choices, the exact line, the pickers' kinds, the exclusive minimum, the
+exclusion group, Confirm, optional and listed inputs, a file output, Run and
+Preview through a stub runner) and `qt_gdal_toolbox_buffers_a_drawn_line_headless`
+(`tests/geo/headless/toolbox.cmake`: a 100 m line buffered 1 m either side
+with flat caps from the toolbox, 200 m2 by hand).
 
 ### X2: Toolbox pipeline tab
 
@@ -776,9 +818,8 @@ Not started. `RasterOverlay::facts` is declared for it.
 
 ## Not done
 
-- **No menu item of F0's own.** The GDAL verb is reachable on the command
-  line, from a script and through `runVerbLine`; its menu item is X1's
-  GDAL Toolbox.
+- **The toolbox builds no pipeline yet.** A pipeline is typed:
+  `GDAL pipeline "read ! ... ! write" FROM ... TO ...`.
 - **`VIEW` in a headless session** is refused naming `AREA`, as MODIFY
   refuses it.
 - **No point is picked in the plan view.** The plan gave `GeoServices` a
