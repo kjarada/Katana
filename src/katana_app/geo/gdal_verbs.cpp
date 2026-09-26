@@ -32,6 +32,7 @@
 #include "katana/interop/terrain_io.hpp"
 #include "replies.hpp"
 #include "schema.hpp"
+#include "staged_files.hpp"
 #include "verb_table.hpp"
 
 namespace katana::app::geo {
@@ -595,20 +596,47 @@ Result<Prepared> runLine(Context& context, const Tokens& tokens, std::size_t at,
     apply.result.commandName = std::string(katana::core::trimmed(line));
     const gp::AlgorithmInfo algorithm = *info;
 
+    // A file TO names is written beside it and put in place by the apply
+    // (staged_files.hpp), as EXPORT's is: with OVERWRITE, GDAL wrote over the
+    // file from the start, and a run cancelled part way left a partial file
+    // where the original had been. A file GDAL's own words name is GDAL's to
+    // write where they say.
+    const bool staged = request.outputTo == gp::OutputTo::File;
+    const std::string stagedFile = request.outputPath;
+
     Prepared prepared;
     prepared.title = "GDAL " + gp::pathText(*path);
-    prepared.work = [request, materialise, records, apply, algorithm](
+    prepared.work = [request, materialise, records, apply, algorithm, staged, stagedFile](
                         const std::stop_token& stop, const Progress& progress) -> Result<Apply> {
         gp::RunRequest run = request;
         if (auto made = materialise(run); !made) {
             return made.error();
         }
+        std::shared_ptr<StagedFiles> files;
+        if (staged) {
+            auto made = StagedFiles::beside(
+                std::filesystem::path(std::u8string(stagedFile.begin(), stagedFile.end())));
+            if (!made) {
+                return made.error();
+            }
+            files = std::move(made).value();
+            const std::u8string written = files->writeTo().generic_u8string();
+            run.outputPath = std::string(written.begin(), written.end());
+        }
         auto outputs = gp::run(run, stop, progress);
         if (!outputs) {
-            return outputs.error();
+            return files ? files->asTarget(outputs.error()) : outputs.error();
         }
         auto kept = std::make_shared<gp::RunOutputs>(std::move(outputs).value());
-        return Apply([kept, records, apply, algorithm](Context& ctx) -> Result<std::string> {
+        if (files) {
+            kept->file = stagedFile;
+        }
+        return Apply([kept, records, apply, algorithm, files](Context& ctx) -> Result<std::string> {
+            if (files) {
+                if (auto placed = files->place(); !placed) {
+                    return placed.error();
+                }
+            }
             const double seconds = kept->seconds;
             auto applied = applyOutputs(ctx, apply, std::move(*kept));
             if (!applied) {
