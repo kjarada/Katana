@@ -128,7 +128,7 @@ SurveyToolDialog::SurveyToolDialog(SurveyDialogContext context, const QString& o
     result_ = new QPlainTextEdit(this);
     result_->setObjectName("result");
     result_->setReadOnly(true);
-    result_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    result_->setFont(katana::qt::theme::monospaceFont());
     // The reports are tables: wrapping would break their columns.
     result_->setLineWrapMode(QPlainTextEdit::NoWrap);
     result_->setPlaceholderText("The report appears here and in the command log.");
@@ -179,7 +179,7 @@ QPlainTextEdit* SurveyToolDialog::addTextField(const QString& label, const QStri
     field->setObjectName(objectName);
     field->setPlaceholderText(placeholder);
     field->setToolTip(tip);
-    field->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    field->setFont(katana::qt::theme::monospaceFont());
     field->setLineWrapMode(QPlainTextEdit::NoWrap);
     field->setTabChangesFocus(true);
     // About eight lines: a longer book scrolls, and the report below keeps

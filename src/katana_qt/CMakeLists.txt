@@ -71,6 +71,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     layer_manager.hpp
     project_crs_dialog.cpp
     project_crs_dialog.hpp
+    property_panel.cpp
+    property_panel.hpp
     script_runner.cpp
     script_runner.hpp
     gis_dialogs.cpp

@@ -1223,7 +1223,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=%drawMenu|?drawMenu"
-            "-DEXPECT=drawMenu: Draw: Point .*; Arc ; Divide .*; Measure "
+            "-DEXPECT=drawMenu: Draw: Point .*; Arc \\[Arc: [^]]*\\] ; Divide .*; Measure "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/draw_menu_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_the_modify_menu_offers_lengthen_reverse_and_match_properties_headless
@@ -1277,6 +1277,29 @@ if(TARGET katana)
             "-DEXPECT=shortcuts: [0-9]+ key sequences, each reaching one thing"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/shortcuts_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # View's Window section: the text size, the toolbar icons and names, and
+    # Reset Window Layout, each a menu item a headless run reaches by name,
+    # each saying what it did (docs/desktop.md, "How the window starts").
+    # A headless run saves none of it (restoreSession is never called).
+    add_test(NAME qt_the_window_section_sizes_the_text_and_toolbars_and_resets_the_layout_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=*viewTextSizeLarge|?viewTextSizeLarge|?viewTextSizeStandard|*viewToolBarIconsLarge|?viewToolBarIconsLarge|*viewToolBarNames|?viewToolBarNames|*viewPanelLayers|*viewResetLayout|?viewPanelLayers|?viewMenu"
+            "-DEXPECT=Text size: large\\..*viewTextSizeLarge: Large, checked.*viewTextSizeStandard: Standard, unchecked.*viewToolBarIconsLarge: Large Icons, checked.*viewToolBarNames: Show Toolbar Names, unchecked.*The panels and toolbars are back where a new window has them\\..*viewPanelLayers: Layers, checked.*viewMenu: View: .*Toolbars \\[.*Text Size \\[.*Reset Window Layout \\["
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/window_section_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Every menu item, in every submenu, has an icon to find it by and a
+    # status tip saying what it does (--check-menus, MainWindow::menuGaps):
+    # until 2026-09-26 sixty of them had neither or one.
+    add_test(NAME qt_every_menu_item_has_an_icon_and_a_status_tip_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCHECK_MENUS=ON"
+            "-DEXPECT=menus: [0-9]+ items, each with an icon and a status tip"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/menus_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_format_menu_opens_the_style_manager_headless
                          qt_the_style_manager_lists_a_library_group_s_linestyles_headless
                          qt_format_menu_opens_the_symbol_library_headless
@@ -1296,6 +1319,8 @@ if(TARGET katana)
                          qt_dist_typed_at_the_command_line_reports_the_inverse_headless
                          qt_quick_select_is_answered_at_the_command_line_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
+                         qt_every_menu_item_has_an_icon_and_a_status_tip_headless
+                         qt_the_window_section_sizes_the_text_and_toolbars_and_resets_the_layout_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
