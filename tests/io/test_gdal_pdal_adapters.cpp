@@ -83,6 +83,9 @@ using namespace katana::pointcloud;
 // built them. Registering GDAL points it at both, unless the environment
 // already has. Where to look is worked out here from where the libraries
 // were loaded, independently of the adapter.
+// Only where the adapter looks beside the libraries; Windows finds its data
+// another way, and an unused constant there fails the build (-Werror).
+#if defined(__linux__) || defined(__APPLE__)
 namespace {
 
 #if defined(__APPLE__)
@@ -94,6 +97,7 @@ constexpr const char* kCurlLibrary = "libcurl.so";
 #endif
 
 } // namespace
+#endif
 
 TEST(GdalAdapter, GdalIsPointedAtTheDataBesideItsLibrary)
 {
