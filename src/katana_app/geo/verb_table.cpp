@@ -26,6 +26,13 @@ namespace katana::app::geo {
 // ---- V2: GIS OVERLAY ----
 // ---- V3: GIS HULL, GIS CLIP ----
 // ---- V4: GIS CHECK, GIS REPAIR, GIS COVERAGE ----
+[[nodiscard]] katana::core::Result<Prepared> prepareGisCheck(Context& context, const Tokens& tokens,
+                                                             std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareGisRepair(Context& context, const Tokens& tokens,
+                                                              std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareGisCoverage(Context& context,
+                                                                const Tokens& tokens,
+                                                                std::string_view line);
 // ---- V5: GIS SQL ----
 // ---- I0: IMPORT, EXPORT, INFO, REFS, COPC ----
 // ---- I1: vector fidelity (no verb of its own) ----
@@ -74,6 +81,23 @@ const std::vector<VerbEntry>& verbTable()
         // ---- V2: GIS OVERLAY ----
         // ---- V3: GIS HULL, GIS CLIP ----
         // ---- V4: GIS CHECK, GIS REPAIR, GIS COVERAGE ----
+        rows.push_back(
+            {"GIS", "CHECK", &prepareGisCheck,
+             "GIS CHECK [<scope>] [markers=<layer>] [PREVIEW]  invalid lines and areas: a\n"
+             "          problem record at each defect (a self-intersection, ...); markers= draws\n"
+             "          a point at each, replacing the last check's"});
+        rows.push_back(
+            {"GIS", "REPAIR", &prepareGisRepair,
+             "GIS REPAIR [<scope>] [method=linework|structure] [PREVIEW]  invalid areas made\n"
+             "          valid in place, ids kept; a result of several parts keeps the id on\n"
+             "          the largest and draws the rest"});
+        rows.push_back(
+            {"GIS", "COVERAGE", &prepareGisCoverage,
+             "GIS COVERAGE CHECK [<scope>] [gap=<m>] [markers=<layer>] [PREVIEW]  overlaps,\n"
+             "          enclosed gaps narrower than gap= and edges that do not match, as\n"
+             "          problem records; GIS COVERAGE CLEAN [<scope>] [gap=<m>] [snap=<m>]\n"
+             "          [merge=longest-border|max-area|min-area|min-index] REPLACE [PREVIEW]\n"
+             "          moves the boundaries so they match (enclosed gaps only)"});
         // ---- V5: GIS SQL ----
         // ---- I0: IMPORT, EXPORT, INFO, REFS, COPC ----
         // ---- I2: FORMATS ----

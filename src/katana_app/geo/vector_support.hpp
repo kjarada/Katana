@@ -168,7 +168,8 @@ executeStep(Context& context, katana::commands::CommandPtr command);
 
 // output arg=output kind=vector target=layer layer=<layer> created= updated=
 // deleted= skipped= - the record applyOutputs writes, so a curated verb's
-// reply reads as the GDAL verb's does.
+// reply reads as the GDAL verb's does. An empty layer is an in-place apply:
+// target=in-place, no layer.
 [[nodiscard]] std::string outputRecord(std::string_view layer, const Applied& applied);
 
 // gis op=<op> seconds=<s> cancelled=no: a curated verb's first record.
@@ -190,6 +191,64 @@ copiesOf(const katana::cad::Document& document, const std::vector<katana::entity
 // A value of a feature's field as an entity property; nullopt for a null.
 [[nodiscard]] std::optional<katana::entity::PropertyValue>
 propertyOf(const katana::gis::processing::FieldValue& value);
+
+// ---- reshaping entities in place ---------------------------------------------------------------
+
+// The features of `set` by the entity each came from.
+[[nodiscard]] std::map<katana::entity::EntityId, const katana::gis::processing::Feature*>
+featuresById(const katana::gis::processing::FeatureSet& set);
+
+// Whether two rings are the same ring: the same points in the same cyclic
+// order, either way round, from any start, a closing repeat ignored.
+[[nodiscard]] bool sameRing(const std::vector<katana::gis::GeoPoint>& a,
+                            const std::vector<katana::gis::GeoPoint>& b);
+// Whether an algorithm gave a feature back as it was: every part of the same
+// kind with the same rings (holes in any order), or the same line.
+[[nodiscard]] bool sameShape(const katana::gis::processing::Feature& before,
+                             const katana::gis::processing::Feature& after);
+
+// An entity's new shape: the parts an algorithm gave back for the feature it
+// came from (make-valid, clean-coverage, clip), and what it was.
+struct Reshaped {
+    katana::entity::EntityId id = katana::entity::kInvalidEntityId;
+    std::vector<katana::gis::VectorGeometry> parts;
+    katana::gis::processing::Feature before;
+};
+
+// One entity whose result was several parts: its id is kept on the largest
+// and the rest are made beside it, as copies of it.
+struct Split {
+    katana::entity::EntityId id = katana::entity::kInvalidEntityId;
+    std::size_t parts = 0;
+    std::size_t made = 0; // entities made: a part's rings are one each
+};
+
+struct Reshape {
+    katana::commands::CommandPtr command; // null when nothing changes
+    std::size_t updated = 0, created = 0;
+    // Entities left as they were: an area whose holes the result changed (an
+    // entity is one ring; its holes are entities of their own), or one the
+    // drawing no longer has.
+    std::size_t left = 0;
+    std::vector<Split> splits;
+    std::vector<std::string> warnings;
+};
+
+// The one command that gives each entity of `reshaped` its new shape: the
+// largest part replaces its geometry (setEntityGeometry, so its id - and its
+// labels and associations - are kept; an area keeps the way round it ran),
+// and every other part is a new entity copied from it - layer, style, colour,
+// properties - with gis.op=<op> and gis.source=<its id>, a part with holes as
+// rings tagged gis.ring and gis.part. The created entities come in the order
+// of `splits`, each split's parts after the largest in order.
+[[nodiscard]] katana::core::Result<Reshape> reshapeCommand(const katana::entity::Model& model,
+                                                           const std::vector<Reshaped>& reshaped,
+                                                           const std::string& op,
+                                                           const std::string& commandName);
+// split entity=<id> parts=<n> created=<id,id>: which entities a reshape made
+// from which, `created` being the ids the command made, in its order.
+[[nodiscard]] std::vector<std::string> splitRecords(const std::vector<Split>& splits,
+                                                    const std::vector<katana::entity::EntityId>& created);
 
 // Markers of a check (GIS CHECK, GIS COVERAGE CHECK) on `layer`, replacing
 // the markers of the same `kind` a previous run left there - as AUTOLABEL
