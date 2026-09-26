@@ -467,3 +467,100 @@ larger than the whole level-range phase could be at a 0.1 m interval, so it is
 noise. The
 parallel `BM_Contours` and `BM_ArchiveTinContours` moved by no more than their
 A/A spreads in any run.
+
+## DEMs from GDAL
+
+DEMs are made through GDAL's algorithms, on the one geoprocessing executor
+(`docs/geoprocessing.md`): `RASTER GRID` makes one from surveyed points. The
+results are reference rasters (derived, with the line that made them as their
+derivation) or files. The DEM verbs share `src/katana_app/geo/dem_support.hpp`:
+a curated verb's own `key=value` options read wherever they stand, band 1 read
+at full precision, a cell's area, and a raster written where a line said kept
+in place.
+
+### Gridding points to a DEM
+
+```
+RASTER GRID [<scope>] [method=linear|invdist|invdistnn|nearest|average|...]
+            [cell=<m> | size=<columns>x<rows>] [z=geometry|<property>]
+            [extent=x0,y0,x1,y1] [power=<p>] [radius=<m>] [NAME <name>]
+            [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>] | TO SURFACE <name>]
+            [OVERWRITE] [PREVIEW]
+```
+
+`src/katana_app/geo/grid_verbs.cpp`. The points the scope takes, and the
+vertices of its lines and areas, are gridded by GDAL's `vector grid <method>`.
+The scope is the shared one (`SELECTION | DRAWING | VIEW | AREA | LAYERS`,
+then `WHERE`), so the points of one layer, of one code or of what a view shows
+are gridded as MODIFY would take them. Without TO the DEM is a reference
+raster named `dem`, or NAME's name.
+
+- **The methods are GDAL's own**, the leaves of `vector grid` read from its
+  catalogue at run time: a method a GDAL upgrade adds is offered with no
+  change. `power=` and `radius=` are refused for a method that has no such
+  argument, naming the methods that do.
+- **Heights: absent is not zero.** With `z=geometry` (the default) a vertex's
+  height is the drawing's, and an entity without a height at every vertex is
+  left out and counted (`skipped.heightless`). GDAL reads a 2D point as
+  z = 0: measured, four points at 100 m and one without a height between them
+  made the middle 0. With `z=<property>`, the property is GDAL's `--zfield`,
+  and an entity without a number there is left out and counted
+  (`skipped.no_z`): GDAL skips a null field but reads a word as 0 (measured,
+  "x" on the middle point made it 0).
+- **Every cell is the size asked for.** GDAL takes a resolution only with an
+  extent, and fits the extent by stretching the cells: measured, 10 m at a
+  3 m cell came back as 3 cells of 3.333 m. So the extent defaults to the
+  bounds of the vertices used, grown outwards to whole cells from the origin:
+  every point is inside the grid, every cell is `cell=` square, and grids of
+  one cell size line up. A given `extent=` keeps its lower-left corner and
+  grows up and right to whole cells. `size=` takes the extent as it is.
+  Without either, the cell is `interop::suggestedCellSize` of the extent, as
+  a surface's raster export chooses it.
+- **Cells no point reaches hold no data**, `interop::geo::kGridNoData`
+  declared on the band. GDAL's default no-data value is 0, which a reader
+  takes for ground at the datum.
+- **Bounded.** A grid of more than 25 million cells (the surfaces' own cap)
+  is refused, naming the cell that would fit.
+- **The options are the verb's wherever they stand.** `cell=5` after a
+  `WHERE LAYER=spots` filter is the verb's, not a condition: none of the
+  verb's keys is a WHERE key (`splitOptions`).
+- **What the scope took is said**, in the scope record every geoprocessing
+  verb gives; a scope that takes nothing, or only heightless points, answers
+  `ran=no` and nothing runs.
+- **TO SURFACE** is the terrain session's: until its store takes a raster
+  result, the executor refuses it after the run, and the dialog does not
+  offer it.
+
+The reply:
+
+```
+grid method=linear algorithm="vector grid linear" z=geometry cell=5 extent=0,0,100,100 size=20x20 seconds=0.044
+input arg=input source=drawing
+scope arg=input scope=drawing matched=121 used=121 points=121 lines=0 polygons=0
+output arg=output kind=raster target=reference id=1 name=ground raster=20x20 file="..." persisted=no
+```
+
+**The window.** Terrain > DEM > Grid Points to DEM (`terrainGrid`) opens
+`gridDemDialog` (`src/katana_qt/geo/grid_dem_dialog.hpp`): the points' scope
+and filter (Global Modify's controls), the method from GDAL's catalogue, cell
+or size, where the heights come from (geometry, or a property the drawing
+holds numbers in), extent, power and radius when the method takes them, and
+the name. It builds the line (`gridDemCommandLine`, a pure function), shows
+it in `gridCommand`, and Run hands it to the window's one executor, where it
+runs as a background job with progress and Cancel; the reply comes back into
+`gridReply` when the job ends. What the dialogs share - the command, preview,
+run and reply panel, and how a dialog hears that its job ended - is
+`src/katana_qt/geo/geo_dialog_support.hpp`.
+
+**Tests.** `tests/geo/test_grid_verb.cpp` (the executor, a Session and the
+MCP server's `katana_run_commands`), `tests/qt_widgets/geo/test_grid_dem_dialog.cpp`,
+`cli.raster_grid_*` (`src/katana_app/geo/cli/grid.cmake`) and
+`qt_grid_points_to_dem_dialog_grids_the_drawing_headless`
+(`tests/geo/headless/grid.cmake`). Every expected value is worked from the
+plane the points are surveyed on, z = 100 + x/10 + y/20: a linear grid
+reproduces a plane exactly, so every cell centre holds the plane's value -
+at (52.5, 47.5), 100 + 5.25 + 2.375 = 107.625 - to Float64 rounding (the
+output is Float64; 1e-9). Inverse distance with a radius of 8 m on a 10 m
+lattice takes the four points round each 10 m cell's centre, 7.07 m away,
+equally weighted, and the mean of a plane at four symmetric corners is the
+plane at the centre: 107.75 at (55, 45).

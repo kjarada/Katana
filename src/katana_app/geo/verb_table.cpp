@@ -16,6 +16,9 @@ namespace katana::app::geo {
 // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
 // ---- T5: RASTER VIEWSHED, LOS ----
 // ---- T6: RASTER GRID ----
+// grid_verbs.cpp: surveyed points to a DEM.
+[[nodiscard]] katana::core::Result<Prepared> prepareRasterGrid(Context& context, const Tokens& tokens,
+                                                               std::string_view line);
 // ---- T7: RASTER MOSAIC, CLIP, FILL, FOOTPRINT, REPROJECT, DIFFERENCE ----
 // ---- V1: GIS BUFFER, GIS DISSOLVE ----
 // ---- V2: GIS OVERLAY ----
@@ -53,6 +56,14 @@ const std::vector<VerbEntry>& verbTable()
         // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
         // ---- T5: RASTER VIEWSHED, LOS ----
         // ---- T6: RASTER GRID ----
+        rows.push_back(
+            {"RASTER", "GRID", &prepareRasterGrid,
+             "RASTER GRID [<scope>] [method=linear|invdist|invdistnn|nearest|average|...]\n"
+             "          [cell=<m> | size=<columns>x<rows>] [z=geometry|<property>]\n"
+             "          [extent=scope|x0,y0,x1,y1] [power=<p>] [radius=<m>] [NAME <name>]\n"
+             "          [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>]] [OVERWRITE]\n"
+             "          [PREVIEW]  the points in scope (and line vertices) gridded into a DEM;\n"
+             "          heightless entities are left out and counted, never read as 0"});
         // ---- T7: RASTER MOSAIC, CLIP, FILL, FOOTPRINT, REPROJECT, DIFFERENCE ----
         // ---- V1: GIS BUFFER, GIS DISSOLVE ----
         // ---- V2: GIS OVERLAY ----
