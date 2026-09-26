@@ -659,6 +659,13 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                     applyHeights(entity, piece.heights);
                     entity.metadata.emplace("source.file", sourceName);
                     entity.metadata.emplace("source.layer", info.name);
+                    for (const gp::FieldDef& field : table->fields) {
+                        if (const auto tag = geo::dateTypeTag(field.type);
+                            tag && entity.properties.contains(field.name)) {
+                            entity.metadata.emplace(
+                                std::string(geo::kImportTypePrefix) + field.name, *tag);
+                        }
+                    }
                     if (piece.ring) {
                         // The entity model has no polygon-with-holes type, so
                         // each ring is its own closed polyline, and its role

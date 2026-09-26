@@ -354,6 +354,43 @@ TEST(DrawingDataset, AHoleWrittenBackIsTaggedAndJoinsItsAreaAgain)
     EXPECT_DOUBLE_EQ(ringArea(parts[0]) - ringArea(parts[1]), 9600.0);
 }
 
+TEST(DrawingDataset, ADateAResultMadeIsADateWhenReadAgain)
+{
+    // A result's Date field becomes a text property tagged gis.type.<key>,
+    // so the drawing read as features gives the field its type again.
+    gp::FeatureTable points;
+    points.name = "points";
+    points.kind = GeometryKind::Point;
+    points.fields = {{"surveyed", gp::FieldType::Date}, {"note", gp::FieldType::String}};
+    katana::gis::VectorGeometry at;
+    at.kind = GeometryKind::Point;
+    at.parts = {{{1, 2, 0}}};
+    points.features.push_back(gp::Feature{
+        {at}, {gp::FieldValue(std::string("2024-05-01")), gp::FieldValue(std::string("x"))}});
+    katana::cad::Document document;
+    igeo::ResultOptions options;
+    options.targetLayer = "gis/dated";
+    auto plan = igeo::resultCommand(document.model(), gp::FeatureSet{{points}}, options);
+    ASSERT_TRUE(plan.ok()) << plan.error().describe();
+    ASSERT_TRUE(document.execute(std::move(plan->command)).ok());
+    const auto made = document.lastCreatedEntities();
+    ASSERT_EQ(made.size(), 1u);
+    auto again = igeo::drawingDataset(document.model(), made);
+    ASSERT_TRUE(again.ok());
+    const gp::FeatureTable& table = again->set.tables.front();
+    const auto typeOf = [&](const std::string& name) {
+        for (const gp::FieldDef& field : table.fields) {
+            if (field.name == name) {
+                return field.type;
+            }
+        }
+        ADD_FAILURE() << "no field " << name;
+        return gp::FieldType::Boolean;
+    };
+    EXPECT_EQ(typeOf("surveyed"), gp::FieldType::Date);
+    EXPECT_EQ(typeOf("note"), gp::FieldType::String);
+}
+
 TEST(DrawingDataset, UpdateGeometryKeepsTheEntitysId)
 {
     katana::cad::Document document;

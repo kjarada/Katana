@@ -256,6 +256,44 @@ TEST(VectorFidelity, TypedFieldsImportTyped)
     EXPECT_EQ(property(entity, "missing"), nullptr) << "absent is no property, not an empty one";
 }
 
+TEST(VectorFidelity, DatesImportedComeBackFromExportAsDates)
+{
+    // GDAL reads "2024-05-01" in a GeoJSON as a Date and the time as a
+    // DateTime; a property holds them as text, and EXPORT wrote that text as
+    // a String field, so a date filter on the exported file found nothing.
+    const TempDir dir("dates");
+    writeText(dir.file("dated.geojson"), R"({"type": "FeatureCollection", "features": [
+        {"type": "Feature",
+         "properties": {"surveyed": "2024-05-01", "stamp": "2024-05-01T10:20:30"},
+         "geometry": {"type": "Point", "coordinates": [1, 2]}}]})");
+    auto imported = interop::importVector(dir.file("dated.geojson"));
+    ASSERT_TRUE(imported.ok()) << imported.error().describe();
+    // The value stays the ISO 8601 text.
+    ASSERT_EQ(imported->entities.size(), 1u);
+    EXPECT_EQ(*property(imported->entities.front(), "surveyed"),
+              PropertyValue(std::string("2024-05-01")));
+    const Model model = modelOf(*imported);
+    ASSERT_TRUE(interop::exportVector(model, dir.file("dated.gpkg")).ok());
+    const gp::FeatureTable table = readBack(dir.file("dated.gpkg"));
+    ASSERT_EQ(table.features.size(), 1u);
+    const auto typeOf = [&](const std::string& name) {
+        return table.fields[fieldIndex(table, name)].type;
+    };
+    EXPECT_EQ(typeOf("surveyed"), gp::FieldType::Date);
+    EXPECT_EQ(typeOf("stamp"), gp::FieldType::DateTime);
+    const auto& values = table.features.front().values;
+    EXPECT_EQ(std::get<std::string>(values[fieldIndex(table, "surveyed")]), "2024-05-01");
+    EXPECT_EQ(std::get<std::string>(values[fieldIndex(table, "stamp")]).substr(0, 19),
+              "2024-05-01T10:20:30");
+    // Text typed as a date by no one stays text: a property set by hand
+    // carries no tag.
+    Entity typed = square(0, 0, 10);
+    typed.properties["surveyed"] = std::string("2024-05-01");
+    ASSERT_TRUE(interop::exportVector(modelWith({typed}), dir.file("typed.gpkg")).ok());
+    const gp::FeatureTable plain = readBack(dir.file("typed.gpkg"));
+    EXPECT_EQ(plain.fields[fieldIndex(plain, "surveyed")].type, gp::FieldType::String);
+}
+
 // ---- KML holds longitude and latitude -------------------------------------------------------
 
 TEST(VectorFidelity, KmlOfAProjectedDrawingIsReprojectedToLonLat)

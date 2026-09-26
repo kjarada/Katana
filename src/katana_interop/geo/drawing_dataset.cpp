@@ -330,9 +330,30 @@ gp::FieldType fieldTypeOf(const PropertyValue& value)
         value);
 }
 
+// A text property's type as its entity's metadata keeps it (a date), else
+// text.
+gp::FieldType textTypeOf(const Entity& entity, const std::string& key)
+{
+    for (const std::string_view prefix : {kImportTypePrefix, kResultTypePrefix}) {
+        const auto tag = entity.metadata.find(std::string(prefix) + key);
+        if (tag == entity.metadata.end()) {
+            continue;
+        }
+        const std::string text = katana::entity::toString(tag->second);
+        if (text == "date") {
+            return gp::FieldType::Date;
+        }
+        if (text == "datetime") {
+            return gp::FieldType::DateTime;
+        }
+    }
+    return gp::FieldType::String;
+}
+
 gp::FieldValue fieldValueOf(const PropertyValue& value, gp::FieldType type)
 {
-    if (type == gp::FieldType::String) {
+    if (type == gp::FieldType::String || type == gp::FieldType::Date ||
+        type == gp::FieldType::DateTime) {
         return katana::entity::toString(value);
     }
     return std::visit([](const auto& held) -> gp::FieldValue { return held; }, value);
@@ -370,7 +391,10 @@ gp::FeatureTable tableOf(const std::string& name, GeometryKind kind,
                 ++dropped;
                 continue;
             }
-            const gp::FieldType type = fieldTypeOf(value);
+            gp::FieldType type = fieldTypeOf(value);
+            if (type == gp::FieldType::String) {
+                type = textTypeOf(*shape->entity, key);
+            }
             const auto [at, inserted] = types.emplace(key, type);
             if (!inserted && at->second != type) {
                 at->second = gp::FieldType::String;
@@ -789,6 +813,13 @@ Result<ResultPlan> createPlan(const katana::entity::Model& model, const gp::Feat
                     entity.geometry = std::move(piece.geometry);
                     entity.layer = layer;
                     entity.properties = properties;
+                    for (const gp::FieldDef& field : table.fields) {
+                        const std::string key = options.propertyPrefix + field.name;
+                        if (const auto tag = dateTypeTag(field.type);
+                            tag && entity.properties.contains(key)) {
+                            entity.metadata[std::string(kResultTypePrefix) + key] = *tag;
+                        }
+                    }
                     if (withHoles && piece.ring) {
                         entity.properties["gis.ring"] = *piece.ring;
                         entity.properties["gis.part"] =
@@ -910,6 +941,17 @@ Result<ResultPlan> inPlacePlan(const katana::entity::Model& model, const gp::Fea
 }
 
 } // namespace
+
+std::optional<std::string> dateTypeTag(gp::FieldType type)
+{
+    if (type == gp::FieldType::Date) {
+        return "date";
+    }
+    if (type == gp::FieldType::DateTime) {
+        return "datetime";
+    }
+    return std::nullopt;
+}
 
 bool isBookkeepingField(const std::string& name)
 {
