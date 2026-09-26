@@ -1260,6 +1260,18 @@ being taken back. The three Surface From items open one dialog,
 opens `surfaceRasterDialog`; both are made on first use and kept, as the
 Alignment Manager is (`docs/terrain.md`, "Surfaces on every front end").
 
+**Terrain > Analysis** holds the terrain analysis items, each opening its
+dialog through `showTerrainDialog` (made on first use under the window, so
+`--dialog <item>` finds it by the name the action carries as its data):
+
+- `terrainContours` "Contours..." opens `contoursDialog`, which writes a
+  CONTOUR line: the source (a surface or a reference raster), the interval,
+  every how many is major, the level counted from, the parent layer, a
+  raster's smoothing, and - with "Keep inside closed shapes of the drawing"
+  (`contourClip`) - the shared scope controls (`contourScope`, the closed
+  shapes the contours are kept inside; the selection at first)
+  (`docs/terrain.md`, "Contours").
+
 **One store of surfaces.** The window's surfaces are a
 `terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the
 store the headless session has too, so `SURFACE <name>` finds the same

@@ -3,13 +3,20 @@
 #include "geo/terrain_dialog_support.hpp"
 
 #include <QComboBox>
+#include <QDialog>
+#include <QFontDatabase>
+#include <QLineEdit>
+#include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
+#include <QStringList>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 
 #include "geo/geo_workbench.hpp"
+#include "katana/core/text.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "katana/terrain/surface_store.hpp"
 
@@ -98,6 +105,53 @@ std::optional<QString> lineWord(const QString& text)
     }
     const bool blank = text.isEmpty() || text.contains(' ') || text.contains('\t');
     return blank ? "\"" + text + "\"" : text;
+}
+
+bool numberList(const QString& text, int count, bool whole)
+{
+    const QStringList items = text.split(',');
+    if (count > 0 && items.size() != count) {
+        return false;
+    }
+    return std::ranges::all_of(items, [whole](const QString& item) {
+        const std::string word = item.trimmed().toStdString();
+        return whole ? katana::core::parseInteger(word).has_value()
+                     : katana::core::parseFiniteDouble(word).has_value();
+    });
+}
+
+QLineEdit* terrainCommandField(QWidget* parent, const QString& name)
+{
+    auto* command = new QLineEdit(parent);
+    command->setObjectName(name);
+    command->setReadOnly(true);
+    command->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    return command;
+}
+
+QPlainTextEdit* terrainReplyField(QWidget* parent, const QString& name)
+{
+    auto* reply = new QPlainTextEdit(parent);
+    reply->setObjectName(name);
+    reply->setReadOnly(true);
+    reply->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    reply->setMinimumHeight(110);
+    return reply;
+}
+
+QDialog& showTerrainDialog(GeoWorkbench& workbench, const QString& name,
+                           const std::function<QDialog*(TerrainDialogContext, QWidget*)>& make)
+{
+    // By the base class: the window has no moc, so a dialog's own class has
+    // no meta-object for findChild to tell it by; the name is unique.
+    auto* dialog = workbench.window().findChild<QDialog*>(name);
+    if (dialog == nullptr) {
+        dialog = make(terrainDialogContext(workbench), &workbench.window());
+    }
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
+    return *dialog;
 }
 
 // What a job's end is matched against: the job the dialog waits for, and

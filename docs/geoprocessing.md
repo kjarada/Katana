@@ -683,7 +683,26 @@ Where it differs from the plan:
 
 ### T1: CONTOUR from a surface or an elevation raster
 
-Not started.
+Built: `CONTOUR` (`src/katana_app/geo/contour_verbs.cpp`), its conversion,
+clip and command in `include/katana/interop/geo/contour_entities.hpp`, and
+Terrain > Analysis > Contours (`terrainContours`, `contoursDialog`,
+`src/katana_qt/geo/contours_dialog.hpp`). `docs/terrain.md`, "Contours", has
+the grammar, the records and the decisions. What T1 to T3 share - a raster
+handed from one GDAL step to the next (`RasterChain`), the source reader
+(`bindTerrainSource`) and the areas a scope's closed shapes make
+(`bindAreas`) - is in `src/katana_app/geo/terrain_steps.cpp`, declared in
+`terrain_verbs.hpp`; the dialogs' shared pieces are in
+`terrain_dialog_support.hpp`. No MCP tool: `katana_run_commands` runs the
+line (`docs/mcp.md`).
+
+Where it differs from the plan:
+
+- Both engines' lines are cut at the boundary by one clipper
+  (`clipContours`); a raster is cut by GDAL to the areas' box first, not by
+  the boundary itself, whose no-data edge would end its contours short.
+- The dialog has a `contourClip` box that turns the scope on.
+- The raster engine refuses more than the tracer's 100 000 levels too,
+  judged on a strided sample before GDAL runs.
 
 ### T2: Terrain shading: hillshade, colour relief, slope shading
 
