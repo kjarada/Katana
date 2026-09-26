@@ -48,10 +48,13 @@ ctest --preset debug            # every test, output shown on failure
 | `linux-release` | Release | as `linux-debug` |
 | `linux-relwithdebinfo` | RelWithDebInfo | as `linux-debug` |
 | `linux-sanitize` | Debug | as `linux-debug`, with `KATANA_ENABLE_SANITIZERS=ON` |
+| `macos-debug` | Debug | the macOS toolchain prefix ("macOS", below) |
+| `macos-release` | Release | as `macos-debug` |
 
 The Windows presets set the compiler to `C:/msys64/ucrt64/bin/g++.exe` and
 `CMAKE_PREFIX_PATH` to `C:/msys64/ucrt64`; the Linux ones name the toolchain
-file `cmake/toolchains/katana-linux.cmake`. Every preset uses Ninja and exports
+file `cmake/toolchains/katana-linux.cmake`, the macOS ones
+`cmake/toolchains/katana-macos.cmake`. Every preset uses Ninja and exports
 `compile_commands.json`. Each has a build and a test preset of the same name
 (the test preset for `tidy` excepted).
 
@@ -98,7 +101,10 @@ PDAL 2.10.1, Eigen 3.4.0, GoogleTest 1.18.0 and Google Benchmark 1.9.5.
 `linux-*` presets name, points CMake at that prefix: its compilers, its
 packages first on `CMAKE_PREFIX_PATH`, and its `lib/` as the programs'
 run-time path, so they load its libstdc++, Qt, GDAL and PROJ without an
-`LD_LIBRARY_PATH`. A missing prefix fails the configure, saying how to make
+`LD_LIBRARY_PATH`; an INSTALLED program's run-time path is `$ORIGIN/../lib`
+instead, where the install copies them ("Bundling"). The sysroot is pinned to
+glibc 2.28, so what is built here runs on Debian 10, Ubuntu 20.04, RHEL 8 and
+later (`docs/release.md`). A missing prefix fails the configure, saying how to make
 it, rather than falling back to the system compiler, which configures cleanly
 and then fails in half a dozen files. Without a preset:
 `-DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/katana-linux.cmake`.
@@ -128,11 +134,34 @@ ctest runs them under `xvfb-run` when it is installed, on Mesa's lavapipe
 where there is no GPU (Debian and Ubuntu: `xvfb`, `mesa-vulkan-drivers`), and
 they skip without them.
 
-What is Windows-only: `KATANA_DEPLOY_RUNTIME` and the `bundle` and `package`
-targets (the Linux build tree runs from its run-time path), and the
-customisation compiled in from `resources/customisation/`, which is
-third-party material kept out of the repository - the tests that need it
-skip without it, on every platform.
+What is Windows-only: `KATANA_DEPLOY_RUNTIME` (the Linux build tree runs
+from its run-time path). The `bundle` and `package` targets work on Linux
+too, since 2026-09-26 ("Bundling"). The customisation compiled in from
+`resources/customisation/` is third-party material kept out of the
+repository - the tests that need it skip without it, on every platform.
+
+## macOS
+
+Katana builds on macOS on Apple silicon with the same script and the same
+libraries, from conda-forge's `osx-arm64` channel, with clang 23 and libc++
+in place of GCC:
+
+```sh
+python3 tools/setup_linux_toolchain.py      # once: into /opt/katana-toolchain, or $KATANA_TOOLCHAIN
+cmake --preset macos-release
+cmake --build --preset macos-release --parallel
+cmake --build build/macos-release --target bundle
+```
+
+GCC cannot be used: every conda-forge C++ library for macOS (Qt, GDAL, PDAL)
+is built against libc++, and GCC's libstdc++ does not link with them.
+`cmake/toolchains/katana-macos.cmake` sets the compiler, macOS 13.3 as the
+oldest target, arm64, and the run-time paths (`@loader_path/../lib` when
+installed). What it took to make the code build with clang, the minimum
+version and Gatekeeper are `docs/release.md`, "macOS". The GPU renderer is
+not built there; the 3D view draws with the software rasteriser. The suite has
+not yet been run on macOS; the release workflow builds and starts the
+package, nothing more.
 
 **Claude Code cloud sessions** run `.claude/hooks/session-start.sh` when they
 start: it runs the setup script into `/opt/katana-toolchain`, installs Xvfb
@@ -185,7 +214,7 @@ failed at link time with no explanation.
 | `katana_make_icons` | no | writes `resources/katana.ico`, a 256 px PNG and `resources/icon_sheet.png` from the icon painters; the output is committed (`docs/desktop.md`) |
 | `katana_tool_icon_sheet` | no | every catalogue tool's icon with its name and aliases (`docs/tools.md`) |
 | `bundle` | no | a self-contained `<build>/dist/Katana` ("Bundling") |
-| `package` | no | that tree as `Katana-<version>-win64.zip`, and an NSIS installer when `makensis` is found |
+| `package` | no | that tree as `Katana-<version>-win64.zip`, and an NSIS installer when `makensis` is found; on Linux and macOS `Katana-<version>-linux-x86_64.tar.gz` or `-macos-arm64.tar.gz` |
 
 ### Where things are built
 
@@ -301,8 +330,19 @@ from.
 
 `cmake --build <build> --target bundle` installs into `<build>/dist/Katana`;
 `--target package` makes `Katana-<version>-win64.zip` (and an NSIS installer
-when `makensis` is on the machine). The result runs with no MSYS2, Qt or GDAL
-installed. Three things make it so, and each was learned by the bundle
+when `makensis` is on the machine), or on Linux and macOS a `.tar.gz`. The
+result runs with no MSYS2, Qt, GDAL or toolchain prefix installed. It holds
+`katana`, `katana_cli` and `katana_mcp`.
+
+On Linux and macOS `cmake/KatanaDeployUnix.cmake.in` does the copying, when
+the build uses a toolchain prefix: the prefix's libraries into `lib/`, Qt's
+plugins into `lib/qt6/plugins` with a `bin/qt.conf`, and `share/proj`,
+`share/gdal` and `ssl/cacert.pem`, in the prefix's own layout so that no
+library's RPATH needs rewriting. Why that layout, and which libraries are left
+to the system, is `docs/release.md`. A build against a distribution's own
+libraries installs only Katana's programs.
+
+On Windows, three things make it so, and each was learned by the bundle
 failing:
 
 * **`windeployqt` for Qt, then a dependency scan over everything it deployed.**
@@ -336,12 +376,10 @@ as MSYS2 builds them; Katana's own code is a few megabytes. The install rules
 are `cmake/KatanaPackaging.cmake`; the licensed reference files under `docs/`
 must never be installed.
 
-**Known problem.** `cmake/KatanaPackaging.cmake` still installs, with no
-condition, a file from the root of the repository that was removed on
-2026-09-23 (the `install(FILES ...)` rule before the LICENSE rule), so
-`cmake --install`, `bundle` and `package` fail at that step until the rule is
-removed or made conditional. Nothing runs the bundle automatically, which is
-why it went unnoticed.
+The rule that once installed a removed root file unconditionally, and so
+failed every `cmake --install`, is conditional now
+(`packaging_installs_only_present_first_party_files`), and the release
+workflow runs `package` on every platform.
 
 ## The build tree runs on its own too
 
@@ -425,5 +463,7 @@ possible as a packaging project of its own.
 
 ## Continuous integration
 
-There is none: `.github/` holds no workflow (audit BLD-01, OPEN). Everything
-above is run by hand, and `ctest` is the whole gate.
+`.github/workflows/release.yml` builds and packages Windows, Linux and macOS
+on a pull request that changes the build, and publishes a GitHub release on a
+`v*` tag (`docs/release.md`). It does not run the tests: there is no CI for
+the suite (audit BLD-01, OPEN), and `ctest`, run by hand, is the whole gate.

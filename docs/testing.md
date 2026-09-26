@@ -291,3 +291,11 @@ the owner's Windows machine, where the suite is normally run.
 - **Eight GPU desktop cases** - the `gpu.GpuSceneView.OnTheDesktop...` and
   `qt_widgets_gpu.RenderViewGpu.OnTheDesktop...` cases, which need Xvfb and
   Mesa's lavapipe (`docs/gpu.md`); not diagnosed further.
+- **Two more file dialogs, intermittently** - `qt_widgets.SheetSetMenu.TheSetIsSavedAndLoadedBackAskingFirst`
+  and `qt_widgets.SheetSetMenu.AnotherSetsSheetsAreAppendedInOneStep` failed
+  in a full `ctest -j 4` run on 2026-09-26 (the first wrote no file, the second
+  waited for a dialog until killed) and passed in each of four runs alone.
+  Their `Answers` helper polls for the modal dialog every 10 ms; under the
+  load of a parallel run it looks as though a poll misses the dialog. Not
+  diagnosed further; ctest sets no timeout for them, so a hang holds the whole
+  run.
