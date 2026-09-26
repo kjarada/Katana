@@ -92,7 +92,17 @@ Model sampleModel()
              katana::entity::PointGeometry{Point2(9, 9)}, Arc2{Point2(0, 0), 2.0, 0.5, -1.5},
              Polyline2{{Point2(0, 0), Point2(4, 0), Point2(4, 3)}, true},
              katana::entity::TextGeometry{Point2(1, 1), "Ünïcödé — BM1", 2.5, 0.25},
-             katana::entity::DimensionGeometry{Point2(0, 0), Point2(10, 0), 2.0, "10.00"}}) {
+             katana::entity::DimensionGeometry{Point2(0, 0), Point2(10, 0), 2.0, "10.00"},
+             // The drawing system's kinds: a 3D string with an arc and a
+             // missing height, an elliptical arc, a fit-point spline.
+             katana::geometry::CurvePolyline2{
+                 {{Point2(0, 0), 0.4, 31.25}, {Point2(8, 2), 0.0, std::nullopt},
+                  {Point2(9, 7), -0.2, 33.5}},
+                 false},
+             katana::geometry::Ellipse2{Point2(5, 5), katana::geometry::Vec2(4, 3), 0.5, 1.0,
+                                        3.0},
+             *katana::geometry::Spline2::throughPoints(
+                 {Point2(0, 0), Point2(2, 5), Point2(6, 4), Point2(9, 9)}, 3)}) {
         Entity entity;
         entity.geometry = geometry;
         EXPECT_TRUE(model.entities.add(entity).ok());

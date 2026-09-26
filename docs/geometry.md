@@ -491,3 +491,64 @@ lands nowhere hot.
 The benchmarks for all three are in `benchmarks/bench_geometry.cpp`; they did
 not exist when the changes were made, which is recorded in
 `docs/performance.md` as a process failure rather than a footnote.
+
+## The drawing curves (`curves2d.hpp`) and vertex editing (`polyline_vertices.hpp`)
+
+The owner asked on 2026-09-25 for "a professional drawing system, with full
+vertex control". Three shapes that `primitives2d.hpp` cannot hold came with
+it, each added as its own type rather than by widening one that exists
+(`docs/drawing.md` says which kind a polyline is stored as, and why):
+
+- **`CurvePolyline2`** - vertices with a per-vertex **bulge** (the tangent of
+  a quarter of the included angle of the segment that starts there, DXF's
+  LWPOLYLINE convention: 0 straight, positive counter-clockwise, 1 a
+  semicircle) and an optional **height**. The bulge was chosen over a centre
+  or radius because it is defined by the segment's two ends alone: moving a
+  vertex keeps each arc's shape, a similarity keeps it, a reverse negates it,
+  and it is what the file formats carry. A positive bulge bulges to the
+  RIGHT of its chord (a counter-clockwise arc has its centre on the left),
+  which the first test fixture got backwards; the area of a closed ring adds
+  `r^2/2 (sweep - sin sweep)` per arc, and the tests pin both.
+- **`Ellipse2`** - DXF's representation: centre, major-axis vector, ratio, and
+  the arc as a start and a POSITIVE sweep of the eccentric anomaly. A mirror
+  is re-expressed (start becomes `-(start + sweep)`) rather than stored as a
+  negative sweep, so every reader sees one orientation. The perimeter is
+  five-point Gauss-Legendre on 64 panels and agrees with the Gauss-Kummer
+  series to 1e-9 m on a 10 m ellipse of ratio 0.3; Ramanujan's second
+  approximation, the first reference tried, is itself 3e-6 m out there.
+- **`Spline2`** - a clamped B-spline or NURBS (degree, control points, knots,
+  optional weights) that KEEPS the fit points it was drawn through: they are
+  what the grips move, and the control points are re-derived from them by
+  global interpolation (chord-length parameters, averaged knots - The NURBS
+  Book 9.2.1). The collocation matrix is banded and totally positive, so it
+  is solved in its band without pivoting, O(n p^2). A rational quadratic with
+  weights 1, sqrt(1/2), 1 is asserted to draw an exact quarter circle.
+
+Ellipses and splines are tessellated by adaptive subdivision that tests the
+midpoint AND both quarter points of each chord, since an S-shaped piece can
+pass through its own chord's middle; arcs keep the sagitta rule above.
+`kCurveChordTolerance` (1 mm) is the tolerance for callers with no view to
+ask - hit testing, sections, exports without curves.
+
+`polyline_vertices.hpp` is the arithmetic of vertex control: insert, delete,
+move, heights, bulges, segment to arc and back, straighten, grade,
+interpolate, Douglas-Peucker weeding, densifying, merging, snapping to a
+grid, close and open, change of start, and filleting or chamfering one
+vertex. Every function maps one `CurvePolyline2` to another, so the grips,
+the Vertices tools, the Vertices panel and the VERTEX verbs are four front
+ends on one implementation. Two decisions in it:
+
+- **Weeding counts height.** A vertex that is on the line in plan but 1 m
+  above the grade between its neighbours is not redundant on a survey
+  string, so a vertex is removable only when both its plan offset and (where
+  heights exist) its height departure are within the tolerance. The two ends
+  of every arc are kept, since an arc IS its ends and bulge, and so is every
+  vertex the caller marks (the Weed tool marks those on a survey point).
+- **A made vertex has an interpolated height or none.** An insert, a densify
+  or a fillet's tangent points take the height interpolated by length
+  between the ends of the segment they are made on - and none when either
+  end has none, because an invented height on a survey string is worse than
+  a missing one.
+
+Tested in `tests/geometry/test_curves2d.cpp` and
+`tests/geometry/test_polyline_vertices.cpp`.

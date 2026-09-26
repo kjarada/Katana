@@ -73,6 +73,8 @@ ToolStep InteractiveTool::anchoredPoint(const Point2& at,
     return point(at);
 }
 
+ToolStep InteractiveTool::point3d(const Point2& at, double /*z*/) { return point(at); }
+
 ToolStep InteractiveTool::entity(katana::entity::EntityId /*id*/, const Point2& /*at*/)
 {
     return ToolStep::rejected(std::string("an entity is not expected here; the tool wants ") +
@@ -131,43 +133,14 @@ ToolStep keepWorkOnEscape(InteractiveTool& tool)
 
 Result<Point2> parsePointInput(std::string_view text, std::optional<Point2> last)
 {
-    const std::string_view input = katana::core::trimmed(text);
-    const bool relative = !input.empty() && input.front() == '@';
-    const std::string_view body = relative ? input.substr(1) : input;
-    if (relative && !last) {
-        return makeError(ErrorCode::InvalidState, "a relative point needs a previous point",
-                         std::string(text));
+    // One grammar with the drafting aids' (drawing/drafting.hpp), at the
+    // command line's convention: degrees counter-clockwise from east, and a
+    // DMS angle or a quadrant bearing after the < of polar input.
+    auto point = parsePrecisePoint(text, last);
+    if (!point) {
+        return point.error();
     }
-
-    katana::math::Vec2 value;
-    if (const auto polar = body.find('<'); polar != std::string_view::npos) {
-        if (!relative) {
-            return makeError(ErrorCode::ParseFailure, "polar points are relative: @distance<angle",
-                             std::string(text));
-        }
-        const auto distance = katana::core::parseFiniteDouble(
-            katana::core::trimmed(body.substr(0, polar)));
-        const auto degrees = katana::core::parseFiniteDouble(
-            katana::core::trimmed(body.substr(polar + 1)));
-        if (!distance || !degrees) {
-            return makeError(ErrorCode::ParseFailure, "expected @distance<angle",
-                             std::string(text));
-        }
-        value = katana::math::Vec2(*distance, 0.0).rotated(*degrees * katana::math::kDegToRad);
-    } else {
-        const auto comma = body.find(',');
-        if (comma == std::string_view::npos) {
-            return makeError(ErrorCode::ParseFailure, "expected a point as x,y", std::string(text));
-        }
-        const auto x = katana::core::parseFiniteDouble(katana::core::trimmed(body.substr(0, comma)));
-        const auto y =
-            katana::core::parseFiniteDouble(katana::core::trimmed(body.substr(comma + 1)));
-        if (!x || !y) {
-            return makeError(ErrorCode::ParseFailure, "expected a point as x,y", std::string(text));
-        }
-        value = katana::math::Vec2(*x, *y);
-    }
-    return relative ? *last + value : Point2(value);
+    return point->point;
 }
 
 ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text)
@@ -180,11 +153,12 @@ ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text)
         tool.expects() != ToolInput::Value &&
         (input.find(',') != std::string_view::npos || (!input.empty() && input.front() == '@'));
     if (looksLikePoint) {
-        auto point = parsePointInput(input, tool.lastPoint());
+        auto point = parsePrecisePoint(input, tool.lastPoint());
         if (!point) {
             return ToolStep::rejected(point.error().describe());
         }
-        return tool.point(*point);
+        // x,y,z: a height for a tool that takes one (point3d's default drops it).
+        return point->z ? tool.point3d(point->point, *point->z) : tool.point(point->point);
     }
     return tool.value(input);
 }
@@ -198,6 +172,57 @@ ToolStep routeSnappedPoint(InteractiveTool& tool, const Document& document, cons
         }
     }
     return tool.point(at);
+}
+
+ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text, DraftingSettings& drafting,
+                         std::optional<Point2> cursor)
+{
+    const std::string_view input = katana::core::trimmed(text);
+    const bool atPoint = tool.expects() == ToolInput::Point;
+    if (atPoint && !input.empty() && input.front() == '<') {
+        const std::string_view angle = katana::core::trimmed(input.substr(1));
+        if (angle.empty() || katana::core::equalsIgnoringCase(angle, "off")) {
+            drafting.angleLock.reset();
+            return ToolStep::next("angle lock off");
+        }
+        const auto direction = parseDirection(angle, drafting.angles);
+        if (!direction) {
+            return ToolStep::rejected(direction.error().message);
+        }
+        drafting.angleLock = *direction;
+        return ToolStep::next("angle locked at " + formatDms(*direction * katana::math::kRadToDeg) +
+                              " (bearing " + formatBearing(*direction) + ")");
+    }
+    if (atPoint && !input.empty() && input.front() == '=') {
+        const std::string_view length = katana::core::trimmed(input.substr(1));
+        if (length.empty() || katana::core::equalsIgnoringCase(length, "off")) {
+            drafting.lengthLock.reset();
+            return ToolStep::next("length lock off");
+        }
+        const auto value = katana::core::parseFiniteDouble(length);
+        if (!value || !(*value > 0.0)) {
+            return ToolStep::rejected("'" + std::string(length) +
+                                      "' is not a length; type =distance, or = to clear the lock");
+        }
+        drafting.lengthLock = *value;
+        return ToolStep::next("length locked at " + katana::core::formatExactReal(*value));
+    }
+    if (tool.expects() != ToolInput::Value && looksLikePoint(input)) {
+        auto point = parsePrecisePoint(input, tool.lastPoint(), drafting);
+        if (!point) {
+            return ToolStep::rejected(point.error().describe());
+        }
+        return point->z ? tool.point3d(point->point, *point->z) : tool.point(point->point);
+    }
+    ToolStep step = tool.value(input);
+    if (step.outcome == ToolStep::Outcome::Rejected && atPoint && tool.lastPoint()) {
+        if (const auto distance = katana::core::parseFiniteDouble(input)) {
+            return tool.point(directDistance(*tool.lastPoint(),
+                                             cursor.value_or(*tool.lastPoint()), *distance,
+                                             drafting));
+        }
+    }
+    return step;
 }
 
 // ---- the catalogue -----------------------------------------------------------------
@@ -299,6 +324,8 @@ const BuiltCatalog& builtCatalog()
         tools::addModifyLengthTools(out.catalog, report);
         tools::addPropertyTools(out.catalog, report);
         tools::addSelectTools(out.catalog, report);
+        tools::addModifyVertexTools(out.catalog, report);
+        tools::addDrawProfessionalTools(out.catalog, report);
         return out;
     }();
     return built;

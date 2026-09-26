@@ -7,6 +7,7 @@
 #include <variant>
 #include <vector>
 
+#include "katana/entity/curve_pieces.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/entity_geometry.hpp"
@@ -46,6 +47,20 @@ const char* toString(SnapMode mode)
         return "Nearest";
     case SnapMode::Grid:
         return "Grid";
+    case SnapMode::Quadrant:
+        return "Quadrant";
+    case SnapMode::Node:
+        return "Node";
+    case SnapMode::Extension:
+        return "Extension";
+    case SnapMode::Parallel:
+        return "Parallel";
+    case SnapMode::ApparentIntersection:
+        return "Apparent Intersection";
+    case SnapMode::From:
+        return "From";
+    case SnapMode::MidBetween:
+        return "Midpoint Between Two Points";
     }
     return "Unknown";
 }
@@ -68,8 +83,21 @@ int rankOf(SnapMode mode)
         return 4;
     case SnapMode::Tangent:
         return 5;
-    default:
+    // The drawing system's modes rank after the originals, and the ones that
+    // are about lines NOT drawn (extensions, apparent crossings, parallels)
+    // after the ones on drawn geometry.
+    case SnapMode::Node:
         return 6;
+    case SnapMode::Quadrant:
+        return 7;
+    case SnapMode::ApparentIntersection:
+        return 8;
+    case SnapMode::Extension:
+        return 9;
+    case SnapMode::Parallel:
+        return 10;
+    default:
+        return 11;
     }
 }
 
@@ -178,6 +206,16 @@ struct EntitySnaps {
     void operator()(const katana::entity::PointGeometry& g) const
     {
         collector.offer(g.position, SnapMode::Endpoint, id);
+        collector.offer(g.position, SnapMode::Node, id);
+    }
+    void quadrants(const Circle2& circle, const Arc2* within = nullptr) const
+    {
+        for (int k = 0; k < 4; ++k) {
+            const Point2 p = circle.pointAtAngle(katana::math::kHalfPi * k);
+            if (within == nullptr || onArc(*within, p)) {
+                collector.offer(p, SnapMode::Quadrant, id);
+            }
+        }
     }
     void operator()(const Segment2& g) const { segment(g); }
     void operator()(const Polyline2& g) const
@@ -192,6 +230,7 @@ struct EntitySnaps {
     void operator()(const Circle2& g) const
     {
         collector.offerCenter(g.center, g.distanceTo(request.cursor), id);
+        quadrants(g);
         if (request.from) {
             for (const Point2& p : perpendicularFeet(g, *request.from)) {
                 collector.offer(p, SnapMode::Perpendicular, id);
@@ -201,12 +240,16 @@ struct EntitySnaps {
             }
         }
     }
-    void operator()(const Arc2& g) const
+    void operator()(const Arc2& g) const { arc(g); }
+    void arc(const Arc2& g, bool withEndpoints = true) const
     {
-        collector.offer(g.startPoint(), SnapMode::Endpoint, id);
-        collector.offer(g.endPoint(), SnapMode::Endpoint, id);
+        if (withEndpoints) {
+            collector.offer(g.startPoint(), SnapMode::Endpoint, id);
+            collector.offer(g.endPoint(), SnapMode::Endpoint, id);
+        }
         collector.offer(g.midpoint(), SnapMode::Midpoint, id);
         collector.offerCenter(g.center, g.distanceTo(request.cursor), id);
+        quadrants(g.circle(), &g);
         if (request.from) {
             for (const Point2& p : perpendicularFeet(g.circle(), *request.from)) {
                 if (onArc(g, p)) {
@@ -241,6 +284,51 @@ struct EntitySnaps {
             collector.offer(vertex, SnapMode::Endpoint, id);
         }
     }
+    // Each vertex an endpoint; a straight segment as a Polyline2's, an arc
+    // segment as an Arc2 (its midpoint, its centre, perpendicular and
+    // tangent feet on it).
+    void operator()(const katana::geometry::CurvePolyline2& g) const
+    {
+        for (const auto& vertex : g.vertices) {
+            collector.offer(vertex.position, SnapMode::Endpoint, id);
+        }
+        for (std::size_t i = 0; i < g.segmentCount(); ++i) {
+            const auto piece = g.segment(i);
+            if (const auto* line = std::get_if<Segment2>(&piece)) {
+                segment(*line, /*withEndpoints=*/false);
+            } else {
+                arc(std::get<Arc2>(piece), /*withEndpoints=*/false);
+            }
+        }
+    }
+    // The centre (while the curve is hovered, as a circle's), the ends of an
+    // arc, and the ends of the axes that lie on it (the Quadrant snap).
+    void operator()(const katana::geometry::Ellipse2& g) const
+    {
+        collector.offerCenter(g.center, g.distanceTo(request.cursor), id);
+        if (!g.isFull()) {
+            collector.offer(g.startPoint(), SnapMode::Endpoint, id);
+            collector.offer(g.endPoint(), SnapMode::Endpoint, id);
+            collector.offer(g.pointAtParameter(g.startParameter + 0.5 * g.sweep),
+                            SnapMode::Midpoint, id);
+        }
+        for (const Point2& p : g.quadrants()) {
+            collector.offer(p, SnapMode::Quadrant, id);
+        }
+    }
+    // The ends, and the fit points a spline was drawn through (Node: they
+    // are points the user placed, as a point entity is).
+    void operator()(const katana::geometry::Spline2& g) const
+    {
+        if (!g.checkStructure()) {
+            return;
+        }
+        collector.offer(g.startPoint(), SnapMode::Endpoint, id);
+        collector.offer(g.endPoint(), SnapMode::Endpoint, id);
+        for (const Point2& p : g.fitPoints) {
+            collector.offer(p, SnapMode::Node, id);
+        }
+    }
 };
 
 // Curves of an entity that can take part in intersection and nearest snaps.
@@ -273,6 +361,98 @@ void appendCurves(const Entity& entity, const Box2& reach,
                 curves.emplace_back(entity.id, piece);
             }
         }
+    } else {
+        // Every other linework kind through the one list of pieces
+        // (entity/curve_pieces.hpp): a curve polyline's segments and arcs,
+        // an ellipse's and a spline's chords - culled the same way.
+        for (const Curve2& piece : katana::entity::curvePieces(entity.geometry)) {
+            if (katana::geometry::boundingBox(piece).intersects(reach)) {
+                curves.emplace_back(entity.id, piece);
+            }
+        }
+    }
+}
+
+// ---- the snaps to lines that are not drawn --------------------------------------------
+//
+// Extension, Apparent Intersection and Parallel find points AWAY from the
+// geometry that produces them - on a line carried on past its end, where two
+// lines would cross, on the parallel through the last point - so they look
+// at the curves of a wider neighbourhood than the aperture (kTrackingReach
+// apertures), and accept only candidates within the aperture of the cursor
+// like every other snap.
+constexpr double kTrackingReach = 25.0;
+
+void offerExtensions(Collector& collector, const SnapRequest& request,
+                     const std::vector<std::pair<EntityId, Curve2>>& curves)
+{
+    for (const auto& [id, curve] : curves) {
+        if (const auto* line = std::get_if<Segment2>(&curve)) {
+            if (line->isDegenerate()) {
+                continue;
+            }
+            const katana::geometry::Line2 carried{line->start, line->delta()};
+            const double t = carried.parameterOf(request.cursor);
+            if (t < 0.0 || t > 1.0) {
+                collector.offer(carried.pointAt(t), SnapMode::Extension, id);
+            }
+        } else if (const auto* arc = std::get_if<Arc2>(&curve)) {
+            const Vec2 toCursor = request.cursor - arc->center;
+            if (toCursor.length() > 0.0 && !onArc(*arc, arc->center + toCursor)) {
+                collector.offer(arc->center + toCursor.normalized() * arc->radius,
+                                SnapMode::Extension, id);
+            }
+        }
+    }
+}
+
+void offerApparentIntersections(Collector& collector,
+                                const std::vector<std::pair<EntityId, Curve2>>& curves)
+{
+    for (std::size_t i = 0; i < curves.size(); ++i) {
+        const auto* a = std::get_if<Segment2>(&curves[i].second);
+        if (a == nullptr || a->isDegenerate()) {
+            continue;
+        }
+        for (std::size_t j = i + 1; j < curves.size(); ++j) {
+            const auto* b = std::get_if<Segment2>(&curves[j].second);
+            if (b == nullptr || b->isDegenerate() || curves[i].first == curves[j].first) {
+                continue;
+            }
+            const Vec2 da = a->delta();
+            const Vec2 db = b->delta();
+            const double denominator = da.cross(db);
+            if (std::abs(denominator) <= katana::math::tolerance::kAngular * da.length() * db.length()) {
+                continue;
+            }
+            const double t = (b->start - a->start).cross(db) / denominator;
+            const double u = (b->start - a->start).cross(da) / denominator;
+            // A real crossing is Intersection's; this is only the ones that
+            // need at least one of the lines carried on.
+            if (t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0) {
+                continue;
+            }
+            collector.offer(a->pointAt(t), SnapMode::ApparentIntersection, curves[i].first);
+        }
+    }
+}
+
+void offerParallels(Collector& collector, const SnapRequest& request,
+                    const std::vector<std::pair<EntityId, Curve2>>& curves)
+{
+    if (!request.from) {
+        return;
+    }
+    for (const auto& [id, curve] : curves) {
+        const auto* line = std::get_if<Segment2>(&curve);
+        if (line == nullptr || line->isDegenerate()) {
+            continue;
+        }
+        const katana::geometry::Line2 parallel{*request.from, line->delta()};
+        const Point2 foot = parallel.closestPoint(request.cursor);
+        if (foot.distanceTo(*request.from) > katana::math::tolerance::kGeometric) {
+            collector.offer(foot, SnapMode::Parallel, id);
+        }
     }
 }
 
@@ -300,6 +480,33 @@ std::optional<SnapResult> snap(const katana::entity::Model& model, const SnapReq
     for (const Entity* entity : nearby) {
         std::visit(EntitySnaps{collector, request, entity->id}, entity->geometry);
         appendCurves(*entity, reach, curves);
+    }
+
+    const bool tracking = hasMode(request.modes, SnapMode::Extension) ||
+                          hasMode(request.modes, SnapMode::ApparentIntersection) ||
+                          (hasMode(request.modes, SnapMode::Parallel) && request.from);
+    // Extension and Parallel are "somewhere along a line" snaps, like
+    // Nearest: an exact point on drawn geometry beats them however close
+    // they are, so they are collected apart and asked after Nearest.
+    Collector along(request);
+    if (tracking) {
+        const Box2 wide = reach.inflated(request.aperture * kTrackingReach);
+        std::vector<std::pair<EntityId, Curve2>> far;
+        detail::forEachCandidate(model, index, wide, scratch, [&](const Entity& entity) {
+            if (isDrawn(model, entity,
+                        request.view != nullptr ? *request.view : kNoLayerOverrides)) {
+                appendCurves(entity, wide, far);
+            }
+        });
+        if (hasMode(request.modes, SnapMode::Extension)) {
+            offerExtensions(along, request, far);
+        }
+        if (hasMode(request.modes, SnapMode::ApparentIntersection)) {
+            offerApparentIntersections(collector, far);
+        }
+        if (hasMode(request.modes, SnapMode::Parallel)) {
+            offerParallels(along, request, far);
+        }
     }
 
     const std::size_t pairLimit = hasMode(request.modes, SnapMode::Intersection) ? curves.size() : 0;
@@ -333,11 +540,15 @@ std::optional<SnapResult> snap(const katana::entity::Model& model, const SnapReq
             return nearest;
         }
     }
+    if (along.best()) {
+        return along.best();
+    }
 
     if (hasMode(request.modes, SnapMode::Grid) && request.gridSpacing > 0.0) {
         const double spacing = request.gridSpacing;
-        return SnapResult{Point2(std::round(request.cursor.x / spacing) * spacing,
-                                 std::round(request.cursor.y / spacing) * spacing),
+        const Vec2 d = request.cursor - request.gridOrigin;
+        return SnapResult{request.gridOrigin + Vec2(std::round(d.x / spacing) * spacing,
+                                                    std::round(d.y / spacing) * spacing),
                           SnapMode::Grid, katana::entity::kInvalidEntityId};
     }
     return std::nullopt;
