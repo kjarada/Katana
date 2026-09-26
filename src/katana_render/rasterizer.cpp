@@ -147,7 +147,7 @@ namespace {
 // this only decides small lists. Measured, the kernel took 12% off the
 // 'Test 4' archive frame and stayed inside the A/A spread elsewhere
 // (docs/performance.md, "SIMD: the software rasteriser").
-constexpr std::size_t kTransformBatchMinimum = 16;
+[[maybe_unused]] constexpr std::size_t kTransformBatchMinimum = 16; // unread without the kernels
 
 } // namespace
 

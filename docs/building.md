@@ -155,7 +155,7 @@ cmake --build build/macos-release --target bundle
 
 GCC cannot be used: every conda-forge C++ library for macOS (Qt, GDAL, PDAL)
 is built against libc++, and GCC's libstdc++ does not link with them.
-`cmake/toolchains/katana-macos.cmake` sets the compiler, macOS 13.3 as the
+`cmake/toolchains/katana-macos.cmake` sets the compiler, macOS 13 as the
 oldest target, arm64, and the run-time paths (`@loader_path/../lib` when
 installed). What it took to make the code build with clang, the minimum
 version and Gatekeeper are `docs/release.md`, "macOS". The GPU renderer is
