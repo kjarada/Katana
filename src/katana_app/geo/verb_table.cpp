@@ -249,8 +249,11 @@ const std::vector<VerbEntry>& verbTable()
              "          a raster: [band=N] [subdataset=N|name] [maxpixels=N] [name=<n>];\n"
              "          a point cloud: [budget=N] [class=N] [resolution=<m>] [name=<n>]"});
         rows.push_back({"EXPORT", "", &prepareExport,
-                        "EXPORT <file>  the drawing, by extension (.dxf, .12da with the surfaces,\n"
-                        "          GeoPackage, GeoJSON, shapefile ...)"});
+                        "EXPORT <file> [<scope>]  the drawing, or what the scope takes of it, by\n"
+                        "          extension (.dxf, .12da with the surfaces, GeoPackage, GeoJSON,\n"
+                        "          shapefile ...); GDAL's formats also [layername=<n> | split=layer]\n"
+                        "          [append] [crs=project|native|<code>] [co=K=V]... [lco=K=V]...\n"
+                        "          [text=points|skip] [curve=<m>] [properties=yes|no]; [PREVIEW]"});
         rows.push_back({"INFO", "", &prepareInfo,
                         "INFO <file|folder|url> [JSON] [STATS] [CHECK] [LAYER <name>]  what a\n"
                         "          GIS file, a folder or a point cloud holds, without importing it:\n"

@@ -530,6 +530,46 @@ TEST_F(McpServer, ImportTakesItsFilterScopeAndPreviewArgumentsAsTheWordsAPersonT
     EXPECT_NE(textOf(refused).find("NOPE"), std::string::npos) << textOf(refused);
 }
 
+TEST_F(McpServer, ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes)
+{
+    // tests/geo/data/lots.geojson imported: three closed polylines on layer
+    // lots, the two lots and the corridor (kind=corridor).
+    initialize();
+    const std::string lots =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "../../tests/geo/data/lots.geojson")
+            .lexically_normal()
+            .generic_string();
+    ASSERT_FALSE(call("katana_import", Json{{"path", lots}})["isError"].get<bool>());
+    const TempDir dir("export options");
+    const std::string out = dir.file("lots.gpkg");
+
+    const Json previewed = call("katana_export", Json{{"path", out},
+                                                      {"scope", "layers"},
+                                                      {"layers", Json{"lots"}},
+                                                      {"where", Json{"PROP=kind:lot"}},
+                                                      {"layer_name", "parcels"},
+                                                      {"preview", true}});
+    ASSERT_FALSE(previewed["isError"].get<bool>()) << textOf(previewed);
+    EXPECT_EQ(previewed["structuredContent"]["commands"][0]["command"],
+              "EXPORT \"" + out + "\" LAYERS lots WHERE PROP=kind:lot layername=parcels PREVIEW");
+    const Json records = previewed["structuredContent"]["records"];
+    ASSERT_GE(records.size(), 2u) << records.dump();
+    EXPECT_EQ(records[0]["record"], "export");
+    EXPECT_EQ(records[0]["entities"], 2);
+    EXPECT_FALSE(std::filesystem::exists(out));
+
+    const Json written = call("katana_export", Json{{"path", out}, {"split_by_layer", true}});
+    ASSERT_FALSE(written["isError"].get<bool>()) << textOf(written);
+    EXPECT_EQ(written["structuredContent"]["records"][0]["record"], "exported");
+    EXPECT_EQ(written["structuredContent"]["records"][0]["features"], 3);
+    EXPECT_EQ(written["structuredContent"]["records"][0]["layers"], "lots");
+
+    const Json refused = call("katana_export", Json{{"path", dir.file("refused.gpkg")},
+                                                    {"layer_creation_options", Json{"NOPE=1"}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("NOPE"), std::string::npos) << textOf(refused);
+}
+
 TEST_F(McpServer, DatasetInfoReturnsRecordsAndGdalsJson)
 {
     // terrain.asc's header: 120 x 90 cells of 1.5 from (-5, -5), no-data

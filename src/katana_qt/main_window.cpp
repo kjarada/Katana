@@ -3748,97 +3748,42 @@ void MainWindow::exportVectorFile()
         selected += '.' + chosenFilter.mid(pattern + 3).chopped(1);
     }
 
-    const std::filesystem::path path = toPath(selected);
-    interop::VectorExportOptions options;
-    if (interop::kindForPath(path) == interop::SourceKind::Archive12d ||
-        katana::dxf::isDxfPath(path)) {
-        // A 12d archive has none of the GDAL formats' choices - it keeps arcs
-        // as arcs and every property - and nor has the native DXF writer, so
-        // the only question is how much.
-        if (!document_.selection().empty()) {
-            const auto answer = QMessageBox::question(
-                this, "Export",
-                "Export only the " + QString::number(document_.selection().size()) +
-                    " selected entities?\n\nNo exports the whole drawing.",
-                QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-            if (answer == QMessageBox::Cancel) {
-                return;
-            }
-            if (answer == QMessageBox::Yes) {
-                options.entities = document_.selection().ids();
-            }
+    // The Export Vector dialog (gis_export_dialog.hpp): its scope and
+    // options are the EXPORT line it shows, and Run hands that line to the
+    // one executor, as if typed (docs/interop.md, "Export options"). One per
+    // window, made the first time and kept, as every GIS dialog is.
+    // Found by its name, as addGisToolAction finds a GIS dialog: the class
+    // has no Q_OBJECT for findChild to cast by.
+    auto* dialog = dynamic_cast<VectorExportDialog*>(findChild<QDialog*>("vectorExportDialog"));
+    if (dialog == nullptr) {
+        GisDialogContext context;
+        context.run = commandRunner();
+        context.document = &document_;
+        context.headless = [this] { return headless_; };
+        if (views_ != nullptr) {
+            context.views = [this] { return scopeFilterViews(views_->viewSet()); };
         }
-    } else {
-        VectorExportDialog dialog(chosenFilter, document_.selection().size(), this);
-        if (dialog.exec() != QDialog::Accepted) {
-            logMessage("Export cancelled.");
-            return;
-        }
-        dialog.apply(options);
-        if (dialog.selectedOnly()) {
-            options.entities = document_.selection().ids();
+        dialog = new VectorExportDialog(std::move(context), this);
+        if (geo_ != nullptr) {
+            QPointer<VectorExportDialog> guard(dialog);
+            (void)geo_->addFinishedListener([guard](JobId id, const VerbOutcome& outcome) {
+                if (guard != nullptr) {
+                    guard->jobFinished(id, outcome);
+                }
+            });
         }
     }
-    (void)exportDrawingTo(path, std::move(options));
-}
-
-bool MainWindow::exportDrawingTo(const std::filesystem::path& path,
-                                 interop::VectorExportOptions options)
-{
-    if (katana::dxf::isDxfPath(path)) {
-        return exportDxfFile(path, options);
+    dialog->reload();
+    dialog->setFile(QDir::fromNativeSeparators(selected));
+    // What is selected is what is usually meant, when there is a selection;
+    // else the whole drawing.
+    if (ScopeFilterWidget* scope = dialog->scopeControls()) {
+        scope->setChoice(document_.selection().empty() ? ScopeChoice::Drawing
+                                                       : ScopeChoice::Selection);
     }
-    if (interop::kindForPath(path) == interop::SourceKind::Archive12d) {
-        // A 12d archive carries what the other formats cannot: the alignments
-        // and the surfaces of the session go with the drawing.
-        std::vector<katana::archive12d::ExportSurface> surfaces;
-        if (options.entities.empty()) {
-            for (const auto& item : sceneSurfaces_) {
-                surfaces.push_back({item.name, item.surface});
-            }
-        }
-        interop::Archive12dExportOptions archiveOptions;
-        archiveOptions.entities = options.entities;
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        auto archive = interop::exportArchive12d(document_.model(), surfaces, path, archiveOptions);
-        QApplication::restoreOverrideCursor();
-        if (!archive.ok()) {
-            logMessage(QString::fromStdString(archive.error().describe()), true);
-            warnUser("Export failed", QString::fromStdString(archive.error().describe()));
-            return false;
-        }
-        logMessage(QString("Exported %1 entities, %2 alignments and %3 surfaces to %4 (12d archive)")
-                       .arg(grouped(archive->entitiesWritten))
-                       .arg(grouped(archive->alignmentsWritten))
-                       .arg(grouped(archive->surfacesWritten))
-                       .arg(fromPath(path.filename())));
-        for (const std::string& warning : archive->warnings) {
-            logMessage("  " + QString::fromStdString(warning));
-        }
-        return true;
-    }
-    // The project's coordinate system goes into the file, and is what a KML
-    // or GPX is converted to longitude and latitude from (docs/interop.md,
-    // "Fidelity").
-    if (options.projectionWkt.empty()) {
-        options.projectionWkt = document_.metadata().coordinateSystem;
-    }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto result = interop::exportVector(document_.model(), path, options);
-    QApplication::restoreOverrideCursor();
-
-    if (!result.ok()) {
-        logMessage(QString::fromStdString(result.error().describe()), true);
-        warnUser("Export failed", QString::fromStdString(result.error().describe()));
-        return false;
-    }
-
-    logMessage("Exported " + grouped(result->featuresWritten) + " features to " +
-               fromPath(path.filename()) + " (" + QString::fromStdString(result->driver) + ")");
-    for (const std::string& warning : result->warnings) {
-        logMessage("  " + QString::fromStdString(warning));
-    }
-    return true;
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
 }
 
 void MainWindow::refreshReferences()
