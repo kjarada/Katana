@@ -879,4 +879,22 @@ TEST_F(McpServer, TerrainListGivesTheSessionsSurfacesAndRasters)
     EXPECT_EQ(content["rasters"][0]["cell"], 1.5);
     EXPECT_NE(textOf(listed).find("surface ground: "), std::string::npos) << textOf(listed);
 }
+
+// T1: CONTOUR is a session line, so the command tool draws contours as the
+// window's Terrain > Analysis > Contours does. terrain.asc's heights run
+// from 24.892 to 38.819, so the whole metres in it are 25 to 38: 14 levels.
+TEST_F(McpServer, ContoursOfASurfaceAreDrawnThroughTheCommandTool)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json drawn = call("katana_run_commands",
+                            Json{{"commands", {"SURFACE FROM FILE \"" + terrain + "\" NAME ground",
+                                               "CONTOUR SURFACE ground interval=1"}}});
+    ASSERT_FALSE(drawn["isError"].get<bool>()) << textOf(drawn);
+    const Json& lines = drawn["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 2U);
+    const std::string reply = lines[1]["output"].get<std::string>();
+    EXPECT_NE(reply.find("contours method=tin cell= levels=14 "), std::string::npos) << reply;
+    EXPECT_NE(reply.find("layer=terrain/contours"), std::string::npos) << reply;
+}
 #endif

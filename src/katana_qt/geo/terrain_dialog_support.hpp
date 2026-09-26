@@ -27,6 +27,8 @@
 #include "jobs.hpp"
 
 class QComboBox;
+class QDialog;
+class QLineEdit;
 class QPlainTextEdit;
 class QWidget;
 
@@ -89,6 +91,22 @@ void fillSources(QComboBox& combo, const std::vector<TerrainSourceChoice>& choic
 // A word of a line: as it is, or double-quoted when it holds a blank. Empty
 // when it holds a double quote, which no line can say.
 [[nodiscard]] std::optional<QString> lineWord(const QString& text);
+
+// A list of `count` numbers separated by commas, as a line writes them
+// ("0,0,40,30"; 0: any count); each must read as a number, whole when
+// `whole`, locale-independently.
+[[nodiscard]] bool numberList(const QString& text, int count, bool whole);
+
+// The fields every terrain dialog has: the line it will run, read-only, and
+// what the line said, in a fixed-width font.
+[[nodiscard]] QLineEdit* terrainCommandField(QWidget* parent, const QString& name);
+[[nodiscard]] QPlainTextEdit* terrainReplyField(QWidget* parent, const QString& name);
+
+// The dialog `name` under the workbench's window, made by `make` the first
+// time - a child of the window, so --dialog finds it by name - then shown and
+// raised. What a Terrain > Analysis item does.
+QDialog& showTerrainDialog(GeoWorkbench& workbench, const QString& name,
+                           const std::function<QDialog*(TerrainDialogContext, QWidget*)>& make);
 
 // Runs a dialog's line and shows what it said in `reply`: at once when it
 // answered (a refusal, a PREVIEW, a headless run), or when its job ends -
