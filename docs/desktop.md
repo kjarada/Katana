@@ -1277,6 +1277,13 @@ dialog through `showTerrainDialog` (made on first use under the window, so
   ramp (a built-in or a colour-map file typed in) and its range, the
   reference raster's name, and a GeoTIFF to save the picture to
   (`docs/terrain.md`, "Shading").
+- `terrainSlope` "Slope and Aspect..." opens `slopeAnalysisDialog`, which
+  writes a RASTER SLOPE or RASTER ASPECT line: the source, the kind, the
+  unit, the class breaks with the layer their areas go under and the least
+  area kept (both off until there are classes), the reference raster's
+  name, and - with `slopeClip` - the shared scope controls (`slopeScope`,
+  the closed shapes the analysis is kept inside) (`docs/terrain.md`, "Slope
+  and aspect").
 
 **One store of surfaces.** The window's surfaces are a
 `terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the

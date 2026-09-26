@@ -22,6 +22,11 @@ katana::core::Result<Prepared> prepareContour(Context& context, const Tokens& to
 katana::core::Result<Prepared> prepareShade(Context& context, const Tokens& tokens,
                                             std::string_view line);
 // ---- T3: RASTER SLOPE, RASTER ASPECT ----
+// slope_verbs.cpp (terrain_verbs.hpp).
+katana::core::Result<Prepared> prepareSlope(Context& context, const Tokens& tokens,
+                                            std::string_view line);
+katana::core::Result<Prepared> prepareAspect(Context& context, const Tokens& tokens,
+                                             std::string_view line);
 // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
 // ---- T5: RASTER VIEWSHED, LOS ----
 // ---- T6: RASTER GRID ----
@@ -83,6 +88,18 @@ const std::vector<VerbEntry>& verbTable()
              "          [save=<file.tif>] [OVERWRITE] [PREVIEW]  a picture of the terrain,\n"
              "          kept as a derived reference raster, with its legend"});
         // ---- T3: RASTER SLOPE, RASTER ASPECT ----
+        rows.push_back(
+            {"RASTER", "SLOPE", &prepareSlope,
+             "RASTER SLOPE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>\n"
+             "          [unit=percent|degree] [classes=<b1>,<b2>,...] [areas=terrain/slope]\n"
+             "          [min_area=<m2>] [NAME <n>] [<scope>] [PREVIEW]  the slope as a\n"
+             "          reference raster; classes drawn as areas on <areas>/<class>, with\n"
+             "          each class's area"});
+        rows.push_back(
+            {"RASTER", "ASPECT", &prepareAspect,
+             "RASTER ASPECT SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>\n"
+             "          [NAME <n>] [<scope>] [PREVIEW]  the direction the ground faces,\n"
+             "          degrees clockwise from north, as a reference raster"});
         // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
         // ---- T5: RASTER VIEWSHED, LOS ----
         // ---- T6: RASTER GRID ----

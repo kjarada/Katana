@@ -27,6 +27,8 @@
 #include "geo/contours_dialog.hpp"
 // ---- T2: Terrain > Analysis > Terrain Shading ----
 #include "geo/terrain_shading_dialog.hpp"
+// ---- T3: Terrain > Analysis > Slope ----
+#include "geo/slope_analysis_dialog.hpp"
 
 namespace katana::qt {
 
@@ -75,6 +77,21 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
         menus.addToTerrain("Analysis", "terrainAnalysisMenu", shading);
     }
     // ---- T3: Terrain > Analysis > Slope ----
+    {
+        QAction* slope = workbench.services().makeAction(
+            Icon::Processing, "Slope and Aspect...",
+            "The slope or aspect of a surface or an elevation raster, and slope classes drawn as "
+            "areas (RASTER SLOPE, RASTER ASPECT)",
+            {}, "terrainSlope");
+        slope->setData("slopeAnalysisDialog");
+        QObject::connect(slope, &QAction::triggered, &workbench.window(), [&workbench] {
+            (void)showTerrainDialog(workbench, "slopeAnalysisDialog",
+                                    [](TerrainDialogContext context, QWidget* parent) -> QDialog* {
+                                        return new SlopeAnalysisDialog(std::move(context), parent);
+                                    });
+        });
+        menus.addToTerrain("Analysis", "terrainAnalysisMenu", slope);
+    }
     // ---- T4: Terrain > Analysis > Zonal Statistics, Drape ----
     // ---- T5: Terrain > Analysis > Viewshed ----
     // ---- T6: Terrain > DEM > Grid from Points ----
