@@ -61,6 +61,12 @@ namespace katana::qt {
 
 void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
 {
+    // Terrain > A&nalysis: A is Cut Section Along Alignment's in the Terrain
+    // menu. Its six items' letters (C, H, S, A, D, V) are each one item's;
+    // qt_every_shortcut_and_menu_letter_reaches_one_thing_headless refuses a
+    // letter shared in one menu, and GeoMenus.EveryItemTheLanesAddHasALetterOfItsOwn
+    // an item with none.
+    const QString kAnalysis = "A&nalysis";
     (void)menus;
     (void)workbench;
     // ---- F0: GDAL algorithm bridge: no item; the typed GDAL line (X1 is its menu item) ----
@@ -150,7 +156,7 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     // ---- T1: Terrain > Analysis > Contours ----
     {
         QAction* contours = workbench.services().makeAction(
-            Icon::Processing, "Contours...",
+            Icon::Processing, "&Contours...",
             "Contour lines of a surface or an elevation raster, drawn on layers (CONTOUR)", {},
             "terrainContours");
         contours->setData("contoursDialog");
@@ -160,12 +166,12 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new ContoursDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain("Analysis", "terrainAnalysisMenu", contours);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", contours);
     }
     // ---- T2: Terrain > Analysis > Terrain Shading ----
     {
         QAction* shading = workbench.services().makeAction(
-            Icon::Processing, "Terrain Shading...",
+            Icon::Processing, "Terrain S&hading...",
             "Hillshade, colour relief or slope shading of a surface or an elevation raster, kept "
             "as a reference raster with its legend (RASTER SHADE)",
             {}, "terrainShading");
@@ -176,12 +182,12 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new TerrainShadingDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain("Analysis", "terrainAnalysisMenu", shading);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", shading);
     }
     // ---- T3: Terrain > Analysis > Slope ----
     {
         QAction* slope = workbench.services().makeAction(
-            Icon::Processing, "Slope and Aspect...",
+            Icon::Processing, "&Slope and Aspect...",
             "The slope or aspect of a surface or an elevation raster, and slope classes drawn as "
             "areas (RASTER SLOPE, RASTER ASPECT)",
             {}, "terrainSlope");
@@ -192,12 +198,12 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new SlopeAnalysisDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain("Analysis", "terrainAnalysisMenu", slope);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", slope);
     }
     // ---- T4: Terrain > Analysis > Statistics by Area, Drape and Sample Heights ----
     {
         QAction* zonal = workbench.services().makeAction(
-            Icon::Processing, "Statistics by Area...",
+            Icon::Processing, "Statistics by &Area...",
             "The mean, range, count and more of a surface or an elevation raster inside each "
             "closed shape, written on the shapes as properties (RASTER ZONAL)",
             {}, "terrainZonal");
@@ -208,9 +214,9 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new ZonalStatsDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain("Analysis", "terrainAnalysisMenu", zonal);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", zonal);
         QAction* drape = workbench.services().makeAction(
-            Icon::Processing, "Drape and Sample Heights...",
+            Icon::Processing, "&Drape and Sample Heights...",
             "Give points and line vertices the height of a surface or an elevation raster, or "
             "read the height at points (DRAPE, RASTER SAMPLE)",
             {}, "terrainDrape");
@@ -221,12 +227,12 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new DrapeDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain("Analysis", "terrainAnalysisMenu", drape);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", drape);
     }
     // ---- T5: Terrain > Analysis > Viewshed and Line of Sight ----
     {
         QAction* viewshed = workbench.services().makeAction(
-            Icon::Processing, "Viewshed and Line of Sight...",
+            Icon::Processing, "&Viewshed and Line of Sight...",
             "What can be seen from observers over a surface or an elevation raster, and whether "
             "one point can be seen from another (RASTER VIEWSHED, LOS)",
             {}, "terrainViewshed");
@@ -237,7 +243,7 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                                         return new ViewshedDialog(std::move(context), parent);
                                     });
         });
-        menus.addToTerrain("Analysis", "terrainAnalysisMenu", viewshed);
+        menus.addToTerrain(kAnalysis, "terrainAnalysisMenu", viewshed);
     }
     // ---- T6: Terrain > DEM > Grid from Points ----
     {
