@@ -690,6 +690,20 @@ Preview through a stub runner) and `qt_gdal_toolbox_buffers_a_drawn_line_headles
 (`tests/geo/headless/toolbox.cmake`: a 100 m line buffered 1 m either side
 with flat caps from the toolbox, 200 m2 by hand).
 
+Its menu letter is X (GDAL Toolbo&x): every other letter of the name is
+another GIS item's once the lanes are merged, and
+`qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` refuses a
+letter shared in one menu. Terrain's DEM submenu is D&EM for the same reason
+(D is Surface From Drawing's).
+
+Not done: a CRS argument (`raster reproject`'s `--output-crs`, `--input-crs`
+...) is a plain line, typed as GDAL reads it. The plan offered GDAL's own
+suggestions there, as the output format has (`processing::suggest`). GDAL
+gives the authorities for an empty value and 7216 `<code> -- <name>` entries
+after `EPSG:` (GDAL 3.13.2, measured with `gdal completion`), so it wants a
+completer that asks again as the text changes and writes `EPSG:<code>` back.
+That is not built.
+
 ### X2: Toolbox pipeline tab
 
 Built: the GDAL Toolbox's Pipeline tab (`src/katana_qt/geo/pipeline_builder.hpp`).
