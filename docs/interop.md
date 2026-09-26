@@ -58,8 +58,8 @@ last the line that made it (`RasterOverlay::derivation`).
 
 | Direction | Formats |
 |---|---|
-| Vector in | Shapefile, GeoJSON, GeoPackage, KML, GML, DXF, MapInfo TAB, SQLite |
-| Vector out | the same, driver inferred from the extension |
+| Vector in | Shapefile, GeoJSON, GeoPackage, KML, GML, DXF, MapInfo TAB, SQLite, CSV with its geometry (WKT, or X, Y and Z) |
+| Vector out | the same, driver inferred from the extension, each written as the format needs ("Fidelity", below) |
 | Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2 — GDAL's readers |
 | Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD in; LAS/LAZ out, at 1 mm (audit IO-17); any of them to COPC |
 | Raster out | a surface as a DEM: GeoTIFF, Esri ASCII grid, Erdas IMG (`exportSurfaceRaster`) |
@@ -99,23 +99,30 @@ Every lossy step is stated rather than hidden.
 * A **two-point LineString** becomes a `Line`, not a two-vertex polyline — a
   drafter expects to be able to fillet it. Longer ones become polylines.
 * A **polygon** becomes closed polylines, one per ring, with the ring's role
-  (`exterior` / `hole`) recorded in entity metadata. The entity model has no
-  polygon-with-holes type, so the information is preserved where it can be
-  rather than discarded.
+  (`source.ring`: `exterior` / `hole`) and the feature it came from
+  (`source.part`) recorded in entity metadata. The entity model has no
+  polygon-with-holes type, so the information is kept where it can be, and
+  EXPORT puts the area together again: a lot with a hole goes out as one
+  polygon with its hole ("Fidelity").
 * **Multi-geometries** are flattened to one entity per part, each carrying a
   copy of the feature's attributes.
 * The **closing vertex** of a ring is dropped; `Polyline2::closed` expresses it,
   and keeping it would create a zero-length final segment the model rejects.
-* **Arcs and circles** have no exact representation in these formats, so they
-  are exported as polylines. `curveTolerance` is the sagitta — the greatest
+* **Curves in a file** - a CircularString, a CompoundCurve, a CurvePolygon -
+  become an `Arc` where the curve is one arc and a `Circle` where it is a
+  whole circle; any other curve is chords by the rule below, and counted.
+* **Arcs and circles** have no exact representation in most of these
+  formats, so they are exported as polylines. `curveTolerance` is the sagitta — the greatest
   distance the polyline may deviate from the true curve — in model units,
   default 1 mm. The chord count follows `φ = 2·acos(1 − tolerance/r)`, so the
   result is the coarsest polyline meeting the tolerance and no finer.
 * **Text and dimensions** have no counterpart at all. They are skipped, counted,
   and reported in `warnings` — never silently dropped (`docs/architecture.md`,
   "Error handling").
-* **Attributes** become string entity properties; entity properties become
-  attributes, doubles formatted at `%.17g` so they round trip exactly.
+* **Attributes** become entity properties of their own type - integers,
+  reals, booleans and text, a date as ISO 8601 text - and properties become
+  fields of their type; a key whose type differs between entities is text,
+  and says so ("Fidelity").
 * **Heights.** A file's Z becomes the `elevation` / `elevations` properties
   that the 12d archive, the survey import and Surface From Drawing all read
   (`entity.hpp`, one writer `setHeights` and one reader `heightsOf`); on export
@@ -171,11 +178,114 @@ result" describes the intent, not the code.
   `Delete`, which removes the sidecar files too.
 * **GeoJSON always declares WGS 84** (RFC 7946). Projected coordinates written
   to it will be read back as degrees, so exporting without a CRS warns.
+* **KML, KMZ and GPX hold longitude and latitude on WGS 84 and nothing else.**
+  An export to one is converted from the project's CRS and says so; with no
+  project CRS it is refused (`InvalidCRS`), where GDAL's KML writer used to
+  write placemarks without their geometry and report success.
 * **No reprojection.** A file's declared CRS is read and reported, never applied.
   Mixing coordinate systems is the user's responsibility and the UI says so.
-  The one exception is data fetched from a web service, whose CRS nobody chose:
+  Two exceptions: data fetched from a web service, whose CRS nobody chose -
   GIS > Online Data moves it into the project's CRS through
-  `VectorImportOptions::targetCrs` and a GDAL warp (`docs/gis_online.md`).
+  `VectorImportOptions::targetCrs` and a GDAL warp (`docs/gis_online.md`) -
+  and an export to a format that holds only longitude and latitude, above.
+
+## Fidelity: what IMPORT and EXPORT no longer lose
+
+The GDAL investigation of 2026-09-26 reproduced a set of silent losses in
+the vector path, each reported as a success. Each is fixed where the loss
+was, and each has a test that fails without the fix
+(`tests/geo/test_vector_fidelity.cpp`;
+`cli.a_lot_with_a_hole_is_exported_as_one_polygon_with_the_projects_crs`,
+`cli.export_of_a_projected_drawing_to_kml_is_in_longitude_and_latitude`,
+`cli.export_to_kml_without_a_project_crs_is_refused`,
+`qt_export_of_a_projected_drawing_to_kml_is_in_longitude_and_latitude_headless`).
+
+**One conversion.** EXPORT reads the drawing through
+`interop::geo::drawingDataset`, the conversion every geoprocessing
+algorithm reads it through (`docs/geoprocessing.md`, "Bindings"), and
+IMPORT makes its entities with `interop::geo::featurePieces`, the one a
+result is made with. The adapter reads a layer as a typed table
+(`GdalDataset::readTable`) and writes typed tables
+(`GdalDataset::writeTables`); `readFeatures` and `writeVector` stay, as the
+same read and write with every value as text. There was a second
+entity-to-feature conversion in `export.cpp` beside the bindings', and the
+losses below came about between the two.
+
+- **A hole is a hole.** A 100 m lot with a 20 m hole, imported and exported
+  to a GeoPackage, came back as two polygons summing to 10 400 m2 instead
+  of 9 600: the export wrote every closed polyline as a polygon of its own.
+  The conversion joins a ring IMPORT tagged as a hole to the area it lies
+  in, the one of its own feature (`source.part`) when there is such, so the
+  lot is one polygon again
+  (`VectorFidelity.ALotWithAHoleRoundTripsThroughGpkgWith9600SquareMetres`).
+  A building inside a lot is still not a hole: only a tagged ring is.
+- **Types.** Every field was text both ways (`GetFieldAsString` in,
+  `OFTString` out), so a sum over an imported area column was no sum.
+  Fields keep their types both ways. A driver without a type gets the
+  nearest one that holds every value: KML's writer has no Integer64, so an
+  id that fits in 32 bits is its Integer, not its text.
+- **CRS.** EXPORT never wrote the project's coordinate system: every
+  shapefile went without a `.prj`. Both command lines and the window now
+  pass it (`document.metadata().coordinateSystem`), so the file declares
+  it.
+- **KML, KMZ and GPX** hold longitude and latitude only. Given MGA
+  coordinates, GDAL's KML writer raised "Latitude 6250000 is invalid",
+  wrote the placemark without its geometry, and the export said "exported
+  1 features". The writer converts to EPSG:4326 by the one reprojection
+  (`gis::reprojectFeatures`) and says it did; with no CRS it refuses. GDAL's
+  KML writer converts by itself when given the CRS, and its GPX writer does
+  not: one conversion of Katana's for all three was preferred to relying on
+  one driver's habit. The point at 330000,6250000 in EPSG:28356 comes back
+  at 151.161906846 E, 33.876653623 S, PROJ's own `cs2cs` answer.
+- **KML heights.** KML's default altitude mode, clampToGround, puts a
+  coordinate on the ground whatever its altitude says, and GDAL's KMZ
+  writer gives a 2D coordinate an altitude of 0. So a heighted feature is
+  written in the "absolute" mode, and an altitude is read as a height only
+  in that mode: a KMZ's plan-only point no longer comes back at 0.
+- **CSV** was written with its fields and no geometry at all. It is written
+  with its geometry - WKT, or X and Y (and Z when every point has a height)
+  for a table of points, which a spreadsheet reads - and the `.csvt` that
+  keeps the field types. IMPORT reads a CSV's geometry columns as its
+  geometry, not as properties as well, and a Z column as heights.
+- **MapInfo TAB** keeps a coordinate as a 32-bit integer across the
+  table's bounds, and GDAL's default bounds made that step a centimetre:
+  330100 came back as 330099.99. The bounds are the data's extent, widened
+  by a tenth and a unit, so the step across a 200 m site is 5e-8 m and
+  across 2000 km 5e-4 m.
+- **Curves and faces.** A CircularString, a TIN and a polyhedral surface
+  were dropped without a word ("imported 1 entities" from a file of three).
+  An arc is an `Arc`, a whole circle a `Circle`, and a line of several arcs
+  chords within `VectorImportOptions::curveTolerance` (1 mm) by the chord
+  rule EXPORT uses, counted in a warning; a TIN or a polyhedral surface is
+  left out, counted in `VectorImportResult::skipped` and said by name. The
+  adapter hands the arcs over as they are (`VectorGeometry::arcs`) rather
+  than making chords itself: GDAL's `getLinearGeometry`, asked for the
+  step that keeps a 1 mm sagitta on a 10 m radius, left 1.001 mm
+  (measured), and katana_io cannot see the geometry layer, where the chord
+  rule lives.
+- **GDAL's warnings** went to the process-wide quiet handler and nowhere
+  else. Each read and write collects the warnings GDAL raises on its own
+  thread (`src/katana_io/cpl_error_collector.hpp`) and returns them, each
+  once with a count, among the import's or export's warnings: a shapefile
+  shortening `surveyed_by_party` to `surveyed_b` says so
+  (`VectorFidelity.WarningsReachTheReply`). A failure GDAL raises while
+  writing a feature fails the export and removes the file, even when GDAL
+  itself carried on.
+
+Every format of the export table is written and read back in one test,
+geometry and fields (`VectorFidelity.RoundTripOfEveryExportDriver`): shp,
+geojson, gpkg, kml, gml, dxf (its fixed fields hold the layer only), csv,
+sqlite and tab.
+
+**Not done.** The online import's reprojection moves an arc's three points
+and not the arc (no web service sends arcs). A KML's own fields (`Name`,
+`description`, `tessellate` ...) still arrive as properties, as they
+always have. A GPX export writes points as waypoints and lines, closed
+ones included, as routes; `.gpx` and `.kmz` are reached by naming the
+driver until the driver registry routes them. `originShift` is still not
+undone on export (QT-07, above). The bridge (`src/katana_io/geo/processing.cpp`)
+keeps its own copy of the error collector and of the typed field reading;
+both could move onto the adapter's.
 
 ## Scale
 
@@ -208,6 +318,8 @@ is opened as a decimated sample held in memory, not worked on in full.
 | Nothing matched the export filter | `InvalidArgument`, no file created |
 | Raster with no georeferencing | imported, placed at the origin, **warned**; refused by Surface From Raster (`InvalidArgument`), which would otherwise build ground in the wrong place |
 | Vector export with a CRS GDAL cannot read | `InvalidCRS` before anything is written (it used to be dropped and the file written with none) |
+| KML, KMZ or GPX export with no project CRS | `InvalidCRS` before anything is written, naming `CRS SET` |
+| GDAL says it could not write a feature, and carries on | `FileExportFailure` with GDAL's message, and the file removed (KML's "Export of geometry to KML failed") |
 | A write that fails at GDAL's setters or at close | `FileExportFailure`, and the partial file removed (audit IO-14; the close path is reviewed, not tested - no failure could be injected there) |
 | DEM export over `maxCells` (25 million) | `InvalidArgument` naming the cell count; the dialog refuses first |
 | Band index out of range | `InvalidArgument` |

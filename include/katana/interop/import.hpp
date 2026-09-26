@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -59,9 +60,16 @@ struct VectorImportOptions {
     std::string layerAttribute = "layer";
     // -1 imports every layer in the dataset.
     int sourceLayerIndex = -1;
+    // 0 imports them all; otherwise at most this many of the file's features.
     std::uint64_t maxFeatures = 0;
-    // Copy feature attributes onto the entities as string properties.
+    // Copy feature attributes onto the entities as properties, typed as the
+    // file types them: integers, reals, booleans, text, and dates as ISO
+    // 8601 text.
     bool attributesAsProperties = true;
+    // A curve that is one arc or one circle becomes an Arc or a Circle; any
+    // other curve (a line of several arcs) is chords, none further than this
+    // from the curve, in the file's units - the 1 mm sagitta EXPORT uses.
+    double curveTolerance = 0.001;
     // Subtracted from every coordinate. Survey data often sits at coordinates
     // where a double has only ~0.1 mm of resolution left; shifting to a local
     // origin restores precision for downstream editing. Recorded in the result
@@ -118,12 +126,15 @@ struct VectorImportResult {
     std::vector<std::string> layersNeeded;
 
     katana::geometry::Box2 bounds;
-    std::uint64_t featuresRead = 0;
-    std::uint64_t featuresSkipped = 0;
+    std::uint64_t featuresRead = 0;    // the file's features read (and in the area)
+    std::uint64_t featuresSkipped = 0; // of those, the ones no entity came of
+    // Geometries left out, by what they were: "tin", "polyhedral surface",
+    // "unsupported <GDAL's type>".
+    std::map<std::string, std::uint64_t> skipped;
     std::string projectionWkt;
     // Non-fatal problems: unsupported geometry types, empty geometries,
-    // attributes that could not be represented. Never silently dropped
-    // (PLAN.MD section 36).
+    // attributes that could not be represented, and GDAL's own warnings.
+    // Never silently dropped (PLAN.MD section 36).
     std::vector<std::string> warnings;
 };
 

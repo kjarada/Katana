@@ -6,10 +6,14 @@
 #include <cwctype>
 #include <filesystem>
 #include <limits>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <system_error>
+#include <variant>
 #include <vector>
 
 #if defined(_WIN32)
@@ -31,8 +35,11 @@
 #include <ogr_spatialref.h>
 #include <ogrsf_frmts.h>
 
+#include "cpl_error_collector.hpp"
 #include "gdal_registry.hpp"
 #include "katana/core/text.hpp"
+#include "katana/gis/processing.hpp"
+#include "katana/gis/reproject.hpp"
 #include "ogr_detail.hpp"
 #include "proj_search_paths.hpp"
 
@@ -227,7 +234,9 @@ bool parseCrs(const std::string& text, OGRSpatialReference& reference)
 
 // ---- OGR geometry -> VectorGeometry ---------------------------------------
 
-std::vector<GeoPoint> pointsOf(const OGRLineString& line)
+// The points of a line or of a CircularString (both are simple curves): a
+// CircularString's points are the ends and the middles of its arcs.
+std::vector<GeoPoint> pointsOf(const OGRSimpleCurve& line)
 {
     std::vector<GeoPoint> points;
     const int count = line.getNumPoints();
@@ -239,12 +248,55 @@ std::vector<GeoPoint> pointsOf(const OGRLineString& line)
     return points;
 }
 
-// Appends one feature per SIMPLE geometry. A multi-geometry or collection is
-// recursed into so that every emitted VectorGeometry has exactly one kind,
-// which is what keeps the consumer free of nested-variant handling.
-void flatten(const OGRGeometry* geometry, const std::map<std::string, std::string>& attributes,
-             std::vector<VectorFeature>& out, std::vector<std::string>& warnings,
-             int depth = 0)
+// A curve's points appended to `points`, and the index each of its arcs
+// starts at appended to `arcs` (VectorGeometry::arcs). A CompoundCurve's
+// members meet end to start, so each after the first gives its points but
+// its first.
+void appendCurve(const OGRCurve& curve, std::vector<GeoPoint>& points,
+                 std::vector<std::size_t>& arcs)
+{
+    const OGRwkbGeometryType type = wkbFlatten(curve.getGeometryType());
+    if (type == wkbCompoundCurve) {
+        const auto* compound = curve.toCompoundCurve();
+        for (int i = 0; i < compound->getNumCurves(); ++i) {
+            appendCurve(*compound->getCurve(i), points, arcs);
+        }
+        return;
+    }
+    const std::vector<GeoPoint> own = pointsOf(*curve.toSimpleCurve());
+    const std::size_t start = points.empty() ? 0 : points.size() - 1;
+    points.insert(points.end(), own.begin() + (points.empty() || own.empty() ? 0 : 1), own.end());
+    if (type == wkbCircularString) {
+        // (0, 1, 2), (2, 3, 4) ...: an arc every two points.
+        for (std::size_t k = 0; k + 2 < own.size(); k += 2) {
+            arcs.push_back(start + k);
+        }
+    }
+}
+
+bool isCurve(OGRwkbGeometryType type)
+{
+    switch (wkbFlatten(type)) {
+    case wkbCircularString:
+    case wkbCompoundCurve:
+    case wkbCurvePolygon:
+    case wkbMultiCurve:
+    case wkbMultiSurface:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Appends one VectorGeometry per SIMPLE geometry. A multi-geometry or
+// collection is recursed into so that every emitted VectorGeometry has
+// exactly one kind, which is what keeps the consumer free of nested-variant
+// handling. A curve is kept as its arcs when `keepArcs` is set (IMPORT turns
+// them into Katana's arcs and circles), and made chords at GDAL's own step
+// otherwise; what has no Katana counterpart - a TIN, a polyhedral surface -
+// is counted in `report`, never silently dropped.
+void flatten(const OGRGeometry* geometry, std::vector<VectorGeometry>& out, bool keepArcs,
+             VectorReadReport& report, int depth = 0)
 {
     if (geometry == nullptr || geometry->IsEmpty()) {
         return;
@@ -252,64 +304,101 @@ void flatten(const OGRGeometry* geometry, const std::map<std::string, std::strin
     // Defensive: OGR geometries are trees and a malformed file could in
     // principle nest collections deeply. 32 is far beyond anything meaningful.
     if (depth > 32) {
-        warnings.push_back("geometry nested more than 32 levels deep was skipped");
+        ++report.skipped["nested too deep"];
         return;
     }
 
-    switch (wkbFlatten(geometry->getGeometryType())) {
+    const OGRwkbGeometryType type = wkbFlatten(geometry->getGeometryType());
+    if (!keepArcs && isCurve(type)) {
+        // The chords GDAL makes at its own step (OGR_ARC_STEPSIZE, 4 degrees):
+        // what an algorithm is handed. IMPORT keeps the arcs and makes its
+        // chords by the one rule EXPORT uses (docs/interop.md, "Curves").
+        const std::unique_ptr<OGRGeometry> linear(geometry->getLinearGeometry());
+        if (linear != nullptr) {
+            ++report.curvesMadeChords;
+            flatten(linear.get(), out, keepArcs, report, depth + 1);
+        }
+        return;
+    }
+
+    switch (type) {
     case wkbPoint: {
         const auto* point = geometry->toPoint();
-        VectorFeature feature;
-        feature.geometry.kind = GeometryKind::Point;
-        feature.geometry.parts.push_back({GeoPoint{point->getX(), point->getY(),
-                                                   point->Is3D() != 0 ? point->getZ() : 0.0}});
-        feature.geometry.hasZ = point->Is3D() != 0;
-        feature.attributes = attributes;
-        out.push_back(std::move(feature));
+        VectorGeometry part;
+        part.kind = GeometryKind::Point;
+        part.parts.push_back({GeoPoint{point->getX(), point->getY(),
+                                       point->Is3D() != 0 ? point->getZ() : 0.0}});
+        part.hasZ = point->Is3D() != 0;
+        out.push_back(std::move(part));
         return;
     }
-    case wkbLineString: {
-        VectorFeature feature;
-        feature.geometry.kind = GeometryKind::LineString;
-        feature.geometry.parts.push_back(pointsOf(*geometry->toLineString()));
-        feature.geometry.hasZ = geometry->Is3D() != 0;
-        feature.attributes = attributes;
-        out.push_back(std::move(feature));
-        return;
-    }
-    case wkbPolygon: {
-        const auto* polygon = geometry->toPolygon();
-        VectorFeature feature;
-        feature.geometry.kind = GeometryKind::Polygon;
-        if (const auto* exterior = polygon->getExteriorRing()) {
-            feature.geometry.parts.push_back(pointsOf(*exterior));
+    case wkbLineString:
+    case wkbCircularString:
+    case wkbCompoundCurve: {
+        VectorGeometry part;
+        part.kind = GeometryKind::LineString;
+        part.parts.emplace_back();
+        part.arcs.emplace_back();
+        appendCurve(*geometry->toCurve(), part.parts.back(), part.arcs.back());
+        part.hasZ = geometry->Is3D() != 0;
+        if (!part.hasArcs()) {
+            part.arcs.clear();
         }
-        for (int i = 0; i < polygon->getNumInteriorRings(); ++i) {
-            if (const auto* hole = polygon->getInteriorRing(i)) {
-                feature.geometry.parts.push_back(pointsOf(*hole));
+        out.push_back(std::move(part));
+        return;
+    }
+    // A Triangle is a polygon of three sides (OGRTriangle is an OGRPolygon).
+    case wkbPolygon:
+    case wkbTriangle:
+    case wkbCurvePolygon: {
+        const auto* polygon = geometry->toCurvePolygon();
+        VectorGeometry part;
+        part.kind = GeometryKind::Polygon;
+        const auto addRing = [&part](const OGRCurve* ring) {
+            if (ring == nullptr || ring->IsEmpty()) {
+                return;
             }
+            part.parts.emplace_back();
+            part.arcs.emplace_back();
+            appendCurve(*ring, part.parts.back(), part.arcs.back());
+        };
+        addRing(polygon->getExteriorRingCurve());
+        for (int i = 0; i < polygon->getNumInteriorRings(); ++i) {
+            addRing(polygon->getInteriorRingCurve(i));
         }
-        if (feature.geometry.parts.empty()) {
+        if (part.parts.empty()) {
             return;
         }
-        feature.geometry.hasZ = polygon->Is3D() != 0;
-        feature.attributes = attributes;
-        out.push_back(std::move(feature));
+        part.hasZ = polygon->Is3D() != 0;
+        if (!part.hasArcs()) {
+            part.arcs.clear();
+        }
+        out.push_back(std::move(part));
         return;
     }
     case wkbMultiPoint:
     case wkbMultiLineString:
     case wkbMultiPolygon:
+    case wkbMultiCurve:
+    case wkbMultiSurface:
     case wkbGeometryCollection: {
         const auto* collection = geometry->toGeometryCollection();
         for (int i = 0; i < collection->getNumGeometries(); ++i) {
-            flatten(collection->getGeometryRef(i), attributes, out, warnings, depth + 1);
+            flatten(collection->getGeometryRef(i), out, keepArcs, report, depth + 1);
         }
         return;
     }
+    // Faces of a 3D model: Katana has no entity that is one, and a TIN
+    // taken apart into triangles would be thousands of closed polylines that
+    // are no longer a surface. Counted and said by name instead.
+    case wkbTIN:
+        ++report.skipped["tin"];
+        return;
+    case wkbPolyhedralSurface:
+        ++report.skipped["polyhedral surface"];
+        return;
     default:
-        warnings.push_back(std::string("unsupported geometry type '") +
-                           OGRGeometryTypeToName(geometry->getGeometryType()) + "' was skipped");
+        ++report.skipped[std::string("unsupported ") + OGRGeometryTypeToName(type)];
         return;
     }
 }
@@ -345,8 +434,55 @@ OGRLinearRing* makeRing(const std::vector<GeoPoint>& points, bool hasZ)
     return ring;
 }
 
+// A part with arcs as the curve it was read from: straight runs as line
+// strings, each arc a CircularString of its three points, joined in a
+// CompoundCurve. A driver without curves makes its own chords of it.
+OGRCompoundCurve* makeCurve(const std::vector<GeoPoint>& points,
+                            const std::vector<std::size_t>& arcs, bool hasZ, bool closed)
+{
+    auto* compound = new OGRCompoundCurve();
+    std::size_t at = 0;
+    const auto straightTo = [&](std::size_t end) {
+        if (end <= at) {
+            return;
+        }
+        auto* line = new OGRLineString();
+        for (std::size_t i = at; i <= end; ++i) {
+            addVertex(*line, points[i], hasZ);
+        }
+        (void)compound->addCurveDirectly(line);
+        at = end;
+    };
+    for (const std::size_t arc : arcs) {
+        if (arc + 2 >= points.size() || arc < at) {
+            continue; // an index that names no arc of this part
+        }
+        straightTo(arc);
+        auto* circular = new OGRCircularString();
+        for (std::size_t i = arc; i <= arc + 2; ++i) {
+            addVertex(*circular, points[i], hasZ);
+        }
+        (void)compound->addCurveDirectly(circular);
+        at = arc + 2;
+    }
+    straightTo(points.size() - 1);
+    const GeoPoint& first = points.front();
+    const GeoPoint& last = points.back();
+    if (closed && (first.x != last.x || first.y != last.y)) {
+        auto* closing = new OGRLineString();
+        addVertex(*closing, last, hasZ);
+        addVertex(*closing, first, hasZ);
+        (void)compound->addCurveDirectly(closing);
+    }
+    return compound;
+}
+
 OGRGeometry* makeGeometry(const VectorGeometry& geometry)
 {
+    const auto arcsOf = [&geometry](std::size_t part) -> const std::vector<std::size_t>* {
+        return part < geometry.arcs.size() && !geometry.arcs[part].empty() ? &geometry.arcs[part]
+                                                                           : nullptr;
+    };
     switch (geometry.kind) {
     case GeometryKind::Point: {
         if (geometry.parts.empty() || geometry.parts.front().empty()) {
@@ -359,6 +495,9 @@ OGRGeometry* makeGeometry(const VectorGeometry& geometry)
         if (geometry.parts.empty() || geometry.parts.front().size() < 2) {
             return nullptr;
         }
+        if (const auto* arcs = arcsOf(0)) {
+            return makeCurve(geometry.parts.front(), *arcs, geometry.hasZ, false);
+        }
         auto* line = new OGRLineString();
         for (const GeoPoint& p : geometry.parts.front()) {
             addVertex(*line, p, geometry.hasZ);
@@ -368,6 +507,20 @@ OGRGeometry* makeGeometry(const VectorGeometry& geometry)
     case GeometryKind::Polygon: {
         if (geometry.parts.empty() || geometry.parts.front().size() < 3) {
             return nullptr;
+        }
+        if (geometry.hasArcs()) {
+            auto* polygon = new OGRCurvePolygon();
+            for (std::size_t r = 0; r < geometry.parts.size(); ++r) {
+                const auto& part = geometry.parts[r];
+                if (part.size() < 3) {
+                    continue;
+                }
+                const auto* arcs = arcsOf(r);
+                (void)polygon->addRingDirectly(makeCurve(part, arcs != nullptr ? *arcs
+                                                                               : std::vector<std::size_t>{},
+                                                         geometry.hasZ, true));
+            }
+            return polygon;
         }
         auto* polygon = new OGRPolygon();
         for (const auto& part : geometry.parts) {
@@ -383,19 +536,208 @@ OGRGeometry* makeGeometry(const VectorGeometry& geometry)
     return nullptr;
 }
 
-OGRwkbGeometryType ogrTypeFor(GeometryKind kind)
+// ---- typed fields ---------------------------------------------------------
+
+namespace gp = katana::gis::processing;
+
+gp::FieldType fieldTypeOf(const OGRFieldDefn& field)
 {
-    switch (kind) {
-    case GeometryKind::Point:
-        return wkbPoint;
-    case GeometryKind::LineString:
-        return wkbLineString;
-    case GeometryKind::Polygon:
-        return wkbPolygon;
-    case GeometryKind::Unknown:
+    switch (field.GetType()) {
+    case OFTInteger:
+        return field.GetSubType() == OFSTBoolean ? gp::FieldType::Boolean
+                                                 : gp::FieldType::Integer64;
+    case OFTInteger64:
+        return gp::FieldType::Integer64;
+    case OFTReal:
+        return gp::FieldType::Real;
+    case OFTDate:
+        return gp::FieldType::Date;
+    case OFTDateTime:
+        return gp::FieldType::DateTime;
+    default:
+        // Text, a time of day, lists and binary: read as GDAL writes them out.
+        return gp::FieldType::String;
+    }
+}
+
+// An ISO 8601 date or date-time, as FieldType::Date and DateTime carry them.
+std::string isoDate(const OGRFeature& feature, int index, bool withTime)
+{
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, zone = 0;
+    float second = 0.0F;
+    if (feature.GetFieldAsDateTime(index, &year, &month, &day, &hour, &minute, &second, &zone) ==
+        FALSE) {
+        return feature.GetFieldAsString(index);
+    }
+    // Whole numbers only: printf's %f would follow the C locale's decimal point.
+    const auto two = [](int value) { return (value < 10 ? "0" : "") + std::to_string(value); };
+    std::string text = std::to_string(year) + "-" + two(month) + "-" + two(day);
+    if (withTime) {
+        const int whole = static_cast<int>(second);
+        const int millis =
+            static_cast<int>(std::lround((second - static_cast<float>(whole)) * 1000.0F));
+        text += "T" + two(hour) + ":" + two(minute) + ":" + two(whole);
+        if (millis > 0) {
+            text += "." + std::string(millis < 100 ? (millis < 10 ? "00" : "0") : "") +
+                    std::to_string(millis);
+        }
+    }
+    return text;
+}
+
+gp::FieldValue fieldValue(const OGRFeature& feature, int index, gp::FieldType type)
+{
+    if (!feature.IsFieldSetAndNotNull(index)) {
+        return std::monostate{};
+    }
+    switch (type) {
+    case gp::FieldType::Boolean:
+        return feature.GetFieldAsInteger(index) != 0;
+    case gp::FieldType::Integer64:
+        return static_cast<std::int64_t>(feature.GetFieldAsInteger64(index));
+    case gp::FieldType::Real:
+        return feature.GetFieldAsDouble(index);
+    case gp::FieldType::Date:
+        return isoDate(feature, index, false);
+    case gp::FieldType::DateTime:
+        return isoDate(feature, index, true);
+    case gp::FieldType::String:
         break;
     }
-    return wkbUnknown;
+    const char* text = feature.GetFieldAsString(index);
+    return std::string(text != nullptr ? text : "");
+}
+
+// A value as text, for readFeatures: what GDAL's GetFieldAsString gives for
+// the same field, a real at the digits that read back as the same double.
+std::string textOf(const gp::FieldValue& value)
+{
+    return std::visit(
+        [](const auto& held) -> std::string {
+            using Held = std::decay_t<decltype(held)>;
+            if constexpr (std::is_same_v<Held, std::monostate>) {
+                return {};
+            } else if constexpr (std::is_same_v<Held, bool>) {
+                return held ? "1" : "0";
+            } else if constexpr (std::is_same_v<Held, std::int64_t>) {
+                return std::to_string(held);
+            } else if constexpr (std::is_same_v<Held, double>) {
+                return katana::core::formatExactReal(held);
+            } else {
+                return held;
+            }
+        },
+        value);
+}
+
+GeometryKind kindOfLayer(OGRwkbGeometryType type)
+{
+    switch (wkbFlatten(type)) {
+    case wkbPoint:
+    case wkbMultiPoint:
+        return GeometryKind::Point;
+    case wkbLineString:
+    case wkbMultiLineString:
+    case wkbCircularString:
+    case wkbCompoundCurve:
+    case wkbMultiCurve:
+        return GeometryKind::LineString;
+    case wkbPolygon:
+    case wkbMultiPolygon:
+    case wkbCurvePolygon:
+    case wkbMultiSurface:
+    case wkbTriangle:
+        return GeometryKind::Polygon;
+    default:
+        return GeometryKind::Unknown;
+    }
+}
+
+std::string wktOfLayer(const OGRLayer& layer)
+{
+    std::string text;
+    if (const OGRSpatialReference* reference = layer.GetSpatialRef()) {
+        char* wkt = nullptr;
+        if (reference->exportToWkt(&wkt) == OGRERR_NONE && wkt != nullptr) {
+            text = wkt;
+        }
+        CPLFree(wkt);
+    }
+    return text;
+}
+
+// KML's altitude is a height only in its "absolute" mode. Its default,
+// clampToGround, puts every coordinate on the ground whatever it says, and
+// GDAL's KMZ writer gives a 2D coordinate an altitude of 0 - read as a
+// height, that would be every feature surveyed at the datum.
+bool heightIsAltitude(const OGRFeature& feature, int altitudeField)
+{
+    if (altitudeField < 0 || !feature.IsFieldSetAndNotNull(altitudeField)) {
+        return false;
+    }
+    return katana::core::equalsIgnoringCase(feature.GetFieldAsString(altitudeField), "absolute");
+}
+
+void dropHeights(VectorGeometry& part)
+{
+    part.hasZ = false;
+    for (auto& ring : part.parts) {
+        for (GeoPoint& point : ring) {
+            point.z = 0.0;
+        }
+    }
+}
+
+// Every feature of `layer` as a typed table (GdalDataset::readTable).
+gp::FeatureTable readLayer(OGRLayer& layer, const std::string& driver,
+                           const VectorReadOptions& options, VectorReadReport& report)
+{
+    gp::FeatureTable table;
+    table.name = layer.GetName();
+    table.kind = kindOfLayer(layer.GetGeomType());
+    table.hasZ = wkbHasZ(layer.GetGeomType()) != 0;
+    table.crsWkt = wktOfLayer(layer);
+    const OGRFeatureDefn* definition = layer.GetLayerDefn();
+    const int fieldCount = definition != nullptr ? definition->GetFieldCount() : 0;
+    for (int f = 0; f < fieldCount; ++f) {
+        const OGRFieldDefn* field = definition->GetFieldDefn(f);
+        table.fields.push_back(gp::FieldDef{field->GetNameRef(), fieldTypeOf(*field)});
+    }
+    const bool kml = driver == "KML" || driver == "LIBKML";
+    const int altitudeField = kml && definition != nullptr
+                                  ? definition->GetFieldIndex("altitudeMode")
+                                  : -1;
+
+    layer.ResetReading();
+    std::uint64_t read = 0;
+    while (OGRFeature* ogr = layer.GetNextFeature()) {
+        ++read;
+        ++report.featuresRead;
+        gp::Feature feature;
+        flatten(ogr->GetGeometryRef(), feature.parts, options.keepArcs, report);
+        if (ogr->GetGeometryRef() == nullptr || ogr->GetGeometryRef()->IsEmpty()) {
+            ++report.skipped["no geometry"];
+        }
+        if (kml && !heightIsAltitude(*ogr, altitudeField)) {
+            for (VectorGeometry& part : feature.parts) {
+                dropHeights(part);
+            }
+        }
+        for (const VectorGeometry& part : feature.parts) {
+            table.hasZ = table.hasZ || part.hasZ;
+        }
+        feature.values.reserve(table.fields.size());
+        for (int f = 0; f < fieldCount; ++f) {
+            feature.values.push_back(
+                fieldValue(*ogr, f, table.fields[static_cast<std::size_t>(f)].type));
+        }
+        table.features.push_back(std::move(feature));
+        OGRFeature::DestroyFeature(ogr);
+        if (options.maxFeatures != 0 && read >= options.maxFeatures) {
+            break;
+        }
+    }
+    return table;
 }
 
 // ---- raster image helpers -------------------------------------------------
@@ -496,10 +838,14 @@ OGRGeometry* makeOgrGeometry(const VectorGeometry& geometry)
 void flattenOgrGeometry(const OGRGeometry* geometry, std::vector<VectorGeometry>& out,
                         std::vector<std::string>& warnings)
 {
-    std::vector<VectorFeature> features;
-    ::katana::gis::flatten(geometry, {}, features, warnings);
-    for (VectorFeature& feature : features) {
-        out.push_back(std::move(feature.geometry));
+    VectorReadReport report;
+    ::katana::gis::flatten(geometry, out, false, report);
+    for (const auto& [what, count] : report.skipped) {
+        warnings.push_back(std::to_string(count) + " " + what + " geometries were skipped");
+    }
+    if (report.curvesMadeChords != 0) {
+        warnings.push_back(std::to_string(report.curvesMadeChords) +
+                           " curves were made chords at GDAL's own step");
     }
 }
 
@@ -514,6 +860,12 @@ bool parseCrs(const std::string& text, OGRSpatialReference& reference)
 
 Result<std::unique_ptr<GdalDataset>> GdalDataset::open(const std::filesystem::path& path)
 {
+    return open(path, {});
+}
+
+Result<std::unique_ptr<GdalDataset>> GdalDataset::open(const std::filesystem::path& path,
+                                                       const std::vector<std::string>& openOptions)
+{
     ensureRegistered();
 
     std::error_code existsError;
@@ -521,9 +873,13 @@ Result<std::unique_ptr<GdalDataset>> GdalDataset::open(const std::filesystem::pa
         return makeError(ErrorCode::NotFound, "file does not exist", path.string());
     }
 
+    CPLStringList options;
+    for (const std::string& option : openOptions) {
+        options.AddString(option.c_str());
+    }
     void* handle = GDALOpenEx(path.string().c_str(),
                               GDAL_OF_READONLY | GDAL_OF_RASTER | GDAL_OF_VECTOR, nullptr,
-                              nullptr, nullptr);
+                              options.List(), nullptr);
     if (handle == nullptr) {
         return makeError(ErrorCode::FileImportFailure,
                          "GDAL could not open '" + path.string() + "'", lastGdalError());
@@ -846,8 +1202,8 @@ Result<std::vector<VectorLayerInfo>> GdalDataset::vectorLayers() const
     return result;
 }
 
-Result<std::vector<VectorFeature>> GdalDataset::readFeatures(int layerIndex,
-                                                             std::uint64_t maxFeatures) const
+Result<gp::FeatureTable> GdalDataset::readTable(int layerIndex, const VectorReadOptions& options,
+                                                VectorReadReport* report) const
 {
     GDALDataset* dataset = asDataset(dataset_);
     if (layerIndex < 0 || layerIndex >= dataset->GetLayerCount()) {
@@ -859,31 +1215,46 @@ Result<std::vector<VectorFeature>> GdalDataset::readFeatures(int layerIndex,
     if (layer == nullptr) {
         return makeError(ErrorCode::Internal, "GDAL returned a null layer");
     }
+    VectorReadReport local;
+    VectorReadReport& out = report != nullptr ? *report : local;
+    // Warnings GDAL raises while this read runs, on this thread; the
+    // process-wide quiet handler keeps them off stderr, and this keeps them
+    // from being lost (they used to be).
+    const detail::CplErrorCollector errors;
+    gp::FeatureTable table = readLayer(*layer, driverName(), options, out);
+    for (std::string& warning : errors.warnings()) {
+        out.warnings.push_back(std::move(warning));
+    }
+    return table;
+}
 
+Result<std::vector<VectorFeature>> GdalDataset::readFeatures(int layerIndex,
+                                                             std::uint64_t maxFeatures) const
+{
+    VectorReadReport report;
+    return readFeatures(layerIndex, maxFeatures, report);
+}
+
+Result<std::vector<VectorFeature>> GdalDataset::readFeatures(int layerIndex,
+                                                             std::uint64_t maxFeatures,
+                                                             VectorReadReport& report) const
+{
+    VectorReadOptions options;
+    options.maxFeatures = maxFeatures;
+    auto table = readTable(layerIndex, options, &report);
+    if (!table) {
+        return table.error();
+    }
     std::vector<VectorFeature> features;
-    std::vector<std::string> warnings; // collected but reported by the caller's importer
-    const OGRFeatureDefn* definition = layer->GetLayerDefn();
-    const int fieldCount = definition != nullptr ? definition->GetFieldCount() : 0;
-
-    layer->ResetReading();
-    while (OGRFeature* feature = layer->GetNextFeature()) {
+    for (gp::Feature& feature : table->features) {
         std::map<std::string, std::string> attributes;
-        for (int i = 0; i < fieldCount; ++i) {
-            if (!feature->IsFieldSetAndNotNull(i)) {
-                continue;
+        for (std::size_t f = 0; f < table->fields.size() && f < feature.values.size(); ++f) {
+            if (!std::holds_alternative<std::monostate>(feature.values[f])) {
+                attributes.emplace(table->fields[f].name, textOf(feature.values[f]));
             }
-            const OGRFieldDefn* field = feature->GetFieldDefnRef(i);
-            if (field == nullptr) {
-                continue;
-            }
-            const char* value = feature->GetFieldAsString(i);
-            attributes.emplace(field->GetNameRef(), value != nullptr ? value : "");
         }
-        flatten(feature->GetGeometryRef(), attributes, features, warnings);
-        OGRFeature::DestroyFeature(feature);
-
-        if (maxFeatures != 0 && features.size() >= maxFeatures) {
-            break;
+        for (VectorGeometry& part : feature.parts) {
+            features.push_back(VectorFeature{std::move(part), attributes});
         }
     }
     return features;
@@ -1057,9 +1428,301 @@ Status GdalDataset::writeRaster(const std::filesystem::path& path,
     return {};
 }
 
-Status GdalDataset::writeVector(const std::filesystem::path& path,
-                                const std::vector<VectorFeature>& features,
-                                const VectorExportOptions& options)
+namespace {
+
+// KEY=VALUE options, Katana's first and the caller's over them: a key the
+// caller gives wins, whatever its case.
+CPLStringList mergedOptions(const std::vector<std::pair<std::string, std::string>>& katana,
+                            const std::vector<std::string>& caller)
+{
+    CPLStringList merged;
+    for (const auto& [key, value] : katana) {
+        merged.SetNameValue(key.c_str(), value.c_str());
+    }
+    for (const std::string& option : caller) {
+        const std::size_t equals = option.find('=');
+        if (equals == std::string::npos || equals == 0) {
+            merged.AddString(option.c_str()); // GDAL says what it makes of it
+            continue;
+        }
+        merged.SetNameValue(option.substr(0, equals).c_str(), option.substr(equals + 1).c_str());
+    }
+    return merged;
+}
+
+bool listed(const char* list, std::string_view word)
+{
+    if (list == nullptr) {
+        return false;
+    }
+    const CPLStringList words(CSLTokenizeString2(list, " ", 0));
+    for (int i = 0; i < words.size(); ++i) {
+        if (word == words[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The OGR type a field is written as: its own where the driver has it, else
+// the nearest the driver has that holds every value - an Integer64 that
+// fits in 32 bits is an Integer in KML, whose writer knows no Integer64 and
+// would write it as text. A driver that lists nothing takes what it is given.
+struct OgrField {
+    OGRFieldType type = OFTString;
+    OGRFieldSubType subType = OFSTNone;
+};
+
+OgrField ogrFieldFor(const gp::FieldDef& field, const gp::FeatureTable& table, std::size_t index,
+                     GDALDriver& driver)
+{
+    const char* types = driver.GetMetadataItem(GDAL_DMD_CREATIONFIELDDATATYPES);
+    const char* subTypes = driver.GetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES);
+    const bool anyType = types == nullptr || *types == '\0';
+    const auto has = [&](std::string_view name) { return anyType || listed(types, name); };
+    switch (field.type) {
+    case gp::FieldType::Boolean:
+        if (has("Integer")) {
+            return {OFTInteger, anyType || listed(subTypes, "Boolean") ? OFSTBoolean : OFSTNone};
+        }
+        break;
+    case gp::FieldType::Integer64: {
+        if (has("Integer64")) {
+            return {OFTInteger64, OFSTNone};
+        }
+        const bool fits = std::ranges::all_of(table.features, [&](const gp::Feature& feature) {
+            const auto* value = index < feature.values.size()
+                                    ? std::get_if<std::int64_t>(&feature.values[index])
+                                    : nullptr;
+            return value == nullptr || (*value >= std::numeric_limits<std::int32_t>::min() &&
+                                        *value <= std::numeric_limits<std::int32_t>::max());
+        });
+        if (fits && has("Integer")) {
+            return {OFTInteger, OFSTNone};
+        }
+        break;
+    }
+    case gp::FieldType::Real:
+        if (has("Real")) {
+            return {OFTReal, OFSTNone};
+        }
+        break;
+    case gp::FieldType::Date:
+        if (has("Date")) {
+            return {OFTDate, OFSTNone};
+        }
+        break;
+    case gp::FieldType::DateTime:
+        if (has("DateTime")) {
+            return {OFTDateTime, OFSTNone};
+        }
+        break;
+    case gp::FieldType::String:
+        break;
+    }
+    return {OFTString, OFSTNone};
+}
+
+OGRwkbGeometryType layerTypeOf(const gp::FeatureTable& table)
+{
+    const bool multi = std::ranges::any_of(
+        table.features, [](const gp::Feature& feature) { return feature.parts.size() > 1; });
+    const bool curved = std::ranges::any_of(table.features, [](const gp::Feature& feature) {
+        return std::ranges::any_of(feature.parts,
+                                   [](const VectorGeometry& part) { return part.hasArcs(); });
+    });
+    OGRwkbGeometryType type = wkbUnknown;
+    switch (table.kind) {
+    case GeometryKind::Point:
+        type = multi ? wkbMultiPoint : wkbPoint;
+        break;
+    case GeometryKind::LineString:
+        type = curved ? (multi ? wkbMultiCurve : wkbCompoundCurve)
+                      : (multi ? wkbMultiLineString : wkbLineString);
+        break;
+    case GeometryKind::Polygon:
+        type = curved ? (multi ? wkbMultiSurface : wkbCurvePolygon)
+                      : (multi ? wkbMultiPolygon : wkbPolygon);
+        break;
+    case GeometryKind::Unknown:
+        return wkbUnknown;
+    }
+    return table.hasZ ? wkbSetZ(type) : type;
+}
+
+OGRGeometry* featureGeometry(const gp::Feature& feature, GeometryKind kind)
+{
+    if (feature.parts.empty()) {
+        return nullptr;
+    }
+    if (feature.parts.size() == 1) {
+        return makeGeometry(feature.parts.front());
+    }
+    OGRGeometryCollection* collection = nullptr;
+    switch (kind) {
+    case GeometryKind::Point:
+        collection = new OGRMultiPoint();
+        break;
+    case GeometryKind::LineString:
+        collection = new OGRMultiLineString();
+        break;
+    case GeometryKind::Polygon:
+        collection = new OGRMultiPolygon();
+        break;
+    case GeometryKind::Unknown:
+        collection = new OGRGeometryCollection();
+        break;
+    }
+    for (const VectorGeometry& part : feature.parts) {
+        if (OGRGeometry* member = makeGeometry(part)) {
+            if (collection->addGeometryDirectly(member) != OGRERR_NONE) {
+                // A curve cannot join a MultiLineString: the collection that
+                // can hold anything takes the whole feature instead.
+                delete member;
+                delete collection;
+                auto* anything = new OGRGeometryCollection();
+                for (const VectorGeometry& again : feature.parts) {
+                    if (OGRGeometry* one = makeGeometry(again)) {
+                        (void)anything->addGeometryDirectly(one);
+                    }
+                }
+                return anything;
+            }
+        }
+    }
+    return collection;
+}
+
+// The extent of a table's coordinates: MapInfo's bounds.
+struct Extent {
+    double minX = std::numeric_limits<double>::infinity();
+    double minY = std::numeric_limits<double>::infinity();
+    double maxX = -std::numeric_limits<double>::infinity();
+    double maxY = -std::numeric_limits<double>::infinity();
+    [[nodiscard]] bool valid() const { return minX <= maxX && minY <= maxY; }
+};
+
+Extent extentOf(const gp::FeatureTable& table)
+{
+    Extent extent;
+    for (const gp::Feature& feature : table.features) {
+        for (const VectorGeometry& part : feature.parts) {
+            for (const auto& ring : part.parts) {
+                for (const GeoPoint& point : ring) {
+                    if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+                        continue;
+                    }
+                    extent.minX = std::min(extent.minX, point.x);
+                    extent.minY = std::min(extent.minY, point.y);
+                    extent.maxX = std::max(extent.maxX, point.x);
+                    extent.maxY = std::max(extent.maxY, point.y);
+                }
+            }
+        }
+    }
+    return extent;
+}
+
+// A MapInfo table keeps each coordinate as a 32-bit integer across its
+// bounds, and GDAL's default bounds for a table without a known projection
+// are wide enough to make that step about a centimetre: 330100 read back as
+// 330099.99 (measured, docs/interop.md "Fidelity"). The data's own extent,
+// widened by a tenth on each side so an edit that moves a vertex out a
+// little still fits, makes the step span / 2^32: 5e-8 m across a 200 m site,
+// 5e-4 m across 2000 km.
+std::string mapInfoBounds(const Extent& extent)
+{
+    const double span = std::max(extent.maxX - extent.minX, extent.maxY - extent.minY);
+    const double margin = 0.1 * span + 1.0;
+    return katana::core::formatExactReal(extent.minX - margin) + "," +
+           katana::core::formatExactReal(extent.minY - margin) + "," +
+           katana::core::formatExactReal(extent.maxX + margin) + "," +
+           katana::core::formatExactReal(extent.maxY + margin);
+}
+
+std::vector<std::pair<std::string, std::string>> katanaLayerOptions(const std::string& driver,
+                                                                    const gp::FeatureTable& table)
+{
+    std::vector<std::pair<std::string, std::string>> options;
+    if (driver == "CSV") {
+        // Without a geometry option the CSV writer drops the geometry and
+        // writes the fields alone (measured: "katana_id,layer", reported as
+        // exported). Points as X, Y (and Z when every one has a height), for
+        // a spreadsheet; anything else, or points of mixed dimension, as WKT.
+        const bool points = table.kind == GeometryKind::Point &&
+                            std::ranges::none_of(table.features, [](const gp::Feature& feature) {
+                                return feature.parts.size() > 1;
+                            });
+        std::size_t heighted = 0, total = 0;
+        for (const gp::Feature& feature : table.features) {
+            for (const VectorGeometry& part : feature.parts) {
+                ++total;
+                heighted += part.hasZ ? 1u : 0u;
+            }
+        }
+        const char* geometry = !points                             ? "AS_WKT"
+                               : heighted == 0                     ? "AS_XY"
+                               : heighted == total                 ? "AS_XYZ"
+                                                                   : "AS_WKT";
+        options.emplace_back("GEOMETRY", geometry);
+        // The .csvt beside it keeps each field's type, and says which columns
+        // are X and Y; without it every field reads back as text.
+        options.emplace_back("CREATE_CSVT", "YES");
+    } else if (driver == "MapInfo File") {
+        const Extent extent = extentOf(table);
+        if (extent.valid()) {
+            options.emplace_back("BOUNDS", mapInfoBounds(extent));
+        }
+    }
+    return options;
+}
+
+std::string layerNameFor(const gp::FeatureSet& set, std::size_t index,
+                         const VectorExportOptions& options)
+{
+    const gp::FeatureTable& table = set.tables[index];
+    if (set.tables.size() == 1 && !options.layerName.empty()) {
+        return options.layerName;
+    }
+    return table.name.empty() ? "features" + std::to_string(index + 1) : table.name;
+}
+
+bool isLonLat(const OGRSpatialReference& reference)
+{
+    OGRSpatialReference wgs84;
+    wgs84.SetWellKnownGeogCS("WGS84");
+    wgs84.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    return reference.IsGeographic() != 0 && reference.IsSame(&wgs84) != 0;
+}
+
+// Every coordinate of `table` from `crs` to longitude and latitude on WGS 84,
+// by the one reprojection (gis::reprojectFeatures), heights untouched.
+Status toLonLat(gp::FeatureTable& table, const std::string& crs)
+{
+    std::vector<VectorFeature> geometries;
+    for (const gp::Feature& feature : table.features) {
+        for (const VectorGeometry& part : feature.parts) {
+            geometries.push_back(VectorFeature{part, {}});
+        }
+    }
+    auto moved = reprojectFeatures(std::move(geometries), crs, "EPSG:4326");
+    if (!moved) {
+        return moved.error();
+    }
+    std::size_t next = 0;
+    for (gp::Feature& feature : table.features) {
+        for (VectorGeometry& part : feature.parts) {
+            part = std::move((*moved)[next++].geometry);
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& path,
+                                                   const gp::FeatureSet& set,
+                                                   const VectorExportOptions& options)
 {
     ensureRegistered();
     CPLErrorReset(); // see writeRaster
@@ -1076,21 +1739,71 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
     if (driver == nullptr) {
         return makeError(ErrorCode::Unsupported, "vector driver is unavailable", driverName);
     }
+    VectorWriteReport report;
+    const detail::CplErrorCollector errors;
 
-    // A coordinate system that cannot be read is refused before anything is
-    // written. It used to be dropped: the file was written with no CRS at all
-    // and the export reported success, which is the silent failure PLAN.MD
-    // section 36 forbids - the layer then reads back as "no coordinate
-    // system", indistinguishable from data that never had one.
-    OGRSpatialReference reference;
-    OGRSpatialReference* referencePtr = nullptr;
-    if (!options.projectionWkt.empty()) {
-        if (!parseCrs(options.projectionWkt, reference)) {
-            return makeError(ErrorCode::InvalidCRS,
-                             "GDAL could not read the coordinate system to write",
-                             lastGdalError());
+    // Everything that can refuse does so before a file exists.
+    //
+    // A coordinate system that cannot be read is refused. It used to be
+    // dropped: the file was written with no CRS at all and the export
+    // reported success, which is the silent failure PLAN.MD section 36
+    // forbids - the layer then reads back as "no coordinate system",
+    // indistinguishable from data that never had one.
+    gp::FeatureSet converted;
+    const gp::FeatureSet* tables = &set;
+    std::vector<std::unique_ptr<OGRSpatialReference>> references(set.tables.size());
+    for (std::size_t t = 0; t < set.tables.size(); ++t) {
+        const std::string& crs =
+            set.tables[t].crsWkt.empty() ? options.projectionWkt : set.tables[t].crsWkt;
+        if (crs.empty()) {
+            continue;
         }
-        referencePtr = &reference;
+        references[t] = std::make_unique<OGRSpatialReference>();
+        if (!parseCrs(crs, *references[t])) {
+            return makeError(ErrorCode::InvalidCRS,
+                             "GDAL could not read the coordinate system to write", lastGdalError());
+        }
+    }
+    if (driverHoldsOnlyLonLat(driverName)) {
+        converted = set;
+        tables = &converted;
+        for (std::size_t t = 0; t < converted.tables.size(); ++t) {
+            gp::FeatureTable& table = converted.tables[t];
+            if (references[t] == nullptr) {
+                return makeError(
+                    ErrorCode::InvalidCRS,
+                    driverName + " holds longitude and latitude on WGS 84 and nothing else, and "
+                                 "these coordinates are in no coordinate system Katana was told "
+                                 "of, so they cannot be converted: set the project's coordinate "
+                                 "system (CRS SET <code>) and export again",
+                    path.string());
+            }
+            if (!isLonLat(*references[t])) {
+                const std::string& crs = table.crsWkt.empty() ? options.projectionWkt : table.crsWkt;
+                if (auto moved = toLonLat(table, crs); !moved) {
+                    return moved.error();
+                }
+                report.warnings.push_back("coordinates were converted from " + describeCrs(crs) +
+                                          " to longitude and latitude on WGS 84 (EPSG:4326), the "
+                                          "only coordinates " + driverName + " holds");
+            }
+            references[t] = std::make_unique<OGRSpatialReference>();
+            references[t]->SetWellKnownGeogCS("WGS84");
+            references[t]->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            table.crsWkt.clear();
+        }
+    }
+    if (driverHoldsNoAreas(driverName)) {
+        for (const gp::FeatureTable& table : tables->tables) {
+            if (table.kind != GeometryKind::Point && table.kind != GeometryKind::LineString &&
+                !table.features.empty()) {
+                return makeError(ErrorCode::Unsupported,
+                                 driverName + " holds points and lines, a layer of each; this "
+                                              "table holds areas or a mix: write areas as their "
+                                              "closed lines",
+                                 table.name);
+            }
+        }
     }
 
     // GDAL's DXF writer turns every polygon into a HATCH with a SOLID fill
@@ -1104,12 +1817,29 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
         outlineNotHatch.emplace("DXF_WRITE_HATCH", "NO");
     }
 
+    const bool anyZ = std::ranges::any_of(tables->tables, [](const gp::FeatureTable& table) {
+        return table.hasZ;
+    });
+    std::vector<std::pair<std::string, std::string>> katanaDataset;
+    if (driverName == "GPX") {
+        // GPX's own schema has no place for a field of ours; its extensions
+        // element does, and GDAL reads it back.
+        katanaDataset.emplace_back("GPX_USE_EXTENSIONS", "YES");
+    } else if (driverName == "KML" && anyZ) {
+        // KML's default, clampToGround, puts every coordinate on the ground
+        // whatever its altitude says: a height is only a height in
+        // "absolute".
+        katanaDataset.emplace_back("AltitudeMode", "absolute");
+    }
+    const CPLStringList datasetOptions = mergedOptions(katanaDataset, options.creationOptions);
+
     // Most drivers refuse to overwrite. Remove an existing file first so that
     // re-exporting to the same name behaves the way a user expects a Save As to.
     std::error_code removeError;
     std::filesystem::remove(path, removeError);
 
-    GDALDataset* dataset = driver->Create(path.string().c_str(), 0, 0, 0, GDT_Unknown, nullptr);
+    GDALDataset* dataset =
+        driver->Create(path.string().c_str(), 0, 0, 0, GDT_Unknown, datasetOptions.List());
     if (dataset == nullptr) {
         return makeError(ErrorCode::FileExportFailure,
                          "GDAL could not create '" + path.string() + "'", lastGdalError());
@@ -1126,68 +1856,74 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
         return error;
     };
 
-    // A shapefile holds exactly one geometry type per layer, so pick the single
-    // kind when the data has one and fall back to wkbUnknown otherwise (which
-    // the more capable formats accept).
-    OGRwkbGeometryType layerType = wkbUnknown;
-    if (!features.empty()) {
-        const GeometryKind first = features.front().geometry.kind;
-        const bool uniform = std::all_of(features.begin(), features.end(),
-                                         [first](const VectorFeature& feature) {
-                                             return feature.geometry.kind == first;
-                                         });
-        if (uniform) {
-            layerType = ogrTypeFor(first);
+    // Every layer and its fields first, then every feature in one
+    // transaction: a GeoPackage creates its tables outside it.
+    struct Written {
+        OGRLayer* layer = nullptr;
+        std::vector<int> fieldIndex; // per table field; -1 when the layer has none for it
+        int altitudeIndex = -1;
+    };
+    std::vector<Written> written(tables->tables.size());
+    for (std::size_t t = 0; t < tables->tables.size(); ++t) {
+        const gp::FeatureTable& table = tables->tables[t];
+        const std::string name = layerNameFor(*tables, t, options);
+        const CPLStringList layerOptions =
+            mergedOptions(katanaLayerOptions(driverName, table), options.layerCreationOptions);
+        OGRLayer* layer = dataset->CreateLayer(name.c_str(), references[t].get(),
+                                               layerTypeOf(table),
+                                               layerOptions.List());
+        if (layer == nullptr) {
+            return abandon(dataset, makeError(ErrorCode::FileExportFailure,
+                                              "GDAL could not create the vector layer",
+                                              lastGdalError()));
         }
-        // A layer that is going to hold heights is declared 3D, or a driver
-        // with a fixed layer type (a shapefile) drops them. The caller decides
-        // what a format that cannot mix 2D and 3D gets (export.cpp).
-        const bool anyZ = std::any_of(features.begin(), features.end(),
-                                      [](const VectorFeature& feature) {
-                                          return feature.geometry.hasZ;
-                                      });
-        if (anyZ && layerType != wkbUnknown) {
-            layerType = wkbSetZ(layerType);
-        }
-    }
-
-    OGRLayer* layer =
-        dataset->CreateLayer(options.layerName.c_str(), referencePtr, layerType, nullptr);
-    if (layer == nullptr) {
-        return abandon(dataset, makeError(ErrorCode::FileExportFailure,
-                                          "GDAL could not create the vector layer",
-                                          lastGdalError()));
-    }
-
-    // Union of attribute names, in the ordered maps' order, so the field layout
-    // is deterministic across runs (Rule 7).
-    std::vector<std::string> fieldNames;
-    for (const VectorFeature& feature : features) {
-        for (const auto& [name, value] : feature.attributes) {
-            if (std::find(fieldNames.begin(), fieldNames.end(), name) == fieldNames.end()) {
-                fieldNames.push_back(name);
+        Written& out = written[t];
+        out.layer = layer;
+        // Some formats have a FIXED set of fields and refuse any other: a DXF
+        // layer has Layer, Linetype, Text and a few more, and CreateField fails
+        // on everything else. That used to abort the whole export - so DXF, the
+        // one format a CAD program cannot do without, could not be written at
+        // all. Such a layer is written with the fields it has; a value is kept
+        // when the format already has a field of that name (OGR matches
+        // names case-insensitively, so ours `layer` lands in DXF's `Layer`) and
+        // dropped otherwise, and the report names what was dropped.
+        const bool canCreateFields = layer->TestCapability(OLCCreateField) != 0;
+        for (std::size_t f = 0; f < table.fields.size(); ++f) {
+            const gp::FieldDef& field = table.fields[f];
+            if (!canCreateFields) {
+                const int index = layer->GetLayerDefn()->GetFieldIndex(field.name.c_str());
+                out.fieldIndex.push_back(index);
+                if (index < 0 && std::ranges::find(report.fieldsNotWritten, field.name) ==
+                                     report.fieldsNotWritten.end()) {
+                    report.fieldsNotWritten.push_back(field.name);
+                }
+                continue;
             }
+            const OgrField type = ogrFieldFor(field, table, f, *driver);
+            OGRFieldDefn definition(field.name.c_str(), type.type);
+            definition.SetSubType(type.subType);
+            const int before = layer->GetLayerDefn()->GetFieldCount();
+            if (layer->CreateField(&definition) != OGRERR_NONE) {
+                return abandon(dataset, makeError(ErrorCode::FileExportFailure,
+                                                  "GDAL could not create field '" + field.name + "'",
+                                                  lastGdalError()));
+            }
+            // By position, not by name: a shapefile shortens a long name
+            // (and says so, a warning in the report).
+            out.fieldIndex.push_back(layer->GetLayerDefn()->GetFieldCount() > before ? before
+                                                                                     : -1);
         }
-    }
-    // Some formats have a FIXED set of fields and refuse any other: a DXF
-    // layer has Layer, Linetype, Text and a few more, and CreateField fails
-    // on everything else. That used to abort the whole export - so DXF, the
-    // one format a CAD program cannot do without, could not be written at
-    // all. Such a layer is written with the fields it has; an attribute is
-    // kept when the format already has a field of that name (OGR matches
-    // names case-insensitively, so ours `layer` lands in DXF's `Layer`) and
-    // dropped otherwise, which driverHasFixedFields lets the caller report.
-    const bool canCreateFields = layer->TestCapability(OLCCreateField) != 0;
-    for (const std::string& name : fieldNames) {
-        if (!canCreateFields) {
-            break;
-        }
-        OGRFieldDefn field(name.c_str(), OFTString);
-        if (layer->CreateField(&field) != OGRERR_NONE) {
-            return abandon(dataset,
-                           makeError(ErrorCode::FileExportFailure,
-                                     "GDAL could not create field '" + name + "'",
-                                     lastGdalError()));
+        if (driverName == "LIBKML" && table.hasZ) {
+            // KMZ's writer takes a feature's altitude mode from a field of
+            // this name, and gives a 2D coordinate an altitude of 0 that its
+            // default mode, clampToGround, keeps on the ground.
+            out.altitudeIndex = layer->GetLayerDefn()->GetFieldIndex("altitudeMode");
+            if (out.altitudeIndex < 0) {
+                OGRFieldDefn altitude("altitudeMode", OFTString);
+                if (layer->CreateField(&altitude) == OGRERR_NONE) {
+                    out.altitudeIndex = layer->GetLayerDefn()->GetFieldIndex("altitudeMode");
+                }
+            }
         }
     }
 
@@ -1216,26 +1952,56 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
         return abandon(dataset, std::move(error));
     };
 
-    for (const VectorFeature& source : features) {
-        OGRGeometry* geometry = makeGeometry(source.geometry);
-        if (geometry == nullptr) {
-            continue; // counted by the caller, which knows what it handed over
-        }
-        OGRFeature* feature = OGRFeature::CreateFeature(layer->GetLayerDefn());
-        feature->SetGeometryDirectly(geometry);
-        for (const auto& [name, value] : source.attributes) {
-            // By index, and only when the field exists: SetField by a name the
-            // layer does not have is an error GDAL logs once per feature.
-            const int index = feature->GetFieldIndex(name.c_str());
-            if (index >= 0) {
-                feature->SetField(index, value.c_str());
+    for (std::size_t t = 0; t < tables->tables.size(); ++t) {
+        const gp::FeatureTable& table = tables->tables[t];
+        const Written& out = written[t];
+        for (const gp::Feature& source : table.features) {
+            OGRGeometry* geometry = featureGeometry(source, table.kind);
+            if (geometry == nullptr) {
+                ++report.featuresSkipped;
+                continue;
             }
-        }
-        const OGRErr status = layer->CreateFeature(feature);
-        OGRFeature::DestroyFeature(feature);
-        if (status != OGRERR_NONE) {
-            return abandonFeatures(makeError(ErrorCode::FileExportFailure,
-                                             "GDAL could not write a feature", lastGdalError()));
+            OGRFeature* feature = OGRFeature::CreateFeature(out.layer->GetLayerDefn());
+            feature->SetGeometryDirectly(geometry);
+            for (std::size_t f = 0; f < source.values.size() && f < out.fieldIndex.size(); ++f) {
+                const int index = out.fieldIndex[f];
+                if (index < 0) {
+                    continue;
+                }
+                std::visit(
+                    [&](const auto& value) {
+                        using Held = std::decay_t<decltype(value)>;
+                        if constexpr (std::is_same_v<Held, std::monostate>) {
+                            feature->SetFieldNull(index);
+                        } else if constexpr (std::is_same_v<Held, bool>) {
+                            feature->SetField(index, value ? 1 : 0);
+                        } else if constexpr (std::is_same_v<Held, std::int64_t>) {
+                            feature->SetField(index, static_cast<GIntBig>(value));
+                        } else if constexpr (std::is_same_v<Held, double>) {
+                            feature->SetField(index, value);
+                        } else {
+                            feature->SetField(index, value.c_str());
+                        }
+                    },
+                    source.values[f]);
+            }
+            if (out.altitudeIndex >= 0 && geometry->Is3D() != 0) {
+                feature->SetField(out.altitudeIndex, "absolute");
+            }
+            const std::size_t before = errors.size();
+            const OGRErr status = out.layer->CreateFeature(feature);
+            OGRFeature::DestroyFeature(feature);
+            // A writer that cannot write a geometry may say so and succeed
+            // anyway: KML writes the placemark without it. What it says is the
+            // failure of the write.
+            const detail::CplErrorCollector::Message* failure = errors.firstFailure(before);
+            if (status != OGRERR_NONE || failure != nullptr) {
+                return abandonFeatures(makeError(ErrorCode::FileExportFailure,
+                                                 "GDAL could not write a feature",
+                                                 failure != nullptr ? failure->text
+                                                                    : lastGdalError()));
+            }
+            ++report.featuresWritten;
         }
     }
     // Where the features reach the file: a full disk shows here.
@@ -1257,6 +2023,54 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
         return makeError(ErrorCode::FileExportFailure,
                          "GDAL could not finish writing '" + path.string() + "'", message);
     }
+    for (std::string& warning : errors.warnings()) {
+        report.warnings.push_back(std::move(warning));
+    }
+    return report;
+}
+
+Status GdalDataset::writeVector(const std::filesystem::path& path,
+                                const std::vector<VectorFeature>& features,
+                                const VectorExportOptions& options)
+{
+    // One table of text fields, the attribute names in the order the
+    // features first give them, so the field layout is deterministic across
+    // runs (Rule 7).
+    gp::FeatureTable table;
+    table.name = options.layerName;
+    if (!features.empty()) {
+        const GeometryKind first = features.front().geometry.kind;
+        const bool uniform = std::ranges::all_of(features, [first](const VectorFeature& feature) {
+            return feature.geometry.kind == first;
+        });
+        table.kind = uniform ? first : GeometryKind::Unknown;
+    }
+    for (const VectorFeature& feature : features) {
+        table.hasZ = table.hasZ || feature.geometry.hasZ;
+        for (const auto& [name, value] : feature.attributes) {
+            if (std::ranges::none_of(table.fields,
+                                     [&](const gp::FieldDef& field) { return field.name == name; })) {
+                table.fields.push_back(gp::FieldDef{name, gp::FieldType::String});
+            }
+        }
+    }
+    for (const VectorFeature& source : features) {
+        gp::Feature feature;
+        feature.parts.push_back(source.geometry);
+        for (const gp::FieldDef& field : table.fields) {
+            const auto found = source.attributes.find(field.name);
+            feature.values.push_back(found == source.attributes.end()
+                                         ? gp::FieldValue(std::monostate{})
+                                         : gp::FieldValue(found->second));
+        }
+        table.features.push_back(std::move(feature));
+    }
+    gp::FeatureSet set;
+    set.tables.push_back(std::move(table));
+    auto written = writeTables(path, set, options);
+    if (!written) {
+        return written.error();
+    }
     return {};
 }
 
@@ -1273,6 +2087,16 @@ bool driverHasFixedFields(const std::string& driver)
 bool driverAssumesWgs84(const std::string& driver)
 {
     return driver == "GeoJSON";
+}
+
+bool driverHoldsOnlyLonLat(const std::string& driver)
+{
+    return driver == "KML" || driver == "LIBKML" || driver == "GPX";
+}
+
+bool driverHoldsNoAreas(const std::string& driver)
+{
+    return driver == "GPX";
 }
 
 std::string describeCrs(const std::string& wkt)
