@@ -514,7 +514,7 @@ SurveyPointReportDialog::SurveyPointReportDialog(SurveyDialogContext context, QW
     report_ = new QPlainTextEdit(this);
     report_->setObjectName("report");
     report_->setReadOnly(true);
-    report_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    report_->setFont(katana::qt::theme::monospaceFont());
     report_->setLineWrapMode(QPlainTextEdit::NoWrap);
     layout->addWidget(report_, 1);
     auto* buttons = new QHBoxLayout();

@@ -221,6 +221,78 @@ void drawTurn(QPainter& painter, const Ink& ink, bool mirrored)
     painter.restore();
 }
 
+// ---- the menu items' marks ---------------------------------------------------------
+
+// The window every layout, panel and toolbar icon is drawn in.
+void drawFrame(const Ink& ink) { ink.stroke(rectangle(2.5, 4, 19, 16, 1.5)); }
+
+// A pencil in the accent at the lower right: the icon edits what it is on.
+void drawPencil(const Ink& ink)
+{
+    ink.stroke(polyline({{12.5, 21.5}, {13.2, 18.6}, {19.4, 12.4}, {21.6, 14.6}, {15.4, 20.8}},
+                        true),
+               true);
+}
+
+// A label: a rounded note with its words, and its leader down to what it
+// labels.
+void drawNote(const Ink& ink, double x, double y, bool accent)
+{
+    ink.stroke(rectangle(x, y, 11, 7, 1.5), accent);
+    ink.line(x + 2.5, y + 3.5, x + 8.5, y + 3.5, accent, 1.2);
+}
+
+// A capital A drawn in strokes, `height` tall with its foot at (x, bottom).
+void drawLetterA(const Ink& ink, double x, double bottom, double height, bool accent)
+{
+    const double half = height * 0.38;
+    ink.stroke(polyline({{x - half, bottom}, {x, bottom - height}, {x + half, bottom}}), accent);
+    ink.line(x - half * 0.62, bottom - height * 0.36, x + half * 0.62, bottom - height * 0.36,
+             accent);
+}
+
+// An arrowhead at (x, y) pointing along (dx, dy), a unit direction.
+void drawHead(const Ink& ink, double x, double y, double dx, double dy)
+{
+    const double back = 3.0;
+    const double side = 2.6;
+    ink.stroke(polyline({{x - back * dx - side * dy, y - back * dy + side * dx},
+                         {x, y},
+                         {x - back * dx + side * dy, y - back * dy - side * dx}}),
+               true);
+}
+
+// An orthographic standard view: the object in plan, the face seen in the
+// accent and the eye's arrow coming at it along (dx, dy).
+void drawOrthographicView(const Ink& ink, double dx, double dy)
+{
+    ink.stroke(rectangle(7, 7, 10, 10));
+    // The face that meets the arrow: the edge the arrow ends on.
+    const double cx = 12 - 5 * dx;
+    const double cy = 12 - 5 * dy;
+    ink.line(cx - 5 * dy, cy - 5 * dx, cx + 5 * dy, cy + 5 * dx, true, 2.4);
+    const double tipX = 12 - 6.2 * dx;
+    const double tipY = 12 - 6.2 * dy;
+    ink.line(tipX - 4.8 * dx, tipY - 4.8 * dy, tipX, tipY, true);
+    drawHead(ink, tipX, tipY, dx, dy);
+}
+
+// An isometric standard view: the cube, and the eye's arrow from its corner
+// along (dx, dy) - both components +-1, so the arrow runs on a diagonal.
+void drawIsometricView(const Ink& ink, double dx, double dy)
+{
+    const QPainterPath top = polyline({{12, 6}, {17.5, 9}, {12, 12}, {6.5, 9}}, true);
+    ink.fill(top, false, 70);
+    ink.stroke(polyline({{12, 6}, {17.5, 9}, {17.5, 15}, {12, 18}, {6.5, 15}, {6.5, 9}}, true));
+    ink.line(12, 12, 12, 18);
+    ink.stroke(top);
+    const double unit = 1.0 / std::sqrt(2.0);
+    const double tipX = 12 - 7.8 * dx;
+    const double tipY = 12 - 7.8 * dy;
+    ink.line(tipX - 3.6 * dx, tipY - 3.6 * dy, tipX, tipY, true);
+    drawHead(ink, tipX, tipY, dx * unit, dy * unit);
+}
+
 } // namespace
 
 const std::vector<Icon>& allIcons()
@@ -267,6 +339,33 @@ const std::vector<Icon>& allIcons()
         Icon::FormatStyles, Icon::FormatSymbols,
         Icon::FormatSurveyCodes, Icon::Purge,
         Icon::GlobalModify,
+        // Menu items
+        Icon::RecentScripts, Icon::Quit,
+        Icon::Deselect,     Icon::SelectById,
+        Icon::CopyViewImage, Icon::Attributes,
+        Icon::SnapEndpoint, Icon::SnapMidpoint,
+        Icon::SnapCenter,   Icon::SnapIntersection,
+        Icon::SnapPerpendicular, Icon::SnapTangent,
+        Icon::SnapNearest,  Icon::SnapGrid,
+        Icon::ThinLines,
+        Icon::LayoutSingle, Icon::LayoutSplitVertical,
+        Icon::LayoutSplitHorizontal, Icon::LayoutThreeLeft,
+        Icon::LayoutThreeTop, Icon::LayoutQuad,
+        Icon::ViewTop,      Icon::ViewBottom,
+        Icon::ViewFront,    Icon::ViewBack,
+        Icon::ViewLeft,     Icon::ViewRight,
+        Icon::ViewIsoSouthWest, Icon::ViewIsoSouthEast,
+        Icon::ViewIsoNorthEast, Icon::ViewIsoNorthWest,
+        Icon::Perspective,  Icon::VerticalExaggeration,
+        Icon::Panels,       Icon::Toolbars,
+        Icon::TextSize,     Icon::ResetLayout,
+        Icon::EditText,     Icon::EditLabel,
+        Icon::LabelLayout,  Icon::LeaderManager,
+        Icon::LeadersForSelection, Icon::ArrangeLeaders,
+        Icon::TextStyles,   Icon::LabelStyles,
+        Icon::DimensionStyles,
+        Icon::LayerVisible, Icon::LayerLocked,
+        Icon::LayerColour,
     };
     return icons;
 }
@@ -875,6 +974,293 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.line(14, 12, 18.5, 12, true);
         ink.stroke(polyline({{16.2, 9.7}, {18.5, 12}, {16.2, 14.3}}), true);
         ink.dot(21, 12, 1.9, true);
+        break;
+    // ---- menu items: File and Edit -------------------------------------------------------
+    case Icon::RecentScripts:
+        ink.stroke(rectangle(2.5, 3.5, 15, 11, 1.5));
+        ink.stroke(polyline({{5.5, 7}, {8, 9}, {5.5, 11}}));
+        ink.line(9.5, 11, 12.5, 11);
+        ink.stroke(circle(17, 16.5, 5), true);
+        ink.stroke(polyline({{17, 13.8}, {17, 16.5}, {19.2, 17.8}}), true, 1.4);
+        break;
+    case Icon::Quit:
+        ink.stroke(polyline({{13, 7.5}, {13, 3}, {4, 3}, {4, 21}, {13, 21}, {13, 16.5}}));
+        ink.line(8.5, 12, 21, 12, true);
+        ink.stroke(polyline({{17.5, 8.5}, {21, 12}, {17.5, 15.5}}), true);
+        break;
+    case Icon::Deselect:
+        ink.dashed(rectangle(3, 3, 14, 14));
+        ink.line(15, 15, 21, 21, true);
+        ink.line(21, 15, 15, 21, true);
+        break;
+    case Icon::SelectById:
+        ink.dashed(rectangle(3, 3, 18, 18));
+        ink.line(10.2, 7, 9.2, 17, true);
+        ink.line(14.8, 7, 13.8, 17, true);
+        ink.line(7, 10.3, 17.2, 10.3, true);
+        ink.line(6.6, 13.9, 16.8, 13.9, true);
+        break;
+    case Icon::CopyViewImage:
+        ink.stroke(polyline({{3, 14.5}, {3, 3}, {16, 3}, {16, 6.5}}));
+        ink.stroke(rectangle(7.5, 8, 14, 12, 1.0), true);
+        ink.stroke(polyline({{9.5, 18}, {13, 13.5}, {15.5, 16}, {17.5, 14}, {20, 18}}), true, 1.3);
+        break;
+    case Icon::Attributes:
+        // A tree of attributes: the group at the top, its values beneath.
+        ink.dot(5, 5, 1.8);
+        ink.line(8.5, 5, 20.5, 5);
+        ink.line(5, 5, 5, 18.5);
+        ink.line(5, 11.5, 9, 11.5);
+        ink.line(5, 18.5, 9, 18.5);
+        ink.line(11.5, 11.5, 20.5, 11.5, true);
+        ink.line(11.5, 18.5, 20.5, 18.5, true);
+        break;
+    // ---- menu items: View, the snap modes ------------------------------------------------
+    case Icon::SnapEndpoint:
+        ink.line(3, 21, 16, 8);
+        ink.stroke(rectangle(13, 5, 6, 6), true);
+        break;
+    case Icon::SnapMidpoint:
+        ink.line(3, 19, 21, 5);
+        ink.stroke(polyline({{12, 7.8}, {15.8, 14.4}, {8.2, 14.4}}, true), true);
+        break;
+    case Icon::SnapCenter:
+        ink.stroke(circle(12, 12, 8.5));
+        ink.stroke(circle(12, 12, 3), true);
+        break;
+    case Icon::SnapIntersection:
+        ink.line(3, 6, 21, 18);
+        ink.line(3, 18, 21, 6);
+        ink.line(9, 9, 15, 15, true, 2.2);
+        ink.line(9, 15, 15, 9, true, 2.2);
+        break;
+    case Icon::SnapPerpendicular:
+        ink.line(3, 19, 21, 19);
+        ink.line(10, 4, 10, 19);
+        ink.stroke(polyline({{10, 14.5}, {14.5, 14.5}, {14.5, 19}}), true);
+        break;
+    case Icon::SnapTangent:
+        ink.stroke(circle(11, 14.5, 6.5));
+        ink.line(2, 8, 22, 8);
+        ink.stroke(circle(11, 8, 2.4), true);
+        break;
+    case Icon::SnapNearest: {
+        QPainterPath curve(QPointF(3, 19));
+        curve.cubicTo(8, 8, 15, 20, 21, 7);
+        ink.stroke(curve);
+        ink.stroke(polyline({{9, 9.5}, {15, 9.5}, {9, 16.5}, {15, 16.5}}, true), true);
+        break;
+    }
+    case Icon::SnapGrid:
+        for (const double x : {5.0, 12.0, 19.0}) {
+            for (const double y : {5.0, 12.0, 19.0}) {
+                ink.dot(x, y, 1.2);
+            }
+        }
+        ink.line(12, 7.5, 12, 16.5, true);
+        ink.line(7.5, 12, 16.5, 12, true);
+        break;
+    case Icon::ThinLines:
+        ink.line(3, 7, 21, 7, false, 3.6);
+        ink.line(3, 13, 21, 13, false, 2.0);
+        ink.line(3, 18.5, 21, 18.5, true, 0.9);
+        break;
+    // ---- the viewport layouts: the main view in the accent ------------------------------
+    case Icon::LayoutSingle:
+        ink.fill(rectangle(2.5, 4, 19, 16, 1.5), true, 80);
+        drawFrame(ink);
+        break;
+    case Icon::LayoutSplitVertical:
+        ink.fill(rectangle(2.5, 4, 9.5, 16), true, 80);
+        drawFrame(ink);
+        ink.line(12, 4, 12, 20);
+        break;
+    case Icon::LayoutSplitHorizontal:
+        ink.fill(rectangle(2.5, 4, 19, 8), true, 80);
+        drawFrame(ink);
+        ink.line(2.5, 12, 21.5, 12);
+        break;
+    case Icon::LayoutThreeLeft:
+        ink.fill(rectangle(2.5, 4, 9.5, 16), true, 80);
+        drawFrame(ink);
+        ink.line(12, 4, 12, 20);
+        ink.line(12, 12, 21.5, 12);
+        break;
+    case Icon::LayoutThreeTop:
+        ink.fill(rectangle(2.5, 4, 19, 8), true, 80);
+        drawFrame(ink);
+        ink.line(2.5, 12, 21.5, 12);
+        ink.line(12, 12, 12, 20);
+        break;
+    case Icon::LayoutQuad:
+        ink.fill(rectangle(2.5, 4, 9.5, 8), true, 80);
+        drawFrame(ink);
+        ink.line(12, 4, 12, 20);
+        ink.line(2.5, 12, 21.5, 12);
+        break;
+    // ---- the standard 3D views ----------------------------------------------------------
+    case Icon::ViewTop:
+        ink.fill(rectangle(7, 7, 10, 10), true, 110);
+        ink.stroke(rectangle(7, 7, 10, 10), true);
+        ink.dot(12, 12, 1.3);
+        break;
+    case Icon::ViewBottom:
+        ink.fill(rectangle(7, 7, 10, 10), true, 45);
+        ink.dashed(rectangle(7, 7, 10, 10), true);
+        break;
+    case Icon::ViewFront:
+        drawOrthographicView(ink, 0, -1); // from the south, looking north
+        break;
+    case Icon::ViewBack:
+        drawOrthographicView(ink, 0, 1);
+        break;
+    case Icon::ViewLeft:
+        drawOrthographicView(ink, 1, 0); // from the west, looking east
+        break;
+    case Icon::ViewRight:
+        drawOrthographicView(ink, -1, 0);
+        break;
+    case Icon::ViewIsoSouthWest:
+        drawIsometricView(ink, 1, -1);
+        break;
+    case Icon::ViewIsoSouthEast:
+        drawIsometricView(ink, -1, -1);
+        break;
+    case Icon::ViewIsoNorthEast:
+        drawIsometricView(ink, -1, 1);
+        break;
+    case Icon::ViewIsoNorthWest:
+        drawIsometricView(ink, 1, 1);
+        break;
+    case Icon::Perspective:
+        // Rails running to a vanishing point, the ties shortening.
+        ink.line(3, 21, 10.5, 4, true);
+        ink.line(21, 21, 13.5, 4, true);
+        ink.line(4.8, 17, 19.2, 17);
+        ink.line(6.8, 12.5, 17.2, 12.5);
+        ink.line(8.6, 8.5, 15.4, 8.5);
+        break;
+    case Icon::VerticalExaggeration:
+        ink.stroke(polyline({{2.5, 20}, {7, 16.5}, {11, 18.5}, {15.5, 13.5}, {21.5, 15.5}}));
+        ink.line(12, 3, 12, 11.5, true);
+        ink.stroke(polyline({{9.5, 5.5}, {12, 3}, {14.5, 5.5}}), true);
+        ink.stroke(polyline({{9.5, 9}, {12, 11.5}, {14.5, 9}}), true);
+        break;
+    // ---- the window ----------------------------------------------------------------------
+    case Icon::Panels:
+        ink.fill(rectangle(2.5, 4, 6, 16), true, 90);
+        drawFrame(ink);
+        ink.line(8.5, 4, 8.5, 20);
+        ink.line(17, 4, 17, 20);
+        break;
+    case Icon::Toolbars:
+        ink.fill(rectangle(2.5, 4, 19, 5), true, 90);
+        drawFrame(ink);
+        ink.line(2.5, 9, 21.5, 9);
+        for (const double x : {6.0, 10.0, 14.0}) {
+            ink.dot(x, 6.5, 1.0);
+        }
+        break;
+    case Icon::TextSize:
+        drawLetterA(ink, 9, 20.5, 16.5, false);
+        drawLetterA(ink, 18.5, 20.5, 9, true);
+        break;
+    case Icon::ResetLayout: {
+        ink.stroke(polyline({{12, 15}, {2.5, 15}, {2.5, 3.5}, {17, 3.5}, {17, 9}}));
+        ink.line(8, 3.5, 8, 15);
+        QPainterPath turn;
+        const QRectF round(11.5, 11, 10, 10);
+        turn.arcMoveTo(round, 100.0);
+        turn.arcTo(round, 100.0, 270.0);
+        ink.stroke(turn, true);
+        // The head where the sweep begins, pointing back along it.
+        ink.stroke(polyline({{14.2, 9.7}, {15.8, 11.1}, {14.4, 13}}), true);
+        break;
+    }
+    // ---- annotation ----------------------------------------------------------------------
+    case Icon::EditText:
+        ink.line(3.5, 4.5, 14.5, 4.5);
+        ink.line(9, 4.5, 9, 18.5);
+        drawPencil(ink);
+        break;
+    case Icon::EditLabel:
+        drawNote(ink, 2.5, 3, false);
+        ink.line(5, 10, 3.5, 19);
+        ink.dot(3.5, 19.5, 1.3);
+        drawPencil(ink);
+        break;
+    case Icon::LabelLayout:
+        ink.stroke(polyline({{5, 3}, {19, 3}, {19, 21}, {5, 21}}, true));
+        ink.line(8, 16, 16, 16);
+        ink.line(8, 18.5, 13, 18.5);
+        drawNote(ink, 6.5, 5.5, true);
+        break;
+    case Icon::LeaderManager:
+        ink.stroke(polyline({{4, 20}, {9.5, 11}, {12.5, 11}}));
+        ink.fill(polyline({{4, 20}, {4.4, 16.2}, {7.1, 17.9}}, true));
+        ink.stroke(rectangle(12.5, 5, 9, 12, 1.5), true);
+        ink.line(14.8, 9, 19.2, 9);
+        ink.line(14.8, 13, 19.2, 13);
+        break;
+    case Icon::LeadersForSelection:
+        ink.dashed(rectangle(2.5, 12.5, 8.5, 9));
+        ink.stroke(polyline({{7, 16.5}, {13, 8}, {16, 8}}), true);
+        drawNote(ink, 11.5, 2.5, true);
+        break;
+    case Icon::ArrangeLeaders:
+        ink.line(11, 2, 11, 22, true, 1.3);
+        for (const double y : {3.0, 10.0, 17.0}) {
+            ink.stroke(rectangle(12, y, 9.5, 4.5, 1.0));
+        }
+        ink.line(3, 7.5, 12, 5.25);
+        ink.line(4.5, 13.5, 12, 12.25);
+        ink.line(2.5, 20.5, 12, 19.25);
+        break;
+    case Icon::TextStyles:
+        drawLetterA(ink, 8.5, 20, 15, false);
+        ink.line(15.5, 7, 21.5, 7, true, 1.5);
+        ink.line(15.5, 12, 21.5, 12, true, 2.4);
+        ink.line(15.5, 17, 21.5, 17, true, 1.1);
+        break;
+    case Icon::LabelStyles:
+        drawNote(ink, 2, 4, false);
+        ink.line(4.5, 11, 3, 19);
+        ink.line(15.5, 12, 21.5, 12, true, 1.5);
+        ink.line(15.5, 16, 21.5, 16, true, 2.4);
+        ink.line(15.5, 20, 21.5, 20, true, 1.1);
+        break;
+    case Icon::DimensionStyles:
+        ink.line(4, 21, 4, 8);
+        ink.line(20, 21, 20, 8);
+        ink.line(4, 11, 20, 11, true);
+        drawHead(ink, 4, 11, -1, 0);
+        drawHead(ink, 20, 11, 1, 0);
+        ink.line(9, 6, 15, 6, false, 2.2);
+        break;
+    case Icon::LayerVisible: {
+        QPainterPath eye(QPointF(2.5, 12));
+        eye.cubicTo(7, 4.5, 17, 4.5, 21.5, 12);
+        eye.cubicTo(17, 19.5, 7, 19.5, 2.5, 12);
+        ink.stroke(eye);
+        ink.stroke(circle(12, 12, 3.4), true);
+        ink.dot(12, 12, 1.3, true);
+        break;
+    }
+    case Icon::LayerLocked: {
+        QPainterPath shackle(QPointF(7.5, 11));
+        shackle.lineTo(7.5, 8);
+        shackle.cubicTo(7.5, 2.2, 16.5, 2.2, 16.5, 8);
+        shackle.lineTo(16.5, 11);
+        ink.stroke(shackle);
+        ink.stroke(rectangle(4.5, 11, 15, 10, 1.5), true);
+        ink.dot(12, 16, 1.4, true);
+        break;
+    }
+    case Icon::LayerColour:
+        ink.fill(rectangle(3, 3, 9, 9, 1.5), false, 200);
+        ink.fill(rectangle(12, 12, 9, 9, 1.5), true);
+        ink.stroke(rectangle(12, 3, 9, 9, 1.5));
+        ink.stroke(rectangle(3, 12, 9, 9, 1.5), true);
         break;
     }
     painter.restore();
