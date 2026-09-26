@@ -447,6 +447,7 @@ tests named below):
 | IFC export (`katana_ifc/drawing.cpp`, `classification.cpp`) | a curve polyline one `IfcIndexedPolyCurve` with an `IfcArcIndex` through each arc's true middle; an ellipse `IfcEllipse`, trimmed by parameter for an arc; a spline `IfcBSplineCurveWithKnots` (rational with weights); a curve polyline or spline on a kerb, pipe or fence layer is that element; a rules file may name the three kinds |
 | Cut Section along the selection | along a curve polyline's or a spline's chords |
 | Alignment Manager, PIs from the selection | a curve polyline refused: its vertices are tangent points, not PIs |
+| the object snap in the window | one owner, the document's drafting settings: View > Snap Modes, the drafting toolbar, `SNAP` and new views read and write the same, where the views had kept a copy that a click in the menu or a new view wrote back over the toolbar's modes; `SNAP` with `modes=`, `add=` or `remove=` typed in the window is the drawing verb (`SNAP <mode> ON\|OFF` stays the window's shorthand) |
 
 ## Not done
 
@@ -485,7 +486,18 @@ nothing to choose. The retrofit is to read the target with
   description's arc course is radius, arc length and chord, which
   `parcelReport` does not yet write.
 - A leader can be put along a curve polyline or an ellipse, not a spline.
-- The IFC import still reads an `IfcIndexedPolyCurve`'s arcs as chords into
-  a `Polyline2`; it makes none of the three kinds.
+- The IFC import makes none of the three kinds: it reads an
+  `IfcIndexedPolyCurve`'s arcs, a trimmed `IfcEllipse` and an
+  `IfcBSplineCurveWithKnots` (rational or not) as chords within its curve
+  tolerance into a `Polyline2`. (Before the merge it read an elliptical arc
+  as the whole ellipse, and a B-spline as a point at 0,0.)
+- The Dimension tool's pick (`annotate_dimension.cpp`) takes a line or a
+  polyline's straight segment, not a curve polyline's: once a polyline has
+  an arc, its straight sides are dimensioned by points (`DIM` with
+  `#id.vertexN`), not by picking the side.
+- View > Snap Modes lists the eight original modes; the drawing system's
+  five (Quadrant, Node, Extension, Parallel, Apparent Intersection) are on
+  the drafting toolbar and `SNAP add=`. Both show the one setting, the
+  document's drafting settings.
 - The Alignment Manager cannot take PIs from a curve polyline (the tangent
   points of its arcs are not PIs); it says so.
