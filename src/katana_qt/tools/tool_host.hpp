@@ -83,6 +83,9 @@ class ToolHost {
     // points (the relative forms from lastPoint()), anything else is a value
     // or an option keyword.
     Outcome typed(std::string_view text);
+    // Where the cursor is, for direct distance entry: a number typed at a
+    // point prompt is that far from the last point towards it.
+    void setCursor(const Point2& at) { cursor_ = at; }
     // Enter, Space or a right-click.
     Outcome enter();
     // Steps back one input inside the tool (the U inside LINE); never the
@@ -134,6 +137,7 @@ class ToolHost {
     void report(const std::function<void(const std::string&)>& hook, const std::string& text);
 
     katana::cad::Document& document_;
+    std::optional<Point2> cursor_;
     const katana::cad::ToolInfo* info_ = nullptr;
     std::unique_ptr<katana::cad::InteractiveTool> tool_;
     // Bumped whenever tool_ is made or dropped, so apply() can tell that a

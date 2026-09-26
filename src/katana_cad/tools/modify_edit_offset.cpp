@@ -56,6 +56,16 @@ std::optional<double> throughDistance(const Geometry& source, const Point2& side
             return Line2{segment->start, segment->delta()}.distanceTo(side);
         }
     }
+    if (const auto* curved = std::get_if<katana::geometry::CurvePolyline2>(&source)) {
+        if (const auto near = curved->nearest(side)) {
+            const auto piece = curved->segment(near->segment);
+            if (const auto* line = std::get_if<Segment2>(&piece)) {
+                return Line2{line->start, line->delta()}.distanceTo(side);
+            }
+            const auto& arc = std::get<Arc2>(piece);
+            return std::abs(arc.center.distanceTo(side) - arc.radius);
+        }
+    }
     return std::nullopt;
 }
 
@@ -105,6 +115,27 @@ Result<Geometry> offsetGeometry(const Geometry& source, double distance, const P
                                  kindName(source) +
                                  ": a side of the copy would turn back on itself or shrink to "
                                  "nothing.");
+        }
+        return Geometry{std::move(*moved)};
+    }
+    if (const auto* curved = std::get_if<katana::geometry::CurvePolyline2>(&source)) {
+        // The side of the nearest piece decides: left of a line, inside a
+        // counter-clockwise arc (geometry::offset's positive side).
+        const auto near = curved->nearest(side);
+        if (!near) {
+            return makeError(ErrorCode::InvalidGeometry, "That polyline has no length to offset.");
+        }
+        double sign = 1.0;
+        const auto piece = curved->segment(near->segment);
+        if (const auto* line = std::get_if<Segment2>(&piece)) {
+            sign = Line2{line->start, line->delta()}.signedDistanceTo(side) >= 0.0 ? 1.0 : -1.0;
+        } else {
+            const auto& arc = std::get<Arc2>(piece);
+            sign = ((side.distanceTo(arc.center) < arc.radius) == (arc.sweep > 0.0)) ? 1.0 : -1.0;
+        }
+        auto moved = katana::geometry::offset(*curved, sign * distance);
+        if (!moved) {
+            return makeError(ErrorCode::InvalidGeometry, asSentence(moved.error().message));
         }
         return Geometry{std::move(*moved)};
     }
@@ -221,7 +252,7 @@ class OffsetTool final : public InteractiveTool {
         const auto type = source->type();
         using katana::entity::EntityType;
         if (type != EntityType::Line && type != EntityType::Arc && type != EntityType::Circle &&
-            type != EntityType::Polyline) {
+            type != EntityType::Polyline && type != EntityType::CurvePolyline) {
             return ToolStep::rejected("A " + kindName(source->geometry) +
                                       " cannot be offset; pick a line, arc, circle or polyline.");
         }

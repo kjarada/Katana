@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "families.hpp"
+#include "katana/cad/drawing/draw_shapes.hpp"
 #include "katana/commands/change_set.hpp"
 #include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
@@ -119,23 +120,66 @@ cmd::CommandPtr createAll(std::string name, std::vector<Entity> entities)
 
 // ---- Point -------------------------------------------------------------------------
 
+// A point with a height (the drawing system's, docs/drawing.md): typed as
+// x,y,z, or placed at the current height set with [Height], which the
+// program remembers as it remembers a fillet radius (the tool restarts after
+// every point, so the tool itself cannot keep it); its height goes in the
+// elevation property every survey point already carries.
+std::optional<double>& currentPointHeight()
+{
+    static std::optional<double> height;
+    return height;
+}
+
 class PointTool final : public InteractiveTool {
   public:
-    explicit PointTool(const ToolContext& context) : attributes_(context.attributes) {}
-
-    [[nodiscard]] std::string prompt() const override { return "Specify a point"; }
-    [[nodiscard]] ToolInput expects() const override { return ToolInput::Point; }
-
-    ToolStep point(const Point2& at) override
+    explicit PointTool(const ToolContext& context)
+        : attributes_(context.attributes), height_(currentPointHeight())
     {
-        // One command per point, so each is its own undo, and a restart so the
-        // tool goes on placing points until Esc - survey marks come in runs.
-        return ToolStep::done(cmd::createPoint(at, attributes_), {}, true);
     }
+
+    [[nodiscard]] std::string prompt() const override
+    {
+        if (askingHeight_) {
+            return "Specify the height for the next points, or [None]";
+        }
+        return height_ ? "Specify a point (x,y,z) or [Height] <height " +
+                             katana::core::formatExactReal(*height_) + ">"
+                       : std::string("Specify a point (x,y,z) or [Height]");
+    }
+    [[nodiscard]] ToolInput expects() const override
+    {
+        return askingHeight_ ? ToolInput::Value : ToolInput::Point;
+    }
+
+    ToolStep point(const Point2& at) override { return place(at, height_); }
+
+    ToolStep point3d(const Point2& at, double z) override { return place(at, z); }
 
     ToolStep value(std::string_view text) override
     {
-        return ToolStep::rejected(quoted(text) + " is not a point; type it as x,y");
+        if (askingHeight_) {
+            askingHeight_ = false;
+            if (isOption(text, "None")) {
+                height_.reset();
+                currentPointHeight() = height_;
+                return ToolStep::next();
+            }
+            const auto z = katana::core::parseFiniteDouble(katana::core::trimmed(text));
+            if (!z) {
+                askingHeight_ = true;
+                return ToolStep::rejected(quoted(text) + " is not a height; type a number or None");
+            }
+            height_ = *z;
+            currentPointHeight() = height_;
+            return ToolStep::next();
+        }
+        if (isOption(text, "Height")) {
+            askingHeight_ = true;
+            return ToolStep::next();
+        }
+        return ToolStep::rejected(quoted(text) +
+                                  " is not a point; type it as x,y or x,y,z, or H for a height");
     }
 
     [[nodiscard]] ToolFeedback preview(const Point2& cursor) const override
@@ -146,7 +190,21 @@ class PointTool final : public InteractiveTool {
     }
 
   private:
+    ToolStep place(const Point2& at, std::optional<double> height)
+    {
+        // One command per point, so each is its own undo, and a restart so the
+        // tool goes on placing points until Esc - survey marks come in runs.
+        if (!height) {
+            return ToolStep::done(cmd::createPoint(at, attributes_), {}, true);
+        }
+        Entity point = makeEntity(PointGeometry{at}, attributes_);
+        katana::entity::setHeights(point.properties, {height});
+        return ToolStep::done(createAll("CREATE_POINT", {std::move(point)}), {}, true);
+    }
+
     cmd::EntityAttributes attributes_;
+    std::optional<double> height_;
+    bool askingHeight_ = false;
 };
 
 // ---- Line --------------------------------------------------------------------------
@@ -274,6 +332,14 @@ class LineTool final : public InteractiveTool {
 };
 
 // ---- Polyline ----------------------------------------------------------------------
+//
+// PLINE with its segment modes (the drawing system's, docs/drawing.md): in
+// Line mode a point is the end of a straight segment; in Arc mode it is the
+// end of an arc TANGENT to the segment before (to the east for the first),
+// as a CAD user draws a road or a kerb, and [Second] makes the next arc pass
+// through a point instead, then end at the next. Close, Undo and Enter as
+// before. A polyline with any arc is a CurvePolyline2; one with none is the
+// Polyline2 it always was.
 
 class PolylineTool final : public InteractiveTool {
   public:
@@ -284,17 +350,42 @@ class PolylineTool final : public InteractiveTool {
         if (vertices_.empty()) {
             return "Specify start point";
         }
-        return canClose() ? "Specify next point or [Close/Undo]" : "Specify next point or [Undo]";
+        if (through_) {
+            return "Specify end point of arc";
+        }
+        std::string options = arc_ ? "Line/Second" : "Arc";
+        if (canClose()) {
+            options += "/Close";
+        }
+        options += "/Undo";
+        return std::string(arc_ ? "Specify end point of arc" : "Specify next point") + " or [" +
+               options + "]";
     }
     [[nodiscard]] ToolInput expects() const override { return ToolInput::Point; }
 
     ToolStep point(const Point2& at) override
     {
-        if (!vertices_.empty() && coincide(at, vertices_.back())) {
+        if (!vertices_.empty() && coincide(at, vertices_.back().position)) {
             return ToolStep::rejected(
                 "the point is where the last vertex is; the next vertex must be somewhere else");
         }
-        vertices_.push_back(at);
+        if (arc_ && !vertices_.empty()) {
+            if (secondPending_) {
+                through_ = at;
+                secondPending_ = false;
+                return ToolStep::next();
+            }
+            double bulge = 0.0;
+            if (through_) {
+                bulge = katana::geometry::bulgeThrough(vertices_.back().position, *through_, at);
+                through_.reset();
+            } else {
+                bulge = tangentBulge(at);
+            }
+            vertices_.back().bulge = bulge;
+        }
+        vertices_.push_back(katana::geometry::CurveVertex{at, 0.0, std::nullopt});
+        history_.push_back(arc_);
         return ToolStep::next();
     }
 
@@ -305,6 +396,20 @@ class PolylineTool final : public InteractiveTool {
         }
         if (isOption(text, "Undo")) {
             return undo();
+        }
+        if (isOption(text, "Arc")) {
+            arc_ = true;
+            return ToolStep::next();
+        }
+        if (isOption(text, "Line")) {
+            arc_ = false;
+            through_.reset();
+            secondPending_ = false;
+            return ToolStep::next();
+        }
+        if (arc_ && isOption(text, "Second") && !vertices_.empty()) {
+            secondPending_ = true;
+            return ToolStep::next();
         }
         return notAChainPoint(text, !vertices_.empty(), canClose());
     }
@@ -322,38 +427,76 @@ class PolylineTool final : public InteractiveTool {
 
     ToolStep undo() override
     {
+        if (secondPending_ || through_) {
+            secondPending_ = false;
+            through_.reset();
+            return ToolStep::next();
+        }
         if (vertices_.empty()) {
             return ToolStep::rejected("nothing to undo; no vertex has been given yet");
         }
         vertices_.pop_back();
+        history_.pop_back();
+        if (!vertices_.empty()) {
+            vertices_.back().bulge = 0.0; // the segment it started is gone
+        }
         return ToolStep::next();
     }
 
     [[nodiscard]] ToolFeedback preview(const Point2& cursor) const override
     {
         ToolFeedback feedback;
-        if (!vertices_.empty()) {
-            Polyline2 shape{vertices_, false};
-            if (!coincide(cursor, vertices_.back())) {
-                shape.vertices.push_back(cursor);
+        for (const auto& vertex : vertices_) {
+            feedback.markers.push_back(vertex.position);
+        }
+        if (vertices_.empty()) {
+            return feedback;
+        }
+        katana::geometry::CurvePolyline2 shape;
+        shape.vertices = vertices_;
+        if (through_) {
+            feedback.markers.push_back(*through_);
+        }
+        if (!coincide(cursor, vertices_.back().position) && !secondPending_) {
+            if (arc_) {
+                shape.vertices.back().bulge =
+                    through_ ? katana::geometry::bulgeThrough(vertices_.back().position,
+                                                              *through_, cursor)
+                             : tangentBulge(cursor);
             }
-            if (shape.vertices.size() >= 2) {
+            shape.vertices.push_back(katana::geometry::CurveVertex{cursor, 0.0, std::nullopt});
+        }
+        if (shape.vertices.size() >= 2) {
+            if (shape.hasArcs()) {
                 feedback.shapes.emplace_back(std::move(shape));
+            } else {
+                feedback.shapes.emplace_back(Polyline2{shape.positions(), false});
             }
         }
-        feedback.markers = vertices_;
         return feedback;
     }
 
     [[nodiscard]] std::optional<Point2> lastPoint() const override
     {
-        return vertices_.empty() ? std::nullopt : std::optional<Point2>(vertices_.back());
+        return vertices_.empty() ? std::nullopt
+                                 : std::optional<Point2>(vertices_.back().position);
     }
 
   private:
     // A closed polyline needs three vertices; with two, Close would only
     // double the one segment back on itself.
     [[nodiscard]] bool canClose() const { return vertices_.size() >= 3; }
+
+    // The direction the chain is heading at its last vertex: the last
+    // segment's tangent at its end, east before there is one.
+    // The bulge of the arc from the last vertex to `to`, tangent to the
+    // segment before it (cad::tangentBulge, shared with PLINE ... ARC).
+    [[nodiscard]] double tangentBulge(const Point2& to) const
+    {
+        katana::geometry::CurvePolyline2 path;
+        path.vertices = vertices_;
+        return katana::cad::tangentBulge(path, to);
+    }
 
     ToolStep close()
     {
@@ -362,23 +505,41 @@ class PolylineTool final : public InteractiveTool {
         }
         // A user who snapped back onto the start and then chose Close means
         // one closed shape, not a closed shape with a doubled first vertex.
-        std::vector<Point2> vertices = vertices_;
-        if (coincide(vertices.back(), vertices.front())) {
-            vertices.pop_back();
-            if (vertices.size() < 3) {
+        // Checked on a copy, so a refusal leaves the chain as it was.
+        if (coincide(vertices_.back().position, vertices_.front().position)) {
+            if (vertices_.size() - 1 < 3) {
                 return ToolStep::rejected(
                     "a closed polyline needs three different vertices; give another point first");
             }
+            vertices_.pop_back();
+            history_.pop_back();
+            vertices_.back().bulge = 0.0;
+        } else if (arc_) {
+            // In Arc mode the closing segment is a tangent arc too.
+            vertices_.back().bulge = tangentBulge(vertices_.front().position);
         }
-        vertices_ = std::move(vertices);
         return finish(true);
     }
 
     ToolStep finish(bool closed)
     {
-        const std::size_t count = vertices_.size();
-        auto command = cmd::createPolyline(Polyline2{std::move(vertices_), closed}, attributes_);
+        katana::geometry::CurvePolyline2 shape;
+        shape.vertices = std::move(vertices_);
+        shape.closed = closed;
+        if (!closed) {
+            shape.vertices.back().bulge = 0.0;
+        }
         vertices_.clear();
+        history_.clear();
+        through_.reset();
+        secondPending_ = false;
+        const std::size_t count = shape.vertices.size();
+        cmd::CommandPtr command;
+        if (shape.hasArcs()) {
+            command = createAll("CREATE_POLYLINE", {makeEntity(shape, attributes_)});
+        } else {
+            command = cmd::createPolyline(Polyline2{shape.positions(), closed}, attributes_);
+        }
         return ToolStep::done(std::move(command),
                               std::string(closed ? "closed polyline of " : "polyline of ") +
                                   std::to_string(count) + " vertices",
@@ -386,7 +547,11 @@ class PolylineTool final : public InteractiveTool {
     }
 
     cmd::EntityAttributes attributes_;
-    std::vector<Point2> vertices_;
+    std::vector<katana::geometry::CurveVertex> vertices_;
+    std::vector<bool> history_; // the mode each vertex was given in
+    bool arc_ = false;
+    bool secondPending_ = false;
+    std::optional<Point2> through_;
 };
 
 // ---- Rectangle ---------------------------------------------------------------------

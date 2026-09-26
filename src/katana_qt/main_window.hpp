@@ -54,6 +54,7 @@
 #include "select_by_id_dialog.hpp"
 #include "sheet_editor.hpp"
 #include "view_workspace.hpp"
+#include "drawing/drawing_ui.hpp"
 
 class QAction;
 class QActionGroup;
@@ -550,6 +551,7 @@ class MainWindow final : public QMainWindow {
     // line no tool and no view verb took; `verb` is its first word, upper
     // case.
     void runInterpreterLine(const QString& line, const QString& verb);
+    void syncSnapActions();
     // SCRIPT <file> [CONTINUE] (script_runner.hpp): the file's lines through
     // runVerbLine, stopping at the first refused unless `continueOnError`,
     // and the record the run ends with logged. A script already running is
@@ -687,6 +689,8 @@ class MainWindow final : public QMainWindow {
     tools::ToolActions toolActions_;
     QAction* selectAction_ = nullptr;
     QMenu* viewMenu_ = nullptr;
+    // The drawing system's dock and drafting toggles (drawing/drawing_ui.hpp).
+    drawing::DrawingUi drawingUi_;
     // The four panels, by the fixed object names a saved layout keys them on:
     // LayersDock, PropertiesDock, CommandLineDock, ReferenceDataDock.
     QDockWidget* layerDock_ = nullptr;
