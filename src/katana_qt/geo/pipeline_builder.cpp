@@ -678,10 +678,14 @@ void PipelineBuilder::textEdited(const QString& text)
 {
     auto parsed = parsePipeline(text, sourceKind());
     if (!parsed) {
-        // Run as typed; the steps stay as they were, and the status says why.
+        // Run as typed when it can be; the steps stay as they were, and the
+        // status says why - and, when the line itself is refused (an
+        // external step), that it does not run, beside the disabled Run.
         typed_ = text;
+        const auto line = pipelineLine(form());
         panel_->setStatus("The text is not read into steps: " + qs(parsed.error().message) +
-                              ". It runs as typed.",
+                              (line ? QString(". It runs as typed.")
+                                    : ". It cannot run: " + qs(line.error().message) + "."),
                           true);
         panel_->refresh();
         return;

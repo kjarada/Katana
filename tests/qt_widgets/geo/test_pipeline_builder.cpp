@@ -179,6 +179,11 @@ TEST(PipelineBuilder, APipelineWithAnExternalStepCannotBeBuilt)
     EXPECT_TRUE(command->placeholderText().contains("external"))
         << command->placeholderText().toStdString();
     EXPECT_FALSE(child<QPushButton>(builder, "gdalPipelineRun")->isEnabled());
+    // The status says it does not run: it said "It runs as typed" beside a
+    // disabled Run.
+    const QString status = child<QLabel>(builder, "gdalPipelineStatus")->text();
+    EXPECT_FALSE(status.contains("runs as typed")) << status.toStdString();
+    EXPECT_TRUE(status.contains("cannot run")) << status.toStdString();
     child<QPushButton>(builder, "gdalPipelineRun")->click();
     EXPECT_TRUE(stub.lines.isEmpty());
 }

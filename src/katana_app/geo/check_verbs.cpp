@@ -79,9 +79,16 @@ std::string number(double value)
     return katana::core::formatExactReal(value);
 }
 
+// A place, to the millimetre as length= is, without trailing zeros: GEOS's
+// arithmetic gives the middle of an edge from y = 0 to 40 as
+// 20.000000000000007, which is 20 to any survey. (+ 0.0 makes a -0 of a
+// rounded -0.0004 read 0.)
 std::string at(const katana::geometry::Point2& point)
 {
-    return number(point.x) + "," + number(point.y);
+    const auto millimetres = [](double value) {
+        return number(std::round(value * 1000.0) / 1000.0 + 0.0);
+    };
+    return millimetres(point.x) + "," + millimetres(point.y);
 }
 
 // A problem's words: GDAL's reason, lower case, blanks as hyphens.

@@ -377,9 +377,15 @@ QString GisToolDialog::summary(const QString& reply) const
     const QString deleted = field(reply, "output", "deleted");
     if (!created.isEmpty()) {
         const bool changed = created != "0" || updated != "0" || deleted != "0";
-        return changed ? QString("Done as one undo step: %1 created, %2 changed, %3 deleted on %4.")
-                             .arg(created, updated, deleted, field(reply, "output", "layer"))
-                       : QString("Done: nothing to draw, and nothing was added to the undo history.");
+        if (!changed) {
+            return "Done: nothing to draw, and nothing was added to the undo history.";
+        }
+        // An in-place reply (target=in-place: REPLACE, REPAIR, COVERAGE
+        // CLEAN) names no layer; the status said "... deleted on .".
+        const QString layer = field(reply, "output", "layer");
+        return QString("Done as one undo step: %1 created, %2 changed, %3 deleted%4.")
+            .arg(created, updated, deleted,
+                 layer.isEmpty() ? QString(", in place") : " on " + layer);
     }
     return "Done. The reply is below and in the command log.";
 }
