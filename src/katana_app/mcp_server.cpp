@@ -412,6 +412,79 @@ std::string importOptionWords(const Json& arguments)
     return words;
 }
 
+// katana_export's options as the words of its EXPORT line (docs/mcp.md, "I3
+// and I4"): the scope first, as a person types it, then the options.
+std::string exportOptionWords(const Json& arguments)
+{
+    std::string words;
+    const Json& scope = argument(arguments, "scope");
+    const Json& area = argument(arguments, "area");
+    if (!scope.is_null() || !area.is_null()) {
+        if (!scope.is_null() && !scope.is_string()) {
+            throw ToolRefusal{"\"scope\" is selection, drawing, area or layers"};
+        }
+        words += " " + scopeWordsOf(scope.is_string() ? scope.get<std::string>() : "area", area,
+                                    argument(arguments, "layers"),
+                                    optionalBool(arguments, "only", false),
+                                    argument(arguments, "where"));
+    } else if (!argument(arguments, "layers").is_null() || !argument(arguments, "where").is_null()) {
+        throw ToolRefusal{"\"layers\" and \"where\" say a scope: give \"scope\" with them"};
+    }
+    if (const Json& name = argument(arguments, "layer_name"); !name.is_null()) {
+        if (!name.is_string() || name.get<std::string>().empty()) {
+            throw ToolRefusal{"\"layer_name\" must be a non-empty string"};
+        }
+        words += optionWord("layername", name.get<std::string>());
+    }
+    if (optionalBool(arguments, "split_by_layer", false)) {
+        words += " split=layer";
+    }
+    if (optionalBool(arguments, "append", false)) {
+        words += " append";
+    }
+    if (const Json& crs = argument(arguments, "crs"); !crs.is_null()) {
+        if (!crs.is_string() || crs.get<std::string>().empty()) {
+            throw ToolRefusal{"\"crs\" is project, native or a code such as EPSG:4326"};
+        }
+        words += optionWord("crs", crs.get<std::string>());
+    }
+    const auto options = [&](const char* name, const char* key) {
+        if (const Json& value = argument(arguments, name); !value.is_null()) {
+            if (!value.is_array() ||
+                !std::ranges::all_of(value, [](const Json& each) { return each.is_string(); })) {
+                throw ToolRefusal{std::string("\"") + name + "\" is a list of \"KEY=VALUE\""};
+            }
+            for (const Json& each : value) {
+                words += optionWord(key, each.get<std::string>());
+            }
+        }
+    };
+    options("creation_options", "co");
+    options("layer_creation_options", "lco");
+    if (const Json& text = argument(arguments, "text"); !text.is_null()) {
+        if (!text.is_string() || (text != "points" && text != "skip")) {
+            throw ToolRefusal{"\"text\" is points or skip"};
+        }
+        words += " text=" + text.get<std::string>();
+    }
+    if (const Json& curve = argument(arguments, "curve"); !curve.is_null()) {
+        if (!curve.is_number() || !(curve.get<double>() > 0.0)) {
+            throw ToolRefusal{"\"curve\" is a distance above 0"};
+        }
+        words += " curve=" + katana::core::formatExactReal(curve.get<double>());
+    }
+    if (const Json& properties = argument(arguments, "properties"); !properties.is_null()) {
+        if (!properties.is_boolean()) {
+            throw ToolRefusal{"\"properties\" must be true or false"};
+        }
+        words += properties.get<bool>() ? " properties=yes" : " properties=no";
+    }
+    if (optionalBool(arguments, "preview", false)) {
+        words += " PREVIEW";
+    }
+    return words;
+}
+
 // ---- the session's state ------------------------------------------------------------
 
 // The drawing's state, as STATUS JSON gives it (cad/document_status.hpp): one
@@ -819,10 +892,86 @@ const std::vector<Tool>& tools()
             "structuredContent.records as objects.",
             objectSchema(
                 Json{{"path",
-                      {{"type", "string"}, {"description", "The file to write, e.g. site.dxf."}}}},
+                      {{"type", "string"}, {"description", "The file to write, e.g. site.dxf."}}},
+                     {"scope",
+                      {{"type", "string"},
+                       {"enum", {"selection", "drawing", "area", "layers"}},
+                       {"description",
+                        "What of the drawing is written (the shared scope grammar); the whole "
+                        "drawing when neither this nor \"area\" is given. area with \"area\", "
+                        "layers with \"layers\" and \"only\"; \"where\" filters it."}}},
+                     {"area",
+                      {{"type", "array"},
+                       {"items", {{"type", "number"}}},
+                       {"minItems", 4},
+                       {"maxItems", 4},
+                       {"description", "[x0, y0, x1, y1]: scope area (given alone, the scope)."}}},
+                     {"layers",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description", "With scope layers: the drawing's layers."}}},
+                     {"only",
+                      {{"type", "boolean"},
+                       {"description", "With scope layers: without their sublayers."}}},
+                     {"where",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "Conditions on what the scope takes: [\"TYPE=polyline\", "
+                        "\"PROP=owner:Smith*\"]."}}},
+                     {"layer_name",
+                      {{"type", "string"},
+                       {"description", "The layer's name in the file (layername=)."}}},
+                     {"split_by_layer",
+                      {{"type", "boolean"},
+                       {"description",
+                        "One file layer per drawing layer, named after it (split=layer)."}}},
+                     {"append",
+                      {{"type", "boolean"},
+                       {"description",
+                        "Add the layer to the file (a GeoPackage) rather than replace it; a "
+                        "layer name the file has is refused (append)."}}},
+                     {"crs",
+                      {{"type", "string"},
+                       {"description",
+                        "project (the default; a GeoJSON is then longitude and latitude, as "
+                        "RFC 7946 says), native (the project's, unconverted, where the format "
+                        "allows), or a code the coordinates are moved into (crs=)."}}},
+                     {"creation_options",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "The driver's creation options, [\"KEY=VALUE\"], each checked against "
+                        "its list (co=)."}}},
+                     {"layer_creation_options",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "The driver's layer creation options, checked likewise (lco=)."}}},
+                     {"text",
+                      {{"type", "string"},
+                       {"enum", {"points", "skip"}},
+                       {"description",
+                        "points: text entities as points with text, text_height and "
+                        "text_rotation fields and an OGR_STYLE label; skip (the default) leaves "
+                        "them out, counted."}}},
+                     {"curve",
+                      {{"type", "number"},
+                       {"description",
+                        "The largest distance a chord may stray from an arc (curve=)."}}},
+                     {"properties",
+                      {{"type", "boolean"},
+                       {"description", "false: entity properties are not written."}}},
+                     {"preview",
+                      {{"type", "boolean"},
+                       {"description",
+                        "Say what would be written and what the scope takes, writing nothing "
+                        "(PREVIEW)."}}}},
                 {"path"}),
             hints(false, true, true), [](Session& session, const Json& arguments) {
-                return recordsReply(session, "EXPORT " + quoted(requiredString(arguments, "path")));
+                return recordsReply(session, "EXPORT " +
+                                                 quoted(requiredString(arguments, "path")) +
+                                                 exportOptionWords(arguments));
             }});
 
         list.push_back(Tool{

@@ -19,6 +19,7 @@
 #include "katana/gis/processing.hpp"
 #include "katana/interop/dataset_info.hpp"
 #include "katana/interop/geo/drawing_dataset.hpp"
+#include "table_reprojection.hpp"
 
 namespace katana::interop {
 namespace {
@@ -150,34 +151,7 @@ katana::gis::CrsBox boxOf(const gp::Feature& feature)
     return box;
 }
 
-// Every part of every feature moved from one CRS to another, by the one
-// reprojection (gis::reprojectFeatures), heights untouched. An arc's three
-// points move with the rest; a conformal projection keeps an arc that small
-// round to far below a millimetre, and no web service sends arcs.
-katana::core::Status reprojectTable(gp::FeatureTable& table, const std::string& from,
-                                    const std::string& to)
-{
-    std::vector<katana::gis::VectorFeature> geometries;
-    for (const gp::Feature& feature : table.features) {
-        for (const katana::gis::VectorGeometry& part : feature.parts) {
-            geometries.push_back(katana::gis::VectorFeature{part, {}});
-        }
-    }
-    if (geometries.empty()) {
-        return {};
-    }
-    auto moved = katana::gis::reprojectFeatures(std::move(geometries), from, to);
-    if (!moved) {
-        return moved.error();
-    }
-    std::size_t next = 0;
-    for (gp::Feature& feature : table.features) {
-        for (katana::gis::VectorGeometry& part : feature.parts) {
-            part = std::move((*moved)[next++].geometry);
-        }
-    }
-    return {};
-}
+using detail::reprojectTable;
 
 // "1 TIN", "3 polyhedral surfaces": what a read left out, for a warning.
 std::string skippedGeometry(const std::string& what, std::uint64_t count)

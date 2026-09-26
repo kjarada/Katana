@@ -612,7 +612,7 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 | Section | Item | What it calls |
 |---|---|---|
 | Vector - GDAL | Import Vector Data... | `describeSource`, then `importVector` with the dialog's `VectorImportOptions` (source layer, target layer, attributes) |
-| | Export Vector... | File's own action; now with a dialog for `VectorExportOptions` (selection, layer name, curve tolerance, properties) |
+| | Export Vector... | File's own action: after the file dialog, the Export Vector dialog (`vectorExportDialog`), whose scope and options are the `EXPORT` line it runs ("Export options") |
 | Raster - GDAL | Import Raster... | `importRaster` with a display resolution |
 | | Export Surface as DEM... | the `SURFACE EXPORT` line: `exportSurfaceRaster` through GDAL's `raster convert` - a tiled, compressed Float32 GeoTIFF, a COG, an Esri ASCII grid or IMG (`docs/terrain.md`) |
 | Point Cloud - PDAL | Import Point Cloud... | `importPointCloud` with a budget, an ASPRS class, and a COPC resolution when the file is COPC |
@@ -896,14 +896,12 @@ and a cancelled export leaves an empty folder.
 
 Not done:
 
-- The Export Vector dialog's selection, layer name, curve tolerance and
-  properties have no `EXPORT` words yet, so it writes through `interop`
-  directly (`MainWindow::exportDrawingTo`); `EXPORT` replaces a file of the
-  same name, as it always has, and takes no scope or filter yet
-  (`docs/geoprocessing.md`, I4). The import dialogs build `IMPORT` lines
-  ("Import options").
 - A process that dies mid-write leaves its `.katana-staging-<pid>-<n>`
   folder beside the target.
+
+The import and export dialogs build `IMPORT` and `EXPORT` lines ("Import
+options", "Export options"); neither writes through `interop` itself any
+more.
 
 ## Import options
 
@@ -1034,6 +1032,117 @@ Not done:
   one.
 - A point cloud takes no scope; `PointCloudImportOptions::clip` exists and
   is not yet given a word.
+
+## Export options
+
+`EXPORT` takes the shared scope and filter, and the options GDAL's formats
+have, read by one parser in `src/katana_app/geo/export_verb.cpp`:
+
+```
+EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
+       [crs=project|native|<code>] [co=KEY=VALUE]... [lco=KEY=VALUE]...
+       [text=points|skip] [curve=<m>] [properties=yes|no] [PREVIEW]
+```
+
+- **The scope is the one grammar** (`cad::parseScopeWords`, resolved by
+  `cad::matchScope`): no scope words is the whole drawing, as `EXPORT`
+  always was. The reply says what it took - a `scope` record after the
+  `exported` one, which stays first, as a reader of the first record found
+  it - and a scope that takes nothing writes nothing and says so
+  (`export ... ran=no`), not an error.
+- **A .dxf and a .12da take the scope too**, through a copy of the drawing
+  that keeps only what the scope took: the native writers take a model, and
+  the copy is already made for the worker. Rejected: threading the scope's
+  entity list through `writeDxfExport` and the archive writer, a second
+  selection mechanism beside the copy. An archive carries the session's
+  surfaces with the whole drawing (no scope, or DRAWING with no filter) and
+  not with a part of it, as the window's export always did. GDAL's options
+  on a .dxf or a .12da are refused by name.
+- **`layername=`, not `layer=`.** An option key is never a WHERE key:
+  `WHERE ... LAYER=` would take `layer=<n>` for a filter
+  (`src/katana_app/geo/vector_support.hpp`). The plan's grammar said
+  `layer=`.
+- **`split=layer`** writes one file layer per drawing layer, named after it,
+  in the order the layers are first met; refused with `layername=`, and for
+  GPX, whose layers are its own.
+- **`append`** adds the layers to the file (a GeoPackage) rather than
+  replacing it (`gis::VectorExportOptions::append`): a layer name the file
+  has is refused before anything is written, a format that adds no layer to
+  an existing file is refused, and a failure part-way deletes only the
+  layers it made. The write is to a copy of the file in the staging folder
+  (`StagedFiles`), which the apply puts in place of it, so a cancelled
+  append leaves the file as it was. `co=` with `append` is refused: they are
+  the options of a new file.
+- **`co=` and `lco=` are checked** against the driver's creation and layer
+  creation lists (`gis::checkOptions`), as IMPORT's `oo=` is: GDAL only
+  warns of an unknown one.
+- **`crs=`.** The project's coordinate system is written by default
+  (`crs=project`), as it has been since the fidelity work. A code moves the
+  coordinates into that system on the way out
+  (`VectorExportOptions::targetCrs`, by the one table reprojection IMPORT's
+  `crs=project` uses);
+  refused without a project CRS to move from. **A GeoJSON is written in
+  longitude and latitude by default**, converted from the project's, with a
+  warning saying so: RFC 7946 section 4 fixes GeoJSON's coordinates to WGS 84
+  longitude and latitude, and GDAL's writer, given projected coordinates,
+  writes them with a `crs` member most readers ignore - so they were read as
+  degrees. `crs=native` keeps the project's system where the format allows
+  it (a GeoJSON with its `crs` member, JSON-FG). KML, KMZ and GPX were
+  already converted ("Fidelity"). The default changed for GeoJSON only; the
+  `interop::exportVector` API writes coordinates as they are unless asked.
+- **`text=points`** writes a text entity as a point at its insertion point,
+  with `text`, `text_height` (model units) and `text_rotation` (degrees
+  anticlockwise) fields and an `OGR_STYLE` field whose `LABEL(t:"...",s:<h>g,
+  a:<deg>)` the writer also sets as the feature's style string, which KML,
+  DXF and MapInfo draw by. `text=skip`, the default, leaves text out and
+  counts it, as before. The reply's `texts=` says how many went.
+- **`curve=`** is the chords' largest stray from an arc, and
+  **`properties=no`** writes no entity properties - the old dialog's two
+  choices, as words.
+- **PREVIEW** answers at once:
+  `export file=... kind=vector driver=GPKG preview=yes entities=<n>` and the
+  scope record, and writes nothing.
+- The `exported` record of a GDAL format gained `layers=` (the file layers
+  written), `crs=` (the system written), `texts=` with `text=points` and
+  `append=yes` with `append`, after its old fields.
+
+**The window.** File > Export Vector (and the GIS menu's same action) asks
+for the file, then opens the Export Vector dialog
+(`src/katana_qt/gis_export_dialog.hpp`), built on the GIS dialog frame: the
+shared "Apply to" and "Only those that match" controls (`vectorExportScope`,
+starting at the selection when there is one, else the whole drawing), the
+option fields (`vectorExportLayerName`, `vectorExportSplit`,
+`vectorExportAppend`, `vectorExportCrs`, `vectorExportCreationOptions`,
+`vectorExportLayerOptions`, `vectorExportText`, `vectorExportCurve`,
+`vectorExportProperties`), and `vectorExportCommand`, `vectorExportPreview`
+and `vectorExportRun`, which hand the line to the one executor. The GDAL
+fields are off for a .dxf or a .12da. The window's own exportDrawingTo and
+its native DXF export (main_window_dxf.cpp), the second path that wrote
+through `interop` directly and asked "selected only?" in a message box, are
+gone. A headless run still refuses the item's file dialog and names the
+`EXPORT` line, which is the non-interactive path.
+
+**MCP.** `katana_export` takes the scope and the options as arguments
+(`docs/mcp.md`, "I3 and I4").
+
+Tests: `ExportOptions.*` (`tests/geo/test_export_options.cpp`), the
+`cli.export_*` checks of `src/katana_app/geo/cli/export_options.cmake`,
+`McpServer.ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes`,
+and `qt_widgets.VectorExportDialog.TheFieldsBuildExactlyTheTypedLineAndRunHandsItOver`
+with `VectorExportLine.*` (`tests/qt_widgets/geo/test_export_dialog.cpp`).
+The expected coordinates of the conversions are PROJ's `cs2cs` figures for
+330000,6250000 in EPSG:28356, as `tests/geo/test_vector_fidelity.cpp`
+records them.
+
+Not done:
+
+- JSON-FG is written only when the file's name picks its driver; EXPORT has
+  no word for a driver other than the extension's, so `crs=native` is shown
+  with a GeoJSON.
+- `text=points` writes one point per text; a multi-line text's lines are one
+  field, its line breaks blanks in the style's label.
+- The archive writer and the DXF writer take no `co=`/`lco=`; they have no
+  such options.
 
 ## Dataset information
 
