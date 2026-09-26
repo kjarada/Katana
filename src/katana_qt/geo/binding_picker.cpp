@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QStackedWidget>
@@ -82,6 +83,8 @@ BindingPicker::BindingPicker(const QString& prefix, unsigned kinds, GeoDialogCon
         auto* form = new QFormLayout(page);
         form->setContentsMargins(0, 0, 0, 0);
         switch (choice.kind) {
+        case BindNone:
+            break;
         case BindDrawing:
             scope_ = new ScopeFilterWidget(prefix, page);
             scope_->views = context_.views;
@@ -150,6 +153,16 @@ BindingKind BindingPicker::kind() const
     return static_cast<BindingKind>(kind_->currentData().toUInt());
 }
 
+void BindingPicker::setOptional()
+{
+    if (kind_->findData(static_cast<unsigned>(BindNone)) >= 0) {
+        return;
+    }
+    kind_->insertItem(0, "Not given", static_cast<unsigned>(BindNone));
+    pages_->insertWidget(0, new QWidget(pages_));
+    kind_->setCurrentIndex(0);
+}
+
 bool BindingPicker::setKind(BindingKind kind)
 {
     const int index = kind_->findData(static_cast<unsigned>(kind));
@@ -163,6 +176,8 @@ bool BindingPicker::setKind(BindingKind kind)
 Result<QString> BindingPicker::words() const
 {
     switch (kind()) {
+    case BindNone:
+        return QString();
     case BindDrawing: {
         auto scope = scope_->verbWords();
         if (!scope) {
@@ -267,6 +282,88 @@ void BindingPicker::browse()
     if (!path.isEmpty()) {
         file_->setText(QDir::toNativeSeparators(path));
     }
+}
+
+BindingList::BindingList(const QString& prefix, unsigned kinds, GeoDialogContext context,
+                         const QString& listName, QWidget* parent)
+    : QWidget(parent)
+{
+    picker_ = new BindingPicker(prefix, kinds, std::move(context), this);
+    list_ = new QListWidget(this);
+    list_->setObjectName(prefix + listName);
+    list_->setToolTip("The datasets, in order; none listed: the one picked above");
+    list_->setMaximumHeight(110);
+    auto* add = new QPushButton("Add", this);
+    add->setObjectName(prefix + "Add");
+    add->setAutoDefault(false);
+    auto* remove = new QPushButton("Remove", this);
+    remove->setObjectName(prefix + "Remove");
+    remove->setAutoDefault(false);
+    auto* buttons = new QVBoxLayout;
+    buttons->addWidget(add);
+    buttons->addWidget(remove);
+    buttons->addStretch(1);
+    auto* row = new QHBoxLayout;
+    row->addWidget(list_, 1);
+    row->addLayout(buttons);
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(picker_);
+    layout->addLayout(row);
+    const auto changed = [this] {
+        if (onChanged) {
+            onChanged();
+        }
+    };
+    picker_->onChanged = changed;
+    connect(add, &QPushButton::clicked, this, [this] {
+        QString why;
+        if (!this->add(&why) && picker_->say) {
+            picker_->say(why);
+        }
+    });
+    connect(remove, &QPushButton::clicked, this, [this, changed] {
+        delete list_->takeItem(list_->currentRow());
+        changed();
+    });
+}
+
+Result<QStringList> BindingList::words() const
+{
+    QStringList words;
+    for (int row = 0; row < list_->count(); ++row) {
+        words << list_->item(row)->text();
+    }
+    if (!words.isEmpty()) {
+        return words;
+    }
+    auto one = picker_->words();
+    if (!one) {
+        return one.error();
+    }
+    if (!one->isEmpty()) {
+        words << *one;
+    }
+    return words;
+}
+
+bool BindingList::add(QString* why)
+{
+    auto words = picker_->words();
+    if (!words || words->isEmpty()) {
+        if (why != nullptr) {
+            *why = words ? QString("choose a dataset to add first")
+                         : QString::fromStdString(words.error().message);
+        }
+        return false;
+    }
+    if (list_->findItems(*words, Qt::MatchExactly).isEmpty()) {
+        list_->addItem(*words);
+    }
+    if (onChanged) {
+        onChanged();
+    }
+    return true;
 }
 
 } // namespace katana::qt

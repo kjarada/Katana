@@ -1243,8 +1243,16 @@ a second implementation of a session verb.
 Its menu items come from one table with a block per package
 (`src/katana_qt/geo/menu_table.cpp`, `GeoMenus`). The GIS sections and the
 Terrain submenus are made only when an item is added, so no empty heading
-shows. F0 adds none: the GDAL verb's item is the toolbox, X1's. It is on the
-command line and on `runVerbLine` until then.
+shows. The GDAL verb's item is GIS > Processing - GDAL > GDAL Toolbox.
+
+**The GDAL Toolbox** (`gdalToolboxDialog`, `src/katana_qt/geo/gdal_toolbox_dialog.hpp`)
+is every one of GDAL's algorithms in one window: the catalogue as a searchable
+tree, and for the algorithm chosen a form made at run time from the arguments
+GDAL declares - its bounds on the spin boxes, its choices in the lists, the
+Advanced ones folded away - a picker for each dataset it reads (the drawing's
+scope and filter, a reference raster, a surface, a file), where the output
+goes, and Confirm for an algorithm that changes existing data. It writes the
+GDAL line and runs it through the one executor, as the dialogs below do.
 
 **The geoprocessing dialogs build lines.** Terrain > DEM > Grid Points to DEM
 (`gridDemDialog`), Terrain > DEM > DEM Tools (`demToolsDialog`, a tab per

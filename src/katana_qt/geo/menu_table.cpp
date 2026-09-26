@@ -19,6 +19,7 @@
 #include <QWidget>
 
 #include "geo/dem_tools_dialog.hpp"
+#include "geo/gdal_toolbox_dialog.hpp"
 #include "geo/geo_workbench.hpp"
 #include "geo/grid_dem_dialog.hpp"
 
@@ -30,6 +31,20 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     (void)workbench;
     // ---- F0: GDAL algorithm bridge: no item; the typed GDAL line (X1 is its menu item) ----
     // ---- X1: GIS > Processing - GDAL > GDAL Toolbox ----
+    {
+        QAction* toolbox = workbench.services().makeAction(
+            Icon::Processing, "GDAL &Toolbox...",
+            "Every one of GDAL's algorithms, with forms made from its own arguments, run on the "
+            "drawing, reference rasters, surfaces or files (the GDAL verb)",
+            {}, "gdalToolbox");
+        toolbox->setData(QString("gdalToolboxDialog"));
+        menus.addToGis("Processing - GDAL", toolbox);
+        QObject::connect(toolbox, &QAction::triggered, toolbox, [&workbench, toolbox] {
+            if (auto* window = qobject_cast<QWidget*>(toolbox->parent())) {
+                showGdalToolboxDialog(workbench, *window);
+            }
+        });
+    }
     // ---- X2: the toolbox's pipeline tab (no item of its own) ----
     // ---- I2: GIS > Processing - GDAL > Formats ----
     // ---- V1: GIS > Analysis - GDAL > Buffer, Dissolve ----

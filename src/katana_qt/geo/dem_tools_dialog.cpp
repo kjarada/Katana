@@ -182,11 +182,19 @@ DemToolsDialog::DemToolsDialog(GeoDialogContext context, QWidget* parent)
         auto* page = new QWidget(tabs_);
         page->setObjectName("demTools" + prefix.mid(3));
         auto* layout = new QVBoxLayout(page);
-        // A mosaic's tiles are rasters or files: a surface is no tile.
-        sources_[i] = new BindingPicker(prefix, tool == DemTool::Mosaic ? (BindRaster | BindFile)
-                                                                        : rasters,
-                                        context_, page);
-        sources_[i]->onChanged = [this] { refresh(); };
+        // A mosaic's tiles are rasters or files, several (a surface is no
+        // tile); every other tool reads one raster.
+        QWidget* picked = nullptr;
+        if (tool == DemTool::Mosaic) {
+            mosaicTiles_ = new BindingList(prefix, BindRaster | BindFile, context_, "Tiles", page);
+            mosaicTiles_->onChanged = [this] { refresh(); };
+            sources_[i] = &mosaicTiles_->picker();
+            picked = mosaicTiles_;
+        } else {
+            sources_[i] = new BindingPicker(prefix, rasters, context_, page);
+            sources_[i]->onChanged = [this] { refresh(); };
+            picked = sources_[i];
+        }
         panels_[i] = new GeoRunPanel(prefix, context_, true, page);
         GeoRunPanel* panel = panels_[i];
         sources_[i]->say = [panel](const QString& text) { panel->setStatus(text, true); };
@@ -204,7 +212,7 @@ DemToolsDialog::DemToolsDialog(GeoDialogContext context, QWidget* parent)
                                                                     : "Raster",
                                         page);
         auto* sourceLayout = new QVBoxLayout(sourceBox);
-        sourceLayout->addWidget(sources_[i]);
+        sourceLayout->addWidget(picked);
 
         switch (tool) {
         case DemTool::Mosaic: {
@@ -213,28 +221,6 @@ DemToolsDialog::DemToolsDialog(GeoDialogContext context, QWidget* parent)
                               "own and keeps that. A folder is every raster in it, a pattern "
                               "(tiles/*.tif) every file it matches.",
                               options));
-            tiles_ = new QListWidget(options);
-            tiles_->setObjectName("demMosaicTiles");
-            tiles_->setToolTip("The tiles, in order; none listed: the source picked is the one");
-            auto* add = new QPushButton("Add", options);
-            add->setObjectName("demMosaicAdd");
-            add->setAutoDefault(false);
-            auto* remove = new QPushButton("Remove", options);
-            remove->setObjectName("demMosaicRemove");
-            remove->setAutoDefault(false);
-            connect(add, &QPushButton::clicked, this, [this] { addTile(); });
-            connect(remove, &QPushButton::clicked, this, [this] {
-                delete tiles_->takeItem(tiles_->currentRow());
-                refresh();
-            });
-            auto* buttons = new QVBoxLayout;
-            buttons->addWidget(add);
-            buttons->addWidget(remove);
-            buttons->addStretch(1);
-            auto* row = new QHBoxLayout;
-            row->addWidget(tiles_, 1);
-            row->addLayout(buttons);
-            grid->addRow("Tiles:", row);
             resolution_ = new QComboBox(options);
             resolution_->setObjectName("demMosaicResolution");
             resolution_->setEditable(true);
@@ -418,19 +404,6 @@ BindingPicker& DemToolsDialog::source(DemTool tool) const
     return *sources_[static_cast<std::size_t>(tool)];
 }
 
-void DemToolsDialog::addTile()
-{
-    auto words = sources_[static_cast<std::size_t>(DemTool::Mosaic)]->words();
-    if (!words) {
-        runPanel(DemTool::Mosaic).setStatus(QString::fromStdString(words.error().message), true);
-        return;
-    }
-    if (tiles_->findItems(*words, Qt::MatchExactly).isEmpty()) {
-        tiles_->addItem(*words);
-    }
-    refresh();
-}
-
 DemToolForm DemToolsDialog::form(DemTool tool) const
 {
     DemToolForm made;
@@ -444,9 +417,11 @@ DemToolForm DemToolsDialog::form(DemTool tool) const
             made.regionError = QString::fromStdString(words.error().message);
         }
     };
-    if (tool == DemTool::Mosaic && tiles_->count() > 0) {
-        for (int row = 0; row < tiles_->count(); ++row) {
-            made.sources << tiles_->item(row)->text();
+    if (tool == DemTool::Mosaic) {
+        if (auto tiles = mosaicTiles_->words()) {
+            made.sources = *tiles;
+        } else {
+            made.regionError = QString::fromStdString(tiles.error().message);
         }
     } else {
         sourceWords(*sources_[index]);
