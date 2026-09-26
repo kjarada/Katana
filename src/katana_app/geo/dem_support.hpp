@@ -78,15 +78,26 @@ readBandOne(const katana::gis::processing::DatasetValue& dataset);
 // The area of one cell of a north-up or rotated grid: |gt1 gt5 - gt2 gt4|.
 [[nodiscard]] double cellArea(const std::array<double, 6>& geotransform);
 
-// A raster a line wrote where it said (save=<file>) kept as a reference
-// raster read from there, under `name` or the first of name-2, name-3 ... no
-// raster has: the file is the person's, so it is neither moved nor copied
-// into the project's cache. The record says so as a derived raster's does:
+// A raster file kept as a reference raster read from where it is, under
+// `name` or the first of name-2, name-3 ... no raster has: one a line wrote
+// where it said (save=<file>), which is the person's and so neither moved nor
+// copied, or one already in the derived folder (a mosaic's VRT). The record
+// says so as a derived raster's does, persisted as the caller says:
 //   output arg=output kind=raster target=reference id=2 name=dem raster=40x30
 //     file="C:/work/dem.tif" persisted=yes
 [[nodiscard]] katana::core::Result<std::string>
 keepInPlace(Context& context, const std::filesystem::path& file, const std::string& name,
-            const std::string& derivation, std::string_view arg = "output");
+            const std::string& derivation, bool persisted, std::string_view arg = "output");
+
+// The georeferencing of a raster dataset, read without its values: a grid's
+// own, a file's opened for this read alone.
+[[nodiscard]] katana::core::Result<katana::gis::RasterInfo>
+rasterInfoOf(const katana::gis::processing::DatasetValue& dataset);
+
+// `from` renamed to `to`, or copied and removed when they are on different
+// volumes; the folder made. FileExportFailure naming `to`.
+[[nodiscard]] katana::core::Status moveFile(const std::filesystem::path& from,
+                                            const std::filesystem::path& to);
 
 // A UTF-8 path as the file system's, and back.
 [[nodiscard]] std::filesystem::path pathOfUtf8(const std::string& utf8);

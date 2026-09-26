@@ -20,6 +20,19 @@ namespace katana::app::geo {
 [[nodiscard]] katana::core::Result<Prepared> prepareRasterGrid(Context& context, const Tokens& tokens,
                                                                std::string_view line);
 // ---- T7: RASTER MOSAIC, CLIP, FILL, FOOTPRINT, REPROJECT, DIFFERENCE ----
+// dem_verbs.cpp: the DEM tools.
+[[nodiscard]] katana::core::Result<Prepared> prepareRasterMosaic(Context& context, const Tokens& tokens,
+                                                                 std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareRasterClip(Context& context, const Tokens& tokens,
+                                                               std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareRasterFill(Context& context, const Tokens& tokens,
+                                                               std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared>
+prepareRasterFootprint(Context& context, const Tokens& tokens, std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared>
+prepareRasterReproject(Context& context, const Tokens& tokens, std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared>
+prepareRasterDifference(Context& context, const Tokens& tokens, std::string_view line);
 // ---- V1: GIS BUFFER, GIS DISSOLVE ----
 // ---- V2: GIS OVERLAY ----
 // ---- V3: GIS HULL, GIS CLIP ----
@@ -65,6 +78,35 @@ const std::vector<VerbEntry>& verbTable()
              "          [PREVIEW]  the points in scope (and line vertices) gridded into a DEM;\n"
              "          heightless entities are left out and counted, never read as 0"});
         // ---- T7: RASTER MOSAIC, CLIP, FILL, FOOTPRINT, REPROJECT, DIFFERENCE ----
+        // <raster> := RASTER <id|name> | SURFACE <name> [CELL <m>] | FILE <path>; each
+        // also takes [NAME <name>] [TO ...] [OVERWRITE] [PREVIEW].
+        rows.push_back(
+            {"RASTER", "MOSAIC", &prepareRasterMosaic,
+             "RASTER MOSAIC <raster|FILE folder|FILE pattern>... [resolution=<r>] [SAVE <file>]\n"
+             "          tiles joined into one DEM, a VRT kept as a reference raster (SAVE writes\n"
+             "          it out and keeps that file)"});
+        rows.push_back(
+            {"RASTER", "CLIP", &prepareRasterClip,
+             "RASTER CLIP <raster> AREA x0,y0,x1,y1 | <scope>  a DEM cut to a box, or to the\n"
+             "          closed boundaries the scope takes"});
+        rows.push_back(
+            {"RASTER", "FILL", &prepareRasterFill,
+             "RASTER FILL <raster> [distance=<cells>] [smoothing=<n>] [strategy=invdist|nearest]\n"
+             "          a DEM's holes filled from their edges; the reply counts the cells"});
+        rows.push_back(
+            {"RASTER", "FOOTPRINT", &prepareRasterFootprint,
+             "RASTER FOOTPRINT <raster> [TO LAYER <path> | TO FILE <path>]  where a raster has\n"
+             "          data, as closed polylines (gis/footprint)"});
+        rows.push_back(
+            {"RASTER", "REPROJECT", &prepareRasterReproject,
+             "RASTER REPROJECT <raster> [crs=<crs> | like=<raster>] [from=<crs>]\n"
+             "          [resampling=<method>] [cell=<m>]  a DEM into the project's CRS, another,\n"
+             "          or another raster's grid"});
+        rows.push_back(
+            {"RASTER", "DIFFERENCE", &prepareRasterDifference,
+             "RASTER DIFFERENCE <raster> <raster> [<scope>] [resampling=<method>]  the first\n"
+             "          minus the second, aligned to the first; cut and fill volumes (grid\n"
+             "          method) within the scope's closed boundaries"});
         // ---- V1: GIS BUFFER, GIS DISSOLVE ----
         // ---- V2: GIS OVERLAY ----
         // ---- V3: GIS HULL, GIS CLIP ----

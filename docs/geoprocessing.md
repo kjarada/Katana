@@ -699,7 +699,31 @@ a dialog's scope offers the window's views.
 
 ### T7: DEM tools: mosaic, clip, fill, footprint, reproject, difference
 
-Not started.
+Built: `RASTER MOSAIC`, `CLIP`, `FILL`, `FOOTPRINT`, `REPROJECT` and
+`DIFFERENCE` (`src/katana_app/geo/dem_verbs.cpp`), recorded in
+`docs/terrain.md`, "The DEM tools". Window: Terrain > DEM > DEM Tools
+(`demToolsDialog`, a tab each). katana_cli and katana_mcp: the verbs, through
+the session. The contract test pins `raster mosaic`'s `input`, `output`,
+`resolution` and `absolute-path`; `raster clip`'s `bbox` and `like`;
+`raster fill-nodata`'s `max-distance`, `smoothing-iterations` and
+`strategy`; `raster footprint`; `raster reproject`'s `output-crs`,
+`input-crs`, `like`, `resampling` and `resolution`; and `raster calc`'s
+`input`, `calc` and `dialect`, with `builtin` among its choices.
+
+Where it differs from the plan:
+
+- A mosaic is written with `SAVE <file>`, not `save=`: an option's value is
+  one unquoted word, and a path may hold blanks.
+- DIFFERENCE aligns with the first raster's extent, size and system said
+  outright, not `--like`, which GDAL ignores silently for rasters with no
+  CRS (measured); and it aligns only when the grids differ.
+- CLIP by boundaries lets GDAL bring the boundaries into the raster's
+  system rather than refusing two known systems that differ: that is the
+  right answer, not a guess. REPROJECT refuses a raster with no system,
+  which GDAL would "reproject" unchanged.
+- The binding picker (`src/katana_qt/geo/binding_picker.hpp`, X1's) was
+  built here, since the DEM tools pick rasters as the toolbox picks its
+  datasets.
 
 ### V1: GIS BUFFER and GIS DISSOLVE
 
