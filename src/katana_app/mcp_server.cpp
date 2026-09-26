@@ -27,6 +27,8 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/import_placement.hpp"
+#include "katana/cad/scope_verbs.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/model.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
@@ -275,6 +277,212 @@ std::string importPlacementWord(const Json& arguments)
         placement.offset = katana::geometry::Vec2(number("offset_east"), number("offset_north"));
     }
     return katana::cad::placementWord(placement);
+}
+
+// One key=value word of a line, quoted when the value holds a blank:
+// ToolRefusal for a double quote or a line break, which no line can carry.
+std::string optionWord(const std::string& key, const std::string& value)
+{
+    if (value.find('"') != std::string::npos || value.find('\n') != std::string::npos) {
+        throw ToolRefusal{"\"" + key + "\" may not hold a double quote or a line break (in "
+                          "SQLite, write an identifier as [name])"};
+    }
+    const bool blank = value.empty() || value.find_first_of(" \t") != std::string::npos;
+    return " " + key + "=" + (blank ? "\"" + value + "\"" : value);
+}
+
+// A list argument - ["a", "b"] or "a,b" - as the comma-joined value a line
+// takes.
+std::string listArgument(const Json& value, const char* name)
+{
+    if (value.is_string()) {
+        return value.get<std::string>();
+    }
+    if (!value.is_array() || value.empty() ||
+        !std::ranges::all_of(value, [](const Json& each) { return each.is_string(); })) {
+        throw ToolRefusal{std::string("\"") + name + "\" is a list of names"};
+    }
+    std::string joined;
+    for (const Json& each : value) {
+        const std::string item = each.get<std::string>();
+        if (item.find(',') != std::string::npos) {
+            throw ToolRefusal{std::string("a name in \"") + name + "\" may not hold a comma"};
+        }
+        joined += (joined.empty() ? "" : ",") + item;
+    }
+    return joined;
+}
+
+// A whole number argument at least `low`, as text.
+std::string wholeArgument(const Json& value, const char* name, long long low)
+{
+    if (!value.is_number_integer() || value.get<long long>() < low) {
+        throw ToolRefusal{std::string("\"") + name + "\" is a whole number from " +
+                          std::to_string(low)};
+    }
+    return std::to_string(value.get<long long>());
+}
+
+// katana_import's options as the words of its IMPORT line (docs/mcp.md, "I3
+// and I4"), each the word a person would type, so the line in the reply is
+// one they could type again.
+std::string importOptionWords(const Json& arguments)
+{
+    std::string words;
+    const auto text = [&](const char* name, const char* key) {
+        if (const Json& value = argument(arguments, name); !value.is_null()) {
+            if (!value.is_string() || value.get<std::string>().empty()) {
+                throw ToolRefusal{std::string("\"") + name + "\" must be a non-empty string"};
+            }
+            words += optionWord(key, value.get<std::string>());
+        }
+    };
+    const auto list = [&](const char* name, const char* key) {
+        if (const Json& value = argument(arguments, name); !value.is_null()) {
+            words += optionWord(key, listArgument(value, name));
+        }
+    };
+    const auto whole = [&](const char* name, const char* key, long long low) {
+        if (const Json& value = argument(arguments, name); !value.is_null()) {
+            words += optionWord(key, wholeArgument(value, name, low));
+        }
+    };
+    list("layers", "layers");
+    text("where", "where");
+    text("sql", "sql");
+    text("dialect", "dialect");
+    list("fields", "fields");
+    text("target_layer", "target");
+    whole("max_features", "max", 1);
+    if (const Json& value = argument(arguments, "open_options"); !value.is_null()) {
+        if (!value.is_array() ||
+            !std::ranges::all_of(value, [](const Json& each) { return each.is_string(); })) {
+            throw ToolRefusal{"\"open_options\" is a list of \"KEY=VALUE\""};
+        }
+        for (const Json& each : value) {
+            words += optionWord("oo", each.get<std::string>());
+        }
+    }
+    if (const Json& value = argument(arguments, "attributes"); !value.is_null()) {
+        if (!value.is_boolean()) {
+            throw ToolRefusal{"\"attributes\" must be true or false"};
+        }
+        words += value.get<bool>() ? "" : " attributes=no";
+    }
+    text("crs", "crs");
+    text("source_crs", "srs");
+    whole("band", "band", 1);
+    if (const Json& value = argument(arguments, "subdataset"); !value.is_null()) {
+        words += optionWord("subdataset", value.is_number_integer()
+                                              ? wholeArgument(value, "subdataset", 1)
+                                              : (value.is_string() ? value.get<std::string>()
+                                                                   : std::string()));
+    }
+    whole("max_pixels", "maxpixels", 1);
+    text("name", "name");
+    whole("budget", "budget", 1);
+    if (const Json& value = argument(arguments, "classes"); !value.is_null()) {
+        words += optionWord("class", value.is_number_integer() ? wholeArgument(value, "classes", 0)
+                                                               : listArgument(value, "classes"));
+    }
+    if (const Json& value = argument(arguments, "resolution"); !value.is_null()) {
+        if (!value.is_number() || !(value.get<double>() > 0.0)) {
+            throw ToolRefusal{"\"resolution\" is a point spacing above 0"};
+        }
+        words += " resolution=" + katana::core::formatExactReal(value.get<double>());
+    }
+    // The scope: `scope`, or an `area` alone.
+    const Json& scope = argument(arguments, "scope");
+    const Json& area = argument(arguments, "area");
+    if (!scope.is_null() || !area.is_null()) {
+        if (!scope.is_null() && !scope.is_string()) {
+            throw ToolRefusal{"\"scope\" is selection, drawing, area or layers"};
+        }
+        words += " " + scopeWordsOf(scope.is_string() ? scope.get<std::string>() : "area", area,
+                                    argument(arguments, "scope_layers"),
+                                    optionalBool(arguments, "only", false),
+                                    argument(arguments, "scope_where"));
+    }
+    if (optionalBool(arguments, "clip", false)) {
+        words += " clip";
+    }
+    if (optionalBool(arguments, "preview", false)) {
+        words += " PREVIEW";
+    }
+    return words;
+}
+
+// katana_export's options as the words of its EXPORT line (docs/mcp.md, "I3
+// and I4"): the scope first, as a person types it, then the options.
+std::string exportOptionWords(const Json& arguments)
+{
+    std::string words;
+    const Json& scope = argument(arguments, "scope");
+    const Json& area = argument(arguments, "area");
+    if (!scope.is_null() || !area.is_null()) {
+        if (!scope.is_null() && !scope.is_string()) {
+            throw ToolRefusal{"\"scope\" is selection, drawing, area or layers"};
+        }
+        words += " " + scopeWordsOf(scope.is_string() ? scope.get<std::string>() : "area", area,
+                                    argument(arguments, "layers"),
+                                    optionalBool(arguments, "only", false),
+                                    argument(arguments, "where"));
+    } else if (!argument(arguments, "layers").is_null() || !argument(arguments, "where").is_null()) {
+        throw ToolRefusal{"\"layers\" and \"where\" say a scope: give \"scope\" with them"};
+    }
+    if (const Json& name = argument(arguments, "layer_name"); !name.is_null()) {
+        if (!name.is_string() || name.get<std::string>().empty()) {
+            throw ToolRefusal{"\"layer_name\" must be a non-empty string"};
+        }
+        words += optionWord("layername", name.get<std::string>());
+    }
+    if (optionalBool(arguments, "split_by_layer", false)) {
+        words += " split=layer";
+    }
+    if (optionalBool(arguments, "append", false)) {
+        words += " append";
+    }
+    if (const Json& crs = argument(arguments, "crs"); !crs.is_null()) {
+        if (!crs.is_string() || crs.get<std::string>().empty()) {
+            throw ToolRefusal{"\"crs\" is project, native or a code such as EPSG:4326"};
+        }
+        words += optionWord("crs", crs.get<std::string>());
+    }
+    const auto options = [&](const char* name, const char* key) {
+        if (const Json& value = argument(arguments, name); !value.is_null()) {
+            if (!value.is_array() ||
+                !std::ranges::all_of(value, [](const Json& each) { return each.is_string(); })) {
+                throw ToolRefusal{std::string("\"") + name + "\" is a list of \"KEY=VALUE\""};
+            }
+            for (const Json& each : value) {
+                words += optionWord(key, each.get<std::string>());
+            }
+        }
+    };
+    options("creation_options", "co");
+    options("layer_creation_options", "lco");
+    if (const Json& text = argument(arguments, "text"); !text.is_null()) {
+        if (!text.is_string() || (text != "points" && text != "skip")) {
+            throw ToolRefusal{"\"text\" is points or skip"};
+        }
+        words += " text=" + text.get<std::string>();
+    }
+    if (const Json& curve = argument(arguments, "curve"); !curve.is_null()) {
+        if (!curve.is_number() || !(curve.get<double>() > 0.0)) {
+            throw ToolRefusal{"\"curve\" is a distance above 0"};
+        }
+        words += " curve=" + katana::core::formatExactReal(curve.get<double>());
+    }
+    if (const Json& properties = argument(arguments, "properties"); !properties.is_null()) {
+        if (!properties.is_boolean()) {
+            throw ToolRefusal{"\"properties\" must be true or false"};
+        }
+        words += properties.get<bool>() ? " properties=yes" : " properties=no";
+    }
+    if (optionalBool(arguments, "preview", false)) {
+        words += " PREVIEW";
+    }
+    return words;
 }
 
 // ---- the session's state ------------------------------------------------------------
@@ -548,13 +756,131 @@ const std::vector<Tool>& tools()
                        {"description",
                         "The same as placement local: move the imported data as one piece so "
                         "its lower-left corner sits at 0,0 (IMPORT ... LOCAL). Refused for "
-                        "rasters and point clouds, which are drawn at their own coordinates."}}}},
+                        "rasters and point clouds, which are drawn at their own coordinates."}}},
+                     {"layers",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description", "Only these of the file's layers, by name (layers=)."}}},
+                     {"where",
+                      {{"type", "string"},
+                       {"description",
+                        "An OGR SQL WHERE clause on the file's features, applied by the driver: "
+                        "kind = 'lot' (where=)."}}},
+                     {"sql",
+                      {{"type", "string"},
+                       {"description",
+                        "A SELECT run on the file, whose rows are imported in place of its "
+                        "layers, as one layer (sql=). No double quotes: SQLite reads "
+                        "[identifier] alike."}}},
+                     {"dialect",
+                      {{"type", "string"},
+                       {"enum", {"ogrsql", "sqlite"}},
+                       {"description", "The dialect of sql; the driver's own by default."}}},
+                     {"scope",
+                      {{"type", "string"},
+                       {"enum", {"selection", "drawing", "area", "layers"}},
+                       {"description",
+                        "Only the file's features in the box of what this takes of the drawing "
+                        "(the shared scope grammar); area with \"area\", layers with "
+                        "\"scope_layers\" and \"only\"; \"scope_where\" filters what it "
+                        "takes. The box goes to the driver as its spatial filter."}}},
+                     {"area",
+                      {{"type", "array"},
+                       {"items", {{"type", "number"}}},
+                       {"minItems", 4},
+                       {"maxItems", 4},
+                       {"description",
+                        "[x0, y0, x1, y1] in the drawing's coordinates: scope area (given alone, "
+                        "it is the scope)."}}},
+                     {"scope_layers",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description", "With scope layers: the drawing's layers."}}},
+                     {"only",
+                      {{"type", "boolean"},
+                       {"description", "With scope layers: without their sublayers."}}},
+                     {"scope_where",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "Conditions on what the scope takes: [\"TYPE=polyline\"]."}}},
+                     {"clip",
+                      {{"type", "boolean"},
+                       {"description",
+                        "Cut features at the scope's edge (an area) or by the closed shapes it "
+                        "takes (clip)."}}},
+                     {"fields",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description", "Only these attributes become properties (fields=)."}}},
+                     {"attributes",
+                      {{"type", "boolean"},
+                       {"description",
+                        "false: no attributes become properties (attributes=no)."}}},
+                     {"target_layer",
+                      {{"type", "string"},
+                       {"description", "Every entity on this layer (target=)."}}},
+                     {"max_features",
+                      {{"type", "integer"},
+                       {"minimum", 1},
+                       {"description", "At most this many features (max=)."}}},
+                     {"open_options",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "The driver's open options, [\"KEY=VALUE\"], each checked against the "
+                        "driver's own list (oo=)."}}},
+                     {"crs",
+                      {{"type", "string"},
+                       {"enum", {"project", "adopt"}},
+                       {"description",
+                        "project: vector data moved into the project's coordinate system; adopt: "
+                        "the project takes the file's when it has none (crs=)."}}},
+                     {"source_crs",
+                      {{"type", "string"},
+                       {"description",
+                        "The coordinate system of a file that declares none, EPSG:28356 (srs=)."}}},
+                     {"band",
+                      {{"type", "integer"},
+                       {"minimum", 1},
+                       {"description", "A raster: this band alone, as grey (band=)."}}},
+                     {"subdataset",
+                      {{"type", Json::array({"integer", "string"})},
+                       {"description",
+                        "A raster: the dataset inside a container, by number or name "
+                        "(subdataset=)."}}},
+                     {"max_pixels",
+                      {{"type", "integer"},
+                       {"minimum", 1},
+                       {"description", "A raster: the display copy's longest side (maxpixels=)."}}},
+                     {"name",
+                      {{"type", "string"},
+                       {"description", "A raster or a point cloud: the reference layer's name."}}},
+                     {"budget",
+                      {{"type", "integer"},
+                       {"minimum", 1},
+                       {"description", "A point cloud: the points kept (budget=)."}}},
+                     {"classes",
+                      {{"type", "integer"},
+                       {"minimum", 0},
+                       {"maximum", 255},
+                       {"description", "A point cloud: only this ASPRS class (class=)."}}},
+                     {"resolution",
+                      {{"type", "number"},
+                       {"description",
+                        "A COPC point cloud: read its octree to this point spacing."}}},
+                     {"preview",
+                      {{"type", "boolean"},
+                       {"description",
+                        "Read with the filters and say how many features matched of how many, "
+                        "importing nothing (PREVIEW)."}}}},
                 {"path"}),
             hints(false, false, false), [](Session& session, const Json& arguments) {
                 const std::string word = importPlacementWord(arguments);
                 return recordsReply(session, "IMPORT " +
                                                  quoted(requiredString(arguments, "path")) +
-                                                 (word.empty() ? "" : " " + word));
+                                                 (word.empty() ? "" : " " + word) +
+                                                 importOptionWords(arguments));
             }});
 
         list.push_back(Tool{
@@ -566,10 +892,86 @@ const std::vector<Tool>& tools()
             "structuredContent.records as objects.",
             objectSchema(
                 Json{{"path",
-                      {{"type", "string"}, {"description", "The file to write, e.g. site.dxf."}}}},
+                      {{"type", "string"}, {"description", "The file to write, e.g. site.dxf."}}},
+                     {"scope",
+                      {{"type", "string"},
+                       {"enum", {"selection", "drawing", "area", "layers"}},
+                       {"description",
+                        "What of the drawing is written (the shared scope grammar); the whole "
+                        "drawing when neither this nor \"area\" is given. area with \"area\", "
+                        "layers with \"layers\" and \"only\"; \"where\" filters it."}}},
+                     {"area",
+                      {{"type", "array"},
+                       {"items", {{"type", "number"}}},
+                       {"minItems", 4},
+                       {"maxItems", 4},
+                       {"description", "[x0, y0, x1, y1]: scope area (given alone, the scope)."}}},
+                     {"layers",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description", "With scope layers: the drawing's layers."}}},
+                     {"only",
+                      {{"type", "boolean"},
+                       {"description", "With scope layers: without their sublayers."}}},
+                     {"where",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "Conditions on what the scope takes: [\"TYPE=polyline\", "
+                        "\"PROP=owner:Smith*\"]."}}},
+                     {"layer_name",
+                      {{"type", "string"},
+                       {"description", "The layer's name in the file (layername=)."}}},
+                     {"split_by_layer",
+                      {{"type", "boolean"},
+                       {"description",
+                        "One file layer per drawing layer, named after it (split=layer)."}}},
+                     {"append",
+                      {{"type", "boolean"},
+                       {"description",
+                        "Add the layer to the file (a GeoPackage) rather than replace it; a "
+                        "layer name the file has is refused (append)."}}},
+                     {"crs",
+                      {{"type", "string"},
+                       {"description",
+                        "project (the default; a GeoJSON is then longitude and latitude, as "
+                        "RFC 7946 says), native (the project's, unconverted, where the format "
+                        "allows), or a code the coordinates are moved into (crs=)."}}},
+                     {"creation_options",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "The driver's creation options, [\"KEY=VALUE\"], each checked against "
+                        "its list (co=)."}}},
+                     {"layer_creation_options",
+                      {{"type", "array"},
+                       {"items", {{"type", "string"}}},
+                       {"description",
+                        "The driver's layer creation options, checked likewise (lco=)."}}},
+                     {"text",
+                      {{"type", "string"},
+                       {"enum", {"points", "skip"}},
+                       {"description",
+                        "points: text entities as points with text, text_height and "
+                        "text_rotation fields and an OGR_STYLE label; skip (the default) leaves "
+                        "them out, counted."}}},
+                     {"curve",
+                      {{"type", "number"},
+                       {"description",
+                        "The largest distance a chord may stray from an arc (curve=)."}}},
+                     {"properties",
+                      {{"type", "boolean"},
+                       {"description", "false: entity properties are not written."}}},
+                     {"preview",
+                      {{"type", "boolean"},
+                       {"description",
+                        "Say what would be written and what the scope takes, writing nothing "
+                        "(PREVIEW)."}}}},
                 {"path"}),
             hints(false, true, true), [](Session& session, const Json& arguments) {
-                return recordsReply(session, "EXPORT " + quoted(requiredString(arguments, "path")));
+                return recordsReply(session, "EXPORT " +
+                                                 quoted(requiredString(arguments, "path")) +
+                                                 exportOptionWords(arguments));
             }});
 
         list.push_back(Tool{
@@ -681,6 +1083,60 @@ bool optionalBool(const Json& arguments, const char* name, bool fallback)
     return value.get<bool>();
 }
 
+std::string scopeWordsOf(const std::string& kind, const Json& area, const Json& layers, bool only,
+                         const Json& where)
+{
+    katana::cad::ScopeWords scope;
+    if (kind == "selection") {
+        scope.source = katana::cad::ScopeSource::Selection;
+    } else if (kind == "drawing") {
+        scope.source = katana::cad::ScopeSource::Drawing;
+    } else if (kind == "area") {
+        if (!area.is_array() || area.size() != 4 ||
+            !std::ranges::all_of(area, [](const Json& n) { return n.is_number(); })) {
+            throw ToolRefusal{"scope area needs \"area\": [x0, y0, x1, y1]"};
+        }
+        scope.source = katana::cad::ScopeSource::Area;
+        const double x0 = area[0].get<double>(), y0 = area[1].get<double>();
+        const double x1 = area[2].get<double>(), y1 = area[3].get<double>();
+        scope.area = katana::geometry::Box2(
+            katana::geometry::Point2(std::min(x0, x1), std::min(y0, y1)),
+            katana::geometry::Point2(std::max(x0, x1), std::max(y0, y1)));
+    } else if (kind == "layers") {
+        if (!layers.is_array() || layers.empty() ||
+            !std::ranges::all_of(layers, [](const Json& l) { return l.is_string(); })) {
+            throw ToolRefusal{"scope layers needs \"layers\": [\"a\", \"b\"]"};
+        }
+        scope.source = katana::cad::ScopeSource::Layers;
+        for (const Json& layer : layers) {
+            scope.layers.push_back(layer.get<std::string>());
+        }
+        scope.sublayers = !only;
+    } else {
+        throw ToolRefusal{"\"scope\" is selection, drawing, area or layers (VIEW is the window's)"};
+    }
+    if (!where.is_null()) {
+        if (!where.is_array()) {
+            throw ToolRefusal{"the scope's conditions are a list: [\"TYPE=polyline\"]"};
+        }
+        for (const Json& condition : where) {
+            if (!condition.is_string()) {
+                throw ToolRefusal{"each of the scope's conditions is a string"};
+            }
+            if (auto status =
+                    katana::cad::parseWhereCondition(condition.get<std::string>(), scope.filter);
+                !status) {
+                throw ToolRefusal{status.error().describe()};
+            }
+        }
+    }
+    auto words = katana::cad::formatScopeWords(scope);
+    if (!words) {
+        throw ToolRefusal{words.error().describe()};
+    }
+    return *words;
+}
+
 // A path as the interpreter reads it: one quoted word. It has no escape, so a
 // path with a quote in it cannot be said at all - and is refused rather than
 // cut short at the quote.
@@ -701,6 +1157,32 @@ Json objectSchema(Json properties, std::vector<std::string> required)
     schema["additionalProperties"] = false;
     return schema;
 }
+
+namespace {
+
+// Every schema says additionalProperties: false, but a client need not check
+// it: an argument the tool does not take (a misspelt "split" for
+// "split_by_layer") was ignored, and the call ran without the option asked
+// for. Refused here, naming it and the arguments there are.
+void refuseUndeclared(const Tool& tool, const Json& arguments)
+{
+    const Json& properties = tool.inputSchema["properties"];
+    for (const auto& given : arguments.items()) {
+        if (properties.is_object() && properties.contains(given.key())) {
+            continue;
+        }
+        std::string known;
+        if (properties.is_object()) {
+            for (const auto& declared : properties.items()) {
+                known += (known.empty() ? "" : ", ") + declared.key();
+            }
+        }
+        throw ToolRefusal{std::string(tool.name) + " takes no argument \"" + given.key() + "\"" +
+                          (known.empty() ? std::string(": it takes none") : "; it takes " + known)};
+    }
+}
+
+} // namespace
 
 Json hints(bool readOnly, bool destructive, bool idempotent, bool openWorld)
 {
@@ -821,6 +1303,7 @@ std::optional<std::string> Server::handle(std::string_view message)
                                        : Json::object();
             ToolReply result;
             try {
+                refuseUndeclared(*tool, arguments);
                 result = tool->call(session_, arguments);
             } catch (const ToolRefusal& refusal) {
                 result = {"error: " + refusal.message, nullptr, true};

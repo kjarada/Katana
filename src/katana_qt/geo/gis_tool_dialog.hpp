@@ -81,6 +81,12 @@ struct GisDialogContext {
     // The workspace's open views, for the scope's View choice. May be unset.
     std::function<std::vector<ScopeFilterView>()> views;
     std::function<bool()> headless;
+    // Optional: told when a job the runner started ends - for a modal
+    // dialog, which the workbench's listener does not reach (the GIS import
+    // dialogs' Preview; MainWindow::awaitJob). False when the outcome was no
+    // job.
+    std::function<bool(const VerbOutcome& started, std::function<void(const VerbOutcome&)> done)>
+        await;
 };
 
 // The scope words a form carries: ScopeFilterWidget::verbWords, or why the

@@ -274,18 +274,32 @@ Result<std::vector<CrsChoice>> suggestCoordinateSystems(double longitude, double
 
 Status Document::setCoordinateSystem(std::string_view text, std::string stepName)
 {
+    auto command = coordinateSystemCommand(text, std::move(stepName));
+    if (!command) {
+        return command.error();
+    }
+    if (*command == nullptr) {
+        return {}; // nothing changed, and nothing to undo
+    }
+    return execute(std::move(*command));
+}
+
+katana::core::Result<katana::commands::CommandPtr>
+Document::coordinateSystemCommand(std::string_view text, std::string stepName)
+{
     auto stored = normaliseCoordinateSystem(text);
     if (!stored) {
         return stored.error();
     }
     if (*stored == metadata_.coordinateSystem) {
-        return {}; // nothing changed, and nothing to undo
+        return katana::commands::CommandPtr{};
     }
     auto apply = [this, before = metadata_.coordinateSystem,
                   after = std::move(*stored)](bool toAfter) {
         metadata_.coordinateSystem = toAfter ? after : before;
     };
-    return execute(std::make_unique<ProjectValueCommand>(std::move(stepName), std::move(apply)));
+    return katana::commands::CommandPtr(
+        std::make_unique<ProjectValueCommand>(std::move(stepName), std::move(apply)));
 }
 
 } // namespace katana::cad

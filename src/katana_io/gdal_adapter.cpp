@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -12,6 +13,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <variant>
 #include <vector>
@@ -680,6 +682,34 @@ void dropHeights(VectorGeometry& part)
     }
 }
 
+// A read's attribute and spatial filters set on `layer` (VectorReadOptions).
+// InvalidArgument, with GDAL's reason, for an attribute filter the driver
+// cannot parse - said, never read as "no features match".
+Status setFilters(OGRLayer& layer, const VectorReadOptions& options)
+{
+    if (options.spatialFilter) {
+        const auto& box = *options.spatialFilter;
+        layer.SetSpatialFilterRect(box[0], box[1], box[2], box[3]);
+    }
+    if (!options.attributeFilter.empty()) {
+        CPLErrorReset();
+        if (layer.SetAttributeFilter(options.attributeFilter.c_str()) != OGRERR_NONE) {
+            const std::string why = lastGdalError();
+            layer.SetSpatialFilter(nullptr);
+            return makeError(ErrorCode::InvalidArgument,
+                             "GDAL could not read the filter" + (why.empty() ? "" : ": " + why),
+                             options.attributeFilter);
+        }
+    }
+    return {};
+}
+
+void clearFilters(OGRLayer& layer)
+{
+    layer.SetSpatialFilter(nullptr);
+    layer.SetAttributeFilter(nullptr);
+}
+
 // Every feature of `layer` as a typed table (GdalDataset::readTable).
 gp::FeatureTable readLayer(OGRLayer& layer, const std::string& driver,
                            const VectorReadOptions& options, VectorReadReport& report)
@@ -1035,6 +1065,17 @@ Result<RasterSamples> GdalDataset::readBandSampled(int bandIndex, int stride) co
 
 Result<RasterImage> GdalDataset::readImage(int maxPixels) const
 {
+    return readImage(maxPixels, 0);
+}
+
+Result<RasterImage> GdalDataset::readImage(int maxPixels, int onlyBand) const
+{
+    if (onlyBand < 0 || onlyBand > asDataset(dataset_)->GetRasterCount()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the raster has " + std::to_string(asDataset(dataset_)->GetRasterCount()) +
+                             " bands",
+                         "band " + std::to_string(onlyBand));
+    }
     if (maxPixels < 1) {
         return makeError(ErrorCode::InvalidArgument, "maxPixels must be at least 1");
     }
@@ -1078,7 +1119,20 @@ Result<RasterImage> GdalDataset::readImage(int maxPixels) const
     image.geotransform[4] *= scaleX;
     image.geotransform[5] *= scaleY;
 
-    const BandRoles roles = classifyBands(*dataset);
+    // One band asked for is that band alone, through its colour table when
+    // it has one - never mixed into a colour the file says its bands make.
+    BandRoles roles;
+    if (onlyBand > 0) {
+        GDALRasterBand* chosen = dataset->GetRasterBand(onlyBand);
+        if (chosen->GetColorInterpretation() == GCI_PaletteIndex &&
+            chosen->GetColorTable() != nullptr) {
+            roles.palette = chosen;
+        } else {
+            roles.grey = chosen;
+        }
+    } else {
+        roles = classifyBands(*dataset);
+    }
 
     auto readByteBand = [&](GDALRasterBand* band, std::vector<std::uint8_t>& out) -> bool {
         out.assign(pixels, 0);
@@ -1233,7 +1287,79 @@ Result<gp::FeatureTable> GdalDataset::readTable(int layerIndex, const VectorRead
     // process-wide quiet handler keeps them off stderr, and this keeps them
     // from being lost (they used to be).
     const detail::CplErrorCollector errors;
+    auto filtered = setFilters(*layer, options);
+    if (!filtered) {
+        return filtered.error();
+    }
     gp::FeatureTable table = readLayer(*layer, driverName(), options, out);
+    // The layer belongs to the dataset, which may be read again: a filter
+    // left on it would quietly narrow the next read.
+    clearFilters(*layer);
+    for (std::string& warning : errors.warnings()) {
+        out.warnings.push_back(std::move(warning));
+    }
+    return table;
+}
+
+Result<gp::FeatureTable> GdalDataset::readSql(const std::string& statement,
+                                              const std::string& dialect,
+                                              const VectorReadOptions& options,
+                                              VectorReadReport* report) const
+{
+    // IMPORT reads; it never writes to the file it imports. The dataset is
+    // open read-only, so a write would fail anyway - but with a driver's
+    // message about permissions, not the reason.
+    const std::string_view text = katana::core::trimmed(statement);
+    const std::size_t end = text.find_first_of(" \t\r\n(");
+    const std::string first = katana::core::lowered(std::string(text.substr(0, end)));
+    if (first != "select" && first != "with") {
+        return makeError(ErrorCode::InvalidArgument,
+                         "only a SELECT statement is read: an import never changes its file",
+                         std::string(text));
+    }
+    const std::string folded = katana::core::lowered(dialect);
+    if (!folded.empty() && folded != "ogrsql" && folded != "sqlite") {
+        return makeError(ErrorCode::InvalidArgument, "the SQL dialect is ogrsql or sqlite",
+                         dialect);
+    }
+    GDALDataset* dataset = asDataset(dataset_);
+    VectorReadReport local;
+    VectorReadReport& out = report != nullptr ? *report : local;
+    const detail::CplErrorCollector errors;
+    std::unique_ptr<OGRPolygon> area;
+    if (options.spatialFilter) {
+        const auto& box = *options.spatialFilter;
+        auto ring = std::make_unique<OGRLinearRing>();
+        ring->addPoint(box[0], box[1]);
+        ring->addPoint(box[2], box[1]);
+        ring->addPoint(box[2], box[3]);
+        ring->addPoint(box[0], box[3]);
+        ring->addPoint(box[0], box[1]);
+        area = std::make_unique<OGRPolygon>();
+        area->addRingDirectly(ring.release());
+    }
+    CPLErrorReset();
+    OGRLayer* rows = dataset->ExecuteSQL(std::string(text).c_str(), area.get(),
+                                         folded.empty() ? nullptr
+                                                        : (folded == "sqlite" ? "SQLITE"
+                                                                              : "OGRSQL"));
+    if (rows == nullptr) {
+        const std::string why = lastGdalError();
+        return makeError(ErrorCode::InvalidArgument,
+                         why.empty() ? std::string("the statement gives no rows to import")
+                                     : "GDAL could not run the statement: " + why,
+                         std::string(text));
+    }
+    // The result set is the dataset's to free, whatever happens below.
+    const std::unique_ptr<OGRLayer, std::function<void(OGRLayer*)>> held(
+        rows, [dataset](OGRLayer* layer) { dataset->ReleaseResultSet(layer); });
+    VectorReadOptions rest = options;
+    rest.spatialFilter.reset(); // ExecuteSQL has it
+    auto filtered = setFilters(*rows, rest);
+    if (!filtered) {
+        return filtered.error();
+    }
+    gp::FeatureTable table = readLayer(*rows, driverName(), rest, out);
     for (std::string& warning : errors.warnings()) {
         out.warnings.push_back(std::move(warning));
     }
@@ -1838,13 +1964,47 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
     }
     const CPLStringList datasetOptions = mergedOptions(katanaDataset, options.creationOptions);
 
-    // Most drivers refuse to overwrite. Remove an existing file first so that
-    // re-exporting to the same name behaves the way a user expects a Save As to.
-    std::error_code removeError;
-    std::filesystem::remove(path, removeError);
-
-    GDALDataset* dataset =
-        driver->Create(path.string().c_str(), 0, 0, 0, GDT_Unknown, datasetOptions.List());
+    std::error_code existsError;
+    const bool appending = options.append && std::filesystem::exists(path, existsError);
+    GDALDataset* dataset = nullptr;
+    // The layers this call made, so a failed append takes away only those.
+    std::vector<std::string> made;
+    if (appending) {
+        // The file as it is, opened to be added to: its own layers stay.
+        dataset = static_cast<GDALDataset*>(GDALOpenEx(path.string().c_str(),
+                                                       GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr,
+                                                       nullptr, nullptr));
+        if (dataset == nullptr) {
+            return makeError(ErrorCode::FileExportFailure,
+                             "GDAL could not open '" + path.string() + "' to add to it",
+                             lastGdalError());
+        }
+        if (dataset->TestCapability(ODsCCreateLayer) == 0) {
+            GDALClose(dataset);
+            return makeError(ErrorCode::Unsupported,
+                             driverName + " adds no layer to a file that exists: write a new "
+                                          "file, or a GeoPackage",
+                             path.string());
+        }
+        for (std::size_t t = 0; t < tables->tables.size(); ++t) {
+            const std::string name = layerNameFor(*tables, t, options);
+            if (dataset->GetLayerByName(name.c_str()) != nullptr) {
+                GDALClose(dataset);
+                return makeError(ErrorCode::InvalidArgument,
+                                 "the file has a layer '" + name +
+                                     "' already: name the new one with layername=",
+                                 path.string());
+            }
+        }
+    } else {
+        // Most drivers refuse to overwrite. Remove an existing file first so
+        // that re-exporting to the same name behaves the way a user expects a
+        // Save As to.
+        std::error_code removeError;
+        std::filesystem::remove(path, removeError);
+        dataset = driver->Create(path.string().c_str(), 0, 0, 0, GDT_Unknown,
+                                 datasetOptions.List());
+    }
     if (dataset == nullptr) {
         return makeError(ErrorCode::FileExportFailure,
                          "GDAL could not create '" + path.string() + "'", lastGdalError());
@@ -1854,8 +2014,22 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
     // files, and leaving a truncated set behind invites someone to open it and
     // believe it. Every failure below unwinds through this, which closes the
     // dataset and asks the DRIVER to delete it - the driver knows about the
-    // sidecar files, std::filesystem::remove would only take the .shp.
-    const auto abandon = [&driver, &path](GDALDataset* handle, Error error) {
+    // sidecar files, std::filesystem::remove would only take the .shp. An
+    // append deletes the layers it made and leaves the file's own.
+    const auto abandon = [&driver, &path, appending, &made](GDALDataset* handle, Error error) {
+        if (appending) {
+            for (const std::string& name : made) {
+                for (int i = handle->GetLayerCount() - 1; i >= 0; --i) {
+                    OGRLayer* layer = handle->GetLayer(i);
+                    if (layer != nullptr && name == layer->GetName()) {
+                        (void)handle->DeleteLayer(i);
+                        break;
+                    }
+                }
+            }
+            GDALClose(handle);
+            return error;
+        }
         GDALClose(handle);
         discardOutput(*driver, path);
         return error;
@@ -1867,6 +2041,7 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
         OGRLayer* layer = nullptr;
         std::vector<int> fieldIndex; // per table field; -1 when the layer has none for it
         int altitudeIndex = -1;
+        int styleField = -1; // the table's OGR_STYLE field, when it has one
     };
     std::vector<Written> written(tables->tables.size());
     for (std::size_t t = 0; t < tables->tables.size(); ++t) {
@@ -1882,8 +2057,14 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
                                               "GDAL could not create the vector layer",
                                               lastGdalError()));
         }
+        made.push_back(layer->GetName());
         Written& out = written[t];
         out.layer = layer;
+        for (std::size_t f = 0; f < table.fields.size(); ++f) {
+            if (table.fields[f].name == "OGR_STYLE") {
+                out.styleField = static_cast<int>(f);
+            }
+        }
         // Some formats have a FIXED set of fields and refuse any other: a DXF
         // layer has Layer, Linetype, Text and a few more, and CreateField fails
         // on everything else. That used to abort the whole export - so DXF, the
@@ -1993,6 +2174,14 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
             if (out.altitudeIndex >= 0 && geometry->Is3D() != 0) {
                 feature->SetField(out.altitudeIndex, "absolute");
             }
+            if (out.styleField >= 0 &&
+                static_cast<std::size_t>(out.styleField) < source.values.size()) {
+                if (const auto* style =
+                        std::get_if<std::string>(&source.values[static_cast<std::size_t>(
+                            out.styleField)])) {
+                    feature->SetStyleString(style->c_str());
+                }
+            }
             const std::size_t before = errors.size();
             const OGRErr status = out.layer->CreateFeature(feature);
             OGRFeature::DestroyFeature(feature);
@@ -2024,7 +2213,9 @@ Result<VectorWriteReport> GdalDataset::writeTables(const std::filesystem::path& 
     // export reported success over a truncated file.
     if (GDALClose(dataset) != CE_None) {
         const std::string message = lastGdalError();
-        discardOutput(*driver, path);
+        if (!appending) {
+            discardOutput(*driver, path);
+        }
         return makeError(ErrorCode::FileExportFailure,
                          "GDAL could not finish writing '" + path.string() + "'", message);
     }
