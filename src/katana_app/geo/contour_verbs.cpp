@@ -41,11 +41,13 @@
 #include "katana/terrain/contours.hpp"
 #include "replies.hpp"
 #include "terrain_verbs.hpp"
+#include "vector_support.hpp"
 
 namespace katana::app::geo {
 
 namespace gp = katana::gis::processing;
 namespace igeo = katana::interop::geo;
+namespace vec = katana::app::geo::vector;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
@@ -72,64 +74,58 @@ struct ContourWords {
     bool preview = false;
 };
 
+// The words after the source, read by the shared reader (vector::readVerbWords)
+// as every GIS verb's are: an option may stand anywhere, after the filter
+// too, except a WHERE key after WHERE - `layer=` there is the filter's LAYER=,
+// which is what the dialog's "Only those that match" writes.
 Result<ContourWords> contourWords(const Tokens& tokens, std::size_t at)
 {
     ContourWords words;
-    const std::string takes =
-        "CONTOUR takes interval=, major=, base=, layer=, smooth=, a scope and PREVIEW";
-    while (at < tokens.size()) {
-        if (tokens.is(at, "PREVIEW")) {
-            words.preview = true;
-            ++at;
-        } else if (const auto option = keyValue(tokens, at)) {
-            const auto& [key, text] = *option;
-            if (key == "interval") {
-                auto interval = positiveOption("interval", text);
-                if (!interval) {
-                    return interval.error();
-                }
-                words.interval = *interval;
-            } else if (key == "major") {
-                const auto every = katana::core::parseInteger(text);
-                if (!every || *every < 0) {
-                    return refusal("major is every how many contours is a major one, 0 for none",
-                                   text);
-                }
-                words.majorEvery = static_cast<std::size_t>(*every);
-            } else if (key == "base") {
-                auto base = numberOption("base", text);
-                if (!base) {
-                    return base.error();
-                }
-                words.base = *base;
-            } else if (key == "layer") {
-                if (auto valid = katana::entity::validateLayerPath(text); !valid) {
-                    return refusal("layer is a layer path: " + valid.error().message, text);
-                }
-                words.layer = text;
-            } else if (key == "smooth") {
-                const auto size = katana::core::parseInteger(text);
-                if (!size || (*size != 0 && *size != 3 && *size != 5)) {
-                    // GDAL's gaussian kernel has these two sizes.
-                    return refusal("smooth is 3 or 5 cells (GDAL's gaussian kernels), or 0 for none",
-                                   text);
-                }
-                words.smooth = static_cast<int>(*size);
-            } else {
-                return refusal(takes, tokens[at]);
+    const vec::WordRules rules{{"interval", "major", "base", "layer", "smooth"},
+                               {"PREVIEW"},
+                               false,
+                               "CONTOUR takes interval=, major=, base=, layer=, smooth=, a scope "
+                               "and PREVIEW"};
+    auto read = vec::readVerbWords(tokens, at, tokens.size(), rules);
+    if (!read) {
+        return read.error();
+    }
+    words.preview = read->has("PREVIEW");
+    if (read->scopeGiven) {
+        words.scope = read->scope;
+    }
+    for (const auto& [key, text] : read->options) {
+        if (key == "interval") {
+            auto interval = positiveOption("interval", text);
+            if (!interval) {
+                return interval.error();
             }
-            ++at;
-        } else if (!tokens.quoted[at] && katana::cad::isScopeWord(tokens[at])) {
-            if (words.scope) {
-                return refusal("CONTOUR takes one scope", tokens[at]);
+            words.interval = *interval;
+        } else if (key == "major") {
+            const auto every = katana::core::parseInteger(text);
+            if (!every || *every < 0) {
+                return refusal("major is every how many contours is a major one, 0 for none", text);
             }
-            auto scope = katana::cad::parseScopeWords(tokens.words, at);
-            if (!scope) {
-                return scope.error();
+            words.majorEvery = static_cast<std::size_t>(*every);
+        } else if (key == "base") {
+            auto base = numberOption("base", text);
+            if (!base) {
+                return base.error();
             }
-            words.scope = std::move(scope).value();
-        } else {
-            return refusal(takes, tokens[at]);
+            words.base = *base;
+        } else if (key == "layer") {
+            if (auto valid = katana::entity::validateLayerPath(text); !valid) {
+                return refusal("layer is a layer path: " + valid.error().message, text);
+            }
+            words.layer = text;
+        } else if (key == "smooth") {
+            const auto size = katana::core::parseInteger(text);
+            if (!size || (*size != 0 && *size != 3 && *size != 5)) {
+                // GDAL's gaussian kernel has these two sizes.
+                return refusal("smooth is 3 or 5 cells (GDAL's gaussian kernels), or 0 for none",
+                               text);
+            }
+            words.smooth = static_cast<int>(*size);
         }
     }
     if (!words.interval) {

@@ -306,6 +306,22 @@ TEST_F(ContourVerb, OneUndoRemovesEveryContour)
 
 // ---- boundaries from the scope -------------------------------------------------------------
 
+TEST_F(ContourVerb, AnOptionMayFollowTheFilterButLayerThereIsTheFilters)
+{
+    // Read as every GIS verb's words are: interval= after the filter is the
+    // verb's own (it was refused as "not a WHERE key"), while LAYER= after
+    // WHERE is the filter's condition - what the scope widget writes there -
+    // so the contours go to the default layer, inside the box on layer 0.
+    draw({polyline({{0, 0}, {25, 0}, {25, 15}, {0, 15}}, true)});
+    const std::string reply =
+        ran("CONTOUR FILE \"" + kPlane + "\" DRAWING WHERE TYPE=polyline interval=0.5 layer=0");
+    const auto scope = record(reply, "scope");
+    ASSERT_TRUE(scope) << reply;
+    EXPECT_EQ(scope->get("where").value_or(""), "TYPE=polyline LAYER=0") << reply;
+    // 100.5 at x = 10 and 101.0 at x = 20 cross the box, as in the test below.
+    EXPECT_EQ(on("terrain/contours/minor").size(), 2U) << reply;
+}
+
 TEST_F(ContourVerb, AClosedBoundaryKeepsOnlyWhatIsInsideItOnBothEngines)
 {
     // A 25 x 15 box from the origin: 100.5 (x = 10) and 101.0 (x = 20) cross

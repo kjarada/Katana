@@ -470,6 +470,19 @@ method=tin|grid cell= levels= count= major= minor= layer= smoothed=` and
   raster with 0 when the raster has no no-data value, and the contours drew
   a cliff from 0 to the ground at the raster's edge (found by hand: 202
   levels on the plane fixture instead of 3).
+- **The words are read by the shared reader** (`vector::readVerbWords`), as
+  every GIS verb's are, not by a reader of CONTOUR's own. The own reader
+  stopped at the scope and handed the rest to the scope parser, so an
+  option after the filter (`DRAWING WHERE TYPE=polyline interval=0.5`) was
+  refused as "not a WHERE key" where GIS BUFFER takes it. `layer=` is also
+  a WHERE key: before WHERE it is the output layer, after it the filter's
+  `LAYER=` - the one rule the shared reader keeps for every verb
+  (`cad::isWhereKey`), because the scope widget writes `WHERE LAYER=...` at
+  the end of the dialog's line
+  (`ContourVerb.AnOptionMayFollowTheFilterButLayerThereIsTheFilters`).
+  Taking `layer=` as the option wherever it stands was rejected: the
+  window's "Only those that match" layer filter would have become the
+  output layer.
 - **The dialog has a `contourClip` box** beside the plan's fields: the
   shared scope controls always name a scope, and "no boundary" is none of
   them.
@@ -644,6 +657,12 @@ area= polygons=` per class and a `legend value= r= g= b=` per class colour.
 - **The class areas are cut exactly, the picture is not.** A picture of
   cells is cells; an area report and the drawn areas are measured, and a
   staircase along a lot boundary would overstate every class there.
+- **The words are read by the shared reader**, NAME taken out first
+  (`analysis::takeKeywordValues`, as RASTER VIEWSHED does), so the options
+  and NAME may follow the filter as CONTOUR's do
+  (`SlopeVerbs.ItsOptionsAndNameMayFollowTheFilter`). SURFACE FROM keeps
+  its own reader: it takes AREA alone, never a filter, so no option can
+  land in one.
 
 ### Not done
 
@@ -696,7 +715,14 @@ with no number has no field), and `zonal stats= prefix= pixels= zones=`.
   `<prefix>_<stat>` an earlier run left on the zone is removed in the same
   step - it was the number of somewhere else.
 - `csv=` writes the zone rows as well, and replaces a file only with
-  `OVERWRITE`.
+  `OVERWRITE`. The file is written before the properties, as GIS OVERLAY
+  and GIS SQL write theirs: a CSV that cannot be written fails the reply,
+  and a failed reply leaves the drawing as it was
+  (`ZonalVerb.ACsvThatCannotBeWrittenLeavesTheZonesAsTheyWere`; the
+  properties were once committed first, so a failure left them written
+  under an error). Staging the file and moving it into place after the
+  commit was rejected: the step can still fail after the move, and the
+  other verbs that write a CSV would then differ.
 
 ### Decided
 

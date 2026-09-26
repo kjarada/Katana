@@ -97,7 +97,10 @@ Result<VerbWords> readVerbWords(const Tokens& tokens, std::size_t begin, std::si
         const std::size_t equals = word.find('=');
         if (equals != std::string::npos && equals > 0) {
             const std::string key = katana::core::lowered(word.substr(0, equals));
-            if (listed(rules.options, key)) {
+            // After WHERE, a WHERE key is the filter's: CONTOUR's layer= is
+            // the output layer before WHERE and a LAYER= condition after it,
+            // which is what the scope widget writes there.
+            if (listed(rules.options, key) && !(inWhere && katana::cad::isWhereKey(key))) {
                 if (out.options.contains(key)) {
                     return makeError(ErrorCode::InvalidArgument, key + "= is given twice", word);
                 }

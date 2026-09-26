@@ -387,14 +387,17 @@ Result<Prepared> prepareRasterZonal(Context& context, const Tokens& tokens, std:
             if (step->size() != 0) {
                 command = std::move(step);
             }
-            auto executed = vec::executeStep(ctx, std::move(command));
-            if (!executed) {
-                return executed.error();
-            }
+            // The file before the drawing, as GIS OVERLAY and GIS SQL write
+            // theirs: a CSV that cannot be written is a failed reply, and a
+            // failed reply must leave the drawing as it was.
             if (!csv.empty()) {
                 if (auto written = vec::writeCsv(csv, kept->rows); !written) {
                     return written.error();
                 }
+            }
+            auto executed = vec::executeStep(ctx, std::move(command));
+            if (!executed) {
+                return executed.error();
             }
             std::vector<std::string> reply{vec::gisRecord("zonal", kept->seconds)};
             reply.insert(reply.end(), records.begin(), records.end());

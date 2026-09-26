@@ -46,17 +46,21 @@
 #include <variant>
 #include <vector>
 
+#include "analysis_support.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "katana/interop/geo/colour_ramps.hpp"
 #include "katana/interop/import.hpp"
 #include "replies.hpp"
 #include "terrain_verbs.hpp"
+#include "vector_support.hpp"
 
 namespace katana::app::geo {
 
 namespace gp = katana::gis::processing;
 namespace igeo = katana::interop::geo;
+namespace vec = katana::app::geo::vector;
+namespace an = katana::app::geo::analysis;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
@@ -121,61 +125,63 @@ Result<std::vector<double>> breakList(const std::string& text, const std::string
     return breaks;
 }
 
+// The words after the source, read by the shared reader as every GIS verb's
+// are (vector::readVerbWords), NAME <n> taken out first.
 Result<SlopeWords> slopeWords(const Tokens& tokens, std::size_t at, bool aspect)
 {
     SlopeWords words;
     words.aspect = aspect;
     std::optional<std::string> classes;
-    const std::string takes =
+    auto split = an::takeKeywordValues(tokens, at, {"NAME"});
+    if (!split) {
+        return split.error();
+    }
+    for (const auto& [keyword, name] : split->taken) {
+        if (words.name) {
+            return refusal("NAME is given twice", name);
+        }
+        if (name.empty()) {
+            return refusal("NAME needs the reference raster's name");
+        }
+        words.name = name;
+    }
+    const vec::WordRules rules{
+        aspect ? std::vector<std::string>{}
+               : std::vector<std::string>{"unit", "classes", "areas", "min_area"},
+        {"PREVIEW"},
+        false,
         aspect ? "RASTER ASPECT takes NAME, a scope and PREVIEW"
-               : "RASTER SLOPE takes unit=, classes=, areas=, min_area=, NAME, a scope and PREVIEW";
-    while (at < tokens.size()) {
-        if (tokens.is(at, "PREVIEW")) {
-            words.preview = true;
-            ++at;
-        } else if (tokens.is(at, "NAME")) {
-            if (at + 1 >= tokens.size() || tokens[at + 1].empty()) {
-                return refusal("NAME needs the reference raster's name");
+               : "RASTER SLOPE takes unit=, classes=, areas=, min_area=, NAME, a scope and "
+                 "PREVIEW"};
+    auto read = vec::readVerbWords(split->rest, 0, split->rest.size(), rules);
+    if (!read) {
+        return read.error();
+    }
+    words.preview = read->has("PREVIEW");
+    if (read->scopeGiven) {
+        words.scope = read->scope;
+    }
+    for (const auto& [key, text] : read->options) {
+        if (key == "unit") {
+            const std::string unit = katana::core::lowered(text);
+            if (unit != "percent" && unit != "degree") {
+                return refusal("unit is percent or degree", text);
             }
-            words.name = tokens[at + 1];
-            at += 2;
-        } else if (const auto option = keyValue(tokens, at); option && !aspect) {
-            const auto& [key, text] = *option;
-            if (key == "unit") {
-                const std::string unit = katana::core::lowered(text);
-                if (unit != "percent" && unit != "degree") {
-                    return refusal("unit is percent or degree", text);
-                }
-                words.unit = unit;
-            } else if (key == "classes") {
-                classes = text;
-            } else if (key == "areas") {
-                if (auto valid = katana::entity::validateLayerPath(text); !valid) {
-                    return refusal("areas is a layer path: " + valid.error().message, text);
-                }
-                words.areas = text;
-                words.areasGiven = true;
-            } else if (key == "min_area") {
-                auto area = positiveOption("min_area", text);
-                if (!area) {
-                    return area.error();
-                }
-                words.minArea = *area;
-            } else {
-                return refusal(takes, tokens[at]);
+            words.unit = unit;
+        } else if (key == "classes") {
+            classes = text;
+        } else if (key == "areas") {
+            if (auto valid = katana::entity::validateLayerPath(text); !valid) {
+                return refusal("areas is a layer path: " + valid.error().message, text);
             }
-            ++at;
-        } else if (!tokens.quoted[at] && katana::cad::isScopeWord(tokens[at])) {
-            if (words.scope) {
-                return refusal("one scope per line", tokens[at]);
+            words.areas = text;
+            words.areasGiven = true;
+        } else if (key == "min_area") {
+            auto area = positiveOption("min_area", text);
+            if (!area) {
+                return area.error();
             }
-            auto scope = katana::cad::parseScopeWords(tokens.words, at);
-            if (!scope) {
-                return scope.error();
-            }
-            words.scope = std::move(scope).value();
-        } else {
-            return refusal(takes, tokens[at]);
+            words.minArea = *area;
         }
     }
     if (classes) {

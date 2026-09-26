@@ -1664,7 +1664,12 @@ Built (`docs/interop.md`, "Import options"). `IMPORT` keeps its I0 row; its
 words are read by `prepareImport` in `src/katana_app/geo/import_verb.cpp`,
 the option words by `vector::readVerbWords` - the one reader of a line's
 own words and its scope - with `oo=` taken out first, since it may be given
-more than once. What the others build on:
+more than once. The reader takes a verb's options wherever they stand, but
+after WHERE a key that is also a WHERE key (`cad::isWhereKey`: CONTOUR's
+`layer=`) is the filter's condition, since the scope widget writes the
+filter at the end of a dialog's line (`docs/terrain.md`, "Contours";
+CONTOUR and RASTER SLOPE / ASPECT moved onto the reader from readers of
+their own that refused an option after the filter). What the others build on:
 
 - **`gis::checkOptions`** (`include/katana/gis/formats.hpp`): KEY=VALUE
   options checked against a driver's open, creation or layer-creation list.
