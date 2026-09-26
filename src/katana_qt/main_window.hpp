@@ -509,6 +509,7 @@ class MainWindow final : public QMainWindow {
     // line no tool and no view verb took; `verb` is its first word, upper
     // case.
     void runInterpreterLine(const QString& line, const QString& verb);
+    void syncSnapActions();
     // SCRIPT <file> [CONTINUE] (script_runner.hpp): the file's lines through
     // runVerbLine, stopping at the first refused unless `continueOnError`,
     // and the record the run ends with logged. A script already running is

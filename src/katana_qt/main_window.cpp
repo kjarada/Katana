@@ -504,11 +504,36 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                        cad::DocumentChange::Metadata)) {
             suggestPlotFiles();
         }
+        if (change.has(cad::DocumentChange::Drafting)) {
+            syncSnapActions();
+        }
     });
     refreshAll();
     views_->stopTool();
     selectAction_->setChecked(true);
     logMessage("Katana ready. Type HELP for the command list.");
+}
+
+// The object snap's items show the document's drafting settings, which the
+// drafting toolbar and the SNAP verb set too (docs/drawing.md). Blocked, so
+// showing a setting does not set it again from inside the notification.
+void MainWindow::syncSnapActions()
+{
+    if (snapAction_ != nullptr) {
+        const QSignalBlocker block(snapAction_);
+        snapAction_->setChecked(views_->snapEnabled());
+    }
+    for (QAction* each : findChildren<QAction*>()) {
+        if (!each->objectName().startsWith("viewSnapMode")) {
+            continue;
+        }
+        const auto mode = each->data();
+        if (!mode.isValid()) {
+            continue;
+        }
+        const QSignalBlocker block(each);
+        each->setChecked((views_->snapModes() & mode.toUInt()) != 0);
+    }
 }
 
 // ---- construction -----------------------------------------------------------------------
@@ -924,6 +949,7 @@ void MainWindow::buildActions()
         // viewSnapModeEndpoint ... viewSnapModeGrid: what --trigger reaches
         // it by, and what SNAP <mode> ON|OFF sets (dispatchLine).
         action->setObjectName(QString("viewSnapMode") + cad::toString(mode));
+        action->setData(static_cast<uint>(static_cast<cad::SnapModes>(mode)));
         action->setCheckable(true);
         action->setChecked(cad::hasMode(views_->snapModes(), mode));
         connect(action, &QAction::toggled, this, [this, mode](bool on) {
@@ -2635,6 +2661,15 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
         logMessage(QString("grid=%1").arg(*on ? "on" : "off"));
         return;
     }
+    // SNAP with the drafting verb's options (modes=, add=, remove=) is the
+    // interpreter's (docs/drawing.md); the window keeps SNAP [ON|OFF] and
+    // SNAP <mode> [ON|OFF] as its shorthand for View > Snap Modes.
+    if ((verb == "SNAP" || verb == "OSNAP") &&
+        std::any_of(words.begin() + 1, words.end(),
+                    [](const QString& word) { return word.contains('='); })) {
+        runInterpreterLine(line, verb);
+        return;
+    }
     if (verb == "SNAP" || verb == "OSNAP") {
         // SNAP <mode> [ON|OFF]: one of View > Snap Modes, by its name there.
         const QString mode = argument == "CENTRE" ? QString("CENTER") : argument;
@@ -2659,7 +2694,9 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
             words.size() <= 2 ? onOff(argument, snapAction_->isChecked()) : std::nullopt;
         if (!on) {
             logMessage("usage: SNAP [ON|OFF] | SNAP <mode> [ON|OFF]   modes: Endpoint, Midpoint, "
-                       "Center, Intersection, Perpendicular, Tangent, Nearest, Grid",
+                       "Center, Intersection, Perpendicular, Tangent, Nearest, Grid | "
+                       "SNAP [on|off] [modes=a,b|all|none] [add=a,b] [remove=a,b] for every "
+                       "mode (HELP)",
                        true);
             return;
         }

@@ -40,7 +40,10 @@ QAction* bound(QToolBar& bar, cad::Document& document, const QString& text, cons
     action->setStatusTip(tip);
     action->setChecked(flag(document.drafting()));
     QObject::connect(action, &QAction::toggled, &bar, [&document, flag](bool on) {
-        flag(document.drafting()) = on;
+        if (flag(document.drafting()) != on) {
+            flag(document.drafting()) = on;
+            document.notifyDraftingChanged();
+        }
     });
     readers.push_back([action, &document, flag] {
         const bool on = flag(document.drafting());
@@ -100,8 +103,11 @@ DrawingUi installDrawingUi(QMainWindow& window, cad::Document& document, QMenu* 
                          "instead of degrees counter-clockwise from east");
     bearings->setChecked(document.drafting().angles == cad::AngleConvention::Bearing);
     QObject::connect(bearings, &QAction::toggled, ui.draftingBar, [&document](bool on) {
-        document.drafting().angles =
-            on ? cad::AngleConvention::Bearing : cad::AngleConvention::Counterclockwise;
+        const auto angles = on ? cad::AngleConvention::Bearing : cad::AngleConvention::Counterclockwise;
+        if (document.drafting().angles != angles) {
+            document.drafting().angles = angles;
+            document.notifyDraftingChanged();
+        }
     });
     readers->push_back([bearings, &document] {
         const bool on = document.drafting().angles == cad::AngleConvention::Bearing;
@@ -128,7 +134,14 @@ DrawingUi installDrawingUi(QMainWindow& window, cad::Document& document, QMenu* 
         action->setChecked((document.drafting().snapModes & bit) != 0);
         QObject::connect(action, &QAction::toggled, ui.draftingBar, [&document, bit](bool on) {
             auto& modes = document.drafting().snapModes;
-            modes = on ? (modes | bit) : (modes & ~bit);
+            const auto next = on ? (modes | bit) : (modes & ~bit);
+            if (next == modes) {
+                return;
+            }
+            // Told, so View > Snap Modes and the views follow (one owner:
+            // the document's drafting settings).
+            modes = next;
+            document.notifyDraftingChanged();
         });
         readers->push_back([action, &document, bit] {
             const bool on = (document.drafting().snapModes & bit) != 0;
