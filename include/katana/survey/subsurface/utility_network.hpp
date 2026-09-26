@@ -67,6 +67,18 @@ enum class UtilityStatus {
 [[nodiscard]] const char* toString(UtilityStatus status);
 [[nodiscard]] std::optional<UtilityStatus> parseUtilityStatus(std::string_view text);
 
+// Cells as one file spelt them, by that file's header: provenance for a
+// deliverable that must repeat a schedule's own words (UtilityAttributes::
+// written), not part of what a line IS. Two lines that say the same thing -
+// one read from a schedule, one from what was drawn, or the same schedule
+// written back in Katana's own spelling - are the same line, so this map
+// takes no part in the equality of what holds it: it is always equal. Its
+// entries are compared, where that matters, as the map it is.
+struct WrittenCells : std::map<std::string, std::string> {
+    using std::map<std::string, std::string>::map;
+    friend bool operator==(const WrittenCells&, const WrittenCells&) { return true; }
+};
+
 // The descriptive attributes the standard asks to be recorded with a service.
 // Empty strings are "not recorded"; a zero diameter is "not recorded" too,
 // because no service has none.
@@ -90,6 +102,17 @@ struct UtilityAttributes {
     // by the schema's own attribute name. Kept so that they can be checked
     // (delivery_schema.hpp) and reported, never dropped.
     std::map<std::string, std::string> fields;
+    // The attributes that ARE interpreted above - the service's id, type,
+    // owner, material, size, status, configuration, description - exactly as
+    // the schedule wrote them, by the header they were written under:
+    // "AssetTypeCode" -> "W", "AssetStatus" -> "In service". Reading turns
+    // "In service" into UtilityStatus::InService; a deliverable written back
+    // out (the IFC export's delivery property set, docs/ifc.md) must carry
+    // the schedule's own value, misspelling and all, or it would quietly
+    // correct what `UTILITY CHECK` reports as wrong. Empty for a line built
+    // in code.
+    WrittenCells written;
+
     // Cells the schedule reader reads as "not recorded", or reads only in
     // part, kept as the schedule wrote them by the reader's column name: a
     // "type" that names no kind ("Not Specified", "N"), a "status" of
@@ -146,6 +169,12 @@ struct UtilityVertex {
     // (a depth description, the date obtained, a pothole report), by the
     // schema's attribute name.
     std::map<std::string, std::string> fields;
+    // The vertex's interpreted cells - point, coordinates, method, level,
+    // level reference, depth, surface, uncertainties, claimed level, path,
+    // verifies - as written, by header: "LocateMethod" -> "Electronic
+    // Detection". See UtilityAttributes::written for why.
+    WrittenCells written;
+
     // As UtilityAttributes::recorded, for a vertex's cells: a "ql" of
     // "Unknown" (no claim), and a "level_ref" given with no level and no
     // depth that reads as the top - which an empty cell reads as too.

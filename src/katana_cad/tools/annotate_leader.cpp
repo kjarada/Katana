@@ -41,18 +41,35 @@
 // leader gets a horizontal landing one arrowhead long first, as AutoCAD adds
 // a hook, so the note never hangs off a slope; a leader within 15 degrees of
 // level, or with no note, has none.
+//
+// A SMART leader (docs/annotation.md, "Smart leaders"): a tip put on a
+// point, a line, an arc, a circle, a polyline or a text - within the view's
+// pick aperture of it - is put ON it and follows it, as the command line's
+// #id@x,y does. A tip snapped to one of its points keeps that point instead.
+// The note of such a leader may then name the entity's values in braces, the
+// label template language: "IL {prop.invert:.3f}" is read off the pit every
+// time the leader is drawn. A line with a brace is checked as it is typed ({{
+// and }} are a brace), and a note that would say nothing about the entity is
+// refused with what the entity lacks. A tip on nothing keeps its note as
+// typed, braces and all.
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "annotate_common.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/selection.hpp"
+#include "katana/cad/survey_coding.hpp"
 #include "katana/core/text.hpp"
+#include "katana/entity/anchor.hpp"
 #include "katana/entity/annotation.hpp"
 #include "katana/entity/entity.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad::tools::annotate {
@@ -69,6 +86,18 @@ using katana::geometry::Vec2;
 namespace tol = katana::math::tolerance;
 
 constexpr double kHookAngle = 15.0 * katana::math::kDegToRad;
+
+// What a tip can be put on: what offers a place along it or a position.
+const std::set<katana::entity::EntityType> kTipTargets = {
+    katana::entity::EntityType::Point,  katana::entity::EntityType::Line,
+    katana::entity::EntityType::Arc,    katana::entity::EntityType::Polyline,
+    katana::entity::EntityType::Circle, katana::entity::EntityType::Text};
+
+// Whether a typed line of the note has a field in it.
+bool hasField(std::string_view line)
+{
+    return line.find('{') != std::string_view::npos || line.find('}') != std::string_view::npos;
+}
 
 // What the options at the first prompt were told; unset takes the dimension
 // style's arrow and height, no callout and the default text style.
@@ -112,11 +141,12 @@ std::string optionList(const std::pair<Value, std::string_view> (&words)[N])
 }
 
 // The leader through `vertices` with note `lines`, sized from `style` at
-// 1 : `scale` unless `options` say otherwise, its tip following `tip`.
-// `vertices` has at least two points, none coincident with the next.
+// 1 : `scale` unless `options` say otherwise, its tip following `tip` and its
+// note a template when `fields`. `vertices` has at least two points, none
+// coincident with the next.
 LeaderGeometry leaderFor(std::vector<Point2> vertices, const std::vector<std::string>& lines,
                          const DimensionStyle& style, double scale, const Options& options,
-                         const AnchorRef& tip)
+                         const AnchorRef& tip, bool fields)
 {
     const auto paper = [&](double size) {
         return style.paperSized ? size : katana::entity::annotationPaperSize(size, scale);
@@ -135,14 +165,15 @@ LeaderGeometry leaderFor(std::vector<Point2> vertices, const std::vector<std::st
     leader.paperHeight = options.paper.value_or(paper(style.textHeight));
     leader.landing = options.landing.value_or(!lines.empty() && steep ? leader.arrowSize : 0.0);
     leader.tipRef = tip;
+    leader.fields = fields && tip.associated() && !leader.text.empty();
     return leader;
 }
 
 class LeaderTool final : public InteractiveTool {
   public:
     explicit LeaderTool(const ToolContext& context)
-        : document_(context.document), attributes_(context.attributes),
-          style_(styleForNewAnnotation(context)),
+        : document_(context.document), pickTolerance_(context.pickTolerance),
+          attributes_(context.attributes), style_(styleForNewAnnotation(context)),
           scale_(context.document != nullptr ? context.document->annotationScale()
                                              : katana::entity::kDefaultAnnotationScale)
     {
@@ -191,11 +222,30 @@ class LeaderTool final : public InteractiveTool {
     ToolStep point(const Point2& at) override
     {
         switch (step_) {
-        case Step::Tip:
+        case Step::Tip: {
+            // A snap to one of an entity's points is that point; else a tip
+            // within the pick aperture of an entity goes on it, at the place
+            // nearest the click; else it is free.
             vertices_ = {at};
             tipRef_ = pending_;
+            if (!tipRef_.associated()) {
+                if (const auto on = tipOn(at)) {
+                    vertices_ = {on->second};
+                    tipRef_ = on->first;
+                }
+            }
+            std::string message;
+            if (tipRef_.associated() && document_ != nullptr) {
+                if (const katana::entity::Entity* target =
+                        document_->model().entities.find(tipRef_.entity)) {
+                    message = "leader on " + std::string(katana::entity::toString(target->type())) +
+                              " " + std::to_string(target->id) +
+                              "; its note may name its values in braces, e.g. {length:.2f}";
+                }
+            }
             step_ = Step::Vertices;
-            return ToolStep::next();
+            return ToolStep::next(std::move(message));
+        }
         case Step::Vertices:
             if (coincident(vertices_.back(), at)) {
                 return ToolStep::rejected(
@@ -267,6 +317,12 @@ class LeaderTool final : public InteractiveTool {
             }
             if (!katana::entity::isValidUtf8(text)) {
                 return ToolStep::rejected("the text is not valid UTF-8");
+            }
+            if (tipRef_.associated() && hasField(text)) {
+                if (auto status = katana::entity::checkLeaderTemplate(text); !status) {
+                    return ToolStep::rejected(status.error().message + ": " +
+                                              status.error().context);
+                }
             }
             lines_.emplace_back(text);
             return ToolStep::next();
@@ -352,13 +408,26 @@ class LeaderTool final : public InteractiveTool {
         case Step::Annotation:
             break;
         }
+        LeaderGeometry made = leader(vertices_, lines_);
+        if (document_ != nullptr) {
+            if (auto status = katana::entity::checkLeaderSaysSomething(document_->model(), made,
+                                                                       codePropertyCandidates());
+                !status) {
+                return ToolStep::rejected(status.error().message + " - type U to take back a line");
+            }
+        }
         std::vector<katana::entity::Entity> entities;
-        entities.push_back(newEntity(leader(vertices_, lines_), attributes_));
+        entities.push_back(newEntity(std::move(made), attributes_));
         const std::size_t count = lines_.size();
         std::string message = count == 0   ? "leader with no text"
                               : count == 1 ? "leader with 1 line of text"
                                            : "leader with " + std::to_string(count) +
                                                  " lines of text";
+        if (smart()) {
+            message += ", read off entity " + std::to_string(tipRef_.entity);
+        } else if (tipRef_.associated()) {
+            message += ", on entity " + std::to_string(tipRef_.entity);
+        }
         return ToolStep::done(createAll("CREATE_LEADER", std::move(entities)), std::move(message),
                               /*restart=*/true);
     }
@@ -420,6 +489,7 @@ class LeaderTool final : public InteractiveTool {
             break;
         }
         case Step::Annotation:
+            // As it will be: a smart note already read off its entity.
             feedback.shapes.emplace_back(leader(vertices_, lines_));
             break;
         }
@@ -443,10 +513,45 @@ class LeaderTool final : public InteractiveTool {
         return ToolStep::next();
     }
 
+    // The leader through `vertices` with note `lines`, a template when the tip
+    // is on an entity and a line names a field.
     [[nodiscard]] LeaderGeometry leader(std::vector<Point2> vertices,
                                         const std::vector<std::string>& lines) const
     {
-        return leaderFor(std::move(vertices), lines, style_, scale_, options_, tipRef_);
+        const bool fields =
+            tipRef_.associated() &&
+            std::any_of(lines.begin(), lines.end(),
+                        [](const std::string& line) { return hasField(line); });
+        return leaderFor(std::move(vertices), lines, style_, scale_, options_, tipRef_, fields);
+    }
+
+    // Whether the note typed so far is a template.
+    [[nodiscard]] bool smart() const { return leader(vertices_, lines_).fields; }
+
+    // The entity under a tip at `at` and the place on it nearest `at`: what
+    // the view's pick aperture finds (at least the geometric tolerance, for a
+    // point typed exactly on a line), of the kinds a tip can be on.
+    [[nodiscard]] std::optional<std::pair<AnchorRef, Point2>> tipOn(const Point2& at) const
+    {
+        if (document_ == nullptr) {
+            return std::nullopt;
+        }
+        const auto& model = document_->model();
+        SelectionFilter filter;
+        filter.types = kTipTargets;
+        const auto picked = pickEntity(model, at, std::max(pickTolerance_, tol::kGeometric), filter,
+                                       &document_->spatialIndex());
+        if (!picked) {
+            return std::nullopt;
+        }
+        const katana::entity::Entity* entity = model.entities.find(*picked);
+        const auto ref =
+            entity != nullptr ? katana::entity::nearestAnchor(*entity, at) : std::nullopt;
+        const auto point = ref ? katana::entity::resolveAnchor(*entity, *ref) : std::nullopt;
+        if (!point) {
+            return std::nullopt;
+        }
+        return std::pair{*ref, *point};
     }
 
     [[nodiscard]] double paperHeight() const
@@ -510,6 +615,7 @@ class LeaderTool final : public InteractiveTool {
     }
 
     const Document* document_ = nullptr;
+    double pickTolerance_ = 0.0;
     katana::commands::EntityAttributes attributes_;
     DimensionStyle style_;
     double scale_;

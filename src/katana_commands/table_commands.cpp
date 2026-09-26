@@ -366,22 +366,35 @@ template <> struct TablePolicy<katana::entity::LabelStyle> {
     static const auto& table(const katana::entity::Model& model) { return model.labelStyles; }
     static Status deletable(std::string_view) { return {}; }
     static Status updatable(const katana::entity::LabelStyle&) { return {}; }
-    // A label left naming a deleted style would draw nothing at all.
+    // A label left naming a deleted style would draw nothing at all, and a
+    // smart leader in it (docs/annotation.md, "Smart leaders") no note.
     static Status inUse(const katana::entity::Model& model, std::string_view name)
     {
         std::size_t count = 0;
         katana::entity::EntityId first = 0;
+        std::size_t leaders = 0;
+        katana::entity::EntityId firstLeader = 0;
         model.entities.forEach([&](const katana::entity::Entity& entity) {
             if (const auto* label = std::get_if<katana::entity::LabelGeometry>(&entity.geometry);
                 label != nullptr && label->style == name) {
                 first = count == 0 ? entity.id : first;
                 ++count;
+            } else if (const auto* leader =
+                           std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
+                       leader != nullptr && leader->labelStyle == name) {
+                firstLeader = leaders == 0 ? entity.id : firstLeader;
+                ++leaders;
             }
         });
         if (count > 0) {
             return makeError(ErrorCode::CommandRejected, "that label style is still used",
                              "used by " + std::to_string(count) + " labels, e.g. id=" +
                                  std::to_string(first));
+        }
+        if (leaders > 0) {
+            return makeError(ErrorCode::CommandRejected, "that label style is still used",
+                             "used by " + std::to_string(leaders) +
+                                 " leaders, e.g. id=" + std::to_string(firstLeader));
         }
         std::string holder;
         model.labelRules.forEach([&](const katana::entity::LabelRule& rule) {
