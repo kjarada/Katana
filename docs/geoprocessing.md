@@ -243,8 +243,11 @@ Every leaf is Safe or Confirm (`src/katana_io/geo/policy.cpp`).
 ### Drawing data to features
 
 `interop::geo::drawingDataset` (`include/katana/interop/geo/drawing_dataset.hpp`)
-is the ONE conversion of entities to feature tables. The vector import and
-export are to move onto it (I1).
+is the ONE conversion of entities to feature tables, and EXPORT writes files
+through it too (I1; `docs/interop.md`, "Fidelity"). For EXPORT it writes
+one table of every kind (`oneTable`), with `katana_id` and `layer` but not
+`style`, `colour` and `type` (`styleFields`), and the properties only when
+asked (`properties`).
 
 - **Tables.** `points`, `lines` and `polygons`; an empty one is omitted.
 - **Fields.** `katana_id` first (Integer64: the key a result is joined back
@@ -259,7 +262,9 @@ export are to move onto it (I1).
 - **Holes.** Only a ring tagged `source.ring=hole` (what IMPORT writes, in
   an entity's metadata) or `gis.ring=hole` (what a result writes, in its
   properties) joins an area. It joins the one it lies wholly inside - the
-  one whose `gis.part` it shares when there is such, else the smallest
+  one whose part it shares when there is such (`gis.part`, or IMPORT's
+  `source.part`), else the smallest, and of equals the one made nearest
+  before it, so a file imported twice joins each hole to its own exterior
   (`DrawingDataset.ATaggedHoleJoinsItsExterior`: 10000 - 400 = 9600 m2). A
   tagged hole inside no area stays an area of its own, and says so. GEOS's
   organisePolygons was the design's choice for this; a point-in-polygon test
@@ -269,7 +274,10 @@ export are to move onto it (I1).
   default), by the same `chordCount` EXPORT uses (`src/katana_interop/curve_chords.hpp`).
 - **Heights.** Z is written only when every vertex has a height: absent is
   not zero (`DrawingDataset.AVertexWithoutAHeightKeepsTheLineTwoDimensional`).
-  With `requireHeights`, a heightless entity is left out and counted.
+  An entity heighted at only some vertices, or an arc whose ends differ,
+  goes in plan with its heights in the elevation fields, and a warning
+  counts them. With `requireHeights`, a heightless entity is left out and
+  counted.
 - **What has no feature.** Text, dimensions, labels and leaders are left
   out and counted by kind; the counts are the scope record's `skipped.*`.
 - **CRS.** The project's coordinate system (the document's
@@ -279,7 +287,10 @@ export are to move onto it (I1).
 
 `resultCommand` builds ONE `commands::Transaction`, named with the verb line,
 and changes nothing itself: the executor executes it, so a result is one
-undo step (`DrawingDataset.AllResultsAreOneUndoStep`).
+undo step (`DrawingDataset.AllResultsAreOneUndoStep`). A feature becomes
+entities by `featurePieces`, which IMPORT uses as well: a point, a line or
+polyline, an arc or a circle where the feature's curve is one
+(`VectorGeometry::arcs`), an area's rings as closed polylines.
 
 - **Create.** Missing layers are made; a result of several tables goes to
   `<layer>/<table>`. Typed fields become typed properties. `gis.op` names
@@ -589,6 +600,17 @@ its names and shapes except here:
 - `PrepareVerb` is `Result<Prepared>(Context&, const Tokens&, line)`.
 - `geo::defaultScratch` is the scratch folder of the window and the session
   alike.
+- I1 added, all source-compatible: `DrawingDatasetOptions::oneTable`,
+  `tableName`, `styleFields` and `properties`; `interop::geo::featurePieces`;
+  `VectorGeometry::arcs`; `GdalDataset::readTable` and `writeTables`, over
+  the `processing::FeatureTable` of this contract.
+- I2 added, all source-compatible: `include/katana/gis/formats.hpp`
+  (`gis::formats`, `findFormat`, `formatOptions`, `readableExtensions`,
+  `vectorSaveChoices`, `vectorWriterFor`, `isVirtualPath`, `isRemotePath`,
+  `identifyContent`); `interop::archiveExtensions`; a `gis::writeZip` of
+  several members. `GdalDataset::open` takes `/vsi` paths, URLs and
+  archives; `vectorDriverForPath` is `vectorWriterFor`, so a `.kml` is
+  LIBKML's. `interop::kindForPath` routes by content where it can look.
 - `RasterOverlay::facts` is declared, not yet filled (D2).
 
 ## Contract tests
@@ -742,12 +764,28 @@ The reply format changed from prose to records; the `cli.*`, `Session.*`,
 
 ### I1: Vector fidelity
 
-Not started. The vector import and export are to move onto `drawingDataset`
-and `resultCommand`.
+Built (`docs/interop.md`, "Fidelity"): EXPORT reads the drawing through
+`drawingDataset` and IMPORT makes entities by `featurePieces`, so the
+geoprocessing bindings and the file path are one conversion. The adapter
+reads and writes typed tables, keeps a file's arcs for the import, counts
+what it cannot carry, and returns GDAL's warnings. KML, KMZ and GPX are
+converted to longitude and latitude from the project's coordinate system,
+which EXPORT now passes on every front end. Tests:
+`tests/geo/test_vector_fidelity.cpp`,
+`src/katana_app/geo/cli/vector_fidelity.cmake`,
+`tests/geo/headless/vector_fidelity.cmake`.
 
 ### I2: Every driver: FORMATS
 
-Not started.
+Built (`docs/interop.md`, "Formats"): the formats come from GDAL's driver
+manager with a small curated overlay (`gis/formats.hpp`), a file is routed
+by what it holds, an archive by its inside, and `/vsi` paths and URLs open.
+`FORMATS` is the verb table's I2 row (`src/katana_app/geo/formats_verbs.cpp`);
+it answers at prepare, as `GDAL LIST` does. `katana_formats` and
+`katana://formats` share its records; GIS > Processing - GDAL > Formats...
+is the I2 block of `menu_table.cpp`. Tests: `tests/geo/test_formats.cpp`,
+`tests/qt_widgets/geo/test_formats_dialog.cpp`,
+`src/katana_app/geo/cli/formats.cmake`, `tests/geo/headless/formats.cmake`.
 
 ### I3: IMPORT options
 

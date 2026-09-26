@@ -44,6 +44,10 @@ struct Snapshot {
     katana::entity::Model model;
     double annotationScale = 1000.0;
     std::vector<katana::terrain::NamedSurface> surfaces;
+    // The project's coordinate system: it goes into the file, and is what a
+    // KML or GPX is converted to longitude and latitude from (docs/interop.md,
+    // "Fidelity").
+    std::string projectionWkt;
 };
 
 Result<std::string> write(Kind kind, const Snapshot& snapshot, const std::filesystem::path& to,
@@ -81,7 +85,9 @@ Result<std::string> write(Kind kind, const Snapshot& snapshot, const std::filesy
         return reply;
     }
     case Kind::Vector: {
-        auto written = interop::exportVector(snapshot.model, to);
+        interop::VectorExportOptions options;
+        options.projectionWkt = snapshot.projectionWkt;
+        auto written = interop::exportVector(snapshot.model, to, options);
         if (!written) {
             return written.error();
         }
@@ -119,6 +125,7 @@ Result<Prepared> prepareExport(Context& context, const Tokens& tokens, std::stri
     snapshot->model = context.document.model();
     snapshot->model.entities.setObserver({});
     snapshot->annotationScale = context.document.annotationScale();
+    snapshot->projectionWkt = context.document.metadata().coordinateSystem;
     if (kind == Kind::Archive) {
         snapshot->surfaces = context.surfaces.all();
     }
