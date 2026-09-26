@@ -1,9 +1,10 @@
 #pragma once
 
-// Entry points of the AVX2 scene kernels, compiled from scene_avx2.cpp, and
-// the layout of the parameters scene.cpp hands them. Declarations and
-// constants only; see src/katana_core/simd/text_kernels.hpp for why the entries
-// have C linkage and a katana_avx2_ prefix.
+// Entry points of the AVX2 scene kernels, compiled from scene_avx2.cpp, of
+// their NEON twins, from scene_neon.cpp, and the layout of the parameters
+// scene.cpp hands them. Declarations and constants only; see
+// src/katana_core/simd/text_kernels.hpp for why the entries have C linkage and
+// a katana_avx2_ or katana_neon_ prefix.
 //
 // Each entry equals the scalar code of scene.cpp bit for bit: the same
 // operations, in the same order, never fused. The layouts:
@@ -81,6 +82,23 @@ void katana_avx2_scene_mesh_faces(const double* points, std::size_t vertexCount,
 // out[i] = each channel of base[i] moved eighths/8 of the way to ink[i],
 // rounded half up, for eighths in 0..8.
 void katana_avx2_scene_fade(const std::uint32_t* base, const std::uint32_t* ink, std::size_t count,
+                            int eighths, std::uint32_t* out);
+
+// The same five, two doubles a register, with the same contracts.
+void katana_neon_scene_lift(const double* points, std::size_t count, const double* params,
+                            double* lifted);
+void katana_neon_scene_surface_normals(const double* lifted, const std::uint32_t* triangles,
+                                       std::size_t count, double* normals);
+void katana_neon_scene_surface_vertices(const double* lifted, std::size_t count,
+                                        const double* normals, const double* params,
+                                        std::uint32_t flat, int useRamp, double* positions,
+                                        std::uint32_t* colours);
+void katana_neon_scene_mesh_faces(const double* points, std::size_t vertexCount,
+                                  const std::uint32_t* faces, std::size_t first, std::size_t count,
+                                  const double* params, const std::uint32_t* faceColours,
+                                  std::size_t faceColourCount, std::uint32_t flat,
+                                  double* positions, std::uint32_t* colours);
+void katana_neon_scene_fade(const std::uint32_t* base, const std::uint32_t* ink, std::size_t count,
                             int eighths, std::uint32_t* out);
 
 } // extern "C"
