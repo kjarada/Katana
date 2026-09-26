@@ -12,6 +12,7 @@
 #include <QToolBar>
 
 #include "drawing/vertex_panel.hpp"
+#include "tools/tool_icons.hpp"
 
 namespace katana::qt::drawing {
 
@@ -69,6 +70,8 @@ DrawingUi installDrawingUi(QMainWindow& window, cad::Document& document, QMenu* 
     QAction* toggle = ui.verticesDock->toggleViewAction();
     toggle->setObjectName("actionVerticesPanel");
     toggle->setText("&Vertices");
+    // Edit Vertices' picture: that tool opens this panel.
+    toggle->setIcon(tools::toolIcon("draw.vertex.edit"));
     toggle->setStatusTip("Show the selected polyline's vertices in a table to edit in place");
     if (panels != nullptr) {
         panels->addAction(toggle);

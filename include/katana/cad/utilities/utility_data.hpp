@@ -130,6 +130,128 @@ struct UtilityRegradeOptions {
 planUtilityRegrade(const katana::entity::Model& model, const UtilityData& data,
                    const UtilityRegradeOptions& options = {});
 
+// ---- services from surveyed or imported geometry -----------------------------------------
+//
+// What UTILITY DRAW <scope> reads (docs/subsurface_utilities.md, "Services from
+// surveyed and imported geometry"): the located services as a survey or an
+// import left them in the drawing - a coded survey's strings, a .12da archive's,
+// a DXF's, a shapefile's or an IFC file's lines - rather than as a schedule
+// file. Each line or open polyline in scope is one service, its vertices the
+// located vertices in order; a point in scope on a vertex gives that vertex
+// its point number and anything it says of itself. What the geometry cannot
+// say - how it was located, to what uncertainty, what kind of service - comes
+// from utility.* properties on the entities (keys, utility_drawing.hpp: set by
+// MODIFY ... SET PROP=, the property panel, or an import's own attributes of
+// those names) and, for what they leave unsaid, from the verb's options.
+
+// What the heights of the geometry are the heights of.
+enum class GeometryHeights {
+    // The ground over the service: a detection marked on the surface and shot
+    // there, which is how most located services are surveyed. The default,
+    // because it errs the safe way: a service level read as the surface
+    // leaves the vertex without a level - QL-B at best, cover not computed -
+    // where a surface read as the service would claim a measured level at
+    // ground and a cover of nothing.
+    Surface,
+    // The service itself, on its level reference: shot on the pipe in a
+    // pothole, or a design or as-constructed model's centre line.
+    Service,
+    // Neither: the heights are not to be used.
+    Unused,
+};
+
+// "surface", "service", "none": the word HEIGHTS and keys::kHeights take.
+[[nodiscard]] std::string_view geometryHeightsWord(GeometryHeights heights);
+// Those words in any case; nullopt for anything else.
+[[nodiscard]] std::optional<GeometryHeights> parseGeometryHeights(std::string_view text);
+
+// What UTILITY DRAW <scope> says for every service and vertex that does not
+// say it itself. Nothing given is nothing assumed: no method refuses the
+// vertex that has none, no uncertainty is "not assessed", no type is Unknown.
+struct GeometryServiceOptions {
+    std::optional<katana::survey::subsurface::UtilityType> type{};
+    std::optional<katana::survey::subsurface::LocationMethod> method{};
+    std::optional<double> horizontalUncertainty{};
+    std::optional<double> verticalUncertainty{};
+    std::optional<katana::survey::subsurface::LevelReference> levelReference{};
+    // What is known between each vertex and the next.
+    std::optional<katana::survey::subsurface::PathEvidence> path{};
+    std::string owner{};
+    std::string material{};
+    std::optional<double> diameter{}; // metres
+    std::optional<katana::survey::subsurface::UtilityStatus> status{};
+    GeometryHeights heights = GeometryHeights::Surface;
+    // An import's own attributes read as schedule columns, {column, property}:
+    // {"type", "ASSET_TYPE"} reads an entity's ASSET_TYPE as its type, as a
+    // schedule's type column is read. The column by its schedule name or an
+    // alias (subsurface::utilityCsvColumnNamed); "line" and "point" name the
+    // service and the vertex. The entity's own utility.* property, where it
+    // has one, wins over a field read so: it is what a person set here.
+    std::vector<std::pair<std::string, std::string>> fields{};
+};
+
+struct GeometryServices {
+    // In the order drawn: by the id of the entity each was read from.
+    std::vector<katana::survey::subsurface::UtilityLine> lines;
+    // lines[i] was read from sources[i].
+    std::vector<katana::entity::EntityId> sources;
+    // Points in scope that gave a vertex its point number and values.
+    std::size_t points = 0;
+    // Points in scope on no vertex of a line taken: not a service on their own.
+    std::size_t loose = 0;
+    // In scope and drawn already: a drawn service's run or point, or an entity
+    // a service was drawn from before (keys::kSource).
+    std::size_t drawn = 0;
+    // What cannot be a service: a closed polyline (an outline - a pit, a
+    // building, a parcel - not a run), an arc, a circle, a text, a label ...
+    std::size_t ignored = 0;
+};
+
+// The services the lines and open polylines of `matched` are, each read whole
+// from the entity; the points of `matched` supply their vertices.
+//
+// A service's id is the entity's name - a field that names it (FIELDS
+// line=), else the first code or name codePropertyCandidates() finds on it
+// (survey_coding.hpp), a coded survey's string name or a .12da archive
+// string's - else "#<entity id>"; a name two entities in scope share, or a
+// service drawn already has, is told apart as "<name>#<entity id>". A
+// vertex's id is the point number (FIELDS point=, else the survey import's
+// "point" property) of the point on it, else "<line id>-<n>".
+//
+// Each value is the most particular said: the point's own utility.*
+// property, then the line entity's, then `options`; and a height - the
+// line's at the vertex, else its point's - is a surface level or a service
+// level as the point's keys::kHeights, else the line's, else options.heights
+// says, where the point does not give that level itself. The line's
+// attributes (type, owner, material, diameter, status, configuration,
+// description, and a delivery schema's line fields) come from the line
+// entity and `options`, never from a point.
+//
+// A line entity's depth (keys::kDepth, or a depth field) is every vertex's:
+// a record of a main laid at 0.9 m says so of all of it.
+//
+// InvalidArgument for a field whose column the schedule does not know, or
+// which is where the geometry already is (easting, northing) or is read only
+// from a schedule (size); and, naming the line and the entity: two points on
+// one vertex (within tolerance::kCoordinate); a vertex no point, line or
+// option gives a method; a value on an entity that does not read, as
+// readUtilityData would refuse it on a drawn point; a vertex id twice in one
+// line; a point that is a vertex of a schedule but has no line
+// (readUtilityData's stray point).
+[[nodiscard]] katana::core::Result<GeometryServices>
+readGeometryServices(const katana::entity::Model& model,
+                     std::span<const katana::entity::EntityId> matched,
+                     const GeometryServiceOptions& options = {});
+
+// The keys a UTILITY DRAW <scope> reply adds to the scope record
+// (scopeRecord): " lines=2 points=9 loose=1 drawn=0 ignored=3".
+[[nodiscard]] std::string geometryServiceKeys(const GeometryServices& services);
+
+// The drawing of `services`, as drawUtilities draws a schedule, each point
+// carrying the entity its line was read from (keys::kSource).
+[[nodiscard]] katana::core::Result<UtilityDrawing>
+drawGeometryServices(const GeometryServices& services, const UtilityDrawOptions& options = {});
+
 // ---- the design CLEARANCE is measured against ----------------------------------------------
 
 // Proposed works drawn as an entity: a line, a polyline (a closed one
