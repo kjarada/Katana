@@ -321,13 +321,24 @@ lines, polylines and areas with their properties.
 
 A raster result goes to `<project>/cache/gdal/<name>.tif`. When the drawing
 has no project it goes to the front end's scratch folder
-(`<temp>/katana-scratch/<process id>`, `geo::defaultScratch`), and the reply
-says `persisted=no`. It is read by `interop::importRaster` as a reference
-raster with `role` Derived and `derivation` - the line that made it. A name
-already taken becomes `<name>-2`, `-3` ...
+(`<temp>/katana-scratch/<process id>-<start>`, `geo::defaultScratch`), and
+the reply says `persisted=no`. It is read by `interop::importRaster` as a
+reference raster with `role` Derived and `derivation` - the line that made
+it. A name already taken becomes `<name>-2`, `-3` ...
 (`GeoExecutor.ARasterResultBecomesADerivedReferenceRaster`). `RasterOverlay`
 gained `role`, `facts`, `derivation` and `displayStyle`; F0 fills the role
 and the derivation, T2 draws the display styles, and D2 persists them.
+
+The scratch folder is named by the process id and the time the process
+first asks for it, not by the id alone. Windows hands an ended process's id
+to a later one, and the folder the earlier one left behind still held its
+files, so a later run's `NAME west` came back as `west-2` - a name not
+asked for, and replies that changed from run to run (two tests failed so in
+one whole-suite run, with 153 such folders in the temp folder;
+`DemSession.ARasterLeftByAnEarlierProcessWithThisIdDoesNotRenameTheResult`).
+Clearing the folders left behind at start-up was rejected: a name does not
+say whether its process has ended, and another window still running may be
+using its folder.
 
 ## The executor
 
@@ -894,8 +905,8 @@ Not started. `RasterOverlay::facts` is declared for it.
   given by name, so a PREVIEW of a `/vsicurl` source waits on the network.
   A run does its opening on the worker.
 - **The scratch folder is left behind.** Derived rasters of a drawing with
-  no project stay in `<temp>/katana-scratch/<process id>` when the process
-  ends.
+  no project stay in `<temp>/katana-scratch/<process id>-<start>` when the
+  process ends.
 - **Measuring the apply.** The cost of creating entities in an apply is not
   yet measured for large results; the benchmark the plan names for it is not
   written. Nothing is promised for a result of millions of features.
