@@ -251,6 +251,35 @@ argumentsGiven(const std::vector<std::string>& path, const std::vector<std::stri
 [[nodiscard]] katana::core::Status checkTokens(const std::vector<std::string>& path,
                                                const std::vector<std::string>& tokens);
 
+// A pipeline step's policy, judged as a leaf's is: Confirm for `update`,
+// which writes into a dataset already there, and for a step no one has
+// judged ("unclassified"); `external` is "refused" (checkTokens). `reason` is
+// "listed", "unclassified" or "refused".
+[[nodiscard]] Policy stepPolicy(std::string_view step, std::string& reason);
+
+// What a run's own words change of data already there, beyond its
+// algorithm's policy (docs/geoprocessing.md, "Safety"). A pipeline is read
+// word by word however it was quoted - one quoted text, words one by one, or
+// --pipeline=... - nested [ ] steps included.
+struct TailEffects {
+    // The step that makes the run Confirm (a pipeline's `update`, or a step
+    // no one has judged); empty when none does.
+    std::string confirmStep;
+    // The first word that lets GDAL replace or add to a dataset already there
+    // (--overwrite, --overwrite-layer, --append, --update, --upsert, --add,
+    // --resume): the run needs OVERWRITE. Empty when none.
+    std::string overwriteWord;
+};
+[[nodiscard]] TailEffects tailEffects(const std::vector<std::string>& path,
+                                      const std::vector<std::string>& tokens);
+
+// Whether the algorithm, with this tail, reads the Z of the features it is
+// given: a value-producing vector grid without --zfield, rasterize --3d, or a
+// pipeline with such a step. Such a run is given only features with a height
+// at every vertex, since GDAL reads a missing one as 0.
+[[nodiscard]] bool readsHeights(const std::vector<std::string>& path,
+                                const std::vector<std::string>& tokens);
+
 // Binds the request and asks GDAL to validate it, running nothing: required
 // arguments, exclusions, dependencies, values. Datasets given by name are
 // opened to be checked. Fails as run() does before it runs.

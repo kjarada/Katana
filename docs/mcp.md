@@ -148,7 +148,7 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
 |---|---|---|
 | `katana_gdal_catalogue` | `{filter?, schemas?}`: a group (`raster`, `vector grid`) or words to look for | `{gdal_version, algorithms: [{path, name, description, aliases, policy, url, container, arguments_schema?, inputs_schema?}]}`; the schemas only when 20 or fewer are listed |
 | `katana_gdal_describe` | `{algorithm}`: `"raster hillshade"`, aliases taken | `{algorithm, arguments: [{name, short_name, aliases, type, required, positional, category, default, choices, min: {value, inclusive}, max, count: {min, max}, dataset: {kinds, accepts, update, sources}, depends_on, exclusion_group, dependency_group, input, output, description}], arguments_schema, inputs_schema, gdal_usage}` |
-| `katana_gdal_run` | `{algorithm, arguments?, tokens?, inputs?, output?, confirm?, preview?}` | `{ok, line, algorithm, inputs, scope: [{arg, matched, used, points, lines, polygons, skipped: {reason: n}}], outputs: [{arg, kind, target, layer?, created?, id?, name?, raster?: {width, height}, file?}], text?, return_code?, warnings, cancelled, seconds}` |
+| `katana_gdal_run` | `{algorithm, arguments?, tokens?, inputs?, output?, confirm?, overwrite?, preview?}` | `{ok, line, algorithm, inputs, scope: [{arg, matched, used, points, lines, polygons, skipped: {reason: n}}], outputs: [{arg, kind, target, layer?, created?, id?, name?, raster?: {width, height}, file?}], text?, return_code?, warnings, cancelled, seconds}` |
 
 - **Read-only tools read the bridge.** `katana_gdal_catalogue` and
   `katana_gdal_describe` change nothing, so they read the bridge directly;
@@ -177,7 +177,15 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
   ... - is refused unless `confirm: true`. The verb refuses it again without
   CONFIRM. The tool's hints are destructive and open-world, since a FILE
   source may be a URL.
+- **So are a pipeline's steps and words.** A pipeline is a Safe leaf, but a
+  pipeline with an `update` step writes into a dataset already there: it
+  needs `confirm: true` too, however `tokens` quote it. GDAL's own words
+  that change an existing dataset (`--overwrite`, `--append`, `--update`,
+  `--upsert`, `--overwrite-layer`, `--add`, `--resume`), in a pipeline
+  or not, need `overwrite: true`, which adds OVERWRITE to the line; the verb
+  refuses both again (`docs/geoprocessing.md`, "Safety").
 
+`McpServer.GdalRunRefusesAPipelineThatChangesExistingDataUnlessToldTo`,
 `McpServer.GdalCatalogueListsHillshade`,
 `McpServer.GdalDescribeGivesASchemaWithBounds`,
 `McpServer.GdalRunBuildsTheLineAndReturnsOutputs`,

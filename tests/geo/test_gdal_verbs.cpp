@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <stop_token>
 #include <string>
@@ -300,6 +301,79 @@ TEST_F(GeoExecutor, GdalsOwnWordsThatChangeAFileNeedOverwrite)
                      scratch.file("out.tif") + "\" --overwrite");
     ASSERT_FALSE(reply.ok());
     EXPECT_NE(reply.error().message.find("OVERWRITE"), std::string::npos);
+}
+
+// The bytes of a file, to show a refused line left it as it was.
+std::string bytesOf(const std::string& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+TEST_F(GeoExecutor, AQuotedPipelineThatOverwritesAFileNeedsOverwrite)
+{
+    const std::string victim = scratch.file("victim.tif");
+    const std::string raster = kData + "/plane.asc";
+    ASSERT_TRUE(run("GDAL raster hillshade \"" + raster + "\" \"" + victim + "\"").ok());
+    const std::string before = bytesOf(victim);
+    ASSERT_FALSE(before.empty());
+    // One quoted text is one word to the line, and still steps to GDAL.
+    const std::string line =
+        "GDAL pipeline \"read " + raster + " ! write --overwrite " + victim + "\"";
+    auto refused = run(line);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(refused.error().message.find("OVERWRITE"), std::string::npos)
+        << refused.error().describe();
+    EXPECT_EQ(bytesOf(victim), before);
+    auto allowed = run(line + " OVERWRITE");
+    ASSERT_TRUE(allowed.ok()) << allowed.error().describe();
+    EXPECT_NE(bytesOf(victim), before);
+}
+
+TEST_F(GeoExecutor, APipelineUpdateStepNeedsConfirmQuotedOrNot)
+{
+    const std::string points = scratch.file("points.geojson");
+    std::ofstream(points)
+        << R"({"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"1",)"
+        << R"("name":"new"},"geometry":{"type":"Point","coordinates":[5,5]}}]})";
+    const std::string target = scratch.file("target.gpkg");
+    const std::string source = scratch.file("source.gpkg");
+    ASSERT_TRUE(
+        run("GDAL vector convert \"" + points + "\" \"" + target + "\" --output-layer=pts").ok());
+    ASSERT_TRUE(
+        run("GDAL vector convert \"" + points + "\" \"" + source + "\" --output-layer=pts").ok());
+    const std::string before = bytesOf(target);
+    for (const std::string& line :
+         {"GDAL vector pipeline read \"" + source + "\" ! update \"" + target + "\"",
+          "GDAL vector pipeline \"read " + source + " ! update " + target + "\"",
+          "GDAL pipeline \"read " + source + " ! tee [ update " + target + " ] ! write " +
+              scratch.file("copy.gpkg") + "\""}) {
+        auto refused = run(line);
+        ASSERT_FALSE(refused.ok()) << line;
+        EXPECT_EQ(refused.error().code, ErrorCode::Unsupported) << line;
+        EXPECT_NE(refused.error().message.find("CONFIRM"), std::string::npos)
+            << refused.error().describe();
+        EXPECT_EQ(refused.error().context, "update");
+        EXPECT_EQ(bytesOf(target), before) << line;
+    }
+    // Said, it runs.
+    auto confirmed =
+        run("GDAL vector pipeline read \"" + source + "\" ! update \"" + target + "\" CONFIRM");
+    ASSERT_TRUE(confirmed.ok()) << confirmed.error().describe();
+}
+
+TEST_F(GeoExecutor, RasterizeAddBurnsIntoAnExistingRasterOnlyWithOverwrite)
+{
+    const std::string raster = scratch.file("burn.tif");
+    ASSERT_TRUE(run("GDAL raster hillshade \"" + kData + "/plane.asc\" \"" + raster + "\"").ok());
+    const std::string before = bytesOf(raster);
+    const std::string line =
+        "GDAL vector rasterize --burn 5 --add \"" + kData + "/lots.geojson\" \"" + raster + "\"";
+    auto refused = run(line);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().context, "--add");
+    EXPECT_EQ(bytesOf(raster), before);
 }
 
 TEST_F(GeoExecutor, GdalTokensAfterAClauseAreRefused)

@@ -520,6 +520,9 @@ ArgSpec specOf(const GDALAlgorithmArg& arg)
 
 // The name of the last step of a pipeline and whether it has words after it:
 // "... ! write out.tif" names the output, "... ! write" leaves it to the run.
+// An `update` step names the dataset it writes into as its output, as write
+// does: bound a second one by the run, GDAL refused every such pipeline with
+// "update: Positional values starting at 'b.tif' are not expected" (measured).
 bool pipelineNamesOutput(std::string_view pipeline)
 {
     const std::size_t bang = pipeline.rfind('!');
@@ -528,7 +531,7 @@ bool pipelineNamesOutput(std::string_view pipeline)
     std::string step;
     std::string argument;
     last >> step;
-    if (katana::core::lowered(step) != "write") {
+    if (katana::core::lowered(step) != "write" && katana::core::lowered(step) != "update") {
         return false;
     }
     while (last >> argument) {

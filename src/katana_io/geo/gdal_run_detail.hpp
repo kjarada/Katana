@@ -18,6 +18,17 @@ namespace katana::gis::processing::detail {
 [[nodiscard]] Policy classify(const std::vector<std::string>& path, const GDALAlgorithm& algorithm,
                               std::string& reason);
 
+// One word of a pipeline as GDAL's pipeline argument takes it ("read x !
+// slope ! write y", nested steps in [ ]): `step` when it names a step - the
+// first word that is not an option after the text's start, a '!' or a '[' -
+// and `first` while no '!' or '[' has been passed.
+struct PipelineWord {
+    std::string text;
+    bool step = false;
+    bool first = false;
+};
+[[nodiscard]] std::vector<PipelineWord> pipelineWords(std::string_view pipeline);
+
 // Whether a pipeline, as GDAL's pipeline argument takes it ("read ! slope !
 // write", nested steps in [ ]), has a step called `external`, which runs a
 // program of the caller's choosing.
