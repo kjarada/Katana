@@ -420,8 +420,10 @@ class DrawingWriter {
             "IfcTrimmedCurve",
             Args()
                 .ref(basis)
-                .raw("(IFCPARAMETERVALUE(" + stepReal(shape.startParameter) + "))")
-                .raw("(IFCPARAMETERVALUE(" + stepReal(shape.endParameter()) + "))")
+                // Each in [0, 2 pi): with the sense true, an end below the
+                // start runs through the parameter 0.
+                .raw("(IFCPARAMETERVALUE(" + stepReal(math::normalizeAngle(shape.startParameter)) + "))")
+                .raw("(IFCPARAMETERVALUE(" + stepReal(math::normalizeAngle(shape.endParameter())) + "))")
                 .boolean(true)
                 .enumeration("PARAMETER"));
     }
