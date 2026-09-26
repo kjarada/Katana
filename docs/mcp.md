@@ -113,7 +113,9 @@ The help (`katana://help`) and the status (`katana://status`) are also
 resources, for a client that attaches context rather than calling tools. The
 status - the tool's text and structured content, and the resource - is the
 interpreter's `STATUS` and `STATUS JSON` (`docs/cad.md`, "STATUS"), so an
-agent driving the window or `katana_cli` reads the same record.
+agent driving the window or `katana_cli` reads the same record. With the GIS
+module, `katana://formats` is the third: `FORMATS JSON`, every format this
+GDAL reads and writes (`katana_formats`, below).
 
 Annotation needs no tool of its own: its verbs reply in `key=value` records
 (`docs/annotation.md`, "The verbs"), which come back in each command's
@@ -184,7 +186,27 @@ Not started.
 
 ### I2: katana_formats
 
-Not started.
+- **`katana_formats`** lists the formats this build of GDAL reads and
+  writes, from its own registry (`docs/interop.md`, "Formats"): each
+  driver's name - what EXPORT's and GDAL's format arguments take - its
+  description, the kinds of data it holds, reads and writes, its extensions,
+  whether it opens `/vsi` paths, its connection prefix and GDAL's page for
+  it. `kind` (`raster` | `vector`), `capability` (`read` | `write`) and
+  `filter` (words each of which the name, description or an extension
+  holds) narrow the list. `driver` gives that one driver's open, creation
+  and layer-creation options instead: each option's name, type, default,
+  choices, bounds and description. Read-only, as `katana_gdal_catalogue` is.
+- **The resource `katana://formats`** is `FORMATS JSON`: every format, the
+  same objects the tool returns.
+
+The tool and the resource are built from the verb's own chooser and records
+(`src/katana_app/geo/formats_verbs.hpp`), so `FORMATS`, the tool and the
+resource cannot come to differ. The text is the verb's records; the
+structured content is `{gdal_version, formats: [...]}`, or the driver's
+`{format, open_options, creation_options, layer_creation_options}`. An
+unknown driver, or a `kind` or `capability` that is neither word, is
+refused. `McpServer.FormatsReturnsStructuredDrivers` pins it, and
+`McpServer.TheHelpAndStatusAreResources` counts the third resource.
 
 ### D1: katana_dataset_info
 

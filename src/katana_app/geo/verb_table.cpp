@@ -25,6 +25,9 @@ namespace katana::app::geo {
 // ---- I0: IMPORT, EXPORT, INFO, REFS, COPC ----
 // ---- I1: vector fidelity (no verb of its own) ----
 // ---- I2: FORMATS ----
+// formats_verbs.cpp, and formats_verbs.hpp for the MCP tool that shares it.
+katana::core::Result<Prepared> prepareFormats(Context& context, const Tokens& tokens,
+                                              std::string_view line);
 // ---- I3: IMPORT options ----
 // ---- I4: EXPORT options ----
 // ---- D1: INFO as data, STATS, CHECK ----
@@ -88,6 +91,11 @@ const std::vector<VerbEntry>& verbTable()
                         "COPC <source> <destination.copc.laz>  a point cloud rewritten as COPC,\n"
                         "          every point kept"});
         // ---- I2: FORMATS ----
+        rows.push_back(
+            {"FORMATS", "", &prepareFormats,
+             "FORMATS [RASTER|VECTOR] [READ|WRITE] [<text>...] [JSON]  the formats this GDAL\n"
+             "          reads and writes, from its registry: driver, kinds, extensions, /vsi\n"
+             "          FORMATS OPTIONS <driver> [JSON]  its open, creation and layer options"});
         // ---- I3: IMPORT options ----
         // ---- I4: EXPORT options ----
         // ---- D1: INFO as data, STATS, CHECK ----

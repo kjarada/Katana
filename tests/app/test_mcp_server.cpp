@@ -599,7 +599,12 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
 {
     initialize();
     const Json list = request("resources/list")["result"]["resources"];
+#if defined(KATANA_TEST_WITH_INTEROP)
+    // And the formats GDAL reads and writes (McpServer.FormatsReturnsStructuredDrivers).
+    ASSERT_EQ(list.size(), 3U);
+#else
     ASSERT_EQ(list.size(), 2U);
+#endif
     const Json help = request("resources/read", Json{{"uri", "katana://help"}});
     EXPECT_NE(help["result"]["contents"][0]["text"].get<std::string>().find("CUSTOMISE"),
               std::string::npos);
@@ -947,5 +952,48 @@ TEST_F(McpServer, GdalRunRefusesAnArgumentTheAlgorithmHasNot)
                                                       {"arguments", {{"no-such", 1}}}});
     EXPECT_TRUE(refused["isError"].get<bool>());
     EXPECT_NE(textOf(refused).find("no-such"), std::string::npos);
+}
+
+// ---- I2: katana_formats and katana://formats ----
+
+TEST_F(McpServer, FormatsReturnsStructuredDrivers)
+{
+    initialize();
+    const Json result = call("katana_formats", Json{{"kind", "vector"},
+                                                    {"capability", "write"},
+                                                    {"filter", "flatgeobuf"}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& formats = result["structuredContent"]["formats"];
+    ASSERT_EQ(formats.size(), 1U) << formats.dump();
+    EXPECT_EQ(formats[0]["driver"], "FlatGeobuf");
+    EXPECT_EQ(formats[0]["write"], Json({"vector"}));
+    EXPECT_EQ(formats[0]["extensions"], Json({"fgb"}));
+    EXPECT_TRUE(result["structuredContent"]["gdal_version"].get<std::string>().starts_with("3."));
+    // The text is the verb's records.
+    EXPECT_NE(textOf(result).find("format driver=FlatGeobuf kind=vector"), std::string::npos);
+
+    // One driver's options, as IMPORT's oo= and EXPORT's co= are checked.
+    const Json gpkg = call("katana_formats", Json{{"driver", "GPKG"}});
+    ASSERT_FALSE(gpkg["isError"].get<bool>()) << textOf(gpkg);
+    bool listAll = false;
+    for (const Json& option : gpkg["structuredContent"]["open_options"]) {
+        if (option["name"] == "LIST_ALL_TABLES") {
+            listAll = true;
+            EXPECT_EQ(option["choices"], Json({"AUTO", "YES", "NO"}));
+        }
+    }
+    EXPECT_TRUE(listAll);
+    EXPECT_TRUE(call("katana_formats", Json{{"driver", "NoSuchDriver"}})["isError"].get<bool>());
+    EXPECT_TRUE(call("katana_formats", Json{{"kind", "both"}})["isError"].get<bool>());
+
+    // The resource is FORMATS JSON: every format, the same objects.
+    const Json resource = request("resources/read", Json{{"uri", "katana://formats"}});
+    const Json all = Json::parse(resource["result"]["contents"][0]["text"].get<std::string>());
+    ASSERT_TRUE(all.is_array());
+    const auto found = std::ranges::find_if(all, [](const Json& format) {
+        return format["driver"] == "FlatGeobuf";
+    });
+    ASSERT_NE(found, all.end());
+    EXPECT_EQ(*found, formats[0]);
 }
 #endif
