@@ -1163,7 +1163,7 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
     geo.interpreter = &interpreter_;
     geo.reference = &reference_;
     geo.surfaces = &surfaceStore_;
-    geo.scratch = katana::app::geo::defaultScratch();
+    geo.scratch = katana::app::geo::ownScratch();
     geo.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
     geo.headless = [this] { return headless_; };
     geo.frame = [this](const katana::geometry::Box2& box) { views_->zoomTo(box); };
