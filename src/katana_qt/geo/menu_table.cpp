@@ -28,6 +28,8 @@
 // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
 #include "geo/coverage_dialog.hpp"
 #include "geo/geometry_check_dialog.hpp"
+// ---- V5: GIS > Analysis - GDAL > Query with SQL ----
+#include "geo/sql_dialog.hpp"
 
 namespace katana::qt {
 
@@ -80,6 +82,12 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                          return new GisCoverageDialog(std::move(context), parent);
                      });
     // ---- V5: GIS > Analysis - GDAL > Query with SQL ----
+    addGisToolAction(menus, workbench, "Analysis - GDAL", Icon::Processing, "Query with S&QL...",
+                     "Ask the drawing a question in SQL - the easement area per owner - as rows, "
+                     "a selection or new entities - GIS SQL",
+                     "gisSql", [](GisDialogContext context, QWidget* parent) {
+                         return new GisSqlDialog(std::move(context), parent);
+                     });
     // ---- T1: Terrain > Analysis > Contours ----
     // ---- T2: Terrain > Analysis > Terrain Shading ----
     // ---- T3: Terrain > Analysis > Slope ----

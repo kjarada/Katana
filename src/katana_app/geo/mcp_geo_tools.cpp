@@ -496,6 +496,9 @@ ToolReply run(Session& session, const Json& arguments)
 
 } // namespace
 
+// ---- V5: katana_gis_query (sql_mcp.cpp) ----
+[[nodiscard]] Tool gisQueryTool();
+
 std::vector<Tool> geoTools()
 {
     std::vector<Tool> tools;
@@ -574,6 +577,7 @@ std::vector<Tool> geoTools()
         hints(false, true, false, true), run});
     // ---- T0: katana_terrain_list ----
     // ---- V5: katana_gis_query ----
+    tools.push_back(gisQueryTool());
     // ---- I2: katana_formats ----
     // ---- D1: katana_dataset_info ----
     // ---- D2: katana_references ----
