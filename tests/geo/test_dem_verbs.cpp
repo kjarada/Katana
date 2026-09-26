@@ -19,6 +19,12 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include "contract_support.hpp"
 #include "geo/dem_support.hpp"
 #include "geo/geo_verbs.hpp"
@@ -594,6 +600,57 @@ TEST(DemSession, TheDemToolsRunThroughTheSessionAndTheMcpServer)
     const std::string text = result["content"][0]["text"].get<std::string>();
     EXPECT_NE(text.find("name=west raster=20x15"), std::string::npos) << text;
     EXPECT_NE(text.find("layer=gis/footprint created=1"), std::string::npos) << text;
+}
+
+// Windows gives a new process the id of one that has ended, and a drawing
+// with no project keeps its derived rasters in a scratch folder the process
+// leaves behind (docs/geoprocessing.md, "Not done"). A result never replaces
+// a file already there, so while the folder was named by the process id
+// alone, this run's `west` came back as `west-2` whenever an earlier process
+// with the same id had made a `west`: a name not asked for, and a reply that
+// changed from run to run (cli.raster_clip_of_the_plane_to_an_area_is_twenty_by_fifteen
+// and GeoSession.AGdalLineRunsThroughTheSessionAndItsRasterIsAReference
+// failed so in a whole-suite run, with 153 such folders left in the temp
+// folder).
+TEST(DemSession, ARasterLeftByAnEarlierProcessWithThisIdDoesNotRenameTheResult)
+{
+#if defined(_WIN32)
+    const auto process = static_cast<long long>(_getpid());
+#else
+    const auto process = static_cast<long long>(getpid());
+#endif
+    // Where an earlier process with this id kept its rasters.
+    std::error_code error;
+    const std::filesystem::path earlier =
+        std::filesystem::temp_directory_path(error) / "katana-scratch" / std::to_string(process);
+    const std::filesystem::path left = earlier / "west.tif";
+    const bool wasThere = std::filesystem::exists(left, error);
+    std::filesystem::create_directories(earlier, error);
+    std::ofstream(left) << "left by an earlier process";
+    ASSERT_TRUE(std::filesystem::exists(left, error));
+
+    // The folder is one per process, whichever front end asks.
+    EXPECT_EQ(geo::defaultScratch(), geo::defaultScratch());
+
+    katana::app::Session session(nullptr);
+    katana::app::mcp::Server server{session, "9.9.9"};
+    const nlohmann::json message{
+        {"jsonrpc", "2.0"},
+        {"id", 1},
+        {"method", "tools/call"},
+        {"params",
+         {{"name", "katana_run_commands"},
+          {"arguments",
+           {{"commands", {"RASTER CLIP FILE \"" + kPlane + "\" AREA 0,0,20,15 NAME west"}}}}}}};
+    const auto reply = server.handle(message.dump());
+    if (!wasThere) {
+        std::filesystem::remove(left, error);
+    }
+    ASSERT_TRUE(reply.has_value());
+    const nlohmann::json result = nlohmann::json::parse(*reply)["result"];
+    ASSERT_FALSE(result.value("isError", true)) << result.dump();
+    const std::string text = result["content"][0]["text"].get<std::string>();
+    EXPECT_NE(text.find("name=west raster=20x15"), std::string::npos) << text;
 }
 
 } // namespace
