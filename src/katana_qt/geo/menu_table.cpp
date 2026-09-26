@@ -32,8 +32,13 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     // ---- F0: GDAL algorithm bridge: no item; the typed GDAL line (X1 is its menu item) ----
     // ---- X1: GIS > Processing - GDAL > GDAL Toolbox ----
     {
+        // X: every other letter of "GDAL Toolbox" is another GIS item's once
+        // the lanes merge (T Import Vector Data, D Export Surface as DEM, O
+        // COPC; and the vector lane's G, A, L and B), and
+        // qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
+        // refuses a letter shared in one menu.
         QAction* toolbox = workbench.services().makeAction(
-            Icon::Processing, "GDAL &Toolbox...",
+            Icon::Processing, "GDAL Toolbo&x...",
             "Every one of GDAL's algorithms, with forms made from its own arguments, run on the "
             "drawing, reference rasters, surfaces or files (the GDAL verb)",
             {}, "gdalToolbox");
@@ -66,7 +71,10 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
             {}, "terrainGrid");
         // The dialog it opens, by object name: how --dialog finds it.
         grid->setData(QString("gridDemDialog"));
-        menus.addToTerrain("&DEM", "terrainDemMenu", grid);
+        // D&EM: D is Surface From Drawing's and M Alignment Manager's in the
+        // Terrain menu, and a letter shared in one menu is refused by
+        // qt_every_shortcut_and_menu_letter_reaches_one_thing_headless.
+        menus.addToTerrain("D&EM", "terrainDemMenu", grid);
         QObject::connect(grid, &QAction::triggered, grid, [&workbench, grid] {
             if (auto* window = qobject_cast<QWidget*>(grid->parent())) {
                 showGridDemDialog(workbench, *window);
@@ -81,7 +89,7 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
             "(RASTER MOSAIC, CLIP, FILL, REPROJECT, FOOTPRINT, DIFFERENCE)",
             {}, "terrainDemTools");
         tools->setData(QString("demToolsDialog"));
-        menus.addToTerrain("&DEM", "terrainDemMenu", tools);
+        menus.addToTerrain("D&EM", "terrainDemMenu", tools);
         QObject::connect(tools, &QAction::triggered, tools, [&workbench, tools] {
             if (auto* window = qobject_cast<QWidget*>(tools->parent())) {
                 showDemToolsDialog(workbench, *window);
