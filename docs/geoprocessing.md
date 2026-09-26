@@ -884,7 +884,64 @@ is wrong), so a file in another CRS is overlaid as it is.
 
 ### V3: GIS HULL and GIS CLIP
 
-Not started.
+```
+GIS HULL [<scope>] [convex | concave=<0..1>] [holes] [TO LAYER <path>] [PREVIEW]
+GIS CLIP [<scope>] BY (<scope> | FILE <path> [LAYER <name>] [where="<sql>"])
+         [TO LAYER <path> | REPLACE] [PREVIEW]
+```
+
+The boundary around what the scope takes, and what it takes cut to a
+boundary (`src/katana_app/geo/hull_clip_verbs.cpp`). The window's items are
+GIS > Analysis - GDAL > Boundary Around Features... and Clip to Boundary...
+(`gisHull`, `gisClip`; `src/katana_qt/geo/hull_dialog.hpp`, `clip_dialog.hpp`).
+
+**HULL** takes every point and vertex of the scope (curves as their chords),
+once each.
+
+- **Convex** - the default - is Katana's own `geometry::convexHull`: GDAL
+  would add nothing. The corners and centre of a square give the square,
+  its centre inside (`GisHull.ConvexHullOfTheCornersAndCentreOfASquareIsTheSquare`).
+- **`concave=<ratio>`** is GDAL's `vector concave-hull` of all the points
+  as ONE multipoint - GDAL hulls each feature, and a hull per point is no
+  boundary. GEOS's ratio runs from 0, the tightest, to 1, the convex hull;
+  `holes` lets it leave a gap inside. On a 1 m grid over an L of 36 m2 the
+  convex hull is 68 m2 and a ratio of 0.1 gives 36.5 m2: the L and the half
+  square the hull cuts across its inner corner
+  (`GisHull.ConcaveHullOfAnLShapedPointSetIsSmallerThanItsConvexHull`).
+- Fewer than three points, or all in a line, bound no area: nothing is drawn,
+  and a warning says why.
+
+**CLIP** runs `vector clip --like`, the boundary bound as the like dataset:
+the second scope's areas, or a file with GDAL's own `--like-layer` and
+`--like-where`. It clips to the like dataset's geometries, not only their
+bounds (measured), and gives each piece a feature of its own.
+
+- **Drawn beside** (the default, or TO LAYER): the pieces on `gis/clip`, the
+  entities left whole (`GisClip.ClipOfALineByABoxHasHandComputedLength`).
+- **REPLACE, in place**: an entity cut keeps its id on its largest piece and
+  the rest are made beside it, as copies, reported by `split` records
+  (`GisClip.APartSplitIntoTwoKeepsTheIdOnTheLargerAndReportsTheOther`); one
+  wholly outside is deleted; one wholly inside is not touched - no rewrite of
+  its vertices (`GisClip.InPlaceWhatIsOutsideGoesAndWhatIsInsideStaysAsItWasInOneStep`).
+  All in one undo step, after the entities are compared with the copies
+  taken at prepare. It is REPAIR's reshape (`vector::reshapeCommand`).
+- A curve cut in place becomes the chords of what is left: GDAL clips
+  lines, and an arc's remainder is drawn as a polyline.
+
+```
+hull kind=concave ratio=0.1 holes=no points=57 area=36.500
+clip mode=replace features=3 whole=1 cut=1 outside=1 area=0.000 length=30.000
+```
+
+**Tests.** `tests/geo/test_hull_and_clip.cpp`, by hand as above, and a pipe
+through boxes at 10..40 and 60..95 keeping its id on the 35 m piece;
+`GisHullClipContract.TheArgumentsTheVerbsBindAreGdals` pins concave-hull and
+clip. The dialogs: `tests/qt_widgets/geo/test_hull_and_clip_dialogs.cpp`;
+katana_cli: `cli.gis_hull_of_a_squares_corners_and_centre_is_the_square`,
+`cli.gis_clip_in_place_leaves_thirty_metres_of_the_line`.
+
+**Not done.** The concave boundary as the edge of SURFACE FROM DRAWING is a
+follow-up once this and T0 are both on main (it crosses the two lanes).
 
 ### V4: GIS CHECK, REPAIR and COVERAGE
 

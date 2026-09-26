@@ -25,6 +25,9 @@
 #include "geo/gis_tool_dialog.hpp"
 // ---- V2: GIS > Analysis - GDAL > Overlay ----
 #include "geo/overlay_dialog.hpp"
+// ---- V3: GIS > Analysis - GDAL > Hull, Clip ----
+#include "geo/clip_dialog.hpp"
+#include "geo/hull_dialog.hpp"
 // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
 #include "geo/coverage_dialog.hpp"
 #include "geo/geometry_check_dialog.hpp"
@@ -62,6 +65,19 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
                          return new GisOverlayDialog(std::move(context), parent);
                      });
     // ---- V3: GIS > Analysis - GDAL > Hull, Clip ----
+    addGisToolAction(menus, workbench, "Analysis - GDAL", Icon::Processing,
+                     "Boundary Around Feat&ures...",
+                     "The boundary around every point and vertex the scope takes - convex, or "
+                     "concave to follow them in - GIS HULL",
+                     "gisHull", [](GisDialogContext context, QWidget* parent) {
+                         return new GisHullDialog(std::move(context), parent);
+                     });
+    addGisToolAction(menus, workbench, "Analysis - GDAL", Icon::Processing, "C&lip to Boundary...",
+                     "Cut what the scope takes to the areas of a second scope or a file - the "
+                     "pieces on a layer, or in place - GIS CLIP",
+                     "gisClip", [](GisDialogContext context, QWidget* parent) {
+                         return new GisClipDialog(std::move(context), parent);
+                     });
     // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
     addGisToolAction(menus, workbench, "Check - GDAL", Icon::Processing, "Check &Geometry...",
                      "Invalid lines and areas - self-intersections and the like - each where it "
