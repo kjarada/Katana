@@ -174,11 +174,22 @@ std::optional<Point2> resolveAnchor(const Entity& entity, const AnchorRef& ref)
             case AnchorPoint::Vertex:
                 return ref.index < v.size() ? std::optional(v[ref.index].position) : std::nullopt;
             case AnchorPoint::SegmentMid:
+            case AnchorPoint::Along: {
                 if (ref.index >= polyline.segmentCount()) {
                     return std::nullopt;
                 }
-                return std::visit([](const auto& piece) { return piece.pointAt(0.5); },
+                // On an arc segment, the fraction of its sweep: ON the arc.
+                const double t = ref.point == AnchorPoint::SegmentMid ? 0.5 : clampedParameter(ref);
+                return std::visit([t](const auto& piece) { return piece.pointAt(t); },
                                   polyline.segment(ref.index));
+            }
+            case AnchorPoint::Inside:
+                if (!polyline.closed || v.size() < 3) {
+                    return std::nullopt;
+                }
+                // Its chords to a millimetre: the inside point is a place for
+                // a note, not a measurement.
+                return insidePoint(polyline.toPolyline(katana::geometry::kCurveChordTolerance));
             default:
                 return std::nullopt;
             }
@@ -192,6 +203,13 @@ std::optional<Point2> resolveAnchor(const Entity& entity, const AnchorRef& ref)
                 return ellipse.startPoint();
             case AnchorPoint::End:
                 return ellipse.endPoint();
+            case AnchorPoint::Along:
+                // The fraction of its sweep of eccentric anomaly - of a turn,
+                // for a whole ellipse, as for a circle.
+                return ellipse.pointAtParameter(ellipse.startParameter +
+                                                clampedParameter(ref) * ellipse.sweep);
+            case AnchorPoint::Inside:
+                return ellipse.isFull() ? std::optional(ellipse.center) : std::nullopt;
             default:
                 return std::nullopt;
             }
@@ -260,6 +278,38 @@ std::optional<AnchorRef> nearestAnchor(const Entity& entity, const Point2& near)
         }
         return found ? std::optional(ref) : std::nullopt;
     }
+    if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&entity.geometry)) {
+        const auto nearest = curve->nearest(near);
+        if (!nearest || curve->segmentCount() == 0 ||
+            curve->segmentLength(nearest->segment) <= 0.0) {
+            return std::nullopt;
+        }
+        ref.index = static_cast<std::uint32_t>(nearest->segment);
+        const auto piece = curve->segment(nearest->segment);
+        if (const auto* segment = std::get_if<Segment2>(&piece)) {
+            ref.parameter = std::clamp(segment->parameterOf(near), 0.0, 1.0);
+        } else {
+            const auto& arc = std::get<Arc2>(piece);
+            const Vec2 radial = nearest->point - arc.center;
+            ref.parameter = std::clamp(arc.parameterOfAngle(std::atan2(radial.y, radial.x)), 0.0, 1.0);
+        }
+        return ref;
+    }
+    if (const auto* ellipse = std::get_if<katana::geometry::Ellipse2>(&entity.geometry)) {
+        const double along =
+            (ellipse->closestParameter(near) - ellipse->startParameter) / ellipse->sweep;
+        if (ellipse->isFull()) {
+            // A turn is [0, 1), as for a circle.
+            const double turn = along - std::floor(along);
+            ref.parameter = turn < 1.0 ? turn : 0.0;
+        } else {
+            ref.parameter = std::clamp(along, 0.0, 1.0);
+        }
+        return ref;
+    }
+    // A spline offers no place along it: its parameter is not its length,
+    // and no fraction of it would stay where the note was put when its
+    // points move. Its ends are named by Start and End.
     return std::nullopt;
 }
 

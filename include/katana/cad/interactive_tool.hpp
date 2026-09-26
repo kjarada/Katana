@@ -122,9 +122,10 @@ class InteractiveTool {
     // tool whose annotation follows its points keeps the reference.
     [[nodiscard]] virtual ToolStep anchoredPoint(const katana::geometry::Point2& at,
                                                  const katana::entity::AnchorRef& anchor);
-    // A point with a height: typed as x,y,z, or snapped to a point that has
-    // one. The default drops the height and takes the point, so only a tool
-    // that draws in 3D (Polyline 3D, Point) overrides it.
+    // A point with a height, typed as x,y,z. The default drops the height
+    // and takes the point, so only a tool that draws in 3D (Polyline 3D,
+    // Point) overrides it; such a tool looks up the height of a clicked
+    // point itself (heightAtPoint), since a click arrives as point().
     [[nodiscard]] virtual ToolStep point3d(const katana::geometry::Point2& at, double z);
     [[nodiscard]] virtual ToolStep entity(katana::entity::EntityId id,
                                           const katana::geometry::Point2& at);

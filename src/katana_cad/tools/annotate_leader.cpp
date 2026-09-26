@@ -87,11 +87,14 @@ namespace tol = katana::math::tolerance;
 
 constexpr double kHookAngle = 15.0 * katana::math::kDegToRad;
 
-// What a tip can be put on: what offers a place along it or a position.
+// What a tip can be put on: what offers a place along it or a position
+// (entity::nearestAnchor) - the drawing system's curve polyline and ellipse
+// too, not a spline, which has no place along it.
 const std::set<katana::entity::EntityType> kTipTargets = {
-    katana::entity::EntityType::Point,  katana::entity::EntityType::Line,
-    katana::entity::EntityType::Arc,    katana::entity::EntityType::Polyline,
-    katana::entity::EntityType::Circle, katana::entity::EntityType::Text};
+    katana::entity::EntityType::Point,         katana::entity::EntityType::Line,
+    katana::entity::EntityType::Arc,           katana::entity::EntityType::Polyline,
+    katana::entity::EntityType::Circle,        katana::entity::EntityType::Text,
+    katana::entity::EntityType::CurvePolyline, katana::entity::EntityType::Ellipse};
 
 // Whether a typed line of the note has a field in it.
 bool hasField(std::string_view line)

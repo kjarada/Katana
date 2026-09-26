@@ -545,6 +545,88 @@ TEST(IfcExportDrawing, EntitiesAreTheClassesTheirLayersNameAndNoneIsAProxy)
     EXPECT_NE(out.text.find("IFCPRESENTATIONLAYERASSIGNMENT('Survey/Kerb',"), std::string::npos);
 }
 
+// The drawing system's kinds (docs/drawing.md) keep their curves, as an arc
+// does (docs/ifc.md): a curve polyline an IfcIndexedPolyCurve with an
+// IfcArcIndex through the true middle of each arc, an elliptical arc an
+// IfcEllipse trimmed by parameter, a spline a (rational) B-spline with
+// knots - and a kerb drawn with an arc is still a kerb.
+TEST(IfcExportDrawing, TheDrawingSystemsCurvesStayCurvesAndACurvedKerbIsStillAKerb)
+{
+    Model model = scenario();
+    // Local (the scenario's origin is 333900, 6249900): east from (100,120)
+    // to (110,120) at 20, then a semicircle north to (110,130) at 21,
+    // bulging east through (115,125) - its middle, at the mean 20.5.
+    add(model,
+        katana::geometry::CurvePolyline2{{{Point2{334000.0, 6250020.0}, 0.0, 20.0},
+                                          {Point2{334010.0, 6250020.0}, 1.0, 20.0},
+                                          {Point2{334010.0, 6250030.0}, 0.0, 21.0}},
+                                         false},
+        "Survey/Kerb");
+    // Half an ellipse, semi-axes 4 east and 2, from eccentric anomaly 0.
+    add(model,
+        katana::geometry::Ellipse2{Point2{334020.0, 6250020.0}, katana::geometry::Vec2(4.0, 0.0),
+                                   0.5, 0.0, 3.0},
+        "Survey/Detail");
+    // A rational quadratic: three control points, clamped knots, a middle
+    // weight of a half.
+    katana::geometry::Spline2 spline;
+    spline.degree = 2;
+    spline.controlPoints = {Point2{334020.0, 6250040.0}, Point2{334025.0, 6250045.0},
+                            Point2{334030.0, 6250040.0}};
+    spline.knots = {0.0, 0.0, 0.0, 1.0, 1.0, 1.0};
+    spline.weights = {1.0, 0.5, 1.0};
+    add(model, spline, "Survey/Detail");
+
+    const auto out = exported({&model, {}, {}}, mga56());
+    EXPECT_EQ(out.entitiesWritten, 8u);
+    EXPECT_EQ(out.entitiesSkipped, 0u);
+    EXPECT_EQ(out.classes.at("IfcKerb"), 2u) << "the curved kerb fell to an annotation";
+
+    const auto polycurves = instancesOf(out.text, "IFCINDEXEDPOLYCURVE");
+    const auto curved = std::find_if(polycurves.begin(), polycurves.end(), [](const std::string& line) {
+        return line.find("IFCLINEINDEX((1,2)),IFCARCINDEX((2,4,3))") != std::string::npos;
+    });
+    ASSERT_NE(curved, polycurves.end()) << "no polycurve of a line then an arc";
+    const auto lists = instancesOf(out.text, "IFCCARTESIANPOINTLIST3D");
+    EXPECT_TRUE(std::any_of(lists.begin(), lists.end(), [](const std::string& line) {
+        return line.find("((100.,120.,20.),(110.,120.,20.),(110.,130.,21.),(115.,125.,20.5))") !=
+               std::string::npos;
+    })) << "the arc's middle is ON it, at its ends' mean height";
+
+    const auto trimmed = instancesOf(out.text, "IFCTRIMMEDCURVE");
+    ASSERT_EQ(trimmed.size(), 1u);
+    EXPECT_NE(trimmed[0].find("(IFCPARAMETERVALUE(0.)),(IFCPARAMETERVALUE(3.)),.T.,.PARAMETER."),
+              std::string::npos)
+        << trimmed[0];
+    const auto ellipses = instancesOf(out.text, "IFCELLIPSE");
+    ASSERT_EQ(ellipses.size(), 1u);
+    EXPECT_NE(ellipses[0].find(",4.,2.)"), std::string::npos) << ellipses[0];
+
+    const auto splines = instancesOf(out.text, "IFCRATIONALBSPLINECURVEWITHKNOTS");
+    ASSERT_EQ(splines.size(), 1u);
+    const auto args = argumentsOf(splines[0]);
+    ASSERT_EQ(args.size(), 9u) << splines[0];
+    EXPECT_EQ(args[0], "2");
+    EXPECT_EQ(args[5], "(3,3)") << "each distinct knot once, with its multiplicity";
+    EXPECT_EQ(args[6], "(0.,1.)");
+    EXPECT_EQ(args[8], "(1.,0.5,1.)");
+}
+
+TEST(IfcExportDrawing, ARulesFileMayNameTheDrawingSystemsKinds)
+{
+    const auto rules = ifc::parseClassificationRules(
+        "rule,words,kinds,class,predefined_type\n"
+        "kerb,KERB,CurvePolyline;Spline,IfcKerb,\n"
+        "pit,PIT,ellipse,IfcDistributionChamberElement,INSPECTIONCHAMBER\n");
+    ASSERT_TRUE(rules.ok()) << rules.error().describe();
+    ASSERT_EQ(rules->size(), 2u);
+    EXPECT_EQ((*rules)[0].kinds, (std::vector<katana::entity::EntityType>{
+                                     katana::entity::EntityType::CurvePolyline,
+                                     katana::entity::EntityType::Spline}));
+    EXPECT_EQ((*rules)[1].kinds,
+              std::vector<katana::entity::EntityType>{katana::entity::EntityType::Ellipse});
+}
+
 TEST(IfcExportDrawing, SelectionAndOptionsLimitWhatIsWritten)
 {
     const Model model = scenario();

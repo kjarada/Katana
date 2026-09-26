@@ -398,7 +398,10 @@ Result<EntityType> entityTypeFromString(std::string_view name)
     constexpr int kKindCount = static_cast<int>(std::variant_size_v<Geometry>);
     for (int raw = 0; raw < kKindCount; ++raw) {
         const auto type = static_cast<EntityType>(raw);
-        if (toString(type) == name) {
+        // In any case: callers once title-cased the name to the enumerator's
+        // spelling, which turned "curvepolyline" into "Curvepolyline" and
+        // refused the one kind with a capital inside its name.
+        if (katana::core::equalsIgnoringCase(toString(type), name)) {
             return type;
         }
     }

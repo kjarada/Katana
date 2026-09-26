@@ -94,6 +94,14 @@ class CommandInterpreter {
     // front end that reads INFO <file> first, so that INFO 12 still reaches
     // the entity when no file of that name exists.
     [[nodiscard]] static bool isEntityId(std::string_view word);
+    // Whether `line` replaces the drawing: NEW, or an OPEN of a project
+    // directory - not OPEN with no target, SELECTION or #ids, which opens
+    // polylines (docs/drawing.md). The window asks it before its discard
+    // question and its reset of the backdrop and views, the session before
+    // its missing-customisation check, katana_mcp before its unsaved-changes
+    // guard, so an OPEN #12 neither asks to discard the drawing nor is
+    // refused for unsaved changes.
+    [[nodiscard]] static bool replacesDocument(std::string_view line);
     // What the scope word VIEW means (scope_verbs.hpp): the window's active
     // plan view, or the view with the id given, with its own hidden layers
     // and its visible area. Headless there is none, and VIEW is refused in

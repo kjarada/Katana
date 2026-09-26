@@ -545,6 +545,28 @@ Result<AreaResult> computeArea(const Document& document, const std::vector<Entit
                 {id, katana::entity::EntityType::Circle, circle->area(), circle->perimeter()});
             continue;
         }
+        // The drawing system's closed figures (docs/drawing.md): exact, the
+        // arcs' segments of area included, not their chords.
+        if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&entity->geometry)) {
+            if (!curve->closed || curve->vertices.size() < 3) {
+                result.skipped.push_back({id, "an open polyline has no area"});
+            } else {
+                result.items.push_back(
+                    {id, katana::entity::EntityType::CurvePolyline, curve->area(), curve->length()});
+            }
+            continue;
+        }
+        if (const auto* ellipse = std::get_if<katana::geometry::Ellipse2>(&entity->geometry)) {
+            if (!ellipse->isFull()) {
+                result.skipped.push_back({id, "an elliptical arc has no area"});
+            } else {
+                result.items.push_back({id, katana::entity::EntityType::Ellipse,
+                                        katana::math::kPi * ellipse->majorRadius() *
+                                            ellipse->minorRadius(),
+                                        ellipse->length()});
+            }
+            continue;
+        }
         const auto* polyline = std::get_if<katana::geometry::Polyline2>(&entity->geometry);
         if (polyline == nullptr) {
             result.skipped.push_back({id, withArticle(entity->type()) + " has no area"});
@@ -604,8 +626,9 @@ std::string formatAreaReport(const AreaResult& result)
                        " - drawing unit '" + result.linearUnit + "' (project settings)\n";
     for (const AreaItem& item : result.items) {
         text += "  " + std::to_string(item.id) +
-                (item.type == katana::entity::EntityType::Circle ? "  circle    "
-                                                                  : "  polyline  ") +
+                (item.type == katana::entity::EntityType::Circle    ? "  circle    "
+                 : item.type == katana::entity::EntityType::Ellipse ? "  ellipse   "
+                                                                    : "  polyline  ") +
                 "area " + area(item.area) + "   perimeter " + fixed(item.perimeter, 3) + " " +
                 lengthUnit + "\n";
     }

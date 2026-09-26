@@ -60,11 +60,14 @@ Result<AnchoredPoint> anchoredPoint(const katana::entity::Model& model, const An
 AnchorPoint defaultAnchor(const katana::entity::Geometry& geometry)
 {
     if (std::holds_alternative<katana::geometry::Arc2>(geometry) ||
-        std::holds_alternative<katana::geometry::Circle2>(geometry)) {
+        std::holds_alternative<katana::geometry::Circle2>(geometry) ||
+        std::holds_alternative<katana::geometry::Ellipse2>(geometry)) {
         return AnchorPoint::Centre;
     }
     if (std::holds_alternative<katana::geometry::Segment2>(geometry) ||
         std::holds_alternative<katana::geometry::Polyline2>(geometry) ||
+        std::holds_alternative<katana::geometry::CurvePolyline2>(geometry) ||
+        std::holds_alternative<katana::geometry::Spline2>(geometry) ||
         std::holds_alternative<katana::entity::LeaderGeometry>(geometry)) {
         return AnchorPoint::Start;
     }
