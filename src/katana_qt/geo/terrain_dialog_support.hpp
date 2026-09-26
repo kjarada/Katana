@@ -24,6 +24,7 @@
 
 #include "command_runner.hpp"
 #include "customisation/scope_filter_widget.hpp"
+#include "geo/point_pick.hpp"
 #include "jobs.hpp"
 
 class QComboBox;
@@ -66,6 +67,9 @@ struct TerrainDialogContext {
     // dialog may not call into it as it goes (TerrainRun holds its state
     // weakly instead).
     std::function<void(std::function<void(JobId, const VerbOutcome&)>)> listen;
+    // A point picked in a plan view (GeoServices::pickPoint). May be unset:
+    // a dialog then offers no Pick, and the point is typed.
+    PointPicker pickPoint;
 };
 
 // The context the window's geoprocessing workbench gives a terrain dialog.

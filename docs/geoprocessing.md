@@ -125,6 +125,11 @@ floating-point data, in `spillDirectory`, and `RunOutputs::file` names it.
 raster is written: without passing through memory, in the form it is kept in
 (`GdalRun.ARasterLargerThanTheMemoryLimitSpillsToATiledGeoTiff`).
 
+A `raster color-map` output made in memory has its bands named red, green,
+blue and, with `--add-alpha`, alpha before it is spilled or read: GDAL 3.13
+leaves them Undefined in MEM, and a picture copied on so drew its clear
+cells opaque (docs/terrain.md, "Viewshed and line of sight", Decided).
+
 ### Names only: staging
 
 A few arguments take a dataset by name only: `raster calc`'s inputs, the
@@ -890,12 +895,80 @@ Where it differs from the plan:
 
 ### T4: Statistics by area, sampling and drape
 
-Not started. `ResultMode::SetProperties` and `UpdateGeometry` are its
-applies, with `geo::unchangedSince`.
+Built: `RASTER ZONAL` (`src/katana_app/geo/zonal_verbs.cpp`), `RASTER SAMPLE`
+and `DRAPE` (`src/katana_app/geo/drape_verbs.cpp`), recorded in
+`docs/terrain.md`, "Statistics by area" and "Sampling and drape". Window:
+Terrain > Analysis > Statistics by Area (`terrainZonal`, `zonalStatsDialog`)
+and Drape and Sample Heights (`terrainDrape`, `drapeDialog`). katana_cli
+and katana_mcp: the verbs, through the session (`katana_run_commands`); no
+tool of their own. Pieces of their own:
+
+- `include/katana/gis/raster_sampling.hpp`: a raster's value at a point,
+  through `GDALRasterInterpolateAtPoint` - the C API, since no algorithm of
+  the framework samples at arbitrary points without a vector round trip
+  (`raster pixel-info` writes a GeoJSON per call).
+- `include/katana/cad/geo/drape.hpp`: the drape as a domain edit, given the
+  ground as a callback, so katana_cad never sees GDAL.
+- `src/katana_app/geo/analysis_support.hpp`, shared with T5: the ground
+  (a surface on its triangles, or a raster file), points written `x,y`, and
+  keyword-and-value words (`AT x,y`) taken out of a line before the rest
+  goes to the one scope parser through `vector::readVerbWords`.
+- `GeoServices::pickPoint` (`src/katana_qt/geo/point_pick.hpp`): the next
+  left click in any plan view, for a dialog's line.
+
+Both in-place applies compare their targets with the copies taken at
+prepare (`geo::unchangedSince`) and refuse when they differ. ZONAL writes
+through `ResultMode::SetProperties`, and in the same step removes a
+`<prefix>_<stat>` an earlier run left where this run has no number.
+`ZonalContract.TheVerbStillFindsTheArgumentsItBinds` pins `raster
+zonal-stats`'s `input`, `zones`, `stat`, `include-field` and `pixels`.
+
+Where it differs from the plan:
+
+- The zones table carries `katana_id` only (GDAL includes the fields it is
+  asked for, and the zones' own properties are theirs already).
+- The statistics offered are the single-number ones; `pixels=centre` is
+  GDAL's `default`.
+- The pick is an event filter on the plan views, not the tool host the
+  "Not done" entry below once proposed: a tool ends in a command, and a
+  pick changes nothing.
+- The dialog adds `zonalOverwrite` and `zonalPreview`; the drape dialog's
+  Sample tab adds `samplePoint`, `sampleAdd`, `sampleRemove` and
+  `sampleMethod` to the plan's `sampleSource`, `samplePoints` and
+  `samplePick`.
 
 ### T5: Viewshed and line of sight
 
-Not started.
+Built: `RASTER VIEWSHED` and `LOS` (`src/katana_app/geo/viewshed_verbs.cpp`),
+recorded in `docs/terrain.md`, "Viewshed and line of sight". Window:
+Terrain > Analysis > Viewshed and Line of Sight (`terrainViewshed`,
+`viewshedDialog`), whose Pick buttons use T4's `GeoServices::pickPoint`.
+katana_cli and katana_mcp: the verbs, through the session
+(`katana_run_commands`); no tool of their own.
+
+- Each observer is one `raster viewshed` run, bound with its own copy of
+  the input (never a dataset shared between runs), every option passed
+  explicitly - `curvature-coefficient` and `visible-value` included - and
+  the runs are unioned natively on the input's grid.
+- An observer off the raster is refused by the work, which is where the
+  raster is first opened.
+- The line of sight is `terrain::lineOfSight`
+  (`include/katana/terrain/line_of_sight.hpp`), fed from the analysis
+  support's ground: a TIN, or a raster through `gis::RasterSampler`.
+- `ViewshedContract.TheVerbStillFindsTheArgumentsItBinds` pins `raster
+  viewshed`'s `input`, `position`, `height`, `target-height`,
+  `max-distance`, `curvature-coefficient` and `visible-value`, and `raster
+  polygonize`'s `attribute-name`.
+
+Where it differs from the plan:
+
+- The viewshed test's fixture is a 1 m wall under a 1.7 m eye, not a 5 m
+  wall: with the eye below the wall top no shadow ends, so the plan's
+  similar-triangles value is not a viewshed's (`docs/terrain.md`).
+- The dialog adds `viewshedObserver`, `viewshedAdd`, `viewshedRemove`,
+  `viewshedUseScope`, `viewshedCurvature` and `viewshedName` to the plan's
+  fields, and the Line of Sight tab `losHeight`, `losTargetHeight` and
+  `losCurvature`.
 
 ### T6: RASTER GRID: survey points to a DEM
 
@@ -1564,10 +1637,8 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
 
 - **`VIEW` in a headless session** is refused naming `AREA`, as MODIFY
   refuses it.
-- **No point is picked in the plan view.** The plan gave `GeoServices` a
-  point pick for a dialog (the viewshed's observer); the window has no such
-  service yet, so it is not declared either. The package that first needs
-  it (T5) adds it through the plan view's tool host.
+- **A picked point does not snap.** `GeoServices::pickPoint` takes the
+  click where it is; snapping belongs to a running tool, and a pick is none.
 - **Stopping late.** Pipelines and vector algorithms report progress once,
   so a cancel stops them only at their end.
 - **PREVIEW opens files on the calling thread.** Validation opens datasets
