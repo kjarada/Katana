@@ -23,6 +23,7 @@
 #include "katana/interop/terrain_io.hpp"
 #include "replies.hpp"
 #include "terrain_verbs.hpp"
+#include "vector_support.hpp" // V5: TO SELECTION and TO REPORT
 
 namespace katana::app::geo {
 
@@ -554,10 +555,31 @@ Result<std::string> applyOutputs(Context& context, const ApplyRequest& request,
         return reply;
     }
     case Target::Kind::Selection:
-    case Target::Kind::Report:
+    case Target::Kind::Report: {
         // ---- V5: GIS SQL: TO SELECTION and TO REPORT ----
-        return unsupported("TO SELECTION and TO REPORT are not available yet: a result goes to "
-                           "a layer, a reference raster or a file");
+        // A query's rows as records, or its katana_id column as the
+        // selection (vector_support.hpp): GIS SQL's AS REPORT and AS SELECT
+        // are these, and so is the GDAL verb's TO REPORT, TO SELECTION.
+        if (!outputs.features) {
+            return unsupported("TO SELECTION and TO REPORT take features, and this result has "
+                               "none");
+        }
+        if (target.kind == Target::Kind::Selection) {
+            auto selected = vector::selectFeatures(context, *outputs.features, request.arg);
+            if (!selected) {
+                return selected.error();
+            }
+            records.push_back(*selected);
+        } else {
+            records = vector::reportRecords(*outputs.features, request.arg);
+        }
+        for (const gp::Diagnostic& diagnostic : outputs.diagnostics) {
+            if (!diagnostic.failure) {
+                records.push_back(warningRecord(diagnostic.message));
+            }
+        }
+        return vector::joined(records);
+    }
     case Target::Kind::Default:
     case Target::Kind::Layer:
     case Target::Kind::Reference:
