@@ -154,13 +154,16 @@ TEST(UtilityDialog, EveryControlHasItsObjectName)
           "utilitySourceFile", "utilitySourceDrawing", "utilityScope", "utilityScopeSelection",
           "utilityScopeView", "utilityView", "utilityOnScreen", "utilityScopeLayers",
           "utilityLayers", "utilitySublayers", "utilityScopeDrawing", "utilityTypePoint",
-          "utilityFilterLayer", "utilityFilterProperty", "utilityFilterValue",
-          "utilityDrawnOnly",
+          "utilityFilterLayer", "utilityFilterProperty", "utilityFilterValue", "utilityDrawnOnly",
           // Clearance's works, and the Schedule tab.
           "utilityDesignFile", "utilityDesignEntity", "utilityDesignEntityId",
           "utilityDesignUseSelected", "utilityDesignLevel", "utilityDesignAlignment",
           "utilityDesignAlignmentName", "utilityScheduleOut", "utilityScheduleOutBrowse",
-          "utilityScheduleSchema", "utilityScheduleSchemaBrowse"}) {
+          "utilityScheduleSchema", "utilityScheduleSchemaBrowse",
+          // Draw's fields for geometry in the drawing.
+          "utilityGeometryGroup", "utilityServiceType", "utilityMethod", "utilityHUnc",
+          "utilityVUnc", "utilityHeights", "utilityLevelRef", "utilityPath", "utilityOwner",
+          "utilityMaterial", "utilityDiameter", "utilityServiceStatus", "utilityFields"}) {
         EXPECT_NE(dialog.findChild<QWidget*>(name), nullptr) << name;
     }
     auto* tabs = child<QTabWidget>(dialog, "utilityTabs");
@@ -545,7 +548,7 @@ TEST(UtilityDialog, ClearanceMeasuresAgainstADesignFileADrawnLineOrAnAlignment)
               "UTILITY CLEARANCE VIEW 1 EXTENTS DESIGN ALIGNMENT \"Main Road\" MARGIN 2");
 }
 
-TEST(UtilityDialog, RegradeAndScheduleAlwaysReadWhatIsDrawnAndDrawAlwaysAFile)
+TEST(UtilityDialog, RegradeAndScheduleAlwaysReadWhatIsDrawnAndDrawReadsEither)
 {
     // Whatever source is chosen above the tabs.
     UtilityForm regrade = formFor(UtilityTool::Regrade);
@@ -564,11 +567,59 @@ TEST(UtilityDialog, RegradeAndScheduleAlwaysReadWhatIsDrawnAndDrawAlwaysAFile)
     EXPECT_EQ(lineOf(schedule), "UTILITY SCHEDULE \"C:/Deliverables/as built.csv\" DRAWING "
                                 "SCHEMA C:/survey/schema.csv");
 
+    // Draw reads what is chosen: the survey or an import in the drawing, or
+    // the schedule file.
     UtilityForm draw = drawn(UtilityTool::Draw, "DRAWING");
     draw.schedule = "C:/survey/schedule.csv";
     draw.spacing = "8";
+    EXPECT_EQ(utilitySourceOf(draw), UtilitySource::Drawing);
+    EXPECT_EQ(lineOf(draw), "UTILITY DRAW DRAWING SPACING 8");
+    draw.source = UtilitySource::File;
     EXPECT_EQ(utilitySourceOf(draw), UtilitySource::File);
     EXPECT_EQ(lineOf(draw), "UTILITY DRAW C:/survey/schedule.csv SPACING 8");
+}
+
+TEST(UtilityDialog, ADrawOfWhatIsDrawnWritesWhatTheGeometryCannotSayInTheVerbsOrder)
+{
+    UtilityForm draw = drawn(UtilityTool::Draw, "LAYERS survey WHERE PROP=code:W*");
+    // Nothing given: each line and point says its own, or the verb refuses.
+    EXPECT_EQ(lineOf(draw), "UTILITY DRAW LAYERS survey WHERE PROP=code:W*");
+    draw.serviceType = "water";
+    draw.method = "EML";
+    draw.horizontalUncertainty = "0.1";
+    draw.verticalUncertainty = "0.3";
+    draw.heights = "surface";
+    draw.levelReference = "centre";
+    draw.path = "detected";
+    draw.owner = "Water Co";
+    draw.material = "DICL";
+    draw.diameter = "150";
+    draw.status = "in service";
+    draw.fields = "line=ASSET_ID, point=PT_ID";
+    draw.spacing = "8";
+    draw.minCover = "0.6";
+    draw.layerPrefix = "located";
+    EXPECT_EQ(lineOf(draw),
+              "UTILITY DRAW LAYERS survey WHERE PROP=code:W* TYPE water METHOD EML H_UNC 0.1 "
+              "V_UNC 0.3 HEIGHTS surface LEVEL_REF centre PATH detected OWNER \"Water Co\" "
+              "MATERIAL DICL DIAMETER_MM 150 STATUS \"in service\" FIELDS \"line=ASSET_ID, "
+              "point=PT_ID\" SPACING 8 MINCOVER 0.6 LAYER located");
+    // A schedule says all of it in its columns: none of it is written.
+    draw.source = UtilitySource::File;
+    draw.schedule = "C:/survey/schedule.csv";
+    EXPECT_EQ(lineOf(draw),
+              "UTILITY DRAW C:/survey/schedule.csv SPACING 8 MINCOVER 0.6 LAYER located");
+
+    // What does not read is refused by its field, and nothing is written.
+    UtilityForm bad = drawn(UtilityTool::Draw, "DRAWING");
+    bad.horizontalUncertainty = "ten cm";
+    EXPECT_TRUE(has(refusalOf(bad), "The horizontal uncertainty must be a number of metres"));
+    bad.horizontalUncertainty.clear();
+    bad.diameter = "150mm";
+    EXPECT_TRUE(has(refusalOf(bad), "The diameter must be a number of millimetres, not '150mm'"));
+    bad.diameter.clear();
+    bad.owner = "The \"Water\" Board";
+    EXPECT_TRUE(has(refusalOf(bad), "The owner holds a double quote"));
 }
 
 TEST(UtilityDialog, AScopeOrWorksThatCannotBeSaidWritesNoLine)
@@ -689,13 +740,15 @@ TEST(UtilityDialog, TheSourceAndTheScopeControlsGiveTheLineItsServices)
     fill(dialog, "utilityFilterValue", "water");
     EXPECT_EQ(command->text(), "UTILITY REPORT VIEW 4 WHERE PROP=utility.type:water");
 
-    // Draw reads its file whatever is chosen; the choice is not its to make.
+    // Draw reads what is chosen: here what is drawn, the survey's or an
+    // import's geometry, with the fields for what it cannot say live.
     dialog.showTool(UtilityTool::Draw);
-    EXPECT_EQ(command->text(), "UTILITY DRAW C:/survey/schedule.csv");
-    EXPECT_TRUE(enabled(dialog, "utilitySchedule"));
-    EXPECT_FALSE(enabled(dialog, "utilityScope"));
-    EXPECT_FALSE(enabled(dialog, "utilitySourceFile"));
-    EXPECT_FALSE(enabled(dialog, "utilitySourceDrawing"));
+    EXPECT_EQ(command->text(), "UTILITY DRAW VIEW 4 WHERE PROP=utility.type:water");
+    EXPECT_FALSE(enabled(dialog, "utilitySchedule"));
+    EXPECT_TRUE(enabled(dialog, "utilityScope"));
+    EXPECT_TRUE(enabled(dialog, "utilitySourceFile"));
+    EXPECT_TRUE(enabled(dialog, "utilitySourceDrawing"));
+    EXPECT_TRUE(enabled(dialog, "utilityGeometryGroup"));
     // Regrade reads the drawing, and grades: the spacing is live.
     dialog.showTool(UtilityTool::Regrade);
     EXPECT_EQ(command->text(), "UTILITY REGRADE VIEW 4 WHERE PROP=utility.type:water");
@@ -780,6 +833,58 @@ TEST(UtilityDialog, AScopeThatTakesNoUtilityLineIsSaidSoAndNothingIsSaidRegraded
     EXPECT_EQ(text(dialog, "utilityStatus"),
               "Nothing in the scope is a utility line: nothing was written.");
     EXPECT_FALSE(QFile::exists(out));
+}
+
+TEST(UtilityDialog, ADrawOfTheSurveyInTheDrawingRunsTheVerbAndSaysWhenNothingWasLeftToDraw)
+{
+    // A located main as an import leaves it: a line named by its code.
+    DrawnBench bench;
+    ASSERT_TRUE(bench.interpreter.run("LINE 334000,6250000 334010,6250000").ok());
+    const katana::entity::EntityId main = bench.document.model().entities.ids().back();
+    ASSERT_TRUE(bench.document
+                    .execute(katana::commands::setEntityProperty({main}, "code", std::string("W7")))
+                    .ok());
+    UtilityDialogContext context = bench.context();
+    std::vector<QString> ran;
+    context.execute = [&bench, &ran](const QString& line) -> Result<std::string> {
+        ran.push_back(line);
+        return bench.interpreter.run(line.toStdString());
+    };
+    UtilityToolsDialog dialog(context);
+    dialog.showTool(UtilityTool::Draw);
+    // The file is the source: the geometry's fields are not the line's.
+    EXPECT_FALSE(enabled(dialog, "utilityGeometryGroup"));
+    press(dialog, "utilitySourceDrawing");
+    EXPECT_TRUE(enabled(dialog, "utilityGeometryGroup"));
+    dialog.scopeControls().setChoice(katana::qt::ScopeChoice::Drawing);
+    // The choices are the verb's own words, as --fill takes them.
+    auto* method = child<QComboBox>(dialog, "utilityMethod");
+    ASSERT_NE(method, nullptr);
+    EXPECT_EQ(method->itemText(0), "not given");
+    method->setCurrentIndex(method->findText("EML"));
+    auto* type = child<QComboBox>(dialog, "utilityServiceType");
+    ASSERT_NE(type, nullptr);
+    type->setCurrentIndex(type->findText("water"));
+    fill(dialog, "utilityHUnc", "0.2");
+    EXPECT_EQ(text(dialog, "utilityCommand"),
+              "UTILITY DRAW DRAWING TYPE water METHOD EML H_UNC 0.2");
+
+    const std::size_t steps = bench.document.history().undoCount();
+    click(dialog, "utilityRun");
+    ASSERT_EQ(ran.size(), 1u);
+    EXPECT_TRUE(text(dialog, "utilityOutput").startsWith("utilities drawn lines=1 "))
+        << text(dialog, "utilityOutput").toStdString();
+    EXPECT_TRUE(text(dialog, "utilityOutput").contains("line id=W7 type=water"));
+    EXPECT_TRUE(text(dialog, "utilityStatus").startsWith("Drawn as one undo step"));
+    EXPECT_EQ(bench.document.history().undoCount(), steps + 1);
+
+    // Again: the main is drawn already, and nothing else in the scope can be.
+    click(dialog, "utilityRun");
+    EXPECT_TRUE(text(dialog, "utilityOutput").contains("nothing drawn"));
+    EXPECT_EQ(text(dialog, "utilityStatus"),
+              "Nothing in the scope to draw: what it took is drawn already or cannot be a "
+              "service. Nothing was added to the undo history.");
+    EXPECT_EQ(bench.document.history().undoCount(), steps + 1);
 }
 
 TEST(UtilityDialog, UseSelectedTakesTheOneSelectedEntityAsTheWorks)

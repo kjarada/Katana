@@ -4,7 +4,6 @@
 #include <QClipboard>
 #include <QDialogButtonBox>
 #include <QFileInfo>
-#include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonDocument>
@@ -23,6 +22,7 @@
 #include <vector>
 
 #include "geo/replies.hpp"
+#include "theme.hpp"
 
 namespace katana::qt {
 
@@ -81,7 +81,7 @@ DatasetInfoDialog::DatasetInfoDialog(const QString& path, DatasetInfoRunner runn
     resize(760, 520);
     auto* layout = new QVBoxLayout(this);
 
-    const QFont fixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    const QFont fixed = katana::qt::theme::monospaceFont();
     tabs_ = new QTabWidget(this);
     tabs_->setObjectName(QStringLiteral("datasetInfoTabs"));
     summary_ = new QPlainTextEdit(this);

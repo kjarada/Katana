@@ -29,6 +29,9 @@ std::vector<Point2> heightVertices(const katana::entity::Entity& entity)
     if (const auto* polyline = std::get_if<katana::geometry::Polyline2>(&entity.geometry)) {
         return polyline->vertices;
     }
+    if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&entity.geometry)) {
+        return curve->positions();
+    }
     return {};
 }
 
@@ -75,6 +78,27 @@ DrapeCommand drapeCommand(const katana::entity::Model& model,
         const katana::entity::Entity* entity = model.entities.find(draped.id);
         if (entity == nullptr) {
             ++out.missing;
+            continue;
+        }
+        // A curve polyline holds its heights in its vertices (docs/drawing.md,
+        // "Which kind a polyline is"), so the drape is a geometry edit: the
+        // same vertices and bulges, each vertex given the ground's height.
+        // Only a difference becomes an edit, as below.
+        if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&entity->geometry)) {
+            katana::geometry::CurvePolyline2 withHeights = *curve;
+            if (draped.heights.size() != withHeights.vertices.size()) {
+                ++out.missing; // not the polyline the heights were sampled for
+                continue;
+            }
+            for (std::size_t i = 0; i < withHeights.vertices.size(); ++i) {
+                withHeights.vertices[i].height = draped.heights[i];
+            }
+            const bool changed = withHeights != *curve;
+            if (changed) {
+                transaction->add(cmd::setEntityGeometry(entity->id, std::move(withHeights)));
+            }
+            out.changed += changed ? 1U : 0U;
+            out.unchanged += changed ? 0U : 1U;
             continue;
         }
         // The properties as setHeights would leave them, compared key by key

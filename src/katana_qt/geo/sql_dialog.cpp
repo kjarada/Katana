@@ -3,7 +3,6 @@
 #include "geo/sql_dialog.hpp"
 
 #include <QComboBox>
-#include <QFontDatabase>
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QLineEdit>
@@ -17,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "theme.hpp"
 #include "geo/replies.hpp"
 #include "geo/vector_support.hpp"
 #include "katana/cad/document.hpp"
@@ -119,7 +119,7 @@ GisSqlDialog::GisSqlDialog(GisDialogContext context, QWidget* parent)
     fields().addRow(QString(), refresh_);
     sql_ = new QPlainTextEdit(this);
     sql_->setObjectName("gisSqlText");
-    sql_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    sql_->setFont(katana::qt::theme::monospaceFont());
     sql_->setPlaceholderText(
         "SELECT owner, SUM(ST_Area(geometry)) AS area FROM polygons GROUP BY owner");
     sql_->setToolTip("One SELECT: a query reads the drawing and never changes it");

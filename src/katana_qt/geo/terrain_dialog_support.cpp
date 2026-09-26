@@ -4,7 +4,6 @@
 
 #include <QComboBox>
 #include <QDialog>
-#include <QFontDatabase>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPlainTextEdit>
@@ -14,6 +13,7 @@
 #include <string>
 #include <utility>
 
+#include "theme.hpp"
 #include "geo/geo_workbench.hpp"
 #include "geo/replies.hpp"
 #include "katana/core/text.hpp"
@@ -118,7 +118,7 @@ QLineEdit* terrainCommandField(QWidget* parent, const QString& name)
     auto* command = new QLineEdit(parent);
     command->setObjectName(name);
     command->setReadOnly(true);
-    command->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    command->setFont(katana::qt::theme::monospaceFont());
     return command;
 }
 
@@ -127,7 +127,7 @@ QPlainTextEdit* terrainReplyField(QWidget* parent, const QString& name)
     auto* reply = new QPlainTextEdit(parent);
     reply->setObjectName(name);
     reply->setReadOnly(true);
-    reply->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    reply->setFont(katana::qt::theme::monospaceFont());
     reply->setMinimumHeight(110);
     return reply;
 }

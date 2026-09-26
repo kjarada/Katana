@@ -13,9 +13,13 @@
 //
 // The rules:
 //   - A point takes the height at its position; a line its two ends; a
-//     polyline every vertex (a closed one's too). Nothing else has vertices
-//     a height belongs to - an arc, a circle, a text - and those are left
-//     as they are and counted by type.
+//     polyline every vertex (a closed one's too). A curve polyline (one with
+//     arcs) takes a height at every vertex too, written into its geometry,
+//     where it keeps its heights (docs/drawing.md): its arcs stay arcs, and
+//     the height between two vertices is the geometry's own rule, linear by
+//     length. Nothing else has vertices a height belongs to - an arc, a
+//     circle, an ellipse, a spline, a text - and those are left as they are
+//     and counted by type.
 //   - A vertex off the ground, or on a hole in it, is left WITHOUT a height
 //     and counted: the drape defines the heights of what it takes, and a
 //     height kept from before would be another surface's, mixed in
@@ -47,7 +51,8 @@ using HeightAt = std::function<std::optional<double>(const katana::geometry::Poi
 
 // The plan positions whose heights an entity carries, in the order
 // entity::heightsOf reads them: a point's position, a line's two ends, a
-// polyline's vertices. Empty for any other entity.
+// polyline's vertices - a curve polyline's in its vertex order, the order
+// its geometry holds its heights in. Empty for any other entity.
 [[nodiscard]] std::vector<katana::geometry::Point2>
 heightVertices(const katana::entity::Entity& entity);
 

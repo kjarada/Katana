@@ -152,7 +152,8 @@ struct ClassificationRule {
 //   rule        the rule's name, shown in reports                   required
 //   words       its words, separated by ';' ("POLE*;LP")             required
 //   kinds       Point;Line;Arc;Polyline;Circle;Text;Dimension;
-//               Label;Leader - empty for any kind
+//               Label;Leader;CurvePolyline;Ellipse;Spline - empty for
+//               any kind
 //   class       the IFC class, as the schema spells it ("IfcColumn")  required
 //   predefined_type   "COLUMN"; empty when the class has none
 //   object_type what a USERDEFINED one is; required with USERDEFINED

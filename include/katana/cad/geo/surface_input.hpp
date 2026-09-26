@@ -11,7 +11,11 @@
 // ones the window's Surface From Drawing kept, with one change:
 //
 //   - A point is a survey point; a polyline, and a line, a breakline through
-//     its vertices, closed when the polyline is.
+//     its vertices, closed when the polyline is. A curve polyline (one with
+//     arcs, holding its heights itself) is a breakline through its chords
+//     at geometry::kCurveChordTolerance, each chord point at the height
+//     interpolated by length along its segment - none where an end has
+//     none, which then breaks the breakline as a missing height does.
 //   - A vertex with no height is left out and counted, and a breakline is
 //     broken there: a null is "not surveyed", and triangulating it at zero
 //     would dig a pit to the datum under it.
@@ -22,8 +26,9 @@
 //     at 0, and one plain line among levelled strings a trench to the datum
 //     (absent is not zero, CLAUDE.md section 11).
 //
-// Everything else a scope takes (text, arcs, circles, dimensions ...) is
-// skipped and counted by its type, never silently dropped.
+// Everything else a scope takes (text, arcs, circles, ellipses, splines,
+// dimensions ...) is skipped and counted by its type, never silently
+// dropped.
 
 #include <cstddef>
 #include <map>

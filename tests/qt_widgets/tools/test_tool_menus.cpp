@@ -49,6 +49,17 @@ void countActions(const QMenu& menu, std::map<std::string, int>& seen)
     }
 }
 
+// The first item of `menu`, past the section title each group opens with.
+const QAction* firstItem(const QMenu& menu)
+{
+    for (const QAction* action : menu.actions()) {
+        if (!action->isSeparator()) {
+            return action;
+        }
+    }
+    return nullptr;
+}
+
 // One menu and one toolbar per category the catalogue has.
 struct Menus {
     QMainWindow window;
@@ -144,9 +155,11 @@ TEST(ToolMenus, ACircleVariantIsItemInTheCircleSubmenuNamedByItsVariant)
 TEST(ToolMenus, LinesComeBeforeCurvesInTheDrawMenu)
 {
     Menus built;
-    const QList<QAction*> items = built.menus.at("Draw")->actions();
-    ASSERT_FALSE(items.isEmpty());
-    EXPECT_EQ(items.front()->objectName(), "draw.point") << "the Lines group, order 10";
+    const QAction* first = firstItem(*built.menus.at("Draw"));
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->objectName(), "draw.point") << "the Lines group, order 10";
+    // Under its group's title.
+    EXPECT_EQ(built.menus.at("Draw")->actions().front()->text(), "Lines");
 }
 
 TEST(ToolMenus, TheRunningToolsActionIsCheckedAndNoneWhenItEnds)
@@ -482,7 +495,16 @@ TEST(ToolMenus, ACategoryTheWindowGaveNoMenuGetsOneBesideTheToolMenusOnItsBar)
     countActions(*tools, seen);
     EXPECT_EQ(seen.count("inquiry.distance"), 1u);
     EXPECT_EQ(seen.count("select.quick"), 1u);
-    EXPECT_EQ(tools->actions().front()->objectName(), "inquiry.distance");
+    ASSERT_NE(firstItem(*tools), nullptr);
+    EXPECT_EQ(firstItem(*tools)->objectName(), "inquiry.distance");
+    // Each group under its title, as a style that draws titles shows them.
+    QStringList sections;
+    for (const QAction* item : tools->actions()) {
+        if (item->isSeparator()) {
+            sections << item->text();
+        }
+    }
+    EXPECT_EQ(sections, (QStringList{"Inquiry", "Select"}));
 }
 
 TEST(ToolMenus, EveryCatalogueToolHasAPaintedIcon)
@@ -510,5 +532,6 @@ TEST(ToolMenus, NamesWhoseLettersEarlierItemsUsedUpStillGetOne)
     EXPECT_TRUE(std::ranges::any_of(modify, [](const QString& text) {
         return QString(text).remove('&') == "Match Properties" && !letterOf(text).isEmpty();
     })) << all;
-    EXPECT_EQ(built.menus.at("Draw")->actions().front()->text(), "&Point");
+    ASSERT_NE(firstItem(*built.menus.at("Draw")), nullptr);
+    EXPECT_EQ(firstItem(*built.menus.at("Draw"))->text(), "&Point");
 }

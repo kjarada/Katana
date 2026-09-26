@@ -12,7 +12,9 @@
 //
 // Layout, as a CAD user expects it:
 //   - one menu and one toolbar per category (Draw, Modify, Annotate, ...);
-//   - a separator between groups (Lines | Curves), groups in kGroupOrder;
+//   - groups in kGroupOrder, each under a section titled with its name in a
+//     menu (a style that draws titles shows "Lines", "Curves") and parted by
+//     a separator on a toolbar;
 //   - tools named "Family, Variant" ("Circle, 2 Points") gathered into a
 //     submenu named by the family, each item by its variant, as AutoCAD's Draw
 //     menu gathers Circle and Arc; on a toolbar the family is ONE button that

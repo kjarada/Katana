@@ -160,7 +160,9 @@ class ProjectStore {
     //     siblings, its reduction settings, report and placed points.
     // 11: the annotation tables - text styles, label styles, auto-label rules
     //     - and a dimension style's paper sizing (docs/annotation.md).
-    static constexpr int kCurrentSchemaVersion = 11;
+    // 12: the drawing system's geometry kinds - curve polyline, ellipse and
+    //     spline (docs/drawing.md) - which a schema-11 build cannot read.
+    static constexpr int kCurrentSchemaVersion = 12;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
 
     // The most bytes one survey job may take in a project: its own row (the

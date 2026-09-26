@@ -26,6 +26,7 @@ add_library(katana_cad STATIC
     layer_overrides.cpp
     view_set.cpp
     scope_verbs.cpp
+    property_outline.cpp
 )
 # The interactive tools (include/katana/cad/interactive_tool.hpp) are globbed:
 # each family is written by its own author, often at the same time as the
@@ -43,6 +44,11 @@ target_sources(katana_cad PRIVATE ${_cad_customisation_sources})
 # and its editor are written by different authors at the same time.
 file(GLOB _cad_plotting_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.cpp")
 target_sources(katana_cad PRIVATE ${_cad_plotting_sources})
+# The drawing system - grips, vertex editing, precision input, the curve
+# pieces (include/katana/cad/drawing/, docs/drawing.md): globbed for the
+# same reason, written beside the annotation and plotting work.
+file(GLOB _cad_drawing_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp")
+target_sources(katana_cad PRIVATE ${_cad_drawing_sources})
 # The built-in plot frame is compiled in with #embed (plotting/frame.cpp) from
 # the committed resources/plot_frames/, so the frame is part of the program and
 # a missing file is a build error, not a blank title block.

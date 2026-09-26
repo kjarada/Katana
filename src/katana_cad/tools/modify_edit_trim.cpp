@@ -7,7 +7,9 @@
 #include <cmath>
 #include <span>
 
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/geometry/polyline_vertices.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "families.hpp"
 #include "modify_edit_support.hpp"
@@ -20,6 +22,7 @@ namespace tol = katana::math::tolerance;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
+using katana::geometry::CurvePolyline2;
 using katana::geometry::IntersectionKind;
 using katana::math::kTwoPi;
 
@@ -174,11 +177,102 @@ Result<Cut> trimPolyline(const Polyline2& polyline, std::span<const Curve2> cutt
     return out;
 }
 
+// The same for a curve polyline (docs/drawing.md): the crossings with its
+// lines and arcs measured along it, and the pieces cut by geometry::subPath,
+// so an arc cut part-way keeps its circle.
+Result<Cut> trimCurvePolyline(const CurvePolyline2& polyline, std::span<const Curve2> cutters,
+                              const Point2& pick)
+{
+    std::vector<double> cuts;
+    for (std::size_t i = 0; i < polyline.segmentCount(); ++i) {
+        const double length = polyline.segmentLength(i);
+        if (!(length > tol::kGeometric)) {
+            continue;
+        }
+        const double start = polyline.stationOfVertex(i);
+        const auto piece = polyline.segment(i);
+        const Curve2 curve = std::visit([](const auto& c) { return Curve2{c}; }, piece);
+        for (const Curve2& cutter : cutters) {
+            const auto hit = katana::geometry::intersect(curve, cutter);
+            if (hit.kind != IntersectionKind::Points) {
+                continue;
+            }
+            for (std::size_t k = 0; k < hit.count; ++k) {
+                const Point2& p = hit.points[k];
+                double t = 0.0;
+                if (const auto* segment = std::get_if<Segment2>(&piece)) {
+                    t = segment->parameterOf(p);
+                } else {
+                    const auto& arc = std::get<Arc2>(piece);
+                    t = arc.parameterOfAngle((p - arc.center).angle());
+                }
+                cuts.push_back(start + std::clamp(t, 0.0, 1.0) * length);
+            }
+        }
+    }
+    const double length = polyline.length();
+    const auto nearest = polyline.nearest(pick);
+    const double at = nearest ? nearest->station : 0.0;
+    Cut out;
+    if (!polyline.closed) {
+        std::erase_if(cuts, [&](double s) {
+            return s <= tol::kGeometric || s >= length - tol::kGeometric;
+        });
+        sortUnique(cuts);
+        if (cuts.empty()) {
+            return makeError(ErrorCode::InvalidGeometry, "no cutting edge crosses that polyline");
+        }
+        double lo = 0.0;
+        double hi = length;
+        for (const double cut : cuts) {
+            if (cut <= at) {
+                lo = cut;
+            } else {
+                hi = cut;
+                break;
+            }
+        }
+        if (lo > 0.0) {
+            out.remaining.emplace_back(katana::geometry::subPath(polyline, 0.0, lo));
+        }
+        if (hi < length) {
+            out.remaining.emplace_back(katana::geometry::subPath(polyline, hi, length));
+        }
+        out.removed.emplace_back(katana::geometry::subPath(polyline, lo, hi));
+        return out;
+    }
+    for (double& cut : cuts) {
+        if (cut >= length - tol::kGeometric) {
+            cut = 0.0;
+        }
+    }
+    sortUnique(cuts);
+    if (cuts.size() < 2) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "a closed polyline needs two crossings with the cutting edges to be "
+                         "trimmed");
+    }
+    const auto above = std::ranges::upper_bound(cuts, at);
+    if (above == cuts.begin() || above == cuts.end()) {
+        out.remaining.emplace_back(katana::geometry::subPath(polyline, cuts.front(), cuts.back()));
+        out.removed.emplace_back(katana::geometry::wrappingPath(polyline, cuts.back(), cuts.front()));
+    } else {
+        const double lo = *(above - 1);
+        const double hi = *above;
+        out.remaining.emplace_back(katana::geometry::wrappingPath(polyline, hi, lo));
+        out.removed.emplace_back(katana::geometry::subPath(polyline, lo, hi));
+    }
+    return out;
+}
+
 Result<Cut> trimGeometry(const Geometry& piece, std::span<const Curve2> cutters,
                          const Point2& pick)
 {
     if (const auto* polyline = std::get_if<Polyline2>(&piece)) {
         return trimPolyline(*polyline, cutters, pick);
+    }
+    if (const auto* curved = std::get_if<CurvePolyline2>(&piece)) {
+        return trimCurvePolyline(*curved, cutters, pick);
     }
     const auto curve = asCurve(piece);
     if (!curve) {
@@ -440,10 +534,13 @@ class EdgeTool final : public InteractiveTool {
         }
         const auto type = piece.type();
         const auto* polyline = std::get_if<Polyline2>(&piece.geometry);
-        const bool closed = polyline != nullptr && polyline->closed;
+        const auto* curved = std::get_if<CurvePolyline2>(&piece.geometry);
+        const bool closed =
+            (polyline != nullptr && polyline->closed) || (curved != nullptr && curved->closed);
         using katana::entity::EntityType;
         if (trim && type != EntityType::Line && type != EntityType::Arc &&
-            type != EntityType::Circle && type != EntityType::Polyline) {
+            type != EntityType::Circle && type != EntityType::Polyline &&
+            type != EntityType::CurvePolyline) {
             return makeError(ErrorCode::Unsupported,
                              "A " + kind +
                                  " cannot be trimmed; pick a line, arc, circle or polyline.");
@@ -478,6 +575,15 @@ class EdgeTool final : public InteractiveTool {
                                             : "No cutting edge crosses that " + kind + "."));
             }
             for (Geometry& remaining : cut->remaining) {
+                if (const auto* kept = std::get_if<CurvePolyline2>(&remaining)) {
+                    // Its heights are in the geometry; stored as the simplest kind.
+                    auto part = writePolyline(piece, *kept);
+                    if (!part) {
+                        return part.error();
+                    }
+                    replacement.push_back(std::move(*part));
+                    continue;
+                }
                 Entity part = piece;
                 part.geometry = std::move(remaining);
                 carryHeights(*original, part);

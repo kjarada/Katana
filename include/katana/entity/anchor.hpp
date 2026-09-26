@@ -35,10 +35,13 @@ namespace katana::entity {
                                                                     const AnchorRef& ref);
 
 // The point of `entity` nearest `near`, NAMED so that it follows the entity:
-// Along for a line, an arc, a circle and a polyline (on a polyline, the
-// segment it is nearest - the first of equals - and how far along it),
-// Position for a point and a text. nullopt for a dimension, a label or a
-// leader, which offer no place to be attached to, and for a polyline with no
+// Along for a line, an arc, a circle, a polyline and a curve polyline (on a
+// polyline, the segment it is nearest - the first of equals - and how far
+// along it; on a curve polyline's arc segment, the fraction of its sweep),
+// and an ellipse (the fraction of its sweep of eccentric anomaly), Position
+// for a point and a text. nullopt for a dimension, a label or a leader,
+// which offer no place to be attached to, for a spline (its parameter is not
+// its length; its ends are Start and End), and for a polyline with no
 // segment of any length. The reference names entity.id. What a leader's tip
 // clicked or typed near a line becomes (docs/annotation.md, "Smart leaders").
 [[nodiscard]] std::optional<AnchorRef> nearestAnchor(const Entity& entity,

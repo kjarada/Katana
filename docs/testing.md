@@ -305,3 +305,21 @@ still being brought up to this standard are named in the script's
 
 Run it alone with `python tools/check_docs.py` from the checkout root; it
 prints each broken reference with its file and line.
+
+## Not done: tests that fail in the Linux cloud container
+
+Sixteen tests were measured failing in the Linux container (GCC 16, Qt 6.11.2
+from conda-forge, offscreen) on an unchanged build of `main` (b749688), and
+passing on the owner's Windows machine. Thirteen of them now pass there too
+("The same suite on Linux" above says how):
+- the four headless reports whose `-DEXPECT=` paired two report lines: the Qt
+  offscreen plugin's "does not support" lines are dropped by
+  `tools/check_screenshot.cmake` before it matches;
+- the three tests that handed in `C:\...` paths: built with
+  `QDir::toNativeSeparators`;
+- the eight GPU desktop cases, which pass once Mesa's lavapipe is installed.
+
+Still failing there: the file-dialog cases of that section's "Not done"
+(`qt_widgets.SheetViewOptions.AnImageViewsPictureIsChosenAndCopiedInOneStep`
+among them): this Qt shows a native dialog, which is no widget, so the test's
+answer never finds the modal `QFileDialog` and it waits until ctest's timeout.

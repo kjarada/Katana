@@ -113,6 +113,43 @@ TEST(SubsurfaceUtilityCsv, RefusesWhatItWouldOtherwiseHaveToGuess)
     EXPECT_NE(code("# nothing\n").find("no header row"), std::string::npos);
 }
 
+TEST(SubsurfaceUtilityCsv, AColumnNamedElsewhereIsTheColumnAHeaderOfThatNameWouldBe)
+{
+    // By name and by alias, compared as a header row is: without case,
+    // blanks, '-' or '_'.
+    for (const auto& [name, column] :
+         {std::pair{"type", "type"}, std::pair{"Service Type", "type"},
+          std::pair{"LocateMethod", "method"}, std::pair{"locate-method", "method"},
+          std::pair{"DIAMETER_MM", "diameter_mm"}, std::pair{"AssetFeature", "AssetFeature"}}) {
+        const UtilityCsvColumn* found = utilityCsvColumnNamed(name);
+        ASSERT_NE(found, nullptr) << name;
+        EXPECT_EQ(found->name, column) << name;
+    }
+    // And it is the reader's own reading: a header of that name reads.
+    EXPECT_TRUE(parseUtilityCsv("line,point,easting,northing,locate-method\nW1,1,0,0,EML\n"
+                                "W1,2,1,0,EML\n")
+                    .ok());
+    EXPECT_EQ(utilityCsvColumnNamed("colour"), nullptr);
+    EXPECT_EQ(utilityCsvColumnNamed(""), nullptr);
+}
+
+TEST(SubsurfaceUtilityCsv, APathReadsItsWordsAndTheFieldWordsForThem)
+{
+    EXPECT_EQ(parsePathEvidence("detected"), PathEvidence::Detected);
+    EXPECT_EQ(parsePathEvidence("Traced"), PathEvidence::Detected);
+    EXPECT_EQ(parsePathEvidence("EXPOSED"), PathEvidence::Exposed);
+    EXPECT_EQ(parsePathEvidence("trench"), PathEvidence::Exposed);
+    EXPECT_EQ(parsePathEvidence("assumed"), PathEvidence::Assumed);
+    EXPECT_EQ(parsePathEvidence("inferred"), PathEvidence::Assumed);
+    // Each word it writes reads back as itself.
+    for (const PathEvidence evidence :
+         {PathEvidence::Detected, PathEvidence::Exposed, PathEvidence::Assumed}) {
+        EXPECT_EQ(parsePathEvidence(toString(evidence)), evidence);
+    }
+    EXPECT_FALSE(parsePathEvidence("dug"));
+    EXPECT_FALSE(parsePathEvidence(""));
+}
+
 TEST(SubsurfaceUtilityCsv, ReadsADesignCentreLine)
 {
     const auto design = parseDesignCsv("Easting,Northing,Level\n0,0,10\n0,10,\n", "stage 1");

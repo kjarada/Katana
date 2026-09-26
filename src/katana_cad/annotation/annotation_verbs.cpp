@@ -644,7 +644,11 @@ Result<ann::AnchoredPoint> CommandInterpreter::parseAnchoredPoint(const std::str
         const auto ref = katana::entity::nearestAnchor(*entity, *near);
         if (!ref) {
             return makeError(ErrorCode::InvalidArgument,
-                             "that entity has no place on it to attach to", text);
+                             std::holds_alternative<katana::geometry::Spline2>(entity->geometry)
+                                 ? "a spline has no place along it to attach to; use #id.start "
+                                   "or #id.end"
+                                 : "that entity has no place on it to attach to",
+                             text);
         }
         auto anchored = ann::anchoredPoint(document_.model(), *ref);
         if (anchored) {
@@ -700,17 +704,26 @@ Result<ann::AnchoredPoint> CommandInterpreter::parseAnchoredPoint(const std::str
                                  text);
             }
             if (index != 0 &&
-                !std::holds_alternative<katana::geometry::Polyline2>(entity->geometry)) {
+                !std::holds_alternative<katana::geometry::Polyline2>(entity->geometry) &&
+                !std::holds_alternative<katana::geometry::CurvePolyline2>(entity->geometry)) {
                 return makeError(ErrorCode::InvalidArgument,
                                  "only a polyline has segments to number: along0:t on a line, "
-                                 "an arc or a circle",
+                                 "an arc, a circle or an ellipse",
+                                 text);
+            }
+            if (std::holds_alternative<katana::geometry::Spline2>(entity->geometry)) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "a spline has no place along it to name; use #id.start, "
+                                 "#id.end or #id@x,y",
                                  text);
             }
             ref.point = katana::entity::AnchorPoint::Along;
             ref.index = index;
             // A circle's turn is [0, 1), as nearestAnchor names it: a whole
-            // turn is where it starts.
-            ref.parameter = std::holds_alternative<katana::geometry::Circle2>(entity->geometry) &&
+            // turn is where it starts - and a whole ellipse's.
+            const auto* ellipse = std::get_if<katana::geometry::Ellipse2>(&entity->geometry);
+            ref.parameter = (std::holds_alternative<katana::geometry::Circle2>(entity->geometry) ||
+                             (ellipse != nullptr && ellipse->isFull())) &&
                                     *fraction == 1.0
                                 ? 0.0
                                 : *fraction;

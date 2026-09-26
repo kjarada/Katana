@@ -385,7 +385,19 @@ The geometry is what the class expects: a run's `Axis` in 3D where every
 vertex has a height, else its `FootPrint`; a point feature's `FootPrint` point
 (and circle); an annotation's `Annotation` point, curve or text. Arcs are
 `IfcIndexedPolyCurve` arcs through three points of the true arc and circles
-`IfcCircle`, never chords. Text is `IfcTextLiteralWithExtent` (plain
+`IfcCircle`, never chords. The drawing system's kinds (`docs/drawing.md`)
+keep their curves too: a curve polyline is one `IfcIndexedPolyCurve` of an
+`IfcLineIndex` per straight segment and an `IfcArcIndex` through each arc's
+true middle (its height the mean of its ends', and in 3D only when every
+vertex has one); an ellipse is an `IfcEllipse` placed along its major axis,
+and an elliptical arc that ellipse as an `IfcTrimmedCurve` by parameter - IFC's
+conic parameter is the eccentric anomaly in radians, as Katana's is; a spline
+is an `IfcBSplineCurveWithKnots` (`IfcRationalBSplineCurveWithKnots` with
+weights), each distinct knot once with its multiplicity, its fit points left
+out as how it was drawn rather than what it is. A curve polyline or spline is
+a run to the default rules, so a kerb drawn with an arc is still an `IfcKerb`,
+and a rules file's `kinds` may name `CurvePolyline`, `Ellipse` and `Spline`.
+Text is `IfcTextLiteralWithExtent` (plain
 `IfcTextLiteral` is deprecated in 4.3). Each entity keeps its layer as an
 `IfcPresentationLayerAssignment`, its colour as a curve style, its properties
 (`Katana_Attributes`) and its provenance (`Katana_Provenance`). Labels are not

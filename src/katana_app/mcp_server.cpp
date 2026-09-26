@@ -24,6 +24,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/import_placement.hpp"
@@ -155,7 +156,8 @@ Batch runLines(Session& session, const std::vector<std::string>& lines, const Ru
             // would leave the server running with nothing to serve.
             result.skipped = true;
             result.messages = "QUIT is not a command here: the MCP client ends the session.";
-        } else if ((verb == "NEW" || verb == "OPEN") && session.document().isModified() &&
+        } else if (katana::cad::CommandInterpreter::replacesDocument(line) &&
+                   session.document().isModified() &&
                    !options.discardUnsavedChanges) {
             // The interpreter replaces the drawing without asking, as a typed
             // NEW always has. A model is not a person looking at the window,
@@ -585,7 +587,10 @@ const std::vector<Tool>& tools()
             "AREA), survey codes (CODE, MAPFILE, CUSTOMISE), AS 5488 subsurface utilities "
             "(UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW, REGRADE, SCHEDULE - on a schedule "
             "file, or on what is drawn by the scope words DRAWING | SELECTION | "
-            "AREA x0,y0,x1,y1 | LAYERS a,b [ONLY], then [WHERE key=value ...]; HELP UTILITY), "
+            "AREA x0,y0,x1,y1 | LAYERS a,b [ONLY], then [WHERE key=value ...]; UTILITY DRAW "
+            "<scope> METHOD <method> [TYPE <type>] [H_UNC <m>] [FIELDS column=property,...] "
+            "draws the lines, polylines and points a survey or an import left in the drawing "
+            "as services; HELP UTILITY), "
             "global modify (MODIFY <scope> [WHERE key=value ...] SET key=value ...), "
             "inspection (LIST, INFO), UNDO/REDO, "
             "and files (NEW, OPEN, SAVE, IMPORT, EXPORT). Each command is one undoable step. By "

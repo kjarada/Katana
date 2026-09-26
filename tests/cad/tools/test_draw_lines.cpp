@@ -122,8 +122,12 @@ TEST(DrawLineTools, AreListedUnderDrawLinesInMenuOrder)
             EXPECT_TRUE(tool->shortcut.empty()) << tool->id;
         }
     }
+    // The drawing system added the 3D polyline, construction line and ray,
+    // double line, sketch and revision cloud (docs/drawing.md).
     EXPECT_EQ(ids, (std::vector<std::string>{"draw.point", "draw.line", "draw.polyline",
-                                             "draw.rectangle", "draw.polygon"}));
+                                             "draw.polyline3d", "draw.rectangle", "draw.polygon",
+                                             "draw.xline", "draw.ray", "draw.dline",
+                                             "draw.sketch", "draw.revcloud"}));
 }
 
 TEST(DrawLineTools, StartFromTheirAutoCadVerbsAndTheInterpretersSpellings)
@@ -185,7 +189,7 @@ TEST(DrawPointTool, PlacesAPointAtEachClickAndKeepsGoingUntilEsc)
 {
     ToolDriver driver;
     driver.start("draw.point");
-    EXPECT_EQ(driver.tool().prompt(), "Specify a point");
+    EXPECT_EQ(driver.tool().prompt(), "Specify a point (x,y,z) or [Height]");
     EXPECT_EQ(driver.tool().expects(), ToolInput::Point);
     EXPECT_EQ(driver.click(1.5, 2.25).outcome, Outcome::Done);
     EXPECT_EQ(driver.click(-3, 4).outcome, Outcome::Done);
@@ -196,7 +200,7 @@ TEST(DrawPointTool, PlacesAPointAtEachClickAndKeepsGoingUntilEsc)
     EXPECT_EQ(points[1].position, Point2(-3.0, 4.0));
     EXPECT_EQ(driver.executed(), 2);
     EXPECT_FALSE(driver.finished());
-    EXPECT_EQ(driver.tool().prompt(), "Specify a point");
+    EXPECT_EQ(driver.tool().prompt(), "Specify a point (x,y,z) or [Height]");
 }
 
 TEST(DrawPointTool, TakesTypedCoordinates)
@@ -539,7 +543,7 @@ TEST(DrawPolylineTool, CloseMakesItClosed)
     (void)driver.click(0, 0);
     (void)driver.click(4, 0);
     (void)driver.click(4, 3);
-    EXPECT_EQ(driver.tool().prompt(), "Specify next point or [Close/Undo]");
+    EXPECT_EQ(driver.tool().prompt(), "Specify next point or [Arc/Close/Undo]");
     const ToolStep step = driver.type("close");
     EXPECT_EQ(step.outcome, Outcome::Done);
     EXPECT_EQ(step.message, "closed polyline of 3 vertices");

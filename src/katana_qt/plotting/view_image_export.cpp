@@ -21,6 +21,7 @@
 
 #include "katana/cad/command_interpreter.hpp"
 #include "plotting/tiff_writer.hpp"
+#include "theme.hpp"
 
 namespace katana::qt {
 
@@ -285,7 +286,7 @@ ViewImageDialog::ViewImageDialog(ViewImageDialogContext context, QWidget* parent
     command_ = new QLineEdit(this);
     command_->setObjectName("viewImageCommand");
     command_->setReadOnly(true);
-    command_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    command_->setFont(katana::qt::theme::monospaceFont());
     command_->setToolTip("The line Export hands to the command line - type it there and it does "
                          "the same");
 

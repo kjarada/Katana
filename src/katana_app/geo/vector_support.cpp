@@ -998,8 +998,12 @@ Result<Reshape> reshapeCommand(const katana::entity::Model& model,
                 continue;
             }
             kept.parts.resize(1);
-            const auto* ring = std::get_if<katana::geometry::Polyline2>(&entity->geometry);
-            const double was = ring != nullptr ? ring->signedArea() : 1.0;
+            // The winding the entity had, read from its ring as the one
+            // conversion made it: the same for a polyline, a curve polyline, an
+            // ellipse or a spline, where a Polyline2-only reading took every
+            // other kind as anticlockwise.
+            const auto& wasRing = one.before.parts.front().parts;
+            const double was = wasRing.empty() ? 1.0 : signedRingArea(wasRing.front());
             if ((was < 0.0) != (signedRingArea(kept.parts.front()) < 0.0)) {
                 std::ranges::reverse(kept.parts.front());
             }

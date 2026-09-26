@@ -187,6 +187,11 @@ endif()
 if(CHECK_SHORTCUTS)
     list(APPEND extra --check-shortcuts)
 endif()
+# -DCHECK_MENUS=ON fails the run when a menu item has no icon or no status
+# tip (--check-menus).
+if(CHECK_MENUS)
+    list(APPEND extra --check-menus)
+endif()
 # -DCOMPARE=<reference>|<file>[|<file>...]: every file the run writes must
 # hold exactly the reference's text, line ends aside (git may check the
 # reference out with either). The written files are removed first, so one

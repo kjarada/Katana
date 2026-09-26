@@ -450,10 +450,35 @@ TEST(UtilityVerbs, HelpUtilityListsEveryOption)
 {
     Session session;
     const std::string help = session.ok("HELP UTILITY");
-    for (const char* word : {"UTILITY REPORT", "UTILITY VERIFY", "UTILITY CLEARANCE",
-                             "UTILITY CHECK", "UTILITY DRAW", "MINCOVER", "SPACING", "WIDTH",
-                             "[H <m>]", "[V <m>]", "MARGIN", "SCHEMA", "LAYER <prefix>",
-                             "bounds="}) {
+    for (const char* word : {"UTILITY REPORT",
+                             "UTILITY VERIFY",
+                             "UTILITY CLEARANCE",
+                             "UTILITY CHECK",
+                             "UTILITY DRAW",
+                             "MINCOVER",
+                             "SPACING",
+                             "WIDTH",
+                             "[H <m>]",
+                             "[V <m>]",
+                             "MARGIN",
+                             "SCHEMA",
+                             "LAYER <prefix>",
+                             "bounds=",
+                             "UTILITY DRAW <scope>",
+                             "[TYPE <type>]",
+                             "[METHOD <method>]",
+                             "[H_UNC <m>]",
+                             "[V_UNC <m>]",
+                             "[HEIGHTS surface|service|none]",
+                             "[LEVEL_REF top|centre|invert]",
+                             "[PATH detected|exposed|assumed]",
+                             "[OWNER <text>]",
+                             "[MATERIAL <text>]",
+                             "[DIAMETER_MM <mm>]",
+                             "[STATUS <status>]",
+                             "utility.heights",
+                             "points= loose= drawn= ignored=",
+                             "[FIELDS column=property,...]"}) {
         EXPECT_TRUE(contains(help, word)) << word;
     }
     EXPECT_EQ(help, katana::cad::utilities::utilityVerbHelp());

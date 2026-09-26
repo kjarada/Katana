@@ -70,6 +70,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     layer_manager.hpp
     project_crs_dialog.cpp
     project_crs_dialog.hpp
+    property_panel.cpp
+    property_panel.hpp
     script_runner.cpp
     script_runner.hpp
     # The GIS menu's option dialogs, one file each, since the geoprocessing
@@ -139,6 +141,12 @@ target_sources(katana PRIVATE ${_katana_annotation_ui})
 file(GLOB _katana_geo_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.hpp")
 target_sources(katana PRIVATE ${_katana_geo_ui})
+# The drawing system's front end (docs/drawing.md): the grips' gesture, the
+# Vertices panel and the drafting settings bar, thin over katana_cad's
+# drawing code. Globbed, one directory, like the sheets and annotation.
+file(GLOB _katana_drawing_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.hpp")
+target_sources(katana PRIVATE ${_katana_drawing_ui})
 # One place a version is written: project(Katana VERSION ...). The About box
 # reads it from here and the Windows resource below from the same variable.
 target_compile_definitions(katana PRIVATE KATANA_VERSION="${PROJECT_VERSION}")

@@ -25,6 +25,7 @@
 #include <cmath>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -505,17 +506,6 @@ Result<Prepared> prepareBuffer(Context& context, const Tokens& tokens, std::stri
 
 // ---- GIS DISSOLVE ------------------------------------------------------------------------------
 
-// Whether `entity` becomes an area of the drawing's feature set: a closed
-// polyline of three vertices or more, or a circle (drawingDataset's rule,
-// closedAsPolygons) - what a dissolve merges, and what REPLACE deletes.
-bool isAreaShape(const katana::entity::Entity& entity)
-{
-    if (const auto* line = std::get_if<katana::geometry::Polyline2>(&entity.geometry)) {
-        return line->closed && line->vertices.size() >= 3;
-    }
-    return std::holds_alternative<katana::geometry::Circle2>(entity.geometry);
-}
-
 Result<Prepared> prepareDissolve(Context& context, const Tokens& tokens, std::string_view line)
 {
     const vec::WordRules rules{{"by", "keep"}, {"REPLACE", "PREVIEW"}, true, kDissolveUsage};
@@ -568,11 +558,23 @@ Result<Prepared> prepareDissolve(Context& context, const Tokens& tokens, std::st
                              "no area in the scope has the property by= names", key);
         }
     }
-    // REPLACE deletes what went in: every area, and every hole joined into one.
+    // REPLACE deletes what went in: every area, and every hole joined into
+    // one - read from the areas table itself, so what is deleted is what the
+    // one conversion made an area (a closed polyline or curve polyline, a
+    // circle, a whole ellipse, a closed spline), never a second rule of it.
+    std::set<EntityId> wentIn;
+    for (const gp::Feature& feature : areas->features) {
+        if (const auto id = vec::featureId(*areas, feature)) {
+            wentIn.insert(*id);
+            if (const auto holes = bound->dataset.holes.find(*id);
+                holes != bound->dataset.holes.end()) {
+                wentIn.insert(holes->second.begin(), holes->second.end());
+            }
+        }
+    }
     std::vector<EntityId> sources;
     for (const EntityId id : bound->match.matched) {
-        const katana::entity::Entity* entity = context.document.model().entities.find(id);
-        if (entity != nullptr && isAreaShape(*entity)) {
+        if (wentIn.contains(id)) {
             sources.push_back(id);
         }
     }

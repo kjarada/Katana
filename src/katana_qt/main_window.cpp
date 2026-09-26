@@ -29,6 +29,7 @@
 #include "plotting/sheet_checks.hpp"
 #include "plotting/sheet_tables.hpp"
 #include "project_crs_dialog.hpp"
+#include "property_panel.hpp"
 #include "render_view_widget.hpp"
 #include "style_manager.hpp"
 
@@ -59,6 +60,7 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QInputDialog>
+#include <QPainter>
 #include <QPixmap>
 #include <QKeyEvent>
 #include <QLabel>
@@ -72,6 +74,8 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QRegularExpression>
+#include <QScreen>
+#include <QGuiApplication>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QTabWidget>
@@ -88,6 +92,7 @@
 #include <cstdio>
 #include <map>
 #include <set>
+#include <tuple>
 #include <utility>
 
 #include "katana/cad/annotation/label_layout.hpp"
@@ -98,6 +103,7 @@
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/dxf/reader.hpp"
+#include "katana/entity/curve_pieces.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/customisation_report.hpp"
@@ -179,6 +185,41 @@ enum ReferenceColumn { kRefName = 0, kRefType, kRefDetail, kRefDisplay, kRefColu
 constexpr double kLeastExaggeration = 0.01;
 constexpr double kMostExaggeration = 1000.0;
 
+// Where the window keeps itself between sessions (restoreSession), in the
+// QSettings the recent scripts are kept in. kLayoutVersion is saveState's
+// version: raised when the toolbars or panels change so that an old layout
+// would put them wrong, which makes restoreState refuse it and the window
+// start as built.
+constexpr const char* kGeometryKey = "window/geometry";
+constexpr const char* kLayoutKey = "window/layout";
+constexpr const char* kMinimisedKey = "window/minimised";
+constexpr const char* kTextSizeKey = "appearance/textSize";
+constexpr const char* kToolBarIconsKey = "appearance/toolBarIcons";
+constexpr const char* kToolBarNamesKey = "appearance/toolBarNames";
+constexpr int kLayoutVersion = 1;
+
+// View > Text Size's items by size: viewTextSizeSmall ... ExtraLarge.
+QString textSizeActionName(katana::qt::theme::TextSize size)
+{
+    using katana::qt::theme::TextSize;
+    switch (size) {
+    case TextSize::Small:
+        return QStringLiteral("viewTextSizeSmall");
+    case TextSize::Standard:
+        return QStringLiteral("viewTextSizeStandard");
+    case TextSize::Large:
+        return QStringLiteral("viewTextSizeLarge");
+    case TextSize::ExtraLarge:
+        return QStringLiteral("viewTextSizeExtraLarge");
+    }
+    return QStringLiteral("viewTextSizeStandard");
+}
+
+QString fromView(std::string_view text)
+{
+    return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+}
+
 // What the command line shows while nothing is typed and no tool is asking.
 constexpr const char* kCommandPlaceholder =
     "Command:  LINE  |  CIRCLE 5,5 3  |  SELECT ALL  |  HELP   (Enter repeats the last tool)";
@@ -191,142 +232,6 @@ QString fromPath(const std::filesystem::path& path)
 std::filesystem::path toPath(const QString& text)
 {
     return std::filesystem::path(text.toStdWString());
-}
-
-QString number(double value)
-{
-    return QString::number(value, 'f', 4);
-}
-
-QString point(const katana::geometry::Point2& p)
-{
-    return number(p.x) + ", " + number(p.y);
-}
-
-// Rows shown in the property panel for one entity of `model`.
-std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::Model& model,
-                                                          const katana::entity::Geometry& geometry)
-{
-    using Rows = std::vector<std::pair<QString, QString>>;
-    struct Visitor {
-        // A label's words are worked out from its target, which is in the
-        // model, not in the label.
-        const katana::entity::Model& model;
-
-        Rows operator()(const katana::entity::PointGeometry& g) const
-        {
-            return {{"Position", point(g.position)}};
-        }
-        Rows operator()(const katana::geometry::Segment2& g) const
-        {
-            const double degrees = katana::math::normalizeAngle(g.delta().angle()) *
-                                   katana::math::kRadToDeg;
-            return {{"Start", point(g.start)},
-                    {"End", point(g.end)},
-                    {"Length", number(g.length())},
-                    {"Angle", number(degrees) + " deg"}};
-        }
-        Rows operator()(const katana::geometry::Arc2& g) const
-        {
-            return {{"Centre", point(g.center)},
-                    {"Radius", number(g.radius)},
-                    {"Start angle", number(g.startAngle * katana::math::kRadToDeg) + " deg"},
-                    {"Sweep", number(g.sweep * katana::math::kRadToDeg) + " deg"},
-                    {"Length", number(g.length())}};
-        }
-        Rows operator()(const katana::geometry::Polyline2& g) const
-        {
-            Rows rows = {{"Vertices", QString::number(g.vertices.size())},
-                         {"Closed", g.closed ? "yes" : "no"},
-                         {"Length", number(g.length())}};
-            if (g.closed) {
-                rows.push_back({"Area", number(g.area())});
-            }
-            return rows;
-        }
-        Rows operator()(const katana::geometry::Circle2& g) const
-        {
-            return {{"Centre", point(g.center)},
-                    {"Radius", number(g.radius)},
-                    {"Circumference", number(g.perimeter())},
-                    {"Area", number(g.area())}};
-        }
-        Rows operator()(const katana::entity::TextGeometry& g) const
-        {
-            Rows rows = {{"Position", point(g.position)},
-                         {"Text", QString::fromStdString(g.text)},
-                         {"Height", number(g.height)},
-                         {"Rotation", number(g.rotation * katana::math::kRadToDeg) + " deg"}};
-            if (!g.style.empty()) {
-                rows.push_back({"Text style", QString::fromStdString(g.style)});
-            }
-            if (g.paperHeight > 0.0) {
-                rows.push_back({"Paper height", number(g.paperHeight) + " mm"});
-            }
-            rows.push_back({"Justify", QString::fromUtf8(katana::entity::toString(g.justify))});
-            return rows;
-        }
-        Rows operator()(const katana::entity::DimensionGeometry& g) const
-        {
-            Rows rows = {{"Kind", QString::fromUtf8(katana::entity::toString(g.kind))},
-                         {"Start", point(g.start)},
-                         {"End", point(g.end)},
-                         {"Measurement", number(g.measurement())},
-                         {"Offset", number(g.offset)}};
-            if (g.usesVertex()) {
-                rows.push_back({"Vertex", point(g.vertex)});
-            }
-            if (g.startRef.associated() || g.endRef.associated() || g.vertexRef.associated()) {
-                rows.push_back({"Associative", "yes"});
-            }
-            return rows;
-        }
-        Rows operator()(const katana::entity::LabelGeometry& g) const
-        {
-            Rows rows = {{"Label style", QString::fromStdString(g.style)}};
-            if (g.target != 0) {
-                rows.push_back({"Labels", QString::number(g.target)});
-            } else {
-                rows.push_back({"Alignment", QString::fromStdString(g.alignment)});
-            }
-            if (g.part >= 0) {
-                rows.push_back({"Part", QString::number(g.part)});
-            }
-            if (!g.rule.empty()) {
-                rows.push_back({"Rule", QString::fromStdString(g.rule)});
-            }
-            // What it says and where, as LABEL LIST replies them: the words
-            // through the same resolver, so the two cannot disagree.
-            rows.push_back(
-                {"Text", QString::fromStdString(katana::cad::annotation::shownLabelText(model, g))});
-            rows.push_back({"Position", g.position ? "pinned at " + point(*g.position)
-                                                   : QString("automatic")});
-            return rows;
-        }
-        Rows operator()(const katana::entity::LeaderGeometry& g) const
-        {
-            // The note as it is drawn: a smart leader's is read off the
-            // entity its tip is on (docs/annotation.md, "Smart leaders").
-            Rows rows = {{"Tip", point(g.vertices.front())},
-                         {"Vertices", QString::number(g.vertices.size())},
-                         {"Text", QString::fromStdString(katana::entity::leaderNote(
-                                      model, g, katana::cad::codePropertyCandidates()))}};
-            if (g.fields) {
-                rows.push_back({"Template", QString::fromStdString(g.text)});
-            }
-            if (!g.labelStyle.empty()) {
-                rows.push_back({"Label style", QString::fromStdString(g.labelStyle)});
-            }
-            if (g.tipRef.associated()) {
-                rows.push_back(
-                    {"On", QString::number(g.tipRef.entity) + " (" +
-                               QString::fromStdString(katana::entity::describe(g.tipRef)) + ")"});
-            }
-            rows.push_back({"Callout", QString::fromUtf8(katana::entity::toString(g.callout))});
-            return rows;
-        }
-    };
-    return std::visit(Visitor{model}, geometry);
 }
 
 // How many of the loaded library's definitions are symbols by decision D3 -
@@ -342,11 +247,17 @@ std::size_t librarySymbolCount(const katana::cad::Document& document)
     }));
 }
 
-QString describeProperty(const katana::entity::PropertyValue& value)
+// A colour as a rounded square, for a list's colour column.
+QIcon colourSwatch(const QColor& colour)
 {
-    // One definition of what a value says, in entity: the panel, the command
-    // line and the attribute manager must not disagree about it.
-    return QString::fromStdString(katana::entity::toString(value));
+    QPixmap pixmap(32, 32);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(theme::border(), 2.0));
+    painter.setBrush(colour);
+    painter.drawRoundedRect(QRectF(3, 3, 26, 26), 6, 6);
+    return QIcon(pixmap);
 }
 
 // A panel's own tool: an icon, with its name in the tooltip. The text buttons
@@ -398,6 +309,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
     buildActions();
     buildDocks();
+    buildWindowMenu();
     buildStatusBar();
     // A category the catalogue gains that no menu here takes is still
     // reachable by its aliases and ids on the command line; said, once the
@@ -435,7 +347,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     views_->onError = [this](const QString& error) { logMessage(error, true); };
     views_->onCursorMoved = [this](const katana::geometry::Point2& world,
                                       const std::optional<cad::SnapResult>& snap) {
-        coordinateLabel_->setText(point(world));
+        coordinateLabel_->setText(planPoint(world));
         snapLabel_->setText(snap ? cad::toString(snap->mode) : "");
     };
     views_->onStatus = [this](const QString& text) { statusBar()->showMessage(text); };
@@ -478,11 +390,38 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                        cad::DocumentChange::Metadata)) {
             suggestPlotFiles();
         }
+        if (change.has(cad::DocumentChange::Drafting)) {
+            syncSnapActions();
+        }
     });
     refreshAll();
     views_->stopTool();
     selectAction_->setChecked(true);
+    // What View > Reset Window Layout goes back to: this window as built.
+    defaultLayout_ = saveState(kLayoutVersion);
     logMessage("Katana ready. Type HELP for the command list.");
+}
+
+// The object snap's items show the document's drafting settings, which the
+// drafting toolbar and the SNAP verb set too (docs/drawing.md). Blocked, so
+// showing a setting does not set it again from inside the notification.
+void MainWindow::syncSnapActions()
+{
+    if (snapAction_ != nullptr) {
+        const QSignalBlocker block(snapAction_);
+        snapAction_->setChecked(views_->snapEnabled());
+    }
+    for (QAction* each : findChildren<QAction*>()) {
+        if (!each->objectName().startsWith("viewSnapMode")) {
+            continue;
+        }
+        const auto mode = each->data();
+        if (!mode.isValid()) {
+            continue;
+        }
+        const QSignalBlocker block(each);
+        each->setChecked((views_->snapModes() & mode.toUInt()) != 0);
+    }
 }
 
 // ---- construction -----------------------------------------------------------------------
@@ -518,11 +457,32 @@ QToolBar* MainWindow::makeToolBar(const QString& title, Qt::ToolBarArea area)
     // The object name is what QMainWindow::saveState keys a toolbar's position
     // on; without one, a saved layout cannot be restored.
     toolbar->setObjectName(title + "ToolBar");
-    toolbar->setIconSize(QSize(20, 20));
+    toolbar->setIconSize(QSize(toolBarIconSize_, toolBarIconSize_));
     toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
     toolbar->setMovable(true);
     toolbar->setFloatable(false);
+    // Its name before its buttons, muted, while it lies along the top or the
+    // bottom: two rows of icon-only buttons read as one undivided strip, and
+    // which icons are Survey's and which Terrain's was a matter of hovering
+    // over each. The Properties bar is left out: its " Style " label already
+    // says what it holds. A vertical bar has no room for a word.
+    QAction* name = nullptr;
+    if (title != "Properties") {
+        auto* caption = new QLabel(title, toolbar);
+        caption->setObjectName("toolBarName");
+        caption->setToolTip(QString("<b>%1</b><br>The %1 toolbar. View &gt; Toolbars shows, "
+                                    "hides and sizes the toolbars.")
+                                .arg(title.toHtmlEscaped()));
+        name = toolbar->addWidget(caption);
+    }
+    toolBars_.emplace_back(toolbar, name);
+    QAction* toggle = toolbar->toggleViewAction();
+    toggle->setObjectName("viewToolBar" + QString(title).remove(' '));
+    toggle->setIcon(katana::qt::icon(Icon::Toolbars));
+    toggle->setStatusTip("Show or hide the " + title + " toolbar");
+    connect(toolbar, &QToolBar::orientationChanged, this, [this] { refreshToolBarNames(); });
     addToolBar(area, toolbar);
+    refreshToolBarNames();
     return toolbar;
 }
 
@@ -664,20 +624,23 @@ void MainWindow::buildActions()
 
     // File keeps to files: the customisation is loaded from Format (and
     // Survey > Survey Coding), where the managers of what it brings are.
-    fileMenu->addActions({newAction, openAction});
-    fileMenu->addSeparator();
-    fileMenu->addActions({saveAction, saveAsAction});
-    fileMenu->addSeparator();
+    // Its seventeen items are in titled sections, as the long menus all are:
+    // a style that draws titles (theme.cpp) says what each group is for.
+    fileMenu->addSection("Drawing");
+    fileMenu->addActions({newAction, openAction, saveAction, saveAsAction});
+    fileMenu->addSection("Import and Export");
     fileMenu->addActions(
         {importAction, exportAction, importIfcAction, exportIfcAction, exportImageAction});
-    fileMenu->addSeparator();
+    fileMenu->addSection("Scripts");
     fileMenu->addAction(runScriptAction);
     recentScriptsMenu_ = fileMenu->addMenu("Recen&t Scripts");
     recentScriptsMenu_->setObjectName("fileRecentScripts");
+    recentScriptsMenu_->setIcon(katana::qt::icon(Icon::RecentScripts));
+    recentScriptsMenu_->menuAction()->setStatusTip("Run one of the last scripts run again");
     refreshRecentScripts();
-    fileMenu->addSeparator();
+    fileMenu->addSection("Plot");
     fileMenu->addActions({plotAction, sheetsAction, plotSheetsAction});
-    fileMenu->addSeparator();
+    fileMenu->addSection("Project");
     // The project's coordinate system: what online data, reprojection and the
     // title block need, set in one place (project_crs_dialog.hpp; CRS verb).
     QAction* crsAction = makeAction(Icon::Properties, "Project &Coordinate System...",
@@ -701,6 +664,8 @@ void MainWindow::buildActions()
     QAction* quitAction =
         fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
     quitAction->setObjectName("fileQuit");
+    quitAction->setIcon(katana::qt::icon(Icon::Quit));
+    quitAction->setStatusTip("Close Katana, asking first about anything unsaved");
 
     QToolBar* fileBar = makeToolBar("File", Qt::TopToolBarArea);
     fileBar->addActions({newAction, openAction, saveAction});
@@ -741,17 +706,21 @@ void MainWindow::buildActions()
     QAction* deselectAction = editMenu->addAction("&Deselect", QKeySequence(Qt::Key_Escape), this,
                                                   [this] { views_->cancel(); });
     deselectAction->setObjectName("editDeselect");
+    deselectAction->setIcon(katana::qt::icon(Icon::Deselect));
+    deselectAction->setStatusTip("Clear the selection, and end the running tool");
     // The ids LIST, INFO and AREA print, back into a selection
     // (select_by_id_dialog.hpp); non-modal and kept, as Format > Layers is.
     QAction* selectByIdAction =
         editMenu->addAction("Select by &ID...", this, [this] { showSelectById(); });
     selectByIdAction->setObjectName("editSelectById");
+    selectByIdAction->setIcon(katana::qt::icon(Icon::SelectById));
     selectByIdAction->setStatusTip("Select entities by the ids LIST and INFO print, and find them");
     selectByIdAction->setData(QStringLiteral("selectByIdDialog")); // for --dialog
     editMenu->addAction(eraseAction);
     QAction* copyImageAction = editMenu->addAction(
         "Copy &View as Image", this, [this] { (void)runVerbLine("SNAPSHOT CLIPBOARD"); });
     copyImageAction->setObjectName("editCopyViewImage");
+    copyImageAction->setIcon(katana::qt::icon(Icon::CopyViewImage));
     copyImageAction->setStatusTip(
         "Copy the plan view, as it is on screen, to the clipboard as an image (SNAPSHOT CLIPBOARD)");
     editMenu->addSeparator();
@@ -771,6 +740,9 @@ void MainWindow::buildActions()
             refreshProperties();
         });
     attributesAction->setObjectName("editAttributes");
+    attributesAction->setIcon(katana::qt::icon(Icon::Attributes));
+    attributesAction->setStatusTip("The selection's attributes as a tree: add, change, rename "
+                                   "and remove them, each one undo step");
 
     // Format > Layers: beside the drawing, like the Format menu's other
     // managers. One instance, made the first time and kept, so it reopens on
@@ -867,6 +839,7 @@ void MainWindow::buildActions()
     snapAction_->setChecked(views_->snapEnabled());
     connect(snapAction_, &QAction::toggled, this, [this](bool on) { views_->setSnapEnabled(on); });
 
+    viewMenu_->addSection("Display");
     viewMenu_->addAction(extentsAction);
     viewMenu_->addActions({gridAction_, snapAction_});
     // Plan-view lines as a cosmetic pixel instead of the 1.5 px hairline:
@@ -874,6 +847,7 @@ void MainWindow::buildActions()
     // with the heavier look one click away. Plots are unaffected.
     QAction* thinLinesAction = viewMenu_->addAction("&Thin screen lines (faster)");
     thinLinesAction->setObjectName("ThinScreenLinesAction");
+    thinLinesAction->setIcon(katana::qt::icon(Icon::ThinLines));
     thinLinesAction->setStatusTip(
         "Draw plan-view lines one pixel wide, which repaints large drawings several times faster");
     thinLinesAction->setCheckable(true);
@@ -889,15 +863,42 @@ void MainWindow::buildActions()
         }
     });
 
-    QMenu* snapMenu = viewMenu_->addMenu("Snap &Modes");
-    for (const cad::SnapMode mode :
-         {cad::SnapMode::Endpoint, cad::SnapMode::Midpoint, cad::SnapMode::Center,
-          cad::SnapMode::Intersection, cad::SnapMode::Perpendicular, cad::SnapMode::Tangent,
-          cad::SnapMode::Nearest, cad::SnapMode::Grid}) {
-        QAction* action = snapMenu->addAction(cad::toString(mode));
+    // Beside Object Snap, which it refines.
+    auto* snapMenu = new QMenu("Snap &Modes", viewMenu_);
+    snapMenu->setObjectName("viewSnapModes");
+    snapMenu->setIcon(katana::qt::icon(Icon::Snap));
+    snapMenu->menuAction()->setStatusTip("Which points Object Snap finds: ends, middles, "
+                                         "centres, crossings and more");
+    viewMenu_->insertMenu(thinLinesAction, snapMenu);
+    // Each mode with the mark the plan view shows for it, and what it finds.
+    struct SnapItem {
+        cad::SnapMode mode;
+        Icon icon;
+        const char* tip;
+    };
+    for (const SnapItem& item : {
+             SnapItem{cad::SnapMode::Endpoint, Icon::SnapEndpoint,
+                      "Snap to the ends of lines, arcs and polyline segments"},
+             SnapItem{cad::SnapMode::Midpoint, Icon::SnapMidpoint,
+                      "Snap to the middle of a line, an arc or a segment"},
+             SnapItem{cad::SnapMode::Center, Icon::SnapCenter,
+                      "Snap to the centre of a circle or an arc"},
+             SnapItem{cad::SnapMode::Intersection, Icon::SnapIntersection,
+                      "Snap to where two entities cross"},
+             SnapItem{cad::SnapMode::Perpendicular, Icon::SnapPerpendicular,
+                      "Snap to the foot of the perpendicular from the last point"},
+             SnapItem{cad::SnapMode::Tangent, Icon::SnapTangent,
+                      "Snap to the point where a line from the last point touches a circle"},
+             SnapItem{cad::SnapMode::Nearest, Icon::SnapNearest,
+                      "Snap to the nearest point on any entity"},
+             SnapItem{cad::SnapMode::Grid, Icon::SnapGrid, "Snap to the grid's points"}}) {
+        const cad::SnapMode mode = item.mode;
+        QAction* action = snapMenu->addAction(katana::qt::icon(item.icon), cad::toString(mode));
+        action->setStatusTip(item.tip);
         // viewSnapModeEndpoint ... viewSnapModeGrid: what --trigger reaches
         // it by, and what SNAP <mode> ON|OFF sets (dispatchLine).
         action->setObjectName(QString("viewSnapMode") + cad::toString(mode));
+        action->setData(static_cast<uint>(static_cast<cad::SnapModes>(mode)));
         action->setCheckable(true);
         action->setChecked(cad::hasMode(views_->snapModes(), mode));
         connect(action, &QAction::toggled, this, [this, mode](bool on) {
@@ -1363,6 +1364,9 @@ void MainWindow::startTool(const std::string& id)
 
 void MainWindow::showRunningTool(const std::string& id)
 {
+    if (id == "draw.vertex.edit") {
+        drawingUi_.showVertices(); // the polyline it picks is shown there
+    }
     toolActions_.setActive(id);
     selectAction_->setChecked(id.empty());
     // The prompt belongs in the command line, where the answer is typed;
@@ -1385,6 +1389,44 @@ katana::core::Status MainWindow::triggerAction(const QString& name)
     }
     action->trigger();
     return {};
+}
+
+QStringList MainWindow::menuGaps(int* items) const
+{
+    QStringList gaps;
+    int counted = 0;
+    const std::function<void(const QMenu&, const QString&)> walk = [&](const QMenu& menu,
+                                                                     const QString& path) {
+        for (const QAction* action : menu.actions()) {
+            if (action->isSeparator() || !action->isVisible()) {
+                continue;
+            }
+            const QString where = path + " > " + QString(action->text()).remove('&');
+            ++counted;
+            QStringList missing;
+            if (action->icon().isNull()) {
+                missing << "no icon";
+            }
+            if (action->statusTip().isEmpty()) {
+                missing << "no status tip";
+            }
+            if (!missing.isEmpty()) {
+                gaps << where + ": " + missing.join(", ");
+            }
+            if (const QMenu* sub = action->menu()) {
+                walk(*sub, where);
+            }
+        }
+    };
+    for (const QAction* top : menuBar()->actions()) {
+        if (const QMenu* menu = top->menu()) {
+            walk(*menu, QString(menu->title()).remove('&'));
+        }
+    }
+    if (items != nullptr) {
+        *items = counted;
+    }
+    return gaps;
 }
 
 QStringList MainWindow::shortcutClashes(int* sequences) const
@@ -1619,7 +1661,20 @@ void MainWindow::buildDocks()
     layerLayout->addLayout(toolRow({addButton, childButton, renameButton, deleteButton}));
     layerTree_ = new QTreeWidget(layerPanel);
     layerTree_->setColumnCount(kLayerColumns);
-    layerTree_->setHeaderLabels({"Layer", "On", "Lock", "Colour", "N"});
+    layerTree_->setHeaderLabels({"Layer", "", "", "", "N"});
+    // Icons over the narrow columns, their words in the tooltips: "On",
+    // "Lock" and "Colour" set those columns' widths, and the layer names
+    // beside them were cut to their first three letters in a 300 px panel.
+    QTreeWidgetItem* header = layerTree_->headerItem();
+    for (const auto& [column, glyph, tip] :
+         std::initializer_list<std::tuple<int, Icon, const char*>>{
+             {kVisible, Icon::LayerVisible, "On: the layer is shown"},
+             {kLocked, Icon::LayerLocked, "Lock: the layer's entities cannot be picked or changed"},
+             {kColor, Icon::LayerColour, "Colour: double-click a swatch to change it"}}) {
+        header->setIcon(column, katana::qt::icon(glyph));
+        header->setToolTip(column, tip);
+    }
+    header->setToolTip(kCount, "N: how many entities are on the layer");
     layerTree_->setSelectionMode(QAbstractItemView::SingleSelection);
     layerTree_->setUniformRowHeights(true);
     layerTree_->setExpandsOnDoubleClick(false); // double click sets the current layer
@@ -1673,16 +1728,11 @@ void MainWindow::buildDocks()
     styleRow->addWidget(propertyStyle_, 1);
     styleRow->addWidget(propertyStyleApply_);
     propertyLayout->addLayout(styleRow);
-    propertyTable_ = new QTableWidget(0, 2, propertyPanel);
-    // Named, so the headless --report can read the rows (a label's Text and
-    // Position, qt_labels_are_made_edited_and_reported_in_the_window_headless).
-    propertyTable_->setObjectName("propertyTable");
-    propertyTable_->setHorizontalHeaderLabels({"Property", "Value"});
-    propertyTable_->verticalHeader()->setVisible(false);
-    propertyTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    propertyTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    propertyTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    propertyLayout->addWidget(propertyTable_);
+    // The selection as a tree read a level at a time (property_panel.hpp):
+    // a surveyed string's thousands of vertex attributes cost nothing until
+    // they are opened.
+    propertyTree_ = new PropertyTreePanel(propertyPanel);
+    propertyLayout->addWidget(propertyTree_, 1);
     propertyDock->setWidget(propertyPanel);
     connect(propertyStyleApply_, &QToolButton::clicked, this, [this] { applyPropertyStyle(); });
     connect(propertyStyle_->lineEdit(), &QLineEdit::returnPressed, this,
@@ -1699,10 +1749,11 @@ void MainWindow::buildDocks()
     commandLog_->setObjectName("commandLog");
     commandLog_->setReadOnly(true);
     commandLog_->setMaximumBlockCount(2000);
-    commandLog_->setFont(QFont("Consolas", 9));
+    commandLog_->setFont(theme::monospaceFont());
     commandInput_ = new QLineEdit(commandPanel);
     commandInput_->setObjectName("commandInput");
-    commandInput_->setFont(QFont("Consolas", 10));
+    // A point larger than the log: it is where the eye is while typing.
+    commandInput_->setFont(theme::monospaceFont(1.0));
     commandInput_->setPlaceholderText(kCommandPlaceholder);
     commandInput_->installEventFilter(this);
     commandLayout->addWidget(commandLog_);
@@ -1737,16 +1788,26 @@ void MainWindow::buildDocks()
     propertyDock->toggleViewAction()->setObjectName("viewPanelProperties");
     commandDock->toggleViewAction()->setObjectName("viewPanelCommandLine");
     referenceDock_->toggleViewAction()->setObjectName("viewPanelReferenceData");
-    viewMenu_->addSeparator();
+    for (QDockWidget* dock : {layerDock, propertyDock, commandDock, referenceDock_}) {
+        dock->toggleViewAction()->setStatusTip("Show or hide the " + dock->windowTitle() +
+                                               " panel");
+    }
+    viewMenu_->addSection("Window");
     QMenu* panels = viewMenu_->addMenu("&Panels");
+    panels->setObjectName("viewPanels");
+    panels->setIcon(katana::qt::icon(Icon::Panels));
+    panels->menuAction()->setStatusTip("Show or hide the panels: Layers, Properties, Command Line, "
+                                       "Reference Data and Vertices");
     panels->addActions({layerDock->toggleViewAction(), propertyDock->toggleViewAction(),
                         commandDock->toggleViewAction(), referenceDock_->toggleViewAction()});
+    drawingUi_ = drawing::installDrawingUi(*this, document_, panels,
+                                           findChild<QMenu*>("drawMenu"));
 
     // Opening sizes. Left to itself Qt gives each dock its size hint, which
     // for a text log is a third of the window - so the drawing, which is the
     // point of the program, opened in the space left over. The drawing gets
     // the room; the panels get what they need to be read.
-    resizeDocks({layerDock, propertyDock}, {300, 270}, Qt::Horizontal);
+    resizeDocks({layerDock, propertyDock}, {300, 300}, Qt::Horizontal);
     resizeDocks({commandDock}, {150}, Qt::Vertical);
 }
 
@@ -2129,11 +2190,15 @@ void MainWindow::refreshLayers()
         item->setCheckState(kVisible, layer->visible ? Qt::Checked : Qt::Unchecked);
         item->setCheckState(kLocked, layer->locked ? Qt::Checked : Qt::Unchecked);
 
-        item->setText(kColor, QString::fromStdString(layer->color.toHex()));
-        item->setBackground(kColor, QColor(layer->color.r, layer->color.g, layer->color.b));
-        item->setForeground(kColor, layer->color.r + layer->color.g + layer->color.b > 380
-                                        ? QBrush(Qt::black)
-                                        : QBrush(Qt::white));
+        // A swatch, with its code in the tooltip: the code written out in the
+        // cell took seventy pixels of a 300 px column, and the layer names
+        // beside it were cut to "AN..." and "BO...".
+        const QString hex = QString::fromStdString(layer->color.toHex());
+        item->setIcon(kColor, colourSwatch(QColor(layer->color.r, layer->color.g, layer->color.b)));
+        item->setData(kColor, Qt::AccessibleTextRole, hex);
+        item->setToolTip(kColor, QString("<b>%1</b><br>Double-click to change the layer's "
+                                         "colour.")
+                                     .arg(hex));
         item->setText(kCount, QString::number(document_.model().entities.countOnLayer(path)));
 
         // The current layer is where new geometry lands, so it is called out
@@ -2173,42 +2238,7 @@ std::string MainWindow::selectedLayerPath() const
                            : item->data(kName, kLayerPathRole).toString().toStdString();
 }
 
-void MainWindow::refreshProperties()
-{
-    std::vector<std::pair<QString, QString>> rows;
-    const auto ids = document_.selection().ids();
-    if (ids.empty()) {
-        rows.push_back({"Selection", "none"});
-        rows.push_back({"Entities", QString::number(document_.model().entities.size())});
-    } else if (ids.size() == 1) {
-        const Entity& entity = *document_.model().entities.find(ids.front());
-        rows.push_back({"Id", QString::number(entity.id)});
-        rows.push_back({"Type", QString::fromUtf8(toString(entity.type()).data())});
-        rows.push_back({"Layer", QString::fromStdString(entity.layer)});
-        rows.push_back({"Colour", entity.color ? QString::fromStdString(entity.color->toHex())
-                                               : QString("ByLayer")});
-        for (auto& row : describeGeometry(document_.model(), entity.geometry)) {
-            rows.push_back(std::move(row));
-        }
-        for (const auto& [key, value] : entity.properties) {
-            rows.push_back({QString::fromStdString(key), describeProperty(value)});
-        }
-    } else {
-        rows.push_back({"Selection", QString::number(ids.size()) + " entities"});
-        std::map<QString, int> byType;
-        for (const auto id : ids) {
-            ++byType[QString::fromUtf8(toString(document_.model().entities.find(id)->type()).data())];
-        }
-        for (const auto& [type, count] : byType) {
-            rows.push_back({type, QString::number(count)});
-        }
-    }
-    propertyTable_->setRowCount(static_cast<int>(rows.size()));
-    for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
-        propertyTable_->setItem(row, 0, new QTableWidgetItem(rows[static_cast<std::size_t>(row)].first));
-        propertyTable_->setItem(row, 1, new QTableWidgetItem(rows[static_cast<std::size_t>(row)].second));
-    }
-}
+void MainWindow::refreshProperties() { propertyTree_->showSelection(document_); }
 
 void MainWindow::refreshStyleChoices()
 {
@@ -2574,9 +2604,220 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
     if (confirmDiscard()) {
         event->accept();
+        // Only a window a person used: a headless run leaves no layout behind.
+        if (!headless_) {
+            saveSession();
+        }
     } else {
         event->ignore();
     }
+}
+
+// ---- the window between sessions -------------------------------------------------------
+
+void MainWindow::buildWindowMenu()
+{
+    QMenu* bars = viewMenu_->addMenu("Tool&bars");
+    bars->setObjectName("viewToolBars");
+    bars->setIcon(katana::qt::icon(Icon::Toolbars));
+    bars->menuAction()->setStatusTip(
+        "Show or hide each toolbar, choose their icons' size, and whether they show their names");
+    bars->addSection("Show");
+    for (const auto& [toolbar, name] : toolBars_) {
+        bars->addAction(toolbar->toggleViewAction());
+    }
+    bars->addSection("Buttons");
+    QAction* names = bars->addAction(katana::qt::icon(Icon::Rename), "Show Toolbar &Names");
+    names->setObjectName("viewToolBarNames");
+    names->setCheckable(true);
+    names->setChecked(toolBarNamesShown_);
+    names->setStatusTip("Show each toolbar's name before its buttons, so the groups are told "
+                        "apart without hovering over them");
+    connect(names, &QAction::toggled, this, [this](bool on) { setToolBarNamesShown(on); });
+    auto* iconGroup = new QActionGroup(this);
+    for (const auto& [pixels, text, name] :
+         std::initializer_list<std::tuple<int, const char*, const char*>>{
+             {16, "&Small Icons", "viewToolBarIconsSmall"},
+             {20, "S&tandard Icons", "viewToolBarIconsStandard"},
+             {28, "&Large Icons", "viewToolBarIconsLarge"}}) {
+        QAction* action = bars->addAction(katana::qt::icon(Icon::Toolbars), text);
+        action->setObjectName(name);
+        action->setCheckable(true);
+        action->setChecked(pixels == toolBarIconSize_);
+        action->setData(pixels);
+        action->setStatusTip(QString("Toolbar icons %1 pixels square").arg(pixels));
+        iconGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [this, size = pixels] {
+            setToolBarIconSize(size);
+        });
+    }
+
+    QMenu* text = viewMenu_->addMenu("Te&xt Size");
+    text->setObjectName("viewTextSize");
+    text->setIcon(katana::qt::icon(Icon::TextSize));
+    text->menuAction()->setStatusTip(
+        "How large the window's text is: menus, panels, dialogs and the command line");
+    auto* textGroup = new QActionGroup(this);
+    for (const auto& [size, label] : std::initializer_list<std::pair<theme::TextSize, const char*>>{
+             {theme::TextSize::Small, "&Small"},
+             {theme::TextSize::Standard, "S&tandard"},
+             {theme::TextSize::Large, "&Large"},
+             {theme::TextSize::ExtraLarge, "&Extra Large"}}) {
+        QAction* action = text->addAction(katana::qt::icon(Icon::TextSize), label);
+        action->setObjectName(textSizeActionName(size));
+        action->setCheckable(true);
+        action->setChecked(size == theme::textSize());
+        const int steps = theme::textSizeSteps(size);
+        action->setStatusTip(
+            steps == 0 ? QString("The platform's own text size")
+                       : QString("The platform's text size %1 %2 point%3")
+                             .arg(steps > 0 ? "and" : "less")
+                             .arg(std::abs(steps))
+                             .arg(std::abs(steps) == 1 ? "" : "s"));
+        textGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [this, chosen = size] { setTextSize(chosen); });
+    }
+
+    QAction* reset = viewMenu_->addAction(katana::qt::icon(Icon::ResetLayout),
+                                          "Reset &Window Layout");
+    reset->setObjectName("viewResetLayout");
+    reset->setStatusTip("Put the panels and toolbars back where a new window has them");
+    connect(reset, &QAction::triggered, this, [this] { resetWindowLayout(); });
+}
+
+void MainWindow::refreshToolBarNames()
+{
+    for (const auto& [toolbar, name] : toolBars_) {
+        if (name != nullptr) {
+            name->setVisible(toolBarNamesShown_ && toolbar->orientation() == Qt::Horizontal);
+        }
+    }
+}
+
+void MainWindow::setToolBarNamesShown(bool shown)
+{
+    toolBarNamesShown_ = shown;
+    refreshToolBarNames();
+    if (auto* action = findChild<QAction*>("viewToolBarNames"); action != nullptr) {
+        const QSignalBlocker quiet(action);
+        action->setChecked(shown);
+    }
+    if (!headless_) {
+        QSettings().setValue(kToolBarNamesKey, shown);
+    }
+}
+
+void MainWindow::setToolBarIconSize(int pixels)
+{
+    toolBarIconSize_ = std::clamp(pixels, 12, 48);
+    for (const auto& [toolbar, name] : toolBars_) {
+        toolbar->setIconSize(QSize(toolBarIconSize_, toolBarIconSize_));
+    }
+    // The Undo and Redo buttons are widgets on the Edit bar, sized apart.
+    for (const char* button : {"editUndoButton", "editRedoButton"}) {
+        if (auto* history = findChild<QToolButton*>(button)) {
+            history->setIconSize(QSize(toolBarIconSize_, toolBarIconSize_));
+        }
+    }
+    for (QAction* action : findChildren<QAction*>()) {
+        if (action->objectName().startsWith("viewToolBarIcons")) {
+            const QSignalBlocker quiet(action);
+            action->setChecked(action->data().toInt() == toolBarIconSize_);
+        }
+    }
+    if (!headless_) {
+        QSettings().setValue(kToolBarIconsKey, toolBarIconSize_);
+    }
+}
+
+void MainWindow::setTextSize(theme::TextSize size)
+{
+    theme::setTextSize(*qApp, size);
+    // The fonts set on widgets of their own, which the application font
+    // does not reach: the command line's fixed pitch.
+    commandLog_->setFont(theme::monospaceFont());
+    commandInput_->setFont(theme::monospaceFont(1.0));
+    for (QAction* action : findChildren<QAction*>()) {
+        if (action->objectName().startsWith("viewTextSize")) {
+            const QSignalBlocker quiet(action);
+            action->setChecked(action->objectName() == textSizeActionName(size));
+        }
+    }
+    if (!headless_) {
+        QSettings().setValue(kTextSizeKey, fromView(theme::toString(size)));
+    }
+    logMessage("Text size: " + fromView(theme::toString(size)) + ".");
+}
+
+void MainWindow::fitToScreen()
+{
+    const QScreen* screen = this->screen() != nullptr ? this->screen() : QGuiApplication::primaryScreen();
+    if (screen == nullptr) {
+        return;
+    }
+    const QRect free = screen->availableGeometry();
+    // Below 1440 x 900 (a 1366 x 768 laptop, a 1280 x 800 one) the fixed
+    // 1360 x 860 window ran off the screen: maximised, the drawing gets every
+    // pixel there is.
+    if (free.width() < 1440 || free.height() < 900) {
+        resize(free.size());
+        move(free.topLeft());
+        setWindowState(windowState() | Qt::WindowMaximized);
+        return;
+    }
+    // 85%: large enough that the drawing is the window, small enough that
+    // it is plainly a window a person can move, with the desktop around it.
+    const QSize size(static_cast<int>(free.width() * 0.85), static_cast<int>(free.height() * 0.85));
+    resize(size);
+    move(free.center() - QPoint(size.width() / 2, size.height() / 2));
+}
+
+void MainWindow::restoreSession()
+{
+    QSettings settings;
+    // The appearance first: the sizes below are laid out in it.
+    if (const auto size =
+            theme::textSizeFrom(settings.value(kTextSizeKey).toString().toStdString())) {
+        if (*size != theme::textSize()) {
+            setTextSize(*size);
+        }
+    }
+    if (const int pixels = settings.value(kToolBarIconsKey, toolBarIconSize_).toInt();
+        pixels != toolBarIconSize_) {
+        setToolBarIconSize(pixels);
+    }
+    setToolBarNamesShown(settings.value(kToolBarNamesKey, toolBarNamesShown_).toBool());
+
+    // Qt puts a window that was on a screen no longer there back onto one.
+    if (!restoreGeometry(settings.value(kGeometryKey).toByteArray())) {
+        fitToScreen();
+    }
+    // A layout saved by another version, or none, leaves the window as built.
+    if (restoreState(settings.value(kLayoutKey).toByteArray(), kLayoutVersion)) {
+        const QStringList unknown =
+            chrome_->minimiseNamed(settings.value(kMinimisedKey).toStringList());
+        (void)unknown; // a view of the last session: views are not kept
+        refreshToolBarNames();
+    }
+}
+
+void MainWindow::saveSession() const
+{
+    QSettings settings;
+    settings.setValue(kGeometryKey, saveGeometry());
+    settings.setValue(kLayoutKey, saveState(kLayoutVersion));
+    settings.setValue(kMinimisedKey, chrome_->minimisedNames());
+}
+
+void MainWindow::resetWindowLayout()
+{
+    // Minimised panels back first, so their tray buttons go with them.
+    for (QDockWidget* dock : {layerDock_, propertyDock_, commandDock_, referenceDock_}) {
+        chrome_->restore(dock);
+    }
+    restoreState(defaultLayout_, kLayoutVersion);
+    refreshToolBarNames();
+    logMessage("The panels and toolbars are back where a new window has them.");
 }
 
 // ---- command line -----------------------------------------------------------------------------
@@ -2790,6 +3031,15 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
         logMessage(QString("grid=%1").arg(*on ? "on" : "off"));
         return;
     }
+    // SNAP with the drafting verb's options (modes=, add=, remove=) is the
+    // interpreter's (docs/drawing.md); the window keeps SNAP [ON|OFF] and
+    // SNAP <mode> [ON|OFF] as its shorthand for View > Snap Modes.
+    if ((verb == "SNAP" || verb == "OSNAP") &&
+        std::any_of(words.begin() + 1, words.end(),
+                    [](const QString& word) { return word.contains('='); })) {
+        runInterpreterLine(line, verb);
+        return;
+    }
     if (verb == "SNAP" || verb == "OSNAP") {
         // SNAP <mode> [ON|OFF]: one of View > Snap Modes, by its name there.
         const QString mode = argument == "CENTRE" ? QString("CENTER") : argument;
@@ -2814,7 +3064,9 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
             words.size() <= 2 ? onOff(argument, snapAction_->isChecked()) : std::nullopt;
         if (!on) {
             logMessage("usage: SNAP [ON|OFF] | SNAP <mode> [ON|OFF]   modes: Endpoint, Midpoint, "
-                       "Center, Intersection, Perpendicular, Tangent, Nearest, Grid",
+                       "Center, Intersection, Perpendicular, Tangent, Nearest, Grid | "
+                       "SNAP [on|off] [modes=a,b|all|none] [add=a,b] [remove=a,b] for every "
+                       "mode (HELP)",
                        true);
             return;
         }
@@ -3021,7 +3273,9 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
 
 void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
 {
-    const bool replacesDocument = verb == "NEW" || verb == "OPEN";
+    // Not an OPEN of polylines (OPEN #12, OPEN SELECTION): that is an edit.
+    const bool replacesDocument =
+        katana::cad::CommandInterpreter::replacesDocument(line.toStdString());
     if (replacesDocument && !confirmDiscard()) {
         return;
     }
@@ -3047,7 +3301,7 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
         clearSceneData();
         views_->zoomExtentsAll();
     }
-    if (verb == "OPEN") {
+    if (replacesDocument && verb == "OPEN") {
         reportMissingCustomisation();
         restoreReferences();
     }
@@ -3182,10 +3436,13 @@ void MainWindow::refreshRecentScripts()
             QString("&%1 %2").arg(at + 1).arg(QFileInfo(path).fileName()), this,
             [this, path] { (void)runVerbLine(scriptCommandLine(path, false)); });
         item->setObjectName(QString("recentScript%1").arg(at + 1));
+        item->setIcon(katana::qt::icon(Icon::RecentScripts));
         item->setStatusTip("Run " + QDir::toNativeSeparators(path));
     }
     if (recent.isEmpty()) {
-        recentScriptsMenu_->addAction("(none)")->setEnabled(false);
+        QAction* none = recentScriptsMenu_->addAction(katana::qt::icon(Icon::RecentScripts), "(none)");
+        none->setStatusTip("No script has been run yet: File > Run Script runs one");
+        none->setEnabled(false);
         return;
     }
     recentScriptsMenu_->addSeparator();
@@ -3194,6 +3451,8 @@ void MainWindow::refreshRecentScripts()
         refreshRecentScripts();
     });
     clear->setObjectName("recentScriptsClear");
+    clear->setIcon(katana::qt::icon(Icon::Erase));
+    clear->setStatusTip("Forget the scripts listed here; the files are not touched");
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
@@ -4479,21 +4738,35 @@ void MainWindow::convertPointCloudToCopc()
 
 void MainWindow::buildViewMenu(QMenu* viewMenu)
 {
-    viewMenu->addSeparator();
+    viewMenu->addSection("Viewports");
 
     // Every item below has an object name, so --trigger and DRIVE's '*' reach
     // it as a click does; the layouts' and the standard views' are their
     // enumerators', since their menu text ("Two: Vertical", "SW Isometric")
     // is no name.
     QMenu* layoutMenu = viewMenu->addMenu("Viewport &Layout");
-    for (const auto& [kind, name] : std::initializer_list<std::pair<cad::LayoutKind, const char*>>{
-             {cad::LayoutKind::Single, "Single"},
-             {cad::LayoutKind::SplitVertical, "SplitVertical"},
-             {cad::LayoutKind::SplitHorizontal, "SplitHorizontal"},
-             {cad::LayoutKind::ThreeLeft, "ThreeLeft"},
-             {cad::LayoutKind::ThreeTop, "ThreeTop"},
-             {cad::LayoutKind::Quad, "Quad"}}) {
-        QAction* action = layoutMenu->addAction(cad::toString(kind));
+    layoutMenu->setIcon(katana::qt::icon(Icon::LayoutQuad));
+    layoutMenu->menuAction()->setStatusTip(
+        "Arrange the open views: one, two, three or four, side by side or stacked");
+    struct LayoutItem {
+        cad::LayoutKind kind;
+        const char* name;
+        Icon icon;
+        const char* tip;
+    };
+    for (const auto& [kind, name, glyph, tip] : std::initializer_list<LayoutItem>{
+             {cad::LayoutKind::Single, "Single", Icon::LayoutSingle, "One view, the whole window"},
+             {cad::LayoutKind::SplitVertical, "SplitVertical", Icon::LayoutSplitVertical,
+              "Two views side by side"},
+             {cad::LayoutKind::SplitHorizontal, "SplitHorizontal", Icon::LayoutSplitHorizontal,
+              "Two views, one above the other"},
+             {cad::LayoutKind::ThreeLeft, "ThreeLeft", Icon::LayoutThreeLeft,
+              "Three views: a large one on the left, two stacked on the right"},
+             {cad::LayoutKind::ThreeTop, "ThreeTop", Icon::LayoutThreeTop,
+              "Three views: a wide one on top, two side by side below"},
+             {cad::LayoutKind::Quad, "Quad", Icon::LayoutQuad, "Four views of equal size"}}) {
+        QAction* action = layoutMenu->addAction(katana::qt::icon(glyph), cad::toString(kind));
+        action->setStatusTip(tip);
         action->setObjectName(QString("viewLayout") + name);
         action->setData(static_cast<int>(kind));
         connect(action, &QAction::triggered, this, [this, kind] {
@@ -4504,9 +4777,23 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
     }
 
     QMenu* kindMenu = viewMenu->addMenu("Active Viewport S&hows");
-    for (const cad::ViewKind kind : {cad::ViewKind::Plan, cad::ViewKind::Model3D,
-                                     cad::ViewKind::Section, cad::ViewKind::Elevation}) {
-        QAction* action = kindMenu->addAction(cad::toString(kind));
+    kindMenu->setIcon(katana::qt::icon(Icon::View3D));
+    kindMenu->menuAction()->setStatusTip(
+        "What the active view shows: the plan, the model in 3D, a section or an elevation");
+    struct KindItem {
+        cad::ViewKind kind;
+        Icon icon;
+        const char* tip;
+    };
+    for (const auto& [kind, glyph, tip] : std::initializer_list<KindItem>{
+             {cad::ViewKind::Plan, Icon::ViewPlan, "Show the plan in the active view"},
+             {cad::ViewKind::Model3D, Icon::View3D, "Show the model in 3D in the active view"},
+             {cad::ViewKind::Section, Icon::ViewSection,
+              "Show the section cut last in the active view"},
+             {cad::ViewKind::Elevation, Icon::ViewElevation,
+              "Show an elevation of the model in the active view"}}) {
+        QAction* action = kindMenu->addAction(katana::qt::icon(glyph), cad::toString(kind));
+        action->setStatusTip(tip);
         // viewShowsPlan, viewShows3D, ...: what --trigger and DRIVE's '*'
         // reach it by.
         action->setObjectName(QString("viewShows") + cad::toString(kind));
@@ -4521,20 +4808,39 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
         kindActions_.push_back(action);
     }
 
+    viewMenu->addSection("3D Views");
     QMenu* standard = viewMenu->addMenu("Standard &3D Views");
-    for (const auto& [view, name] :
-         std::initializer_list<std::pair<render::StandardView, const char*>>{
-             {render::StandardView::Top, "Top"},
-             {render::StandardView::Bottom, "Bottom"},
-             {render::StandardView::Front, "Front"},
-             {render::StandardView::Back, "Back"},
-             {render::StandardView::Left, "Left"},
-             {render::StandardView::Right, "Right"},
-             {render::StandardView::IsoSouthWest, "IsoSouthWest"},
-             {render::StandardView::IsoSouthEast, "IsoSouthEast"},
-             {render::StandardView::IsoNorthEast, "IsoNorthEast"},
-             {render::StandardView::IsoNorthWest, "IsoNorthWest"}}) {
-        QAction* action = standard->addAction(render::toString(view), this, [this, view] {
+    standard->setIcon(katana::qt::icon(Icon::ViewIsoSouthWest));
+    standard->menuAction()->setStatusTip(
+        "Turn the 3D view to look from a side, from above or below, or from a corner");
+    struct StandardItem {
+        render::StandardView view;
+        const char* name;
+        Icon icon;
+        const char* tip;
+    };
+    for (const auto& [view, name, glyph, tip] : std::initializer_list<StandardItem>{
+             {render::StandardView::Top, "Top", Icon::ViewTop, "Look straight down on the model"},
+             {render::StandardView::Bottom, "Bottom", Icon::ViewBottom,
+              "Look straight up at the model from below"},
+             {render::StandardView::Front, "Front", Icon::ViewFront,
+              "Look north at the model, from the south"},
+             {render::StandardView::Back, "Back", Icon::ViewBack,
+              "Look south at the model, from the north"},
+             {render::StandardView::Left, "Left", Icon::ViewLeft,
+              "Look east at the model, from the west"},
+             {render::StandardView::Right, "Right", Icon::ViewRight,
+              "Look west at the model, from the east"},
+             {render::StandardView::IsoSouthWest, "IsoSouthWest", Icon::ViewIsoSouthWest,
+              "Look at the model from above its south-west corner"},
+             {render::StandardView::IsoSouthEast, "IsoSouthEast", Icon::ViewIsoSouthEast,
+              "Look at the model from above its south-east corner"},
+             {render::StandardView::IsoNorthEast, "IsoNorthEast", Icon::ViewIsoNorthEast,
+              "Look at the model from above its north-east corner"},
+             {render::StandardView::IsoNorthWest, "IsoNorthWest", Icon::ViewIsoNorthWest,
+              "Look at the model from above its north-west corner"}}) {
+        QAction* action = standard->addAction(katana::qt::icon(glyph), render::toString(view),
+                                              this, [this, view] {
             if (RenderViewWidget* renderView = views_->activeRenderView()) {
                 renderView->setStandardView(view);
             } else {
@@ -4542,6 +4848,7 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
             }
         });
         action->setObjectName(QString("viewStandard") + name);
+        action->setStatusTip(tip);
     }
     QAction* perspective = viewMenu->addAction("Toggle Pe&rspective", QKeySequence(Qt::Key_F9),
                                                this, [this] {
@@ -4557,9 +4864,15 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
         logMessage(wasPerspective ? "Orthographic projection." : "Perspective projection.");
     });
     perspective->setObjectName("viewTogglePerspective");
+    perspective->setIcon(katana::qt::icon(Icon::Perspective));
+    perspective->setStatusTip(
+        "Switch the active 3D view between perspective and a true-scale orthographic view");
     QAction* exaggeration = viewMenu->addAction("&Vertical Exaggeration...", this,
                                                 [this] { askVerticalExaggeration(); });
     exaggeration->setObjectName("viewVerticalExaggeration");
+    exaggeration->setIcon(katana::qt::icon(Icon::VerticalExaggeration));
+    exaggeration->setStatusTip("Stretch heights in the 3D and section views, so a gentle "
+                               "grade can be seen (EXAGGERATION)");
 }
 
 void MainWindow::refreshViewMenu()
@@ -4744,8 +5057,13 @@ void MainWindow::cutSectionAlongSelection()
     } else if (const auto* polyline =
                    std::get_if<katana::geometry::Polyline2>(&entity->geometry)) {
         alignment = *polyline;
+    } else if (std::holds_alternative<katana::geometry::CurvePolyline2>(entity->geometry) ||
+               std::holds_alternative<katana::geometry::Spline2>(entity->geometry)) {
+        // Along the curve's chords within a millimetre (entity::linework),
+        // which a section's chainage cannot tell from the curve.
+        alignment.vertices = katana::entity::linework(entity->geometry);
     } else {
-        logMessage("A section must be cut along a line or a polyline.", true);
+        logMessage("A section must be cut along a line, a polyline or a spline.", true);
         return;
     }
 
@@ -5006,7 +5324,7 @@ void MainWindow::corridorQuantities()
     auto* layout = new QVBoxLayout(&table);
     auto* text = new QPlainTextEdit(&table);
     text->setReadOnly(true);
-    text->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    text->setFont(katana::qt::theme::monospaceFont());
     text->setPlainText(report);
     layout->addWidget(text);
     auto* close = new QDialogButtonBox(QDialogButtonBox::Close, &table);

@@ -373,6 +373,21 @@ height= cell= file=` records, the rasters a terrain verb reads as `RASTER
   shows the difference on the sample: 13 vertices at 0 then, none now.
 - **A line is a breakline of its two ends.** The window ignored LINE
   entities; a levelled line is as much a breakline as a two-vertex polyline.
+- **A curve polyline is a breakline through its chords.** A string with
+  arcs (`CurvePolyline2`, `docs/drawing.md`) holds its heights in its
+  vertices; its arcs go in as chords at `geometry::kCurveChordTolerance`
+  (1 mm), each chord point at the height interpolated by length along its
+  segment (`CurvePolyline2::tessellateWithHeights`) - the rule main's window
+  Surface From Drawing had for it, ported to `surfaceInput` when the window's
+  loop gave way to the SURFACE verb. A segment with an end not surveyed
+  gives its chord points no height, and the breakline breaks there as at a
+  vertex without one
+  (`DrawingCurves.ASurfaceTakesACurvePolylineAsABreaklineThroughItsChordsAtTheirHeights`,
+  `DrawingCurves.ASurfaceBreaksACurvePolylineWhereAnEndHasNoHeight`). A
+  closed one is a closed breakline with no repeated point. An ellipse and a
+  spline hold no height and are skipped by type, as an arc and a circle are.
+  - *Rejected:* the window's datum rule for a curve polyline with no height
+    at all (z = 0), for the reason the entry above gives.
 - **Float32 by default.** It is the DEM convention and half the size; near
   1000 m its step is 6e-5 m, finer than any survey the surface came from.
   `SurfaceVerbs.SurfaceExportFloat32ReadsBackTheSurfaceWithinFloat32Precision`
@@ -770,8 +785,10 @@ DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
   changes nothing.
 - **DRAPE** sets the heights of the points, lines and polylines the scope
   takes: a point at its position, a line at its ends, a polyline at every
-  vertex. What has no vertices a height belongs to (an arc, a circle, a
-  text) is left and counted by type. The heights are computed on the job's
+  vertex - a curve polyline's too, into its geometry, which is where it
+  keeps them (`DrawingCurves.DrapeGivesACurvePolylinesVerticesTheirHeightsInItsGeometryAsOneStep`).
+  What has no vertices a height belongs to (an arc, a circle, an ellipse, a
+  spline, a text) is left and counted by type. The heights are computed on the job's
   worker (`cad::geo::drapeHeights`, `include/katana/cad/geo/drape.hpp`,
   given the ground as a callback so katana_cad never sees GDAL) and written
   on the GUI thread by one command (`cad::geo::drapeCommand`, through
@@ -791,6 +808,15 @@ DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
 
 ### Decided
 
+- **A curve polyline is draped at its vertices, its arcs kept.** Its
+  heights belong to its vertices and the height along an arc is the
+  geometry's rule, linear by length between them; the drape writes the
+  vertices' heights into the geometry (one `setEntityGeometry` in the same
+  transaction), bulges untouched, and no `elevations` property, which the
+  kind does not use. Rejected: densifying each arc into chords sampled on
+  the ground. It would follow the ground more closely between vertices, but
+  it turns the arcs into a straight polyline - the drape would redraw the
+  string, not height it - and on a curved alignment the arcs are the design.
 - **A vertex off the ground loses its old height.** The drape defines the
   heights of what it takes; a height kept from before would be another
   surface's, mixed in silently. Rejected: keeping it, which draws a string

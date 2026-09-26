@@ -1,8 +1,10 @@
 #include "customisation/scope_filter_widget.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <set>
 #include <string>
+#include <variant>
 
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -34,9 +36,10 @@ using katana::core::Result;
 using katana::entity::EntityType;
 
 // Every geometry kind, in the variant's order: the type boxes of the filter.
-constexpr EntityType kTypes[] = {EntityType::Point,    EntityType::Line,   EntityType::Arc,
-                                 EntityType::Polyline, EntityType::Circle, EntityType::Text,
-                                 EntityType::Dimension};
+// Counted off the variant, not listed: a hand-written list stopped at
+// Dimension, so the window could not filter to a label, a leader, or the
+// drawing system's curve polyline, ellipse and spline that TYPE= reaches.
+constexpr std::size_t kTypeCount = std::variant_size_v<katana::entity::Geometry>;
 
 std::string text(const QString& value)
 {
@@ -132,7 +135,8 @@ ScopeFilterWidget::ScopeFilterWidget(const QString& namePrefix, QWidget* parent)
     typeLayout->setContentsMargins(0, 0, 0, 0);
     int column = 0;
     int row = 0;
-    for (const EntityType type : kTypes) {
+    for (std::size_t kind = 0; kind < kTypeCount; ++kind) {
+        const auto type = static_cast<EntityType>(kind);
         const std::string_view spelt = katana::entity::toString(type);
         const QString name =
             QString::fromUtf8(spelt.data(), static_cast<qsizetype>(spelt.size()));
