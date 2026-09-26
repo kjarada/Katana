@@ -51,6 +51,7 @@
 #include "katana/core/text.hpp"
 #include "katana/interop/geo/raster_products.hpp"
 #include "katana/interop/terrain_io.hpp"
+#include "katana/math/numerics.hpp"
 #include "replies.hpp"
 #include "verb_table.hpp"
 
@@ -119,11 +120,23 @@ Result<std::pair<int, int>> sizeOption(const std::string& text)
     return std::pair<int, int>{static_cast<int>(*columns), static_cast<int>(*rows)};
 }
 
-// The number of whole cells that cover `span`, allowing for the rounding of
-// a span that is a whole number of cells when worked exactly (100 / 5).
+// The number of whole cells that cover `span`: a span within
+// math::tolerance::kGeometric of a whole number of cells is that number, so
+// the rounding of a span worked from projected coordinates adds no cell.
 double wholeCells(double span, double cell)
 {
-    return std::max(1.0, std::ceil(span / cell - 1e-9));
+    return std::max(1.0, std::ceil((span - katana::math::tolerance::kGeometric) / cell));
+}
+
+// The cell line at or below `at`, a coordinate within
+// math::tolerance::kGeometric of a line being on it. The allowance is in
+// model units, not in cells: at an MGA northing a cell count near 6e7 has an
+// ulp of 7.5e-9, so the absolute 1e-9 cells this once allowed vanished in
+// the rounding and 6250000.3 / 0.1 = 62500002.99999999 put the grid a row
+// low (kGeometric is ~50 ulp at the largest projected coordinates).
+double cellLineBelow(double at, double cell)
+{
+    return std::floor((at + katana::math::tolerance::kGeometric) / cell) * cell;
 }
 
 // A feature's value of the field at `index`, as a number: a real or an
@@ -410,8 +423,8 @@ Result<Prepared> prepareRasterGrid(Context& context, const Tokens& tokens, std::
         if (!givenExtent) {
             // Outwards to whole cells from the origin, so grids of one cell
             // size line up and a datum on the edge is inside.
-            x0 = std::floor(x0 / *cell + 1e-9) * *cell;
-            y0 = std::floor(y0 / *cell + 1e-9) * *cell;
+            x0 = cellLineBelow(x0, *cell);
+            y0 = cellLineBelow(y0, *cell);
         }
         const double across = wholeCells(x1 - x0, *cell);
         const double down = wholeCells(y1 - y0, *cell);
