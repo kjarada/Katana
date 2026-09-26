@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "../mcp_tools.hpp"
+#include "formats_verbs.hpp"
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/gis/processing.hpp"
@@ -575,6 +576,94 @@ std::vector<Tool> geoTools()
     // ---- T0: katana_terrain_list ----
     // ---- V5: katana_gis_query ----
     // ---- I2: katana_formats ----
+    // Read-only, as katana_gdal_catalogue is: it reads the registry through
+    // the verb's own chooser and records (formats_verbs.hpp), so the tool,
+    // FORMATS and the katana://formats resource cannot come to differ.
+    tools.push_back(Tool{
+        "katana_formats", "GDAL formats",
+        "The formats this build of GDAL reads and writes, from its own registry: each driver's "
+        "name (what EXPORT's and GDAL's FORMAT take), description, the kinds of data it holds, "
+        "reads and writes (raster, vector), its extensions, and whether it opens /vsi paths "
+        "(inside a .zip, over https). kind and capability narrow the list (\"vector\", "
+        "\"write\"); filter keeps drivers whose name, description or extensions hold every word. "
+        "driver gives that one driver's open, creation and layer-creation options instead: "
+        "each option's name, type, default, choices, bounds and description, what IMPORT's and "
+        "EXPORT's driver options are checked against.",
+        objectSchema(
+            Json{{"kind",
+                  {{"type", "string"},
+                   {"enum", Json::array({"raster", "vector"})},
+                   {"description", "Only drivers of this kind of data."}}},
+                 {"capability",
+                  {{"type", "string"},
+                   {"enum", Json::array({"read", "write"})},
+                   {"description", "Only drivers that read, or write, that kind."}}},
+                 {"filter",
+                  {{"type", "string"},
+                   {"description", "Words each of which the driver's name, description or an "
+                                   "extension holds, e.g. \"parquet\"."}}},
+                 {"driver",
+                  {{"type", "string"},
+                   {"description", "One driver's options instead of the list, e.g. \"GPKG\"."}}}}),
+        hints(true, false, true),
+        [](Session&, const Json& arguments) -> ToolReply {
+            if (const Json& driver = argument(arguments, "driver"); !driver.is_null()) {
+                if (!driver.is_string()) {
+                    throw ToolRefusal{"\"driver\" is a driver's name, as FORMATS lists it"};
+                }
+                const katana::gis::Format* format =
+                    katana::gis::findFormat(driver.get<std::string>());
+                if (format == nullptr) {
+                    throw ToolRefusal{"this GDAL build has no format named \"" +
+                                      driver.get<std::string>() + "\"; katana_formats lists them"};
+                }
+                auto options = katana::gis::formatOptions(format->driver);
+                if (!options) {
+                    throw ToolRefusal{options.error().describe()};
+                }
+                return ToolReply{geo::optionsRecords(*format, *options),
+                                 geo::formatOptionsJson(*format, *options)};
+            }
+            geo::FormatsQuery query;
+            const auto choice = [&arguments](const char* name, const char* first,
+                                             const char* second) -> int {
+                const Json& given = argument(arguments, name);
+                if (given.is_null()) {
+                    return 0;
+                }
+                if (given.is_string() && given.get<std::string>() == first) {
+                    return 1;
+                }
+                if (given.is_string() && given.get<std::string>() == second) {
+                    return 2;
+                }
+                throw ToolRefusal{std::string("\"") + name + "\" is \"" + first + "\" or \"" +
+                                  second + "\""};
+            };
+            if (const int kind = choice("kind", "raster", "vector"); kind != 0) {
+                query.kind = kind == 1 ? katana::gis::DataKind::Raster : katana::gis::DataKind::Vector;
+            }
+            if (const int capability = choice("capability", "read", "write"); capability != 0) {
+                query.capability = capability == 1 ? geo::FormatsQuery::Capability::Read
+                                                   : geo::FormatsQuery::Capability::Write;
+            }
+            if (const Json& filter = argument(arguments, "filter"); !filter.is_null()) {
+                if (!filter.is_string()) {
+                    throw ToolRefusal{"\"filter\" is text"};
+                }
+                query.text = filter.get<std::string>();
+            }
+            Json formats = Json::array();
+            std::string text;
+            const auto chosen = geo::chooseFormats(query);
+            for (const katana::gis::Format* format : chosen) {
+                formats.push_back(geo::formatJson(*format));
+                text += geo::formatRecord(*format) + "\n";
+            }
+            text += geo::formatsSummary(query, chosen.size());
+            return ToolReply{text, Json{{"gdal_version", gp::versions().gdal},
+                                        {"formats", std::move(formats)}}};
+        }});
     // ---- D1: katana_dataset_info ----
     // ---- D2: katana_references ----
     return tools;

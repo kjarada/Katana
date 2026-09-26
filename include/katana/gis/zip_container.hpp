@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,5 +47,15 @@ listZip(const std::filesystem::path& archive);
 // over it, so a failure half-way leaves the old file, not half a new one.
 [[nodiscard]] katana::core::Status writeZip(const std::filesystem::path& archive,
                                             std::string_view memberName, std::string_view bytes);
+
+// One member of an archive to write: its path within, and its bytes.
+struct ZipContent {
+    std::string_view name;
+    std::string_view bytes;
+};
+// The same with several members, in their order. InvalidArgument for none,
+// or for a name that is no plain relative path.
+[[nodiscard]] katana::core::Status writeZip(const std::filesystem::path& archive,
+                                            std::span<const ZipContent> members);
 
 } // namespace katana::gis

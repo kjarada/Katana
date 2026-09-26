@@ -3283,15 +3283,21 @@ QString patternsFor(const std::vector<std::string>& extensions)
     return patterns.join(' ');
 }
 
+// The vector and raster extensions are GDAL's registry's (interop::
+// vectorExtensions, docs/interop.md "Formats"), so the filters offer what
+// this build opens; a file picked through "All files" is still routed by
+// what it holds. An archive (.zip, .tar.gz) is opened by its inside.
 QString importFilter()
 {
     const QString vector = patternsFor(interop::vectorExtensions());
     const QString raster = patternsFor(interop::rasterExtensions());
     const QString cloud = patternsFor(interop::pointCloudExtensions());
     const QString archive = patternsFor(interop::archive12dExtensions());
-    return "All supported (" + vector + ' ' + archive + ' ' + raster + ' ' + cloud + ");;" +
-           "Vector (" + vector + ");;" + "12d Archive (" + archive + ");;" + "Raster (" + raster +
-           ");;" + "Point cloud (" + cloud + ");;" + "All files (*)";
+    const QString zipped = patternsFor(interop::archiveExtensions());
+    return "All supported (" + vector + ' ' + archive + ' ' + raster + ' ' + cloud + ' ' + zipped +
+           ");;" + "Vector (" + vector + ");;" + "12d Archive (" + archive + ");;" + "Raster (" +
+           raster + ");;" + "Point cloud (" + cloud + ");;" + "Zipped GIS data (" + zipped +
+           ");;" + "All files (*)";
 }
 
 } // namespace
@@ -3668,12 +3674,14 @@ void MainWindow::importFile()
         (void)runVerbLine(importLine(selected, {}));
         return;
     }
-    warnUser( "Import",
-                         "Katana does not recognise the extension of\n" + selected +
-                             "\n\nSupported: " + patternsFor(interop::vectorExtensions()) + ' ' +
-                             patternsFor(interop::archive12dExtensions()) + ' ' +
-                             patternsFor(interop::rasterExtensions()) + ' ' +
-                             patternsFor(interop::pointCloudExtensions()));
+    // Routed by what the file holds, so nothing recognised it: not GDAL, and
+    // not by name. The formats are too many to list in a message box; GIS >
+    // Formats lists them, as FORMATS does.
+    warnUser("Import", "Neither GDAL nor Katana recognises the data in\n" + selected +
+                           "\n\nGIS > Formats lists what this build of GDAL reads (FORMATS READ); "
+                           "archives (" + patternsFor(interop::archive12dExtensions()) +
+                           ") and point clouds (" + patternsFor(interop::pointCloudExtensions()) +
+                           ") are read too.");
 }
 
 void MainWindow::importVectorFile(const std::filesystem::path& path,
@@ -3982,6 +3990,8 @@ void MainWindow::exportVectorFile()
         return;
     }
 
+    // Every vector writer of GDAL's registry, the common ones first
+    // (interop::vectorExportFormats, docs/interop.md "Formats").
     QStringList filters;
     for (const interop::FormatChoice& format : interop::vectorExportFormats()) {
         filters << (QString::fromStdString(format.description) + " (*." +
@@ -3989,10 +3999,16 @@ void MainWindow::exportVectorFile()
     }
     filters << "12d Archive (*.12da)" << "12d Archive, zipped (*.12daz)";
     QString chosenFilter;
-    const QString selected = QFileDialog::getSaveFileName(this, "Export", QString(),
-                                                          filters.join(";;"), &chosenFilter);
+    QString selected = QFileDialog::getSaveFileName(this, "Export", QString(),
+                                                    filters.join(";;"), &chosenFilter);
     if (selected.isEmpty()) {
         return;
+    }
+    // A name typed without an extension takes the chosen format's: the
+    // extension is what picks the writer, and none is refused.
+    if (const qsizetype pattern = chosenFilter.lastIndexOf("(*.");
+        pattern >= 0 && chosenFilter.endsWith(')') && QFileInfo(selected).suffix().isEmpty()) {
+        selected += '.' + chosenFilter.mid(pattern + 3).chopped(1);
     }
 
     const std::filesystem::path path = toPath(selected);
@@ -4411,7 +4427,8 @@ void MainWindow::importVectorWithOptions()
 {
     const QString chosen = QFileDialog::getOpenFileName(
         this, "Import Vector Data", QString(),
-        "Vector data (" + patternsFor(interop::vectorExtensions()) + ");;All files (*)");
+        "Vector data (" + patternsFor(interop::vectorExtensions()) + ' ' +
+            patternsFor(interop::archiveExtensions()) + ");;All files (*)");
     if (!chosen.isEmpty()) {
         importWithOptions(chosen);
     }
@@ -4421,7 +4438,8 @@ void MainWindow::importRasterWithOptions()
 {
     const QString chosen = QFileDialog::getOpenFileName(
         this, "Import Raster", QString(),
-        "Raster (" + patternsFor(interop::rasterExtensions()) + ");;All files (*)");
+        "Raster (" + patternsFor(interop::rasterExtensions()) + ' ' +
+            patternsFor(interop::archiveExtensions()) + ");;All files (*)");
     if (!chosen.isEmpty()) {
         importWithOptions(chosen);
     }
@@ -4443,7 +4461,8 @@ void MainWindow::showDatasetInformation()
         this, "Dataset Information", QString(),
         "GIS data and point clouds (" + patternsFor(interop::vectorExtensions()) + ' ' +
             patternsFor(interop::rasterExtensions()) + ' ' +
-            patternsFor(interop::pointCloudExtensions()) + ");;All files (*)");
+            patternsFor(interop::pointCloudExtensions()) + ' ' +
+            patternsFor(interop::archiveExtensions()) + ");;All files (*)");
     if (chosen.isEmpty()) {
         return;
     }

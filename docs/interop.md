@@ -58,19 +58,20 @@ last the line that made it (`RasterOverlay::derivation`).
 
 | Direction | Formats |
 |---|---|
-| Vector in | Shapefile, GeoJSON, GeoPackage, KML, GML, DXF, MapInfo TAB, SQLite, CSV with its geometry (WKT, or X, Y and Z) |
-| Vector out | the same, driver inferred from the extension, each written as the format needs ("Fidelity", below) |
-| Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2 — GDAL's readers |
+| Vector in | every vector format this build of GDAL reads - 77 drivers in GDAL 3.13.2: Shapefile (and a zipped one), GeoJSON, GeoPackage, KML and KMZ, GML, DXF, MapInfo TAB, SQLite, CSV with its geometry (WKT, or X, Y and Z), FlatGeobuf, GeoParquet, GPX, a file geodatabase ... (`FORMATS VECTOR READ`, "Formats", below) |
+| Vector out | every one GDAL writes layers with - 44 drivers; the extension picks the writer, GDAL's own choice for the name, each written as the format needs ("Fidelity", below) |
+| Raster in | every raster format GDAL reads - 143 drivers: GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2, a GeoPackage's or an MBTiles' tiles ... |
 | Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD in; LAS/LAZ out, at 1 mm (audit IO-17); any of them to COPC |
 | Raster out | a surface as a DEM: GeoTIFF, Esri ASCII grid, Erdas IMG (`exportSurfaceRaster`) |
 | 12d Archive | .12da and .12daz in and out — every element of the format; see below |
+| Where | a file, a folder GDAL reads (a `.gdb`), a `/vsi` path, a URL, a `.zip`, `.tar`, `.tgz` or `.gz` by what is inside it |
 
-Not supported: **DWG, IFC**, and **ECW and E57**: the extensions are routed
-to GDAL and PDAL, but the MSYS2 toolchain has no ECW SDK and no PDAL E57
-plugin, so such a file fails to open with the library's own error (this table
-listed both until the audit of 2026-09-23 checked the toolchain). LandXML
-SURVEY data - points and observations - is read by the survey data exchange
-(`docs/survey.md`), not here.
+Not supported: **DWG, IFC**, and **ECW and E57**. The MSYS2 toolchain has no
+ECW SDK, so GDAL has no ECW reader and `.ecw` is not offered at all now that
+the extensions come from GDAL's registry (it was offered until 2026-09-26);
+PDAL has no E57 plugin here, so a `.e57` fails to open with PDAL's own error.
+LandXML SURVEY data - points and observations - is read by the survey data
+exchange (`docs/survey.md`), not here.
 
 ## Two kinds of imported data
 
@@ -281,11 +282,148 @@ sqlite and tab.
 and not the arc (no web service sends arcs). A KML's own fields (`Name`,
 `description`, `tessellate` ...) still arrive as properties, as they
 always have. A GPX export writes points as waypoints and lines, closed
-ones included, as routes; `.gpx` and `.kmz` are reached by naming the
-driver until the driver registry routes them. `originShift` is still not
+ones included, as routes; `.gpx` and `.kmz` are now written by their names
+("Formats", below). `originShift` is still not
 undone on export (QT-07, above). The bridge (`src/katana_io/geo/processing.cpp`)
 keeps its own copy of the error collector and of the typed field reading;
 both could move onto the adapter's.
+
+## Formats: GDAL's registry, not tables kept by hand
+
+Until 2026-09-26 three tables said what Katana read and wrote: the
+extensions the import dialog offered (`vectorExtensions`,
+`rasterExtensions`), the drivers EXPORT wrote with (`kVectorDrivers`, ten
+extensions) and the formats the save dialog listed (`vectorExportFormats`,
+six). They had drifted apart - a CSV could be written and not opened, TAB
+and SQLite written from the command line and not offered by the window
+(audit finding "Three parallel format tables") - they offered `.ecw`, which
+this toolchain's GDAL cannot open, and they left out FlatGeobuf, GeoParquet,
+KMZ, GPX and a zipped shapefile, all of which GDAL here reads and writes.
+So what GDAL can do is read from GDAL (`include/katana/gis/formats.hpp`,
+`src/katana_io/geo/formats.cpp`):
+
+- **The registry.** `gis::formats()` is every driver of this build, read
+  once from its driver manager: whether it holds rasters or vectors
+  (`DCAP_RASTER`, `DCAP_VECTOR`), opens (`DCAP_OPEN`), writes - a vector
+  writer creates layers or fields (`DCAP_CREATE` with `DCAP_CREATE_LAYER` or
+  `DCAP_CREATE_FIELD`), which is what `writeTables` needs; a raster writer
+  creates or copies, and a driver of both kinds writes rasters only when it
+  declares the types it writes them in (a file geodatabase declares none: it
+  reads a geodatabase's rasters and writes only its tables) - its extensions
+  (`DMD_EXTENSIONS`, compound ones whole: `shp.zip`, `gpkg.zip`), whether it
+  opens `/vsi` paths (`DCAP_VIRTUALIO`) and a connection prefix (`PG:`).
+  `gis::formatOptions` is a driver's declared open, creation and
+  layer-creation options, what `oo=` and `co=` will be checked against.
+- **The overlay**, small and each entry with its reason in `formats.cpp`:
+  drivers that are no format a person opens or saves are hidden (`MEM`,
+  `DERIVED`, `HTTP`, `AIVector`, which sends the data to a remote service,
+  and `GPSBabel`, which runs a program Katana does not ship); a `.xml` is
+  written as GML where GDAL would pick NASA's PDS4; sidecars and generic
+  extensions (`.dbf`, `.prj`, `.txt`, `.xml` ...) are not offered in a file
+  dialog, since they are opened through their data file or would fill the
+  filter with files that are not data; the save dialog lists the formats a
+  survey or CAD office exchanges every day first, and offers KMZ beside KML
+  and a zipped shapefile beside a shapefile.
+- **The writer for a name is GDAL's own choice** (`gis::vectorWriterFor`,
+  through `GDALGetOutputDriversForDatasetName`, the ranking GDAL's own
+  tools pick an output's writer by), the first writer Katana offers taken. So a `.kml` is now written
+  by LIBKML, where the hand-kept table named the older KML driver; both
+  write the same KML 2.2 for a drawing, both are converted to longitude and
+  latitude first ("Fidelity"), and a refusal says "KML", not the library's
+  name. LIBKML declares 64-bit integers and writes them as text (KML 2.2's
+  schema, section 9.5, has none), so for it an Integer64 that fits goes as
+  an int. `rasterDriverForPath` stays a table on purpose: `writeRaster`
+  writes a DEM's Float64 heights, and most raster writers GDAL has (PNG,
+  JPEG, GIF) hold 8- or 16-bit integers.
+
+**A file is routed by what it holds** (`interop::kindForPath`). A `.12da`
+and a point cloud are known by their extensions - PDAL's, and GDAL claims
+`.e57` for the images in one. Anything else that can be looked at - a local
+file or folder, a `/vsi` path - is identified by GDAL
+(`gis::identifyContent`, `GDALIdentifyDriverEx`, and for a driver of both
+kinds the dataset opened to see which it holds): a GeoPackage of raster
+tiles is a raster, a `.gdb` folder vector data, a GeoJSON named `lot.data`
+vector data. Routing by extension through the registry alone was rejected:
+a `.gpkg` or `.mbtiles` holds either kind, and the name cannot say which. A
+path that cannot be looked at - a file not written yet, or a URL, whose
+look would cost a round trip - is routed by its name: an extension only
+raster readers claim is a raster, one both claim is vector data, except the
+formats that are chiefly imagery (`mbtiles`, `pdf`, `jp2` ...).
+
+**Archives and paths.**
+
+- `GdalDataset::open` refused every `/vsi` path, URL and connection string
+  as "file does not exist" (`std::filesystem::exists`). It checks only a
+  local path now (`gis::isVirtualPath`); whether the rest exists is GDAL's
+  to find out.
+- An archive GDAL does not open as it is is opened by its inside
+  (`src/katana_io/geo/formats_detail.hpp`, shared by the open and the
+  routing): a `.zip`, `.kmz`, `.tar`, `.tgz` or `.tar.gz` as a folder -
+  a shapefile's four files, or several shapefiles, open so as the layers of
+  one dataset - else the one member that is a dataset; a `.gz` as the one
+  file it compresses. An archive of several datasets is refused
+  (`InvalidArgument`) naming them and the `/vsizip/{<archive>}/<member>`
+  that opens one: guessing between them was rejected. `/vsigzip` takes no
+  braces (measured: `/vsigzip/{<path>}` opens nothing), `/vsizip` and
+  `/vsitar` do, which keeps a folder named `x.zip` from splitting the path.
+- A GPX is read by GDAL as five layers, two of which (`route_points`,
+  `track_points`) are the vertices of its routes and tracks again: a whole
+  GPX import leaves them out and says so, and either is imported by its index.
+
+**`FORMATS`** (`src/katana_app/geo/formats_verbs.cpp`, the verb table's I2
+row) answers at prepare, changing nothing, in every front end:
+
+```
+FORMATS [RASTER|VECTOR] [READ|WRITE] [<text>...] [JSON]
+FORMATS OPTIONS <driver> [JSON]
+```
+
+- one `format driver=... kind=raster,vector read=... write=... extensions=...
+  vsi=yes|no description=...` record per driver, then `listed formats=<n>
+  kind=... capability=... filter=... gdal=<version>`; the words keep a driver
+  whose name, description or extensions hold every one (a keyword quoted is
+  a word: `FORMATS "raster" tile`);
+- `FORMATS OPTIONS GPKG` gives the format's record and one `option
+  driver=GPKG list=open|creation|layer_creation name=... type=... default=...
+  scope=... choices=a,b min= max= description=...` record per option;
+- `JSON` gives the same as data. `katana_formats` (MCP) and the resource
+  `katana://formats` are built from the same functions (`docs/mcp.md`).
+
+**The window.** GIS > Processing - GDAL > Formats... (`gisFormats`) shows a
+non-modal, read-only table (`gisFormatsDialog`: `gisFormatsKind`,
+`gisFormatsCapability`, `gisFormatsFilter`, `gisFormatsTable`,
+`gisFormatsCount`, `gisFormatsCommand`, `gisFormatsOptions`,
+`gisFormatsRun`, `gisFormatsClose`; `src/katana_qt/geo/formats_dialog.hpp`).
+Its choices make the FORMATS line it shows, and the table is that line's
+records, prepared by the one geoprocessing executor. It does not log a
+hundred records at every keystroke; Run in Command Line hands the line to
+the window's executor (`MainWindow::runVerbLine`) for a person who wants it
+in the log. Selecting a driver shows its options. The import dialogs'
+filters are the registry's readable extensions, with a "Zipped GIS data"
+filter for archives; the export dialog lists every writer, and a name typed
+without an extension takes the chosen filter's.
+
+Tests: `tests/geo/test_formats.cpp` (`Formats.*`, `FormatsVerb.*`: the
+registry against GDAL's documented capabilities, the writer for each name,
+FlatGeobuf, GeoParquet, KMZ, GPX and CSV written by their names and read
+back to the micrometre or, in longitude and latitude, to 1e-9 degrees of
+PROJ's conversion; a shapefile in a `.zip` and by `/vsizip`; a gzipped
+GeoJSON and a tar built in the test to RFC 1952 and POSIX ustar; a raster
+GeoPackage routed to raster import; an unknown extension routed by
+content), `McpServer.FormatsReturnsStructuredDrivers`,
+`qt_widgets.FormatsDialog.*`, `cli.formats_lists_writable_vector_drivers`,
+`cli.import_of_a_zipped_shapefile_by_vsizip`,
+`cli.import_of_a_zip_opens_the_one_dataset_inside`,
+`qt_the_formats_dialog_shows_the_formats_line_it_runs_headless` and
+`qt_import_of_a_zip_opens_the_one_dataset_inside_headless`.
+
+**Not done.** `INFO` (`src/katana_interop/dataset_info.cpp`) still checks
+that a file exists before GDAL looks, so it refuses a `/vsi` path that
+IMPORT opens. A zipped shapefile EXPORT writes holds `katana.shp`, the
+layer's name, whatever the archive is called. Routing opens a local file
+once more before it is imported. A URL with no extension is identified over
+the network. The options `formatOptions` lists are not yet checked when
+given (that is IMPORT's and EXPORT's options work).
 
 ## Scale
 
@@ -312,8 +450,10 @@ is opened as a decimated sample held in memory, not worked on in full.
 
 | Condition | Result |
 |---|---|
-| File does not exist | `NotFound` |
-| Extension has no importer/driver | `Unsupported`, naming the extension |
+| File does not exist | `NotFound` (a local path; a `/vsi` path or URL GDAL cannot open is `FileImportFailure` with GDAL's message) |
+| Extension has no writer | `Unsupported`, naming the extension |
+| File no reader recognises, by content or name | `Unsupported`, naming the extension (the window names GIS > Formats) |
+| Archive of several datasets | `InvalidArgument`, naming them and the `/vsizip/{...}/<member>` that opens one |
 | Mixed geometry into a Shapefile | `Unsupported`, nothing written |
 | Nothing matched the export filter | `InvalidArgument`, no file created |
 | Raster with no georeferencing | imported, placed at the origin, **warned**; refused by Surface From Raster (`InvalidArgument`), which would otherwise build ground in the wrong place |
@@ -464,6 +604,7 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 | | Convert Point Cloud to COPC... | `PointCloudEngine::convertToCopc` - every point, then an offer to import it |
 | | Dataset Information... | `describeSource` + `formatDescription`, the gdalinfo / pdal info a person needs first |
 | Online - Web Services | Online Data... | `interop::fetchOnlineLayer`: imagery, elevation and features from public web services, warped or reprojected into the project's CRS and taken in through `importRaster` and `importVector`; the `ONLINE` verbs do the same (`docs/gis_online.md`) |
+| Processing - GDAL | Formats... | the `FORMATS` verb: every format this GDAL reads and writes, and a driver's options ("Formats", above) |
 
 Decisions, and what was rejected:
 
