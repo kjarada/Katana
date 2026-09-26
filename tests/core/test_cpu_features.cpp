@@ -19,10 +19,11 @@ TEST(SimdLevel, AnEmptyRequestKeepsTheDetectedLevel)
 
 TEST(SimdLevel, ScalarCanBeChosenOnAnyProcessor)
 {
-    ASSERT_TRUE(chooseSimdLevel("scalar", SimdLevel::Avx2));
-    EXPECT_EQ(*chooseSimdLevel("scalar", SimdLevel::Avx2), SimdLevel::Scalar);
-    ASSERT_TRUE(chooseSimdLevel("scalar", SimdLevel::Scalar));
-    EXPECT_EQ(*chooseSimdLevel("scalar", SimdLevel::Scalar), SimdLevel::Scalar);
+    for (const SimdLevel detected : {SimdLevel::Scalar, SimdLevel::Avx2, SimdLevel::Neon}) {
+        const auto chosen = chooseSimdLevel("scalar", detected);
+        ASSERT_TRUE(chosen) << katana::core::toString(detected);
+        EXPECT_EQ(*chosen, SimdLevel::Scalar);
+    }
 }
 
 TEST(SimdLevel, Avx2IsChosenWhereTheProcessorRunsIt)
@@ -39,23 +40,77 @@ TEST(SimdLevel, Avx2IsRefusedOnAProcessorWithoutItRatherThanFaultingOrRunningSca
     EXPECT_NE(chosen.error().message.find("avx2"), std::string::npos) << chosen.error().message;
 }
 
-TEST(SimdLevel, AWordThatNamesNoLevelIsRefused)
+TEST(SimdLevel, NeonIsChosenWhereTheProcessorRunsIt)
 {
-    for (const char* word : {"AVX2", "sse2", "avx512", "fast", " scalar"}) {
-        const auto chosen = chooseSimdLevel(word, SimdLevel::Avx2);
-        ASSERT_FALSE(chosen) << word;
-        EXPECT_EQ(chosen.error().code, ErrorCode::InvalidArgument) << word;
+    ASSERT_TRUE(chooseSimdLevel("neon", SimdLevel::Neon));
+    EXPECT_EQ(*chooseSimdLevel("neon", SimdLevel::Neon), SimdLevel::Neon);
+    ASSERT_TRUE(chooseSimdLevel("", SimdLevel::Neon));
+    EXPECT_EQ(*chooseSimdLevel("", SimdLevel::Neon), SimdLevel::Neon);
+}
+
+TEST(SimdLevel, NeonIsRefusedOnAProcessorWithoutIt)
+{
+    // An x86-64 processor, with AVX2 or without: NEON is not its to run.
+    for (const SimdLevel detected : {SimdLevel::Scalar, SimdLevel::Avx2}) {
+        const auto chosen = chooseSimdLevel("neon", detected);
+        ASSERT_FALSE(chosen) << katana::core::toString(detected);
+        EXPECT_EQ(chosen.error().code, ErrorCode::InvalidArgument);
+        EXPECT_NE(chosen.error().message.find("neon"), std::string::npos) << chosen.error().message;
+    }
+}
+
+TEST(SimdLevel, Avx2IsRefusedOnANeonProcessorAlthoughItComesFirstInTheEnumeration)
+{
+    // The kernel levels belong to different architectures: an ARM processor
+    // that runs NEON cannot run AVX2, whatever order the enumeration lists
+    // them in. (Refused by `level > detected`, it would have been allowed.)
+    const auto chosen = chooseSimdLevel("avx2", SimdLevel::Neon);
+    ASSERT_FALSE(chosen);
+    EXPECT_EQ(chosen.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(chosen.error().message.find("avx2"), std::string::npos) << chosen.error().message;
+}
+
+TEST(SimdLevel, AWordThatNamesNoLevelIsRefusedNamingTheWordsThatDo)
+{
+    for (const char* word : {"AVX2", "sse2", "avx512", "fast", " scalar", "NEON", "asimd", "neon "}) {
+        for (const SimdLevel detected : {SimdLevel::Avx2, SimdLevel::Neon}) {
+            const auto chosen = chooseSimdLevel(word, detected);
+            ASSERT_FALSE(chosen) << word;
+            EXPECT_EQ(chosen.error().code, ErrorCode::InvalidArgument) << word;
+            EXPECT_NE(chosen.error().message.find("use scalar, avx2 or neon"), std::string::npos)
+                << chosen.error().message;
+        }
     }
 }
 
 TEST(SimdLevel, TheLevelInForceIsNeverOneTheProcessorCannotRun)
 {
-    EXPECT_LE(katana::core::activeSimdLevel(), katana::core::detectedSimdLevel());
-    EXPECT_LE(katana::core::simdSelection().active, katana::core::simdSelection().detected);
+    // Scalar, or exactly the detected level: never ordered, because two
+    // kernel levels are never both runnable.
+    const SimdLevel detected = katana::core::detectedSimdLevel();
+    const SimdLevel active = katana::core::activeSimdLevel();
+    EXPECT_TRUE(active == SimdLevel::Scalar || active == detected) << katana::core::toString(active);
+    const auto& selection = katana::core::simdSelection();
+    EXPECT_TRUE(selection.active == SimdLevel::Scalar || selection.active == selection.detected);
+}
+
+TEST(SimdLevel, TheDetectedLevelBelongsToThisProcessorsArchitecture)
+{
+#if defined(__aarch64__) || defined(_M_ARM64)
+    // NEON is in every AArch64 processor, so no probe: a build with the NEON
+    // kernels detects Neon, and one without (KATANA_SIMD_KERNELS=OFF) Scalar.
+    EXPECT_NE(katana::core::detectedSimdLevel(), SimdLevel::Avx2);
+#if defined(KATANA_TEST_SIMD_KERNEL_SET_NEON)
+    EXPECT_EQ(katana::core::detectedSimdLevel(), SimdLevel::Neon);
+#endif
+#else
+    EXPECT_NE(katana::core::detectedSimdLevel(), SimdLevel::Neon);
+#endif
 }
 
 // Run by ctest both without KATANA_SIMD and with it set (simd_scalar.core and
-// simd_avx2.core), so the variable is proved to reach the selection.
+// simd_avx2.core or simd_neon.core), so the variable is proved to reach the
+// selection.
 TEST(SimdLevel, TheEnvironmentOverrideDecidesTheStartingLevel)
 {
     const char* requested = std::getenv("KATANA_SIMD");
@@ -86,6 +141,13 @@ TEST(SimdLevel, LevelsHaveTheNamesTheOverrideAccepts)
 {
     EXPECT_STREQ(katana::core::toString(SimdLevel::Scalar), "scalar");
     EXPECT_STREQ(katana::core::toString(SimdLevel::Avx2), "avx2");
+    EXPECT_STREQ(katana::core::toString(SimdLevel::Neon), "neon");
+    // And each name is accepted back as its level.
+    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2, SimdLevel::Neon}) {
+        const auto chosen = chooseSimdLevel(katana::core::toString(level), level);
+        ASSERT_TRUE(chosen) << katana::core::toString(level);
+        EXPECT_EQ(*chosen, level);
+    }
 }
 
 TEST(SimdLevel, OrdinaryCodeIsCompiledForTheBaselineSoTheProgramStartsOnAnyX64Machine)

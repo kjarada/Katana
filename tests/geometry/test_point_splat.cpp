@@ -105,14 +105,14 @@ TEST(ProjectToPixels, APointsPixelIsItsProjectionTruncatedTowardsZeroAndOffTheSc
     const Pixels expected{{54, 49, 0, -10, kOffImage, kOffImage, kOffImage, 54},
                           {41, 39, 40, 40, kOffImage, kOffImage, kOffImage, 41}};
     EXPECT_EQ(atSimdLevel(SimdLevel::Scalar, [&] { return project(p, xs, ys); }), expected);
-    if (katana::test::avx2Available()) {
-        EXPECT_EQ(atSimdLevel(SimdLevel::Avx2, [&] { return project(p, xs, ys); }), expected);
+    if (katana::test::kernelsAvailable()) {
+        EXPECT_EQ(atSimdLevel(katana::test::kernelLevel(), [&] { return project(p, xs, ys); }), expected);
     }
 }
 
-TEST(ProjectToPixels, EveryLengthGivesTheScalarLoopsPixelsAtTheAvx2Level)
+TEST(ProjectToPixels, EveryLengthGivesTheScalarLoopsPixelsAtTheKernelLevel)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     const float inf = std::numeric_limits<float>::infinity();
     const float nan = std::numeric_limits<float>::quiet_NaN();
     // Pixel edges, zeros of both signs, the 1e6 bounds and what is past them.
@@ -128,8 +128,8 @@ TEST(ProjectToPixels, EveryLengthGivesTheScalarLoopsPixelsAtTheAvx2Level)
             ys[i] = awkward[(i * 3 + 7) % awkward.size()];
         }
         const Pixels scalar = atSimdLevel(SimdLevel::Scalar, [&] { return project(p, xs, ys); });
-        const Pixels avx2 = atSimdLevel(SimdLevel::Avx2, [&] { return project(p, xs, ys); });
-        EXPECT_EQ(scalar, avx2) << "length " << length;
+        const Pixels kernel = atSimdLevel(katana::test::kernelLevel(), [&] { return project(p, xs, ys); });
+        EXPECT_EQ(scalar, kernel) << "length " << length;
     }
 }
 
@@ -155,10 +155,12 @@ TEST(SplatCloud, TheImageIsTheSameAtEveryThreadCountAndSimdLevel)
                 EXPECT_EQ(atSimdLevel(SimdLevel::Scalar, [&] { return splatInto(cloud, view, pool); }),
                           reference)
                     << workers + 1 << " threads, radius " << radius << ", budget " << budget;
-                if (katana::test::avx2Available()) {
-                    EXPECT_EQ(atSimdLevel(SimdLevel::Avx2, [&] { return splatInto(cloud, view, pool); }),
+                if (katana::test::kernelsAvailable()) {
+                    const SimdLevel kernel = katana::test::kernelLevel();
+                    EXPECT_EQ(atSimdLevel(kernel, [&] { return splatInto(cloud, view, pool); }),
                               reference)
-                        << "AVX2, " << workers + 1 << " threads, radius " << radius;
+                        << katana::core::toString(kernel) << ", " << workers + 1
+                        << " threads, radius " << radius;
                 }
             }
         }
