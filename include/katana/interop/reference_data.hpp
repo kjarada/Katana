@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,29 @@ namespace katana::interop {
 using ReferenceId = std::uint64_t;
 
 // ---- raster ---------------------------------------------------------------
+
+// What a raster is to the drawing: a picture to work over, heights, or a
+// product made from other data by a geoprocessing run (docs/geoprocessing.md).
+// Derived rasters are kept in the project's cache and can be made again from
+// their `derivation`.
+enum class RasterRole { Imagery, Elevation, Derived };
+
+// How a raster's values are drawn: as they are, or shaded from its heights.
+// Only Plain is drawn so far; the shaded styles are the terrain shading's.
+enum class RasterDisplayStyle { Plain, Hillshade, Relief, ReliefHillshade, Slope };
+
+// The facts of band 1 a reply or a legend needs, read at full precision -
+// never from the RGBA display copy. Absent is not zero: a band without a
+// no-data value, or whose range was never read, says so.
+struct RasterBandFacts {
+    std::string dataType;
+    std::optional<double> noData;
+    std::optional<double> min, max;
+    std::string unit;
+    std::string verticalCrs;
+};
+
+[[nodiscard]] const char* toString(RasterRole role);
 
 struct RasterOverlay {
     ReferenceId id = 0;
@@ -56,6 +80,13 @@ struct RasterOverlay {
     std::string sourceUrl;
     std::string licence;
     std::string attribution;
+
+    RasterRole role = RasterRole::Imagery;
+    RasterBandFacts facts;
+    // The line that made a Derived raster ("GDAL raster hillshade ... FROM
+    // SURFACE ground CELL 1"); empty for any other.
+    std::string derivation;
+    RasterDisplayStyle displayStyle = RasterDisplayStyle::Plain;
 
     // World-space corners of the image. Computed through the full affine, so a
     // rotated or north-up-negative geotransform is handled rather than assumed

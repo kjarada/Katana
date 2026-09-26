@@ -266,6 +266,26 @@ drawing, so the box tests reject nothing) is 2.6-3x faster from the same-side
 test. The first A/B, run before the side test existed, showed the diagonal
 unchanged (30.8 before, 31.4 after, 31.7 again).
 
+## One store of named surfaces
+
+`terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`) holds
+the surfaces a session works with, by name: one in the window, one in each
+headless session. The geoprocessing verbs' `SURFACE <name>` finds a surface
+by the same name on every front end (`docs/geoprocessing.md`).
+
+- **Names are compared case-insensitively.** A name already in use is
+  refused, AlreadyExists, and `uniqueName` gives "name (2)", "name (3)"...
+  The window names a second import of a surface so, as the session names a
+  second alignment.
+- **A surface is a `shared_ptr<const TinSurface>`,** so a background job
+  reads one while the views draw it, and nothing moves it.
+- **Every change bumps `revision()`.** That is how the window knows to
+  rebuild what its views draw (`MainWindow::syncSceneSurfaces`) without
+  being told what changed.
+
+Surfaces are still session data, not saved in the project: saving them is a
+storage-schema decision of its own.
+
 ## Background jobs
 
 Long computations no longer run on the GUI thread behind a wait cursor.

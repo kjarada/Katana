@@ -86,6 +86,10 @@ enum class Icon {
     ExportDem,
     ConvertCopc,
     DatasetInfo,
+    // Geoprocessing (docs/geoprocessing.md): data in, through a run, to a
+    // result - the one icon the geoprocessing tools share until they have
+    // their own.
+    Processing,
     // The workspace (docs/cad.md). The window buttons on every panel's and
     // view's title bar are drawn in neutral only: they act on the window, not
     // on the drawing, and an accent there would compete with the active view's

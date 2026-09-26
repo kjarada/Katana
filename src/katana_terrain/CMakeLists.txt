@@ -14,6 +14,8 @@ add_library(katana_terrain STATIC
     volume.cpp
     tiled_terrain.cpp
     super_surface.cpp
+    # The named surfaces a session keeps (docs/geoprocessing.md).
+    surface_store.cpp
 )
 katana_target_defaults(katana_terrain)
 target_link_libraries(katana_terrain PUBLIC katana_geometry PRIVATE CGAL::CGAL)

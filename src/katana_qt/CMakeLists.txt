@@ -64,8 +64,17 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     project_crs_dialog.hpp
     script_runner.cpp
     script_runner.hpp
-    gis_dialogs.cpp
-    gis_dialogs.hpp
+    # The GIS menu's option dialogs, one file each, since the geoprocessing
+    # packages each extend one of them (docs/geoprocessing.md).
+    gis_dialog_support.hpp
+    gis_import_dialogs.cpp
+    gis_import_dialogs.hpp
+    gis_export_dialog.cpp
+    gis_export_dialog.hpp
+    surface_raster_dialog.cpp
+    surface_raster_dialog.hpp
+    dataset_info_dialog.cpp
+    dataset_info_dialog.hpp
     import_placement.cpp
     import_placement.hpp
     gis_online.cpp
@@ -116,6 +125,12 @@ target_sources(katana PRIVATE ${_katana_plotting_ui})
 file(GLOB _katana_annotation_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.hpp")
 target_sources(katana PRIVATE ${_katana_annotation_ui})
+# The geoprocessing verbs in the window (docs/geoprocessing.md): the workbench
+# that runs them as jobs and the menu table the geoprocessing packages add
+# their items to. Globbed, one directory, several authors at once.
+file(GLOB _katana_geo_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.hpp")
+target_sources(katana PRIVATE ${_katana_geo_ui})
 # One place a version is written: project(Katana VERSION ...). The About box
 # reads it from here and the Windows resource below from the same variable.
 target_compile_definitions(katana PRIVATE KATANA_VERSION="${PROJECT_VERSION}")
@@ -137,8 +152,11 @@ if(WIN32)
                    "${CMAKE_CURRENT_BINARY_DIR}/katana.rc" @ONLY)
     target_sources(katana PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/katana.rc")
 endif()
-target_link_libraries(katana PRIVATE katana_cad katana_interop katana_dxf katana_render Qt6::Widgets
-                                     Qt6::PrintSupport)
+# katana_app: the session's verbs above katana_cad that the window runs too -
+# the geoprocessing executor above all (src/katana_app/geo), so the window
+# never has a second implementation of a verb katana_cli has.
+target_link_libraries(katana PRIVATE katana_cad katana_interop katana_dxf katana_render katana_app
+                                     Qt6::Widgets Qt6::PrintSupport)
 
 # The developer tool that renders the icons to files - see make_icons.cpp for
 # why its output is committed rather than generated during the build. Not part

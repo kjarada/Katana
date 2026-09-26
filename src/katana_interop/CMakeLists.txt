@@ -20,13 +20,20 @@ target_sources(katana_interop PRIVATE ${_interop_online_sources})
 # services is part of the program and a missing file is a build error.
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/online_catalogue.cpp" PROPERTIES
     COMPILE_OPTIONS "--embed-dir=${PROJECT_SOURCE_DIR}/resources/online")
+# The geoprocessing bindings (docs/geoprocessing.md): drawing data to and
+# from GDAL's feature tables, and the rasters a run reads and makes. Globbed,
+# one directory, so the geoprocessing lanes add files without editing this list.
+file(GLOB _interop_geo_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp")
+target_sources(katana_interop PRIVATE ${_interop_geo_sources})
 katana_target_defaults(katana_interop)
 # katana_terrain is PUBLIC and named although katana_archive12d brings it too:
 # terrain_io.hpp includes tin_surface.hpp, and a dependency a public header
 # has should not rest on another library happening to have it.
+# katana_commands is PUBLIC: geo/drawing_dataset.hpp hands back the command
+# a result is applied by.
 target_link_libraries(katana_interop
     PUBLIC katana_core katana_geometry katana_terrain katana_entity katana_archive12d katana_io
-    PRIVATE katana_commands
+           katana_commands
 )
 find_package(nlohmann_json CONFIG REQUIRED)
 target_link_libraries(katana_interop PRIVATE nlohmann_json::nlohmann_json)

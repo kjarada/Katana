@@ -61,6 +61,15 @@ build. Some folders are globbed (`tests/cad/customisation/`,
 `tests/cad/tools/`, and the same two under `tests/qt_widgets/`) so that
 authors working at the same time do not all edit one list.
 
+`tests/geo/` is the one suite that belongs to no single module: the
+geoprocessing bridge, its bindings and its executor are three
+(`docs/geoprocessing.md`). It is configured whenever `katana_app` is built
+with the interop module, links `katana_app`, and globs its `test_*.cpp`, as
+the geoprocessing packages add theirs side by side. Its window checks are
+`tests/geo/headless/*.cmake` and its `cli.*` cases
+`src/katana_app/geo/cli/*.cmake`, each included from the file that would
+otherwise list them.
+
 ### Interactive tools: ToolDriver
 
 A drawing tool is a state machine in `katana_cad` (`docs/tools.md`), tested
@@ -113,6 +122,11 @@ file is tested as a user would make it; `WILL_FAIL` cases show bad input
 fails the process; fixtures (`FIXTURES_SETUP`, `FIXTURES_REQUIRED`) order the
 steps and clean up. The survey-code cases write their own small code file
 rather than depend on the git-ignored customisation.
+
+A test command that goes through `cmake -E env "PATH=...;..."` writes the
+PATH in the `add_test` itself. Kept in a variable, the semicolons in it split
+the list, and the process that runs is not the one meant: the first
+`cli.gdal_*` cases failed exactly so, with "no such file or directory".
 
 ## Data
 

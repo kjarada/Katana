@@ -38,6 +38,22 @@ as plain coordinate arrays (`GeoPoint`), rasters as 8-bit RGBA, and failures as
 `Result<T>`. Both libraries signal errors by throwing; that is caught at the
 adapter boundary and converted, so nothing throws across the interface.
 
+GDAL's algorithm framework - the `gdal raster ...` / `gdal vector ...`
+algorithms - is reached the same way, through `katana::gis::processing`
+(`include/katana/gis/processing.hpp`, in `src/katana_io/geo/`). Drawing
+data, surfaces and derived rasters are bound to it in `katana_interop`
+(`include/katana/interop/geo/`). That, the GDAL verb and its executor are
+`docs/geoprocessing.md`. Two pieces of this layer are shared with it:
+
+- the chords an arc becomes (`src/katana_interop/curve_chords.hpp`), which
+  EXPORT and the bindings use alike;
+- the grid a surface is sampled on (`geo::surfaceGrid`), which
+  `exportSurfaceRaster` now writes.
+
+A reference raster says what it is to the drawing - imagery, elevation, or a
+product derived by a geoprocessing run (`RasterOverlay::role`), and for the
+last the line that made it (`RasterOverlay::derivation`).
+
 ## What is supported
 
 | Direction | Formats |

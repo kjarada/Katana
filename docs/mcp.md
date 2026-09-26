@@ -122,6 +122,82 @@ line of its own (`label=4 piece=0 suppressed=yes`), so an agent can select it
 or pin it elsewhere with `LABEL SET id at=x,y`, as the window's Label Layout
 Report does (`McpServer.LabelLayoutNamesTheLabelsWithNoRoomSoAnAgentCanMoveThem`).
 
+## Geoprocessing tools
+
+GDAL's algorithm framework (`docs/geoprocessing.md`) as tools, in
+`src/katana_app/geo/mcp_geo_tools.cpp`, with the GIS module only. They are
+built from the same helpers as the tools above (`src/katana_app/mcp_tools.hpp`:
+`Tool`, `ToolReply`, `ToolRefusal`, `objectSchema`, `hints`, `oneLine`),
+which moved there from `mcp_server.cpp` unchanged so that a tool in another
+file is the same kind of thing. One subsection per geoprocessing package;
+each adds its tools in its own block of `mcp_geo_tools.cpp`.
+
+### F0: katana_gdal_catalogue, katana_gdal_describe, katana_gdal_run
+
+| Tool | In | Out |
+|---|---|---|
+| `katana_gdal_catalogue` | `{filter?, schemas?}`: a group (`raster`, `vector grid`) or words to look for | `{gdal_version, algorithms: [{path, name, description, aliases, policy, url, container, arguments_schema?, inputs_schema?}]}`; the schemas only when 20 or fewer are listed |
+| `katana_gdal_describe` | `{algorithm}`: `"raster hillshade"`, aliases taken | `{algorithm, arguments: [{name, short_name, aliases, type, required, positional, category, default, choices, min: {value, inclusive}, max, count: {min, max}, dataset: {kinds, accepts, update, sources}, depends_on, exclusion_group, dependency_group, input, output, description}], arguments_schema, inputs_schema, gdal_usage}` |
+| `katana_gdal_run` | `{algorithm, arguments?, tokens?, inputs?, output?, confirm?, preview?}` | `{ok, line, algorithm, inputs, scope: [{arg, matched, used, points, lines, polygons, skipped: {reason: n}}], outputs: [{arg, kind, target, layer?, created?, id?, name?, raster?: {width, height}, file?}], text?, return_code?, warnings, cancelled, seconds}` |
+
+- **Read-only tools read the bridge.** `katana_gdal_catalogue` and
+  `katana_gdal_describe` change nothing, so they read the bridge directly;
+  a line would add nothing. Their schemas are generated from the argument
+  specs GDAL declares (`src/katana_app/geo/schema.hpp`). An algorithm's
+  `arguments_schema` is the JSON Schema of `katana_gdal_run`'s `arguments`,
+  and its `inputs_schema` that of its `inputs`.
+- **`katana_gdal_run` builds a line.** It builds the GDAL line a person would
+  type and runs it through the Session:
+  - `arguments` become GDAL's `--name=value` words; a dataset argument there
+    is refused, since datasets are `inputs`;
+  - `tokens` are GDAL's own words, as they are;
+  - each input becomes a FROM clause; a source is `{scope: "selection" |
+    "drawing" | "area" | "layers", area?, layers?, only?, where?}`, written
+    by the shared `cad::formatScopeWords`, or `{raster}`, `{surface, cell?}`,
+    `{file, layer?}`;
+  - `output` becomes the TO clause: `{layer}`, `{reference}`,
+    `{file, format?, overwrite?}` or `{surface}`.
+
+  The text echoes the line (`> GDAL ...`) with the records the command line
+  prints; the structured content is those records, read back by
+  `geo::parseRecords`, so an agent reads what the scope matched and what was
+  made without parsing text.
+- **Confirm algorithms are gated.** An algorithm whose policy is confirm - it
+  changes or removes existing data: vsi delete, dataset rename, raster edit
+  ... - is refused unless `confirm: true`. The verb refuses it again without
+  CONFIRM. The tool's hints are destructive and open-world, since a FILE
+  source may be a URL.
+
+`McpServer.GdalCatalogueListsHillshade`,
+`McpServer.GdalDescribeGivesASchemaWithBounds`,
+`McpServer.GdalRunBuildsTheLineAndReturnsOutputs`,
+`McpServer.GdalRunRefusesAConfirmAlgorithmWithoutConfirm` and
+`McpServer.GdalRunRefusesAnArgumentTheAlgorithmHasNot` pin them.
+
+### T0: katana_terrain_list
+
+Not started.
+
+### V5: katana_gis_query
+
+Not started.
+
+### I2: katana_formats
+
+Not started.
+
+### D1: katana_dataset_info
+
+Not started.
+
+### D2: katana_references
+
+Not started.
+
+### I3 and I4: katana_import and katana_export options
+
+Not started.
+
 ## What the server adds to the command line
 
 Three rules that a typed command does not have, because a model is not a person

@@ -58,6 +58,13 @@ foreach(_suite IN LISTS _suites)
     endif()
 endforeach()
 
+# The geoprocessing suite (tests/geo/, docs/geoprocessing.md) belongs to no
+# single module: the bridge, the bindings and the executor are three, so it is
+# configured whenever the session that runs them is, with GDAL.
+if(TARGET katana_app AND TARGET katana_interop)
+    add_subdirectory(geo)
+endif()
+
 # The SIMD kernel guard (cmake/KatanaSimd.cmake, tools/check_simd_kernels.cmake).
 # The sources check reads files, like `layering`; the objects check reads what
 # the compiler produced for each *_avx2.cpp in THIS build's configuration, which
@@ -168,6 +175,18 @@ function(katana_name_headless_checks_without_their_environment)
 endfunction()
 if(TARGET katana)
     cmake_language(DEFER CALL katana_name_headless_checks_without_their_environment)
+endif()
+
+# The geoprocessing verbs in the real window, one file per package of the
+# geoprocessing plan (tests/geo/headless/*.cmake), so the lanes add checks
+# without editing this file. Included here, in this directory's scope, so the
+# check above sees their environment.
+if(TARGET katana)
+    file(GLOB _geo_headless_checks CONFIGURE_DEPENDS
+         "${CMAKE_CURRENT_SOURCE_DIR}/geo/headless/*.cmake")
+    foreach(_geo_headless_check IN LISTS _geo_headless_checks)
+        include("${_geo_headless_check}")
+    endforeach()
 endif()
 
 # A plot produced headlessly, so the PDF writing inside the Qt widget is

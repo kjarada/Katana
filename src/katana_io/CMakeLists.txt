@@ -15,6 +15,13 @@ add_library(katana_io STATIC
     web_access.cpp
     reproject.cpp
 )
+# GDAL's algorithm framework behind plain types (include/katana/gis/processing.hpp,
+# docs/geoprocessing.md): globbed, one directory, so the geoprocessing lanes
+# add files without editing this list. The directory's own headers
+# (gdal_registry.hpp, ogr_detail.hpp) are shared with it.
+file(GLOB _katana_io_geo CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp")
+target_sources(katana_io PRIVATE ${_katana_io_geo})
+target_include_directories(katana_io PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 katana_target_defaults(katana_io)
 target_link_libraries(katana_io
     PUBLIC katana_core

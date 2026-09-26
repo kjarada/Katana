@@ -33,6 +33,7 @@
 
 #include "gdal_registry.hpp"
 #include "katana/core/text.hpp"
+#include "ogr_detail.hpp"
 #include "proj_search_paths.hpp"
 
 namespace katana::gis {
@@ -485,6 +486,26 @@ namespace detail {
 void ensureGdalRegistered()
 {
     ensureRegistered();
+}
+
+OGRGeometry* makeOgrGeometry(const VectorGeometry& geometry)
+{
+    return ::katana::gis::makeGeometry(geometry);
+}
+
+void flattenOgrGeometry(const OGRGeometry* geometry, std::vector<VectorGeometry>& out,
+                        std::vector<std::string>& warnings)
+{
+    std::vector<VectorFeature> features;
+    ::katana::gis::flatten(geometry, {}, features, warnings);
+    for (VectorFeature& feature : features) {
+        out.push_back(std::move(feature.geometry));
+    }
+}
+
+bool parseCrs(const std::string& text, OGRSpatialReference& reference)
+{
+    return ::katana::gis::parseCrs(text, reference);
 }
 
 } // namespace detail

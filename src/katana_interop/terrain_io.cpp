@@ -7,6 +7,7 @@
 
 #include "katana/core/text.hpp"
 #include "katana/gis/gdal_adapter.hpp"
+#include "katana/interop/geo/raster_products.hpp"
 
 namespace katana::interop {
 namespace {
@@ -28,14 +29,6 @@ std::uint64_t samplesFor(int width, int height, std::int64_t stride)
     return static_cast<std::uint64_t>(samplesAlong(width, stride)) *
            static_cast<std::uint64_t>(samplesAlong(height, stride));
 }
-
-// The conventional Float32 no-data value of Esri and GDAL DEMs, -FLT_MAX.
-// Unlike the other common sentinel, -9999, it cannot be a real elevation on
-// any body a surveyor works on - the Challenger Deep is about -10 935 m - so a
-// surface whose ground truly lies at -9999 is not silently punched full of
-// holes by a reader. It is exact in Float32 as well as Float64, so it survives
-// a reader that loads the band as Float32 (GDAL's AAIGrid does by default).
-constexpr double kSurfaceNoData = std::numeric_limits<float>::lowest();
 
 } // namespace
 
@@ -219,59 +212,21 @@ Result<SurfaceRasterResult> exportSurfaceRaster(const katana::terrain::TinSurfac
         driver = *inferred;
     }
 
-    const katana::geometry::Box2& bounds = surface.bounds();
-    // Counted in doubles first: a cell size of a micrometre over a 10 km site
-    // is 10^20 cells, which no integer type here would hold.
-    const double columnsWanted = std::max(1.0, std::ceil(bounds.width() / options.cellSize));
-    const double rowsWanted = std::max(1.0, std::ceil(bounds.height() / options.cellSize));
-    const double cellsWanted = columnsWanted * rowsWanted;
-    if (cellsWanted > static_cast<double>(options.maxCells) ||
-        columnsWanted > static_cast<double>(std::numeric_limits<int>::max()) ||
-        rowsWanted > static_cast<double>(std::numeric_limits<int>::max())) {
-        // Named in full: "too many cells" leaves the user guessing how much
-        // larger a cell has to be.
-        return makeError(ErrorCode::InvalidArgument,
-                         "a " + katana::core::formatExactReal(options.cellSize) +
-                             " cell over this surface is " +
-                             katana::core::formatExactReal(cellsWanted) + " cells (" +
-                             katana::core::formatExactReal(columnsWanted) + " x " +
-                             katana::core::formatExactReal(rowsWanted) + "), more than the " +
-                             std::to_string(options.maxCells) +
-                             " an export holds; choose a larger cell",
-                         path.string());
+    // The one sampler (geo::surfaceGrid), so a DEM written here and the grid
+    // a geoprocessing run reads from the same surface are the same grid.
+    auto grid = geo::surfaceGrid(surface, options.cellSize, options.maxCells);
+    if (!grid) {
+        return makeError(grid.error().code, grid.error().message, path.string());
     }
-
     SurfaceRasterResult result;
-    result.columns = static_cast<int>(columnsWanted);
-    result.rows = static_cast<int>(rowsWanted);
-    result.noDataValue = kSurfaceNoData;
+    result.columns = grid->info.width;
+    result.rows = grid->info.height;
+    result.noDataValue = geo::kGridNoData;
     result.driver = driver;
-    // North-up, top-left corner at (min x, max y): row 0 is the northern edge.
-    result.geotransform = {bounds.min.x, options.cellSize, 0.0, bounds.max.y, 0.0,
-                           -options.cellSize};
-
-    const auto columns = static_cast<std::size_t>(result.columns);
-    std::vector<double> values(columns * static_cast<std::size_t>(result.rows), kSurfaceNoData);
-    // One row of positions at a time: the grid of values has to be whole for
-    // GDAL, but a grid of Point2 beside it would double the memory for
-    // nothing, and a row is still thousands of positions for elevationsAt to
-    // share across threads.
-    std::vector<Point2> positions(columns);
-    for (int row = 0; row < result.rows; ++row) {
-        const double y = bounds.max.y - (static_cast<double>(row) + 0.5) * options.cellSize;
-        for (std::size_t column = 0; column < columns; ++column) {
-            positions[column] =
-                Point2(bounds.min.x + (static_cast<double>(column) + 0.5) * options.cellSize, y);
-        }
-        const std::vector<std::optional<double>> elevations = surface.elevationsAt(positions);
-        double* out = values.data() + static_cast<std::size_t>(row) * columns;
-        for (std::size_t column = 0; column < columns; ++column) {
-            if (elevations[column].has_value()) {
-                out[column] = *elevations[column];
-                ++result.cellsWithData;
-            }
-        }
-    }
+    result.geotransform = grid->info.geotransform;
+    const std::vector<double>& values = grid->bands.front();
+    result.cellsWithData = static_cast<std::uint64_t>(
+        std::ranges::count_if(values, [](double value) { return value != geo::kGridNoData; }));
 
     katana::gis::RasterExportOptions raster;
     raster.width = result.columns;
@@ -279,7 +234,7 @@ Result<SurfaceRasterResult> exportSurfaceRaster(const katana::terrain::TinSurfac
     raster.driver = driver;
     raster.projectionWkt = options.projectionWkt;
     raster.geotransform = result.geotransform;
-    raster.noDataValue = kSurfaceNoData;
+    raster.noDataValue = geo::kGridNoData;
     const auto written = katana::gis::GdalDataset::writeRaster(path, raster, values);
     if (!written.ok()) {
         return written.error();

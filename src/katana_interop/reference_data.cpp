@@ -11,6 +11,19 @@ using katana::geometry::Point2;
 
 // ---- raster ---------------------------------------------------------------
 
+const char* toString(RasterRole role)
+{
+    switch (role) {
+    case RasterRole::Imagery:
+        return "imagery";
+    case RasterRole::Elevation:
+        return "elevation";
+    case RasterRole::Derived:
+        return "derived";
+    }
+    return "imagery";
+}
+
 Point2 RasterOverlay::pixelToWorld(double px, double py) const
 {
     const auto& g = geotransform;

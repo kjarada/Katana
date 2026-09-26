@@ -6,6 +6,7 @@
 // a tool can never do something the command line cannot.
 
 #include "mcp_server.hpp"
+#include "mcp_tools.hpp"
 
 #include <algorithm>
 #include <array>
@@ -31,8 +32,6 @@
 namespace katana::app::mcp {
 
 namespace {
-
-using Json = nlohmann::json;
 
 // Oldest first; kLatestProtocolVersion is the last.
 constexpr std::array<std::string_view, 3> kSupportedProtocolVersions{"2024-11-05", "2025-03-26",
@@ -131,17 +130,6 @@ struct Batch {
     bool ok = true;
 };
 
-// A tool's failure that is the caller's to fix, reported as a tool result
-// (isError) so that the model reads it, rather than as a protocol error.
-struct ToolRefusal {
-    std::string message;
-};
-
-struct RunOptions {
-    bool stopOnError = true;
-    bool discardUnsavedChanges = false;
-};
-
 Batch runLines(Session& session, const std::vector<std::string>& lines, const RunOptions& options)
 {
     Batch batch;
@@ -236,45 +224,6 @@ Json linesJson(const Batch& batch)
 
 // ---- tool arguments -----------------------------------------------------------------
 
-const Json& argument(const Json& arguments, const char* name)
-{
-    static const Json kNull;
-    const auto found = arguments.find(name);
-    return found == arguments.end() ? kNull : *found;
-}
-
-std::string requiredString(const Json& arguments, const char* name)
-{
-    const Json& value = argument(arguments, name);
-    if (!value.is_string() || value.get<std::string>().empty()) {
-        throw ToolRefusal{std::string("\"") + name + "\" must be a non-empty string"};
-    }
-    return value.get<std::string>();
-}
-
-bool optionalBool(const Json& arguments, const char* name, bool fallback)
-{
-    const Json& value = argument(arguments, name);
-    if (value.is_null()) {
-        return fallback;
-    }
-    if (!value.is_boolean()) {
-        throw ToolRefusal{std::string("\"") + name + "\" must be true or false"};
-    }
-    return value.get<bool>();
-}
-
-// A path as the interpreter reads it: one quoted word. It has no escape, so a
-// path with a quote in it cannot be said at all - and is refused rather than
-// cut short at the quote.
-std::string quoted(const std::string& path)
-{
-    if (path.find('"') != std::string::npos || path.find('\n') != std::string::npos) {
-        throw ToolRefusal{"a path may not contain a double quote or a line break: " + path};
-    }
-    return '"' + path + '"';
-}
-
 // One line per command: a command with a line break in it would be two, and
 // the second would run unseen by whoever built the first.
 std::string singleLine(const std::string& text, const char* what)
@@ -336,41 +285,6 @@ Json statusOf(const Session& session)
 
 // ---- tools --------------------------------------------------------------------------
 
-struct ToolReply {
-    std::string text;
-    Json structured; // null when the tool has nothing but its text
-    bool isError = false;
-};
-
-struct Tool {
-    const char* name;
-    const char* title;
-    const char* description;
-    Json inputSchema;
-    Json annotations;
-    std::function<ToolReply(Session&, const Json&)> call;
-};
-
-Json objectSchema(Json properties, std::vector<std::string> required = {})
-{
-    Json schema{{"type", "object"}, {"properties", std::move(properties)}};
-    if (!required.empty()) {
-        schema["required"] = std::move(required);
-    }
-    schema["additionalProperties"] = false;
-    return schema;
-}
-
-Json hints(bool readOnly, bool destructive, bool idempotent, bool openWorld = false)
-{
-    Json annotations{{"readOnlyHint", readOnly}, {"openWorldHint", openWorld}};
-    if (!readOnly) {
-        annotations["destructiveHint"] = destructive;
-        annotations["idempotentHint"] = idempotent;
-    }
-    return annotations;
-}
-
 const Json kDiscardProperty{
     {"type", "boolean"},
     {"description", "Allow NEW or OPEN to throw away unsaved changes to the current drawing. "
@@ -388,11 +302,6 @@ ToolReply batchReply(Session& session, const std::vector<std::string>& lines,
     }
     return {text, Json{{"ok", batch.ok}, {"commands", linesJson(batch)}, {"status", status}},
             !batch.ok};
-}
-
-ToolReply oneLine(Session& session, const std::string& line, const RunOptions& options = {})
-{
-    return batchReply(session, {line}, options);
 }
 
 std::vector<std::string> stringList(const Json& value, const char* name)
@@ -655,6 +564,12 @@ const std::vector<Tool>& tools()
                                std::string(redo ? "REDO " : "UNDO ") + std::to_string(steps));
             }});
 
+#if defined(KATANA_WITH_INTEROP)
+        // The geoprocessing tools, from their own file (geo/mcp_geo_tools.cpp).
+        for (Tool& tool : geoTools()) {
+            list.push_back(std::move(tool));
+        }
+#endif
         return list;
     }();
     return kTools;
@@ -697,6 +612,79 @@ std::string errorReply(const Json& id, const RpcError& error)
 }
 
 } // namespace
+
+// ---- the helpers every tool is built from (mcp_tools.hpp) -------------------------------
+
+const Json& argument(const Json& arguments, const char* name)
+{
+    static const Json kNull;
+    const auto found = arguments.find(name);
+    return found == arguments.end() ? kNull : *found;
+}
+
+std::string requiredString(const Json& arguments, const char* name)
+{
+    const Json& value = argument(arguments, name);
+    if (!value.is_string() || value.get<std::string>().empty()) {
+        throw ToolRefusal{std::string("\"") + name + "\" must be a non-empty string"};
+    }
+    return value.get<std::string>();
+}
+
+bool optionalBool(const Json& arguments, const char* name, bool fallback)
+{
+    const Json& value = argument(arguments, name);
+    if (value.is_null()) {
+        return fallback;
+    }
+    if (!value.is_boolean()) {
+        throw ToolRefusal{std::string("\"") + name + "\" must be true or false"};
+    }
+    return value.get<bool>();
+}
+
+// A path as the interpreter reads it: one quoted word. It has no escape, so a
+// path with a quote in it cannot be said at all - and is refused rather than
+// cut short at the quote.
+std::string quoted(const std::string& path)
+{
+    if (path.find('"') != std::string::npos || path.find('\n') != std::string::npos) {
+        throw ToolRefusal{"a path may not contain a double quote or a line break: " + path};
+    }
+    return '"' + path + '"';
+}
+
+Json objectSchema(Json properties, std::vector<std::string> required)
+{
+    Json schema{{"type", "object"}, {"properties", std::move(properties)}};
+    if (!required.empty()) {
+        schema["required"] = std::move(required);
+    }
+    schema["additionalProperties"] = false;
+    return schema;
+}
+
+Json hints(bool readOnly, bool destructive, bool idempotent, bool openWorld)
+{
+    Json annotations{{"readOnlyHint", readOnly}, {"openWorldHint", openWorld}};
+    if (!readOnly) {
+        annotations["destructiveHint"] = destructive;
+        annotations["idempotentHint"] = idempotent;
+    }
+    return annotations;
+}
+
+ToolReply oneLine(Session& session, const std::string& line, const RunOptions& options)
+{
+    return batchReply(session, {line}, options);
+}
+
+LineOutcome runCaptured(Session& session, const std::string& line)
+{
+    const Batch batch = runLines(session, {line}, {});
+    const LineResult& result = batch.lines.front();
+    return LineOutcome{result.ok && !result.skipped, result.output, result.messages};
+}
 
 Server::Server(Session& session, std::string version)
     : session_(session), version_(std::move(version))
