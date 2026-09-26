@@ -14,6 +14,7 @@
 #include "customisation/drawing_summary_dialog.hpp"
 #include "format.hpp"
 #include "dataset_info_dialog.hpp"
+#include "geo/replies.hpp"
 #include "gis_export_dialog.hpp"
 #include "gis_import_dialogs.hpp"
 #include "surface_raster_dialog.hpp"
@@ -4111,15 +4112,51 @@ const interop::RasterOverlay* MainWindow::chooseReferenceRaster(const QString& t
 
 std::unique_ptr<DatasetInfoDialog> MainWindow::makeDatasetInfo(const QString& path)
 {
-    auto description = interop::describeSource(toPath(path));
-    if (!description) {
-        logMessage(QString::fromStdString(description.error().describe()), true);
-        warnUser("Dataset Information", QString::fromStdString(description.error().describe()));
+    // The dialog runs INFO lines through the one executor; it reads nothing
+    // itself (dataset_info_dialog.hpp).
+    DatasetInfoRunner runner;
+    runner.run = commandRunner();
+    runner.await = [this](const VerbOutcome& started, std::function<void(const VerbOutcome&)> done) {
+        return awaitJob(started, std::move(done));
+    };
+    auto dialog = std::make_unique<DatasetInfoDialog>(QDir::fromNativeSeparators(path),
+                                                      std::move(runner), this);
+    // Headless, the lines have answered by now: a file that could not be
+    // described has no window to grab, and the run says so.
+    if (headless_ && !dialog->described()) {
         return nullptr;
     }
-    const QString text = QString::fromStdString(interop::formatDescription(*description));
-    return std::make_unique<DatasetInfoDialog>(
-        "Dataset Information - " + fromPath(description->path.filename()), text, this);
+    return dialog;
+}
+
+bool MainWindow::awaitJob(const VerbOutcome& started, std::function<void(const VerbOutcome&)> done)
+{
+    // The job a line started says so in its reply, as a record:
+    // job id=<n> title="..." state=started (geo/geo_workbench.hpp).
+    std::optional<JobId> job;
+    for (const katana::app::geo::Record& record :
+         katana::app::geo::parseRecords(started.reply.toStdString())) {
+        if (record.kind == "job" && record.get("state") == std::optional<std::string>("started")) {
+            if (const auto id = katana::core::parseInteger(record.get("id").value_or(""))) {
+                job = static_cast<JobId>(*id);
+            }
+        }
+    }
+    if (!job || geo_ == nullptr || !JobRunner::of(*this).isActive(*job)) {
+        return false;
+    }
+    // Told once, then forgotten. The listener is added before the event
+    // loop runs again, so the job cannot end unheard in between.
+    auto key = std::make_shared<int>(0);
+    *key = geo_->addFinishedListener(
+        [this, id = *job, key, done = std::move(done)](JobId ended, const VerbOutcome& outcome) {
+            if (ended != id) {
+                return;
+            }
+            geo_->removeFinishedListener(*key);
+            done(outcome);
+        });
+    return true;
 }
 
 std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
@@ -4379,16 +4416,7 @@ void MainWindow::convertPointCloudToCopc()
     }
     // The conversion is a background job: the offer to import waits for it
     // to end, and is made only when it converted.
-    const JobId job = geo_ != nullptr ? geo_->lastJob() : kNoJob;
-    if (job == kNoJob) {
-        return;
-    }
-    auto key = std::make_shared<int>(0);
-    *key = geo_->addFinishedListener([this, job, key, destination](JobId id, const VerbOutcome& done) {
-        if (id != job) {
-            return;
-        }
-        geo_->removeFinishedListener(*key);
+    (void)awaitJob(outcome, [this, destination](const VerbOutcome& done) {
         if (!done.ok) {
             warnUser("Conversion failed", done.error);
             return;

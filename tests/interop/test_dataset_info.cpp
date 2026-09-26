@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "katana/gis/gdal_adapter.hpp"
+#include "katana/gis/zip_container.hpp"
 #include "katana/interop/dataset_info.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/pointcloud/point_cloud_engine.hpp"
@@ -445,4 +446,79 @@ TEST(DatasetInfo, LayersThatDisagreeAreNotReportedAsHavingNoCrs)
     EXPECT_FALSE(contains(text, "Coordinate system: no coordinate system declared")) << text;
     EXPECT_TRUE(contains(text, "differs between layers")) << text;
     EXPECT_TRUE(contains(text, "b: 2 features, LineString, WGS 84 (EPSG:4326)")) << text;
+}
+
+// ---- GDAL's own reading: fields, bands, /vsi paths ---------------------------------------------
+
+TEST(DatasetInfo, TheFieldsAndBandsAreReadFromGdalsOwnDescription)
+{
+    // A layer whose fields GDAL's GeoJSON driver types from their values: a
+    // whole number Integer, a fraction Real (the driver's documentation).
+    const TempDir dir("fields");
+    const auto path = dir.file("plots.geojson");
+    writeText(path, R"({"type":"FeatureCollection","name":"plots","features":[
+        {"type":"Feature","properties":{"plot":"P1","count":3,"area":12.5},
+         "geometry":{"type":"Point","coordinates":[1,2]}}]})");
+    const auto described = describeSource(path);
+    ASSERT_TRUE(described.ok()) << described.error().describe();
+    ASSERT_EQ(described->vectorLayers.size(), 1u);
+    const std::vector<FieldDescription>& fields = described->vectorLayers.front().fields;
+    ASSERT_EQ(fields.size(), 3u);
+    EXPECT_EQ(fields[0].name, "plot");
+    EXPECT_EQ(fields[0].type, "String");
+    EXPECT_EQ(fields[1].type, "Integer");
+    EXPECT_EQ(fields[2].type, "Real");
+    EXPECT_EQ(described->vectorLayers.front().extent.min, Point2(1.0, 2.0));
+    EXPECT_FALSE(described->vectorJson.empty());
+    EXPECT_TRUE(described->rasterJson.empty());
+
+    // A band: its type and no-data, and no statistics until asked for.
+    const auto raster = dir.file("dem.tif");
+    gis::RasterExportOptions options;
+    options.width = 3;
+    options.height = 2;
+    options.geotransform = {1000.0, 2.0, 0.0, 2000.0, 0.0, -2.0};
+    options.noDataValue = -9999.0;
+    writeRaster(raster, options);
+    const auto band = describeSource(raster);
+    ASSERT_TRUE(band.ok()) << band.error().describe();
+    ASSERT_EQ(band->raster->bands.size(), 1u);
+    EXPECT_EQ(band->raster->bands.front().band, 1);
+    EXPECT_EQ(band->raster->bands.front().dataType, "Float64");
+    EXPECT_EQ(band->raster->bands.front().noData, -9999.0);
+    EXPECT_FALSE(band->raster->bands.front().min.has_value());
+    // writeRaster wrote every cell 1.0: the statistics are exactly that.
+    DescribeOptions statistics;
+    statistics.statistics = true;
+    const auto computed = describeSource(raster, statistics);
+    ASSERT_TRUE(computed.ok()) << computed.error().describe();
+    const BandDescription& one = computed->raster->bands.front();
+    EXPECT_EQ(one.min, 1.0);
+    EXPECT_EQ(one.max, 1.0);
+    EXPECT_EQ(one.mean, 1.0);
+    EXPECT_EQ(one.stdDev, 0.0);
+    EXPECT_FALSE(std::filesystem::exists(dir.file("dem.tif.aux.xml")));
+}
+
+TEST(DatasetInfo, AVsiPathIsGdalsToFindAndIsDescribed)
+{
+    // Inside a zip: no such file is on the disk, and GDAL reads it all the
+    // same, so it is not refused as missing first.
+    const TempDir dir("vsizip");
+    const auto archive = dir.file("control.zip");
+    ASSERT_TRUE(gis::writeZip(archive, "control.geojson",
+                              R"({"type":"FeatureCollection","features":[
+        {"type":"Feature","properties":{"name":"CP1"},"geometry":{"type":"Point","coordinates":[5,6]}}]})")
+                    .ok());
+    const std::filesystem::path inside = "/vsizip/" + archive.generic_string() + "/control.geojson";
+    EXPECT_TRUE(isVirtualPath(inside));
+    EXPECT_FALSE(isVirtualPath(archive));
+    const auto described = describeSource(inside);
+    ASSERT_TRUE(described.ok()) << described.error().describe();
+    ASSERT_EQ(described->vectorLayers.size(), 1u);
+    EXPECT_EQ(described->vectorLayers.front().featureCount, 1u);
+
+    const auto missing = describeSource(dir.file("absent.geojson"));
+    ASSERT_FALSE(missing.ok());
+    EXPECT_EQ(missing.error().code, ErrorCode::NotFound);
 }
