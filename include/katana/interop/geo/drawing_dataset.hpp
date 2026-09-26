@@ -42,6 +42,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/commands/command.hpp"
@@ -135,6 +136,16 @@ resultCommand(const katana::entity::Model& model, const katana::gis::processing:
 // result does not turn back into properties: katana_id, layer, style,
 // colour, type.
 [[nodiscard]] bool isBookkeepingField(const std::string& name);
+
+// A property holds a date as its ISO 8601 text, so a Date or DateTime field
+// is kept as the entity's metadata `<prefix><key>` = "date" | "datetime":
+// IMPORT writes kImportTypePrefix, a result kResultTypePrefix, and
+// drawingDataset gives a text property so tagged on every entity that holds
+// it the field type again. Without it a date came back from EXPORT a String.
+inline constexpr std::string_view kImportTypePrefix = "source.type.";
+inline constexpr std::string_view kResultTypePrefix = "gis.type.";
+// "date" or "datetime" for those two types; nothing for any other.
+[[nodiscard]] std::optional<std::string> dateTypeTag(katana::gis::processing::FieldType type);
 
 // One feature geometry as the entity geometries it becomes: the ONE way a
 // feature becomes entities, for a result (resultCommand) and for IMPORT
