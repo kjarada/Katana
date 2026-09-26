@@ -1,0 +1,8 @@
+# A project's own classification rules, for EXPORT <file.ifc> RULES <this file>
+# and File > Export IFC's "Classification rules" (docs/ifc.md). They are tried
+# before the defaults, so a project names only its exceptions: here, light poles
+# surveyed as points on a lighting layer, which the defaults would write as survey
+# annotations, and headwalls, which they would take for nothing in particular.
+rule,words,kinds,class,predefined_type,object_type,system
+light pole,POLE*;LP;LIGHTING,Point,IfcColumn,COLUMN,,
+headwall,HEADWALL*;HW,Point;Circle,IfcDistributionChamberElement,USERDEFINED,HEADWALL,STORMWATER
