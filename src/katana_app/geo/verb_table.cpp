@@ -27,6 +27,10 @@ namespace katana::app::geo {
 [[nodiscard]] katana::core::Result<Prepared> prepareGisOverlay(Context& context, const Tokens& tokens,
                                                                std::string_view line);
 // ---- V3: GIS HULL, GIS CLIP ----
+[[nodiscard]] katana::core::Result<Prepared> prepareGisHull(Context& context, const Tokens& tokens,
+                                                            std::string_view line);
+[[nodiscard]] katana::core::Result<Prepared> prepareGisClip(Context& context, const Tokens& tokens,
+                                                            std::string_view line);
 // ---- V4: GIS CHECK, GIS REPAIR, GIS COVERAGE ----
 [[nodiscard]] katana::core::Result<Prepared> prepareGisCheck(Context& context, const Tokens& tokens,
                                                              std::string_view line);
@@ -91,6 +95,16 @@ const std::vector<VerbEntry>& verbTable()
              "          [csv=<file>] [OVERWRITE] [PREVIEW]  polygon booleans between two scopes\n"
              "          (default layer gis/overlay): a row per piece with its area or length"});
         // ---- V3: GIS HULL, GIS CLIP ----
+        rows.push_back(
+            {"GIS", "HULL", &prepareGisHull,
+             "GIS HULL [<scope>] [convex | concave=<0..1>] [holes] [TO LAYER <path>] [PREVIEW]\n"
+             "          the boundary around every point and vertex the scope takes (default\n"
+             "          convex; layer gis/hull)"});
+        rows.push_back(
+            {"GIS", "CLIP", &prepareGisClip,
+             "GIS CLIP [<scope>] BY (<scope> | FILE <path> [LAYER <name>] [where=\"<sql>\"])\n"
+             "          [TO LAYER <path> | REPLACE] [PREVIEW]  what the scope takes cut to the\n"
+             "          boundary's areas: the pieces on a layer (gis/clip), or in place"});
         // ---- V4: GIS CHECK, GIS REPAIR, GIS COVERAGE ----
         rows.push_back(
             {"GIS", "CHECK", &prepareGisCheck,
