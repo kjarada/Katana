@@ -556,6 +556,7 @@ GDAL [RUN] <algorithm> [<gdal word>...] [FROM [<arg>] <source>]... [TO [<arg>] <
 <scope>  := SELECTION | DRAWING | VIEW [<id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY],
             then [WHERE key=value ...] - cad::parseScopeWords, the one scope parser
 <target> := LAYER <path> | REFERENCE [<name>] | FILE <path> [FORMAT <driver>]
+            | SURFACE <name> (T0: a raster result triangulated and kept)
             | SELECTION | REPORT (V5: a query's katana_id selected, its rows reported)
 ```
 

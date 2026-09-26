@@ -1130,7 +1130,7 @@ in place.
 ```
 RASTER GRID [<scope>] [method=linear|invdist|invdistnn|nearest|average|...]
             [cell=<m> | size=<columns>x<rows>] [z=geometry|<property>]
-            [extent=x0,y0,x1,y1] [power=<p>] [radius=<m>] [NAME <name>]
+            [extent=scope|x0,y0,x1,y1] [power=<p>] [radius=<m>] [NAME <name>]
             [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>] | TO SURFACE <name>]
             [OVERWRITE] [PREVIEW]
 ```
@@ -1228,17 +1228,26 @@ plane at the centre: 107.75 at (55, 45).
 ### The DEM tools
 
 ```
-RASTER MOSAIC <raster> [<raster>...] [resolution=same|highest|lowest|average|<x>,<y>] [SAVE <file>]
+RASTER MOSAIC <tile> [<tile>...] [resolution=same|highest|lowest|average|<x>,<y>] [SAVE <file>]
 RASTER CLIP <raster> AREA x0,y0,x1,y1 | <scope>
 RASTER FILL <raster> [distance=<cells>] [smoothing=<n>] [strategy=invdist|nearest]
 RASTER FOOTPRINT <raster> [TO LAYER <path> | TO FILE <path>]
 RASTER REPROJECT <raster> [crs=<crs> | like=<raster>] [from=<crs>] [resampling=<method>] [cell=<m>]
 RASTER DIFFERENCE <raster> [MINUS] <raster> [<scope>] [resampling=<method>]
-  and on each: [NAME <name>] [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>]]
-               [OVERWRITE] [PREVIEW]
+  and on each: [NAME <name>] [TO REFERENCE [<name>] | TO FILE <path> [FORMAT <driver>]
+               | TO SURFACE <name>] [OVERWRITE] [PREVIEW]
 
 <raster> := RASTER <id|name> | SURFACE <name> [CELL <m>] | FILE <path>
+<tile>   := RASTER <id|name> | FILE <path|folder|pattern>
 ```
+
+HELP gives the same grammar (`src/katana_app/geo/verb_table.cpp`): its
+first DEM row says what `<raster>` is and the words each tool takes, which
+the rows once left undefined. `GeoVerbUsage.EveryFormTheHelpGivesIsAccepted`
+(`tests/geo/test_verb_usage.cpp`) runs one line of each documented form, with
+every option, so a form the help or this page gives that the verb refuses
+fails the suite. `TO SURFACE` triangulates the raster result as `SURFACE
+FROM RASTER` would, under the name given (the GDAL verb's target).
 
 `src/katana_app/geo/dem_verbs.cpp`, on GDAL's `raster mosaic`, `clip`,
 `fill-nodata`, `footprint`, `reproject` and `calc`. A raster result is a

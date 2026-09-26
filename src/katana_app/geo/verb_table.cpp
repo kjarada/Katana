@@ -111,18 +111,20 @@ const std::vector<VerbEntry>& verbTable()
              "          [TO [<arg>] <target>] [CONFIRM] [OVERWRITE] [PREVIEW]  any of GDAL's\n"
              "          algorithms in GDAL's own words; FROM binds SELECTION | DRAWING | VIEW |\n"
              "          AREA x0,y0,x1,y1 | LAYERS a,b [ONLY] [WHERE k=v ...], RASTER <id|name>,\n"
-             "          SURFACE <name> [CELL <m>] or FILE <path>; TO takes LAYER <path>,\n"
-             "          REFERENCE [<name>] or FILE <path> [FORMAT <driver>]"});
+             "          SURFACE <name> [CELL <m>] or FILE <path> [LAYER <name>]; TO takes\n"
+             "          LAYER <path>, REFERENCE [<name>], FILE <path> [FORMAT <driver>],\n"
+             "          SURFACE <name>, SELECTION or REPORT"});
         // ---- T0: Terrain session ----
         rows.push_back(
             {"SURFACE", "", &prepareSurface,
              "SURFACE LIST [JSON] | INFO <name> | REMOVE <name>  the session's surfaces\n"
              "          SURFACE FROM RASTER <id|name> | FILE <path> [max=<points>]\n"
-             "          [AREA x0,y0,x1,y1] | CLOUD <id|name> [classes=2,...] | <scope>\n"
-             "          [NAME <n>]  triangulate a surface from a DEM's true values, a\n"
-             "          cloud's ground or the drawing's levelled points and lines\n"
+             "          [AREA x0,y0,x1,y1] | CLOUD <id|name> [classes=2,...] [max=<points>]\n"
+             "          | <scope>  [NAME <n>] [PREVIEW]  triangulate a surface from a DEM's\n"
+             "          true values, a cloud's ground or the drawing's levelled points and lines\n"
              "          SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog]\n"
-             "          [co=K=V]... [OVERWRITE]  write it as a DEM (tiled, compressed)"});
+             "          [format=<driver>] [co=K=V]... [OVERWRITE] [PREVIEW]  write it as a DEM\n"
+             "          (tiled, compressed)"});
         // ---- T1: CONTOUR ----
         rows.push_back(
             {"CONTOUR", "", &prepareContour,
@@ -198,13 +200,19 @@ const std::vector<VerbEntry>& verbTable()
              "          vertices) gridded into a DEM;\n"
              "          heightless entities are left out and counted, never read as 0"});
         // ---- T7: RASTER MOSAIC, CLIP, FILL, FOOTPRINT, REPROJECT, DIFFERENCE ----
-        // <raster> := RASTER <id|name> | SURFACE <name> [CELL <m>] | FILE <path>; each
-        // also takes [NAME <name>] [TO ...] [OVERWRITE] [PREVIEW].
+        // The first row says what <raster> is and the words every DEM tool
+        // takes, as docs/terrain.md's grammar does ("The DEM tools"): HELP
+        // lists the rows in this order.
         rows.push_back(
             {"RASTER", "MOSAIC", &prepareRasterMosaic,
-             "RASTER MOSAIC <raster|FILE folder|FILE pattern>... [resolution=<r>] [SAVE <file>]\n"
-             "          tiles joined into one DEM, a VRT kept as a reference raster (SAVE writes\n"
-             "          it out and keeps that file)"});
+             "RASTER MOSAIC, CLIP, FILL, FOOTPRINT, REPROJECT, DIFFERENCE: <raster> is\n"
+             "          RASTER <id|name> | SURFACE <name> [CELL <m>] | FILE <path>, and each\n"
+             "          takes [NAME <name>] [TO REFERENCE [<name>] | TO FILE <path>\n"
+             "          [FORMAT <driver>] | TO SURFACE <name>] [OVERWRITE] [PREVIEW]\n"
+             "          RASTER MOSAIC (RASTER <id|name> | FILE <path|folder|pattern>)...\n"
+             "          [resolution=same|highest|lowest|average|<x>,<y>] [SAVE <file>]  tiles\n"
+             "          joined into one DEM, a VRT kept as a reference raster (SAVE writes it\n"
+             "          out and keeps that file); a surface is no tile"});
         rows.push_back(
             {"RASTER", "CLIP", &prepareRasterClip,
              "RASTER CLIP <raster> AREA x0,y0,x1,y1 | <scope>  a DEM cut to a box, or to the\n"
@@ -224,10 +232,9 @@ const std::vector<VerbEntry>& verbTable()
              "          or another raster's grid"});
         rows.push_back(
             {"RASTER", "DIFFERENCE", &prepareRasterDifference,
-             "RASTER DIFFERENCE <raster> [MINUS] <raster> [<scope>] [resampling=<method>]  the "
-             "first\n"
-             "          minus the second, aligned to the first; cut and fill volumes (grid\n"
-             "          method) within the scope's closed boundaries"});
+             "RASTER DIFFERENCE <raster> [MINUS] <raster> [<scope>] [resampling=<method>]\n"
+             "          the first minus the second, aligned to the first; cut and fill volumes\n"
+             "          (grid method) within the scope's closed boundaries"});
         // ---- V1: GIS BUFFER, GIS DISSOLVE ----
         rows.push_back(
             {"GIS", "BUFFER", &prepareGisBuffer,

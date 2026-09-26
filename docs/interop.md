@@ -943,6 +943,10 @@ Not done:
 
 - A process that dies mid-write leaves its `.katana-staging-<pid>-<n>`
   folder beside the target.
+- The window's Command Reference (`windowHelpText`,
+  `src/katana_qt/command_reference_dialog.cpp`) keeps its own copies of the
+  IFC and CUSTOMISE help blocks rather than reading `ifcHelpText` and the
+  session's, so an edit to one is not seen in the other.
 
 The import and export dialogs build `IMPORT` and `EXPORT` lines ("Import
 options", "Export options"); neither writes through `interop` itself any
