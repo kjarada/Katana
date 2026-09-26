@@ -25,6 +25,8 @@
 
 // ---- T1: Terrain > Analysis > Contours ----
 #include "geo/contours_dialog.hpp"
+// ---- T2: Terrain > Analysis > Terrain Shading ----
+#include "geo/terrain_shading_dialog.hpp"
 
 namespace katana::qt {
 
@@ -57,6 +59,21 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
         menus.addToTerrain("Analysis", "terrainAnalysisMenu", contours);
     }
     // ---- T2: Terrain > Analysis > Terrain Shading ----
+    {
+        QAction* shading = workbench.services().makeAction(
+            Icon::Processing, "Terrain Shading...",
+            "Hillshade, colour relief or slope shading of a surface or an elevation raster, kept "
+            "as a reference raster with its legend (RASTER SHADE)",
+            {}, "terrainShading");
+        shading->setData("terrainShadingDialog");
+        QObject::connect(shading, &QAction::triggered, &workbench.window(), [&workbench] {
+            (void)showTerrainDialog(workbench, "terrainShadingDialog",
+                                    [](TerrainDialogContext context, QWidget* parent) -> QDialog* {
+                                        return new TerrainShadingDialog(std::move(context), parent);
+                                    });
+        });
+        menus.addToTerrain("Analysis", "terrainAnalysisMenu", shading);
+    }
     // ---- T3: Terrain > Analysis > Slope ----
     // ---- T4: Terrain > Analysis > Zonal Statistics, Drape ----
     // ---- T5: Terrain > Analysis > Viewshed ----

@@ -482,6 +482,89 @@ heights the tracer is within 1e-9.
   no stop token of its own; the tracer runs in tens of milliseconds on real
   TINs (above).
 
+## Shading
+
+The RASTER SHADE verb (`src/katana_app/geo/shade_verbs.cpp`) draws an
+elevation source as a picture and keeps it as a derived reference raster,
+which the plan view and the sheet painter draw as they draw any raster.
+The window's Terrain > Analysis > Terrain Shading (`terrainShadingDialog`)
+only builds its line:
+
+```
+RASTER SHADE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
+             [style=hillshade|relief|relief+hillshade|slope|plain] [azimuth=315]
+             [altitude=45] [z=1] [variant=regular|combined|multidirectional|igor]
+             [ramp=terrain|diverging|slope|grey|<file>] [range=<min>,<max>]
+             [NAME <n>] [save=<file.tif>] [OVERWRITE] [PREVIEW]
+```
+
+The reply: the `input` record, `resampled from= to=` when the source was
+averaged down, `shade style=` with the light (`azimuth= altitude= z=
+variant=`) or the unit, `ramp name= min= max= from=data|range`, the `output`
+record of the reference raster, `saved file=` with `save=`, then one
+`legend value= r= g= b=` per colour the picture was painted with.
+
+- **GDAL's algorithms make the picture,** step by step through a
+  `RasterChain` (`terrain_steps.cpp`): `raster hillshade`; `raster
+  color-map` with the ramp spread over the range, written as GDAL's
+  colour-map text; `raster blend --operator hsv-value` for relief over
+  hillshade (the relief's hue and saturation, the hillshade's value); and
+  `raster slope`, in degrees, for slope shading. Each step's raster goes to
+  a file of the chain's own, removed with it, so a failed or cancelled run
+  leaves nothing and no DEM is held whole in memory.
+- **Every style ends as an RGBA picture.** A hillshade is passed through a
+  colour map of its own greys (1 to 255 to themselves, its no-data 0
+  transparent), because the raster reader stretches a single grey band over
+  its own range: flat ground, 181 everywhere, would have been drawn
+  mid-grey. So what is drawn is what GDAL computed
+  (`ShadeVerb.FlatGroundHillshadesTo181EverywhereAtAltitude45`: 1 + 254 sin
+  45 degrees = 180.6).
+- **At display resolution.** A raster longer than the 4096 pixels a
+  reference raster's display copy keeps is averaged down to it first
+  (`raster resize --resampling average`, by the smallest whole step that
+  fits), since a finer picture would only be decimated again to be drawn.
+  A surface is sampled at its CELL, or the cell suggested for its extent.
+- **Ramps** (`include/katana/interop/geo/colour_ramps.hpp`): terrain
+  (hypsometric tints), diverging (blue, white, red: on design minus
+  existing, cut is blue and fill red), slope (green, pale yellow, red) and
+  grey, the ColorBrewer colours named there. Each style has its own - relief
+  terrain, slope slope, plain grey - and `ramp=` chooses another, or a GDAL
+  colour-map file of a person's own, whose value lines (percentages placed
+  on the range as GDAL places them) are then the legend. The ramp spans the
+  data's least and greatest values, read in full at display resolution,
+  unless `range=` says; the diverging ramp's span is made symmetric about
+  zero, so zero is its white. A span of one value is widened a unit about
+  it. The ends are written exactly, so the cells at the range's ends take
+  the ramp's end colours exactly
+  (`ShadeVerb.ARampMapsItsEndpointsExactly`).
+- **The reference raster** is named `NAME`, or the source's name and the
+  style's (`terrain-relief-hillshade`), made unique; its role is Derived,
+  its derivation the line, and its display style the style.
+- **`save=`** also writes the picture as rendered - a tiled, DEFLATE
+  GeoTIFF with the source's georeferencing - for delivery; a file already
+  there only with OVERWRITE.
+
+### Decided
+
+- **Rendered once, into the picture, not at draw time.** The plan said a
+  display style of an elevation raster; drawing it at draw time would put
+  GDAL in the painter. A derived picture is drawn by the code that draws
+  every raster, plots with the sheet, and can be saved; `displayStyle` says
+  which picture it is. Restyling is running the verb again.
+- **The light is refused where there is none.** `azimuth=`, `altitude=`,
+  `z=` and `variant=` belong to the two hillshade styles; `ramp=` and
+  `range=` to the coloured ones. A line that gives them elsewhere is
+  refused, naming them, rather than quietly ignored.
+- **Slope shading is in degrees:** bounded (0 to 90) and what a legend is
+  read in; RASTER SLOPE (below) takes percent too.
+
+### Not done
+
+- **Restyling a raster already there.** A shading is a new reference raster;
+  the Reference Data dock's display menu the plan sketched is D2's.
+- **A legend on the sheet.** The legend is in the reply (and the dialog's);
+  placing it on a sheet is the plotting legend's work.
+
 ## Background jobs
 
 Long computations no longer run on the GUI thread behind a wait cursor.

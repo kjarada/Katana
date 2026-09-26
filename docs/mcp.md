@@ -201,6 +201,16 @@ restate the verb's options as a schema, and the plan gives CONTOUR none
 (`docs/terrain.md`, "Contours").
 `McpServer.ContoursOfASurfaceAreDrawnThroughTheCommandTool` pins it.
 
+### T2: RASTER SHADE through katana_run_commands
+
+The same: `RASTER SHADE` is a session line, and its reply carries the
+`ramp` and `legend value= r= g= b=` records an agent needs to describe the
+picture. The picture is a derived reference raster, which
+`katana_terrain_list` then lists with `role: "derived"` and the line in
+`derived_from`.
+`McpServer.AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster` pins
+it.
+
 ### V5: katana_gis_query
 
 Not started.

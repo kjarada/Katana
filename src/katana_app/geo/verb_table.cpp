@@ -18,6 +18,9 @@ katana::core::Result<Prepared> prepareSurface(Context& context, const Tokens& to
 katana::core::Result<Prepared> prepareContour(Context& context, const Tokens& tokens,
                                               std::string_view line);
 // ---- T2: RASTER SHADE ----
+// shade_verbs.cpp (terrain_verbs.hpp).
+katana::core::Result<Prepared> prepareShade(Context& context, const Tokens& tokens,
+                                            std::string_view line);
 // ---- T3: RASTER SLOPE, RASTER ASPECT ----
 // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
 // ---- T5: RASTER VIEWSHED, LOS ----
@@ -71,6 +74,14 @@ const std::vector<VerbEntry>& verbTable()
              "          surface traced exactly, a raster by GDAL at full resolution; a scope\n"
              "          last keeps them inside its closed shapes"});
         // ---- T2: RASTER SHADE ----
+        rows.push_back(
+            {"RASTER", "SHADE", &prepareShade,
+             "RASTER SHADE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>\n"
+             "          [style=hillshade|relief|relief+hillshade|slope|plain] [azimuth=315]\n"
+             "          [altitude=45] [z=1] [variant=regular|combined|multidirectional|igor]\n"
+             "          [ramp=terrain|diverging|slope|grey|<file>] [range=<min>,<max>] [NAME <n>]\n"
+             "          [save=<file.tif>] [OVERWRITE] [PREVIEW]  a picture of the terrain,\n"
+             "          kept as a derived reference raster, with its legend"});
         // ---- T3: RASTER SLOPE, RASTER ASPECT ----
         // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
         // ---- T5: RASTER VIEWSHED, LOS ----
