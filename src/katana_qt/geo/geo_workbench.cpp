@@ -156,12 +156,17 @@ void GeoMenus::addToGis(const QString& title, QAction* action)
     found->second = action;
 }
 
-void GeoMenus::addToTerrain(const QString& title, const QString& name, QAction* action)
+void GeoMenus::addToTerrain(const QString& title, const QString& name, Icon icon,
+                            const QString& tip, QAction* action)
 {
     QMenu*& menu = terrainMenus_[name];
     if (menu == nullptr) {
         menu = terrain_.addMenu(title);
         menu->setObjectName(name);
+        // A submenu is a menu item too: the window's --check-menus holds it
+        // to an icon and a status tip like every other.
+        menu->setIcon(katana::qt::icon(icon));
+        menu->menuAction()->setStatusTip(tip);
     }
     menu->addAction(action);
 }

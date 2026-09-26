@@ -750,7 +750,11 @@ keeps names unique so that `SURFACE <name>` finds one.
 menu's "Processing - GDAL", "Analysis - GDAL" and "Check - GDAL" sections,
 and the Terrain menu's `terrainAnalysisMenu` and `terrainDemMenu`, the first
 time an item is added, so an empty heading never shows. `Icon::Processing`
-is the one icon the packages share.
+is the one icon the packages share. The two Terrain submenus are items of
+the Terrain menu too, so each gets an icon (Processing, and ExportDem for
+DEM) and a status tip when it is made: main's `--check-menus`
+(`docs/desktop.md`) holds every item in every submenu to both, and the
+first run of it on this branch listed these two as its only gaps.
 
 **Dialogs.** The GIS menu's option dialogs are one file each now
 (`gis_import_dialogs`, `gis_export_dialog`, `surface_raster_dialog`,

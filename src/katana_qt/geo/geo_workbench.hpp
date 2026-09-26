@@ -123,8 +123,10 @@ class GeoMenus {
     // Adds `action` under the GIS menu's section `title`, made at the end of
     // the menu the first time.
     void addToGis(const QString& title, QAction* action);
-    // Adds `action` to the Terrain submenu `title` (object name `name`).
-    void addToTerrain(const QString& title, const QString& name, QAction* action);
+    // Adds `action` at the end of the Terrain submenu `name`, made on first
+    // use with `title`, `icon` and the status tip `tip`.
+    void addToTerrain(const QString& title, const QString& name, Icon icon, const QString& tip,
+                      QAction* action);
 
   private:
     QMenu& gis_;
