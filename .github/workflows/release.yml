@@ -18,12 +18,6 @@ on:
         description: "Release tag to publish, vX.Y.Z matching project(Katana VERSION). Empty: build only."
         required: false
         default: ""
-  # TEMPORARY, until this file is on main: GitHub offers "Run workflow" only
-  # for a workflow on the default branch, so the pull request that adds it is
-  # built this way. Removed before it merges.
-  pull_request:
-    paths:
-      - ".github/workflows/release.yml"
 
 permissions:
   contents: read
