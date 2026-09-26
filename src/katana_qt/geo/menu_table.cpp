@@ -18,6 +18,7 @@
 #include <QAction>
 #include <QWidget>
 
+#include "geo/dem_tools_dialog.hpp"
 #include "geo/geo_workbench.hpp"
 #include "geo/grid_dem_dialog.hpp"
 
@@ -58,6 +59,20 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
         });
     }
     // ---- T7: Terrain > DEM > DEM Tools ----
+    {
+        QAction* tools = workbench.services().makeAction(
+            Icon::Processing, "DEM &Tools...",
+            "Mosaic, clip, fill, reproject, trace and difference DEMs, with cut and fill volumes "
+            "(RASTER MOSAIC, CLIP, FILL, REPROJECT, FOOTPRINT, DIFFERENCE)",
+            {}, "terrainDemTools");
+        tools->setData(QString("demToolsDialog"));
+        menus.addToTerrain("&DEM", "terrainDemMenu", tools);
+        QObject::connect(tools, &QAction::triggered, tools, [&workbench, tools] {
+            if (auto* window = qobject_cast<QWidget*>(tools->parent())) {
+                showDemToolsDialog(workbench, *window);
+            }
+        });
+    }
 }
 
 } // namespace katana::qt

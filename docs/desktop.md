@@ -1247,7 +1247,8 @@ shows. F0 adds none: the GDAL verb's item is the toolbox, X1's. It is on the
 command line and on `runVerbLine` until then.
 
 **The geoprocessing dialogs build lines.** Terrain > DEM > Grid Points to DEM
-(`gridDemDialog`) and the dialogs after it do no work of their own: each
+(`gridDemDialog`), Terrain > DEM > DEM Tools (`demToolsDialog`, a tab per
+tool) and the dialogs after them do no work of their own: each
 writes the line its fields describe into its Command field and hands it to
 `GeoServices::run`, the window's one executor. `GeoRunPanel`
 (`src/katana_qt/geo/geo_dialog_support.hpp`) is the Command, Preview, Run and
