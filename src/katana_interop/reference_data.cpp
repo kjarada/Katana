@@ -331,6 +331,13 @@ std::filesystem::path pathOf(const std::string& text)
     return std::filesystem::path(std::u8string(text.begin(), text.end()));
 }
 
+// A file on disk, not a /vsi path or a URL GDAL reads.
+bool onDisk(const std::filesystem::path& source)
+{
+    const std::string name = utf8(source);
+    return !name.starts_with("/vsi") && name.find("://") == std::string::npos;
+}
+
 // The record's version: a record of a newer one is refused, not half read.
 constexpr int kRecordVersion = 1;
 
@@ -431,6 +438,9 @@ std::string toRecord(const ReferenceSource& source)
                                   {"name", source.name},
                                   {"source", utf8(source.source)},
                                   {"visible", source.visible}};
+    if (!source.inProject.empty()) {
+        record["in_project"] = utf8(source.inProject);
+    }
     if (source.kind == ReferenceSource::Kind::Raster) {
         record["opacity"] = source.opacity;
         record["role"] = toString(source.role);
@@ -481,6 +491,7 @@ Result<ReferenceSource> parseReferenceRecord(std::string_view text)
     if (source.source.empty()) {
         return refused("names no source");
     }
+    source.inProject = pathOf(record.value("in_project", std::string()));
     source.visible = record.value("visible", true);
     source.opacity = std::clamp(record.value("opacity", 1.0), 0.0, 1.0);
     source.role = rasterRoleFromWord(record.value("role", std::string("imagery")))
@@ -499,25 +510,66 @@ Result<ReferenceSource> parseReferenceRecord(std::string_view text)
     return source;
 }
 
-std::vector<std::string> referenceRecords(const ReferenceData& reference)
+std::vector<std::string> referenceRecords(const ReferenceData& reference,
+                                          const std::optional<std::filesystem::path>& project)
 {
+    // A source as the record keeps it: absolute (a path typed relative to
+    // the folder katana_cli ran in means nothing to a later opening from
+    // another), and relative to the project too when it lies inside it.
+    std::optional<std::filesystem::path> root;
+    std::error_code error;
+    if (project) {
+        root = std::filesystem::absolute(*project, error).lexically_normal();
+    }
+    const auto located = [&](ReferenceSource source) {
+        if (!onDisk(source.source)) {
+            return source;
+        }
+        std::error_code failed;
+        const std::filesystem::path absolute = std::filesystem::absolute(source.source, failed);
+        if (!failed) {
+            source.source = absolute.lexically_normal();
+        }
+        if (root && source.source.is_absolute()) {
+            const std::filesystem::path inside = source.source.lexically_relative(*root);
+            if (!inside.empty() && *inside.begin() != "..") {
+                source.inProject = inside;
+            }
+        }
+        return source;
+    };
     std::vector<std::string> records;
     for (const RasterOverlay& raster : reference.rasters()) {
-        records.push_back(toRecord(sourceOf(raster)));
+        records.push_back(toRecord(located(sourceOf(raster))));
     }
     for (const PointCloudLayer& cloud : reference.pointClouds()) {
-        records.push_back(toRecord(sourceOf(cloud)));
+        records.push_back(toRecord(located(sourceOf(cloud))));
     }
     records.insert(records.end(), reference.missing().begin(), reference.missing().end());
     return records;
 }
 
-Result<ReferenceLayer> readReference(const ReferenceSource& source)
+Result<ReferenceLayer> readReference(const ReferenceSource& recorded,
+                                     const std::optional<std::filesystem::path>& project)
 {
-    const std::string name = utf8(source.source);
-    const bool onDisk = !name.starts_with("/vsi") && name.find("://") == std::string::npos;
+    // Where the file is now: where it was recorded; else inside the project
+    // as the record places it there (the project moved with its data); a
+    // relative source - an older build recorded it as typed - inside the
+    // project, then in the working folder as before.
+    ReferenceSource source = recorded;
     std::error_code error;
-    if (onDisk && !std::filesystem::exists(source.source, error)) {
+    if (onDisk(source.source) && project && !std::filesystem::exists(source.source, error)) {
+        for (const std::filesystem::path& candidate :
+             {source.inProject.empty() ? std::filesystem::path() : *project / source.inProject,
+              source.source.is_relative() ? *project / source.source : std::filesystem::path()}) {
+            if (!candidate.empty() && std::filesystem::exists(candidate, error)) {
+                source.source = candidate;
+                break;
+            }
+        }
+    }
+    const std::string name = utf8(source.source);
+    if (onDisk(source.source) && !std::filesystem::exists(source.source, error)) {
         return makeError(ErrorCode::NotFound, "the source of reference layer \"" + source.name +
                                                   "\" is gone",
                          name);

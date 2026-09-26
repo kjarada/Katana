@@ -219,8 +219,14 @@ struct ReferenceSource {
     Kind kind = Kind::Raster;
     std::string name;
     // The file read again: a raster, a point cloud, or the 12d archive a
-    // cloud came in with (the cloud of this name is taken from it).
+    // cloud came in with (the cloud of this name is taken from it). Recorded
+    // absolute: a path typed relative to where katana_cli ran is resolved
+    // when recorded, not against wherever the project is opened from.
     std::filesystem::path source;
+    // The same file relative to the project's folder, when it lies inside it
+    // ("data/terrain.asc"; empty otherwise): read when `source` is gone, so a
+    // project moved or copied with its data keeps its layers.
+    std::filesystem::path inProject;
     bool visible = true;
     // A raster's.
     double opacity = 1.0;
@@ -250,13 +256,22 @@ struct ReferenceSource {
 // Every layer's record, the rasters then the clouds, each in the order added,
 // then the records kept as missing: what a save puts in
 // storage::ProjectMetadata::referenceLayers.
-[[nodiscard]] std::vector<std::string> referenceRecords(const ReferenceData& reference);
+// `project` is the project's folder, when it has one: a source inside it is
+// also recorded relative to it (ReferenceSource::inProject).
+[[nodiscard]] std::vector<std::string>
+referenceRecords(const ReferenceData& reference,
+                 const std::optional<std::filesystem::path>& project = std::nullopt);
 
 // A layer read again from its source, with its recorded name and display
 // settings: what a project's opening restores. NotFound when the source is
 // gone - which a caller reports and carries on from - and the reader's own
 // failure otherwise. Pure: reads the file, touches no ReferenceData.
 using ReferenceLayer = std::variant<RasterOverlay, PointCloudLayer>;
-[[nodiscard]] katana::core::Result<ReferenceLayer> readReference(const ReferenceSource& source);
+// `project` is the folder the project was opened from: a source that is gone
+// is looked for there by its inProject path, and a relative source (a record
+// of an older build) is looked for there before the working folder.
+[[nodiscard]] katana::core::Result<ReferenceLayer>
+readReference(const ReferenceSource& source,
+              const std::optional<std::filesystem::path>& project = std::nullopt);
 
 } // namespace katana::interop

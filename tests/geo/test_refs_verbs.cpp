@@ -404,4 +404,82 @@ TEST(RefsSession, ASavedProjectReopensWithItsReferenceRasters)
     EXPECT_NE(captured.out().find("references rasters=0 clouds=0 missing=0"), std::string::npos);
 }
 
+// The working folder, changed while it lives and put back after.
+class InFolder {
+  public:
+    explicit InFolder(const std::filesystem::path& folder) : was_(std::filesystem::current_path())
+    {
+        std::filesystem::current_path(folder);
+    }
+    ~InFolder()
+    {
+        std::error_code error;
+        std::filesystem::current_path(was_, error);
+    }
+    InFolder(const InFolder&) = delete;
+    InFolder& operator=(const InFolder&) = delete;
+
+  private:
+    std::filesystem::path was_;
+};
+
+TEST(RefsSession, ALayerImportedByARelativePathReopensFromAnotherFolder)
+{
+    // katana_cli run in the data's folder, IMPORT terrain.asc: the record
+    // kept "terrain.asc" as typed, and an OPEN from any other folder found
+    // nothing there (docs/interop.md said the source was absolute).
+    const TempDir scratch("relative");
+    std::filesystem::create_directories(scratch.path() / "data");
+    std::filesystem::create_directories(scratch.path() / "elsewhere");
+    std::filesystem::copy_file(kSamples + "/terrain.asc", scratch.path() / "data" / "terrain.asc");
+    const std::string project = scratch.file("site.katana");
+    {
+        const InFolder there(scratch.path() / "data");
+        katana::app::Session session(nullptr);
+        Captured captured;
+        ASSERT_TRUE(session.run("IMPORT terrain.asc")) << captured.err();
+        ASSERT_TRUE(session.run("SAVE " + quoted(project))) << captured.err();
+    }
+    const InFolder elsewhere(scratch.path() / "elsewhere");
+    katana::app::Session reopened(nullptr);
+    Captured captured;
+    ASSERT_TRUE(reopened.run("OPEN " + quoted(project))) << captured.err();
+    const auto restored = recordsOf(captured.out(), "restored");
+    ASSERT_EQ(restored.size(), 1u) << captured.out();
+    EXPECT_EQ(field(restored[0], "layers"), "1") << captured.out();
+    EXPECT_EQ(field(restored[0], "missing"), "0") << captured.out();
+}
+
+TEST(RefsSession, ALayerInsideTheProjectFollowsTheProjectWhenItMoves)
+{
+    // The data kept in the project's own folder, and the folder moved: the
+    // absolute source is gone, and the layer is found where the record
+    // places it inside the project.
+    const TempDir scratch("moved");
+    const std::filesystem::path first = scratch.path() / "first.katana";
+    const std::filesystem::path moved = scratch.path() / "moved.katana";
+    {
+        katana::app::Session session(nullptr);
+        Captured captured;
+        ASSERT_TRUE(session.run("SAVE " + quoted(first.generic_string()))) << captured.err();
+        std::filesystem::create_directories(first / "data");
+        std::filesystem::copy_file(kSamples + "/terrain.asc", first / "data" / "terrain.asc");
+        ASSERT_TRUE(
+            session.run("IMPORT " + quoted((first / "data" / "terrain.asc").generic_string())))
+            << captured.err();
+        ASSERT_TRUE(session.run("SAVE")) << captured.err();
+    }
+    std::filesystem::rename(first, moved);
+    katana::app::Session reopened(nullptr);
+    Captured captured;
+    ASSERT_TRUE(reopened.run("OPEN " + quoted(moved.generic_string()))) << captured.err();
+    const auto restored = recordsOf(captured.out(), "restored");
+    ASSERT_EQ(restored.size(), 1u) << captured.out();
+    EXPECT_EQ(field(restored[0], "layers"), "1") << captured.out();
+    const auto listed = recordsOf(captured.out(), "reference");
+    ASSERT_FALSE(listed.empty()) << captured.out();
+    EXPECT_NE(field(listed[0], "file").find("moved.katana/data/terrain.asc"), std::string::npos)
+        << captured.out();
+}
+
 } // namespace

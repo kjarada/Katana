@@ -1342,6 +1342,20 @@ restored layers=2 missing=0                                        (RESTORE)
   a save that has somewhere to go (`geo::recordReferences`). `NEW` and
   `OPEN` in `katana_cli` and `katana_mcp` now let the layers and surfaces go
   with their drawing, as the window's always did.
+- **Where a source is.** A record keeps the source absolute, resolved when
+  it is recorded: `IMPORT terrain.asc` typed in katana_cli's working folder
+  was kept as `terrain.asc`, and an OPEN from any other folder found nothing
+  (`RefsSession.ALayerImportedByARelativePathReopensFromAnotherFolder`). A
+  source inside the project's folder is also kept relative to it
+  (`in_project`, a key added to the record, not a new version), and an
+  opening whose absolute source is gone looks for it there, so a project
+  moved or copied with its data keeps its layers
+  (`RefsSession.ALayerInsideTheProjectFollowsTheProjectWhenItMoves`). A
+  relative source a record of an older build holds is looked for in the
+  project, then in the working folder as before. Keeping only the
+  project-relative path was rejected: File > Save As records before it
+  knows the new folder, so a path relative to the old one could name
+  nothing; the absolute path is read first and never depends on it.
 - **A missing file is warned of, not fatal.** The drawing opens; the
   restore says which source is gone and keeps that layer's record, listed as
   `missing`, so the next save does not drop a layer because a drive was not
@@ -1381,9 +1395,9 @@ and `...FromBeforeReferenceLayersWereRecordedOpensWithNone`; `cli.refs_*`;
 `McpServer.ReferencesActsOnALayerByIdOrNameAndListsThemAfter`;
 `qt_reference_dock_builds_refs_lines_headless`.
 
-Not done: a project records each source by its absolute path, so a project
-moved to another machine finds only what is at the same place (a missing
-one is warned of and kept); the display copy is one decimated read, not
+Not done: a source outside the project is found only at the same absolute
+place, so a project moved to another machine without it lists it as
+missing (warned of and kept); the display copy is one decimated read, not
 re-read at view resolution; a web layer whose cached file is gone is not
 fetched again (`ONLINE IMPORT` does).
 

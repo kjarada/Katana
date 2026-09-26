@@ -9,7 +9,8 @@ namespace katana::app::geo {
 void recordReferences(Context& context)
 {
     katana::storage::ProjectMetadata metadata = context.document.metadata();
-    metadata.referenceLayers = katana::interop::referenceRecords(context.reference);
+    metadata.referenceLayers =
+        katana::interop::referenceRecords(context.reference, context.document.projectDirectory());
     // setMetadata changes, and marks, nothing when the records are the same.
     context.document.setMetadata(std::move(metadata));
 }
