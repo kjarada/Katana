@@ -37,6 +37,10 @@ option(KATANA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(KATANA_ENABLE_SANITIZERS "Instrument with ASan/UBSan where the toolchain supports it" OFF)
 option(KATANA_ENABLE_CLANG_TIDY "Run clang-tidy during compilation (requires clang-tidy)" OFF)
 option(KATANA_ENABLE_CPPCHECK "Run cppcheck during compilation (requires cppcheck)" OFF)
+# Who publishes the build: the company in katana.exe's version resource, the
+# installer's publisher, and the name the packages are signed under
+# (cmake/KatanaSign.cmake, docs/release.md "Signing").
+set(KATANA_PUBLISHER "Jarada" CACHE STRING "The publisher named in the programs, installer and signatures")
 
 # ---------------------------------------------------------------------------
 # Where things are built.

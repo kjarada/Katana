@@ -2,7 +2,8 @@
 #
 #   cmake --build build/release --target bundle     -> build/release/dist/Katana/
 #   cmake --build build/release --target package    -> Katana-<version>-win64.zip,
-#                                                      -linux-x86_64.tar.gz, -macos-arm64.tar.gz
+#                                     -win-arm64.zip, -linux-x86_64.tar.gz,
+#                                     -linux-aarch64.tar.gz, -macos-arm64.tar.gz
 #   cmake --install build/release --prefix <dir>    -> the same tree, anywhere
 #
 # The installed tree is SELF-CONTAINED: it runs on a machine with no MSYS2, no
@@ -194,13 +195,27 @@ endif()
 
 # --- CPack -----------------------------------------------------------------------
 set(CPACK_PACKAGE_NAME "Katana")
-set(CPACK_PACKAGE_VENDOR "Katana")
+# The installer shows it as the Publisher in Settings > Apps.
+set(CPACK_PACKAGE_VENDOR "${KATANA_PUBLISHER}")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "High-performance survey and CAD platform")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "Katana")
 set(CPACK_PACKAGE_EXECUTABLES "katana" "Katana")
+# Signing, between staging the tree and archiving it, so what is inside the
+# archive and the installer is signed; and the installer itself afterwards.
+# Each does nothing unless a certificate is named in the environment
+# (cmake/KatanaSign.cmake, docs/release.md "Signing").
+set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
+set(CPACK_POST_BUILD_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
+set(CPACK_KATANA_PUBLISHER "${KATANA_PUBLISHER}")
+set(CPACK_KATANA_OBJDUMP "${CMAKE_OBJDUMP}")
 if(WIN32)
-    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-win64")
+    # win64 is x86-64, as it has been since the first package; ARM64 says so.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+        set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-win-arm64")
+    else()
+        set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-win64")
+    endif()
     # A ZIP always; an installer when NSIS is there to build one. NSIS is not
     # a dependency of the project, so its absence is not an error - install it
     # with `pacman -S mingw-w64-ucrt-x86_64-nsis` and reconfigure.
@@ -210,6 +225,9 @@ if(WIN32)
         list(APPEND CPACK_GENERATOR "NSIS")
         set(CPACK_NSIS_DISPLAY_NAME "Katana ${PROJECT_VERSION}")
         set(CPACK_NSIS_PACKAGE_NAME "Katana")
+        # C:\Program Files, not NSIS's default of Program Files (x86): these
+        # are 64-bit programs.
+        set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
         set(CPACK_NSIS_INSTALLED_ICON_NAME "bin/katana.exe")
         set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
         if(EXISTS "${PROJECT_SOURCE_DIR}/resources/katana.ico")
