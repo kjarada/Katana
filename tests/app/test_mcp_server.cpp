@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -485,6 +486,31 @@ TEST_F(McpServer, ImportReturnsStructuredRecords)
     EXPECT_EQ(written["record"], "exported");
     EXPECT_EQ(written["driver"], "GPKG");
     EXPECT_EQ(written["features"], 9);
+}
+
+TEST_F(McpServer, DatasetInfoReturnsRecordsAndGdalsJson)
+{
+    // terrain.asc's header: 120 x 90 cells of 1.5 from (-5, -5), no-data
+    // -9999. The tool changes nothing and reads only the file.
+    initialize();
+    const std::string terrain =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string();
+    const Json described =
+        call("katana_dataset_info", Json{{"path", terrain}, {"json", true}, {"check", true}});
+    ASSERT_FALSE(described["isError"].get<bool>()) << textOf(described);
+    const Json& content = described["structuredContent"];
+    EXPECT_EQ(content["line"], "INFO \"" + terrain + "\" CHECK");
+    std::map<std::string, Json> first;
+    for (const Json& record : content["records"]) {
+        first.emplace(record["record"].get<std::string>(), record);
+    }
+    EXPECT_EQ(first["dataset"]["driver"], "AAIGrid");
+    EXPECT_EQ(first["raster"]["width"], 120);
+    EXPECT_EQ(first["raster"]["bounds"], (Json{-5.0, -5.0, 175.0, 130.0}));
+    EXPECT_EQ(first["band"]["nodata"], -9999);
+    EXPECT_EQ(first["check"]["code"], 0);
+    EXPECT_EQ(content["gdal"]["raster"]["driverShortName"], "AAIGrid");
+    EXPECT_EQ(session.document().model().entities.size(), 0u);
 }
 #endif
 

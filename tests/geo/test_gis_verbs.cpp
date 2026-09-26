@@ -292,8 +292,10 @@ TEST_F(GisVerbs, CopcRecordsTheFileAndLeavesNothingBesideIt)
 
     auto described = run("INFO " + quoted(destination));
     ASSERT_TRUE(described.ok()) << described.error().describe();
-    EXPECT_NE(described->find("Point cloud: 40,000 points"), std::string::npos) << *described;
-    EXPECT_NE(described->find("COPC: yes"), std::string::npos) << *described;
+    const auto cloud = recordsOf(*described, "pointcloud");
+    ASSERT_EQ(cloud.size(), 1u) << *described;
+    EXPECT_EQ(field(cloud[0], "points"), "40000");
+    EXPECT_EQ(field(cloud[0], "copc"), "yes");
 
     auto usage = run("COPC " + quoted(kSamples + "/survey_scan.las"));
     ASSERT_FALSE(usage.ok());
@@ -438,12 +440,15 @@ TEST_F(GisVerbs, InfoOfAnEntityIsTheInterpretersAndOfAFileTheExecutors)
     auto usage = run("INFO");
     ASSERT_FALSE(usage.ok());
     EXPECT_EQ(usage.error().code, ErrorCode::InvalidArgument);
-    EXPECT_NE(usage.error().message.find("INFO <file> | INFO <id>"), std::string::npos);
+    EXPECT_NE(usage.error().message.find("| INFO <id>"), std::string::npos);
 
     auto described = run("INFO " + kSamples + "/terrain.asc");
     ASSERT_TRUE(described.ok()) << described.error().describe();
-    EXPECT_NE(described->find("Raster: 120 x 90 pixels, 1 band"), std::string::npos) << *described;
-    EXPECT_NE(described->find("Bounds: (-5.000, -5.000) to (175.000, 130.000)"), std::string::npos);
+    const auto raster = recordsOf(*described, "raster");
+    ASSERT_EQ(raster.size(), 1u) << *described;
+    EXPECT_EQ(field(raster[0], "width"), "120");
+    EXPECT_EQ(field(raster[0], "height"), "90");
+    EXPECT_EQ(field(raster[0], "bounds"), "-5,-5,175,130");
 }
 
 TEST_F(GisVerbs, ImportRefusesWhatItCannotRead)

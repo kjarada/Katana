@@ -188,7 +188,23 @@ Not started.
 
 ### D1: katana_dataset_info
 
-Not started.
+| In | Out |
+|---|---|
+| `{path, layer?, stats?, check?, json?}`: a file, a folder, a `/vsi` path or a URL | `{ok, line, records: [{record: "dataset" \| "raster" \| "band" \| "overview" \| "subdataset" \| "layer" \| "field" \| "pointcloud" \| "found" \| "check" \| "problem" \| "warning", ...fields}], gdal?}` |
+
+- **It is the INFO line.** The tool builds `INFO "<path>" [LAYER <name>]
+  [STATS] [CHECK]`, runs it through the Session and hands back its records as
+  objects (`geo::recordsJson`): numbers as numbers, `yes`/`no` as booleans,
+  `bounds` as `[x0, y0, x1, y1]`, an empty value as null - absent, not zero.
+- **`json: true` adds GDAL's own description** as `gdal`, from `INFO ...
+  JSON`: `raster info`, `vector info` and, for a multidimensional format,
+  `mdim info`, verbatim.
+- **It reads, and writes nothing**: `stats` computes the bands' statistics
+  without leaving an `.aux.xml` beside the file. Its hints are read-only and
+  open-world, since a path may be a URL.
+
+`McpServer.DatasetInfoReturnsRecordsAndGdalsJson` pins it; the records are
+`docs/interop.md`'s ("Dataset information").
 
 ### D2: katana_references
 
