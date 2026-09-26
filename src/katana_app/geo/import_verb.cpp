@@ -240,9 +240,30 @@ Result<std::string> adoptAlone(Context& context, const std::string& wkt)
     return "crs adopted=yes id=" + value(context.document.metadata().coordinateSystem);
 }
 
+// The warning an import's reply carries when what it drew is in another
+// coordinate system than the project's: drawn as they are, its coordinates
+// do not register against the drawing's. Nothing when either is unknown, or
+// when the project has just adopted the file's.
+std::optional<std::string> crsWarning(const Context& context, const std::string& wkt,
+                                      std::string_view consequence)
+{
+    auto differs = crsDiffers(wkt, projectCrs(context), "the file", consequence);
+    return differs ? std::optional<std::string>(warningText(*differs)) : std::nullopt;
+}
+
 Result<std::string> applyVector(Context& context, interop::VectorImportResult&& read,
                                 const std::filesystem::path& file, const Request& request)
 {
+    // crs=project moved the data into the project's system as it was when
+    // the line was prepared; a CRS SET since would draw it in the wrong one.
+    if (!request.vector.targetCrs.empty() &&
+        katana::gis::sameCrs(request.vector.targetCrs, projectCrs(context)) !=
+            std::optional<bool>(true)) {
+        return makeError(ErrorCode::InvalidState,
+                         "the project's coordinate system changed while the import ran, and "
+                         "crs=project moved the data into the one it had; import again",
+                         pathText(file));
+    }
     // Layers before the entities on them, and all of it ONE undo step: an
     // import made by mistake is one Ctrl+Z - the project's coordinate system
     // too, when crs=adopt sets it.
@@ -297,6 +318,11 @@ Result<std::string> applyVector(Context& context, interop::VectorImportResult&& 
     }
     for (const std::string& warning : read.warnings) {
         records.push_back(warningText(warning));
+    }
+    if (auto warning = crsWarning(context, read.projectionWkt,
+                                  "its coordinates were drawn as they are; crs=project moves "
+                                  "them into the project's")) {
+        records.push_back(std::move(*warning));
     }
     return joined(records);
 }
@@ -413,6 +439,9 @@ Result<std::string> applyRaster(Context& context, interop::RasterOverlay&& read,
         crsRecord = *adopted;
     }
     const bool georeferenced = read.hasGeotransform;
+    const auto differs = crsWarning(context, read.projectionWkt,
+                                    "it is drawn at its own coordinates; RASTER REPROJECT makes a "
+                                    "copy in the project's");
     const interop::ReferenceId id = context.reference.add(std::move(read));
     std::vector<std::string> records{"imported file=" + value(pathText(file)) + " kind=raster",
                                      referenceRecord(*context.reference.findRaster(id))};
@@ -424,6 +453,9 @@ Result<std::string> applyRaster(Context& context, interop::RasterOverlay&& read,
         // know that.
         records.push_back(warningText("this file carries no georeferencing; it is placed at the "
                                       "origin at one model unit per pixel"));
+    }
+    if (differs) {
+        records.push_back(*differs);
     }
     if (context.changed) {
         context.changed();
@@ -442,9 +474,13 @@ Result<std::string> applyCloud(Context& context, interop::PointCloudLayer&& read
         }
         crsRecord = "\n" + *adopted;
     }
+    const auto differs = crsWarning(context, read.projectionWkt,
+                                    "it is drawn at its own coordinates, where the drawing's are "
+                                    "not");
     const interop::ReferenceId id = context.reference.add(std::move(read));
     const std::string records = "imported file=" + value(pathText(file)) + " kind=pointcloud\n" +
-                                referenceRecord(*context.reference.findPointCloud(id)) + crsRecord;
+                                referenceRecord(*context.reference.findPointCloud(id)) + crsRecord +
+                                (differs ? "\n" + *differs : std::string());
     if (context.changed) {
         context.changed();
     }
@@ -842,7 +878,7 @@ Result<Prepared> prepareImport(Context& context, const Tokens& tokens, std::stri
         if (!readable) {
             return readable.error();
         }
-        vector.assumedSourceCrs = *srs;
+        vector.sourceCrs = *srs;
         request.raster.assumedCrs = *srs;
     }
 

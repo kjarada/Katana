@@ -146,6 +146,7 @@ Result<std::string> keepDerived(Context& context, const ApplyRequest& request,
     }
     const int width = overlay->width;
     const int height = overlay->height;
+    const std::string crs = overlay->projectionWkt;
     const katana::geometry::Box2 bounds = overlay->worldBounds();
     const katana::interop::ReferenceId id = context.reference.add(std::move(*overlay));
     if (context.changed) {
@@ -154,10 +155,17 @@ Result<std::string> keepDerived(Context& context, const ApplyRequest& request,
     if (context.frame && !bounds.empty()) {
         context.frame(bounds);
     }
-    return "output arg=" + value(request.arg) + " kind=raster target=reference id=" +
-           std::to_string(id) + " name=" + value(name) + " raster=" + std::to_string(width) + "x" +
-           std::to_string(height) + " file=" + value(utf8Of(destination)) +
-           " persisted=" + (project ? "yes" : "no");
+    std::string reply = "output arg=" + value(request.arg) +
+                        " kind=raster target=reference id=" + std::to_string(id) +
+                        " name=" + value(name) + " raster=" + std::to_string(width) + "x" +
+                        std::to_string(height) + " file=" + value(utf8Of(destination)) +
+                        " persisted=" + (project ? "yes" : "no");
+    if (const auto differs = crsDiffers(crs, projectCrs(context), "the raster",
+                                        "it is drawn at its own coordinates, where the drawing's "
+                                        "are not; RASTER REPROJECT moves it")) {
+        reply += "\n" + warningRecord(*differs);
+    }
+    return reply;
 }
 
 // A grid a run kept in memory, written where a derived raster is kept.
@@ -385,6 +393,16 @@ Result<Target> parseTarget(const Tokens& tokens, std::size_t& at)
 std::string projectCrs(const Context& context)
 {
     return context.document.metadata().coordinateSystem;
+}
+
+std::optional<std::string> crsDiffers(const std::string& data, const std::string& project,
+                                      std::string_view what, std::string_view consequence)
+{
+    if (katana::gis::sameCrs(data, project) != std::optional<bool>(false)) {
+        return std::nullopt;
+    }
+    return std::string(what) + " is in " + katana::gis::describeCrs(data) + ", not the project's " +
+           katana::gis::describeCrs(project) + ": " + std::string(consequence);
 }
 
 std::filesystem::path derivedFolder(const Context& context)
@@ -637,6 +655,18 @@ Result<std::string> applyOutputs(Context& context, const ApplyRequest& request,
             }
             created = context.document.lastCreatedEntities();
         }
+        // A result in another coordinate system is drawn as it comes (GDAL
+        // vector reproject to EPSG:4326 makes degrees): said, once per
+        // system, rather than drawn silently off the drawing's.
+        std::vector<std::string> crsWarnings;
+        for (const gp::FeatureTable& table : outputs.features->tables) {
+            if (auto differs = crsDiffers(table.crsWkt, projectCrs(context), "the result",
+                                          "its coordinates were drawn as they are, not moved "
+                                          "into the project's");
+                differs && std::ranges::find(crsWarnings, *differs) == crsWarnings.end()) {
+                crsWarnings.push_back(std::move(*differs));
+            }
+        }
         std::string record = "output arg=" + value(request.arg) + " kind=vector target=layer layer=" +
                              value(options.targetLayer);
         record += " created=" + std::to_string(plan->created) +
@@ -645,6 +675,9 @@ Result<std::string> applyOutputs(Context& context, const ApplyRequest& request,
                   " skipped=" + std::to_string(plan->skipped);
         records.push_back(record);
         for (const std::string& warning : plan->warnings) {
+            records.push_back(warningRecord(warning));
+        }
+        for (const std::string& warning : crsWarnings) {
             records.push_back(warningRecord(warning));
         }
         if (context.frame && !created.empty()) {

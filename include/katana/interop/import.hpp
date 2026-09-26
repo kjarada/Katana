@@ -95,6 +95,12 @@ struct VectorImportOptions {
     // The CRS of a layer that declares none, for targetCrs; empty refuses
     // such a layer rather than guess.
     std::string assumedSourceCrs;
+    // The CRS the file's coordinates are in, whatever its layers declare
+    // (IMPORT's srs=, as ogr2ogr's -s_srs): GDAL declares a GeoJSON without a
+    // crs member WGS 84 (RFC 7946), so a fallback for layers that declare
+    // none never reached one, and MGA coordinates were moved as degrees. A
+    // layer that declares another system is said in a warning.
+    std::string sourceCrs;
     // Keeps only features whose bounding box meets this box, given in the
     // source's own CRS (so before any reprojection): the online import's area
     // applied to a file that covers the world (Natural Earth).

@@ -376,6 +376,25 @@ TEST_F(GeoExecutor, RasterizeAddBurnsIntoAnExistingRasterOnlyWithOverwrite)
     EXPECT_EQ(bytesOf(raster), before);
 }
 
+TEST_F(GeoExecutor, AResultInAnotherCrsThanTheProjectsIsSaidToBe)
+{
+    // GDAL vector reproject into EPSG:4326 makes degrees, which TO LAYER
+    // draws into an MGA drawing as they are: 151 E, 34 S among 330000 m
+    // eastings, and nothing said so.
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:28356").ok());
+    type("LINE 330000,6250000 330100,6250000");
+    auto reply = run("GDAL vector reproject --output-crs=EPSG:4326 FROM DRAWING TO LAYER lonlat");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_NE(reply->find("warning text=\"the result is in WGS 84 (EPSG:4326), not the project's "
+                          "GDA94 / MGA zone 56 (EPSG:28356)"),
+              std::string::npos)
+        << *reply;
+    // A result in the project's own system says nothing of it.
+    auto same = run("GDAL vector buffer --distance 1 FROM DRAWING TO LAYER buffered");
+    ASSERT_TRUE(same.ok()) << same.error().describe();
+    EXPECT_EQ(same->find("not the project's"), std::string::npos) << *same;
+}
+
 TEST_F(GeoExecutor, GdalTokensAfterAClauseAreRefused)
 {
     type("LINE 0,0 100,0");

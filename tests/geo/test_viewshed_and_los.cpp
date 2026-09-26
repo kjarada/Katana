@@ -38,6 +38,7 @@
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/text.hpp"
 #include "katana/gis/gdal_adapter.hpp"
+#include "katana/gis/reproject.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "katana/terrain/line_of_sight.hpp"
 #include "katana/terrain/surface_store.hpp"
@@ -230,6 +231,40 @@ TEST_F(Viewshed, OnFlatGroundEveryCellWithinMaxDistanceIsVisible)
     // union grid, which has none, would make GDAL say it ignores.
     EXPECT_TRUE(records(reply, "warning").empty()) << reply;
     EXPECT_EQ(reference.rasters().back().role, katana::interop::RasterRole::Derived);
+}
+
+TEST_F(Viewshed, ARasterInAnotherCrsThanTheDrawingsIsRefusedNotReadAtTheWrongPlace)
+{
+    // flat.asc with a .prj of WGS 84 longitude and latitude, in a project in
+    // MGA zone 56: the observer, a drawing point in metres, would be handed
+    // to GDAL as degrees, and the result was stamped MGA zone 56 whatever
+    // the raster was in. Refused, as RASTER SAMPLE, DRAPE and LOS are.
+    const std::string flat = grid(files, "flat.asc", 41, 41, [](int, int) { return 10; });
+    // The .prj an ASCII grid is read with is Esri's WKT of WGS 84.
+    std::ofstream(files.file("flat.prj"))
+        << R"(GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,)"
+        << R"(298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]])";
+    auto wgs84 = katana::gis::crsToWkt("EPSG:4326");
+    ASSERT_TRUE(wgs84.ok());
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:28356").ok());
+    for (const std::string& line :
+         {"RASTER VIEWSHED FILE \"" + flat + "\" OBSERVER 20.5,20.5 max=10 curvature=none",
+          "RASTER SAMPLE FILE \"" + flat + "\" AT 12.5,7.5",
+          "LOS FILE \"" + flat + "\" OBSERVER 1.5,1.5 TARGET 30.5,30.5"}) {
+        auto refused = geo::runNow(context, line);
+        ASSERT_FALSE(refused.ok()) << line;
+        EXPECT_EQ(refused.error().code, katana::core::ErrorCode::InvalidCRS)
+            << line << ": " << refused.error().describe();
+        EXPECT_NE(refused.error().message.find("RASTER REPROJECT"), std::string::npos)
+            << refused.error().message;
+    }
+    EXPECT_TRUE(reference.rasters().empty());
+    // In the project's own system it runs, and the result keeps it.
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:4326").ok());
+    ran("RASTER VIEWSHED FILE \"" + flat + "\" OBSERVER 20.5,20.5 max=10 curvature=none");
+    ASSERT_FALSE(reference.rasters().empty());
+    EXPECT_EQ(katana::gis::sameCrs(reference.rasters().back().projectionWkt, *wgs84),
+              std::optional<bool>(true));
 }
 
 TEST_F(Viewshed, BehindARidgeTheShadowEndsWhereSimilarTrianglesSay)
