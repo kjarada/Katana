@@ -439,7 +439,7 @@ lines, polylines and areas with their properties.
 
 A raster result goes to `<project>/cache/gdal/<name>.tif`. When the drawing
 has no project it goes to the front end's scratch folder
-(`<temp>/katana-scratch/<process id>-<start>`, `geo::defaultScratch`), and
+(`<temp>/katana-scratch/<process id>-<start>/<n>`, `geo::ownScratch`), and
 the reply says `persisted=no`. It is read by `interop::importRaster` as a
 reference raster with `role` Derived and `derivation` - the line that made
 it. A name already taken becomes `<name>-2`, `-3` ...
@@ -454,10 +454,19 @@ to a later one, and the folder the earlier one left behind still held its
 files, so a later run's `NAME west` came back as `west-2` - a name not
 asked for, and replies that changed from run to run (two tests failed so in
 one whole-suite run, with 153 such folders in the temp folder;
-`DemSession.ARasterLeftByAnEarlierProcessWithThisIdDoesNotRenameTheResult`).
+`DemSession.ARasterAnotherSessionMadeDoesNotRenameTheResult`).
 Clearing the folders left behind at start-up was rejected: a name does not
 say whether its process has ended, and another window still running may be
 using its folder.
+
+Inside the process's folder each front end - each `app::Session`, the
+window - has a numbered folder of its own, given once when it is made. While
+the folder was one per process, a second Session in the same process found
+the first one's `west` and its own came back as `west-2`; the test above
+failed so whenever `katana_geo_tests` ran as one process, and passed under
+ctest, which runs each test alone. Clearing the folder between sessions was
+rejected for the reason above: another front end in the process may still
+hold a reference raster there.
 
 ## The executor
 
@@ -722,8 +731,8 @@ its names and shapes except here:
   `ApplyRequest`: the target, the output's argument, the default name and
   the `ResultOptions`.
 - `PrepareVerb` is `Result<Prepared>(Context&, const Tokens&, line)`.
-- `geo::defaultScratch` is the scratch folder of the window and the session
-  alike.
+- `geo::ownScratch` gives each front end - the window, each session - a
+  scratch folder of its own (it was `defaultScratch`, one per process).
 - I1 added, all source-compatible: `DrawingDatasetOptions::oneTable`,
   `tableName`, `styleFields` and `properties`; `interop::geo::featurePieces`;
   `VectorGeometry::arcs`; `GdalDataset::readTable` and `writeTables`, over

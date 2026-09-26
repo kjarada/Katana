@@ -531,10 +531,14 @@ struct Session::State {
 #if defined(KATANA_WITH_INTEROP)
     SessionState session{document, interpreter, {}, {}, {}, nullptr};
     // Derived rasters of a drawing with no project go to a folder of this
-    // process's own, so two sessions never write over each other's.
-    katana::app::geo::Context geo{document, interpreter, session.interop.reference,
+    // session's own, so two sessions never find each other's files.
+    katana::app::geo::Context geo{document,
+                                  interpreter,
+                                  session.interop.reference,
                                   session.interop.surfaces,
-                                  katana::app::geo::defaultScratch(), {}, {}};
+                                  katana::app::geo::ownScratch(),
+                                  {},
+                                  {}};
 #else
     SessionState session{document, interpreter, {}, {}};
 #endif
