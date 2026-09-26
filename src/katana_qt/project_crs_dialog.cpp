@@ -211,7 +211,7 @@ void ProjectCrsDialog::follow(const katana::cad::DocumentChange& change)
 void ProjectCrsDialog::fill(const QString& filter)
 {
     list_->clear();
-    const auto add = [this](QTreeWidgetItem* parent, const katana::cad::CrsChoice& entry) {
+    const auto add = [](QTreeWidgetItem* parent, const katana::cad::CrsChoice& entry) {
         auto* item = new QTreeWidgetItem(parent, {qs(entry.name), qs(entry.id)});
         item->setData(0, kIdRole, qs(entry.id));
     };

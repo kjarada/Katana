@@ -1,6 +1,6 @@
 // The portable SIMD facade, as ordinary (baseline) code sees it. Built as C++26
-// it is std::simd; as C++23 (KATANA_CXX_STANDARD=23) std::experimental::simd -
-// the same tests hold for both.
+// it is std::simd; as C++23 (KATANA_CXX_STANDARD=23) std::experimental::simd;
+// with libc++, which has neither, plain arrays - the same tests hold for all.
 
 #include <gtest/gtest.h>
 
@@ -26,14 +26,17 @@ TEST(SimdFacade, TheBackendIsStdSimdExactlyWhenTheLibraryProvidesIt)
 {
 #if defined(__cpp_lib_simd) || defined(__glibcxx_simd)
     EXPECT_STREQ(simd::kBackend, "std::simd");
-#else
+#elif defined(__cpp_lib_experimental_parallel_simd)
     EXPECT_STREQ(simd::kBackend, "std::experimental::simd");
+#else
+    EXPECT_STREQ(simd::kBackend, "portable");
 #endif
 }
 
 TEST(SimdFacade, BaselineCodeGetsWholeSse2RegistersOfEveryType)
 {
-    // x86-64 guarantees SSE2: 16 bytes a register, so 2 doubles, 4 floats.
+    // x86-64 guarantees SSE2 and arm64 NEON: 16 bytes a register, so 2
+    // doubles, 4 floats.
     // An ordinary file is compiled for exactly that, never wider.
     EXPECT_EQ(simd::lanes<double> * sizeof(double), 16u);
     EXPECT_EQ(simd::lanes<float> * sizeof(float), 16u);

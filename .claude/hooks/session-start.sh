@@ -19,7 +19,13 @@ fi
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 
 export KATANA_TOOLCHAIN="${KATANA_TOOLCHAIN:-/opt/katana-toolchain}"
-python3 tools/setup_linux_toolchain.py --prefix "$KATANA_TOOLCHAIN" >&2
+if ! python3 tools/setup_linux_toolchain.py --prefix "$KATANA_TOOLCHAIN" --check 2> /dev/null; then
+    python3 tools/setup_linux_toolchain.py --prefix "$KATANA_TOOLCHAIN" >&2
+    # A new toolchain invalidates what the configure found out about the old
+    # one: when the sysroot moved from glibc 2.39 to 2.28, a kept cache still
+    # said pthread_create was in libc, and every program failed to link.
+    rm -f build/linux-release/CMakeCache.txt
+fi
 
 # Only the build tools on PATH, not the whole prefix: its bin/ also holds a
 # python3 that would shadow the system one.

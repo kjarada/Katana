@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the Linux toolchain Katana builds with, into one prefix.
+"""Install the Linux or macOS toolchain Katana builds with, into one prefix.
 
 The Windows build takes every tool and library from MSYS2 UCRT64. Linux
 distributions lag behind that - Ubuntu 24.04 ships GCC 14, CGAL 5.6 and PROJ
@@ -17,6 +17,12 @@ Reproducible: the solve is frozen at SNAPSHOT, so the same versions come back
 on every machine and in every session until SNAPSHOT or SPECS are changed
 here. Idempotent: a prefix whose stamp matches SNAPSHOT and SPECS is left
 alone, so running this again costs a second.
+
+macOS takes the same libraries from conda-forge for osx-arm64, with clang and
+libc++ instead of GCC: every conda-forge C++ library for macOS - Qt, PDAL,
+GDAL - is built against libc++, and GCC's libstdc++ cannot link with them
+(docs/building.md, "macOS"). The script keeps its name because the cloud
+session's start-up hook and the documentation name it.
 
     python3 tools/setup_linux_toolchain.py            # into $KATANA_TOOLCHAIN or /opt/katana-toolchain
     python3 tools/setup_linux_toolchain.py --prefix ~/katana-toolchain
@@ -45,9 +51,7 @@ SNAPSHOT = datetime.datetime(2026, 9, 26, tzinfo=datetime.timezone.utc)
 # The same versions MSYS2 gives the Windows build where the two can match
 # (GCC 16.2); the libraries at the newest release the snapshot has. Eigen is
 # held at 3.4 because the build asks for Eigen3.
-SPECS = [
-    "gxx_linux-64 16.2.*",
-    "gcc_linux-64 16.2.*",
+COMMON_SPECS = [
     "cmake >=3.31",
     "ninja",
     "clang-format",
@@ -62,13 +66,40 @@ SPECS = [
     "gmp",
     "mpfr",
     "libboost-headers",
+    "gtest",
+    "benchmark",
+]
+
+LINUX_SPECS = [
+    "gxx_linux-64 16.2.*",
+    "gcc_linux-64 16.2.*",
+    # The C library the programs are linked against, and so the oldest one they
+    # run on: glibc 2.28 is Debian 10, Ubuntu 20.04 and RHEL 8. Left free, the
+    # solver takes the newest sysroot (2.39 here), and a release built on
+    # Ubuntu 24.04 would refuse to start on anything older.
+    "sysroot_linux-64 2.28.*",
     "libgl-devel",
     # Qt declares QVulkanInstance only where vulkan/vulkan.h is; the loader
     # itself comes with the machine's graphics driver.
     "libvulkan-headers",
-    "gtest",
-    "benchmark",
 ]
+
+# clang 23 is the newest conda-forge has for osx-arm64 at SNAPSHOT; the
+# compiler package brings libc++, ld64 and cctools with it.
+MACOS_SPECS = [
+    "clangxx_osx-arm64 23.*",
+    "clang_osx-arm64 23.*",
+]
+
+
+def is_macos() -> bool:
+    return sys.platform == "darwin"
+
+
+SPECS = COMMON_SPECS + (MACOS_SPECS if is_macos() else LINUX_SPECS)
+
+# The C++ compiler the toolchain files (cmake/toolchains/) expect in bin/.
+COMPILER = "arm64-apple-darwin20.0.0-clang++" if is_macos() else "x86_64-conda-linux-gnu-g++"
 
 # py-rattler's API has changed between releases; this is the one the script
 # is written against.
@@ -84,7 +115,7 @@ def stamp_text() -> str:
 
 def is_current(prefix: Path) -> bool:
     stamp = prefix / STAMP
-    compiler = prefix / "bin" / "x86_64-conda-linux-gnu-g++"
+    compiler = prefix / "bin" / COMPILER
     try:
         return compiler.exists() and json.loads(stamp.read_text()) == json.loads(stamp_text())
     except (OSError, ValueError):
@@ -141,10 +172,13 @@ def main() -> int:
     (prefix / STAMP).unlink(missing_ok=True)  # an interrupted install must not look current
     asyncio.run(install(prefix))
     (prefix / STAMP).write_text(stamp_text() + "\n")
-    compiler = prefix / "bin" / "x86_64-conda-linux-gnu-g++"
-    version = subprocess.run([str(compiler), "-dumpfullversion"], check=True,
-                             capture_output=True, text=True).stdout.strip()
-    print(f"toolchain at {prefix} installed: GCC {version}", file=sys.stderr)
+    compiler = prefix / "bin" / COMPILER
+    if not compiler.exists():
+        print(f"{compiler} is missing after the install", file=sys.stderr)
+        return 1
+    version = subprocess.run([str(compiler), "--version"], check=True,
+                             capture_output=True, text=True).stdout.splitlines()[0]
+    print(f"toolchain at {prefix} installed: {version}", file=sys.stderr)
     return 0
 
 
