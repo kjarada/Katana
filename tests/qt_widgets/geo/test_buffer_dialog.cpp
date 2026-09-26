@@ -61,6 +61,17 @@ TEST(GisBufferLine, AChoiceLeftAtItsDefaultIsLeftOut)
                      "\"design/set backs\"");
 }
 
+TEST(GisBufferLine, ALayerNamedLikeAKeywordIsQuoted)
+{
+    // A layer called "preview" was written bare, and the line then read
+    // PREVIEW as the flag: refused, where the person asked for that layer.
+    GisBufferForm form = bufferForm("5");
+    form.layer = "preview";
+    auto line = katana::qt::gisBufferLine(form);
+    ASSERT_TRUE(line.ok());
+    EXPECT_EQ(*line, "GIS BUFFER DRAWING distance=5 TO LAYER \"preview\"");
+}
+
 TEST(GisBufferLine, APropertyDistanceWinsAndDissolveNamesItsKeys)
 {
     GisBufferForm form = bufferForm("5");

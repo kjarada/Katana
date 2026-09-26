@@ -1035,6 +1035,23 @@ TEST_F(McpServer, GdalRunBuildsTheLineAndReturnsOutputs)
         << textOf(listed);
 }
 
+TEST_F(McpServer, GdalRunQuotesAnOutputNamedLikeAKeyword)
+{
+    // An agent's layer "preview" was written bare: the line read PREVIEW as
+    // the flag and was refused. The one quoting rule quotes it.
+    initialize();
+    (void)call("katana_run_commands", Json{{"commands", {"LINE 0,0 100,0"}}});
+    const Json result =
+        call("katana_gdal_run", Json{{"algorithm", "vector buffer"},
+                                     {"arguments", {{"distance", 1}}},
+                                     {"inputs", {{"input", {{"scope", "drawing"}}}}},
+                                     {"output", {{"layer", "preview"}}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    EXPECT_EQ(result["structuredContent"]["line"],
+              "GDAL vector buffer --distance=1 FROM input DRAWING TO LAYER \"preview\"");
+    EXPECT_EQ(result["structuredContent"]["outputs"][0]["layer"], "preview");
+}
+
 TEST_F(McpServer, GdalRunRefusesAConfirmAlgorithmWithoutConfirm)
 {
     initialize();

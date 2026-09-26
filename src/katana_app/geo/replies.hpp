@@ -21,6 +21,20 @@ namespace katana::app::geo {
 // A length or a time to 3 decimals, locale-independent: "0.017".
 [[nodiscard]] std::string fixed3(double number);
 
+// Whether a line reads `word` - in any case, unquoted - as one of its own
+// words where a name may stand: the clause words (TO, FROM, PREVIEW,
+// CONFIRM, OVERWRITE), the flags (REPLACE ...), the words that take a value
+// (NAME, FORMAT, LAYER, WITH, BY, MINUS, AT ...) and the source and scope
+// words (FILE, RASTER, SURFACE, REFERENCE, DRAWING, WHERE ...).
+[[nodiscard]] bool lineKeyword(std::string_view word);
+// A name or a path as a word of a line: as it is, or quoted when it holds a
+// blank, is empty, or is a lineKeyword - a quoted word is always a value, so
+// TO LAYER "preview" draws on the layer `preview` where TO LAYER preview was
+// refused and TO REFERENCE preview previewed. Nothing for a double quote or a
+// line break, which a line has no way to carry. The ONE quoting rule of the
+// window's dialogs and the MCP tools that write lines.
+[[nodiscard]] std::optional<std::string> lineWord(std::string_view text);
+
 // gdal algorithm="raster hillshade" policy=safe seconds=0.017 cancelled=no
 [[nodiscard]] std::string gdalRecord(const katana::gis::processing::AlgorithmInfo& info,
                                      double seconds);

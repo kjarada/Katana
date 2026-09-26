@@ -482,7 +482,22 @@ phases, so a session runs it inline and the window as a job:
 
 1. **`prepare`, on the calling thread** (the GUI thread in the window):
    - the line is split (`geo::tokenize`: the interpreter's rules, and which
-     words were quoted, so a quoted `"FROM"` is a value);
+     words were quoted, so a quoted `"FROM"` is a value). What writes a
+     line - every GDAL dialog and the MCP tools - quotes a name by the one
+     rule, `geo::lineWord` (`replies.hpp`): a blank, an empty word, or a
+     word the line reads as its own (`geo::lineKeyword`: TO, PREVIEW,
+     CONFIRM, REPLACE, NAME, WHERE, the source and scope words ...). A layer
+     named `preview` was written bare: `TO LAYER preview` was refused, and
+     `TO REFERENCE PREVIEW` previewed instead of making a raster
+     (`GisBuffer.AnOutputNamedLikeAKeywordGoesWhereItSaysOnceQuoted`,
+     `DemVerbs.AReferenceNamedPreviewIsMadeNotPreviewedOnceQuoted`,
+     `GisBufferLine.ALayerNamedLikeAKeywordIsQuoted`,
+     `McpServer.GdalRunQuotesAnOutputNamedLikeAKeyword`). The four helpers
+     that each quoted by their own rule (`gisWord`, the two `lineWord`s of
+     the dialogs' support files, `katana_gdal_run`'s `word`) now call it.
+     Reading a keyword as a name where one is expected was rejected: `TO
+     REFERENCE` takes an optional name, so `TO REFERENCE PREVIEW` is
+     ambiguous to a reader, and a quoted word never is;
    - the verb is found in the table, the algorithm resolved, its policy
      checked;
    - FROM and TO are read by the ONE source and target parsers

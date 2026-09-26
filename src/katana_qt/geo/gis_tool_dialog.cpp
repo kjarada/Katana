@@ -58,11 +58,13 @@ QString field(const QString& reply, const QString& kind, const QString& key)
 
 Result<QString> gisWord(const QString& text, const QString& field)
 {
-    if (text.contains('"')) {
-        return invalid(field + " holds a double quote, which a command line cannot carry");
+    // The one quoting rule (geo::lineWord): a keyword as a name is quoted too.
+    const auto word = katana::app::geo::lineWord(text.toStdString());
+    if (!word) {
+        return invalid(field + " holds a double quote or a line break, which a command line "
+                               "cannot carry");
     }
-    const bool blank = std::any_of(text.begin(), text.end(), [](QChar c) { return c.isSpace(); });
-    return blank || text.isEmpty() ? "\"" + text + "\"" : text;
+    return QString::fromStdString(*word);
 }
 
 Result<QString> gisScope(const GisScopeWords& scope)

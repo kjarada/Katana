@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "geo/geo_workbench.hpp"
+#include "geo/replies.hpp"
 #include "katana/core/text.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "katana/terrain/surface_store.hpp"
@@ -105,11 +106,9 @@ void fillSources(QComboBox& combo, const std::vector<TerrainSourceChoice>& choic
 
 std::optional<QString> lineWord(const QString& text)
 {
-    if (text.contains('"')) {
-        return std::nullopt;
-    }
-    const bool blank = text.isEmpty() || text.contains(' ') || text.contains('\t');
-    return blank ? "\"" + text + "\"" : text;
+    // The one quoting rule (geo::lineWord): a keyword as a name is quoted too.
+    const auto word = katana::app::geo::lineWord(text.toStdString());
+    return word ? std::optional<QString>(QString::fromStdString(*word)) : std::nullopt;
 }
 
 bool numberList(const QString& text, int count, bool whole)
