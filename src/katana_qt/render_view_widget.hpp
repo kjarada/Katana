@@ -238,7 +238,7 @@ class RenderViewWidget final : public QWidget {
 
     // The GPU view and the overlay over it: children, owned by Qt; null when
     // the software rasteriser draws. maybe_unused: a build without the GPU
-    // renderer (macOS, KATANA_GPU=OFF) never reads the GPU-only members, and
+    // renderer (KATANA_GPU=OFF) never reads the GPU-only members, and
     // clang's -Wunused-private-field says so.
     gpu::GpuSceneView* gpuView_ = nullptr;
     [[maybe_unused]] QWidget* overlay_ = nullptr;

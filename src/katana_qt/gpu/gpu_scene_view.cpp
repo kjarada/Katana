@@ -18,6 +18,8 @@ namespace {
 {
 #if defined(KATANA_GPU_VULKAN)
     return GpuBackend::Vulkan;
+#elif defined(KATANA_GPU_METAL)
+    return GpuBackend::Metal;
 #else
     return GpuBackend::Direct3D11;
 #endif
@@ -36,6 +38,8 @@ GpuSceneView::GpuSceneView(katana::render::Camera& camera, QWidget* parent)
 {
 #if defined(KATANA_GPU_VULKAN)
     setApi(QRhiWidget::Api::Vulkan);
+#elif defined(KATANA_GPU_METAL)
+    setApi(QRhiWidget::Api::Metal);
 #else
     setApi(QRhiWidget::Api::Direct3D11);
 #endif
@@ -181,6 +185,8 @@ void GpuSceneView::initialize(QRhiCommandBuffer* /*commands*/)
     QRhi* gpu = rhi();
 #if defined(KATANA_GPU_VULKAN)
     constexpr QRhi::Implementation kBackend = QRhi::Vulkan;
+#elif defined(KATANA_GPU_METAL)
+    constexpr QRhi::Implementation kBackend = QRhi::Metal;
 #else
     constexpr QRhi::Implementation kBackend = QRhi::D3D11;
 #endif

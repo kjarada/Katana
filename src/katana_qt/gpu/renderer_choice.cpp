@@ -37,6 +37,8 @@ const char* toString(GpuBackend backend)
         return "Direct3D 11";
     case GpuBackend::Vulkan:
         return "Vulkan";
+    case GpuBackend::Metal:
+        return "Metal";
     }
     return "unknown";
 }
@@ -65,9 +67,18 @@ RendererDecision chooseRenderer(const RendererEnvironment& environment)
                 "the GPU renderer failed earlier in this session" + ignored};
     }
     const std::string platform = lowered(environment.platformName);
-    const bool shown = environment.backend == GpuBackend::Direct3D11
-                           ? platform == "windows"
-                           : platform == "xcb" || platform == "wayland";
+    bool shown = false;
+    switch (environment.backend) {
+    case GpuBackend::Direct3D11:
+        shown = platform == "windows";
+        break;
+    case GpuBackend::Vulkan:
+        shown = platform == "xcb" || platform == "wayland";
+        break;
+    case GpuBackend::Metal:
+        shown = platform == "cocoa";
+        break;
+    }
     const std::string api = toString(environment.backend);
     if (!shown) {
         const std::string name = platform.empty() ? std::string("none") : platform;
@@ -85,6 +96,8 @@ RendererEnvironment currentRendererEnvironment(bool userPrefersSoftware, bool gp
     environment.gpuBuilt = true; // this file is only compiled into the GPU module
 #if defined(KATANA_GPU_VULKAN)
     environment.backend = GpuBackend::Vulkan;
+#elif defined(KATANA_GPU_METAL)
+    environment.backend = GpuBackend::Metal;
 #else
     environment.backend = GpuBackend::Direct3D11;
 #endif
