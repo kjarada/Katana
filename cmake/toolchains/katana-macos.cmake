@@ -23,12 +23,17 @@ endif()
 set(CMAKE_C_COMPILER "${KATANA_TOOLCHAIN}/bin/arm64-apple-darwin20.0.0-clang")
 set(CMAKE_CXX_COMPILER "${_katana_cxx}")
 set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "")
-# The oldest macOS the programs start on. conda-forge builds its libraries for
-# 11.0; 13.3 is the first whose libc++ availability markup allows the C++17
-# floating-point std::to_chars and std::from_chars the code uses - the
-# markup is checked at compile time even though the libc++ that runs is the
-# bundled one.
-set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "")
+# The oldest macOS the programs start on: 13, the oldest Qt 6.11 supports
+# (conda-forge builds the other libraries for 11.0).
+set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "")
+# libc++'s availability markup refuses library functions the SYSTEM libc++ of
+# the deployment target lacks - floating-point std::from_chars "introduced in
+# macOS 26.0" stopped the first CI build. The programs never use the system's:
+# they load conda-forge's libc++, which the package carries in lib/
+# (cmake/KatanaDeployUnix.cmake.in), so the markup does not apply. This is
+# conda-forge's documented remedy (conda-forge.org/docs/maintainer/
+# knowledge_base, "Newer C++ features with old SDK").
+set(CMAKE_CXX_FLAGS_INIT "-D_LIBCPP_DISABLE_AVAILABILITY")
 list(PREPEND CMAKE_PREFIX_PATH "${KATANA_TOOLCHAIN}")
 
 # libc++ and the libraries are conda-forge's, found at link time in the
