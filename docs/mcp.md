@@ -67,8 +67,8 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_save_project` | save in place, or as a project at `path` | `SAVE` / `SAVE "<path>"` |
 | `katana_list_entities` | every entity with its id, layer and measurements | `LIST` |
 | `katana_describe_entity` | one entity in full | `INFO #<id>` |
-| `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import") | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
-| `katana_export` | DXF always; GIS vector formats with `KATANA_BUILD_IO` | `EXPORT "<path>"` |
+| `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
+| `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; `structuredContent.records` holds the `exported` record and any `warning` | `EXPORT "<path>"` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
@@ -232,7 +232,10 @@ project that matters.
 
 * `src/katana_app/session.cpp` - the session both front ends share: the
   Document, its `CommandInterpreter`, and the verbs above `katana_cad`
-  (`CUSTOMISE`, the DXF and GIS `IMPORT`/`EXPORT`, `INFO <file>`, `COPC`).
+  (`CUSTOMISE`; `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` and the
+  geoprocessing verbs through the executor in `src/katana_app/geo/`, the one
+  the window runs; a build without GDAL has the DXF `IMPORT` and `EXPORT` of
+  `dxf_verbs.cpp`).
   `CODE` and `MAPFILE` were here until 2026-09-26 and are the interpreter's
   now, so the window has them too (`docs/cad.md`). It was
   `katana_cli`'s `main.cpp`; `src/katana_app/main.cpp` is now only the command

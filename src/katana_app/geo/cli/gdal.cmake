@@ -17,7 +17,7 @@ add_test(NAME cli.gdal_hillshade_of_the_sample_terrain_to_a_reference
             -c "GDAL raster hillshade --zfactor=2 FROM FILE \"${_gdal_samples}/terrain.asc\" TO REFERENCE ground-shade"
             -c "REFS")
 set_tests_properties(cli.gdal_hillshade_of_the_sample_terrain_to_a_reference PROPERTIES
-    PASS_REGULAR_EXPRESSION "input arg=input source=file .*output arg=output kind=raster target=reference id=1 name=ground-shade raster=120x90 .*persisted=no.*1  Raster  ground-shade  120x90 px"
+    PASS_REGULAR_EXPRESSION "input arg=input source=file .*output arg=output kind=raster target=reference id=1 name=ground-shade raster=120x90 .*persisted=no.*reference id=1 kind=raster name=ground-shade width=120 height=90 "
     FAIL_REGULAR_EXPRESSION "error")
 
 # By hand: a 100 m line buffered 1 m either side with flat caps is a 100 x 2

@@ -442,6 +442,50 @@ TEST_F(McpServer, ImportLocalMovesAQuotedPathsDataToTheOrigin)
     EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.x, 190.0);
     EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.y, -20.5);
 }
+
+TEST_F(McpServer, ImportReturnsStructuredRecords)
+{
+    // The reply's records as objects, numbers as numbers: an agent reads the
+    // entities that came in, the move LOCAL made and the reference layer's
+    // id without reading text. parcels.geojson: 8 features, the spoil heaps
+    // a MultiPolygon of two, so 9 entities; its lower-left corner (180, 0)
+    // moved to 0,0. terrain.asc: 120 x 90 cells.
+    initialize();
+    const std::string parcels =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "parcels.geojson").generic_string();
+    const Json imported = call("katana_import", Json{{"path", parcels}, {"placement", "local"}});
+    ASSERT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    const Json records = imported["structuredContent"]["records"];
+    ASSERT_GE(records.size(), 2u) << records.dump();
+    EXPECT_EQ(records[0]["record"], "imported");
+    EXPECT_EQ(records[0]["kind"], "vector");
+    EXPECT_EQ(records[0]["entities"], 9);
+    EXPECT_EQ(records[0]["bounds"], (Json{0.0, 0.0, 185.0, 165.0}));
+    EXPECT_EQ(records[1]["record"], "placed");
+    EXPECT_EQ(records[1]["placement"], "local");
+    EXPECT_EQ(records[1]["east"], -180);
+    EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 9);
+
+    const Json raster = call(
+        "katana_import",
+        Json{{"path", (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string()}});
+    ASSERT_FALSE(raster["isError"].get<bool>()) << textOf(raster);
+    const Json layer = raster["structuredContent"]["records"][1];
+    EXPECT_EQ(layer["record"], "reference");
+    EXPECT_EQ(layer["id"], 1);
+    EXPECT_EQ(layer["kind"], "raster");
+    EXPECT_EQ(layer["width"], 120);
+    EXPECT_EQ(layer["height"], 90);
+
+    // EXPORT the same way: what was written, as numbers.
+    const TempDir dir("export records");
+    const Json exported = call("katana_export", Json{{"path", dir.file("parcels.gpkg")}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    const Json written = exported["structuredContent"]["records"][0];
+    EXPECT_EQ(written["record"], "exported");
+    EXPECT_EQ(written["driver"], "GPKG");
+    EXPECT_EQ(written["features"], 9);
+}
 #endif
 
 TEST_F(McpServer, UndoAndRedoStepThroughTheHistory)

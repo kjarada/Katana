@@ -29,6 +29,10 @@
 #include "katana/cad/import_placement.hpp"
 #include "katana/entity/model.hpp"
 
+#if defined(KATANA_WITH_INTEROP)
+#include "geo/gis_records.hpp"
+#endif
+
 namespace katana::app::mcp {
 
 namespace {
@@ -304,6 +308,27 @@ ToolReply batchReply(Session& session, const std::vector<std::string>& lines,
             !batch.ok};
 }
 
+// The reply of a tool whose line answers in records (IMPORT, EXPORT): the
+// batch reply, and the records again as structured content, each an object
+// of its fields (geo/gis_records.hpp), so an agent reads what came in - the
+// entities, the reference layer's id, the move a placement made, each
+// warning - without reading the text. Without GDAL the records are the text's
+// alone: the DXF verbs write the same words, but the reader of them is the
+// executor's.
+ToolReply recordsReply(Session& session, const std::string& line)
+{
+    ToolReply reply = oneLine(session, line);
+#if defined(KATANA_WITH_INTEROP)
+    const Json& commands = reply.structured["commands"];
+    Json records = Json::array();
+    if (!commands.empty() && commands.front().contains("output")) {
+        records = katana::app::geo::recordsJson(commands.front()["output"].get<std::string>());
+    }
+    reply.structured["records"] = std::move(records);
+#endif
+    return reply;
+}
+
 std::vector<std::string> stringList(const Json& value, const char* name)
 {
     if (!value.is_array() || value.empty()) {
@@ -496,7 +521,9 @@ const std::vector<Tool>& tools()
             "vector file or .12da archive holds lands: at its own coordinates (keep, the "
             "default), moved as one piece so its lower-left corner sits at 0,0 (local), onto "
             "the drawing's lower-left corner (alongside), or by offset_east and offset_north "
-            "(offset). The reply says the move made.",
+            "(offset). The reply is records: imported (what came in, its extent and CRS), placed "
+            "(the move made), reference or surface (a layer or surface added, with its id), "
+            "tally and warning - in structuredContent.records as objects.",
             objectSchema(
                 Json{{"path", {{"type", "string"}, {"description", "The file to import."}}},
                      {"placement",
@@ -525,20 +552,24 @@ const std::vector<Tool>& tools()
                 {"path"}),
             hints(false, false, false), [](Session& session, const Json& arguments) {
                 const std::string word = importPlacementWord(arguments);
-                return oneLine(session, "IMPORT " + quoted(requiredString(arguments, "path")) +
-                                            (word.empty() ? "" : " " + word));
+                return recordsReply(session, "IMPORT " +
+                                                 quoted(requiredString(arguments, "path")) +
+                                                 (word.empty() ? "" : " " + word));
             }});
 
         list.push_back(Tool{
             "katana_export", "Export the drawing",
             "Export the drawing to a file, its format chosen by the extension: .dxf always; with "
-            "the GIS module also GIS vector formats.",
+            "the GIS module also GIS vector formats and .12da archives (with the session's "
+            "surfaces). The reply is an exported record - the driver, how many features or "
+            "entities were written and how many skipped - and any warnings, in "
+            "structuredContent.records as objects.",
             objectSchema(
                 Json{{"path",
                       {{"type", "string"}, {"description", "The file to write, e.g. site.dxf."}}}},
                 {"path"}),
             hints(false, true, true), [](Session& session, const Json& arguments) {
-                return oneLine(session, "EXPORT " + quoted(requiredString(arguments, "path")));
+                return recordsReply(session, "EXPORT " + quoted(requiredString(arguments, "path")));
             }});
 
         list.push_back(Tool{

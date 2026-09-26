@@ -842,11 +842,12 @@ never reaches into the window for it.
 
 - **The same dispatcher as a typed line.** `runCommandLine` is Enter on the
   command line: it reads and clears the field, echoes the line, offers it to
-  the workbenches' verbs (`runWorkbenchLine`: `ONLINE`, `UTILITY`), then to a
-  running tool (`ViewWorkspace::typeIntoTool`), and hands whatever is left to
-  `dispatchLine` - the view verbs, the window's own (`SCRIPT`, `CUSTOMISE`,
-  `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `PLOTSHEETS`, `PLOT`,
-  `SNAPSHOT`), a tool's alias, and the interpreter. `runVerbLine` echoes the line and runs the same
+  the workbenches' verbs (`runWorkbenchLine`: the geoprocessing executor's -
+  `GDAL`, `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` - then `ONLINE`,
+  `UTILITY`), then to a running tool (`ViewWorkspace::typeIntoTool`), and
+  hands whatever is left to `dispatchLine` - the view verbs, the window's own
+  (`SCRIPT`, `CUSTOMISE`, `PLOTSHEETS`, `PLOT`, `SNAPSHOT`), a tool's alias,
+  and the interpreter. `runVerbLine` echoes the line and runs the same
   `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
   line is kept in the interpreter's history and undone exactly as a typed one.
 - **Never a running tool's answer.** That step is the only one `runVerbLine`
@@ -930,9 +931,12 @@ Each now reaches the same code on every front end
 - `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST` and `MAPFILE CHECK`
   are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`), given the
   standard colour table by `CommandInterpreter::setColourLookup`.
-- `COPC <source> <destination.copc.laz>`, each path one word or quoted; it
-  logs the `IMPORT` line that reads the result. In a headless session the GIS
-  menu's item opens no file dialog and names this verb instead.
+- `COPC <source> <destination.copc.laz>`, each path one word or quoted, a
+  background job whose `converted` record names the file
+  (`docs/interop.md`, "IMPORT, EXPORT, INFO, REFS and COPC on every front
+  end"). GIS > Convert Point Cloud to COPC offers to import the result once
+  the job has converted it. In a headless session the menu item opens no
+  file dialog and names this verb instead.
 - `CUSTOMISE` alone reports what is loaded, from which files, what the project
   was drawn with that is not loaded, and what it covers in this drawing
   (`cad::customisationReport`, the words `katana_cli` prints); it once
@@ -1035,7 +1039,8 @@ own code keeps, so nothing is written twice:
 - **Online data**: `interop::onlineUsage`;
 - **Window**: `windowHelpText`, the verbs `MainWindow::dispatchLine` and
   `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
-  `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `CUSTOMISE`, `PLOTSHEETS`, `PLOT`,
+  `EXPORT`, `INFO <file>`, `REFS`, `COPC` - the geoprocessing executor's,
+  whose usage the Geoprocessing section gives - `CUSTOMISE`, `PLOTSHEETS`, `PLOT`,
   `SNAPSHOT`, `ZOOM`, `GRID`, `SNAP`, `EXAGGERATION`, `ONLINE`, `UTILITY`,
   `QUIT`, and `HELP`, which adds this section to the interpreter's), and the rule for a bare tool
   word - with the one word that means different things on the two command

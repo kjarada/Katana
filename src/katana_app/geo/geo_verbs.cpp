@@ -57,6 +57,14 @@ const VerbEntry* entryFor(const std::vector<std::string>& words)
     return any;
 }
 
+// The row that takes this line: its verb's, unless that row leaves the line
+// to the interpreter (INFO <id>).
+const VerbEntry* entryTaking(const Tokens& tokens)
+{
+    const VerbEntry* entry = tokens.words.empty() ? nullptr : entryFor(tokens.words);
+    return entry != nullptr && (entry->takes == nullptr || entry->takes(tokens)) ? entry : nullptr;
+}
+
 } // namespace
 
 bool handles(std::string_view line)
@@ -68,7 +76,7 @@ bool handles(std::string_view line)
         const std::size_t blank = body.find_first_of(" \t");
         return entryFor({std::string(body.substr(0, blank))}) != nullptr;
     }
-    return !tokens->words.empty() && !tokens->quoted[0] && entryFor(tokens->words) != nullptr;
+    return !tokens->words.empty() && !tokens->quoted[0] && entryTaking(*tokens) != nullptr;
 }
 
 Result<Prepared> prepare(Context& context, std::string_view line)
@@ -77,7 +85,7 @@ Result<Prepared> prepare(Context& context, std::string_view line)
     if (!tokens) {
         return tokens.error();
     }
-    const VerbEntry* entry = tokens->words.empty() ? nullptr : entryFor(tokens->words);
+    const VerbEntry* entry = entryTaking(*tokens);
     if (entry == nullptr) {
         return makeError(ErrorCode::InvalidArgument, "not a geoprocessing verb",
                          std::string(katana::core::trimmed(line)));

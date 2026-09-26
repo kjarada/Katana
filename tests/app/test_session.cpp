@@ -2,6 +2,7 @@
 // katana_cli runs a line: what goes to stdout, where a reply or a report goes,
 // and what to stderr, where a refusal goes. The verbs' own text is pinned by
 // the cli.* tests; this pins the streams, which a merged ctest log cannot.
+// IMPORT replies in records (docs/interop.md), so its checks read fields.
 
 #include <filesystem>
 #include <fstream>
@@ -160,7 +161,7 @@ TEST(Session, AQuotedImportEndingInLocalMovesTheDataToTheOrigin)
     Session session(nullptr);
     const Printed imported = run(session, "IMPORT \"" + copy.generic_string() + "\" LOCAL");
     EXPECT_TRUE(imported.ok) << imported.err;
-    EXPECT_TRUE(contains(imported.out, "extent 0,0 to 185,165")) << imported.out;
+    EXPECT_TRUE(contains(imported.out, " bounds=0,0,185,165 ")) << imported.out;
     const auto bounds = session.document().model().entities.bounds();
     EXPECT_DOUBLE_EQ(bounds.min.x, 0.0);
     EXPECT_DOUBLE_EQ(bounds.min.y, 0.0);
@@ -180,9 +181,10 @@ TEST(Session, AlongsideAndAnOffsetPlaceTheDataAndSayTheMove)
     ASSERT_TRUE(run(session, "RECT 1000,2000 1010,2005").ok);
     const Printed along = run(session, "IMPORT " + parcels + " ALONGSIDE");
     EXPECT_TRUE(along.ok) << along.err;
-    EXPECT_TRUE(contains(along.out, "ALONGSIDE: moved as one piece by 820.000,2000.000"))
+    EXPECT_TRUE(contains(along.out, "placed placement=alongside east=820 north=2000 "
+                                    "text=\"ALONGSIDE: moved as one piece by 820.000,2000.000"))
         << along.out;
-    EXPECT_TRUE(contains(along.out, "extent 1000,2000 to 1185,2165")) << along.out;
+    EXPECT_TRUE(contains(along.out, " bounds=1000,2000,1185,2165 ")) << along.out;
 
     Session offset(nullptr);
     const Printed moved = run(offset, "IMPORT " + parcels + " offset=10,-20.5");

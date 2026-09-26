@@ -5,6 +5,7 @@
 add_library(katana_app STATIC
     session.cpp session.hpp
     dxf_verbs.cpp dxf_verbs.hpp
+    import_records.cpp import_records.hpp
     mcp_server.cpp mcp_server.hpp
 )
 katana_target_defaults(katana_app)
@@ -614,7 +615,9 @@ endif()
 # in a build without it. Drawn by hand: a 30 x 20 rectangle (perimeter 100,
 # area 600), a circle of radius 5 at (15,10) and a text, on a nested layer;
 # exported, a new drawing, imported back. Three layers go out: 0, Survey and
-# Survey/Kerb - the last as "Survey$Kerb" with its path beside it.
+# Survey/Kerb - the last as "Survey$Kerb" with its path beside it. The replies
+# are the records every build writes (import_records.hpp), with GDAL or
+# without.
 if(KATANA_BUILD_TESTS)
     set(_dxf "${CMAKE_CURRENT_BINARY_DIR}/cli round trip.dxf")
     add_test(NAME cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
@@ -625,7 +628,7 @@ if(KATANA_BUILD_TESTS)
                 -c "IMPORT \"${_dxf}\"" -c "LIST")
     set_tests_properties(cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
         PROPERTIES PASS_REGULAR_EXPRESSION
-        "exported 3 entities and 3 layers \\(DXF R2000.*imported 3 entities from cli round trip\\.dxf \\(DXF R2000\\).*Polyline  layer=Survey/Kerb  vertices=4  closed  length=100  area=600.*Circle  layer=Survey/Kerb  centre 15,10  radius=5 .*Text  layer=Survey/Kerb  \"LOT 42\"")
+        "exported file=\"[^\"]*/cli round trip\\.dxf\" kind=dxf driver=DXF format=\"DXF R2000\" entities=3 skipped=0 layers=3 .*imported file=\"[^\"]*/cli round trip\\.dxf\" kind=dxf format=\"DXF R2000\" entities=3 layers=3 .*Polyline  layer=Survey/Kerb  vertices=4  closed  length=100  area=600.*Circle  layer=Survey/Kerb  centre 15,10  radius=5 .*Text  layer=Survey/Kerb  \"LOT 42\"")
 endif()
 
 # INFO, COPC and IMPORT ... LOCAL, on the sample GIS data. Expected values are
@@ -659,19 +662,20 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
         "Point cloud: 40,000 points.*COPC: no")
     set_tests_properties(cli.copc_cleanup PROPERTIES FIXTURES_SETUP cli_copc)
     set_tests_properties(cli.copc_then_info PROPERTIES FIXTURES_REQUIRED cli_copc
-        PASS_REGULAR_EXPRESSION "converted survey_scan\\.las.*Point cloud: 40,000 points.*COPC: yes")
+        PASS_REGULAR_EXPRESSION "converted source=[^ ]*/survey_scan\\.las file=[^ ]*/cli-scan\\.copc\\.laz format=copc.*Point cloud: 40,000 points.*COPC: yes")
     set_tests_properties(cli.local_is_refused_for_reference_data PROPERTIES
         PASS_REGULAR_EXPRESSION "LOCAL is not supported for rasters and point clouds")
     # A QUOTED path and LOCAL, as katana_import sends them: LOCAL was taken off
     # and the quotes left on, so the file was looked for by its quoted name.
     # parcels.geojson spans (180, 0) to (365, 165) (its coordinates, by hand),
     # so moved to put that lower-left corner at 0,0 it spans (0, 0) to
-    # (185, 165).
+    # (185, 165). Its 8 features, the spoil heaps a MultiPolygon of two, are 9
+    # entities.
     add_test(NAME cli.import_local_of_a_quoted_path_moves_the_data_to_the_origin
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "IMPORT \"${_gis}/parcels.geojson\" LOCAL")
     set_tests_properties(cli.import_local_of_a_quoted_path_moves_the_data_to_the_origin PROPERTIES
-        PASS_REGULAR_EXPRESSION "imported [0-9]+ entities from parcels\\.geojson.*extent 0,0 to 185,165"
+        PASS_REGULAR_EXPRESSION "imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 layers=1 [^\r\n]*bounds=0,0,185,165[^\r\n]*[\r\n]+placed placement=local east=-180 north=0 "
         FAIL_REGULAR_EXPRESSION "error")
     # ALONGSIDE puts the parcels' corner (180, 0) on the rectangle's
     # (1000, 2000); OFFSET moves it by exactly 10,-20.5. Each says its move.
@@ -681,7 +685,7 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
                 -c "IMPORT \"${_gis}/parcels.geojson\" ALONGSIDE" -c UNDO
                 -c "IMPORT ${_gis}/parcels.geojson OFFSET=10,-20.5")
     set_tests_properties(cli.import_alongside_and_offset_place_the_data_and_say_the_move PROPERTIES
-        PASS_REGULAR_EXPRESSION "ALONGSIDE: moved as one piece by 820\\.000,2000\\.000.*extent 1000,2000 to 1185,2165.*OFFSET: moved as one piece by 10\\.000,-20\\.500.*extent 190,-20\\.5 to 375,144\\.5"
+        PASS_REGULAR_EXPRESSION "bounds=1000,2000,1185,2165[^\r\n]*[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000.*bounds=190,-20\\.5,375,144\\.5[^\r\n]*[\r\n]+placed placement=offset east=10 north=-20\\.5 text=\"OFFSET: moved as one piece by 10\\.000,-20\\.500"
         FAIL_REGULAR_EXPRESSION "error")
 endif()
 

@@ -267,7 +267,8 @@ PDAL or the archive and customisation readers: the application's command line
 (`MainWindow::runCommandLine`, whose `dispatchLine` the window's dialogs run
 their lines through too - `docs/desktop.md`, "One executor: the command
 runner") adds `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT`, `INFO <file>`, `REFS`,
-`COPC`, `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
+`COPC` (the geoprocessing executor's, which `katana_cli` and `katana_mcp` run
+too - `docs/interop.md`), `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
 report, `cad::customisationReport`), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
 `SCRIPT <file> [CONTINUE]`,
 the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed

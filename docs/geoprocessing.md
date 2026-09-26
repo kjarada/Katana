@@ -370,7 +370,9 @@ phases, so a session runs it inline and the window as a job:
   ("The window" below).
 
 **The verb table** (`src/katana_app/geo/verb_table.cpp`) maps a verb, and an
-optional second word, to its prepare function and its usage. `handles`,
+optional second word, to its prepare function and its usage, and - where a
+verb is shared with the interpreter - to `takes`, which says which of its
+lines are the executor's (`INFO <file>`, not `INFO <id>`). `handles`,
 `prepare` and `helpText` read it alone. So HELP, the window's Command
 Reference (its "Geoprocessing" section) and `katana_help` list the same
 verbs. It has one reserved block per package.
@@ -706,7 +708,37 @@ Not started. `TO SELECTION` and `TO REPORT` have their block in `bindings.cpp`.
 
 ### I0: One GIS executor: IMPORT, EXPORT, INFO, REFS, COPC
 
-Not started.
+Built. The five verbs are the executor's, a file each
+(`src/katana_app/geo/import_verb.cpp`, `export_verb.cpp`, `info_verb.cpp`,
+`refs_verb.cpp`, `copc_verb.cpp`), in the table's I0 block, and they reply
+in records; `docs/interop.md` ("IMPORT, EXPORT, INFO, REFS and COPC on every
+front end") has the grammar, the records and the decisions. What the other
+packages build on:
+
+- **`VerbEntry::takes`**, optional: whether a line of the verb is the
+  executor's at all. `INFO`'s (`geo::takesInfo`) leaves `INFO <id>` to the
+  interpreter. A row of four fields, as every other package writes, leaves it
+  null.
+- **`Context::farApart` and `Context::imported`**, the window's: the
+  far-apart question an `IMPORT` asks, and the meshes and 3D view only a
+  window shows. A session sets neither.
+- **`geo::StagedFiles`** (`staged_files.hpp`): a file a job writes, put in
+  place by its apply, so a cancel after the write leaves nothing. I4's
+  EXPORT options and any verb that writes a user's file use it.
+- **`gis_records.hpp`**: the `reference` and `surface` records, and
+  `recordJson` / `recordsJson`, any reply's records as JSON objects -
+  `katana_import` and `katana_export` hand them to an agent, and D1's and
+  D2's tools can.
+- **`import_records.hpp`** and **`dxf_verbs.hpp`** in `src/katana_app`: the
+  records and the DXF steps every build shares, so a build without GDAL
+  replies in the same records.
+- The session's `SurfaceStore` now holds a 12d archive's surfaces.
+
+The reply format changed from prose to records; the `cli.*`, `Session.*`,
+`GeoSession.*` and window checks were rewritten for the records only
+(F0's `GeoSession.AGdalLineRunsThroughTheSessionAndItsRasterIsAReference` and
+`cli.gdal_hillshade_of_the_sample_terrain_to_a_reference` among them, for
+`REFS`).
 
 ### I1: Vector fidelity
 
