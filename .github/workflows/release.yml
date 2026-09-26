@@ -77,6 +77,7 @@ jobs:
             compiler: g++.exe
             packages: gcc:p nsis:p
             package: win64
+            verify: ""
           # MSYS2 has no GCC for ARM64; its CLANGARM64 environment is clang
           # and libc++, built for ARM64 Windows.
           - name: Windows ARM64
@@ -85,6 +86,7 @@ jobs:
             compiler: clang++.exe
             packages: clang:p
             package: win-arm64
+            verify: "^simd_"
     env:
       HAS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     defaults:
@@ -111,11 +113,16 @@ jobs:
       - name: Configure
         run: |
           prefix=$(cygpath -m "$MINGW_PREFIX")
+          tests=OFF
+          if [ -n "${{ matrix.verify }}" ]; then tests=ON; fi
           cmake --preset release \
             -DCMAKE_CXX_COMPILER="$prefix/bin/${{ matrix.compiler }}" -DCMAKE_PREFIX_PATH="$prefix" \
-            -DKATANA_BUILD_TESTS=OFF -DKATANA_BUILD_BENCHMARKS=OFF
+            -DKATANA_BUILD_TESTS=$tests -DKATANA_BUILD_BENCHMARKS=OFF
       - name: Build
         run: cmake --build build/release --parallel
+      - name: Verify
+        if: matrix.verify != ''
+        run: ctest --test-dir build/release -R "${{ matrix.verify }}" --output-on-failure --timeout 900
       # Signing as the publisher (cmake/KatanaSign.cmake) when the repository
       # holds a code-signing certificate: WINDOWS_CERTIFICATE (the .pfx,
       # base64) and WINDOWS_CERTIFICATE_PASSWORD.
@@ -178,9 +185,11 @@ jobs:
       matrix:
         include:
           # verify: the tests run on the runner before packaging, a regular
-          # expression over ctest's names; empty builds no tests. The GPU
-          # suite on macOS proves the Metal renderer against the software
-          # one on a real device, which no other machine here has.
+          # expression over ctest's names; empty builds no tests. On the ARM
+          # machines the simd_ suites run every kernel suite at the scalar
+          # and NEON levels on real hardware (elsewhere NEON runs only under
+          # qemu); on macOS the gpu. suite proves the Metal renderer against
+          # the software one on a real device.
           - name: Linux x86-64
             runner: ubuntu-24.04
             preset: linux-release
@@ -190,12 +199,12 @@ jobs:
             runner: ubuntu-24.04-arm
             preset: linux-release
             package: linux-aarch64
-            verify: ""
+            verify: "^simd_"
           - name: macOS arm64
             runner: macos-15
             preset: macos-release
             package: macos-arm64
-            verify: "^gpu[.]"
+            verify: "^gpu[.]|^simd_"
     env:
       HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
