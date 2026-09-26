@@ -1516,16 +1516,30 @@ flagged alike. The dialog never calls the AS 5488 library.
 
 **Where the services come from** (`docs/cad.md`, "Scope and filter") is chosen above the tabs:
 a schedule file (`utilitySourceFile`) or what is drawn
-(`utilitySourceDrawing`), the lines `UTILITY DRAW` drew, taken by Global
-Modify's own "Apply to" and "Only those that match" controls - the shared
-`ScopeFilterWidget` (below), here named `utility...` - on the left. Its
+(`utilitySourceDrawing`), taken by Global Modify's own "Apply to" and "Only
+those that match" controls - the shared `ScopeFilterWidget` (below), here
+named `utility...` - on the left. For Draw, what is drawn is the lines,
+polylines and points a survey or an import left there, drawn as services
+(`docs/subsurface_utilities.md`, "Services from surveyed and imported
+geometry"); for the others, the lines `UTILITY DRAW` drew. The widget's
 `verbWords()` are the line's scope and filter words, so Report on the
 drawing is `UTILITY REPORT DRAWING`, on a view `UTILITY REPORT VIEW 3` (or
-`VIEW 3 EXTENTS` without "Only what is on screen"), and so on. Report,
-Verify, Clearance and Check take either source; Draw always reads its file,
-Regrade and Schedule always the drawing, and the controls that do not apply
-to the tab in front are disabled rather than hidden, so the choice is still
-seen. The scope defaults to the whole drawing, what the utility tools
+`VIEW 3 EXTENTS` without "Only what is on screen"), and so on. Draw,
+Report, Verify, Clearance and Check take either source; Regrade and Schedule
+always the drawing, and the controls that do not apply to the tab in front
+are disabled rather than hidden, so the choice is still seen. Draw of what is
+drawn brings its group "Drawn geometry as services" (`utilityGeometryGroup`)
+to life: what the geometry cannot say for itself - type, method, the two
+uncertainties, what the heights are, level reference, path, owner,
+material, diameter, status, and the Fields that read an import's own
+attributes as the schedule's columns. Each choice lists the verb's own
+words (`EML`, `pothole`, `service`), so the line reads as the choice does and
+the headless `--fill` takes a choice as typed; "not given" leaves the option
+out, for what each line and point says of itself. They were added on
+2026-09-26, when Draw stopped being a file's alone: the owner's services
+are surveyed by GNSS and total station, or come in a `.12da` archive, an IFC
+file, a shapefile or a DXF file, and are post-processed in the drawing, not typed into a schedule
+first. The scope defaults to the whole drawing, what the utility tools
 usually mean. The layers, the views and the alignments follow the drawing
 through a `DocumentWatcher`, and the views are read again whenever the dialog
 is shown. Clearance's works are a design file (`utilityDesignFile`), a drawn
@@ -1566,8 +1580,13 @@ agent types it, framed the same),
 `qt_utility_dialog_reports_what_is_drawn_and_what_the_view_shows_headless`
 (Report on the drawing and on the plan view, on screen),
 `qt_utility_dialog_regrades_what_is_drawn_headless` (nothing moved: no step,
-framed) and `qt_utility_dialog_writes_what_is_drawn_as_a_schedule_headless`
-(the Schedule tab's file read back by a typed `REPORT`).
+framed), `qt_utility_dialog_writes_what_is_drawn_as_a_schedule_headless`
+(the Schedule tab's file read back by a typed `REPORT`) and
+`qt_utility_dialog_draws_what_an_import_left_headless` (a GIS file imported
+by a typed `IMPORT`, then Draw on what is drawn with its Fields: the
+sample's hand-worked figures). A Draw whose scope had nothing left to draw
+says so in the status, and that no undo step was added
+(`UtilityDialog.ADrawOfTheSurveyInTheDrawingRunsTheVerbAndSaysWhenNothingWasLeftToDraw`).
 
 **The window answers `VIEW`.** The scope word `VIEW` (`docs/cad.md`, "Scope
 and filter") is the window's: `MainWindow` gives its interpreter

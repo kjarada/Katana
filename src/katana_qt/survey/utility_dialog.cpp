@@ -30,6 +30,7 @@
 
 #include "customisation/document_watcher.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/utilities/utility_drawing.hpp"
 #include "katana/core/text.hpp"
 #include "katana/survey/subsurface/clearance.hpp"
 #include "katana/survey/subsurface/utility_network.hpp"
@@ -81,20 +82,6 @@ Result<QString> requiredFile(const QString& text, const QString& field)
     return word(path, "the " + field + " path");
 }
 
-// " KEYWORD <number>" for an option that was given, nothing for a blank one.
-// The number goes on the line as typed, once it reads as one.
-Result<QString> option(const QString& keyword, const QString& text, const QString& field)
-{
-    const QString number = text.trimmed();
-    if (number.isEmpty()) {
-        return QString();
-    }
-    if (!katana::core::parseFiniteDouble(number.toStdString())) {
-        return invalid(field + " must be a number of metres, not '" + number + "'");
-    }
-    return " " + keyword + " " + number;
-}
-
 // `part` after `prefix`, or its error.
 Result<QString> prefixed(const QString& prefix, const Result<QString>& part)
 {
@@ -102,6 +89,32 @@ Result<QString> prefixed(const QString& prefix, const Result<QString>& part)
         return part.error();
     }
     return prefix + *part;
+}
+
+// " KEYWORD <number>" for an option that was given, nothing for a blank one.
+// The number goes on the line as typed, once it reads as one.
+Result<QString> option(const QString& keyword, const QString& text, const QString& field,
+                       const QString& unit = "metres")
+{
+    const QString number = text.trimmed();
+    if (number.isEmpty()) {
+        return QString();
+    }
+    if (!katana::core::parseFiniteDouble(number.toStdString())) {
+        return invalid(field + " must be a number of " + unit + ", not '" + number + "'");
+    }
+    return " " + keyword + " " + number;
+}
+
+// " KEYWORD <word>" for a word that was given, quoted when it holds a blank;
+// nothing for a blank one.
+Result<QString> wordOption(const QString& keyword, const QString& text, const QString& field)
+{
+    const QString given = text.trimmed();
+    if (given.isEmpty()) {
+        return QString();
+    }
+    return prefixed(" " + keyword + " ", word(given, field));
 }
 
 // The drawing's scope and filter words, or why the controls say none.
@@ -214,11 +227,10 @@ const char* utilityVerbWord(UtilityTool tool)
 UtilitySource utilitySourceOf(const UtilityForm& form)
 {
     switch (form.tool) {
-    case UtilityTool::Draw:
-        return UtilitySource::File;
     case UtilityTool::Regrade:
     case UtilityTool::Schedule:
         return UtilitySource::Drawing;
+    case UtilityTool::Draw:
     case UtilityTool::Report:
     case UtilityTool::Verify:
     case UtilityTool::Clearance:
@@ -249,6 +261,23 @@ Result<QString> utilityCommandLine(const UtilityForm& form)
     std::vector<Result<QString>> parts;
     switch (form.tool) {
     case UtilityTool::Draw:
+        // What the geometry in the drawing cannot say for itself; a schedule
+        // says it in its columns.
+        if (utilitySourceOf(form) == UtilitySource::Drawing) {
+            parts.push_back(wordOption("TYPE", form.serviceType, "The type of service"));
+            parts.push_back(wordOption("METHOD", form.method, "The location method"));
+            parts.push_back(
+                option("H_UNC", form.horizontalUncertainty, "The horizontal uncertainty"));
+            parts.push_back(option("V_UNC", form.verticalUncertainty, "The vertical uncertainty"));
+            parts.push_back(wordOption("HEIGHTS", form.heights, "What the heights are"));
+            parts.push_back(wordOption("LEVEL_REF", form.levelReference, "The level reference"));
+            parts.push_back(wordOption("PATH", form.path, "The path between vertices"));
+            parts.push_back(wordOption("OWNER", form.owner, "The owner"));
+            parts.push_back(wordOption("MATERIAL", form.material, "The material"));
+            parts.push_back(option("DIAMETER_MM", form.diameter, "The diameter", "millimetres"));
+            parts.push_back(wordOption("STATUS", form.status, "The status"));
+            parts.push_back(wordOption("FIELDS", form.fields, "The fields"));
+        }
         parts.push_back(option("SPACING", form.spacing, "The detected spacing"));
         parts.push_back(option("MINCOVER", form.minCover, "The minimum cover"));
         if (const QString prefix = form.layerPrefix.trimmed(); !prefix.isEmpty()) {
@@ -339,12 +368,13 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     sourceBox->setObjectName("utilitySourceGroup");
     auto* sourceGroup = new QButtonGroup(sourceBox);
     sourceFile_ = radio("utilitySourceFile", "A schedule file", sourceGroup);
-    sourceFile_->setToolTip("Report, Verify, Clearance and Check read the schedule (.csv). "
-                            "Draw always does");
+    sourceFile_->setToolTip("Draw, Report, Verify, Clearance and Check read the schedule (.csv)");
     sourceDrawing_ = radio("utilitySourceDrawing", "What is drawn", sourceGroup);
     sourceDrawing_->setToolTip(
-        "Report, Verify, Clearance and Check read the services UTILITY DRAW drew, taken by the "
-        "scope and filter below - each line whole. Regrade and Schedule always do");
+        "Draw takes the lines, polylines and points a survey or an import left in the drawing "
+        "and draws them as services; Report, Verify, Clearance and Check read the services "
+        "UTILITY DRAW drew, each line whole. Both by the scope and filter below. Regrade and "
+        "Schedule always read what is drawn");
     sourceFile_->setChecked(true);
     schedule_ = field("utilitySchedule", "the utility schedule: a .csv, one row per located vertex",
                       "The schedule of located services (docs/subsurface_utilities.md, \"The "
@@ -355,8 +385,9 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     sourceLayout->addLayout(row({schedule_, scheduleBrowse_}), 0, 1);
     sourceLayout->addWidget(sourceDrawing_, 1, 0);
     sourceLayout->addWidget(
-        noteLabel("the lines UTILITY DRAW drew, in the scope and filter on the left; a scope "
-                  "that takes part of a line takes all of it",
+        noteLabel("in the scope and filter on the left: for Draw, the survey's or an import's "
+                  "lines and points, drawn as services; for the others, the lines UTILITY DRAW "
+                  "drew, where a scope that takes part of a line takes all of it",
                   sourceBox),
         1, 1);
     sourceLayout->setColumnStretch(1, 1);
@@ -391,17 +422,123 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     auto* drawPage = new QWidget(tabs_);
     auto* drawLayout = new QFormLayout(drawPage);
     drawLayout->addRow(noteLabel(
-        "Grades the schedule file and adds it to the drawing as one undo step: a layer for "
+        "Grades the services - the schedule file's, or the survey's or an import's lines and "
+        "points in the drawing - and adds them to the drawing as one undo step: a layer for "
         "each type of service and quality level, with a linetype for each level (QL-A "
         "continuous, QL-B dashed, QL-C dash-dot, QL-D dotted), one polyline for each run at one "
         "level, and a point at every located vertex carrying its whole schedule row - and, with "
         "a minimum cover, whether its cover is below it. A line that cannot be graded refuses "
-        "the whole draw.",
+        "the whole draw. What is drawn already is not drawn again; the survey is left as it "
+        "is.",
         drawPage));
     layerPrefix_ = field("utilityLayerPrefix", "default utilities",
                          "LAYER: the layer the drawn services nest under, as "
                          "<prefix>/<type>/QL-A and <prefix>/<type>/points");
     drawLayout->addRow("Layer prefix:", layerPrefix_);
+
+    // What the geometry cannot say for itself. Each choice shows the verb's
+    // own word, so the line reads as the choice does; "not given" leaves the
+    // option out, for what each line and point says of itself.
+    const auto choices = [this](const char* name, const QString& tip,
+                                std::initializer_list<std::pair<QString, QString>> items) {
+        auto* box = new QComboBox(this);
+        box->setObjectName(name);
+        box->setToolTip(tip);
+        box->addItem("not given", QString());
+        for (const auto& [text, explanation] : items) {
+            box->addItem(text, text);
+            box->setItemData(box->count() - 1, explanation, Qt::ToolTipRole);
+        }
+        return box;
+    };
+    geometry_ = new QGroupBox("Drawn geometry as services (Draw of what is drawn)", drawPage);
+    geometry_->setObjectName("utilityGeometryGroup");
+    auto* geometry = new QGridLayout(geometry_);
+    geometry->addWidget(
+        noteLabel("Each line or open polyline in the scope is a service, named by its code; a "
+                  "point on a vertex gives it its number. What a line or a point says of itself "
+                  "(utility.method, utility.depth ... - Format > Global Modify sets them) wins "
+                  "over these.",
+                  geometry_),
+        0, 0, 1, 4);
+    serviceType_ = choices("utilityServiceType",
+                           "TYPE: the kind of service, where a line does not say (utility.type); "
+                           "not given, unknown",
+                           {});
+    for (const sub::UtilityType type :
+         {sub::UtilityType::Water, sub::UtilityType::Electricity,
+          sub::UtilityType::Telecommunications, sub::UtilityType::Gas,
+          sub::UtilityType::RecycledWater, sub::UtilityType::FireService, sub::UtilityType::Sewer,
+          sub::UtilityType::Stormwater, sub::UtilityType::Fuel,
+          sub::UtilityType::IntelligentTransport, sub::UtilityType::Other}) {
+        const QString typeWord = qs(std::string(katana::cad::utilities::utilityTypeWord(type)));
+        serviceType_->addItem(typeWord, typeWord);
+    }
+    method_ = choices("utilityMethod",
+                      "METHOD: how the services were located, where a point or a line does not say "
+                      "(utility.method). Needed at every vertex",
+                      {{"EML", "electromagnetic location: QL-B at best"},
+                       {"GPR", "ground penetrating radar: QL-B at best"},
+                       {"geophysical", "other geophysics: QL-B at best"},
+                       {"pothole", "non-destructive excavation, the service seen: QL-A at best"},
+                       {"trench", "an open trench, the service seen: QL-A at best"},
+                       {"surface", "a surveyed pit, valve or marker: QL-C at best"},
+                       {"records", "plans and GIS records: QL-D"},
+                       {"anecdotal", "site knowledge: QL-D"}});
+    horizontalUncertainty_ = field("utilityHUnc", "not assessed",
+                                   "H_UNC: the horizontal uncertainty of each located position, "
+                                   "+/- metres. Not assessed is not assumed good: a detection "
+                                   "without one is QL-C");
+    verticalUncertainty_ = field("utilityVUnc", "not assessed",
+                                 "V_UNC: the vertical uncertainty of each level or depth, "
+                                 "+/- metres");
+    heights_ =
+        choices("utilityHeights",
+                "HEIGHTS: what the heights of the lines and points are; not given, the surface",
+                {{"surface", "the ground over the service: marks shot on the surface"},
+                 {"service", "the service itself, on its level reference: shot on the pipe"},
+                 {"none", "not to be used"}});
+    levelReference_ = choices("utilityLevelRef",
+                              "LEVEL_REF: the part of the service a level or depth is on; not "
+                              "given, the top",
+                              {{"top", "the crown, or what is met first above it"},
+                               {"centre", "the centre line"},
+                               {"invert", "the bottom of the bore"}});
+    path_ = choices("utilityPath",
+                    "PATH: what is known between each vertex and the next; not given, detected",
+                    {{"detected", "traced, or detected at intervals"},
+                     {"exposed", "seen all along: an open trench"},
+                     {"assumed", "joined up; nothing observed between"}});
+    owner_ = field("utilityOwner", "each line's own", "OWNER: the asset owner");
+    material_ =
+        field("utilityMaterial", "each line's own", "MATERIAL: what the service is made of");
+    diameter_ = field("utilityDiameter", "each line's own",
+                      "DIAMETER_MM: the outside diameter, millimetres");
+    serviceStatus_ =
+        choices("utilityServiceStatus", "STATUS: the service's status",
+                {{"in service", ""}, {"disused", ""}, {"abandoned", ""}, {"proposed", ""}});
+    fields_ = field("utilityFields", "column=property, ... e.g. type=ASSET_TYPE,line=ASSET_ID",
+                    "FIELDS: an import's own attributes read as the schedule's columns - a "
+                    "shapefile's ASSET_TYPE as the type, its ASSET_ID as the line");
+    const auto pair = [this, geometry](int at, int column, const QString& label, QWidget* widget) {
+        geometry->addWidget(new QLabel(label, geometry_), at, column * 2);
+        geometry->addWidget(widget, at, column * 2 + 1);
+    };
+    pair(1, 0, "Type:", serviceType_);
+    pair(1, 1, "Method:", method_);
+    pair(2, 0, "H uncertainty (m):", horizontalUncertainty_);
+    pair(2, 1, "V uncertainty (m):", verticalUncertainty_);
+    pair(3, 0, "Heights are:", heights_);
+    pair(3, 1, "Level reference:", levelReference_);
+    pair(4, 0, "Path:", path_);
+    pair(4, 1, "Status:", serviceStatus_);
+    pair(5, 0, "Owner:", owner_);
+    pair(5, 1, "Material:", material_);
+    pair(6, 0, "Diameter (mm):", diameter_);
+    pair(6, 1, "Fields:", fields_);
+    geometry->setColumnStretch(1, 1);
+    geometry->setColumnStretch(3, 1);
+    drawLayout->addRow(geometry_);
     tabs_->addTab(drawPage, "Draw");
 
     auto* reportPage = new QWidget(tabs_);
@@ -579,10 +716,31 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     layout->addWidget(output_, 1);
     layout->addLayout(buttons);
 
-    for (QLineEdit* edit :
-         {schedule_, spacing_, layerPrefix_, minCover_, design_, designEntityId_, designLevel_,
-          width_, horizontal_, vertical_, margin_, schema_, scheduleOut_, scheduleSchema_}) {
+    for (QLineEdit* edit : {schedule_,
+                            spacing_,
+                            layerPrefix_,
+                            minCover_,
+                            design_,
+                            designEntityId_,
+                            designLevel_,
+                            width_,
+                            horizontal_,
+                            vertical_,
+                            margin_,
+                            schema_,
+                            scheduleOut_,
+                            scheduleSchema_,
+                            horizontalUncertainty_,
+                            verticalUncertainty_,
+                            owner_,
+                            material_,
+                            diameter_,
+                            fields_}) {
         connect(edit, &QLineEdit::textChanged, this, [this] { refreshCommand(); });
+    }
+    for (QComboBox* box :
+         {serviceType_, method_, heights_, levelReference_, path_, serviceStatus_}) {
+        connect(box, &QComboBox::currentIndexChanged, this, [this] { refreshCommand(); });
     }
     for (QRadioButton* choice :
          {sourceFile_, sourceDrawing_, designFile_, designEntity_, designAlignment_}) {
@@ -708,6 +866,18 @@ UtilityForm UtilityToolsDialog::form() const
     form.vertical = vertical_->text();
     form.margin = margin_->text();
     form.layerPrefix = layerPrefix_->text();
+    form.serviceType = serviceType_->currentData().toString();
+    form.method = method_->currentData().toString();
+    form.horizontalUncertainty = horizontalUncertainty_->text();
+    form.verticalUncertainty = verticalUncertainty_->text();
+    form.heights = heights_->currentData().toString();
+    form.levelReference = levelReference_->currentData().toString();
+    form.path = path_->currentData().toString();
+    form.owner = owner_->text();
+    form.material = material_->text();
+    form.diameter = diameter_->text();
+    form.status = serviceStatus_->currentData().toString();
+    form.fields = fields_->text();
     return form;
 }
 
@@ -726,18 +896,18 @@ void UtilityToolsDialog::refreshCommand()
                         current.tool == UtilityTool::Regrade;
     spacing_->setEnabled(grades);
     minCover_->setEnabled(grades);
-    // The source is chosen where a tool reads either; Draw reads the file and
-    // Regrade and Schedule the drawing whatever is chosen.
-    const bool chooses = current.tool == UtilityTool::Report ||
-                         current.tool == UtilityTool::Verify ||
-                         current.tool == UtilityTool::Clearance ||
-                         current.tool == UtilityTool::Check;
+    // The source is chosen where a tool reads either; Regrade and Schedule
+    // read the drawing whatever is chosen.
+    const bool chooses =
+        current.tool != UtilityTool::Regrade && current.tool != UtilityTool::Schedule;
     sourceFile_->setEnabled(chooses);
     sourceDrawing_->setEnabled(chooses);
     const bool drawing = utilitySourceOf(current) == UtilitySource::Drawing;
     schedule_->setEnabled(!drawing);
     scheduleBrowse_->setEnabled(!drawing);
     scope_->setEnabled(drawing);
+    // What the geometry cannot say is asked only of a draw of the geometry.
+    geometry_->setEnabled(drawing && current.tool == UtilityTool::Draw);
     design_->setEnabled(designFile_->isChecked());
     designBrowse_->setEnabled(designFile_->isChecked());
     designEntityId_->setEnabled(designEntity_->isChecked());
@@ -778,8 +948,13 @@ void UtilityToolsDialog::run()
     const auto leads = [&reply](std::string_view record) { return reply->starts_with(record); };
     switch (running) {
     case UtilityTool::Draw:
-        setStatus("Drawn as one undo step - Undo removes it all. The records are below and in "
-                  "the command log.");
+        if (leads("utilities drawn ")) {
+            setStatus("Drawn as one undo step - Undo removes it all. The records are below and "
+                      "in the command log.");
+        } else {
+            setStatus("Nothing in the scope to draw: what it took is drawn already or cannot be "
+                      "a service. Nothing was added to the undo history.");
+        }
         break;
     case UtilityTool::Regrade:
         if (leads("utilities regraded changed=0 ")) {
