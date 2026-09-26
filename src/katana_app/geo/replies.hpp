@@ -70,9 +70,10 @@ struct Record {
     [[nodiscard]] std::optional<std::string> get(std::string_view key) const;
 };
 
-// The records of a reply, a text record with the lines it says it has.
-// Lines that are not records (a word with no fields) are records of their
-// own kind with no fields.
+// The records of a reply, a text record with the lines it says it has. A
+// record's kind is every word before its first key= ("ifc exported"); lines
+// that are not records (words with no fields) are records of that kind with
+// no fields.
 [[nodiscard]] std::vector<Record> parseRecords(std::string_view text);
 
 } // namespace katana::app::geo
