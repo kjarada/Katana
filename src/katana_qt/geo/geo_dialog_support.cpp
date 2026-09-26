@@ -12,6 +12,7 @@
 #include <QRegularExpression>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <utility>
 
 #include "geo/geo_workbench.hpp"
