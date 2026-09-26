@@ -125,6 +125,20 @@ Every lossy step is stated rather than hidden.
   distance the polyline may deviate from the true curve — in model units,
   default 1 mm. The chord count follows `φ = 2·acos(1 − tolerance/r)`, so the
   result is the coarsest polyline meeting the tolerance and no finer.
+* **The draw system's curves** (`docs/drawing.md`) go out by the same rule,
+  through the one conversion (`docs/geoprocessing.md`, "Drawing data to
+  features"): a **curve polyline** is chords within `curveTolerance`, a
+  Polygon when closed, and 3D when every vertex has a height - its heights
+  are its vertices' own, a chord point's linear by length along its
+  segment, the rule main's EXPORT wrote them by before this branch's one
+  conversion replaced its loop; an end not surveyed leaves that segment's
+  chord points without one, and the string goes in plan with a warning as a
+  part-heighted polyline does. An **ellipse** or a **spline** is chords, a
+  Polygon when whole or closed, always in plan: neither holds a height
+  (`DrawingCurves.ExportWritesEachCurveKindAndInfoReadsItBack`, a GeoPackage
+  read back with INFO: Polygon, LineStringZ, Polygon, LineString). An
+  IMPORT of the file brings them back as polylines; the arcs, the ellipse
+  and the spline are not recovered from their chords.
 * **Text and dimensions** have no counterpart at all. They are skipped, counted,
   and reported in `warnings` — never silently dropped (`docs/architecture.md`,
   "Error handling").

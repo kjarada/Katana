@@ -44,7 +44,11 @@ constexpr std::string_view kCheckUsage =
     "UTILITY CHECK <schedule.csv> SCHEMA <schema.csv>, or UTILITY CHECK <scope> "
     "[WHERE key=value ...] SCHEMA <schema.csv>";
 constexpr std::string_view kDrawUsage =
-    "UTILITY DRAW <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]";
+    "UTILITY DRAW <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>], or UTILITY DRAW "
+    "<scope> [WHERE key=value ...] [TYPE <type>] [METHOD <method>] [H_UNC <m>] [V_UNC <m>] "
+    "[HEIGHTS surface|service|none] [LEVEL_REF top|centre|invert] [PATH detected|exposed|assumed] "
+    "[OWNER <text>] [MATERIAL <text>] [DIAMETER_MM <mm>] [STATUS <status>] "
+    "[FIELDS column=property,...] [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]";
 constexpr std::string_view kRegradeUsage =
     "UTILITY REGRADE <scope> [WHERE key=value ...] [SPACING <m>] [MINCOVER <m>]";
 constexpr std::string_view kScheduleUsage =
@@ -143,18 +147,22 @@ std::string reply(std::string text)
 }
 
 // KEYWORD <value> pairs after the other arguments, each keyword at most
-// once. A length must be finite and not negative; a level may be any finite
-// number, below the datum too; LAYER takes a word.
-enum class OptionKind { Metres, Level, Word };
+// once. A length must be finite and not negative, a size more than nothing; a
+// level may be any finite number, below the datum too; a word is taken as
+// written, for the verb to read.
+enum class OptionKind { Metres, Level, Positive, Word };
 
 struct OptionSpec {
     std::string_view name;
     OptionKind kind = OptionKind::Metres;
+    // What the refusal of a value that is missing, or does not read, says it
+    // needs; empty for the kind's own words.
+    std::string_view needs{};
 };
 
 struct Options {
     std::vector<std::pair<std::string, double>> numbers;
-    std::optional<std::string> layer;
+    std::vector<std::pair<std::string, std::string>> words;
 
     [[nodiscard]] std::optional<double> get(std::string_view name) const
     {
@@ -165,7 +173,34 @@ struct Options {
         }
         return std::nullopt;
     }
+    [[nodiscard]] std::optional<std::string> word(std::string_view name) const
+    {
+        for (const auto& [key, value] : words) {
+            if (key == name) {
+                return value;
+            }
+        }
+        return std::nullopt;
+    }
 };
+
+std::string needsOf(const OptionSpec& spec)
+{
+    if (!spec.needs.empty()) {
+        return std::string(spec.needs);
+    }
+    switch (spec.kind) {
+    case OptionKind::Metres:
+        return "a number of metres, not negative";
+    case OptionKind::Level:
+        return "a level, in metres";
+    case OptionKind::Positive:
+        return "a number more than 0";
+    case OptionKind::Word:
+        return "a value";
+    }
+    return "a value";
+}
 
 Result<Options> readOptions(const Words& args, std::size_t first,
                             const std::vector<OptionSpec>& allowed)
@@ -182,24 +217,23 @@ Result<Options> readOptions(const Words& args, std::size_t first,
             return makeError(ErrorCode::InvalidArgument, "unknown option " + args[i]);
         }
         const std::string name(spec->name);
-        if (options.get(name) || (spec->kind == OptionKind::Word && options.layer)) {
+        if (options.get(name) || options.word(name)) {
             return makeError(ErrorCode::InvalidArgument, name + " given twice");
         }
         if (spec->kind == OptionKind::Word) {
             if (i + 1 >= args.size()) {
-                return makeError(ErrorCode::InvalidArgument, name + " needs a layer name");
+                return makeError(ErrorCode::InvalidArgument, name + " needs " + needsOf(*spec));
             }
-            options.layer = args[i + 1];
+            options.words.emplace_back(name, args[i + 1]);
             continue;
         }
         const auto value =
             i + 1 < args.size() ? core::parseFiniteDouble(args[i + 1]) : std::nullopt;
-        if (spec->kind == OptionKind::Level && !value) {
-            return makeError(ErrorCode::InvalidArgument, name + " needs a level, in metres");
-        }
-        if (!value || *value < 0.0) {
-            return makeError(ErrorCode::InvalidArgument,
-                             name + " needs a number of metres, not negative");
+        const bool reads =
+            value && (spec->kind == OptionKind::Level ||
+                      (spec->kind == OptionKind::Positive ? *value > 0.0 : *value >= 0.0));
+        if (!reads) {
+            return makeError(ErrorCode::InvalidArgument, name + " needs " + needsOf(*spec));
         }
         options.numbers.emplace_back(name, *value);
     }
@@ -293,7 +327,15 @@ std::string withRecord(const Source& source, std::string text)
 
 std::string nothingIn(const Source& source, std::string_view what)
 {
-    return *source.record + "\nno utility lines in the scope: nothing " + std::string(what);
+    std::string text =
+        *source.record + "\nno utility lines in the scope: nothing " + std::string(what);
+    // Survey or imported geometry is not a service until it is drawn as one;
+    // a person who scoped it is most likely asking for that.
+    if (source.data && source.data->ignored > 0) {
+        text += "\nwhat the scope took carries no utility data; UTILITY DRAW with the same scope "
+                "and METHOD <method> draws its lines and polylines as services";
+    }
+    return text;
 }
 
 Result<std::string> report(const Document& document, const Words& args,
@@ -537,21 +579,206 @@ Result<std::string> check(const Document& document, const Words& args,
     return text;
 }
 
+// What a draw from the drawing is told of the geometry it reads, beside
+// SPACING, MINCOVER and LAYER: each the schedule's column of that name, with
+// the value every row of every line in scope would have where the line or
+// the point does not say it itself (readGeometryServices). HEIGHTS says what
+// the geometry's heights are the heights of.
+const std::vector<OptionSpec>& geometryOptions()
+{
+    static const std::vector<OptionSpec> kOptions{
+        {"TYPE", OptionKind::Word, "a utility type: water, electricity, gas ..."},
+        {"METHOD", OptionKind::Word, "a location method: EML, GPR, pothole, surface, records ..."},
+        {"H_UNC", OptionKind::Metres, "a horizontal uncertainty, in metres, not negative"},
+        {"V_UNC", OptionKind::Metres, "a vertical uncertainty, in metres, not negative"},
+        {"HEIGHTS", OptionKind::Word, "surface, service or none"},
+        {"LEVEL_REF", OptionKind::Word, "top, centre or invert"},
+        {"PATH", OptionKind::Word, "detected, exposed or assumed"},
+        {"OWNER", OptionKind::Word, "the owner's name"},
+        {"MATERIAL", OptionKind::Word, "a material"},
+        {"DIAMETER_MM", OptionKind::Positive, "a diameter in millimetres, more than 0"},
+        {"STATUS", OptionKind::Word, "a status: in service, disused, abandoned or proposed"},
+        {"FIELDS", OptionKind::Word,
+         "column=property pairs, comma-separated: type=ASSET_TYPE,method=LOC_METHOD"},
+    };
+    return kOptions;
+}
+
+const std::vector<OptionSpec>& drawOptions()
+{
+    static const std::vector<OptionSpec> kOptions{
+        {"SPACING"}, {"MINCOVER"}, {"LAYER", OptionKind::Word, "a layer name"}};
+    return kOptions;
+}
+
+// A word of the options that must read as one of `parse`'s values.
+template <typename Parse>
+auto readWord(const Options& options, std::string_view name, Parse parse, std::string_view what)
+    -> Result<std::optional<typename decltype(parse(std::string_view{}))::value_type>>
+{
+    using Value = typename decltype(parse(std::string_view{}))::value_type;
+    const auto word = options.word(name);
+    if (!word) {
+        return std::optional<Value>{};
+    }
+    const auto value = parse(*word);
+    if (!value) {
+        return makeError(ErrorCode::InvalidArgument,
+                         std::string(name) + " " + *word + " is not " + std::string(what));
+    }
+    return std::optional<Value>(*value);
+}
+
+Result<GeometryServiceOptions> geometryServiceOptions(const Options& options)
+{
+    GeometryServiceOptions out;
+    auto type = readWord(options, "TYPE", sub::parseUtilityType,
+                         "a utility type (water, electricity, telecommunications, gas, "
+                         "recycled water, fire service, sewer, stormwater, fuel, ITS, other)");
+    if (!type) {
+        return type.error();
+    }
+    out.type = *type;
+    auto method = readWord(options, "METHOD", sub::parseLocationMethod,
+                           "a location method (records, anecdotal, surface, EML, GPR, "
+                           "geophysical, pothole, trench)");
+    if (!method) {
+        return method.error();
+    }
+    out.method = *method;
+    auto reference = readWord(options, "LEVEL_REF", sub::parseLevelReference,
+                              "a level reference (top, centre, invert)");
+    if (!reference) {
+        return reference.error();
+    }
+    out.levelReference = *reference;
+    auto path = readWord(options, "PATH", sub::parsePathEvidence, "detected, exposed or assumed");
+    if (!path) {
+        return path.error();
+    }
+    out.path = *path;
+    auto status = readWord(options, "STATUS", sub::parseUtilityStatus,
+                           "a status (in service, disused, abandoned, proposed)");
+    if (!status) {
+        return status.error();
+    }
+    out.status = *status;
+    auto heights = readWord(options, "HEIGHTS", parseGeometryHeights,
+                            "surface, service or none: what the heights are the heights of");
+    if (!heights) {
+        return heights.error();
+    }
+    out.heights = heights->value_or(GeometryHeights::Surface);
+    out.horizontalUncertainty = options.get("H_UNC");
+    out.verticalUncertainty = options.get("V_UNC");
+    if (const auto millimetres = options.get("DIAMETER_MM")) {
+        out.diameter = *millimetres / 1000.0;
+    }
+    out.owner = options.word("OWNER").value_or("");
+    out.material = options.word("MATERIAL").value_or("");
+    // FIELDS column=property,...: which column each is, readGeometryServices
+    // says, by the schedule reader's own names.
+    if (const auto fields = options.word("FIELDS")) {
+        std::string_view rest = *fields;
+        while (!rest.empty()) {
+            const std::size_t comma = rest.find(',');
+            const std::string_view pair = core::trimmed(rest.substr(0, comma));
+            const std::size_t equals = pair.find('=');
+            if (equals == std::string_view::npos) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "FIELDS needs column=property pairs, comma-separated; \"" +
+                                     std::string(pair) + "\" is not one");
+            }
+            out.fields.emplace_back(std::string(core::trimmed(pair.substr(0, equals))),
+                                    std::string(core::trimmed(pair.substr(equals + 1))));
+            rest = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
+        }
+    }
+    return out;
+}
+
+UtilityDrawOptions drawingOptions(const Options& options)
+{
+    UtilityDrawOptions drawOptions;
+    drawOptions.grading = grading(options);
+    drawOptions.minimumCover = options.get("MINCOVER");
+    if (const auto layer = options.word("LAYER")) {
+        drawOptions.layerPrefix = *layer;
+    }
+    return drawOptions;
+}
+
+// UTILITY DRAW <scope> ...: the lines and polylines a survey or an import left
+// in the drawing, drawn as the services they are, as one undo step. The reply
+// is a draw's, with what the scope took after its first record, as a
+// regrade's is.
+Result<std::string> drawFromGeometry(Document& document, const Words& args,
+                                     const ScopeViewProvider& views)
+{
+    std::size_t at = 1;
+    const auto words = readSourceWords(args, at);
+    if (!words) {
+        return words.error();
+    }
+    std::vector<OptionSpec> allowed = drawOptions();
+    std::ranges::copy(geometryOptions(), std::back_inserter(allowed));
+    const auto options = readOptions(args, at, allowed);
+    if (!options) {
+        return options.error();
+    }
+    const auto geometry = geometryServiceOptions(*options);
+    if (!geometry) {
+        return geometry.error();
+    }
+    const auto match = matchScope(document, *words->scope, views);
+    if (!match) {
+        return match.error();
+    }
+    const auto services = readGeometryServices(document.model(), match->matched, *geometry);
+    if (!services) {
+        return services.error();
+    }
+    const std::string record = scopeRecord(*match) + geometryServiceKeys(*services);
+    if (services->lines.empty()) {
+        return record + "\nno lines or open polylines in the scope that are not drawn already: "
+                        "nothing drawn";
+    }
+    const auto drawing = drawGeometryServices(*services, drawingOptions(*options));
+    if (!drawing) {
+        return drawing.error();
+    }
+    if (auto status = document.execute(utilityDrawCommand(document.model(), *drawing)); !status) {
+        return status.error();
+    }
+    const std::string records = formatUtilityDrawing(*drawing);
+    const std::size_t firstEnd = records.find('\n');
+    return records.substr(0, firstEnd) + "\n" + record +
+           (firstEnd == std::string::npos ? std::string() : records.substr(firstEnd));
+}
+
 // UTILITY DRAW <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]:
-// the graded schedule into the drawing as one undo step (utility_drawing.hpp).
-Result<std::string> draw(Document& document, const Words& args)
+// the graded schedule into the drawing as one undo step (utility_drawing.hpp);
+// or UTILITY DRAW <scope> ..., the geometry in the drawing (drawFromGeometry).
+Result<std::string> draw(Document& document, const Words& args, const ScopeViewProvider& views)
 {
     if (args.size() < 2) {
         return usage(kDrawUsage);
     }
     if (isScopeWord(args[1])) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "UTILITY DRAW draws a schedule file; what is drawn already is graded "
-                         "and drawn again by " +
-                             std::string(kRegradeUsage));
+        return drawFromGeometry(document, args, views);
     }
-    const auto options =
-        readOptions(args, 2, {{"SPACING"}, {"MINCOVER"}, {"LAYER", OptionKind::Word}});
+    // A schedule says how each vertex was located and what each service is.
+    for (std::size_t i = 2; i < args.size(); i += 2) {
+        for (const OptionSpec& spec : geometryOptions()) {
+            if (core::equalsIgnoringCase(args[i], spec.name)) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 std::string(spec.name) +
+                                     " is for a draw of geometry in the drawing (UTILITY DRAW "
+                                     "<scope> ...); a schedule gives its own in its columns");
+            }
+        }
+    }
+    const auto options = readOptions(args, 2, drawOptions());
     if (!options) {
         return options.error();
     }
@@ -559,13 +786,7 @@ Result<std::string> draw(Document& document, const Words& args)
     if (!lines) {
         return lines.error();
     }
-    UtilityDrawOptions drawOptions;
-    drawOptions.grading = grading(*options);
-    drawOptions.minimumCover = options->get("MINCOVER");
-    if (options->layer) {
-        drawOptions.layerPrefix = *options->layer;
-    }
-    const auto drawing = drawUtilities(*lines, drawOptions);
+    const auto drawing = drawUtilities(*lines, drawingOptions(*options));
     if (!drawing) {
         return drawing.error();
     }
@@ -706,7 +927,7 @@ Result<std::string> runUtilityVerb(Document& document, const std::vector<std::st
         return check(document, args, views);
     }
     if (action == "draw") {
-        return draw(document, args);
+        return draw(document, args, views);
     }
     if (action == "regrade") {
         return regrade(document, args, views);
@@ -759,15 +980,17 @@ std::string utilityVerbHelp()
     return R"(AS 5488 subsurface utilities (docs/subsurface_utilities.md). A schedule is a CSV of
 located vertices, one row each; a path with blanks is quoted. Lengths are metres.
 
-REPORT, VERIFY, CLEARANCE and CHECK act on a schedule file OR on what is drawn; REGRADE
-and SCHEDULE on what is drawn only; DRAW on a file only. A first word that is a scope
-word or WHERE takes the lines UTILITY DRAW drew, by the scope and filter MODIFY takes too
-(HELP: "Scope") - SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 |
-LAYERS a,b [ONLY], then [WHERE key=value ...]; any other word is a file's path. A scope
-that takes part of a line takes all of it. The scope's record says what it took:
-"scope=... matched= lines= completed= ignored=" (completed: lines read whole from beyond
-the scope; ignored: entities with no utility data). REPORT, VERIFY, CLEARANCE and CHECK
-lead their reply with it; REGRADE and SCHEDULE lead with their own record, then it.
+Every verb acts on a schedule file OR on what is drawn, but REGRADE and SCHEDULE, which
+act on what is drawn only. A first word that is a scope word or WHERE takes the drawing,
+by the scope and filter MODIFY takes too (HELP: "Scope") - SELECTION | DRAWING |
+VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY], then [WHERE key=value ...];
+any other word is a file's path. DRAW takes the lines, polylines and points a survey or
+an import left there and draws them as services; every other verb takes the services
+DRAW drew, and a scope that takes part of one takes all of it. The scope's record says
+what it took: "scope=... matched= lines= completed= ignored=" (completed: lines read
+whole from beyond the scope; ignored: entities with no utility data). REPORT, VERIFY,
+CLEARANCE and CHECK lead their reply with it; DRAW, REGRADE and SCHEDULE lead with their
+own record, then it.
 
 UTILITY REPORT <schedule.csv> | <scope> [MINCOVER <m>] [SPACING <m>]
           grade located services by AS 5488 quality level: vertices, segments, length at
@@ -795,6 +1018,28 @@ UTILITY DRAW <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
           cover against it.
           Reply: "utilities drawn lines= vertices= segments= entities= layers= bounds=x0,y0,x1,y1"
           then "line id= type= length= ql_a= ql_b= ql_c= ql_d=" for each service
+UTILITY DRAW <scope> [TYPE <type>] [METHOD <method>] [H_UNC <m>] [V_UNC <m>]
+          [HEIGHTS surface|service|none] [LEVEL_REF top|centre|invert]
+          [PATH detected|exposed|assumed] [OWNER <text>] [MATERIAL <text>]
+          [DIAMETER_MM <mm>] [STATUS <status>] [FIELDS column=property,...]
+          [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
+          the surveyed or imported services in the drawing (a coded survey's strings, a .12da,
+          DXF, shapefile or IFC file's lines) drawn as a schedule is: each line or open
+          polyline in scope a service, named by its code, its vertices the located ones; a
+          point in scope on a vertex gives it its point number. What the geometry cannot say
+          comes from utility.* properties on the line or the point (utility.method,
+          utility.h_unc, utility.level, utility.depth, utility.type ..., as MODIFY ... SET
+          PROP= puts them), else from these options: each is the schedule's column of that
+          name. HEIGHTS says what the heights are: the surface over the service (default),
+          the service itself on LEVEL_REF, or none; utility.heights on a point or a line
+          says it for that one. FIELDS reads an import's own attributes as the schedule's
+          columns (a shapefile's ASSET_TYPE as type: FIELDS type=ASSET_TYPE,line=ASSET_ID).
+          A method is needed at every vertex. Draws only what is not drawn already; the
+          sources are left as they are.
+          Reply: the draw's first record, then the scope's
+          "scope=... matched= lines= points= loose= drawn= ignored=" (points: gave a vertex;
+          loose: on no vertex; drawn: drawn already; ignored: cannot be a service), then
+          the lines
 UTILITY REGRADE <scope> [SPACING <m>] [MINCOVER <m>]
           grade the lines in scope again from their points as they are now (moved, levels
           or methods edited) and draw their runs again, as ONE undo step; nothing changed,

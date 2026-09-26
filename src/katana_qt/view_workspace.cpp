@@ -169,8 +169,6 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
         plan->setReferenceData(reference_);
         plan->setMeshes(meshes_);
         plan->setGridVisible(gridVisible_);
-        plan->setSnapEnabled(snapEnabled_);
-        plan->setSnapModes(snapModes_);
         plan->onPrompt = [this](const QString& text) {
             if (onPrompt) {
                 onPrompt(text);
@@ -984,18 +982,17 @@ void ViewWorkspace::setGridVisible(bool visible)
 
 void ViewWorkspace::setSnapEnabled(bool enabled)
 {
-    snapEnabled_ = enabled;
+    document_.drafting().snapEnabled = enabled;
     for (ViewportWidget* plan : planViews()) {
         plan->setSnapEnabled(enabled);
     }
+    document_.notifyDraftingChanged();
 }
 
 void ViewWorkspace::setSnapModes(katana::cad::SnapModes modes)
 {
-    snapModes_ = modes;
-    for (ViewportWidget* plan : planViews()) {
-        plan->setSnapModes(modes);
-    }
+    document_.drafting().snapModes = modes;
+    document_.notifyDraftingChanged();
 }
 
 void ViewWorkspace::cancel()

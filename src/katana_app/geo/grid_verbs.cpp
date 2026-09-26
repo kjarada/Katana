@@ -12,8 +12,9 @@
 // read at run time, so a method GDAL adds is offered with no change here.
 //
 // Heights. With z=geometry (the default) a vertex's height is the drawing's
-// (entity::heightsOf): an entity without a height at every vertex is left out
-// and counted (skipped.heightless), because GDAL reads a 2D point as z = 0 -
+// (entity::heightsOf; a curve polyline's are its vertices' own): an entity
+// without a height at every vertex is left out and counted
+// (skipped.heightless), because GDAL reads a 2D point as z = 0 -
 // a surface pulled down to the datum with no error anywhere. With
 // z=<property> GDAL reads the property (--zfield), and an entity without a
 // number there is left out and counted (skipped.no_z): GDAL reads a word in

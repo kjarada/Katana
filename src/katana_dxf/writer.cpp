@@ -1,3 +1,4 @@
+#include "katana/math/numerics.hpp"
 #include "katana/dxf/writer.hpp"
 
 #include <algorithm>
@@ -240,6 +241,9 @@ class Writer {
     // entity's id.
     void writeGeometry(const Entity& entity);
     void writePolyline(const Entity& entity, const Polyline2& polyline);
+    void writeCurvePolyline(const Entity& entity, const katana::geometry::CurvePolyline2& polyline);
+    void writeEllipse(const Entity& entity, const katana::geometry::Ellipse2& ellipse);
+    void writeSpline(const Entity& entity, const katana::geometry::Spline2& spline);
     void writeText(const Entity& entity, const katana::entity::TextGeometry& text);
     void writeDimension(const Entity& entity, const katana::entity::DimensionGeometry& dimension);
     void writeLeader(const Entity& entity, const katana::entity::LeaderGeometry& leader);
@@ -1026,6 +1030,104 @@ void Writer::writePolyline(const Entity& entity, const Polyline2& polyline)
     text(8, layerOf(entity));
 }
 
+// A polyline with arcs: an LWPOLYLINE with each arc's bulge (group 42), the
+// format's own way of saying it. Heights one and the same at every vertex go
+// in its elevation; any other heights go beside it as this module's extended
+// data, as a straight polyline's partial heights do, since the LWPOLYLINE has
+// one elevation and the 3D POLYLINE, which has a Z per vertex, has no arcs.
+void Writer::writeCurvePolyline(const Entity& entity,
+                                const katana::geometry::CurvePolyline2& polyline)
+{
+    const std::size_t count = polyline.vertices.size();
+    const auto heights = polyline.heights();
+    const bool anyHeight = polyline.hasHeights();
+    bool oneHeight = anyHeight;
+    for (const auto& height : heights) {
+        oneHeight = oneHeight && height.has_value() && *height == *heights.front();
+    }
+    begin("LWPOLYLINE", entity, "AcDbPolyline");
+    integer(90, static_cast<std::int64_t>(count));
+    integer(70, polyline.closed ? 1 : 0);
+    const bool zeroLevel = oneHeight && *heights.front() == 0.0;
+    if (oneHeight && !zeroLevel) {
+        real(38, *heights.front());
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& vertex = polyline.vertices[i];
+        real(10, vertex.position.x + shift_.x);
+        real(20, vertex.position.y + shift_.y);
+        const bool startsSegment = polyline.closed || i + 1 < count;
+        if (startsSegment && vertex.bulge != 0.0) {
+            real(42, vertex.bulge);
+        }
+        extents_.expand(Point2(vertex.position.x + shift_.x, vertex.position.y + shift_.y));
+    }
+    for (const auto& piece : polyline.segments()) {
+        if (const auto* arc = std::get_if<Arc2>(&piece)) {
+            const auto box = arc->boundingBox();
+            extents_.expand(Point2(box.min.x + shift_.x, box.min.y + shift_.y));
+            extents_.expand(Point2(box.max.x + shift_.x, box.max.y + shift_.y));
+        }
+    }
+    finish((anyHeight && !oneHeight) || zeroLevel ? &heights : nullptr);
+}
+
+// ELLIPSE: centre, the major axis's end relative to it, the ratio, and the
+// start and end parameters in radians - Ellipse2's own fields.
+void Writer::writeEllipse(const Entity& entity, const katana::geometry::Ellipse2& ellipse)
+{
+    const auto heights = heightsOf(entity, 1);
+    begin("ELLIPSE", entity, "AcDbEllipse");
+    point(10, ellipse.center, heights.front().value_or(0.0));
+    real(11, ellipse.majorAxis.x);
+    real(21, ellipse.majorAxis.y);
+    real(31, 0.0);
+    real(40, std::min(ellipse.ratio, 1.0));
+    // Each in [0, 2 pi), as a DXF reader expects them; an end below the start
+    // is an arc through the parameter 0, which is how the format says it.
+    const double start = katana::math::normalizeAngle(ellipse.startParameter);
+    real(41, start);
+    real(42, ellipse.isFull() ? start + 2.0 * std::numbers::pi
+                              : katana::math::normalizeAngle(ellipse.endParameter()));
+    finish(isZeroLevel(heights) ? &heights : nullptr);
+    const auto box = ellipse.boundingBox();
+    extents_.expand(Point2(box.min.x + shift_.x, box.min.y + shift_.y));
+    extents_.expand(Point2(box.max.x + shift_.x, box.max.y + shift_.y));
+}
+
+// SPLINE, planar: degree, knots, weights when rational, control points, and
+// the fit points it was drawn through when it has them.
+void Writer::writeSpline(const Entity& entity, const katana::geometry::Spline2& spline)
+{
+    begin("SPLINE", entity, "AcDbSpline");
+    real(210, 0.0);
+    real(220, 0.0);
+    real(230, 1.0);
+    integer(70, 8 | (spline.isRational() ? 4 : 0));
+    integer(71, spline.degree);
+    integer(72, static_cast<std::int64_t>(spline.knots.size()));
+    integer(73, static_cast<std::int64_t>(spline.controlPoints.size()));
+    integer(74, static_cast<std::int64_t>(spline.fitPoints.size()));
+    real(42, 1e-10);
+    real(43, 1e-10);
+    if (!spline.fitPoints.empty()) {
+        real(44, 1e-10);
+    }
+    for (const double knot : spline.knots) {
+        real(40, knot);
+    }
+    for (const double weight : spline.weights) {
+        real(41, weight);
+    }
+    for (const Point2& p : spline.controlPoints) {
+        point(10, p);
+    }
+    for (const Point2& p : spline.fitPoints) {
+        point(11, p);
+    }
+    finish();
+}
+
 // A dimension as the lines and text it draws: the format's DIMENSION needs a
 // picture block beside it that every reader draws instead of the entity, so
 // writing the picture is writing what the reader will see, without the half
@@ -1231,6 +1333,12 @@ void Writer::writeGeometry(const Entity& entity)
                 writeDimension(entity, shape);
             } else if constexpr (std::is_same_v<T, katana::entity::LeaderGeometry>) {
                 writeLeader(entity, shape);
+            } else if constexpr (std::is_same_v<T, katana::geometry::CurvePolyline2>) {
+                writeCurvePolyline(entity, shape);
+            } else if constexpr (std::is_same_v<T, katana::geometry::Ellipse2>) {
+                writeEllipse(entity, shape);
+            } else if constexpr (std::is_same_v<T, katana::geometry::Spline2>) {
+                writeSpline(entity, shape);
             } else if constexpr (std::is_same_v<T, katana::entity::LabelGeometry>) {
                 // A label's words and place are worked out for a view by the
                 // placer, which this module cannot see; counted and said, never

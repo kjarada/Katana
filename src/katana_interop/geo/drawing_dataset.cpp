@@ -186,6 +186,47 @@ std::variant<Shape, std::string> shapeOf(const Entity& entity, const DrawingData
                     shape.points.push_back(shape.points.front());
                     heights.push_back(heights.front());
                 }
+            } else if constexpr (std::is_same_v<Held, katana::geometry::CurvePolyline2>) {
+                // Chords within the tolerance, each chord point at the height
+                // the geometry's own rule gives it (linear by length along its
+                // segment; none where an end has none) - EXPORT's rule. The
+                // heights are the geometry's, not the elevation properties: a
+                // curve polyline holds them itself (docs/drawing.md).
+                const auto walk = held.tessellateWithHeights(options.curveTolerance);
+                std::vector<Point2> positions;
+                positions.reserve(walk.size());
+                for (const auto& step : walk) {
+                    positions.push_back(step.position);
+                    heights.push_back(step.height);
+                }
+                shape.points = planPoints(positions);
+                // The walk repeats the first point when closed; an area's ring
+                // does not.
+                if (held.closed && shape.points.size() >= 4 && options.closedAsPolygons) {
+                    shape.points.pop_back();
+                    heights.pop_back();
+                    shape.kind = GeometryKind::Polygon;
+                } else {
+                    shape.kind = GeometryKind::LineString;
+                }
+            } else if constexpr (std::is_same_v<Held, katana::geometry::Ellipse2> ||
+                                 std::is_same_v<Held, katana::geometry::Spline2>) {
+                // Chords within the tolerance, in plan: neither holds a
+                // height, and a height taken from an elevation property would
+                // be one the drawing never gave the curve between.
+                shape.points = planPoints(held.tessellate(options.curveTolerance));
+                bool shut = false;
+                if constexpr (std::is_same_v<Held, katana::geometry::Ellipse2>) {
+                    shut = held.isFull();
+                } else {
+                    shut = held.isClosedShape();
+                }
+                if (shut && shape.points.size() >= 4 && options.closedAsPolygons) {
+                    shape.points.pop_back();
+                    shape.kind = GeometryKind::Polygon;
+                } else {
+                    shape.kind = GeometryKind::LineString;
+                }
             } else if constexpr (std::is_same_v<Held, katana::entity::TextGeometry>) {
                 skip = "text";
             } else if constexpr (std::is_same_v<Held, katana::entity::DimensionGeometry>) {

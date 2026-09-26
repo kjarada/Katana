@@ -365,7 +365,10 @@ namespace {
 
 // A run of something - a pipe, a kerb, a fence - is a line, an arc or a
 // polyline; a circle on a pits layer is a pit's outline, not a pipe.
-const std::vector<EntityType> kRuns{EntityType::Line, EntityType::Arc, EntityType::Polyline};
+// A curve polyline and a spline are runs as a polyline is: a kerb or a pipe
+// drawn with arcs, or imported from DXF with bulges, is still that kerb.
+const std::vector<EntityType> kRuns{EntityType::Line, EntityType::Arc, EntityType::Polyline,
+                                    EntityType::CurvePolyline, EntityType::Spline};
 const std::vector<EntityType> kPoints{EntityType::Point};
 const std::vector<EntityType> kPointsAndOutlines{EntityType::Point, EntityType::Circle};
 
@@ -514,10 +517,20 @@ EntityClass classifyEntity(const entity::Entity& entity,
     case EntityType::Line:
     case EntityType::Arc:
     case EntityType::Polyline:
-    case EntityType::Circle: {
-        const bool surveyed = entity.properties.contains(entity::kElevationProperty) ||
-                              entity.properties.contains(entity::kElevationsProperty) ||
-                              entity.properties.contains("code");
+    case EntityType::Circle:
+    case EntityType::CurvePolyline:
+    case EntityType::Ellipse:
+    case EntityType::Spline: {
+        // A curve polyline carries its heights on its vertices, not in the
+        // elevation properties.
+        const auto* curve = std::get_if<geometry::CurvePolyline2>(&entity.geometry);
+        const bool surveyed =
+            entity.properties.contains(entity::kElevationProperty) ||
+            entity.properties.contains(entity::kElevationsProperty) ||
+            entity.properties.contains("code") ||
+            (curve != nullptr &&
+             std::any_of(curve->vertices.begin(), curve->vertices.end(),
+                         [](const geometry::CurveVertex& vertex) { return vertex.height.has_value(); }));
         result.ifcClass.predefinedType = surveyed ? "SURVEY" : "NOTDEFINED";
         break;
     }
@@ -692,10 +705,11 @@ std::vector<std::string> splitList(std::string_view text)
     return out;
 }
 
-constexpr std::array<EntityType, 9> kKinds{
-    EntityType::Point,     EntityType::Line,   EntityType::Arc,
-    EntityType::Polyline,  EntityType::Circle, EntityType::Text,
-    EntityType::Dimension, EntityType::Label,  EntityType::Leader};
+constexpr std::array<EntityType, 12> kKinds{
+    EntityType::Point,     EntityType::Line,          EntityType::Arc,
+    EntityType::Polyline,  EntityType::Circle,        EntityType::Text,
+    EntityType::Dimension, EntityType::Label,         EntityType::Leader,
+    EntityType::CurvePolyline, EntityType::Ellipse,   EntityType::Spline};
 
 std::string csvField(std::string_view text)
 {
@@ -780,7 +794,7 @@ core::Result<std::vector<ClassificationRule>> parseClassificationRules(std::stri
             if (found == kKinds.end()) {
                 return fail("\"" + kind +
                             "\" is not a kind: Point, Line, Arc, Polyline, Circle, Text, "
-                            "Dimension, Label or Leader");
+                            "Dimension, Label, Leader, CurvePolyline, Ellipse or Spline");
             }
             rule.kinds.push_back(*found);
         }

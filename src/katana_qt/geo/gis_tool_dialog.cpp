@@ -3,7 +3,6 @@
 #include "geo/gis_tool_dialog.hpp"
 
 #include <QAction>
-#include <QFontDatabase>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QKeySequence>
@@ -127,7 +126,7 @@ GisToolDialog::GisToolDialog(const QString& name, const QString& title, GisDialo
     command_ = new QLineEdit(this);
     command_->setObjectName(name + "Command");
     command_->setReadOnly(true);
-    command_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    command_->setFont(katana::qt::theme::monospaceFont());
     command_->setToolTip("The line Run hands to the command line - type it there, or give it to "
                          "katana_cli or katana_mcp, and it does the same");
     preview_ = new QPushButton("Preview", this);
@@ -145,7 +144,7 @@ GisToolDialog::GisToolDialog(const QString& name, const QString& title, GisDialo
     reply_ = new QPlainTextEdit(this);
     reply_->setObjectName(name + "Reply");
     reply_->setReadOnly(true);
-    reply_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    reply_->setFont(katana::qt::theme::monospaceFont());
     // Records are one to a line: wrapping would break them.
     reply_->setLineWrapMode(QPlainTextEdit::NoWrap);
     reply_->setPlaceholderText("The reply appears here and in the command log.");

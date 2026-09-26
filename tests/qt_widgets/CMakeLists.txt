@@ -53,6 +53,10 @@ file(GLOB _qt_annotation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/an
 # tests: globbed, as they are in the application.
 file(GLOB _qt_geo_sources CONFIGURE_DEPENDS "${_qt_src}/geo/*.cpp")
 file(GLOB _qt_geo_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp")
+# The drawing system's front end (src/katana_qt/drawing/) and its tests:
+# globbed, as it is in the application.
+file(GLOB _qt_drawing_sources CONFIGURE_DEPENDS "${_qt_src}/drawing/*.cpp")
+file(GLOB _qt_drawing_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp")
 add_executable(katana_qt_widget_tests
     main.cpp
     test_view_focus.cpp
@@ -110,6 +114,11 @@ add_executable(katana_qt_widget_tests
     ${_qt_src}/plan_context_menu.cpp
     ${_qt_src}/select_by_id_dialog.cpp
     test_plan_context_menu.cpp
+    # The theme's style, stylesheet and fonts, and the icons (test_theme).
+    test_theme.cpp
+    # The Properties panel's tree (test_property_panel).
+    ${_qt_src}/property_panel.cpp
+    test_property_panel.cpp
     # Terrain > Alignment Manager (test_alignment_manager).
     ${_qt_src}/alignment_manager.cpp
     test_alignment_manager.cpp
@@ -128,6 +137,8 @@ add_executable(katana_qt_widget_tests
     ${_qt_annotation_tests}
     ${_qt_geo_sources}
     ${_qt_geo_tests}
+    ${_qt_drawing_sources}
+    ${_qt_drawing_tests}
 )
 target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
                                                           "${CMAKE_CURRENT_SOURCE_DIR}")
