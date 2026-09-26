@@ -223,11 +223,14 @@ The annotation verbs (2026-09-25; `docs/annotation.md`, "The verbs") are
 `ANNOSCALE`, `TEXTSTYLE` (`TS`), `TEXT` and `MTEXT` with `style=`, `paper=`,
 `justify=` and `rotation=`, `TEXTEDIT`, `LABELSTYLE` (`LS`), `LABEL`,
 `AUTOLABEL`, the `DIM` kinds (`DIM LINEAR|HORIZONTAL|VERTICAL|ALIGNED|ANGULAR|
-RADIUS|DIAMETER|ORDINATE|BASELINE|CONTINUE`), `LEADER` (`LE`) and `BALLOON`,
-and `DIMSTYLE SET <name> field value [field value ...]` (one undo step
-however many pairs, `DIMSTYLE INFO` its record). They take `key=value`
-options and reply in `key=value` lines, so a script or an agent reads what
-happened; each edit is one undo step.
+RADIUS|DIAMETER|ORDINATE|BASELINE|CONTINUE`), `LEADER` (`LE`) and `BALLOON`
+with the smart leaders' `LEADER VALUES|LIST|SET|ATTACH|DETACH|FREEZE|PROP|FOR`
+and `BALLOON FOR`, and `DIMSTYLE SET <name> field value [field value ...]` (one
+undo step however many pairs, `DIMSTYLE INFO` its record). A point they take
+may name another entity's (`#12.end`, `#12.inside`, `#12@x,y` for the place on
+it nearest x,y), and what is made from it follows that entity. They take
+`key=value` options and reply in `key=value` lines, so a script or an agent
+reads what happened; each edit is one undo step.
 `CommandInterpreter::annotationHelpText` is their reference, and `HELP`
 prints it after the rest. The plain `TEXT p height "text"` and `DIM p p
 offset` are unchanged.

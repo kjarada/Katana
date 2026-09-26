@@ -4,7 +4,9 @@
 #include <cmath>
 
 #include "katana/cad/annotation/text_layout.hpp"
+#include "katana/cad/survey_coding.hpp"
 #include "katana/entity/annotation.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad::annotation {
@@ -97,13 +99,16 @@ Drawing buildLeader(const katana::entity::Model& model, const katana::entity::Le
         line.push_back(end);
     }
 
-    if (!leader.text.empty()) {
+    // A smart leader's note is read off its target now (docs/annotation.md,
+    // "Smart leaders"); one with nothing to say is drawn bare.
+    const std::string note = katana::entity::leaderNote(model, leader, codePropertyCandidates());
+    if (!note.empty()) {
         const double gap = kLandingGap * height;
         const double margin = kCalloutMargin * height;
         if (leader.callout == CalloutShape::Circle) {
             // Measure first, then centre the note in the circle that clears it.
-            Drawing probe = layoutText(leader.text, Point2(0.0, 0.0), 0.0,
-                                       TextJustify::MiddleCentre, appearance, measure);
+            Drawing probe = layoutText(note, Point2(0.0, 0.0), 0.0, TextJustify::MiddleCentre,
+                                       appearance, measure);
             double radius = 0.0;
             for (const auto& box : probe.textBoxes) {
                 for (const Point2& corner : box) {
@@ -112,32 +117,32 @@ Drawing buildLeader(const katana::entity::Model& model, const katana::entity::Le
             }
             radius += margin;
             const Point2 centre = end + landingDirection * radius;
-            Drawing note = layoutText(leader.text, centre, 0.0, TextJustify::MiddleCentre,
-                                      appearance, measure);
-            note.masks.push_back(circlePolygon(centre, radius));
-            note.outlines.push_back(circlePolygon(centre, radius));
-            drawing.append(note);
+            Drawing noteDrawing =
+                layoutText(note, centre, 0.0, TextJustify::MiddleCentre, appearance, measure);
+            noteDrawing.masks.push_back(circlePolygon(centre, radius));
+            noteDrawing.outlines.push_back(circlePolygon(centre, radius));
+            drawing.append(noteDrawing);
         } else {
             const Point2 at = end + landingDirection * (leader.callout == CalloutShape::Box
                                                             ? gap + margin
                                                             : gap);
             const TextJustify justify =
                 sign > 0.0 ? TextJustify::MiddleLeft : TextJustify::MiddleRight;
-            Drawing note = layoutText(leader.text, at, 0.0, justify, appearance, measure);
-            if (leader.callout == CalloutShape::Box && !note.textBoxes.empty()) {
+            Drawing noteDrawing = layoutText(note, at, 0.0, justify, appearance, measure);
+            if (leader.callout == CalloutShape::Box && !noteDrawing.textBoxes.empty()) {
                 const Box2 box = [&] {
                     Box2 b;
-                    for (const Point2& p : note.textBoxes.front()) {
+                    for (const Point2& p : noteDrawing.textBoxes.front()) {
                         b.expand(p);
                     }
                     return b.inflated(margin);
                 }();
                 const std::vector<Point2> frame = {box.min, Point2(box.max.x, box.min.y), box.max,
                                                    Point2(box.min.x, box.max.y)};
-                note.masks.push_back(frame);
-                note.outlines.push_back(frame);
+                noteDrawing.masks.push_back(frame);
+                noteDrawing.outlines.push_back(frame);
             }
-            drawing.append(note);
+            drawing.append(noteDrawing);
         }
     }
     drawing.strokes.insert(drawing.strokes.begin(), std::move(line));
