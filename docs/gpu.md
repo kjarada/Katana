@@ -14,9 +14,15 @@ with the software rasteriser everywhere else - every headless run and test,
 and after a GPU view fails ("Hosting", below). The Direct3D 11 path is the
 one measured on the owner's machine; the Vulkan path is tested on Mesa's
 software Vulkan (lavapipe), not yet on a hardware GPU. The Metal path (macOS,
-since 2026-09-26) is built by the release workflow, whose macOS job runs the
-`gpu.` suite on the runner's Metal device before packaging; it has not been
-measured.
+since 2026-09-26) is tested by the release workflow's macOS job, which runs
+the `gpu.` suite on the runner's Metal device before packaging: on the first
+run (GitHub `macos-15`, Apple silicon, 2026-09-26) all 17 hardware device
+cases passed - every `GpuRender` and `GpuLayers` comparison with the software
+rasteriser, the instanced expansion Metal draws with, and
+`SerializedShadersDrawWhatTheRuntimeShadersDraw` - and 70 of 70 ran or
+skipped as expected (the software-device cases skip: macOS has no software
+Metal device; the five `OnTheDesktop` cases skip under the offscreen
+platform). It has not been measured.
 
 ## Architecture
 
