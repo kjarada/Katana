@@ -4349,9 +4349,20 @@ void MainWindow::exportPointCloud()
     if (cloud == nullptr) {
         return; // reported, or the choice was cancelled
     }
+    // A file dialog nobody could close: a headless session is pointed at the
+    // verb, which asks nothing, as Convert Point Cloud to COPC is.
+    if (headless_) {
+        logMessage(QString("A headless session opens no file dialog: type EXPORT <file.las|.laz> "
+                           "CLOUD %1 instead.")
+                       .arg(cloud->id),
+                   true);
+        return;
+    }
     // What is held is a SAMPLE when the import was budgeted, and writing it
     // out as if it were the survey would be a quiet loss of most of the data.
-    if (cloud->isDecimated() && !headless_) {
+    // Asked here; the verb says so in its reply, since a line has nobody to
+    // ask.
+    if (cloud->isDecimated()) {
         const auto answer = QMessageBox::question(
             this, "Export Point Cloud",
             QString("'%1' holds %2 of the file's %3 points - the sample imported for display.\n\n"
@@ -4370,28 +4381,35 @@ void MainWindow::exportPointCloud()
         filters << (QString::fromStdString(format.description) + " (*." +
                     QString::fromStdString(format.extension) + ")");
     }
-    const QString chosen =
+    QString chosen =
         QFileDialog::getSaveFileName(this, "Export Point Cloud",
                                      QString::fromStdString(cloud->name) + ".laz",
                                      filters.join(";;"));
     if (chosen.isEmpty()) {
         return;
     }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = interop::exportPointCloud(*cloud, toPath(chosen));
-    QApplication::restoreOverrideCursor();
-    if (!status) {
-        logMessage(QString::fromStdString(status.error().describe()), true);
-        warnUser("Export failed", QString::fromStdString(status.error().describe()));
+    // The extension is what makes the line a cloud's: a name typed without
+    // one would be the drawing's export, refused for want of a driver.
+    if (!chosen.endsWith(".las", Qt::CaseInsensitive) &&
+        !chosen.endsWith(".laz", Qt::CaseInsensitive)) {
+        chosen += ".laz";
+    }
+    // The dialogs chose the cloud and the file; the writing is the EXPORT
+    // verb's, run as if typed (docs/interop.md, "The GIS menu"), so it is
+    // logged as one and katana_cli's and an agent's EXPORT is the same code.
+    // The cloud by its id: a name several layers share would be refused.
+    const VerbOutcome outcome = runVerbLine(
+        QString("EXPORT \"%1\" CLOUD %2").arg(QDir::fromNativeSeparators(chosen)).arg(cloud->id));
+    if (!outcome.ok) {
+        warnUser("Export failed", outcome.error);
         return;
     }
-    logMessage(QString("Exported %1 points of '%2' to %3%4")
-                   .arg(grouped(cloud->points.size()))
-                   .arg(QString::fromStdString(cloud->name))
-                   .arg(fromPath(toPath(chosen).filename()))
-                   .arg(cloud->isDecimated() ? QString(" (a sample of %1)")
-                                                   .arg(grouped(cloud->sourcePointCount))
-                                             : QString()));
+    // The write is a background job: a failure is known when it ends.
+    (void)awaitJob(outcome, [this](const VerbOutcome& done) {
+        if (!done.ok) {
+            warnUser("Export failed", done.error);
+        }
+    });
 }
 
 void MainWindow::exportSurfaceAsDem()

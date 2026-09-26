@@ -634,13 +634,13 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 
 | Section | Item | What it calls |
 |---|---|---|
-| Vector - GDAL | Import Vector Data... | `describeSource`, then `importVector` with the dialog's `VectorImportOptions` (source layer, target layer, attributes) |
+| Vector - GDAL | Import Vector Data... | a file dialog, `describeSource` for the dialog it routes to, then the Import Vector Data dialog, whose layers, where, fields, scope, target and placement are the `IMPORT` line it runs through the window's one executor ("Import options") |
 | | Export Vector... | File's own action: after the file dialog, the Export Vector dialog (`vectorExportDialog`), whose scope and options are the `EXPORT` line it runs ("Export options") |
-| Raster - GDAL | Import Raster... | `importRaster` with a display resolution |
+| Raster - GDAL | Import Raster... | the same, to the Import Raster dialog: band, subdataset, resolution and name as the `IMPORT` line it runs |
 | | Export Surface as DEM... | the `SURFACE EXPORT` line: `exportSurfaceRaster` through GDAL's `raster convert` - a tiled, compressed Float32 GeoTIFF, a COG, an Esri ASCII grid or IMG (`docs/terrain.md`) |
-| Point Cloud - PDAL | Import Point Cloud... | `importPointCloud` with a budget, an ASPRS class, and a COPC resolution when the file is COPC |
-| | Export Point Cloud... | `exportPointCloud` - LAS or LAZ |
-| | Convert Point Cloud to COPC... | `PointCloudEngine::convertToCopc` - every point, then an offer to import it |
+| Point Cloud - PDAL | Import Point Cloud... | the same, to the Import Point Cloud dialog: budget, class and a COPC resolution when the file is COPC, as the `IMPORT` line it runs |
+| | Export Point Cloud... | the cloud (the Reference Data panel's selection, or asked), a question when it holds a sample, a file dialog, then the `EXPORT <file.las\|.laz> CLOUD <id>` line - `exportPointCloud`, LAS or LAZ, as a job |
+| | Convert Point Cloud to COPC... | two file dialogs, then the `COPC` line - `PointCloudEngine::convertToCopc`, every point - and, when it converted, an offer to import it |
 | | Dataset Information... | the `INFO` lines, through the window's one executor: `describeSource`'s records and GDAL's JSON, the gdalinfo / pdal info a person needs first ("Dataset information", below) |
 | Online - Web Services | Online Data... | `interop::fetchOnlineLayer`: imagery, elevation and features from public web services, warped or reprojected into the project's CRS and taken in through `importRaster` and `importVector`; the `ONLINE` verbs do the same (`docs/gis_online.md`) |
 | Processing - GDAL | Formats... | the `FORMATS` verb: every format this GDAL reads and writes, and a driver's options ("Formats", above) |
@@ -669,7 +669,20 @@ Decisions, and what was rejected:
   a file cannot be described two ways.
 * **A point cloud's export says when it is a sample.** A budgeted import holds
   one point in N; Export Point Cloud asks before writing a sample as though it
-  were the survey, and points at Convert to COPC for the whole file.
+  were the survey, and points at Convert to COPC for the whole file. The
+  writing is the `EXPORT` verb's (`EXPORT <file.las|.laz> [CLOUD <id|name>]
+  [PREVIEW]`, `src/katana_app/geo/export_verb.cpp`), so `katana_cli` and
+  `katana_export`'s `cloud` write a cloud as the item does. A line has nobody
+  to ask, so its reply says it instead: `sample=yes` and a `warning` naming
+  COPC (`GisVerbs.ExportOfAPointCloudWritesTheCloudAsHeldAndSaysWhenItIsASample`,
+  `cli.gis_export_writes_a_reference_cloud_and_says_when_it_is_a_sample`,
+  `McpServer.ExportWritesAReferenceCloudByIdOrName`). A .las or .laz path is
+  a cloud's, never the drawing's: no vector driver EXPORT picks writes one.
+  Without `CLOUD` the one cloud there is is written, and with several the
+  line is refused rather than one guessed. A `.copc.laz` is refused: COPC
+  rewrites a file whole, and a sample written under that name would read as
+  the survey. Headless, the item points at the line rather than open a file
+  dialog nobody can close, as Convert to COPC does.
 * **Surfaces use the libraries.** Surface From Raster re-reads the band's
   true values through GDAL (`readRasterElevations`) on a stride that keeps the
   whole extent under the triangulation cap (QT-24: the old stride could pass

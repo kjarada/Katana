@@ -468,6 +468,34 @@ TEST_F(McpServer, ImportLocalMovesAQuotedPathsDataToTheOrigin)
     EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.y, -20.5);
 }
 
+// katana_export's cloud writes a reference point cloud to a .laz, as GIS >
+// Export Point Cloud does: the scan's 40 000 points (`pdal info`), all held,
+// so no sample and no warning.
+TEST_F(McpServer, ExportWritesAReferenceCloudByIdOrName)
+{
+    initialize();
+    const TempDir folder("export-cloud");
+    const Json imported = call(
+        "katana_import",
+        Json{{"path",
+              (std::filesystem::path(KATANA_GIS_SAMPLES) / "survey_scan.las").generic_string()}});
+    ASSERT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    const Json exported =
+        call("katana_export", Json{{"path", folder.file("scan.laz")}, {"cloud", "survey_scan"}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    const Json& record = exported["structuredContent"]["records"][0];
+    EXPECT_EQ(record["record"], "exported");
+    EXPECT_EQ(record["kind"], "cloud");
+    EXPECT_EQ(record["points"], 40000);
+    EXPECT_EQ(record["sample"], false); // yes/no is a boolean in the records
+    EXPECT_TRUE(std::filesystem::exists(folder.file("scan.laz")));
+    const Json byId = call("katana_export", Json{{"path", folder.file("again.las")}, {"cloud", 1}});
+    EXPECT_FALSE(byId["isError"].get<bool>()) << textOf(byId);
+    const Json refused =
+        call("katana_export", Json{{"path", folder.file("x.las")}, {"cloud", "nothing"}});
+    EXPECT_TRUE(refused["isError"].get<bool>()) << textOf(refused);
+}
+
 TEST_F(McpServer, ImportReturnsStructuredRecords)
 {
     // The reply's records as objects, numbers as numbers: an agent reads the

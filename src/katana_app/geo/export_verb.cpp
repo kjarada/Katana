@@ -7,6 +7,11 @@
 //   EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
 //          [crs=project|native|<code>] [co=K=V]... [lco=K=V]...
 //          [text=points|skip] [curve=<m>] [properties=yes|no] [PREVIEW]
+//   EXPORT <file.las|.laz> [CLOUD <id|name>] [PREVIEW]
+//
+// A .las or .laz is a reference point cloud's, not the drawing's: the points
+// the session holds, written by PDAL - the sample, when the import was
+// budgeted, which the reply says (GIS > Export Point Cloud runs this line).
 //
 // The scope is the one grammar (cad::parseScopeWords, resolved by
 // cad::matchScope): no scope words is the whole drawing, as EXPORT always
@@ -21,6 +26,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <system_error>
@@ -38,6 +44,7 @@
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
+#include "katana/interop/reference_data.hpp"
 #include "replies.hpp"
 #include "staged_files.hpp"
 #include "vector_support.hpp"
@@ -56,7 +63,7 @@ namespace {
 constexpr const char* kUsage =
     "usage: EXPORT <file> [<scope>] [layername=<n> | split=layer] [append] "
     "[crs=project|native|<code>] [co=K=V]... [lco=K=V]... [text=points|skip] [curve=<m>] "
-    "[properties=yes|no] [PREVIEW]";
+    "[properties=yes|no] [PREVIEW] | EXPORT <file.las|.laz> [CLOUD <id|name>] [PREVIEW]";
 
 // The option keys, lower case. co= and lco= are read apart: each may be given
 // more than once. layername= and not layer=: an option key is never a WHERE
@@ -87,7 +94,121 @@ bool beginsOptions(const Tokens& tokens, std::size_t i)
     if (tokens.quoted[i]) {
         return false;
     }
-    return tokens.is(i, "APPEND") || tokens.is(i, "PREVIEW") || katana::cad::isScopeWord(word);
+    return tokens.is(i, "APPEND") || tokens.is(i, "PREVIEW") || tokens.is(i, "CLOUD") ||
+           katana::cad::isScopeWord(word);
+}
+
+// A point cloud's file: .las or .laz, what exportPointCloud writes
+// (interop::pointCloudExportFormats). A .copc.laz is not: COPC rewrites a
+// file whole, and a sample written as one would read as the survey.
+std::optional<std::string> cloudFormat(const std::filesystem::path& file)
+{
+    const std::string name = katana::core::lowered(pathText(file.filename()));
+    if (name.ends_with(".copc.laz")) {
+        return std::nullopt;
+    }
+    for (const interop::FormatChoice& format : interop::pointCloudExportFormats()) {
+        if (name.ends_with("." + format.extension)) {
+            return format.extension;
+        }
+    }
+    return std::nullopt;
+}
+
+// EXPORT <file.las|.laz> [CLOUD <id|name>] [PREVIEW]: the reference cloud the
+// line names - or the one there is - as held, copied now for the worker (the
+// cloud is the reference data's, and could be removed while the job runs),
+// written beside its place and put there by the apply.
+Result<Prepared> exportCloud(Context& context, const Tokens& tokens, std::size_t first,
+                             const std::filesystem::path& file, const std::string& format)
+{
+    std::string named;
+    bool preview = false;
+    for (std::size_t i = first; i < tokens.size(); ++i) {
+        if (tokens.is(i, "CLOUD") && named.empty() && i + 1 < tokens.size()) {
+            named = tokens[++i];
+        } else if (tokens.is(i, "PREVIEW")) {
+            preview = true;
+        } else {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a point cloud's export takes CLOUD <id|name> and PREVIEW; it writes "
+                             "the cloud as held, with no scope or format options",
+                             tokens[i]);
+        }
+    }
+    const std::vector<interop::PointCloudLayer>& clouds = context.reference.pointClouds();
+    const interop::PointCloudLayer* cloud = nullptr;
+    if (named.empty()) {
+        if (clouds.size() != 1) {
+            return makeError(ErrorCode::InvalidArgument,
+                             clouds.empty() ? std::string("there is no point cloud to export; "
+                                                          "IMPORT one first")
+                                            : "CLOUD <id|name> says which point cloud; REFS "
+                                              "lists them",
+                             pathText(file));
+        }
+        cloud = &clouds.front();
+    } else {
+        // By id first, then by name in any case, as SURFACE FROM CLOUD finds one.
+        const auto byId = std::ranges::find_if(clouds, [&](const interop::PointCloudLayer& each) {
+            return std::to_string(each.id) == named;
+        });
+        const auto byName = std::ranges::find_if(clouds, [&](const interop::PointCloudLayer& each) {
+            return katana::core::equalsIgnoringCase(each.name, named);
+        });
+        cloud = byId != clouds.end() ? &*byId : byName != clouds.end() ? &*byName : nullptr;
+        if (cloud == nullptr) {
+            return makeError(ErrorCode::NotFound,
+                             "no point cloud has that id or name; REFS lists the reference layers",
+                             named);
+        }
+    }
+    const bool sample = cloud->isDecimated();
+    const std::string record = "export file=" + value(pathText(file)) +
+                               " kind=cloud format=" + format + " cloud=" + value(cloud->name) +
+                               " id=" + std::to_string(cloud->id) +
+                               " points=" + std::to_string(cloud->points.size()) +
+                               " source_points=" + std::to_string(cloud->sourcePointCount) +
+                               " sample=" + (sample ? "yes" : "no");
+    // Said, not asked: a headless run has nobody to ask, and the window asks
+    // before it writes the line.
+    const std::string warning =
+        sample ? "\n" + warningText("the cloud holds a sample of its file, and the sample is what "
+                                    "is written; COPC <source> <destination.copc.laz> rewrites "
+                                    "the whole file")
+               : std::string();
+    Prepared prepared;
+    prepared.title = "EXPORT " + pathText(file.filename());
+    if (preview) {
+        prepared.reply = record + " preview=yes" + warning;
+        return prepared;
+    }
+    auto held = std::make_shared<const interop::PointCloudLayer>(*cloud);
+    const std::string reply = "exported" + record.substr(std::string("export").size()) + warning;
+    prepared.work = [file, held, reply](const std::stop_token& stop,
+                                        const Progress&) -> Result<Apply> {
+        if (stop.stop_requested()) {
+            return makeError(ErrorCode::InvalidState, "cancelled");
+        }
+        auto staged = StagedFiles::beside(file);
+        if (!staged) {
+            return staged.error();
+        }
+        if (auto written = interop::exportPointCloud(*held, (*staged)->writeTo()); !written) {
+            return (*staged)->asTarget(written.error());
+        }
+        if (stop.stop_requested()) {
+            return makeError(ErrorCode::InvalidState, "cancelled");
+        }
+        const std::shared_ptr<StagedFiles> files = *staged;
+        return Apply([files, reply](Context&) -> Result<std::string> {
+            if (auto placed = files->place(); !placed) {
+                return placed.error();
+            }
+            return reply;
+        });
+    };
+    return prepared;
 }
 
 // What the work writes from: copies, never the Document.
@@ -211,6 +332,9 @@ Result<Prepared> prepareExport(Context& context, const Tokens& tokens, std::stri
         return makeError(ErrorCode::InvalidArgument, kUsage);
     }
     const std::filesystem::path file = pathFromText(path);
+    if (const std::optional<std::string> format = cloudFormat(file)) {
+        return exportCloud(context, tokens, first, file, *format);
+    }
     const Kind kind = katana::dxf::isDxfPath(file) ? Kind::Dxf
                       : interop::kindForPath(file) == interop::SourceKind::Archive12d
                           ? Kind::Archive

@@ -303,12 +303,15 @@ const std::vector<VerbEntry>& verbTable()
              "          [oo=K=V]... ; every kind: [crs=project|adopt] [srs=<code>] [PREVIEW];\n"
              "          a raster: [band=N] [subdataset=N|name] [maxpixels=N] [name=<n>];\n"
              "          a point cloud: [budget=N] [class=N] [resolution=<m>] [name=<n>]"});
-        rows.push_back({"EXPORT", "", &prepareExport,
-                        "EXPORT <file> [<scope>]  the drawing, or what the scope takes of it, by\n"
-                        "          extension (.dxf, .12da with the surfaces, GeoPackage, GeoJSON,\n"
-                        "          shapefile ...); GDAL's formats also [layername=<n> | split=layer]\n"
-                        "          [append] [crs=project|native|<code>] [co=K=V]... [lco=K=V]...\n"
-                        "          [text=points|skip] [curve=<m>] [properties=yes|no]; [PREVIEW]"});
+        rows.push_back(
+            {"EXPORT", "", &prepareExport,
+             "EXPORT <file> [<scope>]  the drawing, or what the scope takes of it, by\n"
+             "          extension (.dxf, .12da with the surfaces, GeoPackage, GeoJSON,\n"
+             "          shapefile ...); GDAL's formats also [layername=<n> | split=layer]\n"
+             "          [append] [crs=project|native|<code>] [co=K=V]... [lco=K=V]...\n"
+             "          [text=points|skip] [curve=<m>] [properties=yes|no]; [PREVIEW]\n"
+             "          EXPORT <file.las|.laz> [CLOUD <id|name>] [PREVIEW]  a reference\n"
+             "          point cloud as held (a budgeted import's sample, said so)"});
         rows.push_back({"INFO", "", &prepareInfo,
                         "INFO <file|folder|url> [JSON] [STATS] [CHECK] [LAYER <name>]  what a\n"
                         "          GIS file, a folder or a point cloud holds, without importing it:\n"

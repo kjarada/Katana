@@ -417,6 +417,15 @@ std::string importOptionWords(const Json& arguments)
 std::string exportOptionWords(const Json& arguments)
 {
     std::string words;
+    if (const Json& cloud = argument(arguments, "cloud"); !cloud.is_null()) {
+        if (cloud.is_number_integer()) {
+            words += " CLOUD " + std::to_string(cloud.get<long long>());
+        } else if (cloud.is_string() && !cloud.get<std::string>().empty()) {
+            words += " CLOUD " + quoted(cloud.get<std::string>());
+        } else {
+            throw ToolRefusal{"\"cloud\" is a reference point cloud's id or name"};
+        }
+    }
     const Json& scope = argument(arguments, "scope");
     const Json& area = argument(arguments, "area");
     if (!scope.is_null() || !area.is_null()) {
@@ -916,9 +925,8 @@ const std::vector<Tool>& tools()
                      {"where",
                       {{"type", "array"},
                        {"items", {{"type", "string"}}},
-                       {"description",
-                        "Conditions on what the scope takes: [\"TYPE=polyline\", "
-                        "\"PROP=owner:Smith*\"]."}}},
+                       {"description", "Conditions on what the scope takes: [\"TYPE=polyline\", "
+                                       "\"PROP=owner:Smith*\"]."}}},
                      {"layer_name",
                       {{"type", "string"},
                        {"description", "The layer's name in the file (layername=)."}}},
@@ -962,6 +970,12 @@ const std::vector<Tool>& tools()
                      {"properties",
                       {{"type", "boolean"},
                        {"description", "false: entity properties are not written."}}},
+                     {"cloud",
+                      {{"type", {"integer", "string"}},
+                       {"description",
+                        "With a .las or .laz path: the reference point cloud to write, by id or "
+                        "name (CLOUD); the one there is when absent. The points held are "
+                        "written, a budgeted import's sample included, which the reply says."}}},
                      {"preview",
                       {{"type", "boolean"},
                        {"description",

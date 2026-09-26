@@ -305,6 +305,63 @@ TEST_F(GisVerbs, CopcRecordsTheFileAndLeavesNothingBesideIt)
               std::string::npos);
 }
 
+// EXPORT <file.las|.laz> writes a reference cloud as it is held, which GIS >
+// Export Point Cloud runs: a budgeted import holds a sample, and the reply
+// says so rather than passing it off as the survey. The file read back holds
+// what was held; the file's 40 000 points (`pdal info`) are its source's.
+TEST_F(GisVerbs, ExportOfAPointCloudWritesTheCloudAsHeldAndSaysWhenItIsASample)
+{
+    auto imported = run("IMPORT " + quoted(kSamples + "/survey_scan.las") + " budget=10000");
+    ASSERT_TRUE(imported.ok()) << imported.error().describe();
+    const auto layer = recordsOf(*run("REFS LIST"), "reference");
+    ASSERT_EQ(layer.size(), 1u);
+    const std::string held = field(layer[0], "points");
+    ASSERT_NE(held, "40000"); // a sample, or the test proves nothing about one
+
+    const std::string file = scratch.file("scan sample.laz");
+    auto previewed = run("EXPORT " + quoted(file) + " PREVIEW");
+    ASSERT_TRUE(previewed.ok()) << previewed.error().describe();
+    EXPECT_TRUE(scratch.names().empty());
+
+    // No CLOUD: the one there is.
+    auto reply = run("EXPORT " + quoted(file));
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    const auto exported = recordsOf(*reply, "exported");
+    ASSERT_EQ(exported.size(), 1u) << *reply;
+    EXPECT_EQ(field(exported[0], "kind"), "cloud");
+    EXPECT_EQ(field(exported[0], "format"), "laz");
+    EXPECT_EQ(field(exported[0], "cloud"), "survey_scan");
+    EXPECT_EQ(field(exported[0], "points"), held);
+    EXPECT_EQ(field(exported[0], "source_points"), "40000");
+    EXPECT_EQ(field(exported[0], "sample"), "yes");
+    EXPECT_EQ(recordsOf(*reply, "warning").size(), 1u) << *reply;
+    EXPECT_EQ(scratch.names(), std::vector<std::string>{"scan sample.laz"});
+    auto described = run("INFO " + quoted(file));
+    ASSERT_TRUE(described.ok()) << described.error().describe();
+    const auto cloud = recordsOf(*described, "pointcloud");
+    ASSERT_EQ(cloud.size(), 1u) << *described;
+    EXPECT_EQ(field(cloud[0], "points"), held);
+
+    // Two clouds: CLOUD says which, by id or name; without it, refused.
+    ASSERT_TRUE(run("IMPORT " + quoted(kSamples + "/survey_scan.las")).ok());
+    auto ambiguous = run("EXPORT " + quoted(scratch.file("whole.las")));
+    ASSERT_FALSE(ambiguous.ok());
+    EXPECT_EQ(ambiguous.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(ambiguous.error().message.find("CLOUD <id|name>"), std::string::npos);
+    auto whole = run("EXPORT " + quoted(scratch.file("whole.las")) + " CLOUD 2");
+    ASSERT_TRUE(whole.ok()) << whole.error().describe();
+    EXPECT_EQ(field(recordsOf(*whole, "exported").at(0), "points"), "40000");
+    EXPECT_EQ(field(recordsOf(*whole, "exported").at(0), "sample"), "no");
+    EXPECT_TRUE(recordsOf(*whole, "warning").empty()) << *whole;
+
+    // What a cloud's export does not take is refused, not ignored.
+    for (const std::string& line : {"EXPORT " + quoted(scratch.file("x.las")) + " DRAWING",
+                                    "EXPORT " + quoted(scratch.file("x.las")) + " CLOUD nothing",
+                                    "EXPORT " + quoted(scratch.file("x.copc.laz")) + " CLOUD 2"}) {
+        EXPECT_FALSE(run(line).ok()) << line;
+    }
+}
+
 TEST_F(GisVerbs, ACancelledImportImportsNothing)
 {
     const std::string line = "IMPORT " + quoted(kSamples + "/parcels.geojson");
