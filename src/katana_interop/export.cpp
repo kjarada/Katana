@@ -7,6 +7,7 @@
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/pointcloud/point_cloud_engine.hpp"
+#include "curve_chords.hpp"
 
 namespace katana::interop {
 namespace {
@@ -31,38 +32,10 @@ katana::gis::GeoPoint toGeo(const Point2& point, const std::optional<Vec2>& orig
     return katana::gis::GeoPoint{point.x, point.y, 0.0};
 }
 
-// Number of chords needed so a circular arc of `radius` spanning `sweep` never
-// deviates from the polyline by more than `tolerance`.
-//
-// The sagitta of a chord subtending an angle phi is r * (1 - cos(phi/2)), so the
-// largest admissible phi is 2 * acos(1 - tolerance / r). When the tolerance is
-// at or beyond the radius the whole arc is within tolerance of a single chord
-// and the formula degenerates, so that case is handled separately rather than
-// left to produce a NaN.
-int chordCount(double radius, double sweep, double tolerance)
-{
-    const double absSweep = std::abs(sweep);
-    if (!(radius > 0.0) || !(absSweep > 0.0)) {
-        return 1;
-    }
-    if (!(tolerance > 0.0)) {
-        return 64; // a caller that asked for zero error gets a fine default
-    }
-    if (tolerance >= radius) {
-        return 1;
-    }
-    const double maxAngle = 2.0 * std::acos(1.0 - tolerance / radius);
-    if (!(maxAngle > 0.0) || !std::isfinite(maxAngle)) {
-        return 4096;
-    }
-    const auto count = static_cast<int>(std::ceil(absSweep / maxAngle));
-    return std::clamp(count, 1, 4096);
-}
-
 std::vector<katana::gis::GeoPoint> tessellateArc(const Arc2& arc, double tolerance,
                                                  const std::optional<Vec2>& origin)
 {
-    const int segments = chordCount(arc.radius, arc.sweep, tolerance);
+    const int segments = detail::chordCount(arc.radius, arc.sweep, tolerance);
     std::vector<katana::gis::GeoPoint> points;
     points.reserve(static_cast<std::size_t>(segments) + 1);
     for (int i = 0; i <= segments; ++i) {
@@ -75,7 +48,8 @@ std::vector<katana::gis::GeoPoint> tessellateArc(const Arc2& arc, double toleran
 std::vector<katana::gis::GeoPoint> tessellateCircle(const Circle2& circle, double tolerance,
                                                     const std::optional<Vec2>& origin)
 {
-    const int segments = std::max(3, chordCount(circle.radius, katana::math::kTwoPi, tolerance));
+    const int segments =
+        std::max(3, detail::chordCount(circle.radius, katana::math::kTwoPi, tolerance));
     std::vector<katana::gis::GeoPoint> points;
     points.reserve(static_cast<std::size_t>(segments));
     for (int i = 0; i < segments; ++i) {

@@ -1,4 +1,4 @@
-#include "gis_dialogs.hpp"
+#include "gis_import_dialogs.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -9,7 +9,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -21,6 +20,7 @@
 #include <utility>
 
 #include "format.hpp"
+#include "gis_dialog_support.hpp"
 #include "import_placement.hpp"
 #include "katana/pointcloud/point_cloud_engine.hpp"
 #include "theme.hpp"
@@ -43,15 +43,6 @@ QLabel* summaryLabel(const interop::SourceDescription& source, QWidget* parent)
     label->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
     label->setWordWrap(false);
     return label;
-}
-
-QDialogButtonBox* okCancel(QDialog* dialog, const QString& okText)
-{
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
-    buttons->button(QDialogButtonBox::Ok)->setText(okText);
-    QObject::connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
-    QObject::connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-    return buttons;
 }
 
 // ASPRS LAS 1.4 R15 table 17, the standard point classes. 8 and 12 are
@@ -274,164 +265,6 @@ interop::PointCloudImportOptions PointCloudImportDialog::options() const
         options.resolution = resolution_->value();
     }
     return options;
-}
-
-// ---- vector export --------------------------------------------------------------------------
-
-VectorExportDialog::VectorExportDialog(const QString& format, std::size_t selected, QWidget* parent)
-    : QDialog(parent)
-{
-    setWindowTitle("Export Vector Data - " + format);
-    auto* layout = new QVBoxLayout(this);
-    auto* form = new QFormLayout();
-
-    selectedOnly_ = new QCheckBox(
-        selected == 0 ? QString("Selected entities only (nothing is selected)")
-                      : QString("Only the %1 selected entities").arg(grouped(selected)),
-        this);
-    selectedOnly_->setEnabled(selected != 0);
-    selectedOnly_->setChecked(selected != 0);
-    form->addRow(QString(), selectedOnly_);
-
-    const interop::VectorExportOptions defaults;
-    layerName_ = new QLineEdit(QString::fromStdString(defaults.layerName), this);
-    layerName_->setToolTip("The layer's name inside the file, for formats that hold several "
-                           "(GeoPackage, KML). Katana's own layers go out as each feature's "
-                           "'layer' attribute.");
-    form->addRow("Layer name in the file:", layerName_);
-
-    // Arcs and circles have no exact form in these formats. The tolerance is
-    // the sagitta - the furthest a chord may stray from the true curve - and
-    // is the user's to choose, because it is a loss of accuracy.
-    curveTolerance_ = new QDoubleSpinBox(this);
-    curveTolerance_->setDecimals(4);
-    curveTolerance_->setRange(0.0001, 100.0);
-    curveTolerance_->setValue(defaults.curveTolerance);
-    curveTolerance_->setSuffix(" units");
-    form->addRow("Arcs as chords within:", curveTolerance_);
-
-    properties_ = new QCheckBox("Write entity properties as attributes", this);
-    properties_->setChecked(defaults.propertiesAsAttributes);
-    form->addRow(QString(), properties_);
-
-    layout->addLayout(form);
-    layout->addWidget(okCancel(this, "Export"));
-}
-
-bool VectorExportDialog::selectedOnly() const
-{
-    return selectedOnly_->isEnabled() && selectedOnly_->isChecked();
-}
-
-void VectorExportDialog::apply(interop::VectorExportOptions& options) const
-{
-    if (const QString name = layerName_->text().trimmed(); !name.isEmpty()) {
-        options.layerName = name.toStdString();
-    }
-    options.curveTolerance = curveTolerance_->value();
-    options.propertiesAsAttributes = properties_->isChecked();
-}
-
-// ---- surface -> DEM -------------------------------------------------------------------------
-
-SurfaceRasterDialog::SurfaceRasterDialog(std::vector<SurfaceChoice> surfaces, QWidget* parent)
-    : QDialog(parent), surfaces_(std::move(surfaces))
-{
-    setWindowTitle("Export Surface as DEM");
-    auto* layout = new QVBoxLayout(this);
-    auto* form = new QFormLayout();
-
-    surface_ = new QComboBox(this);
-    for (const SurfaceChoice& choice : surfaces_) {
-        surface_->addItem(choice.name);
-    }
-    form->addRow("Surface:", surface_);
-
-    cellSize_ = new QDoubleSpinBox(this);
-    cellSize_->setDecimals(3);
-    cellSize_->setRange(0.001, 100'000.0);
-    cellSize_->setSuffix(" units");
-    form->addRow("Cell size:", cellSize_);
-
-    grid_ = new QLabel(this);
-    form->addRow("Grid:", grid_);
-    auto* note = new QLabel("Each cell holds the surface's elevation at its centre; a cell "
-                            "whose centre is off the surface is no-data.",
-                            this);
-    note->setWordWrap(true);
-    note->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
-    form->addRow(QString(), note);
-    layout->addLayout(form);
-    buttons_ = okCancel(this, "Export");
-    layout->addWidget(buttons_);
-
-    const auto suggest = [this] {
-        const int index = surfaceIndex();
-        if (index >= 0) {
-            cellSize_->setValue(interop::suggestedCellSize(surfaces_[static_cast<std::size_t>(index)].bounds));
-        }
-    };
-    connect(surface_, &QComboBox::currentIndexChanged, this, [this, suggest] {
-        suggest();
-        refreshGrid();
-    });
-    connect(cellSize_, &QDoubleSpinBox::valueChanged, this, [this] { refreshGrid(); });
-    suggest();
-    refreshGrid();
-}
-
-int SurfaceRasterDialog::surfaceIndex() const { return surface_->currentIndex(); }
-
-interop::SurfaceRasterOptions SurfaceRasterDialog::options() const
-{
-    interop::SurfaceRasterOptions options;
-    options.cellSize = cellSize_->value();
-    return options;
-}
-
-// The grid the export will write, with the same arithmetic and the same
-// ceiling as exportSurfaceRaster, so OK is refused here rather than failing
-// after the file dialog.
-void SurfaceRasterDialog::refreshGrid()
-{
-    const int index = surfaceIndex();
-    QPushButton* ok = buttons_->button(QDialogButtonBox::Ok);
-    if (index < 0) {
-        grid_->setText("no surface");
-        ok->setEnabled(false);
-        return;
-    }
-    const katana::geometry::Box2& bounds = surfaces_[static_cast<std::size_t>(index)].bounds;
-    const double cell = cellSize_->value();
-    const double columns = std::max(1.0, std::ceil(bounds.width() / cell));
-    const double rows = std::max(1.0, std::ceil(bounds.height() / cell));
-    const double cells = columns * rows;
-    const auto limit = static_cast<double>(interop::SurfaceRasterOptions{}.maxCells);
-    grid_->setText(QString("%1 x %2 cells%3")
-                       .arg(grouped(static_cast<std::uint64_t>(columns)))
-                       .arg(grouped(static_cast<std::uint64_t>(rows)))
-                       .arg(cells > limit ? QString(" - over the %1-cell limit; use a larger cell")
-                                                .arg(grouped(static_cast<std::uint64_t>(limit)))
-                                          : QString()));
-    ok->setEnabled(cells <= limit);
-}
-
-// ---- information ----------------------------------------------------------------------------
-
-DatasetInfoDialog::DatasetInfoDialog(const QString& title, const QString& text, QWidget* parent)
-    : QDialog(parent)
-{
-    setWindowTitle(title);
-    resize(720, 480);
-    auto* layout = new QVBoxLayout(this);
-    auto* view = new QPlainTextEdit(text, this);
-    view->setReadOnly(true);
-    view->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    view->setLineWrapMode(QPlainTextEdit::NoWrap);
-    layout->addWidget(view);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    layout->addWidget(buttons);
 }
 
 } // namespace katana::qt

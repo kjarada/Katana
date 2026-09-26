@@ -13,7 +13,10 @@
 #include "attribute_manager.hpp"
 #include "customisation/drawing_summary_dialog.hpp"
 #include "format.hpp"
-#include "gis_dialogs.hpp"
+#include "dataset_info_dialog.hpp"
+#include "gis_export_dialog.hpp"
+#include "gis_import_dialogs.hpp"
+#include "surface_raster_dialog.hpp"
 #include "jobs.hpp"
 #include "layer_manager.hpp"
 #include "plan_context_menu.hpp"
@@ -954,6 +957,10 @@ void MainWindow::buildActions()
 
     // ---- GIS ---------------------------------------------------------------------------
     buildGisActions(*gisMenu, exportAction);
+    // The geoprocessing packages' items, GIS sections and Terrain submenus,
+    // from their one table (geo/menu_table.cpp).
+    GeoMenus geoMenus(*gisMenu, *terrainMenu);
+    buildGeoMenus(geoMenus, *geo_);
 
     // ---- Help ------------------------------------------------------------------------
     // The reference and the shortcuts are dialogs of their own, non-modal and
@@ -1094,6 +1101,31 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
         return chooseProjectCrs(this, document_, place);
     };
     online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
+
+    // The geoprocessing verbs: the executor's context is this window's
+    // drawing, interpreter (VIEW is its plan view), reference rasters and
+    // surfaces.
+    GeoServices geo;
+    geo.document = &document_;
+    geo.interpreter = &interpreter_;
+    geo.reference = &reference_;
+    geo.surfaces = &surfaceStore_;
+    geo.scratch = katana::app::geo::defaultScratch();
+    geo.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    geo.headless = [this] { return headless_; };
+    geo.frame = [this](const katana::geometry::Box2& box) { views_->zoomTo(box); };
+    geo.changed = [this] {
+        views_->invalidateReferenceCache();
+        refreshReferences();
+        syncSceneSurfaces();
+        views_->refreshAll();
+    };
+    geo.run = commandRunner();
+    geo.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                            const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    geo_ = std::make_unique<GeoWorkbench>(*this, std::move(geo));
 
     QToolBar* gisBar = makeToolBar("GIS", Qt::TopToolBarArea);
     gisBar->addActions({importVector, importRaster, importCloud});
@@ -2458,6 +2490,11 @@ void MainWindow::runTypedLine(const QString& line)
 
 bool MainWindow::runWorkbenchLine(const QString& line)
 {
+    // GDAL and the geoprocessing families after it: the executor katana_cli
+    // and katana_mcp share, run here as background jobs.
+    if (geo_ != nullptr && geo_->runLine(line)) {
+        return true;
+    }
     // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
     // workbench's, as the interoperability verbs are the window's.
     if (online_ != nullptr && online_->runLine(line)) {
@@ -2837,6 +2874,7 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
     // word, HELP SHEETS and HELP UTILITY stay the interpreter's.
     if ((verb == "HELP" || verb == "?") && words.size() == 1) {
         runInterpreterLine(line, verb);
+        logMessage(QString::fromStdString(katana::app::geo::helpText()));
         logMessage(windowHelpText());
         return;
     }
@@ -4207,6 +4245,7 @@ void MainWindow::clearSceneData()
     sceneSurfaces_.clear();
     sceneMeshes_.clear();
     surfaceStore_.clear();
+    sceneSurfacesRevision_ = surfaceStore_.revision();
     meshStore_.clear();
     views_->drawingReplaced();
 }
@@ -4755,20 +4794,47 @@ void MainWindow::addMesh(std::string name, katana::geometry::TriangleMesh mesh,
     views_->setMeshes(&sceneMeshes_);
 }
 
+void MainWindow::syncSceneSurfaces()
+{
+    if (sceneSurfacesRevision_ == surfaceStore_.revision()) {
+        return;
+    }
+    std::vector<cad::SceneSurface> next;
+    next.reserve(surfaceStore_.all().size());
+    for (const katana::terrain::NamedSurface& named : surfaceStore_.all()) {
+        cad::SceneSurface item;
+        const auto kept = std::ranges::find_if(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
+            return shown.surface == named.surface.get();
+        });
+        if (kept != sceneSurfaces_.end()) {
+            item = *kept; // its style, colouring and visibility
+        }
+        item.name = named.name;
+        item.surface = named.surface.get();
+        next.push_back(std::move(item));
+    }
+    sceneSurfaces_ = std::move(next);
+    sceneSurfacesRevision_ = surfaceStore_.revision();
+    // The views hold a pointer to the VECTOR, not to its elements, so this is a
+    // refresh rather than a repair; the surfaces themselves are shared and
+    // never move.
+    views_->setSurfaces(&sceneSurfaces_);
+}
+
 void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surface)
 {
-    surfaceStore_.push_back(
-        std::make_unique<katana::terrain::TinSurface>(std::move(surface)));
-
-    cad::SceneSurface item;
-    item.name = std::move(name);
-    item.surface = surfaceStore_.back().get();
-    sceneSurfaces_.push_back(item);
-
-    // The views hold a pointer to the VECTOR, not to its elements, so this is a
-    // refresh rather than a repair - and the surfaces themselves are behind
-    // unique_ptr precisely so that this push_back cannot move them.
-    views_->setSurfaces(&sceneSurfaces_);
+    // A second surface of a name is "name (2)", as the session names a
+    // second alignment: the store keeps names unique, so SURFACE <name>
+    // finds one.
+    const std::string unique = surfaceStore_.uniqueName(name);
+    if (auto added = surfaceStore_.add(
+            {unique, std::make_shared<const katana::terrain::TinSurface>(std::move(surface)), {}});
+        !added) {
+        logMessage(QString::fromStdString(added.error().describe()), true);
+        return;
+    }
+    syncSceneSurfaces();
+    const cad::SceneSurface& item = sceneSurfaces_.back();
     views_->refreshAll();
 
     logMessage(QString("Surface '%1': %2 vertices, %3 triangles, elevation %4 to %5.")

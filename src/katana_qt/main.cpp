@@ -28,7 +28,7 @@
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
-#include "gis_dialogs.hpp"
+#include "dataset_info_dialog.hpp"
 #include "layer_manager.hpp"
 #include "style_manager.hpp"
 #include "katana/cad/plot.hpp"

@@ -1,5 +1,5 @@
 // Where an import lands, in the window (src/katana_qt/import_placement,
-// gis_dialogs): the Placement group driven by its object names, File >
+// gis_import_dialogs): the Placement group driven by its object names, File >
 // Import's step and the IMPORT line it makes, GIS > Import Vector Data's
 // dialog with the group in it, and the one place the window decides where
 // data it has read goes, in a headless session where nobody is asked.
@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-#include "gis_dialogs.hpp"
+#include "gis_import_dialogs.hpp"
 #include "import_placement.hpp"
 #include "katana/cad/command_interpreter.hpp"
 

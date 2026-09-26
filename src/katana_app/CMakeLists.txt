@@ -18,6 +18,12 @@ target_link_libraries(katana_app PRIVATE nlohmann_json::nlohmann_json)
 if(TARGET katana_interop)
     target_link_libraries(katana_app PRIVATE katana_interop)
     target_compile_definitions(katana_app PRIVATE KATANA_WITH_INTEROP=1)
+    # The geoprocessing executor, the GDAL verb and the MCP geoprocessing
+    # tools (docs/geoprocessing.md): GDAL's, so only with the interop module.
+    # Globbed, one directory, so the geoprocessing lanes add their verb
+    # modules without editing this list.
+    file(GLOB _katana_app_geo CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp")
+    target_sources(katana_app PRIVATE ${_katana_app_geo})
 endif()
 
 # Headless command-line front end. Proves the engine is complete without a GUI.
@@ -698,4 +704,14 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.label_layout_names_the_label_that_found_no_room PROPERTIES
         PASS_REGULAR_EXPRESSION
         "considered=2 placed=1 displaced=0 suppressed=1 orphaned=0[\r\n]+label=3 piece=0 [^\r\n]*[\r\n]+label=4 piece=0 suppressed=yes.*updated label id=4.*considered=2 placed=2 displaced=1 suppressed=0 orphaned=0")
+endif()
+
+# The geoprocessing verbs' cli.* tests, one file per package of the
+# geoprocessing plan (geo/cli/*.cmake), so the lanes add tests without editing
+# this file. Included here, where katana_cli and the test variables are.
+if(KATANA_BUILD_TESTS AND TARGET katana_interop)
+    file(GLOB _katana_geo_cli_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/cli/*.cmake")
+    foreach(_geo_cli_test IN LISTS _katana_geo_cli_tests)
+        include("${_geo_cli_test}")
+    endforeach()
 endif()
