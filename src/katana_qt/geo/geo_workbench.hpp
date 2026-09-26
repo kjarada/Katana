@@ -40,6 +40,8 @@ class QMenu;
 
 namespace katana::qt {
 
+class ViewWorkspace;
+
 struct GeoServices {
     katana::cad::Document* document = nullptr;
     katana::cad::CommandInterpreter* interpreter = nullptr;
@@ -58,6 +60,9 @@ struct GeoServices {
     CommandRunner run;
     // A job ended: its id and what it logged. May be empty.
     std::function<void(JobId, const VerbOutcome&)> finished;
+    // The workspace's views, for a dialog's scope and filter controls (the
+    // View choice). May be null.
+    ViewWorkspace* views = nullptr;
     std::function<QAction*(Icon icon, const QString& text, const QString& tip,
                            const QKeySequence& shortcut, const QString& objectName)>
         makeAction;
