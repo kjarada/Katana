@@ -175,18 +175,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # verify: the tests run on the runner before packaging, a regular
+          # expression over ctest's names; empty builds no tests. The GPU
+          # suite on macOS proves the Metal renderer against the software
+          # one on a real device, which no other machine here has.
           - name: Linux x86-64
             runner: ubuntu-24.04
             preset: linux-release
             package: linux-x86_64
+            verify: ""
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
             preset: linux-release
             package: linux-aarch64
+            verify: ""
           - name: macOS arm64
             runner: macos-15
             preset: macos-release
             package: macos-arm64
+            verify: "^gpu[.]"
     env:
       HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
@@ -214,9 +221,15 @@ jobs:
             ln -sf "$KATANA_TOOLCHAIN/bin/$tool" "$KATANA_TOOLCHAIN/bin-tools/$tool"
           done
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=OFF -DKATANA_BUILD_BENCHMARKS=OFF
+        run: |
+          tests=OFF
+          if [ -n "${{ matrix.verify }}" ]; then tests=ON; fi
+          cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=$tests -DKATANA_BUILD_BENCHMARKS=OFF
       - name: Build
         run: cmake --build build/${{ matrix.preset }} --parallel
+      - name: Verify
+        if: matrix.verify != ''
+        run: ctest --test-dir build/${{ matrix.preset }} -R "${{ matrix.verify }}" --output-on-failure --timeout 600
       # A Developer ID for the publisher, when the repository holds one:
       # MACOS_CERTIFICATE (the .p12, base64), MACOS_CERTIFICATE_PASSWORD and
       # MACOS_SIGN_IDENTITY ("Developer ID Application: <name> (<team>)").

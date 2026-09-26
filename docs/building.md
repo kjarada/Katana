@@ -176,8 +176,8 @@ is built against libc++, and GCC's libstdc++ does not link with them.
 `cmake/toolchains/katana-macos.cmake` sets the compiler, macOS 13 as the
 oldest target, arm64, and the run-time paths (`@loader_path/../lib` when
 installed). What it took to make the code build with clang, the minimum
-version and Gatekeeper are `docs/release.md`, "macOS". The GPU renderer is
-not built there; the 3D view draws with the software rasteriser. The suite has
+version and Gatekeeper are `docs/release.md`, "macOS". The GPU renderer draws
+on Metal there (`docs/gpu.md`). The suite has
 not yet been run on macOS; the release workflow builds and starts the
 package, nothing more.
 
