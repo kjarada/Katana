@@ -25,10 +25,12 @@ namespace katana::app::geo {
 
 // One named surface: surfaceRecord, terrain_verbs.hpp's.
 
-// A record as a JSON object: {"record": kind, field: value ...}. A field is
-// a number when its text is one, true or false for yes and no, bounds a list
-// of four numbers - except the fields that are always words (a file, a name,
-// a sentence), which stay strings whatever they hold: a layer called 12 is a
+// A record as a JSON object: {"record": kind, field: value ...}. The kind is
+// every word before the first key= ("ifc exported"). A field is a number when
+// its text is one, true or false for yes and no, an array of numbers for a
+// comma list of them (bounds, always four or null; a scope's area; a cell of
+// 4,3) - except the fields that are always words (a file, a name, a
+// sentence), which stay strings whatever they hold: a layer called 12 is a
 // name.
 [[nodiscard]] nlohmann::json recordJson(const Record& record);
 

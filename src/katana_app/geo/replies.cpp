@@ -200,8 +200,12 @@ std::vector<Record> parseRecords(std::string_view text)
     for (std::size_t n = 0; n < lines.size(); ++n) {
         const std::string_view line = lines[n];
         Record record;
-        std::size_t i = line.find(' ');
-        record.kind = std::string(line.substr(0, i));
+        // The kind is every word before the first key=: IFC's records have
+        // two ("ifc exported file=..."), and reading one word made the
+        // second part of the first key ("exported file"). A bare word after
+        // the fields is a field with no value, not glued to the next key.
+        std::size_t i = 0;
+        bool fieldsBegun = false;
         while (i != std::string_view::npos && i < line.size()) {
             while (i < line.size() && line[i] == ' ') {
                 ++i;
@@ -210,9 +214,20 @@ std::vector<Record> parseRecords(std::string_view text)
                 break;
             }
             const std::size_t equals = line.find('=', i);
-            if (equals == std::string_view::npos) {
-                break;
+            const std::size_t space = line.find(' ', i);
+            if (equals == std::string_view::npos ||
+                (space != std::string_view::npos && space < equals)) {
+                std::string word(
+                    line.substr(i, space == std::string_view::npos ? space : space - i));
+                if (fieldsBegun) {
+                    record.fields.emplace_back(std::move(word), std::string());
+                } else {
+                    record.kind += (record.kind.empty() ? "" : " ") + word;
+                }
+                i = space;
+                continue;
             }
+            fieldsBegun = true;
             std::string key(line.substr(i, equals - i));
             std::string field;
             i = equals + 1;

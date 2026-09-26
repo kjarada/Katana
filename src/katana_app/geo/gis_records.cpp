@@ -3,8 +3,10 @@
 #include "gis_records.hpp"
 
 #include <array>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "../import_records.hpp"
 #include "katana/core/text.hpp"
@@ -16,6 +18,28 @@ namespace {
 std::string yesNo(bool flag)
 {
     return flag ? "yes" : "no";
+}
+
+// Two or more finite numbers joined by commas; nullopt for anything else,
+// one number included (that is a number, not a list).
+std::optional<std::vector<double>> numberList(std::string_view text)
+{
+    if (text.find(',') == std::string_view::npos) {
+        return std::nullopt;
+    }
+    std::vector<double> numbers;
+    for (std::string_view rest = text;;) {
+        const std::size_t comma = rest.find(',');
+        const auto number = katana::core::parseFiniteDouble(rest.substr(0, comma));
+        if (!number) {
+            return std::nullopt;
+        }
+        numbers.push_back(*number);
+        if (comma == std::string_view::npos) {
+            return numbers;
+        }
+        rest = rest.substr(comma + 1);
+    }
 }
 
 } // namespace
@@ -60,23 +84,17 @@ nlohmann::json recordJson(const Record& record)
             object[key] = text;
             continue;
         }
+        // A list of numbers - bounds and a scope's area x0,y0,x1,y1, a cell
+        // of 4,3, classes 2,6 - is an array of them, so an agent reads a
+        // cell's width without splitting a string. bounds is always four,
+        // or null.
+        if (const std::optional<std::vector<double>> numbers = numberList(text)) {
+            object[key] = key == "bounds" && numbers->size() != 4 ? nlohmann::json(nullptr)
+                                                                  : nlohmann::json(*numbers);
+            continue;
+        }
         if (key == "bounds") {
-            std::array<double, 4> corners{};
-            std::size_t found = 0;
-            std::string_view rest = text;
-            while (found < corners.size()) {
-                const std::size_t comma = rest.find(',');
-                const auto number = katana::core::parseFiniteDouble(rest.substr(0, comma));
-                if (!number) {
-                    break;
-                }
-                corners[found++] = *number;
-                if (comma == std::string_view::npos) {
-                    break;
-                }
-                rest = rest.substr(comma + 1);
-            }
-            object[key] = found == corners.size() ? nlohmann::json(corners) : nlohmann::json(nullptr);
+            object[key] = nullptr;
             continue;
         }
         if (text == "yes" || text == "no") {

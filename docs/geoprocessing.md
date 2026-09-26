@@ -647,7 +647,9 @@ gdal version=3.13.2 release="Iowa City" proj=9.8.1 geos=3.15.0 raster_drivers=14
 The scope record carries the shared `cad::scopeRecord` in its middle, so it
 says what a scope took in the words `MODIFY` and `UTILITY` use.
 `geo::parseRecords` reads the records back; it is how `katana_gdal_run` turns
-the command line's own text into structured content.
+the command line's own text into structured content. A record's kind is
+every word before its first `key=` (`ifc exported`), and a bare word after
+the fields is a field with no value, never glued to the next key.
 
 ### Schemas
 
