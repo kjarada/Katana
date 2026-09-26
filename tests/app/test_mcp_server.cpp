@@ -150,8 +150,8 @@ TEST_F(McpServer, EveryToolIsListedWithAnObjectSchema)
 }
 
 // What an agent reads first names every UTILITY action and the scope words
-// they take, so what is drawn can be graded again and written back without
-// asking HELP first.
+// they take, so what is drawn can be graded again and written back - and a
+// survey or an import drawn as services - without asking HELP first.
 TEST_F(McpServer, TheCommandToolNamesEveryUtilityActionAndTheScopeWords)
 {
     initialize();
@@ -164,9 +164,9 @@ TEST_F(McpServer, TheCommandToolNamesEveryUtilityActionAndTheScopeWords)
     }
     ASSERT_FALSE(description.empty());
     for (const char* word : {"UTILITY REPORT", "VERIFY", "CLEARANCE", "CHECK", "DRAW", "REGRADE",
-                             "SCHEDULE", "HELP UTILITY", "DRAWING", "SELECTION",
-                             "AREA x0,y0,x1,y1", "LAYERS a,b [ONLY]", "WHERE key=value",
-                             "MODIFY"}) {
+                             "SCHEDULE", "HELP UTILITY", "DRAWING", "SELECTION", "AREA x0,y0,x1,y1",
+                             "LAYERS a,b [ONLY]", "WHERE key=value", "MODIFY",
+                             "UTILITY DRAW <scope> METHOD <method>", "FIELDS column=property"}) {
         EXPECT_NE(description.find(word), std::string::npos) << word;
     }
 }

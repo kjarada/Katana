@@ -191,10 +191,13 @@ The AS 5488 subsurface utility verbs (`UTILITY REPORT`, `VERIFY`,
 handed to `utilities::runUtilityVerb` (`include/katana/cad/utilities/`);
 `docs/subsurface_utilities.md`, "UTILITY on the command line", describes
 them. They were `katana_cli`'s own until 2026-09-25; in the interpreter the
-window's command line, `katana_cli` and `katana_mcp` all have them. `REPORT`,
-`VERIFY`, `CLEARANCE` and `CHECK` take a schedule file or what is drawn, by
-the shared scope words ("Scope and filter", below); `REGRADE` and `SCHEDULE`
-only what is drawn, `DRAW` only a file. The reports never touch the drawing. `UTILITY
+window's command line, `katana_cli` and `katana_mcp` all have them. `DRAW`,
+`REPORT`, `VERIFY`, `CLEARANCE` and `CHECK` take a schedule file or what is
+drawn, by the shared scope words ("Scope and filter", below); `REGRADE` and
+`SCHEDULE` only what is drawn. For `DRAW`, what is drawn is the lines,
+polylines and points a survey or an import left, which it draws as services
+(`utilities::readGeometryServices`); for the others, the services `DRAW` drew.
+The reports never touch the drawing. `UTILITY
 DRAW` adds the graded services - layers by type and quality level, a
 linetype per level, a polyline per run at one level, a point per located
 vertex carrying its whole schedule row - as one undo step, `UTILITY REGRADE`
