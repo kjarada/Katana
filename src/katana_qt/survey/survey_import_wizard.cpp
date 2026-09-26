@@ -743,7 +743,7 @@ QWidget* SurveyImportWizard::buildReportPage()
     report_ = new QPlainTextEdit(splitter);
     report_->setObjectName("report");
     report_->setReadOnly(true);
-    report_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    report_->setFont(katana::qt::theme::monospaceFont());
     report_->setLineWrapMode(QPlainTextEdit::NoWrap);
     // The reduction report, for a field file: what will happen to the data.
     importReport_ = new ReductionReportView("importReport", splitter);

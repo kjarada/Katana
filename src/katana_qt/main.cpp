@@ -19,9 +19,11 @@
 #include <QTextDocumentFragment>
 #include <QTextEdit>
 #include <QToolBar>
+#include <QTreeView>
 
 #include <algorithm>
 #include <cstdio>
+#include <functional>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -79,7 +81,8 @@ QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
 // stderr as "NAME: text", so a test can see what a dialog SAYS - an
 // explanation, a count - and not only that it painted. A label's text
 // without its markup, a field's or a text box's text, a list's or a tree's
-// rows (their columns joined by " | ", the rows by " ; "). A NAME that is no
+// rows (their columns joined by " | ", the rows by " ; "; a tree's depth
+// first, down the rows it shows open). A NAME that is no
 // widget there may be one of the window's actions - a menu item or a tool -
 // reported as its text and whether it is checked, so a test can see which
 // tool the menus and toolbars show running. One of the window's menus
@@ -130,14 +133,24 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
     } else if (const auto* view = qobject_cast<const QAbstractItemView*>(widget);
                view != nullptr && view->model() != nullptr) {
         const QAbstractItemModel& model = *view->model();
+        // A tree's rows depth first, down every row it shows open: what a
+        // person reads in it (the Properties panel's groups).
+        const auto* tree = qobject_cast<const QTreeView*>(view);
         QStringList rows;
-        for (int row = 0; row < model.rowCount(); ++row) {
-            QStringList cells;
-            for (int column = 0; column < model.columnCount(); ++column) {
-                cells << model.index(row, column).data().toString();
+        const std::function<void(const QModelIndex&)> walk = [&](const QModelIndex& parent) {
+            for (int row = 0; row < model.rowCount(parent); ++row) {
+                QStringList cells;
+                for (int column = 0; column < model.columnCount(parent); ++column) {
+                    cells << model.index(row, column, parent).data().toString();
+                }
+                rows << cells.join(" | ");
+                const QModelIndex child = model.index(row, 0, parent);
+                if (tree != nullptr && tree->isExpanded(child)) {
+                    walk(child);
+                }
             }
-            rows << cells.join(" | ");
-        }
+        };
+        walk(QModelIndex());
         text = rows.join(" ; ");
     } else {
         std::fprintf(stderr,
@@ -337,6 +350,7 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 //                 [--script FILE...] --screenshot out.png
 //   katana [project-directory] [data-file...] --script FILE... [--command TEXT...]
 //   katana --check-shortcuts --screenshot out.png
+//   katana --check-menus --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -449,6 +463,9 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 // menus share, and fails the run when there is one: Qt disables an
 // ambiguous shortcut for both, so a clash is keys that silently do nothing.
 //
+// --check-menus lists every menu item with no icon or no status tip
+// (MainWindow::menuGaps), and fails the run when there is one.
+//
 // --survey-dialog may be given again: the next dialog opens and the fills and
 // presses after it go to it, so one run can import a file and export it again.
 // --survey-dock ACTION shows the dock that action shows (the Point Manager,
@@ -510,6 +527,7 @@ int main(int argc, char* argv[])
     // --run-line, --enter and --report, in the order given.
     std::vector<std::pair<QString, QString>> surveySteps;
     bool checkShortcuts = false;
+    bool checkMenus = false;
     long long attributeEntity = 0;
     bool fit = true;
     katana::cad::PlotSettings settings;
@@ -593,6 +611,8 @@ int main(int argc, char* argv[])
             surveySteps.emplace_back("--command", QString());
         } else if (argument == "--check-shortcuts") {
             checkShortcuts = true;
+        } else if (argument == "--check-menus") {
+            checkMenus = true;
         } else if (argument == "--attributes") {
             attributeManager = true;
             // An optional entity id: with one entity selected the manager
@@ -663,6 +683,9 @@ int main(int argc, char* argv[])
         window.applyCustomisation(customisation);
     }
     if (!writesOnly && !screenshotPath && !scriptBatch) {
+        // Where the last session left the window, or fitted to the screen:
+        // never in a headless run, whose window is the same everywhere.
+        window.restoreSession();
         window.show();
     }
     for (const QString& input : inputs) {
@@ -716,6 +739,17 @@ int main(int argc, char* argv[])
             }
             std::fprintf(stderr, "shortcuts: %d key sequences, each reaching one thing\n",
                          sequences);
+        }
+        if (checkMenus) {
+            int items = 0;
+            const QStringList gaps = window.menuGaps(&items);
+            for (const QString& gap : gaps) {
+                std::fprintf(stderr, "menu gap: %s\n", qPrintable(gap));
+            }
+            if (!gaps.isEmpty()) {
+                return 1;
+            }
+            std::fprintf(stderr, "menus: %d items, each with an icon and a status tip\n", items);
         }
         if (selectEverything) {
             window.selectAll();

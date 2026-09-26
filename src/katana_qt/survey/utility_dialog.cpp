@@ -526,7 +526,7 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     command_ = new QLineEdit(this);
     command_->setObjectName("utilityCommand");
     command_->setReadOnly(true);
-    command_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    command_->setFont(katana::qt::theme::monospaceFont());
     command_->setToolTip("The line Run hands to the command line - type it there, or give it to "
                          "katana_cli, and it does the same");
     run_ = new QPushButton("Run", this);
@@ -543,7 +543,7 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     output_ = new QPlainTextEdit(this);
     output_->setObjectName("utilityOutput");
     output_->setReadOnly(true);
-    output_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    output_->setFont(katana::qt::theme::monospaceFont());
     // The reports are tables: wrapping would break their columns.
     output_->setLineWrapMode(QPlainTextEdit::NoWrap);
     output_->setPlaceholderText("The reply appears here and in the command log.");

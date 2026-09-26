@@ -19,6 +19,7 @@
 #include "annotation/leader_manager.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/plot.hpp"
+#include "icons.hpp"
 #include "katana/core/text.hpp"
 #include "tools/tool_menus.hpp"
 
@@ -53,6 +54,7 @@ AnnotationWorkbench::AnnotationWorkbench(QWidget& window, katana::cad::Document&
     // (qt_every_shortcut_and_menu_letter_reaches_one_thing_headless).
     textStylesAction_ = new QAction(QStringLiteral("&Text Styles..."), &window);
     textStylesAction_->setObjectName(QStringLiteral("formatTextStyles"));
+    textStylesAction_->setIcon(katana::qt::icon(Icon::TextStyles));
     textStylesAction_->setToolTip(QStringLiteral(
         "The drawing's text styles: face, height on paper, width, slant, colour, background "
         "mask, readability (TEXTSTYLE)"));
@@ -60,6 +62,7 @@ AnnotationWorkbench::AnnotationWorkbench(QWidget& window, katana::cad::Document&
     textStylesAction_->setData(QStringLiteral("textStyleManagerDialog"));
     labelStylesAction_ = new QAction(QStringLiteral("Lab&el Styles and Rules..."), &window);
     labelStylesAction_->setObjectName(QStringLiteral("formatLabelStyles"));
+    labelStylesAction_->setIcon(katana::qt::icon(Icon::LabelStyles));
     labelStylesAction_->setToolTip(QStringLiteral(
         "Label styles - what a label says and where it goes - and the rules that label the "
         "drawing by layer, code and kind (LABELSTYLE, AUTOLABEL)"));
@@ -67,6 +70,7 @@ AnnotationWorkbench::AnnotationWorkbench(QWidget& window, katana::cad::Document&
     labelStylesAction_->setData(QStringLiteral("labelStyleManagerDialog"));
     dimStylesAction_ = new QAction(QStringLiteral("D&imension Styles..."), &window);
     dimStylesAction_->setObjectName(QStringLiteral("formatDimensionStyles"));
+    dimStylesAction_->setIcon(katana::qt::icon(Icon::DimensionStyles));
     dimStylesAction_->setToolTip(QStringLiteral(
         "The drawing's dimension styles: text, arrows, extension lines, units and paper sizing, "
         "and the layers that use each (DIMSTYLE)"));
@@ -77,7 +81,7 @@ AnnotationWorkbench::AnnotationWorkbench(QWidget& window, katana::cad::Document&
                      [this] { showLabelStyles(); });
     QObject::connect(dimStylesAction_, &QAction::triggered, &window,
                      [this] { showDimensionStyles(); });
-    menu.addSeparator();
+    menu.addSection(QStringLiteral("Annotation Styles"));
     menu.addActions({textStylesAction_, labelStylesAction_, dimStylesAction_});
 
     // The plan view's annotation scale, where every drafter looks for it: an
@@ -140,10 +144,11 @@ void AnnotationWorkbench::addLabelActions(QMenu& annotateMenu)
             (void)tools::withMnemonic(item->text().toStdString(), taken);
         }
     }
-    const auto make = [&](const char* text, const char* name, const char* dialog,
+    const auto make = [&](Icon glyph, const char* text, const char* name, const char* dialog,
                           const QString& tip) {
-        auto* action =
-            new QAction(QString::fromStdString(tools::withMnemonic(text, taken)), &window_);
+        auto* action = new QAction(katana::qt::icon(glyph),
+                                   QString::fromStdString(tools::withMnemonic(text, taken)),
+                                   &window_);
         action->setObjectName(QString::fromLatin1(name));
         action->setToolTip(tip);
         action->setStatusTip(tip);
@@ -151,11 +156,13 @@ void AnnotationWorkbench::addLabelActions(QMenu& annotateMenu)
         action->setData(QString::fromLatin1(dialog));
         return action;
     };
-    QAction* editLabel = make("Edit Label...", "annotateEditLabel", "labelEditDialog",
+    QAction* editLabel = make(Icon::EditLabel, "Edit Label...", "annotateEditLabel",
+                              "labelEditDialog",
                               QStringLiteral("The selected label's style, own text, pinned place "
                                              "and layer (LABEL SET)"));
     QAction* labelLayout =
-        make("Label Layout Report...", "annotateLabelLayout", "labelLayoutDialog",
+        make(Icon::LabelLayout, "Label Layout Report...", "annotateLabelLayout",
+             "labelLayoutDialog",
              QStringLiteral("How many labels are placed, moved to find room, left without "
                             "room or label nothing at the annotation scale; selects those "
                             "without room (LABEL LAYOUT)"));
@@ -165,7 +172,7 @@ void AnnotationWorkbench::addLabelActions(QMenu& annotateMenu)
     // last (addEditTextAction), so the editors sit together after the tools.
     const QList<QAction*> items = annotateMenu.actions();
     if (items.isEmpty() || items.back()->objectName() != QStringLiteral("annotateEditText")) {
-        annotateMenu.addSeparator();
+        annotateMenu.addSection(QStringLiteral("Edit Annotation"));
     }
     annotateMenu.addActions({editLabel, labelLayout});
 }
@@ -240,13 +247,14 @@ QAction* AnnotationWorkbench::addEditTextAction(QMenu& annotateMenu)
     // names (qt_every_shortcut_and_menu_letter_reaches_one_thing_headless).
     auto* action = new QAction(QStringLiteral("Edit Te&xt..."), &window_);
     action->setObjectName(QStringLiteral("annotateEditText"));
+    action->setIcon(katana::qt::icon(Icon::EditText));
     action->setToolTip(QStringLiteral(
         "Edit the selected text: its words over several lines, style, height on paper, "
         "justification, rotation and position (TEXTEDIT)"));
     action->setStatusTip(action->toolTip());
     action->setData(QStringLiteral("textEditDialog"));
     QObject::connect(action, &QAction::triggered, &window_, [this] { showTextEdit(); });
-    annotateMenu.addSeparator();
+    annotateMenu.addSection(QStringLiteral("Edit Annotation"));
     annotateMenu.addAction(action);
     return action;
 }
@@ -314,11 +322,15 @@ void AnnotationWorkbench::addLeaderActions(QMenu& annotateMenu)
          "(LEADER ALIGN, BALLOON RENUMBER)",
          2},
     };
-    annotateMenu.addSeparator();
+    // "Leader Manager", not "Leaders": the tools' own Leaders group is above.
+    annotateMenu.addSection(QStringLiteral("Leader Manager"));
     for (const Entry& entry : entries) {
         auto* action =
             new QAction(QString::fromStdString(tools::withMnemonic(entry.text, taken)), &window_);
         action->setObjectName(QString::fromLatin1(entry.name));
+        action->setIcon(katana::qt::icon(entry.tab == 0   ? Icon::LeaderManager
+                                         : entry.tab == 1 ? Icon::LeadersForSelection
+                                                          : Icon::ArrangeLeaders));
         action->setToolTip(QString::fromLatin1(entry.tip));
         action->setStatusTip(action->toolTip());
         action->setData(QStringLiteral("leaderManagerDialog"));

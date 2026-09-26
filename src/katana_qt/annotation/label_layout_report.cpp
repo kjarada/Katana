@@ -17,6 +17,7 @@
 #include <QVBoxLayout>
 
 #include "katana/core/text.hpp"
+#include "theme.hpp"
 
 namespace katana::qt {
 
@@ -161,7 +162,7 @@ LabelLayoutReportDialog::LabelLayoutReportDialog(CommandRunner runner, QWidget* 
     output_ = new QPlainTextEdit(this);
     output_->setObjectName(QStringLiteral("labelLayoutOutput"));
     output_->setReadOnly(true);
-    output_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    output_->setFont(katana::qt::theme::monospaceFont());
     status_ = new QLabel(this);
     status_->setObjectName(QStringLiteral("labelLayoutStatus"));
     status_->setWordWrap(true);
