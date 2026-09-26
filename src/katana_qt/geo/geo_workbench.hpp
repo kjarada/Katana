@@ -26,6 +26,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 
 #include "command_runner.hpp"
 #include "geo/geo_verbs.hpp"
@@ -135,5 +136,16 @@ class GeoMenus {
 // Every package's menu items, from one table with a block per package
 // (menu_table.cpp).
 void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench);
+
+// The record an interactive run logs when its line became a job:
+// `job id=<n> title="..." state=started`, the title quoted as any record's
+// value is (geo::value), so a title with a quote in it still reads back.
+[[nodiscard]] QString startedRecord(JobId id, const QString& title);
+
+// The job a reply says it started: the id of its `job ... state=started`
+// record (startedRecord's), on any line of it; nullopt for a reply that
+// started none - a headless run's, which waited for the job. The one reader
+// of that record, for the dialogs and the window's awaitJob alike.
+[[nodiscard]] std::optional<JobId> startedJob(const QString& reply);
 
 } // namespace katana::qt

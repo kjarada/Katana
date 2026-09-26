@@ -1881,9 +1881,22 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
   (`terrain_dialog_support.hpp`, Surface From and the terrain analysis
   dialogs) and `GisDialogContext` (`gis_tool_dialog.hpp`, the vector
   dialogs). They hold the same things - the executor, `headless`, the
-  document, the views and a job listener - and differ only in the listener's
-  lifetime (a token the dialog drops, or never taken back). When wave 1 was
-  merged, the views they are given were made one `GeoServices::views` (the
-  workspace), but the three structs remain; folding them into one, with the
-  token listener, touches every GDAL dialog and its tests, and is left to
-  the review that follows the merge rather than done inside it.
+  document, the views and a way to hear a job end - and differ in that way:
+  `GeoDialogContext::listen` returns a token whose life bounds the listener,
+  `TerrainDialogContext::listen` is never taken back (safe only because the
+  window destroys the workbench before its child dialogs), and
+  `GisDialogContext` has `await`, told of one job. When wave 1 was merged,
+  the views they are given were made one `GeoServices::views` (the
+  workspace). The review after it made the rest of what they duplicated
+  one each: the quoting of a word (`geo::lineWord`, above), and the reading
+  of the `job id=<n> title="..." state=started` record an interactive run
+  logs - four patterns (the Geo and Terrain supports', the GIS dialog's and
+  `MainWindow::awaitJob`'s) are now `startedJob`, beside the `startedRecord`
+  that writes it (`geo_workbench.hpp`,
+  `GeoWorkbench.TheStartedRecordReadsBackAsItsJob`), and the GIS dialog's own
+  pattern for a record's field is `geo::parseRecords`. The three structs
+  remain: folding them into one, with the token listener, changes the
+  listener contract of the Terrain dialogs, the modal import dialogs'
+  `await`, and the construction in 6, 17 and 24 files that name each
+  context (the dialogs and their widget tests), which is a refactor of its
+  own rather than part of a review's fixes.

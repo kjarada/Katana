@@ -12,11 +12,12 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QHeaderView>
-#include <QRegularExpression>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <optional>
+#include <string>
 #include <utility>
 
 #include "customisation/document_watcher.hpp"
@@ -40,16 +41,16 @@ katana::core::Error invalid(const QString& message)
     return makeError(ErrorCode::InvalidArgument, message.toStdString());
 }
 
-// The value of `key` in the reply's first record of `kind`, or empty.
+// The value of `key` in the reply's first record of `kind`, or empty: read
+// by the one record reader (geo::parseRecords), which undoes a quoted
+// value's escapes, where a pattern of this file's own did not.
 QString field(const QString& reply, const QString& kind, const QString& key)
 {
-    for (const QString& line : reply.split('\n')) {
-        if (!line.startsWith(kind + " ")) {
-            continue;
+    for (const katana::app::geo::Record& record :
+         katana::app::geo::parseRecords(reply.toStdString())) {
+        if (record.kind == kind.toStdString()) {
+            return QString::fromStdString(record.get(key.toStdString()).value_or(std::string()));
         }
-        const QRegularExpression pair(" " + QRegularExpression::escape(key) + "=(\"[^\"]*\"|\\S*)");
-        const QRegularExpressionMatch match = pair.match(line);
-        return match.hasMatch() ? match.captured(1).remove('"') : QString();
     }
     return {};
 }
@@ -310,10 +311,9 @@ void GisToolDialog::runLine(const QString& line)
     pending_ = kNoJob;
     const VerbOutcome outcome = context_.run(line);
     // Interactively the line became a job: its reply comes when it ends.
-    static const QRegularExpression started(R"(^job id=(\d+) .*state=started$)");
-    const QRegularExpressionMatch match = started.match(outcome.reply.trimmed());
-    if (outcome.ok && match.hasMatch()) {
-        pending_ = match.captured(1).toULongLong();
+    if (const std::optional<JobId> started =
+            outcome.ok ? startedJob(outcome.reply) : std::nullopt) {
+        pending_ = *started;
         reply_->setPlainText(outcome.reply.trimmed());
         setStatus("Running as a background job: the reply appears here when it ends. Cancel "
                   "is in the status bar.",

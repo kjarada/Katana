@@ -8,7 +8,6 @@
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPlainTextEdit>
-#include <QRegularExpression>
 #include <QStringList>
 
 #include <algorithm>
@@ -29,16 +28,6 @@ namespace {
 QString qs(const std::string& text)
 {
     return QString::fromStdString(text);
-}
-
-// The job an interactive run started, from the line the workbench logs:
-// `job id=<n> title="..." state=started`.
-JobId startedJob(const QString& reply)
-{
-    static const QRegularExpression started(QStringLiteral("^job id=(\\d+) .*state=started$"),
-                                            QRegularExpression::MultilineOption);
-    const QRegularExpressionMatch match = started.match(reply);
-    return match.hasMatch() ? match.captured(1).toULongLong() : kNoJob;
 }
 
 } // namespace
@@ -191,7 +180,7 @@ VerbOutcome TerrainRun::run(const QString& line)
         return refused;
     }
     const VerbOutcome outcome = context_.run(line);
-    const JobId job = outcome.ok ? startedJob(outcome.reply) : kNoJob;
+    const JobId job = outcome.ok ? startedJob(outcome.reply).value_or(kNoJob) : kNoJob;
     if (job != kNoJob && context_.listen) {
         waiting_->job = job;
         reply_.setPlainText(outcome.reply + "\nRunning - the result is shown here when the job "
