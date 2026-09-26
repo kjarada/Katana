@@ -75,4 +75,7 @@ add_test(NAME qt_gis_export_point_cloud_line_writes_the_cloud_headless
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/gis_export_point_cloud_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 set_tests_properties(qt_gis_export_point_cloud_line_writes_the_cloud_headless PROPERTIES
-    FIXTURES_REQUIRED qt_gis_verbs)
+    FIXTURES_REQUIRED qt_gis_verbs
+    ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+    TIMEOUT 180)
