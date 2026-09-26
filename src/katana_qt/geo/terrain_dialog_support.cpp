@@ -55,6 +55,7 @@ TerrainDialogContext terrainDialogContext(GeoWorkbench& workbench)
         ViewWorkspace* views = services.views;
         context.views = [views] { return scopeFilterViews(views->viewSet()); };
     }
+    context.pickPoint = services.pickPoint;
     context.listen = [&workbench](std::function<void(JobId, const VerbOutcome&)> listener) {
         (void)workbench.addFinishedListener(std::move(listener));
     };

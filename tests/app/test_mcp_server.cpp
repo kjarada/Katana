@@ -1084,4 +1084,22 @@ TEST_F(McpServer, SlopeClassesMadeThroughTheCommandToolAreOneUndoStep)
     ASSERT_FALSE(undone["isError"].get<bool>()) << textOf(undone);
     EXPECT_NE(textOf(undone).find("0 entities"), std::string::npos) << textOf(undone);
 }
+
+// T4: statistics by area through the command tool, written on the drawn lot
+// in place. A 40 x 30 m lot on terrain.asc's 1.5 m cells covers
+// 1200 / 2.25 = 533.333 cells by fractional coverage, wherever it lies, and
+// the reply's zone record says so.
+TEST_F(McpServer, StatisticsByAreaThroughTheCommandToolAreWrittenOnTheLot)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"RECT 10,10 50,40",
+                                              "RASTER ZONAL FILE \"" + terrain +
+                                                  "\" DRAWING stats=count"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::string reply = made["structuredContent"]["commands"][1]["output"].get<std::string>();
+    EXPECT_NE(reply.find("zone entity=1 count=533.33"), std::string::npos) << reply;
+    EXPECT_NE(reply.find("target=in-place created=0 updated=1"), std::string::npos) << reply;
+}
 #endif

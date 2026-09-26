@@ -652,6 +652,128 @@ area= polygons=` per class and a `legend value= r= g= b=` per class colour.
 - **Aspect classes** (north-facing, ...): the aspect raster is there for
   them; a class grammar for directions is not.
 
+## Statistics by area
+
+RASTER ZONAL (`src/katana_app/geo/zonal_verbs.cpp`) measures a surface or an
+elevation raster inside each closed shape a scope takes and writes the
+results on the shapes themselves. The window's Terrain > Analysis >
+Statistics by Area (`zonalStatsDialog`) only builds its line:
+
+```
+RASTER ZONAL SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
+             [<scope>] [stats=mean,min,max,count,sum] [prefix=zone]
+             [pixels=fractional|centre|all-touched] [csv=<file>] [OVERWRITE] [PREVIEW]
+```
+
+The reply: `gis op=zonal`, the `input` record, `scope arg=zones ...`, `zones
+used= skipped.open= skipped.points=`, the in-place `output ... updated=`
+record, one `zone entity=<id> <stat>=<value> ...` per zone (a statistic
+with no number has no field), and `zonal stats= prefix= pixels= zones=`.
+
+- **GDAL computes them:** `raster zonal-stats`, exactextract's method. The
+  zones are handed over as one table carrying `katana_id` only, which is how
+  each result finds its entity again.
+- **Fractional by default.** A cell counts by the part of it the shape
+  covers, so `count` is an area in cells: a 40 x 30 m lot on 1.5 m cells
+  counts 1200 / 2.25 = 533.333 wherever it lies, and a mean is weighted by
+  those parts (on a plane it is the plane at the shape's centroid).
+  `centre` takes a cell whose centre is inside (GDAL's `default`),
+  `all-touched` every cell the shape touches.
+- **Only closed shapes are zones.** Closed polylines and circles, a tagged
+  hole joined to its area (the one drawing-to-features conversion). Open
+  lines and points bound no area: GDAL logs "Non-polygonal geometry" for one
+  and the other zones came back with zero counts (the investigators'
+  finding), so they are left out before GDAL sees them, counted and warned
+  of.
+- **Written in place, one undo step.** `<prefix>_<stat>` properties
+  (`zone_mean`, `zone_count` ...) through the one result writer
+  (`ResultMode::SetProperties`). Before it writes, the apply compares the
+  zones with the copies taken when the line was prepared: a zone edited
+  while the job ran is refused ("the drawing changed while the job ran"),
+  never written over.
+- **Absent is not zero.** A zone off the raster has a count of 0 and no
+  mean; the non-finite number GDAL gives becomes no property, and a
+  `<prefix>_<stat>` an earlier run left on the zone is removed in the same
+  step - it was the number of somewhere else.
+- `csv=` writes the zone rows as well, and replaces a file only with
+  `OVERWRITE`.
+
+### Decided
+
+- **The statistics are the single-number ones.** GDAL's list-valued
+  statistics (`values`, `frac`, `unique`, `coverage`) and the weighted ones
+  (they need a second raster) have no single property to become.
+- **Properties, not a new layer.** The lot is what the question is about;
+  a copy of it carrying the numbers would go stale when the lot is edited,
+  and a property is what a label, a WHERE filter and a report already read.
+- **`centre` rather than GDAL's `default`**, so the word says which cells.
+
+### Not done
+
+- **No CRS check** between the raster and the drawing's shapes, as for
+  CONTOUR and RASTER SLOPE.
+
+## Sampling and drape
+
+RASTER SAMPLE reports the height of the ground at points, and DRAPE gives
+it to the drawing's points and vertices (`src/katana_app/geo/drape_verbs.cpp`).
+The window's Terrain > Analysis > Drape and Sample Heights (`drapeDialog`,
+tabs Drape and Sample) only builds their lines:
+
+```
+RASTER SAMPLE SURFACE <name> | RASTER <id|name> | FILE <path> [AT x,y]...
+              [<scope>] [method=bilinear|nearest|cubic|cubicspline] [PREVIEW]
+DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
+      [method=bilinear|nearest|cubic|cubicspline] [PREVIEW]
+```
+
+- **The ground is read at full precision.** A surface on its own triangles
+  (`TinSurface::elevationAt`), exactly - never through a grid of it; a
+  raster's file through GDAL's own interpolation
+  (`GDALRasterInterpolateAtPoint`, `include/katana/gis/raster_sampling.hpp`),
+  bilinear unless `method=` says. Bilinear on a plane is the plane, which
+  is what `DrapeAndSample.SampleOnAPlaneIsExactWithBilinear` holds it to.
+  `method=` with a surface is refused, as is `CELL`.
+- **Off the ground there is no height.** A point off the raster, or one
+  whose interpolation window touches a no-data cell, has none: a sample
+  says `ground=no` (no `z`), and a drape leaves the vertex heightless and
+  counts it (`off=`, `entities_off=`).
+- **RASTER SAMPLE** reads the points given `AT`, and the point entities the
+  scope takes (the selection when there is neither), one `sample [entity=]
+  at=x,y z=` record each, then `samples method= count= on= off=`. It
+  changes nothing.
+- **DRAPE** sets the heights of the points, lines and polylines the scope
+  takes: a point at its position, a line at its ends, a polyline at every
+  vertex. What has no vertices a height belongs to (an arc, a circle, a
+  text) is left and counted by type. The heights are computed on the job's
+  worker (`cad::geo::drapeHeights`, `include/katana/cad/geo/drape.hpp`,
+  given the ground as a callback so katana_cad never sees GDAL) and written
+  on the GUI thread by one command (`cad::geo::drapeCommand`, through
+  `entity::setHeights`): one undo step, after the entities are compared with
+  their copies from prepare. A second drape on the same ground changes
+  nothing and pushes no step.
+- **A picked point is a typed point.** The dialog's Pick
+  (`GeoServices::pickPoint`, `src/katana_qt/geo/point_pick.hpp`) takes the
+  next left click in a plan view and writes it into the line as `AT x,y`.
+
+### Decided
+
+- **A vertex off the ground loses its old height.** The drape defines the
+  heights of what it takes; a height kept from before would be another
+  surface's, mixed in silently. Rejected: keeping it, which draws a string
+  half on the ground and half at heights no one can trace.
+- **GDAL interpolates, not Katana.** The raster is GDAL's to read; a second
+  bilinear of Katana's would be a second definition of "the height between
+  cells" to keep in step with the rest of the GDAL verbs.
+- **The pick is an event filter, not a catalogue tool.** A tool runs in one
+  view's tool host and ends in a command; a pick is any view's next click
+  and changes nothing.
+
+### Not done
+
+- **The pick does not snap.** It takes the click where it is; snapping is
+  the running tool's, and a pick is no tool.
+
 ## Background jobs
 
 Long computations no longer run on the GUI thread behind a wait cursor.

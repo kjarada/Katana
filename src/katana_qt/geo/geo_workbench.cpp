@@ -32,6 +32,9 @@ GeoWorkbench::GeoWorkbench(QMainWindow& window, GeoServices services)
                services_.frame,
                services_.changed}
 {
+    if (!services_.pickPoint && services_.views != nullptr) {
+        services_.pickPoint = planPointPicker(*services_.views);
+    }
 }
 
 GeoWorkbench::~GeoWorkbench() = default;

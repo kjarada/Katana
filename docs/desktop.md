@@ -1314,6 +1314,18 @@ dialog through `showTerrainDialog` (made on first use under the window, so
   name, and - with `slopeClip` - the shared scope controls (`slopeScope`,
   the closed shapes the analysis is kept inside) (`docs/terrain.md`, "Slope
   and aspect").
+- `terrainZonal` "Statistics by Area..." opens `zonalStatsDialog`, which
+  writes a RASTER ZONAL line: the source, the zones (the shared scope
+  controls, `zonalScope`; the selection at first), the statistics ticked,
+  the property prefix, how cells count, and a CSV file with its Replace box
+  (`docs/terrain.md`, "Statistics by area").
+- `terrainDrape` "Drape and Sample Heights..." opens `drapeDialog`, two
+  tabs: Drape writes a DRAPE line (the ground, how a raster is read between
+  cells - off for a surface - and the shared scope controls, `drapeScope`),
+  and Sample a RASTER SAMPLE line of the points listed, typed or picked in
+  a plan view (`samplePick`, through `GeoServices::pickPoint`: the next
+  left click; Esc or a right click cancels) (`docs/terrain.md`, "Sampling
+  and drape").
 
 **One store of surfaces.** The window's surfaces are a
 `terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the
