@@ -22,11 +22,12 @@ The short version of the standard, as this code reads it:
 | QL-A | exposed and seen (pothole, non-destructive excavation, open trench) and surveyed in 3D | +/-50 mm horizontal and vertical |
 
 **The tolerances are data, not constants** (`QualityLevelTolerances`). The
-defaults are the published figures as they were available to the author; a
-client specification may be tighter, a later edition may differ, and a
-program that hard-coded them would certify against the wrong numbers without
-anyone noticing. Check them against your copy of the standard and the
-project specification, and set them where they differ.
+defaults - QL-A +/-50 mm horizontal and vertical, QL-B +/-300 mm horizontal
+and +/-500 mm vertical - were confirmed against AS 5488 by the project owner
+on 2026-09-26. A client specification may still be tighter and a later
+edition may differ, and a program that hard-coded them would certify against
+the wrong numbers without anyone noticing, so they stay settable: set them
+where the project specification differs.
 
 ## What each tool answers
 
