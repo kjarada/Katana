@@ -657,12 +657,12 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "IMPORT ${_gis}/terrain.asc LOCAL")
     set_tests_properties(cli.info_raster PROPERTIES PASS_REGULAR_EXPRESSION
-        "Raster: 120 x 90 pixels, 1 band.*Pixel size: 1\\.5 x 1\\.5.*Bounds: \\(-5\\.000, -5\\.000\\) to \\(175\\.000, 130\\.000\\)")
+        "dataset file=[^ ]*/terrain\\.asc kind=raster driver=AAIGrid [^\r\n]*[\r\n]+raster width=120 height=90 bands=1 georeferenced=yes cell=1\\.5,1\\.5 bounds=-5,-5,175,130")
     set_tests_properties(cli.info_point_cloud PROPERTIES PASS_REGULAR_EXPRESSION
-        "Point cloud: 40,000 points.*COPC: no")
+        "pointcloud points=40000 [^\r\n]*copc=no")
     set_tests_properties(cli.copc_cleanup PROPERTIES FIXTURES_SETUP cli_copc)
     set_tests_properties(cli.copc_then_info PROPERTIES FIXTURES_REQUIRED cli_copc
-        PASS_REGULAR_EXPRESSION "converted source=[^ ]*/survey_scan\\.las file=[^ ]*/cli-scan\\.copc\\.laz format=copc.*Point cloud: 40,000 points.*COPC: yes")
+        PASS_REGULAR_EXPRESSION "converted source=[^ ]*/survey_scan\\.las file=[^ ]*/cli-scan\\.copc\\.laz format=copc.*pointcloud points=40000 [^\r\n]*copc=yes")
     set_tests_properties(cli.local_is_refused_for_reference_data PROPERTIES
         PASS_REGULAR_EXPRESSION "LOCAL is not supported for rasters and point clouds")
     # A QUOTED path and LOCAL, as katana_import sends them: LOCAL was taken off

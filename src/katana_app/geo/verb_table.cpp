@@ -70,7 +70,10 @@ const std::vector<VerbEntry>& verbTable()
                         "EXPORT <file>  the drawing, by extension (.dxf, .12da with the surfaces,\n"
                         "          GeoPackage, GeoJSON, shapefile ...)"});
         rows.push_back({"INFO", "", &prepareInfo,
-                        "INFO <file>  what a GIS file or point cloud holds, without importing it\n"
+                        "INFO <file|folder|url> [JSON] [STATS] [CHECK] [LAYER <name>]  what a\n"
+                        "          GIS file, a folder or a point cloud holds, without importing it:\n"
+                        "          dataset, raster, band, layer and field records, or GDAL's own\n"
+                        "          JSON; STATS the bands' statistics, CHECK every value read\n"
                         "          (INFO <id> describes an entity, when no file has that name)",
                         &takesInfo});
         rows.push_back({"REFS", "", &prepareRefs,

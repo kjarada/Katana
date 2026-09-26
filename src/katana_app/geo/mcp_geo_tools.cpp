@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "../mcp_tools.hpp"
+#include "gis_records.hpp"
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/gis/processing.hpp"
@@ -494,6 +495,52 @@ ToolReply run(Session& session, const Json& arguments)
     return ToolReply{text, runJson(line, outcome, algorithm), !outcome.ok};
 }
 
+// ---- D1: katana_dataset_info ----
+
+// The INFO line of the arguments, and its reply's records as structured
+// content; with json, GDAL's own info JSON too, from INFO ... JSON - the
+// lines a person would type, run through the Session.
+ToolReply datasetInfo(Session& session, const Json& arguments)
+{
+    std::string words = "INFO " + quoted(requiredString(arguments, "path"));
+    if (const Json& layer = argument(arguments, "layer"); !layer.is_null()) {
+        if (!layer.is_string()) {
+            throw ToolRefusal{"\"layer\" is a layer's name"};
+        }
+        words += " LAYER " + word(layer.get<std::string>(), "a layer name");
+    }
+    std::string line = words;
+    if (optionalBool(arguments, "stats", false)) {
+        line += " STATS";
+    }
+    if (optionalBool(arguments, "check", false)) {
+        line += " CHECK";
+    }
+    const LineOutcome outcome = runCaptured(session, line);
+    std::string text = "> " + line;
+    if (!outcome.output.empty()) {
+        text += "\n" + outcome.output;
+    }
+    if (!outcome.messages.empty()) {
+        text += "\n" + outcome.messages;
+    }
+    Json result{{"ok", outcome.ok}, {"line", line}, {"records", geo::recordsJson(outcome.output)}};
+    if (!outcome.messages.empty()) {
+        result["messages"] = outcome.messages;
+    }
+    if (outcome.ok && optionalBool(arguments, "json", false)) {
+        const std::string jsonLine = words + " JSON";
+        const LineOutcome json = runCaptured(session, jsonLine);
+        const Json parsed = Json::parse(json.output, nullptr, false);
+        if (!json.ok || parsed.is_discarded()) {
+            throw ToolRefusal{jsonLine + " gave no JSON: " + json.messages};
+        }
+        result["gdal"] = parsed;
+        text += "\n> " + jsonLine + "\n(GDAL's JSON is in structuredContent.gdal)";
+    }
+    return ToolReply{text, result, !outcome.ok};
+}
+
 } // namespace
 
 std::vector<Tool> geoTools()
@@ -576,6 +623,31 @@ std::vector<Tool> geoTools()
     // ---- V5: katana_gis_query ----
     // ---- I2: katana_formats ----
     // ---- D1: katana_dataset_info ----
+    tools.push_back(Tool{
+        "katana_dataset_info", "Describe a data file",
+        "What a GIS file, a folder or a point cloud holds, without importing it - the INFO "
+        "verb's records as structured data: dataset (kind, driver, CRS), raster (size, cell, "
+        "bounds), band (type, no-data, and with stats the minimum, maximum, mean and standard "
+        "deviation, computed without writing beside the file), layer (features, geometry, CRS, "
+        "bounds), field (name, type, width), subdataset, pointcloud; a folder gives a found "
+        "record per dataset. check reads every value and reports check and problem records. "
+        "json adds GDAL's own info JSON (raster info, vector info, mdim info) as gdal. path may "
+        "be a /vsi path or a URL.",
+        objectSchema(
+            Json{{"path", {{"type", "string"}, {"description", "The file, folder, /vsi path or URL."}}},
+                 {"layer",
+                  {{"type", "string"}, {"description", "Only this vector layer."}}},
+                 {"stats",
+                  {{"type", "boolean"},
+                   {"description", "Compute every band's statistics from every pixel."}}},
+                 {"check",
+                  {{"type", "boolean"},
+                   {"description", "Read every value, and report what could not be read."}}},
+                 {"json",
+                  {{"type", "boolean"},
+                   {"description", "Add GDAL's own info JSON as \"gdal\" (default false)."}}}},
+            {"path"}),
+        hints(true, false, true, true), datasetInfo});
     // ---- D2: katana_references ----
     return tools;
 }

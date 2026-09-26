@@ -350,7 +350,7 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 | Point Cloud - PDAL | Import Point Cloud... | `importPointCloud` with a budget, an ASPRS class, and a COPC resolution when the file is COPC |
 | | Export Point Cloud... | `exportPointCloud` - LAS or LAZ |
 | | Convert Point Cloud to COPC... | `PointCloudEngine::convertToCopc` - every point, then an offer to import it |
-| | Dataset Information... | `describeSource` + `formatDescription`, the gdalinfo / pdal info a person needs first |
+| | Dataset Information... | the `INFO` lines, through the window's one executor: `describeSource`'s records and GDAL's JSON, the gdalinfo / pdal info a person needs first ("Dataset information", below) |
 | Online - Web Services | Online Data... | `interop::fetchOnlineLayer`: imagery, elevation and features from public web services, warped or reprojected into the project's CRS and taken in through `importRaster` and `importVector`; the `ONLINE` verbs do the same (`docs/gis_online.md`) |
 
 Decisions, and what was rejected:
@@ -370,10 +370,11 @@ Decisions, and what was rejected:
   dialog, and the dialog offers the layers THIS GeoPackage has and a COPC
   level of detail only when the file IS COPC - the engine refuses the question
   of any other file, so offering it would be offering a failure.
-* **One wording.** `formatDescription` is shown by Dataset Information, above
-  every import dialog's options, by the Reference Data panel's Info button,
-  and by the `INFO` verb of both command lines, so a file cannot be described
-  two ways.
+* **One description.** `describeSource` is read by the import dialogs, whose
+  `formatDescription` text stands above their options, and by the `INFO`
+  verb of every front end, whose records Dataset Information and the
+  Reference Data panel's Info button show ("Dataset information", below), so
+  a file cannot be described two ways.
 * **A point cloud's export says when it is a sample.** A budgeted import holds
   one point in N; Export Point Cloud asks before writing a sample as though it
   were the survey, and points at Convert to COPC for the whole file.
@@ -560,8 +561,7 @@ warning text="..."
   rewritten for the records, and only for them - every number they expect
   is the one they expected before. Anyone scripting against the prose has to
   change; an agent reading `structuredContent` no longer parses text at all.
-  `INFO <file>` still replies with `formatDescription`'s text; its records
-  are D1's (`docs/geoprocessing.md`).
+  `INFO`'s records are below ("Dataset information").
 
 ### Decisions
 
@@ -635,6 +635,94 @@ Not done:
   scope or filter yet (`docs/geoprocessing.md`, I4).
 - A process that dies mid-write leaves its `.katana-staging-<pid>-<n>`
   folder beside the target.
+
+## Dataset information
+
+```
+INFO <file|folder|url> [JSON] [STATS] [CHECK] [LAYER <name>]
+```
+
+What a file holds, read without importing it, as records an agent can act
+on - which field to filter on, which band, which layer - or as GDAL's own
+JSON:
+
+```
+dataset file=<path> kind=raster|vector|raster,vector|pointcloud|folder driver=AAIGrid crs="WGS 84 / UTM zone 30N (EPSG:32630)"
+raster width=120 height=90 bands=1 georeferenced=yes cell=1.5,1.5 bounds=-5,-5,175,130
+band band=1 type=Float32 nodata=-9999 min= max= mean= stddev= color=Undefined overviews=0
+overview band=1 index=1 width= height=
+subdataset index=1 name="NETCDF:..." description="..."
+layer name=lots features=3 geometry=Polygon crs="..." bounds=-10,0,110,40 fields=2
+field layer=lots name=kind type=String subtype= width= precision=
+pointcloud points=40000 bounds=... zmin= zmax= color=no copc=no
+found file=<path> driver=GeoJSON has_crs=yes            (a folder: one per dataset)
+check code=0 problems=0                                  (CHECK)
+problem text="..."
+```
+
+- **One reading.** `interop::describeSource` describes a GDAL dataset from
+  GDAL's own `raster info` and `vector info` JSON, run through the
+  geoprocessing bridge, and keeps that JSON beside the description. The
+  records are read from it and `INFO ... JSON` gives it back as it is
+  (`{"path", "raster", "vector", "multidim"}`, GDAL's key order kept), so the
+  two cannot disagree. The adapter's own reading of a dataset for this was
+  replaced: two readers of one file would drift. The import dialogs and
+  `formatDescription` read the same description.
+- **Both readers are asked.** One file can hold rasters and vector layers (a
+  GeoPackage), so `raster info` and `vector info` are both run; what
+  neither reads is refused in the words of the reader its kind suggests.
+  `mdim info` is asked, for JSON, of the multidimensional formats this GDAL
+  has (netCDF, HDF4, HDF5, GRIB, BAG, S-102, S-104, S-111, Zarr, CPHD),
+  since it fails for every classic raster.
+- **Absent is not zero.** A band's statistics are empty until computed;
+  `STATS` computes them from every pixel. GDAL's JSON prints them to three
+  decimals, so the `STATISTICS_` metadata beside them, 14 significant
+  digits, is read first (measured: `"mean":30.341` against
+  `STATISTICS_MEAN 30.341263614231` for the sample terrain). The bridge puts
+  back whatever `.aux.xml` the computation would have left beside the file
+  (`docs/geoprocessing.md`, "Sidecars"), so `STATS` writes nothing there.
+- **CHECK** is GDAL's `dataset check`: every value read, its return code and
+  what failed, as `problem` records. A file GDAL cannot open at all fails
+  the line instead.
+- **A folder** is GDAL's `dataset identify`, recursive and detailed, and the
+  point clouds in it, which GDAL does not read (PDAL describes them). An
+  OpenFileGDB `.gdb` is a folder that GDAL opens as one dataset, and it is
+  described as one.
+- **/vsi paths and URLs** are GDAL's to find: `describeSource` no longer
+  refuses `/vsizip/a.zip/b.geojson` as a missing file before GDAL is asked,
+  and INFO reads any format GDAL reads (`DescribeOptions::anyFormat`), where
+  an import dialog asks only of what Katana imports.
+- **The path**, as INFO has always read it, is one quoted word or the
+  unquoted words before the first keyword; a quoted path followed by a word
+  INFO does not know is refused.
+
+**GIS > Dataset Information** (`datasetInfoDialog`, and the Reference Data
+panel's Info button) builds `INFO "<file>"` and `INFO "<file>" JSON` and runs
+them through the window's one executor, then shows the records: the Summary
+(`datasetInfoSummary`), the Fields (`datasetInfoFields`) and Bands
+(`datasetInfoBands`) tables, and GDAL's JSON indented (`datasetInfoJson`,
+`datasetInfoCopyJson`). Compute Statistics (`datasetInfoStats`) and Check
+(`datasetInfoCheck`) run `INFO ... STATS` and `INFO ... CHECK`;
+`datasetInfoCommand` shows the line last run and `datasetInfoReply` what it
+said. INFO runs as a background job in the window, so the dialog is told when
+the job ends (`MainWindow::awaitJob`, which reads the `job id=<n> ...
+state=started` record the line answered with). MCP: `katana_dataset_info`
+(`docs/mcp.md`).
+
+Tests: `InfoVerb.*` (`tests/geo/test_info_verb.cpp`) - the terrain's
+statistics against the grid's own values read from the text, within the
+half ulp of Float32 GDAL reads it as, and no sidecar; typed GeoJSON fields;
+a folder; CHECK; a `/vsizip` path; a netCDF's multidimensional JSON;
+`DatasetInfo.TheFieldsAndBandsAreReadFromGdalsOwnDescription` and
+`DatasetInfo.AVsiPathIsGdalsToFindAndIsDescribed`;
+`McpServer.DatasetInfoReturnsRecordsAndGdalsJson`; `cli.info_*`;
+`qt_widgets.DatasetInfoDialog.*`;
+`qt_info_typed_and_run_as_a_dialog_runs_it_gives_the_records_headless` and
+`qt_dataset_info_headless`.
+
+Not done: INFO says nothing of a raster's metadata domains or histogram
+(GDAL's JSON has them, under `JSON`), and lists a folder's datasets without
+describing each.
 
 ## The 12d Archive format (.12da, .12daz)
 

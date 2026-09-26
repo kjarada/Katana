@@ -759,7 +759,27 @@ Not started. Its dialog is `gis_export_dialog`.
 
 ### D1: INFO as structured data, STATS, CHECK
 
-Not started. Its dialog is `dataset_info_dialog`.
+Built (`docs/interop.md`, "Dataset information"). `INFO <file|folder|url>
+[JSON] [STATS] [CHECK] [LAYER <name>]` replies with dataset, raster, band,
+overview, subdataset, layer, field and point-cloud records, read from GDAL's
+own `raster info` and `vector info` JSON through the bridge - which
+`interop::describeSource` now uses in place of the adapter's reading - or
+gives that JSON back; a folder is `dataset identify`, CHECK `dataset check`.
+The Dataset Information dialog runs the INFO lines through the window's one
+executor and hears a job's end through `MainWindow::awaitJob`; MCP
+`katana_dataset_info`.
+
+- **Deviations.** The records are built from `interop::SourceDescription`,
+  which gained bands, fields, extents, subdatasets and GDAL's JSON
+  (`DescribeOptions`: statistics, layer, multidim, anyFormat), rather than
+  from a second parse of the JSON in the verb. `STATS` and a layer are
+  options of `describeSource`, so the import dialogs could use them too.
+  Statistics come from the band's `STATISTICS_` metadata (14 digits), not
+  the JSON's rounded keys (3 decimals).
+- **For the other packages.** `MainWindow::awaitJob(started, done)` is how a
+  dialog hears what its line did once the job it started ends (the
+  toolbox's reply, a lane's dialog); it reads the `job` record the line
+  answered with.
 
 ### D2: Reference layers: manageable, persistent, with overviews
 

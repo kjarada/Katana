@@ -536,12 +536,14 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/new_drops_reference_data_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # GIS > Dataset Information and the import dialog, described by GDAL and
-    # PDAL from the file and painted.
+    # PDAL from the file and painted. The dialog runs its INFO lines through
+    # the window's one executor, so what they said is in the log.
     add_test(NAME qt_dataset_info_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDATASET_INFO=${_gis}/terrain.asc"
+            "-DEXPECT=dataset file=[^ ]*/terrain\\.asc kind=raster driver=AAIGrid "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dataset_info_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_import_options_headless
@@ -1432,7 +1434,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>COPC \"${_gis}/survey_scan.las\" \"${_window_copc}\"|>INFO \"${_window_copc}\"|>COPC \"${_gis}/survey_scan.las\"|*convertCopc"
-            "-DEXPECT=converted source=\"?[^ ]*/survey_scan\\.las\"? file=\"[^\"]*/qt copc/window scan\\.copc\\.laz\" format=copc.*Point cloud: 40,000 points.*COPC: yes.*usage: COPC <source> <destination\\.copc\\.laz>.*A headless session opens no file dialog: type COPC <source> <destination\\.copc\\.laz> instead"
+            "-DEXPECT=converted source=\"?[^ ]*/survey_scan\\.las\"? file=\"[^\"]*/qt copc/window scan\\.copc\\.laz\" format=copc.*pointcloud points=40000 [^\r\n]*copc=yes.*usage: COPC <source> <destination\\.copc\\.laz>.*A headless session opens no file dialog: type COPC <source> <destination\\.copc\\.laz> instead"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/copc_typed_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_copc_cleanup PROPERTIES FIXTURES_SETUP qt_copc_clean)

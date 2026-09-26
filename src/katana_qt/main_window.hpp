@@ -169,9 +169,15 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] std::unique_ptr<AttributeManagerDialog> makeAttributeManager();
     [[nodiscard]] std::unique_ptr<LayerManagerDialog> makeLayerManager();
     // GIS > Dataset Information for `path`, built but not shown, as the
-    // managers above; nullptr when the file cannot be described, which has
-    // been logged. For the headless --dataset-info switch.
+    // managers above: it runs its INFO lines through runVerbLine. Headless,
+    // nullptr when the file could not be described, which has been logged.
+    // For the headless --dataset-info switch.
     [[nodiscard]] std::unique_ptr<DatasetInfoDialog> makeDatasetInfo(const QString& path);
+    // When `started` - what runVerbLine returned - says a geoprocessing job
+    // was started and it is still running: `done` is called with the job's
+    // outcome when it ends, and true returned. False otherwise: `started`
+    // is the answer. How a dialog hears what its line did.
+    bool awaitJob(const VerbOutcome& started, std::function<void(const VerbOutcome&)> done);
     // The GIS menu's import dialog for `path`'s kind of data - vector, raster
     // or point cloud, or for a DXF or a .12da the placement step File >
     // Import asks (ImportPlacementDialog) - built but not shown. nullptr,
