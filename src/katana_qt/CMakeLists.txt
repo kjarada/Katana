@@ -26,8 +26,13 @@ endif()
 # that stderr goes nowhere when it is started from cmd.exe, so the --plot
 # switch reports failure through its exit code as well as its message.
 #
+# Not MACOSX_BUNDLE: on macOS the program is bin/katana, as on Linux, so the
+# headless checks, the tests and the bundle (KatanaDeployUnix.cmake.in) find
+# it where they find it everywhere else. A signed Katana.app is a packaging
+# project of its own (docs/release.md, "Not done").
+#
 # No Q_OBJECT classes: signals are connected to lambdas, so moc is not needed.
-add_executable(katana WIN32 MACOSX_BUNDLE
+add_executable(katana WIN32
     main.cpp
     command_reference_dialog.cpp
     command_reference_dialog.hpp

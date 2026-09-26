@@ -33,7 +33,10 @@ list(PREPEND CMAKE_PREFIX_PATH "${KATANA_TOOLCHAIN}")
 # newer than the system's; the run-time path finds them without an
 # LD_LIBRARY_PATH, as the Windows build tree finds its DLLs beside it.
 set(CMAKE_BUILD_RPATH "${KATANA_TOOLCHAIN}/lib")
-set(CMAKE_INSTALL_RPATH "${KATANA_TOOLCHAIN}/lib")
+# An INSTALLED program finds them in lib/ beside its own bin/, where the
+# install copies them (cmake/KatanaDeployUnix.cmake.in), so the installed tree
+# runs on a machine without the prefix.
+set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib")
 
 # GoogleTest and Google Benchmark come from the prefix too, so a Linux
 # configure needs no download (cmake/KatanaThirdParty.cmake).

@@ -10,14 +10,18 @@
 
 #include <gtest/gtest.h>
 
+#include <cpl_conv.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
 
+#include "katana/core/library_data.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/pointcloud/point_cloud_engine.hpp"
 
@@ -72,6 +76,62 @@ class TempFile {
 // ---- point cloud ----------------------------------------------------------------------------
 
 using namespace katana::pointcloud;
+
+// A relocated Linux or macOS tree (docs/release.md) keeps GDAL's data in
+// share/gdal and libcurl's certificates in ssl/cacert.pem beside the lib/ the
+// libraries are in, while the paths compiled into them name the machine that
+// built them. Registering GDAL points it at both, unless the environment
+// already has. Where to look is worked out here from where the libraries
+// were loaded, independently of the adapter.
+namespace {
+
+#if defined(__APPLE__)
+constexpr const char* kGdalLibrary = "libgdal.";
+constexpr const char* kCurlLibrary = "libcurl.";
+#else
+constexpr const char* kGdalLibrary = "libgdal.so";
+constexpr const char* kCurlLibrary = "libcurl.so";
+#endif
+
+} // namespace
+
+TEST(GdalAdapter, GdalIsPointedAtTheDataBesideItsLibrary)
+{
+#if defined(__linux__) || defined(__APPLE__)
+    if (std::getenv("GDAL_DATA") != nullptr) {
+        GTEST_SKIP() << "GDAL_DATA names GDAL's data already";
+    }
+    (void)katana::gis::gdalVersion(); // registers GDAL
+    const auto data = katana::core::dataBesideLibrary(kGdalLibrary, "share/gdal");
+    if (!data) {
+        GTEST_SKIP() << "a distribution's GDAL: no share/gdal beside its directory";
+    }
+    const char* given = CPLGetConfigOption("GDAL_DATA", nullptr);
+    ASSERT_NE(given, nullptr);
+    EXPECT_TRUE(std::filesystem::equivalent(given, *data)) << given;
+#else
+    GTEST_SKIP() << "Windows finds GDAL's data by the DLL's name";
+#endif
+}
+
+TEST(GdalAdapter, GdalIsPointedAtTheCertificatesBesideLibcurl)
+{
+#if defined(__linux__) || defined(__APPLE__)
+    if (std::getenv("CURL_CA_BUNDLE") != nullptr || std::getenv("SSL_CERT_FILE") != nullptr) {
+        GTEST_SKIP() << "the environment names the certificates already";
+    }
+    (void)katana::gis::gdalVersion(); // registers GDAL
+    const auto certificates = katana::core::dataBesideLibrary(kCurlLibrary, "ssl/cacert.pem");
+    if (!certificates) {
+        GTEST_SKIP() << "a distribution's libcurl: no ssl/cacert.pem beside its directory";
+    }
+    const char* given = CPLGetConfigOption("CURL_CA_BUNDLE", nullptr);
+    ASSERT_NE(given, nullptr);
+    EXPECT_TRUE(std::filesystem::equivalent(given, *certificates)) << given;
+#else
+    GTEST_SKIP() << "MSYS2's libcurl finds the certificates the deploy puts beside it";
+#endif
+}
 
 TEST(PointCloudEngine, RejectsZeroDecimationStepWithoutThrowing)
 {

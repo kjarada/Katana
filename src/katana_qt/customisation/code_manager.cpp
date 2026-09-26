@@ -1047,7 +1047,7 @@ void SurveyCodeManagerDialog::explain(const std::string& code)
                                       matchClass(explanation.kind, explanation.matched), how)
                                  .arg(explanation.rules.size()));
 
-    const auto cite = [this](std::size_t rule, const std::string& key, SurveySection section) {
+    const auto cite = [](std::size_t rule, const std::string& key, SurveySection section) {
         return QStringLiteral("#%1 %2 (%3)")
             .arg(rule)
             .arg(text(key), QString::fromLatin1(katana::entity::toString(section)));

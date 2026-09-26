@@ -1,0 +1,241 @@
+# Builds Katana for Windows, Linux and macOS, proves each package starts on
+# its own, and publishes the three as a GitHub release (docs/release.md).
+#
+#   push a tag vX.Y.Z               build, then publish release vX.Y.Z
+#   Actions > Release > Run         build; with a tag given, publish it too
+#   a pull request touching the     build only, so a change to the build or
+#   build or packaging              the packaging is proven before it merges
+#
+# Each job runs the same commands a person runs on that platform
+# (docs/building.md); nothing here is a second way of building.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cmake/**"
+      - "tools/setup_linux_toolchain.py"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, vX.Y.Z matching project(Katana VERSION). Empty: build only."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      # One place a version is written: project(Katana VERSION ...). A tag
+      # that disagrees with it would publish packages named for another
+      # version, so it fails here, before an hour of building.
+      - id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          version=$(sed -n 's/^project(Katana VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          test -n "$version" || { echo "::error::no project(Katana VERSION ...) in CMakeLists.txt"; exit 1; }
+          tag=""
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tag="$GITHUB_REF_NAME"; fi
+          if [ -n "$INPUT_TAG" ]; then tag="$INPUT_TAG"; fi
+          if [ -n "$tag" ] && [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match project(Katana VERSION $version); expected v$version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Katana $version${tag:+, publishing $tag}"
+
+  windows:
+    name: Windows x86-64
+    needs: version
+    runs-on: windows-2025
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      # The toolchain of docs/building.md, "Toolchain": MSYS2 UCRT64.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: unzip
+          pacboy: >-
+            gcc:p cmake:p ninja:p python:p nsis:p
+            qt6-base:p qt6-tools:p cgal:p eigen3:p boost:p gmp:p mpfr:p
+            proj:p gdal:p pdal:p nlohmann-json:p sqlite3:p
+      - name: Toolchain
+        run: |
+          g++ --version | head -1
+          cmake --version | head -1
+      # The release preset, with the compiler and prefix wherever the action
+      # installed MSYS2 (the preset names C:/msys64, a developer's default).
+      - name: Configure
+        run: |
+          ucrt=$(cygpath -m /ucrt64)
+          cmake --preset release \
+            -DCMAKE_CXX_COMPILER="$ucrt/bin/g++.exe" -DCMAKE_PREFIX_PATH="$ucrt" \
+            -DKATANA_BUILD_TESTS=OFF -DKATANA_BUILD_BENCHMARKS=OFF
+      - name: Build
+        run: cmake --build build/release --parallel
+      - name: Package
+        run: cmake --build build/release --target package
+      # The zip is what a user downloads: unpacked with nothing of MSYS2 on
+      # PATH, the command line must draw and save a drawing and the window
+      # must build itself headless.
+      - name: Smoke test the package
+        run: |
+          set -eux
+          rm -rf smoke && mkdir smoke
+          unzip -q "build/release/Katana-${{ needs.version.outputs.version }}-win64.zip" -d smoke
+          root="smoke/Katana-${{ needs.version.outputs.version }}-win64"
+          cp -r samples/site_plan smoke/project
+          export PATH=/c/Windows/System32:/c/Windows:/usr/bin
+          "$root/bin/katana_cli.exe" -c "RECT 0,0 30,20" -c "SAVE smoke/rect.katana"
+          test -f smoke/rect.katana/project.db
+          "$root/bin/katana_cli.exe" -c "INFO samples/gis/terrain.asc" | tee smoke/info.txt
+          grep -q "EPSG:32630" smoke/info.txt
+          "$root/bin/katana_cli.exe" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
+          QT_QPA_PLATFORM=offscreen timeout 300 "$root/bin/katana.exe" smoke/project --screenshot smoke/window.png
+          test -s smoke/window.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: katana-windows
+          path: |
+            build/release/Katana-*-win64.zip
+            build/release/Katana-*-win64.exe
+          if-no-files-found: error
+
+  unix:
+    name: ${{ matrix.name }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86-64
+            runner: ubuntu-24.04
+            preset: linux-release
+            artifact: katana-linux
+            package: linux-x86_64
+          - name: macOS arm64
+            runner: macos-15
+            preset: macos-release
+            artifact: katana-macos
+            package: macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "KATANA_TOOLCHAIN=$HOME/katana-toolchain" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The conda-forge prefix of docs/building.md, "Linux" and "macOS". Its
+      # versions are frozen by the script's SNAPSHOT and SPECS, so the script
+      # is the whole cache key.
+      - uses: actions/cache@v4
+        with:
+          path: ~/katana-toolchain
+          key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/setup_linux_toolchain.py') }}
+      - name: Toolchain
+        run: |
+          python3 tools/setup_linux_toolchain.py
+          echo "$KATANA_TOOLCHAIN/bin-tools" >> "$GITHUB_PATH"
+          mkdir -p "$KATANA_TOOLCHAIN/bin-tools"
+          # Only the build tools on PATH, not the whole prefix: its bin/ also
+          # holds a python3 that would shadow the runner's.
+          for tool in cmake ctest cpack ninja; do
+            ln -sf "$KATANA_TOOLCHAIN/bin/$tool" "$KATANA_TOOLCHAIN/bin-tools/$tool"
+          done
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=OFF -DKATANA_BUILD_BENCHMARKS=OFF
+      - name: Build
+        run: cmake --build build/${{ matrix.preset }} --parallel
+      - name: Package
+        run: cmake --build build/${{ matrix.preset }} --target package
+      # What every Linux desktop has and a CI image may not: the graphics
+      # driver's GL and EGL loaders, which the package leaves to the system
+      # (docs/release.md).
+      - name: System libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends libegl1 libgl1 libopengl0 libfontconfig1
+      # The tarball is what a user downloads, so it is tested with the
+      # toolchain prefix moved out of reach: anything the package failed to
+      # carry fails to load here rather than on the user's machine.
+      - name: Smoke test the package
+        run: |
+          set -eux
+          package="Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}"
+          rm -rf smoke && mkdir smoke
+          tar -xzf "build/${{ matrix.preset }}/$package.tar.gz" -C smoke
+          root="smoke/$package"
+          cp -r samples/site_plan smoke/project
+          mv "$KATANA_TOOLCHAIN" "$KATANA_TOOLCHAIN.away"
+          trap 'mv "$KATANA_TOOLCHAIN.away" "$KATANA_TOOLCHAIN"' EXIT
+          "$root/bin/katana_cli" -c "RECT 0,0 30,20" -c "SAVE smoke/rect.katana"
+          test -f smoke/rect.katana/project.db
+          # GDAL, with PROJ's database found beside the bundled libproj: the
+          # coordinate system is named from proj.db, which nothing else has.
+          "$root/bin/katana_cli" -c "INFO samples/gis/terrain.asc" | tee smoke/info.txt
+          grep -q "EPSG:32630" smoke/info.txt
+          # PDAL and GDAL's vector drivers.
+          "$root/bin/katana_cli" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
+          QT_QPA_PLATFORM=offscreen timeout 300 "$root/bin/katana" smoke/project --screenshot smoke/window.png
+          test -s smoke/window.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: build/${{ matrix.preset }}/Katana-*-${{ matrix.package }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [version, windows, unix]
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum Katana-* | tee SHA256SUMS.txt
+      # A release that already exists (a re-run) gets its files replaced, so
+      # publishing is safe to repeat.
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "Katana $VERSION" \
+              --generate-notes
+          fi
