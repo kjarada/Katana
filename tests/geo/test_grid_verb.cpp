@@ -311,6 +311,32 @@ TEST_F(GridVerb, BoundsOffTheCellGrowOutwardsToWholeCells)
     EXPECT_DOUBLE_EQ(band->geotransform[1], 5.0);
 }
 
+TEST_F(GridVerb, BoundsOnTheCellAtAnMgaNorthingStayOnIt)
+{
+    // Four points 1 m apart at easting 330000.1 and northing 6250000.3 (MGA
+    // zone 56 magnitudes), gridded at 0.1 m: the bounds lie on 0.1 m lines,
+    // so the grid is 10 x 10 cells from (330000.1, 6250000.3). In binary64,
+    // 6250000.3 / 0.1 is 62500002.99999999 (one ulp there is 7.5e-9), so a
+    // floor that allows 1e-9 of a cell put the grid's foot at 6250000.2: 11
+    // rows, the extra one holding no datum.
+    std::vector<Entity> points;
+    for (const double x : {330000.1, 330001.1}) {
+        for (const double y : {6250000.3, 6250001.3}) {
+            points.push_back(spot(x, y, 100.0));
+        }
+    }
+    draw(std::move(points));
+    auto reply = run("RASTER GRID DRAWING cell=0.1");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(record(geo::parseRecords(*reply), "grid")->get("size"), "10x10") << *reply;
+    auto band = geo::readBandOne(reference.rasters().back().source);
+    ASSERT_TRUE(band.ok());
+    // Within 1e-6 m: k x 0.1 in binary64 is off the decimal by an ulp or two
+    // (1e-9 m here), far below the 0.1 m a wrong row would be.
+    EXPECT_NEAR(band->geotransform[0], 330000.1, 1e-6);
+    EXPECT_NEAR(band->geotransform[3] + 10 * band->geotransform[5], 6250000.3, 1e-6);
+}
+
 TEST_F(GridVerb, AGivenExtentKeepsItsCornerAndSizeTakesItAsItIs)
 {
     lattice(0, 0, 100, 100, 10);

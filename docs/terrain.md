@@ -1161,6 +1161,14 @@ raster named `dem`, or NAME's name.
   every point is inside the grid, every cell is `cell=` square, and grids of
   one cell size line up. A given `extent=` keeps its lower-left corner and
   grows up and right to whole cells. `size=` takes the extent as it is.
+  A bound within `math::tolerance::kGeometric` (1e-7 m) of a cell line is
+  on it. The allowance was 1e-9 of a cell, which vanishes in the rounding at
+  projected coordinates: at northing 6250000.3 with 0.1 m cells the quotient
+  is 62500002.99999999 (an ulp there is 7.5e-9), and the grid grew a row
+  below every datum (`GridVerb.BoundsOnTheCellAtAnMgaNorthingStayOnIt`).
+  An allowance in cells scaled by the quotient's size was rejected: at such
+  magnitudes a relative 1e-9 is 0.06 of a cell, which would pull a bound
+  6 mm below a line onto it and leave the datum outside the grid.
   Without either, the cell is `interop::suggestedCellSize` of the extent, as
   a surface's raster export chooses it.
 - **Cells no point reaches hold no data**, `interop::geo::kGridNoData`
