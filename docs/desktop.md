@@ -1404,6 +1404,14 @@ drawing changes and before each preview and export, so "Selected entities
 only" with nothing selected is refused rather than writing the whole drawing -
 as `EXPORT ... SELECTED` is.
 
+With the geoprocessing executor in the window, which takes `IMPORT`,
+`EXPORT` and `INFO` of every other file, `MainWindow::runWorkbenchLine` asks
+`MainWindow::runIfcLine` first, before the geo workbench: a typed line and a
+dialog's line through `runVerbLine` reach the workbench before
+`dispatchLine`, so without it the executor read an IFC line's options as
+part of a path (`qt_ifc_typed_export_and_import_are_the_command_lines_headless`
+failed exactly so). The session does the same (`src/katana_app/session.cpp`).
+
 A .ifc reaches the same line from everywhere else a path enters: File > Import
 and its IFC filter and a path given to the window run `IMPORT "<file>"`, the
 typed `IMPORT`, `EXPORT` and `INFO` are split by the shared grammar before the
