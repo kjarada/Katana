@@ -39,8 +39,10 @@ endif()
 # runs on xcb under Xvfb - which also lets the "OnTheDesktop" cases draw a
 # real QRhiWidget, on lavapipe when there is no GPU. Without xvfb-run the
 # suite runs offscreen and every case that needs a device skips, saying so.
+# macOS: offscreen too - Metal, like Direct3D 11, renders into textures
+# without a window.
 set(_katana_gpu_platform "offscreen")
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
     find_program(KATANA_XVFB_RUN xvfb-run
         DOC "Runs the Vulkan GPU tests under a virtual X server (Debian/Ubuntu: xvfb)")
     if(KATANA_XVFB_RUN)

@@ -176,7 +176,7 @@ on Linux) before any Mac was involved: 21 of 872 translation units failed.
   call is; the call moved into a helper whose arguments make it dependent.
 * clang warns on lambda captures and private fields that are never used where
   GCC does not; they were removed, or marked `[[maybe_unused]]` where only the
-  GPU renderer, which the macOS build does not have, reads them.
+  GPU renderer reads them (a build with `KATANA_GPU=OFF` has none).
 * Two missing standard includes (`<span>`, `<numbers>`) that libstdc++ had
   supplied through other headers.
 * Four thresholds and helpers read only by the AVX2 kernels' call sites
@@ -197,9 +197,9 @@ stopped at floating-point `std::from_chars`, "introduced in macOS 26.0" - but
 the programs load the libc++ the package carries, never the system's. This is
 conda-forge's documented remedy for the same situation.
 
-The GPU renderer is not built on macOS (`src/katana_qt/gpu/CMakeLists.txt`:
-its shaders exist for Direct3D 11 and Vulkan only); the 3D view uses the
-software rasteriser there.
+The GPU renderer draws on Metal there, from the same GLSL baked to Metal
+Shading Language (`docs/gpu.md`, "Shaders"); the macOS job runs the `gpu.`
+test suite on the runner before packaging.
 
 **Gatekeeper.** Without a Developer ID ("Signing") the package is signed ad
 hoc (`codesign --sign -`, which Apple silicon requires of any code, and which

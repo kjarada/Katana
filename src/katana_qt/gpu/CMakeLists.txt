@@ -20,18 +20,23 @@
 #   Linux    Vulkan-style GLSL (shaders/), compiled to SPIR-V at BUILD time by
 #            Qt's qsb (Qt6ShaderTools, in the Linux toolchain) and embedded in
 #            the library with #embed, drawn on Vulkan.
+#   macOS    The same GLSL and the same baking, with qsb also translating each
+#            stage to Metal Shading Language (--msl), drawn on Metal. Metal has
+#            no geometry stage, so the two geometry shaders stay SPIR-V only
+#            and the renderer draws lines and points with its instanced
+#            expansion there (gpu_renderer.cpp asks QRhi::GeometryShader).
 #
 # The renderer does not know which: it asks a ShaderLibrary for a program
 # (shader_library.hpp, defaultShaders()). The two sets must draw the same
 # thing, and a change to one belongs in the other; the tests hold each to the
 # software rasteriser on its own platform.
 
-if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(WIN32 OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(_katana_gpu_default ON)
 else()
     set(_katana_gpu_default OFF)
 endif()
-option(KATANA_GPU "Build the GPU renderer for the 3D view (Direct3D 11 on Windows, Vulkan on Linux)"
+option(KATANA_GPU "Build the GPU renderer for the 3D view (Direct3D 11 on Windows, Vulkan on Linux, Metal on macOS)"
        ${_katana_gpu_default})
 
 if(NOT KATANA_GPU)
@@ -39,11 +44,11 @@ if(NOT KATANA_GPU)
     return()
 endif()
 
-if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(NOT WIN32 AND NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(WARNING
-        "KATANA_GPU is ON but this is neither Windows nor Linux, and the GPU renderer has "
-        "shaders for Direct3D 11 and Vulkan only (docs/gpu.md, 'Shaders'); it is not built and "
-        "the 3D view uses the software rasteriser.")
+        "KATANA_GPU is ON but this is not Windows, Linux or macOS, and the GPU renderer has "
+        "shaders for Direct3D 11, Vulkan and Metal only (docs/gpu.md, 'Shaders'); it is not "
+        "built and the 3D view uses the software rasteriser.")
     return()
 endif()
 
@@ -129,11 +134,18 @@ set(_katana_stages
 set(_katana_baked "")
 foreach(_stage IN LISTS _katana_stages)
     set(_out "${_katana_baked_dir}/${_stage}.qsb")
+    # Metal Shading Language 1.2 beside the SPIR-V on macOS; never for a
+    # geometry stage, which Metal does not have and qsb cannot translate.
+    set(_katana_msl "")
+    if(APPLE AND NOT _stage MATCHES "\\.geom$")
+        set(_katana_msl --msl 12)
+    endif()
     add_custom_command(
         OUTPUT "${_out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_katana_baked_dir}"
         COMMAND "${CMAKE_COMMAND}" -E env LC_ALL=C.UTF-8
-                $<TARGET_FILE:Qt6::qsb> --silent -o "${_out}" "${_katana_shader_dir}/${_stage}"
+                $<TARGET_FILE:Qt6::qsb> --silent ${_katana_msl} -o "${_out}"
+                "${_katana_shader_dir}/${_stage}"
         DEPENDS "${_katana_shader_dir}/${_stage}" "${_katana_shader_dir}/frame.glsl"
                 "${_katana_shader_dir}/quad.glsl" Qt6::qsb
         COMMENT "Baking the ${_stage} shader"
@@ -143,5 +155,10 @@ endforeach()
 set_source_files_properties(baked_shaders.cpp PROPERTIES
     OBJECT_DEPENDS "${_katana_baked}"
     COMPILE_OPTIONS "--embed-dir=${_katana_baked_dir}")
-target_compile_definitions(katana_gpu PUBLIC KATANA_GPU_VULKAN=1)
-message(STATUS "KATANA_GPU is ON: building the Vulkan renderer (SPIR-V baked by qsb)")
+if(APPLE)
+    target_compile_definitions(katana_gpu PUBLIC KATANA_GPU_METAL=1)
+    message(STATUS "KATANA_GPU is ON: building the Metal renderer (MSL baked by qsb)")
+else()
+    target_compile_definitions(katana_gpu PUBLIC KATANA_GPU_VULKAN=1)
+    message(STATUS "KATANA_GPU is ON: building the Vulkan renderer (SPIR-V baked by qsb)")
+endif()
