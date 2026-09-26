@@ -102,9 +102,9 @@ target_include_directories(katana_gpu PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # GuiPrivate is PUBLIC because the tests drive raw QRhi themselves (tests/gpu).
 target_link_libraries(katana_gpu PUBLIC katana_render Qt6::Gui Qt6::GuiPrivate Qt6::Widgets)
 target_compile_definitions(katana_gpu PUBLIC KATANA_HAS_GPU=1)
-# The vertex packing's AVX2 kernel (gpu_scene.cpp, docs/gpu.md "Packing"): the
+# The vertex packing's AVX2 and NEON kernels (gpu_scene.cpp, docs/gpu.md "Packing"): the
 # same on either backend, so before the Windows return below.
-katana_add_simd_sources(katana_gpu AVX2 simd/pack_avx2.cpp)
+katana_add_simd_sources(katana_gpu AVX2 simd/pack_avx2.cpp NEON simd/pack_neon.cpp)
 
 if(WIN32)
     # shader_compiler.cpp calls the HLSL compiler itself (d3dcompiler_47.dll,

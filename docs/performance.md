@@ -295,7 +295,8 @@ small kernels now process four doubles, or 32 bytes, per instruction on a
 processor with AVX2. Which path runs is decided once, at start-up, and every
 kernel gives exactly the same bits as the scalar code it replaces. This
 section covers the policy, the mechanism, the hazard that shapes both, and
-what was measured.
+what was measured. 64-bit ARM builds have the same kernels for NEON; they
+have their own section below ("SIMD: NEON on 64-bit ARM").
 
 ### The policy
 
@@ -327,7 +328,7 @@ what was measured.
   not just "the chip has it".
 - `activeSimdLevel()` is what every kernel family asks. After the first call
   it costs one relaxed atomic load.
-- **`KATANA_SIMD=scalar|avx2`** is read once, on first use. `scalar` is how a
+- **`KATANA_SIMD=scalar|avx2|neon`** is read once, on first use. `scalar` is how a
   machine that has AVX2 proves the path a machine without it would take.
   Asking for a level the processor cannot run, or giving a word that is not
   a level, is refused and not acted on. The refusal is written once to
@@ -426,7 +427,8 @@ Every `ctest` run includes three checks, all in `tools/check_simd_kernels.cmake`
   so it applies in Debug and Release alike. `nm` must find no externally
   visible code symbol other than `katana_avx2_*`, and at least one entry per
   object. `objdump -h` must find no `.ctors` or `.init_array` section.
-  `objdump -d` must find no `vfmadd`, `vfmsub`, `vfnmadd` or `vfnmsub`.
+  `objdump -d` must find no `vfmadd`, `vfmsub`, `vfnmadd` or `vfnmsub`
+  (on AArch64: no `fmla`, `fmls`, `fmadd`, `fmsub`, `fnmadd` or `fnmsub`).
 - **`simd_kernel_objects_under_asan`** runs the same object check on the
   kernels compiled a second time with `-fsanitize=address`, as the
   `linux-sanitize` preset compiles them. They are only compiled, never
@@ -671,6 +673,193 @@ is 4-6x faster than main.
 - **Surfacing the level.** A command-line or About line saying which level
   is in force would let a person see it; today only `simdSelection()` and a
   refused override's stderr line do.
+
+## SIMD: NEON on 64-bit ARM (2026-09-26)
+
+Every AVX2 kernel family has a NEON twin, so an arm64 build - macOS on Apple
+silicon, Linux aarch64, Windows ARM64 - runs kernels where it used to run
+only the scalar references. The contract is the AVX2 one: bit for bit the
+scalar reference, and the level switchable at any moment.
+
+### The level
+
+`SimdLevel` is `{Scalar, Avx2, Neon}`. Scalar runs everywhere; each other
+level belongs to one architecture, so a processor runs Scalar and at most
+one more, and the levels are no longer ordered: "can this processor run it"
+is `level == Scalar || level == detected`. `chooseSimdLevel` used to refuse
+`level > detected`, which would have let an ARM processor that detected Neon
+accept `KATANA_SIMD=avx2`; `SimdLevel.Avx2IsRefusedOnANeonProcessorAlthoughItComesFirstInTheEnumeration`
+holds it (and fails with the old comparison put back).
+
+There is no run-time probe on ARM. Advanced SIMD is part of the AArch64
+baseline that Linux, macOS and Windows on ARM require, and the compilers
+assume it for every AArch64 target, so a build with the NEON kernels
+detects Neon and one without (`KATANA_SIMD_KERNELS=OFF`) detects Scalar.
+`KATANA_SIMD=neon` is accepted there and refused on x86-64 like any level
+the processor cannot run; the refusal names the three words.
+
+### The build
+
+`katana_add_simd_sources(<target> AVX2 <files> NEON <files>)` takes both sets
+and refuses a family without either. `KATANA_SIMD_KERNEL_SET` is `avx2` when
+`CMAKE_SYSTEM_PROCESSOR` is AMD64/x86_64, `neon` when it is arm64 (macOS),
+ARM64 (Windows) or aarch64 (Linux) - the target's processor, so a cross
+build gets the target's set. Only that set is compiled, into
+`<target>_<set>_kernels`, with `KATANA_HAVE_AVX2_KERNELS` or
+`KATANA_HAVE_NEON_KERNELS` defined for the target. The call sites read
+`#if AVX2 ... #elif NEON ... #endif`, or name the entry once through a
+`kKernelLevel`/`kernelActive()` pair where the call is long.
+
+NEON needs no `-m` flag, and so has no inline-copy hazard: an inline
+function compiled beside a NEON kernel is baseline code. The `*_neon.cpp`
+files keep the AVX2 files' discipline all the same - their own OBJECT
+library, `<arm_neon.h>` in place of `<immintrin.h>` and nothing else,
+C-linkage `katana_neon_` entries - because one set of rules is easier to
+hold than two, and because the object check's third rule matters more on
+AArch64, not less: `fmla` and `fmadd` are baseline instructions there, and
+both compilers fuse by default - `a * b + c` at `-O2`, without the flag,
+comes out as one `fmadd` from GCC 16 and from clang 21, in C++26 mode too -
+so ordinary code would be fused the moment `-ffp-contract=off` were lost. `tools/check_simd_kernels.cmake`
+now reads `*_neon.cpp` sources (their own intrinsics header only), expects
+`katana_neon_` entries in a `*_neon.cpp` object (Mach-O's leading underscore
+allowed), refuses Mach-O's `__mod_init_func` as it refuses `.init_array`, and
+refuses `fmla`, `fmls`, `fmadd`, `fmsub`, `fnmadd` and `fnmsub` in either
+objdump's spelling (GNU's `fmla v0.2d, ...`, LLVM's `fmla.2d v0, ...`).
+`simd_kernel_objects_catches_a_fused_multiply_add` compiles a fixture kernel
+of the build's own set that fuses (`tests/simd_kernel_fixtures/`), and
+passes only when the check refuses it, so a pattern that could not see an
+AArch64 FMLA would fail the suite rather than pass it quietly. Before the
+LLVM spelling was added, that fixture compiled for macOS passed the check.
+
+### Bit for bit on ARM: what differs from x86
+
+- **No fused multiply-add, anywhere.** Every product and sum is `vmulq` and
+  `vaddq`; no `vfmaq`. The scalar tails inside the kernel files are ordinary
+  C++ and are protected by `-ffp-contract=off` alone, which the object check
+  verifies.
+- **min, max and clamp are compare and select.** `FMIN`/`FMAX` return a NaN
+  from either operand and `FMINNM`/`FMAXNM` drop it, and all four order -0
+  below +0. `std::min(a, b)` is `b < a ? b : a`, which is none of them, so
+  each is a `vclt`/`vcgt` and a `vbsl` in the order the reference writes it:
+  the bounds' `expand()`, the rasteriser's depth clamp and channel clamp,
+  the scene's `clamp01` and `std::max(0.0, d)`.
+- **Conversions.** `FCVTZS` truncates towards zero as `static_cast<int>`
+  does, and gives 0 for a NaN (which the AVX2 kernel's `0x80000000 & 0xFF`
+  also gives, and AArch64's scalar `FCVTZU`). `FCVTN` (double to float) and
+  `SCVTF` (int to float) round to nearest under the default FPCR, as the
+  casts do. The splat converts to 64-bit integers and narrows; inside the
+  (-1e6, 1e6) window that is the 32-bit result exactly, and outside it the
+  lane is replaced by "no pixel".
+- **`std::hypot` of three.** The scene kernels must match the standard
+  library the scalar code calls, and the two differ: libstdc++ (Linux,
+  Windows) divides by the largest magnitude, libc++ (macOS) from LLVM 19
+  scales by `2^-532` when the largest passes `2^512` (and by `2^532` below
+  `2^-512`) and takes `sqrt(x x + y y + z z) / scale`, its largest found with
+  `fmax` - which `FMAXNM` is. `scene_neon.cpp` picks by `_LIBCPP_VERSION`
+  (libc++ before LLVM 19: the plain formula). A scratch harness, not
+  committed, compared the kernel's lighting with `std::hypot` over 32,768
+  normals of magnitudes from 1e-320 to 1.7e308, under qemu-aarch64: no
+  difference with GCC 16 and libstdc++, none with clang 21 and libc++, and
+  2,048 differences when a kernel compiled for libstdc++ was linked against
+  the libc++ reference - so the choice is real. The macOS build itself has
+  not been run here. `SceneKernels.NormalsTooLongToSquareLightTheSameAtEveryLevel`
+  puts normals of 1e201 through the surface and mesh kernels, where a naive
+  `sqrt` of the squares overflows.
+- **No masked load or store.** The fill's last block of a span may run
+  past the span's last pixel, which may be past the end of the buffer. The
+  AVX2 kernel masks those lanes; the NEON one reads and writes whole blocks
+  of four only inside the span (lanes that did not pass get back the value
+  read, and all four pixels are this span's, which only this call writes)
+  and the last partial block one lane at a time.
+- **Layouts.** Where AVX2 keeps a point in one register as x y z w, NEON
+  has two doubles a register, so the lanes are two points (or two faces)
+  and each coordinate has a register: `LD2`/`LD3`/`LD4` de-interleave and
+  `ST2`/`ST3`/`ST4` put back. The pack kernel's `ST4` writes four whole
+  `GpuVertex` records, colour words as the bits they are.
+
+Every kernel takes the same step as its AVX2 twin - 32 UTF-16 units, 64
+bytes of UTF-8 (four 16-byte blocks), four points, four vertices - except
+the fill (four pixels, not eight), the scene's surface and mesh kernels (two
+vertices or faces) and the fade (four colours). So the tests' block edges are
+the NEON kernels' edges too; where NEON adds edges of its own the tests were
+extended: all 65,536 byte pairs are now judged at ten places (the 16-byte
+edges at 15, 47 and 79 and the NEON final window at 83 added), and four
+hand-worked validator cases sit on NEON's edges.
+
+### The thresholds: kept, and not measured
+
+No ARM machine was at hand; everything here ran under qemu-aarch64, which
+says nothing about speed. So every dispatch minimum is the AVX2 one, kept on
+the reasoning written beside it, not on a measurement:
+
+| minimum | value | why it is kept for NEON |
+|---|---|---|
+| `kValidateMinimum` (`text_encoding.cpp`) | 64 bytes | the kernel's contract, not only its break-even: it works in the same 64-byte steps and needs one before its final window; with four 16-byte registers a step, its break-even is not expected earlier |
+| `kBoundsBatchMinimum` (`point_batch.hpp`) | 16 points | the fixed cost it repays - the call and the zero-sign fix-up - is the same whichever kernel follows |
+| `kTransformMinimum` (`point_batch.cpp`) | 8 points | two kernel steps, of four points, for both |
+| `kProjectMinimum` (`point_splat.cpp`) | 4 points | one kernel step for both |
+| `kTransformBatchMinimum` (`rasterizer.cpp`) | 16 vertices | four kernel steps for both |
+| `kSurfaceKernelMinimum`, `kMeshKernelMinimum`, `kFadeKernelMinimum` (`scene.cpp`) | 16, 2, 8 | a whole number of NEON steps each; the parameter block and the call they repay are the same |
+| the pack kernel (`gpu_scene.cpp`) | any length | no set-up to repay |
+
+### Checked
+
+The NEON kernels have run only on Linux aarch64, under qemu-aarch64 (user
+mode), from a cross build on x86-64: GCC 16.2 from conda-forge's
+`gxx_linux-aarch64`, the aarch64 libraries from conda-forge's
+`linux-aarch64` packages, glibc 2.28's sysroot, `KATANA_BUILD_QT_APP=OFF`
+and `KATANA_BUILD_IO=OFF` (the Qt and GDAL/PDAL parts were not cross-built).
+On 2026-09-26:
+
+- `simd_scalar.*` and `simd_neon.*` for core, geometry, render and cad all
+  passed: 88, 204, 74 and 45 (the cad suite's scene tests) cases at each
+  level, none skipped. `simd_kernel_sources`, `simd_kernel_objects` (read
+  with the aarch64 `nm` and `objdump`), `simd_kernel_objects_under_asan` and
+  `simd_kernel_objects_catches_a_fused_multiply_add` passed.
+- The whole cross-built suite: 3,863 of 3,922 passed. The 59 that failed
+  are every `cli.*` test, which runs `katana_cli` through `cmake -E env`
+  rather than through `CMAKE_CROSSCOMPILING_EMULATOR`, so the host tried to
+  execute an aarch64 program ("Exec format error"); run under qemu by hand,
+  `katana_cli` works.
+- The GPU pack kernel's tests need `katana_gpu`, which needs Qt, so its
+  equivalence tests (`tests/gpu/test_gpu_scene.cpp`, all seven, with
+  `gpu_scene.cpp`, `scene_origin.cpp` and the kernel) were compiled by hand
+  against the cross-built libraries and gtest and run under qemu at both
+  levels: all passed.
+- Each test reaches the kernel: with one lane of a kernel broken, its tests
+  failed under qemu at `KATANA_SIMD=neon` - the bounds' compare-and-select
+  replaced by `vminq_f64` (the NaN and bit-for-bit bounds tests), the fill's
+  fourth lane moved one pixel (six rasteriser tests), the UTF-8 validator's
+  four-byte-lead rule dropped (three validator tests), the splat letting a
+  NaN x through (two projection tests), the scene's `hypot` replaced by the
+  naive formula (`SceneKernels.NormalsTooLongToSquareLightTheSameAtEveryLevel`)
+  and the pack kernel's third vertex offset by the wrong origin (two packing
+  tests). Each was restored and the suites passed again.
+
+The x86-64 build is unchanged in what it runs: its suites, `simd_avx2.*`, the
+object checks, `layering` and `docs` pass as before.
+
+### Not done
+
+- **Nothing was measured on ARM.** The thresholds above and the claim that
+  the kernels are faster at all are inferred from the AVX2 measurements and
+  register widths. The benchmarks name their kernel member `avx2` and ask
+  for level 1 (`benchmarks/bench_simd.cpp`, `bench_scene.cpp`); on ARM that
+  member is refused and skipped, saying so. A `/neon` member and a run on an
+  Apple-silicon or Graviton machine are the next step, and any threshold
+  that moves should be written down here with both numbers.
+- **The macOS and Windows ARM64 builds were compiled, not run.** Every NEON
+  kernel file compiles warning-free under `-Wall -Wextra -Wpedantic -Wshadow
+  -Werror` with GCC 16 (aarch64 Linux) and clang 21 (aarch64 Linux with
+  libstdc++ and libc++, and arm64-apple-macos13 with libc++), and the object
+  check passes on the clang Mach-O objects with LLVM's `nm` and `objdump`.
+  The equivalence tests have run only on Linux aarch64 under qemu. The
+  macOS release job builds with tests off; running the suite there once is
+  what would prove the libc++ `hypot` branch in the real build.
+- **The object check on macOS needs LLVM's tools.** `tests/CMakeLists.txt`
+  looks for `llvm-objdump` and `llvm-nm` when CMake found no objdump; if
+  neither is there, `simd_kernel_objects` gets an empty `OBJDUMP` and fails
+  saying so.
 
 ## SIMD: the software rasteriser (2026-09-24)
 

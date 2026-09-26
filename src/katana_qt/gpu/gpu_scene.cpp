@@ -5,7 +5,7 @@
 #include "katana/core/cpu_features.hpp"
 #include "scene_origin.hpp"
 
-#if defined(KATANA_HAVE_AVX2_KERNELS)
+#if defined(KATANA_HAVE_AVX2_KERNELS) || defined(KATANA_HAVE_NEON_KERNELS)
 #include "simd/pack_kernels.hpp"
 #endif
 
@@ -58,6 +58,15 @@ void packVertices(const DrawList& list, std::size_t count, const katana::math::V
     if (count > 0 && katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2) {
         const double at[3] = {origin.x, origin.y, origin.z};
         katana_avx2_pack_vertices(&list.positions.front().x, list.colors.data(), count, at,
+                                  out.data());
+        return;
+    }
+#elif defined(KATANA_HAVE_NEON_KERNELS)
+    // The same on 64-bit ARM, four vertices a step in registers of two; its
+    // any-length rule is the AVX2 kernel's, not measured on ARM.
+    if (count > 0 && katana::core::activeSimdLevel() == katana::core::SimdLevel::Neon) {
+        const double at[3] = {origin.x, origin.y, origin.z};
+        katana_neon_pack_vertices(&list.positions.front().x, list.colors.data(), count, at,
                                   out.data());
         return;
     }
