@@ -45,7 +45,14 @@ std::vector<Geometry> oneOfEachGeometry()
             TextGeometry{Point2(5, 5), "BM \"A\" 102.45", 2.5, 0.5},
             DimensionGeometry{Point2(0, 0), Point2(10, 0), 3.0, "10.00 m"},
             LabelGeometry{.target = 7, .style = "Lot area", .anchor = Point2(3, 4)},
-            LeaderGeometry{.vertices = {Point2(0, 0), Point2(4, 3)}, .text = "PIT 12"}};
+            LeaderGeometry{.vertices = {Point2(0, 0), Point2(4, 3)}, .text = "PIT 12"},
+            katana::geometry::CurvePolyline2{
+                {{Point2(0, 0), 0.5, 10.25}, {Point2(6, 0), 0.0, std::nullopt},
+                 {Point2(6, 4), -0.25, 12.5}},
+                false},
+            katana::geometry::Ellipse2{Point2(2, 3), katana::geometry::Vec2(5, 1), 0.4, 0.5, 2.0},
+            *katana::geometry::Spline2::throughPoints(
+                {Point2(0, 0), Point2(3, 4), Point2(7, 3), Point2(10, 8)}, 3)};
 }
 
 } // namespace
@@ -57,7 +64,9 @@ TEST(Entity, TypeFollowsGeometryAlternative)
     const auto geometries = oneOfEachGeometry();
     const EntityType expected[] = {EntityType::Point, EntityType::Line, EntityType::Arc,
                                    EntityType::Polyline, EntityType::Circle, EntityType::Text,
-                                   EntityType::Dimension, EntityType::Label, EntityType::Leader};
+                                   EntityType::Dimension, EntityType::Label, EntityType::Leader,
+                                   EntityType::CurvePolyline, EntityType::Ellipse,
+                                   EntityType::Spline};
     // The loop below walks `geometries` and indexes `expected`, so growing one
     // without the other was an out-of-bounds read - which a normal build may
     // well survive, failing only under the sanitizer job. Both are also pinned
@@ -73,7 +82,7 @@ TEST(Entity, TypeFollowsGeometryAlternative)
         ASSERT_TRUE(parsed.ok());
         EXPECT_EQ(*parsed, expected[i]);
     }
-    EXPECT_FALSE(entityTypeFromString("Spline").ok());
+    EXPECT_FALSE(entityTypeFromString("Hyperbola").ok());
 }
 
 TEST(EntityGeometry, ValidateRejectsDegenerateAndNonFinite)

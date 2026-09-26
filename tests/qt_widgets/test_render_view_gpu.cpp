@@ -41,8 +41,9 @@ using katana::qt::test::processEvents;
 
 namespace {
 
-// renderer_choice.cpp's rule 5, for the backend this build carries.
-bool gpuCanBeShown()
+// renderer_choice.cpp's rule 5, for the backend this build carries. These helpers are
+// used only in a build with a GPU backend, hence [[maybe_unused]].
+[[maybe_unused]] bool gpuCanBeShown()
 {
     const QString platform = QGuiApplication::platformName();
 #if defined(KATANA_GPU_VULKAN)
@@ -56,7 +57,7 @@ bool gpuCanBeShown()
 }
 
 // Pixels of `frame` that are not the view's background (28, 30, 36).
-std::size_t drawnPixels(const QImage& frame)
+[[maybe_unused]] std::size_t drawnPixels(const QImage& frame)
 {
     const QImage rgb = frame.convertToFormat(QImage::Format_ARGB32);
     std::size_t drawn = 0;
@@ -71,7 +72,7 @@ std::size_t drawnPixels(const QImage& frame)
 // With KATANA_GPU_TEST_IMAGES set to a directory, saves `frame` there as
 // <name>.png, as the GPU suite does (docs/gpu.md, "Testing"): the way to
 // look at what the hosted view drew.
-void saveForLooking(const char* name, const QImage& frame)
+[[maybe_unused]] void saveForLooking(const char* name, const QImage& frame)
 {
     const QByteArray directory = qgetenv("KATANA_GPU_TEST_IMAGES");
     if (!directory.isEmpty()) {

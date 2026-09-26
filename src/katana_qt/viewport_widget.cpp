@@ -155,7 +155,7 @@ std::optional<Tool> legacyTool(std::string_view id)
 }
 
 ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, QWidget* parent)
-    : QWidget(parent), document_(document), state_(state), tools_(document)
+    : QWidget(parent), document_(document), state_(state), tools_(document), grips_(document)
 {
     setMinimumSize(kMinimumWidth, kMinimumHeight);
     setMouseTracking(true);
@@ -171,6 +171,11 @@ ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, Q
         update();
     });
     wireToolHost();
+    grips_.onError = [this](const QString& error) {
+        if (onError) {
+            onError(error);
+        }
+    };
     activateOnFocus(*this, [this] {
         if (onActivated) {
             onActivated();
@@ -344,18 +349,22 @@ void ViewportWidget::setGridVisible(bool visible)
 
 void ViewportWidget::setSnapEnabled(bool enabled)
 {
-    snapEnabled_ = enabled;
+    document_.drafting().snapEnabled = enabled;
     activeSnap_.reset();
     update();
 }
 
 void ViewportWidget::setSnapModes(cad::SnapModes modes)
 {
-    snapModes_ = modes;
+    document_.drafting().snapModes = modes;
 }
 
 void ViewportWidget::cancel()
 {
+    if (gripsLive() && grips_.escape()) {
+        update();
+        return;
+    }
     if (!typed_.isEmpty()) {
         // As in a command line: the first Esc takes back what was typed.
         typed_.clear();
@@ -375,6 +384,7 @@ void ViewportWidget::cancel()
 
 void ViewportWidget::resetInteraction()
 {
+    grips_.reset();
     typed_.clear();
     boxStart_.reset();
     activeSnap_.reset();
@@ -412,14 +422,17 @@ void ViewportWidget::updateCursor(const QPointF& screen)
     cursorWorld_ = raw;
     activeSnap_.reset();
 
-    // Snapping serves a tool that wants a point: a pick of an entity or a
-    // selection is made where the cursor really is.
-    if (snapEnabled_ && tools_.expects() == cad::ToolInput::Point) {
+    // Snapping serves a tool that wants a point, and a grip being dragged:
+    // a pick of an entity or a selection is made where the cursor really is.
+    const bool gripping = gripsLive() && grips_.active();
+    const std::optional<Point2> base = gripping ? grips_.base() : tools_.lastPoint();
+    if (document_.drafting().snapEnabled &&
+        (tools_.expects() == cad::ToolInput::Point || gripping)) {
         cad::SnapRequest request;
         request.cursor = raw;
         request.aperture = state_.plan.pixelsToWorld(kSnapAperturePixels);
-        request.modes = snapModes_;
-        request.from = tools_.lastPoint();
+        request.modes = document_.drafting().snapModes;
+        request.from = base;
         request.gridSpacing = gridVisible_ ? cad::gridSpacing(state_.plan.scale) : 0.0;
         request.view = &state_.layers;
         // Through the Document's spatial index (PLAN.MD Phase 18). Measured in
@@ -429,8 +442,38 @@ void ViewportWidget::updateCursor(const QPointF& screen)
         activeSnap_ = cad::snap(document_.model(), request, &document_.spatialIndex());
         if (activeSnap_) {
             cursorWorld_ = activeSnap_->point;
+            if (document_.drafting().objectTracking &&
+                cad::TrackingPoints::tracks(activeSnap_->mode)) {
+                tracking_.acquire(activeSnap_->point, katana::math::tolerance::kGeometric);
+            }
         }
     }
+    const bool wantsPoint = tools_.expects() == cad::ToolInput::Point || gripping;
+    if (!wantsPoint || !document_.drafting().objectTracking) {
+        tracking_.clear();
+    }
+    trackingFrom_.reset();
+    // With no object snap, the drafting aids (drawing/drafting.hpp): the
+    // locks, ortho or polar from the base, and object snap tracking.
+    if ((tools_.expects() == cad::ToolInput::Point || gripping) &&
+        (!activeSnap_ || activeSnap_->mode == cad::SnapMode::Grid)) {
+        const double aperture = state_.plan.pixelsToWorld(kSnapAperturePixels);
+        cad::ConstrainedPoint constrained =
+            cad::constrain(base, cursorWorld_, document_.drafting(), aperture);
+        // Tracking paths when nothing else fixed the point: the horizontal
+        // and vertical through each acquired point, and where two cross.
+        if (constrained.label.empty() && document_.drafting().objectTracking) {
+            if (auto tracked = cad::trackAcquired(tracking_.points(), cursorWorld_, aperture)) {
+                constrained = std::move(*tracked);
+                trackingFrom_ = constrained.pathFrom;
+            }
+        }
+        cursorWorld_ = constrained.point;
+        trackingLabel_ = QString::fromStdString(constrained.label);
+    } else {
+        trackingLabel_.clear();
+    }
+    tools_.setCursor(cursorWorld_);
     if (onCursorMoved) {
         onCursorMoved(cursorWorld_, activeSnap_);
     }
@@ -650,6 +693,12 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event)
         return;
     }
     if (event->button() == Qt::RightButton) {
+        if (gripsLive() && grips_.base()) {
+            // A grip picked up is dropped, as Esc drops it.
+            grips_.escape();
+            update();
+            return;
+        }
         if (tools_.active()) {
             // Enter, as in AutoCAD with its shortcut menu off: it finishes a
             // chain, ends a selection or takes the prompt's default.
@@ -667,6 +716,19 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event)
     }
     if (event->button() != Qt::LeftButton) {
         return;
+    }
+    // A grip under the cursor (or one picked up and waiting to be put down)
+    // takes the click before the selection does.
+    if (gripsLive()) {
+        grips_.refresh(notifications_);
+        updateCursor(event->position());
+        if (grips_.press(toWorld(event->position()), pickTolerance(),
+                         (event->modifiers() & Qt::ShiftModifier) != 0,
+                         (event->modifiers() & Qt::ControlModifier) != 0)) {
+            gripPress_ = event->position();
+            update();
+            return;
+        }
     }
     // Selecting, with no tool or for a tool that asks for a selection: a
     // click or a box, settled at the release.
@@ -689,6 +751,16 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event)
     }
     lastMouse_ = event->position();
     updateCursor(event->position());
+    if (gripsLive()) {
+        grips_.refresh(notifications_);
+        const QPointF moved = event->position() - gripPress_;
+        grips_.move(cursorWorld_, toWorld(event->position()), pickTolerance(),
+                    grips_.pressed() ? std::hypot(moved.x(), moved.y()) : 0.0);
+        if (grips_.active()) {
+            updateCursor(event->position()); // now snapped from the grip's base
+            grips_.move(cursorWorld_, toWorld(event->position()), pickTolerance(), 0.0);
+        }
+    }
     update();
 }
 
@@ -697,6 +769,10 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent* event)
     if (event->button() == Qt::MiddleButton) {
         panning_ = false;
         setCursor(Qt::CrossCursor);
+        return;
+    }
+    if (event->button() == Qt::LeftButton && gripsLive() && grips_.release()) {
+        update();
         return;
     }
     if (event->button() == Qt::LeftButton && boxStart_) {
@@ -839,6 +915,37 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
             return;
         }
         QWidget::keyPressEvent(event);
+        return;
+    }
+    // A grip picked up takes what is typed - a point, a distance - and
+    // Enter; hot vertex grips take Delete.
+    if (grips_.base()) {
+        switch (event->key()) {
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            grips_.enter();
+            update();
+            return;
+        case Qt::Key_Backspace:
+            grips_.backspace();
+            update();
+            return;
+        case Qt::Key_Delete:
+            break;
+        case Qt::Key_Escape:
+            cancel();
+            return;
+        default:
+            if (isTypedText(*event) && grips_.type(event->text())) {
+                update();
+                event->accept();
+                return;
+            }
+            break;
+        }
+    }
+    if (event->key() == Qt::Key_Delete && grips_.deleteHot()) {
+        update();
         return;
     }
     switch (event->key()) {
@@ -1085,6 +1192,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     // hint for an empty drawing, the selection box, the snap and the prompt.
     painter.setRenderHint(QPainter::Antialiasing, true);
     drawPreview(painter);
+    drawGrips(painter);
     if (drawingIsEmpty() && !tools_.active()) {
         drawEmptyHint(painter);
     }
@@ -1311,8 +1419,63 @@ void ViewportWidget::drawPrompt(QPainter& painter) const
                      metrics.elidedText(text, Qt::ElideLeft, band.width() - 2 * pad - 2));
 }
 
+void ViewportWidget::drawGrips(QPainter& painter) const
+{
+    if (!gripsLive()) {
+        return;
+    }
+    // Painting is logically const; the grips are rebuilt only when the
+    // document has changed since.
+    auto& grips = const_cast<drawing::GripController&>(grips_);
+    grips.refresh(notifications_);
+    const PlanFrame frame = paintFrame();
+    const PlanPaintOptions options = screenOptions();
+    grips.paint(
+        painter, [this](const Point2& p) { return toScreen(p); },
+        [&](const katana::entity::Geometry& shape) {
+            paintPlanGeometry(painter, frame, options, paintCache_, shape,
+                              katana::entity::DimensionStyle{});
+        },
+        QRectF(rect()).adjusted(-8, -8, 8, 8));
+    if (grips.base()) {
+        // The grip's prompt and what has been typed for it, where a tool's goes.
+        QFont font("Segoe UI");
+        font.setPixelSize(12);
+        painter.setFont(font);
+        const QFontMetrics metrics(font);
+        const int pad = 4;
+        const int height = metrics.height() + 2 * pad;
+        const QRect band(0, this->height() - height, width(), height);
+        painter.fillRect(band, QColor(0x12, 0x16, 0x1a, 220));
+        painter.setPen(kPreview);
+        painter.drawText(band.adjusted(pad + 2, 0, -pad, 0), Qt::AlignVCenter | Qt::AlignLeft,
+                         metrics.elidedText(grips.prompt(), Qt::ElideLeft, band.width() - 2 * pad - 2));
+    }
+}
+
 void ViewportWidget::drawSnapMarker(QPainter& painter) const
 {
+    // Object snap tracking: a small cross on each acquired point, and the
+    // path the cursor is on, dotted from the point it runs through.
+    if (document_.drafting().objectTracking) {
+        painter.setPen(QPen(kSnapMarker, 1));
+        for (const Point2& acquired : tracking_.points()) {
+            const QPointF a = toScreen(acquired);
+            painter.drawLine(a + QPointF(-4, 0), a + QPointF(4, 0));
+            painter.drawLine(a + QPointF(0, -4), a + QPointF(0, 4));
+        }
+        if (trackingFrom_) {
+            painter.setPen(QPen(kSnapMarker, 1, Qt::DotLine));
+            painter.drawLine(toScreen(*trackingFrom_), toScreen(cursorWorld_));
+        }
+    }
+    if (!trackingLabel_.isEmpty() && (!activeSnap_ || activeSnap_->mode == cad::SnapMode::Grid)) {
+        // A drafting aid's tooltip: what constrained the point.
+        const QPointF p = toScreen(cursorWorld_);
+        painter.setPen(kSnapMarker);
+        painter.setFont(QFont("Segoe UI", 8));
+        painter.drawText(p + QPointF(12, 18), trackingLabel_);
+    }
     if (!activeSnap_ || activeSnap_->mode == cad::SnapMode::Grid) {
         return;
     }
@@ -1334,6 +1497,33 @@ void ViewportWidget::drawSnapMarker(QPainter& painter) const
         painter.drawEllipse(p, r, r);
         break;
     case cad::SnapMode::Intersection:
+        painter.drawLine(p + QPointF(-r, -r), p + QPointF(r, r));
+        painter.drawLine(p + QPointF(-r, r), p + QPointF(r, -r));
+        break;
+    case cad::SnapMode::Quadrant: { // a diamond on its point, filled
+        QPolygonF diamond;
+        diamond << p + QPointF(0, -r) << p + QPointF(r, 0) << p + QPointF(0, r) << p + QPointF(-r, 0);
+        painter.setBrush(QColor(kSnapMarker.red(), kSnapMarker.green(), kSnapMarker.blue(), 90));
+        painter.drawPolygon(diamond);
+        painter.setBrush(Qt::NoBrush);
+        break;
+    }
+    case cad::SnapMode::Node: // a circle with a cross in it
+        painter.drawEllipse(p, r, r);
+        painter.drawLine(p + QPointF(-r * 0.7, -r * 0.7), p + QPointF(r * 0.7, r * 0.7));
+        painter.drawLine(p + QPointF(-r * 0.7, r * 0.7), p + QPointF(r * 0.7, -r * 0.7));
+        break;
+    case cad::SnapMode::Extension: // three dots along the carried-on line
+        for (const double dx : {-r, 0.0, r}) {
+            painter.drawEllipse(p + QPointF(dx, 0), 1.2, 1.2);
+        }
+        break;
+    case cad::SnapMode::Parallel: // two slanted strokes
+        painter.drawLine(p + QPointF(-r, r * 0.6), p + QPointF(-r * 0.2, -r));
+        painter.drawLine(p + QPointF(r * 0.2, r), p + QPointF(r, -r * 0.6));
+        break;
+    case cad::SnapMode::ApparentIntersection: // a cross in a square
+        painter.drawRect(QRectF(p.x() - r, p.y() - r, 2 * r, 2 * r));
         painter.drawLine(p + QPointF(-r, -r), p + QPointF(r, r));
         painter.drawLine(p + QPointF(-r, r), p + QPointF(r, -r));
         break;

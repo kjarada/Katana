@@ -324,6 +324,23 @@ constexpr Migration kMigrations[] = {
 
         ALTER TABLE dimension_styles ADD COLUMN paper_sized INTEGER NOT NULL DEFAULT 0;
     )sql"},
+    // The drawing system's geometry kinds (docs/drawing.md): CurvePolyline 9,
+    // Ellipse 10 and Spline 11 in the entities' geometry blob. No table or
+    // column changes - the blob column holds them as it holds every kind - so
+    // a project from before this opens exactly as it was. The version moves
+    // so that a build which cannot read those kinds refuses the whole
+    // project up front as one written by a newer Katana, instead of opening
+    // it and failing row by row with "unknown geometry kind in blob", which
+    // reads as corruption rather than version skew (docs/model.md).
+    //
+    // Every project a build of this schema opens is raised to it, whether or
+    // not it holds one of the kinds: the file has one version, as for every
+    // migration before this. Writing 11 or 12 by what a save happened to
+    // contain was rejected - it would be a second versioning rule beside this
+    // table, and a project would change version with its contents.
+    {12, R"sql(
+        -- The geometry kinds 9 to 11 need no schema change of their own.
+    )sql"},
 };
 
 std::string toUtf8(const fs::path& path)

@@ -458,6 +458,7 @@ class Reader {
     void convertPoint(const Record& record, Sink& sink);
     void convertCircle(const Record& record, Sink& sink, bool arc);
     void convertEllipse(const Record& record, Sink& sink);
+    void convertSpline(const Record& record, Sink& sink);
     void convertLwPolyline(const Record& record, Sink& sink);
     void convertPolyline(const Record& record, Sink& sink);
     void convertText(const Record& record, Sink& sink, bool attribute,
@@ -1076,6 +1077,8 @@ void Reader::convert(const Record& record, Sink& sink)
         convertCircle(record, sink, true);
     } else if (type == "ELLIPSE") {
         convertEllipse(record, sink);
+    } else if (type == "SPLINE") {
+        convertSpline(record, sink);
     } else if (type == "LWPOLYLINE") {
         convertLwPolyline(record, sink);
     } else if (type == "POLYLINE") {
@@ -1328,6 +1331,30 @@ void Reader::convertEllipse(const Record& record, Sink& sink)
         sweep += kTwoPi;
     }
     const bool full = std::abs(sweep - kTwoPi) <= 1e-9;
+    // An ellipse in the plan (extrusion straight up or straight down) is kept
+    // as one (docs/drawing.md); straight down, the minor axis points the
+    // other way, which Ellipse2 says as the same arc walked from its end.
+    if (std::abs(normal.x) <= 1e-12 && std::abs(normal.y) <= 1e-12 && majorLength > 0.0 &&
+        std::abs(mz) <= 1e-12 * majorLength) {
+        katana::geometry::Ellipse2 exact;
+        exact.center = Point2(cx, cy);
+        exact.majorAxis = majorAxis;
+        exact.ratio = std::min(ratio, 1.0);
+        // In [0, 2 pi), as the file's own parameters are: a mirror's
+        // -(start + sweep) is the same place a turn on.
+        exact.startParameter =
+            katana::math::normalizeAngle(normal.z > 0.0 ? start : -(start + sweep));
+        exact.sweep = full ? kTwoPi : sweep;
+        Entity entity;
+        entity.geometry = exact;
+        if (cz != 0.0) {
+            const std::vector<std::optional<double>> heights{cz};
+            emit(std::move(entity), common, sink, &heights);
+        } else {
+            emit(std::move(entity), common, sink, nullptr, true);
+        }
+        return;
+    }
     // Chorded as the circle of the major radius would be: the flatter an
     // ellipse the less a chord stands off it, so this is never too coarse.
     const std::size_t count =
@@ -1353,6 +1380,89 @@ void Reader::convertEllipse(const Record& record, Sink& sink)
     }
 }
 
+// SPLINE: degree, knots, weights, control points and fit points, taken as the
+// file has them into a Spline2 (docs/drawing.md). A spline with fit points
+// and no control points (some writers leave the solve to the reader) is
+// solved through them. Heights are dropped with a warning: Spline2 is a plan
+// curve.
+void Reader::convertSpline(const Record& record, Sink& sink)
+{
+    Common common;
+    katana::geometry::Spline2 spline;
+    int flags = 0;
+    bool bad = false;
+    bool anyZ = false;
+    for (const Pair& pair : record.pairs) {
+        if (common.take(pair)) {
+            continue;
+        }
+        const auto real = [&]() {
+            const auto value = toReal(pair.value);
+            bad = bad || !value;
+            return value.value_or(0.0);
+        };
+        switch (pair.code) {
+        case 70:
+            flags = static_cast<int>(toInteger(pair.value).value_or(0));
+            break;
+        case 71:
+            spline.degree = static_cast<int>(toInteger(pair.value).value_or(3));
+            break;
+        case 40:
+            spline.knots.push_back(real());
+            break;
+        case 41:
+            spline.weights.push_back(real());
+            break;
+        case 10:
+            spline.controlPoints.emplace_back(real(), 0.0);
+            break;
+        case 20:
+            if (!spline.controlPoints.empty()) {
+                spline.controlPoints.back().y = real();
+            }
+            break;
+        case 11:
+            spline.fitPoints.emplace_back(real(), 0.0);
+            break;
+        case 21:
+            if (!spline.fitPoints.empty()) {
+                spline.fitPoints.back().y = real();
+            }
+            break;
+        case 30:
+        case 31:
+            anyZ = anyZ || real() != 0.0;
+            break;
+        default:
+            break;
+        }
+    }
+    if (bad) {
+        warn("SPLINE not imported: a value is not a number");
+        return;
+    }
+    if ((flags & 4) == 0 || spline.weights.size() != spline.controlPoints.size() ||
+        std::all_of(spline.weights.begin(), spline.weights.end(),
+                    [](double w) { return w == 1.0; })) {
+        spline.weights.clear();
+    }
+    if (spline.controlPoints.empty() && spline.fitPoints.size() >= 2) {
+        auto solved = katana::geometry::Spline2::throughPoints(spline.fitPoints, spline.degree);
+        if (!solved) {
+            warn("SPLINE not imported: " + solved.error().message);
+            return;
+        }
+        spline = std::move(*solved);
+    }
+    if (anyZ) {
+        warn("SPLINE heights not imported: a spline is drawn in plan");
+    }
+    Entity entity;
+    entity.geometry = std::move(spline);
+    emit(std::move(entity), common, sink, nullptr, true);
+}
+
 // The vertices' z are world heights already; `level` is false where the
 // polyline lies in a tilted plane, and they are then all 0.
 void Reader::emitPolyline(std::vector<Vertex> vertices, bool closed, bool threeD,
@@ -1373,6 +1483,40 @@ void Reader::emitPolyline(std::vector<Vertex> vertices, bool closed, bool threeD
     }
     if (vertices.empty()) {
         warn(std::string(kind) + " not imported: it has no vertices");
+        return;
+    }
+    // A 2D polyline with arc segments is kept with its arcs, as a
+    // CurvePolyline2 whose heights are its own (docs/drawing.md), wherever
+    // the frame keeps a circle a circle; under a non-uniform scale an arc is
+    // not one any more, and is chorded below as it always was.
+    const std::size_t vertexTotal = vertices.size();
+    const bool anyBulge = std::any_of(vertices.begin(), vertices.end() - (closed ? 0 : 1),
+                                      [](const Vertex& v) { return v.bulge != 0.0 && std::isfinite(v.bulge); });
+    if (!threeD && anyBulge && frame.isSimilarity()) {
+        const auto extended = common.extendedHeights(vertexTotal);
+        katana::geometry::CurvePolyline2 curved;
+        curved.closed = closed;
+        const bool mirrored = frame.determinant() < 0.0;
+        const bool anyZ = std::any_of(vertices.begin(), vertices.end(),
+                                      [](const Vertex& v) { return v.z != 0.0; });
+        for (std::size_t i = 0; i < vertexTotal; ++i) {
+            katana::geometry::CurveVertex vertex;
+            vertex.position = frame.apply(Point2(vertices[i].x, vertices[i].y));
+            // + 0.0: a straight segment's 0 mirrored stays 0, not -0, which
+            // VERTEX LIST would print as a bulge.
+            vertex.bulge = std::isfinite(vertices[i].bulge)
+                               ? (mirrored ? -vertices[i].bulge + 0.0 : vertices[i].bulge)
+                               : 0.0;
+            if (!extended.empty()) {
+                vertex.height = extended[i];
+            } else if (anyZ) {
+                vertex.height = vertices[i].z;
+            }
+            curved.vertices.push_back(vertex);
+        }
+        Entity entity;
+        entity.geometry = std::move(curved);
+        emit(std::move(entity), common, sink, nullptr, level);
         return;
     }
     // The vertices are kept as the file has them - a closed polyline whose
@@ -1983,6 +2127,61 @@ std::optional<Geometry> placeGeometry(const Geometry& geometry, const Affine& tr
             }
             return Geometry{std::move(out)};
         }
+        // Under a similarity the arcs stay arcs (a mirror turns them the
+        // other way); under anything else they are chorded, and the heights
+        // go into the properties as a straight polyline's do.
+        std::optional<Geometry> operator()(const katana::geometry::CurvePolyline2& polyline) const
+        {
+            if (t.isSimilarity()) {
+                katana::geometry::CurvePolyline2 out = polyline;
+                for (auto& vertex : out.vertices) {
+                    vertex.position = t.apply(vertex.position);
+                    if (t.determinant() < 0.0) {
+                        vertex.bulge = -vertex.bulge + 0.0; // never -0
+                    }
+                }
+                return Geometry{std::move(out)};
+            }
+            Polyline2 out = polyline.toPolyline(tolerance / std::max(t.largestScale(), 1e-12));
+            for (Point2& vertex : out.vertices) {
+                vertex = t.apply(vertex);
+            }
+            return Geometry{std::move(out)};
+        }
+        std::optional<Geometry> operator()(const katana::geometry::Ellipse2& ellipse) const
+        {
+            if (t.isSimilarity()) {
+                katana::geometry::Ellipse2 out = ellipse;
+                out.center = t.apply(ellipse.center);
+                out.majorAxis = t.linear(ellipse.majorAxis);
+                if (t.determinant() < 0.0) {
+                    out.startParameter =
+                        katana::math::normalizeAngle(-(ellipse.startParameter + ellipse.sweep));
+                }
+                return Geometry{out};
+            }
+            std::vector<Point2> points =
+                ellipse.tessellate(tolerance / std::max(t.largestScale(), 1e-12));
+            if (ellipse.isFull() && points.size() > 1) {
+                points.pop_back();
+            }
+            for (Point2& p : points) {
+                p = t.apply(p);
+            }
+            return Geometry{Polyline2{std::move(points), ellipse.isFull()}};
+        }
+        // A B-spline is affine invariant: its control points carry it exactly.
+        std::optional<Geometry> operator()(const katana::geometry::Spline2& spline) const
+        {
+            katana::geometry::Spline2 out = spline;
+            for (Point2& p : out.controlPoints) {
+                p = t.apply(p);
+            }
+            for (Point2& p : out.fitPoints) {
+                p = t.apply(p);
+            }
+            return Geometry{std::move(out)};
+        }
     };
     return std::visit(Visitor{transform, tolerance}, geometry);
 }
@@ -2023,6 +2222,25 @@ void Reader::place(const Block& block, const Affine& transform,
             }
         } else if (heightMap->scale != 1.0 || heightMap->offset != 0.0) {
             placeHeights(entity.properties, vertices, heightMap->scale, heightMap->offset);
+        }
+        // A curve polyline holds its heights itself: they move with the insert
+        // there, by the same rule.
+        if (auto* curved = std::get_if<katana::geometry::CurvePolyline2>(&entity.geometry)) {
+            for (auto& vertex : curved->vertices) {
+                if (!heightMap) {
+                    vertex.height.reset();
+                } else if (vertex.height) {
+                    vertex.height = *vertex.height * heightMap->scale + heightMap->offset;
+                } else if (item.atBlockZero && heightMap->offset != 0.0) {
+                    vertex.height = heightMap->offset;
+                }
+            }
+        } else if (std::holds_alternative<Polyline2>(entity.geometry) &&
+                   std::holds_alternative<katana::geometry::CurvePolyline2>(item.entity.geometry)) {
+            // Chorded by a non-uniform insert, which no arc survives: its
+            // heights went with the geometry that held them, and none is
+            // invented for the chords.
+            katana::entity::setHeights(entity.properties, {});
         }
         // A mirror reverses an arc, and the heights at its two ends with it.
         if (transform.determinant() < 0.0 && std::holds_alternative<Arc2>(entity.geometry)) {
@@ -2282,6 +2500,19 @@ void translate(Geometry& geometry, const Vec2& shift)
                 shape.anchor = shape.anchor - shift;
                 if (shape.position) {
                     *shape.position = *shape.position - shift;
+                }
+            } else if constexpr (std::is_same_v<T, katana::geometry::CurvePolyline2>) {
+                for (auto& vertex : shape.vertices) {
+                    vertex.position = vertex.position - shift;
+                }
+            } else if constexpr (std::is_same_v<T, katana::geometry::Ellipse2>) {
+                shape.center = shape.center - shift;
+            } else if constexpr (std::is_same_v<T, katana::geometry::Spline2>) {
+                for (Point2& p : shape.controlPoints) {
+                    p = p - shift;
+                }
+                for (Point2& p : shape.fitPoints) {
+                    p = p - shift;
                 }
             } else {
                 for (Point2& vertex : shape.vertices) {

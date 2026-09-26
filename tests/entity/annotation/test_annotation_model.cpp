@@ -109,7 +109,8 @@ TEST(LabelRules, NeedAStyleAndAKnownType)
     EXPECT_FALSE(validate(rule).ok()) << "no style";
     rule.labelStyle = "Bearing";
     EXPECT_TRUE(validate(rule).ok());
-    rule.entityType = "Spline";
+    // Not a kind there is ("Spline" was, until the drawing system added one).
+    rule.entityType = "Hyperbola";
     EXPECT_FALSE(validate(rule).ok());
     rule.entityType = "Polyline";
     EXPECT_TRUE(validate(rule).ok());

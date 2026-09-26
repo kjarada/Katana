@@ -20,6 +20,10 @@ using katana::core::Status;
 using katana::geometry::Arc2;
 using katana::geometry::Box2;
 using katana::geometry::Circle2;
+using katana::geometry::CurvePolyline2;
+using katana::geometry::CurveVertex;
+using katana::geometry::Ellipse2;
+using katana::geometry::Spline2;
 using katana::geometry::Point2;
 using katana::geometry::Polyline2;
 using katana::geometry::Segment2;
@@ -147,6 +151,12 @@ std::string_view toString(EntityType type)
         return "Label";
     case EntityType::Leader:
         return "Leader";
+    case EntityType::CurvePolyline:
+        return "CurvePolyline";
+    case EntityType::Ellipse:
+        return "Ellipse";
+    case EntityType::Spline:
+        return "Spline";
     }
     return "Unknown";
 }
@@ -388,7 +398,10 @@ Result<EntityType> entityTypeFromString(std::string_view name)
     constexpr int kKindCount = static_cast<int>(std::variant_size_v<Geometry>);
     for (int raw = 0; raw < kKindCount; ++raw) {
         const auto type = static_cast<EntityType>(raw);
-        if (toString(type) == name) {
+        // In any case: callers once title-cased the name to the enumerator's
+        // spelling, which turned "curvepolyline" into "Curvepolyline" and
+        // refused the one kind with a capital inside its name.
+        if (katana::core::equalsIgnoringCase(toString(type), name)) {
             return type;
         }
     }
@@ -714,6 +727,72 @@ struct Validator {
         }
         return {};
     }
+    // A polyline with arcs may close on two vertices - two arcs make a
+    // round shape - so, like Polyline2, only the vertex count of an open
+    // walk and a length are required.
+    Status operator()(const CurvePolyline2& polyline) const
+    {
+        if (polyline.vertices.size() < 2) {
+            return makeError(ErrorCode::InvalidGeometry, "polyline needs at least two vertices");
+        }
+        for (const CurveVertex& vertex : polyline.vertices) {
+            if (auto status = requireFinite(vertex.position, "polyline vertex"); !status) {
+                return status;
+            }
+            if (!std::isfinite(vertex.bulge)) {
+                return makeError(ErrorCode::InvalidGeometry, "polyline bulge is not finite");
+            }
+            if (vertex.height && !std::isfinite(*vertex.height)) {
+                return makeError(ErrorCode::InvalidGeometry, "polyline height is not finite");
+            }
+        }
+        if (!(polyline.length() > tol::kGeometric)) {
+            return makeError(ErrorCode::InvalidGeometry, "polyline has zero length");
+        }
+        return {};
+    }
+    Status operator()(const Ellipse2& ellipse) const
+    {
+        if (auto status = requireFinite(ellipse.center, "ellipse centre"); !status) {
+            return status;
+        }
+        if (!ellipse.majorAxis.isFinite() || !(ellipse.majorRadius() > tol::kGeometric)) {
+            return makeError(ErrorCode::InvalidGeometry, "ellipse major axis must be positive");
+        }
+        if (!(std::isfinite(ellipse.ratio) && ellipse.ratio * ellipse.majorRadius() > tol::kGeometric &&
+              ellipse.ratio <= 1.0 + tol::kRelative)) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "ellipse ratio must be greater than zero and at most 1",
+                             std::to_string(ellipse.ratio));
+        }
+        if (!std::isfinite(ellipse.startParameter) || !std::isfinite(ellipse.sweep) ||
+            !(ellipse.sweep > tol::kAngular) ||
+            ellipse.sweep > katana::math::kTwoPi + tol::kAngular) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "ellipse sweep must be more than zero and at most a full turn");
+        }
+        return {};
+    }
+    Status operator()(const Spline2& spline) const
+    {
+        if (auto status = spline.checkStructure(); !status) {
+            return status;
+        }
+        for (const Point2& p : spline.controlPoints) {
+            if (auto status = requireFinite(p, "spline control point"); !status) {
+                return status;
+            }
+        }
+        for (const Point2& p : spline.fitPoints) {
+            if (auto status = requireFinite(p, "spline fit point"); !status) {
+                return status;
+            }
+        }
+        if (!(spline.boundingBox().width() + spline.boundingBox().height() > tol::kGeometric)) {
+            return makeError(ErrorCode::InvalidGeometry, "spline has zero length");
+        }
+        return {};
+    }
 };
 
 // The lines a dimension draws its measurement along, for its box and for
@@ -827,6 +906,9 @@ Box2 boundingBox(const Geometry& geometry)
         {
             return Polyline2{leader.vertices, false}.boundingBox();
         }
+        Box2 operator()(const CurvePolyline2& polyline) const { return polyline.boundingBox(); }
+        Box2 operator()(const Ellipse2& ellipse) const { return ellipse.boundingBox(); }
+        Box2 operator()(const Spline2& spline) const { return spline.boundingBox(); }
     };
     return std::visit(Visitor{}, geometry);
 }
@@ -871,6 +953,12 @@ double distanceTo(const Geometry& geometry, const Point2& p)
             return Polyline2{leader.vertices, false}.distanceTo(p).value_or(
                 std::numeric_limits<double>::infinity());
         }
+        double operator()(const CurvePolyline2& polyline) const
+        {
+            return polyline.distanceTo(p).value_or(std::numeric_limits<double>::infinity());
+        }
+        double operator()(const Ellipse2& ellipse) const { return ellipse.distanceTo(p); }
+        double operator()(const Spline2& spline) const { return spline.distanceTo(p); }
     };
     return std::visit(Visitor{p}, geometry);
 }
@@ -1002,6 +1090,44 @@ Result<Geometry> transformed(const Geometry& geometry, const Mat3& transform)
             LeaderGeometry result = leader;
             for (Point2& vertex : result.vertices) {
                 vertex = s.point(vertex);
+            }
+            return result;
+        }
+        // Heights are elevations, not plan distances: a plan scale leaves
+        // them alone. A mirror turns every arc the other way.
+        Geometry operator()(const CurvePolyline2& polyline) const
+        {
+            CurvePolyline2 result = polyline;
+            for (CurveVertex& vertex : result.vertices) {
+                vertex.position = s.point(vertex.position);
+                if (s.mirrored) {
+                    vertex.bulge = -vertex.bulge;
+                }
+            }
+            return result;
+        }
+        // Mirrored, the point at t lands where the image's point at -t is
+        // (the minor axis flips relative to the major), so the arc is
+        // re-expressed as starting at -(start + sweep) rather than stored as
+        // a negative sweep.
+        Geometry operator()(const Ellipse2& ellipse) const
+        {
+            Ellipse2 result = ellipse;
+            result.center = s.point(ellipse.center);
+            result.majorAxis = transformVector(s.matrix, ellipse.majorAxis);
+            if (s.mirrored) {
+                result.startParameter = -(ellipse.startParameter + ellipse.sweep);
+            }
+            return result;
+        }
+        Geometry operator()(const Spline2& spline) const
+        {
+            Spline2 result = spline;
+            for (Point2& p : result.controlPoints) {
+                p = s.point(p);
+            }
+            for (Point2& p : result.fitPoints) {
+                p = s.point(p);
             }
             return result;
         }

@@ -11,6 +11,8 @@ file(GLOB _cad_survey_job_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/t
 file(GLOB _cad_annotation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp")
 # The AS 5488 utility verbs and their drawing (docs/subsurface_utilities.md).
 file(GLOB _cad_utility_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/utilities/*.cpp")
+# The drawing system's tests (docs/drawing.md), globbed as its sources are.
+file(GLOB _cad_drawing_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp")
 
 katana_add_test_suite(cad
     LIBS katana_cad
@@ -22,6 +24,7 @@ katana_add_test_suite(cad
         ${_cad_survey_job_tests}
         ${_cad_annotation_tests}
         ${_cad_utility_tests}
+        ${_cad_drawing_tests}
         test_alignment_report.cpp
 )
 # The sample investigation the utility tests draw and report, the one the
