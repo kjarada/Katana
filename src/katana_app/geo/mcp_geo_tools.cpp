@@ -102,7 +102,10 @@ std::string sourceWords(const Json& source, const std::string& arg)
         throw ToolRefusal{"each input of \"" + arg + "\" is an object: {scope ...}, {raster}, "
                                                      "{surface} or {file}"};
     }
-    const int kinds = (source.contains("scope") ? 1 : 0) + (source.contains("raster") ? 1 : 0) +
+    // "where" alone is a scope of the drawing: the selection, filtered, as
+    // WHERE alone reads on the command line.
+    const bool scoped = source.contains("scope") || source.contains("where");
+    const int kinds = (scoped ? 1 : 0) + (source.contains("raster") ? 1 : 0) +
                       (source.contains("surface") ? 1 : 0) + (source.contains("file") ? 1 : 0);
     if (kinds != 1) {
         throw ToolRefusal{"an input of \"" + arg +
@@ -144,7 +147,9 @@ std::string sourceWords(const Json& source, const std::string& arg)
         }
         return words;
     }
-    const std::string kind = source["scope"].is_string() ? source["scope"].get<std::string>() : "";
+    const std::string kind = !source.contains("scope")     ? std::string("selection")
+                             : source["scope"].is_string() ? source["scope"].get<std::string>()
+                                                           : std::string();
     return scopeWordsOf(kind, argument(source, "area"), argument(source, "layers"),
                         optionalBool(source, "only", false), argument(source, "where"));
 }

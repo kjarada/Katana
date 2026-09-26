@@ -1138,7 +1138,17 @@ EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
 
 - **The scope is the one grammar** (`cad::parseScopeWords`, resolved by
   `cad::matchScope`): no scope words is the whole drawing, as `EXPORT`
-  always was. The reply says what it took - a `scope` record after the
+  always was. `WHERE` alone is the parser's own rule, `MODIFY`'s: the
+  selection, filtered; `DRAWING WHERE ...` filters the whole drawing, and the
+  `scope` record says which was taken
+  (`cli.export_where_alone_filters_the_selection_and_drawing_where_the_drawing`).
+  `katana_export`'s `where` without `scope` means the same and writes
+  `SELECTION WHERE ...`; it was refused, while a typed line took it
+  (`McpServer.WhereWithoutAScopeFiltersTheSelectionAsTheLineDoes`). Making
+  `WHERE` alone the drawing for `EXPORT` was rejected: it is one parser's
+  rule for every verb, and `MODIFY WHERE ...` acting on the drawing instead
+  of the selection would change what an edit touches. Refusing `WHERE` alone
+  everywhere was rejected for the same reason. The reply says what it took - a `scope` record after the
   `exported` one, which stays first, as a reader of the first record found
   it - and a scope that takes nothing writes nothing and says so
   (`export ... ran=no`), not an error.

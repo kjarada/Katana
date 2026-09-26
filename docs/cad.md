@@ -1032,6 +1032,11 @@ then [WHERE key=value ...]
 Words are case-insensitive; `SEL`, `ALL` and `LAYER` are the aliases `MODIFY`
 already took. For `MODIFY` no scope word is the selection; a `UTILITY` verb
 needs a scope word or `WHERE`, since any other first word is its file's path.
+`WHERE` with no scope word before it is the selection, filtered, for every
+verb that reads the shared words - `EXPORT` and the GDAL verb's `FROM`
+included, though `EXPORT` with no scope words at all is the whole drawing;
+`katana_mcp`'s `where` without `scope` is written `SELECTION WHERE`
+(`docs/interop.md`, "Export options").
 The `WHERE` keys are Global Modify's filter: `TYPE=point,line`,
 `LAYER=pat[,pat]`, `STYLE=pat|ByLayer`, `COLOUR=#RRGGBB|ByLayer`,
 `PROP=key[:pat]`, `TEXT=pat` and `DRAWN`, with `*` and `?` wildcards.

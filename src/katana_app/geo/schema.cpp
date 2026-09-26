@@ -205,11 +205,12 @@ Json sourceSchema(unsigned kinds)
         properties["only"] = {
             {"type", "boolean"},
             {"description", "With scope layers: those layers only, not the layers beneath."}};
-        properties["where"] = {
-            {"type", "array"},
-            {"items", {{"type", "string"}}},
-            {"description", "Filter conditions, as WHERE takes them: TYPE=polyline, "
-                            "LAYER=pattern, STYLE=, COLOUR=, PROP=key[:pattern], TEXT=, DRAWN."}};
+        properties["where"] = {{"type", "array"},
+                               {"items", {{"type", "string"}}},
+                               {"description",
+                                "Filter conditions, as WHERE takes them: TYPE=polyline, "
+                                "LAYER=pattern, STYLE=, COLOUR=, PROP=key[:pattern], TEXT=, DRAWN. "
+                                "Without scope they filter the selection, as WHERE alone does."}};
     }
     if (raster) {
         forms.emplace_back("a reference raster ({raster})");
