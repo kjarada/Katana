@@ -155,7 +155,13 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
   a line would add nothing. Their schemas are generated from the argument
   specs GDAL declares (`src/katana_app/geo/schema.hpp`). An algorithm's
   `arguments_schema` is the JSON Schema of `katana_gdal_run`'s `arguments`,
-  and its `inputs_schema` that of its `inputs`.
+  and its `inputs_schema` that of its `inputs`. Each input is offered only
+  the sources its kinds read (`dataset.sources`): a raster input no drawing
+  scope, a vector input no raster or surface, a file to every input
+  (`GeoExecutor.TheInputsSchemaOffersOnlyTheSourcesAnArgumentReads`). A
+  source of another kind given anyway is refused by the GDAL verb's binder
+  before anything runs, as it is on the command line and in the window
+  (`McpServer.GdalRunRefusesASourceTheInputDoesNotRead`).
 - **`katana_gdal_run` builds a line.** It builds the GDAL line a person would
   type and runs it through the Session:
   - `arguments` become GDAL's `--name=value` words; a dataset argument there

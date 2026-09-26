@@ -1057,6 +1057,32 @@ TEST_F(McpServer, GdalRunBuildsTheLineAndReturnsOutputs)
         << textOf(listed);
 }
 
+// An input's schema offers only the sources it reads, and a source of
+// another kind is refused before anything runs: hillshade's input reads
+// rasters, so katana_gdal_describe offers it no drawing scope, and a drawing
+// given to it anyway is refused naming what it takes, with nothing drawn or
+// kept. GDAL answered "Unable to fetch band #1" from the worker.
+TEST_F(McpServer, GdalRunRefusesASourceTheInputDoesNotRead)
+{
+    initialize();
+    const Json described =
+        call("katana_gdal_describe", Json{{"algorithm", "raster hillshade"}})["structuredContent"];
+    const Json& offered = described["inputs_schema"]["properties"]["input"]["properties"];
+    EXPECT_FALSE(offered.contains("scope")) << offered.dump();
+    EXPECT_TRUE(offered.contains("raster")) << offered.dump();
+    (void)call("katana_run_commands", Json{{"commands", {"RECT 0,0 10,10"}}});
+    const Json result =
+        call("katana_gdal_run", Json{{"algorithm", "raster hillshade"},
+                                     {"inputs", {{"input", {{"scope", "drawing"}}}}},
+                                     {"output", {{"reference", "shade"}}}});
+    EXPECT_TRUE(result["isError"].get<bool>()) << textOf(result);
+    EXPECT_NE(textOf(result).find("input reads raster datasets, and FROM gives it drawing data; "
+                                  "it takes raster,surface,file"),
+              std::string::npos)
+        << textOf(result);
+    EXPECT_EQ(call("katana_status")["structuredContent"]["entities"], 1);
+}
+
 TEST_F(McpServer, GdalRunQuotesAnOutputNamedLikeAKeyword)
 {
     // An agent's layer "preview" was written bare: the line read PREVIEW as
