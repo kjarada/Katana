@@ -316,7 +316,16 @@ refused. `McpServer.FormatsReturnsStructuredDrivers` pins it, and
 - **It is the INFO line.** The tool builds `INFO "<path>" [LAYER <name>]
   [STATS] [CHECK]`, runs it through the Session and hands back its records as
   objects (`geo::recordsJson`): numbers as numbers, `yes`/`no` as booleans,
-  `bounds` as `[x0, y0, x1, y1]`, an empty value as null - absent, not zero.
+  `bounds` as `[x0, y0, x1, y1]` and any other comma list of numbers as an
+  array (a scope's `area`, a grid's `cell` of `4,3`), an empty value as null
+  - absent, not zero. A record's `record` is every word before its first
+  `key=`: IFC's `ifc exported file=...` is `{"record": "ifc exported",
+  "file": ...}`, where one word made it `ifc` with a field `exported file`
+  (`GisRecords.AKindIsEveryWordBeforeTheFirstKeyAndANumberListIsAnArray`,
+  `McpServer.AnIfcExportsRecordIsItsWholeKindWithItsFields`). A list that is
+  not all numbers (`stats=mean,min`) stays a string: its words are the
+  verb's, and splitting some lists and not others on the kind of item would
+  be a second rule.
 - **`json: true` adds GDAL's own description** as `gdal`, from `INFO ...
   JSON`: `raster info`, `vector info` and, for a multidimensional format,
   `mdim info`, verbatim.

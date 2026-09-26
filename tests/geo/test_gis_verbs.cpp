@@ -582,6 +582,37 @@ TEST(GisRecords, ARecordReadsAsJsonWithItsNumbersAndItsWords)
     EXPECT_EQ(json["role"], "imagery");
 }
 
+// A record's kind is every word before its first key=: IFC's "ifc exported
+// file=..." read as the kind "ifc" and a key "exported file". And a comma
+// list of numbers - a cell of 4,3 (RASTER GRID's size= stretches it), a
+// scope's area - is an array, as bounds always was; a list that is not all
+// numbers stays a word.
+TEST(GisRecords, AKindIsEveryWordBeforeTheFirstKeyAndANumberListIsAnArray)
+{
+    const auto records = geo::parseRecords(
+        "ifc exported file=\"site plan.ifc\" entities=1\n"
+        "grid method=nearest cell=4,3 extent=0,0,40,30 size=10x10 stats=mean,min\n"
+        "scope scope=area area=0,4,8,6 matched=1 flagged\n"
+        "3 entities");
+    ASSERT_EQ(records.size(), 4u);
+    EXPECT_EQ(records[0].kind, "ifc exported");
+    EXPECT_EQ(field(records[0], "file"), "site plan.ifc");
+    const nlohmann::json ifc = geo::recordJson(records[0]);
+    EXPECT_EQ(ifc["record"], "ifc exported");
+    EXPECT_FALSE(ifc.contains("exported file")) << ifc.dump();
+    EXPECT_EQ(ifc["entities"], 1);
+    const nlohmann::json grid = geo::recordJson(records[1]);
+    EXPECT_EQ(grid["cell"], nlohmann::json({4.0, 3.0}));
+    EXPECT_EQ(grid["extent"], nlohmann::json({0.0, 0.0, 40.0, 30.0}));
+    EXPECT_EQ(grid["size"], "10x10");
+    EXPECT_EQ(grid["stats"], "mean,min");
+    const nlohmann::json scope = geo::recordJson(records[2]);
+    EXPECT_EQ(scope["area"], nlohmann::json({0.0, 4.0, 8.0, 6.0}));
+    EXPECT_EQ(scope["matched"], 1);
+    EXPECT_TRUE(scope.contains("flagged")) << scope.dump(); // a bare word, kept
+    EXPECT_EQ(records[3].kind, "3 entities");
+}
+
 // ---- through a Session, as katana_cli and katana_mcp run it ----------------------------------
 
 // std::cout and std::cerr swapped for strings while it lives.

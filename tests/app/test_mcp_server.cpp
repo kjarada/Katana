@@ -1411,3 +1411,23 @@ TEST_F(McpServer, AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines)
         << textOf(imported);
     EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 1);
 }
+
+#if defined(KATANA_TEST_WITH_INTEROP)
+// katana_export of an .ifc hands its records as objects under their whole
+// kind: "ifc exported", with a file field - read as the kind "ifc" and a
+// field "exported file" until the kind became every word before the first
+// key=.
+TEST_F(McpServer, AnIfcExportsRecordIsItsWholeKindWithItsFields)
+{
+    initialize();
+    const TempDir dir("ifc-records");
+    (void)call("katana_run_commands", Json{{"commands", {"PL 0,0 10,0 20,5"}}});
+    const Json exported = call("katana_export", Json{{"path", dir.file("site.ifc")}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    const Json& records = exported["structuredContent"]["records"];
+    ASSERT_FALSE(records.empty()) << exported.dump();
+    EXPECT_EQ(records[0]["record"], "ifc exported") << records.dump();
+    EXPECT_EQ(records[0]["file"], "site.ifc") << records.dump();
+    EXPECT_FALSE(records[0].contains("exported file")) << records.dump();
+}
+#endif
