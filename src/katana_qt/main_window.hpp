@@ -8,6 +8,7 @@
 
 #include <optional>
 #include <QMainWindow>
+#include <QPointer>
 #include <QStringList>
 
 #include <filesystem>
@@ -41,6 +42,7 @@
 #include "keyboard_shortcuts_dialog.hpp"
 #include "script_runner.hpp"
 #include "import_placement.hpp"
+#include "ifc_dialogs.hpp"
 #include "survey/survey_workbench.hpp"
 #include "survey/utility_workbench.hpp"
 #include "tools/tool_menus.hpp"
@@ -393,6 +395,37 @@ class MainWindow final : public QMainWindow {
     // lands in the drawing as it is now, asked or logged.
     [[nodiscard]] PlacementDecision placeImport(const katana::cad::ImportPlacement& placement,
                                                 const katana::geometry::Box2& incoming);
+    // A .ifc, read and written natively (main_window_ifc.cpp, docs/ifc.md),
+    // always by a line: IMPORT, EXPORT, INFO or IFC RULES with
+    // ifc/front_end.hpp's grammar, the same lines katana_cli takes.
+    //
+    // Who ran it: typed (or pasted) on the command line, which asks no one
+    // about the file's coordinate system and says how; File > Import or a
+    // path given to the window, which asks the person there and shows a
+    // failure in a box; a dialog, whose line says TAKECRS or KEEPCRS itself
+    // and which shows its own result.
+    enum class IfcLineFrom { CommandLine, Menu, Dialog };
+    // The line's reply - key=value records - or its error, both in the log;
+    // nullopt when `verb` and `rest` are not an IFC line (another format's).
+    // A cancelled import is CommandRejected.
+    std::optional<katana::core::Result<std::string>>
+    runIfcLine(const QString& verb, const QString& rest,
+               IfcLineFrom from = IfcLineFrom::CommandLine);
+    // `line` echoed as typed and run by runIfcLine: what the dialogs, File >
+    // Import and a path given to the window hand their lines to.
+    katana::core::Result<std::string> runIfcCommand(const QString& line, IfcLineFrom from);
+    katana::core::Result<std::string> importIfc(const katana::ifc::ImportArguments& arguments,
+                                                IfcLineFrom from);
+    katana::core::Result<std::string> exportIfc(const katana::ifc::ExportArguments& arguments);
+    // What an IFC file holds, read but not imported, as INFO answers it:
+    // GIS > Dataset Information and --import-options show it too.
+    katana::core::Result<QString> describeIfcFile(const std::filesystem::path& path);
+    // File > Import IFC and Export IFC: the dialogs, made on first use and
+    // kept, shown non-modally; `file` fills the File field.
+    void showIfcImport(const QString& file = {});
+    void showIfcExport(const QString& file = {});
+    [[nodiscard]] IfcImportContext ifcImportContext();
+    [[nodiscard]] IfcExportContext ifcExportContext();
 
     // ---- GIS menu: GDAL and PDAL (PLAN.MD Phases 17 and 20) ---------------
     // The imports ask for a file of their kind, describe it, and offer its
@@ -559,6 +592,11 @@ class MainWindow final : public QMainWindow {
     std::unique_ptr<AlignmentManagerDialog> alignments_;
     // File > Project Coordinate System, owned here for the reason layers_ is.
     std::unique_ptr<ProjectCrsDialog> projectCrs_;
+    // File > Import IFC and Export IFC, kept between uses. They hold no
+    // Document - only callbacks into this window - so Qt may delete them
+    // with its other children.
+    QPointer<IfcImportDialog> ifcImport_;
+    QPointer<IfcExportDialog> ifcExport_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for

@@ -26,7 +26,9 @@
 // by the rules dimension_text.hpp states for a dimension's number, because a
 // label is a number somebody signs as well.
 
+#include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -79,11 +81,30 @@ using LabelValues = std::map<std::string, LabelValue, std::less<>>;
 [[nodiscard]] katana::core::Status checkLabelTemplate(std::string_view templateText,
                                                       LabelKind kind);
 
+// The same check against any set of values - a label kind's, a leader's
+// (leader_values.hpp): `quantityOf` says what a value name is, nullopt for a
+// name there is no such value, and the refusal of such a name is worded by
+// `unknownValue`. A prop.NAME is never asked about: a property may be a
+// number or text, so only a step that applies to neither is refused.
+[[nodiscard]] katana::core::Status
+checkTemplate(std::string_view templateText,
+              const std::function<std::optional<LabelQuantity>(std::string_view)>& quantityOf,
+              const std::function<std::string(std::string_view)>& unknownValue);
+
+// The value names a template's fields name, in the order they first appear,
+// each once: what a refusal says a target lacks. A template whose braces do
+// not balance names none.
+[[nodiscard]] std::vector<std::string> templateFields(std::string_view templateText);
+
 // The label's text: each template line with its fields filled, a line with
 // an absent value dropped, the lines joined by '\n'. Empty when every line was
 // dropped. A malformed template (which a stored style cannot have) prints its
 // fields as "?" rather than failing a paint.
 [[nodiscard]] std::string formatLabel(std::string_view templateText, const LabelValues& values);
+
+// One value in its quantity's own format, as a field with no step prints it:
+// what LEADER VALUES lists beside each name.
+[[nodiscard]] std::string formatValue(const LabelValue& value);
 
 // The formats the steps use, for the command line's replies and the tests.
 //

@@ -22,6 +22,7 @@
 #include "katana/cad/plotting/sheet_json.hpp"
 #include "katana/cad/plotting/tables.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/core/text.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -77,49 +78,15 @@ std::string joined(const Words& words, std::size_t from, std::string_view separa
     return out;
 }
 
-// A typed "\n" is a line break: a command line has no other way to put one
-// in a note. "\\" is a backslash, so a text that holds "\n" itself (a path,
-// C:\\new) can be typed, as a reply writes it (inQuotes). Any other
-// backslash is itself.
+// A typed text read back, as a reply writes it (core::replyQuoted): core's reader.
 std::string unescaped(std::string_view text)
 {
-    std::string out;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const char next = i + 1 < text.size() ? text[i + 1] : '\0';
-        if (text[i] == '\\' && next == 'n') {
-            out += '\n';
-            ++i;
-        } else if (text[i] == '\\' && next == '\\') {
-            out += '\\';
-            ++i;
-        } else {
-            out += text[i];
-        }
-    }
-    return out;
+    return katana::core::unescapeTyped(text);
 }
 
-// A value in a reply: in double quotes, a line break written back as "\n"
-// and a backslash as "\\", so the reply stays one fact per line and a text
-// typed back (unescaped) is the text stored. A double quote, which only a
-// loaded set can hold (the command line cannot type one inside quotes), is
-// written "\"" so the reply still reads unambiguously.
-std::string inQuotes(std::string_view text)
-{
-    std::string out = "\"";
-    for (const char c : text) {
-        if (c == '\n') {
-            out += "\\n";
-        } else if (c == '\\') {
-            out += "\\\\";
-        } else if (c == '"') {
-            out += "\\\"";
-        } else {
-            out += c;
-        }
-    }
-    return out + "\"";
-}
+// A value in a reply: core's (text.hpp), which every verb whose reply is
+// read back shares. A text typed back (unescaped) is the text stored.
+using katana::core::replyQuoted;
 
 std::string countOf(std::size_t count, std::string_view one, std::string_view many)
 {
@@ -648,7 +615,7 @@ std::string sheetLine(const SheetSet& set, std::size_t index)
     const Sheet& sheet = set.sheets[index];
     return std::format("sheet {} id={} name={} paper={} orientation={} frame={} legendblock={} "
                        "views={}",
-                       index + 1, sheet.id, inQuotes(sheet.name), paperName(sheet.paper),
+                       index + 1, sheet.id, replyQuoted(sheet.name), paperName(sheet.paper),
                        sheet.landscape ? "landscape" : "portrait",
                        sheet.frame.empty() ? std::string("none") : sheet.frame,
                        onOffText(sheet.frameLegend), sheet.viewports.size());
@@ -778,8 +745,9 @@ Error unknownTitleField(std::string_view field)
 
 std::string revisionLine(const Revision& revision)
 {
-    return std::format("revision code={} date={} description={} by={}", inQuotes(revision.code),
-                       inQuotes(revision.date), inQuotes(revision.description), inQuotes(revision.by));
+    return std::format("revision code={} date={} description={} by={}", replyQuoted(revision.code),
+                       replyQuoted(revision.date), replyQuoted(revision.description),
+                       replyQuoted(revision.by));
 }
 
 // ---- SHEETS --------------------------------------------------------------------------
@@ -789,7 +757,7 @@ std::string pageSetupLine(const PageSetup& setup)
 {
     return std::format("pagesetup style={} lineweight={} dpi={} pattern={} filepersheet={}",
                        toString(setup.colourMode), decimal(setup.lineWeightScale),
-                       decimal(setup.dpi), inQuotes(setup.fileNamePattern),
+                       decimal(setup.dpi), replyQuoted(setup.fileNamePattern),
                        onOffText(setup.filePerSheet));
 }
 
@@ -1132,10 +1100,10 @@ Result<std::string> sheetField(Document& document, std::size_t index, const Word
     const Sheet& sheet = set.sheets[index];
     if (args.size() == 3) {
         if (const auto own = sheet.fields.find(field); own != sheet.fields.end()) {
-            return std::format("sheet {} field {}={}", index + 1, field, inQuotes(own->second));
+            return std::format("sheet {} field {}={}", index + 1, field, replyQuoted(own->second));
         }
         return std::format("sheet {} field {}={} automatic", index + 1, field,
-                           inQuotes(automatic.find(field)->second));
+                           replyQuoted(automatic.find(field)->second));
     }
     const std::string value = unescaped(joined(args, 3));
     const Status status = editSheet(
@@ -1155,7 +1123,7 @@ Result<std::string> sheetField(Document& document, std::size_t index, const Word
     if (value.empty()) {
         return std::format("sheet {} field {} cleared", index + 1, field);
     }
-    return std::format("sheet {} field {}={}", index + 1, field, inQuotes(value));
+    return std::format("sheet {} field {}={}", index + 1, field, replyQuoted(value));
 }
 
 // What `viewport` shows, as world points: the front end's (with its
@@ -1272,7 +1240,7 @@ Result<std::string> sheetVerb(Document& document, const Words& args,
         }
         const std::string gone =
             std::format("removed sheet {} id={} name={}", index + 1, set.sheets[index].id,
-                        inQuotes(set.sheets[index].name));
+                        replyQuoted(set.sheets[index].name));
         if (Status status = removeSheet(document, index); !status) {
             return status.error();
         }
@@ -2293,9 +2261,9 @@ Result<std::string> titleBlockList(const Document& document)
     std::string reply;
     for (const std::string_view field : titleBlockFields()) {
         reply += std::format("{}{}={}", reply.empty() ? "" : "\n", field,
-                             inQuotes(titleBlockValue(**set, field).value()));
+                             replyQuoted(titleBlockValue(**set, field).value()));
     }
-    reply += "\nlogo=" + inQuotes((*set)->defaults.logoAsset);
+    reply += "\nlogo=" + replyQuoted((*set)->defaults.logoAsset);
     reply += "\n" + countOf((*set)->revisions.size(), "revision", "revisions");
     for (const Revision& revision : (*set)->revisions) {
         reply += "\n" + revisionLine(revision);
@@ -2370,7 +2338,7 @@ Result<std::string> revisionVerb(Document& document, const Words& args)
         if (!status) {
             return status.error();
         }
-        return "removed revision code=" + inQuotes(code);
+        return "removed revision code=" + replyQuoted(code);
     }
     return usage(kUsage);
 }
@@ -2405,7 +2373,7 @@ Result<std::string> titleBlockVerb(Document& document, const Words& args)
         if (!name) {
             return name.error();
         }
-        return "logo=" + inQuotes(*name);
+        return "logo=" + replyQuoted(*name);
     }
     const auto field = titleFieldFrom(args[0]);
     if (!field) {
@@ -2413,7 +2381,7 @@ Result<std::string> titleBlockVerb(Document& document, const Words& args)
     }
     if (args.size() == 1) {
         return std::format("{}={}", *field,
-                           inQuotes(titleBlockValue(document.sheetSet(), *field).value()));
+                           replyQuoted(titleBlockValue(document.sheetSet(), *field).value()));
     }
     const std::string value = unescaped(joined(args, 1));
     const Status status = editSheetSet(
@@ -2423,7 +2391,8 @@ Result<std::string> titleBlockVerb(Document& document, const Words& args)
     if (!status) {
         return status.error();
     }
-    return std::format("{}={}", *field, inQuotes(titleBlockValue(document.sheetSet(), *field).value()));
+    return std::format("{}={}", *field,
+                       replyQuoted(titleBlockValue(document.sheetSet(), *field).value()));
 }
 
 } // namespace
@@ -2550,12 +2519,13 @@ std::string checkReplyLine(const Finding& finding)
     std::string line = std::format(
         "{} {} {} {} message={}", toString(finding.severity), finding.code,
         finding.sheetIndex ? std::to_string(*finding.sheetIndex + 1) : std::string("-"),
-        finding.viewportId.empty() ? std::string("-") : finding.viewportId, inQuotes(finding.message));
+        finding.viewportId.empty() ? std::string("-") : finding.viewportId,
+        replyQuoted(finding.message));
     if (!finding.fix.empty()) {
-        line += " fix=" + inQuotes(finding.fix);
+        line += " fix=" + replyQuoted(finding.fix);
     }
     if (!finding.subject.empty()) {
-        line += " subject=" + inQuotes(finding.subject);
+        line += " subject=" + replyQuoted(finding.subject);
     }
     return line;
 }
@@ -3126,7 +3096,7 @@ std::string describeSheet(const SheetSet& set, std::size_t index)
     }
     std::string text = sheetLine(set, index);
     for (const auto& [field, value] : set.sheets[index].fields) {
-        text += std::format("\n  field {}={}", field, inQuotes(value));
+        text += std::format("\n  field {}={}", field, replyQuoted(value));
     }
     for (const Viewport& viewport : set.sheets[index].viewports) {
         text += "\n  " + viewportSummary(viewport);
@@ -3148,7 +3118,7 @@ std::string describeViewport(const Viewport& viewport)
     }
     const ViewportSource& source = viewport.source;
     if (isSection(kind) || !source.alignment.empty()) {
-        line += " alignment=" + inQuotes(source.alignment);
+        line += " alignment=" + replyQuoted(source.alignment);
     }
     if (isSection(kind) || source.chainageFrom != 0.0 || source.chainageTo != 0.0) {
         line += " from=" + decimal(source.chainageFrom) + " to=" + decimal(source.chainageTo);
@@ -3187,13 +3157,13 @@ std::string describeViewport(const Viewport& viewport)
         for (const std::string& layer : viewport.hiddenLayers.hidden()) {
             hidden += (hidden.empty() ? "" : ",") + layer;
         }
-        line += " hidden=" + inQuotes(hidden);
+        line += " hidden=" + replyQuoted(hidden);
     }
     if (!viewport.title.empty()) {
-        line += " title=" + inQuotes(viewport.title);
+        line += " title=" + replyQuoted(viewport.title);
     }
     if (!viewport.text.empty()) {
-        line += " text=" + inQuotes(viewport.text);
+        line += " text=" + replyQuoted(viewport.text);
     }
     if (!viewport.marks.empty()) {
         line += std::format(" marks={}", viewport.marks.size());

@@ -3,11 +3,13 @@
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <set>
 #include <utility>
 
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/label_values.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad::annotation {
@@ -136,6 +138,38 @@ followDimension(const Model& model, const katana::entity::DimensionGeometry& dim
     return result;
 }
 
+// A smart leader whose target this update removes - a label, or another
+// smart leader - goes too, however long the chain: removed ids are gathered
+// until a pass adds none, and a leader that was to follow a target now
+// removed is removed instead. Only smart leaders chain, since only they read
+// an annotation as their target; the extra passes run only when the first
+// removed something.
+void removeSmartLeadersOfRemoved(const Model& model, ChangeSet& changes)
+{
+    if (changes.remove.empty()) {
+        return;
+    }
+    std::set<katana::entity::EntityId> removed(changes.remove.begin(), changes.remove.end());
+    bool grew = true;
+    while (grew) {
+        grew = false;
+        model.entities.forEach([&](const Entity& entity) {
+            const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
+            if (leader == nullptr || !katana::entity::isSmart(*leader) ||
+                !leader->tipRef.associated() || removed.contains(entity.id) ||
+                !removed.contains(leader->tipRef.entity) ||
+                model.layers.resolve(entity.layer).locked) {
+                return;
+            }
+            removed.insert(entity.id);
+            changes.remove.push_back(entity.id);
+            grew = true;
+        });
+    }
+    std::erase_if(changes.modify,
+                  [&](const Entity& entity) { return removed.contains(entity.id); });
+}
+
 } // namespace
 
 ChangeSet associativeChanges(const Model& model)
@@ -187,6 +221,13 @@ ChangeSet associativeChanges(const Model& model)
         if (!leader.tipRef.associated()) {
             return;
         }
+        // A smart leader's note is read off its target (docs/annotation.md,
+        // "Smart leaders"): it goes with it, as a label does, and comes back
+        // with it on undo. A plain one stays and lets the reference go.
+        if (katana::entity::isSmart(leader) && !model.entities.contains(leader.tipRef.entity)) {
+            changes.remove.push_back(entity.id);
+            return;
+        }
         katana::entity::LeaderGeometry followed = leader;
         bool changed = false;
         follow(model, followed.tipRef, followed.vertices.front(), changed);
@@ -205,6 +246,7 @@ ChangeSet associativeChanges(const Model& model)
             changes.modify.push_back(std::move(moved));
         }
     });
+    removeSmartLeadersOfRemoved(model, changes);
     return changes;
 }
 

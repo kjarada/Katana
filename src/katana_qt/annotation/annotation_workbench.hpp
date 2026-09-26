@@ -1,10 +1,11 @@
 #pragma once
 
-// The annotation front end in the Format menu (docs/annotation.md, "In the
-// window"): Text Styles..., Label Styles and Rules..., Dimension Styles...,
-// the plan view's annotation scale on the Format toolbar; and in the Annotate
-// menu, after its tools, Edit Text..., Edit Label... and Label Layout
-// Report....
+// The annotation front end (docs/annotation.md, "In the window"): in the
+// Format menu Text Styles..., Label Styles and Rules... and Dimension
+// Styles..., and the plan view's annotation scale on the Format toolbar; in
+// the Annotate menu, after its tools, Edit Text..., Edit Label..., Label
+// Layout Report... and the Leaders manager (Leaders..., Leaders for
+// Selection..., Arrange Leaders and Balloons...).
 //
 // No dialog here changes the drawing itself: each builds the line a person
 // would type - TEXTSTYLE, LABELSTYLE, AUTOLABEL, DIMSTYLE, TEXTEDIT,
@@ -40,6 +41,7 @@ class DimensionStyleManagerDialog;
 class TextEditDialog;
 class LabelEditDialog;
 class LabelLayoutReportDialog;
+class LeaderManagerDialog;
 
 class AnnotationWorkbench {
   public:
@@ -58,6 +60,15 @@ class AnnotationWorkbench {
     // menu over here. The dialog edits the one text selected.
     QAction* addEditTextAction(QMenu& annotateMenu);
     TextEditDialog& showTextEdit();
+
+    // The Leaders manager, on its tab: 0 Leader, 1 For Selection, 2 Arrange
+    // (LeaderManagerDialog::Tab).
+    LeaderManagerDialog& showLeaders(int tab = 0);
+
+    // Adds the Leaders manager's three entries to the Annotate menu, after
+    // its tools: "annotateLeaders", "annotateLeadersForSelection",
+    // "annotateArrangeLeaders", each with a menu letter no item there has.
+    void addLeaderActions(QMenu& annotateMenu);
     // The Format toolbar's scale box ("annotationScaleCombo").
     [[nodiscard]] QComboBox* scaleBox() const { return scale_; }
 
@@ -101,6 +112,7 @@ class AnnotationWorkbench {
     QPointer<LabelEditDialog> editLabel_;
     QPointer<LabelLayoutReportDialog> labelLayout_;
     CommandRunner run_;
+    QPointer<LeaderManagerDialog> leaders_;
     struct Listener;
     std::unique_ptr<Listener> listener_;
 };
