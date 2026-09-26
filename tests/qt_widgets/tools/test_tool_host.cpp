@@ -214,9 +214,12 @@ TEST(ToolHost, ASelectingToolsAnswerIsLeftInTheDocumentsSelection)
 
 TEST(ToolHost, ASnapOnAnEntitysPointReachesTheToolAsThatPoint)
 {
-    // A leader's tip snapped to a line's end follows the line; one snapped
-    // to somewhere along it (Nearest) names no point of it and is a plain
-    // point, as a click with no snap is.
+    // A leader's tip snapped to a line's end follows the line's End. One
+    // snapped to somewhere along it (Nearest) names no point of the line, so
+    // the snap hands the tool a plain point - and the Leader puts a tip on
+    // what it is clicked on (docs/annotation.md, "Smart leaders"): it goes on
+    // the line at the place nearest, 4 of the line's 10 along, and follows
+    // it there.
     Document document;
     ASSERT_TRUE(
         document.execute(katana::commands::createLine(Point2(0, 0), Point2(10, 0))).ok());
@@ -240,6 +243,8 @@ TEST(ToolHost, ASnapOnAnEntitysPointReachesTheToolAsThatPoint)
               (katana::entity::AnchorRef{line, katana::entity::AnchorPoint::End, 0}));
     const auto along =
         leader(katana::cad::SnapResult{Point2(4, 0), katana::cad::SnapMode::Nearest, line});
-    EXPECT_FALSE(along.tipRef.associated());
+    EXPECT_EQ(along.tipRef.entity, line);
+    EXPECT_EQ(along.tipRef.point, katana::entity::AnchorPoint::Along);
+    EXPECT_DOUBLE_EQ(along.tipRef.parameter, 0.4);
     EXPECT_EQ(along.vertices.front(), Point2(4, 0));
 }

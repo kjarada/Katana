@@ -95,9 +95,15 @@
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/customisation_report.hpp"
+#include "katana/archive12d/domain.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
-#include "katana/archive12d/domain.hpp"
+#include "katana/commands/entity_commands.hpp"
+#include "katana/dxf/reader.hpp"
+#include "katana/entity/anchor.hpp"
+#include "katana/entity/entity_geometry.hpp"
+#include "katana/entity/leader_values.hpp"
+#include "katana/geometry/alignment.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/dataset_info.hpp"
@@ -292,10 +298,25 @@ std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::
         }
         Rows operator()(const katana::entity::LeaderGeometry& g) const
         {
-            return {{"Tip", point(g.vertices.front())},
-                    {"Vertices", QString::number(g.vertices.size())},
-                    {"Text", QString::fromStdString(g.text)},
-                    {"Callout", QString::fromUtf8(katana::entity::toString(g.callout))}};
+            // The note as it is drawn: a smart leader's is read off the
+            // entity its tip is on (docs/annotation.md, "Smart leaders").
+            Rows rows = {{"Tip", point(g.vertices.front())},
+                         {"Vertices", QString::number(g.vertices.size())},
+                         {"Text", QString::fromStdString(katana::entity::leaderNote(
+                                      model, g, katana::cad::codePropertyCandidates()))}};
+            if (g.fields) {
+                rows.push_back({"Template", QString::fromStdString(g.text)});
+            }
+            if (!g.labelStyle.empty()) {
+                rows.push_back({"Label style", QString::fromStdString(g.labelStyle)});
+            }
+            if (g.tipRef.associated()) {
+                rows.push_back(
+                    {"On", QString::number(g.tipRef.entity) + " (" +
+                               QString::fromStdString(katana::entity::describe(g.tipRef)) + ")"});
+            }
+            rows.push_back({"Callout", QString::fromUtf8(katana::entity::toString(g.callout))});
+            return rows;
         }
     };
     return std::visit(Visitor{model}, geometry);
@@ -883,6 +904,9 @@ void MainWindow::buildActions()
     // Annotate > Edit Label... and Label Layout Report..., after the
     // catalogue's tools: the annotation workbench's, which Format made.
     annotation_->addLabelActions(*annotateMenu);
+    // The Leaders manager's entries under the Annotate tools, made by the
+    // annotation workbench buildFormatActions has just built.
+    annotation_->addLeaderActions(*annotateMenu);
 
     // ---- Survey ------------------------------------------------------------------------
     buildSurveyActions(*surveyMenu, customiseAction, replaceCustomisationAction, codeAction);

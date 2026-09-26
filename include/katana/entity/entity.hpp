@@ -120,15 +120,32 @@ struct TextGeometry {
 // `point` says which point of the entity, and `index` which vertex or segment
 // where that needs saying; entity/anchor.hpp resolves one against an entity
 // and says which kinds of entity offer which points.
+//
+// Append-only: the value is stored. Along and Inside were added on 2026-09-25
+// with smart leaders (docs/annotation.md, "Smart leaders") and are written in
+// geometry blob version 3 only (geometry_blob.hpp), so an older build refuses
+// an annotation that uses them rather than reading an anchor it cannot place.
 enum class AnchorPoint : std::uint8_t {
-    Position = 0, // a point's position, a text's insertion point
-    Start = 1,    // a line's or an arc's start, a polyline's first vertex
-    End = 2,      // a line's or an arc's end, a polyline's last vertex
-    Mid = 3,      // a line's or an arc's midpoint
-    Centre = 4,   // an arc's or a circle's centre
-    Vertex = 5,   // a polyline's vertex `index`
+    Position = 0,   // a point's position, a text's insertion point
+    Start = 1,      // a line's or an arc's start, a polyline's first vertex
+    End = 2,        // a line's or an arc's end, a polyline's last vertex
+    Mid = 3,        // a line's or an arc's midpoint
+    Centre = 4,     // an arc's or a circle's centre
+    Vertex = 5,     // a polyline's vertex `index`
     SegmentMid = 6, // the midpoint of a polyline's segment `index`
+    // ON the entity, `parameter` of the way along: a line's or an arc's
+    // fraction from its start, a polyline's segment `index` and the fraction
+    // along that segment, a circle's fraction of a turn counter-clockwise
+    // from east. What a leader's tip put anywhere on a line is, so that it
+    // stays on the same place of the line when the line moves or stretches.
+    Along = 7,
+    // Inside a closed figure: a closed polyline's inside point (the point its
+    // area label goes at, insidePoint in anchor.hpp), a circle's centre.
+    Inside = 8,
 };
+
+// The last enumerator, for the checks that refuse a stored value past it.
+inline constexpr AnchorPoint kLastAnchorPoint = AnchorPoint::Inside;
 
 [[nodiscard]] std::string_view toString(AnchorPoint point);
 [[nodiscard]] katana::core::Result<AnchorPoint> anchorPointFromString(std::string_view name);
@@ -137,6 +154,8 @@ struct AnchorRef {
     std::uint64_t entity = 0; // an EntityId; 0 means "not associated"
     AnchorPoint point = AnchorPoint::Position;
     std::uint32_t index = 0;
+    // Along's fraction, in [0, 1]; 0 for every other point (validate).
+    double parameter = 0.0;
 
     [[nodiscard]] constexpr bool associated() const { return entity != 0; }
     friend constexpr bool operator==(const AnchorRef&, const AnchorRef&) = default;
@@ -272,6 +291,25 @@ struct LeaderGeometry {
     // The entity the tip follows (the associative update); not associated by
     // default.
     AnchorRef tipRef{};
+
+    // Appended 2026-09-25 with smart leaders (docs/annotation.md, "Smart
+    // leaders"): a note READ OFF the entity the tip is on, worked out every
+    // time the leader is drawn, so it cannot disagree with the geometry or
+    // the attributes it describes however they were edited. With both at
+    // their defaults a leader is a plain one, stored exactly as before
+    // (geometry_blob.cpp).
+    //
+    // `text` is a TEMPLATE in the label template language
+    // (entity/label_text.hpp) whose fields are the values of the tip's entity
+    // at the tip (entity/leader_values.hpp): "IL {prop.invert:.3f}".
+    bool fields = false;
+    // The label style whose template the note is: one style's template
+    // edited, every leader in it says the new thing. `text` is then empty and
+    // `fields` off; a note is its own template or its style's, never both.
+    // Only the template: the leader is set in its own text style and height
+    // (LEADER copies the label style's when it makes one), so what it looks
+    // like is the leader's, as it is for every other leader.
+    std::string labelStyle{};
 
     friend bool operator==(const LeaderGeometry&, const LeaderGeometry&) = default;
 };

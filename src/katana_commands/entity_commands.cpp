@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <limits>
+#include <map>
 #include <utility>
 
 #include "katana/commands/change_set.hpp"
@@ -105,6 +106,36 @@ Status applyTransform(Entity& entity, const Mat3& transform)
 }
 
 // Adds transformed duplicates of the selection; the originals stay.
+// An annotation copied WITH the entity it refers to - a leader's tip, a
+// dimension's points, a label's target - refers to that entity's copy, so a
+// pit copied with its callout gets a callout of its own rather than a second
+// one of the original (docs/annotation.md, "Associativity"). A reference to
+// an entity not copied is kept: the copy is another annotation of it.
+void referToCopies(Entity& entity, const std::map<EntityId, EntityId>& copyOf)
+{
+    const auto remap = [&](std::uint64_t& id) {
+        if (const auto found = copyOf.find(id); found != copyOf.end()) {
+            id = found->second;
+        }
+    };
+    if (auto* dimension = std::get_if<katana::entity::DimensionGeometry>(&entity.geometry)) {
+        for (katana::entity::AnchorRef* ref :
+             {&dimension->startRef, &dimension->endRef, &dimension->vertexRef}) {
+            if (ref->associated()) {
+                remap(ref->entity);
+            }
+        }
+    } else if (auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry)) {
+        if (leader->tipRef.associated()) {
+            remap(leader->tipRef.entity);
+        }
+    } else if (auto* label = std::get_if<katana::entity::LabelGeometry>(&entity.geometry)) {
+        if (label->target != 0) {
+            remap(label->target);
+        }
+    }
+}
+
 CommandPtr duplicateEach(std::string name, std::vector<EntityId> ids,
                          std::vector<Mat3> transforms)
 {
@@ -114,8 +145,18 @@ CommandPtr duplicateEach(std::string name, std::vector<EntityId> ids,
                            if (auto status = requireSelection(ids); !status) {
                                return status.error();
                            }
+                           // The ids the copies will have: an add is given the
+                           // next id, in the order the change set lists them
+                           // (EntityDatabase::add), and a redo puts each back
+                           // under the id it had.
+                           const EntityId first = context.model.entities.nextId();
                            ChangeSet changes;
                            for (const Mat3& transform : transforms) {
+                               std::map<EntityId, EntityId> copyOf;
+                               const EntityId base = first + changes.add.size();
+                               for (std::size_t k = 0; k < ids.size(); ++k) {
+                                   copyOf[ids[k]] = base + k;
+                               }
                                for (const EntityId id : ids) {
                                    auto entity = findEntity(context, id);
                                    if (!entity) {
@@ -124,6 +165,7 @@ CommandPtr duplicateEach(std::string name, std::vector<EntityId> ids,
                                    if (auto status = applyTransform(*entity, transform); !status) {
                                        return status.error();
                                    }
+                                   referToCopies(*entity, copyOf);
                                    changes.add.push_back(std::move(*entity));
                                }
                            }
@@ -311,6 +353,17 @@ CommandPtr mirrorEntities(std::vector<EntityId> ids, const Point2& a, const Poin
 CommandPtr copyEntities(std::vector<EntityId> ids, const Vec2& delta)
 {
     return duplicateEach("COPY", std::move(ids), {Mat3::translation(delta)});
+}
+
+CommandPtr duplicateEntities(std::string name, std::vector<EntityId> ids,
+                             std::vector<Mat3> transforms)
+{
+    if (transforms.empty()) {
+        return makeCommand(std::move(name), [](const CommandContext&) -> Result<ChangeSet> {
+            return makeError(ErrorCode::InvalidArgument, "nothing to copy");
+        });
+    }
+    return duplicateEach(std::move(name), std::move(ids), std::move(transforms));
 }
 
 CommandPtr arrayEntities(std::vector<EntityId> ids, int rows, int columns, const Vec2& spacing)

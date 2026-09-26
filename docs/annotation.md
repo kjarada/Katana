@@ -3,9 +3,10 @@
 Everything a drafter writes ON a drawing rather than draws IN it: text sized
 for the sheet, text styles, labels that read their words off the geometry,
 rules that label a whole drawing, the placer that keeps labels apart, the
-dimension kinds, leaders and callouts. The model's side is `katana_entity`
+dimension kinds, leaders and callouts, and smart leaders that read their note
+off what they point at. The model's side is `katana_entity`
 (`include/katana/entity/annotation.hpp`, `label_text.hpp`, `label_values.hpp`,
-`anchor.hpp`, `text_block.hpp`), the layout and the edits are `katana_cad`
+`leader_values.hpp`, `anchor.hpp`, `text_block.hpp`), the layout and the edits are `katana_cad`
 (`include/katana/cad/annotation/`, `src/katana_cad/annotation/`), and the
 window's part is a thin front end (`src/katana_qt/annotation/`). Built on
 2026-09-25 at the owner's request for "a professional annotation system",
@@ -276,11 +277,14 @@ and nothing else. Matching is in entity id order (Rule 7).
 
 A dimension's points, a leader's tip and a label's target can NAME the
 entity they belong to (`AnchorRef`: an entity and which of its points -
-position, start, end, mid, centre, vertex N, the middle of segment N). On the
-command line a point written `#id`, `#id.end`, `#id.v3` or `#id.s2` names one;
-the interactive dimension tools name the lines, arcs and circles they are
-given by picking, and - since 2026-09-26 - any point the plan view SNAPPED to
-an entity's end, middle, centre or vertex. The view hands the tool what its
+position, start, end, mid, centre, vertex N, the middle of segment N, a place
+ALONG it, INSIDE it). On the command line a point written `#id`, `#id.end`,
+`#id.v3`, `#id.s2`, `#id.inside` or `#id.along2:0.25` names one, and
+`#id@x,y` names the place on the entity nearest x,y (`nearestAnchor`); the
+interactive dimension tools name the lines, arcs and circles they are given
+by picking, the Leader tool the entity its tip is clicked on, and - since
+2026-09-26 - any point the plan view SNAPPED to an entity's end, middle,
+centre or vertex. The view hands the tool what its
 snap found (`cad::snapAnchor` turns an Endpoint, Midpoint or Center snap into
 the reference; `cad::routeSnappedPoint` gives it to
 `InteractiveTool::anchoredPoint`, whose default is a plain point), and the
@@ -291,6 +295,36 @@ what they make follows the entity exactly as the verb's `#id` points do
 Perpendicular, Tangent or Nearest snap is not a point one entity keeps, and
 stays a plain point.
 
+**Along** (added with smart leaders) is a fraction of the way along: a line's
+or an arc's from its start, a polyline's segment N and the fraction along it,
+a circle's fraction of a turn counter-clockwise from east. `#id.alongN:T`
+types it exactly - segment N (0 on a line, an arc or a circle), fraction T
+from 0 to 1 - as `LIST` prints it ("along 2 0.25"), and so as the window's
+Along sets it; `#id@x,y` names only the place nearest a point, which at a
+polyline's corner is the first of the two segments meeting there
+(`AnExactPlaceAlongIsTypedAsLongAsTheEntityHasIt`). A circle's turn is
+[0, 1): a whole turn is typed as, and stored as, its start. A stored fraction
+that is not a number reads as 0, the start
+(`AFractionThatIsNoNumberReadsAsTheStart`). It is what keeps a
+tip at a quarter of the way along a pipe when the pipe is stretched to twice
+the length (`ATipOnALineStaysAtItsPlaceAlongIt`). A circle has no start, so a
+tip on a circle keeps its compass direction from the centre as the circle
+moves or grows; rotating a circle turns nothing a tip could follow.
+**Inside** is a closed polyline's inside point - the centroid, or the middle
+of the widest run through it when the centroid is in a notch (`insidePoint`,
+the point an area label goes at) - or a circle's centre.
+
+A copy follows its original's references only where it should: an
+annotation COPIED, MIRRORED or ARRAYED together with what it refers to
+refers to the copy, so a pit copied with its callout gets a callout of its own
+(`ACopyOfAPitWithItsCalloutGetsACalloutOfItsOwn`,
+`CopiesOfAnnotationReferToCopiesOfWhatTheyReferTo`), and so it does from the
+window's Copy tool, Rotate and Scale with their Copy option and the polar
+Array, which make their copies with the same command,
+`commands::duplicateEntities` (`ACalloutCopiedWithItsPitReadsThePitsCopy`).
+Copied alone, it is another annotation of the original. Before smart leaders
+a copied pair snapped the copy's tip back onto the original pit.
+
 Rather than teach every command about annotation, `Document::execute` wraps
 EVERY command in `withAssociativeUpdate`
 (`include/katana/cad/annotation/associative.hpp`): after the command runs,
@@ -299,9 +333,11 @@ second change set INSIDE the same undo step, so one undo puts back the
 geometry and everything that followed it. A radius follows its circle's
 centre and radius and keeps its direction; an angle between two lines
 follows their intersection; a label follows its target and is removed with
-it (and comes back with it on undo); a reference to an erased entity is
-dropped, leaving an ordinary dimension where it was, as a CAD user expects.
-An annotation on a locked layer is left alone.
+it (and comes back with it on undo); a SMART leader goes with its target the
+same way, and so does a smart leader reading a leader that went, however
+long the chain; a reference to an erased entity is
+dropped, leaving an ordinary dimension or a plain leader where it was, as a
+CAD user expects. An annotation on a locked layer is left alone.
 
 ## Dimensions
 
@@ -383,11 +419,151 @@ and paper height;
 it used to draw a polyline, an arrowhead and a text per line, which drifted
 apart when one was moved.
 
+## Smart leaders
+
+Built on 2026-09-25 at the owner's request for "more functionality for
+leaders to interact with geometry and attributes, make them smart". A SMART
+leader's tip is ON an entity and its note is READ OFF it: the pit's invert,
+the pipe's size and length, the chainage along the main to the tip, the lot's
+area - worked out every time the leader is drawn, as a label's words are, so
+the note cannot disagree with the geometry or the attributes however either
+was edited, by hand, by `PROP`, by Global Modify or by an agent. Two members
+of `LeaderGeometry` say so, both appended with their defaults being a plain
+leader:
+
+* `fields`: the leader's `text` is a TEMPLATE in the label template language
+  (`include/katana/entity/label_text.hpp`, "Templates" above) -
+  `LEADER #12 25,15 template="IL {prop.invert:.3f}\n{length:.1f} m"`;
+* `labelStyle`: the note is that label style's template, read live - one
+  `LABELSTYLE SET` and every leader in the style says the new thing. Only the
+  template: the look is the leader's own, and `LEADER` lends it the label
+  style's text style and paper height when it makes it (unless `style=` or
+  `paper=` says otherwise), so it looks as the style's labels do. A leader's
+  note is its own template or its style's, never both, and a style a leader
+  reads cannot be deleted (`ALabelStyleALeaderReadsIsNotDeletedAndMustExist`).
+
+A plain leader's note is still exactly what was typed, braces and all.
+
+### What a leader can say
+
+`include/katana/entity/leader_values.hpp` is the reference, and `LEADER VALUES
+#id@x,y` lists what a note at a place could say, each value in its own format.
+The values are those of the entity the tip names AT THE TIP
+(`anchorValues`): the whole set of names is `leaderValueNames`, and a
+template naming anything else is refused as it is typed, with the name
+(`checkLeaderTemplate`).
+
+| Target | Values |
+|---|---|
+| every one | `id`, `layer`, `type` (Point, Line, ...), `code`, `point`, `description`, `prop.NAME`, and `x`, `y`, `easting`, `northing` of the tip |
+| Point, Text | `z`, `rl` - its level; a text's `text` |
+| Line | `bearing`, `distance`, `length`, `dx`, `dy`, `segment`, `chainage` (from its start to the tip), and `z`, `rl` at the tip, `dz`, `grade` from its heights |
+| Arc | `radius`, `diameter`, `length`, `chord`, `delta`, `bearing` (of the chord), `tangent`, `chainage`, `z`, `rl` |
+| Circle | `radius`, `diameter`, `length`, `area`, `perimeter`, `z`, `rl` |
+| Polyline | the segment the tip is on - `bearing`, `distance`, `dx`, `dy`, `dz`, `grade`, `segment` - and the whole line's `length`, `vertices`, `chainage` to the tip and `z` at it; a closed one's `area` and `perimeter` |
+| Dimension | `measurement`, or an angular one's `angle` |
+
+Three rules decide what is there, each the model's policy already:
+
+* **`length` is the whole entity's.** A callout on a pipe says the pipe's
+  length; the segment the tip landed on is `distance`. A segment label's
+  `length` is its segment's, since a label is of that segment.
+* **Absent is not zero.** A level at the tip is the height of the vertex it
+  is at, or interpolated between two vertices that both have one - never made
+  up from one end (`ALineSaysItsBearingAndTheLevelAndChainageAtTheTip`); a
+  tip inside a lot has a level only when every vertex is at one. A template
+  line naming a value the target lacks is dropped, as a label's is.
+* **The place, else the nearest.** When a reference names a place the target
+  no longer has - a vertex since deleted - the place on the target nearest the
+  tip stands for it, rather than the leader going blank.
+
+A leader that would say NOTHING - every line dropped - is refused on the way
+in by `LEADER` and the Leader tool, naming what the target lacks ("the leader
+would say nothing: its target has no prop.invrt"), since a property the
+target does not carry is far more often a typo than an intent
+(`checkLeaderSaysSomething`). So is a smart leader whose tip is on nothing.
+
+### Pointing at the right place
+
+`#id@x,y` puts the tip on the entity nearest x,y and names the place ALONG it
+("Associativity" above), so the tip stays at the same place of a line that
+moves or stretches, and the chainage and level it reads are the new ones.
+`#id.inside` points into a lot; a leader ending inside an outline ends in a
+DOT unless `arrow=` says otherwise, one ending on it in an arrowhead
+(ISO 128-22, leader lines; `InsideALotTheArrowIsADotAndTheNoteItsArea`). `LEADER
+ATTACH id #id@x,y` moves a leader's tip onto an entity, `LEADER SET id
+tip=...` too, and the Leader tool puts a tip clicked within the pick aperture
+of a point, line, arc, circle, polyline or text on it (`docs/tools.md`).
+
+### Changing what an entity says, through its leader
+
+`LEADER PROP id SET invert 10.5 [real]` sets the attribute on the entity the
+leader's tip is on - the same command `PROP SET` is, one undo step - and
+replies with the note as it now reads; `LEADER PROP id DELETE key` removes it
+(`ATemplateIsReadOffThePitAndFollowsItsAttributes`).
+
+### Many at once
+
+`LEADER FOR id... | SELECTION [template= | labelstyle= | text=]` makes a
+leader to each entity as ONE step: its tip at a point's or a text's position,
+the middle of a line or an arc, halfway along an open polyline, inside a
+closed one, and on a circle on the side the note goes; the note `length=` mm
+(10: four of a leader's default 2.5 mm text heights, clear of the tip and a
+point's symbol) from the tip at `angle=` degrees (45: up and to the right,
+off the horizontal and vertical most drawn lines follow) - chosen, not a
+standard's, and kept in `LeadersForOptions` alone - at the document's
+annotation scale. An entity that offers no place (a dimension, a label, a leader) or
+about which the note would say nothing is skipped and counted, and the reply
+says the first reason when nothing was made
+(`ForMakesOneLeaderPerEntityInOneStep`). `BALLOON FOR` numbers a balloon to
+each on from the highest; a smart balloon (`template=`) is no number in the
+run. A numbered balloon stays a circle: only a circle's number is counted,
+so `BALLOON` or `BALLOON FOR` with no note and `callout=box` or `none` is
+refused rather than make a number that would be given again
+(`ANumberedBalloonIsACircleSoItsNumberIsCounted`).
+
+### Arranging them
+
+`LEADER ALIGN id id... | SELECTION [x=] [spacing=mm]` lines the notes up in a
+column, as AutoCAD's MLEADERALIGN does: each leader's last vertex - where its
+note hangs - goes to one x (the topmost note's, or `x=`), and with `spacing=`
+the notes are stacked that many paper millimetres apart from the top down, in
+the order they were; nothing else of a leader moves
+(`AlignPutsTheNotesInAColumnTopDown`). `BALLOON RENUMBER [start=1]
+[order=id|x|y]` numbers the numbered balloons again from `start`, in the
+order they were made, across the sheet by their tips, or down it; a smart
+balloon is left alone (`RenumberingNumbersTheBalloonsInTheOrderAsked`). Each
+is one step, and none when nothing moves.
+
+### One set of edits
+
+`include/katana/cad/annotation/leader_edit.hpp` is every leader edit - the
+note and look (`changeLeaders`, `applyLeaderChange`), attaching, freezing
+and detaching, an attribute through the leader, one per entity
+(`leadersFor`), aligning, renumbering - each checked against the model and
+returned as ONE command or refused - a template that does not check, a
+style not in the drawing, a size below 0 mm (`paper=-3` included; 0 is the
+text style's height, or no landing) - never half made. The verbs parse their
+words into it, and the window's Leaders manager ("In the window" below)
+fills it from its form, so a verb typed and a button pressed cannot differ.
+
+### Freezing and letting go
+
+`LEADER FREEZE id...` turns a smart note into the words it says now and
+keeps the tip following; `LEADER DETACH id...` lets the tip go, freezing a
+smart note first, since a note read off nothing would say nothing. Both are
+one step. `INFO` and `LIST` print what a leader says, its template and what
+it is on; the property panel shows the same (`Text`, `Template`, `Label
+style`, `On`).
+
 ## The verbs
 
 `CommandInterpreter::annotationHelpText` is the reference, printed by `HELP`.
-Options are `key=value`, `\n` in a text or template is a line break, and
-every reply is `key=value` records an agent can read without guessing:
+Options are `key=value`, `\n` in a text or template is a line break and
+`\\` a backslash - so a note holding `\n` itself (`C:\\new`) can be typed,
+as a reply writes it (`core::unescapeTyped`, the sheet verbs' reader too;
+`ABackslashIsTypedAsTwoSoANoteMayHoldBackslashN`) - and every reply is
+`key=value` records an agent can read without guessing:
 
 | Verb | Replies, for example |
 |---|---|
@@ -398,8 +574,13 @@ every reply is `key=value` records an agent can read without guessing:
 | `LABEL id... style=`, `LABEL SELECTION`, `LABEL ALIGN name`, `LIST`, `SET`, `DELETE`, `LAYOUT [scale= collisions=]` | `scale=600 considered=5 placed=4 displaced=0 suppressed=1 orphaned=0`, a `label=... x= y= candidate= text=` line for each piece placed and a `label=... piece=... suppressed=yes` line for each that found no room |
 | `AUTOLABEL RULE ADD \| SET \| DELETE \| LIST`, `RUN`, `PREVIEW`, `CLEAR` | `autolabel created=2 kept=0 removed=0 skipped=0` and `rule=... labels=N` |
 | `DIM LINEAR \| HORIZONTAL \| VERTICAL \| ALIGNED \| ANGULAR \| RADIUS \| DIAMETER \| ORDINATE \| BASELINE \| CONTINUE` | `created dimension id=5 kind=diameter measures=10 text=Ø10.000 associative=yes`, `created dimensions=2 ids=7,8` |
-| `LEADER p p... text= arrow= callout= style= paper= arrowsize= landing=`, `BALLOON` | `created leader id=26 text="PIT 12\nIL 10.50" associative=no` |
+| `LEADER p p... text= \| template= \| labelstyle= arrow= callout= style= paper= arrowsize= landing=`, `BALLOON` | `created leader id=26 text="IL 10.500" associative=yes target=12 anchor=position template="IL {prop.invert:.3f}"` |
 | `DIMSTYLE LIST \| INFO name \| NEW name [field value ...] \| SET name field value [field value ...] \| DELETE name` | `dimension style site updated`; `INFO`: `name=site text=3.5 gap=0.625 ... paper=on layers=1 reads=10.000` |
+| `LEADER VALUES id \| #id[.point\|@x,y]` | `target=12 type=Point` and a `value=rl text=12.500` line each |
+| `LEADER LIST [id...] [target=id]`, `SET id... tip= at= ...`, `ATTACH id p`, `DETACH`, `FREEZE` | `id=26 layer=0 vertices=2 tip=10,10 target=12 anchor=position smart=yes template=... arrow=ClosedFilled callout=none text=...` |
+| `LEADER PROP id SET key value [type] \| DELETE key` | `leader=26 target=12 property=invert text="IL 10.500"` |
+| `LEADER FOR id... \| SELECTION`, `BALLOON FOR` | `created leaders=4 ids=7,8,9,10 skipped=1` |
+| `LEADER ALIGN id... [x= spacing=mm]`, `BALLOON RENUMBER [start= order=id\|x\|y]` | `aligned leaders=3 x=22 spacing=4`, `balloons=3 renumbered=3` |
 
 `TS`, `LS`, `MT` and `LE` are aliases. `LABEL` of many entities, `AUTOLABEL
 RUN` and `DIM BASELINE` are each ONE undo step (`ManyLabelsAreOneStep`). A
@@ -544,6 +725,94 @@ A double click on a label in the plan view opens Edit Label on it
 triggers `annotateEditText` for a text; `docs/desktop.md`, "Double click to
 edit").
 
+**Leaders.** Under the Annotate menu's tools, three entries open the Leaders
+manager (`LeaderManagerDialog`, `src/katana_qt/annotation/leader_manager.hpp`,
+the dialog `leaderManagerDialog`) on one of its tabs: **Leaders...**
+(`annotateLeaders`), **Leaders for Selection...**
+(`annotateLeadersForSelection`) and **Arrange Leaders and Balloons...**
+(`annotateArrangeLeaders`), each given a menu letter the tools have not taken
+(`AnnotationWorkbench::addLeaderActions`). It is the smart leaders' front end
+and decides nothing of its own: every button is an edit of
+`include/katana/cad/annotation/leader_edit.hpp`, the same the LEADER and
+BALLOON verbs make, one undo step each, and a refusal is said in the
+dialog's problem line in the command's words.
+
+* **Leader**: every leader in the drawing, by what it says, and a form for the
+  chosen one, which follows the drawing's selection. The form says what the
+  tip is on in words ("Polyline 1, 50.0% along segment 2") and, for a tip
+  along a line, an arc, a circle or a polyline segment, how far along in per
+  cent, which Apply moves it by; **Attach to Selected** puts the tip of a
+  plain leader, or of one on something else, on the first entity selected with
+  it that offers a place (not a dimension or a label), at the place of it
+  nearest the tip, and is no step where the tip is already (`LEADER ATTACH`,
+  `AttachToSelectedPutsTheTipOnTheEntityAndAlongMovesIt`). The note is Text, a
+  Template read off that entity, or a Label style's template, checked as it is
+  typed and shown as it would read ("Says"); a style's template is shown to
+  read, and read again when the style is edited
+  (`AStylesNoteIsReadAfreshWhenTheStyleChanges`). Beside it are the values the
+  entity offers at the tip: double-clicking one puts `{name}` into the note
+  where the cursor is - the end of the note until the user moves it - and
+  makes the note a template. Below: the arrow, callout, text style and sizes;
+  an attribute of the entity set or removed through the leader, of the type
+  chosen or as typed (`LEADER PROP`, which reads a value as `PROP SET` does -
+  `CommandInterpreter::propertyValue`); and Freeze Note, Detach Tip and Apply.
+  Choosing a label style lends the form that style's text style and height, as
+  `labelstyle=` lends a leader them; choosing another style puts back what the
+  first lent before lending its own, and so does a style appearing in or going
+  from the drawing under the form
+  (`AStyleThatComesOrGoesUnderTheFormLendsItsLook`); choosing Text or Template
+  again puts back the words typed, and the look from before in each field
+  still showing what the style lent - not in one the user has changed since
+  (`ANoteMadeAStylesAndBackKeepsTheUsersWordsAndLook`,
+  `ALookTypedAfterALendIsKeptAndAStylesHeightIsLentExactly`).
+
+  Apply sends only what the user changed: the form remembers what it showed
+  and leaves out every field still showing that, so a value its widgets cannot
+  hold exactly - a height finer than their 3 decimals, a landing past their
+  1000 mm, a non-breaking space - is never rewritten, and an untouched form
+  applied is no step
+  (`AnUntouchedFormIsNoStepAndWhatItsWidgetsCannotHoldIsKept`). A note made a
+  label style's is the one exception, since the style lends its look to
+  whatever the edit leaves out: the text style and height the form shows are
+  sent unless they are the style's own, which is then lent whole, finer than
+  the form's decimals - so a look set back to the leader's own over the
+  style's is kept
+  (`ALookSetBackOverAStylesIsKeptAndAnotherStyleLendsOverTheOneBefore`). With
+  the shown leader one of several selected, Apply, Freeze and Detach change
+  them all, in one step, and the form says so
+  (`SeveralSelectedLeadersAreChangedTogetherInOneStep`) - all but Along, which
+  is where the shown leader's tip is on its own entity: changed with others
+  selected, Apply refuses it rather than move every tip to that one place.
+  Freeze, Detach and Attach act on the leader as drawn, so while the form has
+  changes not applied they are greyed, their tips say why, and they refuse
+  (`TheListChoosesAndFreezeWaitsForTheFormToBeApplied`). The form is read
+  again from the leader when the leader changes under it - an undo, a verb
+  typed - and left alone, unapplied edits and all, when something else changes
+  (`TheFormFollowsTheSelectionAndAnUndoButKeepsUnappliedEdits`); a drawing
+  opened or started afresh starts the form afresh, even where the new drawing
+  has the very same leader (`ADrawingReplacedStartsTheFormAfresh`). It watches
+  the document through `DocumentWatcher`, as `docs/desktop.md` asks.
+* **For Selection**: a leader, or with Balloons ticked a balloon, to each
+  selected entity (`LEADER FOR`, `BALLOON FOR`): the note as text, a template
+  or a label style's, checked and shown as it would read for the first
+  selected entity that has a place for a leader, with the values that entity
+  offers there to double-click into it; the look (arrow and callout, each
+  Automatic by default - a dot for a tip inside an outline, a circle for a
+  balloon - text style, height, arrow size, landing), a label style's shown as
+  it lends it, as on the Leader tab, and what the boxes show being what the
+  leaders get (`ForSelectionShowsTheLookAStyleLendsAndMakesWhatItShows`); and
+  the note's direction and distance on paper. A balloon with no note is
+  numbered on from the highest there is, and must stay a circle
+  (`ANumberedBalloonMustStayACircle`). It says how many it made and why it
+  skipped any, and what it made is selected, so the Leader tab shows it and
+  Arrange can line it up
+  (`ForSelectionIsPreviewedForTheFirstAndPlacedAsTold`).
+* **Arrange**: the selected leaders' notes lined up at the topmost's x or a
+  given one, stacked or not (`LEADER ALIGN`), and the balloons numbered again
+  from a number, as made, across or down (`BALLOON RENUMBER`); numbering
+  that changes nothing is no step
+  (`ArrangeAlignsTheSelectedNotesAndRenumbersTheBalloons`).
+
 ## Stored with the project
 
 Migration 11 (`src/katana_storage/project_store.cpp`, `docs/model.md`) adds
@@ -567,6 +836,15 @@ test still holds and an older build still reads every drawing that uses
 none of this; one that does is refused per entity as an unknown version,
 loudly.
 
+Smart leaders added a third, `kBlobVersionSmartLeader`, on the same rule
+(`fitsVersionTwo`): written only for a dimension or a leader with an anchor
+Along or Inside - every anchor then carries its fraction - and for a smart
+leader, whose `fields` and `labelStyle` follow its version-2 payload. A plain
+leader and every other annotation is still version 2, byte for byte
+(`AVersionThreeBlobHoldsThemAndNothingElseNeedsOne`), so no schema migration
+was needed, and a build from before refuses exactly the entities it could
+not read correctly (`SmartLeadersAndAnchorsAlongSurviveSavingTwiceAndReopening`).
+
 ## Exchange
 
 DXF (`include/katana/dxf/writer.hpp`) has no label entity, and the writer
@@ -582,7 +860,9 @@ entity's layer and in its colour. The window's DXF export and `katana_cli`'s
 `EXPORT` both do it, with the document's annotation scale, so both write the
 same file; paper-sized text is written at that scale's height. Written
 without them (a caller that passes nothing), labels and the other dimension
-kinds are skipped with a warning and a leader is its line, landing and note.
+kinds are skipped with a warning and a leader is its line, landing and note -
+a smart leader's note as it reads (`leaderNote`), without `{code}`, which
+survey coding decides and the writer cannot see.
 A label with no room at the scale is left out and said so. A mask, a width
 factor and a slant do not reach the file.
 
@@ -615,6 +895,13 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/qt_widgets/annotation/test_label_edit_dialog.cpp` | the `LABEL SET` line Edit Label writes, the dialog and the Label Layout Report driven by object name, each line run as the window runs it |
 | `qt_labels_are_made_edited_and_reported_in_the_window_headless` | the window end to end: `LBL` answered on the command line, the Properties rows, Edit Label's line through the one executor, the layout report, the Annotate menu |
 | `cli.label_layout_names_the_label_that_found_no_room` | `katana_cli`: the suppressed record, and a pinned label placed |
+| `tests/entity/annotation/test_leader_values.cpp` | Along and Inside anchors, the nearest place, what a leader can say of every kind of target, the leader template check, validation, the version-3 blob and JSON; the degenerate cases - a fraction that is no number, a repeated vertex, a figure of no area, no place at all - and a national grid's magnitudes |
+| `tests/cad/annotation/test_smart_leaders.cpp` | the LEADER verbs end to end: templates, label styles, `#id@x,y`, `.inside` and `.alongN:T`, a backslash typed, VALUES, LIST, SET, ATTACH, DETACH, FREEZE, PROP, FOR, ALIGN, BALLOON FOR and RENUMBER; following stretches and moves, going with the target, copies |
+| `tests/cad/tools/test_modify_transform.cpp` | (`ACalloutCopiedWithItsPitReadsThePitsCopy`) the Copy, Rotate and Scale with Copy, and polar Array tools copy a callout as one of its pit's copy |
+| `src/katana_app/CMakeLists.txt` | `cli.a_smart_leader_is_saved_with_the_point_it_reads` and the tests after it: the verbs through `katana_cli` - saved, opened by another process and read afresh, an exact along, balloons numbered again, a refusal stopping and failing the script |
+| `tests/cad/tools/test_smart_leader_tool.cpp` | the Leader tool: a tip put on what it is clicked on, fields checked as typed, a note that would say nothing refused |
+| `tests/cad/annotation/test_leader_edit.cpp` | the shared edits: an unchanged edit is no command, what cannot be made is refused rather than skipped (negative sizes too), a label style's look lent, attaching (and again, no command), the value rows, where a leader goes on an entity (and a tip put on one, inside a lot), LEADER FOR's and ALIGN's refusals, a numbered balloon kept a circle and the largest number refusing a next |
+| `tests/qt_widgets/annotation/test_leader_manager.cpp` | the Leaders manager driven by object name and its widgets' own signals: the form, the template checked and previewed, only what changed applied (values the widgets cannot hold kept), the note kind switched and back, a style's template read afresh, values double-clicked in at the cursor, a label style's look lent, set back, kept when typed over and lent exactly, and lent anew when the style comes or goes, attributes set, attach (past a dimension, waiting for Apply, again no step) and along, several leaders at once, freeze and detach waiting for Apply, following the selection, undo and a replaced drawing, For Selection's preview for the first with a place, its look and a style's, and placing, numbered balloons kept circles, Arrange, each menu entry's tab |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
 | `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name: named New, Apply of the changed keys, Insert Value, rules added, updated and switched, and Run, Preview and Clear of the chosen rules |
 | `qt_the_label_style_manager_runs_chosen_rules_headless` (`tests/CMakeLists.txt`) | the real window: a label style named with its kind, a rule with its type previewed and run as the one chosen |
@@ -655,3 +942,40 @@ it skipped dimensions, and so does the archive exporter.
   on import becomes a label, a leader or a dimension kind.
 * **The 3D view** draws a label as a marker at its anchor and a leader as
   its line: its words are worked out for a scale the 3D view does not have.
+* **Smart leaders** have one arrow: a multi-leader - one note, several arrows
+  to several pits, "3 x SMH" - is not built. A tip on a polyline names its
+  segment by number, as a Vertex anchor does, so inserting a vertex before
+  it moves the tip to the next segment along. The Leader tool attaches only
+  to an entity within the pick aperture; clicking inside a lot does not
+  point into it (`#id.inside`, `LEADER FOR` and the Leaders manager's Attach
+  to Selected do). An arc's or a circle's centre is reached only by typing
+  (`#id.centre`). DXF export writes the note as it reads, not a field a CAD
+  reader could update.
+* **A double quote** cannot be typed in a note, a template, a style's name
+  or an attribute: the command line has no escape for one inside quotes, so
+  what the window and the Leader tool can put in a note, a script cannot.
+  The project-wide limit, as for sheets (`docs/plotting.md`).
+* **The Leaders manager edits through `leader_edit.hpp` directly**, not by
+  handing a `LEADER` or `BALLOON` line to the window's command line, which
+  the contributors' contract now asks of a dialog (the Subsurface Utilities
+  dialog is the model). It was built before that contract came back to main,
+  as the Text
+  and Label Style managers beside it were, and each of its edits is still
+  the one the verb makes and one undo step - but it is not echoed to the
+  command log or kept in the command history. Every edit now has an exact
+  spelling to hand over - `LEADER SET id ...` with only the changed options
+  and numbers written exactly (`core::formatExactReal`), `tip=#id.alongN:T`,
+  `LEADER ATTACH id #id.inside|#id.alongN:T`, `LEADER FREEZE|DETACH`,
+  `LEADER PROP`, `LEADER|BALLOON FOR SELECTION`, `LEADER ALIGN`, `BALLOON
+  RENUMBER` - save a note holding a double quote (above); the change is an
+  executor handed to the dialog, as the utilities dialog is given one, and
+  its tests driving lines.
+* **Scope and filter.** `LEADER FOR`, `LEADER ALIGN`, `LEADER LIST`,
+  `LEADER FREEZE` and `DETACH`, `BALLOON FOR` and `BALLOON RENUMBER`, and the
+  Leaders manager's For Selection and Arrange tabs, act on ids, the
+  selection or every balloon - not yet on the Global Modify scope and filter
+  (a view, layers, an area; only those that match) that the contributors'
+  contract now asks of every tool. The shared verb grammar and the shared
+  "Apply to" widget it names are not built yet, and a second scope reader
+  here would be the second implementation the contract forbids; once they
+  are, these take them.
