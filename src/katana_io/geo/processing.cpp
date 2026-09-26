@@ -539,6 +539,25 @@ bool pipelineNamesOutput(std::string_view pipeline)
     return false;
 }
 
+// Whether a pipeline's last step prints rather than writes a dataset: the
+// steps GDAL 3.13 declares with an output-string (its pipeline usage's
+// pipeline_algorithms: compare, export-schema, info). Any other last step -
+// write, or a processing step whose result is the pipeline's output - makes
+// a dataset. A pipeline has an output-string for those three, which is no
+// reason to leave its output unbound when it ends in write (measured: every
+// pipeline to a layer or a reference raster failed with "write: Positional
+// arguments starting at 'OUTPUT' have not been specified").
+bool pipelinePrints(std::string_view pipeline)
+{
+    const std::size_t bang = pipeline.rfind('!');
+    std::istringstream last(std::string(bang == std::string_view::npos ? pipeline
+                                                                       : pipeline.substr(bang + 1)));
+    std::string step;
+    last >> step;
+    step = katana::core::lowered(step);
+    return step == "info" || step == "compare" || step == "export-schema";
+}
+
 bool pipelineNamesInput(std::string_view pipeline)
 {
     const std::size_t bang = pipeline.find('!');
@@ -1300,7 +1319,11 @@ Status bind(const RunRequest& request, Binding& bound, const ErrorCollector& err
     if (output != nullptr && !tailNamesOutput && !output->IsExplicitlySet()) {
         // An info-like algorithm whose output is optional prints to
         // output-string by default, and is left to.
-        const bool printsByDefault = !output->IsRequired() && alg.GetArg("output-string") != nullptr;
+        GDALAlgorithmArg* steps = pipeline ? alg.GetArg("pipeline") : nullptr;
+        const bool printsByDefault =
+            !output->IsRequired() && alg.GetArg("output-string") != nullptr &&
+            (steps == nullptr || steps->GetType() != GAAT_STRING ||
+             pipelinePrints(steps->Get<std::string>()));
         if (request.outputTo == OutputTo::Memory && !printsByDefault) {
             if (GDALAlgorithmArg* format = alg.GetArg("output-format");
                 format != nullptr && !tail.given.contains(format->GetName()) && !format->Set("MEM")) {
