@@ -1577,7 +1577,12 @@ packages build on:
   window shows. A session sets neither.
 - **`geo::StagedFiles`** (`staged_files.hpp`): a file a job writes, put in
   place by its apply, so a cancel after the write leaves nothing. I4's
-  EXPORT options and any verb that writes a user's file use it.
+  EXPORT options and any verb that writes a user's file use it. A writer's
+  failure is given back through `StagedFiles::asTarget`, which puts the
+  target's path where the staging folder's was: an EXPORT refused for its
+  CRS named `.katana-staging-19705-1/f.kml`, a folder gone by the time
+  anyone read it (review finding;
+  `ExportOptions.AWritersFailureNamesTheFileAskedForNotItsStagingFolder`).
 - **`gis_records.hpp`**: the `reference` and `surface` records, and
   `recordJson` / `recordsJson`, any reply's records as JSON objects -
   `katana_import` and `katana_export` hand them to an agent, and D1's and

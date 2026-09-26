@@ -102,4 +102,29 @@ katana::core::Status StagedFiles::place() const
     return {};
 }
 
+katana::core::Error StagedFiles::asTarget(katana::core::Error error) const
+{
+    const std::filesystem::path parent =
+        target_.parent_path().empty() ? std::filesystem::path(".") : target_.parent_path();
+    // The file first, then the folder alone (a shapefile's .dbf beside it),
+    // in each spelling a writer may have used.
+    const std::vector<std::pair<std::string, std::string>> spellings{
+        {pathText(writeTo_), pathText(target_)},
+        {writeTo_.string(), target_.string()},
+        {writeTo_.generic_string(), target_.generic_string()},
+        {pathText(folder_), pathText(parent)},
+        {folder_.string(), parent.string()},
+        {folder_.generic_string(), parent.generic_string()},
+    };
+    for (std::string* text : {&error.message, &error.context}) {
+        for (const auto& [from, to] : spellings) {
+            for (std::size_t at = text->find(from); !from.empty() && at != std::string::npos;
+                 at = text->find(from, at + to.size())) {
+                text->replace(at, from.size(), to);
+            }
+        }
+    }
+    return error;
+}
+
 } // namespace katana::app::geo

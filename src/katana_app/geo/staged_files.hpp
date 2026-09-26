@@ -42,6 +42,12 @@ class StagedFiles {
     // same name. FileExportFailure naming the file that could not be moved.
     [[nodiscard]] katana::core::Status place() const;
 
+    // A writer's failure as the person asked for it: the staging folder's
+    // path, in the message or the context, is the target's. An export
+    // refused for its CRS named ".katana-staging-19705-1/f.kml", a folder no
+    // one made and that is gone by the time they read it.
+    [[nodiscard]] katana::core::Error asTarget(katana::core::Error error) const;
+
   private:
     StagedFiles(std::filesystem::path folder, std::filesystem::path target);
 

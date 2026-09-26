@@ -116,6 +116,22 @@ TEST_F(ExportOptions, AKmlSaysItIsInLongitudeAndLatitudeNotTheProjects)
     EXPECT_NE(exported->get("crs").value_or("").find("EPSG:4326"), std::string::npos) << reply;
 }
 
+TEST_F(ExportOptions, AWritersFailureNamesTheFileAskedForNotItsStagingFolder)
+{
+    // A KML of a drawing in no coordinate system is refused by the writer,
+    // which wrote into the staging folder: the refusal named
+    // ".katana-staging-<pid>-<n>/pegs.kml".
+    add(katana::entity::PointGeometry{{1.0, 2.0}}, "pegs");
+    const std::string out = file("pegs.kml");
+    const auto refused = run("EXPORT " + quoted(out));
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, katana::core::ErrorCode::InvalidCRS);
+    EXPECT_EQ(refused.error().describe().find(".katana-staging"), std::string::npos)
+        << refused.error().describe();
+    EXPECT_NE(refused.error().context.find("pegs.kml"), std::string::npos)
+        << refused.error().describe();
+}
+
 TEST_F(ExportOptions, EntitiesImportedMovedGoOutInNoCoordinateSystem)
 {
     // Imported LOCAL, the lot is moved to 0,0: its coordinates are in
