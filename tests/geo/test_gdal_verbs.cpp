@@ -559,7 +559,11 @@ TEST(GeoSession, AGdalLineRunsThroughTheSessionAndItsRasterIsAReference)
     EXPECT_TRUE(session.run("REFS"));
     EXPECT_NE(captured.out().find("target=reference id=1 name=hillshade"), std::string::npos)
         << captured.out();
-    EXPECT_NE(captured.out().find("1  Raster  hillshade  40x30 px"), std::string::npos);
+    // REFS replies in records since IMPORT, EXPORT, INFO, REFS and COPC became
+    // the executor's (docs/interop.md).
+    EXPECT_NE(captured.out().find("reference id=1 kind=raster name=hillshade width=40 height=30"),
+              std::string::npos)
+        << captured.out();
     EXPECT_FALSE(session.run("GDAL raster hillshade --config X=Y"));
     EXPECT_NE(captured.err().find("error: InvalidArgument: --config is refused"), std::string::npos)
         << captured.err();

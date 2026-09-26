@@ -209,6 +209,33 @@ QString ImportPlacementDialog::line() const { return importLine(path_, box_->pla
 
 // ---- deciding -------------------------------------------------------------------------------
 
+FarApartAnswer askFarApart(QWidget* parent, const QString& advice,
+                           const katana::geometry::Box2& incoming)
+{
+    QMessageBox box(parent);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(QStringLiteral("Far from the current drawing"));
+    box.setText(advice + ".");
+    box.setInformativeText(
+        QString("The file covers %1,%2 to %3,%4.\n\n"
+                "Shifting moves everything it holds as one piece so its lower-left corner sits "
+                "on the drawing's; its shape and internal dimensions are unchanged. IMPORT ... "
+                "ALONGSIDE does the same without asking.")
+            .arg(incoming.min.x, 0, 'f', 2)
+            .arg(incoming.min.y, 0, 'f', 2)
+            .arg(incoming.max.x, 0, 'f', 2)
+            .arg(incoming.max.y, 0, 'f', 2));
+    QPushButton* shift = box.addButton(QStringLiteral("Shift Alongside"), QMessageBox::AcceptRole);
+    box.addButton(QStringLiteral("Keep Survey Coordinates"), QMessageBox::DestructiveRole);
+    QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(shift);
+    box.exec();
+    if (box.clickedButton() == cancel) {
+        return FarApartAnswer::Cancel;
+    }
+    return box.clickedButton() == shift ? FarApartAnswer::ShiftAlongside : FarApartAnswer::Keep;
+}
+
 PlacementDecision decideImportPlacement(QWidget* parent, bool headless,
                                         const ImportPlacement& placement,
                                         const katana::geometry::Box2& drawing,
@@ -236,29 +263,12 @@ PlacementDecision decideImportPlacement(QWidget* parent, bool headless,
         log(qs(advice.message) + " (kept: no one to ask).", true);
         return decision;
     }
-    QMessageBox box(parent);
-    box.setIcon(QMessageBox::Question);
-    box.setWindowTitle(QStringLiteral("Far from the current drawing"));
-    box.setText(qs(advice.message) + ".");
-    box.setInformativeText(
-        QString("The file covers %1,%2 to %3,%4.\n\n"
-                "Shifting moves everything it holds as one piece so its lower-left corner sits "
-                "on the drawing's; its shape and internal dimensions are unchanged. IMPORT ... "
-                "ALONGSIDE does the same without asking.")
-            .arg(incoming.min.x, 0, 'f', 2)
-            .arg(incoming.min.y, 0, 'f', 2)
-            .arg(incoming.max.x, 0, 'f', 2)
-            .arg(incoming.max.y, 0, 'f', 2));
-    QPushButton* shift = box.addButton(QStringLiteral("Shift Alongside"), QMessageBox::AcceptRole);
-    box.addButton(QStringLiteral("Keep Survey Coordinates"), QMessageBox::DestructiveRole);
-    QPushButton* cancel = box.addButton(QMessageBox::Cancel);
-    box.setDefaultButton(shift);
-    box.exec();
-    if (box.clickedButton() == cancel) {
+    const FarApartAnswer answer = askFarApart(parent, qs(advice.message), incoming);
+    if (answer == FarApartAnswer::Cancel) {
         decision.cancelled = true;
         return decision;
     }
-    if (box.clickedButton() == shift) {
+    if (answer == FarApartAnswer::ShiftAlongside) {
         const katana::cad::ImportShift resolved = katana::cad::resolveImportShift(
             ImportPlacement{ImportPlacementMode::Alongside, {}}, drawing, incoming);
         decision.shift = resolved.shift;

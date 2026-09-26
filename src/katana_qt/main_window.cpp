@@ -1126,6 +1126,52 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
         return makeAction(icon, text, tip, shortcut, name);
     };
     geo_ = std::make_unique<GeoWorkbench>(*this, std::move(geo));
+    // What only this window does with an IMPORT line: ask where data that
+    // lands far from the drawing goes - nobody is asked headless - and show
+    // a 12d archive's meshes, and its surfaces, in a 3D view.
+    geo_->context().farApart = [this](const katana::geometry::Box2&,
+                                      const katana::geometry::Box2& incoming,
+                                      const std::string& advice) {
+        using katana::app::geo::FarApartChoice;
+        if (headless_) {
+            return FarApartChoice::Keep;
+        }
+        switch (askFarApart(this, QString::fromStdString(advice), incoming)) {
+        case FarApartAnswer::ShiftAlongside:
+            return FarApartChoice::Alongside;
+        case FarApartAnswer::Cancel:
+            return FarApartChoice::Cancel;
+        case FarApartAnswer::Keep:
+            break;
+        }
+        return FarApartChoice::Keep;
+    };
+    geo_->context().imported = [this](katana::app::geo::ImportShown&& shown) {
+        for (katana::archive12d::ImportedMesh& mesh : shown.meshes) {
+            // A 12d colour Katana has no RGB for leaves the mesh its default
+            // clay, which is visible against a surface and against the drawing.
+            constexpr katana::render::Rgba kMeshDefault = katana::render::rgba(190, 170, 140);
+            const auto toRgba = [](const std::optional<katana::entity::Color>& colour,
+                                   katana::render::Rgba fallback) {
+                return colour ? katana::render::rgba(colour->r, colour->g, colour->b) : fallback;
+            };
+            const katana::render::Rgba base = toRgba(mesh.color, kMeshDefault);
+            std::vector<katana::render::Rgba> faces;
+            faces.reserve(mesh.faceColors.size());
+            for (const auto& colour : mesh.faceColors) {
+                faces.push_back(toRgba(colour, base));
+            }
+            addMesh(mesh.name, std::move(mesh.mesh), base, std::move(faces));
+        }
+        // A surface or a mesh is a 3D thing: in plan it is only a footprint,
+        // so an import that brings one opens the 3D view - once, not once per
+        // mesh (a real archive brings 1 453 of them).
+        if (shown.surfaces != 0 || !shown.meshes.empty()) {
+            views_->ensureView(cad::ViewKind::Model3D);
+            refreshViewMenu();
+            views_->refreshAll();
+        }
+    };
 
     QToolBar* gisBar = makeToolBar("GIS", Qt::TopToolBarArea);
     gisBar->addActions({importVector, importRaster, importCloud});
@@ -2711,94 +2757,11 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
                                           : katana::archive12d::LoadMode::Merge);
         return;
     }
-    // INFO 12 describes entity 12, as the interpreter's INFO does - unless a
-    // file is really called that. Every INFO was once taken for a file here,
-    // so INFO 12 answered that the file did not exist. INFO #12 is always
-    // the entity, as in the session (session.cpp): Entity Information sends
-    // it, whatever files the working directory holds.
-    if (verb == "INFO" && words.size() == 2 &&
-        cad::CommandInterpreter::isEntityId(words[1].toStdString()) &&
-        (words[1].startsWith('#') || !QFileInfo::exists(words[1]))) {
-        runInterpreterLine(line, verb);
-        return;
-    }
-    // IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN], the path and the
-    // placement read as the session reads them
-    // (CommandInterpreter::importArgument): LOCAL was once taken for part of
-    // the path, and "site.dxf LOCAL" had no importer.
-    if (verb == "IMPORT") {
-        const auto typed =
-            cad::CommandInterpreter::importArgument(line.mid(words.front().size()).toStdString());
-        if (!typed) {
-            logMessage(QString::fromStdString(typed.error().describe()), true);
-            return;
-        }
-        if (typed->path.empty()) {
-            logMessage("usage: IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]", true);
-            return;
-        }
-        importPath(QString::fromStdString(typed->path), typed->placement);
-        return;
-    }
-    // The interoperability verbs, as katana_cli has them. They live in the
-    // front ends, not the CommandInterpreter, because katana_cad may not see
-    // GDAL or PDAL (tools/check_layering.cmake). The argument is the rest of
-    // the line, one layer of quotes removed, so a path may hold spaces.
-    if (verb == "EXPORT" || verb == "INFO") {
-        QString path = line.mid(words.front().size()).trimmed();
-        if (path.size() >= 2 && path.startsWith('"') && path.endsWith('"')) {
-            path = path.mid(1, path.size() - 2);
-        }
-        if (path.isEmpty()) {
-            logMessage("usage: " + verb + " <file>", true);
-            return;
-        }
-        if (verb == "EXPORT") {
-            (void)exportDrawingTo(toPath(path), {});
-        } else if (auto description = interop::describeSource(toPath(path))) {
-            logMessage(QString::fromStdString(interop::formatDescription(*description)).trimmed());
-        } else {
-            logMessage(QString::fromStdString(description.error().describe()), true);
-        }
-        return;
-    }
-    if (verb == "REFS") {
-        if (reference_.empty()) {
-            logMessage("No reference layers.");
-        }
-        for (const auto& raster : reference_.rasters()) {
-            logMessage(QString("%1  Raster  %2  %3 x %4 px")
-                           .arg(raster.id)
-                           .arg(QString::fromStdString(raster.name))
-                           .arg(raster.width)
-                           .arg(raster.height));
-        }
-        for (const auto& cloud : reference_.pointClouds()) {
-            logMessage(QString("%1  Point cloud  %2  %3 of %4 points")
-                           .arg(cloud.id)
-                           .arg(QString::fromStdString(cloud.name))
-                           .arg(grouped(cloud.points.size()))
-                           .arg(grouped(cloud.sourcePointCount)));
-        }
-        return;
-    }
-    // COPC <source> <destination.copc.laz>, as katana_cli has it: each path
-    // one word or quoted, read by the interpreter's own rules. What the GIS
-    // menu's item runs once its two files are chosen.
-    if (verb == "COPC") {
-        const auto tokens = cad::CommandInterpreter::tokenize(line.toStdString());
-        if (!tokens) {
-            logMessage(QString::fromStdString(tokens.error().describe()), true);
-            return;
-        }
-        if (tokens->size() != 3) {
-            logMessage("usage: COPC <source> <destination.copc.laz>", true);
-            return;
-        }
-        convertPointCloudToCopc(toPath(QString::fromStdString((*tokens)[1])),
-                                toPath(QString::fromStdString((*tokens)[2])));
-        return;
-    }
+    // IMPORT, EXPORT, INFO <file>, REFS and COPC are not here: they are the
+    // executor katana_cli and katana_mcp run (src/katana_app/geo), which the
+    // geo workbench runs as jobs (runWorkbenchLine). INFO <id> is left to the
+    // interpreter by the executor itself (geo::takesInfo).
+
     // PLOTSHEETS [path] [format=] [style=] [sheets=] [dpi=] [lineweight=]
     // [folder=] [pattern=]: the sheets plotted as the Plot dialog and
     // --plot-sheets plot them, the set's page setup filling in what is not
@@ -3298,42 +3261,9 @@ QString importFilter()
 
 void MainWindow::importPath(const QString& path, const cad::ImportPlacement& placement)
 {
-    const std::filesystem::path file = toPath(path);
-    if (katana::dxf::isDxfPath(file)) {
-        importDxfFile(file, placement);
-        return;
-    }
-    const interop::SourceKind kind = interop::kindForPath(file);
-    // Refused by name, in katana_cli's words, rather than dropped: a raster
-    // or a cloud has no shift to take.
-    if (placement.mode != cad::ImportPlacementMode::Keep &&
-        (kind == interop::SourceKind::Raster || kind == interop::SourceKind::PointCloud)) {
-        const std::string word = placement.mode == cad::ImportPlacementMode::Offset
-                                     ? std::string("OFFSET")
-                                     : cad::placementWord(placement);
-        logMessage("InvalidArgument: " + QString::fromStdString(word) +
-                       " is not supported for rasters and point clouds, which are reference "
-                       "data drawn at their own coordinates",
-                   true);
-        return;
-    }
-    switch (kind) {
-    case interop::SourceKind::Vector:
-        importVectorFile(file, {}, placement);
-        return;
-    case interop::SourceKind::Raster:
-        importRasterFile(file);
-        return;
-    case interop::SourceKind::PointCloud:
-        importPointCloudFile(file);
-        return;
-    case interop::SourceKind::Archive12d:
-        importArchive12dFile(file, placement);
-        return;
-    case interop::SourceKind::Unknown:
-        break;
-    }
-    logMessage("No importer for " + path, true);
+    // The line a person would type, through the one executor: what it read
+    // and where it put it are logged as records, and it is one undo step.
+    (void)runVerbLine(importLine(QDir::fromNativeSeparators(path), placement));
 }
 
 PlacementDecision MainWindow::placeImport(const cad::ImportPlacement& placement,
@@ -3755,153 +3685,6 @@ void MainWindow::importVectorFile(const std::filesystem::path& path,
     if (!imported->projectionWkt.empty()) {
         logMessage("  coordinates were imported unchanged; the file declares its own CRS");
     }
-    views_->zoomExtentsAll();
-}
-
-void MainWindow::importArchive12dFile(const std::filesystem::path& path,
-                                      const cad::ImportPlacement& placement)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto imported = interop::importArchive12d(path);
-    QApplication::restoreOverrideCursor();
-    if (!imported.ok()) {
-        logMessage(QString::fromStdString(imported.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(imported.error().describe()));
-        return;
-    }
-
-    // Where it lands, as a vector import decides it and for the same reason:
-    // a 12da is survey data at survey coordinates. A move is read again with
-    // the shift, which the importer applies to everything - entities,
-    // surfaces and clouds alike.
-    const PlacementDecision placed = placeImport(placement, imported->bounds);
-    if (placed.cancelled) {
-        logMessage("Import cancelled.");
-        return;
-    }
-    if (placed.shift) {
-        interop::Archive12dImportOptions options;
-        options.originShift = placed.shift;
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        imported = interop::importArchive12d(path, options);
-        QApplication::restoreOverrideCursor();
-        if (!imported.ok()) {
-            logMessage(QString::fromStdString(imported.error().describe()), true);
-            return;
-        }
-    }
-
-    // Layers, entities and alignments: one transaction, one Ctrl+Z.
-    auto transaction = std::make_unique<cmd::Transaction>("IMPORT");
-    for (const Layer& layer : imported->layersNeeded) {
-        if (!document_.model().layers.contains(layer.name)) {
-            transaction->add(cmd::createLayer(layer));
-        }
-    }
-    for (const katana::entity::Style& style : imported->stylesNeeded) {
-        if (!document_.model().styles.contains(style.name)) {
-            transaction->add(cmd::createStyle(style));
-        }
-    }
-    const std::size_t created = imported->entities.size();
-    if (created != 0) {
-        transaction->add(cmd::createEntities(std::move(imported->entities)));
-    }
-    std::size_t alignments = 0;
-    for (katana::entity::Alignment& alignment : imported->alignments) {
-        // A name the drawing already has would fail the whole transaction.
-        const std::string base = alignment.name;
-        for (int copy = 2; document_.model().alignments.contains(alignment.name); ++copy) {
-            alignment.name = base + " (" + std::to_string(copy) + ")";
-        }
-        transaction->add(cmd::createAlignment(alignment));
-        ++alignments;
-    }
-    // An archive of TINs, meshes or point clouds alone has no layer, style,
-    // entity or alignment for the drawing, so the transaction is empty - and
-    // the stack refuses an empty transaction as a command that changes
-    // nothing. Executed regardless, that refusal returned from here before
-    // the surfaces below were added, and a TIN archive imported as "Import
-    // failed" and an empty 3D view. Only a transaction with something in it
-    // runs; the session data below is added either way.
-    if (transaction->size() != 0) {
-        const auto status = document_.execute(std::move(transaction));
-        if (!status) {
-            logMessage(QString::fromStdString(status.error().describe()), true);
-            warnUser("Import failed", QString::fromStdString(status.error().describe()));
-            return;
-        }
-    }
-
-    QString summary = "Imported " + grouped(created) + " entities";
-    if (alignments != 0) {
-        summary += ", " + grouped(alignments) + " alignments";
-    }
-    if (!imported->surfaces.empty()) {
-        summary += ", " + grouped(imported->surfaces.size()) + " surfaces";
-    }
-    if (!imported->meshes.empty()) {
-        summary += ", " + grouped(imported->meshes.size()) + " meshes";
-    }
-    if (!imported->clouds.empty()) {
-        summary += ", " + grouped(imported->clouds.size()) + " point clouds";
-    }
-    summary += " from " + fromPath(path.filename()) + " (" +
-               QString::fromStdString(imported->encoding);
-    if (!imported->archiveVersion.empty()) {
-        summary += ", 12d archive " + QString::fromStdString(imported->archiveVersion);
-    }
-    logMessage(summary + ")");
-    for (const auto& tally : imported->tally) {
-        logMessage(QString("  %1: %2 read, %3 imported")
-                       .arg(QString::fromStdString(tally.keyword))
-                       .arg(grouped(tally.read))
-                       .arg(grouped(tally.imported)),
-                   tally.imported < tally.read);
-    }
-    for (const std::string& warning : imported->warnings) {
-        logMessage("  " + QString::fromStdString(warning));
-    }
-
-    // Surfaces and clouds are session data, outside undo - see interop/
-    // reference_data.hpp for why - and are added after the transaction so that
-    // a rejected import leaves nothing behind.
-    for (auto& surface : imported->surfaces) {
-        addSurface(surface.name, std::move(surface.surface));
-    }
-    for (auto& mesh : imported->meshes) {
-        // A 12d colour Katana has no RGB for leaves the mesh its default
-        // clay, which is visible against a surface and against the drawing.
-        constexpr katana::render::Rgba kMeshDefault = katana::render::rgba(190, 170, 140);
-        const auto toRgba = [](const std::optional<katana::entity::Color>& colour,
-                               katana::render::Rgba fallback) {
-            return colour ? katana::render::rgba(colour->r, colour->g, colour->b) : fallback;
-        };
-        const katana::render::Rgba base = toRgba(mesh.color, kMeshDefault);
-        std::vector<katana::render::Rgba> faces;
-        faces.reserve(mesh.faceColors.size());
-        for (const auto& colour : mesh.faceColors) {
-            faces.push_back(toRgba(colour, base));
-        }
-        addMesh(mesh.name, std::move(mesh.mesh), base, std::move(faces));
-    }
-    // A mesh is a 3D thing: in plan it is only a footprint, so the first
-    // import that brings one opens the 3D view, exactly as a surface does.
-    // Once, after the loop - not once per mesh, and a real archive brings
-    // 1 453 of them.
-    if (!imported->meshes.empty()) {
-        views_->ensureView(cad::ViewKind::Model3D);
-        refreshViewMenu();
-    }
-    if (!imported->clouds.empty()) {
-        for (auto& cloud : imported->clouds) {
-            reference_.add(std::move(cloud));
-        }
-        views_->invalidateReferenceCache();
-        refreshReferences();
-    }
-    views_->refreshAll();
     views_->zoomExtentsAll();
 }
 
@@ -4594,30 +4377,28 @@ void MainWindow::convertPointCloudToCopc()
         warnUser("Conversion failed", outcome.error);
         return;
     }
-    if (!headless_ && QMessageBox::question(this, "Convert Point Cloud to COPC",
-                                            "Import the COPC file now?") == QMessageBox::Yes) {
-        importWithOptions(destination);
-    }
-}
-
-void MainWindow::convertPointCloudToCopc(const std::filesystem::path& source,
-                                         const std::filesystem::path& destination)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = katana::pointcloud::PointCloudEngine{}.convertToCopc(source, destination);
-    QApplication::restoreOverrideCursor();
-    if (!status) {
-        logMessage(QString::fromStdString(status.error().describe()), true);
+    // The conversion is a background job: the offer to import waits for it
+    // to end, and is made only when it converted.
+    const JobId job = geo_ != nullptr ? geo_->lastJob() : kNoJob;
+    if (job == kNoJob) {
         return;
     }
-    logMessage("Converted " + fromPath(source.filename()) + " to " +
-               fromPath(destination.filename()) + ", every point kept.");
-    // The next step, as a line to type: a COPC file is read at a level of
-    // detail, which the import asks for.
-    logMessage("  IMPORT \"" + QDir::fromNativeSeparators(fromPath(destination)) +
-               "\" reads it at a level of detail");
+    auto key = std::make_shared<int>(0);
+    *key = geo_->addFinishedListener([this, job, key, destination](JobId id, const VerbOutcome& done) {
+        if (id != job) {
+            return;
+        }
+        geo_->removeFinishedListener(*key);
+        if (!done.ok) {
+            warnUser("Conversion failed", done.error);
+            return;
+        }
+        if (QMessageBox::question(this, "Convert Point Cloud to COPC",
+                                  "Import the COPC file now?") == QMessageBox::Yes) {
+            importWithOptions(destination);
+        }
+    });
 }
-
 
 // ---- view layout, 3D and sections (PLAN.MD Phases 08, 14, 15, 21) ------------------------
 

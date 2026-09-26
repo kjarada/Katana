@@ -408,14 +408,15 @@ if(TARGET katana)
     # alignment, so the import's drawing transaction is empty; the stack
     # refuses an empty one, and the import used to stop there with "Import
     # failed" before adding the surfaces or the clouds. EXPECT names the
-    # summary, and for the TINs a surface line (logged as each surface is
-    # added), so the run must get past the transaction to pass.
+    # imported record, and for the TINs a surface record (written as each
+    # surface is added, after the transaction), so the run must get past the
+    # transaction to pass. Each tin is 9 points and 8 triangles (the file).
     add_test(NAME qt_import_tin_only_archive_adds_its_surfaces_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/multiple_tins.12da"
-            "-DEXPECT=Imported 0 entities, 4 surfaces from multiple_tins[.]12da.*Surface '[^']+': [0-9]+ vertices, [0-9]+ triangles"
+            "-DEXPECT=imported file=\"?[^ ]*/multiple_tins[.]12da\"? kind=archive entities=0 alignments=0 surfaces=4 .*surface name=\"TIN SOUTH WEST\" triangles=8 points=9 "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_tin_only_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_import_tin_only_archive_adds_its_surfaces_headless PROPERTIES
@@ -427,7 +428,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/las_point_cloud.12da"
-            "-DEXPECT=Imported 0 entities, 2 point clouds from las_point_cloud[.]12da"
+            "-DEXPECT=imported file=\"?[^ ]*/las_point_cloud[.]12da\"? kind=archive entities=0 [^\r\n]*clouds=2 .*reference id=1 kind=pointcloud name=\"SITE SCAN\".*reference id=2 kind=pointcloud name=\"ROAD SCAN\""
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_cloud_only_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_import_cloud_only_archive_adds_its_clouds_headless PROPERTIES
@@ -1346,7 +1347,7 @@ endif()
 # A .dxf through the window both ways goes to the native module, not GDAL:
 # the hand-written R2000 fixture imported (9 entities - see
 # tests/dxf/test_reader.cpp) and the drawing exported from the command line,
-# each reported in the native module's words.
+# each reported in the records every build writes (docs/interop.md).
 if(TARGET katana)
     add_test(NAME qt_dxf_import_and_export_go_through_the_native_module_headless
         COMMAND ${CMAKE_COMMAND}
@@ -1355,7 +1356,7 @@ if(TARGET katana)
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/dxf/data/r2000_site.dxf"
             "-DDRIVE=>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_dxf_export.dxf"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_dxf_headless.png"
-            "-DEXPECT=Imported 9 entities from r2000_site\\.dxf \\(DXF R2000\\).*Exported 9 entities and 3 layers to qt_dxf_export\\.dxf \\(DXF R2000\\)"
+            "-DEXPECT=imported file=\"?[^ ]*/r2000_site\\.dxf\"? kind=dxf format=\"DXF R2000\" entities=9 .*exported file=\"?[^ ]*/qt_dxf_export\\.dxf\"? kind=dxf driver=DXF format=\"DXF R2000\" entities=9 skipped=0 layers=3 "
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_dxf_import_and_export_go_through_the_native_module_headless PROPERTIES
         ENVIRONMENT_MODIFICATION
@@ -1418,9 +1419,9 @@ if(TARGET katana)
         WORKING_DIRECTORY "${_info_dir}")
     # COPC typed, into a folder name with blanks, then described: every point
     # of the sample's 40 000 (`pdal info`, as cli.copc_then_info) kept, and
-    # the IMPORT line that reads the result said after it. One path is a
-    # usage error; the menu item, whose two file dialogs no headless session
-    # can answer, points at the verb instead of waiting on them.
+    # the converted record naming the file. One path is a usage error; the
+    # menu item, whose two file dialogs no headless session can answer,
+    # points at the verb instead of waiting on them.
     set(_window_copc "${CMAKE_CURRENT_BINARY_DIR}/qt copc/window scan.copc.laz")
     add_test(NAME qt_copc_cleanup
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/qt copc")
@@ -1431,7 +1432,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>COPC \"${_gis}/survey_scan.las\" \"${_window_copc}\"|>INFO \"${_window_copc}\"|>COPC \"${_gis}/survey_scan.las\"|*convertCopc"
-            "-DEXPECT=Converted survey_scan\\.las to window scan\\.copc\\.laz, every point kept\\.[\r\n]+  IMPORT \"[^\r\n]*/qt copc/window scan\\.copc\\.laz\" reads it at a level of detail.*Point cloud: 40,000 points.*COPC: yes.*usage: COPC <source> <destination\\.copc\\.laz>.*A headless session opens no file dialog: type COPC <source> <destination\\.copc\\.laz> instead"
+            "-DEXPECT=converted source=\"?[^ ]*/survey_scan\\.las\"? file=\"[^\"]*/qt copc/window scan\\.copc\\.laz\" format=copc.*Point cloud: 40,000 points.*COPC: yes.*usage: COPC <source> <destination\\.copc\\.laz>.*A headless session opens no file dialog: type COPC <source> <destination\\.copc\\.laz> instead"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/copc_typed_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_copc_cleanup PROPERTIES FIXTURES_SETUP qt_copc_clean)
@@ -1448,7 +1449,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>IMPORT \"${_gis}/parcels.geojson\" LOCAL|>IMPORT ${_gis}/terrain.asc local"
-            "-DEXPECT=LOCAL: moved as one piece by -180\\.000,0\\.000, so its lower-left corner sits at 0,0\\.[\r\n]+Imported [0-9]+ entities from parcels\\.geojson[\r\n]+  extent 0\\.00,0\\.00 to 185\\.00,165\\.00.*LOCAL is not supported for rasters and point clouds"
+            "-DEXPECT=imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 [^\r\n]*bounds=0,0,185,165[^\r\n]*[\r\n]+placed placement=local east=-180 north=0 text=\"LOCAL: moved as one piece by -180\\.000,0\\.000, so its lower-left corner sits at 0,0\\.\".*LOCAL is not supported for rasters and point clouds"
             "-DFORBID=No importer|Far from|no one to ask"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_local_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -1461,7 +1462,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>RECT 1000,2000 1010,2005|>IMPORT \"${_gis}/parcels.geojson\" ALONGSIDE|>UNDO|>IMPORT ${_gis}/parcels.geojson OFFSET=10,-20.5|>IMPORT \"${PROJECT_SOURCE_DIR}/tests/dxf/data/r2000_site.dxf\" local|>IMPORT ${_gis}/terrain.asc ALONGSIDE|>IMPORT ${_gis}/parcels.geojson OFFSET=ten,0"
-            "-DEXPECT=ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.[\r\n]+Imported [0-9]+ entities from parcels\\.geojson[\r\n]+  extent 1000\\.00,2000\\.00 to 1185\\.00,2165\\.00.*OFFSET: moved as one piece by 10\\.000,-20\\.500\\.[\r\n]+Imported [0-9]+ entities from parcels\\.geojson[\r\n]+  extent 190\\.00,-20\\.50 to 375\\.00,144\\.50.*LOCAL: moved as one piece by [^\r\n]*, so its lower-left corner sits at 0,0\\.[\r\n]+Imported 9 entities from r2000_site\\.dxf.*ALONGSIDE is not supported for rasters and point clouds.*OFFSET= takes the east and north"
+            "-DEXPECT=bounds=1000,2000,1185,2165[^\r\n]*[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.\".*bounds=190,-20\\.5,375,144\\.5[^\r\n]*[\r\n]+placed placement=offset east=10 north=-20\\.5 text=\"OFFSET: moved as one piece by 10\\.000,-20\\.500\\.\".*imported file=\"?[^ ]*/r2000_site\\.dxf\"? kind=dxf format=\"DXF R2000\" entities=9 [^\r\n]*[\r\n]+placed placement=local [^\r\n]*text=\"LOCAL: moved as one piece by [^\r\n]*, so its lower-left corner sits at 0,0\\.\".*ALONGSIDE is not supported for rasters and point clouds.*OFFSET= takes the east and north"
             "-DFORBID=No importer|Far from"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_placement_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")

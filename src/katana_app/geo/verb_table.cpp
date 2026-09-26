@@ -60,6 +60,24 @@ const std::vector<VerbEntry>& verbTable()
         // ---- V4: GIS CHECK, GIS REPAIR, GIS COVERAGE ----
         // ---- V5: GIS SQL ----
         // ---- I0: IMPORT, EXPORT, INFO, REFS, COPC ----
+        rows.push_back(
+            {"IMPORT", "", &prepareImport,
+             "IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]  a drawing (.dxf), vector data or\n"
+             "          a .12da archive as entities, a raster or a point cloud as a reference\n"
+             "          layer, by its extension; LOCAL puts its lower-left corner at 0,0,\n"
+             "          ALONGSIDE on the drawing's, OFFSET moves it by dE east and dN north"});
+        rows.push_back({"EXPORT", "", &prepareExport,
+                        "EXPORT <file>  the drawing, by extension (.dxf, .12da with the surfaces,\n"
+                        "          GeoPackage, GeoJSON, shapefile ...)"});
+        rows.push_back({"INFO", "", &prepareInfo,
+                        "INFO <file>  what a GIS file or point cloud holds, without importing it\n"
+                        "          (INFO <id> describes an entity, when no file has that name)",
+                        &takesInfo});
+        rows.push_back({"REFS", "", &prepareRefs,
+                        "REFS [LIST]  the reference layers: rasters and point clouds"});
+        rows.push_back({"COPC", "", &prepareCopc,
+                        "COPC <source> <destination.copc.laz>  a point cloud rewritten as COPC,\n"
+                        "          every point kept"});
         // ---- I2: FORMATS ----
         // ---- I3: IMPORT options ----
         // ---- I4: EXPORT options ----

@@ -472,14 +472,17 @@ On every surface:
   `IMPORT "<file>" <word>` line it makes through the window's one executor;
   GIS > Import Vector Data given a DXF or a .12da does the same. The vector
   dialog imports itself - its layer and attribute choices have no `IMPORT`
-  word - and logs the move it makes. The three importers decide where the
-  data goes in one place, `decideImportPlacement`
-  (`src/katana_qt/import_placement.hpp`), which asks the far-apart question
-  for Keep and, in a headless session, keeps the coordinates and says why.
-  A headless File > Import opens no file dialog: it names the verb.
+  word - and logs the move it makes. An `IMPORT` line that keeps the data's
+  coordinates asks the far-apart question through the executor's
+  `Context::farApart` (below, "IMPORT, EXPORT, INFO, REFS and COPC on every
+  front end"); the vector dialog's own import asks it through
+  `decideImportPlacement` (`src/katana_qt/import_placement.hpp`). Both show
+  the one question box, `askFarApart`. A headless window asks nothing and
+  keeps the coordinates. A headless File > Import opens no file dialog: it
+  names the verb.
 - **katana_cli**: `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, the move
-  printed after the "imported" line; the DXF import too, in a build without
-  GDAL. Giving katana_cli `LOCAL` alone and leaving the rest for later was
+  said by the `placed` record after the `imported` one; the DXF import too,
+  in a build without GDAL. Giving katana_cli `LOCAL` alone and leaving the rest for later was
   considered and rejected, because a verb the window types and the CLI does
   not is the gap this work closes.
 - **katana_mcp**: `katana_import` takes `placement` (`keep`, `local`,
@@ -494,6 +497,144 @@ Tests: `ImportPlacement.*` and `CadInterpreter.AnImportArgument*`
 
 Not done: the vector dialog's source layer, target layer and attributes have
 no `IMPORT` word, so that one dialog imports without a line to log.
+
+## IMPORT, EXPORT, INFO, REFS and COPC on every front end
+
+Until 2026-09-26 these verbs were written twice: once in `session.cpp`,
+printing prose to stdout for `katana_cli` and `katana_mcp`, and again in
+`MainWindow::dispatchLine`, logging other prose in the window. The two had
+drifted - the window framed and asked, the CLI kept no surfaces - and neither
+reply could be read by a program. They are now verbs of the one
+geoprocessing executor (`src/katana_app/geo/`, `docs/geoprocessing.md`, "The
+executor"), a file each: `import_verb.cpp`, `export_verb.cpp`,
+`info_verb.cpp`, `refs_verb.cpp`, `copc_verb.cpp`. The session runs them
+inline; the window's geo workbench runs them as background jobs, with
+progress and Cancel in the status bar, and a headless window waits for them.
+
+```
+IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]
+EXPORT <file>
+INFO <file>                (INFO <id> stays the interpreter's: an entity)
+REFS [LIST]
+COPC <source> <destination.copc.laz>
+```
+
+### Replies
+
+Records, one per line, as every geoprocessing verb replies
+(`src/katana_app/import_records.hpp`, `src/katana_app/geo/gis_records.hpp`):
+
+```
+imported file=<path> kind=vector entities=9 layers=1 features=9 skipped=0 bounds=x0,y0,x1,y1 crs="..."
+imported file=<path> kind=dxf format="DXF R2000" entities=9 layers=3 linetypes=2 bounds=...
+imported file=<path> kind=archive entities= alignments= surfaces= meshes= clouds= layers= styles= encoding= version= member= bounds=
+imported file=<path> kind=raster            (then its reference record)
+imported file=<path> kind=pointcloud        (then its reference record)
+placed placement=local|alongside|offset east=<dE> north=<dN> text="LOCAL: moved as one piece by ..."
+tally element=<what> read=<n> imported=<n>
+surface name= triangles= points= bounds= zmin= zmax= source=
+reference id= kind=raster name= width= height= bounds= georeferenced= visible= opacity= role= file=
+reference id= kind=pointcloud name= points= source_points= bounds= visible= color= file=
+meshes count= triangles= held=yes|no
+references rasters=<n> clouds=<n>
+exported file=<path> kind=vector driver=GPKG features= skipped=
+exported file=<path> kind=dxf driver=DXF format="DXF R2000" entities= skipped= layers= bytes=
+exported file=<path> kind=archive driver=12da entities= skipped= alignments= surfaces= bytes=
+converted source=<path> file=<path> format=copc
+warning text="..."
+```
+
+- **`east` and `north` are the move**, what was added to every coordinate as
+  `OFFSET=dE,dN` gives it, and empty when nothing moved (`ALONGSIDE` into an
+  empty drawing). The readers subtract an origin shift; the record says the
+  move, which is what a person reads the sentence for.
+- **`features`** counts what the reader read, a multi-part feature once per
+  part - the sample's spoil heaps, one MultiPolygon, are two.
+- **The DXF records are the same in every build.** The DXF steps live in
+  `src/katana_app/dxf_verbs.hpp`, split as the executor runs a line (a pure
+  read or write, then the apply), and a build without GDAL runs them back to
+  back through `runDxfVerb`. One DXF import, one DXF export, one reply.
+- **This changed the replies.** `imported 9 entities from parcels.geojson`
+  and `  extent 0,0 to 185,165` became the records above; the `cli.*`,
+  `Session.*`, `GeoSession.*` and window checks that read the prose were
+  rewritten for the records, and only for them - every number they expect
+  is the one they expected before. Anyone scripting against the prose has to
+  change; an agent reading `structuredContent` no longer parses text at all.
+  `INFO <file>` still replies with `formatDescription`'s text; its records
+  are D1's (`docs/geoprocessing.md`).
+
+### Decisions
+
+- **The window keeps what only it does, through the executor's context**
+  (`geo::Context`), not a second implementation:
+  - `farApart` is asked, on the GUI thread, when an `IMPORT` that keeps its
+    coordinates lands far from the drawing: Shift Alongside, Keep or Cancel
+    (`askFarApart`). Shift Alongside reads the file again with the shift, in
+    the apply, as a typed `ALONGSIDE` would have. A session, and a headless
+    window, have nobody to ask: the data keeps its coordinates and a
+    `warning` record says what to type instead. The headless window used to
+    log that as an error, which failed a `--command` import the CLI ran
+    without complaint; it is the CLI's warning now.
+  - `imported` shows what only a window can: a 12d archive's meshes, and the
+    3D view for new surfaces or meshes. A session counts the meshes and says
+    it holds none (`meshes ... held=no`).
+  - `frame` frames what the import added; `changed` redraws the reference
+    layers and surfaces.
+- **A 12d archive's surfaces go into the session's store**
+  (`terrain::SurfaceStore`), in the CLI and MCP too, where the session once
+  said it held none. A geoprocessing line then finds them by name
+  (`GDAL raster hillshade FROM SURFACE "TIN SOUTH WEST" ...`), and `EXPORT
+  <file>.12da` writes them back, as the window's export always did. A name
+  already taken is "name (2)".
+- **`INFO <id>` is left to the interpreter by the executor itself.** The verb
+  table's rows gained `takes` (`geo::takesInfo`): `INFO 12` is the entity
+  unless a file of that name exists, `INFO #12` always is.
+- **EXPORT and COPC write beside their target, and the apply moves the file
+  into place** (`src/katana_app/geo/staged_files.hpp`). A job's work may not
+  change what a person can see, and a cancelled job never applies
+  (`src/katana_qt/jobs.hpp`), but the writers - GDAL's, the DXF and archive
+  writers, PDAL's COPC - cannot be stopped part way. Written straight to the
+  target, a cancel after the write would report a cancel that did not
+  happen. So the work writes into a folder of its own beside the target, and
+  the apply renames what it wrote into place; a job dropped after its write
+  takes the folder with it. Rejected: a scratch folder elsewhere (the move
+  would be a copy across volumes), and a scratch NAME beside the target (a
+  shapefile is several files named by its stem, a writer takes its driver
+  from the extension, and a `.12daz` names its member after the file).
+- **EXPORT writes a copy of the drawing**, taken when the line is prepared,
+  so the window stays live while a large drawing is written. The copy's
+  entity observer is cleared: a copy must never report to the Document.
+- **Cancel lands at the end of a read or a write.** The readers and writers
+  take no stop token; a cancelled `IMPORT` imports nothing and a cancelled
+  `EXPORT` or `COPC` writes nothing, but each stops only when its read or
+  write ends. The status bar shows them as busy, with no measure.
+- **Where the verbs are said.** HELP, the window's Command Reference and
+  `katana_help` list them from the executor's table; the session's own
+  "Interop" help block is gone, and so are the window's copies in
+  `dispatchLine` and its archive and DXF importers.
+
+Tests: `GisVerbs.*`, `GisSession.*` and `GisRecords.*`
+(`tests/geo/test_gis_verbs.cpp`), `McpServer.ImportReturnsStructuredRecords`,
+the `cli.gis_*` checks (`src/katana_app/geo/cli/gis_verbs.cmake`), the
+window's `qt_gis_*_headless` (`tests/geo/headless/gis_verbs.cmake`) - of
+which `qt_gis_import_line_gives_the_sessions_records_headless` expects the
+very records `cli.gis_import_line_gives_the_records_the_window_gives` does -
+and `qt_widgets.GisVerbsWindow.*`, where a cancelled import imports nothing
+and a cancelled export leaves an empty folder.
+
+Not done:
+
+- The GIS menu's import dialogs - a vector file's layers, target and
+  attributes, a raster's display resolution and name, a cloud's budget, class
+  and COPC resolution - have no `IMPORT` words yet, so they import through
+  `interop` directly (`MainWindow::importWithOptions`). The Export Vector
+  dialog's selection, layer name, curve tolerance and properties likewise
+  (`MainWindow::exportDrawingTo`). They are the import and export options
+  packages of `docs/geoprocessing.md`.
+- `EXPORT` replaces a file of the same name, as it always has; it takes no
+  scope or filter yet (`docs/geoprocessing.md`, I4).
+- A process that dies mid-write leaves its `.katana-staging-<pid>-<n>`
+  folder beside the target.
 
 ## The 12d Archive format (.12da, .12daz)
 
