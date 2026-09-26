@@ -250,6 +250,23 @@ ends set it before a save and warn on opening a project whose files are not
 loaded (`cad/customisation_record.hpp`; `docs/survey_coding.md`, "What the
 project records").
 
+The second is `reference_layers`: the reference layers - rasters and point
+clouds - the drawing is worked on top of (`ProjectMetadata::referenceLayers`),
+one record a line, each a line of versioned JSON that `interop` writes and
+reads (`interop/reference_data.hpp`: `toRecord`, `parseReferenceRecord`) and
+storage carries without reading. `save` refuses a record that is empty or
+holds a line break. The records say where each layer came from and how it is
+shown, never its pixels or points; both front ends set them before a save and
+read the layers again when a project opens (`docs/interop.md`, "Reference
+layers"). The plan for this asked for a storage migration and a table; a key
+was chosen instead, as the customisation record was (decision D6): a schema
+change would have made every project this build saves unopenable by the builds
+before it (`open` refuses a newer schema) and backed up and migrated every
+older project on opening, for a list of a few short records - where a key an
+older build does not read is kept and written back by it
+(`ProjectStoreRoundTrip.TheReferenceLayersAProjectRecordsRoundTripAsTheyWere`,
+`ProjectStoreRoundTrip.AProjectFromBeforeReferenceLayersWereRecordedOpensWithNone`).
+
 ## Numerical assumptions
 
 The model stores `double` coordinates in model units (metres unless a project

@@ -724,6 +724,95 @@ Not done: INFO says nothing of a raster's metadata domains or histogram
 (GDAL's JSON has them, under `JSON`), and lists a folder's datasets without
 describing each.
 
+## Reference layers
+
+```
+REFS [LIST] [JSON]
+REFS SHOW|HIDE|REMOVE|INFO <ref>
+REFS OPACITY <ref> <0..1>                     (a raster's)
+REFS COLOR <ref> elevation|intensity|classification|rgb|flat   (a point cloud's; COLOUR too)
+REFS RENAME <ref> <name>
+REFS OVERVIEWS <ref> [levels=2,4,8] CONFIRM   (a raster's)
+REFS RESTORE
+<ref> := a layer's id, or its name in any case
+```
+
+```
+reference id=1 kind=raster name=terrain width=120 height=90 bounds=... georeferenced=yes visible=yes opacity=1 role=imagery display=plain file=...
+reference id=2 kind=pointcloud name=scan points=40000 source_points=40000 bounds=... visible=yes color=elevation file=...
+missing name=ortho kind=raster file=...
+references rasters=1 clouds=1 missing=0
+removed id=2 kind=pointcloud name=scan
+source file=... url=... licence=... attribution=... crs=...        (INFO)
+derivation line="GDAL raster hillshade ..."                        (INFO of a derived raster)
+overviews id=1 file=.../terrain.asc.ovr count=2 levels=2,4         (then an overview record each)
+restored layers=2 missing=0                                        (RESTORE)
+```
+
+- **The project keeps them.** The header of `reference_data.hpp` always said
+  the project records each layer's source and display settings and reads
+  the pixels again on opening; nothing did. Now a save records every layer
+  (`interop::referenceRecords`: kind, name, source, visibility, a raster's
+  opacity, role, display style, derivation, web source and licence and the
+  display copy's size, a cloud's colouring, point size and the points it
+  held), and opening the project runs `REFS RESTORE`, which reads each
+  layer again from its source through the one executor - a job in the
+  window - with its recorded name and settings. A cloud that came in with
+  a 12d archive is read again from the archive. How the records are kept
+  is `docs/model.md`'s ("Metadata a newer build wrote"): a key, not a
+  schema change.
+- **Taken at the save.** A layer imported, hidden or restyled does not by
+  itself make the drawing ask to be saved: reference data was session data,
+  and File > New after an import still simply drops it (audit QT-17). Both
+  front ends record the layers where they record the customisation, before
+  a save that has somewhere to go (`geo::recordReferences`). `NEW` and
+  `OPEN` in `katana_cli` and `katana_mcp` now let the layers and surfaces go
+  with their drawing, as the window's always did.
+- **A missing file is warned of, not fatal.** The drawing opens; the
+  restore says which source is gone and keeps that layer's record, listed as
+  `missing`, so the next save does not drop a layer because a drive was not
+  connected that day. `REFS REMOVE <name>` lets it go.
+- **Overviews only when told.** `REFS OVERVIEWS` runs GDAL's `raster
+  overview add --external` on the raster's file, writing `<file>.ovr` beside
+  it - which Katana otherwise never does to a person's file
+  (`docs/geoprocessing.md`, "Safety") - so the line must say `CONFIRM`,
+  `katana_references` must be given `confirm: true`, and the window asks
+  (headless, nobody can, so its line goes without and is refused, saying
+  what it would write). The overviews make GDAL's reads of a large raster
+  faster; the display copy is not re-read at view resolution.
+- **By id or by name.** A name several layers share is refused, naming
+  their ids.
+
+**The window.** The Reference Data panel builds REFS lines and runs them
+through the window's one executor, each logged as typed: the list
+(`referenceList`, its check boxes `REFS SHOW|HIDE`), Show (`referenceShow`),
+Hide (`referenceHide`), Information (`referenceInfo`: `REFS INFO`, then the
+Dataset Information dialog on the layer's file), Build Overviews
+(`referenceOverviews`), Remove (`referenceRemove`), and below the list the
+selected layer's Opacity (`referenceOpacity`) and Colour
+(`referenceColour`). The per-row controls it had were replaced by these: a
+control in a cell has no name a test or an agent can reach, and a line's
+reply rebuilds the table the cell is in.
+
+**MCP**: `katana_references` (`docs/mcp.md`).
+
+Tests: `RefsVerbs.*` and `RefsSession.ASavedProjectReopensWithItsReferenceRasters`
+(`tests/geo/test_refs_verbs.cpp`) - visibility round trip, opacity bounds,
+colour, rename and remove by name, JSON and INFO, overviews built only with
+CONFIRM (120 x 90 halved is 60 x 45, quartered 30 x 23 - GDAL rounds up),
+every display setting through a record, a derived raster's line kept, a
+missing source kept for the next save, an archive's clouds read again;
+`ProjectStoreRoundTrip.TheReferenceLayersAProjectRecordsRoundTripAsTheyWere`
+and `...FromBeforeReferenceLayersWereRecordedOpensWithNone`; `cli.refs_*`;
+`McpServer.ReferencesActsOnALayerByIdOrNameAndListsThemAfter`;
+`qt_reference_dock_builds_refs_lines_headless`.
+
+Not done: a project records each source by its absolute path, so a project
+moved to another machine finds only what is at the same place (a missing
+one is warned of and kept); the display copy is one decimated read, not
+re-read at view resolution; a web layer whose cached file is gone is not
+fetched again (`ONLINE IMPORT` does).
+
 ## The 12d Archive format (.12da, .12daz)
 
 12d Model is the civil design package most Australian survey and road work is

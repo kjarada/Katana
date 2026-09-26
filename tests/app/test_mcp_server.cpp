@@ -512,6 +512,35 @@ TEST_F(McpServer, DatasetInfoReturnsRecordsAndGdalsJson)
     EXPECT_EQ(content["gdal"]["raster"]["driverShortName"], "AAIGrid");
     EXPECT_EQ(session.document().model().entities.size(), 0u);
 }
+
+TEST_F(McpServer, ReferencesActsOnALayerByIdOrNameAndListsThemAfter)
+{
+    initialize();
+    const std::string terrain =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string();
+    ASSERT_FALSE(call("katana_import", Json{{"path", terrain}})["isError"].get<bool>());
+
+    const Json hidden = call("katana_references", Json{{"action", "hide"}, {"id", 1}});
+    ASSERT_FALSE(hidden["isError"].get<bool>()) << textOf(hidden);
+    EXPECT_EQ(hidden["structuredContent"]["line"], "REFS hide 1");
+    EXPECT_EQ(hidden["structuredContent"]["records"][0]["visible"], false);
+    ASSERT_EQ(hidden["structuredContent"]["references"].size(), 1u);
+    EXPECT_EQ(hidden["structuredContent"]["references"][0]["name"], "terrain");
+
+    const Json faded =
+        call("katana_references", Json{{"action", "opacity"}, {"id", "terrain"}, {"value", 0.25}});
+    ASSERT_FALSE(faded["isError"].get<bool>()) << textOf(faded);
+    EXPECT_EQ(faded["structuredContent"]["references"][0]["opacity"], 0.25);
+
+    // Overviews write beside the raster's file: refused unless confirmed.
+    const Json refused = call("katana_references", Json{{"action", "overviews"}, {"id", 1}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("confirm"), std::string::npos) << textOf(refused);
+
+    const Json listed = call("katana_references");
+    EXPECT_EQ(listed["structuredContent"]["line"], "REFS LIST");
+    EXPECT_EQ(listed["structuredContent"]["references"][0]["id"], 1);
+}
 #endif
 
 TEST_F(McpServer, UndoAndRedoStepThroughTheHistory)
