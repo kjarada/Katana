@@ -286,8 +286,14 @@ std::string modeNames(SnapModes modes)
     for (std::uint32_t bit = 1; bit != 0 && bit <= static_cast<std::uint32_t>(SnapMode::MidBetween);
          bit <<= 1) {
         if ((modes & bit) != 0) {
+            // As modesOf reads it: one word, "apparentintersection" - a
+            // blank inside a value would end it for every key=value reader.
             text += text.empty() ? "" : ",";
-            text += lowerOf(toString(static_cast<SnapMode>(bit)));
+            for (const char c : lowerOf(toString(static_cast<SnapMode>(bit)))) {
+                if (c != ' ') {
+                    text += c;
+                }
+            }
         }
     }
     return text.empty() ? std::string("none") : text;
@@ -308,7 +314,8 @@ Result<SnapModes> modesOf(const std::string& text)
         const std::size_t comma = std::min(lower.find(',', from), lower.size());
         const std::string name = lower.substr(from, comma - from);
         bool found = false;
-        for (std::uint32_t bit = 1; bit <= static_cast<std::uint32_t>(SnapMode::ApparentIntersection);
+        // Every mode modeNames writes, so a record reads back.
+        for (std::uint32_t bit = 1; bit <= static_cast<std::uint32_t>(SnapMode::MidBetween);
              bit <<= 1) {
             const std::string known = lowerOf(toString(static_cast<SnapMode>(bit)));
             std::string compact;
@@ -333,15 +340,22 @@ Result<SnapModes> modesOf(const std::string& text)
     return modes;
 }
 
+// An angle held in radians, in degrees to a nanodegree: typed as 15, it is
+// held as 15 x pi / 180 and would come back as 14.999999999999998.
+std::string degrees(double radians)
+{
+    return real(std::round(radians * katana::math::kRadToDeg * 1.0e9) / 1.0e9);
+}
+
 std::string draftingRecord(const DraftingSettings& s)
 {
     std::ostringstream out;
     out << "ortho=" << onOff(s.ortho) << " polar=" << onOff(s.polar)
-        << " increment=" << real(s.polarIncrement * katana::math::kRadToDeg)
+        << " increment=" << degrees(s.polarIncrement)
         << " tracking=" << onOff(s.objectTracking)
         << " angles=" << (s.angles == AngleConvention::Bearing ? "bearing" : "ccw")
         << " anglelock="
-        << (s.angleLock ? real(*s.angleLock * katana::math::kRadToDeg) : std::string("none"))
+        << (s.angleLock ? degrees(*s.angleLock) : std::string("none"))
         << " lengthlock=" << (s.lengthLock ? real(*s.lengthLock) : std::string("none"))
         << " snap=" << onOff(s.snapEnabled) << " modes=" << modeNames(s.snapModes);
     return out.str();

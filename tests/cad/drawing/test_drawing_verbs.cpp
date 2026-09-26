@@ -462,6 +462,23 @@ TEST(DrawingVerbs, SnapSetsAddsAndRemovesModesByName)
     EXPECT_EQ(s.fails("SNAP modes=endpoint,sideways"), ErrorCode::ParseFailure);
 }
 
+TEST(DrawingVerbs, TheDraftingRecordReadsBackAsTheSameSettings)
+{
+    // Every mode's name is one word (a blank would end the value for any
+    // key=value reader), and SNAP modes= takes the record's own list.
+    Session s;
+    const std::string all = value(s.ok("SNAP on modes=all"), "modes");
+    EXPECT_EQ(all.find(' '), std::string::npos) << all;
+    EXPECT_NE(all.find("apparentintersection"), std::string::npos) << all;
+    const SnapModes written = s.document.drafting().snapModes;
+    s.ok("SNAP modes=none");
+    s.ok("SNAP modes=" + all);
+    EXPECT_EQ(s.document.drafting().snapModes, written) << "the record did not read back";
+    // The default increment is 15 degrees, held in radians; said as 15.
+    Session fresh;
+    EXPECT_EQ(value(fresh.ok("DRAFTING"), "increment"), "15");
+}
+
 TEST(DrawingVerbs, DrawVerbPointsFollowTheAngleConventionToo)
 {
     Session s;
