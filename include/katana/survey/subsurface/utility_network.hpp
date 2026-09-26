@@ -199,6 +199,11 @@ enum class PathEvidence {
 };
 
 [[nodiscard]] const char* toString(PathEvidence evidence);
+// "detected", "exposed", "assumed" and the field words "traced", "trench" and
+// "inferred", compared as a schedule's header is (any case; blanks, '-' and
+// '_' ignored): how a schedule's path column reads, and so how the same word
+// reads wherever else it is typed. nullopt for anything else.
+[[nodiscard]] std::optional<PathEvidence> parsePathEvidence(std::string_view text);
 
 struct UtilityLine {
     std::string id;

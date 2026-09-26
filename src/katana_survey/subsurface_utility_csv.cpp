@@ -47,6 +47,25 @@ struct Table {
     }
 };
 
+// The column of `known` that `header` names, by its name or an alias.
+const UtilityCsvColumn* columnNamed(const std::vector<UtilityCsvColumn>& known,
+                                    std::string_view header)
+{
+    const std::string name = key(header);
+    const UtilityCsvColumn* match = nullptr;
+    for (const UtilityCsvColumn& candidate : known) {
+        if (name == key(candidate.name)) {
+            match = &candidate;
+        }
+        for (const std::string_view alias : candidate.aliases) {
+            if (name == key(alias)) {
+                match = &candidate;
+            }
+        }
+    }
+    return match;
+}
+
 // The rows of `text`, with its header's columns resolved against `known`.
 core::Result<Table> readTable(std::string_view text, const std::vector<UtilityCsvColumn>& known)
 {
@@ -57,18 +76,7 @@ core::Result<Table> readTable(std::string_view text, const std::vector<UtilityCs
     Table table;
     const std::string where = at(raw->headerLine);
     for (std::size_t column = 0; column < raw->header.size(); ++column) {
-        const std::string name = key(raw->header[column]);
-        const UtilityCsvColumn* match = nullptr;
-        for (const UtilityCsvColumn& candidate : known) {
-            if (name == key(candidate.name)) {
-                match = &candidate;
-            }
-            for (const std::string_view alias : candidate.aliases) {
-                if (name == key(alias)) {
-                    match = &candidate;
-                }
-            }
-        }
+        const UtilityCsvColumn* match = columnNamed(known, raw->header[column]);
         if (!match) {
             return makeError(ErrorCode::ParseFailure,
                              "unknown column \"" + raw->header[column] + "\"", where);
@@ -118,21 +126,6 @@ core::Status optionalCell(const Table& table, const Row& row, std::string_view c
 }
 
 const auto kNumber = [](std::string_view text) { return core::parseFiniteDouble(text); };
-
-std::optional<PathEvidence> parsePathEvidence(std::string_view text)
-{
-    const std::string name = key(text);
-    if (name == "detected" || name == "traced") {
-        return PathEvidence::Detected;
-    }
-    if (name == "exposed" || name == "trench") {
-        return PathEvidence::Exposed;
-    }
-    if (name == "assumed" || name == "inferred") {
-        return PathEvidence::Assumed;
-    }
-    return std::nullopt;
-}
 
 // A quality level a schedule claims; "Unknown" parses (as no claim, which the
 // caller makes of it) so that it is not refused as a typo.
@@ -204,6 +197,21 @@ struct AttributeSource {
 
 } // namespace
 
+std::optional<PathEvidence> parsePathEvidence(std::string_view text)
+{
+    const std::string name = key(text);
+    if (name == "detected" || name == "traced") {
+        return PathEvidence::Detected;
+    }
+    if (name == "exposed" || name == "trench") {
+        return PathEvidence::Exposed;
+    }
+    if (name == "assumed" || name == "inferred") {
+        return PathEvidence::Assumed;
+    }
+    return std::nullopt;
+}
+
 const std::vector<UtilityCsvColumn>& utilityCsvColumns()
 {
     static const std::vector<UtilityCsvColumn> kColumns{
@@ -267,6 +275,11 @@ const std::vector<UtilityCsvColumn>& utilityCsvColumns()
         {"Notes", {}, false, CarriedOn::Vertex},
     };
     return kColumns;
+}
+
+const UtilityCsvColumn* utilityCsvColumnNamed(std::string_view header)
+{
+    return columnNamed(utilityCsvColumns(), header);
 }
 
 core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
