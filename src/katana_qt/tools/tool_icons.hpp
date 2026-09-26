@@ -87,5 +87,8 @@ bool paintDrawDivideIcon(std::string_view toolId, const ToolInk& ink);
 bool paintModifyLengthIcon(std::string_view toolId, const ToolInk& ink);
 bool paintPropertyIcon(std::string_view toolId, const ToolInk& ink);
 bool paintSelectIcon(std::string_view toolId, const ToolInk& ink);
+// The drawing system's tools: Draw > Vertices and the professional draw tools
+// (icons_drawing.cpp, docs/drawing.md).
+bool paintDrawingIcon(std::string_view toolId, const ToolInk& ink);
 
 } // namespace katana::qt::tools

@@ -10,6 +10,8 @@
 #include <fstream>
 #include <string>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include "katana/storage/project_store.hpp"
 #include "katana/storage/sqlite_database.hpp"
@@ -92,7 +94,17 @@ Model sampleModel()
              katana::entity::PointGeometry{Point2(9, 9)}, Arc2{Point2(0, 0), 2.0, 0.5, -1.5},
              Polyline2{{Point2(0, 0), Point2(4, 0), Point2(4, 3)}, true},
              katana::entity::TextGeometry{Point2(1, 1), "Ünïcödé — BM1", 2.5, 0.25},
-             katana::entity::DimensionGeometry{Point2(0, 0), Point2(10, 0), 2.0, "10.00"}}) {
+             katana::entity::DimensionGeometry{Point2(0, 0), Point2(10, 0), 2.0, "10.00"},
+             // The drawing system's kinds: a 3D string with an arc and a
+             // missing height, an elliptical arc, a fit-point spline.
+             katana::geometry::CurvePolyline2{
+                 {{Point2(0, 0), 0.4, 31.25}, {Point2(8, 2), 0.0, std::nullopt},
+                  {Point2(9, 7), -0.2, 33.5}},
+                 false},
+             katana::geometry::Ellipse2{Point2(5, 5), katana::geometry::Vec2(4, 3), 0.5, 1.0,
+                                        3.0},
+             *katana::geometry::Spline2::throughPoints(
+                 {Point2(0, 0), Point2(2, 5), Point2(6, 4), Point2(9, 9)}, 3)}) {
         Entity entity;
         entity.geometry = geometry;
         EXPECT_TRUE(model.entities.add(entity).ok());
@@ -496,6 +508,99 @@ TEST_F(ProjectStoreMigration, RefusesProjectsFromANewerKatana)
     const auto opened = ProjectStore::open(projectDir());
     ASSERT_FALSE(opened.ok());
     EXPECT_EQ(opened.error().code, ErrorCode::Unsupported);
+}
+
+// Schema 12 (docs/model.md): the drawing system's geometry kinds - curve
+// polyline 9, ellipse 10, spline 11 - with no table change of their own.
+
+TEST_F(ProjectStoreMigration, ASchemaElevenProjectOpensAsItWasAndIsRaisedToTwelve)
+{
+    Model model;
+    Entity line;
+    line.geometry = Segment2{Point2(1, 2), Point2(3, 4)};
+    const auto id = model.entities.add(line);
+    ASSERT_TRUE(id.ok());
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        // Schema 11 as the build before this one left it: 12 changed no
+        // table, so the version is the only difference.
+        auto raw = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(raw.ok());
+        ASSERT_TRUE(raw->setUserVersion(11).ok());
+    }
+    auto store = ProjectStore::open(projectDir());
+    ASSERT_TRUE(store.ok()) << store.error().describe();
+    EXPECT_EQ(*store->schemaVersion(), 12);
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+    ASSERT_NE(loaded.entities.find(*id), nullptr);
+    EXPECT_EQ(loaded.entities.find(*id)->geometry, line.geometry);
+    // Migrated only with a way back, as every migration is.
+    EXPECT_FALSE(fs::is_empty(projectDir() / "backups"));
+}
+
+TEST_F(ProjectStoreMigration, AProjectHoldingTheDrawingKindsIsWrittenAsSchemaTwelve)
+{
+    const Model model = sampleModel();
+    bool curve = false;
+    bool ellipse = false;
+    bool spline = false;
+    model.entities.forEach([&](const Entity& entity) {
+        curve = curve || std::holds_alternative<katana::geometry::CurvePolyline2>(entity.geometry);
+        ellipse = ellipse || std::holds_alternative<katana::geometry::Ellipse2>(entity.geometry);
+        spline = spline || std::holds_alternative<katana::geometry::Spline2>(entity.geometry);
+    });
+    ASSERT_TRUE(curve && ellipse && spline) << "the sample no longer holds the three kinds";
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        // Read off the file, not through the store, which could agree with
+        // itself about a wrong number.
+        auto raw = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(raw.ok());
+        const auto version = raw->userVersion();
+        ASSERT_TRUE(version.ok());
+        EXPECT_EQ(*version, 12);
+    }
+    auto store = ProjectStore::open(projectDir());
+    ASSERT_TRUE(store.ok()) << store.error().describe();
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+    std::vector<Entity> saved;
+    model.entities.forEach([&](const Entity& e) { saved.push_back(e); });
+    std::vector<Entity> reopened;
+    loaded.entities.forEach([&](const Entity& e) { reopened.push_back(e); });
+    EXPECT_EQ(reopened, saved);
+}
+
+TEST_F(ProjectStoreMigration, ABuildThatCannotReadTheProjectSaysItIsNewerAndWhichSchemas)
+{
+    // What a schema-11 build does with a schema-12 project, by the same check
+    // one schema up: refused before any row is read, as version skew, naming
+    // both numbers - not "unknown geometry kind in blob" per entity.
+    { ASSERT_TRUE(ProjectStore::create(projectDir(), {}).ok()); }
+    {
+        auto raw = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(raw.ok());
+        ASSERT_TRUE(raw->setUserVersion(13).ok());
+    }
+    const auto opened = ProjectStore::open(projectDir());
+    ASSERT_FALSE(opened.ok());
+    EXPECT_EQ(opened.error().code, ErrorCode::Unsupported);
+    EXPECT_NE(opened.error().message.find("newer version of Katana"), std::string::npos)
+        << opened.error().describe();
+    EXPECT_EQ(opened.error().context, "schema=13 supported=12");
 }
 
 // ---- backup & recovery --------------------------------------------------------------------

@@ -24,7 +24,7 @@ open-ended property maps.
 ```cpp
 struct Entity {
     EntityId id;                  // uint64, 1-based
-    Geometry geometry;            // variant of the nine entity geometries
+    Geometry geometry;            // variant of the twelve entity geometries
     std::string layer;            // "0" by default
     std::string style;            // empty means ByLayer
     std::optional<Color> color;   // empty means ByLayer
@@ -36,8 +36,10 @@ struct Entity {
 
 `Geometry` is a `std::variant` over `PointGeometry`, `Segment2`, `Arc2`,
 `Polyline2`, `Circle2`, `TextGeometry`, `DimensionGeometry`, `LabelGeometry`
-and `LeaderGeometry`, ordered to match `EntityType` so `typeOf()` is a cast of
-the variant index. The last two, and the text style, justification and paper
+and `LeaderGeometry`, then the drawing system's `CurvePolyline2`, `Ellipse2`
+and `Spline2` (see "The kinds appended since" below), ordered to match
+`EntityType` so `typeOf()` is a cast of the variant index. The label and the
+leader, and the text style, justification and paper
 height of a text and the kinds of a dimension, came with the annotation
 system on 2026-09-25 (`docs/annotation.md`): a label stores WHAT it labels and
 in which label style, never its text, and a leader is one entity from its
@@ -214,7 +216,7 @@ paragraph said geometry was JSON too, from before schema 3.)
 history and its reference: each entry's comment says why the change was made
 and why no existing row needed repairing. The file is marked as a Katana
 project by `PRAGMA application_id` ("KTNA") and versioned by
-`PRAGMA user_version`. At schema 11 it holds nineteen tables:
+`PRAGMA user_version`. At schema 12 it holds nineteen tables:
 
 | Migration | Adds |
 |---|---|
@@ -229,6 +231,7 @@ project by `PRAGMA application_id` ("KTNA") and versioned by
 | 9 | a style's `description`, `symbol` and `symbol_size` |
 | 10 | `survey_jobs` and `survey_job_files`: each imported field file kept whole, with its settings, report and the entities it made |
 | 11 | `text_styles`, `label_styles` (name, kind and the rest as versioned JSON) and `label_rules`, and a dimension style's `paper_sized` (`docs/annotation.md`, "Stored with the project") |
+| 12 | no table: the drawing system's geometry kinds - curve polyline 9, ellipse 10, spline 11 - in the existing geometry blob (`docs/drawing.md`). The version moves so a schema-11 build refuses the project up front as one from a newer Katana ("schema=12 supported=11") rather than failing row by row with "unknown geometry kind in blob". Every project a schema-12 build opens is raised to 12, whether or not it holds one of the kinds; writing 11 or 12 by what a save contained was rejected as a second versioning rule beside `kMigrations` |
 
 A new table or column is a new entry at the end, never an edit of a released
 one, and each default is chosen so that a project written before it draws
@@ -306,9 +309,25 @@ have not yet been measured on a 10⁶-entity drawing.
 
 ## Adding a geometry kind
 
-`static_assert(std::variant_size_v<Geometry> == 7)` in `entity.hpp` points here.
+`static_assert(std::variant_size_v<Geometry> == 12)` in `entity.hpp` points here.
 The count is deliberately awkward to change, because the fan-out is wide and
 some of it does not fail at compile time.
+
+### The kinds appended since
+
+| Index | Kind | Added by |
+|---|---|---|
+| 7 | `LabelGeometry` | the annotation system (branch `annotation-system`) |
+| 8 | `LeaderGeometry` | the annotation system |
+| 9 | `CurvePolyline2` - a polyline with arc segments (bulges) and per-vertex heights | the drawing system (`docs/drawing.md`) |
+| 10 | `Ellipse2` - an ellipse or elliptical arc | the drawing system |
+| 11 | `Spline2` - a B-spline or NURBS, with its fit points | the drawing system |
+
+The two systems were written at the same time on two branches. The drawing
+system's branch merged the annotation branch before appending, so that its
+kinds went on after Label and Leader and no kind byte means two things; any
+later kind goes after 11. All five are written in version 2 of the geometry
+blob (`geometry_blob.hpp`), since a version-1 reader knows none of them.
 
 ### Two rules that are not negotiable
 
@@ -341,13 +360,26 @@ the viewport cull and validation for free.
 | `scene.cpp` | `appendEntities` (`static_assert` on the trailing `else`) |
 | `export.cpp` | the export visitor (`static_assert` on the trailing `else`) |
 | `command_interpreter.cpp` | `describe`'s `Detail` visitor |
-| `viewport_widget.cpp` | `drawGeometry`'s visitor |
+| `plan_painter.cpp` | `drawGeometry`'s visitor (it moved there from `viewport_widget.cpp`) |
 | `main_window.cpp` | `describeGeometry`'s visitor |
+| `anchor.cpp` | `resolveAnchor`, which points of a kind a dimension or leader can follow |
+| `modify_transform.cpp` | the Stretch tool's `Stretcher` |
+| `src/katana_dxf/reader.cpp` | `translate` and `placeGeometry` (a block's contents under its insert) |
+| `src/katana_dxf/writer.cpp` | the entity writer (`static_assert` on the trailing `else`) |
+| `domain_export.cpp` | the archive export's visitor |
 
 ### The compiler will NOT stop you here
 
 These opted out of exhaustive dispatch, mostly for good reasons. Each is a
 place where a new kind is silently absent rather than reported.
+
+**`entity/curve_pieces.hpp` is the cure for most of them.** `curvePieces`
+gives any geometry as the segments, arcs and circles the editing kernel
+understands (a curve polyline's segments and arcs exactly; an ellipse's and
+a spline's chords to a millimetre). The drawing system routed the snaps'
+`appendCurves`, the section's crossings, box selection and the trim and
+extend boundaries (`edgeCurves`) through it rather than adding three cases
+to each chain, so a kind taught to `curvePieces` reaches all of them.
 
 | Where | What is silently lost |
 |---|---|
@@ -358,7 +390,7 @@ place where a new kind is silently absent rather than reported.
 | `editing.hpp` `Curve2` | a second variant. A curve-like kind almost certainly belongs here too; it has its own `static_assert`. |
 | `entity_commands.cpp` | `asCurve`, `edgeCurves`, `asSegment` decide what is trimmable, offsettable and filletable. |
 | `import.cpp` | maps `gis::GeometryKind` inwards; only Point/LineString/Polygon exist there. |
-| `project_store.cpp` | `kCurrentSchemaVersion` does not change for a new kind, so an older build does not refuse the project up front — it opens it and fails per row with "unknown geometry kind in blob". Loud, but late, and phrased as corruption rather than version skew. Consider bumping it. |
+| `project_store.cpp` | `kCurrentSchemaVersion` does not change by itself for a new kind, so an older build would not refuse the project up front — it would open it and fail per row with "unknown geometry kind in blob": loud, but late, and phrased as corruption rather than version skew. Add a migration entry with the kind, as schema 12 did for the drawing system's three (`ProjectStoreMigration` tests). |
 
 ### Tests with a hand-written "one of each" corpus
 

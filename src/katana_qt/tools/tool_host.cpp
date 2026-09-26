@@ -100,7 +100,7 @@ ToolHost::Outcome ToolHost::typed(std::string_view text)
                                "; press Esc to end the tool first.");
         return Outcome::Rejected;
     }
-    return apply(cad::routeTypedInput(*tool_, text));
+    return apply(cad::routeTypedInput(*tool_, text, document_.drafting(), cursor_));
 }
 
 ToolHost::Outcome ToolHost::enter() { return tool_ != nullptr ? apply(tool_->enter()) : idle(); }

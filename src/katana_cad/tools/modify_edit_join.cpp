@@ -16,6 +16,7 @@
 
 #include "katana/entity/entity_geometry.hpp"
 #include "modify_edit_support.hpp"
+#include "katana/cad/drawing/vertex_editing.hpp"
 
 namespace katana::cad::tools::modify_edit {
 
@@ -404,8 +405,10 @@ class ExplodeTool final : public InteractiveTool {
         std::vector<std::pair<EntityId, std::vector<Entity>>> exploded;
         for (const EntityId id : ids) {
             const Entity& entity = *session_.original(id);
-            const auto* polyline = std::get_if<Polyline2>(&entity.geometry);
-            if (polyline == nullptr) {
+            // Either polyline kind (docs/drawing.md): a curve polyline's arc
+            // segments come apart as arcs.
+            const auto polyline = readPolyline(entity);
+            if (!polyline) {
                 ++other;
                 continue;
             }
@@ -467,35 +470,38 @@ class ExplodeTool final : public InteractiveTool {
         ToolFeedback feedback;
         for (const EntityId id : selectionNow(context_, picked_)) {
             const Entity* entity = session_.original(id);
-            if (const auto* polyline = std::get_if<Polyline2>(&entity->geometry)) {
-                feedback.markers.insert(feedback.markers.end(), polyline->vertices.begin(),
-                                        polyline->vertices.end());
+            if (const auto polyline = readPolyline(*entity)) {
+                const auto positions = polyline->positions();
+                feedback.markers.insert(feedback.markers.end(), positions.begin(), positions.end());
             }
         }
         return feedback;
     }
 
   private:
-    // A line per segment - the closing one too - wearing the polyline's
-    // layer, style, colour and properties, with the heights of its two ends.
-    // A segment with no length (a repeated vertex) makes no line: the model
-    // would refuse it.
-    static std::vector<Entity> explode(const Entity& entity, const Polyline2& polyline)
+    // A line per straight segment and an arc per arc segment - the closing
+    // one too - wearing the polyline's layer, style, colour and properties,
+    // with the heights of its two ends (an arc's in its start-to-end order,
+    // as the model keeps an arc's). A segment with no length (a repeated
+    // vertex) makes nothing: the model would refuse it.
+    static std::vector<Entity> explode(const Entity& entity,
+                                       const katana::geometry::CurvePolyline2& polyline)
     {
-        const auto heights = katana::entity::heightsOf(entity.properties, polyline.vertices.size());
-        std::vector<Entity> lines;
+        std::vector<Entity> pieces;
         for (std::size_t i = 0; i < polyline.segmentCount(); ++i) {
-            const Segment2 segment = polyline.segment(i);
-            if (segment.isDegenerate()) {
+            const auto piece = polyline.segment(i);
+            if (const auto* segment = std::get_if<Segment2>(&piece); segment != nullptr &&
+                                                                     segment->isDegenerate()) {
                 continue;
             }
-            Entity line = entity;
-            line.geometry = segment;
-            katana::entity::setHeights(line.properties,
-                                       {heights[i], heights[(i + 1) % polyline.vertices.size()]});
-            lines.push_back(std::move(line));
+            Entity made = entity;
+            std::visit([&made](const auto& shape) { made.geometry = shape; }, piece);
+            katana::entity::setHeights(made.properties,
+                                       {polyline.vertices[i].height,
+                                        polyline.vertices[polyline.segmentEnd(i)].height});
+            pieces.push_back(std::move(made));
         }
-        return lines;
+        return pieces;
     }
 
     ToolContext context_;

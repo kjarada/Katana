@@ -1,5 +1,7 @@
 #include "plan_painter.hpp"
 
+#include "katana/cad/drawing/construction.hpp"
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -1349,6 +1351,11 @@ void PlanPainter::drawEntities()
             if (!entity.visible || !resolved.layerDrawn) {
                 return;
             }
+            // Construction lines and rays are drawing aids: on screen, never
+            // on paper (drawing/construction.hpp).
+            if (paper() && cad::isConstructionLayer(entity.layer)) {
+                return;
+            }
             // This box test is NOT the one forEachCandidate already did:
             // queryExtents is deliberately wider than the geometry (an arc offers
             // its centre for snapping), so this is the tighter, drawing-specific
@@ -1814,6 +1821,30 @@ void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
             }
             self.drawText(drawing.textAnchor, drawing.text, drawing.textHeight,
                           drawing.textRotation);
+        }
+        // The drawing system's curves, chorded in model space to a quarter of
+        // a pixel as the arcs above are.
+        void operator()(const katana::geometry::CurvePolyline2& g) const
+        {
+            const double tolerance = 0.25 / std::max(self.view_.scale, 1e-12);
+            if (g.closed && self.hatch_ != nullptr) {
+                const Polyline2 boundary = g.toPolyline(tolerance);
+                QPolygonF polygon;
+                polygon.reserve(static_cast<int>(boundary.vertices.size()));
+                for (const auto& vertex : boundary.vertices) {
+                    polygon << self.toScreen(vertex);
+                }
+                self.drawHatch(boundary, polygon);
+            }
+            self.strokePolyline(g.tessellate(tolerance), false);
+        }
+        void operator()(const katana::geometry::Ellipse2& g) const
+        {
+            self.strokePolyline(g.tessellate(0.25 / std::max(self.view_.scale, 1e-12)), false);
+        }
+        void operator()(const katana::geometry::Spline2& g) const
+        {
+            self.strokePolyline(g.tessellate(0.25 / std::max(self.view_.scale, 1e-12)), false);
         }
     };
     std::visit(Visitor{*this, drawArcPath}, geometry);

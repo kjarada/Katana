@@ -109,6 +109,12 @@ std::size_t vertexCount(const katana::entity::Geometry& geometry)
         {
             return l.vertices.size();
         }
+        std::size_t operator()(const katana::geometry::CurvePolyline2& p) const
+        {
+            return p.vertices.size();
+        }
+        std::size_t operator()(const katana::geometry::Ellipse2&) const { return 0; }
+        std::size_t operator()(const katana::geometry::Spline2&) const { return 0; }
     };
     return std::visit(Visitor{}, geometry);
 }

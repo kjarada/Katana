@@ -139,7 +139,7 @@ TEST_F(AnnotationStorage, EveryTableAndKindSurvivesSavingTwiceAndReopening)
     }
     auto store = ProjectStore::open(projectDir());
     ASSERT_TRUE(store.ok()) << store.error().describe();
-    EXPECT_EQ(*store->schemaVersion(), 11);
+    EXPECT_EQ(*store->schemaVersion(), 12);
     const auto contents = store->load();
     ASSERT_TRUE(contents.ok()) << contents.error().describe();
     Model loaded;
@@ -180,7 +180,7 @@ TEST_F(AnnotationStorage, AProjectFromBeforeSchema11OpensWithNoneAndModelDimensi
     }
     auto store = ProjectStore::open(projectDir());
     ASSERT_TRUE(store.ok()) << store.error().describe();
-    EXPECT_EQ(*store->schemaVersion(), 11);
+    EXPECT_EQ(*store->schemaVersion(), 12);
     const auto contents = store->load();
     ASSERT_TRUE(contents.ok()) << contents.error().describe();
     Model loaded;
