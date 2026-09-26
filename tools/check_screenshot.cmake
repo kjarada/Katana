@@ -224,6 +224,14 @@ if(DEFINED REFUSED)
     message(STATUS "screenshot_headless: refused as the test requires")
     return()
 endif()
+# Qt's offscreen platform plugin warns on stderr for each window call it
+# stubs out ("This plugin does not support raise()", QPlatformWindow in
+# qtbase). The Qt 6 of conda-forge on Linux says it and MSYS2's on Windows
+# does not, so a pattern that names the lines between two steps would pass on
+# one and fail on the other. The lines are Qt's, not the application's
+# report, and are taken out before anything is matched.
+string(REGEX REPLACE "This plugin does not support [A-Za-z]+\\(\\)\r?\n" "" out "${out}")
+string(REGEX REPLACE "This plugin does not support [A-Za-z]+\\(\\)\r?\n" "" err "${err}")
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "katana --screenshot exited with ${rc}\n${out}\n${err}")
 endif()

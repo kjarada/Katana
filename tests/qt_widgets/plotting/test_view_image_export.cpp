@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <QComboBox>
+#include <QDir>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -103,7 +104,7 @@ TEST(Snapshot, WhatTheGrammarDoesNotTakeIsRefused)
 TEST(Snapshot, TheLineItWritesIsTheLineItReads)
 {
     SnapshotRequest request;
-    request.path = "C:\\out\\view.png";
+    request.path = QDir::toNativeSeparators("C:/out/view.png");
     request.width = 300;
     request.height = 150;
     request.background = Background::White;

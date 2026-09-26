@@ -456,9 +456,14 @@ TEST_F(SurfaceVerbs, ACogExportPassesGdalsCogValidation)
                      << validated.error().message;
     }
     ASSERT_TRUE(validated.ok()) << validated.error().describe();
-    const auto code = record(*validated, "return");
-    ASSERT_TRUE(code) << *validated;
-    EXPECT_EQ(code->get("code").value_or(""), "0") << *validated;
+    // "driver cog validate" declares no return-code argument (GDAL 3.13's
+    // own argument list; only "dataset check" and "raster compare" have one),
+    // so its verdict is the sentence GDAL's validate_cloud_optimized_geotiff
+    // prints: "<file> is a valid cloud optimized GeoTIFF", and "is NOT a
+    // valid" when it is not.
+    EXPECT_NE(validated->find("is a valid cloud optimized GeoTIFF"), std::string::npos)
+        << *validated;
+    EXPECT_EQ(validated->find("is NOT a valid"), std::string::npos) << *validated;
 }
 
 TEST_F(SurfaceVerbs, ExportTakesCreationOptionsAndRefusesWhatItCannotWrite)
