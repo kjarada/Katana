@@ -13,6 +13,8 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -32,6 +34,11 @@ struct RasterElevationOptions {
     // the cap - never truncated to its first rows. 0 is refused.
     std::size_t maxPoints = 400'000;
     int band = 1;
+    // Only the pixels of this window of the ground, so the cap is spent on
+    // the site rather than on the whole sheet a DEM was delivered as. Cut
+    // by GDAL (`raster clip --bbox`) before the stride is chosen; a window
+    // reaching past the raster takes what the raster has there.
+    std::optional<katana::geometry::Box2> area;
 };
 
 struct RasterElevations {
@@ -79,18 +86,42 @@ struct CloudSurfacePoints {
 // any, otherwise every return, flagged.
 [[nodiscard]] CloudSurfacePoints surfacePoints(const PointCloudLayer& cloud);
 
+// The returns of the ASPRS classes asked for, whatever the cloud holds - a
+// person who knows the classes of their data says so (SURFACE FROM CLOUD
+// classes=2,8). groundOnly is true when the classes are exactly {2};
+// `excluded` counts the returns of every other class. An empty list is the
+// policy above.
+[[nodiscard]] CloudSurfacePoints surfacePoints(const PointCloudLayer& cloud,
+                                               const std::vector<std::uint8_t>& classes);
+
 // ---- surface -> DEM -----------------------------------------------------------
 
 struct SurfaceRasterOptions {
     // World units per cell, square. Must be positive and finite.
     double cellSize = 1.0;
-    // Empty: from the path's extension (gis::GdalDataset::rasterDriverForPath).
+    // Empty: from the path's extension (gis::GdalDataset::rasterDriverForPath),
+    // or COG when `cog` is set.
     std::string driver;
     std::string projectionWkt;
     // Largest grid written, columns x rows. The whole grid is held as doubles
     // before GDAL writes it, so this is 200 MB; a finer grid is refused with
     // InvalidArgument naming the cell count, rather than exhausting memory.
     std::uint64_t maxCells = 25'000'000;
+    // What each cell is stored as: Float32 (the default) or Float64. Float32
+    // is the DEM convention and half the size; near 1000 m its step is 6e-5
+    // m, far finer than any survey that made the surface. The no-data value
+    // is exact in both.
+    std::string dataType = "Float32";
+    // A Cloud Optimised GeoTIFF, written by GDAL's COG driver: tiled,
+    // compressed and with overviews, readable a window at a time over HTTP.
+    bool cog = false;
+    // KEY=VALUE, GDAL's creation options for the driver, over Katana's
+    // defaults for it: a GeoTIFF is tiled and DEFLATE-compressed with the
+    // floating-point predictor (PREDICTOR=3), a COG DEFLATE with PREDICTOR=YES.
+    std::vector<std::string> creationOptions;
+    // A file already at the path is replaced only when this says so; else
+    // AlreadyExists, and the file is left as it was.
+    bool overwrite = false;
 };
 
 struct SurfaceRasterResult {
@@ -101,6 +132,7 @@ struct SurfaceRasterResult {
     // and declared as the band's no-data value.
     double noDataValue = 0.0;
     std::string driver;
+    std::string dataType;
     std::array<double, 6> geotransform{0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
 };
 
@@ -108,12 +140,17 @@ struct SurfaceRasterResult {
 // TIN's own linear interpolation (TinSurface::elevationsAt) - the value a
 // surveyor would read off the surface there, not an average over the cell.
 // The grid is north-up with its top-left corner at the surface's (min x,
-// max y). InvalidArgument for an empty surface, a bad cell size or too many
-// cells; Unsupported for an extension no raster driver claims;
-// FileExportFailure from GDAL.
+// max y). The grid is written by GDAL's own `raster convert`
+// (gis/processing.hpp), so every driver that can write a raster - those that
+// only copy a finished dataset, as AAIGrid, included - and every creation
+// option it takes are there. InvalidArgument for an empty surface, a bad cell
+// size, too many cells or a data type other than Float32 and Float64;
+// Unsupported for an extension no raster driver claims; AlreadyExists for a
+// file in the way without `overwrite`; InvalidState "cancelled" when `stop`
+// is requested (no file is left); what GDAL refused otherwise.
 [[nodiscard]] katana::core::Result<SurfaceRasterResult>
 exportSurfaceRaster(const katana::terrain::TinSurface& surface, const std::filesystem::path& path,
-                    const SurfaceRasterOptions& options = {});
+                    const SurfaceRasterOptions& options = {}, const std::stop_token& stop = {});
 
 // A cell size for `bounds` of about `targetCells` along its longer side,
 // rounded to 1, 2 or 5 x 10^n so the grid lines fall on round coordinates.

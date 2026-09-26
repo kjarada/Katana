@@ -1,7 +1,7 @@
 #pragma once
 
 // What the GIS menu's option dialogs share (gis_import_dialogs.hpp,
-// gis_export_dialog.hpp, surface_raster_dialog.hpp): their OK and Cancel row.
+// gis_export_dialog.hpp): their OK and Cancel row.
 
 #include <QDialog>
 #include <QDialogButtonBox>

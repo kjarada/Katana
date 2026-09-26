@@ -849,4 +849,34 @@ TEST_F(McpServer, GdalRunRefusesAnArgumentTheAlgorithmHasNot)
     EXPECT_TRUE(refused["isError"].get<bool>());
     EXPECT_NE(textOf(refused).find("no-such"), std::string::npos);
 }
+
+// katana_terrain_list: what SURFACE LIST JSON says, as structured content.
+// terrain.asc's least and greatest values, read from the text grid, are
+// 24.892 and 38.819, and a surface of all its 10 800 cells spans exactly
+// them; the grid is read as Float32, within 2e-6 of the text at that size.
+TEST_F(McpServer, TerrainListGivesTheSessionsSurfacesAndRasters)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json empty = call("katana_terrain_list");
+    ASSERT_FALSE(empty["isError"].get<bool>()) << textOf(empty);
+    EXPECT_TRUE(empty["structuredContent"]["surfaces"].empty());
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"IMPORT \"" + terrain + "\"",
+                                              "SURFACE FROM RASTER 1 NAME ground"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const Json listed = call("katana_terrain_list");
+    ASSERT_FALSE(listed["isError"].get<bool>()) << textOf(listed);
+    const Json& content = listed["structuredContent"];
+    ASSERT_EQ(content["surfaces"].size(), 1U) << content.dump();
+    EXPECT_EQ(content["surfaces"][0]["name"], "ground");
+    EXPECT_EQ(content["surfaces"][0]["points"], 10800);
+    EXPECT_NEAR(content["surfaces"][0]["zmin"].get<double>(), 24.892, 2e-6);
+    EXPECT_NEAR(content["surfaces"][0]["zmax"].get<double>(), 38.819, 2e-6);
+    ASSERT_EQ(content["rasters"].size(), 1U);
+    EXPECT_EQ(content["rasters"][0]["id"], 1);
+    EXPECT_EQ(content["rasters"][0]["width"], 120);
+    EXPECT_EQ(content["rasters"][0]["cell"], 1.5);
+    EXPECT_NE(textOf(listed).find("surface ground: "), std::string::npos) << textOf(listed);
+}
 #endif

@@ -286,6 +286,109 @@ by the same name on every front end (`docs/geoprocessing.md`).
 Surfaces are still session data, not saved in the project: saving them is a
 storage-schema decision of its own.
 
+## Surfaces on every front end
+
+The SURFACE verb (`src/katana_app/geo/surface_verbs.cpp`) makes, lists and
+writes out the store's surfaces. It runs through the one geoprocessing
+executor (`docs/geoprocessing.md`), so `katana_cli`, `katana_mcp` and the
+window's command line run the same code, and the window's Terrain > Surface
+From and GIS > Export Surface as DEM only build its lines:
+
+```
+SURFACE LIST [JSON] | SURFACE INFO <name> | SURFACE REMOVE <name>
+SURFACE FROM RASTER <id|name> | FILE <path> [max=<points>] [AREA x0,y0,x1,y1] [NAME <n>]
+SURFACE FROM CLOUD <id|name> [classes=2,...] [max=<points>] [NAME <n>]
+SURFACE FROM <scope> [NAME <n>]
+SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog] [format=<driver>]
+               [co=K=V]... [OVERWRITE]
+```
+
+Every form takes PREVIEW, which says what would be read and makes nothing.
+A reply is key=value records: how the source was read (`sampled stride=
+pixels= nodata= points=`, `thinned from= step= points=`, the drawing's
+`scope` record), `merged duplicates=` when coincident points were averaged,
+then `surface name= triangles= points= bounds= zmin= zmax= source=`.
+`SURFACE LIST` lists the surfaces and, as `raster id= name= kind= width=
+height= cell= file=` records, the rasters a terrain verb reads as `RASTER
+<id|name>`; `SURFACE LIST JSON` is what `katana_terrain_list` hands an agent
+(`docs/mcp.md`).
+
+- **A raster is read at its true values.** `readRasterElevations` reads the
+  band from its file through GDAL, never the 8-bit display copy a reference
+  raster holds (audit QT-23), on the stride that keeps the extent under the
+  cap: 400 000 points unless `max=` says (audit QT-24). `AREA` cuts the raster
+  first, with GDAL's `raster clip --bbox`, so the cap is spent on the site and
+  not on the whole sheet a DEM was delivered as; a window reaching past the
+  raster takes what is there.
+- **A cloud gives its ground,** or every return when nothing is classified
+  as ground, which the reply says with a warning (`surfacePoints`, audit
+  QT-10). `classes=` chooses the ASPRS classes instead, for a person who
+  knows their data. The points are thinned to the cap on a stride.
+- **The drawing is taken by the shared scope** (`docs/cad.md`, "Scope and
+  filter"): `SURFACE FROM DRAWING WHERE DRAWN` is what the drawing shows,
+  which is what the dialog offers first; `SURFACE FROM LAYERS ground ONLY`
+  one layer. As the plan wrote it, `DRAWING` may also come before a
+  narrower scope (`FROM DRAWING LAYERS ground`), naming the source. The
+  rules that turn entities into survey points and breaklines are
+  `cad::geo::surfaceInput` (`include/katana/cad/geo/surface_input.hpp`),
+  moved out of the window so every front end shares them.
+- **A name is the source's,** made unique ("terrain (2)"), unless `NAME`
+  gives one, which must be free: AlreadyExists otherwise.
+- **The DEM is written by GDAL's `raster convert`** (`exportSurfaceRaster`):
+  the surface sampled at cell centres by `surfaceGrid`, stored as Float32
+  unless `type=Float64` asks, a GeoTIFF tiled and DEFLATE-compressed with the
+  floating-point predictor, a Cloud Optimised GeoTIFF with `cog` through
+  GDAL's COG driver, and `co=K=V` over those defaults. A file already there
+  is replaced only with OVERWRITE (AlreadyExists otherwise), as TO FILE's
+  rule has it.
+- **`TO SURFACE <name>`** keeps a GDAL run's raster as a surface
+  (`src/katana_app/geo/bindings.cpp`, T0's block): its true values on the
+  same capped stride, the spilled raster removed once read.
+
+### Decided
+
+- **A heightless entity is left out and counted, not put on the datum.** The
+  window's Surface From Drawing put an entity with no `elevation` or
+  `elevations` property at z = 0 and warned only when no entity at all had
+  one. A 2D drawing (the site plan sample) became a flat surface at 0, and
+  one plain line among levelled strings dug a trench to the datum - the
+  audit IO-01 failure again (absent is not zero). The moved rules leave it
+  out, count it (`skipped.heightless`, `vertices.heightless`) and refuse a
+  scope with fewer than three heighted points, with the scope record in the
+  refusal. Everything else is the window's rule, which
+  `SurfaceInput.OnLevelledDataTheRulesGiveExactlyWhatTheWindowGave` checks
+  against a verbatim copy of the old loop, and
+  `SurfaceInput.OnTheSitePlanTheHeightlessAreLeftOutWhereTheWindowPutThemOnTheDatum`
+  shows the difference on the sample: 13 vertices at 0 then, none now.
+- **A line is a breakline of its two ends.** The window ignored LINE
+  entities; a levelled line is as much a breakline as a two-vertex polyline.
+- **Float32 by default.** It is the DEM convention and half the size; near
+  1000 m its step is 6e-5 m, finer than any survey the surface came from.
+  `SurfaceVerbs.SurfaceExportFloat32ReadsBackTheSurfaceWithinFloat32Precision`
+  bounds the error by one Float32 step (7.63e-6 near 100): half from the
+  Float32 heights the fixture is read as, half from the storage.
+- **GDAL writes the DEM, not `GdalDataset::writeRaster`.** Only the
+  algorithm's convert reaches every driver's creation options and the COG
+  driver; the old writer made Float64 with none. The window's dialog and the
+  verb share the one writer.
+- **One dialog for the three Surface From items.** Each opens it on its own
+  source, with Reference Data's chosen cloud or raster first, so the options
+  the verb has (a window, a cap, classes, a name, the drawing's scope) are
+  in the window too. Its fields follow the plan's `<d>` rule
+  (`surfaceFromScope`, `surfaceFromCommand` ...), where the plan's text said
+  `surfaceScope`.
+
+### Not done
+
+- **TO SURFACE triangulates in the apply.** The GDAL verb's work is F0's and
+  ends with the run, so a raster kept as a surface is triangulated when the
+  job's result is applied - on the window's GUI thread, up to 1.7 s at the
+  400 000-point cap. SURFACE FROM triangulates in its work.
+- **A 12d archive's tins are still dropped by katana_cli's IMPORT.** The
+  session has a store now, and IMPORT's move into the one GIS executor (I0)
+  is where they are to be kept in it.
+- **Surfaces are not saved** with the project, as above.
+
 ## Background jobs
 
 Long computations no longer run on the GUI thread behind a wait cursor.
@@ -315,13 +418,14 @@ own `std::jthread`. The contract that keeps the single-threaded document safe:
   `JobRunner::of(window)` finds or creates a window's runner by object name, so
   the window needs no member for it.
 
-Surface From Point Cloud, Raster and Drawing are jobs. The cloud's ground points
-and the drawing's points and breaklines are copied on the GUI thread (the
-document is single-threaded). The raster is read by the job, from its path:
-GDAL keeps its error handlers per thread, and the reader opens its own dataset.
-A headless run (`--action`, `--trigger`) waits for the job, pumping a real
-event loop, so the screenshot or report that follows sees the surface. It also
-logs the longest event-loop pause.
+Surface From Point Cloud, Raster and Drawing are jobs: the SURFACE FROM line
+the dialog builds runs as the geoprocessing workbench's job
+(`src/katana_qt/geo/geo_workbench.hpp`). The cloud's ground points and the
+drawing's points and breaklines are copied when the line is prepared, on the
+GUI thread (the document is single-threaded). The raster is read by the job,
+from its path: GDAL keeps its error handlers per thread, and the reader opens
+its own dataset. A headless run waits for the job, pumping a real event loop,
+so the screenshot or report that follows sees the surface.
 
 The wait is `QEventLoop::exec()`, quit by the job's completion. The first
 version called `processEvents(WaitForMoreEvents)`, and on Windows, outside

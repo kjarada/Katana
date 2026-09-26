@@ -346,7 +346,7 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 | Vector - GDAL | Import Vector Data... | `describeSource`, then `importVector` with the dialog's `VectorImportOptions` (source layer, target layer, attributes) |
 | | Export Vector... | File's own action; now with a dialog for `VectorExportOptions` (selection, layer name, curve tolerance, properties) |
 | Raster - GDAL | Import Raster... | `importRaster` with a display resolution |
-| | Export Surface as DEM... | `exportSurfaceRaster` - GeoTIFF, Esri ASCII grid or IMG |
+| | Export Surface as DEM... | the `SURFACE EXPORT` line: `exportSurfaceRaster` through GDAL's `raster convert` - a tiled, compressed Float32 GeoTIFF, a COG, an Esri ASCII grid or IMG (`docs/terrain.md`) |
 | Point Cloud - PDAL | Import Point Cloud... | `importPointCloud` with a budget, an ASPRS class, and a COPC resolution when the file is COPC |
 | | Export Point Cloud... | `exportPointCloud` - LAS or LAZ |
 | | Convert Point Cloud to COPC... | `PointCloudEngine::convertToCopc` - every point, then an offer to import it |
@@ -383,8 +383,10 @@ Decisions, and what was rejected:
   it threefold). Surface From Point Cloud uses `surfacePoints`, the one policy:
   the ground returns (ASPRS class 2) when the cloud has any, otherwise every
   return - and the log says which, because a surface over trees presented as
-  ground is the failure QT-10 found. Choosing which raster or cloud now takes
-  the panel's selection, or the only one there is, before asking.
+  ground is the failure QT-10 found. Both are the SURFACE FROM verb's now,
+  the same on every front end (`docs/terrain.md`, "Surfaces on every front
+  end"); the Surface From dialog lists the rasters and clouds and chooses the
+  panel's selection first.
 * **Reference data goes with its drawing.** File > New, Open, and `NEW` or
   `OPEN` typed on the command line clear the rasters and clouds (QT-17): an
   orthophoto of the last site no longer sits behind the next one.
