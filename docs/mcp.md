@@ -208,7 +208,22 @@ Not started.
 
 ### D2: katana_references
 
-Not started.
+| In | Out |
+|---|---|
+| `{action?: "list" \| "show" \| "hide" \| "remove" \| "info" \| "opacity" \| "color" \| "rename" \| "overviews" \| "restore", id?: integer \| string, value?: number \| string, confirm?}` | `{ok, line, records: [...], references: [{record: "reference", id, kind, name, visible, opacity?, color?, ...}], missing: [...]}` |
+
+- **It is the REFS line** (`docs/interop.md`, "Reference layers"): built
+  from the action, the layer's id or name and the value, run through the
+  Session, its records handed back as objects - then `REFS JSON`, so every
+  reply carries the layers as they are after it, each with the id the next
+  call names it by.
+- **Overviews need `confirm: true`**: they are written beside the raster's
+  file. The tool refuses without it, and the verb refuses a line without
+  CONFIRM.
+- **`restore`** reads again the layers the project records, as opening it
+  does; `missing` lists those whose files could not be read.
+
+`McpServer.ReferencesActsOnALayerByIdOrNameAndListsThemAfter` pins it.
 
 ### I3 and I4: katana_import and katana_export options
 

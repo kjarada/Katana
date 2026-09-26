@@ -249,7 +249,7 @@ TEST_F(GisVerbs, RefsListsWhatWasImportedAsRecords)
 {
     auto empty = run("REFS");
     ASSERT_TRUE(empty.ok());
-    EXPECT_EQ(*empty, "references rasters=0 clouds=0");
+    EXPECT_EQ(*empty, "references rasters=0 clouds=0 missing=0");
 
     ASSERT_TRUE(run("IMPORT " + quoted(kSamples + "/terrain.asc")).ok());
     ASSERT_TRUE(run("IMPORT " + quoted(kSamples + "/survey_scan.las")).ok());

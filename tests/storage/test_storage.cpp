@@ -1566,8 +1566,65 @@ TEST_F(ProjectStoreRoundTrip, AMetadataKeyANewerBuildWroteSurvivesOpenSaveSave)
     EXPECT_EQ(again->metadata.unknownKeys,
               (std::map<std::string, std::string>{{"symbol_rotation_mode", "north"}}));
     EXPECT_EQ(again->metadata.name, "Forward");
-    // 9 keys this build writes + the 1 it does not know = 10 rows, each once.
-    EXPECT_EQ(metadataRows(projectDir() / "project.db").size(), 10u);
+    // 10 keys this build writes (reference_layers the tenth) + the 1 it does
+    // not know = 11 rows, each once.
+    EXPECT_EQ(metadataRows(projectDir() / "project.db").size(), 11u);
+}
+
+TEST_F(ProjectStoreRoundTrip, TheReferenceLayersAProjectRecordsRoundTripAsTheyWere)
+{
+    // Opaque to storage: the records come back exactly, in their order.
+    const Model model = sampleModel();
+    ProjectMetadata metadata;
+    metadata.referenceLayers = {R"({"version":1,"kind":"raster","name":"ortho ÿ"})",
+                                R"({"version":1,"kind":"pointcloud","name":"scan"})"};
+    auto store = ProjectStore::create(projectDir(), metadata);
+    ASSERT_TRUE(store.ok());
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok());
+    EXPECT_EQ(contents->metadata.referenceLayers, metadata.referenceLayers);
+    EXPECT_TRUE(contents->metadata.unknownKeys.empty()) << "reference_layers is this build's key";
+
+    metadata.referenceLayers.clear();
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+    EXPECT_TRUE(store->load()->metadata.referenceLayers.empty()) << "none, not one empty record";
+
+    // A record that would not read back as itself is refused.
+    for (const char* record : {"", "two\nrecords"}) {
+        ProjectMetadata refused;
+        refused.referenceLayers = {record};
+        const auto status = store->save(captureModel(model, refused));
+        ASSERT_FALSE(status.ok()) << "\"" << record << "\"";
+        EXPECT_EQ(status.error().code, ErrorCode::InvalidArgument);
+    }
+}
+
+TEST_F(ProjectStoreRoundTrip, AProjectFromBeforeReferenceLayersWereRecordedOpensWithNone)
+{
+    // Written before the key existed: no reference_layers row at all. It
+    // opens as it was, at the same schema - the records needed no migration -
+    // and its next save writes the key.
+    const Model model = sampleModel();
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        auto db = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(db.ok());
+        ASSERT_TRUE(db->execute("DELETE FROM metadata WHERE key = 'reference_layers'").ok());
+    }
+    auto store = ProjectStore::open(projectDir());
+    ASSERT_TRUE(store.ok());
+    EXPECT_EQ(*store->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+    EXPECT_TRUE(store->listBackups().empty()) << "nothing to migrate, so nothing backed up";
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok());
+    EXPECT_TRUE(contents->metadata.referenceLayers.empty());
+    EXPECT_TRUE(contents->metadata.unknownKeys.empty());
 }
 
 TEST_F(ProjectStoreRoundTrip, TheCustomisationAProjectWasDrawnWithRoundTrips)

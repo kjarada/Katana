@@ -783,7 +783,25 @@ executor and hears a job's end through `MainWindow::awaitJob`; MCP
 
 ### D2: Reference layers: manageable, persistent, with overviews
 
-Not started. `RasterOverlay::facts` is declared for it.
+Built (`docs/interop.md`, "Reference layers"): the REFS family on every
+front end, the project's record of its reference layers, REFS RESTORE on
+opening, the Reference Data panel as a builder of REFS lines, and MCP
+`katana_references`.
+
+- **Deviations.** The records are a metadata key, `reference_layers`, not a
+  table added by a storage migration: a schema change would make every
+  project this build saves unopenable by the builds before it, and back up
+  and migrate every older project on opening, for a few short records,
+  where a key an older build keeps as it was (`docs/model.md`, decision
+  D6). They are recorded at each save rather than whenever a layer changes,
+  so an import does not by itself make the drawing ask to be saved.
+  `REFS RESTORE` is added to the grammar: opening a project runs it, and an
+  agent can too. `RasterOverlay::facts` is still not filled: INFO reads a
+  band's facts from its file (D1), and nothing yet needs them held.
+- **For the other packages.** `interop::ReferenceSource` and its record
+  carry `displayStyle` (T2's) and `derivation`, so a shaded or derived
+  raster comes back as it was; `geo::recordReferences(context)` is what a
+  front end calls before a save.
 
 ## Not done
 

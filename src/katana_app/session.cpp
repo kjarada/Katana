@@ -33,6 +33,7 @@
 
 #if defined(KATANA_WITH_INTEROP)
 #include "geo/geo_verbs.hpp"
+#include "geo/references.hpp"
 #include "katana/interop/reference_data.hpp"
 #endif
 
@@ -440,6 +441,14 @@ bool runLine(SessionState& session, const std::string& line)
             metadata.customisation, session.customisationMissingAtOpen,
             session.document.styleLibrary(), session.customisation);
         session.document.setMetadata(std::move(metadata));
+#if defined(KATANA_WITH_INTEROP)
+        // And the reference layers it is worked on top of: their sources and
+        // display, read again when it opens (docs/interop.md, "Reference
+        // layers").
+        if (session.geo != nullptr) {
+            katana::app::geo::recordReferences(*session.geo);
+        }
+#endif
     }
     const auto reply = session.interpreter.run(line);
     if (!reply) {
@@ -476,6 +485,24 @@ bool runLine(SessionState& session, const std::string& line)
                       << sampleOf(missing, missing.size()) << "\n";
         }
     }
+#if defined(KATANA_WITH_INTEROP)
+    if ((verb == "NEW" || verb == "OPEN") && session.geo != nullptr) {
+        // The reference layers and the surfaces go with their drawing, as
+        // the window's do (audit QT-17); an OPEN then reads again the layers
+        // the project records. A layer whose file is gone is warned of by
+        // the restore, and the drawing is open all the same.
+        session.interop.reference.clear();
+        session.interop.surfaces.clear();
+        if (verb == "OPEN" && katana::app::geo::recordsReferences(*session.geo)) {
+            if (const auto restored = katana::app::geo::runNow(*session.geo, "REFS RESTORE")) {
+                std::cout << *restored << '\n';
+            } else {
+                std::cerr << "warning: the reference layers were not read again: "
+                          << restored.error().describe() << '\n';
+            }
+        }
+    }
+#endif
     return true;
 }
 

@@ -20,23 +20,6 @@ std::string yesNo(bool flag)
 
 } // namespace
 
-const char* colorWord(katana::interop::PointColorMode mode)
-{
-    switch (mode) {
-    case katana::interop::PointColorMode::Elevation:
-        return "elevation";
-    case katana::interop::PointColorMode::Intensity:
-        return "intensity";
-    case katana::interop::PointColorMode::Classification:
-        return "classification";
-    case katana::interop::PointColorMode::SourceColor:
-        return "rgb";
-    case katana::interop::PointColorMode::Flat:
-        return "flat";
-    }
-    return "elevation";
-}
-
 std::string referenceRecord(const katana::interop::RasterOverlay& raster)
 {
     return "reference id=" + std::to_string(raster.id) + " kind=raster name=" +
@@ -46,6 +29,7 @@ std::string referenceRecord(const katana::interop::RasterOverlay& raster)
            " georeferenced=" + yesNo(raster.hasGeotransform) + " visible=" + yesNo(raster.visible) +
            " opacity=" + recordNumber(raster.opacity) +
            " role=" + std::string(katana::interop::toString(raster.role)) +
+           " display=" + std::string(katana::interop::toWord(raster.displayStyle)) +
            " file=" + value(pathText(raster.source));
 }
 
@@ -55,7 +39,7 @@ std::string referenceRecord(const katana::interop::PointCloudLayer& cloud)
            value(cloud.name) + " points=" + std::to_string(cloud.points.size()) +
            " source_points=" + std::to_string(cloud.sourcePointCount) +
            " bounds=" + boundsText(cloud.worldBounds()) + " visible=" + yesNo(cloud.visible) +
-           " color=" + std::string(colorWord(cloud.colorMode)) +
+           " color=" + std::string(katana::interop::toWord(cloud.colorMode)) +
            " file=" + value(pathText(cloud.source));
 }
 

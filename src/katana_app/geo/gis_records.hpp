@@ -26,11 +26,6 @@ namespace katana::app::geo {
 // One named surface.
 [[nodiscard]] std::string surfaceRecord(const katana::terrain::NamedSurface& surface);
 
-// A point cloud's colouring as a line says it: elevation, intensity,
-// classification, rgb or flat - one word each, unlike the names the window's
-// menus show ("Source colour").
-[[nodiscard]] const char* colorWord(katana::interop::PointColorMode mode);
-
 // A record as a JSON object: {"record": kind, field: value ...}. A field is
 // a number when its text is one, true or false for yes and no, bounds a list
 // of four numbers - except the fields that are always words (a file, a name,
