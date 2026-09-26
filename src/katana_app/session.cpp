@@ -28,17 +28,13 @@
 #include "katana/core/text.hpp"
 #include "katana/entity/tables.hpp"
 #include "dxf_verbs.hpp"
+#include "import_records.hpp"
 #include "session.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
 #include "geo/geo_verbs.hpp"
-#include "katana/commands/entity_commands.hpp"
-#include "katana/interop/archive12d.hpp"
-#include "katana/interop/export.hpp"
-#include "katana/interop/import.hpp"
-#include "katana/interop/dataset_info.hpp"
+#include "geo/references.hpp"
 #include "katana/interop/reference_data.hpp"
-#include "katana/pointcloud/point_cloud_engine.hpp"
 #endif
 
 namespace {
@@ -56,25 +52,6 @@ bool isQuit(const std::string& line)
         verb += static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     }
     return verb == "QUIT" || verb == "EXIT";
-}
-
-// The rest of the line after the verb: leading and trailing blanks removed, and
-// one layer of surrounding quotes stripped, so a path with spaces works.
-// Outside the interoperability guard: the DXF verbs use it too, and they are
-// offered in a build with no GDAL.
-std::string argumentOf(const std::string& line, std::size_t verbLength)
-{
-    std::string rest = line.substr(verbLength);
-    const auto first = rest.find_first_not_of(" \t");
-    if (first == std::string::npos) {
-        return {};
-    }
-    const auto last = rest.find_last_not_of(" \t");
-    rest = rest.substr(first, last - first + 1);
-    if (rest.size() >= 2 && rest.front() == '"' && rest.back() == '"') {
-        rest = rest.substr(1, rest.size() - 2);
-    }
-    return rest;
 }
 
 std::string upperVerb(const std::string& line)
@@ -321,415 +298,17 @@ bool runCustomise(katana::cad::Document& document,
 
 #if defined(KATANA_WITH_INTEROP)
 
-// What the far-apart WARNING tells a person to do instead.
-constexpr const char* kReplaceAdvice =
-    "  undo, then re-import with  IMPORT <file> LOCAL  to move it as one piece so its "
-    "lower-left corner sits at 0,0, or  IMPORT <file> ALONGSIDE  to put that corner on the "
-    "drawing's\n";
-
-// LOCAL, ALONGSIDE or OFFSET: how a refusal names a placement.
-std::string placementKeyword(const katana::cad::ImportPlacement& placement)
-{
-    return placement.mode == katana::cad::ImportPlacementMode::Offset
-               ? std::string("OFFSET")
-               : katana::cad::placementWord(placement);
-}
-
-// IMPORT, EXPORT and REFS live here rather than in CommandInterpreter because
-// the interpreter belongs to katana_cad, which must not see GDAL or PDAL - that
-// separation is what lets katana_cad build with -DKATANA_BUILD_IO=OFF. The
-// front ends own the interoperability, and both front ends offer the same verbs.
+// What the geoprocessing executor's verbs - IMPORT, EXPORT, INFO <file>, REFS,
+// COPC, GDAL and the families after them (geo/geo_verbs.hpp) - keep beside
+// the drawing. They live above katana_cad, which must not see GDAL or PDAL:
+// that separation is what lets katana_cad build with -DKATANA_BUILD_IO=OFF.
 struct InteropState {
     katana::interop::ReferenceData reference;
     // The session's named surfaces (terrain/surface_store.hpp): what a
-    // geoprocessing line's SURFACE <name> finds.
+    // geoprocessing line's SURFACE <name> finds, and where an IMPORT puts a
+    // 12d archive's.
     katana::terrain::SurfaceStore surfaces;
 };
-
-// IMPORT <file> LOCAL | ALONGSIDE | OFFSET=dE,dN moves the data as one piece:
-// its lower-left corner to 0,0, onto the drawing's, or by the offset, instead
-// of leaving it at its own survey coordinates (cad/import_placement.hpp).
-// `placement` is read off the line with the path by
-// CommandInterpreter::importArgument. The data is read again with the shift,
-// so the one reader moves every kind of geometry alike.
-bool importPath(katana::cad::Document& document, InteropState& state, const std::string& text,
-                const katana::cad::ImportPlacement& placement)
-{
-    namespace interop = katana::interop;
-    namespace cmd = katana::commands;
-    const std::filesystem::path file(text);
-    const auto existingBounds = document.model().entities.bounds();
-
-    switch (interop::kindForPath(file)) {
-    case interop::SourceKind::Vector: {
-        interop::VectorImportOptions options;
-        auto imported = interop::importVector(file, options);
-        if (!imported) {
-            std::cerr << "error: " << imported.error().describe() << '\n';
-            return false;
-        }
-        const katana::cad::ImportShift placed =
-            katana::cad::resolveImportShift(placement, existingBounds, imported->bounds);
-        if (placed.shift) {
-            options.originShift = *placed.shift;
-            imported = interop::importVector(file, options);
-            if (!imported) {
-                std::cerr << "error: " << imported.error().describe() << '\n';
-                return false;
-            }
-        }
-        auto transaction = std::make_unique<cmd::Transaction>("IMPORT");
-        for (const std::string& name : imported->layersNeeded) {
-            if (!document.model().layers.contains(name)) {
-                katana::entity::Layer layer;
-                layer.name = name;
-                transaction->add(cmd::createLayer(layer));
-            }
-        }
-        const std::size_t count = imported->entities.size();
-        const auto bounds = imported->bounds;
-        transaction->add(cmd::createEntities(std::move(imported->entities)));
-        const auto status = document.execute(std::move(transaction));
-        if (!status) {
-            std::cerr << "error: " << status.error().describe() << '\n';
-            return false;
-        }
-        std::cout << "imported " << count << " entities from " << file.filename().string()
-                  << '\n';
-        if (!placed.said.empty()) {
-            std::cout << "  " << placed.said << '\n';
-        }
-        for (const std::string& warning : imported->warnings) {
-            std::cout << "  " << warning << '\n';
-        }
-        if (!bounds.empty()) {
-            std::cout << "  extent " << bounds.min.x << "," << bounds.min.y << " to "
-                      << bounds.max.x << "," << bounds.max.y << '\n';
-        }
-        // Said out loud rather than left for the user to discover by zooming to
-        // extents and finding their drawing has become a dot.
-        const auto advice = interop::advisePlacement(existingBounds, bounds);
-        if (advice.farApart) {
-            std::cout << "  WARNING: " << advice.message << '\n' << kReplaceAdvice;
-        }
-        return true;
-    }
-    case interop::SourceKind::Archive12d: {
-        interop::Archive12dImportOptions options;
-        auto imported = interop::importArchive12d(file, options);
-        if (!imported) {
-            std::cerr << "error: " << imported.error().describe() << '\n';
-            return false;
-        }
-        const katana::cad::ImportShift placed =
-            katana::cad::resolveImportShift(placement, existingBounds, imported->bounds);
-        if (placed.shift) {
-            options.originShift = *placed.shift;
-            imported = interop::importArchive12d(file, options);
-            if (!imported) {
-                std::cerr << "error: " << imported.error().describe() << '\n';
-                return false;
-            }
-        }
-        // Layers, entities and alignments are ONE undo step, like any import.
-        auto transaction = std::make_unique<cmd::Transaction>("IMPORT");
-        for (const katana::entity::Layer& layer : imported->layersNeeded) {
-            if (!document.model().layers.contains(layer.name)) {
-                transaction->add(cmd::createLayer(layer));
-            }
-        }
-        for (const katana::entity::Style& style : imported->stylesNeeded) {
-            if (!document.model().styles.contains(style.name)) {
-                transaction->add(cmd::createStyle(style));
-            }
-        }
-        const std::size_t count = imported->entities.size();
-        if (count != 0) {
-            transaction->add(cmd::createEntities(std::move(imported->entities)));
-        }
-        std::size_t alignments = 0;
-        for (katana::entity::Alignment& alignment : imported->alignments) {
-            // A name the drawing already has would fail the whole transaction.
-            const std::string base = alignment.name;
-            for (int copy = 2; document.model().alignments.contains(alignment.name); ++copy) {
-                alignment.name = base + " (" + std::to_string(copy) + ")";
-            }
-            transaction->add(cmd::createAlignment(alignment));
-            ++alignments;
-        }
-        const auto status = document.execute(std::move(transaction));
-        if (!status) {
-            std::cerr << "error: " << status.error().describe() << '\n';
-            return false;
-        }
-        std::cout << "imported " << count << " entities and " << alignments
-                  << " alignments from " << file.filename().string() << " ("
-                  << imported->encoding;
-        if (!imported->archiveVersion.empty()) {
-            std::cout << ", 12d archive " << imported->archiveVersion;
-        }
-        std::cout << ")\n";
-        if (!placed.said.empty()) {
-            std::cout << "  " << placed.said << '\n';
-        }
-        for (const auto& tally : imported->tally) {
-            std::cout << "  " << tally.keyword << ": " << tally.read << " read, " << tally.imported
-                      << " imported\n";
-        }
-        for (const auto& surface : imported->surfaces) {
-            // The CLI has nowhere to keep a surface; the desktop application
-            // does. Said, so that "12 tins read" is not taken for "12 kept".
-            std::cout << "  surface \"" << surface.name << "\": "
-                      << surface.surface.triangleCount() << " triangles (read and checked; the "
-                      << "CLI holds no surfaces - import in the desktop application to use it)\n";
-        }
-        if (!imported->meshes.empty()) {
-            // Same as a surface: read, checked, and nowhere for the CLI to
-            // keep it. Said in numbers so it is not taken for kept.
-            std::size_t triangles = 0;
-            for (const auto& mesh : imported->meshes) {
-                triangles += mesh.mesh.triangleCount();
-            }
-            std::cout << "  " << imported->meshes.size() << " meshes, " << triangles
-                      << " triangles (read and checked; the CLI holds no meshes - import in the "
-                      << "desktop application to see them)\n";
-        }
-        for (auto& cloud : imported->clouds) {
-            std::cout << "  point cloud \"" << cloud.name << "\": " << cloud.points.size()
-                      << " points\n";
-            state.reference.add(std::move(cloud));
-        }
-        for (const std::string& warning : imported->warnings) {
-            std::cout << "  " << warning << '\n';
-        }
-        if (!imported->bounds.empty()) {
-            std::cout << "  extent " << imported->bounds.min.x << "," << imported->bounds.min.y
-                      << " to " << imported->bounds.max.x << "," << imported->bounds.max.y << '\n';
-        }
-        const auto advice = interop::advisePlacement(existingBounds, imported->bounds);
-        if (advice.farApart) {
-            std::cout << "  WARNING: " << advice.message << '\n' << kReplaceAdvice;
-        }
-        return true;
-    }
-    case interop::SourceKind::Raster:
-    case interop::SourceKind::PointCloud:
-        // Reference data is drawn at its own coordinates and has no shift to
-        // take, so a placement is refused by name rather than dropped - or, as
-        // LOCAL was, left on the end of the path to fail as a missing file
-        // "ortho.tif LOCAL" (audit QT-13, QT-14).
-        if (placement.mode != katana::cad::ImportPlacementMode::Keep) {
-            std::cerr << "error: InvalidArgument: " << placementKeyword(placement)
-                      << " is not supported for rasters and point clouds, which are reference "
-                         "data drawn at their own coordinates\n";
-            return false;
-        }
-        break;
-    default:
-        break;
-    }
-
-    switch (interop::kindForPath(file)) {
-    case interop::SourceKind::Raster: {
-        auto raster = interop::importRaster(file);
-        if (!raster) {
-            std::cerr << "error: " << raster.error().describe() << '\n';
-            return false;
-        }
-        const int w = raster->width;
-        const int h = raster->height;
-        const bool georeferenced = raster->hasGeotransform;
-        const auto bounds = raster->worldBounds();
-        state.reference.add(std::move(*raster));
-        std::cout << "imported raster " << file.filename().string() << " (" << w << "x" << h
-                  << " px)";
-        if (georeferenced) {
-            std::cout << " covering " << bounds.min.x << ',' << bounds.min.y << " to "
-                      << bounds.max.x << ',' << bounds.max.y;
-        } else {
-            std::cout << " (not georeferenced; placed at the origin)";
-        }
-        std::cout << '\n';
-        return true;
-    }
-    case interop::SourceKind::PointCloud: {
-        auto cloud = interop::importPointCloud(file);
-        if (!cloud) {
-            std::cerr << "error: " << cloud.error().describe() << '\n';
-            return false;
-        }
-        const std::size_t shown = cloud->points.size();
-        const std::uint64_t total = cloud->sourcePointCount;
-        const bool decimated = cloud->isDecimated();
-        state.reference.add(std::move(*cloud));
-        std::cout << "imported point cloud " << file.filename().string() << " (" << shown
-                  << " points";
-        if (decimated) {
-            std::cout << " sampled from " << total;
-        }
-        std::cout << ")\n";
-        return true;
-    }
-    case interop::SourceKind::Vector:
-    case interop::SourceKind::Archive12d:
-    case interop::SourceKind::Unknown:
-        break;
-    }
-    std::cerr << "error: Unsupported: no importer for '" << file.extension().string() << "'\n";
-    return false;
-}
-
-// INFO <file>: what a GIS file or point cloud holds, without importing it. The
-// wording is interop::formatDescription's, which the desktop application's
-// GIS > Dataset Information shows too.
-bool describePath(const std::string& text)
-{
-    auto description = katana::interop::describeSource(std::filesystem::path(text));
-    if (!description) {
-        std::cerr << "error: " << description.error().describe() << '\n';
-        return false;
-    }
-    std::cout << katana::interop::formatDescription(*description);
-    return true;
-}
-
-// COPC <source> <destination.copc.laz>: the whole file rewritten as a Cloud
-// Optimised Point Cloud, every point kept, so that later reads can ask for a
-// level of detail instead of decimating (PLAN.MD Phase 17). Each path is one
-// word or quoted, read by the interpreter's own rules - as the window's COPC
-// reads them - so a path with spaces is quoted and one without need not be.
-bool convertToCopc(const std::string& line)
-{
-    const auto words = katana::cad::CommandInterpreter::tokenize(line);
-    if (!words) {
-        std::cerr << "error: " << words.error().describe() << '\n';
-        return false;
-    }
-    if (words->size() != 3) {
-        std::cerr << "error: InvalidArgument: usage: COPC <source> <destination.copc.laz>\n";
-        return false;
-    }
-    const std::vector<std::string> paths(words->begin() + 1, words->end());
-    const auto status = katana::pointcloud::PointCloudEngine{}.convertToCopc(paths[0], paths[1]);
-    if (!status) {
-        std::cerr << "error: " << status.error().describe() << '\n';
-        return false;
-    }
-    std::cout << "converted " << std::filesystem::path(paths[0]).filename().string() << " to "
-              << std::filesystem::path(paths[1]).filename().string() << " (COPC)\n";
-    return true;
-}
-
-bool exportPath(katana::cad::Document& document, const std::string& text)
-{
-    namespace interop = katana::interop;
-    const std::filesystem::path target(text);
-    if (interop::kindForPath(target) == interop::SourceKind::Archive12d) {
-        // No surfaces: the CLI holds none.
-        auto archive = interop::exportArchive12d(document.model(), {}, target);
-        if (!archive) {
-            std::cerr << "error: " << archive.error().describe() << '\n';
-            return false;
-        }
-        std::cout << "exported " << archive->entitiesWritten << " entities and "
-                  << archive->alignmentsWritten << " alignments (12d archive, "
-                  << archive->bytesWritten << " bytes)\n";
-        for (const std::string& warning : archive->warnings) {
-            std::cout << "  " << warning << '\n';
-        }
-        return true;
-    }
-    auto result = interop::exportVector(document.model(), target);
-    if (!result) {
-        std::cerr << "error: " << result.error().describe() << '\n';
-        return false;
-    }
-    std::cout << "exported " << result->featuresWritten << " features (" << result->driver
-              << ")\n";
-    for (const std::string& warning : result->warnings) {
-        std::cout << "  " << warning << '\n';
-    }
-    return true;
-}
-
-void listReferences(const InteropState& state)
-{
-    if (state.reference.empty()) {
-        std::cout << "no reference layers\n";
-        return;
-    }
-    for (const auto& raster : state.reference.rasters()) {
-        std::cout << raster.id << "  Raster  " << raster.name << "  " << raster.width << "x"
-                  << raster.height << " px\n";
-    }
-    for (const auto& cloud : state.reference.pointClouds()) {
-        std::cout << cloud.id << "  PointCloud  " << cloud.name << "  " << cloud.points.size()
-                  << " pts\n";
-    }
-}
-
-// nullopt when the line is not one of the interoperability verbs.
-std::optional<bool> runInterop(katana::cad::Document& document, InteropState& state,
-                               const std::string& line)
-{
-    const std::string verb = upperVerb(line);
-    if (verb == "IMPORT") {
-        const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
-        const auto argument = katana::cad::CommandInterpreter::importArgument(
-            space == std::string::npos ? std::string_view{} : std::string_view(line).substr(space));
-        if (!argument) {
-            std::cerr << "error: " << argument.error().describe() << '\n';
-            return false;
-        }
-        if (argument->path.empty()) {
-            std::cerr << "error: InvalidArgument: usage: IMPORT <file> [LOCAL | ALONGSIDE | "
-                         "OFFSET=dE,dN]\n";
-            return false;
-        }
-        return importPath(document, state, argument->path, argument->placement);
-    }
-    if (verb == "EXPORT") {
-        const std::string argument = argumentOf(line, line.find_first_of(" \t") == std::string::npos
-                                                          ? line.size()
-                                                          : line.find_first_of(" \t"));
-        if (argument.empty()) {
-            std::cerr << "error: InvalidArgument: usage: EXPORT <file>\n";
-            return false;
-        }
-        return exportPath(document, argument);
-    }
-    if (verb == "REFS") {
-        listReferences(state);
-        return true;
-    }
-    if (verb == "INFO" || verb == "COPC") {
-        const std::size_t space = line.find_first_of(" \t");
-        const std::string argument = argumentOf(line, space == std::string::npos ? line.size() : space);
-        if (argument.empty()) {
-            std::cerr << "error: InvalidArgument: usage: " << verb
-                      << (verb == "INFO" ? " <file>\n" : " <source> <destination.copc.laz>\n");
-            return false;
-        }
-        // INFO 12 is the interpreter's: an entity, described. Every INFO was
-        // once taken for a file here, so katana_describe_entity answered
-        // "file does not exist" in every build with GDAL. A file that is
-        // really called 12 is still described - but INFO #12 is always the
-        // entity: katana_describe_entity and the plan view's Entity
-        // Information send it, and a file called 1 or #1 where the program
-        // was started (a mistyped shell 2>1 makes one) once turned both into
-        // "no importer reads files named ''".
-        std::error_code error;
-        if (verb == "INFO" && katana::cad::CommandInterpreter::isEntityId(argument) &&
-            (argument.starts_with('#') ||
-             !std::filesystem::exists(std::filesystem::path(argument), error))) {
-            return std::nullopt;
-        }
-        // COPC takes the whole line: argumentOf strips one pair of
-        // surrounding quotes, which would run two quoted paths together.
-        return verb == "INFO" ? describePath(argument) : convertToCopc(line);
-    }
-    return std::nullopt;
-}
 
 #endif // KATANA_WITH_INTEROP
 
@@ -811,30 +390,11 @@ bool runLine(SessionState& session, const std::string& line)
         return runCustomise(session.document, session.customisation,
                             session.customisationMissingAtOpen, paths, replace);
     }
-    // A .dxf is read and written natively, with or without GDAL (dxf_verbs.hpp).
-    if (const std::string verb = upperVerb(line); verb == "IMPORT" || verb == "EXPORT") {
-        const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
-        const std::string_view rest =
-            space == std::string::npos ? std::string_view{} : std::string_view(line).substr(space);
-        using Argument = katana::cad::CommandInterpreter::ImportArgument;
-        const katana::core::Result<Argument> argument =
-            verb == "IMPORT" ? katana::cad::CommandInterpreter::importArgument(rest)
-                             : katana::core::Result<Argument>(Argument{
-                                   argumentOf(line, space == std::string::npos ? line.size()
-                                                                               : space),
-                                   {}});
-        if (!argument) {
-            std::cerr << "error: " << argument.error().describe() << '\n';
-            return false;
-        }
-        if (const std::optional<bool> handled = katana::app::runDxfVerb(
-                session.document, verb, argument->path, argument->placement)) {
-            return *handled;
-        }
-    }
 #if defined(KATANA_WITH_INTEROP)
-    // The geoprocessing verbs (GDAL and the families after it) run through the
-    // one executor, inline: a session has nobody to wait for a job.
+    // IMPORT, EXPORT, INFO <file>, REFS, COPC, GDAL and the families after
+    // them run through the one executor the window runs them through, inline:
+    // a session has nobody to wait for a job. A .dxf among them is read and
+    // written natively (dxf_verbs.hpp).
     if (session.geo != nullptr && katana::app::geo::handles(line)) {
         const auto reply = katana::app::geo::runNow(*session.geo, line);
         if (!reply) {
@@ -846,11 +406,26 @@ bool runLine(SessionState& session, const std::string& line)
         }
         return true;
     }
-    // Interoperability verbs are handled before the interpreter sees the line,
-    // because they live above katana_cad rather than inside it.
-    if (const std::optional<bool> handled =
-            runInterop(session.document, session.interop, line)) {
-        return *handled;
+#else
+    // Without GDAL, IMPORT and EXPORT are a .dxf's alone, read and written
+    // natively by the same steps the executor runs (dxf_verbs.hpp).
+    if (const std::string verb = upperVerb(line); verb == "IMPORT" || verb == "EXPORT") {
+        const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
+        const std::string_view rest =
+            space == std::string::npos ? std::string_view{} : std::string_view(line).substr(space);
+        using Argument = katana::cad::CommandInterpreter::ImportArgument;
+        const katana::core::Result<Argument> argument =
+            verb == "IMPORT" ? katana::cad::CommandInterpreter::importArgument(rest)
+                             : katana::core::Result<Argument>(
+                                   Argument{katana::app::restOfLine(line), {}});
+        if (!argument) {
+            std::cerr << "error: " << argument.error().describe() << '\n';
+            return false;
+        }
+        if (const std::optional<bool> handled = katana::app::runDxfVerb(
+                session.document, verb, argument->path, argument->placement)) {
+            return *handled;
+        }
     }
 #endif
     // The project records the customisation it was drawn with - the files'
@@ -866,6 +441,14 @@ bool runLine(SessionState& session, const std::string& line)
             metadata.customisation, session.customisationMissingAtOpen,
             session.document.styleLibrary(), session.customisation);
         session.document.setMetadata(std::move(metadata));
+#if defined(KATANA_WITH_INTEROP)
+        // And the reference layers it is worked on top of: their sources and
+        // display, read again when it opens (docs/interop.md, "Reference
+        // layers").
+        if (session.geo != nullptr) {
+            katana::app::geo::recordReferences(*session.geo);
+        }
+#endif
     }
     const auto reply = session.interpreter.run(line);
     if (!reply) {
@@ -902,6 +485,24 @@ bool runLine(SessionState& session, const std::string& line)
                       << sampleOf(missing, missing.size()) << "\n";
         }
     }
+#if defined(KATANA_WITH_INTEROP)
+    if ((verb == "NEW" || verb == "OPEN") && session.geo != nullptr) {
+        // The reference layers and the surfaces go with their drawing, as
+        // the window's do (audit QT-17); an OPEN then reads again the layers
+        // the project records. A layer whose file is gone is warned of by
+        // the restore, and the drawing is open all the same.
+        session.interop.reference.clear();
+        session.interop.surfaces.clear();
+        if (verb == "OPEN" && katana::app::geo::recordsReferences(*session.geo)) {
+            if (const auto restored = katana::app::geo::runNow(*session.geo, "REFS RESTORE")) {
+                std::cout << *restored << '\n';
+            } else {
+                std::cerr << "warning: the reference layers were not read again: "
+                          << restored.error().describe() << '\n';
+            }
+        }
+    }
+#endif
     return true;
 }
 
@@ -965,16 +566,8 @@ std::string Session::helpText()
             "          libraries (.4d) and survey code files (.mapfile), merged\n"
             "          into what is loaded; CUSTOMISE alone reports what is loaded\n";
 #if defined(KATANA_WITH_INTEROP)
-    text += "Interop   IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN] | EXPORT <file> | REFS\n"
-            "          vector -> entities; raster and point cloud -> "
-            "reference layers\n"
-            "          LOCAL: lower-left corner to 0,0; ALONGSIDE: onto the drawing's;\n"
-            "          OFFSET: moved by dE,dN\n"
-            "          INFO <file>  what a GIS file or point cloud holds, "
-            "without importing it\n"
-            "          (INFO <id> describes an entity, when no file has that name)\n"
-            "          COPC <source> <destination.copc.laz>  rewrite a point "
-            "cloud as COPC\n";
+    // IMPORT, EXPORT, INFO <file>, REFS and COPC are the executor's, so its
+    // table says them, as it does in the window's HELP.
     text += katana::app::geo::helpText();
 #else
     text += "Interop   IMPORT <file.dxf> [LOCAL | ALONGSIDE | OFFSET=dE,dN] | EXPORT <file.dxf>\n"

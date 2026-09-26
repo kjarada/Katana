@@ -67,8 +67,8 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_save_project` | save in place, or as a project at `path` | `SAVE` / `SAVE "<path>"` |
 | `katana_list_entities` | every entity with its id, layer and measurements | `LIST` |
 | `katana_describe_entity` | one entity in full | `INFO #<id>` |
-| `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import") | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
-| `katana_export` | DXF always; GIS vector formats with `KATANA_BUILD_IO` | `EXPORT "<path>"` |
+| `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
+| `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; `structuredContent.records` holds the `exported` record and any `warning` | `EXPORT "<path>"` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
@@ -188,11 +188,42 @@ Not started.
 
 ### D1: katana_dataset_info
 
-Not started.
+| In | Out |
+|---|---|
+| `{path, layer?, stats?, check?, json?}`: a file, a folder, a `/vsi` path or a URL | `{ok, line, records: [{record: "dataset" \| "raster" \| "band" \| "overview" \| "subdataset" \| "layer" \| "field" \| "pointcloud" \| "found" \| "check" \| "problem" \| "warning", ...fields}], gdal?}` |
+
+- **It is the INFO line.** The tool builds `INFO "<path>" [LAYER <name>]
+  [STATS] [CHECK]`, runs it through the Session and hands back its records as
+  objects (`geo::recordsJson`): numbers as numbers, `yes`/`no` as booleans,
+  `bounds` as `[x0, y0, x1, y1]`, an empty value as null - absent, not zero.
+- **`json: true` adds GDAL's own description** as `gdal`, from `INFO ...
+  JSON`: `raster info`, `vector info` and, for a multidimensional format,
+  `mdim info`, verbatim.
+- **It reads, and writes nothing**: `stats` computes the bands' statistics
+  without leaving an `.aux.xml` beside the file. Its hints are read-only and
+  open-world, since a path may be a URL.
+
+`McpServer.DatasetInfoReturnsRecordsAndGdalsJson` pins it; the records are
+`docs/interop.md`'s ("Dataset information").
 
 ### D2: katana_references
 
-Not started.
+| In | Out |
+|---|---|
+| `{action?: "list" \| "show" \| "hide" \| "remove" \| "info" \| "opacity" \| "color" \| "rename" \| "overviews" \| "restore", id?: integer \| string, value?: number \| string, confirm?}` | `{ok, line, records: [...], references: [{record: "reference", id, kind, name, visible, opacity?, color?, ...}], missing: [...]}` |
+
+- **It is the REFS line** (`docs/interop.md`, "Reference layers"): built
+  from the action, the layer's id or name and the value, run through the
+  Session, its records handed back as objects - then `REFS JSON`, so every
+  reply carries the layers as they are after it, each with the id the next
+  call names it by.
+- **Overviews need `confirm: true`**: they are written beside the raster's
+  file. The tool refuses without it, and the verb refuses a line without
+  CONFIRM.
+- **`restore`** reads again the layers the project records, as opening it
+  does; `missing` lists those whose files could not be read.
+
+`McpServer.ReferencesActsOnALayerByIdOrNameAndListsThemAfter` pins it.
 
 ### I3 and I4: katana_import and katana_export options
 
@@ -232,7 +263,10 @@ project that matters.
 
 * `src/katana_app/session.cpp` - the session both front ends share: the
   Document, its `CommandInterpreter`, and the verbs above `katana_cad`
-  (`CUSTOMISE`, the DXF and GIS `IMPORT`/`EXPORT`, `INFO <file>`, `COPC`).
+  (`CUSTOMISE`; `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` and the
+  geoprocessing verbs through the executor in `src/katana_app/geo/`, the one
+  the window runs; a build without GDAL has the DXF `IMPORT` and `EXPORT` of
+  `dxf_verbs.cpp`).
   `CODE` and `MAPFILE` were here until 2026-09-26 and are the interpreter's
   now, so the window has them too (`docs/cad.md`). It was
   `katana_cli`'s `main.cpp`; `src/katana_app/main.cpp` is now only the command
