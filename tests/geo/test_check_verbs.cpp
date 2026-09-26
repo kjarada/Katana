@@ -225,6 +225,29 @@ TEST_F(GisCheck, AnEnclosedGapNarrowerThanGapIsReported)
     EXPECT_EQ(coverage->get("gap"), "0.05");
 }
 
+TEST_F(GisCheck, WhereAProblemIsIsSaidToTheMillimetre)
+{
+    // Four rectangles about a 0.02 m gap (the reviewer's case): the gap along
+    // R's west edge, x = 50.02 from y = 0 to 40, is found at its middle,
+    // (50.02, 20). GEOS works it out as 20.000000000000007, which the reply
+    // printed; a coordinate is said to the millimetre, as length= is.
+    rect(0, 0, 50, 40, "lots");
+    const EntityId right = rect(50.02, 0, 100, 40, "lots");
+    rect(0, 40, 100, 80, "lots");
+    rect(0, -40, 100, 0, "lots");
+    const std::string reply = ok("GIS COVERAGE CHECK LAYERS lots gap=0.05");
+    bool found = false;
+    for (const auto& problem : problems(reply)) {
+        const std::string at = problem.get("at").value_or("");
+        EXPECT_EQ(at.find("0000000"), std::string::npos) << reply;
+        if (problem.get("entity") == std::to_string(right)) {
+            EXPECT_EQ(at, "50.02,20") << reply;
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found) << reply;
+}
+
 TEST_F(GisCheck, CleanWithoutReplaceIsRefused)
 {
     gapFixture();

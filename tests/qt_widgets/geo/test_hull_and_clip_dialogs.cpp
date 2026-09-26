@@ -7,6 +7,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
@@ -158,6 +159,9 @@ TEST(GisClipDialog, ItsLineCutsAPipeInPlaceThroughTheExecutor)
     dialog.run();
     EXPECT_TRUE(dialog.replyText().contains("target=in-place created=0 updated=1"))
         << dialog.replyText().toStdString();
+    // An in-place reply names no layer: the status said "... deleted on .".
+    EXPECT_EQ(dialog.findChild<QLabel*>("gisClipStatus")->text(),
+              "Done as one undo step: 0 created, 1 changed, 0 deleted, in place.");
     const auto* pipe = window.document.model().entities.find(1);
     ASSERT_NE(pipe, nullptr);
     EXPECT_NEAR(std::get<katana::geometry::Segment2>(pipe->geometry).length(), 30.0, 1e-9);

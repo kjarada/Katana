@@ -107,8 +107,12 @@ Result<std::vector<std::string>> fieldWords(const std::string* keep, const std::
 
 // The fields a piece carries, as the drawing's properties: input_owner is
 // owner where only one side has an owner; katana_id names the subject
-// (gis.source when drawn) and the overlay's becomes gis.with; the drawing's
-// bookkeeping (layer, style, colour, type) is dropped.
+// (gis.source when drawn) and the overlay's becomes gis.with. Dropped from
+// either side, prefixed or not (difference, update and clip give the
+// subject's fields unprefixed): the drawing's bookkeeping (layer, style,
+// colour, type), and gis.* provenance - an overlay made by another verb
+// carries gis.op and gis.source, which on a row read as the piece's own,
+// and the piece drawn is given its own.
 gp::FeatureTable renamed(const gp::FeatureTable& table)
 {
     std::map<std::string, int> sides; // base name -> sides it appears on
@@ -135,7 +139,7 @@ gp::FeatureTable renamed(const gp::FeatureTable& table)
         std::string name = table.fields[f].name;
         if (base == "katana_id") {
             name = side == "method" ? "gis.with" : "katana_id";
-        } else if (igeo::isBookkeepingField(base) && !side.empty()) {
+        } else if (igeo::isBookkeepingField(base) || base.starts_with("gis.")) {
             continue;
         } else if (!side.empty() && sides[base] == 1) {
             name = base;
