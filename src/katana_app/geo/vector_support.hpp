@@ -46,6 +46,8 @@ struct WordRules {
     bool target = false;
     // The verb's usage, for the refusal of a word it does not know.
     std::string usage;
+    // The words that begin the target: TO, and AS for GIS SQL's AS REPORT.
+    std::vector<std::string> targetWords{"TO"};
 };
 
 struct VerbWords {
@@ -194,6 +196,59 @@ copiesOf(const katana::cad::Document& document, const std::vector<katana::entity
 // A value of a feature's field as an entity property; nullopt for a null.
 [[nodiscard]] std::optional<katana::entity::PropertyValue>
 propertyOf(const katana::gis::processing::FieldValue& value);
+
+// ---- rows: what a query or an overlay reports --------------------------------------------------
+
+// One feature's fields as a reply's row: a field whose value is null has no
+// cell, so a row record says nothing of it rather than an empty value.
+struct Row {
+    std::vector<std::pair<std::string, std::string>> cells;
+};
+
+struct RowOptions {
+    // katana_id as entity=, gis.with as with=: an overlay's pieces.
+    bool entityKeys = false;
+    // The area= of an area, the length= of a line.
+    bool measures = false;
+};
+
+// A value as a row writes it: 12, 0.5, true, text as it is; empty for null.
+[[nodiscard]] std::string cellText(const katana::gis::processing::FieldValue& value);
+// A column's name as a row's key: a blank, '=' or '"' - which would break the
+// record - becomes '_' ("count(*) n" is count(*)_n). The column record says
+// which name each key stands for.
+[[nodiscard]] std::string rowKey(std::string_view name);
+[[nodiscard]] std::vector<Row> rowsOf(const katana::gis::processing::FeatureTable& table,
+                                      const RowOptions& options = {});
+// row <field>=<value> ...
+[[nodiscard]] std::string rowRecord(const Row& row);
+// column name=<field> key=<its row key> type=string|integer|real|boolean|date|
+// datetime, one per field: what a reader of the rows needs to know a 7 from
+// a "7".
+[[nodiscard]] std::vector<std::string> columnRecords(const katana::gis::processing::FeatureTable& table);
+// The rows as CSV: `columns` in that order, or as the rows first name them
+// when empty; a cell quoted when it holds a comma, a quote or a line break.
+[[nodiscard]] katana::core::Status writeCsv(const std::string& path, const std::vector<Row>& rows,
+                                            const std::vector<std::string>& columns = {});
+
+// TO REPORT: every table's columns and rows, then
+// output arg=<arg> kind=vector target=report rows=<n>.
+[[nodiscard]] std::vector<std::string> reportRecords(const katana::gis::processing::FeatureSet& set,
+                                                     std::string_view arg);
+// TO SELECTION: the entities the katana_id column names become the selection
+// (the drawing's own; not an undo step, as SELECT is not); the record
+// output arg=<arg> kind=vector target=selection selected=<n> missing=<m>.
+// InvalidArgument when no table has a katana_id column to select by.
+[[nodiscard]] katana::core::Result<std::string>
+selectFeatures(Context& context, const katana::gis::processing::FeatureSet& set, std::string_view arg);
+
+// A statement as one quoted word of a line: its line breaks as blanks, and -
+// for SQLite - its double-quoted identifiers as [bracketed] ones, which
+// SQLite reads alike and a line can carry ("gis.source" is [gis.source]).
+// InvalidArgument for a double quote no line can carry: one inside a '...'
+// literal, one never closed, or any in OGR SQL. What the SQL dialog and
+// katana_gis_query write their GIS SQL lines with.
+[[nodiscard]] katana::core::Result<std::string> sqlForLine(std::string_view sql, bool sqlite);
 
 // ---- reshaping entities in place ---------------------------------------------------------------
 

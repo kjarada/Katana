@@ -153,6 +153,9 @@ class GisToolDialog : public QDialog {
     [[nodiscard]] virtual QString summary(const QString& reply) const;
     // Adds <d>Problems below the fields: a check's dialog.
     void addProblemsTable();
+    // Told each reply shown - for a dialog that reads more of it than the
+    // frame does (Query with SQL's grid). An empty reply for a failure.
+    virtual void replied(const QString& reply) { (void)reply; }
     [[nodiscard]] const GisDialogContext& context() const { return context_; }
     [[nodiscard]] bool documentAlive() const;
 
