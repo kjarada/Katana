@@ -488,6 +488,48 @@ TEST_F(McpServer, ImportReturnsStructuredRecords)
     EXPECT_EQ(written["features"], 9);
 }
 
+TEST_F(McpServer, ImportTakesItsFilterScopeAndPreviewArgumentsAsTheWordsAPersonTypes)
+{
+    // tests/geo/data/lots.geojson, by hand: A and B kind=lot, 50 x 40 side by
+    // side from (0, 0); C kind=corridor across both at y = 18..22. The box
+    // (40, 10) - (60, 30) meets all three; kind = 'lot' leaves A and B.
+    initialize();
+    const std::string lots =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "../../tests/geo/data/lots.geojson")
+            .lexically_normal()
+            .generic_string();
+    const Json previewed =
+        call("katana_import", Json{{"path", lots},
+                                   {"where", "kind = 'lot'"},
+                                   {"area", Json{40, 10, 60, 30}},
+                                   {"clip", true},
+                                   {"preview", true}});
+    ASSERT_FALSE(previewed["isError"].get<bool>()) << textOf(previewed);
+    EXPECT_EQ(previewed["structuredContent"]["commands"][0]["command"],
+              "IMPORT \"" + lots + "\" where=\"kind = 'lot'\" AREA 40,10,60,30 clip PREVIEW");
+    const Json records = previewed["structuredContent"]["records"];
+    ASSERT_GE(records.size(), 2u) << records.dump(); // and any warning GDAL gave
+    EXPECT_EQ(records[0]["record"], "scope");
+    EXPECT_EQ(records[1]["record"], "import");
+    EXPECT_EQ(records[1]["features"], 2);
+    EXPECT_EQ(records[1]["of"], 3);
+    EXPECT_EQ(previewed["structuredContent"]["status"]["entities"], 0);
+
+    const Json imported = call("katana_import", Json{{"path", lots},
+                                                     {"fields", Json{"name"}},
+                                                     {"target_layer", "site"},
+                                                     {"max_features", 2}});
+    ASSERT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    EXPECT_EQ(imported["structuredContent"]["commands"][0]["command"],
+              "IMPORT \"" + lots + "\" fields=name target=site max=2");
+    EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 2);
+
+    const Json refused =
+        call("katana_import", Json{{"path", lots}, {"open_options", Json{"NOPE=1"}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("NOPE"), std::string::npos) << textOf(refused);
+}
+
 TEST_F(McpServer, DatasetInfoReturnsRecordsAndGdalsJson)
 {
     // terrain.asc's header: 120 x 90 cells of 1.5 from (-5, -5), no-data

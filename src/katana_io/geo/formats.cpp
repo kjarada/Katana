@@ -31,6 +31,7 @@ namespace {
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
+using katana::core::Status;
 
 // ---- the curated overlay ------------------------------------------------------------------
 //
@@ -320,6 +321,58 @@ Result<FormatOptions> formatOptions(std::string_view driver)
     options.creation = parseOptions(gdal->GetMetadataItem(GDAL_DMD_CREATIONOPTIONLIST));
     options.layerCreation = parseOptions(gdal->GetMetadataItem(GDAL_DS_LAYER_CREATIONOPTIONLIST));
     return options;
+}
+
+Status checkOptions(std::string_view driver, OptionList which, const std::vector<std::string>& given)
+{
+    if (given.empty()) {
+        return {};
+    }
+    auto options = formatOptions(driver);
+    if (!options) {
+        return options.error();
+    }
+    const std::vector<FormatOption>& list = which == OptionList::Open       ? options->open
+                                            : which == OptionList::Creation ? options->creation
+                                                                            : options->layerCreation;
+    const char* kind = which == OptionList::Open       ? "open"
+                       : which == OptionList::Creation ? "creation"
+                                                       : "layer creation";
+    std::string known;
+    for (const FormatOption& option : list) {
+        known += (known.empty() ? "" : ", ") + option.name;
+    }
+    for (const std::string& word : given) {
+        const std::size_t equals = word.find('=');
+        if (equals == std::string::npos || equals == 0) {
+            return makeError(ErrorCode::InvalidArgument,
+                             std::string("a ") + kind + " option is KEY=VALUE", word);
+        }
+        const std::string key = word.substr(0, equals);
+        const std::string value = word.substr(equals + 1);
+        const auto found = std::ranges::find_if(list, [&key](const FormatOption& option) {
+            return katana::core::equalsIgnoringCase(option.name, key);
+        });
+        if (found == list.end()) {
+            return makeError(ErrorCode::InvalidArgument,
+                             list.empty() ? std::string(driver) + " takes no " + kind + " options"
+                                          : std::string(driver) + " has no " + kind +
+                                                " option " + key + "; it has " + known,
+                             word);
+        }
+        if (!found->choices.empty() &&
+            std::ranges::none_of(found->choices, [&value](const std::string& choice) {
+                return katana::core::equalsIgnoringCase(choice, value);
+            })) {
+            std::string choices;
+            for (const std::string& choice : found->choices) {
+                choices += (choices.empty() ? "" : ", ") + choice;
+            }
+            return makeError(ErrorCode::InvalidArgument,
+                             found->name + " is one of " + choices, word);
+        }
+    }
+    return {};
 }
 
 std::vector<std::string> readableExtensions(DataKind kind)

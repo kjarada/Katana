@@ -99,6 +99,22 @@ struct FormatOptions {
 // NotFound for a driver findFormat does not find.
 [[nodiscard]] katana::core::Result<FormatOptions> formatOptions(std::string_view driver);
 
+// Which of a driver's lists an option is checked against: IMPORT's oo=,
+// EXPORT's co= and lco=.
+enum class OptionList { Open, Creation, LayerCreation };
+
+// `given`, KEY=VALUE each, checked against the driver's own list of that
+// kind (formatOptions): InvalidArgument naming the first that is not
+// KEY=VALUE, whose key the driver does not declare - listing the keys it
+// does - or whose value is not one of a string-select's choices. GDAL itself
+// only warns of an option it does not know and carries on without it, so a
+// misspelt one (RFC7964=YES) was written as if it had worked. Keys and
+// choices ignore case, as GDAL's do. A driver that declares no list of that
+// kind is refused any option, saying so. NotFound for a driver findFormat
+// does not find. Nothing given is always good.
+[[nodiscard]] katana::core::Status checkOptions(std::string_view driver, OptionList which,
+                                                const std::vector<std::string>& given);
+
 enum class DataKind { Raster, Vector };
 
 // The extensions of the formats that read data of `kind`, for a file
