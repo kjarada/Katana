@@ -50,12 +50,7 @@ std::vector<std::string> splitList(std::string_view text)
 
 Result<EntityType> parseTypeName(std::string_view text)
 {
-    // entityTypeFromString takes the enumerator's spelling: title case.
-    std::string name = katana::core::lowered(text);
-    if (!name.empty()) {
-        name.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(name.front())));
-    }
-    return katana::entity::entityTypeFromString(name);
+    return katana::entity::entityTypeFromString(text);
 }
 
 // A WHERE condition: a word holding '=', or DRAWN.

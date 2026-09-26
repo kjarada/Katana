@@ -17,7 +17,10 @@
 //     or `gis.ring=hole` (what a result writes) joins the exterior it lies in,
 //     the one with its `gis.part` (`source.part`, IMPORT's) when it has one;
 //   - arcs and circles are chords within curveTolerance (the export's 1 mm
-//     sagitta by default);
+//     sagitta by default); so are the draw system's curves: a curve polyline
+//     (an area when closed, its heights its vertices' own and a chord
+//     point's linear by length along its segment), an ellipse (an area when
+//     whole) and a spline (an area when closed), those two in plan;
 //   - Z only when every vertex has a height (absent is not zero); with
 //     requireHeights a heightless entity is left out and counted;
 //   - text, dimensions, labels and leaders have no feature; they are left out

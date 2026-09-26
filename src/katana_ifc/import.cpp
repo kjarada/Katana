@@ -21,6 +21,7 @@
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/layer_path.hpp"
+#include "katana/geometry/curves2d.hpp"
 #include "katana/math/mat4.hpp"
 #include "katana/math/numerics.hpp"
 #include "step_reader.hpp"
@@ -988,8 +989,12 @@ class Reader {
     // angle, in the file's angle unit - or a point on the circle, whichever
     // the file gives; with both, the one MasterRepresentation prefers, the
     // parameter when it says neither. nullopt when either end is neither.
+    // `stretch` is an ellipse's SemiAxis1 / SemiAxis2: a trimming point in
+    // its placement's frame is at eccentric anomaly atan2(y a / b, x), which
+    // for a circle (stretch 1) is its polar angle.
     std::optional<std::pair<double, double>> circleTrim(const StepInstance& item,
-                                                        const StepInstance& circle) const
+                                                        const StepInstance& circle,
+                                                        double stretch = 1.0) const
     {
         const auto inverse = axisPlacement(at(circle, 0)).inverse();
         const StepValue* master = arg(item, 4);
@@ -1011,7 +1016,7 @@ class Reader {
                     const StepInstance* on = m_.find(value.reference);
                     if (is(on, "IFCCARTESIANPOINT")) {
                         const Vec3 local = math::transformPoint(*inverse, cartesian(on));
-                        point = std::atan2(local.y, local.x);
+                        point = std::atan2(local.y * stretch, local.x);
                     }
                 }
             }
@@ -1243,6 +1248,27 @@ class Reader {
                        at(*basis, 0)->type == "IFCAXIS2PLACEMENT3D";
                 return true;
             }
+            if (basis->type == "IFCELLIPSE") {
+                // As a circle's arc, in the ellipse's frame squashed along its
+                // second axis: IFC's conic parameter is the eccentric anomaly.
+                // Read as the whole ellipse, an elliptical arc came back closed.
+                const double semi1 = number(*basis, 1).value_or(0.0);
+                const double semi2 = number(*basis, 2).value_or(semi1);
+                if (!(semi1 > 0.0) || !(semi2 > 0.0)) {
+                    return false;
+                }
+                const auto ends = circleTrim(item, *basis, semi1 / semi2);
+                if (!ends) {
+                    return false;
+                }
+                const Mat4 squash = frame * axisPlacement(at(*basis, 0)) *
+                                    Mat4::scaling(Vec3(1.0, semi2 / semi1, 1.0));
+                const auto arc = circlePoints(squash, semi1, ends->first, ends->second);
+                points.insert(points.end(), arc.begin(), arc.end());
+                in3d = in3d && at(*basis, 0) != nullptr &&
+                       at(*basis, 0)->type == "IFCAXIS2PLACEMENT3D";
+                return true;
+            }
             const auto t1 = trim(1);
             const auto t2 = trim(2);
             if (basis->type == "IFCLINE" && t1 && t2) {
@@ -1260,6 +1286,53 @@ class Reader {
                 return true;
             }
             return curvePoints(*basis, frame, points, in3d, depth + 1);
+        }
+        if (type == "IFCBSPLINECURVEWITHKNOTS" || type == "IFCRATIONALBSPLINECURVEWITHKNOTS") {
+            // Degree, control points, the knots as distinct values with their
+            // multiplicities, and a rational one's weights: a Spline2, chorded
+            // within the import's curve tolerance, in plan (Katana's spline is
+            // two-dimensional). Unread, it once came in as a point at 0,0.
+            geometry::Spline2 spline;
+            spline.degree = static_cast<int>(number(item, 0).value_or(0.0));
+            for (const std::uint32_t id : ids(item, 1)) {
+                const Vec3 p = world(frame, cartesian(m_.find(id)));
+                spline.controlPoints.push_back(geometry::Point2(p.x, p.y));
+            }
+            const StepValue* multiplicities = arg(item, 5);
+            const StepValue* knots = arg(item, 6);
+            if (multiplicities == nullptr || knots == nullptr ||
+                multiplicities->kind != StepValue::Kind::List ||
+                knots->kind != StepValue::Kind::List ||
+                multiplicities->items.size() != knots->items.size()) {
+                return false;
+            }
+            for (std::size_t i = 0; i < knots->items.size(); ++i) {
+                const auto count = multiplicities->items[i].number();
+                const auto knot = knots->items[i].number();
+                if (!count || !knot || *count < 1.0 || *count > 64.0) {
+                    return false;
+                }
+                spline.knots.insert(spline.knots.end(), static_cast<std::size_t>(*count), *knot);
+            }
+            if (type == "IFCRATIONALBSPLINECURVEWITHKNOTS") {
+                if (const StepValue* weights = arg(item, 8);
+                    weights != nullptr && weights->kind == StepValue::Kind::List) {
+                    for (const StepValue& weight : weights->items) {
+                        spline.weights.push_back(weight.number().value_or(0.0));
+                    }
+                }
+            }
+            if (!spline.checkStructure()) {
+                return false;
+            }
+            // The control points are in the world already (a B-spline is
+            // the same curve of its points moved by any affine map), so the
+            // tolerance is the world's, as an arc's is above.
+            for (const geometry::Point2& p : spline.toPolyline(options_.curveTolerance).vertices) {
+                points.push_back(Vec3(p.x, p.y, 0.0));
+            }
+            in3d = false;
+            return true;
         }
         if (type == "IFCCOMPOSITECURVE" || type == "IFCCOMPOSITECURVEONSURFACE") {
             for (const std::uint32_t id : ids(item, 0)) {

@@ -8,6 +8,7 @@
 
 #include "katana/cad/parcel.hpp"
 #include "katana/cad/project_crs.hpp"
+#include "katana/cad/property_outline.hpp"
 #include "katana/cad/purge.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_code_verbs.hpp"
@@ -325,6 +326,41 @@ std::string describe(const katana::entity::Model& model, const Entity& entity)
                 out << "  callout=" << katana::entity::toString(g.callout);
             }
         }
+        void operator()(const katana::geometry::CurvePolyline2& g) const
+        {
+            std::size_t arcs = 0;
+            std::size_t withHeight = 0;
+            for (std::size_t i = 0; i < g.segmentCount(); ++i) {
+                arcs += g.isArc(i) ? 1 : 0;
+            }
+            for (const auto& vertex : g.vertices) {
+                withHeight += vertex.height ? 1 : 0;
+            }
+            out << "  vertices=" << g.vertices.size() << (g.closed ? "  closed" : "  open")
+                << "  arcs=" << arcs << "  heights=" << withHeight << "  length=" << g.length();
+            if (g.closed) {
+                out << "  area=" << g.area();
+            }
+        }
+        void operator()(const katana::geometry::Ellipse2& g) const
+        {
+            out << "  centre " << g.center.x << "," << g.center.y << "  major=" << g.majorRadius()
+                << "  minor=" << g.minorRadius() << "  rotation="
+                << g.majorAxis.angle() * katana::math::kRadToDeg;
+            if (!g.isFull()) {
+                out << "  start=" << g.startParameter * katana::math::kRadToDeg
+                    << "  sweep=" << g.sweep * katana::math::kRadToDeg;
+            }
+            out << "  length=" << g.length();
+        }
+        void operator()(const katana::geometry::Spline2& g) const
+        {
+            out << "  degree=" << g.degree << "  control=" << g.controlPoints.size();
+            if (g.hasFitPoints()) {
+                out << "  fit=" << g.fitPoints.size();
+            }
+            out << "  length=" << g.length();
+        }
     };
     std::visit(Detail{out, model}, entity.geometry);
     if (!entity.visible) {
@@ -471,6 +507,8 @@ Scope     MODIFY and the UTILITY verbs: SELECTION | DRAWING | VIEW [id] [EXTENTS
           STYLE.SYMBOLSIZE=   PREVIEW reports what would change and changes nothing
 Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
           PROP RENAME old new   (selection; the type is guessed unless stated)
+          PROP TREE [scope] [WHERE k=v ...] [UNDER path] [FROM n] [LIMIT n]   the
+          properties as the tree their '/' names make, one level a reply (UNDER vertex/3)
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
 Inspect   LIST | INFO id (or #id) | STATUS [JSON] (the drawing at a glance) | HELP
@@ -484,7 +522,7 @@ Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK schedule.csv|scope ...  AS 5488 
           grade, verify, clear, check against a schema, on a schedule or what is drawn;
           DRAW schedule.csv, REGRADE scope, SCHEDULE out.csv scope (HELP UTILITY)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM ?  LE MT TS LS
-)" + annotationHelpText();
+)" + annotationHelpText() + drawingHelpText();
 }
 
 Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
@@ -668,6 +706,20 @@ katana::core::Result<std::string> purgeTables(Document& document,
 
 } // namespace
 
+bool CommandInterpreter::replacesDocument(std::string_view line)
+{
+    const auto tokens = tokenize(line);
+    if (!tokens || tokens->empty()) {
+        return false;
+    }
+    std::string verb = upper(tokens->front());
+    if (const auto alias = aliases().find(verb); alias != aliases().end()) {
+        verb = alias->second;
+    }
+    const Tokens args(tokens->begin() + 1, tokens->end());
+    return verb == "NEW" || (verb == "OPEN" && !isDrawingVerb(verb, args));
+}
+
 CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
 {
     auto tokens = tokenize(line);
@@ -697,6 +749,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     if (isAnnotationVerb(verb, args)) {
         return annotation(verb, args);
     }
+    if (isDrawingVerb(verb, args)) {
+        return drawingVerb(verb, args);
+    }
     if (plotting::isSheetVerb(verb)) {
         return plotting::runSheetVerb(document_, *tokens, sheetContext_);
     }
@@ -706,7 +761,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     if (isSurveyCodeVerb(verb)) {
         return runSurveyCodeVerb(document_, *tokens, colourOf_);
     }
-    for (const char* name : {"POINT", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "TEXT", "DIM"}) {
+    // PLINE is the drawing system's (isDrawingVerb, above), so each replies
+    // with the id of what it made.
+    for (const char* name : {"POINT", "LINE", "RECT", "CIRCLE", "ARC", "TEXT", "DIM"}) {
         if (verb == name) {
             return draw(verb, args);
         }
@@ -1088,7 +1145,8 @@ CommandInterpreter::Reply CommandInterpreter::draw(const std::string& verb, cons
 {
     const cmd::EntityAttributes attributes = document_.currentAttributes();
 
-    // Leading arguments that are points; PLINE may end with CLOSE.
+    // Leading arguments that are points. (PLINE is the drawing system's:
+    // drawing/drawing_verbs.cpp.)
     const auto parsePoints = [&](std::size_t count) -> Result<std::vector<Point2>> {
         std::vector<Point2> points;
         for (std::size_t i = 0; i < count; ++i) {
@@ -1130,20 +1188,6 @@ CommandInterpreter::Reply CommandInterpreter::draw(const std::string& verb, cons
         }
         const std::size_t count = chain->size();
         return finish(document_.execute(std::move(chain)), std::to_string(count) + " lines created");
-    }
-    if (verb == "PLINE") {
-        const bool closed = !args.empty() && (upper(args.back()) == "CLOSE" || upper(args.back()) == "C");
-        const std::size_t pointCount = args.size() - (closed ? 1 : 0);
-        if (pointCount < 2) {
-            return usage("PLINE p p [p...] [CLOSE]");
-        }
-        auto points = parsePoints(pointCount);
-        if (!points) {
-            return points.error();
-        }
-        return finish(document_.execute(cmd::createPolyline(
-                          katana::geometry::Polyline2{std::move(*points), closed}, attributes)),
-                      "polyline created");
     }
     if (verb == "RECT") {
         if (args.size() != 2) {
@@ -1457,16 +1501,7 @@ CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
         filter.layer = args[1];
         collect(filter);
     } else if (mode == "TYPE" && args.size() == 2) {
-        // entityTypeFromString expects the spelling of the enumerator, so the
-        // name is title cased. An empty argument has no first character to
-        // keep: begin() + 1 would then be past end() and the range would be
-        // inverted, so it is left alone and rejected below by name.
-        std::string name = upper(args[1]);
-        if (!name.empty()) {
-            std::transform(name.begin() + 1, name.end(), name.begin() + 1,
-                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        }
-        const auto type = katana::entity::entityTypeFromString(name);
+        const auto type = katana::entity::entityTypeFromString(args[1]);
         if (!type) {
             return type.error();
         }
@@ -2109,6 +2144,14 @@ CommandInterpreter::Reply CommandInterpreter::parcel(const Tokens& args)
     if (entity == nullptr) {
         return makeError(ErrorCode::NotFound, "no entity with that id", args[0]);
     }
+    if (std::holds_alternative<katana::geometry::CurvePolyline2>(entity->geometry)) {
+        // Not chorded behind the surveyor's back: a legal description's arc
+        // course is radius, arc and chord, which parcelReport does not write.
+        return makeError(ErrorCode::Unsupported,
+                         "a parcel with arc courses is not reported yet; its courses are "
+                         "bearings and distances of straight sides",
+                         args[0]);
+    }
     const auto* boundary = std::get_if<katana::geometry::Polyline2>(&entity->geometry);
     if (boundary == nullptr) {
         return makeError(ErrorCode::InvalidGeometry, "a parcel must be a closed polyline", args[0]);
@@ -2478,6 +2521,12 @@ CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)
 CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb,
                                                          const Tokens& args)
 {
+    // PROP TREE reads, and takes a scope as every reading verb does
+    // (property_outline.hpp), so it is answered before the selection is
+    // required: PROP TREE DRAWING needs none.
+    if (verb == "PROP" && !args.empty() && upper(args[0]) == "TREE") {
+        return propertyTreeReply(document_, Tokens(args.begin() + 1, args.end()), scopeViews_);
+    }
     if (auto selected = requireSelection(); !selected) {
         return selected;
     }
@@ -2509,7 +2558,8 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
     // bare `PROP key value` could not be extended without becoming
     // ambiguous, since a property may be named DELETE.
     static constexpr const char* kPropUsage =
-        "PROP LIST | SET key value [text|integer|real|boolean] | DELETE key | RENAME old new";
+        "PROP LIST | SET key value [text|integer|real|boolean] | DELETE key | RENAME old new | "
+        "TREE [scope] [UNDER path] [FROM n] [LIMIT n]";
     const std::string action = args.empty() ? std::string("LIST") : upper(args[0]);
 
     if (action == "LIST") {

@@ -338,6 +338,46 @@ asked (`properties`).
   the part hint is checked against.
 - **Curves.** Arcs and circles are chords within `curveTolerance` (1 mm by
   default), by the same `chordCount` EXPORT uses (`src/katana_interop/curve_chords.hpp`).
+- **The draw system's curves** (`docs/drawing.md`), each read as main's
+  vector export read it before the one conversion took EXPORT over:
+  - a **curve polyline** (`CurvePolyline2`, a polyline with arcs by bulge)
+    is chords within `curveTolerance` (`tessellateWithHeights`), and closed
+    it is an area (`DrawingCurves.AClosedCurvePolylineIsAnAreaShortOfItsArcsSegmentByAtMostTheChordError`:
+    100 + 25 (pi/2 - 1) m2, less at most the arc's length times the
+    tolerance). Its heights are its vertices' own, not the elevation
+    properties (it holds them itself); a chord point's height is the
+    geometry's rule, linear by length along its segment, and none where an
+    end has none - so a string with one vertex not surveyed goes in plan
+    and is counted, as a polyline does
+    (`DrawingCurves.ASlopingArcsChordPointsTakeTheHeightLinearByLengthAlongIt`,
+    `DrawingCurves.AnArcWithAnEndNotSurveyedGoesInPlanNotAtZero`).
+  - an **ellipse** or **spline** is chords within `curveTolerance`; a whole
+    ellipse, and a spline that ends where it began, is an area; both go in
+    plan, since neither holds a height
+    (`DrawingCurves.AWholeEllipseIsAnAreaAndAnArcOfOneALineBothInPlan`,
+    `DrawingCurves.AClosedSplineIsAnAreaAndAnOpenOneALine`).
+  - Everything that reads the drawing through this conversion takes them
+    with no code of its own: EXPORT, every GDAL algorithm, the closed
+    shapes used as zones (RASTER ZONAL), clip boundaries (GIS CLIP, RASTER
+    CLIP, IMPORT's clip, CONTOUR's and slope's boundaries), dissolve and
+    overlay areas, and the points HULL and RASTER GRID read. GIS DISSOLVE
+    REPLACE deletes the entities of the areas table rather than testing
+    each entity's kind, since that test was a second rule of what an area
+    is and did not know the new kinds
+    (`DrawingCurves.DissolveReplaceDeletesTheEllipsesItMerged`).
+  - An in-place result on one of them (GIS CLIP REPLACE cutting it, a
+    repair that moved it) writes back the chords of what GDAL returned, as
+    a polyline with its heights in its properties - the same as an arc
+    cut in place. A result that leaves it as it was is no edit, so the
+    curve stays a curve.
+  - *Rejected:* taking an ellipse's or spline's height from an `elevation`
+    property. Neither kind has a height in the draw system, and main's
+    export wrote both in plan; a height the geometry does not hold would
+    be one invented for every point between.
+  - *Rejected:* a curve type in the tables (GDAL's CircularString /
+    CompoundCurve) for a curve polyline's arcs. The algorithms work on
+    linear geometry and GEOS linearises curves itself at its own
+    tolerance; chording here keeps the one tolerance the reply can state.
 - **Heights.** Z is written only when every vertex has a height: absent is
   not zero (`DrawingDataset.AVertexWithoutAHeightKeepsTheLineTwoDimensional`).
   An entity heighted at only some vertices, or an arc whose ends differ,
@@ -1232,8 +1272,9 @@ types the same lines through `katana_run_commands`.
   each feature (measured). So merging by a property is `vector combine
   --group-by` and then `vector dissolve`; the combine's geometry collection
   comes back as the feature's parts.
-- **Areas only.** Closed polylines and circles (drawingDataset's areas, with
-  their tagged holes); the points and lines a scope takes are left as they
+- **Areas only.** Closed polylines, closed curve polylines, circles, whole
+  ellipses and closed splines (drawingDataset's areas, with their tagged
+  holes); the points and lines a scope takes are left as they
   are, and a warning says how many.
 - **`keep=identical`** keeps each property the whole group holds alike
   (`--add-extra-fields=always-identical`); the rest are left behind

@@ -12,6 +12,9 @@ set(_qt_src "${PROJECT_SOURCE_DIR}/src/katana_qt")
 file(GLOB _qt_customisation_sources CONFIGURE_DEPENDS "${_qt_src}/customisation/*.cpp")
 file(GLOB _qt_tool_sources CONFIGURE_DEPENDS "${_qt_src}/tools/*.cpp")
 file(GLOB _qt_annotation_sources CONFIGURE_DEPENDS "${_qt_src}/annotation/*.cpp")
+# The drawing system's front end (docs/drawing.md): the plan view drives its
+# grips, so the viewport does not link without it.
+file(GLOB _qt_drawing_sources CONFIGURE_DEPENDS "${_qt_src}/drawing/*.cpp")
 add_executable(katana_qt_benchmarks
     main.cpp
     bench_plan_paint.cpp
@@ -33,6 +36,7 @@ add_executable(katana_qt_benchmarks
     ${_qt_customisation_sources}
     ${_qt_tool_sources}
     ${_qt_annotation_sources}
+    ${_qt_drawing_sources}
 )
 target_include_directories(katana_qt_benchmarks PRIVATE "${_qt_src}" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(katana_qt_benchmarks PRIVATE

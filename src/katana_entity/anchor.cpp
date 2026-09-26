@@ -157,6 +157,77 @@ std::optional<Point2> resolveAnchor(const Entity& entity, const AnchorRef& ref)
                 return std::nullopt;
             }
         }
+        // The drawing system's kinds (docs/drawing.md): a curve polyline as
+        // a polyline, its segment middles on the arcs; an ellipse's and a
+        // spline's ends and an ellipse's centre.
+        std::optional<Point2> operator()(const katana::geometry::CurvePolyline2& polyline) const
+        {
+            const auto& v = polyline.vertices;
+            if (v.empty()) {
+                return std::nullopt;
+            }
+            switch (ref.point) {
+            case AnchorPoint::Start:
+                return v.front().position;
+            case AnchorPoint::End:
+                return v.back().position;
+            case AnchorPoint::Vertex:
+                return ref.index < v.size() ? std::optional(v[ref.index].position) : std::nullopt;
+            case AnchorPoint::SegmentMid:
+            case AnchorPoint::Along: {
+                if (ref.index >= polyline.segmentCount()) {
+                    return std::nullopt;
+                }
+                // On an arc segment, the fraction of its sweep: ON the arc.
+                const double t = ref.point == AnchorPoint::SegmentMid ? 0.5 : clampedParameter(ref);
+                return std::visit([t](const auto& piece) { return piece.pointAt(t); },
+                                  polyline.segment(ref.index));
+            }
+            case AnchorPoint::Inside:
+                if (!polyline.closed || v.size() < 3) {
+                    return std::nullopt;
+                }
+                // Its chords to a millimetre: the inside point is a place for
+                // a note, not a measurement.
+                return insidePoint(polyline.toPolyline(katana::geometry::kCurveChordTolerance));
+            default:
+                return std::nullopt;
+            }
+        }
+        std::optional<Point2> operator()(const katana::geometry::Ellipse2& ellipse) const
+        {
+            switch (ref.point) {
+            case AnchorPoint::Centre:
+                return ellipse.center;
+            case AnchorPoint::Start:
+                return ellipse.startPoint();
+            case AnchorPoint::End:
+                return ellipse.endPoint();
+            case AnchorPoint::Along:
+                // The fraction of its sweep of eccentric anomaly - of a turn,
+                // for a whole ellipse, as for a circle.
+                return ellipse.pointAtParameter(ellipse.startParameter +
+                                                clampedParameter(ref) * ellipse.sweep);
+            case AnchorPoint::Inside:
+                return ellipse.isFull() ? std::optional(ellipse.center) : std::nullopt;
+            default:
+                return std::nullopt;
+            }
+        }
+        std::optional<Point2> operator()(const katana::geometry::Spline2& spline) const
+        {
+            if (!spline.checkStructure()) {
+                return std::nullopt;
+            }
+            switch (ref.point) {
+            case AnchorPoint::Start:
+                return spline.startPoint();
+            case AnchorPoint::End:
+                return spline.endPoint();
+            default:
+                return std::nullopt;
+            }
+        }
     };
     return std::visit(Visitor{ref}, entity.geometry);
 }
@@ -207,6 +278,38 @@ std::optional<AnchorRef> nearestAnchor(const Entity& entity, const Point2& near)
         }
         return found ? std::optional(ref) : std::nullopt;
     }
+    if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&entity.geometry)) {
+        const auto nearest = curve->nearest(near);
+        if (!nearest || curve->segmentCount() == 0 ||
+            curve->segmentLength(nearest->segment) <= 0.0) {
+            return std::nullopt;
+        }
+        ref.index = static_cast<std::uint32_t>(nearest->segment);
+        const auto piece = curve->segment(nearest->segment);
+        if (const auto* segment = std::get_if<Segment2>(&piece)) {
+            ref.parameter = std::clamp(segment->parameterOf(near), 0.0, 1.0);
+        } else {
+            const auto& arc = std::get<Arc2>(piece);
+            const Vec2 radial = nearest->point - arc.center;
+            ref.parameter = std::clamp(arc.parameterOfAngle(std::atan2(radial.y, radial.x)), 0.0, 1.0);
+        }
+        return ref;
+    }
+    if (const auto* ellipse = std::get_if<katana::geometry::Ellipse2>(&entity.geometry)) {
+        const double along =
+            (ellipse->closestParameter(near) - ellipse->startParameter) / ellipse->sweep;
+        if (ellipse->isFull()) {
+            // A turn is [0, 1), as for a circle.
+            const double turn = along - std::floor(along);
+            ref.parameter = turn < 1.0 ? turn : 0.0;
+        } else {
+            ref.parameter = std::clamp(along, 0.0, 1.0);
+        }
+        return ref;
+    }
+    // A spline offers no place along it: its parameter is not its length,
+    // and no fraction of it would stay where the note was put when its
+    // points move. Its ends are named by Start and End.
     return std::nullopt;
 }
 

@@ -9,7 +9,9 @@
 
 #include <cmath>
 
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/entity/entity_geometry.hpp"
+#include "katana/geometry/polyline_vertices.hpp"
 #include "modify_edit_support.hpp"
 
 namespace katana::cad::tools::modify_edit {
@@ -20,6 +22,7 @@ namespace tol = katana::math::tolerance;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
+using katana::geometry::CurvePolyline2;
 using katana::math::kTwoPi;
 using katana::math::normalizeAngle;
 
@@ -46,6 +49,9 @@ Point2 onto(const Geometry& geometry, const Point2& p)
     }
     if (const auto* polyline = std::get_if<Polyline2>(&geometry)) {
         return polyline->closestPoint(p).value_or(p);
+    }
+    if (const auto* curved = std::get_if<CurvePolyline2>(&geometry)) {
+        return curved->closestPoint(p).value_or(p);
     }
     return p;
 }
@@ -171,6 +177,45 @@ Result<Broken> breakGeometry(const Geometry& geometry, const Point2& a, const Po
         }
         return out;
     }
+    if (const auto* curved = std::get_if<CurvePolyline2>(&geometry)) {
+        // As a straight polyline, measured along its arcs (geometry::subPath);
+        // the pieces are curve polylines, stored by the drawing system's rule
+        // when the tool makes them entities.
+        const double sa = curved->nearest(a)->station;
+        const double sb = curved->nearest(b)->station;
+        const double length = curved->length();
+        const auto exact = [&](CurvePolyline2 piece, double from, double to) {
+            for (const auto& [station, point] : {std::pair{sa, a}, std::pair{sb, b}}) {
+                if (!piece.vertices.empty() && std::abs(from - station) <= tol::kGeometric) {
+                    piece.vertices.front().position = point;
+                }
+                if (!piece.vertices.empty() && std::abs(to - station) <= tol::kGeometric) {
+                    piece.vertices.back().position = point;
+                }
+            }
+            return Geometry{std::move(piece)};
+        };
+        if (!curved->closed) {
+            return breakOpen(sa, sb, length, kind, [&](double from, double to) {
+                return exact(katana::geometry::subPath(*curved, from, to), from, to);
+            });
+        }
+        if (std::abs(sa - sb) <= tol::kGeometric ||
+            std::abs(std::abs(sa - sb) - length) <= tol::kGeometric) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "A closed polyline cannot be broken at a single point; pick two "
+                             "points.");
+        }
+        Broken out;
+        if (sa < sb) {
+            out.pieces.push_back(exact(katana::geometry::wrappingPath(*curved, sb, sa), sb, sa));
+            out.removed.push_back(exact(katana::geometry::subPath(*curved, sa, sb), sa, sb));
+        } else {
+            out.pieces.push_back(exact(katana::geometry::subPath(*curved, sb, sa), sb, sa));
+            out.removed.push_back(exact(katana::geometry::wrappingPath(*curved, sa, sb), sa, sb));
+        }
+        return out;
+    }
     return makeError(ErrorCode::Unsupported, "A " + kind +
                                                  " cannot be broken; pick a line, arc, circle or "
                                                  "polyline.");
@@ -213,12 +258,14 @@ class BreakTool final : public InteractiveTool {
         const auto type = entity->type();
         using katana::entity::EntityType;
         if (type != EntityType::Line && type != EntityType::Arc && type != EntityType::Circle &&
-            type != EntityType::Polyline) {
+            type != EntityType::Polyline && type != EntityType::CurvePolyline) {
             return ToolStep::rejected("A " + kindName(entity->geometry) +
                                       " cannot be broken; pick a line, arc, circle or polyline.");
         }
         const auto* polyline = std::get_if<Polyline2>(&entity->geometry);
-        if (atPoint_ && (type == EntityType::Circle || (polyline != nullptr && polyline->closed))) {
+        const auto* curved = std::get_if<CurvePolyline2>(&entity->geometry);
+        if (atPoint_ && (type == EntityType::Circle || (polyline != nullptr && polyline->closed) ||
+                         (curved != nullptr && curved->closed))) {
             // Refused at the pick: every point after it would be refused as
             // "one point", and a one-point tool cannot take a second.
             return ToolStep::rejected(asSentence(withArticle(kindName(entity->geometry)) +
@@ -249,6 +296,15 @@ class BreakTool final : public InteractiveTool {
         }
         std::vector<Entity> pieces;
         for (Geometry& geometry : broken->pieces) {
+            if (const auto* curved = std::get_if<CurvePolyline2>(&geometry)) {
+                // Its heights are in the geometry; stored as the simplest kind.
+                auto piece = writePolyline(original, *curved);
+                if (!piece) {
+                    return ToolStep::rejected(asSentence(piece.error().message));
+                }
+                pieces.push_back(std::move(*piece));
+                continue;
+            }
             Entity piece = original;
             piece.geometry = std::move(geometry);
             carryHeights(original, piece);

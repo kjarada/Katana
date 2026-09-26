@@ -153,8 +153,8 @@ TEST_F(McpServer, EveryToolIsListedWithAnObjectSchema)
 }
 
 // What an agent reads first names every UTILITY action and the scope words
-// they take, so what is drawn can be graded again and written back without
-// asking HELP first.
+// they take, so what is drawn can be graded again and written back - and a
+// survey or an import drawn as services - without asking HELP first.
 TEST_F(McpServer, TheCommandToolNamesEveryUtilityActionAndTheScopeWords)
 {
     initialize();
@@ -167,9 +167,9 @@ TEST_F(McpServer, TheCommandToolNamesEveryUtilityActionAndTheScopeWords)
     }
     ASSERT_FALSE(description.empty());
     for (const char* word : {"UTILITY REPORT", "VERIFY", "CLEARANCE", "CHECK", "DRAW", "REGRADE",
-                             "SCHEDULE", "HELP UTILITY", "DRAWING", "SELECTION",
-                             "AREA x0,y0,x1,y1", "LAYERS a,b [ONLY]", "WHERE key=value",
-                             "MODIFY"}) {
+                             "SCHEDULE", "HELP UTILITY", "DRAWING", "SELECTION", "AREA x0,y0,x1,y1",
+                             "LAYERS a,b [ONLY]", "WHERE key=value", "MODIFY",
+                             "UTILITY DRAW <scope> METHOD <method>", "FIELDS column=property"}) {
         EXPECT_NE(description.find(word), std::string::npos) << word;
     }
 }
@@ -263,6 +263,18 @@ TEST_F(McpServer, NewAndOpenRefuseToDiscardUnsavedChangesUnlessToldTo)
     const Json done = call("katana_new_project", Json{{"discard_unsaved_changes", true}});
     EXPECT_FALSE(done["isError"].get<bool>()) << textOf(done);
     EXPECT_EQ(call("katana_status")["structuredContent"]["entities"], 0);
+}
+
+TEST_F(McpServer, OpeningAPolylineIsAnEditNotADiscardOfTheDrawing)
+{
+    // OPEN SELECTION (and OPEN #id) opens polylines (docs/drawing.md): it
+    // keeps the drawing, so the unsaved-changes guard NEW and OPEN of a
+    // project are held to does not refuse it.
+    initialize();
+    const Json result = call(
+        "katana_run_commands", Json{{"commands", {"RECT 0,0 30,20", "SELECT ALL", "OPEN SELECTION"}}});
+    EXPECT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 1);
 }
 
 TEST_F(McpServer, AProjectSavedByOneSessionOpensInAnother)

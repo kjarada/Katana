@@ -2,7 +2,6 @@
 
 #include "geo/geo_dialog_support.hpp"
 
-#include <QFontDatabase>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -90,7 +89,7 @@ GeoRunPanel::GeoRunPanel(const QString& prefix, GeoDialogContext context, bool p
     command_ = new QLineEdit(this);
     command_->setObjectName(prefix + "Command");
     command_->setReadOnly(true);
-    command_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    command_->setFont(katana::qt::theme::monospaceFont());
     command_->setToolTip("The line Run hands to the command line - type it there, give it to "
                          "katana_cli or send it to katana_mcp, and it does the same");
     if (preview) {
@@ -111,7 +110,7 @@ GeoRunPanel::GeoRunPanel(const QString& prefix, GeoDialogContext context, bool p
     reply_ = new QPlainTextEdit(this);
     reply_->setObjectName(prefix + "Reply");
     reply_->setReadOnly(true);
-    reply_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    reply_->setFont(katana::qt::theme::monospaceFont());
     // Records are one to a line; wrapping would make one look like two.
     reply_->setLineWrapMode(QPlainTextEdit::NoWrap);
     reply_->setPlaceholderText("The reply appears here and in the command log.");

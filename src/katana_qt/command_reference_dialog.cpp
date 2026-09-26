@@ -23,6 +23,7 @@
 #include "katana/cad/utilities/utility_verbs.hpp"
 #include "geo/geo_verbs.hpp"
 #include "katana/interop/online_verbs.hpp"
+#include "theme.hpp"
 
 namespace katana::qt {
 
@@ -258,7 +259,7 @@ CommandReferenceDialog::CommandReferenceDialog(std::vector<ReferenceSection> sec
     detail_ = new QPlainTextEdit(this);
     detail_->setObjectName("commandReferenceDetail");
     detail_->setReadOnly(true);
-    detail_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    detail_->setFont(katana::qt::theme::monospaceFont());
     detail_->setLineWrapMode(QPlainTextEdit::NoWrap);
     detail_->setPlaceholderText("Choose a command to see all it takes.");
 

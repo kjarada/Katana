@@ -4,7 +4,6 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
-#include <QFontDatabase>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -66,7 +65,7 @@ QLineEdit* commandField(const QString& name, QWidget* parent)
     auto* field = new QLineEdit(parent);
     field->setObjectName(name);
     field->setReadOnly(true);
-    field->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    field->setFont(katana::qt::theme::monospaceFont());
     field->setToolTip("The line Import runs - type it on the command line, or give it to "
                       "katana_cli or katana_mcp, and it does the same");
     return field;
@@ -97,7 +96,7 @@ QLabel* summaryLabel(const interop::SourceDescription& source, QWidget* parent)
 {
     auto* label = new QLabel(QString::fromStdString(interop::formatDescription(source)).trimmed(),
                              parent);
-    label->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    label->setFont(katana::qt::theme::monospaceFont());
     label->setTextFormat(Qt::PlainText); // the file's own words, never markup
     label->setTextInteractionFlags(Qt::TextSelectableByMouse);
     label->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
