@@ -1,3 +1,4 @@
+#include "katana/math/numerics.hpp"
 #include "katana/dxf/writer.hpp"
 
 #include <algorithm>
@@ -1082,9 +1083,12 @@ void Writer::writeEllipse(const Entity& entity, const katana::geometry::Ellipse2
     real(21, ellipse.majorAxis.y);
     real(31, 0.0);
     real(40, std::min(ellipse.ratio, 1.0));
-    real(41, ellipse.startParameter);
-    real(42, ellipse.isFull() ? ellipse.startParameter + 2.0 * std::numbers::pi
-                              : ellipse.endParameter());
+    // Each in [0, 2 pi), as a DXF reader expects them; an end below the start
+    // is an arc through the parameter 0, which is how the format says it.
+    const double start = katana::math::normalizeAngle(ellipse.startParameter);
+    real(41, start);
+    real(42, ellipse.isFull() ? start + 2.0 * std::numbers::pi
+                              : katana::math::normalizeAngle(ellipse.endParameter()));
     finish(isZeroLevel(heights) ? &heights : nullptr);
     const auto box = ellipse.boundingBox();
     extents_.expand(Point2(box.min.x + shift_.x, box.min.y + shift_.y));

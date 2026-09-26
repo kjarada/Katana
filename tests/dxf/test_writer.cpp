@@ -578,6 +578,35 @@ TEST(DxfWriter, AnEllipseAndAnEllipticalArcComeBackAsEllipses)
     EXPECT_NEAR(b.sweep, 2.0, 1e-12);
 }
 
+TEST(DxfWriterDrawingKinds, AnEllipticalArcThroughTheParameterZeroIsWrittenInOneTurn)
+{
+    using katana::entity::Model;
+    using katana::geometry::Ellipse2;
+    // From 5.5 rad for 2 rad: the end, 7.5, is 7.5 - 2 pi = 1.2168... in the
+    // turn a DXF reader expects, below the start - which is how the format
+    // says the arc passes 0.
+    Model model;
+    Ellipse2 arc;
+    arc.center = Point2(0.0, 0.0);
+    arc.majorAxis = katana::geometry::Vec2(4.0, 0.0);
+    arc.ratio = 0.5;
+    arc.startParameter = 5.5;
+    arc.sweep = 2.0;
+    add(model, arc);
+    const std::string text = written(model);
+    const std::size_t at = text.find("\n 42\n", text.find("AcDbEllipse"));
+    ASSERT_NE(at, std::string::npos) << text;
+    const double end = std::stod(text.substr(at + 5, 24));
+    EXPECT_NEAR(end, 7.5 - 2.0 * std::numbers::pi, 1e-12);
+    const auto back = dxf::readDxf(text);
+    ASSERT_TRUE(back.ok());
+    const auto ellipses = ofKind<Ellipse2>(*back);
+    ASSERT_EQ(ellipses.size(), 1u);
+    const auto& read = std::get<Ellipse2>(ellipses[0]->geometry);
+    EXPECT_NEAR(read.startParameter, 5.5, 1e-12);
+    EXPECT_NEAR(read.sweep, 2.0, 1e-12);
+}
+
 TEST(DxfWriter, ASplineComesBackWithItsControlPointsKnotsAndFitPoints)
 {
     using katana::geometry::Spline2;
