@@ -448,6 +448,8 @@ tests named below):
 | Cut Section along the selection | along a curve polyline's or a spline's chords |
 | Alignment Manager, PIs from the selection | a curve polyline refused: its vertices are tangent points, not PIs |
 | the object snap in the window | one owner, the document's drafting settings: View > Snap Modes, the drafting toolbar, `SNAP` and new views read and write the same, where the views had kept a copy that a click in the menu or a new view wrote back over the toolbar's modes; `SNAP` with `modes=`, `add=` or `remove=` typed in the window is the drawing verb (`SNAP <mode> ON\|OFF` stays the window's shorthand) |
+| the Properties panel's Geometry group (`property_panel.cpp`) | a curve polyline its vertices, closed, arcs, heights, length and area when closed; an ellipse its centre, radii, rotation, sweep and length; a spline its degree, control and fit points and length. Main moved these rows out of `main_window.cpp` into the tree panel while this branch was open, and the second merge of main (after PR #9 and #11) carried the three kinds across |
+| View > Panels > Vertices | Edit Vertices' icon, since main's `--check-menus` now requires an icon and a status tip on every item and that tool opens this panel |
 
 ## Not done
 

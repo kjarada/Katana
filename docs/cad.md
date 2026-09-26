@@ -176,7 +176,8 @@ Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 `DIM`), modification on the selection (`MOVE`, `COPY`, `ROTATE`, `SCALE`,
 `MIRROR`, `ARRAY`, `ERASE`), editing (`OFFSET`, `TRIM`, `EXTEND`, `FILLET`,
 `CHAMFER`), `SELECT`, `LAYER`, the tables (`LINETYPE`, `DIMSTYLE`, `HATCH`,
-`STYLE`), civil (`ALIGN`, `PARCEL`), attributes (`CHLAYER`, `COLOR`, `PROP`),
+`STYLE`), civil (`ALIGN`, `PARCEL`), attributes (`CHLAYER`, `COLOR`, `PROP`,
+`PROP TREE`),
 `UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `STATUS`, `HELP`, and the sheet,
 annotation, utility and survey-code families below. Aliases include
 `LT`/`LTYPE`, `DS`, `HA`, `ST`, `AL` and `PARC`. This list lacked the tables
@@ -196,10 +197,13 @@ The AS 5488 subsurface utility verbs (`UTILITY REPORT`, `VERIFY`,
 handed to `utilities::runUtilityVerb` (`include/katana/cad/utilities/`);
 `docs/subsurface_utilities.md`, "UTILITY on the command line", describes
 them. They were `katana_cli`'s own until 2026-09-25; in the interpreter the
-window's command line, `katana_cli` and `katana_mcp` all have them. `REPORT`,
-`VERIFY`, `CLEARANCE` and `CHECK` take a schedule file or what is drawn, by
-the shared scope words ("Scope and filter", below); `REGRADE` and `SCHEDULE`
-only what is drawn, `DRAW` only a file. The reports never touch the drawing. `UTILITY
+window's command line, `katana_cli` and `katana_mcp` all have them. `DRAW`,
+`REPORT`, `VERIFY`, `CLEARANCE` and `CHECK` take a schedule file or what is
+drawn, by the shared scope words ("Scope and filter", below); `REGRADE` and
+`SCHEDULE` only what is drawn. For `DRAW`, what is drawn is the lines,
+polylines and points a survey or an import left, which it draws as services
+(`utilities::readGeometryServices`); for the others, the services `DRAW` drew.
+The reports never touch the drawing. `UTILITY
 DRAW` adds the graded services - layers by type and quality level, a
 linetype per level, a polyline per run at one level, a point per located
 vertex carrying its whole schedule row - as one undo step, `UTILITY REGRADE`
@@ -296,6 +300,57 @@ answer; a single word that is a tool's alias or id starts the tool; the same
 word with arguments (`LINE 0,0 10,0`) is still the interpreter's, which is
 what scripts and the headless checks type; and an empty line is Enter in the
 drawing.
+
+### Properties as a tree: PROP TREE
+
+An entity has one flat map of properties (`include/katana/entity/entity.hpp`).
+An archive import flattens its attribute groups into it with '/' -
+`Asset/Dimensions/Size` - and a string's per-vertex attributes as
+`vertex/3/QualityLevel`, so a surveyed string of a thousand vertices with
+thirty attributes each is thirty thousand keys. `PROP LIST` prints all of
+them on one line; the Properties panel listed all of them as rows, made
+before it could show the first. The owner's request of 2026-09-26 was a tree,
+and "a smart way to load all these information".
+
+`cad::propertyOutline` (`include/katana/cad/property_outline.hpp`) reads the
+names as the tree their slashes make, ONE LEVEL at a time: the entries
+directly beneath a path, each with how many names are beneath it
+(`children`) and how many values (`values`), and its own value when one is
+stored there - a name can be both a value and a branch. Nothing is stored:
+the tree is a reading of the names, as the layer tree is of layer paths.
+Asking for a level costs the keys beneath it, never the whole map, because
+the map is ordered and a level is one `lower_bound` and a walk. Several
+entities are read as one, as the attribute manager reads them: a value shows
+where every entity holds the same one, and one that only some hold, or that
+they hold differently, `varies` - showing the first entity's value would put
+words in the others' mouths.
+
+**Entries are in natural order** (`cad::naturalLess`): digits compare as
+whole numbers, so vertex 2 comes before vertex 10, where the map's own order
+puts 10 to 19 between 1 and 2; letters without regard to case, a tie then
+broken by case, so the order is total.
+
+`PROP TREE [scope] [WHERE k=v ...] [UNDER path] [FROM n] [LIMIT n]` replies
+with it, a record for the level and one per entry, a page at a time
+(`cad::kPropertyTreePage`, 200 entries, unless `LIMIT` says):
+
+```
+scope=selection matched=1 under="" entries=3 from=0 shown=3
+path=Asset children=1 values=1
+path=code value=KERB type=text
+path=vertex children=2 values=2
+```
+
+It takes the shared scope grammar (above), the selection by default, and is
+answered before the selection is required, so `PROP TREE DRAWING` needs none;
+the other `PROP` words stay on the selection. `UNDER`, `FROM` and `LIMIT`
+are words of their own rather than a bare path because a property may be
+named anything, a scope word included. A scope that takes nothing is a reply
+(`matched=0 entries=0`); `FROM` past the end is an empty page. Tested in
+`tests/cad/test_property_outline.cpp` and by
+`cli.prop_tree_reads_the_attributes_one_level_at_a_time`; the panel's use of
+it is `docs/desktop.md`, "The Properties panel: a tree read a level at a
+time".
 
 ## The project's coordinate system
 
@@ -1117,7 +1172,7 @@ them to the one parser (`cad::parseWhereCondition` reads one condition for
 it), rather than the parser learning `SET`
 (`ScopeVerbsTest.ModifyTakesItsOwnWordsWhereverTheyStoodBeforeTheSharedParser`).
 The `UTILITY` verbs are the second user (`docs/subsurface_utilities.md`,
-"Drawing data").
+"Drawing data"); `PROP TREE` is the third (below, "Properties as a tree").
 The window's side is `ScopeFilterWidget`
 (`src/katana_qt/customisation/scope_filter_widget.*`): Global Modify's "Apply
 to" and "Only those that match" as one widget every dialog shares, whose

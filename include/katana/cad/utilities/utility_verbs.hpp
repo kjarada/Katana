@@ -11,23 +11,32 @@
 //                     ALIGNMENT <name> [WIDTH <m>] [H <m>] [V <m>] [MARGIN <m>]
 //   UTILITY CHECK     <schedule.csv> | <scope> SCHEMA <schema.csv>
 //   UTILITY DRAW      <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
+//   UTILITY DRAW      <scope> [TYPE <type>] [METHOD <method>] [H_UNC <m>] [V_UNC <m>]
+//                     [HEIGHTS surface|service|none] [LEVEL_REF top|centre|invert]
+//                     [PATH detected|exposed|assumed] [OWNER <text>] [MATERIAL <text>]
+//                     [DIAMETER_MM <mm>] [STATUS <status>] [FIELDS column=property,...]
+//                     [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
 //   UTILITY REGRADE   <scope> [SPACING <m>] [MINCOVER <m>]
 //   UTILITY SCHEDULE  <out.csv> <scope> [SCHEMA <schema.csv>]
 //
 // Words are case-insensitive and a path with blanks is quoted. <scope> is the
 // shared scope and filter words (scope_verbs.hpp): a first word that is one,
-// or WHERE, takes the services UTILITY DRAW drew (utility_data.hpp) instead
-// of a file, each line whole. REPORT, VERIFY, CLEARANCE and CHECK take a file
-// or the drawing, and on the drawing lead their reply with what the scope
-// took (scopeRecord); REGRADE and SCHEDULE take only the drawing, and lead
-// with their own record, then the scope's; DRAW takes only a file. A scope
-// that takes no utility line is answered with the scope's record and "no
-// utility lines in the scope", by every verb, and is not a failure.
+// or WHERE, takes the drawing instead of a file. For DRAW it takes the lines,
+// polylines and points a survey or an import left there, which it draws as
+// services (readGeometryServices, utility_data.hpp); for every other verb it
+// takes the services DRAW drew, each line whole. REPORT, VERIFY, CLEARANCE
+// and CHECK take a file or the drawing, and on the drawing lead their reply
+// with what the scope took (scopeRecord); DRAW takes either too, and on the
+// drawing, like REGRADE and SCHEDULE, which take only the drawing, leads with
+// its own record, then the scope's. A scope that takes nothing to act on is
+// answered with the scope's record and says so, by every verb, and is not a
+// failure.
 // REPORT, VERIFY, CLEARANCE, CHECK and SCHEDULE read and report; they never
 // touch the drawing. CHECK is refused when the schedule has errors against
 // the schema, with the whole check in the refusal, so a script stops there
-// and still shows why. DRAW adds the graded schedule to the drawing as ONE
-// undo step (utility_drawing.hpp), and REGRADE draws what is drawn again from
+// and still shows why. DRAW adds the graded schedule, or the geometry's
+// services, to the drawing as ONE undo step (utility_drawing.hpp) and leaves
+// the geometry it read as it was, and REGRADE draws what is drawn again from
 // its points as ONE step; each replies with its records, the first of which
 // carries the bounds= a front end frames.
 

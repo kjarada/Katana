@@ -18,6 +18,42 @@ and from Survey > Survey Coding, beside the managers of what it brings. The
 status bar shows a view's running readout, how many entities are selected of
 how many, the current layer, the active snap and the cursor coordinates.
 
+### How the window starts
+
+`main` (`src/katana_qt/main.cpp`) makes the `QApplication`, then applies the
+theme before any widget exists (`theme::apply`: the style, the palette, the
+stylesheet, and the platform's font taken as the one font of the whole
+window - below, "Text"), sets the application icon, reads the switches, and
+builds the `MainWindow`: its actions and menus, its panels, View's Window
+section (`MainWindow::buildWindowMenu`) and the status bar, and records the
+layout it was built with for View > Reset Window Layout. The default
+customisation is loaded next, so the first drawing is drawn with it. Then an
+interactive run - one with no `--screenshot`, `--plot`, `--plot-sheets`,
+`--sheets-json` or batch `--script` - puts the window where the last session
+left it (`MainWindow::restoreSession`) and shows it, and the project and files
+on the command line are opened.
+
+**Where the window was.** Until 2026-09-26 every session opened a 1360 x 860
+window, whatever the screen: on a 1366 x 768 laptop it ran off the bottom,
+and on a large screen it was a small window in a corner, with the panels and
+toolbars wherever Qt put them and nothing a person moved kept. Now an
+interactive session keeps, in the application's `QSettings`, the window's
+place and size (`saveGeometry`), where the panels and toolbars are
+(`saveState`, keyed on the object names every dock and toolbar has), which
+panels are minimised to the tray (`DockChrome::minimisedNames`), the text
+size, the toolbar icon size and whether the toolbars show their names; they
+are written when the window closes and read before it is shown. With nothing
+saved - the first run - or a layout from another version (`kLayoutVersion`,
+raised when a change to the toolbars or panels would make an old layout put
+them wrong), the window fits the screen it is on (`MainWindow::fitToScreen`):
+85% of the free area, centred, or maximised on a screen smaller than
+1440 x 900, where the drawing needs every pixel. View > Reset Window Layout
+puts the panels and toolbars back as a new window has them and leaves the
+size and the appearance alone. The views inside the workspace are not kept:
+they belong to the drawing being worked on, not to the window. A headless
+run neither reads nor writes any of it (`docs/headless.md`), so a screenshot
+is the same on every machine.
+
 The readout (`FrameStatsLabel`) is a 3D view's frame time or a section's
 station and elevation under the cursor, forwarded from whichever view raised
 it (`ViewWorkspace::onFrameStats`) and kept apart from `onStatus`, which is
@@ -152,6 +188,12 @@ millions. Text below three pixels tall is drawn as a baseline stroke rather than
 glyphs, so a zoomed-out drawing stays legible instead of dissolving into
 unreadable marks.
 
+The Layers panel's narrow columns - shown, locked, colour - are headed by
+icons with their words in the tooltips, and a layer's colour is a swatch
+with its code in the tooltip: the words "On", "Lock" and "Colour" and a
+"#FFD54F" in every row took so much of a 300 px panel that the layer names
+were cut to three letters.
+
 Layer visibility, locking and colour are edited in the layer panel or the
 Layers dialog (Format > Layers..., Ctrl+L); each edit is a command, so it
 participates in undo. Choosing the CURRENT layer is
@@ -214,6 +256,49 @@ a palette completely - the native Windows style draws light controls into a
 dark palette. The accent is blue, not the red of the logo: in an engineering
 program red already means "error", and a checked tool must not read as one.
 
+**Text.** The fonts are tokens too (`theme::uiFont`, `theme::monospaceFont`,
+`theme::overlayFont`). The command line named "Consolas", the plan view's
+prompt and snap tag "Segoe UI" at fixed sizes, and eighteen dialogs'
+reports and command fields `QFontDatabase::systemFont(FixedFont)` - Courier
+New on Windows, wider and lighter than the Consolas beside it - while on
+Windows the menus, the menu bar, tooltips and message boxes each kept the
+font the platform gave that class. Now the whole window is one font, the
+platform's UI face (Segoe UI on Windows): `theme::setTextSize` sets it
+without a class name, which drops the per-class fonts. The fixed-pitch font
+is the first the machine has of Cascadia Mono, Consolas, DejaVu Sans Mono,
+Liberation Mono and Menlo, then the platform's own, at the same size as the
+chrome, so a column of coordinates in a report lines up and is the size of
+the text around it. **View > Text Size** (`viewTextSizeSmall` to
+`viewTextSizeExtraLarge`) moves every font together: Small is the platform's
+size less a point, Large two points more and Extra Large four - one point
+(9 to 10) is a difference few people see. The command line's font, set on
+the widget, is set again with the rest. The drawing's own text face
+(`PlanPaintOptions::fontFamily`) is content, like the viewport's colours, and
+is not a theme font: a plot must print the same whatever size the window's
+text is.
+
+**`KatanaStyle` (in `theme.cpp`) - Fusion, with two things it does not do.**
+The Survey, Terrain and GIS menus were grouped under titled sections
+("Surfaces", "Point Cloud - PDAL") and not one title had ever been seen:
+Fusion says it does not support sections (`SH_Menu_SupportsSections`), so
+`QMenu` drew each as a plain separator - and the stylesheet drew a menu's
+separators with its own parent's code whenever the menu had a background
+colour, which draws no text either. The style says it does and draws the
+title in small muted capitals, and the `QMenu` rule declares
+`-qt-style-features: background-color`, which hands the separators back to
+the style while the stylesheet keeps drawing the items
+(`qt_widgets.Theme.AMenuSectionShowsItsTitleUnderTheStylesheet`, shown
+failing without that line). Every long menu is now in titled sections: File
+(Drawing, Import and Export, Scripts, Plot, Project), View (Display,
+Viewports, 3D Views, Window), Format (Tables and Libraries, Customisation
+Files, Across the Drawing, Annotation Styles), Annotate's editors and Leader
+Manager, and the tool menus by their catalogue groups (Lines, Curves,
+Transform, Edit, Dimensions ...; `src/katana_qt/tools/tool_menus.hpp`). Second, for a
+choice list that cannot be typed into, Fusion drops a popup the height of
+every item (`SH_ComboBox_Popup`), ignoring `maxVisibleItems`: a drawing's two
+hundred styles ran off the screen. The style asks for the scrolling list
+(`qt_widgets.Theme.ALongChoiceListScrollsRatherThanRunningOffTheScreen`).
+
 **`icons.hpp` - the icons are drawn in code.** Each is a vector drawing on a
 24-unit grid painted by a `QIconEngine` at whatever size and device-pixel ratio
 Qt asks for. There are no image files behind them, for four reasons: they are
@@ -240,6 +325,20 @@ disappears. `katana.rc.in` embeds the icon and a `VERSIONINFO` block whose
 numbers come from `project(Katana VERSION ...)`, so a version is written in
 exactly one place.
 
+**Every menu item has an icon and says what it does.** Until 2026-09-26
+sixty menu items had no icon or no status tip, or neither: the snap modes,
+the viewport layouts, the standard 3D views, Deselect, Quit, the annotation
+editors and managers, every submenu. `MainWindow::menuGaps` walks the menu
+bar and every submenu and lists each item without both; `katana
+--check-menus` fails a run that has one, and
+`qt_every_menu_item_has_an_icon_and_a_status_tip_headless` runs it. The new
+icons keep the one language: a snap mode is the mark the plan view draws for
+it, on the geometry it snaps to; a layout is its panes with the main view in
+the accent; an orthographic standard view is the object in plan with the face
+seen in the accent and the eye's arrow coming at it, and an isometric one the
+cube with the arrow from its corner. `qt_widgets.Icons.TheListHoldsEveryIconOnceAndEachPaintsSomething`
+holds `allIcons` to every enumerator, in order, each painting at 16 px.
+
 **The contact sheet earned its keep at once.** The first application icon had
 the handle running UP the blade with the guard at the pommel - a sign error in
 the tangent - and the Circle tool read as a minus sign in a ring. Both were
@@ -261,6 +360,18 @@ behind an overflow arrow. Every toolbar and dock has an object name, which is
 what `QMainWindow::saveState` keys a layout on. View > Panels brings back any
 dock that has been closed.
 
+**A toolbar says its name.** Two rows of icon-only buttons read as one
+undivided strip, and which icons were Survey's and which Terrain's was a
+matter of hovering over each. A toolbar along the top or the bottom now
+starts with its name, muted (`QLabel#toolBarName`, made by
+`MainWindow::makeToolBar`); a vertical one has no room for a word, and the
+Properties bar's " Style " label already says what it holds. View >
+Toolbars (`viewToolBars`) shows or hides each toolbar (`viewToolBarFile` ...),
+turns the names off (`viewToolBarNames`) and sizes the icons: Small 16 px,
+Standard 20, Large 28 (`viewToolBarIconsSmall` ...). Words under every icon were
+rejected: the two top rows hold some sixty buttons, and with their words they
+would not fit in the widest window.
+
 **Every key reaches one thing.** `MainWindow::shortcutClashes` gathers every
 key a person can press - each action's key sequences, any `QShortcut`, each
 menu's Alt letter and each item's underlined letter within its own menu (two
@@ -278,15 +389,13 @@ person ("The Command Reference and the keyboard shortcuts", below).
 reviewed, and the same run can drive the menus and dialogs step by step:
 `docs/headless.md`.
 
-**Not done.** Settings are not persisted: toolbar positions, dock layout and
-window geometry are not saved between sessions although every object now has
-the name that would allow it (the dock chrome has the hooks, below). There is no
-light theme. The dialogs (corridor, plot) are themed but plain. View >
-Viewport Layout's actions still have no object names (View > Active Viewport
-Shows has them: `viewShowsPlan`, `viewShows3D`, `viewShowsSection`,
-`viewShowsElevation`). `resources/icon_sheet.png` is regenerated by
-`katana_make_icons` and now carries the Survey icons and the four Format ones
-(Purge Unused is a broom, not a second bin).
+**Not done.** There is no light theme. The dialogs (corridor, plot) are
+themed but plain. The views inside the workspace are not kept between
+sessions (above, "How the window starts"); the dock chrome's hooks
+(`minimisedNames`, `minimiseNamed`) are ready for it. The Text Size is the
+window's; a dialog that set a font of its own other than the fixed-pitch one
+keeps it. `resources/icon_sheet.png` is regenerated by `katana_make_icons` and
+carries every icon, the menu items' of 2026-09-26 included.
 
 ## The workspace: every view is a dock, and each has its own layers
 
@@ -485,6 +594,71 @@ Point Manager dock (`SurveyPointsDock`) wears the chrome now that
 `SurveyServices::chrome` hands it over, and the workbench has the chrome
 forget the dock before deleting it; its minimise, tray and float have been
 seen only in a screenshot, with no automated test.
+
+## The Properties panel: a tree read a level at a time
+
+The panel was a two-column table, rebuilt whole after every change: Id, Type,
+Layer, Colour, what the geometry measures, then every property by its flat
+name. A string brought in from a survey archive carries its attributes
+flattened into '/' names ("The attribute manager", below), so thirty
+attributes on each of a thousand vertices was thirty thousand rows, all made
+before the first could be seen, and a line of a thousand heights in one cell.
+The owner's request of 2026-09-26: "i want the attributes in the properties
+to show as a tree structure, because some lines are very long and contain
+lots of attributes in the vertices, so need a smart way to load all these
+information".
+
+`PropertyTreePanel` (`src/katana_qt/property_panel.hpp`) is a filter box
+above a tree (`propertyFilter`, and `propertyTable`, the name the table had,
+so `--report` and DRIVE's `?` read it as before). One entity is its groups:
+
+| Group | Holds | Opened |
+|---|---|---|
+| General | Id, Type, Layer, Colour (and Visible when hidden) | yes |
+| Geometry | what the shape measures, as the table showed it | yes |
+| Vertices | each vertex, "Vertex 3 \| x, y, z", its own attributes (`vertex/3/...`) beneath it | no |
+| Attributes | the properties as the tree their '/' names make | yes |
+| Source | the import's record of the entity (`Entity::metadata`), kept to be written back | no |
+
+**Nothing is read until it is opened.** A group's level is read by
+`cad::propertyOutline` - the reading `PROP TREE` replies with, so the panel and
+an agent cannot disagree (`docs/cad.md`, "Properties as a tree: PROP TREE") -
+when a person opens it, and made a page of 200 rows at a time
+(`kPropertyPage`); a "Show 200 more" row at the end of a level makes the next
+page when clicked or chosen with Enter. The model (`PropertyTreeModel`)
+draws an expander for a level it has not read, so a vertex with thirty
+attributes costs one row until it is opened. A vertex is numbered from 1, as
+the archive numbers its attributes; its height is shown only where it has one
+(absent is not zero), and the `elevations` list in Attributes says "see
+Vertices" instead of a thousand numbers. Attributes of a
+vertex the string no longer has (one since removed) keep the `vertex` branch
+in Attributes, so nothing held is out of sight.
+
+**The filter lists every value that holds the words typed**, however deep -
+a vertex's attributes and the source record too - by whole name
+(`vertex/3/QL | B`), in natural order, after a pause in the typing; cleared,
+the tree is back as it was left. **Rows stay open across a refresh**: the
+window rebuilds the panel after every change, and the opened rows are
+remembered by the keys of their path and opened again where they still are,
+so an undo elsewhere does not fold up the vertex being read; a group a person
+closed stays closed from one entity to the next. Several entities are read as
+the attribute manager reads them - General counts them by type, Attributes
+shows a value where all agree and `<varies>` where they do not (opened by
+itself up to 500 entities, read on demand past that). Copy (Ctrl+C, or the
+shortcut menu) puts the selected rows on the clipboard, name and value
+separated by a tab. The panel edits nothing; the Style row above it and
+Edit > Attributes do.
+
+One trap was found on the way and is recorded in the model: `QTreeView`
+calls `fetchMore` from inside its own layout of the row it is opening, and a
+fetch there that removed the Show more row cleared the view's items under
+the layout and wrote past their end (valgrind found it in
+`qt_widgets.PropertyPanel.ALongStringIsMadeAPageAtATimeWithAShowMoreRow`). So
+`fetchMore` only reads a level the first time, adding rows and removing none,
+and the next pages come from the Show more row after the click is over
+(`qt_widgets.PropertyPanel.OpeningALongLevelAsAPersonDoesReadsItsFirstPageOnly`,
+which fails with the old rule because the view then made every page at once).
+The rest is `tests/qt_widgets/test_property_panel.cpp`.
 
 ## The layer manager, and why "move" is "rename"
 
@@ -1342,16 +1516,30 @@ flagged alike. The dialog never calls the AS 5488 library.
 
 **Where the services come from** (`docs/cad.md`, "Scope and filter") is chosen above the tabs:
 a schedule file (`utilitySourceFile`) or what is drawn
-(`utilitySourceDrawing`), the lines `UTILITY DRAW` drew, taken by Global
-Modify's own "Apply to" and "Only those that match" controls - the shared
-`ScopeFilterWidget` (below), here named `utility...` - on the left. Its
+(`utilitySourceDrawing`), taken by Global Modify's own "Apply to" and "Only
+those that match" controls - the shared `ScopeFilterWidget` (below), here
+named `utility...` - on the left. For Draw, what is drawn is the lines,
+polylines and points a survey or an import left there, drawn as services
+(`docs/subsurface_utilities.md`, "Services from surveyed and imported
+geometry"); for the others, the lines `UTILITY DRAW` drew. The widget's
 `verbWords()` are the line's scope and filter words, so Report on the
 drawing is `UTILITY REPORT DRAWING`, on a view `UTILITY REPORT VIEW 3` (or
-`VIEW 3 EXTENTS` without "Only what is on screen"), and so on. Report,
-Verify, Clearance and Check take either source; Draw always reads its file,
-Regrade and Schedule always the drawing, and the controls that do not apply
-to the tab in front are disabled rather than hidden, so the choice is still
-seen. The scope defaults to the whole drawing, what the utility tools
+`VIEW 3 EXTENTS` without "Only what is on screen"), and so on. Draw,
+Report, Verify, Clearance and Check take either source; Regrade and Schedule
+always the drawing, and the controls that do not apply to the tab in front
+are disabled rather than hidden, so the choice is still seen. Draw of what is
+drawn brings its group "Drawn geometry as services" (`utilityGeometryGroup`)
+to life: what the geometry cannot say for itself - type, method, the two
+uncertainties, what the heights are, level reference, path, owner,
+material, diameter, status, and the Fields that read an import's own
+attributes as the schedule's columns. Each choice lists the verb's own
+words (`EML`, `pothole`, `service`), so the line reads as the choice does and
+the headless `--fill` takes a choice as typed; "not given" leaves the option
+out, for what each line and point says of itself. They were added on
+2026-09-26, when Draw stopped being a file's alone: the owner's services
+are surveyed by GNSS and total station, or come in a `.12da` archive, an IFC
+file, a shapefile or a DXF file, and are post-processed in the drawing, not typed into a schedule
+first. The scope defaults to the whole drawing, what the utility tools
 usually mean. The layers, the views and the alignments follow the drawing
 through a `DocumentWatcher`, and the views are read again whenever the dialog
 is shown. Clearance's works are a design file (`utilityDesignFile`), a drawn
@@ -1392,8 +1580,13 @@ agent types it, framed the same),
 `qt_utility_dialog_reports_what_is_drawn_and_what_the_view_shows_headless`
 (Report on the drawing and on the plan view, on screen),
 `qt_utility_dialog_regrades_what_is_drawn_headless` (nothing moved: no step,
-framed) and `qt_utility_dialog_writes_what_is_drawn_as_a_schedule_headless`
-(the Schedule tab's file read back by a typed `REPORT`).
+framed), `qt_utility_dialog_writes_what_is_drawn_as_a_schedule_headless`
+(the Schedule tab's file read back by a typed `REPORT`) and
+`qt_utility_dialog_draws_what_an_import_left_headless` (a GIS file imported
+by a typed `IMPORT`, then Draw on what is drawn with its Fields: the
+sample's hand-worked figures). A Draw whose scope had nothing left to draw
+says so in the status, and that no undo step was added
+(`UtilityDialog.ADrawOfTheSurveyInTheDrawingRunsTheVerbAndSaysWhenNothingWasLeftToDraw`).
 
 **The window answers `VIEW`.** The scope word `VIEW` (`docs/cad.md`, "Scope
 and filter") is the window's: `MainWindow` gives its interpreter

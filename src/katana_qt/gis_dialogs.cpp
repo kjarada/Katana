@@ -38,7 +38,7 @@ QLabel* summaryLabel(const interop::SourceDescription& source, QWidget* parent)
 {
     auto* label = new QLabel(QString::fromStdString(interop::formatDescription(source)).trimmed(),
                              parent);
-    label->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    label->setFont(katana::qt::theme::monospaceFont());
     label->setTextInteractionFlags(Qt::TextSelectableByMouse);
     label->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
     label->setWordWrap(false);
@@ -426,7 +426,7 @@ DatasetInfoDialog::DatasetInfoDialog(const QString& title, const QString& text, 
     auto* layout = new QVBoxLayout(this);
     auto* view = new QPlainTextEdit(text, this);
     view->setReadOnly(true);
-    view->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    view->setFont(katana::qt::theme::monospaceFont());
     view->setLineWrapMode(QPlainTextEdit::NoWrap);
     layout->addWidget(view);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);

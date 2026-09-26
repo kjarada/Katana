@@ -4,10 +4,12 @@
 that Claude - in Claude Desktop, Claude Code or any other MCP client - can run
 an engineering project in Katana: open a project, draw and edit it, run the
 survey calculations, lay out alignments and parcels, apply survey codes,
-grade, check and draw located buried services by AS 5488 quality level, and
-grade again, report, check and write back as a schedule what is drawn
-(`UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW`, `REGRADE`,
-`SCHEDULE`, `docs/subsurface_utilities.md`), change what a scope and a filter
+grade, check and draw located buried services by AS 5488 quality level - from
+a schedule, or from the lines and points a survey or an import left in the
+drawing (`UTILITY DRAW <scope> METHOD ...`) - and grade again, report, check
+and write back as a schedule what is drawn (`UTILITY REPORT`, `VERIFY`,
+`CLEARANCE`, `CHECK`, `DRAW`, `REGRADE`, `SCHEDULE`,
+`docs/subsurface_utilities.md`), change what a scope and a filter
 take (`MODIFY`, `docs/cad.md`, "Scope and filter"), import and export, and
 save it. The tool that runs commands names each `UTILITY` action and the
 scope words in its description, since that is what a client reads first.
@@ -87,6 +89,18 @@ working directory (a mistyped shell `2>1` makes the first), it once answered
 (`McpServer.DescribeEntityNamesTheEntityWhateverFilesTheWorkingDirectoryHolds`).
 The tool's description of `local` said it imported "in the drawing's own
 coordinates rather than reprojecting"; it moves the data, and says so.
+
+An entity's attributes are read a level at a time through
+`katana_run_commands` with `PROP TREE` (`docs/cad.md`, "Properties as a tree:
+PROP TREE"): `katana_describe_entity` sends `INFO`, which prints every
+property, and a surveyed string with thirty attributes on each of a
+thousand vertices is thirty thousand lines of it. `PROP TREE`, on the
+selection or any scope, answers the top of the tree - `Asset`,
+`vertex` with how many names and values are beneath each - and `PROP TREE
+UNDER vertex/3` one vertex's, in pages (`FROM`, `LIMIT`), as the window's
+Properties panel reads them. No tool of its own was added: the verb's
+records are already the structured answer, and a tool would be a second
+spelling of it.
 
 The annotation styles are read and changed through `katana_run_commands`
 with the verbs the window's managers send (`docs/annotation.md`): `DIMSTYLE

@@ -9,6 +9,7 @@
 #include <optional>
 #include <QMainWindow>
 #include <QPointer>
+#include <QByteArray>
 #include <QStringList>
 
 #include <filesystem>
@@ -21,6 +22,7 @@
 #include "command_reference_dialog.hpp"
 #include "command_runner.hpp"
 #include "icons.hpp"
+#include "theme.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/customisation_record.hpp"
 #include "katana/cad/plot.hpp"
@@ -76,6 +78,7 @@ namespace katana::qt {
 class StyleManagerDialog;
 class AttributeManagerDialog;
 class LayerManagerDialog;
+class PropertyTreePanel;
 class DatasetInfoDialog;
 class DrawingSummaryDialog;
 
@@ -106,6 +109,31 @@ class MainWindow final : public QMainWindow {
     // waits on a box no one can see, which is how the first headless 12da
     // import hung.
     void setHeadless(bool headless) { headless_ = headless; }
+
+    // ---- the window between sessions ----------------------------------------------------
+    //
+    // An interactive run starts where the last one was left: the window's
+    // place, size and state, where the panels and toolbars are, which panels
+    // are minimised, the text size, the toolbar icon size and whether the
+    // toolbars show their names. With nothing saved - the first run, or a
+    // layout from an older version - the window fits the screen it is on
+    // (fitToScreen). A headless run neither reads nor writes any of it: it is
+    // always the default 1360 x 860 window, so a screenshot is the same on
+    // every machine. main() calls restoreSession before the window is shown.
+    void restoreSession();
+    // The first-run size: 85% of the screen's free area, centred; maximised
+    // on a screen smaller than 1440 x 900, where the drawing needs every
+    // pixel it can have.
+    void fitToScreen();
+    // The panels and toolbars back where a new window has them (View >
+    // Reset Window Layout); the window's size and the appearance stay.
+    void resetWindowLayout();
+    // View > Text Size: the whole window's text, the command line's too.
+    void setTextSize(theme::TextSize size);
+    // View > Toolbars: the toolbars' icons, 16, 20 or 28 pixels square, and
+    // whether a toolbar along the top shows its name before its buttons.
+    void setToolBarIconSize(int pixels);
+    void setToolBarNamesShown(bool shown);
 
     // Refreshes the panels on the next pass of the event loop, once, however
     // many times it is asked before then. See the listener in the constructor
@@ -222,6 +250,13 @@ class MainWindow final : public QMainWindow {
     // (Format) > L"). `sequences`, when given, is set to how many distinct
     // sequences there are. For the headless --check-shortcuts switch.
     [[nodiscard]] QStringList shortcutClashes(int* sequences = nullptr) const;
+    // Every item of the menu bar's menus, their submenus' too, that has no
+    // icon or no status tip, one line each ("View > Snap Modes > Endpoint:
+    // no icon"); empty when there is none. A menu item owes a person a
+    // picture to find it by and a sentence saying what it does - the
+    // toolbars show the same actions with the icon alone, and the status bar
+    // shows the sentence. For the headless --check-menus switch.
+    [[nodiscard]] QStringList menuGaps(int* items = nullptr) const;
     // Every key those actions and shortcuts answer to, with the menu path
     // its command is under, in the menus' order: Help > Keyboard Shortcuts'
     // table. The keys are the ones shortcutClashes counts.
@@ -255,6 +290,13 @@ class MainWindow final : public QMainWindow {
     // back to its own when nothing runs.
     void showRunningTool(const std::string& id);
     void buildViewMenu(QMenu* viewMenu);
+    // View's Window section after Panels: Toolbars, Text Size, Reset Window
+    // Layout. After buildDocks, when every toolbar and panel exists.
+    void buildWindowMenu();
+    void saveSession() const;
+    // Each toolbar's name shows while the toolbar lies along the top or the
+    // bottom and names are wanted.
+    void refreshToolBarNames();
     // A right-click in a plan view with no tool running: the shortcut menu
     // (plan_context_menu.hpp) for the selection, at `globalPos`.
     void showPlanContextMenu(const QPoint& globalPos);
@@ -609,7 +651,7 @@ class MainWindow final : public QMainWindow {
     std::vector<katana::cad::SceneMesh> sceneMeshes_;
     QTreeWidget* layerTree_ = nullptr;
     QTableWidget* referenceTable_ = nullptr;
-    QTableWidget* propertyTable_ = nullptr;
+    PropertyTreePanel* propertyTree_ = nullptr;
     QPlainTextEdit* commandLog_ = nullptr;
     QLineEdit* commandInput_ = nullptr;
     QLabel* coordinateLabel_ = nullptr;
@@ -657,6 +699,13 @@ class MainWindow final : public QMainWindow {
     QDockWidget* referenceDock_ = nullptr;
     std::vector<QAction*> layoutActions_;
     std::vector<QAction*> kindActions_;
+    // Every toolbar makeToolBar made, with the action of the name shown
+    // before its buttons (null for one that has a label of its own).
+    std::vector<std::pair<QToolBar*, QAction*>> toolBars_;
+    bool toolBarNamesShown_ = true;
+    int toolBarIconSize_ = 20;
+    // The layout a new window has, for View > Reset Window Layout.
+    QByteArray defaultLayout_;
 
     // Imported imagery and point clouds. Owned here rather than by the
     // Document so that katana_cad stays free of GDAL and PDAL, which is what

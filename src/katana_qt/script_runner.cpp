@@ -15,6 +15,7 @@
 #include <QVBoxLayout>
 
 #include "katana/cad/command_interpreter.hpp"
+#include "theme.hpp"
 
 namespace katana::qt {
 
@@ -169,7 +170,7 @@ ScriptRunDialog::ScriptRunDialog(ScriptDialogContext context, QWidget* parent)
     preview_ = new QPlainTextEdit(this);
     preview_->setObjectName("scriptPreview");
     preview_->setReadOnly(true);
-    preview_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    preview_->setFont(katana::qt::theme::monospaceFont());
     preview_->setLineWrapMode(QPlainTextEdit::NoWrap);
     preview_->setPlaceholderText("The commands the script holds appear here.");
     preview_->setMinimumHeight(160);
@@ -182,7 +183,7 @@ ScriptRunDialog::ScriptRunDialog(ScriptDialogContext context, QWidget* parent)
     command_ = new QLineEdit(this);
     command_->setObjectName("scriptCommand");
     command_->setReadOnly(true);
-    command_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    command_->setFont(katana::qt::theme::monospaceFont());
     command_->setToolTip("The line Run hands to the command line - type it there and it does the "
                          "same");
 

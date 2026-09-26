@@ -174,11 +174,21 @@ struct BoxAnswer {
 TEST(CustomisationWorkbench, TheFormatMenuOffersLayersTheManagersTheLoadsAndPurgeInThatOrder)
 {
     Bench bench;
+    // Each group under a titled section, the first too (theme.cpp draws the
+    // titles).
     EXPECT_EQ(names(bench.menu->actions()),
-              (std::vector<std::string>{"formatLayers", "formatStyles", "formatSymbols",
+              (std::vector<std::string>{"---", "formatLayers", "formatStyles", "formatSymbols",
                                         "formatSurveyCodes", "---", "loadCustomisation",
                                         "replaceCustomisation", "---", "formatGlobalModify",
                                         "formatPurge"}));
+    QStringList titles;
+    for (const QAction* action : bench.menu->actions()) {
+        if (action->isSeparator()) {
+            titles << action->text();
+        }
+    }
+    EXPECT_EQ(titles, (QStringList{"Tables and Libraries", "Customisation Files",
+                                   "Across the Drawing"}));
     EXPECT_EQ(names(bench.bar->actions()),
               (std::vector<std::string>{"formatStyles", "formatSymbols", "formatSurveyCodes",
                                         "formatGlobalModify"}));

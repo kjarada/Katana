@@ -1,0 +1,29 @@
+{
+"type": "FeatureCollection",
+"name": "located_services",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::28356" } },
+"features": [
+{ "type": "Feature", "properties": { "ASSET_ID": "W1", "ASSET_TYPE": "W", "OWNER": "WaterCo", "MATERIAL": "DICL", "DIA_MM": 150, "STATUS": "live", "DESC": "trunk main", "METHOD": "EML", "H_UNC": 0.10, "QL": "QL-B" },
+  "geometry": { "type": "LineString", "coordinates": [ [334000.000, 6250000.000], [334008.000, 6250000.150], [334016.000, 6250000.250], [334016.080, 6250000.310], [334017.500, 6250000.300], [334030.000, 6250000.500] ] } },
+{ "type": "Feature", "properties": { "ASSET_ID": "E1", "ASSET_TYPE": "E", "OWNER": "PowerCo", "MATERIAL": "PVC conduits", "DIA_MM": 400, "STATUS": "live", "CONFIG": "4 x 100 mm conduits", "DESC": "11 kV", "METHOD": "GPR", "H_UNC": 0.25, "V_UNC": 0.45, "LEVEL_REF": "top", "QL": "QL-B" },
+  "geometry": { "type": "LineString", "coordinates": [ [334000.000, 6250003.000], [334009.000, 6250003.100], [334018.000, 6250003.100], [334027.000, 6250003.000] ] } },
+{ "type": "Feature", "properties": { "ASSET_ID": "T1", "ASSET_TYPE": "C", "OWNER": "TelcoCo", "STATUS": "live", "CONFIG": "pit to pit", "METHOD": "surface", "QL": "QL-C", "PATH": "assumed" },
+  "geometry": { "type": "LineString", "coordinates": [ [334002.000, 6250005.500], [334035.000, 6250005.600] ] } },
+{ "type": "Feature", "properties": { "ASSET_ID": "G1", "ASSET_TYPE": "G", "OWNER": "GasCo", "MATERIAL": "PE", "STATUS": "live", "DESC": "from 1998 as-constructed plan", "METHOD": "records", "QL": "QL-D", "PATH": "assumed" },
+  "geometry": { "type": "LineString", "coordinates": [ [334000.000, 6250007.000], [334040.000, 6250007.200] ] } },
+{ "type": "Feature", "properties": { "PT_ID": "W1-1" }, "geometry": { "type": "Point", "coordinates": [334000.000, 6250000.000] } },
+{ "type": "Feature", "properties": { "PT_ID": "W1-2", "LEVEL": 19.20, "LEVEL_REF": "centre", "V_UNC": 0.35 }, "geometry": { "type": "Point", "coordinates": [334008.000, 6250000.150, 20.25] } },
+{ "type": "Feature", "properties": { "PT_ID": "W1-3", "LEVEL": 19.18, "LEVEL_REF": "centre", "H_UNC": 0.12, "V_UNC": 0.40 }, "geometry": { "type": "Point", "coordinates": [334016.000, 6250000.250, 20.22] } },
+{ "type": "Feature", "properties": { "PT_ID": "W1-X1", "METHOD": "pothole", "LEVEL": 19.155, "LEVEL_REF": "top", "H_UNC": 0.02, "V_UNC": 0.02, "QL": "QL-A", "PATH": "exposed", "VERIFIES": "W1-3" }, "geometry": { "type": "Point", "coordinates": [334016.080, 6250000.310, 20.22] } },
+{ "type": "Feature", "properties": { "PT_ID": "W1-4", "METHOD": "pothole", "LEVEL": 19.150, "LEVEL_REF": "top", "H_UNC": 0.02, "V_UNC": 0.02, "QL": "QL-A" }, "geometry": { "type": "Point", "coordinates": [334017.500, 6250000.300, 20.21] } },
+{ "type": "Feature", "properties": { "PT_ID": "W1-5" }, "geometry": { "type": "Point", "coordinates": [334030.000, 6250000.500] } },
+{ "type": "Feature", "properties": { "PT_ID": "E1-1", "LEVEL": 19.60 }, "geometry": { "type": "Point", "coordinates": [334000.000, 6250003.000, 20.40] } },
+{ "type": "Feature", "properties": { "PT_ID": "E1-2", "LEVEL": 19.55 }, "geometry": { "type": "Point", "coordinates": [334009.000, 6250003.100, 20.35] } },
+{ "type": "Feature", "properties": { "PT_ID": "E1-3", "LEVEL": 19.40, "H_UNC": 0.35, "V_UNC": 0.60 }, "geometry": { "type": "Point", "coordinates": [334018.000, 6250003.100, 20.30] } },
+{ "type": "Feature", "properties": { "PT_ID": "E1-4", "LEVEL": 19.50 }, "geometry": { "type": "Point", "coordinates": [334027.000, 6250003.000, 20.28] } },
+{ "type": "Feature", "properties": { "PT_ID": "T1-P1" }, "geometry": { "type": "Point", "coordinates": [334002.000, 6250005.500] } },
+{ "type": "Feature", "properties": { "PT_ID": "T1-P2" }, "geometry": { "type": "Point", "coordinates": [334035.000, 6250005.600] } },
+{ "type": "Feature", "properties": { "PT_ID": "G1-1" }, "geometry": { "type": "Point", "coordinates": [334000.000, 6250007.000] } },
+{ "type": "Feature", "properties": { "PT_ID": "G1-2" }, "geometry": { "type": "Point", "coordinates": [334040.000, 6250007.200] } }
+]
+}

@@ -23,6 +23,7 @@
 
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/plotting/page_setup.hpp"
+#include "theme.hpp"
 
 namespace katana::qt {
 
@@ -252,7 +253,7 @@ PlotDrawingDialog::PlotDrawingDialog(PlotDrawingDialogContext context, QWidget* 
     command_ = new QLineEdit(this);
     command_->setObjectName("plotDrawingCommand");
     command_->setReadOnly(true);
-    command_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    command_->setFont(katana::qt::theme::monospaceFont());
     command_->setToolTip("The line Plot hands to the command line - type it there and it does "
                          "the same");
 

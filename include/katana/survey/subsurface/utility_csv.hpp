@@ -65,6 +65,12 @@ struct UtilityCsvColumn {
 // Every column the reader knows, in the order above.
 [[nodiscard]] const std::vector<UtilityCsvColumn>& utilityCsvColumns();
 
+// The column `header` names, by its name or an alias, compared as the reader
+// compares a header row's; null for a name it does not know. So a column
+// named anywhere else - UTILITY DRAW's FIELDS, which reads an import's own
+// attributes as columns - is the one the reader would take.
+[[nodiscard]] const UtilityCsvColumn* utilityCsvColumnNamed(std::string_view header);
+
 // Lines in order of first appearance. ParseFailure, naming the line of text,
 // for: no header, an unknown or repeated column, a missing required column,
 // a row with the wrong number of fields, an unparseable number / method /
