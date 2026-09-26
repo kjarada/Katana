@@ -216,7 +216,7 @@ paragraph said geometry was JSON too, from before schema 3.)
 history and its reference: each entry's comment says why the change was made
 and why no existing row needed repairing. The file is marked as a Katana
 project by `PRAGMA application_id` ("KTNA") and versioned by
-`PRAGMA user_version`. At schema 11 it holds nineteen tables:
+`PRAGMA user_version`. At schema 12 it holds nineteen tables:
 
 | Migration | Adds |
 |---|---|
@@ -231,6 +231,7 @@ project by `PRAGMA application_id` ("KTNA") and versioned by
 | 9 | a style's `description`, `symbol` and `symbol_size` |
 | 10 | `survey_jobs` and `survey_job_files`: each imported field file kept whole, with its settings, report and the entities it made |
 | 11 | `text_styles`, `label_styles` (name, kind and the rest as versioned JSON) and `label_rules`, and a dimension style's `paper_sized` (`docs/annotation.md`, "Stored with the project") |
+| 12 | no table: the drawing system's geometry kinds - curve polyline 9, ellipse 10, spline 11 - in the existing geometry blob (`docs/drawing.md`). The version moves so a schema-11 build refuses the project up front as one from a newer Katana ("schema=12 supported=11") rather than failing row by row with "unknown geometry kind in blob". Every project a schema-12 build opens is raised to 12, whether or not it holds one of the kinds; writing 11 or 12 by what a save contained was rejected as a second versioning rule beside `kMigrations` |
 
 A new table or column is a new entry at the end, never an edit of a released
 one, and each default is chosen so that a project written before it draws
@@ -389,7 +390,7 @@ to each chain, so a kind taught to `curvePieces` reaches all of them.
 | `editing.hpp` `Curve2` | a second variant. A curve-like kind almost certainly belongs here too; it has its own `static_assert`. |
 | `entity_commands.cpp` | `asCurve`, `edgeCurves`, `asSegment` decide what is trimmable, offsettable and filletable. |
 | `import.cpp` | maps `gis::GeometryKind` inwards; only Point/LineString/Polygon exist there. |
-| `project_store.cpp` | `kCurrentSchemaVersion` does not change for a new kind, so an older build does not refuse the project up front — it opens it and fails per row with "unknown geometry kind in blob". Loud, but late, and phrased as corruption rather than version skew. Consider bumping it. |
+| `project_store.cpp` | `kCurrentSchemaVersion` does not change by itself for a new kind, so an older build would not refuse the project up front — it would open it and fail per row with "unknown geometry kind in blob": loud, but late, and phrased as corruption rather than version skew. Add a migration entry with the kind, as schema 12 did for the drawing system's three (`ProjectStoreMigration` tests). |
 
 ### Tests with a hand-written "one of each" corpus
 

@@ -72,7 +72,7 @@ namespace katana::entity {
 // knots, weights, fit points - each list u32-counted). They hold no anchor,
 // so version 3 never has cause to be written for them; a reader takes them
 // in version 2 or 3 alike. A build that predates them refuses them as an
-// unknown kind, and the project's schema 12 (docs/storage.md) says so before
+// unknown kind, and the project's schema 12 (docs/model.md) says so before
 // any blob is read.
 inline constexpr std::uint8_t kBlobVersion = 1;
 inline constexpr std::uint8_t kBlobVersionAnnotation = 2;
