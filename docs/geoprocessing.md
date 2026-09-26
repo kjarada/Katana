@@ -125,6 +125,11 @@ floating-point data, in `spillDirectory`, and `RunOutputs::file` names it.
 raster is written: without passing through memory, in the form it is kept in
 (`GdalRun.ARasterLargerThanTheMemoryLimitSpillsToATiledGeoTiff`).
 
+A `raster color-map` output made in memory has its bands named red, green,
+blue and, with `--add-alpha`, alpha before it is spilled or read: GDAL 3.13
+leaves them Undefined in MEM, and a picture copied on so drew its clear
+cells opaque (docs/terrain.md, "Viewshed and line of sight", Decided).
+
 ### Names only: staging
 
 A few arguments take a dataset by name only: `raster calc`'s inputs, the

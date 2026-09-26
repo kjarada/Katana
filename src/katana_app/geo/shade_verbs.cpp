@@ -222,28 +222,6 @@ Result<ShadeWords> shadeWords(const Tokens& tokens, std::size_t at)
     return words;
 }
 
-// What the verb reads its source as, for a reference raster's default name.
-std::string sourceName(const Context& context, const Source& source)
-{
-    switch (source.kind) {
-    case Source::Kind::Surface:
-        return source.surface;
-    case Source::Kind::File:
-        return pathOf(source.path).stem().string();
-    case Source::Kind::Raster:
-        for (const katana::interop::RasterOverlay& raster : context.reference.rasters()) {
-            if (std::to_string(raster.id) == source.raster ||
-                katana::core::equalsIgnoringCase(raster.name, source.raster)) {
-                return raster.name;
-            }
-        }
-        return source.raster;
-    case Source::Kind::Drawing:
-        break;
-    }
-    return "raster";
-}
-
 // The picture, made; what the apply keeps and says.
 struct Rendered {
     std::filesystem::path file;
