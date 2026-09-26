@@ -94,6 +94,14 @@ class CommandInterpreter {
     // front end that reads INFO <file> first, so that INFO 12 still reaches
     // the entity when no file of that name exists.
     [[nodiscard]] static bool isEntityId(std::string_view word);
+    // Whether `line` replaces the drawing: NEW, or an OPEN of a project
+    // directory - not OPEN with no target, SELECTION or #ids, which opens
+    // polylines (docs/drawing.md). The window asks it before its discard
+    // question and its reset of the backdrop and views, the session before
+    // its missing-customisation check, katana_mcp before its unsaved-changes
+    // guard, so an OPEN #12 neither asks to discard the drawing nor is
+    // refused for unsaved changes.
+    [[nodiscard]] static bool replacesDocument(std::string_view line);
     // What the scope word VIEW means (scope_verbs.hpp): the window's active
     // plan view, or the view with the id given, with its own hidden layers
     // and its visible area. Headless there is none, and VIEW is refused in
@@ -170,6 +178,24 @@ class CommandInterpreter {
     // from it follows the entity (annotation/associative.hpp).
     [[nodiscard]] katana::core::Result<annotation::AnchoredPoint>
     parseAnchoredPoint(const std::string& text);
+
+    // The drawing system's verbs (drawing/drawing_verbs.cpp, docs/drawing.md):
+    // VERTEX, WEED, DENSIFY, STRAIGHTEN, CLOSE, OPEN (of polylines),
+    // STARTVERTEX, VERTEXZ, PLINE with ARC and LINE, PLINE3D, SPLINE, ELLIPSE,
+    // XLINE, RAY, DLINE and the drafting settings. Options are key=value;
+    // replies are key=value records, one per line.
+    [[nodiscard]] static bool isDrawingVerb(const std::string& verb, const Tokens& args);
+    [[nodiscard]] static std::string drawingHelpText();
+    [[nodiscard]] Reply drawingVerb(const std::string& verb, const Tokens& args);
+    [[nodiscard]] Reply vertexVerb(const Tokens& args);
+    [[nodiscard]] Reply polylineVerb(const std::string& verb, const Tokens& args);
+    [[nodiscard]] Reply drawShapeVerb(const std::string& verb, const Tokens& args);
+    [[nodiscard]] Reply draftingVerb(const std::string& verb, const Tokens& args);
+    // A point with an optional height, relative input measured from `from`
+    // when given (a vertex being moved) or else from the last point.
+    [[nodiscard]] katana::core::Result<PrecisePoint>
+    parseDrawingPoint(const std::string& text,
+                      std::optional<katana::geometry::Point2> from = std::nullopt);
 
     Document& document_;
     std::vector<std::string> history_;

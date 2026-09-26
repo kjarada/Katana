@@ -13,6 +13,7 @@
 #include "katana/cad/annotation/text_layout.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/cad/survey_coding.hpp"
+#include "katana/entity/curve_pieces.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/text_block.hpp"
 #include "katana/math/numerics.hpp"
@@ -530,6 +531,28 @@ void appendLinework(const katana::entity::Geometry& geometry, std::vector<Segmen
         chord(*arc);
     } else if (const auto* circle = std::get_if<katana::geometry::Circle2>(&geometry)) {
         chord(katana::geometry::Arc2{circle->center, circle->radius, 0.0, katana::math::kTwoPi});
+    } else if (std::holds_alternative<katana::geometry::CurvePolyline2>(geometry)) {
+        // Its straight segments as they are, its arcs chorded as an arc is.
+        for (const auto& piece : katana::entity::curvePieces(geometry)) {
+            if (const auto* segment = std::get_if<Segment2>(&piece)) {
+                if (out.size() < limit) {
+                    out.push_back(*segment);
+                }
+            } else if (const auto* part = std::get_if<katana::geometry::Arc2>(&piece)) {
+                chord(*part);
+            }
+        }
+    } else if (std::holds_alternative<katana::geometry::Ellipse2>(geometry) ||
+               std::holds_alternative<katana::geometry::Spline2>(geometry)) {
+        // Chords of a 256th of its extent: as coarse, for its size, as an
+        // arc's sixteen a turn, since a keep-out is a place a label should
+        // not stand, not a measurement.
+        const double tolerance = std::max(
+            katana::geometry::kCurveChordTolerance,
+            std::hypot(katana::entity::boundingBox(geometry).width(),
+                       katana::entity::boundingBox(geometry).height()) /
+                256.0);
+        appendPath(katana::entity::linework(geometry, tolerance), false, out, limit);
     }
 }
 

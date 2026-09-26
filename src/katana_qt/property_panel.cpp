@@ -617,6 +617,37 @@ std::vector<PropertyRow> geometryRows(const katana::entity::Model& model,
             rows.push_back(leaf("Callout", qs(katana::entity::toString(g.callout))));
             return rows;
         }
+        // The drawing system's kinds; their vertices are edited in the
+        // Vertices panel (qt/drawing/vertex_panel.hpp).
+        Rows operator()(const katana::geometry::CurvePolyline2& g) const
+        {
+            Rows rows = {leaf("Vertices", grouped(g.vertices.size())),
+                         leaf("Closed", g.closed ? "yes" : "no"),
+                         leaf("Arcs", g.hasArcs() ? "yes" : "no"),
+                         leaf("Heights", g.hasHeights() ? "yes" : "no"),
+                         leaf("Length", planNumber(g.length()))};
+            if (g.closed) {
+                rows.push_back(leaf("Area", planNumber(g.area())));
+            }
+            return rows;
+        }
+        Rows operator()(const katana::geometry::Ellipse2& g) const
+        {
+            return {
+                leaf("Centre", planPoint(g.center)),
+                leaf("Major radius", planNumber(g.majorRadius())),
+                leaf("Minor radius", planNumber(g.minorRadius())),
+                leaf("Rotation", planNumber(g.majorAxis.angle() * katana::math::kRadToDeg) + " deg"),
+                leaf("Sweep", planNumber(g.sweep * katana::math::kRadToDeg) + " deg"),
+                leaf("Length", planNumber(g.length()))};
+        }
+        Rows operator()(const katana::geometry::Spline2& g) const
+        {
+            return {leaf("Degree", QString::number(g.degree)),
+                    leaf("Control points", grouped(g.controlPoints.size())),
+                    leaf("Fit points", grouped(g.fitPoints.size())),
+                    leaf("Length", planNumber(g.length()))};
+        }
     };
     return std::visit(Visitor{model}, geometry);
 }

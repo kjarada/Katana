@@ -212,7 +212,9 @@ TEST(ScopeWordsParse, WhatCannotBeReadIsRefusedNamingTheWord)
     // word that does not read, like the colour below.
     const katana::core::Error blob = refusal("WHERE TYPE=blob");
     EXPECT_EQ(blob.code, ErrorCode::ParseFailure);
-    EXPECT_TRUE(contains(blob.describe(), "Blob")) << blob.describe();
+    // The word as it was typed: a title-cased "Blob" was the parser's own
+    // spelling, from when it title-cased the name to match the enumerator.
+    EXPECT_TRUE(contains(blob.describe(), "blob")) << blob.describe();
     EXPECT_TRUE(contains(refusal("WHERE COLOUR=red").describe(), "red"));
 }
 
