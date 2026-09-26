@@ -108,6 +108,35 @@ beside the others, with `PATH` given the toolchain's runtime,
 `QT_QPA_PLATFORM=offscreen` and a `TIMEOUT`, because a modal box in a
 headless run is a hang.
 
+### The same suite on Linux
+
+The suite is written on Windows (MSYS2) and also run on Linux against
+conda-forge's toolchain (`tools/setup_linux_toolchain.py`). What differs,
+and how the tests hold on both:
+
+- **Qt's offscreen plugin talks.** On Linux it prints "This plugin does not
+  support raise()" and the like for each window call it stubs out.
+  `tools/check_screenshot.cmake` takes those lines out before it matches
+  `-DEXPECT=`, because they are Qt's and not the window's report.
+- **GDAL's drivers differ by build.** conda-forge's GDAL 3.13.2 has no PDF
+  driver, so its catalogue has 120 leaf algorithms where MSYS2's has 121
+  (`gdal driver pdf list-layers`); it has the CAD driver, which reads
+  `.dwg`, and MSYS2's has not. A test that counts on a driver asks
+  `gis::findFormat` whether it is there and expects what follows.
+- **A test's paths are made native.** A dialog test that hands in a Windows
+  path (`C:\out\view.png`) builds it with `QDir::toNativeSeparators`: on
+  Linux a backslash is a legal file-name character, and
+  `QDir::fromNativeSeparators` rightly leaves it alone.
+- **The GPU cases need a Vulkan driver.** Without Mesa's lavapipe
+  (`mesa-vulkan-drivers`) the "OnTheDesktop" cases fail to make a device.
+
+Not done: on Linux `SheetSetMenu.TheSetIsSavedAndLoadedBackAskingFirst`
+fails, and `SheetSetMenu.AnotherSetsSheetsAreAppendedInOneStep` and
+`SheetViewOptions.AnImageViewsPictureIsChosenAndCopiedInOneStep` hang until
+ctest's timeout. The file-dialog answering in those tests does not reach the
+dialog there. The tests and the code they drive are unchanged since the GDAL
+work began (2dd37cf), so they fail the same way on main.
+
 Choose the lighter tool: a widget test when the widget can be built alone, a
 headless check when the behaviour needs the window, its menus or the
 interplay of several parts. A headless check proves construction and what

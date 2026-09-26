@@ -7,6 +7,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -69,7 +70,7 @@ TEST(ShadingLine, TheRampTheRangeTheNameAndTheSaveAreWritten)
     form.rangeMin = "-2";
     form.rangeMax = "2";
     form.name = "cut fill";
-    form.save = "C:\\out\\cut fill.tif";
+    form.save = QDir::toNativeSeparators("C:/out/cut fill.tif");
     form.overwrite = true;
     EXPECT_EQ(*katana::qt::shadingLine(form),
               "RASTER SHADE SURFACE ground style=relief+hillshade ramp=diverging range=-2,2 NAME "

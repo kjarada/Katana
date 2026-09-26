@@ -7,6 +7,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -165,7 +166,7 @@ TEST(SurfaceExportLine, TheLineNamesTheSurfaceTheFileAndTheOptions)
 {
     SurfaceExportForm form;
     form.surface = "site ground";
-    form.file = "C:\\out\\dem 1.tif";
+    form.file = QDir::toNativeSeparators("C:/out/dem 1.tif");
     form.cell = 0.5;
     form.cog = true;
     form.overwrite = true;

@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include "katana/gis/formats.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/gis/processing.hpp"
 
@@ -140,6 +141,15 @@ const gp::ArgSpec* argNamed(const gp::AlgorithmSpec& spec, const std::string& na
 
 // ---- the catalogue --------------------------------------------------------------------------
 
+// GDAL 3.13.2 as MSYS2 builds it has 121 leaf algorithms. One of them,
+// `gdal driver pdf list-layers`, is registered by the PDF driver and exists
+// only in a GDAL built with it: conda-forge's 3.13.2 has no PDF driver, and
+// its own `gdal driver --help` lists no pdf subcommand, so it has 120.
+std::size_t expectedLeaves()
+{
+    return katana::gis::findFormat("PDF") != nullptr ? 121u : 120u;
+}
+
 TEST(GdalCatalogue, HoldsEveryLeafFromTheRootIncludingTheDriverFamily)
 {
     // 121 leaves in GDAL 3.13.2, walked from the root "gdal": the registry's
@@ -154,7 +164,7 @@ TEST(GdalCatalogue, HoldsEveryLeafFromTheRootIncludingTheDriverFamily)
                              info.path == std::vector<std::string>{"driver", "gpkg", "validate"};
         rasterGroup = rasterGroup || (info.container && info.path == std::vector<std::string>{"raster"});
     }
-    EXPECT_GE(leaves, 121u);
+    EXPECT_GE(leaves, expectedLeaves());
     EXPECT_TRUE(driverGpkgValidate);
     EXPECT_TRUE(rasterGroup);
 }
@@ -718,7 +728,7 @@ TEST(GdalVersions, NameTheLibraryAndCountItsAlgorithms)
     EXPECT_FALSE(versions.proj.empty());
     EXPECT_GT(versions.rasterDrivers, 0);
     EXPECT_GT(versions.vectorDrivers, 0);
-    EXPECT_GE(versions.algorithms, 121);
+    EXPECT_GE(static_cast<std::size_t>(versions.algorithms), expectedLeaves());
 }
 
 TEST(GdalWords, AValueIsWrittenAsGdalsCommandLineWritesIt)
