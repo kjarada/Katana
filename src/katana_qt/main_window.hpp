@@ -187,6 +187,10 @@ class MainWindow final : public QMainWindow {
     // logged, for a file that cannot be described or has no such dialog. For
     // --import-options.
     [[nodiscard]] std::unique_ptr<QDialog> makeImportOptions(const QString& path);
+    // What an accepted import dialog of makeImportOptions does: its IMPORT
+    // line run through the one executor, as if typed. The menu's import and
+    // a headless --import-options whose Run was pressed share it.
+    void finishImport(const QDialog& dialog);
     // File > Export Vector's dialog (VectorExportDialog, one per window) for
     // `path`, shown, with the scope set as the menu sets it: what File >
     // Export Vector opens once its file dialog has answered. For

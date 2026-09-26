@@ -139,6 +139,7 @@ GisToolDialog::GisToolDialog(const QString& name, const QString& title, GisDialo
     status_ = new QLabel(this);
     status_->setObjectName(name + "Status");
     status_->setWordWrap(true);
+    status_->setTextFormat(Qt::PlainText); // a refusal's words, never markup
     status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     reply_ = new QPlainTextEdit(this);
     reply_->setObjectName(name + "Reply");

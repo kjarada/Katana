@@ -1033,7 +1033,16 @@ IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]
   dataset inside a container by its number in INFO's list or by its name.
 - **A point cloud's `class=`** is one ASPRS class: the reader filters by one
   (`PointCloudReadOptions::classification`); a list is refused rather than
-  read as its first.
+  read as its first. With `budget=`, the step is sized to the class: the
+  filter runs before the decimation, and a step sized to the whole file
+  kept 738 of 1000 for class 2 of `samples/gis/survey_scan.las` (29512 of
+  its 40000 points, counted from the point records). No LAS header counts
+  points by class, so the first read measures it - at most kept x step
+  points passed the filter - and a second read at the step that sizes gives
+  984 (`ImportOptions.ABudgetWithAClassIsSizedToThePointsOfThatClass`).
+  Reading the file once more to count the class exactly was rejected: the
+  measured bound already keeps within the budget, and costs the same second
+  read only when it helps.
 - **An option of another kind of data is refused by name** - `band=` on a
   shapefile, `where=` on a raster - rather than ignored and seeming to have
   worked.
@@ -1278,7 +1287,12 @@ them through the window's one executor, then shows the records: the Summary
 `datasetInfoCopyJson`). Compute Statistics (`datasetInfoStats`) and Check
 (`datasetInfoCheck`) run `INFO ... STATS` and `INFO ... CHECK`;
 `datasetInfoCommand` shows the line last run and `datasetInfoReply` what it
-said. INFO runs as a background job in the window, so the dialog is told when
+said. A band's statistics, once computed, stay in the Bands table when a
+later reply - Check's - gives none for the same file: Check blanked them
+(`DatasetInfoDialog.StatisticsAndCheckAreTheirLines`). The reply and the
+import dialogs' status lines are plain text: GDAL's words are shown as they
+are, where a `<code>` in one was taken for markup and vanished
+(`VectorImportDialog.AMessageIsShownAsTypedNotAsMarkup`). INFO runs as a background job in the window, so the dialog is told when
 the job ends (`MainWindow::awaitJob`, which reads the `job id=<n> ...
 state=started` record the line answered with). MCP: `katana_dataset_info`
 (`docs/mcp.md`).

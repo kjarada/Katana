@@ -569,6 +569,18 @@ if(TARGET katana)
             "-DEXPECT=vectorImportCommand: IMPORT \"[^\"]*lots\\.geojson\" where=\"kind = 'lot'\".*vectorImportMatchCount: 2 of 3 features match; 2 entities would be imported"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/vector_import_dialog_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # And its Import (vectorImportRun) imports what the filter takes, as the
+    # menu's dialog does once accepted: the two lots. Its buttons had no
+    # object names, so a headless run could preview but never import.
+    add_test(NAME qt_vector_import_dialog_imports_what_its_filter_takes_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DIMPORT_OPTIONS=${PROJECT_SOURCE_DIR}/tests/geo/data/lots.geojson"
+            "-DDRIVE=vectorImportWhere=kind = 'lot'|!vectorImportRun|>LIST"
+            "-DEXPECT=2 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/vector_import_dialog_run_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # File > Export Vector's dialog, opened for a file as the menu opens it
     # once its file dialog has answered (^FILE), over a drawing the command
     # line made: layer "other" holds lots A and B alone, so the filter takes
@@ -593,6 +605,7 @@ if(TARGET katana)
                          qt_new_drops_reference_data_headless
                          qt_dataset_info_headless qt_import_options_headless
                          qt_vector_import_dialog_previews_its_line_headless
+                         qt_vector_import_dialog_imports_what_its_filter_takes_headless
                          qt_vector_export_dialog_writes_what_its_filter_takes_headless
         PROPERTIES ENVIRONMENT_MODIFICATION "${_qt_env}" TIMEOUT 180)
 

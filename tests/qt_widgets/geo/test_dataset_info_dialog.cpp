@@ -130,6 +130,11 @@ TEST(DatasetInfoDialog, StatisticsAndCheckAreTheirLines)
     child<QPushButton>(dialog, "datasetInfoCheck")->click();
     EXPECT_EQ(executor.lines.back(), "INFO \"" + path + "\" CHECK");
     EXPECT_EQ(child<QLabel>(dialog, "datasetInfoReply")->text(), "check code=0 problems=0");
+    // The check's own band records carry no statistics; the ones computed
+    // are of the same file and stay (they were wiped to blanks).
+    ASSERT_EQ(bands->rowCount(), 1);
+    EXPECT_NEAR(bands->item(0, 3)->text().toDouble(), 24.892, 2e-6);
+    EXPECT_NEAR(bands->item(0, 4)->text().toDouble(), 38.819, 2e-6);
 }
 
 TEST(DatasetInfoDialog, AVectorFilesFieldsAreListed)
