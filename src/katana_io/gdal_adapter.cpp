@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -12,6 +13,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <variant>
 #include <vector>
@@ -680,6 +682,34 @@ void dropHeights(VectorGeometry& part)
     }
 }
 
+// A read's attribute and spatial filters set on `layer` (VectorReadOptions).
+// InvalidArgument, with GDAL's reason, for an attribute filter the driver
+// cannot parse - said, never read as "no features match".
+Status setFilters(OGRLayer& layer, const VectorReadOptions& options)
+{
+    if (options.spatialFilter) {
+        const auto& box = *options.spatialFilter;
+        layer.SetSpatialFilterRect(box[0], box[1], box[2], box[3]);
+    }
+    if (!options.attributeFilter.empty()) {
+        CPLErrorReset();
+        if (layer.SetAttributeFilter(options.attributeFilter.c_str()) != OGRERR_NONE) {
+            const std::string why = lastGdalError();
+            layer.SetSpatialFilter(nullptr);
+            return makeError(ErrorCode::InvalidArgument,
+                             "GDAL could not read the filter" + (why.empty() ? "" : ": " + why),
+                             options.attributeFilter);
+        }
+    }
+    return {};
+}
+
+void clearFilters(OGRLayer& layer)
+{
+    layer.SetSpatialFilter(nullptr);
+    layer.SetAttributeFilter(nullptr);
+}
+
 // Every feature of `layer` as a typed table (GdalDataset::readTable).
 gp::FeatureTable readLayer(OGRLayer& layer, const std::string& driver,
                            const VectorReadOptions& options, VectorReadReport& report)
@@ -1035,6 +1065,17 @@ Result<RasterSamples> GdalDataset::readBandSampled(int bandIndex, int stride) co
 
 Result<RasterImage> GdalDataset::readImage(int maxPixels) const
 {
+    return readImage(maxPixels, 0);
+}
+
+Result<RasterImage> GdalDataset::readImage(int maxPixels, int onlyBand) const
+{
+    if (onlyBand < 0 || onlyBand > asDataset(dataset_)->GetRasterCount()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the raster has " + std::to_string(asDataset(dataset_)->GetRasterCount()) +
+                             " bands",
+                         "band " + std::to_string(onlyBand));
+    }
     if (maxPixels < 1) {
         return makeError(ErrorCode::InvalidArgument, "maxPixels must be at least 1");
     }
@@ -1078,7 +1119,20 @@ Result<RasterImage> GdalDataset::readImage(int maxPixels) const
     image.geotransform[4] *= scaleX;
     image.geotransform[5] *= scaleY;
 
-    const BandRoles roles = classifyBands(*dataset);
+    // One band asked for is that band alone, through its colour table when
+    // it has one - never mixed into a colour the file says its bands make.
+    BandRoles roles;
+    if (onlyBand > 0) {
+        GDALRasterBand* chosen = dataset->GetRasterBand(onlyBand);
+        if (chosen->GetColorInterpretation() == GCI_PaletteIndex &&
+            chosen->GetColorTable() != nullptr) {
+            roles.palette = chosen;
+        } else {
+            roles.grey = chosen;
+        }
+    } else {
+        roles = classifyBands(*dataset);
+    }
 
     auto readByteBand = [&](GDALRasterBand* band, std::vector<std::uint8_t>& out) -> bool {
         out.assign(pixels, 0);
@@ -1233,7 +1287,79 @@ Result<gp::FeatureTable> GdalDataset::readTable(int layerIndex, const VectorRead
     // process-wide quiet handler keeps them off stderr, and this keeps them
     // from being lost (they used to be).
     const detail::CplErrorCollector errors;
+    auto filtered = setFilters(*layer, options);
+    if (!filtered) {
+        return filtered.error();
+    }
     gp::FeatureTable table = readLayer(*layer, driverName(), options, out);
+    // The layer belongs to the dataset, which may be read again: a filter
+    // left on it would quietly narrow the next read.
+    clearFilters(*layer);
+    for (std::string& warning : errors.warnings()) {
+        out.warnings.push_back(std::move(warning));
+    }
+    return table;
+}
+
+Result<gp::FeatureTable> GdalDataset::readSql(const std::string& statement,
+                                              const std::string& dialect,
+                                              const VectorReadOptions& options,
+                                              VectorReadReport* report) const
+{
+    // IMPORT reads; it never writes to the file it imports. The dataset is
+    // open read-only, so a write would fail anyway - but with a driver's
+    // message about permissions, not the reason.
+    const std::string_view text = katana::core::trimmed(statement);
+    const std::size_t end = text.find_first_of(" \t\r\n(");
+    const std::string first = katana::core::lowered(std::string(text.substr(0, end)));
+    if (first != "select" && first != "with") {
+        return makeError(ErrorCode::InvalidArgument,
+                         "only a SELECT statement is read: an import never changes its file",
+                         std::string(text));
+    }
+    const std::string folded = katana::core::lowered(dialect);
+    if (!folded.empty() && folded != "ogrsql" && folded != "sqlite") {
+        return makeError(ErrorCode::InvalidArgument, "the SQL dialect is ogrsql or sqlite",
+                         dialect);
+    }
+    GDALDataset* dataset = asDataset(dataset_);
+    VectorReadReport local;
+    VectorReadReport& out = report != nullptr ? *report : local;
+    const detail::CplErrorCollector errors;
+    std::unique_ptr<OGRPolygon> area;
+    if (options.spatialFilter) {
+        const auto& box = *options.spatialFilter;
+        auto ring = std::make_unique<OGRLinearRing>();
+        ring->addPoint(box[0], box[1]);
+        ring->addPoint(box[2], box[1]);
+        ring->addPoint(box[2], box[3]);
+        ring->addPoint(box[0], box[3]);
+        ring->addPoint(box[0], box[1]);
+        area = std::make_unique<OGRPolygon>();
+        area->addRingDirectly(ring.release());
+    }
+    CPLErrorReset();
+    OGRLayer* rows = dataset->ExecuteSQL(std::string(text).c_str(), area.get(),
+                                         folded.empty() ? nullptr
+                                                        : (folded == "sqlite" ? "SQLITE"
+                                                                              : "OGRSQL"));
+    if (rows == nullptr) {
+        const std::string why = lastGdalError();
+        return makeError(ErrorCode::InvalidArgument,
+                         why.empty() ? std::string("the statement gives no rows to import")
+                                     : "GDAL could not run the statement: " + why,
+                         std::string(text));
+    }
+    // The result set is the dataset's to free, whatever happens below.
+    const std::unique_ptr<OGRLayer, std::function<void(OGRLayer*)>> held(
+        rows, [dataset](OGRLayer* layer) { dataset->ReleaseResultSet(layer); });
+    VectorReadOptions rest = options;
+    rest.spatialFilter.reset(); // ExecuteSQL has it
+    auto filtered = setFilters(*rows, rest);
+    if (!filtered) {
+        return filtered.error();
+    }
+    gp::FeatureTable table = readLayer(*rows, driverName(), rest, out);
     for (std::string& warning : errors.warnings()) {
         out.warnings.push_back(std::move(warning));
     }

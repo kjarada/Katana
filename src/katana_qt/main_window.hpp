@@ -379,22 +379,10 @@ class MainWindow final : public QMainWindow {
     // loaded. A warning; the project opens all the same.
     void reportMissingCustomisation();
     void reportCustomisationCoverage();
-    // The GIS menu's import dialogs' choices, which have no IMPORT words yet
-    // (docs/interop.md, "Not done"); File > Import, a path on the command line
-    // and a typed IMPORT are the executor's (geo/import_verb.cpp).
-    // `placement` is where the data lands, as importPath says; Keep asks when
-    // it is far from the drawing (decideImportPlacement, import_placement.hpp).
-    void importVectorFile(const std::filesystem::path& path,
-                          katana::interop::VectorImportOptions options = {},
-                          const katana::cad::ImportPlacement& placement = {});
     // File > Import's step for a DXF or a .12da archive, whose only choice
     // is where it lands (ImportPlacementDialog), and then the IMPORT line
     // it makes, through runVerbLine.
     void importWithPlacement(const QString& path);
-    void importRasterFile(const std::filesystem::path& path,
-                          katana::interop::RasterImportOptions options = {});
-    void importPointCloudFile(const std::filesystem::path& path,
-                              katana::interop::PointCloudImportOptions options = {});
     void exportVectorFile();
     // Writes the drawing, or `options.entities` of it, to `path`: a vector
     // format by extension, or a 12d archive - the Export Vector dialog's
