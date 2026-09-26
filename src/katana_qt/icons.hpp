@@ -147,6 +147,76 @@ enum class Icon {
     FormatSurveyCodes,
     Purge,
     GlobalModify,
+    // The menu items that had no icon until 2026-09-26 (MainWindow::menuGaps
+    // and --check-menus find any item still without one). File and Edit: a
+    // script with a clock, a door with the way out, a selection cleared, a
+    // selection by number, a view copied as a picture, an attribute tree.
+    RecentScripts,
+    Quit,
+    Deselect,
+    SelectById,
+    CopyViewImage,
+    Attributes,
+    // The snap modes, each as the plan view marks it (viewport_widget.cpp,
+    // drawSnapMarker) in the accent on the geometry it snaps to: a square at
+    // an end, a triangle at a middle, a ring at a centre, a cross where two
+    // lines meet, a right angle, a ring on a tangent, an hourglass on a
+    // curve, a crosshair on the grid.
+    SnapEndpoint,
+    SnapMidpoint,
+    SnapCenter,
+    SnapIntersection,
+    SnapPerpendicular,
+    SnapTangent,
+    SnapNearest,
+    SnapGrid,
+    ThinLines,
+    // The viewport layouts (cad::layoutRects), the first view - the main one
+    // - in the accent.
+    LayoutSingle,
+    LayoutSplitVertical,
+    LayoutSplitHorizontal,
+    LayoutThreeLeft,
+    LayoutThreeTop,
+    LayoutQuad,
+    // The standard 3D views. An orthographic view is the object in plan with
+    // the accent on the face seen and an arrow from where the eye is; Top is
+    // that face filled, Bottom the same face dashed, seen through. An
+    // isometric view is the cube with the accent arrow from its corner.
+    ViewTop,
+    ViewBottom,
+    ViewFront,
+    ViewBack,
+    ViewLeft,
+    ViewRight,
+    ViewIsoSouthWest,
+    ViewIsoSouthEast,
+    ViewIsoNorthEast,
+    ViewIsoNorthWest,
+    Perspective,
+    VerticalExaggeration,
+    // The window: its panels, its toolbars, its text size, its layout put
+    // back.
+    Panels,
+    Toolbars,
+    TextSize,
+    ResetLayout,
+    // Annotation's editors and managers beside the tools, and the Format
+    // menu's annotation styles.
+    EditText,
+    EditLabel,
+    LabelLayout,
+    LeaderManager,
+    LeadersForSelection,
+    ArrangeLeaders,
+    TextStyles,
+    LabelStyles,
+    DimensionStyles,
+    // The Layers panel's column heads: shown (an eye), locked (a padlock),
+    // colour (swatches).
+    LayerVisible,
+    LayerLocked,
+    LayerColour,
 };
 
 // Every value of Icon, in declaration order, for the contact sheet and for

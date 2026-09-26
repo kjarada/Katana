@@ -16,6 +16,7 @@
 #include "customisation/document_watcher.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
+#include "theme.hpp"
 
 namespace katana::qt {
 
@@ -73,7 +74,7 @@ DrawingSummaryDialog::DrawingSummaryDialog(DrawingSummaryContext context, QWidge
     customisation_ = new QPlainTextEdit(this);
     customisation_->setObjectName("drawingSummaryCustomisation");
     customisation_->setReadOnly(true);
-    customisation_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    customisation_->setFont(katana::qt::theme::monospaceFont());
     customisation_->setLineWrapMode(QPlainTextEdit::NoWrap);
     customisation_->setMinimumHeight(150);
 

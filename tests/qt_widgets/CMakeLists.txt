@@ -103,6 +103,11 @@ add_executable(katana_qt_widget_tests
     ${_qt_src}/plan_context_menu.cpp
     ${_qt_src}/select_by_id_dialog.cpp
     test_plan_context_menu.cpp
+    # The theme's style, stylesheet and fonts, and the icons (test_theme).
+    test_theme.cpp
+    # The Properties panel's tree (test_property_panel).
+    ${_qt_src}/property_panel.cpp
+    test_property_panel.cpp
     # Terrain > Alignment Manager (test_alignment_manager).
     ${_qt_src}/alignment_manager.cpp
     test_alignment_manager.cpp

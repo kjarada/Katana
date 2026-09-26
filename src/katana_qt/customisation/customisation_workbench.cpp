@@ -105,19 +105,22 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
     QObject::connect(globalModifyAction_, &QAction::triggered, &window_,
                      [this] { showGlobalModify(); });
 
+    // Titled sections: a style that draws titles (theme.cpp) shows what each
+    // group is for, and one that does not shows the separators these were.
+    menu.addSection(QStringLiteral("Tables and Libraries"));
     if (services_.layers != nullptr) {
         menu.addAction(services_.layers);
     }
     menu.addActions({stylesAction_, symbolsAction_, codesAction_});
     if (services_.loadCustomisation != nullptr || services_.replaceCustomisation != nullptr) {
-        menu.addSeparator();
+        menu.addSection(QStringLiteral("Customisation Files"));
         for (QAction* shared : {services_.loadCustomisation, services_.replaceCustomisation}) {
             if (shared != nullptr) {
                 menu.addAction(shared);
             }
         }
     }
-    menu.addSeparator();
+    menu.addSection(QStringLiteral("Across the Drawing"));
     menu.addAction(globalModifyAction_);
     menu.addAction(purgeAction_);
 
