@@ -116,8 +116,10 @@ struct Prepared {
 [[nodiscard]] std::string helpText();
 
 // Where a front end keeps derived rasters for a drawing with no project:
-// <temp>/katana-scratch/<process id>, so two processes never write over each
-// other's. Nothing is created until a raster is written there.
+// <temp>/katana-scratch/<process id>-<start>, one folder per process, the
+// same whoever asks, so no process - not even a later one given an ended
+// one's id - finds another's files there. Nothing is created until a raster
+// is written there.
 [[nodiscard]] std::filesystem::path defaultScratch();
 
 } // namespace katana::app::geo

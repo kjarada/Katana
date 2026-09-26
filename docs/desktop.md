@@ -1248,8 +1248,33 @@ a second implementation of a session verb.
 Its menu items come from one table with a block per package
 (`src/katana_qt/geo/menu_table.cpp`, `GeoMenus`). The GIS sections and the
 Terrain submenus are made only when an item is added, so no empty heading
-shows. F0 adds none: the GDAL verb's item is the toolbox, X1's. It is on the
-command line and on `runVerbLine` until then.
+shows. The GDAL verb's item is GIS > Processing - GDAL > GDAL Toolbox.
+
+**The GDAL Toolbox** (`gdalToolboxDialog`, `src/katana_qt/geo/gdal_toolbox_dialog.hpp`)
+is every one of GDAL's algorithms in one window: the catalogue as a searchable
+tree, and for the algorithm chosen a form made at run time from the arguments
+GDAL declares - its bounds on the spin boxes, its choices in the lists, the
+Advanced ones folded away - a picker for each dataset it reads (the drawing's
+scope and filter, a reference raster, a surface, a file), where the output
+goes, and Confirm for an algorithm that changes existing data. Its Pipeline
+tab chains GDAL's pipeline steps - only those that read what the pipeline
+makes at that point - and shows the pipeline's text, which may be edited and
+is read back into steps. It writes the GDAL line and runs it through the one
+executor, as the dialogs below do.
+
+**The geoprocessing dialogs build lines.** Terrain > DEM > Grid Points to DEM
+(`gridDemDialog`), Terrain > DEM > DEM Tools (`demToolsDialog`, a tab per
+tool) and the dialogs after them do no work of their own: each
+writes the line its fields describe into its Command field and hands it to
+`GeoServices::run`, the window's one executor. `GeoRunPanel`
+(`src/katana_qt/geo/geo_dialog_support.hpp`) is the Command, Preview, Run and
+Reply they share: an interactive run answers `job id=<n> ... state=started`,
+so the panel shows "running" and takes the reply from the workbench's
+finished listeners when the job ends; a headless run's reply is the runner's
+own. A dialog is kept once made, a child of the window, so `--dialog` finds it
+by the name its action carries. Their scope and filter controls are Global
+Modify's (`ScopeFilterWidget`), given the window's views through
+`GeoServices::views`.
 
 **The terrain dialogs** (Terrain > Surface From, GIS > Export Surface as DEM,
 and the Terrain > Analysis items) share

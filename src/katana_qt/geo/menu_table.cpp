@@ -15,12 +15,16 @@
 // Each item opens its dialog, which builds the line and runs it through the
 // window's one executor (GeoServices::run).
 
+#include "geo/dem_tools_dialog.hpp"
 #include "geo/formats_dialog.hpp"
+#include "geo/gdal_toolbox_dialog.hpp"
 #include "geo/geo_workbench.hpp"
+#include "geo/grid_dem_dialog.hpp"
 
 #include <QAction>
 #include <QDialog>
 #include <QMainWindow>
+#include <QWidget>
 
 #include <utility>
 
@@ -39,6 +43,25 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     (void)workbench;
     // ---- F0: GDAL algorithm bridge: no item; the typed GDAL line (X1 is its menu item) ----
     // ---- X1: GIS > Processing - GDAL > GDAL Toolbox ----
+    {
+        // X: every other letter of "GDAL Toolbox" is another GIS item's once
+        // the lanes merge (T Import Vector Data, D Export Surface as DEM, O
+        // COPC; and the vector lane's G, A, L and B), and
+        // qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
+        // refuses a letter shared in one menu.
+        QAction* toolbox = workbench.services().makeAction(
+            Icon::Processing, "GDAL Toolbo&x...",
+            "Every one of GDAL's algorithms, with forms made from its own arguments, run on the "
+            "drawing, reference rasters, surfaces or files (the GDAL verb)",
+            {}, "gdalToolbox");
+        toolbox->setData(QString("gdalToolboxDialog"));
+        menus.addToGis("Processing - GDAL", toolbox);
+        QObject::connect(toolbox, &QAction::triggered, toolbox, [&workbench, toolbox] {
+            if (auto* window = qobject_cast<QWidget*>(toolbox->parent())) {
+                showGdalToolboxDialog(workbench, *window);
+            }
+        });
+    }
     // ---- X2: the toolbox's pipeline tab (no item of its own) ----
     // ---- I2: GIS > Processing - GDAL > Formats ----
     addFormatsItem(menus, workbench);
@@ -97,7 +120,39 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     // ---- T4: Terrain > Analysis > Zonal Statistics, Drape ----
     // ---- T5: Terrain > Analysis > Viewshed ----
     // ---- T6: Terrain > DEM > Grid from Points ----
+    {
+        QAction* grid = workbench.services().makeAction(
+            Icon::Processing, "&Grid Points to DEM...",
+            "Grid the points in a scope - their heights, or a property - into a DEM kept as a "
+            "reference raster (RASTER GRID)",
+            {}, "terrainGrid");
+        // The dialog it opens, by object name: how --dialog finds it.
+        grid->setData(QString("gridDemDialog"));
+        // D&EM: D is Surface From Drawing's and M Alignment Manager's in the
+        // Terrain menu, and a letter shared in one menu is refused by
+        // qt_every_shortcut_and_menu_letter_reaches_one_thing_headless.
+        menus.addToTerrain("D&EM", "terrainDemMenu", grid);
+        QObject::connect(grid, &QAction::triggered, grid, [&workbench, grid] {
+            if (auto* window = qobject_cast<QWidget*>(grid->parent())) {
+                showGridDemDialog(workbench, *window);
+            }
+        });
+    }
     // ---- T7: Terrain > DEM > DEM Tools ----
+    {
+        QAction* tools = workbench.services().makeAction(
+            Icon::Processing, "DEM &Tools...",
+            "Mosaic, clip, fill, reproject, trace and difference DEMs, with cut and fill volumes "
+            "(RASTER MOSAIC, CLIP, FILL, REPROJECT, FOOTPRINT, DIFFERENCE)",
+            {}, "terrainDemTools");
+        tools->setData(QString("demToolsDialog"));
+        menus.addToTerrain("D&EM", "terrainDemMenu", tools);
+        QObject::connect(tools, &QAction::triggered, tools, [&workbench, tools] {
+            if (auto* window = qobject_cast<QWidget*>(tools->parent())) {
+                showDemToolsDialog(workbench, *window);
+            }
+        });
+    }
 }
 
 } // namespace katana::qt

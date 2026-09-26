@@ -102,7 +102,9 @@ rename, reorganize". The contract tests (below) are what notice when it does.
 - **The output.** It goes to memory (`--output-format MEM`, an empty name),
   unless the tail names it or the request asks for a file. An info-like
   algorithm whose output is optional and which prints (`raster pixel-info`)
-  is left to print. The output's reference is taken before `Finalize()`,
+  is left to print; a pipeline prints only when its last step does (`info`,
+  `compare`, `export-schema`: "Pipelines" below). The output's reference is
+  taken before `Finalize()`,
   which drops the algorithm's own; taken after, it is null.
 - **Reading an output back.** A raster becomes a `RasterGrid` (Float64
   values, GDAL's data type named), and a vector a `FeatureSet` of typed
@@ -227,8 +229,8 @@ Every leaf is Safe or Confirm (`src/katana_io/geo/policy.cpp`).
   "unclassified" until someone judges it, and
   `GdalPolicy.UnclassifiedLeavesNeedConfirmAndAreNamed` names every one.
 - **Running one.** A Confirm algorithm runs only when the line says
-  `CONFIRM`, or an MCP call passes `confirm: true`. The toolbox's Confirm box
-  (X1) will be the window's way.
+  `CONFIRM`, or an MCP call passes `confirm: true`. In the window it is the
+  toolbox's Confirm box, without which it writes no line.
 - **Refused words.** `--config`, `--help`, `-h`, `--help-doc`,
   `--json-usage`, `--progress`, `--quiet` and `-q` are refused
   (`checkTokens`), and so is a pipeline step called `external`, in the words
@@ -330,14 +332,25 @@ lines, polylines and areas with their properties.
 
 A raster result goes to `<project>/cache/gdal/<name>.tif`. When the drawing
 has no project it goes to the front end's scratch folder
-(`<temp>/katana-scratch/<process id>`, `geo::defaultScratch`), and the reply
-says `persisted=no`. It is read by `interop::importRaster` as a reference
-raster with `role` Derived and `derivation` - the line that made it. A name
-already taken becomes `<name>-2`, `-3` ...
+(`<temp>/katana-scratch/<process id>-<start>`, `geo::defaultScratch`), and
+the reply says `persisted=no`. It is read by `interop::importRaster` as a
+reference raster with `role` Derived and `derivation` - the line that made
+it. A name already taken becomes `<name>-2`, `-3` ...
 (`GeoExecutor.ARasterResultBecomesADerivedReferenceRaster`). `RasterOverlay`
 gained `role`, `facts`, `derivation` and `displayStyle`; F0 fills the role
 and the derivation, T2 sets the display style of the pictures it renders
 (the style is rendered into them), and D2 persists them.
+
+The scratch folder is named by the process id and the time the process
+first asks for it, not by the id alone. Windows hands an ended process's id
+to a later one, and the folder the earlier one left behind still held its
+files, so a later run's `NAME west` came back as `west-2` - a name not
+asked for, and replies that changed from run to run (two tests failed so in
+one whole-suite run, with 153 such folders in the temp folder;
+`DemSession.ARasterLeftByAnEarlierProcessWithThisIdDoesNotRenameTheResult`).
+Clearing the folders left behind at start-up was rejected: a name does not
+say whether its process has ended, and another window still running may be
+using its folder.
 
 ## The executor
 
@@ -493,8 +506,8 @@ time and never written by hand:
 - `inputsSchema` is the schema of its `inputs`, a Source object per input
   dataset.
 
-`GDAL HELP ... JSON`, `katana_gdal_describe` and the toolbox (X1) read the
-same functions.
+`GDAL HELP ... JSON` and `katana_gdal_describe` read the same functions, and
+the toolbox's forms the specs they are made from.
 
 ## The window
 
@@ -669,11 +682,115 @@ tools are in `docs/mcp.md`.
 
 ### X1: GIS > GDAL Toolbox window
 
-Not started.
+Built: GIS > Processing - GDAL > GDAL Toolbox (`gdalToolbox`, opening
+`gdalToolboxDialog`; `src/katana_qt/geo/gdal_toolbox_dialog.hpp`), the GDAL
+verb's menu item. It runs nothing itself: it writes the GDAL line its fields
+describe and hands it to the window's one executor, so its CLI and MCP
+surfaces are the verb's and `katana_gdal_run`'s.
+
+- **The catalogue** is a tree, group then algorithm, filtered by a search
+  over paths, aliases and descriptions; the algorithm named exactly as typed,
+  else the first shown, is chosen as the search is typed. A Confirm
+  algorithm says "confirm" beside it.
+- **The form is GDAL's declaration** (`argument_form.hpp`), read when the
+  algorithm is chosen: a check box, a choice of GDAL's choices, a spin box
+  carrying GDAL's bounds, a comma-separated line for a list. A number starts
+  "not given" unless GDAL has a default; only what differs from GDAL's
+  default is written. An exclusive bound is refused at its end value when the
+  line is written (`contour --interval=0`), so nothing runs. Base arguments
+  show and the rest fold away (`gdalToolboxAdvanced`). One given of an
+  exclusion group disables the others; a dependent argument waits for what it
+  depends on. What the executor refuses (`--quiet`) is not offered, nor what
+  the output's target says (`--output-format`, `--overwrite`, `--append`,
+  `--update`, `--overwrite-layer`, `--upsert`).
+- **Datasets are bound by pickers** (`binding_picker.hpp`), each offering only
+  what can be one: the drawing by Global Modify's own scope and filter
+  controls (for a vector), a reference raster or a surface (for a raster), or
+  a file. An optional input is "Not given" until it is; an argument that takes
+  several datasets gets a list. The first required input is bound by a FROM
+  without its name, as the verb binds it; every other names its argument.
+- **The output** goes where its kinds allow: a layer (vector), a reference
+  raster (raster), a file with its format and OVERWRITE; a surface is listed
+  and not offered until the terrain session's store takes a raster result.
+- **Confirm** shows only for a Confirm algorithm, and the line waits for it.
+- **Help** opens GDAL's page for the algorithm; headless it is said, not
+  opened.
+- **The algorithm last chosen** is remembered per user (QSettings) and
+  chosen again; a store that cannot be read is no algorithm.
+
+`gdalToolboxLine` is the pure function the line comes from. Tests:
+`tests/qt_widgets/geo/test_gdal_toolbox.cpp` (the search, the form's bounds
+and choices, the exact line, the pickers' kinds, the exclusive minimum, the
+exclusion group, Confirm, optional and listed inputs, a file output, Run and
+Preview through a stub runner) and `qt_gdal_toolbox_buffers_a_drawn_line_headless`
+(`tests/geo/headless/toolbox.cmake`: a 100 m line buffered 1 m either side
+with flat caps from the toolbox, 200 m2 by hand).
+
+Its menu letter is X (GDAL Toolbo&x): every other letter of the name is
+another GIS item's once the lanes are merged, and
+`qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` refuses a
+letter shared in one menu. Terrain's DEM submenu is D&EM for the same reason
+(D is Surface From Drawing's).
+
+Not done: a CRS argument (`raster reproject`'s `--output-crs`, `--input-crs`
+...) is a plain line, typed as GDAL reads it. The plan offered GDAL's own
+suggestions there, as the output format has (`processing::suggest`). GDAL
+gives the authorities for an empty value and 7216 `<code> -- <name>` entries
+after `EPSG:` (GDAL 3.13.2, measured with `gdal completion`), so it wants a
+completer that asks again as the text changes and writes `EPSG:<code>` back.
+That is not built.
 
 ### X2: Toolbox pipeline tab
 
-Not started.
+Built: the GDAL Toolbox's Pipeline tab (`src/katana_qt/geo/pipeline_builder.hpp`).
+Its CLI and MCP surfaces are the GDAL verb's: it writes
+`GDAL pipeline "read ! <step> ... ! write" FROM input <source> TO <target>`.
+
+#### Pipelines
+
+- **The steps are GDAL's own.** The pipeline's usage lists its steps
+  (`pipeline_algorithms`); each offered is the catalogue algorithm under
+  raster or vector of that name, whose form (`ArgumentForm`, restricted to
+  the arguments a step takes) edits it. `read` and `write` are the
+  pipeline's ends, bound by FROM and TO; `external` runs a program and `tee`
+  is a pipeline of its own, so neither is offered, and a text naming
+  external is refused as the verb refuses it.
+- **A step is offered only where it reads what the pipeline makes.** After a
+  raster, raster steps; after `contour` or `polygonize`, vector steps; a
+  file may be either until a step says. So a mixed raster-to-vector pipeline
+  is built step by step, and the output offers a layer or a reference raster
+  as the last step makes one.
+- **The text is shown and may be edited.** An edit is read back into steps
+  (`parsePipeline`): options as `--name=value`, `--name value`, `-n value`,
+  flags, and values by position in GDAL's order, each checked by the step's
+  form. A text that cannot be read into steps still runs as typed, and the
+  status says why the steps did not follow.
+- **A value with a blank cannot be carried.** The pipeline is one quoted
+  word on the line, and a line has no quote inside a quoted word.
+- **A recipe is the line in a script** (`gdalPipelineSave` adds it to a
+  `.kcs`; File > Run Script replays it), not a `.gdalg.json`, which cannot
+  hold a dataset bound from the drawing (see "Decisions").
+- **GDAL's usage JSON is not JSON.** It writes a default of Infinity (vector
+  grid's radius) bare; the step list is read after such numbers are made
+  null.
+
+A pipeline ending in `write` now binds its output as any run's (the bridge,
+"The output"): before, a pipeline to a layer or a reference raster failed
+with "write: Positional arguments starting at 'OUTPUT' have not been
+specified", because a pipeline has an `output-string` - for the steps that
+print - and the bridge took that to mean it prints. It prints only when its
+last step is `info`, `compare` or `export-schema`, the steps GDAL declares
+with an output-string (`PipelineContract.TheStepsThatPrintAreTheOnesGdalDeclaresSo`
+names any it adds; `PipelineVerb.*` fail without the fix).
+
+Tests: `tests/qt_widgets/geo/test_pipeline_builder.cpp`,
+`tests/geo/test_pipeline_verb.cpp`,
+`cli.gdal_pipeline_contours_then_buffer_from_a_raster_to_a_layer`
+(`src/katana_app/geo/cli/pipeline.cmake`) and
+`qt_gdal_toolbox_pipeline_tab_runs_its_steps_headless`
+(`tests/geo/headless/pipeline.cmake`). By hand: plane.asc spans
+100.025 .. 101.975, so contours every 0.5 m are 100.5, 101.0 and 101.5, each
+buffered into one area: three.
 
 ### T0: Terrain session: one surface store and SURFACE verbs on every front end
 
@@ -781,11 +898,52 @@ Not started.
 
 ### T6: RASTER GRID: survey points to a DEM
 
-Not started. `DrawingDatasetOptions::requireHeights` is its binding.
+Built: `RASTER GRID` (`src/katana_app/geo/grid_verbs.cpp`), recorded in
+`docs/terrain.md`, "Gridding points to a DEM". It grids the points a scope
+takes with `vector grid <method>`, heights from the geometry
+(`DrawingDatasetOptions::requireHeights`) or a property (`--zfield`), and
+keeps the DEM as a derived reference raster. Window: Terrain > DEM > Grid
+Points to DEM (`gridDemDialog`). katana_cli and katana_mcp: the verb, through
+the session (`katana_run_commands`). Its contract test pins `vector grid
+linear`'s `input`, `output` (a name only, which the bridge stages),
+`extent`, `resolution`, `size`, `zfield`, `nodata`, `input-layer` and
+`radius`, and `invdist`'s `power`.
+
+Where it differs from the plan: the extent is grown outwards to whole cells
+(GDAL stretches the cells to fit an extent, measured), and `TO SURFACE`
+waits for T0's block in the bindings, so the dialog's `gridToSurface` is
+not offered yet. The shared pieces of the DEM verbs are
+`src/katana_app/geo/dem_support.hpp`, and of their dialogs
+`src/katana_qt/geo/geo_dialog_support.hpp`; `GeoServices::views` is new, so
+a dialog's scope offers the window's views.
 
 ### T7: DEM tools: mosaic, clip, fill, footprint, reproject, difference
 
-Not started.
+Built: `RASTER MOSAIC`, `CLIP`, `FILL`, `FOOTPRINT`, `REPROJECT` and
+`DIFFERENCE` (`src/katana_app/geo/dem_verbs.cpp`), recorded in
+`docs/terrain.md`, "The DEM tools". Window: Terrain > DEM > DEM Tools
+(`demToolsDialog`, a tab each). katana_cli and katana_mcp: the verbs, through
+the session. The contract test pins `raster mosaic`'s `input`, `output`,
+`resolution` and `absolute-path`; `raster clip`'s `bbox` and `like`;
+`raster fill-nodata`'s `max-distance`, `smoothing-iterations` and
+`strategy`; `raster footprint`; `raster reproject`'s `output-crs`,
+`input-crs`, `like`, `resampling` and `resolution`; and `raster calc`'s
+`input`, `calc` and `dialect`, with `builtin` among its choices.
+
+Where it differs from the plan:
+
+- A mosaic is written with `SAVE <file>`, not `save=`: an option's value is
+  one unquoted word, and a path may hold blanks.
+- DIFFERENCE aligns with the first raster's extent, size and system said
+  outright, not `--like`, which GDAL ignores silently for rasters with no
+  CRS (measured); and it aligns only when the grids differ.
+- CLIP by boundaries lets GDAL bring the boundaries into the raster's
+  system rather than refusing two known systems that differ: that is the
+  right answer, not a guess. REPROJECT refuses a raster with no system,
+  which GDAL would "reproject" unchanged.
+- The binding picker (`src/katana_qt/geo/binding_picker.hpp`, X1's) was
+  built here, since the DEM tools pick rasters as the toolbox picks its
+  datasets.
 
 ### V1: GIS BUFFER and GIS DISSOLVE
 
@@ -922,9 +1080,6 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
 
 ## Not done
 
-- **No menu item of F0's own.** The GDAL verb is reachable on the command
-  line, from a script and through `runVerbLine`; its menu item is X1's
-  GDAL Toolbox.
 - **`VIEW` in a headless session** is refused naming `AREA`, as MODIFY
   refuses it.
 - **No point is picked in the plan view.** The plan gave `GeoServices` a
@@ -937,8 +1092,8 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
   given by name, so a PREVIEW of a `/vsicurl` source waits on the network.
   A run does its opening on the worker.
 - **The scratch folder is left behind.** Derived rasters of a drawing with
-  no project stay in `<temp>/katana-scratch/<process id>` when the process
-  ends.
+  no project stay in `<temp>/katana-scratch/<process id>-<start>` when the
+  process ends.
 - **Measuring the apply.** The cost of creating entities in an apply is not
   yet measured for large results; the benchmark the plan names for it is not
   written. Nothing is promised for a result of millions of features.

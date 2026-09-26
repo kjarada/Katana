@@ -4,6 +4,8 @@
 #include "geo_verbs.hpp"
 
 #include <cctype>
+#include <chrono>
+#include <filesystem>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -121,17 +123,31 @@ std::string helpText()
 
 std::filesystem::path defaultScratch()
 {
-    std::error_code error;
-    std::filesystem::path temp = std::filesystem::temp_directory_path(error);
-    if (error) {
-        temp = std::filesystem::current_path(error);
-    }
+    // Worked out once, so every front end in one process keeps its rasters in
+    // one folder. Named by the process id AND the time it was first asked
+    // for: Windows hands an ended process's id to a later one, which found the
+    // folder the earlier one left behind with its files still in it, and a
+    // result never replaces a file (keepDerived), so its `west` came back as
+    // `west-2`. Two processes with one id never run at once, so the later
+    // one's clock reads later.
+    static const std::filesystem::path folder = [] {
+        std::error_code error;
+        std::filesystem::path temp = std::filesystem::temp_directory_path(error);
+        if (error) {
+            temp = std::filesystem::current_path(error);
+        }
 #if defined(_WIN32)
-    const auto process = static_cast<long long>(_getpid());
+        const auto process = static_cast<long long>(_getpid());
 #else
-    const auto process = static_cast<long long>(getpid());
+        const auto process = static_cast<long long>(getpid());
 #endif
-    return temp / "katana-scratch" / std::to_string(process);
+        const auto started = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count();
+        return temp / "katana-scratch" /
+               (std::to_string(process) + "-" + std::to_string(started));
+    }();
+    return folder;
 }
 
 } // namespace katana::app::geo
