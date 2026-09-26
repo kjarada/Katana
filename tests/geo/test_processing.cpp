@@ -633,6 +633,81 @@ TEST(GdalRun, ARunOnAUserFileLeavesNoSidecarBesideIt)
     EXPECT_FALSE(std::filesystem::exists(folder.path() / "plane.asc.aux.xml"));
 }
 
+TEST(GdalRun, APipelinesReadStepLeavesNoSidecarBesideItsFile)
+{
+    // A file a pipeline's read step names is bound to no dataset argument,
+    // so it was not watched: info --stats left plane.asc.aux.xml beside it.
+    TempDir folder("sidecar-pipeline");
+    std::filesystem::copy_file(kData + "/plane.asc", folder.path() / "plane.asc");
+    const std::string file = folder.file("plane.asc");
+    const std::filesystem::path sidecar = folder.path() / "plane.asc.aux.xml";
+    // One quoted text, and words one by one.
+    for (const std::vector<std::string>& tokens : std::vector<std::vector<std::string>>{
+             {"read " + file + " ! info --stats"}, {"read", file, "!", "info", "--stats"}}) {
+        gp::RunRequest run = request({"raster", "pipeline"});
+        run.tokens = tokens;
+        auto outputs = gp::run(run);
+        ASSERT_TRUE(outputs.ok()) << outputs.error().describe();
+        ASSERT_TRUE(outputs->text.has_value());
+        EXPECT_NE(outputs->text->find("STATISTICS_MEAN"), std::string::npos) << *outputs->text;
+        EXPECT_FALSE(std::filesystem::exists(sidecar)) << tokens.front();
+    }
+}
+
+TEST(GdalRun, AFileSourcesLayerIsTheLayerOfItsOwnDataset)
+{
+    // like.gpkg holds two areas: decoy, far away, and m, the square 5..15.
+    // Clipping (0,0) and (10,10) by like's layer m keeps (10,10) alone. The
+    // layer was set as --input-layer, the points' own, which have no m.
+    TempDir folder("layer-of-like");
+    const auto area = [](double x0, double x1) {
+        const std::string a = std::to_string(x0), b = std::to_string(x1);
+        return R"({"type":"FeatureCollection","features":[{"type":"Feature","properties":{},)"
+               R"("geometry":{"type":"Polygon","coordinates":[[[)" +
+               a + "," + a + "],[" + b + "," + a + "],[" + b + "," + b + "],[" + a + "," + b +
+               "],[" + a + "," + a + "]]]}}]}";
+    };
+    std::ofstream(folder.path() / "decoy.geojson") << area(100, 101);
+    std::ofstream(folder.path() / "m.geojson") << area(5, 15);
+    std::ofstream(folder.path() / "points.geojson")
+        << R"({"type":"FeatureCollection","features":[)"
+        << R"({"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[0,0]}},)"
+        << R"({"type":"Feature","properties":{},"geometry":{"type":"Point","coordinates":[10,10]}}]})";
+    const std::string like = folder.file("like.gpkg");
+    for (const char* layer : {"decoy", "m"}) {
+        gp::RunRequest made = request({"vector", "convert"});
+        made.tokens = {folder.file(std::string(layer) + ".geojson"), like,
+                       "--output-layer=" + std::string(layer)};
+        if (std::string(layer) == "m") {
+            made.tokens.push_back("--update");
+        }
+        ASSERT_TRUE(gp::run(made).ok()) << layer;
+    }
+    gp::RunRequest clip = request({"vector", "clip"});
+    clip.values.emplace_back(
+        "input", gp::DatasetValue(gp::DatasetPath{folder.file("points.geojson"), {}, {}}));
+    clip.values.emplace_back("like", gp::DatasetValue(gp::DatasetPath{like, {}, "m"}));
+    auto outputs = gp::run(clip);
+    ASSERT_TRUE(outputs.ok()) << outputs.error().describe();
+    ASSERT_TRUE(outputs->features.has_value());
+    std::size_t kept = 0;
+    for (const gp::FeatureTable& table : outputs->features->tables) {
+        kept += table.features.size();
+    }
+    EXPECT_EQ(kept, 1u);
+    // A dataset argument with no layer argument of its own refuses a layer
+    // rather than giving it to another dataset: raster reproject's like has
+    // none, and its input is a raster.
+    gp::RunRequest refused = request({"raster", "reproject"});
+    refused.values.emplace_back("input",
+                                gp::DatasetValue(gp::DatasetPath{kData + "/plane.asc", {}, {}}));
+    refused.values.emplace_back("like", gp::DatasetValue(gp::DatasetPath{like, {}, "m"}));
+    auto no = gp::run(refused);
+    ASSERT_FALSE(no.ok());
+    EXPECT_EQ(no.error().code, katana::core::ErrorCode::InvalidArgument);
+    EXPECT_EQ(no.error().context, "like");
+}
+
 TEST(GdalRun, ASidecarAlreadyBesideAFileIsReadAndLeftAsItWas)
 {
     // Turning GDAL's sidecars off for a run would stop this one being READ
