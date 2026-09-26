@@ -129,9 +129,10 @@ Every lossy step is stated rather than hidden.
   and reported in `warnings` — never silently dropped (`docs/architecture.md`,
   "Error handling").
 * **Attributes** become entity properties of their own type - integers,
-  reals, booleans and text, a date as ISO 8601 text - and properties become
-  fields of their type; a key whose type differs between entities is text,
-  and says so ("Fidelity").
+  reals, booleans and text, a date as ISO 8601 text with its type kept in
+  the metadata - and properties become fields of their type, a date a date;
+  a key whose type differs between entities is text, and says so
+  ("Fidelity").
 * **Heights.** A file's Z becomes the `elevation` / `elevations` properties
   that the 12d archive, the survey import and Surface From Drawing all read
   (`entity.hpp`, one writer `setHeights` and one reader `heightsOf`); on export
@@ -244,6 +245,25 @@ losses below came about between the two.
   Fields keep their types both ways. A driver without a type gets the
   nearest one that holds every value: KML's writer has no Integer64, so an
   id that fits in 32 bits is its Integer, not its text.
+- **Dates.** A property has no date type, so a Date or DateTime field is its
+  ISO 8601 text, and EXPORT wrote that text as a String: the claim above
+  was untrue of dates (review finding; a GPKG's `surveyed (Date)` came back
+  `surveyed (String)`). IMPORT now keeps the type in the entity's metadata
+  (`source.type.<key>` = `date` | `datetime`; a result keeps
+  `gis.type.<key>`), and the one conversion to features gives a text
+  property so tagged the field type again
+  (`VectorFidelity.DatesImportedComeBackFromExportAsDates`,
+  `DrawingDataset.ADateAResultMadeIsADateWhenReadAgain`). Text typed by
+  hand stays text however much it looks like a date.
+  - *Rejected:* recognising ISO 8601 text on export. A lot number or a
+    code that happens to read `2024-05-01` would become a date without
+    anyone having said it was one.
+  - *Rejected:* a date type in `PropertyValue`. It is the stored form of
+    every property, and a new alternative is a storage schema change for
+    one field type.
+  - *Not done:* a result that sets properties on existing entities
+    (SetProperties) writes the text without the tag, so such a date goes
+    out as text.
 - **CRS.** EXPORT never wrote the project's coordinate system: every
   shapefile went without a `.prj`. Both command lines and the window now
   pass it (`document.metadata().coordinateSystem`), so the file declares
