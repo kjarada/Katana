@@ -17,6 +17,15 @@
 
 #include "geo/geo_workbench.hpp"
 
+#include <QAction>
+#include <QDialog>
+#include <QMainWindow>
+
+#include <utility>
+
+// ---- T1: Terrain > Analysis > Contours ----
+#include "geo/contours_dialog.hpp"
+
 namespace katana::qt {
 
 void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
@@ -33,6 +42,20 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
     // ---- V5: GIS > Analysis - GDAL > Query with SQL ----
     // ---- T1: Terrain > Analysis > Contours ----
+    {
+        QAction* contours = workbench.services().makeAction(
+            Icon::Processing, "Contours...",
+            "Contour lines of a surface or an elevation raster, drawn on layers (CONTOUR)", {},
+            "terrainContours");
+        contours->setData("contoursDialog");
+        QObject::connect(contours, &QAction::triggered, &workbench.window(), [&workbench] {
+            (void)showTerrainDialog(workbench, "contoursDialog",
+                                    [](TerrainDialogContext context, QWidget* parent) -> QDialog* {
+                                        return new ContoursDialog(std::move(context), parent);
+                                    });
+        });
+        menus.addToTerrain("Analysis", "terrainAnalysisMenu", contours);
+    }
     // ---- T2: Terrain > Analysis > Terrain Shading ----
     // ---- T3: Terrain > Analysis > Slope ----
     // ---- T4: Terrain > Analysis > Zonal Statistics, Drape ----

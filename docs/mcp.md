@@ -190,6 +190,17 @@ through `katana_run_commands`, or by `katana_gdal_run` with `output:
 {surface}`. `McpServer.TerrainListGivesTheSessionsSurfacesAndRasters` pins
 it.
 
+### T1: CONTOUR through katana_run_commands
+
+No tool of its own: `CONTOUR` is a session line, so `katana_run_commands`
+runs it exactly as the window's Terrain > Analysis > Contours does, and its
+reply is the verb's records (`contours method= cell= levels= count= major=
+minor= layer= smoothed=`, the scope's `areas used= skipped.open=`). What an
+agent needs to choose a source is `katana_terrain_list`'s. A tool would only
+restate the verb's options as a schema, and the plan gives CONTOUR none
+(`docs/terrain.md`, "Contours").
+`McpServer.ContoursOfASurfaceAreDrawnThroughTheCommandTool` pins it.
+
 ### V5: katana_gis_query
 
 Not started.

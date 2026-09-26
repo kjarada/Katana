@@ -14,6 +14,9 @@ namespace katana::app::geo {
 katana::core::Result<Prepared> prepareSurface(Context& context, const Tokens& tokens,
                                               std::string_view line);
 // ---- T1: CONTOUR ----
+// contour_verbs.cpp (terrain_verbs.hpp).
+katana::core::Result<Prepared> prepareContour(Context& context, const Tokens& tokens,
+                                              std::string_view line);
 // ---- T2: RASTER SHADE ----
 // ---- T3: RASTER SLOPE, RASTER ASPECT ----
 // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
@@ -60,6 +63,13 @@ const std::vector<VerbEntry>& verbTable()
              "          SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog]\n"
              "          [co=K=V]... [OVERWRITE]  write it as a DEM (tiled, compressed)"});
         // ---- T1: CONTOUR ----
+        rows.push_back(
+            {"CONTOUR", "", &prepareContour,
+             "CONTOUR SURFACE <name> | RASTER <id|name> | FILE <path> interval=<m> [major=5]\n"
+             "          [base=0] [layer=terrain/contours] [smooth=3|5] [<scope>] [PREVIEW]\n"
+             "          contour lines on <layer>/major and <layer>/minor at their levels: a\n"
+             "          surface traced exactly, a raster by GDAL at full resolution; a scope\n"
+             "          last keeps them inside its closed shapes"});
         // ---- T2: RASTER SHADE ----
         // ---- T3: RASTER SLOPE, RASTER ASPECT ----
         // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----

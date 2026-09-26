@@ -6,7 +6,6 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFontDatabase>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -46,43 +45,9 @@ katana::core::Error invalid(const QString& message)
     return makeError(ErrorCode::InvalidArgument, message.toStdString());
 }
 
-QPlainTextEdit* replyField(QWidget* parent, const QString& name)
-{
-    auto* reply = new QPlainTextEdit(parent);
-    reply->setObjectName(name);
-    reply->setReadOnly(true);
-    reply->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    reply->setMinimumHeight(110);
-    return reply;
-}
-
-QLineEdit* commandField(QWidget* parent, const QString& name)
-{
-    auto* command = new QLineEdit(parent);
-    command->setObjectName(name);
-    command->setReadOnly(true);
-    command->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    return command;
-}
-
 QString mutedStyle()
 {
     return QString("color: %1").arg(theme::textMuted().name());
-}
-
-// A list of numbers separated by commas, as a line writes it ("2,8",
-// "0,0,40,30"); each must read as a number, locale-independently.
-bool numbers(const QString& text, int count, bool whole)
-{
-    const QStringList items = text.split(',');
-    if (count > 0 && items.size() != count) {
-        return false;
-    }
-    return std::ranges::all_of(items, [whole](const QString& item) {
-        const std::string word = item.trimmed().toStdString();
-        return whole ? katana::core::parseInteger(word).has_value()
-                     : katana::core::parseFiniteDouble(word).has_value();
-    });
 }
 
 } // namespace
@@ -106,20 +71,20 @@ Result<QString> surfaceFromLine(const SurfaceFromForm& form)
         line += form.source.trimmed();
         if (form.kind == SurfaceFromKind::Cloud && !form.classes.trimmed().isEmpty()) {
             const QString classes = QString(form.classes).remove(' ');
-            if (!numbers(classes, 0, true)) {
+            if (!numberList(classes, 0, true)) {
                 return invalid("Classes: whole numbers separated by commas, as 2,8");
             }
             line += " classes=" + classes;
         }
         if (!form.maxPoints.trimmed().isEmpty()) {
-            if (!numbers(form.maxPoints.trimmed(), 1, true)) {
+            if (!numberList(form.maxPoints.trimmed(), 1, true)) {
                 return invalid("Most points: a whole number");
             }
             line += " max=" + form.maxPoints.trimmed();
         }
         if (form.kind == SurfaceFromKind::Raster && !form.area.trimmed().isEmpty()) {
             const QString area = QString(form.area).remove(' ');
-            if (!numbers(area, 4, false)) {
+            if (!numberList(area, 4, false)) {
                 return invalid("Window: four numbers x0,y0,x1,y1");
             }
             line += " AREA " + area;
@@ -181,7 +146,7 @@ SurfaceFromDialog::SurfaceFromDialog(TerrainDialogContext context, QWidget* pare
     name_->setObjectName("surfaceFromName");
     name_->setPlaceholderText("the source's name");
     nameRow->addRow("Name:", name_);
-    command_ = commandField(this, "surfaceFromCommand");
+    command_ = terrainCommandField(this, "surfaceFromCommand");
     nameRow->addRow("Command:", command_);
     layout->addLayout(nameRow);
 
@@ -195,7 +160,7 @@ SurfaceFromDialog::SurfaceFromDialog(TerrainDialogContext context, QWidget* pare
     buttons->addWidget(preview_);
     buttons->addWidget(run_);
     layout->addLayout(buttons);
-    reply_ = replyField(this, "surfaceFromReply");
+    reply_ = terrainReplyField(this, "surfaceFromReply");
     layout->addWidget(reply_);
     runner_ = std::make_unique<TerrainRun>(context_, *reply_);
 
@@ -376,7 +341,7 @@ SurfaceRasterDialog::SurfaceRasterDialog(TerrainDialogContext context, QWidget* 
     overwrite_ = new QCheckBox("Replace a file already there", this);
     overwrite_->setObjectName("surfaceRasterOverwrite");
     form->addRow(QString(), overwrite_);
-    command_ = commandField(this, "surfaceRasterCommand");
+    command_ = terrainCommandField(this, "surfaceRasterCommand");
     form->addRow("Command:", command_);
     layout->addLayout(form);
 
@@ -390,7 +355,7 @@ SurfaceRasterDialog::SurfaceRasterDialog(TerrainDialogContext context, QWidget* 
     buttons->addWidget(preview_);
     buttons->addWidget(run_);
     layout->addLayout(buttons);
-    reply_ = replyField(this, "surfaceRasterReply");
+    reply_ = terrainReplyField(this, "surfaceRasterReply");
     layout->addWidget(reply_);
     runner_ = std::make_unique<TerrainRun>(context_, *reply_);
 

@@ -384,10 +384,103 @@ height= cell= file=` records, the rasters a terrain verb reads as `RASTER
   ends with the run, so a raster kept as a surface is triangulated when the
   job's result is applied - on the window's GUI thread, up to 1.7 s at the
   400 000-point cap. SURFACE FROM triangulates in its work.
-- **A 12d archive's tins are still dropped by katana_cli's IMPORT.** The
+- **A .12da archive's tins are still dropped by katana_cli's IMPORT.** The
   session has a store now, and IMPORT's move into the one GIS executor (I0)
   is where they are to be kept in it.
 - **Surfaces are not saved** with the project, as above.
+
+## Contours
+
+The CONTOUR verb (`src/katana_app/geo/contour_verbs.cpp`) draws contour
+lines of a surface or an elevation raster. It runs through the one
+geoprocessing executor, so `katana_cli`, `katana_mcp` (through
+`katana_run_commands`) and the window's command line run the same code, and
+the window's Terrain > Analysis > Contours (`contoursDialog`) only builds its
+line:
+
+```
+CONTOUR SURFACE <name> | RASTER <id|name> | FILE <path> interval=<m> [major=5]
+        [base=0] [layer=terrain/contours] [smooth=3|5] [<scope>] [PREVIEW]
+```
+
+The reply is the source's `input` record, the scope's (`scope arg=boundary
+...`, then `areas used= skipped.open= skipped.points=`), then `contours
+method=tin|grid cell= levels= count= major= minor= layer= smoothed=` and
+`output ... created=`.
+
+- **One verb, two engines, one output.** A SURFACE is traced exactly on its
+  triangles by `terrain::contours` - the tracer above, finished and
+  measured, and until now never offered to anyone. A RASTER or FILE is
+  contoured by GDAL's `raster contour` at its full resolution, always with
+  `--elevation-name` (GDAL writes no level without it, only an ID) and
+  `--3d`. GDAL's lines are turned into the tracer's `terrain::Contour`
+  (`interop::geo::contoursFromFeatures`), so which contour is major, which
+  layer it goes to and what height it carries are decided in one place,
+  `interop::geo::contourCommand`: polylines on `<layer>/major` and
+  `<layer>/minor`, a ring closed, every vertex at the level
+  (`entity::setHeights`, so the `elevation` property), in one undo step.
+- **Major by the tracer's rule.** Levels are `base + k * interval`; a level
+  is major when k is a multiple of `major` (0: none). GDAL's `--offset` is
+  the base.
+- **A scope, last on the line, gives boundaries.** Its closed shapes -
+  closed polylines and circles, a tagged hole joining its area, read by the
+  one drawing conversion (`drawingDataset`) - are the areas the contours are
+  kept inside; both engines' lines are cut at the boundary itself
+  (`interop::geo::clipContours`: split where a line crosses a ring, the
+  piece kept when its middle is inside an area and in none of its holes, on
+  a ring counting as inside; a cut ring's piece through its first vertex is
+  joined across it). A raster is first cut by GDAL's `raster clip --bbox`
+  to the areas' box, a cell wider (and the smoothing kernel's half-width
+  more), within the raster, so only the site is contoured and the cut lines
+  still reach the boundary. Open lines and points bound nothing: counted
+  (`skipped.open`, `skipped.points`) and warned about; a scope with no
+  closed shape draws nothing and says so, as a scope that takes nothing is
+  not an error.
+- **`smooth=3|5`** runs GDAL's gaussian `raster neighbors` over a raster
+  first, for presentation, and the reply says `smoothed=yes`. The sizes are
+  GDAL's: its gaussian kernel has no other. A gaussian is symmetric and sums
+  to one, so it leaves a plane's contours where they were away from the
+  edges (`ContourVerb.SmoothingAPlaneLeavesItsContoursWhereTheyWere`).
+- **Too many levels is refused before anything is drawn.** The tracer
+  refuses more than 100 000 levels (a unit mistake, not a wish); a raster's
+  levels are counted over its values read on a stride of about a million
+  cells first, and refused the same way. A sample's range is within the
+  whole's, so a count that is already too many is certainly too many.
+
+### Decided
+
+- **Both engines cut at the boundary, not GDAL's cut by geometry.** GDAL's
+  `raster clip --geometry` makes the cells outside no-data, so a raster's
+  contours would stop half a cell or more inside the boundary while a
+  surface's reached it. One clipper for both gives one answer; the raster is
+  still cut first, to a box, for speed.
+- **A raster's box stays within the raster.** Cut with
+  `--allow-bbox-outside-source`, GDAL fills the part of the box past the
+  raster with 0 when the raster has no no-data value, and the contours drew
+  a cliff from 0 to the ground at the raster's edge (found by hand: 202
+  levels on the plane fixture instead of 3).
+- **The dialog has a `contourClip` box** beside the plan's fields: the
+  shared scope controls always name a scope, and "no boundary" is none of
+  them.
+- **GDAL carries a raster's contours to its edge, a surface's stop at its
+  last vertex.** On the plane fixture, a raster contour runs y = 0 to 30,
+  the one on the surface made from it y = 0.5 to 29.5 (the cell centres).
+  Both are what the engines are; the reply's `method` says which ran.
+
+Tolerances in `test_contour_verb.cpp` come from the fixture: `plane.asc` is
+read as Float32, each height within 3.815e-6 of its value near 100, which a
+gradient of 0.05 turns into at most 7.63e-5 m along x; on a surface of exact
+heights the tracer is within 1e-9.
+
+### Not done
+
+- **No CRS check between the raster and the project.** A raster in another
+  coordinate system draws its contours where its coordinates say; judging
+  equivalence needs `OGRSpatialReference::IsSame`, which the verbs cannot
+  see (D1/I1's reference-layer facts are where it belongs).
+- **Cancel is checked around GDAL's steps and after the tracer,** which has
+  no stop token of its own; the tracer runs in tens of milliseconds on real
+  TINs (above).
 
 ## Background jobs
 
