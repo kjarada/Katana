@@ -1942,8 +1942,25 @@ if(TARGET katana)
             "-DFORBID=no such menu item|No 3D viewport"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/view_menu_named_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The object snap has one owner, the document's drafting settings
+    # (docs/drawing.md): the drawing system's SNAP with options reaches the
+    # interpreter through the window's command line, a mode the drafting
+    # toolbar turned on survives a click in View > Snap Modes (the views once
+    # kept their own copy and wrote it back), and the menu follows a SNAP
+    # line. Loose between the reports (.*), as the offscreen platform prints
+    # its own notes among them.
+    add_test(NAME qt_the_object_snap_has_one_owner_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SNAP add=quadrant|?actionSnapQuadrant|*viewSnapModeEndpoint|?actionSnapQuadrant|?viewSnapModeEndpoint|>SNAP add=endpoint|?viewSnapModeEndpoint|>DRAFTING"
+            "-DEXPECT=modes=[^\r\n]*quadrant.*actionSnapQuadrant: Quadrant, checked.*actionSnapQuadrant: Quadrant, checked.*viewSnapModeEndpoint: Endpoint, unchecked.*viewSnapModeEndpoint: Endpoint, checked.*modes=endpoint[^\r\n]*quadrant"
+            "-DFORBID=usage: SNAP|no such menu item"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/object_snap_owner_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_select_by_id_selects_and_frames_headless
         qt_every_view_menu_item_is_named_and_its_values_are_typed_headless
+        qt_the_object_snap_has_one_owner_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
