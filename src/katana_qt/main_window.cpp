@@ -4064,6 +4064,12 @@ bool MainWindow::exportDrawingTo(const std::filesystem::path& path,
         }
         return true;
     }
+    // The project's coordinate system goes into the file, and is what a KML
+    // or GPX is converted to longitude and latitude from (docs/interop.md,
+    // "Fidelity").
+    if (options.projectionWkt.empty()) {
+        options.projectionWkt = document_.metadata().coordinateSystem;
+    }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto result = interop::exportVector(document_.model(), path, options);
     QApplication::restoreOverrideCursor();

@@ -25,6 +25,11 @@ struct VectorExportOptions {
     std::string layerName = "katana";
     // Empty: inferred from the path extension.
     std::string driver;
+    // The drawing's coordinate system (anything GDAL reads: "EPSG:7856", WKT),
+    // written into the file. A format that holds only longitude and latitude
+    // (KML, KMZ, GPX) is written in them, converted from this; without it
+    // such an export is refused with InvalidCRS, since GDAL would write its
+    // placemarks without their geometry and report success.
     std::string projectionWkt;
 
     // Added back to every coordinate, undoing an import's originShift.
@@ -48,7 +53,11 @@ struct VectorExportResult {
 };
 
 // Entity types with no vector-format counterpart (text, dimensions) are skipped
-// and counted, never silently dropped.
+// and counted, never silently dropped. The entities go through the one
+// conversion to features (interop/geo/drawing_dataset.hpp): properties keep
+// their types, a ring IMPORT tagged as a hole is written as its area's hole,
+// and the file is written by GdalDataset::writeTables, which meets each
+// format's needs (docs/interop.md, "Fidelity").
 [[nodiscard]] katana::core::Result<VectorExportResult>
 exportVector(const katana::entity::Model& model, const std::filesystem::path& path,
              const VectorExportOptions& options = {});
