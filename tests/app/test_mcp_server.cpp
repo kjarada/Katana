@@ -996,4 +996,92 @@ TEST_F(McpServer, FormatsReturnsStructuredDrivers)
     ASSERT_NE(found, all.end());
     EXPECT_EQ(*found, formats[0]);
 }
+
+// katana_terrain_list: what SURFACE LIST JSON says, as structured content.
+// terrain.asc's least and greatest values, read from the text grid, are
+// 24.892 and 38.819, and a surface of all its 10 800 cells spans exactly
+// them; the grid is read as Float32, within 2e-6 of the text at that size.
+TEST_F(McpServer, TerrainListGivesTheSessionsSurfacesAndRasters)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json empty = call("katana_terrain_list");
+    ASSERT_FALSE(empty["isError"].get<bool>()) << textOf(empty);
+    EXPECT_TRUE(empty["structuredContent"]["surfaces"].empty());
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"IMPORT \"" + terrain + "\"",
+                                              "SURFACE FROM RASTER 1 NAME ground"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const Json listed = call("katana_terrain_list");
+    ASSERT_FALSE(listed["isError"].get<bool>()) << textOf(listed);
+    const Json& content = listed["structuredContent"];
+    ASSERT_EQ(content["surfaces"].size(), 1U) << content.dump();
+    EXPECT_EQ(content["surfaces"][0]["name"], "ground");
+    EXPECT_EQ(content["surfaces"][0]["points"], 10800);
+    EXPECT_NEAR(content["surfaces"][0]["zmin"].get<double>(), 24.892, 2e-6);
+    EXPECT_NEAR(content["surfaces"][0]["zmax"].get<double>(), 38.819, 2e-6);
+    ASSERT_EQ(content["rasters"].size(), 1U);
+    EXPECT_EQ(content["rasters"][0]["id"], 1);
+    EXPECT_EQ(content["rasters"][0]["width"], 120);
+    EXPECT_EQ(content["rasters"][0]["cell"], 1.5);
+    EXPECT_NE(textOf(listed).find("surface ground: "), std::string::npos) << textOf(listed);
+}
+
+// T1: CONTOUR is a session line, so the command tool draws contours as the
+// window's Terrain > Analysis > Contours does. terrain.asc's heights run
+// from 24.892 to 38.819, so the whole metres in it are 25 to 38: 14 levels.
+TEST_F(McpServer, ContoursOfASurfaceAreDrawnThroughTheCommandTool)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json drawn = call("katana_run_commands",
+                            Json{{"commands", {"SURFACE FROM FILE \"" + terrain + "\" NAME ground",
+                                               "CONTOUR SURFACE ground interval=1"}}});
+    ASSERT_FALSE(drawn["isError"].get<bool>()) << textOf(drawn);
+    const Json& lines = drawn["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 2U);
+    const std::string reply = lines[1]["output"].get<std::string>();
+    EXPECT_NE(reply.find("contours method=tin cell= levels=14 "), std::string::npos) << reply;
+    EXPECT_NE(reply.find("layer=terrain/contours"), std::string::npos) << reply;
+}
+
+// T2: a shading is a derived reference raster, which katana_terrain_list
+// then lists with the line that made it.
+TEST_F(McpServer, AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json shaded = call("katana_run_commands",
+                             Json{{"commands", {"RASTER SHADE FILE \"" + terrain + "\""}}});
+    ASSERT_FALSE(shaded["isError"].get<bool>()) << textOf(shaded);
+    const Json listed = call("katana_terrain_list");
+    ASSERT_FALSE(listed["isError"].get<bool>()) << textOf(listed);
+    const Json& rasters = listed["structuredContent"]["rasters"];
+    ASSERT_EQ(rasters.size(), 1U) << rasters.dump();
+    EXPECT_EQ(rasters[0]["name"], "terrain-hillshade");
+    EXPECT_EQ(rasters[0]["role"], "derived");
+    EXPECT_NE(rasters[0]["derived_from"].get<std::string>().find("RASTER SHADE"),
+              std::string::npos);
+}
+
+// T3: slope classes through the command tool, one undo step. terrain.asc's
+// heights span 24.892 to 38.819 on 1.5 m cells, so Horn's gradient, a
+// weighted difference of at most 4 x 13.927 m over 8 x 1.5 m, is at most
+// 4.64 along each axis: under 657 % however it falls. A break at 1000 puts
+// all 120 x 90 cells of 2.25 m2 in [0, 1000): 24 300 m2.
+TEST_F(McpServer, SlopeClassesMadeThroughTheCommandToolAreOneUndoStep)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"RASTER SLOPE FILE \"" + terrain + "\" classes=1000"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::string reply = made["structuredContent"]["commands"][0]["output"].get<std::string>();
+    EXPECT_NE(reply.find("class name=0-1000 from=0 to=1000 unit=percent area=24300.000"),
+              std::string::npos)
+        << reply;
+    const Json undone = call("katana_run_commands", Json{{"commands", {"UNDO", "LIST"}}});
+    ASSERT_FALSE(undone["isError"].get<bool>()) << textOf(undone);
+    EXPECT_NE(textOf(undone).find("0 entities"), std::string::npos) << textOf(undone);
+}
 #endif

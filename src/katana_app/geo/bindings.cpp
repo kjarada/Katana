@@ -22,6 +22,7 @@
 #include "katana/interop/geo/raster_products.hpp"
 #include "katana/interop/terrain_io.hpp"
 #include "replies.hpp"
+#include "terrain_verbs.hpp"
 
 namespace katana::app::geo {
 
@@ -502,10 +503,56 @@ Result<std::string> applyOutputs(Context& context, const ApplyRequest& request,
         return makeError(ErrorCode::Unsupported, why);
     };
     switch (target.kind) {
-    case Target::Kind::Surface:
+    case Target::Kind::Surface: {
         // ---- T0: Terrain session: TO SURFACE ----
-        return unsupported("TO SURFACE is not available yet: keep the result as a reference "
-                           "raster (TO REFERENCE) or a file (TO FILE)");
+        // A raster result triangulated as SURFACE FROM RASTER triangulates a
+        // DEM - its true values on the stride that keeps it under the cap -
+        // and kept under the name TO gives, which must be free. The raster
+        // was spilled to a file of the run's (maxMemoryCells 0), removed once
+        // read; a grid kept in memory is written first, as for REFERENCE.
+        if (outputs.features) {
+            return unsupported("features cannot be a surface; SURFACE FROM LAYERS <layer> "
+                               "triangulates what TO LAYER draws");
+        }
+        if (outputs.raster) {
+            auto file = writeGrid(context, *outputs.raster);
+            if (!file) {
+                return file.error();
+            }
+            outputs.file = utf8Of(*file);
+            outputs.raster.reset();
+        }
+        if (!outputs.file) {
+            return unsupported("the run made no raster to triangulate");
+        }
+        const std::filesystem::path raster = pathOf(*outputs.file);
+        if (target.name.empty() || context.surfaces.find(target.name) != nullptr) {
+            std::error_code removed;
+            std::filesystem::remove(raster, removed);
+            return makeError(ErrorCode::AlreadyExists,
+                             "TO SURFACE needs a name no surface has; SURFACE LIST names them",
+                             target.name);
+        }
+        auto built = surfaceFromRasterFile(raster, kSurfacePointCap, std::nullopt);
+        std::error_code removed;
+        std::filesystem::remove(raster, removed);
+        if (!built) {
+            return built.error();
+        }
+        auto kept = keepSurface(context, target.name, request.result.commandName, false,
+                                std::move(built).value());
+        if (!kept) {
+            return kept.error();
+        }
+        std::string reply = "output arg=" + value(request.arg) +
+                            " kind=raster target=surface name=" + value(target.name) + "\n" + *kept;
+        for (const gp::Diagnostic& diagnostic : outputs.diagnostics) {
+            if (!diagnostic.failure) {
+                reply += "\n" + warningRecord(diagnostic.message);
+            }
+        }
+        return reply;
+    }
     case Target::Kind::Selection:
     case Target::Kind::Report:
         // ---- V5: GIS SQL: TO SELECTION and TO REPORT ----
