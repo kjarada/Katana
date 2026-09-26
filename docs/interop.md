@@ -751,6 +751,21 @@ choice with four answers, defined once in `include/katana/cad/import_placement.h
   (`ImportShift::said`): `LOCAL: moved as one piece by -180.000,0.000, so its
   lower-left corner sits at 0,0.` A raster or a point cloud refuses a
   placement by name: it is reference data drawn at its own coordinates.
+- **A moved entity is in no known coordinate system, and says so.** IMPORT
+  writes the shift on each entity it moved (metadata `source.shift` =
+  `dE,dN`, `geo::kShiftKey`). The one conversion to features
+  (`drawingDataset`) then gives no table the project's system, and warns:
+  EXPORT wrote shifted coordinates into a GeoPackage labelled with the
+  project's system, which put a lot imported LOCAL at 0,0 of MGA zone 56,
+  off the coast of Africa (review finding). Now the file declares none, its
+  `exported` record says `crs=`, and an export that would convert them (a
+  KML, `crs=<code>`) is refused with `InvalidCRS`
+  (`ExportOptions.EntitiesImportedMovedGoOutInNoCoordinateSystem`). A GDAL
+  run given them from the drawing gets no system either.
+  - *Rejected:* moving them back on export by the recorded shift. The
+    entities may have been edited since, relative to where they were put;
+    writing them somewhere they are not in the drawing is a second,
+    silent move.
 - **Alongside is the far-apart question's Shift Alongside**: the same move
   (`interop::advisePlacement`'s `suggestedShift`), which is now made by
   `resolveImportShift` in both places.
@@ -984,8 +999,29 @@ IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]
   (`VectorImportOptions::targetCrs`); refused, naming `CRS SET`, when the
   project has none, and for a raster or a point cloud, which are drawn at
   their own coordinates (RASTER REPROJECT makes a moved copy). **`srs=`** is
-  the CRS of a file that declares none (a CSV, a DXF): used as the source
-  for `crs=project`, and recorded as the file's otherwise. **`crs=adopt`**
+  the CRS a vector file's coordinates are in, whatever its layers declare,
+  as ogr2ogr's `-s_srs`: used as the source for `crs=project`, and recorded
+  as the file's otherwise; a layer that declares another system is said in
+  a warning (`VectorImportOptions::sourceCrs`). It was the CRS of a layer
+  that declares none, which a GeoJSON without a `crs` member never is:
+  GDAL declares it WGS 84 (RFC 7946 section 4), so `srs=EPSG:28356
+  crs=project` moved MGA metres as degrees and drew the lots millions of
+  metres away (review finding;
+  `ImportOptions.SrsSaysWhatAGeoJsonWithoutACrsMemberIsIn`). The online
+  import keeps the fallback it needs (`assumedSourceCrs`, WGS 84 for a
+  service's layer that declares none). For a raster, `srs=` still only
+  records a system on one that declares none.
+- **A file in another system than the project's is said.** Imported
+  without `crs=project`, a vector file, a raster or a point cloud known to
+  be in another system (`gis::sameCrs`) is drawn at its own coordinates,
+  which do not register against the drawing's; the reply says so in a
+  warning naming both (`ImportOptions.AFileInAnotherCrsThanTheProjectsIsSaidToBe`).
+  `crs=adopt` that set the project's from the file's says nothing.
+- **`crs=project` is checked again at the apply.** The data is moved on the
+  worker into the project's system as it was at prepare; a `CRS SET` while
+  the import ran would draw it in the wrong one, so the apply refuses with
+  `InvalidState` and adds nothing
+  (`ImportOptions.CrsProjectRefusesWhenTheProjectsCrsChangedWhileTheImportRan`). **`crs=adopt`**
   sets the project's CRS from the file's when the project has none - in the
   SAME undo step as the entities (`Document::coordinateSystemCommand`), so
   one Undo takes both away - and does nothing, saying why
@@ -1073,6 +1109,13 @@ EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
   `exported` one, which stays first, as a reader of the first record found
   it - and a scope that takes nothing writes nothing and says so
   (`export ... ran=no`), not an error.
+- **The `exported` record's `crs=` is what the file is in**
+  (`VectorExportResult::projectionWkt`): the project's, `crs=<code>`'s,
+  WGS 84 for KML, KMZ and GPX, which the writer converts to whatever the
+  drawing is in, and none for entities imported moved. It named the
+  project's system for a KML whose coordinates were longitude and latitude
+  (review finding;
+  `ExportOptions.AKmlSaysItIsInLongitudeAndLatitudeNotTheProjects`).
 - **A .dxf and a .12da take the scope too**, through a copy of the drawing
   that keeps only what the scope took: the native writers take a model, and
   the copy is already made for the worker. Rejected: threading the scope's

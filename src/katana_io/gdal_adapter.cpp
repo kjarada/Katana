@@ -2295,6 +2295,38 @@ bool driverHoldsNoAreas(const std::string& driver)
     return driver == "GPX";
 }
 
+std::optional<bool> sameCrs(const std::string& a, const std::string& b)
+{
+    if (a.empty() || b.empty()) {
+        return std::nullopt;
+    }
+    if (a == b) {
+        return true;
+    }
+    ensureRegistered();
+    OGRSpatialReference first;
+    OGRSpatialReference second;
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    const bool read = parseCrs(a, first) && parseCrs(b, second);
+    if (read) {
+        // A 3D geographic system is its 2D one with heights, which Katana
+        // keeps apart from the plan coordinates anyway.
+        if (first.IsGeographic() != 0 && first.GetAxesCount() == 3) {
+            (void)first.DemoteTo2D(nullptr);
+        }
+        if (second.IsGeographic() != 0 && second.GetAxesCount() == 3) {
+            (void)second.DemoteTo2D(nullptr);
+        }
+    }
+    const char* const criteria[] = {"IGNORE_DATA_AXIS_TO_SRS_AXIS_MAPPING=YES", nullptr};
+    const bool same = read && first.IsSame(&second, criteria) != 0;
+    CPLPopErrorHandler();
+    if (!read) {
+        return std::nullopt;
+    }
+    return same;
+}
+
 std::string describeCrs(const std::string& wkt)
 {
     if (wkt.empty()) {

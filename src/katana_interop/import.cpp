@@ -433,10 +433,22 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
             }
         }
     }
+    // srs=: what every layer is in, whatever it declares.
+    std::string sourceWkt;
+    if (!options.sourceCrs.empty()) {
+        auto readable = katana::gis::crsToWkt(options.sourceCrs);
+        if (!readable) {
+            return readable.error();
+        }
+        sourceWkt = std::move(*readable);
+    }
     // The statement's rows are in whatever CRS its layers are; the first
     // layer's is the one a scope's box is moved into.
     result.projectionWkt =
-        (*layers)[static_cast<std::size_t>(indices.front() < 0 ? 0 : indices.front())].projectionWkt;
+        !sourceWkt.empty()
+            ? sourceWkt
+            : (*layers)[static_cast<std::size_t>(indices.front() < 0 ? 0 : indices.front())]
+                  .projectionWkt;
     if (!options.targetCrs.empty()) {
         // Every coordinate below is in the target, so that is what the
         // result declares.
@@ -513,6 +525,22 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
             options.targetLayer.empty()
                 ? sanitizeLayerName(info.name.empty() ? path.stem().string() : info.name)
                 : options.targetLayer;
+        const auto overrideDeclared = [&](katana::gis::VectorLayerInfo& layer) {
+            if (sourceWkt.empty()) {
+                return;
+            }
+            if (katana::gis::sameCrs(layer.projectionWkt, sourceWkt) ==
+                std::optional<bool>(false)) {
+                result.warnings.push_back(
+                    "layer '" + layer.name + "' declares " +
+                    katana::gis::describeCrs(layer.projectionWkt) + "; srs= says it is in " +
+                    katana::gis::describeCrs(sourceWkt) + ", which is what it is read as");
+            }
+            layer.projectionWkt = sourceWkt;
+        };
+        if (index >= 0) {
+            overrideDeclared(info);
+        }
         if (index >= 0 && options.targetCrs.empty() && !info.projectionWkt.empty() &&
             !result.projectionWkt.empty() && info.projectionWkt != result.projectionWkt) {
             result.warnings.push_back("layer '" + info.name +
@@ -545,9 +573,13 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
         if (index < 0) {
             // The statement's rows carry the CRS of what it read.
             info.projectionWkt = table->crsWkt;
+            overrideDeclared(info);
             if (options.targetCrs.empty()) {
-                result.projectionWkt = table->crsWkt;
+                result.projectionWkt = info.projectionWkt;
             }
+        }
+        if (!sourceWkt.empty()) {
+            table->crsWkt = sourceWkt;
         }
         for (const auto& [what, count] : report.skipped) {
             if (what != "no geometry") {
@@ -659,6 +691,16 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                     applyHeights(entity, piece.heights);
                     entity.metadata.emplace("source.file", sourceName);
                     entity.metadata.emplace("source.layer", info.name);
+                    if (options.originShift) {
+                        // Moved from the file's coordinates: no longer in its
+                        // coordinate system nor the project's, which EXPORT
+                        // and the algorithms must not claim for it
+                        // (drawing_dataset.hpp).
+                        entity.metadata.emplace(
+                            std::string(geo::kShiftKey),
+                            katana::core::formatExactReal(options.originShift->x) + "," +
+                                katana::core::formatExactReal(options.originShift->y));
+                    }
                     for (const gp::FieldDef& field : table->fields) {
                         if (const auto tag = geo::dateTypeTag(field.type);
                             tag && entity.properties.contains(field.name)) {

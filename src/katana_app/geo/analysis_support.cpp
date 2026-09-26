@@ -8,6 +8,7 @@
 #include <variant>
 
 #include "katana/core/text.hpp"
+#include "katana/gis/gdal_adapter.hpp"
 #include "replies.hpp"
 
 namespace katana::app::geo::analysis {
@@ -87,6 +88,7 @@ Result<Ground> bindGround(Context& context, const Tokens& tokens, std::size_t& a
     }
     ground.path = file->path;
     ground.record = inputRecord("input", ground.source);
+    ground.projectCrs = projectCrs(context);
     return ground;
 }
 
@@ -97,6 +99,21 @@ Result<OpenGround> openGround(const Ground& ground, katana::gis::Resampling meth
         const std::shared_ptr<const katana::terrain::TinSurface> surface = ground.surface;
         open.at = [surface](const Point2& at) { return surface->elevationAt(at); };
         return open;
+    }
+    if (!ground.projectCrs.empty()) {
+        auto opened = katana::gis::GdalDataset::open(pathOf(ground.path));
+        auto info =
+            opened ? (*opened)->rasterInfo() : Result<katana::gis::RasterInfo>(opened.error());
+        if (info && katana::gis::sameCrs(info->projectionWkt, ground.projectCrs) ==
+                        std::optional<bool>(false)) {
+            return makeError(ErrorCode::InvalidCRS,
+                             "the raster is in " + katana::gis::describeCrs(info->projectionWkt) +
+                                 " and the drawing in " +
+                                 katana::gis::describeCrs(ground.projectCrs) +
+                                 ": the drawing's points would be read at the wrong place; "
+                                 "RASTER REPROJECT the raster into the project's first",
+                             ground.path);
+        }
     }
     auto sampler = katana::gis::RasterSampler::open(pathOf(ground.path));
     if (!sampler) {

@@ -420,6 +420,14 @@ class GdalDataset {
 // CRS we could not read" are different things to the person importing it.
 [[nodiscard]] std::string describeCrs(const std::string& wkt);
 
+// Whether two coordinate systems are one, as GDAL's OGRSpatialReference::
+// IsSame judges it, not by their text: a .prj's naming of a system and
+// EPSG's definition of it are the same, and so are a geographic 3D system
+// and its 2D one (GDAL declares a GeoJSON with heights EPSG:4979), and the
+// axis order data is mapped to is not compared. Nothing when either is empty
+// or cannot be read: nothing is known to differ.
+[[nodiscard]] std::optional<bool> sameCrs(const std::string& a, const std::string& b);
+
 // The GDAL version string, for the about box and for bug reports.
 [[nodiscard]] std::string gdalVersion();
 

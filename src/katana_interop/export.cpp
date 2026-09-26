@@ -267,6 +267,7 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
             stats.skipped[reason] += count;
         }
         stats.warnings.insert(stats.warnings.end(), one.warnings.begin(), one.warnings.end());
+        stats.shifted += one.shifted;
         for (gp::FeatureTable& table : dataset->set.tables) {
             set.tables.push_back(std::move(table));
         }
@@ -390,8 +391,20 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
     }
 
     // crs=<code>: moved on the way out, and the file says the system it is
-    // now in.
+    // now in. Entities IMPORT moved from their file's coordinates are in no
+    // known system: the file says none, and cannot be moved into one.
     std::string writtenCrs = options.projectionWkt;
+    if (stats.shifted != 0) {
+        if (!options.targetCrs.empty() || katana::gis::driverHoldsOnlyLonLat(driver)) {
+            return makeError(ErrorCode::InvalidCRS,
+                             std::to_string(stats.shifted) +
+                                 " entities were imported moved from their file's coordinates "
+                                 "(LOCAL, ALONGSIDE or OFFSET=), so they are in no known "
+                                 "coordinate system and cannot be converted to another",
+                             path.string());
+        }
+        writtenCrs.clear();
+    }
     if (!options.targetCrs.empty()) {
         auto target = katana::gis::crsToWkt(options.targetCrs);
         if (!target) {
@@ -427,6 +440,12 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
     }
 
     result.featuresWritten = written->featuresWritten;
+    // What the file's coordinates are in: KML, KMZ and GPX are converted to
+    // longitude and latitude by the writer, whatever the drawing is in.
+    result.projectionWkt = writtenCrs;
+    if (!writtenCrs.empty() && katana::gis::driverHoldsOnlyLonLat(driver)) {
+        result.projectionWkt = katana::gis::crsToWkt("EPSG:4326").valueOr(writtenCrs);
+    }
     result.entitiesSkipped += written->featuresSkipped;
     if (katana::gis::driverHasFixedFields(driver)) {
         result.warnings.push_back(

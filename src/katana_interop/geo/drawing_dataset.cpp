@@ -987,6 +987,21 @@ Result<DrawingDataset> drawingDataset(const katana::entity::Model& model,
     }
     joinHoles(shapes, stats);
 
+    for (const Shape& shape : shapes) {
+        stats.shifted +=
+            shape.kind != GeometryKind::Unknown && shape.entity->metadata.contains(kShiftKey) ? 1u
+                                                                                              : 0u;
+    }
+    DrawingDatasetOptions own = options;
+    if (stats.shifted != 0 && !options.crsWkt.empty()) {
+        own.crsWkt.clear();
+        stats.warnings.push_back(
+            std::to_string(stats.shifted) +
+            " entities were imported moved from their file's coordinates (LOCAL, ALONGSIDE or "
+            "OFFSET=), so they are in no known coordinate system: the features carry none, not "
+            "the project's");
+    }
+
     std::vector<const Shape*> points, lines, polygons;
     for (const Shape& shape : shapes) {
         switch (shape.kind) {
@@ -1019,7 +1034,7 @@ Result<DrawingDataset> drawingDataset(const katana::entity::Model& model,
             " arcs have different heights at their two ends and were written in plan, their "
             "heights kept as attributes: a height between the ends of an arc is not recorded");
     }
-    if (options.oneTable) {
+    if (own.oneTable) {
         std::vector<const Shape*> all;
         for (const Shape& shape : shapes) {
             if (shape.kind != GeometryKind::Unknown) {
@@ -1030,21 +1045,20 @@ Result<DrawingDataset> drawingDataset(const katana::entity::Model& model,
             const GeometryKind first = all.front()->kind;
             const bool uniform = std::ranges::all_of(
                 all, [first](const Shape* shape) { return shape->kind == first; });
-            result.set.tables.push_back(tableOf(options.tableName,
-                                                uniform ? first : GeometryKind::Unknown, all,
-                                                options, stats));
+            result.set.tables.push_back(
+                tableOf(own.tableName, uniform ? first : GeometryKind::Unknown, all, own, stats));
         }
         return result;
     }
     if (!points.empty()) {
-        result.set.tables.push_back(tableOf("points", GeometryKind::Point, points, options, stats));
+        result.set.tables.push_back(tableOf("points", GeometryKind::Point, points, own, stats));
     }
     if (!lines.empty()) {
-        result.set.tables.push_back(tableOf("lines", GeometryKind::LineString, lines, options, stats));
+        result.set.tables.push_back(tableOf("lines", GeometryKind::LineString, lines, own, stats));
     }
     if (!polygons.empty()) {
         result.set.tables.push_back(
-            tableOf("polygons", GeometryKind::Polygon, polygons, options, stats));
+            tableOf("polygons", GeometryKind::Polygon, polygons, own, stats));
     }
     return result;
 }

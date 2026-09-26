@@ -83,6 +83,9 @@ struct DrawingDatasetStats {
     std::size_t points = 0, lines = 0, polygons = 0; // features written
     std::map<std::string, std::size_t> skipped; // reason -> count
     std::vector<std::string> warnings;
+    // Entities IMPORT moved from their file's coordinates (kShiftKey): when
+    // any is used, no table claims the project's coordinate system.
+    std::size_t shifted = 0;
 };
 
 struct DrawingDataset {
@@ -143,6 +146,13 @@ resultCommand(const katana::entity::Model& model, const katana::gis::processing:
 // drawingDataset gives a text property so tagged on every entity that holds
 // it the field type again. Without it a date came back from EXPORT a String.
 inline constexpr std::string_view kImportTypePrefix = "source.type.";
+// The metadata IMPORT writes on an entity it moved from its file's
+// coordinates (LOCAL, ALONGSIDE, OFFSET=): "dE,dN", the shift subtracted.
+// Such an entity is in neither the file's coordinate system nor the
+// project's, so drawingDataset gives no table with one in it a coordinate
+// system, and says so: a file EXPORT wrote with the project's labelled
+// shifted coordinates as georeferenced ones.
+inline constexpr std::string_view kShiftKey = "source.shift";
 inline constexpr std::string_view kResultTypePrefix = "gis.type.";
 // "date" or "datetime" for those two types; nothing for any other.
 [[nodiscard]] std::optional<std::string> dateTypeTag(katana::gis::processing::FieldType type);

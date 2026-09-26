@@ -752,6 +752,13 @@ DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
   `entity::setHeights`): one undo step, after the entities are compared with
   their copies from prepare. A second drape on the same ground changes
   nothing and pushes no step.
+- **The ground is in the drawing's coordinate system.** A raster known to
+  be in another system than the project's (`gis::sameCrs`, which compares
+  with GDAL's `IsSame`, not the text) is refused with `InvalidCRS` naming
+  both and RASTER REPROJECT: the drawing's points would be read at the
+  wrong place in it. `an::openGround` does it for RASTER SAMPLE, DRAPE and
+  LOS alike; a raster or a project with no system is read as it is
+  (`Viewshed.ARasterInAnotherCrsThanTheDrawingsIsRefusedNotReadAtTheWrongPlace`).
 - **A picked point is a typed point.** The dialog's Pick
   (`GeoServices::pickPoint`, `src/katana_qt/geo/point_pick.hpp`) takes the
   next left click in a plan view and writes it into the line as `AT x,y`.
@@ -803,6 +810,13 @@ LOS SURFACE <name> | RASTER <id|name> | FILE <path> OBSERVER x,y TARGET x,y
   `curvature=` GDAL's curvature-and-refraction coefficient, 0.85714 unless
   given (`none` is 0). Katana passes every one of them explicitly, so a
   changed default in GDAL cannot change a result.
+- **The raster is in the drawing's system, or refused.** The observers
+  are drawing points handed to GDAL as the raster's coordinates, so a
+  raster known to be in another system than the project's is refused
+  (`InvalidCRS`), as RASTER SAMPLE, DRAPE and LOS refuse it; the result
+  keeps the raster's own system, the project's only for a raster that
+  declares none. It was stamped with the project's whatever the raster's
+  was (review finding).
 - **What is kept.** A derived reference raster holding 1 where some
   observer sees the cell and 0 elsewhere, named `<source>-viewshed` unless
   `NAME` says; its display copy is tinted orange where seen and clear
