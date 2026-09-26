@@ -568,8 +568,21 @@ GDAL [RUN] <algorithm> [<gdal word>...] [FROM [<arg>] <source>]... [TO [<arg>] <
   the first unquoted FROM, TO, CONFIRM, OVERWRITE or PREVIEW, and GDAL words
   after a clause are refused (`GeoExecutor.GdalTokensAfterAClauseAreRefused`).
 - **FROM** binds a dataset argument: the one it names (`FROM method LAYERS
-  corridor`), or the first required input no FROM has taken. A list argument
-  takes several FROMs. A dataset GDAL's words also give is refused as given
+  corridor`), or the first required input no FROM has taken, or - when no
+  required one is left - the algorithm's one input, required or not. A
+  pipeline's `input` is optional (its `read` step may name a file), so the
+  example below with an unnamed FROM was refused as "no required dataset
+  left" (`PipelineVerb.AnUnnamedFromBindsThePipelinesOneInput`). Fixing only
+  the example was rejected: the rule surprised anyone who typed it, and an
+  algorithm with one input leaves FROM nothing else to mean. Where two or
+  more optional inputs are left, which is meant is not guessed and FROM must
+  name it. A list argument takes several FROMs.
+- **A source of a kind the argument does not read is refused** as the line
+  is read, before anything runs: the drawing given to a raster input
+  (`hillshade`'s), a raster or surface to a vector input
+  (`GeoExecutor.ASourceOfAKindTheArgumentDoesNotReadIsRefusedBeforeItRuns`).
+  GDAL answered the first "Unable to fetch band #1", from the worker. A
+  file goes to any input; GDAL opens it for the kinds the input reads. A dataset GDAL's words also give is refused as given
   twice (`GeoExecutor.AnInputGivenTwiceIsRefused`). No dataset argument of
   GDAL's is named like a source or scope word
   (`GdalContract.NoDatasetArgumentIsNamedLikeASourceKeyword`), so the

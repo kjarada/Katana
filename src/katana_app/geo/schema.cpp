@@ -178,48 +178,62 @@ Json argumentsSchema(const gp::AlgorithmSpec& spec)
     return Json{{"type", "object"}, {"properties", properties}, {"additionalProperties", false}};
 }
 
-Json sourceSchema()
+Json sourceSchema(unsigned kinds)
 {
-    return Json{
-        {"type", "object"},
-        {"description",
-         "One source: drawing data by scope ({scope, area?, layers?, only?, where?}), a "
-         "reference raster ({raster}), a surface ({surface, cell?}) or a file ({file, layer?})."},
-        {"properties",
-         {{"scope",
-           {{"type", "string"},
-            {"enum", {"selection", "drawing", "area", "layers"}},
-            {"description", "Which drawing data: the selection, the whole drawing, a window "
-                            "(area) or named layers (layers)."}}},
-          {"area",
-           {{"type", "array"},
-            {"items", {{"type", "number"}}},
-            {"minItems", 4},
-            {"maxItems", 4},
-            {"description", "x0, y0, x1, y1, with scope area."}}},
-          {"layers",
-           {{"type", "array"},
-            {"items", {{"type", "string"}}},
-            {"description", "Layer paths, with scope layers."}}},
-          {"only",
-           {{"type", "boolean"},
-            {"description", "With scope layers: those layers only, not the layers beneath."}}},
-          {"where",
-           {{"type", "array"},
+    // Only the sources an argument of these kinds reads (sourcesFor): a
+    // raster input offered the drawing's scope took drawing data the binder
+    // then had to refuse. A file is offered to every kind.
+    const bool vector = kinds == 0 || (kinds & gp::DatasetKind::Vector) != 0;
+    const bool raster = kinds == 0 || (kinds & gp::DatasetKind::Raster) != 0;
+    Json properties = Json::object();
+    std::vector<std::string> forms;
+    if (vector) {
+        forms.emplace_back("drawing data by scope ({scope, area?, layers?, only?, where?})");
+        properties["scope"] = {{"type", "string"},
+                               {"enum", {"selection", "drawing", "area", "layers"}},
+                               {"description",
+                                "Which drawing data: the selection, the whole drawing, a window "
+                                "(area) or named layers (layers)."}};
+        properties["area"] = {{"type", "array"},
+                              {"items", {{"type", "number"}}},
+                              {"minItems", 4},
+                              {"maxItems", 4},
+                              {"description", "x0, y0, x1, y1, with scope area."}};
+        properties["layers"] = {{"type", "array"},
+                                {"items", {{"type", "string"}}},
+                                {"description", "Layer paths, with scope layers."}};
+        properties["only"] = {
+            {"type", "boolean"},
+            {"description", "With scope layers: those layers only, not the layers beneath."}};
+        properties["where"] = {
+            {"type", "array"},
             {"items", {{"type", "string"}}},
             {"description", "Filter conditions, as WHERE takes them: TYPE=polyline, "
-                            "LAYER=pattern, STYLE=, COLOUR=, PROP=key[:pattern], TEXT=, DRAWN."}}},
-          {"raster",
-           {{"type", {"integer", "string"}},
-            {"description", "A reference raster's id or name (REFS lists them)."}}},
-          {"surface", {{"type", "string"}, {"description", "A surface's name."}}},
-          {"cell",
-           {{"type", "number"},
+                            "LAYER=pattern, STYLE=, COLOUR=, PROP=key[:pattern], TEXT=, DRAWN."}};
+    }
+    if (raster) {
+        forms.emplace_back("a reference raster ({raster})");
+        forms.emplace_back("a surface ({surface, cell?})");
+        properties["raster"] = {
+            {"type", {"integer", "string"}},
+            {"description", "A reference raster's id or name (REFS lists them)."}};
+        properties["surface"] = {{"type", "string"}, {"description", "A surface's name."}};
+        properties["cell"] = {
+            {"type", "number"},
             {"exclusiveMinimum", 0},
-            {"description", "With surface: the grid cell; suggested from its extent when absent."}}},
-          {"file", {{"type", "string"}, {"description", "A file, a /vsi path or a URL."}}},
-          {"layer", {{"type", "string"}, {"description", "With file: the file's layer."}}}}},
-        {"additionalProperties", false}};
+            {"description", "With surface: the grid cell; suggested from its extent when absent."}};
+    }
+    forms.emplace_back("a file ({file, layer?})");
+    properties["file"] = {{"type", "string"}, {"description", "A file, a /vsi path or a URL."}};
+    properties["layer"] = {{"type", "string"}, {"description", "With file: the file's layer."}};
+    std::string description = "One source: ";
+    for (std::size_t i = 0; i < forms.size(); ++i) {
+        description += (i == 0 ? "" : i + 1 == forms.size() ? " or " : ", ") + forms[i];
+    }
+    return Json{{"type", "object"},
+                {"description", description + "."},
+                {"properties", std::move(properties)},
+                {"additionalProperties", false}};
 }
 
 Json inputsSchema(const gp::AlgorithmSpec& spec)
@@ -233,9 +247,10 @@ Json inputsSchema(const gp::AlgorithmSpec& spec)
         Json schema;
         if (arg.type == gp::ArgType::DatasetList && arg.maxCount != 1) {
             schema = Json{{"oneOf",
-                           {sourceSchema(), Json{{"type", "array"}, {"items", sourceSchema()}}}}};
+                           {sourceSchema(arg.datasetKinds),
+                            Json{{"type", "array"}, {"items", sourceSchema(arg.datasetKinds)}}}}};
         } else {
-            schema = sourceSchema();
+            schema = sourceSchema(arg.datasetKinds);
         }
         schema["description"] = arg.description + " Accepts " + sourcesFor(arg) + ".";
         properties[arg.name] = std::move(schema);

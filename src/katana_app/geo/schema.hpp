@@ -32,9 +32,11 @@ namespace katana::app::geo {
 // dataset argument, a Source object or, for a list, an array of them.
 [[nodiscard]] nlohmann::json inputsSchema(const katana::gis::processing::AlgorithmSpec& spec);
 
-// The JSON Schema of one Source: {scope, area, layers, only, where} |
-// {raster} | {surface, cell} | {file, layer}.
-[[nodiscard]] nlohmann::json sourceSchema();
+// The JSON Schema of one Source an argument of `kinds` (processing's
+// DatasetKind bits) reads: {scope, area, layers, only, where} for vector,
+// {raster} | {surface, cell} for raster, and {file, layer} for any; 0 is
+// every source.
+[[nodiscard]] nlohmann::json sourceSchema(unsigned kinds);
 
 // {algorithm:{...}, arguments:[...], arguments_schema, inputs_schema,
 //  gdal_usage}: katana_gdal_describe's answer and GDAL HELP ... JSON.

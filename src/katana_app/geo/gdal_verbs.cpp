@@ -408,6 +408,14 @@ Result<Prepared> runLine(Context& context, const Tokens& tokens, std::size_t at,
                     break;
                 }
             }
+            // Or an algorithm's one input, required or not: a pipeline's
+            // `input` is optional (its read step may name a file instead),
+            // and with no other input FROM can mean nothing else. Where
+            // several optional inputs are left, which one is meant is not
+            // guessed.
+            if (from.arg.empty() && inputs.size() == 1) {
+                from.arg = inputs.front()->name;
+            }
             if (from.arg.empty()) {
                 return makeError(ErrorCode::InvalidArgument,
                                  "FROM has no required dataset left to bind; name one: FROM "
@@ -416,6 +424,23 @@ Result<Prepared> runLine(Context& context, const Tokens& tokens, std::size_t at,
             }
         }
         const gp::ArgSpec* arg = argNamed(*spec, from.arg);
+        // A source of a kind the argument does not read is refused here,
+        // before anything runs, rather than handed to GDAL, which said only
+        // "Unable to fetch band #1" of a drawing given to a raster input.
+        const bool readsRaster = (arg->datasetKinds & gp::DatasetKind::Raster) != 0;
+        const bool readsVector = (arg->datasetKinds & gp::DatasetKind::Vector) != 0;
+        const bool grid =
+            from.source.kind == Source::Kind::Raster || from.source.kind == Source::Kind::Surface;
+        if (arg->datasetKinds != 0 &&
+            ((from.source.kind == Source::Kind::Drawing && !readsVector) ||
+             (grid && !readsRaster))) {
+            return makeError(ErrorCode::InvalidArgument,
+                             from.arg + " reads " + gp::datasetKindsText(arg->datasetKinds) +
+                                 " datasets, and FROM gives it " +
+                                 (grid ? std::string("a raster") : std::string("drawing data")) +
+                                 "; it takes " + sourcesFor(*arg),
+                             from.arg);
+        }
         const std::size_t count = ++fromCount[from.arg];
         const bool list = arg->type == gp::ArgType::DatasetList && arg->maxCount != 1;
         if (count > 1 && !list) {
