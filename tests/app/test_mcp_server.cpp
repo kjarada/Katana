@@ -215,6 +215,28 @@ TEST_F(McpServer, ABatchStopsAtTheFirstFailingCommandAndSaysWhich)
     EXPECT_EQ(result["structuredContent"]["status"]["entities"], 0);
 }
 
+// HELP sent as a command is the session's whole help, what katana_help and
+// --help give: CUSTOMISE and IFC are the session's, not the
+// interpreter's, and the interpreter's own HELP left them out.
+TEST_F(McpServer, HelpSentAsACommandIsTheWholeSessionHelp)
+{
+    initialize();
+    const Json result = call("katana_run_commands", Json{{"commands", {"HELP", "?"}}});
+    EXPECT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const std::string text = textOf(result);
+    // The reply's text is trimmed at its end, so the help is sought without
+    // its closing newline.
+    std::string help = Session::helpText();
+    while (!help.empty() && help.back() == '\n') {
+        help.pop_back();
+    }
+    const std::size_t first = text.find(help);
+    ASSERT_NE(first, std::string::npos) << text;
+    EXPECT_NE(text.find(help, first + help.size()), std::string::npos) << text;
+    EXPECT_NE(text.find("CUSTOMISE [REPLACE]"), std::string::npos);
+    EXPECT_NE(text.find("IMPORT <file.ifc>"), std::string::npos);
+}
+
 TEST_F(McpServer, ABatchToldToCarryOnRunsPastAFailure)
 {
     initialize();

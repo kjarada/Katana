@@ -340,6 +340,17 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.the_help_names_the_customisation_files_by_what_they_are PROPERTIES
         PASS_REGULAR_EXPRESSION "a loaded library linestyle or ByLayer.*CUSTOMISE \\[REPLACE\\] <file> \\[<file>\\.\\.\\.\\]  load style${_eol} +libraries \\(\\.4d\\) and survey code files \\(\\.mapfile\\)"
         FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)")
+
+    # HELP typed as a line is the session's whole help, as --help and
+    # katana_help are: CUSTOMISE, IFC and the window-only verbs are
+    # the session's, not the interpreter's, and were missing from it. ? is
+    # HELP's alias.
+    add_test(NAME cli.help_typed_as_a_line_is_the_whole_session_help
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "HELP" -c "?")
+    set_tests_properties(cli.help_typed_as_a_line_is_the_whole_session_help PROPERTIES
+        PASS_REGULAR_EXPRESSION "Customise CUSTOMISE \\[REPLACE\\].*IFC       IMPORT <file\\.ifc>.*Window    PLOT, PLOTSHEETS.*Customise CUSTOMISE \\[REPLACE\\].*IFC       IMPORT <file\\.ifc>.*Window    PLOT, PLOTSHEETS"
+        FAIL_REGULAR_EXPRESSION "error: ")
 endif()
 
 # The sheet verbs with no window (docs/plotting.md, "Sheets on the command

@@ -345,6 +345,17 @@ bool runLine(SessionState& session, const std::string& line)
         !body.empty() && body.front() == '#') {
         return true;
     }
+    // HELP (or ?) alone is the whole session's help - CUSTOMISE, IFC and the
+    // geo executor's families too, which the interpreter cannot know of - so
+    // katana_cli -c HELP and katana_run_commands say what katana_help and
+    // --help say. With a word (HELP SHEETS, HELP UTILITY) it stays the
+    // interpreter's.
+    if (const std::string_view body = katana::core::trimmed(line);
+        body.find_first_of(" \t") == std::string_view::npos &&
+        (upperVerb(line) == "HELP" || upperVerb(line) == "?")) {
+        std::cout << katana::app::Session::helpText() << '\n';
+        return true;
+    }
     if (const char* why = windowOnlyVerb(upperVerb(line))) {
         std::cerr << "error: Unsupported: " << upperVerb(line) << ' ' << why << '\n';
         return false;

@@ -539,7 +539,9 @@ verb is shared with the interpreter - to `takes`, which says which of its
 lines are the executor's (`INFO <file>`, not `INFO <id>`). `handles`,
 `prepare` and `helpText` read it alone. So HELP, the window's Command
 Reference (its "Geoprocessing" section) and `katana_help` list the same
-verbs. It has one reserved block per package.
+verbs, and HELP typed as a session line is `katana_help`'s text
+(`cli.help_typed_as_a_line_names_the_geo_families`). It has one reserved
+block per package.
 
 ## The GDAL verb
 
