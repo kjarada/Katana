@@ -931,6 +931,27 @@ Result<PointCloudLayer> importPointCloud(const std::filesystem::path& path,
     if (!cloud.ok()) {
         return cloud.error();
     }
+    // The step was sized to every point, but the class filter comes before
+    // the decimation, so a class that is a fraction of the file came back as
+    // that fraction of the budget (738 of 1000 for class 2 of the sample
+    // scan). No header counts points by class, and this read measured it:
+    // the filter passed at most kept x step points, so a step sized to that
+    // keeps within the budget. One more read, only when it would bring back
+    // more than the first.
+    if (options.classification.has_value() && !options.resolution.has_value() &&
+        readOptions.decimationStep > 1) {
+        const std::uint64_t measured =
+            static_cast<std::uint64_t>(cloud->points.size()) * readOptions.decimationStep;
+        const std::uint32_t step =
+            katana::pointcloud::PointCloudEngine::decimationForBudget(measured, options.budget);
+        if (step < readOptions.decimationStep) {
+            readOptions.decimationStep = step;
+            cloud = engine.read(path, readOptions);
+            if (!cloud.ok()) {
+                return cloud.error();
+            }
+        }
+    }
     if (cloud->points.empty()) {
         return makeError(ErrorCode::InvalidArgument,
                          "no points survived the import filters", path.string());

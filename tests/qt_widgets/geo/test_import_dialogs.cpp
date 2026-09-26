@@ -142,6 +142,48 @@ TEST(VectorImportDialog, PreviewRunsTheLineWithPreviewAndShowsTheMatch)
               "2 of 5 features match; 2 entities would be imported.");
 }
 
+TEST(VectorImportDialog, AMessageIsShownAsTypedNotAsMarkup)
+{
+    // What a preview says is GDAL's text; read as rich text, a "<code>" in
+    // it was taken for a tag and vanished.
+    const OwnSettings settings;
+    GisDialogContext context;
+    context.run = [](const QString&) {
+        return VerbOutcome{false, QString(), "ParseFailure: no such column <code> in lots"};
+    };
+    katana::qt::VectorImportDialog dialog(vectorSource(), Box2{}, std::move(context));
+    child<QLineEdit>(dialog, "vectorImportWhere")->setText("code = 1");
+    child<QPushButton>(dialog, "vectorImportPreview")->click();
+    auto* shown = child<QLabel>(dialog, "vectorImportMatchCount");
+    EXPECT_EQ(shown->text(), "ParseFailure: no such column <code> in lots");
+    EXPECT_EQ(shown->textFormat(), Qt::PlainText);
+}
+
+TEST(ImportDialogs, ImportAndCancelHaveTheirDialogsNames)
+{
+    // A headless run presses a button by its object name; these had none.
+    const OwnSettings settings;
+    katana::qt::VectorImportDialog vector(vectorSource(), Box2{});
+    auto* run = child<QPushButton>(vector, "vectorImportRun");
+    ASSERT_NE(run, nullptr);
+    EXPECT_EQ(run->text(), "Import");
+    EXPECT_NE(child<QPushButton>(vector, "vectorImportCancel"), nullptr);
+    katana::interop::SourceDescription raster;
+    raster.path = "C:/data/ortho.tif";
+    raster.kind = katana::interop::SourceKind::Raster;
+    raster.raster = katana::interop::RasterDescription{};
+    katana::qt::RasterImportDialog rasterDialog(raster);
+    EXPECT_NE(child<QPushButton>(rasterDialog, "rasterImportRun"), nullptr);
+    EXPECT_NE(child<QPushButton>(rasterDialog, "rasterImportCancel"), nullptr);
+    katana::interop::SourceDescription cloud;
+    cloud.path = "C:/data/scan.las";
+    cloud.kind = katana::interop::SourceKind::PointCloud;
+    cloud.pointCloud = katana::interop::PointCloudDescription{};
+    katana::qt::PointCloudImportDialog cloudDialog(cloud);
+    EXPECT_NE(child<QPushButton>(cloudDialog, "pointCloudImportRun"), nullptr);
+    EXPECT_NE(child<QPushButton>(cloudDialog, "pointCloudImportCancel"), nullptr);
+}
+
 TEST(VectorImportDialog, ADoubleQuoteInAFieldHasNoLine)
 {
     const OwnSettings settings;

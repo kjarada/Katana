@@ -768,6 +768,13 @@ int main(int argc, char* argv[])
                 optionsDialog->show();
                 target = optionsDialog.get();
                 targetName = target->objectName();
+                // Its Run pressed (vectorImportRun ...), the import runs as
+                // the menu's does once its dialog is accepted.
+                if (importOptions) {
+                    QDialog* accepted = optionsDialog.get();
+                    QObject::connect(accepted, &QDialog::accepted, &window,
+                                     [&window, accepted] { window.finishImport(*accepted); });
+                }
                 QApplication::processEvents();
                 QApplication::processEvents();
             }

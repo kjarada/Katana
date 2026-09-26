@@ -119,6 +119,7 @@ GeoRunPanel::GeoRunPanel(const QString& prefix, GeoDialogContext context, bool p
     status_ = new QLabel(this);
     status_->setObjectName(prefix + "Status");
     status_->setWordWrap(true);
+    status_->setTextFormat(Qt::PlainText); // a refusal's words, never markup
     status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     reply_ = new QPlainTextEdit(this);
     reply_->setObjectName(prefix + "Reply");
