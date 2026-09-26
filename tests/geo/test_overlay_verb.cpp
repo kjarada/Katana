@@ -4,6 +4,7 @@
 // 50 x 40 m lots side by side and a 4 m corridor across both, 120 m long.
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -98,6 +99,47 @@ TEST_F(GisOverlay, DifferenceLeaves1800SquareMetresOfEachLot)
     }
     EXPECT_EQ(on("gis/overlay").size(), 4u); // each lot's two strips
     EXPECT_NEAR(areaOn("gis/overlay"), 3600.0, 1e-9);
+}
+
+TEST_F(GisOverlay, ARowCarriesTheLotsPropertiesNotTheDrawingsBookkeeping)
+{
+    // A difference keeps the subject's fields without GDAL's input_ prefix,
+    // so the drawing's layer, style, colour and type came back as the row's
+    // - words about the entity, not properties of it - where an
+    // intersection's rows left them out.
+    const std::string reply = ok("GIS OVERLAY difference LAYERS lots WITH LAYERS corridor");
+    const auto found = rows(reply);
+    ASSERT_EQ(found.size(), 2u);
+    for (const auto& row : found) {
+        for (const char* bookkeeping : {"layer", "style", "colour", "type"}) {
+            EXPECT_FALSE(row.get(bookkeeping).has_value()) << bookkeeping << " in " << reply;
+        }
+        EXPECT_TRUE(row.get("owner").has_value()) << reply;
+    }
+}
+
+TEST_F(GisOverlay, AnOverlayMadeByAnotherVerbLendsItsIdNotItsProvenance)
+{
+    // The corridor as another verb's result carries gis.op and gis.source.
+    // A row says which overlay piece it met by with=; the overlay's own
+    // gis.op and gis.source, unprefixed on a row, read as the piece's own
+    // (gis.source=<the pipe> beside entity=<the lot>), and the drawn piece
+    // is given the overlay's own anyway.
+    const EntityId made = rect(
+        -10, 18, 110, 22, "made",
+        PropertyMap{{"gis.op", std::string("vector buffer")}, {"gis.source", std::int64_t{99}}});
+    const std::string reply = ok("GIS OVERLAY intersection LAYERS lots WITH LAYERS made");
+    const auto found = rows(reply);
+    ASSERT_EQ(found.size(), 2u);
+    for (const auto& row : found) {
+        EXPECT_EQ(row.get("with"), std::to_string(made));
+        EXPECT_FALSE(row.get("gis.op").has_value()) << reply;
+        EXPECT_FALSE(row.get("gis.source").has_value()) << reply;
+    }
+    for (const Entity& piece : on("gis/overlay")) {
+        EXPECT_EQ(text(piece, "gis.op"), "vector layer-algebra");
+        EXPECT_NE(text(piece, "gis.source"), "99");
+    }
 }
 
 TEST_F(GisOverlay, UnionAreaIsLotsPlusCorridorMinusOverlap)

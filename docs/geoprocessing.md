@@ -648,6 +648,10 @@ line through `MainWindow::runVerbLine` reach it alike.
 - **Headless, the line waits for its job.** Under `--command`, `--run-line`
   or a script it calls `JobRunner::waitFor`, so its outcome is logged, and
   captured by `runVerbLine`, before the next line.
+- **A dialog's status line** (`GisToolDialog::summary`) says what the step
+  did: created, changed and deleted, on the layer the reply names, or "in
+  place" when the reply is `target=in-place` and names none (it said "...
+  deleted on ."; `GisClipDialog.ItsLineCutsAPipeInPlaceThroughTheExecutor`).
 - **Interactively, it logs `job id=<n> title="..." state=started`.** When
   the job ends, `GeoServices::finished` and the listeners
   (`GeoWorkbench::addFinishedListener`) are told. That is how a dialog learns
@@ -890,7 +894,10 @@ Its CLI and MCP surfaces are the GDAL verb's: it writes
   (`parsePipeline`): options as `--name=value`, `--name value`, `-n value`,
   flags, and values by position in GDAL's order, each checked by the step's
   form. A text that cannot be read into steps still runs as typed, and the
-  status says why the steps did not follow.
+  status says why the steps did not follow. When the line itself is
+  refused - an `external` step - the status says it cannot run and why,
+  beside the disabled Run; it said "It runs as typed"
+  (`PipelineBuilder.APipelineWithAnExternalStepCannotBeBuilt`).
 - **A value with a blank cannot be carried.** The pipeline is one quoted
   word on the line, and a line has no quote inside a quoted word.
 - **A recipe is the line in a script** (`gdalPipelineSave` adds it to a
@@ -1301,8 +1308,17 @@ item is GIS > Analysis - GDAL > Overlay... (`gisOverlay`,
   `method_<field>`. A name only one side has is given back as it was
   (`owner`); one both sides have keeps GDAL's prefix (`input_name`,
   `method_name`). The subject's `katana_id` becomes `gis.source` and the
-  overlay's `gis.with`, so each piece says which two entities it came from;
-  the drawing's bookkeeping fields are dropped. `keep=` and `keepwith=`
+  overlay's `gis.with`, so each piece says which two entities it came from.
+  Dropped from either side, prefixed or not: the drawing's bookkeeping
+  fields (`layer`, `style`, `colour`, `type`) and `gis.*` provenance.
+  difference, update and clip give the subject's fields without GDAL's
+  prefix, and the bookkeeping came back in their rows
+  (`GisOverlay.ARowCarriesTheLotsPropertiesNotTheDrawingsBookkeeping`); an
+  overlay made by another verb lent its `gis.op` and `gis.source`, which on
+  a row read as the piece's own (`gis.source=<the pipe>` beside
+  `entity=<the lot>`) though the piece drawn is given its own
+  (`GisOverlay.AnOverlayMadeByAnotherVerbLendsItsIdNotItsProvenance`).
+  `with=` names the overlay piece. `keep=` and `keepwith=`
   choose the fields (GDAL's `--input-field`, `--method-field`); `katana_id`
   is always carried.
 - **Rows.** One `row` record per piece: `entity=`, `with=`, what it carries,
@@ -1436,7 +1452,13 @@ check features=2 problems=1 entities=1
 ```
 
 The bow-tie (30,0) (40,10) (40,0) (30,10) crosses itself where x - 30 = y
-and 40 - x = y: at (35,5) (`GisCheck.ABowTieSelfIntersectsAt35Comma5`). A
+and 40 - x = y: at (35,5) (`GisCheck.ABowTieSelfIntersectsAt35Comma5`).
+`at=` is said to the millimetre, as `length=` is, without trailing zeros:
+GEOS's arithmetic put the middle of an edge from y = 0 to 40 at
+20.000000000000007, which the reply printed
+(`GisCheck.WhereAProblemIsIsSaidToTheMillimetre`). `fixed3`'s trailing
+zeros were rejected there: a place is two numbers joined by a comma, and
+`at=35,5` is what the records have always said. A
 check changes nothing - unless `markers=<layer>` asks for a point at each
 problem. Those replace the markers the last check left on that layer (tagged
 `gis.marker=check`), in one step, the way AUTOLABEL replaces its rule's
