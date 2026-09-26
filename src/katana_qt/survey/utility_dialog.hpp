@@ -13,15 +13,16 @@
 // by typing the same line, and the line the dialog shows is the one to type.
 //
 // Where the services come from (docs/cad.md, "Scope and filter"): a schedule
-// file, or what is drawn - the lines UTILITY DRAW drew, taken by the same
-// "Apply to" and "Only those that match" controls as Global Modify
-// (ScopeFilterWidget), which give the line its scope and filter words
-// (SELECTION | DRAWING | VIEW <id> [EXTENTS] | LAYERS a,b [ONLY], then
-// WHERE ...). Report, Verify, Clearance
-// and Check take either; Draw always reads a file; Regrade and Schedule always
-// read the drawing. Clearance's proposed works are a design file, a line or
-// polyline in the drawing (#id, with a LEVEL) or one of the document's
-// alignments.
+// file, or what is drawn, taken by the same "Apply to" and "Only those that
+// match" controls as Global Modify (ScopeFilterWidget), which give the line
+// its scope and filter words (SELECTION | DRAWING | VIEW <id> [EXTENTS] |
+// LAYERS a,b [ONLY], then WHERE ...). For Draw, what is drawn is the lines,
+// polylines and points a survey or an import left there, drawn as services
+// with what the "Drawn geometry as services" fields say of them; for the
+// others, the services UTILITY DRAW drew. Draw, Report, Verify, Clearance and
+// Check take either; Regrade and Schedule always read the drawing.
+// Clearance's proposed works are a design file, a line or polyline in the
+// drawing (#id, with a LEVEL) or one of the document's alignments.
 //
 // The line is made by utilityCommandLine, a pure function of what the fields
 // hold, so it is tested without a window: a path with blanks is quoted, an
@@ -60,6 +61,22 @@
 //   utilityMinCover        the minimum cover to flag, metres (MINCOVER; Draw,
 //                          Report and Regrade)
 //   utilityLayerPrefix     the top of the layers a Draw makes (LAYER)
+//   utilityGeometryGroup   Draw's fields for geometry in the drawing, live when
+//                          Draw reads what is drawn; each left at "not given"
+//                          or blank is the entity's own, else the verb's
+//                          default. The choices show the verb's own words, so
+//                          --fill takes them as typed:
+//   utilityServiceType     TYPE: water, electricity, gas ...
+//   utilityMethod          METHOD: EML, GPR, pothole, trench, surface ...
+//   utilityHUnc, utilityVUnc  H_UNC, V_UNC: uncertainties, metres
+//   utilityHeights         HEIGHTS: surface, service or none
+//   utilityLevelRef        LEVEL_REF: top, centre or invert
+//   utilityPath            PATH: detected, exposed or assumed
+//   utilityOwner, utilityMaterial  OWNER, MATERIAL
+//   utilityDiameter        DIAMETER_MM: millimetres
+//   utilityServiceStatus   STATUS: in service, disused, abandoned, proposed
+//   utilityFields          FIELDS: column=property, ... - an import's own
+//                          attributes read as the schedule's columns
 //   utilityDesignFile      Clearance's works are a design file (radio) ...
 //   utilityDesign          ... this one (.csv)
 //   utilityDesignBrowse    choose it with a file dialog
@@ -150,8 +167,8 @@ enum class UtilityDesignSource {
 // read; a blank option is left out of the line.
 struct UtilityForm {
     UtilityTool tool = UtilityTool::Draw;
-    // Report, Verify, Clearance and Check read either; Draw always the file,
-    // Regrade and Schedule always the drawing (utilitySourceOf).
+    // Draw, Report, Verify, Clearance and Check read either; Regrade and
+    // Schedule always the drawing (utilitySourceOf).
     UtilitySource source = UtilitySource::File;
     QString schedule;
     // The drawing's scope and filter words, as ScopeFilterWidget::verbWords
@@ -173,15 +190,34 @@ struct UtilityForm {
     QString vertical;
     QString margin;
     QString layerPrefix;
+    // Draw's, when it reads what is drawn (UTILITY DRAW <scope>'s options):
+    // each the verb's own word - "water", "EML", "service" - or blank, left
+    // out, for what each entity says of itself.
+    QString serviceType;
+    QString method;
+    QString horizontalUncertainty;
+    QString verticalUncertainty;
+    QString heights;
+    QString levelReference;
+    QString path;
+    QString owner;
+    QString material;
+    QString diameter; // millimetres, as DIAMETER_MM takes it
+    QString status;
+    QString fields;
 };
 
-// Where `form`'s tool reads its services from: its own for Draw (the file),
-// Regrade and Schedule (the drawing), else the form's choice.
+// Where `form`'s tool reads its services from: the drawing for Regrade and
+// Schedule, else the form's choice.
 [[nodiscard]] UtilitySource utilitySourceOf(const UtilityForm& form);
 
 // The UTILITY line `form` describes, exactly as it would be typed, where
 // <source> is the schedule's path or the scope words:
 //   UTILITY DRAW <schedule> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
+//   UTILITY DRAW <scope> [TYPE <type>] [METHOD <method>] [H_UNC <m>] [V_UNC <m>]
+//                [HEIGHTS <h>] [LEVEL_REF <r>] [PATH <p>] [OWNER <text>]
+//                [MATERIAL <text>] [DIAMETER_MM <mm>] [STATUS <s>] [FIELDS <pairs>]
+//                [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
 //   UTILITY REPORT <source> [MINCOVER <m>] [SPACING <m>]
 //   UTILITY VERIFY <source>
 //   UTILITY CLEARANCE <schedule> <design> [WIDTH <m>] [H <m>] [V <m>] [MARGIN <m>]
@@ -288,6 +324,19 @@ class UtilityToolsDialog final : public QDialog {
     QLineEdit* spacing_ = nullptr;
     QLineEdit* layerPrefix_ = nullptr;
     QLineEdit* minCover_ = nullptr;
+    QWidget* geometry_ = nullptr;
+    QComboBox* serviceType_ = nullptr;
+    QComboBox* method_ = nullptr;
+    QLineEdit* horizontalUncertainty_ = nullptr;
+    QLineEdit* verticalUncertainty_ = nullptr;
+    QComboBox* heights_ = nullptr;
+    QComboBox* levelReference_ = nullptr;
+    QComboBox* path_ = nullptr;
+    QLineEdit* owner_ = nullptr;
+    QLineEdit* material_ = nullptr;
+    QLineEdit* diameter_ = nullptr;
+    QComboBox* serviceStatus_ = nullptr;
+    QLineEdit* fields_ = nullptr;
     QRadioButton* designFile_ = nullptr;
     QRadioButton* designEntity_ = nullptr;
     QRadioButton* designAlignment_ = nullptr;

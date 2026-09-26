@@ -424,6 +424,25 @@ TEST(UtilityData, TheWindowsViewIsAScopeAndHeadlessItIsRefusedNamingArea)
     EXPECT_EQ(firstLine(reply), "scope=view view=2 matched=18 lines=3 completed=0 ignored=0");
 }
 
+TEST(UtilityData, APathTypedOnAPointReadsAsTheSchedulesPathColumnReadsIt)
+{
+    // The schedule's path column takes the field words "traced", "trench"
+    // and "inferred" too (subsurface::parsePathEvidence); the drawing took
+    // only the three it writes, and refused "trench" typed in the property
+    // panel for the pothole's open trench, which the schedule would read.
+    Session session;
+    session.ok("UTILITY DRAW " + sample("schedule.csv"));
+    const std::string report = session.ok("UTILITY REPORT DRAWING");
+    session.select({session.point("W1-X1")});
+    session.ok("PROP SET utility.path trench text");
+    EXPECT_EQ(session.ok("UTILITY REPORT DRAWING"), report);
+    session.ok("PROP SET utility.path Trench text");
+    EXPECT_EQ(session.ok("UTILITY REPORT DRAWING"), report);
+    session.ok("PROP SET utility.path dug text");
+    EXPECT_TRUE(contains(session.refused("UTILITY REPORT DRAWING").message,
+                         "has utility.path \"dug\", which is not detected, exposed or assumed"));
+}
+
 TEST(UtilityData, PointsThatDoNotAgreeAreRefusedByName)
 {
     Session session;
@@ -735,7 +754,6 @@ TEST(UtilityData, TheVerbsRefuseASourceTheyDoNotTake)
                          "usage: UTILITY SCHEDULE <out.csv> <scope>"));
     EXPECT_TRUE(contains(refusal("UTILITY SCHEDULE out.csv DRAWING SCHEMA"),
                          "usage: UTILITY SCHEDULE"));
-    EXPECT_TRUE(contains(refusal("UTILITY DRAW DRAWING"), "UTILITY REGRADE <scope>"));
     EXPECT_TRUE(contains(refusal("UTILITY REPORT DRAWING WHERE SHADE=blue"), "not a WHERE key"));
     EXPECT_TRUE(contains(refusal("UTILITY REPORT LAYERS nowhere"), "layer does not exist"));
     EXPECT_TRUE(contains(refusal("UTILITY VERIFY DRAWING extra"), "usage: UTILITY VERIFY"));

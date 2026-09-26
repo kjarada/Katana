@@ -41,12 +41,14 @@ project specification, and set them where they differ.
 | Does the deliverable meet the client's schema? | `subsurface::checkDelivery` | `CHECK ... SCHEMA` |
 | What should the schema's Clash attribute say? | `subsurface::clashOf` | `CLEARANCE` |
 | Where is each stretch, at what level, on the plan? | `utilities::drawUtilities` | `DRAW` |
+| Which services are the survey's, or an import's, lines and points? | `utilities::readGeometryServices` | `DRAW <scope>` |
 | What does it grade as now that it has been edited in CAD? | `utilities::planUtilityRegrade` | `REGRADE` |
 | What does the drawing deliver, as a schedule? | `subsurface::writeUtilityCsv` | `SCHEDULE` |
 
-Every question but the drawing's is asked of a schedule file or of what is
-drawn, chosen by the scope and filter words every verb shares ("Drawing
-data", below).
+Every question is asked of a schedule file or of what is drawn, chosen by
+the scope and filter words every verb shares ("Drawing data", below) - the
+drawing of the services too, which takes the survey's or an import's own
+lines and points ("Services from surveyed and imported geometry", below).
 
 ## Decisions, and where this is stricter than the standard
 
@@ -152,6 +154,16 @@ katana_cli -c "UTILITY CLEARANCE samples/utilities/schedule.csv samples/utilitie
 katana_cli -c "UTILITY DRAW samples/utilities/schedule.csv" -c "LAYER LIST"
 ```
 
+`samples/utilities/located_services.geojson` is the same investigation as a
+GIS delivers it: plan strings and the points shot on the ground, with the
+services' and the points' attributes under the GIS's own names. Imported and
+drawn, it draws what the schedule draws, figure for figure
+(`cli.utility_draw_takes_the_services_an_import_left_in_the_drawing`):
+
+```
+katana_cli -c "IMPORT samples/utilities/located_services.geojson" -c "UTILITY DRAW DRAWING FIELDS line=ASSET_ID,point=PT_ID,type=ASSET_TYPE,owner=OWNER,material=MATERIAL,diameter_mm=DIA_MM,status=STATUS,config=CONFIG,description=DESC,method=METHOD,h_unc=H_UNC,v_unc=V_UNC,ql=QL,level=LEVEL,level_ref=LEVEL_REF,path=PATH,verifies=VERIFIES" -c "UTILITY REPORT LAYERS utilities MINCOVER 0.6"
+```
+
 An investigation is delivered as IFC 4.3 with `EXPORT <file.ifc> UTILITIES
 <schedule.csv> [SCHEMA <schema.csv>]`: each service an
 `IfcDistributionSystem`, each graded segment the pipe, cable or conduit
@@ -173,6 +185,11 @@ UTILITY CLEARANCE <schedule.csv> | <scope> [DESIGN] <design.csv> | #<id> [LEVEL 
                   [WIDTH <m>] [H <m>] [V <m>] [MARGIN <m>]
 UTILITY CHECK     <schedule.csv> | <scope> SCHEMA <schema.csv>
 UTILITY DRAW      <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
+UTILITY DRAW      <scope> [TYPE <type>] [METHOD <method>] [H_UNC <m>] [V_UNC <m>]
+                  [HEIGHTS surface|service|none] [LEVEL_REF top|centre|invert]
+                  [PATH detected|exposed|assumed] [OWNER <text>] [MATERIAL <text>]
+                  [DIAMETER_MM <mm>] [STATUS <status>] [FIELDS column=property,...]
+                  [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
 UTILITY REGRADE   <scope> [SPACING <m>] [MINCOVER <m>]
 UTILITY SCHEDULE  <out.csv> <scope> [SCHEMA <schema.csv>]
 ```
@@ -185,9 +202,11 @@ x0,y0,x1,y1` or `LAYERS a,b [ONLY]`, then `[WHERE key=value ...]`. Unlike
 verb needs a scope word or `WHERE` to read the drawing at all. `VIEW` is the window's plan view as it is on screen,
 `EXTENTS` its layers anywhere; `katana_cli` and `katana_mcp` have no view and
 take `AREA` instead. A first word that is one of those, or `WHERE`, takes the services
-drawn in the document ("Drawing data", below); anything else is the path of
-a schedule, as before - a file named like a scope word is given with its
-directory (`./drawing`).
+drawn in the document ("Drawing data", below) - for `DRAW`, the lines,
+polylines and points a survey or an import left there, to draw as services
+("Services from surveyed and imported geometry", below); anything else is
+the path of a schedule, as before - a file named like a scope word is given
+with its directory (`./drawing`).
 
 `REPORT`, `VERIFY`, `CLEARANCE`, `CHECK` and `SCHEDULE` read and reply; they
 never touch the drawing, so they are safe against any open project.
@@ -359,7 +378,8 @@ layer/s, elements, filtered elements, like global change". `REPORT`,
 `VERIFY`, `CLEARANCE` and `CHECK` take the services drawn in the document, by
 the scope and filter words Global Modify takes (`docs/cad.md`, "Scope and
 filter"), as well as a schedule file; `REGRADE` and `SCHEDULE` take only
-what is drawn, and `DRAW` only a file. The file stays a source beside the drawing: a delivered
+what is drawn, and `DRAW` a file or the survey's own geometry (the next
+section). The file stays a source beside the drawing: a delivered
 schedule is still checked before anyone draws it.
 
 `utilities::readUtilityData` (`include/katana/cad/utilities/utility_data.hpp`)
@@ -396,7 +416,11 @@ reads the scope's services from the drawn points:
   To make it a point of no line, delete its `utility.vertex` and
   `utility.order` too. Values a person types in the property panel read as the schedule
   reads them: `EML` is a method, `19` is a level, `2.5` a place between the
-  second and third points.
+  second and third points, `trench` an exposed path - through the schedule
+  reader's own `subsurface::parsePathEvidence`; until 2026-09-26 the drawing
+  had a second reading of a path that knew only the three words it writes,
+  and refused `trench`
+  (`UtilityData.APathTypedOnAPointReadsAsTheSchedulesPathColumnReadsIt`).
 
 Three proofs hold the drawing to the schedule, each a test in
 `tests/cad/utilities/test_utility_data.cpp`:
@@ -491,6 +515,144 @@ out by service, not by layer: each run the class the schedule's own export
 gives it, each point a survey annotation, one system a service, each
 classified by its quality level (`docs/ifc.md`, "Subsurface utilities").
 
+## Services from surveyed and imported geometry
+
+The owner, on 2026-09-26: "the utility tools only act on a csv schedule, i want
+it to act on the data on the program, normally we survey the data by gps,
+total station, etc, we import it into the software then we start the post
+processing"; and the data also comes by an ordinary import - a `.12da`
+archive, IFC, a shapefile, DXF. Until then a service reached the drawing only through a schedule file,
+so a survey had to be typed into a `.csv` before any of this could grade it.
+
+**`UTILITY DRAW <scope>` draws the geometry in scope as services**
+(`utilities::readGeometryServices`, `utilities::drawGeometryServices`,
+`include/katana/cad/utilities/utility_data.hpp`), exactly as a `DRAW` of the
+schedule that says the same thing draws it: the same layers, runs and points,
+the points carrying the same rows. So everything after it - `REPORT`,
+`VERIFY`, `CLEARANCE`, `CHECK`, `REGRADE`, `SCHEDULE`, the IFC export - works on
+a survey as on a schedule, with no second path through any of them. It takes
+what any import leaves, whoever made it: a coded survey's strings (a polyline
+carrying its string name in `code`, `docs/survey_coding.md`) and points (a
+point carrying its number in `point`, `docs/survey.md`), a `.12da` archive's
+strings (named in `12d.name`), a DXF's or a shapefile's lines, an IFC file's
+pipes - heights and all, since every import writes them one way
+(`entity::setHeights`).
+
+- **A service is each line or open polyline in scope**, its vertices the
+  located vertices in order. A closed polyline is an outline - a pit, a
+  building, a parcel - not a run, and is counted `ignored`, as are arcs,
+  circles, texts and the rest.
+- **Its id is its name**: the first code or name survey coding finds on it
+  (`cad::codePropertyCandidates`), else `#<entity id>`. A name two sources in
+  the draw share, or a service drawn already has, is told apart as
+  `<name>#<entity id>`, since a line id is what holds a service's points
+  together.
+- **A point in scope on a vertex** - within `tolerance::kCoordinate`, the one
+  ground mark - gives it its point number as the vertex id (else
+  `<line>-<n>`) and whatever the point says of itself. Two points on one
+  vertex are refused by name: which is the survey's is not guessed. A point
+  on no vertex of a line taken is not a service on its own, and is counted
+  `loose`.
+- **Each value is the most particular said**: the point's own `utility.*`
+  property (the keys a drawn point carries, "What the grading found is on
+  the entities" above), then the line's, then the verb's option. The line's
+  attributes - type, owner, material, diameter, status, configuration,
+  description - are the line's and the options' alone, never a point's. A
+  line may say a method, uncertainties, level reference, claim, path and
+  depth for all its vertices; a depth on a record of a main "laid at 0.9 m"
+  is the depth all along it. The utility properties are set the one way any
+  property is: `MODIFY <scope> SET PROP=utility.method:pothole`, Format >
+  Global Modify, or the property panel - so the potholes of a survey are
+  selected and marked, and the rest of the string takes `METHOD EML`.
+- **A height is the surface unless something says otherwise.** Most located
+  services are marked on the ground and shot there; `HEIGHTS service` says
+  the heights are the service's own, on its level reference (a pothole shot
+  on the pipe, an as-constructed or design model), and `HEIGHTS none` that
+  they are not to be used. `utility.heights` on a line or a point says it
+  for that one - a string shot on the ground whose potholes were shot on the
+  pipe. The default errs the safe way: a service level read as the surface
+  leaves the vertex with no level - QL-B at best, no cover computed - where
+  a surface read as the service would certify a measured level at the
+  ground and a cover of nothing. A height is the line's at the vertex, else
+  its point's; a level the point gives itself (`utility.level`,
+  `utility.surface_level`, `utility.depth`) wins over either reading.
+- **Nothing is assumed.** No method at a vertex - none on its point, its
+  line or the verb - refuses the draw, naming the vertex: how a service was
+  located is the whole of its quality level, so no default could be right.
+  No uncertainty is "not assessed", which grades a detection QL-C, as a
+  schedule's empty cell does. No type is `unknown`, drawn magenta. A
+  GNSS or total station precision on an imported point is not taken as the
+  service's uncertainty: it is the mark's, and the locator's error is most
+  of the service's.
+- **`FIELDS column=property,...` reads an import's own attributes as the
+  schedule's columns**: `FIELDS type=ASSET_TYPE,line=ASSET_ID` reads a
+  shapefile's `ASSET_TYPE` as each service's type and its `ASSET_ID` as its
+  id. A column is named as a schedule's header names it, aliases and all
+  (`subsurface::utilityCsvColumnNamed`, the schedule reader's own lookup), so
+  `LocateMethod=LOC_METHOD` and a delivery schema's own attributes
+  (`AssetFeature=FEAT`) read as they would in a schedule; `diameter_mm` is
+  millimetres, as the schedule's is. A property a person set in Katana
+  (`utility.owner`) wins over a field read so. `easting` and `northing` are
+  refused (the geometry is where the service is), and so is `size`, whose
+  `W x H` reading is the schedule reader's alone.
+- **What is drawn is not drawn again.** Each point a draw from the drawing
+  makes carries the entity its line was read from, `utility.source` =
+  `#<id>`, which `REGRADE` keeps as it keeps a person's own properties. A
+  source that a point names, a drawn service's runs and points, and a
+  survey point on a vertex of a source drawn before are all counted `drawn`
+  and left alone; so the same draw run again after more of the site is
+  surveyed draws only what is new. A scope with nothing left to draw says
+  so, and is no failure.
+- **The survey is left as it is.** The services are drawn beside it, under
+  `utilities/` (or `LAYER`), as a schedule's are: the survey is the record
+  of what was measured, and a draw that rewrote it could not be undone by
+  anyone who later deleted the drawn services.
+
+The reply is the draw's, with what the scope took after its first record, as
+a regrade's is - so `utilities::drawReplyBounds` frames it the same way:
+
+```
+utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000.000,6250000.000,334040.000,6250007.200
+scope=drawing matched=18 lines=4 points=14 loose=0 drawn=0 ignored=0
+line id=W1 type=water length=30.024 ql_a=1.420 ql_b=16.102 ql_c=12.502 ql_d=0.000
+```
+
+`points` counts the points that gave a vertex its number and values, `loose`
+the points on no line taken, `drawn` what is drawn already, `ignored` what
+cannot be a service. A `REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `REGRADE`
+or `SCHEDULE` whose scope takes only such geometry - the survey, not yet
+drawn as services - says that `UTILITY DRAW` with the same scope draws it.
+
+Held by `tests/cad/utilities/test_utility_geometry.cpp`: a survey read as
+services is, field for field, the schedule written by hand from the same
+field book, and drawn it is that schedule's drawing, entity for entity
+(`UtilityGeometry.ASurveyDrawnAsServicesDrawsWhatTheScheduleOfTheSameSurveyDraws`);
+every other verb then reads it as that schedule's drawing, and a regrade of it
+changes nothing
+(`UtilityGeometry.EveryVerbReadsWhatWasDrawnFromTheSurveyAsTheSchedulesDrawing`).
+Through a real import, `located_services.geojson` draws and reports what
+`schedule.csv` does, word for word
+(`cli.utility_draw_takes_the_services_an_import_left_in_the_drawing`).
+
+Rejected:
+
+- **Marking the survey's own entities as the services in place.** A DXF's or
+  a shapefile's lines have no points to carry a vertex's evidence; the
+  survey's strings would become runs that `REGRADE` deletes and draws again
+  split by quality level; and the survey, the record of what was measured,
+  would be rewritten by a grading.
+- **Grading raw geometry in every verb, with the options on each.** The
+  evidence of a pothole in the middle of a string has nowhere to live but a
+  point, and the points-are-the-schedule model already gives every verb its
+  data once the services are drawn; a second reading in six verbs is six
+  places to disagree.
+- **Reading every property named like a schedule column.** An import's
+  `type`, `status` or `id` means what its author meant; `FIELDS` says which
+  are the schedule's.
+- **A new verb.** `DRAW` already draws services; that it now takes the
+  drawing, as the other verbs do, is one form fewer to learn, and the dialog's
+  Draw tab reads either source as the others do.
+
 ## The TfNSW Utility Schema and Specification
 
 TfNSW's Utility Schema and Specification (DMS-FT-493, v1.2, December 2022) is
@@ -580,7 +742,8 @@ Exposures, Clearance of Proposed Works, Check Against a Delivery Schema,
 Regrade Drawn Utilities and Export Drawn Utilities as a Schedule. Each opens
 the same dialog on its own tab. The dialog has one field for each option the
 verb takes - the detected spacing and minimum cover shared by Draw, Report and
-Regrade, as `SPACING` and `MINCOVER` are - shows the exact `UTILITY` line it
+Regrade, as `SPACING` and `MINCOVER` are, and on Draw of what is drawn the
+group "Drawn geometry as services" for the options above - shows the exact `UTILITY` line it
 will run, and runs that line through the window's command line. The line is
 logged and undoable like a typed one, and the reply appears in the dialog,
 where it can be copied or saved. Typing the same line on the command line
@@ -594,8 +757,9 @@ what is on screen, or its layers anywhere), the checked layers with or
 without their sublayers, or the whole drawing; then types, layer and style
 patterns, colour, a property and its value, text, drawn only - and they write
 the scope words into the line: `UTILITY REPORT VIEW 3 WHERE
-PROP=utility.type:water`. Report, Verify, Clearance and Check read either
-source; Draw reads its file; Regrade and Schedule read the drawing. Clearance's
+PROP=utility.type:water`. Draw, Report, Verify, Clearance and Check read
+either source - for Draw, what is drawn is the survey's or an import's
+geometry; Regrade and Schedule read the drawing. Clearance's
 works are a design file, a line or polyline in the drawing (its `#id`, or Use
 Selected, at a level or its own heights) or one of the drawing's alignments.
 `VIEW` typed in the window works too, since the window answers it; a script
@@ -605,6 +769,20 @@ schema too, and its preview shows each service's graded segments by the class
 they are written as (`docs/ifc.md`, "In the window").
 
 ## Not done
+
+- A service drawn from the drawing does not follow its survey: a string
+  moved after the draw leaves the service where it was drawn. Move the
+  service's points and `REGRADE`, or delete the service and draw again.
+- An arc in the scope is not a service, and neither is a spline: chording one
+  would invent located vertices nobody located. Draw the run as a polyline
+  through its located points.
+- Points are not strung into services by the draw: a coded survey's points
+  are strung by its linework first (`docs/survey_coding.md`), and a point on
+  no line is counted `loose`.
+- `FIELDS` reads an entity's properties, not its metadata; a `size` of
+  `W x H` is read from a schedule only; the surface level at a vertex is not
+  taken from a surface (a TIN) - only from a height, a point's own, or a
+  field.
 
 - The dialog's Clearance design from an entity takes the id typed or the
   one entity selected; picking the works in the drawing while the dialog
