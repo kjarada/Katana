@@ -436,8 +436,13 @@ std::string exportOptionWords(const Json& arguments)
                                     argument(arguments, "layers"),
                                     optionalBool(arguments, "only", false),
                                     argument(arguments, "where"));
-    } else if (!argument(arguments, "layers").is_null() || !argument(arguments, "where").is_null()) {
-        throw ToolRefusal{"\"layers\" and \"where\" say a scope: give \"scope\" with them"};
+    } else if (!argument(arguments, "where").is_null() && argument(arguments, "layers").is_null()) {
+        // "where" alone filters the selection, as WHERE alone does on the
+        // command line (the one scope parser's rule, MODIFY's): written
+        // SELECTION WHERE ..., so the line says what it takes.
+        words += " " + scopeWordsOf("selection", area, Json(), false, argument(arguments, "where"));
+    } else if (!argument(arguments, "layers").is_null()) {
+        throw ToolRefusal{"\"layers\" says a scope: give \"scope\": \"layers\" with it"};
     }
     if (const Json& name = argument(arguments, "layer_name"); !name.is_null()) {
         if (!name.is_string() || name.get<std::string>().empty()) {
@@ -926,7 +931,9 @@ const std::vector<Tool>& tools()
                       {{"type", "array"},
                        {"items", {{"type", "string"}}},
                        {"description", "Conditions on what the scope takes: [\"TYPE=polyline\", "
-                                       "\"PROP=owner:Smith*\"]."}}},
+                                       "\"PROP=owner:Smith*\"]. Without \"scope\" they filter "
+                                       "the selection, as WHERE alone does on the command line; "
+                                       "\"scope\": \"drawing\" filters the whole drawing."}}},
                      {"layer_name",
                       {{"type", "string"},
                        {"description", "The layer's name in the file (layername=)."}}},
