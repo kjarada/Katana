@@ -58,6 +58,30 @@ TEST(SubsurfaceUtilityCsv, ReadsLinesByNameInOrderOfFirstAppearance)
     EXPECT_EQ(gas.pathEvidence[0], PathEvidence::Assumed);
 }
 
+// What is read is kept as it was written too, under the header it was
+// written under, so that a deliverable written back out (the IFC export's
+// delivery property set) carries the schedule's own values rather than
+// Katana's reading of them.
+TEST(SubsurfaceUtilityCsv, KeepsEachInterpretedCellAsWrittenUnderItsHeader)
+{
+    const auto lines = parseUtilityCsv(kSchedule);
+    ASSERT_TRUE(lines.ok()) << lines.error().describe();
+    const auto& written = (*lines)[0].attributes.written;
+    EXPECT_EQ(written.at("Line"), "W1");
+    EXPECT_EQ(written.at("Type"), "water");
+    EXPECT_EQ(written.at("Status"), "live");
+    EXPECT_EQ(written.at("Owner"), "Water Co, North");
+    EXPECT_EQ(written.at("Diameter_mm"), "150");
+    EXPECT_FALSE(written.contains("Description")); // W1 has none
+
+    const auto& pothole = (*lines)[0].vertices[2].written;
+    EXPECT_EQ(pothole.at("Point_ID"), "P3");
+    EXPECT_EQ(pothole.at("Location Method"), "pothole");
+    EXPECT_EQ(pothole.at("RL"), "99.10"); // not 99.1
+    EXPECT_EQ(pothole.at("Level_Ref"), "centre");
+    EXPECT_FALSE((*lines)[0].vertices[0].written.contains("RL")); // absent stays absent
+}
+
 TEST(SubsurfaceUtilityCsv, RefusesWhatItWouldOtherwiseHaveToGuess)
 {
     const auto code = [](std::string_view text) {

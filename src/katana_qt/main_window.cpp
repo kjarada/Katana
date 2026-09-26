@@ -48,6 +48,7 @@
 #include <QDialogButtonBox>
 #include <QFileInfo>
 #include <QDoubleSpinBox>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QCheckBox>
@@ -105,6 +106,7 @@
 #include "katana/entity/leader_values.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/gis/gdal_adapter.hpp"
+#include "katana/ifc/export.hpp"
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/dataset_info.hpp"
 #include "katana/interop/export.hpp"
@@ -536,10 +538,10 @@ void MainWindow::buildActions()
                    QKeySequence::SaveAs, "fileSaveAs");
     QAction* importAction =
         makeAction(Icon::Import, "&Import...",
-                   "Import a drawing, an image or a point cloud (DXF, SHP, GeoTIFF, LAS ...)",
+                   "Import a drawing, an image or a point cloud (DXF, IFC, SHP, GeoTIFF, LAS ...)",
                    QKeySequence(Qt::CTRL | Qt::Key_I), "fileImport");
     QAction* exportAction = makeAction(Icon::Export, "Export &Vector...",
-                                       "Export the drawing (DXF, GeoPackage, GeoJSON, SHP ...)",
+                                       "Export the drawing (DXF, IFC, GeoPackage, GeoJSON, SHP ...)",
                                        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E),
                                        "fileExportVector");
     QAction* plotAction = makeAction(Icon::Plot, "&Plot to PDF...",
@@ -569,6 +571,21 @@ void MainWindow::buildActions()
     connect(importAction, &QAction::triggered, this, [this] { importFile(); });
     connect(exportAction, &QAction::triggered, this, [this] { exportVectorFile(); });
     connect(plotAction, &QAction::triggered, this, [this] { plotToPdf(); });
+    // IFC 4.3 both ways (docs/ifc.md), each a dialog of its own: what an IFC
+    // exchange chooses - which objects, a utility schedule and its schema,
+    // a project's classification rules - has no place in the generic ones.
+    QAction* importIfcAction =
+        makeAction(Icon::Import, "Import I&FC...",
+                   "Import an IFC file: alignments as PIs and PVIs, elements and annotations with "
+                   "their property sets, terrain as surfaces",
+                   QKeySequence(), "fileImportIfc");
+    QAction* exportIfcAction = makeAction(
+        Icon::Export, "&Export IFC...",
+        "Export IFC 4.3: alignments, the drawing by class and an AS 5488 utility investigation, "
+        "with a preview of the class each object becomes",
+        QKeySequence(), "fileExportIfc");
+    connect(importIfcAction, &QAction::triggered, this, [this] { showIfcImport(); });
+    connect(exportIfcAction, &QAction::triggered, this, [this] { showIfcExport(); });
     QAction* sheetsAction =
         makeAction(Icon::Plot, "S&heets...",
                    "Lay the drawing out on sheets with a title block, and plot them",
@@ -646,10 +663,11 @@ void MainWindow::buildActions()
     fileMenu->addSeparator();
     fileMenu->addActions({saveAction, saveAsAction});
     fileMenu->addSeparator();
-    fileMenu->addActions({importAction, exportAction, exportImageAction});
+    fileMenu->addActions(
+        {importAction, exportAction, importIfcAction, exportIfcAction, exportImageAction});
     fileMenu->addSeparator();
     fileMenu->addAction(runScriptAction);
-    recentScriptsMenu_ = fileMenu->addMenu("Rec&ent Scripts");
+    recentScriptsMenu_ = fileMenu->addMenu("Recen&t Scripts");
     recentScriptsMenu_->setObjectName("fileRecentScripts");
     refreshRecentScripts();
     fileMenu->addSeparator();
@@ -1846,6 +1864,11 @@ void MainWindow::refreshAll()
     if (crsButton_ != nullptr) {
         crsButton_->setText("CRS: " + projectCrsLabel(document_));
     }
+    // File > Export IFC, open beside the drawing: its counts and selection
+    // follow the drawing, as the panels do.
+    if (!ifcExport_.isNull() && ifcExport_->isVisible()) {
+        ifcExport_->refresh();
+    }
 }
 
 void MainWindow::refreshHistoryMenus()
@@ -2709,6 +2732,13 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
         runInterpreterLine(line, verb);
         return;
     }
+    // A .ifc takes the verbs' options exactly as katana_cli reads them
+    // (ifc/front_end.hpp), so its line is split by that grammar before the
+    // generic one takes the rest as a path; IFC RULES is IFC's alone.
+    if ((verb == "IMPORT" || verb == "EXPORT" || verb == "INFO" || verb == "IFC") &&
+        runIfcLine(verb, line.mid(words.front().size())).has_value()) {
+        return;
+    }
     // IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN], the path and the
     // placement read as the session reads them
     // (CommandInterpreter::importArgument): LOCAL was once taken for part of
@@ -3275,9 +3305,9 @@ QString importFilter()
     const QString raster = patternsFor(interop::rasterExtensions());
     const QString cloud = patternsFor(interop::pointCloudExtensions());
     const QString archive = patternsFor(interop::archive12dExtensions());
-    return "All supported (" + vector + ' ' + archive + ' ' + raster + ' ' + cloud + ");;" +
-           "Vector (" + vector + ");;" + "12d Archive (" + archive + ");;" + "Raster (" + raster +
-           ");;" + "Point cloud (" + cloud + ");;" + "All files (*)";
+    return "All supported (" + vector + " *.ifc " + archive + ' ' + raster + ' ' + cloud + ");;" +
+           "Vector (" + vector + ");;" + "IFC (*.ifc);;" + "12d Archive (" + archive + ");;" +
+           "Raster (" + raster + ");;" + "Point cloud (" + cloud + ");;" + "All files (*)";
 }
 
 } // namespace
@@ -3285,6 +3315,17 @@ QString importFilter()
 void MainWindow::importPath(const QString& path, const cad::ImportPlacement& placement)
 {
     const std::filesystem::path file = toPath(path);
+    if (katana::ifc::isIfcPath(file)) {
+        // As the line it is: echoed, and answered as a typed one is.
+        katana::ifc::ImportArguments arguments;
+        arguments.path = path.toStdString();
+        if (const auto line = katana::ifc::formatImportLine(arguments)) {
+            (void)runIfcCommand(QString::fromStdString(*line), IfcLineFrom::Menu);
+        } else {
+            logMessage(QString::fromStdString(line.error().describe()), true);
+        }
+        return;
+    }
     if (katana::dxf::isDxfPath(file)) {
         importDxfFile(file, placement);
         return;
@@ -3645,6 +3686,16 @@ void MainWindow::importFile()
     // else keeps the quick path, the GIS menu's imports being the considered
     // one (docs/interop.md, "Placing an import").
     const std::filesystem::path path = toPath(selected);
+    if (katana::ifc::isIfcPath(path)) {
+        katana::ifc::ImportArguments arguments;
+        arguments.path = selected.toStdString();
+        if (const auto line = katana::ifc::formatImportLine(arguments)) {
+            (void)runIfcCommand(QString::fromStdString(*line), IfcLineFrom::Menu);
+        } else {
+            logMessage(QString::fromStdString(line.error().describe()), true);
+        }
+        return;
+    }
     const interop::SourceKind kind = interop::kindForPath(path);
     if (katana::dxf::isDxfPath(path) || kind == interop::SourceKind::Archive12d) {
         importWithPlacement(selected);
@@ -3656,7 +3707,7 @@ void MainWindow::importFile()
     }
     warnUser( "Import",
                          "Katana does not recognise the extension of\n" + selected +
-                             "\n\nSupported: " + patternsFor(interop::vectorExtensions()) + ' ' +
+                             "\n\nSupported: " + patternsFor(interop::vectorExtensions()) + " *.ifc " +
                              patternsFor(interop::archive12dExtensions()) + ' ' +
                              patternsFor(interop::rasterExtensions()) + ' ' +
                              patternsFor(interop::pointCloudExtensions()));
@@ -3973,11 +4024,21 @@ void MainWindow::exportVectorFile()
         filters << (QString::fromStdString(format.description) + " (*." +
                     QString::fromStdString(format.extension) + ")");
     }
-    filters << "12d Archive (*.12da)" << "12d Archive, zipped (*.12daz)";
+    filters << "12d Archive (*.12da)" << "12d Archive, zipped (*.12daz)" << "IFC 4.3 (*.ifc)";
     QString chosenFilter;
-    const QString selected = QFileDialog::getSaveFileName(this, "Export", QString(),
-                                                          filters.join(";;"), &chosenFilter);
+    QString selected = QFileDialog::getSaveFileName(this, "Export", QString(), filters.join(";;"),
+                                                    &chosenFilter);
     if (selected.isEmpty()) {
+        return;
+    }
+    // IFC has choices of its own - a utility schedule, rules, which objects
+    // go - so its dialog takes the file from here. A name typed without the
+    // extension the IFC filter shows is given it, or GDAL would get the file.
+    if (chosenFilter.startsWith("IFC") && QFileInfo(selected).suffix().isEmpty()) {
+        selected += ".ifc";
+    }
+    if (katana::ifc::isIfcPath(toPath(selected))) {
+        showIfcExport(selected);
         return;
     }
 
@@ -4018,6 +4079,20 @@ void MainWindow::exportVectorFile()
 bool MainWindow::exportDrawingTo(const std::filesystem::path& path,
                                  interop::VectorExportOptions options)
 {
+    if (katana::ifc::isIfcPath(path)) {
+        // The typed EXPORT's defaults: everything, or the entities asked for
+        // (the selection, which is where they come from) - as its line.
+        katana::ifc::ExportArguments arguments;
+        const auto name = path.u8string();
+        arguments.path.assign(name.begin(), name.end());
+        arguments.selected = !options.entities.empty();
+        const auto line = katana::ifc::formatExportLine(arguments);
+        if (!line) {
+            logMessage(QString::fromStdString(line.error().describe()), true);
+            return false;
+        }
+        return runIfcCommand(QString::fromStdString(*line), IfcLineFrom::Menu).ok();
+    }
     if (katana::dxf::isDxfPath(path)) {
         return exportDxfFile(path, options);
     }
@@ -4313,6 +4388,16 @@ const interop::RasterOverlay* MainWindow::chooseReferenceRaster(const QString& t
 
 std::unique_ptr<DatasetInfoDialog> MainWindow::makeDatasetInfo(const QString& path)
 {
+    if (katana::ifc::isIfcPath(toPath(path))) {
+        auto described = describeIfcFile(toPath(path));
+        if (!described) {
+            logMessage(QString::fromStdString(described.error().describe()), true);
+            warnUser("Dataset Information", QString::fromStdString(described.error().describe()));
+            return nullptr;
+        }
+        return std::make_unique<DatasetInfoDialog>(
+            "Dataset Information - " + fromPath(toPath(path).filename()), *described, this);
+    }
     auto description = interop::describeSource(toPath(path));
     if (!description) {
         logMessage(QString::fromStdString(description.error().describe()), true);
@@ -4326,6 +4411,20 @@ std::unique_ptr<DatasetInfoDialog> MainWindow::makeDatasetInfo(const QString& pa
 
 std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
 {
+    if (katana::ifc::isIfcPath(toPath(path))) {
+        // Described first, as the GIS files are: a file that cannot be read
+        // has no dialog, and says why.
+        auto described = describeIfcFile(toPath(path));
+        if (!described) {
+            logMessage(QString::fromStdString(described.error().describe()), true);
+            warnUser("Import", QString::fromStdString(described.error().describe()));
+            return nullptr;
+        }
+        auto dialog = std::make_unique<IfcImportDialog>(ifcImportContext(), this);
+        dialog->setFile(path);
+        dialog->setSummary(*described);
+        return dialog;
+    }
     // A DXF or a .12da has one option, where it lands; GDAL is not asked.
     const std::filesystem::path file = toPath(path);
     if (katana::dxf::isDxfPath(file) ||
@@ -4362,6 +4461,10 @@ void MainWindow::importWithOptions(const QString& path)
     if (katana::dxf::isDxfPath(file) ||
         interop::kindForPath(file) == interop::SourceKind::Archive12d) {
         importWithPlacement(path);
+        return;
+    }
+    if (katana::ifc::isIfcPath(toPath(path))) {
+        showIfcImport(path); // IFC's own options, non-modally
         return;
     }
     auto dialog = makeImportOptions(path);
@@ -4486,7 +4589,7 @@ void MainWindow::exportSurfaceAsDem()
 {
     if (sceneSurfaces_.empty()) {
         logMessage("There is no surface to export. Build one from the Terrain menu, or import "
-                   "a 12d archive that holds a tin.",
+                   "a 12d archive that holds a tin or an IFC file that holds a terrain.",
                    true);
         return;
     }
