@@ -311,6 +311,24 @@ TEST_F(ZonalVerb, TheCsvHasARowPerZoneAndIsNotReplacedWithoutOverwrite)
     EXPECT_TRUE(geo::runNow(context, line + " OVERWRITE").ok());
 }
 
+TEST_F(ZonalVerb, ACsvThatCannotBeWrittenLeavesTheZonesAsTheyWere)
+{
+    // The reply is a failure, so the drawing must not have changed: the
+    // statistics were once written, as an undo step, before the CSV was
+    // tried.
+    const EntityId lot = box(10, 5, 30, 25);
+    const Entity before = *document.model().entities.find(lot);
+    const std::uint64_t revision = document.modelRevision();
+    const std::filesystem::path csv = scratch.path() / "no such folder" / "zones.csv";
+    auto reply =
+        geo::runNow(context, "RASTER ZONAL FILE \"" + kPlane + "\" DRAWING stats=count csv=\"" +
+                                 csv.generic_string() + "\"");
+    ASSERT_FALSE(reply.ok());
+    EXPECT_EQ(reply.error().code, ErrorCode::FileExportFailure) << reply.error().describe();
+    EXPECT_EQ(*document.model().entities.find(lot), before);
+    EXPECT_EQ(document.modelRevision(), revision);
+}
+
 TEST_F(ZonalVerb, WhatTheVerbCannotDoIsRefusedNamingIt)
 {
     (void)box(10, 5, 30, 25);

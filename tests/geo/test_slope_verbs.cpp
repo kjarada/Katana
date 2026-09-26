@@ -362,6 +362,26 @@ TEST_F(SlopeVerbs, AScopeKeepsTheAnalysisInsideItsClosedShapes)
     EXPECT_EQ(on("inside/2-10"), 1U);
 }
 
+TEST_F(SlopeVerbs, ItsOptionsAndNameMayFollowTheFilter)
+{
+    // The words are read as every GIS verb's are: classes= and areas= after
+    // the filter are the verb's own (they were refused as "not a WHERE
+    // key"). The triangle is the one above: 52.53125 m2 in class 2-10.
+    Entity triangle;
+    Polyline2 outline;
+    outline.vertices = {{5, 5}, {15.25, 5}, {5, 15.25}};
+    outline.closed = true;
+    triangle.geometry = outline;
+    ASSERT_TRUE(document.execute(katana::commands::createEntities({triangle})).ok());
+    const std::string reply =
+        ran("RASTER SLOPE FILE \"" + kPlane +
+            "\" DRAWING WHERE TYPE=polyline classes=2,10 areas=inside NAME s");
+    EXPECT_EQ(classRecord(reply, "2-10")->get("area").value_or(""), "52.531") << reply;
+    EXPECT_EQ(on("inside/2-10"), 1U);
+    EXPECT_EQ(run("RASTER SLOPE FILE \"" + kPlane + "\" NAME a NAME b").error().code,
+              ErrorCode::InvalidArgument);
+}
+
 TEST_F(SlopeVerbs, AScopeWithNoClosedShapeMakesNothingAndSaysSo)
 {
     Entity open;

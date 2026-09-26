@@ -253,6 +253,18 @@ bool isScopeWord(std::string_view word)
     return false;
 }
 
+bool isWhereKey(std::string_view key)
+{
+    // The keys parseWhereCondition reads.
+    const std::string folded = upper(key);
+    for (const char* name : {"TYPE", "LAYER", "STYLE", "COLOUR", "COLOR", "PROP", "TEXT"}) {
+        if (folded == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
 Result<std::optional<katana::entity::Color>> parseColourOrByLayer(std::string_view text)
 {
     if (upper(text) == "BYLAYER") {

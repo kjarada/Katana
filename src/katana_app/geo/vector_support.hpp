@@ -66,7 +66,9 @@ struct VerbWords {
 };
 
 // Reads words [begin, end) of `tokens`: the options, flags and TO clause
-// `rules` names, wherever they stand, and the rest as ONE scope clause.
+// `rules` names, wherever they stand, and the rest as ONE scope clause. An
+// option whose key is a WHERE key (cad::isWhereKey: layer=) is the option
+// before WHERE and a condition after it.
 // InvalidArgument naming the word for an option or flag given twice, an
 // option with no value, a TO where none is taken or given twice; the scope
 // parser's refusal for its own words; and InvalidArgument with the usage for
