@@ -10,9 +10,23 @@
 namespace katana::app::geo {
 
 // ---- T0: Terrain session: SURFACE LIST, INFO, REMOVE, FROM, EXPORT ----
+// surface_verbs.cpp (terrain_verbs.hpp).
+katana::core::Result<Prepared> prepareSurface(Context& context, const Tokens& tokens,
+                                              std::string_view line);
 // ---- T1: CONTOUR ----
+// contour_verbs.cpp (terrain_verbs.hpp).
+katana::core::Result<Prepared> prepareContour(Context& context, const Tokens& tokens,
+                                              std::string_view line);
 // ---- T2: RASTER SHADE ----
+// shade_verbs.cpp (terrain_verbs.hpp).
+katana::core::Result<Prepared> prepareShade(Context& context, const Tokens& tokens,
+                                            std::string_view line);
 // ---- T3: RASTER SLOPE, RASTER ASPECT ----
+// slope_verbs.cpp (terrain_verbs.hpp).
+katana::core::Result<Prepared> prepareSlope(Context& context, const Tokens& tokens,
+                                            std::string_view line);
+katana::core::Result<Prepared> prepareAspect(Context& context, const Tokens& tokens,
+                                             std::string_view line);
 // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
 // ---- T5: RASTER VIEWSHED, LOS ----
 // ---- T6: RASTER GRID ----
@@ -50,9 +64,45 @@ const std::vector<VerbEntry>& verbTable()
              "          SURFACE <name> [CELL <m>] or FILE <path>; TO takes LAYER <path>,\n"
              "          REFERENCE [<name>] or FILE <path> [FORMAT <driver>]"});
         // ---- T0: Terrain session ----
+        rows.push_back(
+            {"SURFACE", "", &prepareSurface,
+             "SURFACE LIST [JSON] | INFO <name> | REMOVE <name>  the session's surfaces\n"
+             "          SURFACE FROM RASTER <id|name> | FILE <path> [max=<points>]\n"
+             "          [AREA x0,y0,x1,y1] | CLOUD <id|name> [classes=2,...] | <scope>\n"
+             "          [NAME <n>]  triangulate a surface from a DEM's true values, a\n"
+             "          cloud's ground or the drawing's levelled points and lines\n"
+             "          SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog]\n"
+             "          [co=K=V]... [OVERWRITE]  write it as a DEM (tiled, compressed)"});
         // ---- T1: CONTOUR ----
+        rows.push_back(
+            {"CONTOUR", "", &prepareContour,
+             "CONTOUR SURFACE <name> | RASTER <id|name> | FILE <path> interval=<m> [major=5]\n"
+             "          [base=0] [layer=terrain/contours] [smooth=3|5] [<scope>] [PREVIEW]\n"
+             "          contour lines on <layer>/major and <layer>/minor at their levels: a\n"
+             "          surface traced exactly, a raster by GDAL at full resolution; a scope\n"
+             "          last keeps them inside its closed shapes"});
         // ---- T2: RASTER SHADE ----
+        rows.push_back(
+            {"RASTER", "SHADE", &prepareShade,
+             "RASTER SHADE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>\n"
+             "          [style=hillshade|relief|relief+hillshade|slope|plain] [azimuth=315]\n"
+             "          [altitude=45] [z=1] [variant=regular|combined|multidirectional|igor]\n"
+             "          [ramp=terrain|diverging|slope|grey|<file>] [range=<min>,<max>] [NAME <n>]\n"
+             "          [save=<file.tif>] [OVERWRITE] [PREVIEW]  a picture of the terrain,\n"
+             "          kept as a derived reference raster, with its legend"});
         // ---- T3: RASTER SLOPE, RASTER ASPECT ----
+        rows.push_back(
+            {"RASTER", "SLOPE", &prepareSlope,
+             "RASTER SLOPE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>\n"
+             "          [unit=percent|degree] [classes=<b1>,<b2>,...] [areas=terrain/slope]\n"
+             "          [min_area=<m2>] [NAME <n>] [<scope>] [PREVIEW]  the slope as a\n"
+             "          reference raster; classes drawn as areas on <areas>/<class>, with\n"
+             "          each class's area"});
+        rows.push_back(
+            {"RASTER", "ASPECT", &prepareAspect,
+             "RASTER ASPECT SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>\n"
+             "          [NAME <n>] [<scope>] [PREVIEW]  the direction the ground faces,\n"
+             "          degrees clockwise from north, as a reference raster"});
         // ---- T4: RASTER ZONAL, RASTER SAMPLE, DRAPE ----
         // ---- T5: RASTER VIEWSHED, LOS ----
         // ---- T6: RASTER GRID ----

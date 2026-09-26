@@ -18,6 +18,19 @@
 #include "geo/formats_dialog.hpp"
 #include "geo/geo_workbench.hpp"
 
+#include <QAction>
+#include <QDialog>
+#include <QMainWindow>
+
+#include <utility>
+
+// ---- T1: Terrain > Analysis > Contours ----
+#include "geo/contours_dialog.hpp"
+// ---- T2: Terrain > Analysis > Terrain Shading ----
+#include "geo/terrain_shading_dialog.hpp"
+// ---- T3: Terrain > Analysis > Slope ----
+#include "geo/slope_analysis_dialog.hpp"
+
 namespace katana::qt {
 
 void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
@@ -35,8 +48,52 @@ void buildGeoMenus(GeoMenus& menus, GeoWorkbench& workbench)
     // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
     // ---- V5: GIS > Analysis - GDAL > Query with SQL ----
     // ---- T1: Terrain > Analysis > Contours ----
+    {
+        QAction* contours = workbench.services().makeAction(
+            Icon::Processing, "Contours...",
+            "Contour lines of a surface or an elevation raster, drawn on layers (CONTOUR)", {},
+            "terrainContours");
+        contours->setData("contoursDialog");
+        QObject::connect(contours, &QAction::triggered, &workbench.window(), [&workbench] {
+            (void)showTerrainDialog(workbench, "contoursDialog",
+                                    [](TerrainDialogContext context, QWidget* parent) -> QDialog* {
+                                        return new ContoursDialog(std::move(context), parent);
+                                    });
+        });
+        menus.addToTerrain("Analysis", "terrainAnalysisMenu", contours);
+    }
     // ---- T2: Terrain > Analysis > Terrain Shading ----
+    {
+        QAction* shading = workbench.services().makeAction(
+            Icon::Processing, "Terrain Shading...",
+            "Hillshade, colour relief or slope shading of a surface or an elevation raster, kept "
+            "as a reference raster with its legend (RASTER SHADE)",
+            {}, "terrainShading");
+        shading->setData("terrainShadingDialog");
+        QObject::connect(shading, &QAction::triggered, &workbench.window(), [&workbench] {
+            (void)showTerrainDialog(workbench, "terrainShadingDialog",
+                                    [](TerrainDialogContext context, QWidget* parent) -> QDialog* {
+                                        return new TerrainShadingDialog(std::move(context), parent);
+                                    });
+        });
+        menus.addToTerrain("Analysis", "terrainAnalysisMenu", shading);
+    }
     // ---- T3: Terrain > Analysis > Slope ----
+    {
+        QAction* slope = workbench.services().makeAction(
+            Icon::Processing, "Slope and Aspect...",
+            "The slope or aspect of a surface or an elevation raster, and slope classes drawn as "
+            "areas (RASTER SLOPE, RASTER ASPECT)",
+            {}, "terrainSlope");
+        slope->setData("slopeAnalysisDialog");
+        QObject::connect(slope, &QAction::triggered, &workbench.window(), [&workbench] {
+            (void)showTerrainDialog(workbench, "slopeAnalysisDialog",
+                                    [](TerrainDialogContext context, QWidget* parent) -> QDialog* {
+                                        return new SlopeAnalysisDialog(std::move(context), parent);
+                                    });
+        });
+        menus.addToTerrain("Analysis", "terrainAnalysisMenu", slope);
+    }
     // ---- T4: Terrain > Analysis > Zonal Statistics, Drape ----
     // ---- T5: Terrain > Analysis > Viewshed ----
     // ---- T6: Terrain > DEM > Grid from Points ----

@@ -47,7 +47,9 @@ using ReferenceId = std::uint64_t;
 enum class RasterRole { Imagery, Elevation, Derived };
 
 // How a raster's values are drawn: as they are, or shaded from its heights.
-// Only Plain is drawn so far; the shaded styles are the terrain shading's.
+// RASTER SHADE renders a shaded style into the picture itself, a derived
+// raster whose RGBA the views and the sheet painter draw as they draw any
+// other; the style says which picture it is (docs/terrain.md, "Shading").
 enum class RasterDisplayStyle { Plain, Hillshade, Relief, ReliefHillshade, Slope };
 
 // The facts of band 1 a reply or a legend needs, read at full precision -

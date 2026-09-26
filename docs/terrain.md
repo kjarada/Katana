@@ -286,6 +286,361 @@ by the same name on every front end (`docs/geoprocessing.md`).
 Surfaces are still session data, not saved in the project: saving them is a
 storage-schema decision of its own.
 
+## Surfaces on every front end
+
+The SURFACE verb (`src/katana_app/geo/surface_verbs.cpp`) makes, lists and
+writes out the store's surfaces. It runs through the one geoprocessing
+executor (`docs/geoprocessing.md`), so `katana_cli`, `katana_mcp` and the
+window's command line run the same code, and the window's Terrain > Surface
+From and GIS > Export Surface as DEM only build its lines:
+
+```
+SURFACE LIST [JSON] | SURFACE INFO <name> | SURFACE REMOVE <name>
+SURFACE FROM RASTER <id|name> | FILE <path> [max=<points>] [AREA x0,y0,x1,y1] [NAME <n>]
+SURFACE FROM CLOUD <id|name> [classes=2,...] [max=<points>] [NAME <n>]
+SURFACE FROM <scope> [NAME <n>]
+SURFACE EXPORT <name> <file> [cell=<m>] [type=Float32|Float64] [cog] [format=<driver>]
+               [co=K=V]... [OVERWRITE]
+```
+
+Every form takes PREVIEW, which says what would be read and makes nothing.
+A reply is key=value records: how the source was read (`sampled stride=
+pixels= nodata= points=`, `thinned from= step= points=`, the drawing's
+`scope` record), `merged duplicates=` when coincident points were averaged,
+then `surface name= triangles= points= bounds= zmin= zmax= source=`.
+`SURFACE LIST` lists the surfaces and, as `raster id= name= kind= width=
+height= cell= file=` records, the rasters a terrain verb reads as `RASTER
+<id|name>`; `SURFACE LIST JSON` is what `katana_terrain_list` hands an agent
+(`docs/mcp.md`).
+
+- **A raster is read at its true values.** `readRasterElevations` reads the
+  band from its file through GDAL, never the 8-bit display copy a reference
+  raster holds (audit QT-23), on the stride that keeps the extent under the
+  cap: 400 000 points unless `max=` says (audit QT-24). `AREA` cuts the raster
+  first, with GDAL's `raster clip --bbox`, so the cap is spent on the site and
+  not on the whole sheet a DEM was delivered as; a window reaching past the
+  raster takes what is there.
+- **A cloud gives its ground,** or every return when nothing is classified
+  as ground, which the reply says with a warning (`surfacePoints`, audit
+  QT-10). `classes=` chooses the ASPRS classes instead, for a person who
+  knows their data. The points are thinned to the cap on a stride.
+- **The drawing is taken by the shared scope** (`docs/cad.md`, "Scope and
+  filter"): `SURFACE FROM DRAWING WHERE DRAWN` is what the drawing shows,
+  which is what the dialog offers first; `SURFACE FROM LAYERS ground ONLY`
+  one layer. As the plan wrote it, `DRAWING` may also come before a
+  narrower scope (`FROM DRAWING LAYERS ground`), naming the source. The
+  rules that turn entities into survey points and breaklines are
+  `cad::geo::surfaceInput` (`include/katana/cad/geo/surface_input.hpp`),
+  moved out of the window so every front end shares them.
+- **A name is the source's,** made unique ("terrain (2)"), unless `NAME`
+  gives one, which must be free: AlreadyExists otherwise.
+- **The DEM is written by GDAL's `raster convert`** (`exportSurfaceRaster`):
+  the surface sampled at cell centres by `surfaceGrid`, stored as Float32
+  unless `type=Float64` asks, a GeoTIFF tiled and DEFLATE-compressed with the
+  floating-point predictor, a Cloud Optimised GeoTIFF with `cog` through
+  GDAL's COG driver, and `co=K=V` over those defaults. A file already there
+  is replaced only with OVERWRITE (AlreadyExists otherwise), as TO FILE's
+  rule has it.
+- **`TO SURFACE <name>`** keeps a GDAL run's raster as a surface
+  (`src/katana_app/geo/bindings.cpp`, T0's block): its true values on the
+  same capped stride, the spilled raster removed once read.
+
+### Decided
+
+- **A heightless entity is left out and counted, not put on the datum.** The
+  window's Surface From Drawing put an entity with no `elevation` or
+  `elevations` property at z = 0 and warned only when no entity at all had
+  one. A 2D drawing (the site plan sample) became a flat surface at 0, and
+  one plain line among levelled strings dug a trench to the datum - the
+  audit IO-01 failure again (absent is not zero). The moved rules leave it
+  out, count it (`skipped.heightless`, `vertices.heightless`) and refuse a
+  scope with fewer than three heighted points, with the scope record in the
+  refusal. Everything else is the window's rule, which
+  `SurfaceInput.OnLevelledDataTheRulesGiveExactlyWhatTheWindowGave` checks
+  against a verbatim copy of the old loop, and
+  `SurfaceInput.OnTheSitePlanTheHeightlessAreLeftOutWhereTheWindowPutThemOnTheDatum`
+  shows the difference on the sample: 13 vertices at 0 then, none now.
+- **A line is a breakline of its two ends.** The window ignored LINE
+  entities; a levelled line is as much a breakline as a two-vertex polyline.
+- **Float32 by default.** It is the DEM convention and half the size; near
+  1000 m its step is 6e-5 m, finer than any survey the surface came from.
+  `SurfaceVerbs.SurfaceExportFloat32ReadsBackTheSurfaceWithinFloat32Precision`
+  bounds the error by one Float32 step (7.63e-6 near 100): half from the
+  Float32 heights the fixture is read as, half from the storage.
+- **GDAL writes the DEM, not `GdalDataset::writeRaster`.** Only the
+  algorithm's convert reaches every driver's creation options and the COG
+  driver; the old writer made Float64 with none. The window's dialog and the
+  verb share the one writer.
+- **One dialog for the three Surface From items.** Each opens it on its own
+  source, with Reference Data's chosen cloud or raster first, so the options
+  the verb has (a window, a cap, classes, a name, the drawing's scope) are
+  in the window too. Its fields follow the plan's `<d>` rule
+  (`surfaceFromScope`, `surfaceFromCommand` ...), where the plan's text said
+  `surfaceScope`.
+
+### Not done
+
+- **TO SURFACE triangulates in the apply.** The GDAL verb's work is F0's and
+  ends with the run, so a raster kept as a surface is triangulated when the
+  job's result is applied - on the window's GUI thread, up to 1.7 s at the
+  400 000-point cap. SURFACE FROM triangulates in its work.
+- **A .12da archive's tins are still dropped by katana_cli's IMPORT.** The
+  session has a store now, and IMPORT's move into the one GIS executor (I0)
+  is where they are to be kept in it.
+- **Surfaces are not saved** with the project, as above.
+
+## Contours
+
+The CONTOUR verb (`src/katana_app/geo/contour_verbs.cpp`) draws contour
+lines of a surface or an elevation raster. It runs through the one
+geoprocessing executor, so `katana_cli`, `katana_mcp` (through
+`katana_run_commands`) and the window's command line run the same code, and
+the window's Terrain > Analysis > Contours (`contoursDialog`) only builds its
+line:
+
+```
+CONTOUR SURFACE <name> | RASTER <id|name> | FILE <path> interval=<m> [major=5]
+        [base=0] [layer=terrain/contours] [smooth=3|5] [<scope>] [PREVIEW]
+```
+
+The reply is the source's `input` record, the scope's (`scope arg=boundary
+...`, then `areas used= skipped.open= skipped.points=`), then `contours
+method=tin|grid cell= levels= count= major= minor= layer= smoothed=` and
+`output ... created=`.
+
+- **One verb, two engines, one output.** A SURFACE is traced exactly on its
+  triangles by `terrain::contours` - the tracer above, finished and
+  measured, and until now never offered to anyone. A RASTER or FILE is
+  contoured by GDAL's `raster contour` at its full resolution, always with
+  `--elevation-name` (GDAL writes no level without it, only an ID) and
+  `--3d`. GDAL's lines are turned into the tracer's `terrain::Contour`
+  (`interop::geo::contoursFromFeatures`), so which contour is major, which
+  layer it goes to and what height it carries are decided in one place,
+  `interop::geo::contourCommand`: polylines on `<layer>/major` and
+  `<layer>/minor`, a ring closed, every vertex at the level
+  (`entity::setHeights`, so the `elevation` property), in one undo step.
+- **Major by the tracer's rule.** Levels are `base + k * interval`; a level
+  is major when k is a multiple of `major` (0: none). GDAL's `--offset` is
+  the base.
+- **A scope, last on the line, gives boundaries.** Its closed shapes -
+  closed polylines and circles, a tagged hole joining its area, read by the
+  one drawing conversion (`drawingDataset`) - are the areas the contours are
+  kept inside; both engines' lines are cut at the boundary itself
+  (`interop::geo::clipContours`: split where a line crosses a ring, the
+  piece kept when its middle is inside an area and in none of its holes, on
+  a ring counting as inside; a cut ring's piece through its first vertex is
+  joined across it). A raster is first cut by GDAL's `raster clip --bbox`
+  to the areas' box, a cell wider (and the smoothing kernel's half-width
+  more), within the raster, so only the site is contoured and the cut lines
+  still reach the boundary. Open lines and points bound nothing: counted
+  (`skipped.open`, `skipped.points`) and warned about; a scope with no
+  closed shape draws nothing and says so, as a scope that takes nothing is
+  not an error.
+- **`smooth=3|5`** runs GDAL's gaussian `raster neighbors` over a raster
+  first, for presentation, and the reply says `smoothed=yes`. The sizes are
+  GDAL's: its gaussian kernel has no other. A gaussian is symmetric and sums
+  to one, so it leaves a plane's contours where they were away from the
+  edges (`ContourVerb.SmoothingAPlaneLeavesItsContoursWhereTheyWere`).
+- **Too many levels is refused before anything is drawn.** The tracer
+  refuses more than 100 000 levels (a unit mistake, not a wish); a raster's
+  levels are counted over its values read on a stride of about a million
+  cells first, and refused the same way. A sample's range is within the
+  whole's, so a count that is already too many is certainly too many.
+
+### Decided
+
+- **Both engines cut at the boundary, not GDAL's cut by geometry.** GDAL's
+  `raster clip --geometry` makes the cells outside no-data, so a raster's
+  contours would stop half a cell or more inside the boundary while a
+  surface's reached it. One clipper for both gives one answer; the raster is
+  still cut first, to a box, for speed.
+- **A raster's box stays within the raster.** Cut with
+  `--allow-bbox-outside-source`, GDAL fills the part of the box past the
+  raster with 0 when the raster has no no-data value, and the contours drew
+  a cliff from 0 to the ground at the raster's edge (found by hand: 202
+  levels on the plane fixture instead of 3).
+- **The dialog has a `contourClip` box** beside the plan's fields: the
+  shared scope controls always name a scope, and "no boundary" is none of
+  them.
+- **GDAL carries a raster's contours to its edge, a surface's stop at its
+  last vertex.** On the plane fixture, a raster contour runs y = 0 to 30,
+  the one on the surface made from it y = 0.5 to 29.5 (the cell centres).
+  Both are what the engines are; the reply's `method` says which ran.
+
+Tolerances in `test_contour_verb.cpp` come from the fixture: `plane.asc` is
+read as Float32, each height within 3.815e-6 of its value near 100, which a
+gradient of 0.05 turns into at most 7.63e-5 m along x; on a surface of exact
+heights the tracer is within 1e-9.
+
+### Not done
+
+- **No CRS check between the raster and the project.** A raster in another
+  coordinate system draws its contours where its coordinates say; judging
+  equivalence needs `OGRSpatialReference::IsSame`, which the verbs cannot
+  see (D1/I1's reference-layer facts are where it belongs).
+- **Cancel is checked around GDAL's steps and after the tracer,** which has
+  no stop token of its own; the tracer runs in tens of milliseconds on real
+  TINs (above).
+
+## Shading
+
+The RASTER SHADE verb (`src/katana_app/geo/shade_verbs.cpp`) draws an
+elevation source as a picture and keeps it as a derived reference raster,
+which the plan view and the sheet painter draw as they draw any raster.
+The window's Terrain > Analysis > Terrain Shading (`terrainShadingDialog`)
+only builds its line:
+
+```
+RASTER SHADE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
+             [style=hillshade|relief|relief+hillshade|slope|plain] [azimuth=315]
+             [altitude=45] [z=1] [variant=regular|combined|multidirectional|igor]
+             [ramp=terrain|diverging|slope|grey|<file>] [range=<min>,<max>]
+             [NAME <n>] [save=<file.tif>] [OVERWRITE] [PREVIEW]
+```
+
+The reply: the `input` record, `resampled from= to=` when the source was
+averaged down, `shade style=` with the light (`azimuth= altitude= z=
+variant=`) or the unit, `ramp name= min= max= from=data|range`, the `output`
+record of the reference raster, `saved file=` with `save=`, then one
+`legend value= r= g= b=` per colour the picture was painted with.
+
+- **GDAL's algorithms make the picture,** step by step through a
+  `RasterChain` (`terrain_steps.cpp`): `raster hillshade`; `raster
+  color-map` with the ramp spread over the range, written as GDAL's
+  colour-map text; `raster blend --operator hsv-value` for relief over
+  hillshade (the relief's hue and saturation, the hillshade's value); and
+  `raster slope`, in degrees, for slope shading. Each step's raster goes to
+  a file of the chain's own, removed with it, so a failed or cancelled run
+  leaves nothing and no DEM is held whole in memory.
+- **Every style ends as an RGBA picture.** A hillshade is passed through a
+  colour map of its own greys (1 to 255 to themselves, its no-data 0
+  transparent), because the raster reader stretches a single grey band over
+  its own range: flat ground, 181 everywhere, would have been drawn
+  mid-grey. So what is drawn is what GDAL computed
+  (`ShadeVerb.FlatGroundHillshadesTo181EverywhereAtAltitude45`: 1 + 254 sin
+  45 degrees = 180.6).
+- **At display resolution.** A raster longer than the 4096 pixels a
+  reference raster's display copy keeps is averaged down to it first
+  (`raster resize --resampling average`, by the smallest whole step that
+  fits), since a finer picture would only be decimated again to be drawn.
+  A surface is sampled at its CELL, or the cell suggested for its extent.
+- **Ramps** (`include/katana/interop/geo/colour_ramps.hpp`): terrain
+  (hypsometric tints), diverging (blue, white, red: on design minus
+  existing, cut is blue and fill red), slope (green, pale yellow, red) and
+  grey, the ColorBrewer colours named there. Each style has its own - relief
+  terrain, slope slope, plain grey - and `ramp=` chooses another, or a GDAL
+  colour-map file of a person's own, whose value lines (percentages placed
+  on the range as GDAL places them) are then the legend. The ramp spans the
+  data's least and greatest values, read in full at display resolution,
+  unless `range=` says; the diverging ramp's span is made symmetric about
+  zero, so zero is its white. A span of one value is widened a unit about
+  it. The ends are written exactly, so the cells at the range's ends take
+  the ramp's end colours exactly
+  (`ShadeVerb.ARampMapsItsEndpointsExactly`).
+- **The reference raster** is named `NAME`, or the source's name and the
+  style's (`terrain-relief-hillshade`), made unique; its role is Derived,
+  its derivation the line, and its display style the style.
+- **`save=`** also writes the picture as rendered - a tiled, DEFLATE
+  GeoTIFF with the source's georeferencing - for delivery; a file already
+  there only with OVERWRITE.
+
+### Decided
+
+- **Rendered once, into the picture, not at draw time.** The plan said a
+  display style of an elevation raster; drawing it at draw time would put
+  GDAL in the painter. A derived picture is drawn by the code that draws
+  every raster, plots with the sheet, and can be saved; `displayStyle` says
+  which picture it is. Restyling is running the verb again.
+- **The light is refused where there is none.** `azimuth=`, `altitude=`,
+  `z=` and `variant=` belong to the two hillshade styles; `ramp=` and
+  `range=` to the coloured ones. A line that gives them elsewhere is
+  refused, naming them, rather than quietly ignored.
+- **Slope shading is in degrees:** bounded (0 to 90) and what a legend is
+  read in; RASTER SLOPE (below) takes percent too.
+
+### Not done
+
+- **Restyling a raster already there.** A shading is a new reference raster;
+  the Reference Data dock's display menu the plan sketched is D2's.
+- **A legend on the sheet.** The legend is in the reply (and the dialog's);
+  placing it on a sheet is the plotting legend's work.
+
+## Slope and aspect
+
+RASTER SLOPE and RASTER ASPECT (`src/katana_app/geo/slope_verbs.cpp`) keep
+the slope or the aspect of a surface or an elevation raster as a derived
+reference raster, and RASTER SLOPE draws slope classes as areas. The
+window's Terrain > Analysis > Slope and Aspect (`slopeAnalysisDialog`) only
+builds their lines:
+
+```
+RASTER SLOPE SURFACE <name> [CELL <m>] | RASTER <id|name> | FILE <path>
+             [unit=percent|degree] [classes=<b1>,<b2>,...] [areas=terrain/slope]
+             [min_area=<m2>] [NAME <n>] [<scope>] [PREVIEW]
+RASTER ASPECT <source> [NAME <n>] [<scope>] [PREVIEW]
+```
+
+The reply: the `input` record, the scope's (`scope arg=area ...`, `areas
+used= skipped.open= skipped.points=`), `slope unit= method=horn raster=WxH
+cell=` (or `aspect convention=azimuth flat=nodata ...`), `sieved min_area=
+cells=` with `min_area=`, the reference raster's `output` record, then with
+classes `output arg=areas ... created=`, one `class name= from= to= unit=
+area= polygons=` per class and a `legend value= r= g= b=` per class colour.
+
+- **GDAL computes them:** `raster slope` and `raster aspect`, Horn's 3 x 3
+  window, the edges interpolated by GDAL's own edge rule (a corner of a
+  plane reads half its gradient: 2.5 % on the 5 % fixture). Aspect is
+  degrees clockwise from north; flat ground has none (no-data).
+- **The raster kept is the values,** at full precision, so another verb reads
+  it as `RASTER <id>` (zonal statistics of slope, contours of it); its
+  display copy is replaced by a coloured picture of the same grid - by class
+  when there are classes, else the slope ramp over the slope's range, and
+  aspect's eight compass colours round the circle, north at both ends - so
+  it is not drawn as a grey stretch of its values.
+- **Percent by default,** as grades are read in civil design (a 1:4 batter
+  is 25 %); `unit=degree` for degrees.
+- **Classes.** `classes=5,10,25` makes [0,5), [5,10), [10,25) and 25 and up,
+  named `0-5`, `5-10`, `10-25`, `25+`. GDAL's `raster reclassify` sorts the
+  cells (to Int16: its UInt8 cannot hold the -9999 no-data), `raster sieve`
+  merges regions under `min_area` - converted to whole cells, rounded up -
+  into their largest neighbour, and `raster polygonize` draws each region.
+  Each is a closed polyline on `<areas>/<class>` (holes tagged, as every
+  result's are), with `slope_class`, `slope_from`, `slope_to` (none on the
+  open top class: absent is not zero) and `slope_unit`, through F0's
+  `resultCommand`: one undo step. The class record's `area` sums the
+  regions' areas, holes taken out.
+- **A scope keeps the analysis inside its closed shapes.** The raster is cut
+  to their box, a cell wider and within the raster, so the slope at the
+  boundary is Horn's on real ground and not an edge rule; the slope is then
+  cut to the shapes by GDAL's `raster clip --geometry`, which keeps every
+  cell a shape touches; and the class areas, whole cells, are cut to the
+  shapes exactly by `vector clip`, so each class's area is its area inside
+  them and the classes add up to the shapes
+  (`SlopeVerbs.AScopeKeepsTheAnalysisInsideItsClosedShapes`: 52.531 m2, the
+  triangle's, where the touched cells are 66). A scope with no closed shape
+  makes nothing and says so.
+
+### Decided
+
+- **The first class begins at 0, not -inf.** No slope is below 0, and a
+  class bounded by -inf took in the -9999 no-data GDAL gives a cell it
+  cannot compute (the investigators' finding); 0 needs no pass over the data
+  to find its least value. The top class is open (`inf]`) for the same
+  reason: no pass over the data to find its greatest.
+- **Values kept, picture drawn.** RASTER SHADE's slope style keeps a picture;
+  RASTER SLOPE keeps the numbers, which analysis needs, and draws a picture
+  of them.
+- **The class areas are cut exactly, the picture is not.** A picture of
+  cells is cells; an area report and the drawn areas are measured, and a
+  staircase along a lot boundary would overstate every class there.
+
+### Not done
+
+- **A CRS check** between the raster and the drawing's shapes, as for
+  CONTOUR.
+- **Aspect classes** (north-facing, ...): the aspect raster is there for
+  them; a class grammar for directions is not.
+
 ## Background jobs
 
 Long computations no longer run on the GUI thread behind a wait cursor.
@@ -315,13 +670,14 @@ own `std::jthread`. The contract that keeps the single-threaded document safe:
   `JobRunner::of(window)` finds or creates a window's runner by object name, so
   the window needs no member for it.
 
-Surface From Point Cloud, Raster and Drawing are jobs. The cloud's ground points
-and the drawing's points and breaklines are copied on the GUI thread (the
-document is single-threaded). The raster is read by the job, from its path:
-GDAL keeps its error handlers per thread, and the reader opens its own dataset.
-A headless run (`--action`, `--trigger`) waits for the job, pumping a real
-event loop, so the screenshot or report that follows sees the surface. It also
-logs the longest event-loop pause.
+Surface From Point Cloud, Raster and Drawing are jobs: the SURFACE FROM line
+the dialog builds runs as the geoprocessing workbench's job
+(`src/katana_qt/geo/geo_workbench.hpp`). The cloud's ground points and the
+drawing's points and breaklines are copied when the line is prepared, on the
+GUI thread (the document is single-threaded). The raster is read by the job,
+from its path: GDAL keeps its error handlers per thread, and the reader opens
+its own dataset. A headless run waits for the job, pumping a real event loop,
+so the screenshot or report that follows sees the surface.
 
 The wait is `QEventLoop::exec()`, quit by the job's completion. The first
 version called `processEvents(WaitForMoreEvents)`, and on Windows, outside

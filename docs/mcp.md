@@ -178,7 +178,48 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
 
 ### T0: katana_terrain_list
 
-Not started.
+| Tool | Arguments | Structured content |
+|---|---|---|
+| `katana_terrain_list` | `{}` | `{surfaces: [{name, triangles, points, bounds: [x0, y0, x1, y1], zmin, zmax, plan_area, source}], rasters: [{id, name, role, width, height, cell, crs, nodata, source, derived_from}]}` |
+
+It runs `SURFACE LIST JSON` through the Session, as the command line would,
+and hands its JSON back: the surfaces a terrain verb reads as `SURFACE
+<name>` and the rasters it reads as `RASTER <id|name>` (`docs/terrain.md`,
+"Surfaces on every front end"). A raster's `cell` is null unless its cells
+are square and unrotated; `nodata` is null until the reference-layer work
+reads it. Read-only and idempotent. Surfaces are made with `SURFACE FROM`
+through `katana_run_commands`, or by `katana_gdal_run` with `output:
+{surface}`. `McpServer.TerrainListGivesTheSessionsSurfacesAndRasters` pins
+it.
+
+### T1: CONTOUR through katana_run_commands
+
+No tool of its own: `CONTOUR` is a session line, so `katana_run_commands`
+runs it exactly as the window's Terrain > Analysis > Contours does, and its
+reply is the verb's records (`contours method= cell= levels= count= major=
+minor= layer= smoothed=`, the scope's `areas used= skipped.open=`). What an
+agent needs to choose a source is `katana_terrain_list`'s. A tool would only
+restate the verb's options as a schema, and the plan gives CONTOUR none
+(`docs/terrain.md`, "Contours").
+`McpServer.ContoursOfASurfaceAreDrawnThroughTheCommandTool` pins it.
+
+### T2: RASTER SHADE through katana_run_commands
+
+The same: `RASTER SHADE` is a session line, and its reply carries the
+`ramp` and `legend value= r= g= b=` records an agent needs to describe the
+picture. The picture is a derived reference raster, which
+`katana_terrain_list` then lists with `role: "derived"` and the line in
+`derived_from`.
+`McpServer.AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster` pins
+it.
+
+### T3: RASTER SLOPE and RASTER ASPECT through katana_run_commands
+
+The same again: the lines run through `katana_run_commands`, and the reply's
+`class name= from= to= unit= area= polygons=` records are the per-class area
+report an agent reads; the areas are one undo step (`UNDO` takes them all).
+The slope raster is listed by `katana_terrain_list` like any derived raster.
+`McpServer.SlopeClassesMadeThroughTheCommandToolAreOneUndoStep` pins it.
 
 ### V5: katana_gis_query
 

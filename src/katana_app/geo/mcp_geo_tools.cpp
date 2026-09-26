@@ -496,6 +496,37 @@ ToolReply run(Session& session, const Json& arguments)
     return ToolReply{text, runJson(line, outcome, algorithm), !outcome.ok};
 }
 
+// ---- T0: katana_terrain_list ----
+// SURFACE LIST JSON through the Session, as a person's SURFACE LIST: the
+// session's surfaces and the rasters a terrain verb reads.
+ToolReply terrainList(Session& session, const Json&)
+{
+    const std::string line = "SURFACE LIST JSON";
+    const LineOutcome outcome = runCaptured(session, line);
+    if (!outcome.ok) {
+        return ToolReply{outcome.messages, Json(), true};
+    }
+    Json listed = Json::parse(outcome.output, nullptr, false);
+    if (listed.is_discarded()) {
+        return ToolReply{"SURFACE LIST JSON did not answer JSON: " + outcome.output, Json(), true};
+    }
+    std::string text = "> " + line;
+    for (const Json& surface : listed["surfaces"]) {
+        text += "\nsurface " + surface["name"].get<std::string>() + ": " +
+                std::to_string(surface["triangles"].get<std::size_t>()) + " triangles, z " +
+                geo::fixed3(surface["zmin"].get<double>()) + " to " +
+                geo::fixed3(surface["zmax"].get<double>());
+    }
+    for (const Json& raster : listed["rasters"]) {
+        text += "\nraster " + std::to_string(raster["id"].get<std::uint64_t>()) + " " +
+                raster["name"].get<std::string>() + ": " +
+                std::to_string(raster["width"].get<int>()) + "x" +
+                std::to_string(raster["height"].get<int>()) + " " +
+                raster["role"].get<std::string>();
+    }
+    return ToolReply{text, std::move(listed)};
+}
+
 // ---- D1: katana_dataset_info ----
 
 // The INFO line of the arguments, and its reply's records as structured
@@ -704,6 +735,14 @@ std::vector<Tool> geoTools()
             {"algorithm"}),
         hints(false, true, false, true), run});
     // ---- T0: katana_terrain_list ----
+    tools.push_back(Tool{
+        "katana_terrain_list", "Surfaces and rasters",
+        "The session's named surfaces (TIN, made by SURFACE FROM or TO SURFACE) and its reference "
+        "rasters: what CONTOUR, RASTER SHADE, RASTER SLOPE and a GDAL run's FROM SURFACE <name> "
+        "or FROM RASTER <id|name> read. Each surface's triangles, points, bounds [x0,y0,x1,y1], "
+        "zmin, zmax, plan area and source; each raster's id, name, role (imagery, elevation or "
+        "derived), size, square cell, coordinate system, file and the line that derived it.",
+        objectSchema(Json::object()), hints(true, false, true), terrainList});
     // ---- V5: katana_gis_query ----
     // ---- I2: katana_formats ----
     // Read-only, as katana_gdal_catalogue is: it reads the registry through
