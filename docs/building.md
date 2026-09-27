@@ -204,9 +204,9 @@ need the host's `qsb` (`QT_HOST_PATH`), which was not tried.
 
 ## macOS
 
-Katana builds on macOS with the same script and the same libraries, from
-conda-forge's `osx-arm64` channel on Apple silicon and `osx-64` on an Intel
-Mac, with clang 23 and libc++ in place of GCC:
+Katana builds on macOS on Apple silicon with the same script and the same
+libraries, from conda-forge's `osx-arm64` channel, with clang 23 and libc++
+in place of GCC (Intel Macs are not a target; `docs/release.md`, "macOS"):
 
 ```sh
 python3 tools/setup_linux_toolchain.py      # once: into /opt/katana-toolchain, or $KATANA_TOOLCHAIN
@@ -217,15 +217,14 @@ cmake --build build/macos-release --target bundle
 
 GCC cannot be used: every conda-forge C++ library for macOS (Qt, GDAL, PDAL)
 is built against libc++, and GCC's libstdc++ does not link with them.
-`cmake/toolchains/katana-macos.cmake` sets the compiler and architecture by
-the host's processor (`arm64-apple-darwin20.0.0` or
-`x86_64-apple-darwin13.4.0`), macOS 13 as the oldest target, and the run-time
+`cmake/toolchains/katana-macos.cmake` sets the compiler
+(`arm64-apple-darwin20.0.0`), arm64, macOS 13 as the oldest target, and the run-time
 paths (`@loader_path/../Frameworks`, installed in `Katana.app`). `bundle`
 makes `<build>/dist/Katana/Katana.app` and `package` a `.dmg` holding it.
 What it took to make the code build with clang, the app's layout, the minimum
 version and Gatekeeper are `docs/release.md`, "macOS". The GPU renderer draws
-on Metal there (`docs/gpu.md`). The whole suite runs on both kinds of Mac in
-the release workflow (`docs/release.md`).
+on Metal there (`docs/gpu.md`). The whole suite runs on Apple silicon in the
+release workflow (`docs/release.md`).
 
 **Claude Code cloud sessions** run `.claude/hooks/session-start.sh` when they
 start: it runs the setup script into `/opt/katana-toolchain`, installs Xvfb
@@ -278,7 +277,7 @@ failed at link time with no explanation.
 | `katana_make_icons` | no | writes `resources/katana.ico`, a 256 px PNG and `resources/icon_sheet.png` from the icon painters; the output is committed (`docs/desktop.md`) |
 | `katana_tool_icon_sheet` | no | every catalogue tool's icon with its name and aliases (`docs/tools.md`) |
 | `bundle` | no | a self-contained `<build>/dist/Katana` ("Bundling") |
-| `package` | no | that tree as `Katana-<version>-win64.zip` (`-win-arm64.zip`), and an NSIS installer when `makensis` is found; on Linux `Katana-<version>-linux-x86_64.tar.gz` (`-linux-aarch64`); on macOS `Katana-<version>-macos-arm64.dmg` (`-macos-x86_64`) holding `Katana.app` |
+| `package` | no | that tree as `Katana-<version>-win64.zip` (`-win-arm64.zip`), and an NSIS installer when `makensis` is found; on Linux `Katana-<version>-linux-x86_64.tar.gz` (`-linux-aarch64`); on macOS `Katana-<version>-macos-arm64.dmg` holding `Katana.app` |
 
 ### Where things are built
 

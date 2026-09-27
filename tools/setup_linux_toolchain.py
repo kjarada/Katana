@@ -93,14 +93,11 @@ LINUX_SPECS = [
     "libvulkan-headers",
 ]
 
-# clang 23 is the newest conda-forge has for macOS at SNAPSHOT; the compiler
-# package brings libc++, ld64 and cctools with it. osx-arm64 on Apple
-# silicon, osx-64 on an Intel Mac - each built to run on that machine.
-_MACOS_TARGET = "osx-arm64" if is_arm64() else "osx-64"
-
+# clang 23 is the newest conda-forge has for osx-arm64 at SNAPSHOT; the
+# compiler package brings libc++, ld64 and cctools with it.
 MACOS_SPECS = [
-    f"clangxx_{_MACOS_TARGET} 23.*",
-    f"clang_{_MACOS_TARGET} 23.*",
+    "clangxx_osx-arm64 23.*",
+    "clang_osx-arm64 23.*",
 ]
 
 
@@ -112,10 +109,7 @@ SPECS = COMMON_SPECS + (MACOS_SPECS if is_macos() else LINUX_SPECS)
 
 # The C++ compiler the toolchain files (cmake/toolchains/) expect in bin/.
 if is_macos():
-    # conda-forge's triples: Apple silicon's toolchain starts at Darwin 20
-    # (macOS 11), the Intel one at Darwin 13.4 (OS X 10.9).
-    COMPILER = ("arm64-apple-darwin20.0.0-clang++" if is_arm64()
-                else "x86_64-apple-darwin13.4.0-clang++")
+    COMPILER = "arm64-apple-darwin20.0.0-clang++"
 elif is_arm64():
     COMPILER = "aarch64-conda-linux-gnu-g++"
 else:

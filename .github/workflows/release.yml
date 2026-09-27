@@ -1,5 +1,5 @@
 # Builds Katana for Windows (x86-64, ARM64), Linux (x86-64, ARM64) and macOS
-# (Apple silicon, Intel), runs the whole test suite on each, proves each
+# (Apple silicon), runs the whole test suite on each, proves each
 # package and installer starts on its own, signs what can be signed, and
 # publishes them as a GitHub release (docs/release.md).
 #
@@ -233,13 +233,6 @@ jobs:
             runner: macos-15
             preset: macos-release
             package: macos-arm64
-            archive: dmg
-          # Intel Macs, on the last Intel runner GitHub offers (supported
-          # until August 2027); the toolchain is conda-forge's osx-64 one.
-          - name: macOS x86-64
-            runner: macos-15-intel
-            preset: macos-release
-            package: macos-x86_64
             archive: dmg
     env:
       HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}

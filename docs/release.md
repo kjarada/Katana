@@ -9,8 +9,8 @@ are made the way they are. How to build on one machine is
 
 The workflow is `.github/workflows/release.yml`. It runs ONLY when started by
 hand - a commit, a tag or a pull request starts nothing (the owner's
-decision, 2026-09-26: a build of six platforms is hours of runner time,
-spent when a release is wanted and not on every push). It builds the six
+decision, 2026-09-26: a build of five platforms is hours of runner time,
+spent when a release is wanted and not on every push). It builds the five
 packages, runs the whole test suite on each platform, starts each package
 from what a user downloads and each installer silently, signs what it has
 keys for, and publishes them.
@@ -22,7 +22,7 @@ keys for, and publishes them.
    from. With the tag left empty the run builds and tests the packages and
    publishes nothing - the way to try a change to the build.
 3. The run takes as long as its slowest job (Windows x86-64: build, the
-   whole suite, the installer). When all six pass, release `vX.Y.Z` appears
+   whole suite, the installer). When all five pass, release `vX.Y.Z` appears
    with:
 
 | File | What it is |
@@ -34,7 +34,6 @@ keys for, and publishes them.
 | `Katana-X.Y.Z-linux-x86_64.tar.gz` | Linux x86-64, glibc 2.28 or later; run `bin/katana` |
 | `Katana-X.Y.Z-linux-aarch64.tar.gz` | Linux on 64-bit ARM, glibc 2.28 or later |
 | `Katana-X.Y.Z-macos-arm64.dmg` | macOS 13 or later on Apple silicon: `Katana.app` to drag into Applications |
-| `Katana-X.Y.Z-macos-x86_64.dmg` | macOS 13 or later on an Intel Mac |
 | `SHA256SUMS.txt` | the SHA-256 of each file above |
 | `*.asc`, `katana-signing-key.asc` | OpenPGP signatures and the public key, when the repository holds the key ("Signing") |
 
@@ -64,7 +63,6 @@ way of building.
 | Linux x86-64 | `ubuntu-24.04` | `tools/setup_linux_toolchain.py`, GCC 16.2 | `cmake --preset linux-release` |
 | Linux ARM64 | `ubuntu-24.04-arm` | the same script, which installs conda-forge's `linux-aarch64` GCC 16.2 on an ARM machine | `cmake --preset linux-release` |
 | macOS arm64 | `macos-15` | the same script, conda-forge's `osx-arm64` clang 23 | `cmake --preset macos-release` |
-| macOS x86-64 | `macos-15-intel` | the same script, which installs the `osx-64` clang 23 on an Intel Mac | `cmake --preset macos-release` |
 
 The ARM64 jobs build natively on GitHub's ARM runners, which private
 repositories have had since 2026-01-29, rather than cross-compiling: the
@@ -92,7 +90,7 @@ Until 2026-09-27 the jobs ran only the part of the suite that meets hardware
 nowhere else (`simd_` on the ARM machines, `gpu.` on macOS), and the release's
 question was only whether each package was complete. The whole suite is the
 stronger gate at the cost of runner time: a release is rare (it is started by
-hand), and the six machines are the only place four of the platforms'
+hand), and the five machines are the only place four of the platforms'
 suites run at all. Those runners remain the only place some code meets real
 hardware:
 
@@ -100,7 +98,6 @@ hardware:
 |---|---|
 | macOS arm64 | the Metal renderer against the software one on a real GPU |
 | Linux ARM64, Windows ARM64, macOS arm64 | the NEON kernels at both levels, natively (built on x86-64 they run only under qemu, `docs/building.md`) |
-| macOS x86-64 | the AVX2 kernels built by clang against libc++ |
 
 ### The smoke test
 
@@ -259,14 +256,12 @@ hoc, so `codesign --verify --deep --strict` accepts it. CPack's DragNDrop
 generator makes the disk image, with a link to `/Applications` beside the
 app.
 
-**Intel Macs.** The setup script installs conda-forge's `osx-64` clang (target
-`x86_64-apple-darwin13.4.0`) on an Intel Mac, and the toolchain file picks the
-compiler and `CMAKE_OSX_ARCHITECTURES` by the host's processor. The build is
-native on GitHub's `macos-15-intel` runner, which GitHub supports until
-August 2027. A universal binary (both architectures in one app) was rejected:
-conda-forge's libraries are single-architecture, so it would mean building
-every library twice and joining them with `lipo`, for a download twice the
-size. Two disk images are simpler, and the AVX2 kernels run on the Intel one.
+**Apple silicon only.** Intel Macs are not a target (the owner's decision,
+2026-09-27). An Intel build was tried the same day - conda-forge has the whole
+library set for `osx-64`, and GitHub's `macos-15-intel` runner could build it
+natively - and removed before it shipped. Adding it back is a matrix entry in
+the workflow and a host check in `cmake/toolchains/katana-macos.cmake` and the
+setup script choosing the `osx-64` compiler.
 
 The minimum is macOS 13 (`CMAKE_OSX_DEPLOYMENT_TARGET` in
 `cmake/toolchains/katana-macos.cmake`), the oldest Qt 6.11 supports. libc++'s
@@ -350,10 +345,6 @@ without asking Apple's service, even offline.
 * **Signing needs keys the repository does not yet hold.** Until the
   secrets in "Signing" are added, releases carry checksums only: SmartScreen
   warns on Windows and macOS quarantines the download.
-* **Intel Macs after August 2027.** `macos-15-intel` is GitHub's last Intel
-  runner. After it is retired the Intel image must be cross-built on Apple
-  silicon (conda-forge's `osx-64` packages with `CMAKE_OSX_ARCHITECTURES=x86_64`),
-  and its tests would run only under Rosetta.
 * **The Windows ARM64 installer's own code is x86**, run emulated: NSIS has no
   ARM64 build. The programs it installs are ARM64.
 * **No AppImage, `.deb` or Flatpak.** The Linux package is a tarball.
