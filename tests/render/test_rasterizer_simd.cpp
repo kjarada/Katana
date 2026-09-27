@@ -1,6 +1,7 @@
 // The rasteriser's fast paths (rasterizer.cpp, "conservative coverage", and
 // src/katana_render/simd/): tiles left out at binning, rows bounded before the
-// fill, eight pixels a step on AVX2, four vertices a step in the transform.
+// fill, eight pixels a step on AVX2 (four on NEON), four vertices a step in the
+// transform.
 // Each one is only allowed to change the time a frame takes. So every scene
 // here is drawn at both SIMD levels and on 0, 1, 3 and 7 worker threads, and
 // all eight frames must agree in every colour and every depth bit (Rule 7);
@@ -22,6 +23,7 @@
 #include "katana/core/cpu_features.hpp"
 #include "katana/core/task_pool.hpp"
 #include "katana/render/rasterizer.hpp"
+#include "simd_levels.hpp"
 
 using katana::core::SimdLevel;
 using katana::core::TaskPool;
@@ -111,15 +113,6 @@ Frame draw(const DrawList& list, const Camera& camera, SimdLevel level, std::siz
     return frame;
 }
 
-std::vector<SimdLevel> levelsHere()
-{
-    std::vector<SimdLevel> levels{SimdLevel::Scalar};
-    if (katana::core::detectedSimdLevel() == SimdLevel::Avx2) {
-        levels.push_back(SimdLevel::Avx2);
-    }
-    return levels;
-}
-
 // Draws `list` at every level on every thread count and expects one frame.
 // Returns it, drawn at the scalar level on one thread.
 Frame everyWayTheSame(const DrawList& list, const Camera& camera,
@@ -128,7 +121,7 @@ Frame everyWayTheSame(const DrawList& list, const Camera& camera,
 {
     options.background = kBackground;
     const Frame reference = draw(list, camera, SimdLevel::Scalar, 0, options, before);
-    for (const SimdLevel level : levelsHere()) {
+    for (const SimdLevel level : katana::test::simdLevels()) {
         for (const std::size_t workers : {std::size_t{0}, std::size_t{1}, std::size_t{3},
                                           std::size_t{7}}) {
             const Frame frame = draw(list, camera, level, workers, options, before);

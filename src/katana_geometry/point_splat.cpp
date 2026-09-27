@@ -20,7 +20,10 @@ namespace {
 // BM_ProjectToPixels (bench_simd.cpp) and the kernel allowed from one point:
 // at 4 points a call it already beats the loop (0.21 against 0.23 ms per
 // 65,536 points), at 8 by 1.3x, on the splat's 512-point blocks by 2.5x.
-constexpr std::size_t kProjectMinimum = 4;
+// The NEON kernel takes the same four points a step, so the same minimum is
+// one whole step for it too; that it pays from there is inferred from the
+// AVX2 measurement, not measured on ARM.
+[[maybe_unused]] constexpr std::size_t kProjectMinimum = 4; // unread without the kernels
 
 // Points projected at a time into a buffer on the stack: 4 KB of pixel
 // coordinates, which stay in L1 between the projection and the scatter.
@@ -73,6 +76,13 @@ void project(const PixelProjection& p, const float* xs, const float* ys, std::si
         katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2) {
         static_assert(sizeof(PixelProjection) == 5 * sizeof(double));
         katana_avx2_project_to_pixels(&p.halfWidth, xs, ys, count, px, py);
+        return;
+    }
+#elif defined(KATANA_HAVE_NEON_KERNELS)
+    if (count >= kProjectMinimum &&
+        katana::core::activeSimdLevel() == katana::core::SimdLevel::Neon) {
+        static_assert(sizeof(PixelProjection) == 5 * sizeof(double));
+        katana_neon_project_to_pixels(&p.halfWidth, xs, ys, count, px, py);
         return;
     }
 #endif

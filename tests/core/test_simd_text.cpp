@@ -1,8 +1,9 @@
 // The text kernels held to their scalar references: decodeText and
 // isValidUtf8 at every SIMD level must give the same text, the same error at
 // the same byte, and the same answer. The AVX2 path works in blocks of 32 units
-// (decoding) or 32 and 64 bytes (validation), so the cases put the interesting
-// unit before, on and after each block edge.
+// (decoding) or 32 and 64 bytes (validation), and the NEON path in the same
+// steps of 16-byte registers, so the cases put the interesting unit before, on
+// and after each block edge.
 
 #include <gtest/gtest.h>
 
@@ -88,10 +89,7 @@ TEST(SimdText, AnAsciiRunLongerThanABlockIsNarrowedByteForByteAtEveryLevel)
     const std::string bytes =
         utf16(ascii(70, 'A') + std::vector<std::uint16_t>{0x00E9} + ascii(5, 'b'), true);
     const std::string expected = std::string(70, 'A') + "\xC3\xA9" + "bbbbb";
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         const Outcome outcome = decodeAt(level, bytes);
         ASSERT_TRUE(outcome.ok) << outcome.text;
         EXPECT_EQ(outcome.text, expected) << katana::core::toString(level);
@@ -100,22 +98,22 @@ TEST(SimdText, AnAsciiRunLongerThanABlockIsNarrowedByteForByteAtEveryLevel)
 
 TEST(SimdText, BigEndianAsciiIsTakenFromTheSecondByteOfEachUnit)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     // FE FF, then 33 'x' as 00 78, U+00E9 as 00 E9, then 40 'y': the block of
     // units 32-63 holds the non-ASCII unit at its second place.
     const std::string bytes =
         utf16(ascii(33, 'x') + std::vector<std::uint16_t>{0x00E9} + ascii(40, 'y'), false);
     const std::string expected = std::string(33, 'x') + "\xC3\xA9" + std::string(40, 'y');
-    const Outcome avx2 = decodeAt(SimdLevel::Avx2, bytes);
-    ASSERT_TRUE(avx2.ok) << avx2.text;
-    EXPECT_EQ(avx2.text, expected);
-    EXPECT_EQ(avx2.encoding, katana::core::TextEncoding::Utf16BigEndian);
-    EXPECT_EQ(avx2, decodeAt(SimdLevel::Scalar, bytes));
+    const Outcome kernel = decodeAt(katana::test::kernelLevel(), bytes);
+    ASSERT_TRUE(kernel.ok) << kernel.text;
+    EXPECT_EQ(kernel.text, expected);
+    EXPECT_EQ(kernel.encoding, katana::core::TextEncoding::Utf16BigEndian);
+    EXPECT_EQ(kernel, decodeAt(SimdLevel::Scalar, bytes));
 }
 
 TEST(SimdText, AUnitIsAsciiOnlyWhenBelow0x80InBothByteOrders)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     // Each unit alone at place 35 of a 64-unit run. Worked by hand:
     //   U+007F (DEL) is ASCII and stays one byte, 7F.
     //   U+0080 -> 00010 / 000000 -> C2 80: only the top bit of the low byte set.
@@ -131,18 +129,18 @@ TEST(SimdText, AUnitIsAsciiOnlyWhenBelow0x80InBothByteOrders)
         for (const bool little : {true, false}) {
             const std::string bytes =
                 utf16(ascii(35, 'q') + std::vector<std::uint16_t>{c.unit} + ascii(28, 'r'), little);
-            const Outcome avx2 = decodeAt(SimdLevel::Avx2, bytes);
-            ASSERT_TRUE(avx2.ok) << avx2.text;
-            EXPECT_EQ(avx2.text, std::string(35, 'q') + c.utf8 + std::string(28, 'r'))
+            const Outcome kernel = decodeAt(katana::test::kernelLevel(), bytes);
+            ASSERT_TRUE(kernel.ok) << kernel.text;
+            EXPECT_EQ(kernel.text, std::string(35, 'q') + c.utf8 + std::string(28, 'r'))
                 << std::hex << c.unit << (little ? " LE" : " BE");
-            EXPECT_EQ(avx2, decodeAt(SimdLevel::Scalar, bytes));
+            EXPECT_EQ(kernel, decodeAt(SimdLevel::Scalar, bytes));
         }
     }
 }
 
 TEST(SimdText, AMalformedSurrogateIsReportedAtTheSameByteAtEveryLevel)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     // A lone low surrogate after 37 ASCII units: unit 37 of the text after the
     // mark begins at byte 2 x 37 = 74 of it.
     const std::string lowAlone =
@@ -152,7 +150,7 @@ TEST(SimdText, AMalformedSurrogateIsReportedAtTheSameByteAtEveryLevel)
     EXPECT_NE(lowScalar.text.find("low surrogate with no high"), std::string::npos)
         << lowScalar.text;
     EXPECT_NE(lowScalar.text.find("[byte 74]"), std::string::npos) << lowScalar.text;
-    EXPECT_EQ(decodeAt(SimdLevel::Avx2, lowAlone), lowScalar);
+    EXPECT_EQ(decodeAt(katana::test::kernelLevel(), lowAlone), lowScalar);
 
     // A high surrogate followed by 'a' at unit 40: byte 80.
     const std::string highAlone =
@@ -160,7 +158,7 @@ TEST(SimdText, AMalformedSurrogateIsReportedAtTheSameByteAtEveryLevel)
     const Outcome highScalar = decodeAt(SimdLevel::Scalar, highAlone);
     ASSERT_FALSE(highScalar.ok);
     EXPECT_NE(highScalar.text.find("[byte 80]"), std::string::npos) << highScalar.text;
-    EXPECT_EQ(decodeAt(SimdLevel::Avx2, highAlone), highScalar);
+    EXPECT_EQ(decodeAt(katana::test::kernelLevel(), highAlone), highScalar);
 
     // A high surrogate as the very last unit, after two whole blocks.
     const std::string truncated = utf16(ascii(64, 'a') + std::vector<std::uint16_t>{0xD83D}, true);
@@ -168,12 +166,12 @@ TEST(SimdText, AMalformedSurrogateIsReportedAtTheSameByteAtEveryLevel)
     ASSERT_FALSE(truncatedScalar.ok);
     EXPECT_NE(truncatedScalar.text.find("ends in the middle"), std::string::npos)
         << truncatedScalar.text;
-    EXPECT_EQ(decodeAt(SimdLevel::Avx2, truncated), truncatedScalar);
+    EXPECT_EQ(decodeAt(katana::test::kernelLevel(), truncated), truncatedScalar);
 }
 
 TEST(SimdText, DecodingGivesTheSameTextOrTheSameErrorAtEveryLevel)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     // Generated: runs of ASCII of every length up to three blocks, broken by
     // every kind of unit - two- and three-byte characters, whole surrogate
     // pairs, broken ones - in both byte orders, marked and not.
@@ -204,7 +202,7 @@ TEST(SimdText, DecodingGivesTheSameTextOrTheSameErrorAtEveryLevel)
         // provide them.
         const bool mark = next() % 3 != 0;
         const std::string bytes = utf16(units, little, mark);
-        EXPECT_EQ(decodeAt(SimdLevel::Avx2, bytes), decodeAt(SimdLevel::Scalar, bytes))
+        EXPECT_EQ(decodeAt(katana::test::kernelLevel(), bytes), decodeAt(SimdLevel::Scalar, bytes))
             << "round " << round;
         ++compared;
     }
@@ -213,7 +211,7 @@ TEST(SimdText, DecodingGivesTheSameTextOrTheSameErrorAtEveryLevel)
 
 TEST(SimdText, Utf8ValidationGivesTheSameAnswerAtEveryLevel)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     struct Case {
         std::string text;
         bool valid;
@@ -232,9 +230,9 @@ TEST(SimdText, Utf8ValidationGivesTheSameAnswerAtEveryLevel)
     };
     for (const Case& c : cases) {
         const bool scalar = atSimdLevel(SimdLevel::Scalar, [&] { return isValidUtf8(c.text); });
-        const bool avx2 = atSimdLevel(SimdLevel::Avx2, [&] { return isValidUtf8(c.text); });
+        const bool kernel = atSimdLevel(katana::test::kernelLevel(), [&] { return isValidUtf8(c.text); });
         EXPECT_EQ(scalar, c.valid) << c.text.size();
-        EXPECT_EQ(avx2, c.valid) << c.text.size();
+        EXPECT_EQ(kernel, c.valid) << c.text.size();
     }
 
     // Every position of one bad byte, and of one good character, across the
@@ -244,9 +242,9 @@ TEST(SimdText, Utf8ValidationGivesTheSameAnswerAtEveryLevel)
             std::string text(200, 'z');
             text.insert(at, insert);
             const bool scalar = atSimdLevel(SimdLevel::Scalar, [&] { return isValidUtf8(text); });
-            const bool avx2 = atSimdLevel(SimdLevel::Avx2, [&] { return isValidUtf8(text); });
+            const bool kernel = atSimdLevel(katana::test::kernelLevel(), [&] { return isValidUtf8(text); });
             EXPECT_EQ(scalar, insert.size() == 2) << at;
-            EXPECT_EQ(avx2, scalar) << at;
+            EXPECT_EQ(kernel, scalar) << at;
         }
     }
 }
@@ -277,10 +275,7 @@ TEST(SimdText, TextDenseWithMultibyteCharactersValidatesAlikeAtEveryLevel)
             const bool whole = !(cut > 0 && static_cast<unsigned char>(prefix.back()) == 0xC3);
             const std::string loneContinuation = prefix + "a\x80" + std::string(run, 'b');
             const std::string truncated = prefix + std::string(run, 'b') + "\xC3";
-            for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-                if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-                    continue;
-                }
+            for (const SimdLevel level : katana::test::simdLevels()) {
                 EXPECT_EQ(atSimdLevel(level, [&] { return isValidUtf8(prefix); }), whole)
                     << "run " << run << " cut " << cut << " at " << katana::core::toString(level);
                 EXPECT_FALSE(atSimdLevel(level, [&] { return isValidUtf8(loneContinuation); }))
@@ -317,7 +312,10 @@ TEST(SimdText, TheValidatorFindsEachKindOfErrorWorkedByHandAtABlockEdge)
     // bytes at a time, 64 a step; the last 32 bytes of the text are judged
     // again with the 32 before them. Each case puts one character across one
     // of those edges in a text of 100 bytes (steps [0,64) and [64,96), then
-    // the window [68,100)) or at its very end. Worked from the UTF-8 rules:
+    // the window [68,100)) or at its very end. The NEON validator does the
+    // same 16 bytes at a time - the step [0,64), blocks [64,80) and [80,96),
+    // the window [84,100) - and the last cases are across its own edges.
+    // Worked from the UTF-8 rules:
     struct Case {
         const char* what;
         std::string text;
@@ -356,24 +354,35 @@ TEST(SimdText, TheValidatorFindsEachKindOfErrorWorkedByHandAtABlockEdge)
         {"a lead that ends a text of exactly one step", with(64, 63, {0xC3}), false},
         {"a two-byte character that ends a text of exactly one step", with(64, 62, {0xC3, 0xA9}),
          true},
+        {"a two-byte character across a 16-byte edge in the step", with(100, 15, {0xC3, 0xA9}),
+         true},
+        {"a three-byte character across the NEON final window", with(100, 82, {0xE2, 0x82, 0xAC}),
+         true},
+        // E2 at 79 ends the block [64,80) open, and [80,96) is all ASCII,
+        // which the NEON validator passes over without judging it.
+        {"a lead open before a 16-byte block of ASCII", with(100, 79, {0xE2}), false},
+        {"a four-byte character across the 16-byte edge after the step",
+         with(100, 77, {0xF0, 0x9F, 0x98, 0x80}), true},
     };
     for (const Case& c : cases) {
         EXPECT_EQ(validAt(SimdLevel::Scalar, c.text), c.valid) << c.what;
-        if (katana::test::avx2Available()) {
-            EXPECT_EQ(validAt(SimdLevel::Avx2, c.text), c.valid) << c.what;
+        if (katana::test::kernelsAvailable()) {
+            EXPECT_EQ(validAt(katana::test::kernelLevel(), c.text), c.valid) << c.what;
         }
     }
 }
 
 TEST(SimdText, EveryPairOfBytesAtEveryBlockEdgeIsJudgedAsTheByteLoopJudgesIt)
 {
-    KATANA_REQUIRE_AVX2();
-    // All 65536 pairs in a text of 100 bytes of 'a' (steps [0,64) and
-    // [64,96), then the final window [68,100)): beginning the text, across
-    // the 32-byte edge in the first step, across the step edge, across the
-    // start of the final window, across the edge the final window covers
-    // again, and ending the text.
-    const std::size_t places[] = {0, 31, 63, 67, 95, 98};
+    KATANA_REQUIRE_SIMD_KERNELS();
+    // All 65536 pairs in a text of 100 bytes of 'a' (AVX2: steps [0,64) and
+    // [64,96), then the final window [68,100); NEON: the step [0,64) in
+    // 16-byte blocks, blocks [64,80) and [80,96), then the window [84,100)):
+    // beginning the text, across the 16- and 32-byte edges in the first
+    // step, across the step edge, across the 16-byte edge after it, across
+    // the start of either final window, across the edge the final window
+    // covers again, and ending the text.
+    const std::size_t places[] = {0, 15, 31, 47, 63, 67, 79, 83, 95, 98};
     std::size_t differ = 0;
     std::size_t valid = 0;
     for (unsigned first = 0; first < 256; ++first) {
@@ -383,7 +392,7 @@ TEST(SimdText, EveryPairOfBytesAtEveryBlockEdgeIsJudgedAsTheByteLoopJudgesIt)
                                                         static_cast<unsigned char>(second)});
                 const bool scalar = validAt(SimdLevel::Scalar, text);
                 valid += scalar ? 1 : 0;
-                if (validAt(SimdLevel::Avx2, text) != scalar && ++differ <= 10) {
+                if (validAt(katana::test::kernelLevel(), text) != scalar && ++differ <= 10) {
                     ADD_FAILURE() << "bytes " << first << " " << second << " at " << at;
                 }
             }
@@ -392,13 +401,13 @@ TEST(SimdText, EveryPairOfBytesAtEveryBlockEdgeIsJudgedAsTheByteLoopJudgesIt)
     EXPECT_EQ(differ, 0u);
     // By hand: a pair is valid when both bytes are ASCII (128 x 128) or it is
     // one two-byte character (30 leads C2-DF x 64 continuations 80-BF):
-    // 16384 + 1920 = 18304 pairs, at each of the 6 places.
-    EXPECT_EQ(valid, 18304u * 6);
+    // 16384 + 1920 = 18304 pairs, at each of the 10 places.
+    EXPECT_EQ(valid, 18304u * 10);
 }
 
 TEST(SimdText, EveryLeadWithEachKindOfFollowerIsJudgedAsTheByteLoopJudgesIt)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     // Every lead byte C0-FF, and the continuations 80 and BF in its place, as
     // the first of four bytes across the step edge (and of three ending the
     // text), followed by bytes from every range the rules tell apart: ASCII;
@@ -414,7 +423,7 @@ TEST(SimdText, EveryLeadWithEachKindOfFollowerIsJudgedAsTheByteLoopJudgesIt)
     const auto compare = [&](const std::string& text) {
         const bool scalar = validAt(SimdLevel::Scalar, text);
         valid += scalar ? 1 : 0;
-        if (validAt(SimdLevel::Avx2, text) != scalar && ++differ <= 10) {
+        if (validAt(katana::test::kernelLevel(), text) != scalar && ++differ <= 10) {
             std::string bytes;
             for (const char ch : text) {
                 if (ch != 'a') {
@@ -442,7 +451,7 @@ TEST(SimdText, EveryLeadWithEachKindOfFollowerIsJudgedAsTheByteLoopJudgesIt)
 
 TEST(SimdText, GeneratedTextWithDamageIsJudgedAsTheByteLoopJudgesIt)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     // Characters of every length (the first and last of each, and U+10FFFF)
     // and runs of ASCII, 64 to 400 bytes, then damaged: a byte replaced,
     // removed or inserted, or the text cut.
@@ -494,7 +503,7 @@ TEST(SimdText, GeneratedTextWithDamageIsJudgedAsTheByteLoopJudgesIt)
         }
         const bool scalar = validAt(SimdLevel::Scalar, text);
         valid += scalar ? 1 : 0;
-        EXPECT_EQ(validAt(SimdLevel::Avx2, text), scalar) << "round " << round;
+        EXPECT_EQ(validAt(katana::test::kernelLevel(), text), scalar) << "round " << round;
         ++compared;
     }
     EXPECT_EQ(compared, 6000u);

@@ -50,6 +50,8 @@ namespace {
     return platform == QStringLiteral("xcb") || platform == QStringLiteral("wayland");
 #elif defined(KATANA_GPU_D3D11)
     return platform == QStringLiteral("windows");
+#elif defined(KATANA_GPU_METAL)
+    return platform == QStringLiteral("cocoa");
 #else
     (void)platform;
     return false;

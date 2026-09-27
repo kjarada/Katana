@@ -110,6 +110,28 @@ TEST(RendererChoice, TheVulkanBuildIsShownOnXcbAndWaylandOnly)
     }
 }
 
+// The Metal build (macOS) is shown by Qt's cocoa platform, and by nothing the
+// Direct3D 11 or Vulkan builds are shown by.
+TEST(RendererChoice, TheMetalBuildIsShownOnCocoaOnly)
+{
+    for (const char* platform : {"cocoa", "Cocoa"}) {
+        RendererEnvironment environment = desktop();
+        environment.backend = katana::qt::gpu::GpuBackend::Metal;
+        environment.platformName = platform;
+        const auto decision = chooseRenderer(environment);
+        EXPECT_EQ(decision.kind, RendererKind::Gpu) << platform;
+        EXPECT_NE(decision.reason.find("Metal"), std::string::npos) << decision.reason;
+    }
+    for (const char* platform : {"windows", "xcb", "wayland", "offscreen", "minimal", ""}) {
+        RendererEnvironment environment = desktop();
+        environment.backend = katana::qt::gpu::GpuBackend::Metal;
+        environment.platformName = platform;
+        const auto decision = chooseRenderer(environment);
+        EXPECT_EQ(decision.kind, RendererKind::Software) << platform;
+        EXPECT_NE(decision.reason.find("Metal"), std::string::npos) << decision.reason;
+    }
+}
+
 // Only an explicit KATANA_RENDERER=gpu lets the view draw on a software
 // device; the default refuses one, and the software choice never carries it.
 TEST(RendererChoice, OnlyAskingForTheGpuAllowsASoftwareDevice)

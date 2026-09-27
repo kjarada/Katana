@@ -17,7 +17,15 @@ else()
     set(KATANA_TOOLCHAIN "/opt/katana-toolchain")
 endif()
 
-set(_katana_cxx "${KATANA_TOOLCHAIN}/bin/x86_64-conda-linux-gnu-g++")
+# conda-forge prefixes its compilers with the target triple: x86_64 on a PC,
+# aarch64 on 64-bit ARM (tools/setup_linux_toolchain.py installs the one for
+# the machine it runs on).
+if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    set(_katana_triple "aarch64-conda-linux-gnu")
+else()
+    set(_katana_triple "x86_64-conda-linux-gnu")
+endif()
+set(_katana_cxx "${KATANA_TOOLCHAIN}/bin/${_katana_triple}-g++")
 if(NOT EXISTS "${_katana_cxx}")
     message(FATAL_ERROR
         "No Katana toolchain at ${KATANA_TOOLCHAIN} (${_katana_cxx} is missing). "
@@ -25,7 +33,7 @@ if(NOT EXISTS "${_katana_cxx}")
         "or point KATANA_TOOLCHAIN at the prefix it was installed into.")
 endif()
 
-set(CMAKE_C_COMPILER "${KATANA_TOOLCHAIN}/bin/x86_64-conda-linux-gnu-gcc")
+set(CMAKE_C_COMPILER "${KATANA_TOOLCHAIN}/bin/${_katana_triple}-gcc")
 set(CMAKE_CXX_COMPILER "${_katana_cxx}")
 list(PREPEND CMAKE_PREFIX_PATH "${KATANA_TOOLCHAIN}")
 
@@ -33,7 +41,10 @@ list(PREPEND CMAKE_PREFIX_PATH "${KATANA_TOOLCHAIN}")
 # newer than the system's; the run-time path finds them without an
 # LD_LIBRARY_PATH, as the Windows build tree finds its DLLs beside it.
 set(CMAKE_BUILD_RPATH "${KATANA_TOOLCHAIN}/lib")
-set(CMAKE_INSTALL_RPATH "${KATANA_TOOLCHAIN}/lib")
+# An INSTALLED program finds them in lib/ beside its own bin/, where the
+# install copies them (cmake/KatanaDeployUnix.cmake.in), so the installed tree
+# runs on a machine without the prefix.
+set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib")
 
 # GoogleTest and Google Benchmark come from the prefix too, so a Linux
 # configure needs no download (cmake/KatanaThirdParty.cmake).

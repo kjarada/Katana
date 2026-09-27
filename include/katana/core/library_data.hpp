@@ -27,14 +27,23 @@
 namespace katana::core {
 
 // The file a loaded shared library was mapped from, found by the start of its
-// file name ("libproj.so" matches libproj.so.25). Linux; std::nullopt
-// elsewhere - on Windows gdal_adapter.cpp finds DLLs by name itself, and PROJ
-// finds its data beside its own DLL.
+// file name ("libproj.so" matches libproj.so.25). Linux and macOS;
+// std::nullopt elsewhere - on Windows gdal_adapter.cpp finds DLLs by name
+// itself, and PROJ finds its data beside its own DLL.
 [[nodiscard]] std::optional<std::filesystem::path>
 loadedLibraryPath(std::string_view fileNamePrefix);
 
+// <prefix>/<relative> for the loaded library found as loadedLibraryPath does,
+// where the library is in <prefix>/lib - the layout of the toolchain prefix
+// and of the Linux and macOS bundles (cmake/KatanaDeployUnix.cmake.in) - when
+// that file or directory exists. std::nullopt when the library is not loaded
+// or the path does not exist, as for a distribution's library in
+// /usr/lib/<triplet>.
+[[nodiscard]] std::optional<std::filesystem::path>
+dataBesideLibrary(std::string_view fileNamePrefix, const std::filesystem::path& relative);
+
 // The directory PROJ's data should be read from, when Katana should say:
-// on Linux, <prefix>/share/proj beside the loaded libproj, when it holds
+// on Linux and macOS, <prefix>/share/proj beside the loaded libproj, when it holds
 // proj.db and neither PROJ_DATA nor PROJ_LIB is set (an explicit choice
 // outranks a default). std::nullopt otherwise - PROJ's own search is then
 // right. Worked out once per process; safe from any thread. Each user of
