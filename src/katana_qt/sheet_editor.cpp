@@ -2626,7 +2626,7 @@ QDialog* SheetEditor::buildGenerateDialog()
         return words.join(' ');
     };
 
-    const auto enable = [=, this] {
+    const auto enable = [=] {
         const QString k = kindNow();
         const bool fit = k == QLatin1String("fit");
         const bool grid = k == QLatin1String("grid");

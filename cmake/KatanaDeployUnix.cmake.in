@@ -1,0 +1,186 @@
+# Makes an installed Linux or macOS tree self-contained: every library the
+# programs and Qt's plugins load that comes from the toolchain prefix
+# (tools/setup_linux_toolchain.py - conda-forge's GCC or clang, Qt, GDAL, PDAL,
+# PROJ), copied into lib/, and the data GDAL, PROJ and libcurl read at run time.
+# The Unix counterpart of KatanaDeploy.cmake.in, run by `cmake --install` (and
+# so by the `bundle` and `package` targets). Configured with @ONLY: every ${...}
+# is evaluated when the script RUNS and every @...@ at configure time.
+#
+# The tree MIRRORS the toolchain prefix, which is what makes it work with
+# nothing rewritten:
+#
+#   bin/katana, katana_cli, katana_mcp   RPATH $ORIGIN/../lib (@loader_path on macOS)
+#   bin/qt.conf                          Qt's plugins, relative to bin/
+#   lib/*.so* or *.dylib                 as in the prefix, where each library's
+#                                        own RPATH ($ORIGIN, @loader_path)
+#                                        already finds the others
+#   lib/qt6/plugins/<kind>/...           as in the prefix, where each plugin's
+#                                        RPATH $ORIGIN/../../.. is lib/
+#   share/proj, share/gdal               found beside libproj and libgdal
+#   ssl/cacert.pem                       found beside libcurl
+#                                        (core/library_data.hpp,
+#                                        gdal_adapter.cpp)
+#
+# Why not the distribution's libraries: Katana needs GCC 15 or later, CGAL 6
+# and PROJ 9.5, which no long-term-support distribution ships (docs/building.md,
+# "Linux"), so the libraries it is built against exist only in the toolchain
+# prefix, and a tree that borrowed them from there would run only on the
+# machine that built it.
+
+if(POLICY CMP0207)
+    cmake_policy(SET CMP0207 NEW)
+endif()
+
+set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+set(_bin "${_prefix}/bin")
+set(_lib "${_prefix}/lib")
+set(_toolchain "@KATANA_TOOLCHAIN_PREFIX@")
+set(_qt_plugins "@KATANA_QT_PLUGIN_DIR@")
+set(_apple "@APPLE@")
+
+# Libraries that belong to the machine it RUNS on, never shipped, though the
+# toolchain prefix has copies: the C library (a copy of it cannot be loaded
+# beside the system's), the graphics driver's GL, EGL and Vulkan loaders, and
+# the X11 and font-configuration libraries, whose configuration files are
+# found by a path compiled in for the toolchain prefix - a shipped fontconfig
+# reads no fonts.conf and Qt draws no text. The set follows AppImage's
+# excludelist (github.com/AppImageCommunity/pkg2appimage, "excludelist"), for
+# the same reasons. Every Linux desktop has them.
+set(_system_libraries
+    "^ld-linux" "^libc\\.so" "^libm\\.so" "^libmvec\\.so" "^libdl\\.so" "^libpthread\\.so"
+    "^librt\\.so" "^libutil\\.so" "^libresolv\\.so" "^libanl\\.so"
+    "^libGL\\.so" "^libGLX\\.so" "^libEGL\\.so" "^libOpenGL\\.so" "^libGLdispatch\\.so"
+    "^libGLESv2\\.so" "^libdrm\\.so" "^libgbm\\.so" "^libvulkan\\.so"
+    "^libX11\\.so" "^libX11-xcb\\.so" "^libxcb\\.so" "^libfontconfig\\.so" "^libfreetype\\.so")
+
+# --- 1. Qt's plugins -------------------------------------------------------------
+# Loaded by name at start-up, so no scan of the executables finds them: without
+# platforms/ the window dies with "no Qt platform plugin could be initialized".
+# The offscreen platform is the headless one (`katana --screenshot`, `--plot`).
+set(_plugin_kinds platforms platformthemes platforminputcontexts imageformats iconengines
+                  xcbglintegrations egldeviceintegrations wayland-decoration-client
+                  wayland-graphics-integration-client wayland-shell-integration
+                  tls styles printsupport generic)
+set(_modules "")
+if(EXISTS "${_bin}/katana" AND IS_DIRECTORY "${_qt_plugins}")
+    foreach(_kind IN LISTS _plugin_kinds)
+        if(IS_DIRECTORY "${_qt_plugins}/${_kind}")
+            file(COPY "${_qt_plugins}/${_kind}" DESTINATION "${_lib}/qt6/plugins")
+            file(GLOB _found "${_qt_plugins}/${_kind}/*.so" "${_qt_plugins}/${_kind}/*.dylib")
+            list(APPEND _modules ${_found})
+        endif()
+    endforeach()
+    # Qt finds its plugins through qt.conf beside the program, read relative to
+    # the program's own directory; without it Qt asks the prefix compiled into
+    # it, which is the toolchain's on the machine that built it.
+    file(WRITE "${_bin}/qt.conf" "[Paths]\nPrefix=..\nPlugins=lib/qt6/plugins\n")
+endif()
+
+# --- 2. Every library they load ----------------------------------------------------
+# What is scanned is the BUILD tree's programs and the prefix's own plugins,
+# not the copies just installed: those still carry the RPATH naming the
+# prefix's lib/, so every dependency resolves the way the loader resolves it.
+# The installed copies' RPATH names the lib/ being filled now, and a scan of
+# them resolves everything through DIRECTORIES instead, with a warning for
+# each of a hundred libraries.
+set(_executables "")
+foreach(_program katana katana_cli katana_mcp)
+    if(EXISTS "${_bin}/${_program}" AND EXISTS "@CMAKE_BINARY_DIR@/bin/${_program}")
+        list(APPEND _executables "@CMAKE_BINARY_DIR@/bin/${_program}")
+    endif()
+endforeach()
+
+file(GET_RUNTIME_DEPENDENCIES
+    EXECUTABLES ${_executables}
+    MODULES ${_modules}
+    RESOLVED_DEPENDENCIES_VAR _resolved
+    UNRESOLVED_DEPENDENCIES_VAR _unresolved
+    CONFLICTING_DEPENDENCIES_PREFIX _conflict
+    DIRECTORIES "${_toolchain}/lib"
+    POST_EXCLUDE_REGEXES "^/usr/lib/" "^/System/" "^/lib/" "^/lib64/" "^/usr/lib64/")
+
+foreach(_name IN LISTS _conflict_FILENAMES)
+    list(GET _conflict_${_name} 0 _first)
+    list(APPEND _resolved "${_first}")
+endforeach()
+
+file(MAKE_DIRECTORY "${_lib}" "${_prefix}/ssl")
+set(_copied 0)
+foreach(_dependency IN LISTS _resolved)
+    # Only what came from the toolchain; anything else resolved is the
+    # operating system's.
+    file(REAL_PATH "${_dependency}" _real)
+    if(NOT _real MATCHES "^${_toolchain}/" AND NOT _dependency MATCHES "^${_toolchain}/")
+        continue()
+    endif()
+    get_filename_component(_name "${_dependency}" NAME)
+    set(_skip FALSE)
+    foreach(_pattern IN LISTS _system_libraries)
+        if(_name MATCHES "${_pattern}")
+            set(_skip TRUE)
+        endif()
+    endforeach()
+    if(_skip OR EXISTS "${_lib}/${_name}")
+        continue()
+    endif()
+    # Under the name the loader asks for (the soname, libfoo.so.1), with the
+    # contents of the file the symbolic link chain ends at.
+    file(COPY_FILE "${_real}" "${_lib}/${_name}")
+    math(EXPR _copied "${_copied} + 1")
+endforeach()
+message(STATUS "Katana deploy: ${_copied} runtime libraries copied into ${_lib}")
+
+# Unresolved names that are the system's are expected (the scan does not look
+# in /usr/lib for a program whose RPATH does not name it); anything else is a
+# tree that starts here and fails elsewhere, so it is named now.
+set(_missing "")
+foreach(_name IN LISTS _unresolved)
+    set(_expected FALSE)
+    foreach(_pattern IN LISTS _system_libraries)
+        if(_name MATCHES "${_pattern}")
+            set(_expected TRUE)
+        endif()
+    endforeach()
+    if(NOT _expected AND NOT _name MATCHES "^/usr/lib/|^/System/")
+        list(APPEND _missing "${_name}")
+    endif()
+endforeach()
+if(_missing)
+    list(JOIN _missing "\n  " _text)
+    message(WARNING "Katana deploy: these dependencies were NOT found and are not bundled:\n  ${_text}")
+endif()
+
+# --- 3. Data read at run time -------------------------------------------------------
+foreach(_data proj gdal)
+    if(IS_DIRECTORY "${_toolchain}/share/${_data}")
+        file(COPY "${_toolchain}/share/${_data}" DESTINATION "${_prefix}/share")
+    else()
+        message(WARNING "Katana deploy: ${_toolchain}/share/${_data} was not found; "
+                        "the bundle will lack it")
+    endif()
+endforeach()
+if(EXISTS "${_toolchain}/ssl/cacert.pem")
+    file(COPY_FILE "${_toolchain}/ssl/cacert.pem" "${_prefix}/ssl/cacert.pem")
+else()
+    message(WARNING "Katana deploy: ${_toolchain}/ssl/cacert.pem was not found; "
+                    "no https:// request will be trusted")
+endif()
+
+# --- 4. macOS: a signature that matches ------------------------------------------------
+# Apple silicon refuses to run code whose signature does not match it, and
+# `cmake --install` has just rewritten the programs' load commands (their
+# RPATH) after the linker signed them. Ad hoc, as the linker did: a
+# distributable signature needs a Developer ID, which the build does not have.
+if(_apple)
+    foreach(_name katana katana_cli katana_mcp)
+        set(_program "${_bin}/${_name}")
+        if(NOT EXISTS "${_program}")
+            continue()
+        endif()
+        execute_process(COMMAND codesign --force --sign - "${_program}"
+            RESULT_VARIABLE _rc ERROR_VARIABLE _err)
+        if(NOT _rc EQUAL 0)
+            message(FATAL_ERROR "codesign ${_program} failed (${_rc}): ${_err}")
+        endif()
+    endforeach()
+endif()

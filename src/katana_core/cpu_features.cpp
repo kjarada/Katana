@@ -20,14 +20,20 @@ SimdLevel probeProcessor()
     if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
         return SimdLevel::Avx2;
     }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    // Advanced SIMD is part of the AArch64 baseline that Linux, macOS and
+    // Windows on ARM all require, and the compilers assume it for every
+    // AArch64 target (they predefine __ARM_NEON): no processor this runs on
+    // lacks it, so there is nothing to probe.
+    return SimdLevel::Neon;
 #endif
     return SimdLevel::Scalar;
 }
 
 // Whether the kernels for `level` were compiled into this build at all. A build
 // for another architecture, or one configured with KATANA_SIMD_KERNELS=OFF,
-// has only the scalar references; detecting AVX2 there must not route a call to
-// a kernel that does not exist.
+// has only the scalar references; detecting AVX2 or NEON there must not route
+// a call to a kernel that does not exist.
 constexpr bool built(SimdLevel level)
 {
     switch (level) {
@@ -35,6 +41,12 @@ constexpr bool built(SimdLevel level)
         return true;
     case SimdLevel::Avx2:
 #if defined(KATANA_HAVE_AVX2_KERNELS)
+        return true;
+#else
+        return false;
+#endif
+    case SimdLevel::Neon:
+#if defined(KATANA_HAVE_NEON_KERNELS)
         return true;
 #else
         return false;
@@ -91,6 +103,8 @@ const char* toString(SimdLevel level)
         return "scalar";
     case SimdLevel::Avx2:
         return "avx2";
+    case SimdLevel::Neon:
+        return "neon";
     }
     return "unknown";
 }
@@ -107,12 +121,17 @@ Result<SimdLevel> chooseSimdLevel(std::string_view requested, SimdLevel detected
         level = SimdLevel::Scalar;
     } else if (requested == "avx2") {
         level = SimdLevel::Avx2;
+    } else if (requested == "neon") {
+        level = SimdLevel::Neon;
     } else {
         return makeError(ErrorCode::InvalidArgument,
                          "'" + std::string(requested) +
-                             "' is not a SIMD level; use scalar or avx2");
+                             "' is not a SIMD level; use scalar, avx2 or neon");
     }
-    if (level > detected) {
+    // Not `level > detected`: the kernel levels belong to different
+    // architectures, and an AArch64 processor that runs NEON cannot run AVX2
+    // although Avx2 comes before Neon in the enumeration.
+    if (level != SimdLevel::Scalar && level != detected) {
         return makeError(ErrorCode::InvalidArgument,
                          std::string(toString(level)) +
                              " was asked for but this processor supports only " +

@@ -237,9 +237,11 @@ class RenderViewWidget final : public QWidget {
     QPoint lastMouse_;
 
     // The GPU view and the overlay over it: children, owned by Qt; null when
-    // the software rasteriser draws.
+    // the software rasteriser draws. maybe_unused: a build without the GPU
+    // renderer (KATANA_GPU=OFF) never reads the GPU-only members, and
+    // clang's -Wunused-private-field says so.
     gpu::GpuSceneView* gpuView_ = nullptr;
-    QWidget* overlay_ = nullptr;
+    [[maybe_unused]] QWidget* overlay_ = nullptr;
     QString rendererReason_;
     // What the GPU view has not been given since the last rebuild: every
     // layer (the terrain was rebuilt); the drawing's - grid, entities and
@@ -249,7 +251,7 @@ class RenderViewWidget final : public QWidget {
     bool gpuDrawingStale_ = false;
     bool gpuSelectionStale_ = false;
     bool gpuEdgesShown_ = false;
-    bool rebuiltSinceStats_ = false;
+    [[maybe_unused]] bool rebuiltSinceStats_ = false;
 
     katana::cad::Document* listenedDocument_ = nullptr;
     // Declared LAST so it is destroyed FIRST: the listener it owns captures

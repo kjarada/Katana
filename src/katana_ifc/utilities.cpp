@@ -52,6 +52,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <span>
 
 #include "katana/core/text.hpp"
 #include "katana/survey/subsurface/quality_level.hpp"

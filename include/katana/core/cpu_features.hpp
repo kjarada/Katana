@@ -5,7 +5,10 @@
 // WHY RUNTIME DISPATCH. The shipped program is built for baseline x86-64
 // (SSE2), so it starts on any 64-bit PC. A machine with AVX2 gets 4 doubles or
 // 32 bytes per instruction from a handful of kernels compiled for it; a machine
-// without gets the scalar reference. The choice is made HERE, once, and every
+// without gets the scalar reference. On 64-bit ARM (Apple silicon, Linux
+// aarch64, Windows ARM64) the same kernels exist for NEON, 2 doubles or 16
+// bytes per instruction; NEON is part of every AArch64 processor, so there the
+// choice is only between the kernels and the scalar references. The choice is made HERE, once, and every
 // kernel family asks for it - never by compiling ordinary code with -mavx2,
 // which lets the linker hand AVX2 copies of shared inline functions to baseline
 // callers (docs/performance.md, "The inline-copy hazard").
@@ -17,8 +20,9 @@
 // one process and compare them.
 //
 // The override: the environment variable KATANA_SIMD, read once at the first
-// question, set to `scalar` or `avx2`. `scalar` is how a test proves that a
-// machine without AVX2 is served correctly on a machine that has it.
+// question, set to `scalar`, `avx2` or `neon`. `scalar` is how a test proves
+// that a machine without the kernels is served correctly on a machine that has
+// them.
 
 #include <string>
 #include <string_view>
@@ -27,21 +31,29 @@
 
 namespace katana::core {
 
-// Ordered: a higher level can run everything a lower one can.
-enum class SimdLevel { Scalar, Avx2 };
+// Scalar first: every processor runs it. Each other level belongs to one
+// architecture - Avx2 to x86-64, Neon to AArch64 - so a processor runs Scalar
+// and at most one other, and two kernel levels are never compared by order:
+// "can this processor run it" is `level == Scalar || level == detected`.
+enum class SimdLevel { Scalar, Avx2, Neon };
 
 [[nodiscard]] const char* toString(SimdLevel level);
 
-// What the processor AND the operating system support. AVX2 is reported only
-// with FMA beside it (every processor with one has had the other) and only
-// when the OS saves the 256-bit registers across context switches, which the
-// compiler's own detection checks; a CPU flag without that would fault.
+// What the processor AND the operating system support, among the levels this
+// build has kernels for. AVX2 is reported only with FMA beside it (every
+// processor with one has had the other) and only when the OS saves the
+// 256-bit registers across context switches, which the compiler's own
+// detection checks; a CPU flag without that would fault. NEON needs no probe:
+// the AArch64 architecture makes Advanced SIMD mandatory, and every AArch64
+// operating system saves its registers, so a build with the NEON kernels
+// reports Neon.
 [[nodiscard]] SimdLevel detectedSimdLevel();
 
 // `requested` is the text of KATANA_SIMD. Empty means "whatever was detected".
 // InvalidArgument for a word that names no level, and for a level the
-// processor cannot run - asking for AVX2 on a machine without it must fail
-// loudly, not crash with an illegal instruction and not quietly run scalar.
+// processor cannot run - asking for AVX2 on a machine without it, or for NEON
+// on an x86-64 one, must fail loudly, not crash with an illegal instruction
+// and not quietly run scalar.
 [[nodiscard]] Result<SimdLevel> chooseSimdLevel(std::string_view requested, SimdLevel detected);
 
 // How the level in force was arrived at, for a diagnostic line or a log.

@@ -22,7 +22,8 @@
 //   5. The platform cannot show the build's GPU view         -> software
 //      (offscreen and minimal - headless runs - and, for the Direct3D 11
 //      build, anything but the windows platform; for the Vulkan build,
-//      anything but xcb and wayland)
+//      anything but xcb and wayland; for the Metal build, anything but
+//      cocoa)
 //   6. Otherwise                                             -> GPU
 //      (KATANA_RENDERER=gpu cannot make rules 1-5 go away, and the GPU is
 //      already the default. What it does add is permission to draw on a
@@ -44,7 +45,7 @@ enum class RendererKind { Gpu, Software };
 
 // The graphics API the GPU renderer was built for (gpu/CMakeLists.txt): it
 // decides which platforms can show it.
-enum class GpuBackend { Direct3D11, Vulkan };
+enum class GpuBackend { Direct3D11, Vulkan, Metal };
 
 [[nodiscard]] const char* toString(GpuBackend backend);
 

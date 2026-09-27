@@ -9,6 +9,8 @@
 
 #include <gtest/gtest.h>
 
+#include <vector>
+
 #include "katana/core/cpu_features.hpp"
 
 namespace katana::test {
@@ -40,7 +42,7 @@ class ScopedSimdLevel {
 };
 
 // f() at `level`, with the level restored afterwards. Fails the test if the
-// processor cannot run the level; callers check avx2Available() first.
+// processor cannot run the level; callers ask kernelsAvailable() first.
 template <typename F> auto atSimdLevel(katana::core::SimdLevel level, F&& f)
 {
     ScopedSimdLevel scope(level);
@@ -48,18 +50,39 @@ template <typename F> auto atSimdLevel(katana::core::SimdLevel level, F&& f)
     return f();
 }
 
-[[nodiscard]] inline bool avx2Available()
+// The level whose kernels this machine runs - Avx2 on an x86-64 processor
+// with AVX2, Neon on 64-bit ARM - or Scalar where there are none. It is what
+// every comparison holds against Scalar, so one test covers whichever kernel
+// set the build has.
+[[nodiscard]] inline katana::core::SimdLevel kernelLevel()
 {
-    return katana::core::detectedSimdLevel() >= katana::core::SimdLevel::Avx2;
+    return katana::core::detectedSimdLevel();
+}
+
+[[nodiscard]] inline bool kernelsAvailable()
+{
+    return kernelLevel() != katana::core::SimdLevel::Scalar;
+}
+
+// Scalar, then the kernel level where there is one: the levels a test runs
+// the same call at.
+[[nodiscard]] inline std::vector<katana::core::SimdLevel> simdLevels()
+{
+    std::vector<katana::core::SimdLevel> levels{katana::core::SimdLevel::Scalar};
+    if (kernelsAvailable()) {
+        levels.push_back(kernelLevel());
+    }
+    return levels;
 }
 
 } // namespace katana::test
 
 // Skips (visibly, with the reason) a comparison that would compare the scalar
-// path with itself on a processor that cannot run the AVX2 one.
-#define KATANA_REQUIRE_AVX2()                                                                      \
+// path with itself on a processor that has no kernels to run.
+#define KATANA_REQUIRE_SIMD_KERNELS()                                                              \
     do {                                                                                           \
-        if (!katana::test::avx2Available()) {                                                      \
-            GTEST_SKIP() << "this processor has no AVX2: only the scalar path can run here";       \
+        if (!katana::test::kernelsAvailable()) {                                                   \
+            GTEST_SKIP() << "no SIMD kernels run on this processor: only the scalar path can "     \
+                            "run here";                                                            \
         }                                                                                          \
     } while (false)
