@@ -37,8 +37,6 @@ using katana::geometry::Polyline2;
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
-
 // A drawing with every geometry kind, scattered and overlapping, so the
 // comparison is not over one easy shape. Fixed seed: a failure repeats.
 // `layers`, when given, deals the entities round those layers in turn (they

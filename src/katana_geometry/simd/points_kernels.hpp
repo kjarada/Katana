@@ -1,8 +1,9 @@
 #pragma once
 
-// Entry points of the AVX2 point kernels, compiled from points_avx2.cpp.
-// Declarations only; see src/katana_core/simd/text_kernels.hpp for why they
-// have C linkage and a katana_avx2_ prefix.
+// Entry points of the AVX2 point kernels, compiled from points_avx2.cpp, and
+// of their NEON twins, from points_neon.cpp. Declarations only; see
+// src/katana_core/simd/text_kernels.hpp for why they have C linkage and a
+// katana_avx2_ or katana_neon_ prefix.
 //
 // Points are arrays of doubles in the layout of math::Vec2 (x, y) and
 // math::Vec3 (x, y, z), which point_batch.cpp static_asserts. Each entry equals
@@ -29,5 +30,12 @@ void katana_avx2_bounds2(const double* points, std::size_t count, double* box);
 
 // box = {min x, min y, min z, max x, max y, max z}, as math::AABB::expand.
 void katana_avx2_bounds3(const double* points, std::size_t count, double* box);
+
+// The same four, two doubles a register, with the same contracts (and the same
+// zero-sign exception for the bounds).
+void katana_neon_transform_points3(const double* m, double* points, std::size_t count);
+void katana_neon_transform_points2(const double* m, double* points, std::size_t count);
+void katana_neon_bounds2(const double* points, std::size_t count, double* box);
+void katana_neon_bounds3(const double* points, std::size_t count, double* box);
 
 } // extern "C"

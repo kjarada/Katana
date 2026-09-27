@@ -93,6 +93,25 @@
             "displayName": "Debug + ASan + UBSan (Linux)",
             "inherits": "linux-debug",
             "cacheVariables": { "KATANA_ENABLE_SANITIZERS": "ON" }
+        },
+        {
+            "name": "macos",
+            "hidden": true,
+            "inherits": "base",
+            "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+            "toolchainFile": "${sourceDir}/cmake/toolchains/katana-macos.cmake"
+        },
+        {
+            "name": "macos-debug",
+            "displayName": "Debug (macOS, tools/setup_linux_toolchain.py)",
+            "inherits": "macos",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+        },
+        {
+            "name": "macos-release",
+            "displayName": "Release (macOS, tools/setup_linux_toolchain.py)",
+            "inherits": "macos",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
         }
     ],
     "buildPresets": [
@@ -104,7 +123,9 @@
         { "name": "linux-debug", "configurePreset": "linux-debug" },
         { "name": "linux-release", "configurePreset": "linux-release" },
         { "name": "linux-relwithdebinfo", "configurePreset": "linux-relwithdebinfo" },
-        { "name": "linux-sanitize", "configurePreset": "linux-sanitize" }
+        { "name": "linux-sanitize", "configurePreset": "linux-sanitize" },
+        { "name": "macos-debug", "configurePreset": "macos-debug" },
+        { "name": "macos-release", "configurePreset": "macos-release" }
     ],
     "testPresets": [
         {
@@ -145,6 +166,16 @@
         {
             "name": "linux-sanitize",
             "configurePreset": "linux-sanitize",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "macos-debug",
+            "configurePreset": "macos-debug",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "macos-release",
+            "configurePreset": "macos-release",
             "output": { "outputOnFailure": true }
         }
     ]

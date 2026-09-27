@@ -766,8 +766,7 @@ void MainWindow::buildActions()
     // button is one step; the k-th entry of the list is UNDO k or REDO k,
     // run through the one executor as one line). The menus are refilled
     // with the panels (refreshHistoryMenus).
-    const auto historyButton = [this, editBar](QAction* action, const char* name,
-                                               const char* menuName) {
+    const auto historyButton = [editBar](QAction* action, const char* name, const char* menuName) {
         auto* button = new QToolButton(editBar);
         button->setObjectName(name);
         button->setDefaultAction(action);

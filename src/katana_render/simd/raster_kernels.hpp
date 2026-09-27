@@ -1,8 +1,9 @@
 #pragma once
 
-// Entry points of the AVX2 rasteriser kernels, compiled from raster_avx2.cpp.
-// Declarations only; src/katana_core/simd/text_kernels.hpp says why they have C
-// linkage and a katana_avx2_ prefix.
+// Entry points of the AVX2 rasteriser kernels, compiled from raster_avx2.cpp,
+// and of their NEON twins, from raster_neon.cpp. Declarations only;
+// src/katana_core/simd/text_kernels.hpp says why they have C linkage and a
+// katana_avx2_ or katana_neon_ prefix.
 //
 // Each entry gives exactly the bits of its scalar reference in rasterizer.cpp
 // (transformVertices and shadePixel): every lane does the reference's operations
@@ -45,6 +46,16 @@ void katana_avx2_transform_vertices(const double* mvp, const double* positions,
 // written through the row-major buffers of `stride` pixels a row. Returns how
 // many pixels were written.
 std::size_t katana_avx2_shade_rows(const float* triangle, float invArea, const int* spans,
+                                   int firstRow, int rowCount, int covered, int depthWrite,
+                                   std::uint32_t* color, float* depth, std::size_t stride);
+
+// The same two with the same contracts, four vertices a step as above and four
+// pixels a step instead of eight.
+void katana_neon_transform_vertices(const double* mvp, const double* positions,
+                                    std::size_t count, const std::uint32_t* colors,
+                                    std::size_t colorCount, float width, float height,
+                                    float* clip, std::uint8_t* codes, float* screen);
+std::size_t katana_neon_shade_rows(const float* triangle, float invArea, const int* spans,
                                    int firstRow, int rowCount, int covered, int depthWrite,
                                    std::uint32_t* color, float* depth, std::size_t stride);
 

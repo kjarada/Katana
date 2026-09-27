@@ -60,12 +60,26 @@ endforeach()
 
 # The SIMD kernel guard (cmake/KatanaSimd.cmake, tools/check_simd_kernels.cmake).
 # The sources check reads files, like `layering`; the objects check reads what
-# the compiler produced for each *_avx2.cpp in THIS build's configuration, which
-# is where the inline-copy hazard would actually show.
+# the compiler produced for each *_avx2.cpp (or, on 64-bit ARM, *_neon.cpp) in
+# THIS build's configuration, which is where the inline-copy hazard would
+# actually show.
 add_test(NAME simd_kernel_sources
     COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
             -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
 get_property(_simd_object_libraries GLOBAL PROPERTY KATANA_SIMD_OBJECT_LIBRARIES)
+# The target's own nm and objdump, which CMake finds beside the compiler - a
+# cross build's aarch64 ones. Apple's toolchain may have no objdump, so there
+# LLVM's is looked for; it reads Mach-O as the check needs.
+set(_simd_nm "${CMAKE_NM}")
+set(_simd_objdump "${CMAKE_OBJDUMP}")
+if(APPLE AND NOT _simd_objdump)
+    find_program(KATANA_LLVM_OBJDUMP NAMES llvm-objdump DOC "objdump for the SIMD kernel object check")
+    find_program(KATANA_LLVM_NM NAMES llvm-nm DOC "nm for the SIMD kernel object check")
+    if(KATANA_LLVM_OBJDUMP AND KATANA_LLVM_NM)
+        set(_simd_objdump "${KATANA_LLVM_OBJDUMP}")
+        set(_simd_nm "${KATANA_LLVM_NM}")
+    endif()
+endif()
 if(_simd_object_libraries AND NOT MSVC)
     set(_simd_objects "")
     foreach(_library IN LISTS _simd_object_libraries)
@@ -73,8 +87,8 @@ if(_simd_object_libraries AND NOT MSVC)
     endforeach()
     list(JOIN _simd_objects "|" _simd_objects)
     add_test(NAME simd_kernel_objects
-        COMMAND ${CMAKE_COMMAND} "-DOBJECTS=${_simd_objects}" "-DNM=${CMAKE_NM}"
-                "-DOBJDUMP=${CMAKE_OBJDUMP}"
+        COMMAND ${CMAKE_COMMAND} "-DOBJECTS=${_simd_objects}" "-DNM=${_simd_nm}"
+                "-DOBJDUMP=${_simd_objdump}"
                 -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
 
     # The same kernels compiled as the linux-sanitize preset compiles them, with
@@ -91,18 +105,36 @@ if(_simd_object_libraries AND NOT MSVC)
     add_test(NAME simd_kernel_objects_under_asan
         COMMAND ${CMAKE_COMMAND}
                 "-DOBJECTS=$<JOIN:$<TARGET_OBJECTS:katana_simd_kernels_under_asan>,|>"
-                "-DNM=${CMAKE_NM}" "-DOBJDUMP=${CMAKE_OBJDUMP}"
+                "-DNM=${_simd_nm}" "-DOBJDUMP=${_simd_objdump}"
                 -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
+
+    # The check itself, on a kernel of this build's set that fuses a multiply
+    # and an add: a check that cannot see the instruction - an AArch64 FMLA
+    # its pattern does not name, say - passes as quietly as one that finds
+    # none. Compiled with the kernels' own options, never linked.
+    add_library(katana_simd_fused_fixture OBJECT
+        simd_kernel_fixtures/fused_${KATANA_SIMD_KERNEL_SET}.cpp)
+    katana_target_defaults(katana_simd_fused_fixture)
+    katana_simd_kernel_options(katana_simd_fused_fixture)
+    add_test(NAME simd_kernel_objects_catches_a_fused_multiply_add
+        COMMAND ${CMAKE_COMMAND}
+                "-DOBJECTS=$<JOIN:$<TARGET_OBJECTS:katana_simd_fused_fixture>,|>"
+                "-DNM=${_simd_nm}" "-DOBJDUMP=${_simd_objdump}"
+                -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
+    set_tests_properties(simd_kernel_objects_catches_a_fused_multiply_add PROPERTIES
+        PASS_REGULAR_EXPRESSION "fused_${KATANA_SIMD_KERNEL_SET}[.]cpp[.]o[a-z]*: contains [a-z0-9]+ - a fused multiply-add")
 endif()
 
 # The suites with kernels in them, run again with the level forced through the
-# KATANA_SIMD override. `scalar` is what a processor without AVX2 runs, proved
-# here on one that has it; `avx2` runs every public caller of a kernel on the
-# AVX2 path. (Where the processor has no AVX2, the avx2 run is refused by the
-# override, says so, and runs scalar.)
+# KATANA_SIMD override. `scalar` is what a processor without the kernels runs,
+# proved here on one that has them; `avx2` (x86-64) or `neon` (64-bit ARM) -
+# the set this build compiled, KATANA_SIMD_KERNEL_SET - runs every public
+# caller of a kernel on the kernel path. (Where an x86-64 processor has no
+# AVX2, the avx2 run is refused by the override, says so, and runs scalar.)
+set(_simd_levels scalar ${KATANA_SIMD_KERNEL_SET})
 foreach(_suite core geometry render)
     if(TARGET katana_${_suite}_tests)
-        foreach(_level scalar avx2)
+        foreach(_level IN LISTS _simd_levels)
             add_test(NAME simd_${_level}.${_suite} COMMAND katana_${_suite}_tests)
             set_tests_properties(simd_${_level}.${_suite} PROPERTIES
                 ENVIRONMENT_MODIFICATION
@@ -113,7 +145,7 @@ endforeach()
 # The cad suite is large and its kernels are the scene build's alone, so only
 # the scene tests are run again at each level.
 if(TARGET katana_cad_tests)
-    foreach(_level scalar avx2)
+    foreach(_level IN LISTS _simd_levels)
         add_test(NAME simd_${_level}.cad
                  COMMAND katana_cad_tests "--gtest_filter=CadScene*:Scene*")
         set_tests_properties(simd_${_level}.cad PROPERTIES

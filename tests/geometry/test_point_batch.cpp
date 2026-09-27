@@ -1,9 +1,9 @@
 // Batch transforms and bounds, held to the point-by-point loops they replace:
-// the same bits at every SIMD level. The AVX2 kernels take four points a step,
-// so sizes run through every remainder and past the dispatch minimums: 8 for
-// transforms, kBoundsBatchMinimum (16) for bounds. A hand-worked bounds case
-// must be at least that long, or at the AVX2 level it would test the inline
-// loop and not the kernel; each one asserts so.
+// the same bits at every SIMD level. The AVX2 and NEON kernels both take four
+// points a step, so sizes run through every remainder and past the dispatch
+// minimums: 8 for transforms, kBoundsBatchMinimum (16) for bounds. A
+// hand-worked bounds case must be at least that long, or at the kernel level
+// it would test the inline loop and not the kernel; each one asserts so.
 
 #include <gtest/gtest.h>
 
@@ -94,10 +94,7 @@ TEST(PointBatch, A3dTransformGivesTheValuesWorkedByHandAtEveryLevel)
     // [2 0 0 10], [0 2 0 20], [0 0 2 30], exact. (k, -k, k/2) maps to
     // (2k + 10, -2k + 20, k + 30); every product and sum is exact in double.
     const Mat4 m = Mat4::translation(Vec3(10.0, 20.0, 30.0)) * Mat4::scaling(Vec3(2.0, 2.0, 2.0));
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         std::vector<Vec3> points;
         for (int k = 0; k <= 10; ++k) {
             points.emplace_back(k, -k, 0.5 * k);
@@ -116,10 +113,7 @@ TEST(PointBatch, A2dTransformGivesTheValuesWorkedByHandAtEveryLevel)
     // A quarter turn and a shift by (5, 7), written out so that cos and sin
     // leave no rounding: (x, y) -> (-y + 5, x + 7). (k, 2k) -> (5 - 2k, k + 7).
     const Mat3 m(0.0, -1.0, 5.0, 1.0, 0.0, 7.0, 0.0, 0.0, 1.0);
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         std::vector<Point2> points;
         for (int k = 0; k <= 10; ++k) {
             points.emplace_back(k, 2.0 * k);
@@ -134,7 +128,7 @@ TEST(PointBatch, A2dTransformGivesTheValuesWorkedByHandAtEveryLevel)
 
 TEST(PointBatch, TransformsEqualTransformPointOnEveryPointBitForBitAtEveryLevel)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     Random random;
     for (int round = 0; round < 300; ++round) {
         const std::size_t count = static_cast<std::size_t>(round % 71);
@@ -154,27 +148,27 @@ TEST(PointBatch, TransformsEqualTransformPointOnEveryPointBitForBitAtEveryLevel)
             in2.emplace_back(random.coordinate(300000.0), random.coordinate(6250000.0));
         }
         auto scalar3 = in3;
-        auto avx3 = in3;
+        auto kernel3 = in3;
         auto scalar2 = in2;
-        auto avx2 = in2;
+        auto kernel2 = in2;
         atSimdLevel(SimdLevel::Scalar, [&] { transformPoints(m4, scalar3); });
-        atSimdLevel(SimdLevel::Avx2, [&] { transformPoints(m4, avx3); });
+        atSimdLevel(katana::test::kernelLevel(), [&] { transformPoints(m4, kernel3); });
         atSimdLevel(SimdLevel::Scalar, [&] { transformPoints(m3, scalar2); });
-        atSimdLevel(SimdLevel::Avx2, [&] { transformPoints(m3, avx2); });
+        atSimdLevel(katana::test::kernelLevel(), [&] { transformPoints(m3, kernel2); });
         for (std::size_t i = 0; i < count; ++i) {
             const Vec3 reference3 = katana::math::transformPoint(m4, in3[i]);
             const Point2 reference2 = katana::math::transformPoint(m3, in2[i]);
             ASSERT_TRUE(same(scalar3[i], reference3)) << "round " << round << " point " << i;
-            ASSERT_TRUE(same(avx3[i], reference3)) << "round " << round << " point " << i;
+            ASSERT_TRUE(same(kernel3[i], reference3)) << "round " << round << " point " << i;
             ASSERT_TRUE(same(scalar2[i], reference2)) << "round " << round << " point " << i;
-            ASSERT_TRUE(same(avx2[i], reference2)) << "round " << round << " point " << i;
+            ASSERT_TRUE(same(kernel2[i], reference2)) << "round " << round << " point " << i;
         }
     }
 }
 
 TEST(PointBatch, BoundsGiveTheBoxWorkedByHandAtEveryLevel)
 {
-    // Seventeen points, so the AVX2 path takes four steps of four and a tail
+    // Seventeen points, so the kernel path takes four steps of four and a tail
     // of one. Reading down the columns: x from -3.5 (point 6) to 7 (point 16,
     // the tail); y from -4 (point 4) to 9 (point 13).
     const std::vector<Point2> flat = {{3, -1},     {-2, 5},  {6, 0.5},   {1, 1},     {0.25, -4},
@@ -191,10 +185,7 @@ TEST(PointBatch, BoundsGiveTheBoxWorkedByHandAtEveryLevel)
                                      {0.75, 8, -3}, {6.5, 1, 2}};
     ASSERT_GE(flat.size(), kBoundsBatchMinimum);
     ASSERT_GE(solid.size(), kBoundsBatchMinimum);
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         const Box2 box = atSimdLevel(level, [&] { return boundsOf(flat); });
         EXPECT_EQ(box, Box2(Point2(-3.5, -4.0), Point2(7.0, 9.0))) << katana::core::toString(level);
         const AABB cube = atSimdLevel(level, [&] { return boundsOf(solid); });
@@ -209,10 +200,11 @@ TEST(PointBatch, WhereTheExtremeIsZeroTheBoundsKeepTheFirstZeroMetAsExpandDoes)
     // and -0 < +0 is false, so of the zeros the first one met stays. x runs
     // 1, 2, 3, -0, +0, 5, 6, ..., 16: the minimum is the -0 at place 3.
     //
-    // The places are chosen against the AVX2 path, which keeps one running
-    // minimum per lane - point i in lane i mod 4 - and folds the lanes 0 to 3
-    // at the end: it meets the +0 at place 4 (lane 0) before the -0 at place 3
-    // (lane 3), so a kernel that merely folded would answer +0.
+    // The places are chosen against the kernel paths, which keep one running
+    // minimum per lane - point i in lane i mod 4, in one register of four
+    // (AVX2) or two of two (NEON) - and fold the lanes 0 to 3 at the end: they
+    // meet the +0 at place 4 (lane 0) before the -0 at place 3 (lane 3), so a
+    // kernel that merely folded would answer +0.
     const double xs[] = {1.0,  2.0,  3.0,  -0.0, 0.0,  5.0,  6.0,  7.0, 8.0,
                          9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0};
     std::vector<Point2> points;
@@ -220,10 +212,7 @@ TEST(PointBatch, WhereTheExtremeIsZeroTheBoundsKeepTheFirstZeroMetAsExpandDoes)
         points.emplace_back(x, -x); // y: the maximum is -(-0) = +0 at place 3
     }
     ASSERT_GE(points.size(), kBoundsBatchMinimum);
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         const Box2 box = atSimdLevel(level, [&] { return boundsOf(points); });
         EXPECT_EQ(box.min.x, 0.0);
         EXPECT_TRUE(std::signbit(box.min.x)) << katana::core::toString(level);
@@ -232,10 +221,7 @@ TEST(PointBatch, WhereTheExtremeIsZeroTheBoundsKeepTheFirstZeroMetAsExpandDoes)
     }
     // And the other way round: +0 first.
     std::swap(points[3], points[4]);
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         const Box2 box = atSimdLevel(level, [&] { return boundsOf(points); });
         EXPECT_FALSE(std::signbit(box.min.x)) << katana::core::toString(level);
         EXPECT_TRUE(std::signbit(box.max.y)) << katana::core::toString(level);
@@ -255,10 +241,7 @@ TEST(PointBatch, BoundsPassOverNaNCoordinatesAsExpandDoes)
         points.emplace_back(x, 1.0);
     }
     ASSERT_GE(points.size(), kBoundsBatchMinimum);
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         const Box2 box = atSimdLevel(level, [&] { return boundsOf(points); });
         EXPECT_EQ(box.min.x, 0.5) << katana::core::toString(level);
         EXPECT_EQ(box.max.x, 5.0) << katana::core::toString(level);
@@ -267,10 +250,7 @@ TEST(PointBatch, BoundsPassOverNaNCoordinatesAsExpandDoes)
 
 TEST(PointBatch, TheBoundsOfNothingAreEmpty)
 {
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         EXPECT_TRUE(atSimdLevel(level, [] { return boundsOf(std::vector<Point2>{}); }).empty());
         EXPECT_TRUE(atSimdLevel(level, [] { return boundsOf(std::vector<Vec3>{}); }).empty());
     }
@@ -278,7 +258,7 @@ TEST(PointBatch, TheBoundsOfNothingAreEmpty)
 
 TEST(PointBatch, BoundsEqualTheExpandLoopBitForBitAtEveryLevel)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     Random random;
     for (int round = 0; round < 600; ++round) {
         const std::size_t count = static_cast<std::size_t>(round % 71);
@@ -306,9 +286,9 @@ TEST(PointBatch, BoundsEqualTheExpandLoopBitForBitAtEveryLevel)
             return atSimdLevel(level, [&] { return boundsOf(solid); });
         };
         ASSERT_TRUE(same(flatAt(SimdLevel::Scalar), loop2)) << round;
-        ASSERT_TRUE(same(flatAt(SimdLevel::Avx2), loop2)) << round;
+        ASSERT_TRUE(same(flatAt(katana::test::kernelLevel()), loop2)) << round;
         ASSERT_TRUE(same(solidAt(SimdLevel::Scalar), loop3)) << round;
-        ASSERT_TRUE(same(solidAt(SimdLevel::Avx2), loop3)) << round;
+        ASSERT_TRUE(same(solidAt(katana::test::kernelLevel()), loop3)) << round;
     }
 }
 
@@ -327,10 +307,7 @@ TEST(PointBatch, APolylineAndAMeshAreBoundedThroughTheBatchPath)
     }
     ASSERT_GE(line.vertices.size(), kBoundsBatchMinimum);
     ASSERT_GE(mesh.vertices.size(), kBoundsBatchMinimum);
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         const Box2 box = atSimdLevel(level, [&] { return line.boundingBox(); });
         EXPECT_EQ(box, Box2(Point2(0.0, -3.0), Point2(19.0, 19.0)))
             << katana::core::toString(level);
@@ -362,10 +339,7 @@ TEST(PointBatch, AnArrayShorterThanTheBatchMinimumIsBoundedInlineWithoutACall)
     // The static_asserts above are the test of "inline": they compile only
     // while the short path is in the header. At run time the same arrays give
     // the same boxes at every level.
-    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
-        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
-            continue;
-        }
+    for (const SimdLevel level : katana::test::simdLevels()) {
         EXPECT_EQ(atSimdLevel(level, [] { return boundsOf(kShortFlat); }),
                   Box2(Point2(-1.0, -2.0), Point2(4.0, 5.0)))
             << katana::core::toString(level);
