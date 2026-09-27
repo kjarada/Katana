@@ -8,6 +8,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QDir>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -92,7 +93,10 @@ TEST(PlotDrawing, WhatTheGrammarDoesNotTakeIsRefusedByItsWord)
 TEST(PlotDrawing, TheLineItWritesIsTheLineItReads)
 {
     PlotDrawingRequest request;
-    request.path = "C:\\plots\\site plan.pdf";
+    // The path as the platform's file dialog gives it: "C:\plots\site plan.pdf"
+    // on Windows. On POSIX '\' is part of a file name, not a separator
+    // (POSIX.1-2017, 3.170), so each platform is given its own native form.
+    request.path = QDir::toNativeSeparators("C:/plots/site plan.pdf");
     request.fit = false;
     request.settings.paper = PaperSize::A2;
     request.settings.landscape = false;

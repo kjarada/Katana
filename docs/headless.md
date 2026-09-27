@@ -248,6 +248,20 @@ is still read, and a failure prints the text that was checked. Pair it with an
 `-DEXPECT`, so that a run which printed nothing cannot pass for one that said
 nothing wrong. `docs/survey.md` has the survey import wizard's use of these.
 
+Before any of `-DEXPECT`, `-DREFUSED` and `-DFORBID` is matched, the script
+drops the whole lines in which Qt's platform layer says the plugin cannot do
+a window-management request - "This plugin does not support
+propagateSizeHints()", `raise()`, `lower()`, window opacity or masks, keyboard
+or mouse grabs. Linux's offscreen plugin prints the first whenever a window's
+minimum size changes (a dialog shown, views arranged), Windows' does not, so
+on Linux it fell between two report lines an `-DEXPECT` pairs and failed four
+checks that pass on Windows. They are Qt's words about the platform, not the
+application's, and dropping only those whole lines keeps every check able to
+say that two reports are adjacent; loosening the checks to `.*` between the
+lines was rejected for that reason. A note that can matter to a check - no
+Vulkan instance, no system fonts, no OpenGL context - is not in the list and
+is still matched.
+
 A PNG must also be of plausible size (a window that painted only its
 background compresses to a few kilobytes), and PDF and PNG headers are
 compared as hex: CMake's plain `file(READ ... LIMIT 4)` returned `%PDF` plus a
