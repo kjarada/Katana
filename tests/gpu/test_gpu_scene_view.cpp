@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <string>
 
 #include <QApplication>
 #include <QImage>
@@ -73,6 +74,16 @@ constexpr const char* kNeedsDesktop =
 constexpr const char* kNeedsDesktop =
     "needs the windows platform (KATANA_GPU_TEST_PLATFORM=windows)";
 #endif
+
+// Empty when the OnTheDesktop cases can run here: the desktop platform, and
+// a Vulkan driver to draw with where the build is the Vulkan one.
+std::string whyNotOnTheDesktop()
+{
+    if (!onDesktop()) {
+        return kNeedsDesktop;
+    }
+    return katana::qt::gpu::testing::whyNoVulkanDriver();
+}
 
 std::size_t drawnPixels(const QImage& grabbed)
 {
@@ -239,8 +250,8 @@ TEST(GpuSceneView, ResizingKeepsTheHostsCameraInTheWidgetsLogicalPixels)
 // its host's camera, which the offscreen tests can only prove of the renderer.
 TEST(GpuSceneView, OnTheDesktopDrawsTheSceneThroughTheHostsCamera)
 {
-    if (!onDesktop()) {
-        GTEST_SKIP() << kNeedsDesktop;
+    if (const std::string why = whyNotOnTheDesktop(); !why.empty()) {
+        GTEST_SKIP() << why;
     }
     katana::render::DrawList list;
     const auto a = list.addVertex(katana::math::Vec3(-20.0, -20.0, 0.0), katana::render::rgba(220, 60, 60));
@@ -281,8 +292,8 @@ TEST(GpuSceneView, OnTheDesktopDrawsTheSceneThroughTheHostsCamera)
 // frame the scene on every first frame, through the host's own zoomExtents.
 TEST(GpuSceneView, OnTheDesktopAHostCameraAlreadyFramedKeepsItsViewThroughTheFirstFrame)
 {
-    if (!onDesktop()) {
-        GTEST_SKIP() << kNeedsDesktop;
+    if (const std::string why = whyNotOnTheDesktop(); !why.empty()) {
+        GTEST_SKIP() << why;
     }
     Camera camera;
     camera.setTarget(katana::math::Vec3(-15.0, -15.0, 0.0));
@@ -339,8 +350,8 @@ TEST(GpuSceneView, OnTheDesktopAHostCameraAlreadyFramedKeepsItsViewThroughTheFir
 // a grab, where a shown widget's grabs take 2-5 ms and read back the frame.
 TEST(GpuSceneView, OnTheDesktopADrawListArrivingAfterTheFirstFrameIsFramed)
 {
-    if (!onDesktop()) {
-        GTEST_SKIP() << kNeedsDesktop;
+    if (const std::string why = whyNotOnTheDesktop(); !why.empty()) {
+        GTEST_SKIP() << why;
     }
     Camera camera;
     GpuSceneView view(camera);
@@ -380,8 +391,8 @@ TEST(GpuSceneView, OnTheDesktopADrawListArrivingAfterTheFirstFrameIsFramed)
 // 125%.)
 TEST(GpuSceneView, OnTheDesktopAFrameLeavesTheHostsCameraReadyForTheSoftwareView)
 {
-    if (!onDesktop()) {
-        GTEST_SKIP() << kNeedsDesktop;
+    if (const std::string why = whyNotOnTheDesktop(); !why.empty()) {
+        GTEST_SKIP() << why;
     }
     const katana::render::DrawList list = triangleAt(katana::math::Vec3());
     Camera camera;
@@ -409,8 +420,8 @@ TEST(GpuSceneView, OnTheDesktopAFrameLeavesTheHostsCameraReadyForTheSoftwareView
 // device is what the view would get - a desktop with no GPU, or Xvfb.
 TEST(GpuSceneView, OnTheDesktopASoftwareDeviceIsRefusedUnlessAllowed)
 {
-    if (!onDesktop()) {
-        GTEST_SKIP() << kNeedsDesktop;
+    if (const std::string why = whyNotOnTheDesktop(); !why.empty()) {
+        GTEST_SKIP() << why;
     }
     // The view and a hardware OffscreenGpu ask QRhi for the same default
     // device, so this says which kind the view will get.

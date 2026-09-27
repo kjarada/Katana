@@ -11,6 +11,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QDir>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -162,7 +163,14 @@ TEST(ScriptRunner, TheScriptVerbRefusesNoFileAndAWordItDoesNotKnow)
 
 TEST(ScriptRunner, TheLineItWritesIsTheLineItReads)
 {
-    const QString line = katana::qt::scriptCommandLine("C:\\my scripts\\site.kcs", true);
+    // The dialog hands over the path the platform's file dialog gave, in the
+    // platform's own separators: "C:\my scripts\site.kcs" on Windows. The
+    // line writes it with '/', which every platform's file API reads. On a
+    // POSIX system '\' is an ordinary character of a file name, not a
+    // separator (POSIX.1-2017, 3.170 "Filename"), so a Windows path is not a
+    // native path there and the test gives each platform its own.
+    const QString line = katana::qt::scriptCommandLine(
+        QDir::toNativeSeparators("C:/my scripts/site.kcs"), true);
     EXPECT_EQ(line, "SCRIPT \"C:/my scripts/site.kcs\" CONTINUE");
     const auto command = katana::qt::parseScriptCommand(line);
     ASSERT_TRUE(command.ok());

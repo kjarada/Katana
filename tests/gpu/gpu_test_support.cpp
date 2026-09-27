@@ -8,6 +8,9 @@
 #include <QDir>
 #include <QImage>
 #include <QString>
+#if defined(KATANA_GPU_VULKAN)
+#include <QVulkanInstance>
+#endif
 
 #include "katana/core/task_pool.hpp"
 #include "katana/render/rasterizer.hpp"
@@ -29,6 +32,20 @@ std::unique_ptr<OffscreenGpu> makeGpu(int width, int height, GpuDevice device, s
         return nullptr;
     }
     return std::move(created.value());
+}
+
+std::string whyNoVulkanDriver()
+{
+#if defined(KATANA_GPU_VULKAN)
+    QVulkanInstance probe;
+    if (!probe.create()) {
+        // VK_ERROR_INCOMPATIBLE_DRIVER (-9) is the loader finding no driver.
+        return "no Vulkan driver on this machine: vkCreateInstance returned " +
+               std::to_string(probe.errorCode()) +
+               " (Debian/Ubuntu: mesa-vulkan-drivers installs lavapipe)";
+    }
+#endif
+    return {};
 }
 
 Image cpuRender(const katana::render::DrawList& list, const katana::render::Camera& camera,

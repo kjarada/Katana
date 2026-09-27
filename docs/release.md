@@ -1,7 +1,7 @@
 # Releases
 
 How Katana is built for Windows, Linux and macOS - on x86-64 and on ARM64 -
-and published as a GitHub release, how the packages are signed, and why they
+tested, and published as a GitHub release, how the packages are signed, and why they
 are made the way they are. How to build on one machine is
 `docs/building.md`; this is all of them together.
 
@@ -9,10 +9,11 @@ are made the way they are. How to build on one machine is
 
 The workflow is `.github/workflows/release.yml`. It runs ONLY when started by
 hand - a commit, a tag or a pull request starts nothing (the owner's
-decision, 2026-09-26: a build of five platforms is an hour of runner time,
+decision, 2026-09-26: a build of five platforms is hours of runner time,
 spent when a release is wanted and not on every push). It builds the five
-packages, starts each one from its unpacked archive, signs what it has keys
-for, and publishes them.
+packages, runs the whole test suite on each platform, starts each package
+from what a user downloads and each installer silently, signs what it has
+keys for, and publishes them.
 
 1. Set the version in the root `CMakeLists.txt`, `project(Katana VERSION X.Y.Z)`,
    and merge it to `main`.
@@ -20,23 +21,27 @@ for, and publishes them.
    `vX.Y.Z`. The release, and its tag, are made on the commit the run started
    from. With the tag left empty the run builds and tests the packages and
    publishes nothing - the way to try a change to the build.
-3. The run takes as long as its slowest build (Windows x86-64, with the NSIS
-   installer). When all five pass, release `vX.Y.Z` appears with:
+3. The run takes as long as its slowest job (Windows x86-64: build, the
+   whole suite, the installer). When all five pass, release `vX.Y.Z` appears
+   with:
 
 | File | What it is |
 |---|---|
 | `Katana-X.Y.Z-win64.exe` | Windows x86-64 installer (NSIS), with an uninstaller |
 | `Katana-X.Y.Z-win64.zip` | the same tree to unzip anywhere; run `bin/katana.exe` |
-| `Katana-X.Y.Z-win-arm64.zip` | Windows 11 on ARM64 |
+| `Katana-X.Y.Z-win-arm64.exe` | Windows 11 on ARM64 installer (NSIS), with an uninstaller |
+| `Katana-X.Y.Z-win-arm64.zip` | the same tree to unzip anywhere |
 | `Katana-X.Y.Z-linux-x86_64.tar.gz` | Linux x86-64, glibc 2.28 or later; run `bin/katana` |
 | `Katana-X.Y.Z-linux-aarch64.tar.gz` | Linux on 64-bit ARM, glibc 2.28 or later |
-| `Katana-X.Y.Z-macos-arm64.tar.gz` | macOS 13 or later on Apple silicon |
+| `Katana-X.Y.Z-macos-arm64.dmg` | macOS 13 or later on Apple silicon: `Katana.app` to drag into Applications |
 | `SHA256SUMS.txt` | the SHA-256 of each file above |
 | `*.asc`, `katana-signing-key.asc` | OpenPGP signatures and the public key, when the repository holds the key ("Signing") |
 
-Each archive holds `bin/katana`, `bin/katana_cli` and `bin/katana_mcp`, the
-libraries they load, and `share/katana/samples`. How a user installs each is
-the root readme's job, not this document's.
+Each Windows and Linux archive holds `bin/katana`, `bin/katana_cli` and
+`bin/katana_mcp`, the libraries they load, and `share/katana/samples`; each
+disk image holds `Katana.app`, with the same programs in `Contents/MacOS`
+("macOS"). How a user installs each is the root readme's job, not this
+document's.
 
 A tag that does not match `project(Katana VERSION ...)` fails the run in its
 first job, before any building: the packages are named from the CMake
@@ -47,16 +52,17 @@ failed publish is fixed by re-running it.
 ## What each job does
 
 Each job runs the commands `docs/building.md` gives for its platform, with
-`KATANA_BUILD_TESTS` and `KATANA_BUILD_BENCHMARKS` off, then
-`--target package`. Nothing in the workflow is a second way of building.
+`KATANA_BUILD_TESTS` on and `KATANA_BUILD_BENCHMARKS` off, then the whole
+suite (`ctest`), then `--target package`. Nothing in the workflow is a second
+way of building.
 
 | Job | Runner | Toolchain | Configure |
 |---|---|---|---|
 | Windows x86-64 | `windows-2025` | MSYS2 UCRT64, GCC 16 | `cmake --preset release`, with the compiler and prefix where the action installed MSYS2 |
-| Windows ARM64 | `windows-11-arm` | MSYS2 CLANGARM64, clang and libc++ | the same, with `clang++` |
+| Windows ARM64 | `windows-11-arm` | MSYS2 CLANGARM64, clang and libc++; NSIS from Chocolatey | the same, with `clang++` and `-DKATANA_MAKENSIS` |
 | Linux x86-64 | `ubuntu-24.04` | `tools/setup_linux_toolchain.py`, GCC 16.2 | `cmake --preset linux-release` |
 | Linux ARM64 | `ubuntu-24.04-arm` | the same script, which installs conda-forge's `linux-aarch64` GCC 16.2 on an ARM machine | `cmake --preset linux-release` |
-| macOS arm64 | `macos-15` | the same script, clang 23 | `cmake --preset macos-release` |
+| macOS arm64 | `macos-15` | the same script, conda-forge's `osx-arm64` clang 23 | `cmake --preset macos-release` |
 
 The ARM64 jobs build natively on GitHub's ARM runners, which private
 repositories have had since 2026-01-29, rather than cross-compiling: the
@@ -72,16 +78,26 @@ frozen: it installs whatever the rolling distribution has that day, so a
 Windows release records the compiler's version in its log (the "Toolchain"
 step).
 
-### Tests on the machine the package is for
+### The whole suite, on the machine the package is for
 
-Before packaging, some jobs build the tests and run a part of them there
-(the `verify` column of the workflow's matrix), because those runners are the
-only places the code in question meets real hardware:
+Before packaging, every job builds the tests and runs all of them, in
+parallel, with `QT_QPA_PLATFORM=offscreen`; a single failure stops the job,
+so nothing is packaged from a build with a failing test. On Linux the suite
+runs under Xvfb with Mesa's software Vulkan driver installed, so the `gpu.`
+suite exercises the Vulkan renderer rather than skipping.
 
-| Job | Runs | Why |
-|---|---|---|
-| macOS arm64 | `gpu.` and `simd_` | the Metal renderer against the software one on the runner's GPU, and the NEON kernels against the scalar references |
-| Linux ARM64, Windows ARM64 | `simd_` | the NEON kernels at both levels, natively (built on x86-64 they run only under qemu, `docs/building.md`) |
+Until 2026-09-27 the jobs ran only the part of the suite that meets hardware
+nowhere else (`simd_` on the ARM machines, `gpu.` on macOS), and the release's
+question was only whether each package was complete. The whole suite is the
+stronger gate at the cost of runner time: a release is rare (it is started by
+hand), and the five machines are the only place four of the platforms'
+suites run at all. Those runners remain the only place some code meets real
+hardware:
+
+| Job | What only it proves |
+|---|---|
+| macOS arm64 | the Metal renderer against the software one on a real GPU |
+| Linux ARM64, Windows ARM64, macOS arm64 | the NEON kernels at both levels, natively (built on x86-64 they run only under qemu, `docs/building.md`) |
 
 ### The smoke test
 
@@ -103,9 +119,16 @@ MOVED AWAY for the test, so that a
 library the package failed to carry fails to load there rather than on a
 user's machine. On Windows `PATH` is cut to the Windows directories.
 
-The tests do not run in this workflow. They are the gate before a change is
-merged (`docs/testing.md`); the release job's question is only whether the
-package is complete. See "Not done".
+On macOS the disk image is mounted, its link to `/Applications` checked,
+and `Katana.app` copied out of it as a user drags it; `Info.plist` must parse,
+the icon must be there, and `codesign --verify --deep --strict` must accept
+the bundle's seal before the programs in `Contents/MacOS` run.
+
+**The installers.** Each Windows installer is then run as an administrator's
+deployment runs it: `/S /D=<folder>`, silently, into a folder of its own. The
+installed `katana_cli` must name `EPSG:32630` as above, and the uninstaller
+(`Uninstall.exe /S`, kept in place with `_?=` so the step waits for it) must
+remove `bin\katana_cli.exe`.
 
 ## How the Linux and macOS packages are made self-contained
 
@@ -146,6 +169,9 @@ library, which has no such directory beside it.
 Qt's plugins are copied from the prefix into `lib/qt6/plugins`, and
 `bin/qt.conf` points Qt at them; without it Qt asks the prefix compiled into
 it, the build machine's.
+
+On macOS the same tree is `Katana.app` ("macOS", below): the layout inside
+`Contents` keeps the same relative paths under Apple's names.
 
 **What stays the system's, on Linux.** The C library, the GL, EGL and Vulkan
 loaders (the graphics driver's), X11's `libX11` and `libxcb`, `fontconfig` and
@@ -196,9 +222,46 @@ on Linux) before any Mac was involved: 21 of 872 translation units failed.
   `[[maybe_unused]]`. A GCC build with `KATANA_SIMD_KERNELS=OFF` failed on
   `kernelParams` the same way.
 
-`katana` is no longer a `MACOSX_BUNDLE`: on macOS it is `bin/katana`, as on
-Linux, so the headless checks, the tests and the package find it where they
-find it everywhere else.
+`katana` is not a `MACOSX_BUNDLE` in the build tree: there it is
+`bin/katana`, as on Linux, so the headless checks and the tests find it where
+they find it everywhere else. The bundle is made when installing.
+
+**Katana.app.** `cmake --install` (and so `package` and `bundle`) lays the
+tree out as an application bundle, because code signing seals a bundle only
+when code and data are where it expects them, and Finder shows a bundle as
+one application with its icon:
+
+| In the bundle | What | Stands for, in the Linux tree |
+|---|---|---|
+| `Contents/Info.plist` | the executable (`katana`), the icon, the identifier `com.jarada.katana`, the minimum macOS (`cmake/KatanaInfo.plist.in`) | - |
+| `Contents/MacOS/` | `katana`, `katana_cli`, `katana_mcp`; RPATH `@loader_path/../Frameworks` | `bin/` |
+| `Contents/Frameworks/` | the libraries, and Qt's plugins in `Frameworks/qt6/plugins` | `lib/` |
+| `Contents/Resources/qt.conf` | `Plugins=Frameworks/qt6/plugins`; in a bundle Qt reads `qt.conf` here and resolves it against `Contents` | `bin/qt.conf` |
+| `Contents/Resources/share/`, `ssl/` | GDAL, PROJ and certificate data; the samples | `share/`, `ssl/` |
+| `Contents/Resources/katana.icns` | the icon, made from `resources/katana.png` by `sips` and `iconutil` at install time | - |
+
+`Frameworks` mirrors `lib/`, so every conda-forge library and plugin still
+finds the others through its own relative RPATH; only the data moved, and
+`core::dataBesideLibraryFile` looks in `Resources/` for a library in
+`Frameworks/`. Putting the data in `Contents/share` beside `Frameworks`
+would have needed no code change, but codesign expects everything that is
+not code under `Resources`, and notarisation checks the seal. Moving Qt's
+plugins to the conventional `Contents/PlugIns` was rejected: each plugin's
+RPATH (`@loader_path/../../..`) would then miss `Frameworks`, and rewriting
+them breaks their signatures.
+
+After installing, every library, then `katana_cli` and `katana_mcp`, then the
+bundle (which signs `katana` with `Info.plist` bound to it) are signed ad
+hoc, so `codesign --verify --deep --strict` accepts it. CPack's DragNDrop
+generator makes the disk image, with a link to `/Applications` beside the
+app.
+
+**Apple silicon only.** Intel Macs are not a target (the owner's decision,
+2026-09-27). An Intel build was tried the same day - conda-forge has the whole
+library set for `osx-64`, and GitHub's `macos-15-intel` runner could build it
+natively - and removed before it shipped. Adding it back is a matrix entry in
+the workflow and a host check in `cmake/toolchains/katana-macos.cmake` and the
+setup script choosing the `osx-64` compiler.
 
 The minimum is macOS 13 (`CMAKE_OSX_DEPLOYMENT_TARGET` in
 `cmake/toolchains/katana-macos.cmake`), the oldest Qt 6.11 supports. libc++'s
@@ -212,14 +275,15 @@ The GPU renderer draws on Metal there, from the same GLSL baked to Metal
 Shading Language (`docs/gpu.md`, "Shaders"); the macOS job runs the `gpu.`
 test suite on the runner before packaging.
 
-**Gatekeeper.** Without a Developer ID ("Signing") the package is signed ad
-hoc (`codesign --sign -`, which Apple silicon requires of any code, and which
+**Gatekeeper.** Without a Developer ID ("Signing") the app is signed ad hoc
+(`codesign --sign -`, which Apple silicon requires of any code, and which
 `cmake --install` must redo after rewriting the programs' RPATH) and is not
 notarised. A copy downloaded through a browser is quarantined, and macOS
-refuses to open it until the quarantine is cleared once after unpacking:
+refuses to open it until the quarantine is cleared once after copying it to
+Applications:
 
 ```sh
-xattr -dr com.apple.quarantine Katana-X.Y.Z-macos-arm64
+xattr -dr com.apple.quarantine /Applications/Katana.app
 ```
 
 ## Signing
@@ -246,7 +310,7 @@ from the environment, so a person signs a local package the same way:
 | Platform | Environment | Signs |
 |---|---|---|
 | Windows | `KATANA_SIGN_PFX` (a .pfx), `KATANA_SIGN_PASSWORD` | `katana.exe`, `katana_cli.exe`, `katana_mcp.exe` and the installer, Authenticode SHA-256, time-stamped, with `osslsigncode` (or `signtool`) |
-| macOS | `KATANA_SIGN_IDENTITY` (a keychain identity) | every library and plugin, then the programs, with the hardened runtime, time-stamped |
+| macOS | `KATANA_SIGN_IDENTITY` (a keychain identity) | every library and plugin, then the programs, then `Katana.app`, with the hardened runtime, time-stamped; afterwards the `.dmg` |
 
 The workflow fills those from repository secrets (Settings > Secrets and
 variables > Actions), and adds what CPack cannot do:
@@ -269,28 +333,20 @@ gpg --quick-generate-key "Jarada <address@example.com>" ed25519 sign 3y
 gpg --armor --export-secret-keys "Jarada" > jarada-signing.asc   # the GPG_PRIVATE_KEY secret
 ```
 
-The macOS package is notarised as a zip of its tree: a tarball cannot carry
-a stapled ticket, so Gatekeeper asks Apple's service the first time each
-program opens, which needs a network connection that once.
+The disk image is notarised as it is, and the ticket stapled to it
+(`xcrun stapler staple`), so Gatekeeper accepts `Katana.app` copied out of it
+without asking Apple's service, even offline.
 
 ## Not done
 
-* **The tests do not run in the release workflow.** It checks that each
-  package is complete, not that the code is correct; the suite is still run by
-  hand (`docs/testing.md`), and there is still no CI for it (audit BLD-01).
-  Running `ctest` in the Linux and macOS jobs would add most of an hour to
-  each, and the macOS suite has never been run at all.
+* **No CI on every change.** The whole suite runs in the release workflow,
+  which is started by hand; a change is still gated by running the suite
+  locally (`docs/testing.md`, audit BLD-01).
 * **Signing needs keys the repository does not yet hold.** Until the
   secrets in "Signing" are added, releases carry checksums only: SmartScreen
   warns on Windows and macOS quarantines the download.
-* **No `Katana.app` or `.dmg`.** A `.app` whose `Contents/` holds this same
-  tree, signed and notarised with a stapled ticket, is a packaging step of
-  its own.
-* **No Intel Mac build.** GitHub's Intel macOS runners are being retired; the
-  toolchain script would need `clangxx_osx-64` and an `x86_64` runner.
-* **The Windows ARM64 package has no installer**, only the zip: its job
-  does not install NSIS, and whether MSYS2's CLANGARM64 environment has a
-  package for it was not checked.
+* **The Windows ARM64 installer's own code is x86**, run emulated: NSIS has no
+  ARM64 build. The programs it installs are ARM64.
 * **No AppImage, `.deb` or Flatpak.** The Linux package is a tarball.
 * **The Windows toolchain is not frozen.** MSYS2 installs what it has on the
   day; two runs a month apart may build with different GCC and Qt versions.

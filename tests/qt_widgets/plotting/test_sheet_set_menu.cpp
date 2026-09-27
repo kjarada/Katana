@@ -142,11 +142,8 @@ struct Answers {
         QObject::connect(&timer, &QTimer::timeout, [this] {
             QWidget* modal = QApplication::activeModalWidget();
             if (auto* dialog = qobject_cast<QFileDialog*>(modal)) {
-                // QFileDialog's own accept is protected; through QDialog it
-                // is the same virtual call a click on Open makes.
                 if (filesSeen < files.size()) {
-                    dialog->selectFile(files[filesSeen++]);
-                    static_cast<QDialog*>(dialog)->accept();
+                    katana::qt::test::chooseFile(*dialog, files[filesSeen++]);
                 } else {
                     dialog->reject();
                 }
@@ -164,6 +161,30 @@ struct Answers {
 };
 
 } // namespace
+
+// The answer the tests below give a file dialog (widget_harness.hpp's
+// chooseFile) chooses the file whether or not the dialog has been activated
+// yet. Once it has, its file-name box has the focus, and QFileDialog::
+// selectFile leaves a focused box alone: the answer then chose nothing, and
+// which came first - the activation or the poll - was down to the load on
+// the machine. Here the dialog is made active first, the late poll's case,
+// every time.
+TEST(FileDialogAnswer, TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus)
+{
+    const ScratchDirectory scratch("focus");
+    const QString file = scratch.file("chosen.json");
+    ASSERT_TRUE(plotting::writeSheetSetFile(plotting::SheetSet{}, scratch.path / "chosen.json").ok());
+    QFileDialog dialog(nullptr, QStringLiteral("Load Sheet Set"),
+                       QString::fromStdWString(scratch.path.wstring()),
+                       QStringLiteral("Sheet sets (*.json)"));
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    ASSERT_TRUE(katana::qt::test::showActive(dialog));
+    ASSERT_NE(qobject_cast<QLineEdit*>(QApplication::focusWidget()), nullptr)
+        << "the file-name box has the focus, as it does once the dialog is active";
+    katana::qt::test::chooseFile(dialog, file);
+    EXPECT_EQ(dialog.result(), QDialog::Accepted);
+    EXPECT_EQ(dialog.selectedFiles().join('|').toStdString(), file.toStdString());
+}
 
 TEST(SheetSetMenu, TheMenuComesFirstWithEveryItemByName)
 {
