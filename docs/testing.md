@@ -263,39 +263,98 @@ still being brought up to this standard are named in the script's
 Run it alone with `python tools/check_docs.py` from the checkout root; it
 prints each broken reference with its file and line.
 
-## Not done: sixteen tests that fail in the Linux cloud container
+## The eighteen tests that failed in the Linux cloud container
 
-Measured on 2026-09-26 in the Linux container (GCC 16, Qt 6.11.2 from
-conda-forge, offscreen), on an unchanged build of `main` (b749688) as well as
-on the branch that found them, so none is a regression of either. They pass on
-the owner's Windows machine, where the suite is normally run.
+On 2026-09-26 sixteen tests failed, and two more failed now and then, in the
+Linux container (GCC 16, Qt 6.11.2 from conda-forge, offscreen) while they
+passed on the owner's Windows machine. On 2026-09-27 each was traced to its
+cause and fixed; a full `QT_QPA_PLATFORM=offscreen ctest --preset
+linux-release -j 2 --timeout 300` in the container then passes with no
+failures. What was wrong with each, and why it was fixed where it was:
 
-- **Four headless reports** - `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`,
+- **Four headless reports** (`qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`,
   `qt_drawing_summary_and_status_json_describe_the_drawing_headless`,
   `qt_plot_and_view_image_dialogs_run_their_verbs_headless`,
-  `qt_every_view_menu_item_is_named_and_its_values_are_typed_headless`: their
-  `-DEXPECT=` wants two report lines next to each other, and Linux's offscreen
-  plugin prints "This plugin does not support propagateSizeHints()" between
-  them whenever a window's minimum size changes (a dialog shown, views
-  arranged). The fix is in the checks, not the program: `.*` between the lines
-  those checks pair, or `check_screenshot.cmake` dropping that plugin's
-  "does not support" lines before it matches.
-- **Three Windows paths** - `qt_widgets.ScriptRunner.TheLineItWritesIsTheLineItReads`,
+  `qt_every_view_menu_item_is_named_and_its_values_are_typed_headless`).
+  Their `-DEXPECT=` wants two report lines next to each other. Linux's
+  offscreen plugin prints "This plugin does not support propagateSizeHints()"
+  between them whenever a window's minimum size changes. The program was not
+  at fault. `tools/check_screenshot.cmake` now drops Qt's window-management
+  "does not support" lines before it matches (`docs/headless.md`). Putting `.*`
+  between the paired lines was rejected: it would stop those checks proving
+  that two reports are adjacent. Without the filter all four fail again.
+- **Three Windows paths** (`qt_widgets.ScriptRunner.TheLineItWritesIsTheLineItReads`,
   `qt_widgets.PlotDrawing.TheLineItWritesIsTheLineItReads`,
-  `qt_widgets.Snapshot.TheLineItWritesIsTheLineItReads` write and read a line
-  naming `C:\...`, whose backslashes mean something else on Linux.
-- **One file dialog** - `qt_widgets.SheetViewOptions.AnImageViewsPictureIsChosenAndCopiedInOneStep`
-  answers `QFileDialog::getOpenFileName` by finding the modal `QFileDialog`
-  widget; this Qt shows a native dialog there, which is no widget, so the test
-  waits until ctest's timeout.
-- **Eight GPU desktop cases** - the `gpu.GpuSceneView.OnTheDesktop...` and
-  `qt_widgets_gpu.RenderViewGpu.OnTheDesktop...` cases, which need Xvfb and
-  Mesa's lavapipe (`docs/gpu.md`); not diagnosed further.
-- **Two more file dialogs, intermittently** - `qt_widgets.SheetSetMenu.TheSetIsSavedAndLoadedBackAskingFirst`
-  and `qt_widgets.SheetSetMenu.AnotherSetsSheetsAreAppendedInOneStep` failed
-  in a full `ctest -j 4` run on 2026-09-26 (the first wrote no file, the second
-  waited for a dialog until killed) and passed in each of four runs alone.
-  Their `Answers` helper polls for the modal dialog every 10 ms; under the
-  load of a parallel run it looks as though a poll misses the dialog. Not
-  diagnosed further; ctest sets no timeout for them, so a hang holds the whole
-  run.
+  `qt_widgets.Snapshot.TheLineItWritesIsTheLineItReads`).
+  The tests handed the line writer `C:\...` as a platform's file dialog would
+  on Windows, and expected `/` back. On Linux `QDir::fromNativeSeparators`
+  rightly leaves `\` alone, because POSIX allows it in a file name
+  (POSIX.1-2017, 3.170). So the code was right and the input was not a native
+  path there. The tests now build their input with `QDir::toNativeSeparators`.
+  On Windows that is exactly the old backslashed path, so nothing they assert
+  there is weaker. On POSIX there is no separator to convert, and that part of
+  the check can only be made on Windows.
+- **Three file dialogs: one always, two intermittently**
+  (`qt_widgets.SheetViewOptions.AnImageViewsPictureIsChosenAndCopiedInOneStep`,
+  `qt_widgets.SheetSetMenu.TheSetIsSavedAndLoadedBackAskingFirst`,
+  `qt_widgets.SheetSetMenu.AnotherSetsSheetsAreAppendedInOneStep`).
+  - What was wrong. The note written on 2026-09-26 guessed a native dialog.
+    That was wrong: a backtrace shows Qt's own widget `QFileDialog` in
+    `exec()`, with its file-system thread running. The cause is in how the
+    tests answered it. `QFileDialog::selectFile` writes the name into the
+    dialog's file-name box only while that box does not have the keyboard
+    focus (`qfiledialog.cpp`). The box takes the focus when the dialog is
+    activated, which on the offscreen platform happens in the first pass of
+    the dialog's own event loop.
+  - What followed. A 10 ms poll that ran before the activation chose the file.
+    One that ran after it left the box empty, and Open with an empty box
+    keeps the dialog up. The image test's poll always came after, and it had
+    stopped polling, so it waited for ever. The Sheet Set tests' poll came
+    before or after depending on load. Save then wrote the default name, and
+    Load waited.
+  - The fix. The one answer they now share, `chooseFile` in
+    `tests/qt_widgets/widget_harness.hpp`, takes the focus off the box before
+    `selectFile`. The image test's helper also cancels a dialog that is still
+    up rather than leaving it, so a choice that does not take fails the test
+    instead of hanging it.
+  - The regression test. `qt_widgets.FileDialogAnswer.TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus`
+    activates the dialog first, which is the late poll's case, every time.
+    Without the fix it fails (result 0, no file chosen). With the fix, the
+    three dialog tests and the rest of `SheetSetMenu` and `SheetViewOptions`
+    passed 20 repeats each, 4 at a time, with 4 more CPU-bound processes
+    running.
+  - Making the product force non-native dialogs was not needed and was not
+    done. The widget dialog is what the offscreen platform gives.
+- **Eight GPU desktop cases** (`gpu.GpuSceneView.OnTheDesktop...` x5,
+  `qt_widgets_gpu.RenderViewGpu.OnTheDesktop...` x3).
+  - What was wrong. "Failed to create Vulkan instance: -9" is
+    `VK_ERROR_INCOMPATIBLE_DRIVER`: the Vulkan loader found no driver, because
+    the container had no `mesa-vulkan-drivers`. Both the conda-forge loader in
+    the toolchain and the system one search `/usr/share/vulkan/icd.d`. With
+    the package installed, all eight draw on lavapipe under Xvfb and pass.
+    Pointing `VK_DRIVER_FILES` at nothing brings the -9 back.
+  - The fix. A machine with no Vulkan driver at all is a fact about the
+    machine, so these cases now skip there with that reason, as the device
+    cases already skip without a device (`whyNoVulkanDriver`,
+    `tests/gpu/gpu_test_support.cpp`, compiled into the widget tests too). A
+    driver that is there and fails still fails them.
+  - Found on the way. The three `qt_widgets_gpu.*` tests and
+    `gpu_offscreen.*` are plain `add_test`s, and a gtest skip exits 0, so
+    ctest reported a skipped case as passed. They now carry a
+    `SKIP_REGULAR_EXPRESSION`.
+  - For the release workflow. A Linux runner that is to exercise these
+    installs `xvfb` and `mesa-vulkan-drivers` before configuring. Without them
+    the cases skip, saying why, rather than fail.
+
+What still skips in that run, and why, all for reasons outside the program:
+
+- the tests that read the gitignored reference customisation, and the headless
+  quit check that is disabled without it;
+- the two `OnlineLive.*` cases (`KATANA_ONLINE_TESTS=1`);
+- the `gpu.*/Hardware` device cases, since the container has no GPU;
+- `GdalAdapter.GdalIsPointedAtTheCertificatesBesideLibcurl`, where the
+  environment already names the certificates;
+- the offscreen registrations of the desktop-only cases:
+  `gpu.GpuSceneView.UnderTheOffscreenPlatformReportsThatItCannotRenderSoTheHostFallsBack`
+  under xcb, which `gpu_offscreen.*` runs, and `qt_widgets.RenderViewGpu.OnTheDesktop...`,
+  which `qt_widgets_gpu.*` runs.
