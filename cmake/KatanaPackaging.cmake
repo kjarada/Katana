@@ -1,9 +1,10 @@
 # Installing, bundling and packaging.
 #
 #   cmake --build build/release --target bundle     -> build/release/dist/Katana/
-#   cmake --build build/release --target package    -> Katana-<version>-win64.zip,
-#                                     -win-arm64.zip, -linux-x86_64.tar.gz,
-#                                     -linux-aarch64.tar.gz, -macos-arm64.tar.gz
+#   cmake --build build/release --target package    -> Katana-<version>-win64.zip
+#                                     and .exe, -win-arm64.zip and .exe,
+#                                     -linux-x86_64.tar.gz, -linux-aarch64.tar.gz,
+#                                     -macos-arm64.dmg, -macos-x86_64.dmg
 #   cmake --install build/release --prefix <dir>    -> the same tree, anywhere
 #
 # The installed tree is SELF-CONTAINED: it runs on a machine with no MSYS2, no
@@ -24,17 +25,39 @@
 # <directory of the PROJ DLL>/../share/proj, so this layout is found without
 # any configuration, and interop::useBundledData points GDAL at share/gdal.
 
+# On macOS the same tree is an application bundle, Katana.app, laid out as
+# code signing and Finder expect: programs in Contents/MacOS, libraries and
+# Qt's plugins in Contents/Frameworks, and everything that is not code - GDAL,
+# PROJ and certificate data, the samples - in Contents/Resources. The tree
+# inside Contents keeps the relative layout the programs rely on
+# (KatanaDeployUnix.cmake.in), with Frameworks for lib/ and Resources for the
+# prefix of share/ and ssl/ (core/library_data.hpp).
+if(APPLE AND DEFINED KATANA_TOOLCHAIN)
+    set(KATANA_APP_BUNDLE "Katana.app")
+    # The name macOS files the application's settings and permissions under;
+    # reverse-DNS by convention, and never changed once released, since a new
+    # one is a different application to macOS.
+    set(KATANA_BUNDLE_IDENTIFIER "com.jarada.katana" CACHE STRING
+        "CFBundleIdentifier of Katana.app")
+    set(KATANA_INSTALL_BINDIR "${KATANA_APP_BUNDLE}/Contents/MacOS")
+    set(KATANA_INSTALL_DATADIR "${KATANA_APP_BUNDLE}/Contents/Resources/share")
+else()
+    set(KATANA_APP_BUNDLE "")
+    set(KATANA_INSTALL_BINDIR "${CMAKE_INSTALL_BINDIR}")
+    set(KATANA_INSTALL_DATADIR "${CMAKE_INSTALL_DATADIR}")
+endif()
+
 if(TARGET katana)
-    install(TARGETS katana RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS katana RUNTIME DESTINATION ${KATANA_INSTALL_BINDIR})
 endif()
 foreach(_katana_program katana_cli katana_mcp)
     if(TARGET ${_katana_program})
-        install(TARGETS ${_katana_program} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        install(TARGETS ${_katana_program} RUNTIME DESTINATION ${KATANA_INSTALL_BINDIR})
     endif()
 endforeach()
 
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/katana/samples"
+    DESTINATION "${KATANA_INSTALL_DATADIR}/katana/samples"
     # A project directory accumulates backups and caches as it is used; a
     # shipped sample should be the drawing and nothing else.
     PATTERN "backups" EXCLUDE
@@ -129,6 +152,10 @@ if(NOT WIN32 AND DEFINED KATANA_TOOLCHAIN)
     if(NOT IS_DIRECTORY "${KATANA_QT_PLUGIN_DIR}")
         set(KATANA_QT_PLUGIN_DIR "${KATANA_TOOLCHAIN}/lib/qt6/plugins")
     endif()
+    if(KATANA_APP_BUNDLE)
+        configure_file("${CMAKE_CURRENT_LIST_DIR}/KatanaInfo.plist.in"
+                       "${CMAKE_BINARY_DIR}/Info.plist" @ONLY)
+    endif()
     configure_file("${CMAKE_CURRENT_LIST_DIR}/KatanaDeployUnix.cmake.in"
                    "${CMAKE_BINARY_DIR}/KatanaDeployUnix.cmake" @ONLY)
     install(SCRIPT "${CMAKE_BINARY_DIR}/KatanaDeployUnix.cmake")
@@ -209,6 +236,7 @@ set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
 set(CPACK_POST_BUILD_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
 set(CPACK_KATANA_PUBLISHER "${KATANA_PUBLISHER}")
 set(CPACK_KATANA_OBJDUMP "${CMAKE_OBJDUMP}")
+set(CPACK_KATANA_APP_BUNDLE "${KATANA_APP_BUNDLE}")
 if(WIN32)
     # win64 is x86-64, as it has been since the first package; ARM64 says so.
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
@@ -218,11 +246,17 @@ if(WIN32)
     endif()
     # A ZIP always; an installer when NSIS is there to build one. NSIS is not
     # a dependency of the project, so its absence is not an error - install it
-    # with `pacman -S mingw-w64-ucrt-x86_64-nsis` and reconfigure.
+    # with `pacman -S mingw-w64-ucrt-x86_64-nsis` and reconfigure. MSYS2 has
+    # no NSIS for ARM64; NSIS's own x86 build, which Windows on ARM runs
+    # emulated, makes the same installer - pass -DKATANA_MAKENSIS=<its
+    # makensis.exe>. The installer's own code is x86 either way; what it
+    # installs is the programs built here.
     set(CPACK_GENERATOR "ZIP")
     find_program(KATANA_MAKENSIS NAMES makensis HINTS "${KATANA_RUNTIME_BIN}")
     if(KATANA_MAKENSIS)
         list(APPEND CPACK_GENERATOR "NSIS")
+        # The makensis found here, not one CPack finds for itself elsewhere.
+        set(CPACK_NSIS_EXECUTABLE "${KATANA_MAKENSIS}")
         set(CPACK_NSIS_DISPLAY_NAME "Katana ${PROJECT_VERSION}")
         set(CPACK_NSIS_PACKAGE_NAME "Katana")
         # C:\Program Files, not NSIS's default of Program Files (x86): these
@@ -237,7 +271,15 @@ if(WIN32)
     endif()
 elseif(APPLE)
     set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-macos-${CMAKE_SYSTEM_PROCESSOR}")
-    set(CPACK_GENERATOR "TGZ")
+    if(KATANA_APP_BUNDLE)
+        # A disk image holding Katana.app beside a link to /Applications, the
+        # drag-to-install a Mac user expects (CPack's DragNDrop adds the link).
+        set(CPACK_GENERATOR "DragNDrop")
+        set(CPACK_DMG_VOLUME_NAME "Katana ${PROJECT_VERSION}")
+        set(CPACK_DMG_FORMAT "UDZO")
+    else()
+        set(CPACK_GENERATOR "TGZ")
+    endif()
 else()
     set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-linux-${CMAKE_SYSTEM_PROCESSOR}")
     set(CPACK_GENERATOR "TGZ")

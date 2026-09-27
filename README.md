@@ -26,25 +26,28 @@ Each release on the repository's **Releases** page has one package per platform:
 | Platform | File | Runs on |
 |---|---|---|
 | Windows, Intel/AMD 64-bit | `Katana-X.Y.Z-win64.exe` (installer) or `Katana-X.Y.Z-win64.zip` | Windows 10 and 11, x64 |
-| Windows on ARM | `Katana-X.Y.Z-win-arm64.zip` | Windows 11 on ARM64 (Snapdragon and similar) |
+| Windows on ARM | `Katana-X.Y.Z-win-arm64.exe` (installer) or `Katana-X.Y.Z-win-arm64.zip` | Windows 11 on ARM64 (Snapdragon and similar) |
 | Linux, Intel/AMD 64-bit | `Katana-X.Y.Z-linux-x86_64.tar.gz` | glibc 2.28 or later: Ubuntu 20.04+, Debian 10+, RHEL/Rocky/Alma 8+, Fedora 29+ |
 | Linux on ARM | `Katana-X.Y.Z-linux-aarch64.tar.gz` | the same distributions on 64-bit ARM (AWS Graviton, Ampere, Raspberry Pi 4/5 with a 64-bit OS) |
-| macOS | `Katana-X.Y.Z-macos-arm64.tar.gz` | macOS 13 Ventura or later on Apple silicon (M1 and later) |
+| macOS, Apple silicon | `Katana-X.Y.Z-macos-arm64.dmg` | macOS 13 Ventura or later on M1 and later |
+| macOS, Intel | `Katana-X.Y.Z-macos-x86_64.dmg` | macOS 13 Ventura or later on an Intel Mac |
 | all | `SHA256SUMS.txt` | the checksum of every file above |
 | all, when signed | `*.asc`, `katana-signing-key.asc` | OpenPGP signatures, and the key they verify against |
 
 Every package is self-contained. It carries Qt, GDAL, PDAL, PROJ and the
 C++ runtime, so you don't need to install anything else except where a
-platform below says so. Nothing is written outside the folder you unpack it
-into, apart from your own projects and settings.
+platform below says so. Nothing is written outside the folder (or the app)
+you install it into, apart from your own projects and settings.
 
 ---
 
 ## Install on Windows
 
-### With the installer (x64)
+### With the installer (x64 or ARM64)
 
-1. Download `Katana-X.Y.Z-win64.exe` and run it.
+1. Download `Katana-X.Y.Z-win64.exe` (Intel/AMD) or
+   `Katana-X.Y.Z-win-arm64.exe` (ARM) and run it. Check which one you need
+   in **Settings > System > About > System type**.
 2. If Windows SmartScreen says "Windows protected your PC", choose
    **More info**, then **Run anyway**. This appears while the installer is
    not signed with a certificate Windows already trusts; see
@@ -52,6 +55,16 @@ into, apart from your own projects and settings.
 3. Choose a folder (the default is `C:\Program Files\Katana`) and finish.
    Katana appears in the Start menu. Uninstall it from
    **Settings > Apps**, where the publisher is shown as Jarada.
+
+To install it without questions, for example from a deployment script, run
+the installer with `/S`, and choose the folder with `/D=`, which must come
+last and is not quoted:
+
+```powershell
+Start-Process .\Katana-X.Y.Z-win64.exe -ArgumentList '/S','/D=C:\Katana' -Wait
+```
+
+Its uninstaller, `C:\Katana\Uninstall.exe`, takes `/S` too.
 
 ### From the zip (x64 or ARM64)
 
@@ -132,36 +145,33 @@ made them).
 
 ## Install on macOS
 
-1. Download `Katana-X.Y.Z-macos-arm64.tar.gz` (Apple silicon only; check
-   **Apple menu > About This Mac**: the chip is "Apple M...").
-2. Unpack it into Applications or anywhere else. Double-clicking the file in
-   Finder does it, or in Terminal:
-
-   ```sh
-   tar -xzf ~/Downloads/Katana-X.Y.Z-macos-arm64.tar.gz -C ~/Applications
-   ```
-
-3. If the release was not notarised by Apple, macOS says "Katana can't be
+1. Download the disk image for your Mac. **Apple menu > About This Mac**
+   shows the chip: "Apple M..." needs `Katana-X.Y.Z-macos-arm64.dmg`, "Intel"
+   needs `Katana-X.Y.Z-macos-x86_64.dmg`.
+2. Open the `.dmg` and drag **Katana** onto the **Applications** folder
+   beside it. Then eject the disk image.
+3. Open Katana from Applications or Launchpad. To keep it in the Dock,
+   right-click its Dock icon while it runs and choose **Options > Keep in
+   Dock**.
+4. If the release was not notarised by Apple, macOS says "Katana can't be
    opened because Apple cannot check it". Clear the download quarantine
    once, and it opens normally from then on:
 
    ```sh
-   xattr -dr com.apple.quarantine ~/Applications/Katana-X.Y.Z-macos-arm64
+   xattr -dr com.apple.quarantine /Applications/Katana.app
    ```
 
    A notarised release (see [Verify a download](#verify-a-download)) opens
    without this step.
 
-4. Run it:
+The command-line programs are inside the app. To use them from Terminal:
 
-   ```sh
-   ~/Applications/Katana-X.Y.Z-macos-arm64/bin/katana
-   ```
+```sh
+/Applications/Katana.app/Contents/MacOS/katana_cli --help
+ln -s /Applications/Katana.app/Contents/MacOS/katana_cli /usr/local/bin/katana_cli   # optional
+```
 
-   Or double-click `bin/katana` in Finder. To keep it in the Dock, right-click
-   its Dock icon while it runs and choose **Options > Keep in Dock**.
-
-To remove it, delete the folder.
+To remove it, drag Katana from Applications to the Bin.
 
 ---
 
@@ -186,7 +196,7 @@ whatever signing keys the repository holds when the release is made:
 |---|---|---|
 | OpenPGP | a `.asc` beside every file | `gpg --import katana-signing-key.asc`, then `gpg --verify Katana-X.Y.Z-linux-x86_64.tar.gz.asc` |
 | Authenticode (Windows) | inside `katana.exe`, `katana_cli.exe`, `katana_mcp.exe` and the installer | right-click the file > **Properties** > **Digital Signatures** |
-| Developer ID and notarisation (macOS) | inside every program and library | `codesign --verify --deep --strict --verbose=2 bin/katana` and `spctl --assess --type execute -v bin/katana` |
+| Developer ID and notarisation (macOS) | on the disk image, and inside the app and every library | `codesign --verify --deep --strict --verbose=2 /Applications/Katana.app` and `spctl --assess --type execute -v /Applications/Katana.app` |
 
 A release made without a key has only the checksums, and the platforms
 behave as described in the install steps above: SmartScreen on Windows,
@@ -243,7 +253,7 @@ The toolchains, presets and options are in `docs/building.md`; in short:
 |---|---|---|
 | Windows | MSYS2 UCRT64 (x64) or CLANGARM64 (ARM64) | `cmake --preset release` then `cmake --build build/release --parallel` |
 | Linux (x64, ARM64) | `python3 tools/setup_linux_toolchain.py` installs GCC 16 and the libraries from conda-forge | `cmake --preset linux-release` then `cmake --build --preset linux-release --parallel` |
-| macOS (Apple silicon) | the same script installs clang and the libraries | `cmake --preset macos-release` then `cmake --build --preset macos-release --parallel` |
+| macOS (Apple silicon, Intel) | the same script installs clang and the libraries for the Mac it runs on | `cmake --preset macos-release` then `cmake --build --preset macos-release --parallel` |
 
 `cmake --build <build> --target package` makes the same package a release
 ships. The tests run with `ctest --preset <preset>`; `docs/testing.md` covers
@@ -253,9 +263,10 @@ them.
 
 Releases are built by the **Release** workflow, which runs only when started
 by hand: **Actions > Release > Run workflow**. Given a tag `vX.Y.Z` matching
-`project(Katana VERSION ...)` in `CMakeLists.txt`, it builds all five
-packages, starts each one from its unpacked archive, signs them, and
-publishes the release. Without a tag it builds and tests them only.
+`project(Katana VERSION ...)` in `CMakeLists.txt`, it builds all six
+platforms, runs the whole test suite on each, starts each package and
+installer as a user would, signs them, and publishes the release. Without a
+tag it builds and tests them only.
 `docs/release.md` has the details, including how to add the signing keys.
 
 ## Documentation
