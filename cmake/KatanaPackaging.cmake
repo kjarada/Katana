@@ -4,7 +4,7 @@
 #   cmake --build build/release --target package    -> Katana-<version>-win64.zip
 #                                     and .exe, -win-arm64.zip and .exe,
 #                                     -linux-x86_64.tar.gz, -linux-aarch64.tar.gz,
-#                                     -macos-arm64.dmg, -macos-x86_64.dmg
+#                                     -macos-arm64.dmg
 #   cmake --install build/release --prefix <dir>    -> the same tree, anywhere
 #
 # The installed tree is SELF-CONTAINED: it runs on a machine with no MSYS2, no
