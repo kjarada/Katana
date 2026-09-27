@@ -40,6 +40,7 @@
 #include "cpl_error_collector.hpp"
 #include "gdal_registry.hpp"
 #include "geo/formats_detail.hpp"
+#include "katana/core/library_data.hpp"
 #include "katana/core/text.hpp"
 #include "katana/gis/formats.hpp"
 #include "katana/gis/processing.hpp"
@@ -138,6 +139,46 @@ void locateGdalData()
         const std::u8string utf8 = data.generic_u8string();
         CPLSetConfigOption("GDAL_DATA", std::string(utf8.begin(), utf8.end()).c_str());
     }
+#else
+    // Linux and macOS: a relocated prefix - the Linux and macOS bundles
+    // (cmake/KatanaDeployUnix.cmake.in) - keeps libgdal in lib/ and its data in
+    // share/gdal, while the path compiled into GDAL names the toolchain prefix
+    // on the machine that built it, which the bundle's machine does not have.
+#if defined(__APPLE__)
+    constexpr std::string_view library = "libgdal."; // libgdal.38.dylib
+#else
+    constexpr std::string_view library = "libgdal.so";
+#endif
+    if (const auto data = katana::core::dataBesideLibrary(library, "share/gdal")) {
+        CPLSetConfigOption("GDAL_DATA", data->string().c_str());
+    }
+#endif
+}
+
+// Tells libcurl, through GDAL, which certificates https:// is checked against,
+// when nothing else has. The Windows deploy puts them where MSYS2's libcurl
+// looks by itself (etc/ssl/certs beside bin/); conda-forge's libcurl, which the
+// Linux and macOS builds use, looks at <its prefix>/ssl/cacert.pem, compiled
+// in, so in a relocated bundle it would find none and refuse every https://
+// answer. The deploy copies the file to ssl/cacert.pem beside lib/ and this
+// points GDAL at it. A distribution's libcurl has no ssl/ beside its
+// directory, so its own default stands; CURL_CA_BUNDLE or SSL_CERT_FILE, set
+// by the user, win.
+void locateCertificates()
+{
+#if defined(__linux__) || defined(__APPLE__)
+    if (CPLGetConfigOption("CURL_CA_BUNDLE", nullptr) != nullptr ||
+        CPLGetConfigOption("SSL_CERT_FILE", nullptr) != nullptr) {
+        return;
+    }
+#if defined(__APPLE__)
+    constexpr std::string_view library = "libcurl."; // libcurl.4.dylib
+#else
+    constexpr std::string_view library = "libcurl.so";
+#endif
+    if (const auto bundle = katana::core::dataBesideLibrary(library, "ssl/cacert.pem")) {
+        CPLSetConfigOption("CURL_CA_BUNDLE", bundle->string().c_str());
+    }
 #endif
 }
 
@@ -146,6 +187,7 @@ void ensureRegistered()
     static std::once_flag once;
     std::call_once(once, [] {
         locateGdalData();
+        locateCertificates();
         katana::io_detail::pointGdalAtProjData();
         GDALAllRegister();
         // Keep GDAL's chatter off stderr; failures are reported through Result

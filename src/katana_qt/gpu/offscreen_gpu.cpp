@@ -95,6 +95,14 @@ OffscreenGpu::create(int width, int height, const OffscreenOptions& options)
     QRhiVulkanInitParams params;
     params.inst = p.vulkan.get();
     p.rhi.reset(QRhi::create(QRhi::Vulkan, &params, flags));
+#elif defined(KATANA_GPU_METAL)
+    // Metal needs no window or platform plugin, so, as Direct3D 11 does on
+    // Windows, it renders into a texture under Qt's offscreen platform. macOS
+    // has no software Metal device: PreferSoftwareRenderer finds none and the
+    // check below says so.
+    const char* const api = "Metal";
+    QRhiMetalInitParams params;
+    p.rhi.reset(QRhi::create(QRhi::Metal, &params, flags));
 #endif
     if (!p.rhi) {
         return makeError(ErrorCode::Unsupported,

@@ -57,6 +57,8 @@ bool onDesktop()
     const QString platform = QGuiApplication::platformName();
 #if defined(KATANA_GPU_VULKAN)
     return platform == QStringLiteral("xcb") || platform == QStringLiteral("wayland");
+#elif defined(KATANA_GPU_METAL)
+    return platform == QStringLiteral("cocoa");
 #else
     return platform == QStringLiteral("windows");
 #endif
@@ -64,6 +66,9 @@ bool onDesktop()
 
 #if defined(KATANA_GPU_VULKAN)
 constexpr const char* kNeedsDesktop = "needs the xcb or wayland platform (ctest runs it under Xvfb)";
+#elif defined(KATANA_GPU_METAL)
+constexpr const char* kNeedsDesktop =
+    "needs the cocoa platform (KATANA_GPU_TEST_PLATFORM=cocoa)";
 #else
 constexpr const char* kNeedsDesktop =
     "needs the windows platform (KATANA_GPU_TEST_PLATFORM=windows)";

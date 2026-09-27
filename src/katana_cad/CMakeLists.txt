@@ -78,7 +78,7 @@ target_sources(katana_cad PRIVATE ${_cad_geo_sources})
 katana_target_defaults(katana_cad)
 # The scene build's kernels (docs/performance.md, "SIMD: kernels chosen at run
 # time"): lighting, colour and edge fades of dense TINs and meshes.
-katana_add_simd_sources(katana_cad AVX2 simd/scene_avx2.cpp)
+katana_add_simd_sources(katana_cad AVX2 simd/scene_avx2.cpp NEON simd/scene_neon.cpp)
 # katana_geodesy for the survey tools' coordinate converter (survey_tools.cpp):
 # the one survey tool whose answer is PROJ's, reached through the transformer
 # that refuses a ballpark datum shift. tools/check_layering.cmake already lets
