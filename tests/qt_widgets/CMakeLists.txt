@@ -148,6 +148,11 @@ katana_target_defaults(katana_qt_widget_tests)
 # compile what the application does; offscreen, the rules choose software.
 if(TARGET katana_gpu)
     target_link_libraries(katana_qt_widget_tests PRIVATE katana_gpu)
+    # The GPU suite's support, for its whyNoVulkanDriver: the OnTheDesktop
+    # cases of test_render_view_gpu.cpp skip on it as the gpu suite's do.
+    target_sources(katana_qt_widget_tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests/gpu/gpu_test_support.cpp")
+    target_include_directories(katana_qt_widget_tests PRIVATE "${PROJECT_SOURCE_DIR}/tests/gpu")
 endif()
 set_target_properties(katana_qt_widget_tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
@@ -181,9 +186,13 @@ if(TARGET katana_gpu AND NOT WIN32 AND KATANA_XVFB_RUN)
         add_test(NAME qt_widgets_gpu.RenderViewGpu.${_case}
             COMMAND "${KATANA_XVFB_RUN}" -a -s "-screen 0 1280x1024x24"
                     $<TARGET_FILE:katana_qt_widget_tests> --gtest_filter=RenderViewGpu.${_case})
+        # A case that skips - no Vulkan driver on the machine - exits 0, which
+        # a plain add_test would count as passed; gtest_discover_tests says
+        # so for the other cases, this says so for these.
         set_tests_properties(qt_widgets_gpu.RenderViewGpu.${_case} PROPERTIES
             ENVIRONMENT_MODIFICATION
                 "QT_QPA_PLATFORM=set:offscreen;KATANA_WIDGET_TEST_PLATFORM=set:xcb;KATANA_RENDERER=set:gpu"
+            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
             TIMEOUT 120)
     endforeach()
 endif()
