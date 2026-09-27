@@ -616,19 +616,28 @@ struct StyleManagerDialog::Impl {
     // instantiating its body to find out.
     void connectGuarded(auto* sender, auto signal, auto slot)
     {
-        using Slot = decltype(slot);
         QObject::connect(sender, signal, guard.get(),
                          [this, slot = std::move(slot)](const auto&... args) -> void {
                              if (!live()) {
                                  return;
                              }
-                             if constexpr (std::is_invocable_v<const Slot&,
-                                                               decltype(args)...>) {
-                                 slot(args...);
-                             } else {
-                                 slot();
-                             }
+                             callSlot(slot, args...);
                          });
+    }
+
+    // The slot with the signal's arguments when it takes them, else with none.
+    // A function of its own so that the call without arguments depends on the
+    // arguments' types: written inline, in the wrapper above, `slot()` does
+    // not, and clang checks it - and rejects it for a slot that takes them -
+    // as soon as connectGuarded is instantiated.
+    template <typename Slot, typename... Args>
+    static void callSlot(const Slot& slot, const Args&... args)
+    {
+        if constexpr (std::is_invocable_v<const Slot&, const Args&...>) {
+            slot(args...);
+        } else {
+            slot();
+        }
     }
 
     // ---- selection ----------------------------------------------------------------------
