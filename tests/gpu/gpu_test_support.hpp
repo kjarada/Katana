@@ -24,6 +24,14 @@ using Image = std::vector<katana::render::Rgba>;
                                                     std::string& whyNot,
                                                     const OffscreenOptions& base = {});
 
+// Empty when this machine can make a Vulkan instance - some driver is
+// installed, lavapipe at the least - or when the build is not the Vulkan one;
+// otherwise why not. The OnTheDesktop cases skip on it as the device cases
+// skip on makeGpu: a machine with no Vulkan driver at all (a container
+// without mesa-vulkan-drivers) is a fact about the machine, not a failure of
+// the view. A driver that is there and fails still fails the case.
+[[nodiscard]] std::string whyNoVulkanDriver();
+
 // The same list through the software rasteriser, single-threaded, at the
 // camera's viewport size.
 [[nodiscard]] Image cpuRender(const katana::render::DrawList& list,

@@ -457,6 +457,13 @@ packing and fallback cases need no device and always run.
   `mesa-vulkan-drivers`, `xvfb`). The one offscreen case is registered again as
   `gpu_offscreen.*`. Without `xvfb-run` the suite runs offscreen and its device
   cases skip, saying why.
+  Without a Vulkan driver at all (no `mesa-vulkan-drivers` and no GPU driver:
+  the loader's "Failed to create Vulkan instance: -9") the `OnTheDesktop`
+  cases skip too, saying so, through the suite's `whyNoVulkanDriver`, as the
+  device cases skip without a device; a driver that is there and fails still
+  fails them. The `gpu_offscreen.*` and `qt_widgets_gpu.*` tests are plain
+  `add_test`s, so they carry a `SKIP_REGULAR_EXPRESSION`: without it ctest
+  counted a skipped case as passed.
 
 A GPU frame is never bit-identical to the CPU's (multisampled edges, the
 antialiased fringe, fill rules rounding differently at exact pixel centres), nor

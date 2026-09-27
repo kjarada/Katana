@@ -162,6 +162,9 @@ struct ScratchDirectory {
 };
 
 // The next file dialog answered with `file`, as a person picks it.
+// The first file dialog is answered with `file`; one that is still up, or
+// another, is cancelled, so that a choice that did not take fails the test
+// rather than leaving it waiting.
 struct FileAnswer {
     QTimer timer;
     bool seen = false;
@@ -173,12 +176,12 @@ struct FileAnswer {
             if (dialog == nullptr) {
                 return;
             }
+            if (seen) {
+                dialog->reject();
+                return;
+            }
             seen = true;
-            timer.stop();
-            dialog->selectFile(file);
-            // QFileDialog's own accept is protected; through QDialog it is
-            // the same virtual call a click on Open makes.
-            static_cast<QDialog*>(dialog)->accept();
+            katana::qt::test::chooseFile(*dialog, file);
         });
         timer.start();
     }
