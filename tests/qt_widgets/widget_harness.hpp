@@ -9,6 +9,7 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QFileDialog>
 #include <QWidget>
 
 #include "katana/cad/document.hpp"
@@ -44,6 +45,28 @@ inline bool showActive(QWidget& window)
         QCoreApplication::processEvents();
     }
     return QApplication::activeWindow() == &window;
+}
+
+// Chooses `file` in a QFileDialog drawn with Qt's own widgets and accepts it,
+// as typing the name and pressing Open does. QFileDialog::selectFile writes
+// the name into the dialog's file-name box only while that box does NOT have
+// the keyboard focus (qfiledialog.cpp: `if (!isVisible() ||
+// !d->lineEdit()->hasFocus())`), and the box takes the focus when the dialog
+// is activated - on the offscreen platform, in the first pass of the
+// dialog's own event loop. A poll that came before the activation chose the
+// file; one that came after left the box empty, and Open with an empty box
+// keeps the dialog up: the image test waited for ever, the Sheet Set tests
+// wrote to the default name or waited, depending on the load of the machine.
+// Taking the focus off the box first makes the choice the same either way.
+inline void chooseFile(QFileDialog& dialog, const QString& file)
+{
+    if (QWidget* focused = dialog.focusWidget()) {
+        focused->clearFocus();
+    }
+    dialog.selectFile(file);
+    // QFileDialog's own accept is protected; through QDialog it is the same
+    // virtual call a click on Open makes.
+    static_cast<QDialog&>(dialog).accept();
 }
 
 // A view of `kind` in `parent`, as ViewWorkspace::buildContent makes one,

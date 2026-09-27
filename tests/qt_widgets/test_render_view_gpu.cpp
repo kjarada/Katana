@@ -7,7 +7,7 @@
 // tests/qt_widgets/CMakeLists.txt); on Windows, run the binary with
 // KATANA_WIDGET_TEST_PLATFORM=windows by hand. Offscreen, where the rest of
 // this suite runs, they skip - and there the software view is what every
-// other case tests.
+// other case tests. They skip, too, on a machine with no Vulkan driver at all.
 //
 // Each case runs in a process of its own under ctest, which matters to the
 // last: a GPU view that failed is not tried again for the rest of the
@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <string>
 
 #include <QApplication>
 #include <QImage>
@@ -28,6 +29,7 @@
 
 #if defined(KATANA_HAS_GPU)
 #include "gpu/gpu_scene_view.hpp"
+#include "gpu_test_support.hpp"
 #endif
 
 using katana::cad::Document;
@@ -57,6 +59,19 @@ namespace {
     return false;
 #endif
 }
+
+#if defined(KATANA_HAS_GPU)
+// Empty when these cases can run: a platform the GPU view can be shown on,
+// and a driver to draw with (the gpu suite's whyNoVulkanDriver).
+std::string whyNotShown()
+{
+    if (!gpuCanBeShown()) {
+        return "needs a platform the GPU view can be shown on; this is " +
+               QGuiApplication::platformName().toStdString();
+    }
+    return katana::qt::gpu::testing::whyNoVulkanDriver();
+}
+#endif
 
 // Pixels of `frame` that are not the view's background (28, 30, 36).
 [[maybe_unused]] std::size_t drawnPixels(const QImage& frame)
@@ -110,9 +125,8 @@ struct OneLine {
 // the target (as test_render_view.cpp works out for the software view).
 TEST(RenderViewGpu, OnTheDesktopTheHostsLayersAreDrawnByItsGpuChild)
 {
-    if (!gpuCanBeShown()) {
-        GTEST_SKIP() << "needs a platform the GPU view can be shown on; this is "
-                     << QGuiApplication::platformName().toStdString();
+    if (const std::string why = whyNotShown(); !why.empty()) {
+        GTEST_SKIP() << why;
     }
     OneLine scene;
     ViewState& state = scene.views.add(ViewKind::Model3D);
@@ -143,9 +157,8 @@ TEST(RenderViewGpu, OnTheDesktopTheHostsLayersAreDrawnByItsGpuChild)
 // hands them over at the next frame, the terrain's untouched.
 TEST(RenderViewGpu, OnTheDesktopAnEditReachesTheGpuView)
 {
-    if (!gpuCanBeShown()) {
-        GTEST_SKIP() << "needs a platform the GPU view can be shown on; this is "
-                     << QGuiApplication::platformName().toStdString();
+    if (const std::string why = whyNotShown(); !why.empty()) {
+        GTEST_SKIP() << why;
     }
     OneLine scene;
     ViewState& state = scene.views.add(ViewKind::Model3D);
@@ -173,9 +186,8 @@ TEST(RenderViewGpu, OnTheDesktopAnEditReachesTheGpuView)
 // view of the session tries the GPU again (renderer_choice.hpp, rule 4).
 TEST(RenderViewGpu, OnTheDesktopAFailedGpuViewLeavesTheSessionToTheSoftwareRasteriser)
 {
-    if (!gpuCanBeShown()) {
-        GTEST_SKIP() << "needs a platform the GPU view can be shown on; this is "
-                     << QGuiApplication::platformName().toStdString();
+    if (const std::string why = whyNotShown(); !why.empty()) {
+        GTEST_SKIP() << why;
     }
     OneLine scene;
     ViewState& state = scene.views.add(ViewKind::Model3D);
