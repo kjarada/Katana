@@ -29,8 +29,7 @@ Each release on the repository's **Releases** page has one package per platform:
 | Windows on ARM | `Katana-X.Y.Z-win-arm64.exe` (installer) or `Katana-X.Y.Z-win-arm64.zip` | Windows 11 on ARM64 (Snapdragon and similar) |
 | Linux, Intel/AMD 64-bit | `Katana-X.Y.Z-linux-x86_64.tar.gz` | glibc 2.28 or later: Ubuntu 20.04+, Debian 10+, RHEL/Rocky/Alma 8+, Fedora 29+ |
 | Linux on ARM | `Katana-X.Y.Z-linux-aarch64.tar.gz` | the same distributions on 64-bit ARM (AWS Graviton, Ampere, Raspberry Pi 4/5 with a 64-bit OS) |
-| macOS, Apple silicon | `Katana-X.Y.Z-macos-arm64.dmg` | macOS 13 Ventura or later on M1 and later |
-| macOS, Intel | `Katana-X.Y.Z-macos-x86_64.dmg` | macOS 13 Ventura or later on an Intel Mac |
+| macOS | `Katana-X.Y.Z-macos-arm64.dmg` | macOS 13 Ventura or later on Apple silicon (M1 and later); Intel Macs are not supported |
 | all | `SHA256SUMS.txt` | the checksum of every file above |
 | all, when signed | `*.asc`, `katana-signing-key.asc` | OpenPGP signatures, and the key they verify against |
 
@@ -145,9 +144,8 @@ made them).
 
 ## Install on macOS
 
-1. Download the disk image for your Mac. **Apple menu > About This Mac**
-   shows the chip: "Apple M..." needs `Katana-X.Y.Z-macos-arm64.dmg`, "Intel"
-   needs `Katana-X.Y.Z-macos-x86_64.dmg`.
+1. Download `Katana-X.Y.Z-macos-arm64.dmg`. It runs on Apple silicon only:
+   **Apple menu > About This Mac** must show the chip as "Apple M...".
 2. Open the `.dmg` and drag **Katana** onto the **Applications** folder
    beside it. Then eject the disk image.
 3. Open Katana from Applications or Launchpad. To keep it in the Dock,
@@ -253,7 +251,7 @@ The toolchains, presets and options are in `docs/building.md`; in short:
 |---|---|---|
 | Windows | MSYS2 UCRT64 (x64) or CLANGARM64 (ARM64) | `cmake --preset release` then `cmake --build build/release --parallel` |
 | Linux (x64, ARM64) | `python3 tools/setup_linux_toolchain.py` installs GCC 16 and the libraries from conda-forge | `cmake --preset linux-release` then `cmake --build --preset linux-release --parallel` |
-| macOS (Apple silicon, Intel) | the same script installs clang and the libraries for the Mac it runs on | `cmake --preset macos-release` then `cmake --build --preset macos-release --parallel` |
+| macOS (Apple silicon) | the same script installs clang and the libraries | `cmake --preset macos-release` then `cmake --build --preset macos-release --parallel` |
 
 `cmake --build <build> --target package` makes the same package a release
 ships. The tests run with `ctest --preset <preset>`; `docs/testing.md` covers
@@ -263,7 +261,7 @@ them.
 
 Releases are built by the **Release** workflow, which runs only when started
 by hand: **Actions > Release > Run workflow**. Given a tag `vX.Y.Z` matching
-`project(Katana VERSION ...)` in `CMakeLists.txt`, it builds all six
+`project(Katana VERSION ...)` in `CMakeLists.txt`, it builds all five
 platforms, runs the whole test suite on each, starts each package and
 installer as a user would, signs them, and publishes the release. Without a
 tag it builds and tests them only.

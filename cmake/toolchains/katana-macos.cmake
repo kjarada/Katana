@@ -12,17 +12,7 @@ else()
     set(KATANA_TOOLCHAIN "/opt/katana-toolchain")
 endif()
 
-# conda-forge's compilers are named by target triple: Apple silicon's toolchain
-# starts at Darwin 20 (macOS 11), the Intel one at Darwin 13.4. The machine
-# builds for itself, as the setup script installs the toolchain for it.
-if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
-    set(_katana_triple "arm64-apple-darwin20.0.0")
-    set(_katana_arch "arm64")
-else()
-    set(_katana_triple "x86_64-apple-darwin13.4.0")
-    set(_katana_arch "x86_64")
-endif()
-set(_katana_cxx "${KATANA_TOOLCHAIN}/bin/${_katana_triple}-clang++")
+set(_katana_cxx "${KATANA_TOOLCHAIN}/bin/arm64-apple-darwin20.0.0-clang++")
 if(NOT EXISTS "${_katana_cxx}")
     message(FATAL_ERROR
         "No Katana toolchain at ${KATANA_TOOLCHAIN} (${_katana_cxx} is missing). "
@@ -30,9 +20,11 @@ if(NOT EXISTS "${_katana_cxx}")
         "or point KATANA_TOOLCHAIN at the prefix it was installed into.")
 endif()
 
-set(CMAKE_C_COMPILER "${KATANA_TOOLCHAIN}/bin/${_katana_triple}-clang")
+set(CMAKE_C_COMPILER "${KATANA_TOOLCHAIN}/bin/arm64-apple-darwin20.0.0-clang")
 set(CMAKE_CXX_COMPILER "${_katana_cxx}")
-set(CMAKE_OSX_ARCHITECTURES "${_katana_arch}" CACHE STRING "")
+# Apple silicon only: Intel Macs are not a target (the owner's decision,
+# 2026-09-27; docs/release.md, "macOS").
+set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "")
 # The oldest macOS the programs start on: 13, the oldest Qt 6.11 supports
 # (conda-forge builds the other libraries for 11.0).
 set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "")
