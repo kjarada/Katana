@@ -211,6 +211,29 @@ execute_process(
     OUTPUT_VARIABLE out
     ERROR_VARIABLE err
     TIMEOUT 120)
+# What a platform plugin says it cannot do with a window is taken out before
+# anything is matched. Qt's QPlatformWindow prints these notes (its default
+# raise(), lower(), propagateSizeHints() and so on, qplatformwindow.cpp) when
+# the plugin has no window manager to ask - Linux's offscreen plugin prints
+# "This plugin does not support propagateSizeHints()" whenever a window's
+# minimum size changes, Windows' offscreen plugin does not - so they fall
+# between report lines an EXPECT pairs, on one platform only. They are Qt's
+# words about the platform, not the application's; only whole lines naming a
+# window-management request are dropped, so a note that matters (no Vulkan
+# instance, no fonts, no OpenGL context) is still there to be matched.
+# Loosening each EXPECT to `.*` between its lines was rejected: it would stop
+# those checks proving that two reports are next to each other.
+foreach(_stream out err)
+    set(_text "\n${${_stream}}")
+    set(_before "")
+    while(NOT _text STREQUAL _before)
+        set(_before "${_text}")
+        string(REGEX REPLACE
+            "\nThis plugin does not support (propagateSizeHints\\(\\)|raise\\(\\)|lower\\(\\)|setting window (opacity|masks)|grabbing the (keyboard|mouse))\r?\n"
+            "\n" _text "${_text}")
+    endwhile()
+    string(SUBSTRING "${_text}" 1 -1 ${_stream})
+endforeach()
 # -DREFUSED=<regex>: the run must be REFUSED - exit 1, which is how the
 # application turns down a step it cannot take (a --fill of a choice the
 # dialog does not offer, a --press of a disabled button); a crash is not a

@@ -69,5 +69,7 @@ if(NOT _katana_gpu_platform STREQUAL "offscreen")
     set_tests_properties(
         gpu_offscreen.GpuSceneView.UnderTheOffscreenPlatformReportsThatItCannotRenderSoTheHostFallsBack
         PROPERTIES ENVIRONMENT_MODIFICATION
-            "QT_QPA_PLATFORM=set:offscreen;KATANA_GPU_TEST_PLATFORM=set:offscreen")
+            "QT_QPA_PLATFORM=set:offscreen;KATANA_GPU_TEST_PLATFORM=set:offscreen"
+            # A skip exits 0; without this a plain add_test calls it passed.
+            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]")
 endif()

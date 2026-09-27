@@ -16,7 +16,8 @@
 #                                  Application: <name> (<team>)"
 #            -> codesign with the hardened runtime, time-stamped; every
 #               library and plugin too, since the hardened runtime loads
-#               only code signed by the same team
+#               only code signed by the same team; then Katana.app, and
+#               afterwards the disk image
 #   both     KATANA_SIGN_TIMESTAMP the time-stamp server (default DigiCert's)
 #
 # Linux has no signature inside a package; the release's files are signed
@@ -102,9 +103,10 @@ if(NOT "$ENV{KATANA_SIGN_PFX}" STREQUAL "")
         endforeach()
     endif()
 elseif(NOT "$ENV{KATANA_SIGN_IDENTITY}" STREQUAL "" AND _stage STREQUAL "pre")
-    # Libraries first, the programs that load them last: a signature covers
-    # the file it is in, and the programs are the entry points Gatekeeper
-    # checks.
+    # Inside out: the libraries and plugins, then the programs that load
+    # them, then Katana.app, whose seal records every nested signature and
+    # resource. A signature covers the file it is in, and the hardened
+    # runtime loads only libraries signed by the same team.
     file(GLOB_RECURSE _libraries "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*.dylib"
                                  "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*.so")
     foreach(_library IN LISTS _libraries)
@@ -112,13 +114,35 @@ elseif(NOT "$ENV{KATANA_SIGN_IDENTITY}" STREQUAL "" AND _stage STREQUAL "pre")
             _katana_sign_macos("${_library}")
         endif()
     endforeach()
-    file(GLOB_RECURSE _programs "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*/bin/katana*")
+    file(GLOB_RECURSE _programs "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*/MacOS/katana*"
+                                "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*/bin/katana*")
     foreach(_program IN LISTS _programs)
         if(NOT _program MATCHES "\\.conf$")
             _katana_sign_macos("${_program}")
         endif()
     endforeach()
+    file(GLOB _bundles "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/${CPACK_KATANA_APP_BUNDLE}"
+                       "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*/${CPACK_KATANA_APP_BUNDLE}")
+    if(CPACK_KATANA_APP_BUNDLE)
+        foreach(_bundle IN LISTS _bundles)
+            _katana_sign_macos("${_bundle}")
+        endforeach()
+    endif()
     list(LENGTH _libraries _count)
     message(STATUS "Katana sign: the programs and ${_count} libraries signed as "
                    "$ENV{KATANA_SIGN_IDENTITY}")
+elseif(NOT "$ENV{KATANA_SIGN_IDENTITY}" STREQUAL "")
+    # The disk image itself, so Gatekeeper can name its publisher before it is
+    # opened; the release workflow then notarises it and staples the ticket.
+    foreach(_package IN LISTS CPACK_PACKAGE_FILES)
+        if(_package MATCHES "\\.dmg$")
+            execute_process(
+                COMMAND codesign --force --timestamp --sign "$ENV{KATANA_SIGN_IDENTITY}" "${_package}"
+                RESULT_VARIABLE _rc ERROR_VARIABLE _err OUTPUT_QUIET)
+            if(NOT _rc EQUAL 0)
+                message(FATAL_ERROR "codesign ${_package} failed: ${_err}")
+            endif()
+            message(STATUS "Katana sign: ${_package} signed as $ENV{KATANA_SIGN_IDENTITY}")
+        endif()
+    endforeach()
 endif()

@@ -62,6 +62,31 @@ std::optional<std::filesystem::path> loadedLibraryPath(std::string_view fileName
 #endif
 }
 
+std::optional<std::filesystem::path> dataBesideLibraryFile(const std::filesystem::path& library,
+                                                           const std::filesystem::path& relative)
+{
+    std::error_code ignored;
+    // The loader's name may be <prefix>/lib/./libproj.so.25 (an rpath with a
+    // dot in it), or a symbolic link; canonical makes parent_path mean the
+    // directory the file really is in.
+    const std::filesystem::path real = std::filesystem::weakly_canonical(library, ignored);
+    if (!real.is_absolute()) {
+        return std::nullopt; // an empty name would look in the working directory
+    }
+    const std::filesystem::path directory = real.parent_path();
+    const std::filesystem::path prefix = directory.parent_path();
+    if (const auto data = prefix / relative; std::filesystem::exists(data, ignored)) {
+        return data;
+    }
+    if (directory.filename() == "Frameworks") {
+        if (const auto data = prefix / "Resources" / relative;
+            std::filesystem::exists(data, ignored)) {
+            return data;
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<std::filesystem::path> dataBesideLibrary(std::string_view fileNamePrefix,
                                                        const std::filesystem::path& relative)
 {
@@ -69,16 +94,7 @@ std::optional<std::filesystem::path> dataBesideLibrary(std::string_view fileName
     if (!library) {
         return std::nullopt;
     }
-    std::error_code ignored;
-    // The loader's name may be <prefix>/lib/./libproj.so.25 (an rpath with a
-    // dot in it), or a symbolic link; canonical makes parent_path mean the
-    // directory the file really is in.
-    const std::filesystem::path real = std::filesystem::weakly_canonical(*library, ignored);
-    const std::filesystem::path data = real.parent_path().parent_path() / relative;
-    if (std::filesystem::exists(data, ignored)) {
-        return data;
-    }
-    return std::nullopt;
+    return dataBesideLibraryFile(*library, relative);
 }
 
 const std::optional<std::filesystem::path>& projDataDirectory()

@@ -22,6 +22,8 @@ endif()
 
 set(CMAKE_C_COMPILER "${KATANA_TOOLCHAIN}/bin/arm64-apple-darwin20.0.0-clang")
 set(CMAKE_CXX_COMPILER "${_katana_cxx}")
+# Apple silicon only: Intel Macs are not a target (the owner's decision,
+# 2026-09-27; docs/release.md, "macOS").
 set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "")
 # The oldest macOS the programs start on: 13, the oldest Qt 6.11 supports
 # (conda-forge builds the other libraries for 11.0).
@@ -41,8 +43,9 @@ list(PREPEND CMAKE_PREFIX_PATH "${KATANA_TOOLCHAIN}")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-L${KATANA_TOOLCHAIN}/lib")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-L${KATANA_TOOLCHAIN}/lib")
 set(CMAKE_BUILD_RPATH "${KATANA_TOOLCHAIN}/lib")
-# Installed, lib/ beside bin/ (cmake/KatanaDeployUnix.cmake.in).
-set(CMAKE_INSTALL_RPATH "@loader_path/../lib")
+# Installed, in Katana.app: the programs in Contents/MacOS, the libraries in
+# Contents/Frameworks (cmake/KatanaDeployUnix.cmake.in).
+set(CMAKE_INSTALL_RPATH "@loader_path/../Frameworks")
 
 set(KATANA_FIND_TEST_FRAMEWORKS ON CACHE BOOL
     "Find GoogleTest and Google Benchmark with find_package instead of downloading them")
