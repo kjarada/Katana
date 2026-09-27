@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <QComboBox>
+#include <QDir>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -103,7 +104,10 @@ TEST(Snapshot, WhatTheGrammarDoesNotTakeIsRefused)
 TEST(Snapshot, TheLineItWritesIsTheLineItReads)
 {
     SnapshotRequest request;
-    request.path = "C:\\out\\view.png";
+    // The path as the platform's file dialog gives it: "C:\out\view.png" on
+    // Windows. On POSIX '\' is part of a file name, not a separator
+    // (POSIX.1-2017, 3.170), so each platform is given its own native form.
+    request.path = QDir::toNativeSeparators("C:/out/view.png");
     request.width = 300;
     request.height = 150;
     request.background = Background::White;
