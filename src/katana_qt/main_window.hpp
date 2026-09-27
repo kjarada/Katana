@@ -33,11 +33,13 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/log.hpp"
+#include "katana/terrain/surface_store.hpp"
 #include "katana/terrain/tin_builder.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "customisation/customisation_workbench.hpp"
+#include "geo/geo_workbench.hpp"
 #include "gis_online.hpp"
 #include "keyboard_shortcuts_dialog.hpp"
 #include "script_runner.hpp"
@@ -53,6 +55,7 @@
 // Whole, not declared: selectById_ is destroyed wherever the window is.
 #include "select_by_id_dialog.hpp"
 #include "sheet_editor.hpp"
+#include "surface_raster_dialog.hpp"
 #include "view_workspace.hpp"
 #include "drawing/drawing_ui.hpp"
 
@@ -88,12 +91,13 @@ class MainWindow final : public QMainWindow {
 
     // Opens a project given on the command line.
     void openProject(const QString& directory);
-    // Imports a data file given on the command line, routed by its extension
-    // exactly as File > Import does. With a `placement` - a typed IMPORT
-    // <file> LOCAL, ALONGSIDE or OFFSET=dE,dN - vector data, a .12da archive
-    // or a DXF is moved as one piece (cad/import_placement.hpp), and nobody
-    // is asked where to put it; a raster or a point cloud refuses it by name,
-    // being reference data drawn at its own coordinates.
+    // Imports a data file given on the command line: the IMPORT line File >
+    // Import would make, run through the one executor (runVerbLine), so it is
+    // logged, and undone, as if typed. With a `placement` - LOCAL, ALONGSIDE
+    // or OFFSET=dE,dN - vector data, a .12da archive or a DXF is moved as one
+    // piece (cad/import_placement.hpp), and nobody is asked where to put it;
+    // a raster or a point cloud refuses it by name, being reference data
+    // drawn at its own coordinates.
     void importPath(const QString& path, const katana::cad::ImportPlacement& placement = {});
     // Plots the drawing to `path` on the active plan viewport. With
     // `fitToDrawing` the scale is the first standard one the drawing fits at
@@ -197,15 +201,30 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] std::unique_ptr<AttributeManagerDialog> makeAttributeManager();
     [[nodiscard]] std::unique_ptr<LayerManagerDialog> makeLayerManager();
     // GIS > Dataset Information for `path`, built but not shown, as the
-    // managers above; nullptr when the file cannot be described, which has
-    // been logged. For the headless --dataset-info switch.
+    // managers above: it runs its INFO lines through runVerbLine. Headless,
+    // nullptr when the file could not be described, which has been logged.
+    // For the headless --dataset-info switch.
     [[nodiscard]] std::unique_ptr<DatasetInfoDialog> makeDatasetInfo(const QString& path);
+    // When `started` - what runVerbLine returned - says a geoprocessing job
+    // was started and it is still running: `done` is called with the job's
+    // outcome when it ends, and true returned. False otherwise: `started`
+    // is the answer. How a dialog hears what its line did.
+    bool awaitJob(const VerbOutcome& started, std::function<void(const VerbOutcome&)> done);
     // The GIS menu's import dialog for `path`'s kind of data - vector, raster
     // or point cloud, or for a DXF or a .12da the placement step File >
     // Import asks (ImportPlacementDialog) - built but not shown. nullptr,
     // logged, for a file that cannot be described or has no such dialog. For
     // --import-options.
     [[nodiscard]] std::unique_ptr<QDialog> makeImportOptions(const QString& path);
+    // What an accepted import dialog of makeImportOptions does: its IMPORT
+    // line run through the one executor, as if typed. The menu's import and
+    // a headless --import-options whose Run was pressed share it.
+    void finishImport(const QDialog& dialog);
+    // File > Export Vector's dialog (VectorExportDialog, one per window) for
+    // `path`, shown, with the scope set as the menu sets it: what File >
+    // Export Vector opens once its file dialog has answered. For
+    // --export-options, since a headless run opens no file dialog.
+    QDialog* showExportOptions(const QString& path);
     // Triggers the menu item whose object name is `name`, exactly as a click
     // does. For the headless --action switch, so that a menu command is run
     // by a test through the same QAction a person clicks. NotFound for an
@@ -316,10 +335,16 @@ class MainWindow final : public QMainWindow {
     void refreshViewMenu();
 
     // ---- terrain, 3D and sections (PLAN.MD Phases 14, 15, 21) -------------
-    void buildSurfaceFromPointCloud();
-    void buildSurfaceFromRaster();
-    void buildSurfaceFromDrawing();
+    // Terrain > Surface From Point Cloud, Raster and Drawing: the Surface
+    // From dialog (surface_raster_dialog.hpp) on that source, Reference
+    // Data's chosen cloud or raster first. It builds a SURFACE FROM line and
+    // runs it through runVerbLine.
+    void showSurfaceFrom(SurfaceFromKind kind);
     void addSurface(std::string name, katana::terrain::TinSurface surface);
+    // sceneSurfaces_ made again from surfaceStore_ when it has changed, each
+    // surface keeping how it was shown. A surface the store gained is shown
+    // in a 3D view, framed: one the user cannot see is not obviously made.
+    void syncSceneSurfaces();
     // Session data like a surface: not an entity, not undoable, and drawn in
     // 3D with its footprint in plan.
     void addMesh(std::string name, katana::geometry::TriangleMesh mesh,
@@ -408,40 +433,15 @@ class MainWindow final : public QMainWindow {
     // loaded. A warning; the project opens all the same.
     void reportMissingCustomisation();
     void reportCustomisationCoverage();
-    // The options are the GIS menu's dialogs' choices; File > Import and a
-    // path on the command line take the defaults. `placement` is where the
-    // data lands, as importPath says; Keep asks when it is far from the
-    // drawing (decideImportPlacement, import_placement.hpp).
-    void importVectorFile(const std::filesystem::path& path,
-                          katana::interop::VectorImportOptions options = {},
-                          const katana::cad::ImportPlacement& placement = {});
-    void importArchive12dFile(const std::filesystem::path& path,
-                              const katana::cad::ImportPlacement& placement = {});
     // File > Import's step for a DXF or a .12da archive, whose only choice
     // is where it lands (ImportPlacementDialog), and then the IMPORT line
     // it makes, through runVerbLine.
     void importWithPlacement(const QString& path);
-    void importRasterFile(const std::filesystem::path& path,
-                          katana::interop::RasterImportOptions options = {});
-    void importPointCloudFile(const std::filesystem::path& path,
-                              katana::interop::PointCloudImportOptions options = {});
     void exportVectorFile();
-    // Writes the drawing, or `options.entities` of it, to `path`: a vector
-    // format by extension, or a 12d archive. Reports into the log; false when
-    // it failed, which has been reported too.
-    bool exportDrawingTo(const std::filesystem::path& path,
-                         katana::interop::VectorExportOptions options);
-    // A .dxf, read and written natively rather than through GDAL
-    // (main_window_dxf.cpp). The export honours the options' entities,
-    // layers and origin shift; the rest are GDAL's.
-    void importDxfFile(const std::filesystem::path& path,
-                       const katana::cad::ImportPlacement& placement = {});
     // decideImportPlacement for this window: where data read at `incoming`
     // lands in the drawing as it is now, asked or logged.
     [[nodiscard]] PlacementDecision placeImport(const katana::cad::ImportPlacement& placement,
                                                 const katana::geometry::Box2& incoming);
-    bool exportDxfFile(const std::filesystem::path& path,
-                       const katana::interop::VectorExportOptions& options);
     // A .ifc, read and written natively (main_window_ifc.cpp, docs/ifc.md),
     // always by a line: IMPORT, EXPORT, INFO or IFC RULES with
     // ifc/front_end.hpp's grammar, the same lines katana_cli takes.
@@ -484,20 +484,17 @@ class MainWindow final : public QMainWindow {
     // dialog for its kind, import with the choices.
     void importWithOptions(const QString& path);
     void exportPointCloud();
+    // GIS > Export Surface as DEM: the dialog that builds a SURFACE EXPORT
+    // line (surface_raster_dialog.hpp).
     void exportSurfaceAsDem();
     // GIS > Convert Point Cloud to COPC: asks for the two files, then runs the
-    // COPC line they make through runVerbLine, and offers to import the
-    // result.
+    // COPC line they make through runVerbLine - a job - and when it has
+    // converted, offers to import the result.
     void convertPointCloudToCopc();
-    // COPC <source> <destination>, typed or from the menu item: converts,
-    // asks nothing, and logs the result and the IMPORT line that reads it.
-    void convertPointCloudToCopc(const std::filesystem::path& source,
-                                 const std::filesystem::path& destination);
     void showDatasetInformation();
     // The reference layer selected in the panel, or the only one of its kind
     // when the panel has no selection; nullptr, having said why, otherwise.
     [[nodiscard]] const katana::interop::PointCloudLayer* chooseReferenceCloud(const QString& title);
-    [[nodiscard]] const katana::interop::RasterOverlay* chooseReferenceRaster(const QString& title);
     // Drops the rasters and point clouds, with the drawing they were loaded
     // beside (audit QT-17): File > New and Open must not leave the previous
     // drawing's orthophoto behind the next one.
@@ -509,6 +506,18 @@ class MainWindow final : public QMainWindow {
     void removeSelectedReference();
     void zoomToSelectedReference();
     void onReferenceCellChanged(int row, int column);
+    // The Reference Data panel's: the layer selected in it, and its opacity
+    // or colouring shown in the panel's controls without running a line.
+    [[nodiscard]] std::optional<katana::interop::ReferenceId> selectedReference() const;
+    void showSelectedReferenceDisplay();
+    // REFS <action> <selected id> [words], through runVerbLine; refused, and
+    // said, when nothing is selected.
+    VerbOutcome runReferenceLine(const QString& action, const QString& words = {});
+    // Before a save: the project records the reference layers as they are
+    // (geo::recordReferences). After an open: they are read again (REFS
+    // RESTORE), when it records any.
+    void recordReferences();
+    void restoreReferences();
 
     // Returns false when the user cancels (unsaved changes).
     [[nodiscard]] bool confirmDiscard();
@@ -533,8 +542,8 @@ class MainWindow final : public QMainWindow {
     // at its prompt: each typed in turn, blank lines left out, so none of
     // them is run as a command.
     void typeLinesIntoTool(const QString& text);
-    // The ONLINE and UTILITY verbs, run by their workbenches; false leaves the
-    // line to whoever asked.
+    // The geoprocessing verbs (GDAL ...), the ONLINE and the UTILITY verbs,
+    // run by their workbenches; false leaves the line to whoever asked.
     bool runWorkbenchLine(const QString& line);
     // Who a line came from. Only a person's typed line starts a tool by a
     // bare word; a script's, a paste's or a dialog's is the interpreter's, as
@@ -641,16 +650,21 @@ class MainWindow final : public QMainWindow {
     // imported point clouds, rasters and drawing geometry, and owned here for
     // the same reason reference data is: katana_cad must stay free of GDAL and
     // PDAL so it still builds with -DKATANA_BUILD_IO=OFF.
-    // unique_ptr, NOT a vector of values: sceneSurfaces_ holds raw pointers
-    // into this store, and a vector of values would move every surface - and
-    // dangle every one of those pointers - the moment it reallocated.
-    std::vector<std::unique_ptr<katana::terrain::TinSurface>> surfaceStore_;
+    // The one store of named surfaces (terrain/surface_store.hpp) that the
+    // geoprocessing verbs' SURFACE <name> reads too; each surface is shared
+    // and immutable, so sceneSurfaces_ may point into it and a background
+    // job may read one while the views draw it. sceneSurfaces_ is rebuilt
+    // from the store whenever its revision moves (syncSceneSurfaces).
+    katana::terrain::SurfaceStore surfaceStore_;
     std::vector<katana::cad::SceneSurface> sceneSurfaces_;
+    std::uint64_t sceneSurfacesRevision_ = 0;
     // Meshes (12d trimeshes), held the same way and for the same reasons.
     std::vector<std::unique_ptr<katana::geometry::TriangleMesh>> meshStore_;
     std::vector<katana::cad::SceneMesh> sceneMeshes_;
     QTreeWidget* layerTree_ = nullptr;
     QTableWidget* referenceTable_ = nullptr;
+    QComboBox* referenceOpacity_ = nullptr;
+    QComboBox* referenceColour_ = nullptr;
     PropertyTreePanel* propertyTree_ = nullptr;
     QPlainTextEdit* commandLog_ = nullptr;
     QLineEdit* commandInput_ = nullptr;
@@ -711,6 +725,15 @@ class MainWindow final : public QMainWindow {
     // Document so that katana_cad stays free of GDAL and PDAL, which is what
     // lets it build with -DKATANA_BUILD_IO=OFF for the sanitizer job.
     katana::interop::ReferenceData reference_;
+    // The geoprocessing verbs (geo/geo_workbench.hpp): GDAL and the families
+    // after it, run by the executor katana_cli shares, as background jobs.
+    // Declared after the Document, the surfaces and the reference data, which
+    // its context holds, so that it goes before them.
+    std::unique_ptr<GeoWorkbench> geo_;
+    // Terrain > Surface From and GIS > Export Surface as DEM, children of the
+    // window made on first use and kept, non-modal.
+    SurfaceFromDialog* surfaceFrom_ = nullptr;
+    SurfaceRasterDialog* surfaceExport_ = nullptr;
 
     bool refreshingLayers_ = false;     // suppresses cellChanged while rebuilding
     bool refreshingReferences_ = false; // ditto, for the reference table

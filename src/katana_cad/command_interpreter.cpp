@@ -2938,6 +2938,11 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
         }
         return text;
     }
+    // LIST takes no words. It once ignored them, so LIST LAYER x listed the
+    // whole drawing and read as though it had filtered it.
+    if (!args.empty()) {
+        return usage("LIST (every entity; INFO id describes one)");
+    }
     std::string text = std::to_string(model.entities.size()) + " entities";
     model.entities.forEach([&](const Entity& entity) { text += "\n" + describe(model, entity); });
     return text;

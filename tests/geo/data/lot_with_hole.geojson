@@ -1,0 +1,11 @@
+{
+  "type": "FeatureCollection",
+  "name": "lot_with_hole",
+  "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::28356" } },
+  "features": [
+    { "type": "Feature", "properties": { "lot": 7, "area_m2": 9600.0 },
+      "geometry": { "type": "Polygon", "coordinates": [
+        [ [330000, 6250000], [330100, 6250000], [330100, 6250100], [330000, 6250100], [330000, 6250000] ],
+        [ [330040, 6250040], [330060, 6250040], [330060, 6250060], [330040, 6250060], [330040, 6250040] ] ] } }
+  ]
+}

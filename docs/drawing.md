@@ -75,8 +75,9 @@ an imported one does.
 | DXF write | LWPOLYLINE with bulges (group 42); heights one elevation, or this module's extended data | ELLIPSE | SPLINE |
 | DXF read | LWPOLYLINE and 2D POLYLINE with bulges come in as `CurvePolyline2` (they were chorded before) | ELLIPSE in plan comes in as `Ellipse2` | SPLINE comes in as `Spline2` |
 | archive export | a super string with arc segments and per-vertex heights | chords | chords |
-| vector export | chords, heights interpolated | chords | chords |
-| surface from drawing | chords with interpolated heights, as breaklines | - | - |
+| vector export, and every GDAL algorithm (the one conversion, `interop::geo::drawingDataset`; `docs/geoprocessing.md`) | chords, heights interpolated; an area when closed | chords in plan; an area when whole | chords in plan; an area when closed |
+| surface from drawing (`cad::geo::surfaceInput`, the SURFACE verb) | chords with interpolated heights, as breaklines | - | - |
+| DRAPE (`cad::geo::drapeCommand`) | a height at every vertex, into the geometry; arcs kept | - | - |
 | move, rotate, scale, mirror | exact (a mirror negates the bulges) | exact (a mirror re-expresses the sweep) | exact |
 | stretch | vertices in the window move, arcs keep their bulge | whole, when its centre is inside | fit (or control) points move, solved again |
 | offset (the Offset tool and OFFSET) | concentric arcs, mitre or round joins (`geometry::offset`), the side from the nearest piece | refused | refused |

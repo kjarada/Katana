@@ -10,18 +10,26 @@
 // stack's before-image undo machinery for a visibility toggle, and would give
 // the user a "select all" that returns an orthophoto.
 //
-// So reference data lives beside the model, is not undoable, and is not saved
-// into the project database - the project records the SOURCE PATH and the
-// display settings, and the pixels are re-read on open. Rule 3 still holds: the
-// renderer paints this, it does not own it. The Document owns it, the CLI can
-// manipulate it headless, and the viewport merely draws it.
+// So reference data lives beside the model, is not undoable, and its pixels
+// and points are not saved into the project database. The project records
+// each layer's SOURCE and its display settings (ReferenceSource, below, kept
+// in storage::ProjectMetadata::referenceLayers) and the front ends read them
+// again when it opens (REFS RESTORE, docs/interop.md "Reference layers").
+// Rule 3 still holds: the renderer paints this, it does not own it. A front
+// end owns it, the CLI manipulates it headless, and the viewport merely draws
+// it.
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <variant>
 #include <vector>
 
+#include "katana/core/error.hpp"
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/pointcloud/point_cloud_engine.hpp"
@@ -31,6 +39,31 @@ namespace katana::interop {
 using ReferenceId = std::uint64_t;
 
 // ---- raster ---------------------------------------------------------------
+
+// What a raster is to the drawing: a picture to work over, heights, or a
+// product made from other data by a geoprocessing run (docs/geoprocessing.md).
+// Derived rasters are kept in the project's cache and can be made again from
+// their `derivation`.
+enum class RasterRole { Imagery, Elevation, Derived };
+
+// How a raster's values are drawn: as they are, or shaded from its heights.
+// RASTER SHADE renders a shaded style into the picture itself, a derived
+// raster whose RGBA the views and the sheet painter draw as they draw any
+// other; the style says which picture it is (docs/terrain.md, "Shading").
+enum class RasterDisplayStyle { Plain, Hillshade, Relief, ReliefHillshade, Slope };
+
+// The facts of band 1 a reply or a legend needs, read at full precision -
+// never from the RGBA display copy. Absent is not zero: a band without a
+// no-data value, or whose range was never read, says so.
+struct RasterBandFacts {
+    std::string dataType;
+    std::optional<double> noData;
+    std::optional<double> min, max;
+    std::string unit;
+    std::string verticalCrs;
+};
+
+[[nodiscard]] const char* toString(RasterRole role);
 
 struct RasterOverlay {
     ReferenceId id = 0;
@@ -56,6 +89,13 @@ struct RasterOverlay {
     std::string sourceUrl;
     std::string licence;
     std::string attribution;
+
+    RasterRole role = RasterRole::Imagery;
+    RasterBandFacts facts;
+    // The line that made a Derived raster ("GDAL raster hillshade ... FROM
+    // SURFACE ground CELL 1"); empty for any other.
+    std::string derivation;
+    RasterDisplayStyle displayStyle = RasterDisplayStyle::Plain;
 
     // World-space corners of the image. Computed through the full affine, so a
     // rotated or north-up-negative geotransform is handled rather than assumed
@@ -130,7 +170,17 @@ class ReferenceData {
     [[nodiscard]] PointCloudLayer* findPointCloud(ReferenceId id);
 
     bool remove(ReferenceId id);
+    // Every layer, and every record kept as missing: a drawing closed.
     void clear();
+
+    // The records (toRecord) of layers a project names whose source could
+    // not be read when it opened: kept, so that saving does not drop a layer
+    // because its drive was not connected that day, and listed as missing.
+    void keepMissing(std::string record) { missing_.push_back(std::move(record)); }
+    [[nodiscard]] const std::vector<std::string>& missing() const { return missing_; }
+    // Drops the missing record of that layer name, case-insensitively; false
+    // when none has it.
+    bool forgetMissing(std::string_view name);
 
     [[nodiscard]] bool empty() const { return rasters_.empty() && pointClouds_.empty(); }
     [[nodiscard]] std::size_t size() const { return rasters_.size() + pointClouds_.size(); }
@@ -142,7 +192,86 @@ class ReferenceData {
   private:
     std::vector<RasterOverlay> rasters_;
     std::vector<PointCloudLayer> pointClouds_;
+    std::vector<std::string> missing_;
     ReferenceId nextId_ = 1;
 };
+
+// ---- the words a line and a record use ------------------------------------
+
+// elevation, intensity, classification, rgb, flat: one word each, unlike the
+// names the window's menus show ("Source colour").
+[[nodiscard]] const char* toWord(PointColorMode mode);
+[[nodiscard]] std::optional<PointColorMode> pointColorModeFromWord(std::string_view word);
+// plain, hillshade, relief, relief+hillshade, slope.
+[[nodiscard]] const char* toWord(RasterDisplayStyle style);
+[[nodiscard]] std::optional<RasterDisplayStyle> displayStyleFromWord(std::string_view word);
+// imagery, elevation, derived: toString's words, read back.
+[[nodiscard]] std::optional<RasterRole> rasterRoleFromWord(std::string_view word);
+
+// ---- what a project keeps -------------------------------------------------
+
+// A reference layer as the project records it: where it came from and how it
+// is shown, never its pixels or points. One line of versioned JSON a layer
+// (toRecord): a field a newer build adds is skipped by an older one, and a
+// record of a newer version is refused by name rather than half read.
+struct ReferenceSource {
+    enum class Kind { Raster, PointCloud };
+    Kind kind = Kind::Raster;
+    std::string name;
+    // The file read again: a raster, a point cloud, or the 12d archive a
+    // cloud came in with (the cloud of this name is taken from it). Recorded
+    // absolute: a path typed relative to where katana_cli ran is resolved
+    // when recorded, not against wherever the project is opened from.
+    std::filesystem::path source;
+    // The same file relative to the project's folder, when it lies inside it
+    // ("data/terrain.asc"; empty otherwise): read when `source` is gone, so a
+    // project moved or copied with its data keeps its layers.
+    std::filesystem::path inProject;
+    bool visible = true;
+    // A raster's.
+    double opacity = 1.0;
+    RasterRole role = RasterRole::Imagery;
+    RasterDisplayStyle displayStyle = RasterDisplayStyle::Plain;
+    std::string derivation;
+    std::string sourceUrl, licence, attribution;
+    // The display copy's larger side, so it is read again at the size it had.
+    int maxPixels = 4096;
+    // A point cloud's.
+    PointColorMode colorMode = PointColorMode::Elevation;
+    double pointSize = 1.0;
+    // The points it held, as the import's budget, so it is read again at the
+    // density it had.
+    std::uint64_t budget = 2'000'000;
+};
+
+[[nodiscard]] ReferenceSource sourceOf(const RasterOverlay& raster);
+[[nodiscard]] ReferenceSource sourceOf(const PointCloudLayer& cloud);
+
+// One line of JSON: {"version":1,"kind":"raster","name":...}.
+[[nodiscard]] std::string toRecord(const ReferenceSource& source);
+// InvalidArgument for a record that is not one, and for one of a version
+// newer than this build reads, naming it.
+[[nodiscard]] katana::core::Result<ReferenceSource> parseReferenceRecord(std::string_view record);
+
+// Every layer's record, the rasters then the clouds, each in the order added,
+// then the records kept as missing: what a save puts in
+// storage::ProjectMetadata::referenceLayers.
+// `project` is the project's folder, when it has one: a source inside it is
+// also recorded relative to it (ReferenceSource::inProject).
+[[nodiscard]] std::vector<std::string>
+referenceRecords(const ReferenceData& reference,
+                 const std::optional<std::filesystem::path>& project = std::nullopt);
+
+// A layer read again from its source, with its recorded name and display
+// settings: what a project's opening restores. NotFound when the source is
+// gone - which a caller reports and carries on from - and the reader's own
+// failure otherwise. Pure: reads the file, touches no ReferenceData.
+using ReferenceLayer = std::variant<RasterOverlay, PointCloudLayer>;
+// `project` is the folder the project was opened from: a source that is gone
+// is looked for there by its inProject path, and a relative source (a record
+// of an older build) is looked for there before the working folder.
+[[nodiscard]] katana::core::Result<ReferenceLayer>
+readReference(const ReferenceSource& source,
+              const std::optional<std::filesystem::path>& project = std::nullopt);
 
 } // namespace katana::interop

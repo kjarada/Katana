@@ -1016,11 +1016,12 @@ never reaches into the window for it.
 
 - **The same dispatcher as a typed line.** `runCommandLine` is Enter on the
   command line: it reads and clears the field, echoes the line, offers it to
-  the workbenches' verbs (`runWorkbenchLine`: `ONLINE`, `UTILITY`), then to a
-  running tool (`ViewWorkspace::typeIntoTool`), and hands whatever is left to
-  `dispatchLine` - the view verbs, the window's own (`SCRIPT`, `CUSTOMISE`,
-  `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `PLOTSHEETS`, `PLOT`,
-  `SNAPSHOT`), a tool's alias, and the interpreter. `runVerbLine` echoes the line and runs the same
+  the workbenches' verbs (`runWorkbenchLine`: the geoprocessing executor's -
+  `GDAL`, `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` - then `ONLINE`,
+  `UTILITY`), then to a running tool (`ViewWorkspace::typeIntoTool`), and
+  hands whatever is left to `dispatchLine` - the view verbs, the window's own
+  (`SCRIPT`, `CUSTOMISE`, `PLOTSHEETS`, `PLOT`, `SNAPSHOT`), a tool's alias,
+  and the interpreter. `runVerbLine` echoes the line and runs the same
   `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
   line is kept in the interpreter's history and undone exactly as a typed one.
 - **Never a running tool's answer.** That step is the only one `runVerbLine`
@@ -1104,9 +1105,12 @@ Each now reaches the same code on every front end
 - `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST` and `MAPFILE CHECK`
   are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`), given the
   standard colour table by `CommandInterpreter::setColourLookup`.
-- `COPC <source> <destination.copc.laz>`, each path one word or quoted; it
-  logs the `IMPORT` line that reads the result. In a headless session the GIS
-  menu's item opens no file dialog and names this verb instead.
+- `COPC <source> <destination.copc.laz>`, each path one word or quoted, a
+  background job whose `converted` record names the file
+  (`docs/interop.md`, "IMPORT, EXPORT, INFO, REFS and COPC on every front
+  end"). GIS > Convert Point Cloud to COPC offers to import the result once
+  the job has converted it. In a headless session the menu item opens no
+  file dialog and names this verb instead.
 - `CUSTOMISE` alone reports what is loaded, from which files, what the project
   was drawn with that is not loaded, and what it covers in this drawing
   (`cad::customisationReport`, the words `katana_cli` prints); it once
@@ -1209,7 +1213,8 @@ own code keeps, so nothing is written twice:
 - **Online data**: `interop::onlineUsage`;
 - **Window**: `windowHelpText`, the verbs `MainWindow::dispatchLine` and
   `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
-  `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `CUSTOMISE`, `PLOTSHEETS`, `PLOT`,
+  `EXPORT`, `INFO <file>`, `REFS`, `COPC` - the geoprocessing executor's,
+  whose usage the Geoprocessing section gives - `CUSTOMISE`, `PLOTSHEETS`, `PLOT`,
   `SNAPSHOT`, `ZOOM`, `GRID`, `SNAP`, `EXAGGERATION`, `ONLINE`, `UTILITY`,
   `QUIT`, and `HELP`, which adds this section to the interpreter's), and the rule for a bare tool
   word - with the one word that means different things on the two command
@@ -1389,6 +1394,146 @@ workbench - one executor, so no path exists in the dialog that an agent cannot
 take on the command line. The download runs as a background job with its
 progress and Cancel in the status bar; the entities arrive as one command.
 
+## Geoprocessing jobs: GDAL on the window's command line
+
+The geoprocessing verbs (`docs/geoprocessing.md`) - GDAL, and the families
+the geoprocessing packages add - are `GeoWorkbench`
+(`src/katana_qt/geo/geo_workbench.hpp`), built as the online and utility
+workbenches are. `MainWindow::buildGisActions` hands it the window's
+document, interpreter, reference rasters and surfaces. `runWorkbenchLine`
+asks it before the online and utility workbenches, so a typed line and a
+dialog's line through `runVerbLine` reach the same executor `katana_cli` and
+`katana_mcp` run. The window links `katana_app` for it: the window never has
+a second implementation of a session verb.
+
+- **Prepared on the GUI thread.** The line is read, its scope resolved and
+  what the run needs copied there. What answers at once - LIST, HELP, a
+  PREVIEW, a refusal - is logged there.
+- **Run as a job.** Anything that runs is a background job (`jobs.hpp`), with
+  progress and Cancel in the status bar. The job's Apply runs the executor's
+  apply, as one undo step.
+- **Headless, the line waits for its job,** so what it did is logged, and
+  captured by `runVerbLine`, before the next line.
+- **Interactively it logs `job id=<n> title="..." state=started`,** and when
+  the job ends it tells `GeoServices::finished` and any listener a dialog
+  added (`GeoWorkbench::addFinishedListener`). A cancelled job applies
+  nothing, whenever the cancel arrived.
+
+Its menu items come from one table with a block per package
+(`src/katana_qt/geo/menu_table.cpp`, `GeoMenus`). The GIS sections and the
+Terrain submenus are made only when an item is added, so no empty heading
+shows. The GDAL verb's item is GIS > Processing - GDAL > GDAL Toolbox.
+
+**The GDAL Toolbox** (`gdalToolboxDialog`, `src/katana_qt/geo/gdal_toolbox_dialog.hpp`)
+is every one of GDAL's algorithms in one window: the catalogue as a searchable
+tree, and for the algorithm chosen a form made at run time from the arguments
+GDAL declares - its bounds on the spin boxes, its choices in the lists, the
+Advanced ones folded away - a picker for each dataset it reads (the drawing's
+scope and filter, a reference raster, a surface, a file), where the output
+goes, and Confirm for an algorithm that changes existing data. Its Pipeline
+tab chains GDAL's pipeline steps - only those that read what the pipeline
+makes at that point - and shows the pipeline's text, which may be edited and
+is read back into steps. It writes the GDAL line and runs it through the one
+executor, as the dialogs below do.
+
+**The geoprocessing dialogs build lines.** Terrain > DEM > Grid Points to DEM
+(`gridDemDialog`), Terrain > DEM > DEM Tools (`demToolsDialog`, a tab per
+tool) and the dialogs after them do no work of their own: each
+writes the line its fields describe into its Command field and hands it to
+`GeoServices::run`, the window's one executor. `GeoRunPanel`
+(`src/katana_qt/geo/geo_dialog_support.hpp`) is the Command, Preview, Run and
+Reply they share: an interactive run answers `job id=<n> ... state=started`,
+so the panel shows "running" and takes the reply from the workbench's
+finished listeners when the job ends; a headless run's reply is the runner's
+own. A dialog is kept once made, a child of the window, so `--dialog` finds it
+by the name its action carries. Their scope and filter controls are Global
+Modify's (`ScopeFilterWidget`), given the window's views through
+`GeoServices::views`.
+
+**The terrain dialogs** (Terrain > Surface From, GIS > Export Surface as DEM,
+and the Terrain > Analysis items) share
+`src/katana_qt/geo/terrain_dialog_support.hpp`. Each writes its line into a
+read-only `<d>Command` field and Run hands it to `runVerbLine`. `TerrainRun`
+shows the reply in `<d>Reply`: at once when the line answered at once (a
+refusal, a PREVIEW, a headless run), else when the job whose id the reply
+named ends. A dialog is a child of the window, which destroys the workbench
+before its children, so a dialog never calls into the workbench as it goes:
+what a finished listener reaches is held weakly instead of the listener
+being taken back. The three Surface From items open one dialog,
+`surfaceFromDialog`, on their own source, and GIS > Export Surface as DEM
+opens `surfaceRasterDialog`; both are made on first use and kept, as the
+Alignment Manager is (`docs/terrain.md`, "Surfaces on every front end").
+
+**Terrain > Analysis** holds the terrain analysis items, each opening its
+dialog through `showTerrainDialog` (made on first use under the window, so
+`--dialog <item>` finds it by the name the action carries as its data).
+The submenu is A&nalysis (A is Cut Section Along Alignment's) and its items
+take C, H, S, A, D and V, so each is reached from the keyboard; they had no
+letters, and `GeoMenus.EveryItemTheLanesAddHasALetterOfItsOwn` now fails an
+item the GIS or Terrain lanes add without one, as
+`qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` fails a
+letter shared in one menu:
+
+- `terrainContours` "Contours..." opens `contoursDialog`, which writes a
+  CONTOUR line: the source (a surface or a reference raster), the interval,
+  every how many is major, the level counted from, the parent layer, a
+  raster's smoothing, and - with "Keep inside closed shapes of the drawing"
+  (`contourClip`) - the shared scope controls (`contourScope`, the closed
+  shapes the contours are kept inside; the selection at first)
+  (`docs/terrain.md`, "Contours").
+- `terrainShading` "Terrain Shading..." opens `terrainShadingDialog`, which
+  writes a RASTER SHADE line: the source, the style, the light (for the
+  hillshade styles only: the light's controls are off for the others), the
+  ramp (a built-in or a colour-map file typed in) and its range, the
+  reference raster's name, and a GeoTIFF to save the picture to
+  (`docs/terrain.md`, "Shading").
+- `terrainSlope` "Slope and Aspect..." opens `slopeAnalysisDialog`, which
+  writes a RASTER SLOPE or RASTER ASPECT line: the source, the kind, the
+  unit, the class breaks with the layer their areas go under and the least
+  area kept (both off until there are classes), the reference raster's
+  name, and - with `slopeClip` - the shared scope controls (`slopeScope`,
+  the closed shapes the analysis is kept inside) (`docs/terrain.md`, "Slope
+  and aspect").
+- `terrainZonal` "Statistics by Area..." opens `zonalStatsDialog`, which
+  writes a RASTER ZONAL line: the source, the zones (the shared scope
+  controls, `zonalScope`; the selection at first), the statistics ticked,
+  the property prefix, how cells count, and a CSV file with its Replace box
+  (`docs/terrain.md`, "Statistics by area").
+- `terrainDrape` "Drape and Sample Heights..." opens `drapeDialog`, two
+  tabs: Drape writes a DRAPE line (the ground, how a raster is read between
+  cells - off for a surface - and the shared scope controls, `drapeScope`),
+  and Sample a RASTER SAMPLE line of the points listed, typed or picked in
+  a plan view (`samplePick`, through `GeoServices::pickPoint`: the next
+  left click; Esc or a right click cancels) (`docs/terrain.md`, "Sampling
+  and drape").
+- `terrainViewshed` "Viewshed and Line of Sight..." opens `viewshedDialog`,
+  two tabs: Viewshed writes a RASTER VIEWSHED line (the ground, observers
+  typed or picked - or, with `viewshedUseScope`, the points the shared
+  scope controls take - the eye and target heights, how far to look, the
+  curvature, a layer for the visible area and the raster's name), and Line
+  of Sight a LOS line (the two ends, each typed or picked, and the heights)
+  (`docs/terrain.md`, "Viewshed and line of sight").
+- The three are driven by object name through the real window headless,
+  filled, run and their replies read (`tests/geo/headless/analysis.cmake`;
+  `docs/terrain.md`, "Viewshed and line of sight", "Tests in the window").
+  The pick buttons are not: a pick waits for a click in a plan view, which
+  a headless drive does not make, so the points are typed.
+
+**One store of surfaces.** The window's surfaces are a
+`terrain::SurfaceStore` (`include/katana/terrain/surface_store.hpp`), the
+store the headless session has too, so `SURFACE <name>` finds the same
+surface on every front end. `MainWindow::syncSceneSurfaces` rebuilds the
+views' list from it whenever its revision moves, keeping how each was shown.
+Surfaces are shared and immutable, so a job may read one while the views
+draw it. The store keeps names unique: a second surface of a name is
+"name (2)".
+
+**The GIS menu's option dialogs are one file each** - `gis_import_dialogs`,
+`gis_export_dialog`, `surface_raster_dialog`, `dataset_info_dialog`, with
+their shared OK/Cancel row in `gis_dialog_support.hpp` - split from one
+`gis_dialogs` file without a change in behaviour, since four geoprocessing
+packages each extend one of them.
+
 ## File > Import IFC and Export IFC
 
 IFC 4.3 both ways (`docs/ifc.md`) has two entries of its own in File,
@@ -1438,6 +1583,14 @@ the dialog reads the window's counts again (`IfcExportDialog::refresh`) as the
 drawing changes and before each preview and export, so "Selected entities
 only" with nothing selected is refused rather than writing the whole drawing -
 as `EXPORT ... SELECTED` is.
+
+With the geoprocessing executor in the window, which takes `IMPORT`,
+`EXPORT` and `INFO` of every other file, `MainWindow::runWorkbenchLine` asks
+`MainWindow::runIfcLine` first, before the geo workbench: a typed line and a
+dialog's line through `runVerbLine` reach the workbench before
+`dispatchLine`, so without it the executor read an IFC line's options as
+part of a path (`qt_ifc_typed_export_and_import_are_the_command_lines_headless`
+failed exactly so). The session does the same (`src/katana_app/session.cpp`).
 
 A .ifc reaches the same line from everywhere else a path enters: File > Import
 and its IFC filter and a path given to the window run `IMPORT "<file>"`, the

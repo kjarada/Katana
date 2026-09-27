@@ -188,6 +188,13 @@ and civil verbs until the audit of 2026-09-23. The drawing system's verbs
 `docs/drawing.md`, "The command line"; `PLINE` is handled there now, and
 replies with the new polyline's record.
 
+`LIST` takes no words. It listed the whole drawing whatever followed it, so
+`LIST LAYER x` read as a filter it was not - a headless test of the contours
+dialog used it as one - and it now refuses them with its usage
+(`cli.list_refuses_words_it_does_not_take`). Giving it the shared scope
+(`LIST [<scope>]`, "Scope and filter" below) is the fuller answer and is not
+done: `LIST` is among the verbs that still act on their own arguments.
+
 The sheet verbs (`SHEETS`, `SHEET`, `VIEW`, `TILE`, `GENERATE`,
 `TITLEBLOCK`, and `HELP SHEETS`) are handed to `plotting::runSheetVerb`;
 `docs/plotting.md`, "Sheets on the command line", describes them.
@@ -279,7 +286,8 @@ PDAL or the archive and customisation readers: the application's command line
 (`MainWindow::runCommandLine`, whose `dispatchLine` the window's dialogs run
 their lines through too - `docs/desktop.md`, "One executor: the command
 runner") adds `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT`, `INFO <file>`, `REFS`,
-`COPC`, `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
+`COPC` (the geoprocessing executor's, which `katana_cli` and `katana_mcp` run
+too - `docs/interop.md`), `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
 report, `cad::customisationReport`), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
 `SCRIPT <file> [CONTINUE]`,
 the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed
@@ -1084,6 +1092,11 @@ then [WHERE key=value ...]
 Words are case-insensitive; `SEL`, `ALL` and `LAYER` are the aliases `MODIFY`
 already took. For `MODIFY` no scope word is the selection; a `UTILITY` verb
 needs a scope word or `WHERE`, since any other first word is its file's path.
+`WHERE` with no scope word before it is the selection, filtered, for every
+verb that reads the shared words - `EXPORT` and the GDAL verb's `FROM`
+included, though `EXPORT` with no scope words at all is the whole drawing;
+`katana_mcp`'s `where` without `scope` is written `SELECTION WHERE`
+(`docs/interop.md`, "Export options").
 The `WHERE` keys are Global Modify's filter: `TYPE=point,line`,
 `LAYER=pat[,pat]`, `STYLE=pat|ByLayer`, `COLOUR=#RRGGBB|ByLayer`,
 `PROP=key[:pat]`, `TEXT=pat` and `DRAWN`, with `*` and `?` wildcards.

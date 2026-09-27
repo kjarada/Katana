@@ -158,7 +158,7 @@ imported (anything else), in order, before any step runs.
 | `--style-manager` | open the styles and linetypes manager and grab it |
 | `--layer-manager` | open the Layers dialog and grab it; Format > Layers is non-modal, so `--dialog formatLayers` reaches the same dialog as a step |
 | `--attributes [ID]` | open the attribute manager (Edit > Attributes, still modal in a person's session) on entity ID and grab it |
-| `--dataset-info FILE`, `--import-options FILE` | build GIS > Dataset Information or the GIS import dialog for FILE and grab it; for a DXF or a .12da the import dialog is File > Import's placement step (`docs/interop.md`, "Placing an import") |
+| `--dataset-info FILE`, `--import-options FILE` | build GIS > Dataset Information or the GIS import dialog for FILE and grab it; for a DXF or a .12da the import dialog is File > Import's placement step (`docs/interop.md`, "Placing an import"). With steps, it is the target they start on, so `--fill vectorImportWhere=...`, `--press vectorImportPreview` and `--report vectorImportMatchCount` drive it (`qt_vector_import_dialog_previews_its_line_headless`). Its Import and Cancel are `<dialog>Run` and `<dialog>Cancel` (`vectorImportRun`, `rasterImportRun`, `pointCloudImportRun`); a pressed Run imports as the menu's accepted dialog does, through `MainWindow::finishImport` (`qt_vector_import_dialog_imports_what_its_filter_takes_headless`) |
 | `--check-shortcuts` | fail the run when a key reaches more than one thing (`desktop.md`, "Every key reaches one thing") |
 | `--check-menus` | fail the run when a menu item, in any submenu, has no icon or no status tip, listing each (`desktop.md`, "Every menu item has an icon and says what it does") |
 | `--script FILE` | run a `katana_cli` script (`.kcs`) in the window, a step among the others: the window's `SCRIPT` verb through its one executor, each line its own undo step, stopping at the first refused (`desktop.md`, "Run Script"). A script that stops fails the run, exit 1. Without `--screenshot`, `--plot` or `--plot-sheets` the run is a batch, as `katana_cli`'s is: never shown, over when its steps are, and failed by the first step refused |
@@ -177,13 +177,14 @@ every action, field, button and tab gets one. In a test they are one
 | `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`, `dimensionStyleManagerDialog`; Annotate > Edit Text carries `textEditDialog`; File > Project Coordinate System carries `projectCrsDialog`; the Annotate menu's `annotateLeaders`, `annotateLeadersForSelection` and `annotateArrangeLeaders` all carry `leaderManagerDialog`; the seven Subsurface Utilities items all carry `utilityDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
 | `--survey-dock ACTION` | `#ACTION` | shows the dock that action shows and makes it the target; at the end its status line is printed |
 | `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers |
-| `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does |
+| `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does. A disabled field is refused, as `--press` refuses a disabled button: a person cannot type into it and the line does not read it (`qt_fill_of_a_disabled_field_is_refused_headless`) |
 | `--press BUTTON` | `!BUTTON` | clicks it - a radio button too, which is how one is chosen (`!utilitySourceDrawing`); a disabled button fails the run |
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
 | `--run-line TEXT` | `<TEXT` | runs TEXT through the window's one executor, as a dialog runs the line it built (`MainWindow::runVerbLine`, `desktop.md`, "One executor: the command runner"): never a running tool's answer; prints `--run-line TEXT: ok=yes` or `ok=no`, then a `  reply: ` or `  error: ` line for each line it logged - what the dialog gets back. Without `--screenshot` it runs with the `--command` lines, and a refused one fails a run that writes |
 | `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`) |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
+| `--export-options FILE` | `^FILE` | opens File > Export Vector's dialog for FILE, in its turn, and makes it the target - what the menu opens once its file dialog has answered, which a headless run never opens. A step rather than a switch, so the `--command` lines before it have made the drawing whose layers and scope it offers (`qt_vector_export_dialog_writes_what_its_filter_takes_headless`) |
 
 What the target is at the end is what `--screenshot` grabs; steps that were
 all commands leave the window. A dialog that deletes itself when a step
@@ -311,3 +312,12 @@ A modal box in a headless run is a hang until the test's timeout. So
 - the Format workbench tells each manager (`CustomisationServices::headless`),
   so the symbol library and the code manager open no file dialog and the code
   manager's close asks nothing, and Purge Unused does not ask.
+
+## Not done
+
+- A `--fill` of a list selects the row, as a click on its text does, but never
+  ticks a checkable row: the shared scope widget's "The checked layers" list
+  (`vectorExportLayers`, `globalModifyLayers`) cannot be ticked by a step. A
+  run reaches the same export through the filter's layer field
+  (`vectorExportFilterLayer=other`) or types the `LAYERS` line with
+  `--run-line`. A `ROW=on` form of `--fill` for checkable rows would close it.

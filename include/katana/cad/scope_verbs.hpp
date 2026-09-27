@@ -93,6 +93,12 @@ struct ScopeWords {
 // given with its directory ("./drawing").
 [[nodiscard]] bool isScopeWord(std::string_view word);
 
+// True for the key of a WHERE condition - TYPE, LAYER, STYLE, COLOUR (COLOR),
+// PROP, TEXT - in any case. After WHERE a verb's own key=value option of the
+// same name is the condition, not the option: a verb that reads its options
+// wherever they stand asks this.
+[[nodiscard]] bool isWhereKey(std::string_view key);
+
 // Reads the scope and filter words of `words` from `at` and leaves `at` at
 // the first word that is neither, where the verb's own words begin. A scope
 // word is read only before WHERE; after WHERE, a word holding '=' or DRAWN is
