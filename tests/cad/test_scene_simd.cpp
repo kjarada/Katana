@@ -1,10 +1,11 @@
-// The scene build's AVX2 kernels (src/katana_cad/simd/scene_avx2.cpp) against
-// its scalar code: every draw list compared element by element, to the bit.
+// The scene build's kernels (src/katana_cad/simd/scene_avx2.cpp on x86-64,
+// scene_neon.cpp on 64-bit ARM) against its scalar code: every draw list
+// compared element by element, to the bit.
 //
 // Each test builds the same scene twice, once at each level, in one process.
-// ctest also runs this suite with KATANA_SIMD=scalar and =avx2
-// (simd_scalar.cad, simd_avx2.cad), which puts every other scene test on
-// each path in turn.
+// ctest also runs this suite with KATANA_SIMD=scalar and =kernel or =neon
+// (simd_scalar.cad, simd_avx2.cad or simd_neon.cad), which puts every other
+// scene test on each path in turn.
 
 #include <gtest/gtest.h>
 
@@ -19,6 +20,7 @@
 
 #include "katana/cad/scene.hpp"
 #include "katana/core/cpu_features.hpp"
+#include "simd_levels.hpp"
 
 using katana::cad::SceneBuilder;
 using katana::cad::SceneLayers;
@@ -34,66 +36,38 @@ using katana::terrain::TinSurface;
 namespace {
 
 // Puts the process at a level for a scope and back afterwards.
-class AtLevel {
-  public:
-    explicit AtLevel(SimdLevel level)
-    {
-        auto previous = katana::core::setSimdLevel(level);
-        ok_ = previous.ok();
-        if (ok_) {
-            previous_ = *previous;
-        }
-    }
-    ~AtLevel()
-    {
-        if (ok_) {
-            (void)katana::core::setSimdLevel(previous_);
-        }
-    }
-    AtLevel(const AtLevel&) = delete;
-    AtLevel& operator=(const AtLevel&) = delete;
-    [[nodiscard]] bool ok() const { return ok_; }
+using AtLevel = katana::test::ScopedSimdLevel;
 
-  private:
-    bool ok_ = false;
-    SimdLevel previous_ = SimdLevel::Scalar;
-};
-
-bool avx2Available()
-{
-    return katana::core::detectedSimdLevel() == SimdLevel::Avx2;
-}
-
-template <typename T> void expectSameBits(const std::vector<T>& scalar, const std::vector<T>& avx2,
+template <typename T> void expectSameBits(const std::vector<T>& scalar, const std::vector<T>& kernel,
                                           const std::string& what)
 {
-    ASSERT_EQ(scalar.size(), avx2.size()) << what;
+    ASSERT_EQ(scalar.size(), kernel.size()) << what;
     for (std::size_t i = 0; i < scalar.size(); ++i) {
-        if (std::memcmp(&scalar[i], &avx2[i], sizeof(T)) != 0) {
+        if (std::memcmp(&scalar[i], &kernel[i], sizeof(T)) != 0) {
             std::string detail;
             if constexpr (sizeof(T) % sizeof(std::uint32_t) == 0) {
                 for (std::size_t w = 0; w < sizeof(T) / sizeof(std::uint32_t); ++w) {
                     std::uint32_t l = 0;
                     std::uint32_t r = 0;
                     std::memcpy(&l, reinterpret_cast<const char*>(&scalar[i]) + 4 * w, 4);
-                    std::memcpy(&r, reinterpret_cast<const char*>(&avx2[i]) + 4 * w, 4);
+                    std::memcpy(&r, reinterpret_cast<const char*>(&kernel[i]) + 4 * w, 4);
                     detail += " " + std::to_string(l) + "/" + std::to_string(r);
                 }
             }
             ADD_FAILURE() << what << " differs first at element " << i << " of " << scalar.size()
-                          << " (scalar/avx2 words:" << detail << ")";
+                          << " (scalar/kernel words:" << detail << ")";
             return;
         }
     }
 }
 
-void expectSameList(const DrawList& scalar, const DrawList& avx2, const std::string& what)
+void expectSameList(const DrawList& scalar, const DrawList& kernel, const std::string& what)
 {
-    expectSameBits(scalar.positions, avx2.positions, what + " positions");
-    expectSameBits(scalar.colors, avx2.colors, what + " colours");
-    expectSameBits(scalar.triangles, avx2.triangles, what + " triangles");
-    expectSameBits(scalar.lines, avx2.lines, what + " lines");
-    expectSameBits(scalar.points, avx2.points, what + " points");
+    expectSameBits(scalar.positions, kernel.positions, what + " positions");
+    expectSameBits(scalar.colors, kernel.colors, what + " colours");
+    expectSameBits(scalar.triangles, kernel.triangles, what + " triangles");
+    expectSameBits(scalar.lines, kernel.lines, what + " lines");
+    expectSameBits(scalar.points, kernel.points, what + " points");
 }
 
 void expectSameBox(const katana::math::AABB& a, const katana::math::AABB& b, const std::string& what)
@@ -103,13 +77,13 @@ void expectSameBox(const katana::math::AABB& a, const katana::math::AABB& b, con
     EXPECT_EQ(std::memcmp(left, right, sizeof(left)), 0) << what;
 }
 
-void expectSameLayers(const SceneLayers& scalar, const SceneLayers& avx2)
+void expectSameLayers(const SceneLayers& scalar, const SceneLayers& kernel)
 {
-    expectSameList(scalar.terrain, avx2.terrain, "terrain");
-    expectSameList(scalar.edges, avx2.edges, "edges");
-    expectSameBits(scalar.edgeBase, avx2.edgeBase, "edge base");
-    expectSameBits(scalar.edgeInk, avx2.edgeInk, "edge ink");
-    expectSameBox(scalar.bounds, avx2.bounds, "bounds");
+    expectSameList(scalar.terrain, kernel.terrain, "terrain");
+    expectSameList(scalar.edges, kernel.edges, "edges");
+    expectSameBits(scalar.edgeBase, kernel.edgeBase, "edge base");
+    expectSameBits(scalar.edgeInk, kernel.edgeInk, "edge ink");
+    expectSameBox(scalar.bounds, kernel.bounds, "bounds");
 }
 
 // A cells x cells grid of squares, two triangles each with the diagonal
@@ -165,17 +139,15 @@ void expectSameTerrain(const std::vector<SceneSurface>& surfaces,
                        const std::vector<SceneMesh>& meshes, const SceneOptions& options)
 {
     const SceneLayers scalar = terrainAt(SimdLevel::Scalar, surfaces, meshes, options);
-    const SceneLayers avx2 = terrainAt(SimdLevel::Avx2, surfaces, meshes, options);
-    expectSameLayers(scalar, avx2);
+    const SceneLayers kernel = terrainAt(katana::test::kernelLevel(), surfaces, meshes, options);
+    expectSameLayers(scalar, kernel);
 }
 
 } // namespace
 
 TEST(SceneKernels, ALitRampColouredTinBuildsTheSameDrawListsAtEveryLevel)
 {
-    if (!avx2Available()) {
-        GTEST_SKIP() << "no AVX2 on this processor";
-    }
+    KATANA_REQUIRE_SIMD_KERNELS();
     // 1 to 9 cells: 4 to 100 vertices, both sides of the dispatch threshold
     // and every remainder of four; then one big enough to be all kernel.
     for (const int cells : {1, 2, 3, 4, 5, 6, 7, 8, 9, 60}) {
@@ -196,9 +168,7 @@ TEST(SceneKernels, ALitRampColouredTinBuildsTheSameDrawListsAtEveryLevel)
 
 TEST(SceneKernels, EveryStyleAndColouringOfASurfaceBuildsTheSameAtEveryLevel)
 {
-    if (!avx2Available()) {
-        GTEST_SKIP() << "no AVX2 on this processor";
-    }
+    KATANA_REQUIRE_SIMD_KERNELS();
     const TinSurface a = rollingTin(11);
     const TinSurface b = rollingTin(6, 300020.0, 6250010.0);
     for (const SurfaceStyle style : {SurfaceStyle::Shaded, SurfaceStyle::ShadedWithEdges,
@@ -224,9 +194,7 @@ TEST(SceneKernels, EveryStyleAndColouringOfASurfaceBuildsTheSameAtEveryLevel)
 
 TEST(SceneKernels, ASurfaceOfOneElevationTakesTheRampsMiddleColourAtEveryLevel)
 {
-    if (!avx2Available()) {
-        GTEST_SKIP() << "no AVX2 on this processor";
-    }
+    KATANA_REQUIRE_SIMD_KERNELS();
     // A flat TIN spans no elevation, so the ramp is its middle colour,
     // elevationRampColor(0.5) = (235, 220, 130), before the light shades it:
     // a flat face lit from straight above takes sky 1.0 and the whole sun.
@@ -255,17 +223,15 @@ TEST(SceneKernels, ASurfaceOfOneElevationTakesTheRampsMiddleColourAtEveryLevel)
     options.groundAmbient = 0.0;
     options.sunStrength = 0.0;
     const SceneLayers scalar = terrainAt(SimdLevel::Scalar, surfaces, {}, options);
-    const SceneLayers avx2 = terrainAt(SimdLevel::Avx2, surfaces, {}, options);
-    expectSameLayers(scalar, avx2);
-    ASSERT_EQ(avx2.terrain.colors.size(), 25u);
-    EXPECT_EQ(avx2.terrain.colors[12], katana::render::rgba(235, 220, 130));
+    const SceneLayers kernel = terrainAt(katana::test::kernelLevel(), surfaces, {}, options);
+    expectSameLayers(scalar, kernel);
+    ASSERT_EQ(kernel.terrain.colors.size(), 25u);
+    EXPECT_EQ(kernel.terrain.colors[12], katana::render::rgba(235, 220, 130));
 }
 
 TEST(SceneKernels, MeshesBuildTheSameAtEveryLevelIncludingBadAndDegenerateFaces)
 {
-    if (!avx2Available()) {
-        GTEST_SKIP() << "no AVX2 on this processor";
-    }
+    KATANA_REQUIRE_SIMD_KERNELS();
     // Boxes of 12 faces, cut to every count from 1 to 25 so each remainder
     // of the kernel's four faces is met, with a face naming a vertex that is
     // not there (skipped at both levels), a face of zero area (left unlit)
@@ -307,11 +273,43 @@ TEST(SceneKernels, MeshesBuildTheSameAtEveryLevelIncludingBadAndDegenerateFaces)
     }
 }
 
+TEST(SceneKernels, NormalsTooLongToSquareLightTheSameAtEveryLevel)
+{
+    KATANA_REQUIRE_SIMD_KERNELS();
+    // std::hypot of a normal whose squares overflow a double: a surface lifted
+    // 1e200 times over has face normals near 1e201 (a 7 x 5 m cell, relief of
+    // metres), whose squares, near 1e402, are past DBL_MAX (1.8e308).
+    // libstdc++ divides by the largest component first, libc++ scales by
+    // 2^-532 when the largest passes 2^512 (1.3e154): the kernels copy
+    // whichever the scalar code calls, and this is where the two part from
+    // the naive formula. A mesh as large, and one with a NaN corner, too.
+    const TinSurface tin = rollingTin(9);
+    std::vector<SceneSurface> surfaces(1);
+    surfaces[0].surface = &tin;
+    surfaces[0].style = SurfaceStyle::Shaded;
+    SceneOptions options;
+    options.verticalExaggeration = 1.0e200;
+    options.lightDirection = {0.3, -0.4, 0.8};
+    expectSameTerrain(surfaces, {}, options);
+
+    katana::geometry::TriangleMesh mesh;
+    for (int k = 0; k < 8; ++k) {
+        mesh.vertices.emplace_back((k & 1) != 0 ? 1.0e100 : 0.0, (k & 2) != 0 ? 3.0e100 : 0.0,
+                                   (k & 4) != 0 ? 2.0e100 : 0.0);
+    }
+    mesh.vertices.emplace_back(std::numeric_limits<double>::quiet_NaN(), 1.0, 2.0);
+    mesh.faces = {{0, 2, 1}, {1, 2, 3}, {4, 5, 6}, {5, 7, 6}, {0, 1, 8},
+                  {0, 1, 4}, {1, 5, 4}, {2, 6, 3}, {3, 6, 7}};
+    std::vector<SceneMesh> items(1);
+    items[0].mesh = &mesh;
+    SceneOptions plain;
+    plain.lightDirection = {0.3, -0.4, 0.8};
+    expectSameTerrain({}, items, plain);
+}
+
 TEST(SceneKernels, EdgeFadesEqualTheScalarBlendForEveryChannelPairAndEveryEighth)
 {
-    if (!avx2Available()) {
-        GTEST_SKIP() << "no AVX2 on this processor";
-    }
+    KATANA_REQUIRE_SIMD_KERNELS();
     // Every (base, ink) pair of channel values, each in all four channels at
     // once, with a count that ends mid-block. The kernel works in integers;
     // the scalar blend in doubles, so this is the proof they agree.
@@ -342,18 +340,18 @@ TEST(SceneKernels, EdgeFadesEqualTheScalarBlendForEveryChannelPairAndEveryEighth
         run.typicalEdge = pixel * tenths / 10.0;
         layers.edgeRuns = {run};
         SceneLayers scalar = layers;
-        SceneLayers avx2 = layers;
+        SceneLayers kernel = layers;
         {
             AtLevel at(SimdLevel::Scalar);
             SceneBuilder::fadeEdges(scalar, camera);
         }
         {
-            AtLevel at(SimdLevel::Avx2);
-            SceneBuilder::fadeEdges(avx2, camera);
+            AtLevel at(katana::test::kernelLevel());
+            SceneBuilder::fadeEdges(kernel, camera);
         }
-        EXPECT_EQ(scalar.edgeRuns[0].applied, avx2.edgeRuns[0].applied);
-        expectSameBits(scalar.edges.colors, avx2.edges.colors, "faded colours");
-        eighthsSeen |= 1 << static_cast<int>(avx2.edgeRuns[0].applied * 8.0f);
+        EXPECT_EQ(scalar.edgeRuns[0].applied, kernel.edgeRuns[0].applied);
+        expectSameBits(scalar.edges.colors, kernel.edges.colors, "faded colours");
+        eighthsSeen |= 1 << static_cast<int>(kernel.edgeRuns[0].applied * 8.0f);
     }
     EXPECT_EQ(eighthsSeen, 0x1FF) << "every strength from 0 to 8 eighths";
 }

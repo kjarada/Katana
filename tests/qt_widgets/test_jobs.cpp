@@ -87,7 +87,7 @@ TEST(JobRunner, WorkRunsOffTheGuiThreadAndApplyAndFinishedRunOnIt)
         [&](JobControl&) -> katana::core::Result<JobRunner::Apply> {
             worker = std::this_thread::get_id();
             const int value = 6 * 7;
-            return JobRunner::Apply([&, value] {
+            return JobRunner::Apply([&] {
                 applier = std::this_thread::get_id();
                 applied = value;
             });
@@ -312,7 +312,7 @@ TEST(JobRunner, SeveralJobsRunTogetherAndEachFinishesOnce)
     for (int i = 1; i <= 4; ++i) {
         runner.start(
             QString("job %1").arg(i),
-            [i](JobControl&) -> katana::core::Result<JobRunner::Apply> {
+            [](JobControl&) -> katana::core::Result<JobRunner::Apply> {
                 return JobRunner::Apply{};
             },
             [&, i](const JobReport& r) {

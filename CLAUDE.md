@@ -4,9 +4,13 @@ This file is loaded at the start of every session, and every subagent and
 workflow agent gets it too. It is the standing contract for how work is done
 here.
 
-There is no plan document and no README. The owner removed them on 2026-09-23
-("it complicates the development cycle"), so do not bring them back. `docs/`
-is the record: one document per area, indexed by `docs/index.md`.
+There is no plan document. The owner removed it on 2026-09-23 ("it
+complicates the development cycle"), so do not bring it back. `docs/` is the
+record: one document per area, indexed by `docs/index.md`. The root
+`README.md` (added at the owner's request on 2026-09-26) is for people
+installing Katana: what it is, the downloads, and how to install, verify and
+run them on each platform. Keep it to that; development detail belongs in
+`docs/`, and `docs/` does not cite it (`tools/check_docs.py`).
 
 ---
 

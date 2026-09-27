@@ -1,9 +1,10 @@
-# GPU rendering: the 3D view on Direct3D 11 and Vulkan
+# GPU rendering: the 3D view on Direct3D 11, Vulkan and Metal
 
 The 3D view can draw on the CPU (`render::Rasterizer`, docs/render.md) or on
 the GPU. This document is the record of the GPU renderer: it takes the same
 `render::DrawList`s and `render::Camera` and draws them with QRhi, Qt's
-rendering hardware interface - on Direct3D 11 on Windows, on Vulkan on Linux.
+rendering hardware interface - on Direct3D 11 on Windows, on Vulkan on Linux,
+on Metal on macOS.
 It lives in `src/katana_qt/gpu` (library `katana_gpu`), is tested in
 `tests/gpu` and timed in `benchmarks/gpu`.
 
@@ -12,7 +13,16 @@ It lives in `src/katana_qt/gpu` (library `katana_gpu`), is tested in
 with the software rasteriser everywhere else - every headless run and test,
 and after a GPU view fails ("Hosting", below). The Direct3D 11 path is the
 one measured on the owner's machine; the Vulkan path is tested on Mesa's
-software Vulkan (lavapipe), not yet on a hardware GPU.
+software Vulkan (lavapipe), not yet on a hardware GPU. The Metal path (macOS,
+since 2026-09-26) is tested by the release workflow's macOS job, which runs
+the `gpu.` suite on the runner's Metal device before packaging: on the first
+run (GitHub `macos-15`, Apple silicon, 2026-09-26) all 17 hardware device
+cases passed - every `GpuRender` and `GpuLayers` comparison with the software
+rasteriser, the instanced expansion Metal draws with, and
+`SerializedShadersDrawWhatTheRuntimeShadersDraw` - and 70 of 70 ran or
+skipped as expected (the software-device cases skip: macOS has no software
+Metal device; the five `OnTheDesktop` cases skip under the offscreen
+platform). It has not been measured.
 
 ## Architecture
 
@@ -134,7 +144,12 @@ order the profile ranked them (2026-09-25):
    origin lane, each fail that test and the hand-worked one after it. The
    kernel has no minimum length: a probe build with the minimum at 1 packed
    four vertices as fast as the loop (minimums 64 against 67 ns; in the A/A
-   copy 66 against 68).
+   copy 66 against 68). On 64-bit ARM the same step is `simd/pack_neon.cpp`:
+   LD3 splits two vertices' doubles into x, y and z registers, FCVTN rounds
+   them to float, and ST4 interleaves them with the colour words into four
+   whole vertices. It is held to the loop by the same test, run under
+   qemu-aarch64 (`docs/performance.md`, "SIMD: NEON on 64-bit ARM"); its
+   any-length rule is the AVX2 kernel's, not measured on ARM.
 
 `tools/compare_benchmarks.py --alternate 7 BM_GpuPack before=... after=...
 after_again=...`, on the cloud container's 4-core Xeon at 2.10 GHz. `before`
@@ -215,8 +230,19 @@ Why the GLSL is written by hand rather than generated from the HLSL, or the
 HLSL from it: `qsb` cannot translate a **geometry** shader into HLSL or MSL,
 and the default expansion is one. The two sets must draw the same thing; a
 change to one belongs in the other, and the tests hold each to the software
-rasteriser on its own platform. Metal, which has no geometry stage, would
-draw with `Expansion::Instanced`.
+rasteriser on its own platform.
+
+**macOS: the same `.qsb`, with Metal Shading Language, drawn on Metal.** The
+GLSL above is baked with `qsb --msl 12` as well, so each `.qsb` carries MSL 1.2
+beside the SPIR-V, translated by SPIRV-Cross inside `qsb`; QRhi's Metal
+backend picks the MSL. Metal has no geometry stage, so the two geometry
+shaders are baked as SPIR-V only (`qsb` cannot translate them), and the
+renderer, finding `QRhi::GeometryShader` unsupported, draws lines and points
+with `Expansion::Instanced`, whose stages are all translated. No shader was
+written a third time. Checked on Linux before any Mac: `qsb --msl 12`
+translates all eleven non-geometry stages. Metal, like Direct3D 11, renders
+into a texture without a window, so the `gpu.` suite runs its device cases
+under the offscreen platform there.
 
 What the Vulkan conventions change, and why the shaders did not need to
 change with them: clip-space y points down and depth runs 0 to 1, so
@@ -313,7 +339,8 @@ real platform and environment. First match wins:
    behind the user's back.
 5. The platform cannot show the build's view (`GpuBackend`): offscreen and
    minimal always; for the Direct3D 11 build anything but `windows`, for the
-   Vulkan build anything but `xcb` and `wayland` - software.
+   Vulkan build anything but `xcb` and `wayland`, for the Metal build
+   anything but `cocoa` - software.
 6. Otherwise - the GPU.
 
 `KATANA_RENDERER=gpu` cannot undo rules 1-5, and the GPU is already the
@@ -391,15 +418,17 @@ one window must use the same API.
 
 ## Build
 
-`KATANA_GPU` (ON by default on Windows and Linux, OFF elsewhere) builds
+`KATANA_GPU` (ON by default on Windows, Linux and macOS, OFF elsewhere) builds
 `katana_gpu`, which defines `KATANA_HAS_GPU` for whoever links it, and
-`KATANA_GPU_D3D11` or `KATANA_GPU_VULKAN` for the backend it was built for;
+`KATANA_GPU_D3D11`, `KATANA_GPU_VULKAN` or `KATANA_GPU_METAL` for the backend
+it was built for;
 `katana` and the widget tests link it when it is built. QRhi's headers are
 semi-public: they reach the include path only through `Qt6::GuiPrivate`, with
 a narrower compatibility promise than the rest of Qt, which is why everything
 QRhi-shaped stays in this directory behind Katana's own types. If
-`GuiPrivate` is missing - or, on Linux, Qt's shader baker `Qt6::qsb` - or the
-platform is neither Windows nor Linux, configure says why and the GPU module
+`GuiPrivate` is missing - or, on Linux and macOS, Qt's shader baker
+`Qt6::qsb` - or the platform is none of Windows, Linux and macOS, configure
+says why and the GPU module
 is skipped: the 3D view keeps the software rasteriser. No new DLL ships on
 Windows: QRhi is inside `Qt6Gui.dll`, and `d3dcompiler_47.dll` is part of
 Windows. On Linux the Vulkan loader, `libvulkan.so.1`, comes with the

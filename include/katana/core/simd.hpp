@@ -1,7 +1,8 @@
 #pragma once
 
-// Portable SIMD vectors: std::simd where the standard library provides it, and
-// std::experimental::simd (the Parallelism TS v2) otherwise.
+// Portable SIMD vectors: std::simd where the standard library provides it,
+// std::experimental::simd (the Parallelism TS v2) where that is, and plain
+// arrays where neither is (libc++).
 //
 // WHY A FACADE. libstdc++ 16 ships <simd> only in C++26 mode and does not yet
 // advertise it (__cpp_lib_simd is undefined; its internal __glibcxx_simd is
@@ -32,11 +33,25 @@
 #include <simd>
 #endif
 
+// Which backend: 2 the standard, 1 the TS, 0 neither. libc++ (clang on macOS,
+// docs/building.md) ships the TS header only behind -fexperimental-library and
+// <simd> not at all, so there the facade is plain arrays of a register's
+// width, which the optimiser vectorises or not; the names and the lane-by-lane
+// semantics below are the same.
 #if defined(__cpp_lib_simd) || defined(__glibcxx_simd)
 #define KATANA_SIMD_STANDARD 1
+#define KATANA_SIMD_BACKEND 2
 #else
-#include <experimental/simd>
 #define KATANA_SIMD_STANDARD 0
+#if __has_include(<experimental/simd>)
+#include <experimental/simd>
+#endif
+#if defined(__cpp_lib_experimental_parallel_simd)
+#define KATANA_SIMD_BACKEND 1
+#else
+#include <array>
+#define KATANA_SIMD_BACKEND 0
+#endif
 #endif
 
 namespace katana::core::simd {
@@ -68,7 +83,7 @@ template <typename T>
     return std::simd::select(mask, whenTrue, whenFalse);
 }
 
-#else
+#elif KATANA_SIMD_BACKEND == 1
 
 inline constexpr const char* kBackend = "std::experimental::simd";
 
@@ -93,6 +108,62 @@ template <typename T>
 {
     Vec<T> result = whenFalse;
     std::experimental::where(mask, result) = whenTrue;
+    return result;
+}
+
+#else
+
+inline constexpr const char* kBackend = "portable";
+
+// The width of the baseline register on x86-64 (SSE2) and arm64 (NEON) alike.
+inline constexpr std::size_t kRegisterBytes = 16;
+
+template <typename T> struct PortableMask {
+    std::array<bool, kRegisterBytes / sizeof(T)> lane{};
+};
+
+template <typename T> struct PortableVec {
+    using mask_type = PortableMask<T>;
+    [[nodiscard]] static constexpr std::size_t size() { return kRegisterBytes / sizeof(T); }
+    std::array<T, kRegisterBytes / sizeof(T)> lane{};
+
+    friend mask_type operator<(const PortableVec& a, const PortableVec& b)
+    {
+        mask_type result;
+        for (std::size_t i = 0; i < size(); ++i) {
+            result.lane[i] = a.lane[i] < b.lane[i];
+        }
+        return result;
+    }
+};
+
+template <typename T> using Vec = PortableVec<T>;
+template <typename T> using Mask = typename Vec<T>::mask_type;
+
+template <typename T> [[nodiscard]] inline Vec<T> load(const T* from)
+{
+    Vec<T> value;
+    for (std::size_t i = 0; i < Vec<T>::size(); ++i) {
+        value.lane[i] = from[i];
+    }
+    return value;
+}
+
+template <typename T> inline void store(const Vec<T>& value, T* to)
+{
+    for (std::size_t i = 0; i < Vec<T>::size(); ++i) {
+        to[i] = value.lane[i];
+    }
+}
+
+template <typename T>
+[[nodiscard]] inline Vec<T> select(const Mask<T>& mask, const Vec<T>& whenTrue,
+                                   const Vec<T>& whenFalse)
+{
+    Vec<T> result;
+    for (std::size_t i = 0; i < Vec<T>::size(); ++i) {
+        result.lane[i] = mask.lane[i] ? whenTrue.lane[i] : whenFalse.lane[i];
+    }
     return result;
 }
 

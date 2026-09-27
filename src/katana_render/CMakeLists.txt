@@ -13,6 +13,7 @@ add_library(katana_render STATIC
 )
 katana_target_defaults(katana_render)
 # The fill and the vertex transform, eight pixels or four vertices a step on a
-# processor with AVX2; rasterizer.cpp chooses at run time (docs/performance.md).
-katana_add_simd_sources(katana_render AVX2 simd/raster_avx2.cpp)
+# processor with AVX2, four of each with NEON; rasterizer.cpp chooses at run
+# time (docs/performance.md).
+katana_add_simd_sources(katana_render AVX2 simd/raster_avx2.cpp NEON simd/raster_neon.cpp)
 target_link_libraries(katana_render PUBLIC katana_geometry katana_core)

@@ -165,15 +165,16 @@ bool sameFloat(float a, float b)
 
 } // namespace
 
-// The AVX2 packing (simd/pack_avx2.cpp) against the loop it replaces, through
-// packDrawList itself: every length from 0 to 70, so every tail of one to
-// three past every block edge, and lists shorter than one block, over coordinates
+// The AVX2 or NEON packing (simd/pack_avx2.cpp, pack_neon.cpp) against the
+// loop it replaces, through packDrawList itself: every length from 0 to 70,
+// so every tail of one to three past every block edge, and lists shorter than
+// one block, over coordinates
 // as survey data has them and the values a conversion can get wrong - both
 // zeros, infinities, NaN, subnormals, doubles too large for a float and too
 // small for one.
 TEST(PackDrawList, EveryVertexPacksToTheSameBitsAtEachSimdLevel)
 {
-    KATANA_REQUIRE_AVX2();
+    KATANA_REQUIRE_SIMD_KERNELS();
     using katana::core::SimdLevel;
     std::mt19937_64 random(20260926);
     std::uniform_real_distribution<double> survey(-7.0e6, 7.0e6);
@@ -211,7 +212,8 @@ TEST(PackDrawList, EveryVertexPacksToTheSameBitsAtEachSimdLevel)
             GpuSceneData vector;
             katana::test::atSimdLevel(SimdLevel::Scalar,
                                       [&] { packDrawList(list, origin, scalar); });
-            katana::test::atSimdLevel(SimdLevel::Avx2, [&] { packDrawList(list, origin, vector); });
+            katana::test::atSimdLevel(katana::test::kernelLevel(),
+                                      [&] { packDrawList(list, origin, vector); });
 
             ASSERT_EQ(vector.vertices.size(), scalar.vertices.size());
             for (std::size_t i = 0; i < count; ++i) {

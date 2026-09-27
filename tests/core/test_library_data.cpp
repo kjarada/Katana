@@ -19,9 +19,39 @@ TEST(LibraryData, ALoadedLibraryIsFoundByTheStartOfItsFileName)
     ASSERT_TRUE(libc.has_value());
     EXPECT_TRUE(libc->filename().string().starts_with("libc.so"));
     EXPECT_TRUE(std::filesystem::exists(*libc)) << libc->string();
+#elif defined(__APPLE__)
+    // Every macOS process has libSystem mapped (libSystem.B.dylib).
+    const auto system = loadedLibraryPath("libSystem.");
+    ASSERT_TRUE(system.has_value());
+    EXPECT_TRUE(system->filename().string().starts_with("libSystem."));
 #else
-    GTEST_SKIP() << "found by name on Linux only; Windows finds its DLLs where it needs them";
+    GTEST_SKIP() << "found by name on Linux and macOS only; Windows finds its DLLs where it needs "
+                    "them";
 #endif
+}
+
+TEST(LibraryData, DataBesideALibraryIsTheLibrarysGrandparentJoinedToThePathAsked)
+{
+#if defined(__linux__)
+    // The C library itself, named relative to its directory's parent, is a
+    // path known to exist without assuming where the distribution put it.
+    const auto libc = loadedLibraryPath("libc.so");
+    ASSERT_TRUE(libc.has_value());
+    const std::filesystem::path real = std::filesystem::canonical(*libc);
+    const std::filesystem::path relative = real.parent_path().filename() / real.filename();
+    const auto found = katana::core::dataBesideLibrary("libc.so", relative);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_TRUE(std::filesystem::equivalent(*found, real)) << found->string();
+
+    EXPECT_FALSE(katana::core::dataBesideLibrary("libc.so", "katana_no_such_directory/x"));
+#else
+    GTEST_SKIP() << "the C library is found by name on Linux only";
+#endif
+}
+
+TEST(LibraryData, NoDataIsBesideALibraryThatIsNotLoaded)
+{
+    EXPECT_FALSE(katana::core::dataBesideLibrary("libkatana_no_such_library.so", "share"));
 }
 
 TEST(LibraryData, ALibraryThatIsNotLoadedIsNotFound)

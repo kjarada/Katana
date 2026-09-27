@@ -13,7 +13,12 @@ namespace {
 // keeps a C++23 build (KATANA_CXX_STANDARD) from failing -Werror on it, as in
 // plotting/frame.cpp.
 #pragma GCC diagnostic push
+#if defined(__clang__)
+// clang files #embed in C++ under the C23 extensions.
+#pragma clang diagnostic ignored "-Wc23-extensions"
+#else
 #pragma GCC diagnostic ignored "-Wc++26-extensions"
+#endif
 constexpr unsigned char kTrianglesVertex[] = {
 #embed "triangles.vert.qsb"
 };

@@ -1,7 +1,9 @@
 # Installing, bundling and packaging.
 #
 #   cmake --build build/release --target bundle     -> build/release/dist/Katana/
-#   cmake --build build/release --target package    -> Katana-<version>-win64.zip
+#   cmake --build build/release --target package    -> Katana-<version>-win64.zip,
+#                                     -win-arm64.zip, -linux-x86_64.tar.gz,
+#                                     -linux-aarch64.tar.gz, -macos-arm64.tar.gz
 #   cmake --install build/release --prefix <dir>    -> the same tree, anywhere
 #
 # The installed tree is SELF-CONTAINED: it runs on a machine with no MSYS2, no
@@ -10,7 +12,8 @@
 # because the toolchain's bin directory is on PATH.
 #
 #   Katana/
-#     bin/katana.exe, katana_cli.exe     the programs
+#     bin/katana.exe, katana_cli.exe,    the programs
+#         katana_mcp.exe
 #     bin/*.dll                          Qt, GDAL, PDAL, PROJ, the C++ runtime
 #     bin/platforms, styles, ...         Qt plugins, where Qt looks for them
 #     share/proj, share/gdal             proj.db and the GDAL support files
@@ -22,13 +25,13 @@
 # any configuration, and interop::useBundledData points GDAL at share/gdal.
 
 if(TARGET katana)
-    install(TARGETS katana
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        BUNDLE DESTINATION .)
+    install(TARGETS katana RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
-if(TARGET katana_cli)
-    install(TARGETS katana_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-endif()
+foreach(_katana_program katana_cli katana_mcp)
+    if(TARGET ${_katana_program})
+        install(TARGETS ${_katana_program} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
+endforeach()
 
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/katana/samples"
@@ -64,8 +67,7 @@ endforeach()
 # --- runtime dependencies ------------------------------------------------------
 #
 # Windows only, and only for a toolchain whose DLLs live beside its compiler
-# (MSYS2 / MinGW). On Linux the distribution's package manager owns the
-# dependencies, and bundling them would fight it.
+# (MSYS2 / MinGW). Linux and macOS are below.
 if(WIN32)
     find_program(KATANA_WINDEPLOYQT NAMES windeployqt6 windeployqt
         HINTS "${KATANA_RUNTIME_BIN}")
@@ -107,6 +109,29 @@ if(WIN32)
     configure_file("${CMAKE_CURRENT_LIST_DIR}/KatanaDeploy.cmake.in"
                    "${CMAKE_BINARY_DIR}/KatanaDeploy.cmake" @ONLY)
     install(SCRIPT "${CMAKE_BINARY_DIR}/KatanaDeploy.cmake")
+endif()
+
+# Linux and macOS, when the build uses a toolchain prefix of its own
+# (cmake/toolchains/katana-linux.cmake, katana-macos.cmake): the libraries come
+# from that prefix and nowhere else, so an installed tree that did not carry
+# them would run only on the machine that built it. KatanaDeployUnix.cmake.in
+# copies them into lib/, beside Qt's plugins and the GDAL, PROJ and
+# certificate data. A build against a distribution's own libraries leaves the
+# dependencies to its package manager, as before.
+if(NOT WIN32 AND DEFINED KATANA_TOOLCHAIN)
+    set(KATANA_TOOLCHAIN_PREFIX "${KATANA_TOOLCHAIN}")
+    set(KATANA_QT_PLUGIN_DIR "")
+    find_program(KATANA_QMAKE NAMES qmake6 qmake HINTS "${KATANA_TOOLCHAIN}/bin" NO_DEFAULT_PATH)
+    if(KATANA_QMAKE)
+        execute_process(COMMAND "${KATANA_QMAKE}" -query QT_INSTALL_PLUGINS
+            OUTPUT_VARIABLE KATANA_QT_PLUGIN_DIR OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    if(NOT IS_DIRECTORY "${KATANA_QT_PLUGIN_DIR}")
+        set(KATANA_QT_PLUGIN_DIR "${KATANA_TOOLCHAIN}/lib/qt6/plugins")
+    endif()
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/KatanaDeployUnix.cmake.in"
+                   "${CMAKE_BINARY_DIR}/KatanaDeployUnix.cmake" @ONLY)
+    install(SCRIPT "${CMAKE_BINARY_DIR}/KatanaDeployUnix.cmake")
 endif()
 
 # --- the build tree runs on its own ----------------------------------------------
@@ -170,13 +195,27 @@ endif()
 
 # --- CPack -----------------------------------------------------------------------
 set(CPACK_PACKAGE_NAME "Katana")
-set(CPACK_PACKAGE_VENDOR "Katana")
+# The installer shows it as the Publisher in Settings > Apps.
+set(CPACK_PACKAGE_VENDOR "${KATANA_PUBLISHER}")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "High-performance survey and CAD platform")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "Katana")
 set(CPACK_PACKAGE_EXECUTABLES "katana" "Katana")
+# Signing, between staging the tree and archiving it, so what is inside the
+# archive and the installer is signed; and the installer itself afterwards.
+# Each does nothing unless a certificate is named in the environment
+# (cmake/KatanaSign.cmake, docs/release.md "Signing").
+set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
+set(CPACK_POST_BUILD_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
+set(CPACK_KATANA_PUBLISHER "${KATANA_PUBLISHER}")
+set(CPACK_KATANA_OBJDUMP "${CMAKE_OBJDUMP}")
 if(WIN32)
-    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-win64")
+    # win64 is x86-64, as it has been since the first package; ARM64 says so.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+        set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-win-arm64")
+    else()
+        set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-win64")
+    endif()
     # A ZIP always; an installer when NSIS is there to build one. NSIS is not
     # a dependency of the project, so its absence is not an error - install it
     # with `pacman -S mingw-w64-ucrt-x86_64-nsis` and reconfigure.
@@ -186,6 +225,9 @@ if(WIN32)
         list(APPEND CPACK_GENERATOR "NSIS")
         set(CPACK_NSIS_DISPLAY_NAME "Katana ${PROJECT_VERSION}")
         set(CPACK_NSIS_PACKAGE_NAME "Katana")
+        # C:\Program Files, not NSIS's default of Program Files (x86): these
+        # are 64-bit programs.
+        set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
         set(CPACK_NSIS_INSTALLED_ICON_NAME "bin/katana.exe")
         set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
         if(EXISTS "${PROJECT_SOURCE_DIR}/resources/katana.ico")
@@ -193,7 +235,11 @@ if(WIN32)
             set(CPACK_NSIS_MUI_UNIICON "${PROJECT_SOURCE_DIR}/resources/katana.ico")
         endif()
     endif()
+elseif(APPLE)
+    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-macos-${CMAKE_SYSTEM_PROCESSOR}")
+    set(CPACK_GENERATOR "TGZ")
 else()
+    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-linux-${CMAKE_SYSTEM_PROCESSOR}")
     set(CPACK_GENERATOR "TGZ")
 endif()
 include(CPack)
