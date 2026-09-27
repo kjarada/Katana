@@ -1,5 +1,5 @@
 // Where an import lands, in the window (src/katana_qt/import_placement,
-// gis_dialogs): the Placement group driven by its object names, File >
+// gis_import_dialogs): the Placement group driven by its object names, File >
 // Import's step and the IMPORT line it makes, GIS > Import Vector Data's
 // dialog with the group in it, and the one place the window decides where
 // data it has read goes, in a headless session where nobody is asked.
@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-#include "gis_dialogs.hpp"
+#include "gis_import_dialogs.hpp"
 #include "import_placement.hpp"
 #include "katana/cad/command_interpreter.hpp"
 
@@ -175,9 +175,12 @@ TEST(VectorImportDialog, TheGisImportHasThePlacementGroupAndNamesItsFields)
     source.driver = "GeoJSON";
     source.vectorLayers.push_back({"parcels", 4, "Polygon", ""});
     katana::qt::VectorImportDialog dialog(source, Box2{});
-    ASSERT_NE(child<QWidget>(dialog, "importSourceLayer"), nullptr);
-    ASSERT_NE(child<QWidget>(dialog, "importTargetLayer"), nullptr);
-    ASSERT_NE(child<QWidget>(dialog, "importAttributes"), nullptr);
+    // The fields' names follow every GIS dialog's <d><Field> rule since the
+    // dialog came to build IMPORT lines (docs/interop.md, "Import options"):
+    // they were importSourceLayer, importTargetLayer and importAttributes.
+    ASSERT_NE(child<QWidget>(dialog, "vectorImportLayers"), nullptr);
+    ASSERT_NE(child<QWidget>(dialog, "vectorImportTarget"), nullptr);
+    ASSERT_NE(child<QWidget>(dialog, "vectorImportAttributes"), nullptr);
     EXPECT_EQ(dialog.placementBox().placement(), ImportPlacement{});
     child<QRadioButton>(dialog, "importPlacementLocal")->click();
     EXPECT_EQ(dialog.placementBox().placement().mode, ImportPlacementMode::Local);

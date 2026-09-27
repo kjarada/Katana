@@ -18,6 +18,7 @@
 
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/gis/formats.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
@@ -96,7 +97,12 @@ TEST(InteropRouting, ExtensionsAreClassified)
     EXPECT_EQ(kindForPath("terrain.asc"), SourceKind::Raster);
     EXPECT_EQ(kindForPath("scan.las"), SourceKind::PointCloud);
     EXPECT_EQ(kindForPath("scan.laz"), SourceKind::PointCloud);
-    EXPECT_EQ(kindForPath("drawing.dwg"), SourceKind::Unknown);
+    // A .dwg is read only by GDAL's CAD driver (libopencad), which some
+    // builds have (conda-forge's) and others lack (MSYS2's); the routing
+    // follows GDAL's registry, so what it says follows the driver.
+    EXPECT_EQ(kindForPath("drawing.dwg"),
+              katana::gis::findFormat("CAD") != nullptr ? SourceKind::Vector : SourceKind::Unknown);
+    EXPECT_EQ(kindForPath("drawing.nosuchformat"), SourceKind::Unknown);
     EXPECT_EQ(kindForPath("noextension"), SourceKind::Unknown);
 
     // GDAL and PDAL both claim .ply. In a survey tool it is a point cloud, and
@@ -956,13 +962,14 @@ Entity heightedPoint(double x, double y, std::optional<double> z)
 }
 
 // The imported entity that came from model entity `id`, found by the
-// katana_id attribute the export writes.
+// katana_id attribute the export writes. An Integer64 field, read back as an
+// integer since the import keeps field types (docs/interop.md, "Fidelity").
 const Entity* byKatanaId(const VectorImportResult& read, katana::entity::EntityId id)
 {
     for (const Entity& entity : read.entities) {
         const auto found = entity.properties.find("katana_id");
         if (found != entity.properties.end() &&
-            std::get<std::string>(found->second) == std::to_string(id)) {
+            found->second == katana::entity::PropertyValue(static_cast<std::int64_t>(id))) {
             return &entity;
         }
     }

@@ -6,6 +6,7 @@ add_library(katana_app STATIC
     session.cpp session.hpp
     dxf_verbs.cpp dxf_verbs.hpp
     ifc_verbs.cpp ifc_verbs.hpp
+    import_records.cpp import_records.hpp
     mcp_server.cpp mcp_server.hpp
 )
 katana_target_defaults(katana_app)
@@ -22,6 +23,12 @@ target_link_libraries(katana_app PRIVATE nlohmann_json::nlohmann_json)
 if(TARGET katana_interop)
     target_link_libraries(katana_app PRIVATE katana_interop)
     target_compile_definitions(katana_app PRIVATE KATANA_WITH_INTEROP=1)
+    # The geoprocessing executor, the GDAL verb and the MCP geoprocessing
+    # tools (docs/geoprocessing.md): GDAL's, so only with the interop module.
+    # Globbed, one directory, so the geoprocessing lanes add their verb
+    # modules without editing this list.
+    file(GLOB _katana_app_geo CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp")
+    target_sources(katana_app PRIVATE ${_katana_app_geo})
 endif()
 
 # Headless command-line front end. Proves the engine is complete without a GUI.
@@ -333,6 +340,25 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.the_help_names_the_customisation_files_by_what_they_are PROPERTIES
         PASS_REGULAR_EXPRESSION "a loaded library linestyle or ByLayer.*CUSTOMISE \\[REPLACE\\] <file> \\[<file>\\.\\.\\.\\]  load style${_eol} +libraries \\(\\.4d\\) and survey code files \\(\\.mapfile\\)"
         FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)")
+
+    # LIST takes no words: LIST LAYER x once listed the whole drawing, as
+    # though it had filtered it. Refused with its usage; LIST alone lists.
+    add_test(NAME cli.list_refuses_words_it_does_not_take
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LINE 0,0 10,0" -c "LIST" -c "LIST LAYER 0")
+    set_tests_properties(cli.list_refuses_words_it_does_not_take PROPERTIES
+        PASS_REGULAR_EXPRESSION "1 entities.*error: InvalidArgument: usage: LIST [(]every entity; INFO id describes one[)]")
+
+    # HELP typed as a line is the session's whole help, as --help and
+    # katana_help are: CUSTOMISE, IFC and the window-only verbs are
+    # the session's, not the interpreter's, and were missing from it. ? is
+    # HELP's alias.
+    add_test(NAME cli.help_typed_as_a_line_is_the_whole_session_help
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "HELP" -c "?")
+    set_tests_properties(cli.help_typed_as_a_line_is_the_whole_session_help PROPERTIES
+        PASS_REGULAR_EXPRESSION "Customise CUSTOMISE \\[REPLACE\\].*IFC       IMPORT <file\\.ifc>.*Window    PLOT, PLOTSHEETS.*Customise CUSTOMISE \\[REPLACE\\].*IFC       IMPORT <file\\.ifc>.*Window    PLOT, PLOTSHEETS"
+        FAIL_REGULAR_EXPRESSION "error: ")
 endif()
 
 # The sheet verbs with no window (docs/plotting.md, "Sheets on the command
@@ -824,7 +850,9 @@ endif()
 # in a build without it. Drawn by hand: a 30 x 20 rectangle (perimeter 100,
 # area 600), a circle of radius 5 at (15,10) and a text, on a nested layer;
 # exported, a new drawing, imported back. Three layers go out: 0, Survey and
-# Survey/Kerb - the last as "Survey$Kerb" with its path beside it.
+# Survey/Kerb - the last as "Survey$Kerb" with its path beside it. The replies
+# are the records every build writes (import_records.hpp), with GDAL or
+# without.
 if(KATANA_BUILD_TESTS)
     set(_dxf "${CMAKE_CURRENT_BINARY_DIR}/cli round trip.dxf")
     add_test(NAME cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
@@ -835,7 +863,7 @@ if(KATANA_BUILD_TESTS)
                 -c "IMPORT \"${_dxf}\"" -c "LIST")
     set_tests_properties(cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
         PROPERTIES PASS_REGULAR_EXPRESSION
-        "exported 3 entities and 3 layers \\(DXF R2000.*imported 3 entities from cli round trip\\.dxf \\(DXF R2000\\).*Polyline  layer=Survey/Kerb  vertices=4  closed  length=100  area=600.*Circle  layer=Survey/Kerb  centre 15,10  radius=5 .*Text  layer=Survey/Kerb  \"LOT 42\"")
+        "exported file=\"[^\"]*/cli round trip\\.dxf\" kind=dxf driver=DXF format=\"DXF R2000\" entities=3 skipped=0 layers=3 .*imported file=\"[^\"]*/cli round trip\\.dxf\" kind=dxf format=\"DXF R2000\" entities=3 layers=3 .*Polyline  layer=Survey/Kerb  vertices=4  closed  length=100  area=600.*Circle  layer=Survey/Kerb  centre 15,10  radius=5 .*Text  layer=Survey/Kerb  \"LOT 42\"")
 endif()
 
 # INFO, COPC and IMPORT ... LOCAL, on the sample GIS data. Expected values are
@@ -864,24 +892,25 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "IMPORT ${_gis}/terrain.asc LOCAL")
     set_tests_properties(cli.info_raster PROPERTIES PASS_REGULAR_EXPRESSION
-        "Raster: 120 x 90 pixels, 1 band.*Pixel size: 1\\.5 x 1\\.5.*Bounds: \\(-5\\.000, -5\\.000\\) to \\(175\\.000, 130\\.000\\)")
+        "dataset file=[^ ]*/terrain\\.asc kind=raster driver=AAIGrid [^\r\n]*[\r\n]+raster width=120 height=90 bands=1 georeferenced=yes cell=1\\.5,1\\.5 bounds=-5,-5,175,130")
     set_tests_properties(cli.info_point_cloud PROPERTIES PASS_REGULAR_EXPRESSION
-        "Point cloud: 40,000 points.*COPC: no")
+        "pointcloud points=40000 [^\r\n]*copc=no")
     set_tests_properties(cli.copc_cleanup PROPERTIES FIXTURES_SETUP cli_copc)
     set_tests_properties(cli.copc_then_info PROPERTIES FIXTURES_REQUIRED cli_copc
-        PASS_REGULAR_EXPRESSION "converted survey_scan\\.las.*Point cloud: 40,000 points.*COPC: yes")
+        PASS_REGULAR_EXPRESSION "converted source=[^ ]*/survey_scan\\.las file=[^ ]*/cli-scan\\.copc\\.laz format=copc.*pointcloud points=40000 [^\r\n]*copc=yes")
     set_tests_properties(cli.local_is_refused_for_reference_data PROPERTIES
         PASS_REGULAR_EXPRESSION "LOCAL is not supported for rasters and point clouds")
     # A QUOTED path and LOCAL, as katana_import sends them: LOCAL was taken off
     # and the quotes left on, so the file was looked for by its quoted name.
     # parcels.geojson spans (180, 0) to (365, 165) (its coordinates, by hand),
     # so moved to put that lower-left corner at 0,0 it spans (0, 0) to
-    # (185, 165).
+    # (185, 165). Its 8 features, the spoil heaps a MultiPolygon of two, are 9
+    # entities.
     add_test(NAME cli.import_local_of_a_quoted_path_moves_the_data_to_the_origin
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "IMPORT \"${_gis}/parcels.geojson\" LOCAL")
     set_tests_properties(cli.import_local_of_a_quoted_path_moves_the_data_to_the_origin PROPERTIES
-        PASS_REGULAR_EXPRESSION "imported [0-9]+ entities from parcels\\.geojson.*extent 0,0 to 185,165"
+        PASS_REGULAR_EXPRESSION "imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 layers=1 [^\r\n]*bounds=0,0,185,165[^\r\n]*[\r\n]+placed placement=local east=-180 north=0 "
         FAIL_REGULAR_EXPRESSION "error")
     # ALONGSIDE puts the parcels' corner (180, 0) on the rectangle's
     # (1000, 2000); OFFSET moves it by exactly 10,-20.5. Each says its move.
@@ -891,7 +920,7 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
                 -c "IMPORT \"${_gis}/parcels.geojson\" ALONGSIDE" -c UNDO
                 -c "IMPORT ${_gis}/parcels.geojson OFFSET=10,-20.5")
     set_tests_properties(cli.import_alongside_and_offset_place_the_data_and_say_the_move PROPERTIES
-        PASS_REGULAR_EXPRESSION "ALONGSIDE: moved as one piece by 820\\.000,2000\\.000.*extent 1000,2000 to 1185,2165.*OFFSET: moved as one piece by 10\\.000,-20\\.500.*extent 190,-20\\.5 to 375,144\\.5"
+        PASS_REGULAR_EXPRESSION "bounds=1000,2000,1185,2165[^\r\n]*[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000.*bounds=190,-20\\.5,375,144\\.5[^\r\n]*[\r\n]+placed placement=offset east=10 north=-20\\.5 text=\"OFFSET: moved as one piece by 10\\.000,-20\\.500"
         FAIL_REGULAR_EXPRESSION "error")
 endif()
 
@@ -914,6 +943,16 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.label_layout_names_the_label_that_found_no_room PROPERTIES
         PASS_REGULAR_EXPRESSION
         "considered=2 placed=1 displaced=0 suppressed=1 orphaned=0[\r\n]+label=3 piece=0 [^\r\n]*[\r\n]+label=4 piece=0 suppressed=yes.*updated label id=4.*considered=2 placed=2 displaced=1 suppressed=0 orphaned=0")
+endif()
+
+# The geoprocessing verbs' cli.* tests, one file per package of the
+# geoprocessing plan (geo/cli/*.cmake), so the lanes add tests without editing
+# this file. Included here, where katana_cli and the test variables are.
+if(KATANA_BUILD_TESTS AND TARGET katana_interop)
+    file(GLOB _katana_geo_cli_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/cli/*.cmake")
+    foreach(_geo_cli_test IN LISTS _katana_geo_cli_tests)
+        include("${_geo_cli_test}")
+    endforeach()
 endif()
 
 # The properties as a tree, one level a line (property_outline.hpp; the

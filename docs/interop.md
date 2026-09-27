@@ -38,25 +38,48 @@ as plain coordinate arrays (`GeoPoint`), rasters as 8-bit RGBA, and failures as
 `Result<T>`. Both libraries signal errors by throwing; that is caught at the
 adapter boundary and converted, so nothing throws across the interface.
 
+GDAL's algorithm framework - the `gdal raster ...` / `gdal vector ...`
+algorithms - is reached the same way, through `katana::gis::processing`
+(`include/katana/gis/processing.hpp`, in `src/katana_io/geo/`). Drawing
+data, surfaces and derived rasters are bound to it in `katana_interop`
+(`include/katana/interop/geo/`). That, the GDAL verb and its executor are
+`docs/geoprocessing.md`. Two pieces of this layer are shared with it:
+
+- the chords an arc becomes (`src/katana_interop/curve_chords.hpp`), which
+  EXPORT and the bindings use alike;
+- the grid a surface is sampled on (`geo::surfaceGrid`), which
+  `exportSurfaceRaster` now writes.
+
+A reference raster says what it is to the drawing - imagery, elevation, or a
+product derived by a geoprocessing run (`RasterOverlay::role`), and for the
+last the line that made it (`RasterOverlay::derivation`).
+
+The GIS analysis and check verbs - `GIS BUFFER`, `DISSOLVE`, `OVERLAY`, `HULL`,
+`CLIP`, `CHECK`, `REPAIR`, `COVERAGE` and `SQL` - read the drawing through the
+same conversion and apply what they make through `geo::resultCommand` as one
+undo step; they are `docs/geoprocessing.md`'s "V1" onwards.
+
 ## What is supported
 
 | Direction | Formats |
 |---|---|
-| Vector in | Shapefile, GeoJSON, GeoPackage, KML, GML, DXF, MapInfo TAB, SQLite |
-| Vector out | the same, driver inferred from the extension |
-| Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2 — GDAL's readers |
+| Vector in | every vector format this build of GDAL reads - 77 drivers in GDAL 3.13.2: Shapefile (and a zipped one), GeoJSON, GeoPackage, KML and KMZ, GML, DXF, MapInfo TAB, SQLite, CSV with its geometry (WKT, or X, Y and Z), FlatGeobuf, GeoParquet, GPX, a file geodatabase ... (`FORMATS VECTOR READ`, "Formats", below) |
+| Vector out | every one GDAL writes layers with - 44 drivers; the extension picks the writer, GDAL's own choice for the name, each written as the format needs ("Fidelity", below) |
+| Raster in | every raster format GDAL reads - 143 drivers: GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2, a GeoPackage's or an MBTiles' tiles ... |
 | Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD in; LAS/LAZ out, at 1 mm (audit IO-17); any of them to COPC |
 | Raster out | a surface as a DEM: GeoTIFF, Esri ASCII grid, Erdas IMG (`exportSurfaceRaster`) |
 | 12d Archive | .12da and .12daz in and out — every element of the format; see below |
+| Where | a file, a folder GDAL reads (a `.gdb`), a `/vsi` path, a URL, a `.zip`, `.tar`, `.tgz` or `.gz` by what is inside it |
 
 IFC is not here: `katana_ifc` reads and writes it natively, with no GDAL
-(`docs/ifc.md`), and both front ends route a `.ifc` to it before any of
-these. Not supported: **DWG**, and **ECW and E57**: the extensions are routed
-to GDAL and PDAL, but the MSYS2 toolchain has no ECW SDK and no PDAL E57
-plugin, so such a file fails to open with the library's own error (this table
-listed both until the audit of 2026-09-23 checked the toolchain). LandXML
-SURVEY data - points and observations - is read by the survey data exchange
-(`docs/survey.md`), not here.
+(`docs/ifc.md`), and every front end routes a `.ifc` to it before any of
+these. Not supported: **DWG** where GDAL has no CAD driver, and **ECW and
+E57**. The MSYS2 toolchain has no ECW SDK, so GDAL has no ECW reader and
+`.ecw` is not offered at all now that the extensions come from GDAL's
+registry (it was offered until 2026-09-26); PDAL has no E57 plugin here, so
+a `.e57` fails to open with PDAL's own error. LandXML SURVEY data - points
+and observations - is read by the survey data exchange (`docs/survey.md`),
+not here.
 
 ## Two kinds of imported data
 
@@ -85,23 +108,45 @@ Every lossy step is stated rather than hidden.
 * A **two-point LineString** becomes a `Line`, not a two-vertex polyline — a
   drafter expects to be able to fillet it. Longer ones become polylines.
 * A **polygon** becomes closed polylines, one per ring, with the ring's role
-  (`exterior` / `hole`) recorded in entity metadata. The entity model has no
-  polygon-with-holes type, so the information is preserved where it can be
-  rather than discarded.
+  (`source.ring`: `exterior` / `hole`) and the feature it came from
+  (`source.part`) recorded in entity metadata. The entity model has no
+  polygon-with-holes type, so the information is kept where it can be, and
+  EXPORT puts the area together again: a lot with a hole goes out as one
+  polygon with its hole ("Fidelity").
 * **Multi-geometries** are flattened to one entity per part, each carrying a
   copy of the feature's attributes.
 * The **closing vertex** of a ring is dropped; `Polyline2::closed` expresses it,
   and keeping it would create a zero-length final segment the model rejects.
-* **Arcs and circles** have no exact representation in these formats, so they
-  are exported as polylines. `curveTolerance` is the sagitta — the greatest
+* **Curves in a file** - a CircularString, a CompoundCurve, a CurvePolygon -
+  become an `Arc` where the curve is one arc and a `Circle` where it is a
+  whole circle; any other curve is chords by the rule below, and counted.
+* **Arcs and circles** have no exact representation in most of these
+  formats, so they are exported as polylines. `curveTolerance` is the sagitta — the greatest
   distance the polyline may deviate from the true curve — in model units,
   default 1 mm. The chord count follows `φ = 2·acos(1 − tolerance/r)`, so the
   result is the coarsest polyline meeting the tolerance and no finer.
+* **The draw system's curves** (`docs/drawing.md`) go out by the same rule,
+  through the one conversion (`docs/geoprocessing.md`, "Drawing data to
+  features"): a **curve polyline** is chords within `curveTolerance`, a
+  Polygon when closed, and 3D when every vertex has a height - its heights
+  are its vertices' own, a chord point's linear by length along its
+  segment, the rule main's EXPORT wrote them by before this branch's one
+  conversion replaced its loop; an end not surveyed leaves that segment's
+  chord points without one, and the string goes in plan with a warning as a
+  part-heighted polyline does. An **ellipse** or a **spline** is chords, a
+  Polygon when whole or closed, always in plan: neither holds a height
+  (`DrawingCurves.ExportWritesEachCurveKindAndInfoReadsItBack`, a GeoPackage
+  read back with INFO: Polygon, LineStringZ, Polygon, LineString). An
+  IMPORT of the file brings them back as polylines; the arcs, the ellipse
+  and the spline are not recovered from their chords.
 * **Text and dimensions** have no counterpart at all. They are skipped, counted,
   and reported in `warnings` — never silently dropped (`docs/architecture.md`,
   "Error handling").
-* **Attributes** become string entity properties; entity properties become
-  attributes, doubles formatted at `%.17g` so they round trip exactly.
+* **Attributes** become entity properties of their own type - integers,
+  reals, booleans and text, a date as ISO 8601 text with its type kept in
+  the metadata - and properties become fields of their type, a date a date;
+  a key whose type differs between entities is text, and says so
+  ("Fidelity").
 * **Heights.** A file's Z becomes the `elevation` / `elevations` properties
   that the 12d archive, the survey import and Surface From Drawing all read
   (`entity.hpp`, one writer `setHeights` and one reader `heightsOf`); on export
@@ -157,11 +202,281 @@ result" describes the intent, not the code.
   `Delete`, which removes the sidecar files too.
 * **GeoJSON always declares WGS 84** (RFC 7946). Projected coordinates written
   to it will be read back as degrees, so exporting without a CRS warns.
-* **No reprojection.** A file's declared CRS is read and reported, never applied.
-  Mixing coordinate systems is the user's responsibility and the UI says so.
-  The one exception is data fetched from a web service, whose CRS nobody chose:
-  GIS > Online Data moves it into the project's CRS through
-  `VectorImportOptions::targetCrs` and a GDAL warp (`docs/gis_online.md`).
+* **KML, KMZ and GPX hold longitude and latitude on WGS 84 and nothing else.**
+  An export to one is converted from the project's CRS and says so; with no
+  project CRS it is refused (`InvalidCRS`), where GDAL's KML writer used to
+  write placemarks without their geometry and report success.
+* **Reprojection only when asked.** A file's declared CRS is read and
+  reported, and by default not applied: an IMPORT keeps the file's
+  coordinates. Moving vector data into the project's CRS is an explicit
+  opt-in, `IMPORT <file> crs=project` ("Import options" below), and
+  `crs=adopt` sets the project's CRS from the file when the project has none.
+  Why an opt-in and not the default: a survey file is often in a CRS its
+  header gets wrong or leaves out (a DXF, a CSV, a shapefile without its
+  .prj), and a silent reprojection of a file whose CRS was guessed moves every
+  point by up to hundreds of metres with nothing to show it happened; kept
+  coordinates are at least the coordinates the surveyor wrote. The earlier
+  rule - never reproject a file at all - is rejected too: it left an agent
+  or a person with a GDA2020 project and a GDA94 file no way in but an
+  outside tool. Data fetched from a web service, whose CRS nobody chose, is
+  still always moved (GIS > Online Data, through
+  `VectorImportOptions::targetCrs` and a GDAL warp, `docs/gis_online.md`),
+  and so is an export to a format that holds only longitude and latitude,
+  above.
+
+## Fidelity: what IMPORT and EXPORT no longer lose
+
+The GDAL investigation of 2026-09-26 reproduced a set of silent losses in
+the vector path, each reported as a success. Each is fixed where the loss
+was, and each has a test that fails without the fix
+(`tests/geo/test_vector_fidelity.cpp`;
+`cli.a_lot_with_a_hole_is_exported_as_one_polygon_with_the_projects_crs`,
+`cli.export_of_a_projected_drawing_to_kml_is_in_longitude_and_latitude`,
+`cli.export_to_kml_without_a_project_crs_is_refused`,
+`qt_export_of_a_projected_drawing_to_kml_is_in_longitude_and_latitude_headless`).
+
+**One conversion.** EXPORT reads the drawing through
+`interop::geo::drawingDataset`, the conversion every geoprocessing
+algorithm reads it through (`docs/geoprocessing.md`, "Bindings"), and
+IMPORT makes its entities with `interop::geo::featurePieces`, the one a
+result is made with. The adapter reads a layer as a typed table
+(`GdalDataset::readTable`) and writes typed tables
+(`GdalDataset::writeTables`); `readFeatures` and `writeVector` stay, as the
+same read and write with every value as text. There was a second
+entity-to-feature conversion in `export.cpp` beside the bindings', and the
+losses below came about between the two.
+
+- **A hole is a hole.** A 100 m lot with a 20 m hole, imported and exported
+  to a GeoPackage, came back as two polygons summing to 10 400 m2 instead
+  of 9 600: the export wrote every closed polyline as a polygon of its own.
+  The conversion joins a ring IMPORT tagged as a hole to the area it lies
+  in, the one of its own feature (`source.part`) when there is such, so the
+  lot is one polygon again
+  (`VectorFidelity.ALotWithAHoleRoundTripsThroughGpkgWith9600SquareMetres`).
+  A building inside a lot is still not a hole: only a tagged ring is.
+- **Types.** Every field was text both ways (`GetFieldAsString` in,
+  `OFTString` out), so a sum over an imported area column was no sum.
+  Fields keep their types both ways. A driver without a type gets the
+  nearest one that holds every value: KML's writer has no Integer64, so an
+  id that fits in 32 bits is its Integer, not its text.
+- **Dates.** A property has no date type, so a Date or DateTime field is its
+  ISO 8601 text, and EXPORT wrote that text as a String: the claim above
+  was untrue of dates (review finding; a GPKG's `surveyed (Date)` came back
+  `surveyed (String)`). IMPORT now keeps the type in the entity's metadata
+  (`source.type.<key>` = `date` | `datetime`; a result keeps
+  `gis.type.<key>`), and the one conversion to features gives a text
+  property so tagged the field type again
+  (`VectorFidelity.DatesImportedComeBackFromExportAsDates`,
+  `DrawingDataset.ADateAResultMadeIsADateWhenReadAgain`). Text typed by
+  hand stays text however much it looks like a date.
+  - *Rejected:* recognising ISO 8601 text on export. A lot number or a
+    code that happens to read `2024-05-01` would become a date without
+    anyone having said it was one.
+  - *Rejected:* a date type in `PropertyValue`. It is the stored form of
+    every property, and a new alternative is a storage schema change for
+    one field type.
+  - *Not done:* a result that sets properties on existing entities
+    (SetProperties) writes the text without the tag, so such a date goes
+    out as text.
+- **CRS.** EXPORT never wrote the project's coordinate system: every
+  shapefile went without a `.prj`. Both command lines and the window now
+  pass it (`document.metadata().coordinateSystem`), so the file declares
+  it.
+- **KML, KMZ and GPX** hold longitude and latitude only. Given MGA
+  coordinates, GDAL's KML writer raised "Latitude 6250000 is invalid",
+  wrote the placemark without its geometry, and the export said "exported
+  1 features". The writer converts to EPSG:4326 by the one reprojection
+  (`gis::reprojectFeatures`) and says it did; with no CRS it refuses. GDAL's
+  KML writer converts by itself when given the CRS, and its GPX writer does
+  not: one conversion of Katana's for all three was preferred to relying on
+  one driver's habit. The point at 330000,6250000 in EPSG:28356 comes back
+  at 151.161906846 E, 33.876653623 S, PROJ's own `cs2cs` answer.
+- **KML heights.** KML's default altitude mode, clampToGround, puts a
+  coordinate on the ground whatever its altitude says, and GDAL's KMZ
+  writer gives a 2D coordinate an altitude of 0. So a heighted feature is
+  written in the "absolute" mode, and an altitude is read as a height only
+  in that mode: a KMZ's plan-only point no longer comes back at 0.
+- **CSV** was written with its fields and no geometry at all. It is written
+  with its geometry - WKT, or X and Y (and Z when every point has a height)
+  for a table of points, which a spreadsheet reads - and the `.csvt` that
+  keeps the field types. IMPORT reads a CSV's geometry columns as its
+  geometry, not as properties as well, and a Z column as heights.
+- **MapInfo TAB** keeps a coordinate as a 32-bit integer across the
+  table's bounds, and GDAL's default bounds made that step a centimetre:
+  330100 came back as 330099.99. The bounds are the data's extent, widened
+  by a tenth and a unit, so the step across a 200 m site is 5e-8 m and
+  across 2000 km 5e-4 m.
+- **Curves and faces.** A CircularString, a TIN and a polyhedral surface
+  were dropped without a word ("imported 1 entities" from a file of three).
+  An arc is an `Arc`, a whole circle a `Circle`, and a line of several arcs
+  chords within `VectorImportOptions::curveTolerance` (1 mm) by the chord
+  rule EXPORT uses, counted in a warning; a TIN or a polyhedral surface is
+  left out, counted in `VectorImportResult::skipped` and said by name. The
+  adapter hands the arcs over as they are (`VectorGeometry::arcs`) rather
+  than making chords itself: GDAL's `getLinearGeometry`, asked for the
+  step that keeps a 1 mm sagitta on a 10 m radius, left 1.001 mm
+  (measured), and katana_io cannot see the geometry layer, where the chord
+  rule lives.
+- **GDAL's warnings** went to the process-wide quiet handler and nowhere
+  else. Each read and write collects the warnings GDAL raises on its own
+  thread (`src/katana_io/cpl_error_collector.hpp`) and returns them, each
+  once with a count, among the import's or export's warnings: a shapefile
+  shortening `surveyed_by_party` to `surveyed_b` says so
+  (`VectorFidelity.WarningsReachTheReply`). A failure GDAL raises while
+  writing a feature fails the export and removes the file, even when GDAL
+  itself carried on.
+
+Every format of the export table is written and read back in one test,
+geometry and fields (`VectorFidelity.RoundTripOfEveryExportDriver`): shp,
+geojson, gpkg, kml, gml, dxf (its fixed fields hold the layer only), csv,
+sqlite and tab.
+
+**Not done.** The online import's reprojection moves an arc's three points
+and not the arc (no web service sends arcs). A KML's own fields (`Name`,
+`description`, `tessellate` ...) still arrive as properties, as they
+always have. A GPX export writes points as waypoints and lines, closed
+ones included, as routes; `.gpx` and `.kmz` are now written by their names
+("Formats", below). `originShift` is still not
+undone on export (QT-07, above). The bridge (`src/katana_io/geo/processing.cpp`)
+keeps its own copy of the error collector and of the typed field reading;
+both could move onto the adapter's.
+
+## Formats: GDAL's registry, not tables kept by hand
+
+Until 2026-09-26 three tables said what Katana read and wrote: the
+extensions the import dialog offered (`vectorExtensions`,
+`rasterExtensions`), the drivers EXPORT wrote with (`kVectorDrivers`, ten
+extensions) and the formats the save dialog listed (`vectorExportFormats`,
+six). They had drifted apart - a CSV could be written and not opened, TAB
+and SQLite written from the command line and not offered by the window
+(audit finding "Three parallel format tables") - they offered `.ecw`, which
+this toolchain's GDAL cannot open, and they left out FlatGeobuf, GeoParquet,
+KMZ, GPX and a zipped shapefile, all of which GDAL here reads and writes.
+So what GDAL can do is read from GDAL (`include/katana/gis/formats.hpp`,
+`src/katana_io/geo/formats.cpp`):
+
+- **The registry.** `gis::formats()` is every driver of this build, read
+  once from its driver manager: whether it holds rasters or vectors
+  (`DCAP_RASTER`, `DCAP_VECTOR`), opens (`DCAP_OPEN`), writes - a vector
+  writer creates layers or fields (`DCAP_CREATE` with `DCAP_CREATE_LAYER` or
+  `DCAP_CREATE_FIELD`), which is what `writeTables` needs; a raster writer
+  creates or copies, and a driver of both kinds writes rasters only when it
+  declares the types it writes them in (a file geodatabase declares none: it
+  reads a geodatabase's rasters and writes only its tables) - its extensions
+  (`DMD_EXTENSIONS`, compound ones whole: `shp.zip`, `gpkg.zip`), whether it
+  opens `/vsi` paths (`DCAP_VIRTUALIO`) and a connection prefix (`PG:`).
+  `gis::formatOptions` is a driver's declared open, creation and
+  layer-creation options, what `oo=` and `co=` will be checked against.
+- **The overlay**, small and each entry with its reason in `formats.cpp`:
+  drivers that are no format a person opens or saves are hidden (`MEM`,
+  `DERIVED`, `HTTP`, `AIVector`, which sends the data to a remote service,
+  and `GPSBabel`, which runs a program Katana does not ship); a `.xml` is
+  written as GML where GDAL would pick NASA's PDS4; sidecars and generic
+  extensions (`.dbf`, `.prj`, `.txt`, `.xml` ...) are not offered in a file
+  dialog, since they are opened through their data file or would fill the
+  filter with files that are not data; the save dialog lists the formats a
+  survey or CAD office exchanges every day first, and offers KMZ beside KML
+  and a zipped shapefile beside a shapefile.
+- **The writer for a name is GDAL's own choice** (`gis::vectorWriterFor`,
+  through `GDALGetOutputDriversForDatasetName`, the ranking GDAL's own
+  tools pick an output's writer by), the first writer Katana offers taken. So a `.kml` is now written
+  by LIBKML, where the hand-kept table named the older KML driver; both
+  write the same KML 2.2 for a drawing, both are converted to longitude and
+  latitude first ("Fidelity"), and a refusal says "KML", not the library's
+  name. LIBKML declares 64-bit integers and writes them as text (KML 2.2's
+  schema, section 9.5, has none), so for it an Integer64 that fits goes as
+  an int. `rasterDriverForPath` stays a table on purpose: `writeRaster`
+  writes a DEM's Float64 heights, and most raster writers GDAL has (PNG,
+  JPEG, GIF) hold 8- or 16-bit integers.
+
+**A file is routed by what it holds** (`interop::kindForPath`). A `.12da`
+and a point cloud are known by their extensions - PDAL's, and GDAL claims
+`.e57` for the images in one. Anything else that can be looked at - a local
+file or folder, a `/vsi` path - is identified by GDAL
+(`gis::identifyContent`, `GDALIdentifyDriverEx`, and for a driver of both
+kinds the dataset opened to see which it holds): a GeoPackage of raster
+tiles is a raster, a `.gdb` folder vector data, a GeoJSON named `lot.data`
+vector data. Routing by extension through the registry alone was rejected:
+a `.gpkg` or `.mbtiles` holds either kind, and the name cannot say which. A
+path that cannot be looked at - a file not written yet, or a URL, whose
+look would cost a round trip - is routed by its name: an extension only
+raster readers claim is a raster, one both claim is vector data, except the
+formats that are chiefly imagery (`mbtiles`, `pdf`, `jp2` ...).
+
+**Archives and paths.**
+
+- `GdalDataset::open` refused every `/vsi` path, URL and connection string
+  as "file does not exist" (`std::filesystem::exists`). It checks only a
+  local path now (`gis::isVirtualPath`); whether the rest exists is GDAL's
+  to find out.
+- An archive GDAL does not open as it is is opened by its inside
+  (`src/katana_io/geo/formats_detail.hpp`, shared by the open and the
+  routing): a `.zip`, `.kmz`, `.tar`, `.tgz` or `.tar.gz` as a folder -
+  a shapefile's four files, or several shapefiles, open so as the layers of
+  one dataset - else the one member that is a dataset; a `.gz` as the one
+  file it compresses. An archive of several datasets is refused
+  (`InvalidArgument`) naming them and the `/vsizip/{<archive>}/<member>`
+  that opens one: guessing between them was rejected. `/vsigzip` takes no
+  braces (measured: `/vsigzip/{<path>}` opens nothing), `/vsizip` and
+  `/vsitar` do, which keeps a folder named `x.zip` from splitting the path.
+- A GPX is read by GDAL as five layers, two of which (`route_points`,
+  `track_points`) are the vertices of its routes and tracks again: a whole
+  GPX import leaves them out and says so, and either is imported by its index.
+
+**`FORMATS`** (`src/katana_app/geo/formats_verbs.cpp`, the verb table's I2
+row) answers at prepare, changing nothing, in every front end:
+
+```
+FORMATS [RASTER|VECTOR] [READ|WRITE] [<text>...] [JSON]
+FORMATS OPTIONS <driver> [JSON]
+```
+
+- one `format driver=... kind=raster,vector read=... write=... extensions=...
+  vsi=yes|no description=...` record per driver, then `listed formats=<n>
+  kind=... capability=... filter=... gdal=<version>`; the words keep a driver
+  whose name, description or extensions hold every one (a keyword quoted is
+  a word: `FORMATS "raster" tile`);
+- `FORMATS OPTIONS GPKG` gives the format's record and one `option
+  driver=GPKG list=open|creation|layer_creation name=... type=... default=...
+  scope=... choices=a,b min= max= description=...` record per option;
+- `JSON` gives the same as data. `katana_formats` (MCP) and the resource
+  `katana://formats` are built from the same functions (`docs/mcp.md`).
+
+**The window.** GIS > Processing - GDAL > Formats... (`gisFormats`) shows a
+non-modal, read-only table (`gisFormatsDialog`: `gisFormatsKind`,
+`gisFormatsCapability`, `gisFormatsFilter`, `gisFormatsTable`,
+`gisFormatsCount`, `gisFormatsCommand`, `gisFormatsOptions`,
+`gisFormatsRun`, `gisFormatsClose`; `src/katana_qt/geo/formats_dialog.hpp`).
+Its choices make the FORMATS line it shows, and the table is that line's
+records, prepared by the one geoprocessing executor. It does not log a
+hundred records at every keystroke; Run in Command Line hands the line to
+the window's executor (`MainWindow::runVerbLine`) for a person who wants it
+in the log. Selecting a driver shows its options. The import dialogs'
+filters are the registry's readable extensions, with a "Zipped GIS data"
+filter for archives; the export dialog lists every writer, and a name typed
+without an extension takes the chosen filter's.
+
+Tests: `tests/geo/test_formats.cpp` (`Formats.*`, `FormatsVerb.*`: the
+registry against GDAL's documented capabilities, the writer for each name,
+FlatGeobuf, GeoParquet, KMZ, GPX and CSV written by their names and read
+back to the micrometre or, in longitude and latitude, to 1e-9 degrees of
+PROJ's conversion; a shapefile in a `.zip` and by `/vsizip`; a gzipped
+GeoJSON and a tar built in the test to RFC 1952 and POSIX ustar; a raster
+GeoPackage routed to raster import; an unknown extension routed by
+content), `McpServer.FormatsReturnsStructuredDrivers`,
+`qt_widgets.FormatsDialog.*`, `cli.formats_lists_writable_vector_drivers`,
+`cli.import_of_a_zipped_shapefile_by_vsizip`,
+`cli.import_of_a_zip_opens_the_one_dataset_inside`,
+`qt_the_formats_dialog_shows_the_formats_line_it_runs_headless` and
+`qt_import_of_a_zip_opens_the_one_dataset_inside_headless`.
+
+**Not done.** `INFO` (`src/katana_interop/dataset_info.cpp`) still checks
+that a file exists before GDAL looks, so it refuses a `/vsi` path that
+IMPORT opens. A zipped shapefile EXPORT writes holds `katana.shp`, the
+layer's name, whatever the archive is called. Routing opens a local file
+once more before it is imported. A URL with no extension is identified over
+the network. The options `formatOptions` lists are not yet checked when
+given (that is IMPORT's and EXPORT's options work).
 
 ## Scale
 
@@ -188,12 +503,16 @@ is opened as a decimated sample held in memory, not worked on in full.
 
 | Condition | Result |
 |---|---|
-| File does not exist | `NotFound` |
-| Extension has no importer/driver | `Unsupported`, naming the extension |
+| File does not exist | `NotFound` (a local path; a `/vsi` path or URL GDAL cannot open is `FileImportFailure` with GDAL's message) |
+| Extension has no writer | `Unsupported`, naming the extension |
+| File no reader recognises, by content or name | `Unsupported`, naming the extension (the window names GIS > Formats) |
+| Archive of several datasets | `InvalidArgument`, naming them and the `/vsizip/{...}/<member>` that opens one |
 | Mixed geometry into a Shapefile | `Unsupported`, nothing written |
 | Nothing matched the export filter | `InvalidArgument`, no file created |
 | Raster with no georeferencing | imported, placed at the origin, **warned**; refused by Surface From Raster (`InvalidArgument`), which would otherwise build ground in the wrong place |
 | Vector export with a CRS GDAL cannot read | `InvalidCRS` before anything is written (it used to be dropped and the file written with none) |
+| KML, KMZ or GPX export with no project CRS | `InvalidCRS` before anything is written, naming `CRS SET` |
+| GDAL says it could not write a feature, and carries on | `FileExportFailure` with GDAL's message, and the file removed (KML's "Export of geometry to KML failed") |
 | A write that fails at GDAL's setters or at close | `FileExportFailure`, and the partial file removed (audit IO-14; the close path is reviewed, not tested - no failure could be injected there) |
 | DEM export over `maxCells` (25 million) | `InvalidArgument` naming the cell count; the dialog refuses first |
 | Band index out of range | `InvalidArgument` |
@@ -329,15 +648,16 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 
 | Section | Item | What it calls |
 |---|---|---|
-| Vector - GDAL | Import Vector Data... | `describeSource`, then `importVector` with the dialog's `VectorImportOptions` (source layer, target layer, attributes) |
-| | Export Vector... | File's own action; now with a dialog for `VectorExportOptions` (selection, layer name, curve tolerance, properties) |
-| Raster - GDAL | Import Raster... | `importRaster` with a display resolution |
-| | Export Surface as DEM... | `exportSurfaceRaster` - GeoTIFF, Esri ASCII grid or IMG |
-| Point Cloud - PDAL | Import Point Cloud... | `importPointCloud` with a budget, an ASPRS class, and a COPC resolution when the file is COPC |
-| | Export Point Cloud... | `exportPointCloud` - LAS or LAZ |
-| | Convert Point Cloud to COPC... | `PointCloudEngine::convertToCopc` - every point, then an offer to import it |
-| | Dataset Information... | `describeSource` + `formatDescription`, the gdalinfo / pdal info a person needs first |
+| Vector - GDAL | Import Vector Data... | a file dialog, `describeSource` for the dialog it routes to, then the Import Vector Data dialog, whose layers, where, fields, scope, target and placement are the `IMPORT` line it runs through the window's one executor ("Import options") |
+| | Export Vector... | File's own action: after the file dialog, the Export Vector dialog (`vectorExportDialog`), whose scope and options are the `EXPORT` line it runs ("Export options") |
+| Raster - GDAL | Import Raster... | the same, to the Import Raster dialog: band, subdataset, resolution and name as the `IMPORT` line it runs |
+| | Export Surface as DEM... | the `SURFACE EXPORT` line: `exportSurfaceRaster` through GDAL's `raster convert` - a tiled, compressed Float32 GeoTIFF, a COG, an Esri ASCII grid or IMG (`docs/terrain.md`) |
+| Point Cloud - PDAL | Import Point Cloud... | the same, to the Import Point Cloud dialog: budget, class and a COPC resolution when the file is COPC, as the `IMPORT` line it runs |
+| | Export Point Cloud... | the cloud (the Reference Data panel's selection, or asked), a question when it holds a sample, a file dialog, then the `EXPORT <file.las\|.laz> CLOUD <id>` line - `exportPointCloud`, LAS or LAZ, as a job |
+| | Convert Point Cloud to COPC... | two file dialogs, then the `COPC` line - `PointCloudEngine::convertToCopc`, every point - and, when it converted, an offer to import it |
+| | Dataset Information... | the `INFO` lines, through the window's one executor: `describeSource`'s records and GDAL's JSON, the gdalinfo / pdal info a person needs first ("Dataset information", below) |
 | Online - Web Services | Online Data... | `interop::fetchOnlineLayer`: imagery, elevation and features from public web services, warped or reprojected into the project's CRS and taken in through `importRaster` and `importVector`; the `ONLINE` verbs do the same (`docs/gis_online.md`) |
+| Processing - GDAL | Formats... | the `FORMATS` verb: every format this GDAL reads and writes, and a driver's options ("Formats", above) |
 
 Decisions, and what was rejected:
 
@@ -356,21 +676,37 @@ Decisions, and what was rejected:
   dialog, and the dialog offers the layers THIS GeoPackage has and a COPC
   level of detail only when the file IS COPC - the engine refuses the question
   of any other file, so offering it would be offering a failure.
-* **One wording.** `formatDescription` is shown by Dataset Information, above
-  every import dialog's options, by the Reference Data panel's Info button,
-  and by the `INFO` verb of both command lines, so a file cannot be described
-  two ways.
+* **One description.** `describeSource` is read by the import dialogs, whose
+  `formatDescription` text stands above their options, and by the `INFO`
+  verb of every front end, whose records Dataset Information and the
+  Reference Data panel's Info button show ("Dataset information", below), so
+  a file cannot be described two ways.
 * **A point cloud's export says when it is a sample.** A budgeted import holds
   one point in N; Export Point Cloud asks before writing a sample as though it
-  were the survey, and points at Convert to COPC for the whole file.
+  were the survey, and points at Convert to COPC for the whole file. The
+  writing is the `EXPORT` verb's (`EXPORT <file.las|.laz> [CLOUD <id|name>]
+  [PREVIEW]`, `src/katana_app/geo/export_verb.cpp`), so `katana_cli` and
+  `katana_export`'s `cloud` write a cloud as the item does. A line has nobody
+  to ask, so its reply says it instead: `sample=yes` and a `warning` naming
+  COPC (`GisVerbs.ExportOfAPointCloudWritesTheCloudAsHeldAndSaysWhenItIsASample`,
+  `cli.gis_export_writes_a_reference_cloud_and_says_when_it_is_a_sample`,
+  `McpServer.ExportWritesAReferenceCloudByIdOrName`). A .las or .laz path is
+  a cloud's, never the drawing's: no vector driver EXPORT picks writes one.
+  Without `CLOUD` the one cloud there is is written, and with several the
+  line is refused rather than one guessed. A `.copc.laz` is refused: COPC
+  rewrites a file whole, and a sample written under that name would read as
+  the survey. Headless, the item points at the line rather than open a file
+  dialog nobody can close, as Convert to COPC does.
 * **Surfaces use the libraries.** Surface From Raster re-reads the band's
   true values through GDAL (`readRasterElevations`) on a stride that keeps the
   whole extent under the triangulation cap (QT-24: the old stride could pass
   it threefold). Surface From Point Cloud uses `surfacePoints`, the one policy:
   the ground returns (ASPRS class 2) when the cloud has any, otherwise every
   return - and the log says which, because a surface over trees presented as
-  ground is the failure QT-10 found. Choosing which raster or cloud now takes
-  the panel's selection, or the only one there is, before asking.
+  ground is the failure QT-10 found. Both are the SURFACE FROM verb's now,
+  the same on every front end (`docs/terrain.md`, "Surfaces on every front
+  end"); the Surface From dialog lists the rasters and clouds and chooses the
+  panel's selection first.
 * **Reference data goes with its drawing.** File > New, Open, and `NEW` or
   `OPEN` typed on the command line clear the rasters and clouds (QT-17): an
   orthophoto of the last site no longer sits behind the next one.
@@ -442,6 +778,21 @@ choice with four answers, defined once in `include/katana/cad/import_placement.h
   (`ImportShift::said`): `LOCAL: moved as one piece by -180.000,0.000, so its
   lower-left corner sits at 0,0.` A raster or a point cloud refuses a
   placement by name: it is reference data drawn at its own coordinates.
+- **A moved entity is in no known coordinate system, and says so.** IMPORT
+  writes the shift on each entity it moved (metadata `source.shift` =
+  `dE,dN`, `geo::kShiftKey`). The one conversion to features
+  (`drawingDataset`) then gives no table the project's system, and warns:
+  EXPORT wrote shifted coordinates into a GeoPackage labelled with the
+  project's system, which put a lot imported LOCAL at 0,0 of MGA zone 56,
+  off the coast of Africa (review finding). Now the file declares none, its
+  `exported` record says `crs=`, and an export that would convert them (a
+  KML, `crs=<code>`) is refused with `InvalidCRS`
+  (`ExportOptions.EntitiesImportedMovedGoOutInNoCoordinateSystem`). A GDAL
+  run given them from the drawing gets no system either.
+  - *Rejected:* moving them back on export by the recorded shift. The
+    entities may have been edited since, relative to where they were put;
+    writing them somewhere they are not in the drawing is a second,
+    silent move.
 - **Alongside is the far-apart question's Shift Alongside**: the same move
   (`interop::advisePlacement`'s `suggestedShift`), which is now made by
   `resolveImportShift` in both places.
@@ -458,14 +809,17 @@ On every surface:
   `IMPORT "<file>" <word>` line it makes through the window's one executor;
   GIS > Import Vector Data given a DXF or a .12da does the same. The vector
   dialog imports itself - its layer and attribute choices have no `IMPORT`
-  word - and logs the move it makes. The three importers decide where the
-  data goes in one place, `decideImportPlacement`
-  (`src/katana_qt/import_placement.hpp`), which asks the far-apart question
-  for Keep and, in a headless session, keeps the coordinates and says why.
-  A headless File > Import opens no file dialog: it names the verb.
+  word - and logs the move it makes. An `IMPORT` line that keeps the data's
+  coordinates asks the far-apart question through the executor's
+  `Context::farApart` (below, "IMPORT, EXPORT, INFO, REFS and COPC on every
+  front end"); the vector dialog's own import asks it through
+  `decideImportPlacement` (`src/katana_qt/import_placement.hpp`). Both show
+  the one question box, `askFarApart`. A headless window asks nothing and
+  keeps the coordinates. A headless File > Import opens no file dialog: it
+  names the verb.
 - **katana_cli**: `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, the move
-  printed after the "imported" line; the DXF import too, in a build without
-  GDAL. Giving katana_cli `LOCAL` alone and leaving the rest for later was
+  said by the `placed` record after the `imported` one; the DXF import too,
+  in a build without GDAL. Giving katana_cli `LOCAL` alone and leaving the rest for later was
   considered and rejected, because a verb the window types and the CLI does
   not is the gap this work closes.
 - **katana_mcp**: `katana_import` takes `placement` (`keep`, `local`,
@@ -478,8 +832,636 @@ Tests: `ImportPlacement.*` and `CadInterpreter.AnImportArgument*`
 `cli.import_alongside_and_offset_place_the_data_and_say_the_move`,
 `qt_widgets.ImportPlacementBox.*` and `qt_import_placement_typed_on_the_windows_command_line_headless`.
 
-Not done: the vector dialog's source layer, target layer and attributes have
-no `IMPORT` word, so that one dialog imports without a line to log.
+The GIS menu's vector import dialog carries the same Placement group, and
+its line - with the placement word, and any options ("Import options") -
+is what it runs.
+
+## IMPORT, EXPORT, INFO, REFS and COPC on every front end
+
+Until 2026-09-26 these verbs were written twice: once in `session.cpp`,
+printing prose to stdout for `katana_cli` and `katana_mcp`, and again in
+`MainWindow::dispatchLine`, logging other prose in the window. The two had
+drifted - the window framed and asked, the CLI kept no surfaces - and neither
+reply could be read by a program. They are now verbs of the one
+geoprocessing executor (`src/katana_app/geo/`, `docs/geoprocessing.md`, "The
+executor"), a file each: `import_verb.cpp`, `export_verb.cpp`,
+`info_verb.cpp`, `refs_verb.cpp`, `copc_verb.cpp`. The session runs them
+inline; the window's geo workbench runs them as background jobs, with
+progress and Cancel in the status bar, and a headless window waits for them.
+
+```
+IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]
+EXPORT <file>
+INFO <file>                (INFO <id> stays the interpreter's: an entity)
+REFS [LIST]
+COPC <source> <destination.copc.laz>
+```
+
+### Replies
+
+Records, one per line, as every geoprocessing verb replies
+(`src/katana_app/import_records.hpp`, `src/katana_app/geo/gis_records.hpp`):
+
+```
+imported file=<path> kind=vector entities=9 layers=1 features=9 skipped=0 bounds=x0,y0,x1,y1 crs="..."
+imported file=<path> kind=dxf format="DXF R2000" entities=9 layers=3 linetypes=2 bounds=...
+imported file=<path> kind=archive entities= alignments= surfaces= meshes= clouds= layers= styles= encoding= version= member= bounds=
+imported file=<path> kind=raster            (then its reference record)
+imported file=<path> kind=pointcloud        (then its reference record)
+placed placement=local|alongside|offset east=<dE> north=<dN> text="LOCAL: moved as one piece by ..."
+tally element=<what> read=<n> imported=<n>
+surface name= triangles= points= bounds= zmin= zmax= source=
+reference id= kind=raster name= width= height= bounds= georeferenced= visible= opacity= role= file=
+reference id= kind=pointcloud name= points= source_points= bounds= visible= color= file=
+meshes count= triangles= held=yes|no
+references rasters=<n> clouds=<n>
+exported file=<path> kind=vector driver=GPKG features= skipped=
+exported file=<path> kind=dxf driver=DXF format="DXF R2000" entities= skipped= layers= bytes=
+exported file=<path> kind=archive driver=12da entities= skipped= alignments= surfaces= bytes=
+converted source=<path> file=<path> format=copc
+warning text="..."
+```
+
+- **`east` and `north` are the move**, what was added to every coordinate as
+  `OFFSET=dE,dN` gives it, and empty when nothing moved (`ALONGSIDE` into an
+  empty drawing). The readers subtract an origin shift; the record says the
+  move, which is what a person reads the sentence for.
+- **`features`** counts what the reader read, a multi-part feature once per
+  part - the sample's spoil heaps, one MultiPolygon, are two.
+- **The DXF records are the same in every build.** The DXF steps live in
+  `src/katana_app/dxf_verbs.hpp`, split as the executor runs a line (a pure
+  read or write, then the apply), and a build without GDAL runs them back to
+  back through `runDxfVerb`. One DXF import, one DXF export, one reply.
+- **This changed the replies.** `imported 9 entities from parcels.geojson`
+  and `  extent 0,0 to 185,165` became the records above; the `cli.*`,
+  `Session.*`, `GeoSession.*` and window checks that read the prose were
+  rewritten for the records, and only for them - every number they expect
+  is the one they expected before. Anyone scripting against the prose has to
+  change; an agent reading `structuredContent` no longer parses text at all.
+  `INFO`'s records are below ("Dataset information").
+
+### Decisions
+
+- **The window keeps what only it does, through the executor's context**
+  (`geo::Context`), not a second implementation:
+  - `farApart` is asked, on the GUI thread, when an `IMPORT` that keeps its
+    coordinates lands far from the drawing: Shift Alongside, Keep or Cancel
+    (`askFarApart`). Shift Alongside reads the file again with the shift, in
+    the apply, as a typed `ALONGSIDE` would have. A session, and a headless
+    window, have nobody to ask: the data keeps its coordinates and a
+    `warning` record says what to type instead. The headless window used to
+    log that as an error, which failed a `--command` import the CLI ran
+    without complaint; it is the CLI's warning now.
+  - `imported` shows what only a window can: a 12d archive's meshes, and the
+    3D view for new surfaces or meshes. A session counts the meshes and says
+    it holds none (`meshes ... held=no`).
+  - `frame` frames what the import added; `changed` redraws the reference
+    layers and surfaces.
+- **A 12d archive's surfaces go into the session's store**
+  (`terrain::SurfaceStore`), in the CLI and MCP too, where the session once
+  said it held none. A geoprocessing line then finds them by name
+  (`GDAL raster hillshade FROM SURFACE "TIN SOUTH WEST" ...`), and `EXPORT
+  <file>.12da` writes them back, as the window's export always did. A name
+  already taken is "name (2)".
+- **`INFO <id>` is left to the interpreter by the executor itself.** The verb
+  table's rows gained `takes` (`geo::takesInfo`): `INFO 12` is the entity
+  unless a file of that name exists, `INFO #12` always is.
+- **EXPORT and COPC write beside their target, and the apply moves the file
+  into place** (`src/katana_app/geo/staged_files.hpp`). A job's work may not
+  change what a person can see, and a cancelled job never applies
+  (`src/katana_qt/jobs.hpp`), but the writers - GDAL's, the DXF and archive
+  writers, PDAL's COPC - cannot be stopped part way. Written straight to the
+  target, a cancel after the write would report a cancel that did not
+  happen. So the work writes into a folder of its own beside the target, and
+  the apply renames what it wrote into place; a job dropped after its write
+  takes the folder with it. Rejected: a scratch folder elsewhere (the move
+  would be a copy across volumes), and a scratch NAME beside the target (a
+  shapefile is several files named by its stem, a writer takes its driver
+  from the extension, and a `.12daz` names its member after the file).
+- **EXPORT writes a copy of the drawing**, taken when the line is prepared,
+  so the window stays live while a large drawing is written. The copy's
+  entity observer is cleared: a copy must never report to the Document.
+- **Cancel lands at the end of a read or a write.** The readers and writers
+  take no stop token; a cancelled `IMPORT` imports nothing and a cancelled
+  `EXPORT` or `COPC` writes nothing, but each stops only when its read or
+  write ends. The status bar shows them as busy, with no measure.
+- **Where the verbs are said.** HELP, the window's Command Reference and
+  `katana_help` list them from the executor's table; the session's own
+  "Interop" help block is gone, and so are the window's copies in
+  `dispatchLine` and its archive and DXF importers. HELP (or `?`) alone,
+  typed as a session line - `katana_cli -c HELP`, or `HELP` among
+  `katana_run_commands` - is `Session::helpText`, the text `katana_help`
+  and `--help` give. It used to reach the interpreter, whose HELP knows
+  neither the executor's verbs nor CUSTOMISE and IFC, which are the
+  session's (`cli.help_typed_as_a_line_is_the_whole_session_help`,
+  `McpServer.HelpSentAsACommandIsTheWholeSessionHelp`). With a word,
+  `HELP SHEETS` and `HELP UTILITY` stay the interpreter's.
+
+Tests: `GisVerbs.*`, `GisSession.*` and `GisRecords.*`
+(`tests/geo/test_gis_verbs.cpp`), `McpServer.ImportReturnsStructuredRecords`,
+the `cli.gis_*` checks (`src/katana_app/geo/cli/gis_verbs.cmake`), the
+window's `qt_gis_*_headless` (`tests/geo/headless/gis_verbs.cmake`) - of
+which `qt_gis_import_line_gives_the_sessions_records_headless` expects the
+very records `cli.gis_import_line_gives_the_records_the_window_gives` does -
+and `qt_widgets.GisVerbsWindow.*`, where a cancelled import imports nothing
+and a cancelled export leaves an empty folder.
+
+Not done:
+
+- A process that dies mid-write leaves its `.katana-staging-<pid>-<n>`
+  folder beside the target.
+- The window's Command Reference (`windowHelpText`,
+  `src/katana_qt/command_reference_dialog.cpp`) keeps its own copies of the
+  IFC and CUSTOMISE help blocks rather than reading `ifcHelpText` and the
+  session's, so an edit to one is not seen in the other.
+
+The import and export dialogs build `IMPORT` and `EXPORT` lines ("Import
+options", "Export options"); neither writes through `interop` itself any
+more.
+
+## Import options
+
+`IMPORT` grew words that say what of a file is read and how, read by one
+parser in `src/katana_app/geo/import_verb.cpp` (the contract's grammar D):
+
+```
+IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]
+       vector data:  [layers=a,b] [where="<OGR SQL WHERE>"] [sql="<SELECT>"] [dialect=ogrsql|sqlite]
+                     [<scope> [clip]] [fields=a,b] [attributes=no] [target=<layer>] [max=N]
+                     [oo=KEY=VALUE]...
+       every kind:   [crs=project|adopt] [srs=<code>] [PREVIEW]
+       a raster:     [band=N] [subdataset=N|name] [maxpixels=N] [name=<n>]
+       a cloud:      [budget=N] [class=N] [resolution=<m>] [name=<n>]
+```
+
+- **`where=` and the scope go to the driver**, not through Katana after a
+  full read: `GdalDataset::readTable` sets `OGRLayer::SetAttributeFilter` and
+  `SetSpatialFilterRect` (`gis::VectorReadOptions::attributeFilter`,
+  `spatialFilter`), so a GeoPackage answers from its SQLite and its R-tree,
+  and a feature outside is never read. The filters are cleared after the
+  read, so a dataset read twice is not narrowed the second time. A filter
+  GDAL cannot parse is refused with GDAL's reason - never read as "nothing
+  matches".
+- **`sql=`** runs a SELECT on the dataset (`GdalDataset::readSql`,
+  `GDALDataset::ExecuteSQL`) and imports its rows as one layer named after
+  the file. Only `SELECT` and `WITH` are read: an import never changes its
+  file. It is refused with `layers=`. The statement is one word of the line,
+  so it holds no double quote; SQLite reads `[identifier]` alike, as GIS SQL
+  takes it (`vector::sqlForLine`).
+- **The scope is the shared one** (`cad::parseScopeWords`, resolved by
+  `cad::matchScope`): AREA's box, a VIEW's visible area, else the extent of
+  what SELECTION, DRAWING or LAYERS takes - in the drawing's coordinates,
+  which are the file's, or the project's with `crs=project`, when the box
+  is moved into each layer's CRS first (`gis::transformBox`, densified, so
+  the box the driver filters by encloses the one asked for). The reply says
+  what it took: `scope scope=area area=... matched=0 box=... clip=no`. A
+  scope that takes nothing reads nothing and says so (`import ... ran=no`),
+  not an error.
+- **`clip` cuts** at the box (AREA, a VIEW's area: `vector clip --bbox`) or
+  by the closed shapes the scope takes (`vector clip --like`, which clips to
+  their geometry, not their bounds), through the one bridge, after any
+  reprojection. A scope that takes no closed shape is refused for `clip`.
+  Rejected: Katana's own clipping of rings, a second implementation of what
+  GIS CLIP already runs through GDAL.
+- **A scope with a placement is refused.** The scope is in the drawing's
+  coordinates, which LOCAL, ALONGSIDE and OFFSET move the data away from;
+  reading "what lies in this box" and then moving it elsewhere would say
+  two things at once.
+- **`oo=` is checked against the driver's own list** (`gis::checkOptions`,
+  from `GDAL_DMD_OPENOPTIONLIST`): a key it does not declare, or a
+  string-select value outside its choices, is refused naming the keys it
+  has. GDAL itself only warns and reads on without the option, which looked
+  as if the option had worked. The same check serves EXPORT's `co=` and
+  `lco=`.
+- **`crs=project`** moves vector data into the project's coordinate system
+  (`VectorImportOptions::targetCrs`); refused, naming `CRS SET`, when the
+  project has none, and for a raster or a point cloud, which are drawn at
+  their own coordinates (RASTER REPROJECT makes a moved copy). **`srs=`** is
+  the CRS a vector file's coordinates are in, whatever its layers declare,
+  as ogr2ogr's `-s_srs`: used as the source for `crs=project`, and recorded
+  as the file's otherwise; a layer that declares another system is said in
+  a warning (`VectorImportOptions::sourceCrs`). It was the CRS of a layer
+  that declares none, which a GeoJSON without a `crs` member never is:
+  GDAL declares it WGS 84 (RFC 7946 section 4), so `srs=EPSG:28356
+  crs=project` moved MGA metres as degrees and drew the lots millions of
+  metres away (review finding;
+  `ImportOptions.SrsSaysWhatAGeoJsonWithoutACrsMemberIsIn`). The online
+  import keeps the fallback it needs (`assumedSourceCrs`, WGS 84 for a
+  service's layer that declares none). For a raster, `srs=` still only
+  records a system on one that declares none.
+- **A file in another system than the project's is said.** Imported
+  without `crs=project`, a vector file, a raster or a point cloud known to
+  be in another system (`gis::sameCrs`) is drawn at its own coordinates,
+  which do not register against the drawing's; the reply says so in a
+  warning naming both (`ImportOptions.AFileInAnotherCrsThanTheProjectsIsSaidToBe`).
+  `crs=adopt` that set the project's from the file's says nothing.
+- **`crs=project` is checked again at the apply.** The data is moved on the
+  worker into the project's system as it was at prepare; a `CRS SET` while
+  the import ran would draw it in the wrong one, so the apply refuses with
+  `InvalidState` and adds nothing
+  (`ImportOptions.CrsProjectRefusesWhenTheProjectsCrsChangedWhileTheImportRan`). **`crs=adopt`**
+  sets the project's CRS from the file's when the project has none - in the
+  SAME undo step as the entities (`Document::coordinateSystemCommand`), so
+  one Undo takes both away - and does nothing, saying why
+  (`crs adopted=no reason=...`), when the project has one already: changing
+  a project's CRS is `CRS SET`'s decision, not an import's.
+- **A raster's `band=`** shows that band alone as grey, stretched over its
+  own range (or through its colour table), whatever the file says its bands
+  make (`GdalDataset::readImage` with a band); **`subdataset=`** opens a
+  dataset inside a container by its number in INFO's list or by its name.
+- **A point cloud's `class=`** is one ASPRS class: the reader filters by one
+  (`PointCloudReadOptions::classification`); a list is refused rather than
+  read as its first. With `budget=`, the step is sized to the class: the
+  filter runs before the decimation, and a step sized to the whole file
+  kept 738 of 1000 for class 2 of `samples/gis/survey_scan.las` (29512 of
+  its 40000 points, counted from the point records). No LAS header counts
+  points by class, so the first read measures it - at most kept x step
+  points passed the filter - and a second read at the step that sizes gives
+  984 (`ImportOptions.ABudgetWithAClassIsSizedToThePointsOfThatClass`).
+  Reading the file once more to count the class exactly was rejected: the
+  measured bound already keeps within the budget, and costs the same second
+  read only when it helps.
+- **An option of another kind of data is refused by name** - `band=` on a
+  shapefile, `where=` on a raster - rather than ignored and seeming to have
+  worked.
+- **PREVIEW** reads with every filter and replies
+  `import file=... kind=vector preview=yes features=N of=M entities=E layers=L`
+  (after the scope record), importing nothing; for a raster or a cloud,
+  which have no filters to count, it answers without reading. `of` is the
+  features the layers read hold before any filter (`featuresInFile`).
+- **What the filters took is said**: an import with `layers=`, `where=`,
+  `sql=` or a scope adds `matched features=N of=M` after its `imported`
+  record, and a filter that takes nothing imports nothing with a warning -
+  an answer, where a file that yields nothing unfiltered is still refused.
+- **The path** is the first word: quoted, or unquoted up to the first
+  option, flag, placement or scope word, so a path with a blank still reads
+  without quotes. With nothing after it but a placement, the line is read by
+  `CommandInterpreter::importArgument` exactly as before.
+
+**The window.** GIS > Import Vector Data, Import Raster and Import Point
+Cloud (`src/katana_qt/gis_import_dialogs.hpp`) are built from the file's
+description and show the `IMPORT` line their fields make (`<d>Command`);
+Import hands that line to `MainWindow::runVerbLine`, so the dialog does
+nothing an agent cannot. The vector dialog's scope is the shared "Apply to"
+and "Only those that match" widget (`vectorImportScope`), off until
+`vectorImportUseScope` is ticked; its Preview runs the line with PREVIEW and
+shows the count in `vectorImportMatchCount`. The fields that were
+`importSourceLayer`, `importTargetLayer` and `importAttributes` are
+`vectorImportLayers` (every layer ticked is no `layers=` word),
+`vectorImportTarget` and `vectorImportAttributes`, named as every GIS
+dialog's are. The window's own importVectorFile, importRasterFile and
+importPointCloudFile, the second path that imported through `interop`
+directly, are gone.
+
+**MCP.** `katana_import` takes the options as arguments and builds the line
+(`docs/mcp.md`, "I3 and I4").
+
+Tests: `ImportOptions.*` and `RasterBands.*`
+(`tests/geo/test_import_options.cpp`), the `cli.import_*` checks of
+`src/katana_app/geo/cli/import_options.cmake`,
+`McpServer.ImportTakesItsFilterScopeAndPreviewArgumentsAsTheWordsAPersonTypes`,
+and `qt_widgets.VectorImportDialog.TheFieldsBuildExactlyTheTypedLine` with
+its neighbours (`tests/qt_widgets/geo/test_import_dialogs.cpp`).
+
+Not done:
+
+- A raster's `band=` and `subdataset=` are not recorded with the reference
+  layer, so a project reopened (REFS RESTORE) shows the file as it is
+  without them.
+- `srs=` for a raster only records the CRS on the reference layer; nothing
+  is moved.
+- No test reads a real container's subdataset: no fixture holds one (a
+  netCDF would); `ImportOptions.ASubdatasetOfAFileWithNoneIsRefused` covers
+  the refusal only.
+- The scope for `sql=` with `crs=project` is moved into the first layer's
+  CRS: a statement over layers in different systems is filtered in that
+  one.
+- A point cloud takes no scope; `PointCloudImportOptions::clip` exists and
+  is not yet given a word.
+
+## Export options
+
+`EXPORT` takes the shared scope and filter, and the options GDAL's formats
+have, read by one parser in `src/katana_app/geo/export_verb.cpp`:
+
+```
+EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
+       [crs=project|native|<code>] [co=KEY=VALUE]... [lco=KEY=VALUE]...
+       [text=points|skip] [curve=<m>] [properties=yes|no] [PREVIEW]
+```
+
+- **The scope is the one grammar** (`cad::parseScopeWords`, resolved by
+  `cad::matchScope`): no scope words is the whole drawing, as `EXPORT`
+  always was. `WHERE` alone is the parser's own rule, `MODIFY`'s: the
+  selection, filtered; `DRAWING WHERE ...` filters the whole drawing, and the
+  `scope` record says which was taken
+  (`cli.export_where_alone_filters_the_selection_and_drawing_where_the_drawing`).
+  `katana_export`'s `where` without `scope` means the same and writes
+  `SELECTION WHERE ...`; it was refused, while a typed line took it
+  (`McpServer.WhereWithoutAScopeFiltersTheSelectionAsTheLineDoes`). Making
+  `WHERE` alone the drawing for `EXPORT` was rejected: it is one parser's
+  rule for every verb, and `MODIFY WHERE ...` acting on the drawing instead
+  of the selection would change what an edit touches. Refusing `WHERE` alone
+  everywhere was rejected for the same reason. The reply says what it took - a `scope` record after the
+  `exported` one, which stays first, as a reader of the first record found
+  it - and a scope that takes nothing writes nothing and says so
+  (`export ... ran=no`), not an error.
+- **The `exported` record's `crs=` is what the file is in**
+  (`VectorExportResult::projectionWkt`): the project's, `crs=<code>`'s,
+  WGS 84 for KML, KMZ and GPX, which the writer converts to whatever the
+  drawing is in, and none for entities imported moved. It named the
+  project's system for a KML whose coordinates were longitude and latitude
+  (review finding;
+  `ExportOptions.AKmlSaysItIsInLongitudeAndLatitudeNotTheProjects`).
+- **A .dxf and a .12da take the scope too**, through a copy of the drawing
+  that keeps only what the scope took: the native writers take a model, and
+  the copy is already made for the worker. Rejected: threading the scope's
+  entity list through `writeDxfExport` and the archive writer, a second
+  selection mechanism beside the copy. An archive carries the session's
+  surfaces with the whole drawing (no scope, or DRAWING with no filter) and
+  not with a part of it, as the window's export always did. GDAL's options
+  on a .dxf or a .12da are refused by name.
+- **`layername=`, not `layer=`.** An option key is never a WHERE key:
+  `WHERE ... LAYER=` would take `layer=<n>` for a filter
+  (`src/katana_app/geo/vector_support.hpp`). The plan's grammar said
+  `layer=`.
+- **`split=layer`** writes one file layer per drawing layer, named after it,
+  in the order the layers are first met; refused with `layername=`, and for
+  GPX, whose layers are its own.
+- **`append`** adds the layers to the file (a GeoPackage) rather than
+  replacing it (`gis::VectorExportOptions::append`): a layer name the file
+  has is refused before anything is written, a format that adds no layer to
+  an existing file is refused, and a failure part-way deletes only the
+  layers it made. The write is to a copy of the file in the staging folder
+  (`StagedFiles`), which the apply puts in place of it, so a cancelled
+  append leaves the file as it was. `co=` with `append` is refused: they are
+  the options of a new file.
+- **`co=` and `lco=` are checked** against the driver's creation and layer
+  creation lists (`gis::checkOptions`), as IMPORT's `oo=` is: GDAL only
+  warns of an unknown one.
+- **`crs=`.** The project's coordinate system is written by default
+  (`crs=project`), as it has been since the fidelity work. A code moves the
+  coordinates into that system on the way out
+  (`VectorExportOptions::targetCrs`, by the one table reprojection IMPORT's
+  `crs=project` uses);
+  refused without a project CRS to move from. **A GeoJSON is written in
+  longitude and latitude by default**, converted from the project's, with a
+  warning saying so: RFC 7946 section 4 fixes GeoJSON's coordinates to WGS 84
+  longitude and latitude, and GDAL's writer, given projected coordinates,
+  writes them with a `crs` member most readers ignore - so they were read as
+  degrees. `crs=native` keeps the project's system where the format allows
+  it (a GeoJSON with its `crs` member, JSON-FG). KML, KMZ and GPX were
+  already converted ("Fidelity"). The default changed for GeoJSON only; the
+  `interop::exportVector` API writes coordinates as they are unless asked.
+- **`text=points`** writes a text entity as a point at its insertion point,
+  with `text`, `text_height` (model units) and `text_rotation` (degrees
+  anticlockwise) fields and an `OGR_STYLE` field whose `LABEL(t:"...",s:<h>g,
+  a:<deg>)` the writer also sets as the feature's style string, which KML,
+  DXF and MapInfo draw by. `text=skip`, the default, leaves text out and
+  counts it, as before. The reply's `texts=` says how many went.
+- **`curve=`** is the chords' largest stray from an arc, and
+  **`properties=no`** writes no entity properties - the old dialog's two
+  choices, as words.
+- **PREVIEW** answers at once:
+  `export file=... kind=vector driver=GPKG preview=yes entities=<n>` and the
+  scope record, and writes nothing.
+- The `exported` record of a GDAL format gained `layers=` (the file layers
+  written), `crs=` (the system written), `texts=` with `text=points` and
+  `append=yes` with `append`, after its old fields.
+
+**The window.** File > Export Vector (and the GIS menu's same action) asks
+for the file, then opens the Export Vector dialog
+(`src/katana_qt/gis_export_dialog.hpp`), built on the GIS dialog frame: the
+shared "Apply to" and "Only those that match" controls (`vectorExportScope`,
+starting at the selection when there is one, else the whole drawing), the
+option fields (`vectorExportLayerName`, `vectorExportSplit`,
+`vectorExportAppend`, `vectorExportCrs`, `vectorExportCreationOptions`,
+`vectorExportLayerOptions`, `vectorExportText`, `vectorExportCurve`,
+`vectorExportProperties`), and `vectorExportCommand`, `vectorExportPreview`
+and `vectorExportRun`, which hand the line to the one executor. The GDAL
+fields are off for a .dxf or a .12da. The window's own exportDrawingTo and
+its native DXF export (main_window_dxf.cpp), the second path that wrote
+through `interop` directly and asked "selected only?" in a message box, are
+gone. A headless run still refuses the item's file dialog and names the
+`EXPORT` line, which is the non-interactive path.
+
+**MCP.** `katana_export` takes the scope and the options as arguments
+(`docs/mcp.md`, "I3 and I4").
+
+Tests: `ExportOptions.*` (`tests/geo/test_export_options.cpp`), the
+`cli.export_*` checks of `src/katana_app/geo/cli/export_options.cmake`,
+`McpServer.ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes`,
+and `qt_widgets.VectorExportDialog.TheFieldsBuildExactlyTheTypedLineAndRunHandsItOver`
+with `VectorExportLine.*` (`tests/qt_widgets/geo/test_export_dialog.cpp`).
+The expected coordinates of the conversions are PROJ's `cs2cs` figures for
+330000,6250000 in EPSG:28356, as `tests/geo/test_vector_fidelity.cpp`
+records them.
+
+Not done:
+
+- JSON-FG is written only when the file's name picks its driver; EXPORT has
+  no word for a driver other than the extension's, so `crs=native` is shown
+  with a GeoJSON.
+- `text=points` writes one point per text; a multi-line text's lines are one
+  field, its line breaks blanks in the style's label.
+- The archive writer and the DXF writer take no `co=`/`lco=`; they have no
+  such options.
+
+## Dataset information
+
+```
+INFO <file|folder|url> [JSON] [STATS] [CHECK] [LAYER <name>]
+```
+
+What a file holds, read without importing it, as records an agent can act
+on - which field to filter on, which band, which layer - or as GDAL's own
+JSON:
+
+```
+dataset file=<path> kind=raster|vector|raster,vector|pointcloud|folder driver=AAIGrid crs="WGS 84 / UTM zone 30N (EPSG:32630)"
+raster width=120 height=90 bands=1 georeferenced=yes cell=1.5,1.5 bounds=-5,-5,175,130
+band band=1 type=Float32 nodata=-9999 min= max= mean= stddev= color=Undefined overviews=0
+overview band=1 index=1 width= height=
+subdataset index=1 name="NETCDF:..." description="..."
+layer name=lots features=3 geometry=Polygon crs="..." bounds=-10,0,110,40 fields=2
+field layer=lots name=kind type=String subtype= width= precision=
+pointcloud points=40000 bounds=... zmin= zmax= color=no copc=no
+found file=<path> driver=GeoJSON has_crs=yes            (a folder: one per dataset)
+check code=0 problems=0                                  (CHECK)
+problem text="..."
+```
+
+- **One reading.** `interop::describeSource` describes a GDAL dataset from
+  GDAL's own `raster info` and `vector info` JSON, run through the
+  geoprocessing bridge, and keeps that JSON beside the description. The
+  records are read from it and `INFO ... JSON` gives it back as it is
+  (`{"path", "raster", "vector", "multidim"}`, GDAL's key order kept), so the
+  two cannot disagree. The adapter's own reading of a dataset for this was
+  replaced: two readers of one file would drift. The import dialogs and
+  `formatDescription` read the same description.
+- **Both readers are asked.** One file can hold rasters and vector layers (a
+  GeoPackage), so `raster info` and `vector info` are both run; what
+  neither reads is refused in the words of the reader its kind suggests.
+  `mdim info` is asked, for JSON, of the multidimensional formats this GDAL
+  has (netCDF, HDF4, HDF5, GRIB, BAG, S-102, S-104, S-111, Zarr, CPHD),
+  since it fails for every classic raster.
+- **Absent is not zero.** A band's statistics are empty until computed;
+  `STATS` computes them from every pixel. GDAL's JSON prints them to three
+  decimals, so the `STATISTICS_` metadata beside them, 14 significant
+  digits, is read first (measured: `"mean":30.341` against
+  `STATISTICS_MEAN 30.341263614231` for the sample terrain). The bridge puts
+  back whatever `.aux.xml` the computation would have left beside the file
+  (`docs/geoprocessing.md`, "Sidecars"), so `STATS` writes nothing there.
+- **CHECK** is GDAL's `dataset check`: every value read, its return code and
+  what failed, as `problem` records. A file GDAL cannot open at all fails
+  the line instead.
+- **A folder** is GDAL's `dataset identify`, recursive and detailed, and the
+  point clouds in it, which GDAL does not read (PDAL describes them). An
+  OpenFileGDB `.gdb` is a folder that GDAL opens as one dataset, and it is
+  described as one.
+- **/vsi paths and URLs** are GDAL's to find: `describeSource` no longer
+  refuses `/vsizip/a.zip/b.geojson` as a missing file before GDAL is asked,
+  and INFO reads any format GDAL reads (`DescribeOptions::anyFormat`), where
+  an import dialog asks only of what Katana imports.
+- **The path**, as INFO has always read it, is one quoted word or the
+  unquoted words before the first keyword; a quoted path followed by a word
+  INFO does not know is refused.
+
+**GIS > Dataset Information** (`datasetInfoDialog`, and the Reference Data
+panel's Info button) builds `INFO "<file>"` and `INFO "<file>" JSON` and runs
+them through the window's one executor, then shows the records: the Summary
+(`datasetInfoSummary`), the Fields (`datasetInfoFields`) and Bands
+(`datasetInfoBands`) tables, and GDAL's JSON indented (`datasetInfoJson`,
+`datasetInfoCopyJson`). Compute Statistics (`datasetInfoStats`) and Check
+(`datasetInfoCheck`) run `INFO ... STATS` and `INFO ... CHECK`;
+`datasetInfoCommand` shows the line last run and `datasetInfoReply` what it
+said. A band's statistics, once computed, stay in the Bands table when a
+later reply - Check's - gives none for the same file: Check blanked them
+(`DatasetInfoDialog.StatisticsAndCheckAreTheirLines`). The reply and the
+import dialogs' status lines are plain text: GDAL's words are shown as they
+are, where a `<code>` in one was taken for markup and vanished
+(`VectorImportDialog.AMessageIsShownAsTypedNotAsMarkup`). INFO runs as a background job in the window, so the dialog is told when
+the job ends (`MainWindow::awaitJob`, which reads the `job id=<n> ...
+state=started` record the line answered with). MCP: `katana_dataset_info`
+(`docs/mcp.md`).
+
+Tests: `InfoVerb.*` (`tests/geo/test_info_verb.cpp`) - the terrain's
+statistics against the grid's own values read from the text, within the
+half ulp of Float32 GDAL reads it as, and no sidecar; typed GeoJSON fields;
+a folder; CHECK; a `/vsizip` path; a netCDF's multidimensional JSON;
+`DatasetInfo.TheFieldsAndBandsAreReadFromGdalsOwnDescription` and
+`DatasetInfo.AVsiPathIsGdalsToFindAndIsDescribed`;
+`McpServer.DatasetInfoReturnsRecordsAndGdalsJson`; `cli.info_*`;
+`qt_widgets.DatasetInfoDialog.*`;
+`qt_info_typed_and_run_as_a_dialog_runs_it_gives_the_records_headless` and
+`qt_dataset_info_headless`.
+
+Not done: INFO says nothing of a raster's metadata domains or histogram
+(GDAL's JSON has them, under `JSON`), and lists a folder's datasets without
+describing each.
+
+## Reference layers
+
+```
+REFS [LIST] [JSON]
+REFS SHOW|HIDE|REMOVE|INFO <ref>
+REFS OPACITY <ref> <0..1>                     (a raster's)
+REFS COLOR <ref> elevation|intensity|classification|rgb|flat   (a point cloud's; COLOUR too)
+REFS RENAME <ref> <name>
+REFS OVERVIEWS <ref> [levels=2,4,8] CONFIRM   (a raster's)
+REFS RESTORE
+<ref> := a layer's id, or its name in any case
+```
+
+```
+reference id=1 kind=raster name=terrain width=120 height=90 bounds=... georeferenced=yes visible=yes opacity=1 role=imagery display=plain file=...
+reference id=2 kind=pointcloud name=scan points=40000 source_points=40000 bounds=... visible=yes color=elevation file=...
+missing name=ortho kind=raster file=...
+references rasters=1 clouds=1 missing=0
+removed id=2 kind=pointcloud name=scan
+source file=... url=... licence=... attribution=... crs=...        (INFO)
+derivation line="GDAL raster hillshade ..."                        (INFO of a derived raster)
+overviews id=1 file=.../terrain.asc.ovr count=2 levels=2,4         (then an overview record each)
+restored layers=2 missing=0                                        (RESTORE)
+```
+
+- **The project keeps them.** The header of `reference_data.hpp` always said
+  the project records each layer's source and display settings and reads
+  the pixels again on opening; nothing did. Now a save records every layer
+  (`interop::referenceRecords`: kind, name, source, visibility, a raster's
+  opacity, role, display style, derivation, web source and licence and the
+  display copy's size, a cloud's colouring, point size and the points it
+  held), and opening the project runs `REFS RESTORE`, which reads each
+  layer again from its source through the one executor - a job in the
+  window - with its recorded name and settings. A cloud that came in with
+  a 12d archive is read again from the archive. How the records are kept
+  is `docs/model.md`'s ("Metadata a newer build wrote"): a key, not a
+  schema change.
+- **Taken at the save.** A layer imported, hidden or restyled does not by
+  itself make the drawing ask to be saved: reference data was session data,
+  and File > New after an import still simply drops it (audit QT-17). Both
+  front ends record the layers where they record the customisation, before
+  a save that has somewhere to go (`geo::recordReferences`). `NEW` and
+  `OPEN` in `katana_cli` and `katana_mcp` now let the layers and surfaces go
+  with their drawing, as the window's always did.
+- **Where a source is.** A record keeps the source absolute, resolved when
+  it is recorded: `IMPORT terrain.asc` typed in katana_cli's working folder
+  was kept as `terrain.asc`, and an OPEN from any other folder found nothing
+  (`RefsSession.ALayerImportedByARelativePathReopensFromAnotherFolder`). A
+  source inside the project's folder is also kept relative to it
+  (`in_project`, a key added to the record, not a new version), and an
+  opening whose absolute source is gone looks for it there, so a project
+  moved or copied with its data keeps its layers
+  (`RefsSession.ALayerInsideTheProjectFollowsTheProjectWhenItMoves`). A
+  relative source a record of an older build holds is looked for in the
+  project, then in the working folder as before. Keeping only the
+  project-relative path was rejected: File > Save As records before it
+  knows the new folder, so a path relative to the old one could name
+  nothing; the absolute path is read first and never depends on it.
+- **A missing file is warned of, not fatal.** The drawing opens; the
+  restore says which source is gone and keeps that layer's record, listed as
+  `missing`, so the next save does not drop a layer because a drive was not
+  connected that day. `REFS REMOVE <name>` lets it go.
+- **Overviews only when told.** `REFS OVERVIEWS` runs GDAL's `raster
+  overview add --external` on the raster's file, writing `<file>.ovr` beside
+  it - which Katana otherwise never does to a person's file
+  (`docs/geoprocessing.md`, "Safety") - so the line must say `CONFIRM`,
+  `katana_references` must be given `confirm: true`, and the window asks
+  (headless, nobody can, so its line goes without and is refused, saying
+  what it would write). The overviews make GDAL's reads of a large raster
+  faster; the display copy is not re-read at view resolution.
+- **By id or by name.** A name several layers share is refused, naming
+  their ids.
+
+**The window.** The Reference Data panel builds REFS lines and runs them
+through the window's one executor, each logged as typed: the list
+(`referenceList`, its check boxes `REFS SHOW|HIDE`), Show (`referenceShow`),
+Hide (`referenceHide`), Information (`referenceInfo`: `REFS INFO`, then the
+Dataset Information dialog on the layer's file), Build Overviews
+(`referenceOverviews`), Remove (`referenceRemove`), and below the list the
+selected layer's Opacity (`referenceOpacity`) and Colour
+(`referenceColour`). The per-row controls it had were replaced by these: a
+control in a cell has no name a test or an agent can reach, and a line's
+reply rebuilds the table the cell is in.
+
+**MCP**: `katana_references` (`docs/mcp.md`).
+
+Tests: `RefsVerbs.*` and `RefsSession.ASavedProjectReopensWithItsReferenceRasters`
+(`tests/geo/test_refs_verbs.cpp`) - visibility round trip, opacity bounds,
+colour, rename and remove by name, JSON and INFO, overviews built only with
+CONFIRM (120 x 90 halved is 60 x 45, quartered 30 x 23 - GDAL rounds up),
+every display setting through a record, a derived raster's line kept, a
+missing source kept for the next save, an archive's clouds read again;
+`ProjectStoreRoundTrip.TheReferenceLayersAProjectRecordsRoundTripAsTheyWere`
+and `...FromBeforeReferenceLayersWereRecordedOpensWithNone`; `cli.refs_*`;
+`McpServer.ReferencesActsOnALayerByIdOrNameAndListsThemAfter`;
+`qt_reference_dock_builds_refs_lines_headless`.
+
+Not done: a source outside the project is found only at the same absolute
+place, so a project moved to another machine without it lists it as
+missing (warned of and kept); the display copy is one decimated read, not
+re-read at view resolution; a web layer whose cached file is gone is not
+fetched again (`ONLINE IMPORT` does).
 
 ## The 12d Archive format (.12da, .12daz)
 

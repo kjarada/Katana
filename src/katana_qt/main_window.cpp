@@ -13,7 +13,12 @@
 #include "attribute_manager.hpp"
 #include "customisation/drawing_summary_dialog.hpp"
 #include "format.hpp"
-#include "gis_dialogs.hpp"
+#include "dataset_info_dialog.hpp"
+#include "geo/references.hpp"
+#include "geo/replies.hpp"
+#include "gis_export_dialog.hpp"
+#include "gis_import_dialogs.hpp"
+#include "surface_raster_dialog.hpp"
 #include "jobs.hpp"
 #include "layer_manager.hpp"
 #include "plan_context_menu.hpp"
@@ -938,9 +943,14 @@ void MainWindow::buildActions()
                                         "Triangulate a surface from an elevation raster's true "
                                         "values, read through GDAL",
                                         {}, "surfaceFromRaster");
-    QAction* drawingSurface = makeAction(Icon::SurfaceFromDrawing, "Surface From &Drawing",
-                                         "Triangulate a surface from the drawing's points and lines",
+    QAction* drawingSurface = makeAction(Icon::SurfaceFromDrawing, "Surface From &Drawing...",
+                                         "Triangulate a surface from the levelled points and lines "
+                                         "of the drawing, a scope of it or a filter",
                                          {}, "surfaceFromDrawing");
+    // One dialog for the three, on their own source: what --dialog finds.
+    for (QAction* surfaceFrom : {cloudSurface, rasterSurface, drawingSurface}) {
+        surfaceFrom->setData(QString("surfaceFromDialog"));
+    }
     QAction* quantities = makeAction(Icon::CorridorQuantities, "Corridor &Quantities...",
                                      "Cut and fill along an alignment, by average end area",
                                      QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q),
@@ -966,9 +976,12 @@ void MainWindow::buildActions()
     // The dialog it shows, by object name: how --dialog finds it.
     alignmentManager->setData(QString("alignmentManagerDialog"));
     connect(alignmentManager, &QAction::triggered, this, [this] { showAlignmentManager(); });
-    connect(cloudSurface, &QAction::triggered, this, [this] { buildSurfaceFromPointCloud(); });
-    connect(rasterSurface, &QAction::triggered, this, [this] { buildSurfaceFromRaster(); });
-    connect(drawingSurface, &QAction::triggered, this, [this] { buildSurfaceFromDrawing(); });
+    connect(cloudSurface, &QAction::triggered, this,
+            [this] { showSurfaceFrom(SurfaceFromKind::Cloud); });
+    connect(rasterSurface, &QAction::triggered, this,
+            [this] { showSurfaceFrom(SurfaceFromKind::Raster); });
+    connect(drawingSurface, &QAction::triggered, this,
+            [this] { showSurfaceFrom(SurfaceFromKind::Drawing); });
     connect(quantities, &QAction::triggered, this, &MainWindow::corridorQuantities);
     connect(corridor, &QAction::triggered, this, &MainWindow::corridorSurface);
     connect(alignmentSection, &QAction::triggered, this, &MainWindow::cutSectionAlongAlignment);
@@ -996,6 +1009,10 @@ void MainWindow::buildActions()
 
     // ---- GIS ---------------------------------------------------------------------------
     buildGisActions(*gisMenu, exportAction);
+    // The geoprocessing packages' items, GIS sections and Terrain submenus,
+    // from their one table (geo/menu_table.cpp).
+    GeoMenus geoMenus(*gisMenu, *terrainMenu);
+    buildGeoMenus(geoMenus, *geo_);
 
     // ---- Help ------------------------------------------------------------------------
     // The reference and the shortcuts are dialogs of their own, non-modal and
@@ -1077,6 +1094,7 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
         Icon::ExportDem, "Export Surface as &DEM...",
         "Write a surface to a GeoTIFF, ASCII grid or IMG elevation raster through GDAL",
         {}, "exportSurfaceDem");
+    exportDem->setData(QString("surfaceRasterDialog"));
     QAction* copc = makeAction(
         Icon::ConvertCopc, "Convert Point Cloud to C&OPC...",
         "Rewrite a LAS or LAZ as a Cloud Optimised Point Cloud, which can be read at any level "
@@ -1136,6 +1154,78 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
         return chooseProjectCrs(this, document_, place);
     };
     online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
+
+    // The geoprocessing verbs: the executor's context is this window's
+    // drawing, interpreter (VIEW is its plan view), reference rasters and
+    // surfaces.
+    GeoServices geo;
+    geo.document = &document_;
+    geo.interpreter = &interpreter_;
+    geo.reference = &reference_;
+    geo.surfaces = &surfaceStore_;
+    geo.scratch = katana::app::geo::ownScratch();
+    geo.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    geo.headless = [this] { return headless_; };
+    geo.frame = [this](const katana::geometry::Box2& box) { views_->zoomTo(box); };
+    geo.changed = [this] {
+        views_->invalidateReferenceCache();
+        refreshReferences();
+        syncSceneSurfaces();
+        views_->refreshAll();
+    };
+    geo.run = commandRunner();
+    geo.views = views_;
+    geo.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                            const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    geo_ = std::make_unique<GeoWorkbench>(*this, std::move(geo));
+    // What only this window does with an IMPORT line: ask where data that
+    // lands far from the drawing goes - nobody is asked headless - and show
+    // a 12d archive's meshes, and its surfaces, in a 3D view.
+    geo_->context().farApart = [this](const katana::geometry::Box2&,
+                                      const katana::geometry::Box2& incoming,
+                                      const std::string& advice) {
+        using katana::app::geo::FarApartChoice;
+        if (headless_) {
+            return FarApartChoice::Keep;
+        }
+        switch (askFarApart(this, QString::fromStdString(advice), incoming)) {
+        case FarApartAnswer::ShiftAlongside:
+            return FarApartChoice::Alongside;
+        case FarApartAnswer::Cancel:
+            return FarApartChoice::Cancel;
+        case FarApartAnswer::Keep:
+            break;
+        }
+        return FarApartChoice::Keep;
+    };
+    geo_->context().imported = [this](katana::app::geo::ImportShown&& shown) {
+        for (katana::archive12d::ImportedMesh& mesh : shown.meshes) {
+            // A 12d colour Katana has no RGB for leaves the mesh its default
+            // clay, which is visible against a surface and against the drawing.
+            constexpr katana::render::Rgba kMeshDefault = katana::render::rgba(190, 170, 140);
+            const auto toRgba = [](const std::optional<katana::entity::Color>& colour,
+                                   katana::render::Rgba fallback) {
+                return colour ? katana::render::rgba(colour->r, colour->g, colour->b) : fallback;
+            };
+            const katana::render::Rgba base = toRgba(mesh.color, kMeshDefault);
+            std::vector<katana::render::Rgba> faces;
+            faces.reserve(mesh.faceColors.size());
+            for (const auto& colour : mesh.faceColors) {
+                faces.push_back(toRgba(colour, base));
+            }
+            addMesh(mesh.name, std::move(mesh.mesh), base, std::move(faces));
+        }
+        // A surface or a mesh is a 3D thing: in plan it is only a footprint,
+        // so an import that brings one opens the 3D view - once, not once per
+        // mesh (a real archive brings 1 453 of them).
+        if (shown.surfaces != 0 || !shown.meshes.empty()) {
+            views_->ensureView(cad::ViewKind::Model3D);
+            refreshViewMenu();
+            views_->refreshAll();
+        }
+    };
 
     QToolBar* gisBar = makeToolBar("GIS", Qt::TopToolBarArea);
     gisBar->addActions({importVector, importRaster, importCloud});
@@ -1722,6 +1812,13 @@ void MainWindow::buildDocks()
 
 void MainWindow::buildReferenceDock()
 {
+    // The Reference Data panel builds REFS lines and runs them through the
+    // window's one executor (docs/interop.md, "Reference layers"), as a
+    // person or an agent would type them: each is logged, and does what
+    // katana_cli's does. Object names: referenceList, referenceShow,
+    // referenceHide, referenceRemove, referenceInfo, referenceOverviews,
+    // referenceOpacity, referenceColour; ReferenceImportButton and
+    // ReferenceZoomButton.
     auto* dock = new QDockWidget("Reference Data", this);
     dock->setObjectName("ReferenceDataDock");
     referenceDock_ = dock;
@@ -1734,13 +1831,25 @@ void MainWindow::buildReferenceDock()
                   "Import a drawing, an image or a point cloud, as File > Import does.");
     auto* zoomButton = panelTool(panel, Icon::ZoomTo, "ReferenceZoomButton", "Zoom To",
                                  "Frame the selected reference layer in every plan view.");
-    auto* infoButton = panelTool(panel, Icon::DatasetInfo, "ReferenceInfoButton", "Information",
-                                 "What the selected layer's file holds, as GDAL or PDAL reads it.");
-    auto* removeButton = panelTool(panel, Icon::Erase, "ReferenceRemoveButton", "Remove",
-                                   "Remove the selected reference layer. The file is not touched.");
-    layout->addLayout(toolRow({importButton, zoomButton, infoButton, removeButton}));
+    auto* showButton = panelTool(panel, Icon::Layers, "referenceShow", "Show",
+                                 "Show the selected reference layer (REFS SHOW).");
+    auto* hideButton = panelTool(panel, Icon::ViewLayersFiltered, "referenceHide", "Hide",
+                                 "Hide the selected reference layer (REFS HIDE).");
+    auto* infoButton = panelTool(panel, Icon::DatasetInfo, "referenceInfo", "Information",
+                                 "The selected layer's source and display (REFS INFO), and what its "
+                                 "file holds, as GDAL or PDAL reads it.");
+    auto* overviewsButton = panelTool(
+        panel, Icon::Processing, "referenceOverviews", "Build Overviews",
+        "Build overviews for the selected raster, written beside its file as .ovr (REFS "
+        "OVERVIEWS ... CONFIRM), so it is read quickly at every scale.");
+    auto* removeButton = panelTool(panel, Icon::Erase, "referenceRemove", "Remove",
+                                   "Remove the selected reference layer (REFS REMOVE). The file "
+                                   "is not touched.");
+    layout->addLayout(toolRow({importButton, zoomButton, showButton, hideButton, infoButton,
+                               overviewsButton, removeButton}));
 
-    referenceTable_ = new QTableWidget(0, 4, panel);
+    referenceTable_ = new QTableWidget(0, kRefColumns, panel);
+    referenceTable_->setObjectName("referenceList");
     referenceTable_->setHorizontalHeaderLabels({"Name", "Type", "Detail", "Display"});
     referenceTable_->horizontalHeader()->setStretchLastSection(true);
     referenceTable_->verticalHeader()->setVisible(false);
@@ -1748,37 +1857,99 @@ void MainWindow::buildReferenceDock()
     referenceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     layout->addWidget(referenceTable_);
 
+    // How the selected layer is drawn: a raster's opacity, a cloud's colour.
+    auto* display = new QHBoxLayout();
+    referenceOpacity_ = new QComboBox(panel);
+    referenceOpacity_->setObjectName("referenceOpacity");
+    referenceOpacity_->addItems({"100%", "75%", "50%", "25%"});
+    referenceOpacity_->setToolTip("How much of the selected raster shows (REFS OPACITY)");
+    referenceColour_ = new QComboBox(panel);
+    referenceColour_->setObjectName("referenceColour");
+    using Mode = katana::interop::PointColorMode;
+    for (const Mode mode : {Mode::Elevation, Mode::Intensity, Mode::Classification,
+                            Mode::SourceColor, Mode::Flat}) {
+        referenceColour_->addItem(katana::interop::toString(mode),
+                                  QString::fromLatin1(katana::interop::toWord(mode)));
+    }
+    referenceColour_->setToolTip("How the selected point cloud is coloured (REFS COLOR)");
+    display->addWidget(new QLabel("Opacity", panel));
+    display->addWidget(referenceOpacity_);
+    display->addWidget(new QLabel("Colour", panel));
+    display->addWidget(referenceColour_, 1);
+    layout->addLayout(display);
+
     dock->setWidget(panel);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
 
     connect(importButton, &QToolButton::clicked, this, [this] { importFile(); });
     connect(zoomButton, &QToolButton::clicked, this, [this] { zoomToSelectedReference(); });
+    connect(showButton, &QToolButton::clicked, this, [this] { runReferenceLine("SHOW"); });
+    connect(hideButton, &QToolButton::clicked, this, [this] { runReferenceLine("HIDE"); });
     connect(removeButton, &QToolButton::clicked, this, [this] { removeSelectedReference(); });
-    // What the selected layer's SOURCE holds - which, for a cloud, is the
-    // whole file and not the sample the panel shows.
+    // The layer's own facts, then what its SOURCE holds - which, for a
+    // cloud, is the whole file and not the sample the panel shows.
     connect(infoButton, &QToolButton::clicked, this, [this] {
-        const int row = referenceTable_->currentRow();
-        const QTableWidgetItem* item = row < 0 ? nullptr : referenceTable_->item(row, kRefName);
-        if (item == nullptr) {
+        const std::optional<katana::interop::ReferenceId> id = selectedReference();
+        if (!id) {
             logMessage("Select a reference layer first.", true);
             return;
         }
-        const auto id =
-            static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
         std::filesystem::path source;
-        if (const auto* raster = reference_.findRaster(id)) {
+        if (const auto* raster = reference_.findRaster(*id)) {
             source = raster->source;
-        } else if (const auto* cloud = reference_.findPointCloud(id)) {
+        } else if (const auto* cloud = reference_.findPointCloud(*id)) {
             source = cloud->source;
+        }
+        if (!runReferenceLine("INFO").ok) {
+            return;
         }
         if (auto dialog = makeDatasetInfo(fromPath(source))) {
             dialog->exec();
         }
     });
+    connect(overviewsButton, &QToolButton::clicked, this, [this] {
+        const std::optional<katana::interop::ReferenceId> id = selectedReference();
+        const auto* raster = id ? reference_.findRaster(*id) : nullptr;
+        if (raster == nullptr) {
+            logMessage("Select a raster first: overviews are a raster's.", true);
+            return;
+        }
+        // Writing beside a person's file is asked for: CONFIRM is the
+        // answer. A headless run has nobody to ask, so its line goes without
+        // it, and the verb says what it would write.
+        std::filesystem::path ovr = raster->source;
+        ovr += ".ovr";
+        const bool confirmed =
+            !headless_ && QMessageBox::question(this, "Build Overviews",
+                                                "Write the overviews of '" +
+                                                    QString::fromStdString(raster->name) +
+                                                    "' beside its file, as\n" + fromPath(ovr) +
+                                                    "?") == QMessageBox::Yes;
+        if (!headless_ && !confirmed) {
+            return;
+        }
+        (void)runReferenceLine("OVERVIEWS", confirmed ? QStringLiteral("CONFIRM") : QString());
+    });
+    connect(referenceOpacity_, &QComboBox::currentIndexChanged, this, [this](int chosen) {
+        if (refreshingReferences_) {
+            return;
+        }
+        static constexpr const char* kValues[] = {"1", "0.75", "0.5", "0.25"};
+        (void)runReferenceLine("OPACITY", QString::fromLatin1(kValues[std::clamp(chosen, 0, 3)]));
+    });
+    connect(referenceColour_, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (refreshingReferences_) {
+            return;
+        }
+        (void)runReferenceLine("COLOR", referenceColour_->currentData().toString());
+    });
     connect(referenceTable_, &QTableWidget::cellChanged, this,
             [this](int row, int column) { onReferenceCellChanged(row, column); });
     connect(referenceTable_, &QTableWidget::cellDoubleClicked, this,
             [this](int, int) { zoomToSelectedReference(); });
+    connect(referenceTable_, &QTableWidget::itemSelectionChanged, this,
+            [this] { showSelectedReferenceDisplay(); });
+    showSelectedReferenceDisplay();
 }
 
 void MainWindow::buildStatusBar()
@@ -2379,6 +2550,7 @@ void MainWindow::openProject(const QString& directory)
     logMessage("Opened " + directory + " (" +
                QString::number(document_.model().entities.size()) + " entities).");
     reportMissingCustomisation();
+    restoreReferences();
 }
 
 bool MainWindow::saveDocument()
@@ -2387,6 +2559,7 @@ bool MainWindow::saveDocument()
         return saveDocumentAs();
     }
     recordCustomisation();
+    recordReferences();
     const auto status = document_.save();
     if (!status) {
         warnUser("Save Failed", QString::fromStdString(status.error().describe()));
@@ -2410,6 +2583,7 @@ bool MainWindow::saveDocumentAs()
         target += ".katana";
     }
     recordCustomisation();
+    recordReferences();
     const auto status = document_.saveAs(toPath(target));
     if (!status) {
         warnUser("Save Failed", QString::fromStdString(status.error().describe()));
@@ -2745,6 +2919,23 @@ void MainWindow::runTypedLine(const QString& line)
 
 bool MainWindow::runWorkbenchLine(const QString& line)
 {
+    // A .ifc's IMPORT, EXPORT and INFO, and IFC RULES, are IFC's grammar
+    // before anything else, as in the session (session.cpp): the geo
+    // executor below takes IMPORT, EXPORT and INFO of every other file, and
+    // would read an IFC line's options as a path or GDAL's options.
+    if (const QStringList words = line.split(' ', Qt::SkipEmptyParts); !words.isEmpty()) {
+        const QString verb = words.front().toUpper();
+        if ((verb == "IMPORT" || verb == "EXPORT" || verb == "INFO" || verb == "IFC") &&
+            runIfcLine(verb, line.mid(line.indexOf(words.front()) + words.front().size()))
+                .has_value()) {
+            return true;
+        }
+    }
+    // GDAL and the geoprocessing families after it: the executor katana_cli
+    // and katana_mcp share, run here as background jobs.
+    if (geo_ != nullptr && geo_->runLine(line)) {
+        return true;
+    }
     // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
     // workbench's, as the interoperability verbs are the window's.
     if (online_ != nullptr && online_->runLine(line)) {
@@ -2972,99 +3163,16 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
                                           : katana::archive12d::LoadMode::Merge);
         return;
     }
-    // INFO 12 describes entity 12, as the interpreter's INFO does - unless a
-    // file is really called that. Every INFO was once taken for a file here,
-    // so INFO 12 answered that the file did not exist. INFO #12 is always
-    // the entity, as in the session (session.cpp): Entity Information sends
-    // it, whatever files the working directory holds.
-    if (verb == "INFO" && words.size() == 2 &&
-        cad::CommandInterpreter::isEntityId(words[1].toStdString()) &&
-        (words[1].startsWith('#') || !QFileInfo::exists(words[1]))) {
-        runInterpreterLine(line, verb);
-        return;
-    }
+    // IMPORT, EXPORT, INFO <file>, REFS and COPC are not here: they are the
+    // executor katana_cli and katana_mcp run (src/katana_app/geo), which the
+    // geo workbench runs as jobs (runWorkbenchLine). INFO <id> is left to the
+    // interpreter by the executor itself (geo::takesInfo).
+    //
     // A .ifc takes the verbs' options exactly as katana_cli reads them
     // (ifc/front_end.hpp), so its line is split by that grammar before the
     // generic one takes the rest as a path; IFC RULES is IFC's alone.
     if ((verb == "IMPORT" || verb == "EXPORT" || verb == "INFO" || verb == "IFC") &&
         runIfcLine(verb, line.mid(words.front().size())).has_value()) {
-        return;
-    }
-    // IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN], the path and the
-    // placement read as the session reads them
-    // (CommandInterpreter::importArgument): LOCAL was once taken for part of
-    // the path, and "site.dxf LOCAL" had no importer.
-    if (verb == "IMPORT") {
-        const auto typed =
-            cad::CommandInterpreter::importArgument(line.mid(words.front().size()).toStdString());
-        if (!typed) {
-            logMessage(QString::fromStdString(typed.error().describe()), true);
-            return;
-        }
-        if (typed->path.empty()) {
-            logMessage("usage: IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]", true);
-            return;
-        }
-        importPath(QString::fromStdString(typed->path), typed->placement);
-        return;
-    }
-    // The interoperability verbs, as katana_cli has them. They live in the
-    // front ends, not the CommandInterpreter, because katana_cad may not see
-    // GDAL or PDAL (tools/check_layering.cmake). The argument is the rest of
-    // the line, one layer of quotes removed, so a path may hold spaces.
-    if (verb == "EXPORT" || verb == "INFO") {
-        QString path = line.mid(words.front().size()).trimmed();
-        if (path.size() >= 2 && path.startsWith('"') && path.endsWith('"')) {
-            path = path.mid(1, path.size() - 2);
-        }
-        if (path.isEmpty()) {
-            logMessage("usage: " + verb + " <file>", true);
-            return;
-        }
-        if (verb == "EXPORT") {
-            (void)exportDrawingTo(toPath(path), {});
-        } else if (auto description = interop::describeSource(toPath(path))) {
-            logMessage(QString::fromStdString(interop::formatDescription(*description)).trimmed());
-        } else {
-            logMessage(QString::fromStdString(description.error().describe()), true);
-        }
-        return;
-    }
-    if (verb == "REFS") {
-        if (reference_.empty()) {
-            logMessage("No reference layers.");
-        }
-        for (const auto& raster : reference_.rasters()) {
-            logMessage(QString("%1  Raster  %2  %3 x %4 px")
-                           .arg(raster.id)
-                           .arg(QString::fromStdString(raster.name))
-                           .arg(raster.width)
-                           .arg(raster.height));
-        }
-        for (const auto& cloud : reference_.pointClouds()) {
-            logMessage(QString("%1  Point cloud  %2  %3 of %4 points")
-                           .arg(cloud.id)
-                           .arg(QString::fromStdString(cloud.name))
-                           .arg(grouped(cloud.points.size()))
-                           .arg(grouped(cloud.sourcePointCount)));
-        }
-        return;
-    }
-    // COPC <source> <destination.copc.laz>, as katana_cli has it: each path
-    // one word or quoted, read by the interpreter's own rules. What the GIS
-    // menu's item runs once its two files are chosen.
-    if (verb == "COPC") {
-        const auto tokens = cad::CommandInterpreter::tokenize(line.toStdString());
-        if (!tokens) {
-            logMessage(QString::fromStdString(tokens.error().describe()), true);
-            return;
-        }
-        if (tokens->size() != 3) {
-            logMessage("usage: COPC <source> <destination.copc.laz>", true);
-            return;
-        }
-        convertPointCloudToCopc(toPath(QString::fromStdString((*tokens)[1])),
-                                toPath(QString::fromStdString((*tokens)[2])));
         return;
     }
     // PLOTSHEETS [path] [format=] [style=] [sheets=] [dpi=] [lineweight=]
@@ -3142,6 +3250,7 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
     // word, HELP SHEETS and HELP UTILITY stay the interpreter's.
     if ((verb == "HELP" || verb == "?") && words.size() == 1) {
         runInterpreterLine(line, verb);
+        logMessage(QString::fromStdString(katana::app::geo::helpText()));
         logMessage(windowHelpText());
         return;
     }
@@ -3176,6 +3285,7 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
     if (verb == "SAVE" &&
         katana::cad::typedSaveHasDestination(line.toStdString(), document_.hasProject())) {
         recordCustomisation();
+        recordReferences();
     }
     const auto reply = interpreter_.run(line.toStdString());
     if (!reply) {
@@ -3192,6 +3302,7 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
     }
     if (replacesDocument && verb == "OPEN") {
         reportMissingCustomisation();
+        restoreReferences();
     }
     historyCursor_ = static_cast<int>(interpreter_.history().size());
 }
@@ -3557,15 +3668,21 @@ QString patternsFor(const std::vector<std::string>& extensions)
     return patterns.join(' ');
 }
 
+// The vector and raster extensions are GDAL's registry's (interop::
+// vectorExtensions, docs/interop.md "Formats"), so the filters offer what
+// this build opens; a file picked through "All files" is still routed by
+// what it holds. An archive (.zip, .tar.gz) is opened by its inside.
 QString importFilter()
 {
     const QString vector = patternsFor(interop::vectorExtensions());
     const QString raster = patternsFor(interop::rasterExtensions());
     const QString cloud = patternsFor(interop::pointCloudExtensions());
     const QString archive = patternsFor(interop::archive12dExtensions());
-    return "All supported (" + vector + " *.ifc " + archive + ' ' + raster + ' ' + cloud + ");;" +
-           "Vector (" + vector + ");;" + "IFC (*.ifc);;" + "12d Archive (" + archive + ");;" +
-           "Raster (" + raster + ");;" + "Point cloud (" + cloud + ");;" + "All files (*)";
+    const QString zipped = patternsFor(interop::archiveExtensions());
+    return "All supported (" + vector + " *.ifc " + archive + ' ' + raster + ' ' + cloud + ' ' +
+           zipped + ");;" + "Vector (" + vector + ");;" + "IFC (*.ifc);;" + "12d Archive (" +
+           archive + ");;" + "Raster (" + raster + ");;" + "Point cloud (" + cloud + ");;" +
+           "Zipped GIS data (" + zipped + ");;" + "All files (*)";
 }
 
 } // namespace
@@ -3584,41 +3701,9 @@ void MainWindow::importPath(const QString& path, const cad::ImportPlacement& pla
         }
         return;
     }
-    if (katana::dxf::isDxfPath(file)) {
-        importDxfFile(file, placement);
-        return;
-    }
-    const interop::SourceKind kind = interop::kindForPath(file);
-    // Refused by name, in katana_cli's words, rather than dropped: a raster
-    // or a cloud has no shift to take.
-    if (placement.mode != cad::ImportPlacementMode::Keep &&
-        (kind == interop::SourceKind::Raster || kind == interop::SourceKind::PointCloud)) {
-        const std::string word = placement.mode == cad::ImportPlacementMode::Offset
-                                     ? std::string("OFFSET")
-                                     : cad::placementWord(placement);
-        logMessage("InvalidArgument: " + QString::fromStdString(word) +
-                       " is not supported for rasters and point clouds, which are reference "
-                       "data drawn at their own coordinates",
-                   true);
-        return;
-    }
-    switch (kind) {
-    case interop::SourceKind::Vector:
-        importVectorFile(file, {}, placement);
-        return;
-    case interop::SourceKind::Raster:
-        importRasterFile(file);
-        return;
-    case interop::SourceKind::PointCloud:
-        importPointCloudFile(file);
-        return;
-    case interop::SourceKind::Archive12d:
-        importArchive12dFile(file, placement);
-        return;
-    case interop::SourceKind::Unknown:
-        break;
-    }
-    logMessage("No importer for " + path, true);
+    // The line a person would type, through the one executor: what it read
+    // and where it put it are logged as records, and it is one undo step.
+    (void)runVerbLine(importLine(QDir::fromNativeSeparators(path), placement));
 }
 
 PlacementDecision MainWindow::placeImport(const cad::ImportPlacement& placement,
@@ -3963,303 +4048,14 @@ void MainWindow::importFile()
         (void)runVerbLine(importLine(selected, {}));
         return;
     }
-    warnUser( "Import",
-                         "Katana does not recognise the extension of\n" + selected +
-                             "\n\nSupported: " + patternsFor(interop::vectorExtensions()) + " *.ifc " +
-                             patternsFor(interop::archive12dExtensions()) + ' ' +
-                             patternsFor(interop::rasterExtensions()) + ' ' +
-                             patternsFor(interop::pointCloudExtensions()));
-}
-
-void MainWindow::importVectorFile(const std::filesystem::path& path,
-                                  interop::VectorImportOptions options,
-                                  const cad::ImportPlacement& placement)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto imported = interop::importVector(path, options);
-    QApplication::restoreOverrideCursor();
-    if (!imported.ok()) {
-        logMessage(QString::fromStdString(imported.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(imported.error().describe()));
-        return;
-    }
-
-    // Where it lands, chosen or asked BEFORE anything is added. A move is
-    // read again with the shift rather than made afterwards - the same
-    // choices, the layers, the target, the attributes, with the shift added -
-    // so the one reader applies the one shift to everything, as katana_cli
-    // does.
-    const PlacementDecision placed = placeImport(placement, imported->bounds);
-    if (placed.cancelled) {
-        logMessage("Import cancelled.");
-        return;
-    }
-    if (placed.shift) {
-        options.originShift = placed.shift;
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        imported = interop::importVector(path, options);
-        QApplication::restoreOverrideCursor();
-        if (!imported.ok()) {
-            logMessage(QString::fromStdString(imported.error().describe()), true);
-            return;
-        }
-    }
-
-    // Layers must exist before the entities that reference them, and the whole
-    // import has to be ONE undo step - a user who imports a shapefile by
-    // mistake expects a single Ctrl+Z to remove it, not one per layer.
-    auto transaction = std::make_unique<cmd::Transaction>("IMPORT");
-    for (const std::string& name : imported->layersNeeded) {
-        if (!document_.model().layers.contains(name)) {
-            Layer layer;
-            layer.name = name;
-            transaction->add(cmd::createLayer(layer));
-        }
-    }
-    const std::size_t created = imported->entities.size();
-    const auto importedBounds = imported->bounds;
-    if (created != 0) {
-        transaction->add(cmd::createEntities(std::move(imported->entities)));
-    }
-
-    // A file with nothing the drawing can hold - every feature skipped, say -
-    // leaves the transaction empty, and the stack refuses an empty one as a
-    // command that changes nothing. That is not a failed import: the file was
-    // read, and its warnings below say why nothing came of it.
-    if (transaction->size() != 0) {
-        const auto status = document_.execute(std::move(transaction));
-        if (!status) {
-            logMessage(QString::fromStdString(status.error().describe()), true);
-            warnUser("Import failed", QString::fromStdString(status.error().describe()));
-            return;
-        }
-    }
-
-    logMessage("Imported " + grouped(created) + " entities from " + fromPath(path.filename()));
-    if (!importedBounds.empty()) {
-        logMessage(QString("  extent %1,%2 to %3,%4")
-                       .arg(importedBounds.min.x, 0, 'f', 2)
-                       .arg(importedBounds.min.y, 0, 'f', 2)
-                       .arg(importedBounds.max.x, 0, 'f', 2)
-                       .arg(importedBounds.max.y, 0, 'f', 2));
-    }
-    for (const std::string& warning : imported->warnings) {
-        logMessage("  " + QString::fromStdString(warning));
-    }
-    if (!imported->projectionWkt.empty()) {
-        logMessage("  coordinates were imported unchanged; the file declares its own CRS");
-    }
-    views_->zoomExtentsAll();
-}
-
-void MainWindow::importArchive12dFile(const std::filesystem::path& path,
-                                      const cad::ImportPlacement& placement)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto imported = interop::importArchive12d(path);
-    QApplication::restoreOverrideCursor();
-    if (!imported.ok()) {
-        logMessage(QString::fromStdString(imported.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(imported.error().describe()));
-        return;
-    }
-
-    // Where it lands, as a vector import decides it and for the same reason:
-    // a 12da is survey data at survey coordinates. A move is read again with
-    // the shift, which the importer applies to everything - entities,
-    // surfaces and clouds alike.
-    const PlacementDecision placed = placeImport(placement, imported->bounds);
-    if (placed.cancelled) {
-        logMessage("Import cancelled.");
-        return;
-    }
-    if (placed.shift) {
-        interop::Archive12dImportOptions options;
-        options.originShift = placed.shift;
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        imported = interop::importArchive12d(path, options);
-        QApplication::restoreOverrideCursor();
-        if (!imported.ok()) {
-            logMessage(QString::fromStdString(imported.error().describe()), true);
-            return;
-        }
-    }
-
-    // Layers, entities and alignments: one transaction, one Ctrl+Z.
-    auto transaction = std::make_unique<cmd::Transaction>("IMPORT");
-    for (const Layer& layer : imported->layersNeeded) {
-        if (!document_.model().layers.contains(layer.name)) {
-            transaction->add(cmd::createLayer(layer));
-        }
-    }
-    for (const katana::entity::Style& style : imported->stylesNeeded) {
-        if (!document_.model().styles.contains(style.name)) {
-            transaction->add(cmd::createStyle(style));
-        }
-    }
-    const std::size_t created = imported->entities.size();
-    if (created != 0) {
-        transaction->add(cmd::createEntities(std::move(imported->entities)));
-    }
-    std::size_t alignments = 0;
-    for (katana::entity::Alignment& alignment : imported->alignments) {
-        // A name the drawing already has would fail the whole transaction.
-        const std::string base = alignment.name;
-        for (int copy = 2; document_.model().alignments.contains(alignment.name); ++copy) {
-            alignment.name = base + " (" + std::to_string(copy) + ")";
-        }
-        transaction->add(cmd::createAlignment(alignment));
-        ++alignments;
-    }
-    // An archive of TINs, meshes or point clouds alone has no layer, style,
-    // entity or alignment for the drawing, so the transaction is empty - and
-    // the stack refuses an empty transaction as a command that changes
-    // nothing. Executed regardless, that refusal returned from here before
-    // the surfaces below were added, and a TIN archive imported as "Import
-    // failed" and an empty 3D view. Only a transaction with something in it
-    // runs; the session data below is added either way.
-    if (transaction->size() != 0) {
-        const auto status = document_.execute(std::move(transaction));
-        if (!status) {
-            logMessage(QString::fromStdString(status.error().describe()), true);
-            warnUser("Import failed", QString::fromStdString(status.error().describe()));
-            return;
-        }
-    }
-
-    QString summary = "Imported " + grouped(created) + " entities";
-    if (alignments != 0) {
-        summary += ", " + grouped(alignments) + " alignments";
-    }
-    if (!imported->surfaces.empty()) {
-        summary += ", " + grouped(imported->surfaces.size()) + " surfaces";
-    }
-    if (!imported->meshes.empty()) {
-        summary += ", " + grouped(imported->meshes.size()) + " meshes";
-    }
-    if (!imported->clouds.empty()) {
-        summary += ", " + grouped(imported->clouds.size()) + " point clouds";
-    }
-    summary += " from " + fromPath(path.filename()) + " (" +
-               QString::fromStdString(imported->encoding);
-    if (!imported->archiveVersion.empty()) {
-        summary += ", 12d archive " + QString::fromStdString(imported->archiveVersion);
-    }
-    logMessage(summary + ")");
-    for (const auto& tally : imported->tally) {
-        logMessage(QString("  %1: %2 read, %3 imported")
-                       .arg(QString::fromStdString(tally.keyword))
-                       .arg(grouped(tally.read))
-                       .arg(grouped(tally.imported)),
-                   tally.imported < tally.read);
-    }
-    for (const std::string& warning : imported->warnings) {
-        logMessage("  " + QString::fromStdString(warning));
-    }
-
-    // Surfaces and clouds are session data, outside undo - see interop/
-    // reference_data.hpp for why - and are added after the transaction so that
-    // a rejected import leaves nothing behind.
-    for (auto& surface : imported->surfaces) {
-        addSurface(surface.name, std::move(surface.surface));
-    }
-    for (auto& mesh : imported->meshes) {
-        // A 12d colour Katana has no RGB for leaves the mesh its default
-        // clay, which is visible against a surface and against the drawing.
-        constexpr katana::render::Rgba kMeshDefault = katana::render::rgba(190, 170, 140);
-        const auto toRgba = [](const std::optional<katana::entity::Color>& colour,
-                               katana::render::Rgba fallback) {
-            return colour ? katana::render::rgba(colour->r, colour->g, colour->b) : fallback;
-        };
-        const katana::render::Rgba base = toRgba(mesh.color, kMeshDefault);
-        std::vector<katana::render::Rgba> faces;
-        faces.reserve(mesh.faceColors.size());
-        for (const auto& colour : mesh.faceColors) {
-            faces.push_back(toRgba(colour, base));
-        }
-        addMesh(mesh.name, std::move(mesh.mesh), base, std::move(faces));
-    }
-    // A mesh is a 3D thing: in plan it is only a footprint, so the first
-    // import that brings one opens the 3D view, exactly as a surface does.
-    // Once, after the loop - not once per mesh, and a real archive brings
-    // 1 453 of them.
-    if (!imported->meshes.empty()) {
-        views_->ensureView(cad::ViewKind::Model3D);
-        refreshViewMenu();
-    }
-    if (!imported->clouds.empty()) {
-        for (auto& cloud : imported->clouds) {
-            reference_.add(std::move(cloud));
-        }
-        views_->invalidateReferenceCache();
-        refreshReferences();
-    }
-    views_->refreshAll();
-    views_->zoomExtentsAll();
-}
-
-void MainWindow::importRasterFile(const std::filesystem::path& path,
-                                  interop::RasterImportOptions options)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto raster = interop::importRaster(path, options);
-    QApplication::restoreOverrideCursor();
-
-    if (!raster.ok()) {
-        logMessage(QString::fromStdString(raster.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(raster.error().describe()));
-        return;
-    }
-
-    const bool georeferenced = raster->hasGeotransform;
-    const int pixelWidth = raster->width;
-    const int pixelHeight = raster->height;
-    reference_.add(std::move(*raster));
-    views_->invalidateReferenceCache();
-    refreshReferences();
-
-    logMessage("Imported raster " + fromPath(path.filename()) + " (" +
-               QString::number(pixelWidth) + " x " + QString::number(pixelHeight) + " px)");
-    if (!georeferenced) {
-        // Placing it at the origin is a guess, and the user has to know that.
-        logMessage("  this file carries no georeferencing; it is placed at the origin at "
-                   "one model unit per pixel",
-                   true);
-    }
-    views_->zoomExtentsAll();
-}
-
-void MainWindow::importPointCloudFile(const std::filesystem::path& path,
-                                      interop::PointCloudImportOptions options)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto cloud = interop::importPointCloud(path, options);
-    QApplication::restoreOverrideCursor();
-
-    if (!cloud.ok()) {
-        logMessage(QString::fromStdString(cloud.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(cloud.error().describe()));
-        return;
-    }
-
-    const std::size_t shown = cloud->points.size();
-    const std::uint64_t total = cloud->sourcePointCount;
-    const bool decimated = cloud->isDecimated();
-    reference_.add(std::move(*cloud));
-    views_->invalidateReferenceCache();
-    refreshReferences();
-
-    QString message = "Imported point cloud " + fromPath(path.filename()) + " (" +
-                      grouped(shown) + " points";
-    if (decimated) {
-        message += " sampled from " + grouped(total);
-    }
-    logMessage(message + ")");
-    views_->zoomExtentsAll();
+    // Routed by what the file holds, so nothing recognised it: not GDAL, and
+    // not by name. The formats are too many to list in a message box; GIS >
+    // Formats lists them, as FORMATS does.
+    warnUser("Import", "Neither GDAL nor Katana recognises the data in\n" + selected +
+                           "\n\nGIS > Formats lists what this build of GDAL reads (FORMATS READ); "
+                           "archives (" + patternsFor(interop::archive12dExtensions()) +
+                           ") and point clouds (" + patternsFor(interop::pointCloudExtensions()) +
+                           ") are read too.");
 }
 
 void MainWindow::exportVectorFile()
@@ -4277,6 +4073,8 @@ void MainWindow::exportVectorFile()
         return;
     }
 
+    // Every vector writer of GDAL's registry, the common ones first
+    // (interop::vectorExportFormats, docs/interop.md "Formats").
     QStringList filters;
     for (const interop::FormatChoice& format : interop::vectorExportFormats()) {
         filters << (QString::fromStdString(format.description) + " (*." +
@@ -4284,121 +4082,65 @@ void MainWindow::exportVectorFile()
     }
     filters << "12d Archive (*.12da)" << "12d Archive, zipped (*.12daz)" << "IFC 4.3 (*.ifc)";
     QString chosenFilter;
-    QString selected = QFileDialog::getSaveFileName(this, "Export", QString(), filters.join(";;"),
-                                                    &chosenFilter);
+    QString selected = QFileDialog::getSaveFileName(this, "Export", QString(),
+                                                    filters.join(";;"), &chosenFilter);
     if (selected.isEmpty()) {
         return;
     }
-    // IFC has choices of its own - a utility schedule, rules, which objects
-    // go - so its dialog takes the file from here. A name typed without the
-    // extension the IFC filter shows is given it, or GDAL would get the file.
-    if (chosenFilter.startsWith("IFC") && QFileInfo(selected).suffix().isEmpty()) {
-        selected += ".ifc";
+    // A name typed without an extension takes the chosen format's: the
+    // extension is what picks the writer, and none is refused.
+    if (const qsizetype pattern = chosenFilter.lastIndexOf("(*.");
+        pattern >= 0 && chosenFilter.endsWith(')') && QFileInfo(selected).suffix().isEmpty()) {
+        selected += '.' + chosenFilter.mid(pattern + 3).chopped(1);
     }
+    // IFC has choices of its own - a utility schedule, rules, which objects
+    // go - so its dialog takes the file from here.
     if (katana::ifc::isIfcPath(toPath(selected))) {
         showIfcExport(selected);
         return;
     }
-
-    const std::filesystem::path path = toPath(selected);
-    interop::VectorExportOptions options;
-    if (interop::kindForPath(path) == interop::SourceKind::Archive12d ||
-        katana::dxf::isDxfPath(path)) {
-        // A 12d archive has none of the GDAL formats' choices - it keeps arcs
-        // as arcs and every property - and nor has the native DXF writer, so
-        // the only question is how much.
-        if (!document_.selection().empty()) {
-            const auto answer = QMessageBox::question(
-                this, "Export",
-                "Export only the " + QString::number(document_.selection().size()) +
-                    " selected entities?\n\nNo exports the whole drawing.",
-                QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-            if (answer == QMessageBox::Cancel) {
-                return;
-            }
-            if (answer == QMessageBox::Yes) {
-                options.entities = document_.selection().ids();
-            }
-        }
-    } else {
-        VectorExportDialog dialog(chosenFilter, document_.selection().size(), this);
-        if (dialog.exec() != QDialog::Accepted) {
-            logMessage("Export cancelled.");
-            return;
-        }
-        dialog.apply(options);
-        if (dialog.selectedOnly()) {
-            options.entities = document_.selection().ids();
-        }
-    }
-    (void)exportDrawingTo(path, std::move(options));
+    (void)showExportOptions(selected);
 }
 
-bool MainWindow::exportDrawingTo(const std::filesystem::path& path,
-                                 interop::VectorExportOptions options)
+QDialog* MainWindow::showExportOptions(const QString& selected)
 {
-    if (katana::ifc::isIfcPath(path)) {
-        // The typed EXPORT's defaults: everything, or the entities asked for
-        // (the selection, which is where they come from) - as its line.
-        katana::ifc::ExportArguments arguments;
-        const auto name = path.u8string();
-        arguments.path.assign(name.begin(), name.end());
-        arguments.selected = !options.entities.empty();
-        const auto line = katana::ifc::formatExportLine(arguments);
-        if (!line) {
-            logMessage(QString::fromStdString(line.error().describe()), true);
-            return false;
+    // The Export Vector dialog (gis_export_dialog.hpp): its scope and
+    // options are the EXPORT line it shows, and Run hands that line to the
+    // one executor, as if typed (docs/interop.md, "Export options"). One per
+    // window, made the first time and kept, as every GIS dialog is.
+    // Found by its name, as addGisToolAction finds a GIS dialog: the class
+    // has no Q_OBJECT for findChild to cast by.
+    auto* dialog = dynamic_cast<VectorExportDialog*>(findChild<QDialog*>("vectorExportDialog"));
+    if (dialog == nullptr) {
+        GisDialogContext context;
+        context.run = commandRunner();
+        context.document = &document_;
+        context.headless = [this] { return headless_; };
+        if (views_ != nullptr) {
+            context.views = [this] { return scopeFilterViews(views_->viewSet()); };
         }
-        return runIfcCommand(QString::fromStdString(*line), IfcLineFrom::Menu).ok();
-    }
-    if (katana::dxf::isDxfPath(path)) {
-        return exportDxfFile(path, options);
-    }
-    if (interop::kindForPath(path) == interop::SourceKind::Archive12d) {
-        // A 12d archive carries what the other formats cannot: the alignments
-        // and the surfaces of the session go with the drawing.
-        std::vector<katana::archive12d::ExportSurface> surfaces;
-        if (options.entities.empty()) {
-            for (const auto& item : sceneSurfaces_) {
-                surfaces.push_back({item.name, item.surface});
-            }
+        dialog = new VectorExportDialog(std::move(context), this);
+        if (geo_ != nullptr) {
+            QPointer<VectorExportDialog> guard(dialog);
+            (void)geo_->addFinishedListener([guard](JobId id, const VerbOutcome& outcome) {
+                if (guard != nullptr) {
+                    guard->jobFinished(id, outcome);
+                }
+            });
         }
-        interop::Archive12dExportOptions archiveOptions;
-        archiveOptions.entities = options.entities;
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        auto archive = interop::exportArchive12d(document_.model(), surfaces, path, archiveOptions);
-        QApplication::restoreOverrideCursor();
-        if (!archive.ok()) {
-            logMessage(QString::fromStdString(archive.error().describe()), true);
-            warnUser("Export failed", QString::fromStdString(archive.error().describe()));
-            return false;
-        }
-        logMessage(QString("Exported %1 entities, %2 alignments and %3 surfaces to %4 (12d archive)")
-                       .arg(grouped(archive->entitiesWritten))
-                       .arg(grouped(archive->alignmentsWritten))
-                       .arg(grouped(archive->surfacesWritten))
-                       .arg(fromPath(path.filename())));
-        for (const std::string& warning : archive->warnings) {
-            logMessage("  " + QString::fromStdString(warning));
-        }
-        return true;
     }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto result = interop::exportVector(document_.model(), path, options);
-    QApplication::restoreOverrideCursor();
-
-    if (!result.ok()) {
-        logMessage(QString::fromStdString(result.error().describe()), true);
-        warnUser("Export failed", QString::fromStdString(result.error().describe()));
-        return false;
+    dialog->reload();
+    dialog->setFile(QDir::fromNativeSeparators(selected));
+    // What is selected is what is usually meant, when there is a selection;
+    // else the whole drawing.
+    if (ScopeFilterWidget* scope = dialog->scopeControls()) {
+        scope->setChoice(document_.selection().empty() ? ScopeChoice::Drawing
+                                                       : ScopeChoice::Selection);
     }
-
-    logMessage("Exported " + grouped(result->featuresWritten) + " features to " +
-               fromPath(path.filename()) + " (" + QString::fromStdString(result->driver) + ")");
-    for (const std::string& warning : result->warnings) {
-        logMessage("  " + QString::fromStdString(warning));
-    }
-    return true;
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
+    return dialog;
 }
 
 void MainWindow::refreshReferences()
@@ -4406,28 +4148,29 @@ void MainWindow::refreshReferences()
     if (referenceTable_ == nullptr) {
         return;
     }
+    // Kept across the rebuild, so a line run on the selected layer leaves it
+    // selected for the next.
+    const std::optional<katana::interop::ReferenceId> kept = selectedReference();
     refreshingReferences_ = true;
     referenceTable_->setRowCount(0);
 
     const auto addRow = [this](katana::interop::ReferenceId id, const QString& name, bool visible,
-                               const QString& type, const QString& detail) {
+                               const QString& type, const QString& detail, const QString& shown) {
         const int row = referenceTable_->rowCount();
         referenceTable_->insertRow(row);
 
         auto* nameItem = new QTableWidgetItem(name);
-        nameItem->setFlags(nameItem->flags() | Qt::ItemIsUserCheckable);
+        nameItem->setFlags((nameItem->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
         nameItem->setCheckState(visible ? Qt::Checked : Qt::Unchecked);
         nameItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(id));
         referenceTable_->setItem(row, kRefName, nameItem);
 
-        auto* typeItem = new QTableWidgetItem(type);
-        typeItem->setFlags(typeItem->flags() & ~Qt::ItemIsEditable);
-        referenceTable_->setItem(row, kRefType, typeItem);
-
-        auto* detailItem = new QTableWidgetItem(detail);
-        detailItem->setFlags(detailItem->flags() & ~Qt::ItemIsEditable);
-        referenceTable_->setItem(row, kRefDetail, detailItem);
-        return row;
+        for (const auto& [column, text] : {std::pair(kRefType, type), std::pair(kRefDetail, detail),
+                                           std::pair(kRefDisplay, shown)}) {
+            auto* item = new QTableWidgetItem(text);
+            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            referenceTable_->setItem(row, column, item);
+        }
     };
 
     for (const katana::interop::RasterOverlay& raster : reference_.rasters()) {
@@ -4436,54 +4179,88 @@ void MainWindow::refreshReferences()
         if (!raster.hasGeotransform) {
             detail += "  (not georeferenced)";
         }
-        const int row = addRow(raster.id, QString::fromStdString(raster.name), raster.visible,
-                               "Raster", detail);
-
-        auto* opacity = new QComboBox(referenceTable_);
-        opacity->addItems({"100%", "75%", "50%", "25%"});
-        const int index = raster.opacity > 0.875   ? 0
-                          : raster.opacity > 0.625 ? 1
-                          : raster.opacity > 0.375 ? 2
-                                                   : 3;
-        opacity->setCurrentIndex(index);
-        const katana::interop::ReferenceId id = raster.id;
-        connect(opacity, &QComboBox::currentIndexChanged, this, [this, id](int chosen) {
-            if (auto* target = reference_.findRaster(id)) {
-                static constexpr double kValues[] = {1.0, 0.75, 0.5, 0.25};
-                target->opacity = kValues[std::clamp(chosen, 0, 3)];
-                views_->repaintViews();
-            }
-        });
-        referenceTable_->setCellWidget(row, kRefDisplay, opacity);
+        addRow(raster.id, QString::fromStdString(raster.name), raster.visible, "Raster", detail,
+               QString::number(qRound(raster.opacity * 100.0)) + "%");
     }
-
     for (const katana::interop::PointCloudLayer& cloud : reference_.pointClouds()) {
         QString detail = grouped(cloud.points.size()) + " pts";
         if (cloud.isDecimated()) {
             detail += " of " + grouped(cloud.sourcePointCount);
         }
-        const int row = addRow(cloud.id, QString::fromStdString(cloud.name), cloud.visible,
-                               "Point cloud", detail);
-
-        auto* mode = new QComboBox(referenceTable_);
-        using Mode = katana::interop::PointColorMode;
-        for (const Mode value : {Mode::Elevation, Mode::Intensity, Mode::Classification,
-                                 Mode::SourceColor, Mode::Flat}) {
-            mode->addItem(katana::interop::toString(value), static_cast<int>(value));
+        addRow(cloud.id, QString::fromStdString(cloud.name), cloud.visible, "Point cloud", detail,
+               katana::interop::toString(cloud.colorMode));
+    }
+    for (int row = 0; kept && row < referenceTable_->rowCount(); ++row) {
+        if (referenceTable_->item(row, kRefName)->data(Qt::UserRole).toULongLong() == *kept) {
+            referenceTable_->selectRow(row);
         }
-        mode->setCurrentIndex(static_cast<int>(cloud.colorMode));
-        const katana::interop::ReferenceId id = cloud.id;
-        connect(mode, &QComboBox::currentIndexChanged, this, [this, id](int chosen) {
-            if (auto* target = reference_.findPointCloud(id)) {
-                target->colorMode = static_cast<katana::interop::PointColorMode>(chosen);
-                views_->invalidateReferenceCache();
-            }
-        });
-        referenceTable_->setCellWidget(row, kRefDisplay, mode);
     }
 
     referenceTable_->resizeColumnsToContents();
     refreshingReferences_ = false;
+    showSelectedReferenceDisplay();
+}
+
+std::optional<katana::interop::ReferenceId> MainWindow::selectedReference() const
+{
+    const int row = referenceTable_ != nullptr ? referenceTable_->currentRow() : -1;
+    const QTableWidgetItem* item = row < 0 ? nullptr : referenceTable_->item(row, kRefName);
+    if (item == nullptr) {
+        return std::nullopt;
+    }
+    return static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
+}
+
+void MainWindow::showSelectedReferenceDisplay()
+{
+    if (referenceOpacity_ == nullptr || referenceColour_ == nullptr) {
+        return;
+    }
+    // Set from the layer, not a choice: no line is run for it.
+    const bool wasRefreshing = std::exchange(refreshingReferences_, true);
+    const std::optional<katana::interop::ReferenceId> id = selectedReference();
+    const auto* raster = id ? reference_.findRaster(*id) : nullptr;
+    const auto* cloud = id ? reference_.findPointCloud(*id) : nullptr;
+    referenceOpacity_->setEnabled(raster != nullptr);
+    referenceColour_->setEnabled(cloud != nullptr);
+    if (raster != nullptr) {
+        referenceOpacity_->setCurrentIndex(raster->opacity > 0.875   ? 0
+                                           : raster->opacity > 0.625 ? 1
+                                           : raster->opacity > 0.375 ? 2
+                                                                     : 3);
+    }
+    if (cloud != nullptr) {
+        referenceColour_->setCurrentIndex(
+            referenceColour_->findData(QString::fromLatin1(katana::interop::toWord(cloud->colorMode))));
+    }
+    refreshingReferences_ = wasRefreshing;
+}
+
+VerbOutcome MainWindow::runReferenceLine(const QString& action, const QString& words)
+{
+    const std::optional<katana::interop::ReferenceId> id = selectedReference();
+    if (!id) {
+        logMessage("Select a reference layer first.", true);
+        return {false, {}, "no reference layer is selected"};
+    }
+    return runVerbLine("REFS " + action + " " + QString::number(*id) +
+                       (words.isEmpty() ? QString() : " " + words));
+}
+
+void MainWindow::recordReferences()
+{
+    if (geo_ != nullptr) {
+        katana::app::geo::recordReferences(geo_->context());
+    }
+}
+
+void MainWindow::restoreReferences()
+{
+    // The layers the project records, read again through the one executor
+    // (REFS RESTORE), so what was restored, and what was missing, is logged.
+    if (geo_ != nullptr && katana::app::geo::recordsReferences(geo_->context())) {
+        (void)runVerbLine(QStringLiteral("REFS RESTORE"));
+    }
 }
 
 void MainWindow::onReferenceCellChanged(int row, int column)
@@ -4496,31 +4273,18 @@ void MainWindow::onReferenceCellChanged(int row, int column)
         return;
     }
     const auto id = static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
-    const bool visible = item->checkState() == Qt::Checked;
-    if (auto* raster = reference_.findRaster(id)) {
-        raster->visible = visible;
-    } else if (auto* cloud = reference_.findPointCloud(id)) {
-        cloud->visible = visible;
-    }
-    views_->repaintViews();
+    const QString line = QString("REFS %1 %2")
+                             .arg(item->checkState() == Qt::Checked ? "SHOW" : "HIDE")
+                             .arg(id);
+    // Run once the table has finished with the click: the line's reply
+    // rebuilds the table, and with it the item this signal came from.
+    QMetaObject::invokeMethod(this, [this, line] { (void)runVerbLine(line); },
+                              Qt::QueuedConnection);
 }
 
 void MainWindow::removeSelectedReference()
 {
-    const int row = referenceTable_ != nullptr ? referenceTable_->currentRow() : -1;
-    if (row < 0) {
-        return;
-    }
-    const QTableWidgetItem* item = referenceTable_->item(row, kRefName);
-    if (item == nullptr) {
-        return;
-    }
-    const auto id = static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
-    if (reference_.remove(id)) {
-        logMessage("Removed reference layer " + item->text());
-        views_->invalidateReferenceCache();
-        refreshReferences();
-    }
+    (void)runReferenceLine("REMOVE");
 }
 
 void MainWindow::zoomToSelectedReference()
@@ -4564,6 +4328,7 @@ void MainWindow::clearSceneData()
     sceneSurfaces_.clear();
     sceneMeshes_.clear();
     surfaceStore_.clear();
+    sceneSurfacesRevision_ = surfaceStore_.revision();
     meshStore_.clear();
     views_->drawingReplaced();
 }
@@ -4631,40 +4396,45 @@ const interop::PointCloudLayer* MainWindow::chooseReferenceCloud(const QString& 
                        [this](const QString& why) { logMessage(why, true); });
 }
 
-const interop::RasterOverlay* MainWindow::chooseReferenceRaster(const QString& title)
-{
-    std::optional<katana::interop::ReferenceId> selected;
-    if (const int row = referenceTable_->currentRow(); row >= 0) {
-        if (const QTableWidgetItem* item = referenceTable_->item(row, kRefName)) {
-            selected = static_cast<katana::interop::ReferenceId>(
-                item->data(Qt::UserRole).toULongLong());
-        }
-    }
-    return chooseLayer(reference_.rasters(), selected, title, "raster", headless_, this,
-                       [this](const QString& why) { logMessage(why, true); });
-}
-
 std::unique_ptr<DatasetInfoDialog> MainWindow::makeDatasetInfo(const QString& path)
 {
-    if (katana::ifc::isIfcPath(toPath(path))) {
-        auto described = describeIfcFile(toPath(path));
-        if (!described) {
-            logMessage(QString::fromStdString(described.error().describe()), true);
-            warnUser("Dataset Information", QString::fromStdString(described.error().describe()));
-            return nullptr;
-        }
-        return std::make_unique<DatasetInfoDialog>(
-            "Dataset Information - " + fromPath(toPath(path).filename()), *described, this);
-    }
-    auto description = interop::describeSource(toPath(path));
-    if (!description) {
-        logMessage(QString::fromStdString(description.error().describe()), true);
-        warnUser("Dataset Information", QString::fromStdString(description.error().describe()));
+    // The dialog runs INFO lines through the one executor; it reads nothing
+    // itself (dataset_info_dialog.hpp).
+    DatasetInfoRunner runner;
+    runner.run = commandRunner();
+    runner.await = [this](const VerbOutcome& started, std::function<void(const VerbOutcome&)> done) {
+        return awaitJob(started, std::move(done));
+    };
+    auto dialog = std::make_unique<DatasetInfoDialog>(QDir::fromNativeSeparators(path),
+                                                      std::move(runner), this);
+    // Headless, the lines have answered by now: a file that could not be
+    // described has no window to grab, and the run says so.
+    if (headless_ && !dialog->described()) {
         return nullptr;
     }
-    const QString text = QString::fromStdString(interop::formatDescription(*description));
-    return std::make_unique<DatasetInfoDialog>(
-        "Dataset Information - " + fromPath(description->path.filename()), text, this);
+    return dialog;
+}
+
+bool MainWindow::awaitJob(const VerbOutcome& started, std::function<void(const VerbOutcome&)> done)
+{
+    // The job a line started says so in its reply, as a record
+    // (startedJob, geo/geo_workbench.hpp).
+    const std::optional<JobId> job = startedJob(started.reply);
+    if (!job || geo_ == nullptr || !JobRunner::of(*this).isActive(*job)) {
+        return false;
+    }
+    // Told once, then forgotten. The listener is added before the event
+    // loop runs again, so the job cannot end unheard in between.
+    auto key = std::make_shared<int>(0);
+    *key = geo_->addFinishedListener(
+        [this, id = *job, key, done = std::move(done)](JobId ended, const VerbOutcome& outcome) {
+            if (ended != id) {
+                return;
+            }
+            geo_->removeFinishedListener(*key);
+            done(outcome);
+        });
+    return true;
 }
 
 std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
@@ -4697,9 +4467,24 @@ std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
         return nullptr;
     }
     switch (description->kind) {
-    case interop::SourceKind::Vector:
-        return std::make_unique<VectorImportDialog>(*description,
-                                                    document_.model().entities.bounds(), this);
+    case interop::SourceKind::Vector: {
+        // Preview runs its line through the one executor and waits for the
+        // job, as every GIS dialog does; the scope offers this drawing's
+        // layers and the workspace's views.
+        GisDialogContext context;
+        context.run = commandRunner();
+        context.await = [this](const VerbOutcome& started,
+                               std::function<void(const VerbOutcome&)> done) {
+            return awaitJob(started, std::move(done));
+        };
+        context.document = &document_;
+        context.headless = [this] { return headless_; };
+        if (views_ != nullptr) {
+            context.views = [this] { return scopeFilterViews(views_->viewSet()); };
+        }
+        return std::make_unique<VectorImportDialog>(
+            *description, document_.model().entities.bounds(), std::move(context), this);
+    }
     case interop::SourceKind::Raster:
         return std::make_unique<RasterImportDialog>(*description, this);
     case interop::SourceKind::PointCloud:
@@ -4733,25 +4518,39 @@ void MainWindow::importWithOptions(const QString& path)
         logMessage("Import cancelled.");
         return;
     }
+    finishImport(*dialog);
+}
+
+void MainWindow::finishImport(const QDialog& dialog)
+{
     // Routed by the dialog the file got, which was routed by what the file
     // IS - a .las chosen through Import Vector's "All files" still arrives
-    // as a point cloud. The vector dialog's layer and attribute choices have
-    // no IMPORT word yet, so it imports itself; the move it makes is logged.
-    if (const auto* vector = dynamic_cast<const VectorImportDialog*>(dialog.get())) {
+    // as a point cloud. Each dialog's choices are the IMPORT line it shows,
+    // run through the one executor as if typed: echoed, logged, one undo step
+    // (docs/interop.md, "Import options").
+    katana::core::Result<QString> line =
+        katana::core::makeError(katana::core::ErrorCode::InvalidArgument, "no import line");
+    if (const auto* vector = dynamic_cast<const VectorImportDialog*>(&dialog)) {
         vector->placementBox().remember();
-        importVectorFile(file, vector->options(), vector->placementBox().placement());
-    } else if (const auto* raster = dynamic_cast<const RasterImportDialog*>(dialog.get())) {
-        importRasterFile(file, raster->options());
-    } else if (const auto* cloud = dynamic_cast<const PointCloudImportDialog*>(dialog.get())) {
-        importPointCloudFile(file, cloud->options());
+        line = vector->command();
+    } else if (const auto* raster = dynamic_cast<const RasterImportDialog*>(&dialog)) {
+        line = raster->command();
+    } else if (const auto* cloud = dynamic_cast<const PointCloudImportDialog*>(&dialog)) {
+        line = cloud->command();
     }
+    if (!line) {
+        logMessage(QString::fromStdString(line.error().describe()), true);
+        return;
+    }
+    (void)runVerbLine(*line);
 }
 
 void MainWindow::importVectorWithOptions()
 {
     const QString chosen = QFileDialog::getOpenFileName(
         this, "Import Vector Data", QString(),
-        "Vector data (" + patternsFor(interop::vectorExtensions()) + ");;All files (*)");
+        "Vector data (" + patternsFor(interop::vectorExtensions()) + ' ' +
+            patternsFor(interop::archiveExtensions()) + ");;All files (*)");
     if (!chosen.isEmpty()) {
         importWithOptions(chosen);
     }
@@ -4761,7 +4560,8 @@ void MainWindow::importRasterWithOptions()
 {
     const QString chosen = QFileDialog::getOpenFileName(
         this, "Import Raster", QString(),
-        "Raster (" + patternsFor(interop::rasterExtensions()) + ");;All files (*)");
+        "Raster (" + patternsFor(interop::rasterExtensions()) + ' ' +
+            patternsFor(interop::archiveExtensions()) + ");;All files (*)");
     if (!chosen.isEmpty()) {
         importWithOptions(chosen);
     }
@@ -4783,7 +4583,8 @@ void MainWindow::showDatasetInformation()
         this, "Dataset Information", QString(),
         "GIS data and point clouds (" + patternsFor(interop::vectorExtensions()) + ' ' +
             patternsFor(interop::rasterExtensions()) + ' ' +
-            patternsFor(interop::pointCloudExtensions()) + ");;All files (*)");
+            patternsFor(interop::pointCloudExtensions()) + ' ' +
+            patternsFor(interop::archiveExtensions()) + ");;All files (*)");
     if (chosen.isEmpty()) {
         return;
     }
@@ -4798,9 +4599,20 @@ void MainWindow::exportPointCloud()
     if (cloud == nullptr) {
         return; // reported, or the choice was cancelled
     }
+    // A file dialog nobody could close: a headless session is pointed at the
+    // verb, which asks nothing, as Convert Point Cloud to COPC is.
+    if (headless_) {
+        logMessage(QString("A headless session opens no file dialog: type EXPORT <file.las|.laz> "
+                           "CLOUD %1 instead.")
+                       .arg(cloud->id),
+                   true);
+        return;
+    }
     // What is held is a SAMPLE when the import was budgeted, and writing it
     // out as if it were the survey would be a quiet loss of most of the data.
-    if (cloud->isDecimated() && !headless_) {
+    // Asked here; the verb says so in its reply, since a line has nobody to
+    // ask.
+    if (cloud->isDecimated()) {
         const auto answer = QMessageBox::question(
             this, "Export Point Cloud",
             QString("'%1' holds %2 of the file's %3 points - the sample imported for display.\n\n"
@@ -4819,80 +4631,47 @@ void MainWindow::exportPointCloud()
         filters << (QString::fromStdString(format.description) + " (*." +
                     QString::fromStdString(format.extension) + ")");
     }
-    const QString chosen =
+    QString chosen =
         QFileDialog::getSaveFileName(this, "Export Point Cloud",
                                      QString::fromStdString(cloud->name) + ".laz",
                                      filters.join(";;"));
     if (chosen.isEmpty()) {
         return;
     }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = interop::exportPointCloud(*cloud, toPath(chosen));
-    QApplication::restoreOverrideCursor();
-    if (!status) {
-        logMessage(QString::fromStdString(status.error().describe()), true);
-        warnUser("Export failed", QString::fromStdString(status.error().describe()));
+    // The extension is what makes the line a cloud's: a name typed without
+    // one would be the drawing's export, refused for want of a driver.
+    if (!chosen.endsWith(".las", Qt::CaseInsensitive) &&
+        !chosen.endsWith(".laz", Qt::CaseInsensitive)) {
+        chosen += ".laz";
+    }
+    // The dialogs chose the cloud and the file; the writing is the EXPORT
+    // verb's, run as if typed (docs/interop.md, "The GIS menu"), so it is
+    // logged as one and katana_cli's and an agent's EXPORT is the same code.
+    // The cloud by its id: a name several layers share would be refused.
+    const VerbOutcome outcome = runVerbLine(
+        QString("EXPORT \"%1\" CLOUD %2").arg(QDir::fromNativeSeparators(chosen)).arg(cloud->id));
+    if (!outcome.ok) {
+        warnUser("Export failed", outcome.error);
         return;
     }
-    logMessage(QString("Exported %1 points of '%2' to %3%4")
-                   .arg(grouped(cloud->points.size()))
-                   .arg(QString::fromStdString(cloud->name))
-                   .arg(fromPath(toPath(chosen).filename()))
-                   .arg(cloud->isDecimated() ? QString(" (a sample of %1)")
-                                                   .arg(grouped(cloud->sourcePointCount))
-                                             : QString()));
+    // The write is a background job: a failure is known when it ends.
+    (void)awaitJob(outcome, [this](const VerbOutcome& done) {
+        if (!done.ok) {
+            warnUser("Export failed", done.error);
+        }
+    });
 }
 
 void MainWindow::exportSurfaceAsDem()
 {
-    if (sceneSurfaces_.empty()) {
-        logMessage("There is no surface to export. Build one from the Terrain menu, or import "
-                   "a 12d archive that holds a tin or an IFC file that holds a terrain.",
-                   true);
-        return;
+    // The dialog writes the SURFACE EXPORT line and runs it through
+    // runVerbLine; the surface is sampled and written by the verb's job.
+    if (surfaceExport_ == nullptr) {
+        surfaceExport_ = new SurfaceRasterDialog(terrainDialogContext(*geo_), this);
     }
-    std::vector<SurfaceChoice> choices;
-    choices.reserve(sceneSurfaces_.size());
-    for (const cad::SceneSurface& item : sceneSurfaces_) {
-        choices.push_back({QString::fromStdString(item.name), item.surface->bounds()});
-    }
-    SurfaceRasterDialog dialog(std::move(choices), this);
-    if (dialog.exec() != QDialog::Accepted || dialog.surfaceIndex() < 0) {
-        return;
-    }
-    const cad::SceneSurface& chosenSurface =
-        sceneSurfaces_[static_cast<std::size_t>(dialog.surfaceIndex())];
-
-    QStringList filters;
-    for (const interop::FormatChoice& format : interop::rasterExportFormats()) {
-        filters << (QString::fromStdString(format.description) + " (*." +
-                    QString::fromStdString(format.extension) + ")");
-    }
-    const QString chosen = QFileDialog::getSaveFileName(
-        this, "Export Surface as DEM", QString::fromStdString(chosenSurface.name) + ".tif",
-        filters.join(";;"));
-    if (chosen.isEmpty()) {
-        return;
-    }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto written = interop::exportSurfaceRaster(*chosenSurface.surface, toPath(chosen),
-                                                dialog.options());
-    QApplication::restoreOverrideCursor();
-    if (!written) {
-        logMessage(QString::fromStdString(written.error().describe()), true);
-        warnUser("Export failed", QString::fromStdString(written.error().describe()));
-        return;
-    }
-    logMessage(QString("Wrote '%1' as a %2 x %3 DEM (%4 cells on the surface) to %5 (%6).")
-                   .arg(QString::fromStdString(chosenSurface.name))
-                   .arg(written->columns)
-                   .arg(written->rows)
-                   .arg(grouped(written->cellsWithData))
-                   .arg(fromPath(toPath(chosen).filename()))
-                   .arg(QString::fromStdString(written->driver)));
-    // Said, because a DEM with no coordinate system is placed by whatever
-    // reads it: a Katana surface does not record the one it was built in.
-    logMessage("  the DEM declares no coordinate system; its coordinates are the drawing's");
+    surfaceExport_->show();
+    surfaceExport_->raise();
+    surfaceExport_->activateWindow();
 }
 
 void MainWindow::convertPointCloudToCopc()
@@ -4940,52 +4719,21 @@ void MainWindow::convertPointCloudToCopc()
         warnUser("Conversion failed", outcome.error);
         return;
     }
-    if (!headless_ && QMessageBox::question(this, "Convert Point Cloud to COPC",
-                                            "Import the COPC file now?") == QMessageBox::Yes) {
-        importWithOptions(destination);
-    }
+    // The conversion is a background job: the offer to import waits for it
+    // to end, and is made only when it converted.
+    (void)awaitJob(outcome, [this, destination](const VerbOutcome& done) {
+        if (!done.ok) {
+            warnUser("Conversion failed", done.error);
+            return;
+        }
+        if (QMessageBox::question(this, "Convert Point Cloud to COPC",
+                                  "Import the COPC file now?") == QMessageBox::Yes) {
+            importWithOptions(destination);
+        }
+    });
 }
-
-void MainWindow::convertPointCloudToCopc(const std::filesystem::path& source,
-                                         const std::filesystem::path& destination)
-{
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = katana::pointcloud::PointCloudEngine{}.convertToCopc(source, destination);
-    QApplication::restoreOverrideCursor();
-    if (!status) {
-        logMessage(QString::fromStdString(status.error().describe()), true);
-        return;
-    }
-    logMessage("Converted " + fromPath(source.filename()) + " to " +
-               fromPath(destination.filename()) + ", every point kept.");
-    // The next step, as a line to type: a COPC file is read at a level of
-    // detail, which the import asks for.
-    logMessage("  IMPORT \"" + QDir::fromNativeSeparators(fromPath(destination)) +
-               "\" reads it at a level of detail");
-}
-
 
 // ---- view layout, 3D and sections (PLAN.MD Phases 08, 14, 15, 21) ------------------------
-
-namespace {
-
-// Thinning a point cloud before triangulating it is not an optimisation, it is
-// the difference between a surface and a hang: CGAL's constrained Delaunay is
-// well behaved but two million points still costs minutes and gigabytes, and a
-// ground surface does not carry two million points of information. The cap is
-// generous enough that a normal survey is triangulated whole.
-constexpr std::size_t kMaximumTinPoints = 400'000;
-
-[[nodiscard]] std::uint32_t thinningFor(std::size_t available)
-{
-    if (available <= kMaximumTinPoints) {
-        return 1;
-    }
-    // Rounded UP, so the result is at or under the cap rather than just over.
-    return static_cast<std::uint32_t>((available + kMaximumTinPoints - 1) / kMaximumTinPoints);
-}
-
-} // namespace
 
 void MainWindow::buildViewMenu(QMenu* viewMenu)
 {
@@ -5194,29 +4942,42 @@ void MainWindow::addMesh(std::string name, katana::geometry::TriangleMesh mesh,
     views_->setMeshes(&sceneMeshes_);
 }
 
-void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surface)
+void MainWindow::syncSceneSurfaces()
 {
-    surfaceStore_.push_back(
-        std::make_unique<katana::terrain::TinSurface>(std::move(surface)));
-
-    cad::SceneSurface item;
-    item.name = std::move(name);
-    item.surface = surfaceStore_.back().get();
-    sceneSurfaces_.push_back(item);
-
+    if (sceneSurfacesRevision_ == surfaceStore_.revision()) {
+        return;
+    }
+    // Whether the store gained a surface the scene has not drawn: SURFACE
+    // FROM, TO SURFACE and an import alike.
+    const bool gained = std::ranges::any_of(surfaceStore_.all(), [&](const auto& named) {
+        return std::ranges::none_of(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
+            return shown.surface == named.surface.get();
+        });
+    });
+    std::vector<cad::SceneSurface> next;
+    next.reserve(surfaceStore_.all().size());
+    for (const katana::terrain::NamedSurface& named : surfaceStore_.all()) {
+        cad::SceneSurface item;
+        const auto kept = std::ranges::find_if(sceneSurfaces_, [&](const cad::SceneSurface& shown) {
+            return shown.surface == named.surface.get();
+        });
+        if (kept != sceneSurfaces_.end()) {
+            item = *kept; // its style, colouring and visibility
+        }
+        item.name = named.name;
+        item.surface = named.surface.get();
+        next.push_back(std::move(item));
+    }
+    sceneSurfaces_ = std::move(next);
+    sceneSurfacesRevision_ = surfaceStore_.revision();
     // The views hold a pointer to the VECTOR, not to its elements, so this is a
-    // refresh rather than a repair - and the surfaces themselves are behind
-    // unique_ptr precisely so that this push_back cannot move them.
+    // refresh rather than a repair; the surfaces themselves are shared and
+    // never move.
     views_->setSurfaces(&sceneSurfaces_);
     views_->refreshAll();
-
-    logMessage(QString("Surface '%1': %2 vertices, %3 triangles, elevation %4 to %5.")
-                   .arg(QString::fromStdString(sceneSurfaces_.back().name))
-                   .arg(item.surface->vertexCount())
-                   .arg(item.surface->triangleCount())
-                   .arg(item.surface->minElevation(), 0, 'f', 3)
-                   .arg(item.surface->maxElevation(), 0, 'f', 3));
-
+    if (!gained) {
+        return;
+    }
     // Show it. A surface the user cannot see is not obviously a success.
     views_->ensureView(cad::ViewKind::Model3D);
     refreshViewMenu();
@@ -5226,356 +4987,55 @@ void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surfac
     }
 }
 
-namespace {
-
-// What a Surface From command's job prepares on its own thread: the points
-// and breaklines to triangulate. Notes about how they were chosen (a sampling
-// stride, no-data pixels left out) go into `notes` as they are found, not
-// into the result, because they matter MOST when the preparation fails: "14
-// 400 no-data pixels left out" is the reason a raster has fewer than three
-// points to triangulate, and a note carried in the result was lost with it.
-using SurfaceInput = std::function<katana::core::Result<katana::terrain::TinInput>(
-    katana::qt::JobControl&, QStringList& notes)>;
-
-// What every Surface From command shares once its inputs are in hand: the
-// triangulation, run as a background job (jobs.hpp) so that the window keeps
-// painting and answering while CGAL works - 1.7 s at the 400k-point cap,
-// measured, which used to be 1.7 s of a frozen window behind a wait cursor.
-//
-// `prepare` runs on the job's thread, on inputs the job already OWNS (a
-// copied cloud, a raster path): never the document or a widget, which belong
-// to the GUI thread. `addSurface` runs on the GUI thread with the result and
-// is the only step that touches the window. `log` reports the outcome, which
-// is never silent: the notes - whether or not the job succeeded - then a
-// failure's message, a cancellation or the time taken.
-//
-// A headless session waits for the job, pumping events, because what follows
-// it (a screenshot, a report) must see the surface; it also logs the longest
-// pause of the event loop, the freeze an interactive user would have felt.
-void startSurfaceJob(katana::qt::JobRunner& runner, bool headless, const QString& title,
-                     SurfaceInput prepare, katana::terrain::TinBuildOptions options,
-                     std::function<void(katana::terrain::TinSurface&&)> addSurface,
-                     std::function<void(const QString&, bool)> log)
+void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surface)
 {
-    using katana::qt::JobRunner;
-    // Written by the job before its completion is posted and read on the GUI
-    // thread after it is delivered; the post orders the two.
-    auto notes = std::make_shared<QStringList>();
-    // For the headless report: how much of the pause was the Apply step.
-    auto applySeconds = std::make_shared<double>(0.0);
-    if (headless) {
-        runner.resetEventLoopPause();
-    }
-    const katana::qt::JobId id = runner.start(
-        title,
-        [prepare = std::move(prepare), options, notes, addSurface, log](
-            katana::qt::JobControl& control) -> katana::core::Result<JobRunner::Apply> {
-            control.setStage("Reading");
-            auto input = prepare(control, *notes);
-            if (!input) {
-                return input.error();
-            }
-            if (control.stopRequested()) {
-                return JobRunner::Apply{}; // cancelled: the runner discards it anyway
-            }
-            control.setStage("Triangulating");
-            auto built = katana::terrain::buildTin(*input, options);
-            if (!built) {
-                return built.error();
-            }
-            // Shared, because an Apply is a std::function and must be
-            // copyable; the surface itself is moved out exactly once.
-            auto result = std::make_shared<katana::terrain::TinBuildResult>(std::move(*built));
-            return JobRunner::Apply([result, addSurface, log] {
-                if (result->report.duplicatePointCount > 0) {
-                    log(QString("%1 coincident points merged by averaging their elevations.")
-                            .arg(result->report.duplicatePointCount),
-                        false);
-                }
-                addSurface(std::move(result->surface));
-            });
-        },
-        [title, notes, applySeconds, log](const katana::qt::JobReport& report) {
-            *applySeconds = report.applySeconds;
-            for (const QString& note : *notes) {
-                log(note, false);
-            }
-            switch (report.outcome) {
-            case katana::qt::JobOutcome::Finished:
-                log(QString("%1: triangulated in %2 s in the background.")
-                        .arg(title)
-                        .arg(report.workSeconds, 0, 'f', 2),
-                    false);
-                break;
-            case katana::qt::JobOutcome::Cancelled:
-                log(title + " was cancelled; no surface was added.", false);
-                break;
-            case katana::qt::JobOutcome::Failed:
-                log(QString::fromStdString(report.error), true);
-                break;
-            }
-        });
-    if (headless) {
-        runner.waitFor(id);
-        log(QString("%1: the event loop paused for at most %2 ms while it ran (adding the "
-                    "result: %3 ms).")
-                .arg(title)
-                .arg(runner.longestEventLoopPause() * 1000.0, 0, 'f', 0)
-                .arg(*applySeconds * 1000.0, 0, 'f', 0),
-            false);
-    }
-}
-
-} // namespace
-
-void MainWindow::buildSurfaceFromPointCloud()
-{
-    const interop::PointCloudLayer* cloud = chooseReferenceCloud("Surface From Point Cloud");
-    if (cloud == nullptr) {
-        return; // reported, or the choice was cancelled
-    }
-
-    // The ground returns when the cloud is classified, every return when it
-    // is not - one policy, interop::surfacePoints, and SAID either way: a
-    // surface over trees and roofs presented as ground is the silent failure
-    // audit QT-10 found.
-    //
-    // Copied here, on the GUI thread, because the cloud belongs to the
-    // reference data and could be removed while the job runs; the job then
-    // owns its copy outright.
-    auto source = std::make_shared<interop::CloudSurfacePoints>(interop::surfacePoints(*cloud));
-    if (source->groundOnly) {
-        logMessage(QString("Using the %1 ground points (ASPRS class 2); %2 other returns left out.")
-                       .arg(grouped(source->points.size()))
-                       .arg(grouped(source->excluded)));
-    } else {
-        logMessage("This cloud has no points classified as ground (ASPRS class 2), so every "
-                   "return is triangulated: vegetation and buildings are part of the surface.",
-                   true);
-    }
-    const std::uint32_t step = thinningFor(source->points.size());
-    if (step > 1) {
-        logMessage(QString("Thinning %1 points to every %2 for triangulation.")
-                       .arg(grouped(source->points.size()))
-                       .arg(step));
-    }
-
-    katana::terrain::TinBuildOptions options;
-    // Scanned points land on the same ground mark constantly and their
-    // elevations differ by millimetres. Failing on that would make a surface
-    // from a real scan impossible, so the mean is taken and reported.
-    options.duplicatePoints = katana::terrain::DuplicatePointPolicy::Average;
-    const std::string name = cloud->name;
-    startSurfaceJob(
-        katana::qt::JobRunner::of(*this), headless_, "Surface From Point Cloud",
-        [source, step](katana::qt::JobControl&,
-                       QStringList&) -> katana::core::Result<katana::terrain::TinInput> {
-            katana::terrain::TinInput input;
-            input.points.reserve(source->points.size() / step + 1);
-            for (std::size_t i = 0; i < source->points.size(); i += step) {
-                input.points.push_back(source->points[i]);
-            }
-            return input;
-        },
-        options,
-        [this, name](katana::terrain::TinSurface&& surface) {
-            addSurface(name, std::move(surface));
-        },
-        [this](const QString& text, bool isError) { logMessage(text, isError); });
-}
-
-void MainWindow::buildSurfaceFromRaster()
-{
-    const interop::RasterOverlay* raster = chooseReferenceRaster("Surface From Raster");
-    if (raster == nullptr) {
-        return; // reported, or the choice was cancelled
-    }
-
-    // The band's TRUE values, read again from the source through GDAL. The
-    // overlay holds only the 8-bit display copy - a grey ramp stretched over
-    // the band's range - and heights rebuilt from that were 256 terraces
-    // between two numbers the user had to type (audit QT-23). The source is
-    // sampled on a stride that keeps the whole extent under the triangulation
-    // cap (audit QT-24: the old stride could exceed it threefold).
-    //
-    // Read on the job's thread, from the file: a path is all the job takes,
-    // so the overlay can go away meanwhile. GDAL keeps its error handlers per
-    // thread, and the reader opens a dataset of its own.
-    interop::RasterElevationOptions options;
-    options.maxPoints = kMaximumTinPoints;
-    const std::filesystem::path path = raster->source;
-    const std::string name = raster->name;
-
-    katana::terrain::TinBuildOptions buildOptions;
-    buildOptions.duplicatePoints = katana::terrain::DuplicatePointPolicy::Average;
-    startSurfaceJob(
-        katana::qt::JobRunner::of(*this), headless_, "Surface From Raster",
-        [path, options, name](katana::qt::JobControl&, QStringList& notes)
-            -> katana::core::Result<katana::terrain::TinInput> {
-            auto elevations = interop::readRasterElevations(path, options);
-            if (!elevations) {
-                return elevations.error();
-            }
-            if (elevations->stride > 1) {
-                notes << QString("Sampling one pixel in %1 along each row and column of %2: %3 "
-                                 "points.")
-                             .arg(elevations->stride)
-                             .arg(QString::fromStdString(name))
-                             .arg(grouped(elevations->points.size()));
-            }
-            if (elevations->noData != 0) {
-                notes << QString("%1 no-data pixels left out.").arg(grouped(elevations->noData));
-            }
-            if (elevations->points.size() < 3) {
-                return katana::core::makeError(
-                    katana::core::ErrorCode::InvalidArgument,
-                    "that raster has fewer than three pixels with an elevation to triangulate");
-            }
-            katana::terrain::TinInput input;
-            input.points = std::move(elevations->points);
-            return input;
-        },
-        buildOptions,
-        [this, name](katana::terrain::TinSurface&& surface) {
-            addSurface(name, std::move(surface));
-        },
-        [this](const QString& text, bool isError) { logMessage(text, isError); });
-}
-
-void MainWindow::buildSurfaceFromDrawing()
-{
-    // Points and polyline vertices in the drawing, at the heights their
-    // "elevation" property gives them - or, for a 3D string that came from a
-    // 12d archive, the per-vertex "elevations" list. A 2D CAD drawing has no Z
-    // of its own, so without either everything lands on the datum and the
-    // surface is flat - which is reported rather than left to puzzle over.
-    //
-    // A vertex whose height is NULL is left out, and the breakline is broken
-    // there: a null is "not surveyed", and triangulating it at zero would dig a
-    // pit to the datum under every unlevelled point.
-    katana::terrain::TinInput input;
-    std::size_t withElevation = 0;
-    std::size_t withoutHeight = 0;
-
-    document_.model().entities.forEach([&](const Entity& entity) {
-        // What the drawing SHOWS is what is triangulated: a layer switched off
-        // is left out, as it is out of every view (audit REN-04).
-        // The document rule, not the active view's: a surface is shared by
-        // every view and must not depend on which one was clicked last.
-        if (!katana::cad::isDrawn(document_.model(), entity, katana::cad::kNoLayerOverrides)) {
-            return;
-        }
-        const bool carriesHeights =
-            entity.properties.contains(std::string(katana::entity::kElevationProperty)) ||
-            entity.properties.contains(std::string(katana::entity::kElevationsProperty));
-        withElevation += carriesHeights ? 1 : 0;
-        const auto heightAt = [&](const std::vector<std::optional<double>>& heights,
-                                  std::size_t index) -> std::optional<double> {
-            if (!carriesHeights) {
-                return 0.0; // a plain 2D drawing: the datum, as before
-            }
-            return heights[index];
-        };
-        if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity.geometry)) {
-            const auto heights = katana::entity::heightsOf(entity.properties, 1);
-            if (const auto z = heightAt(heights, 0)) {
-                input.points.push_back(
-                    katana::geometry::Point3(point->position.x, point->position.y, *z));
-            } else {
-                ++withoutHeight;
-            }
-        } else if (const auto* polyline =
-                       std::get_if<katana::geometry::Polyline2>(&entity.geometry)) {
-            const auto heights =
-                katana::entity::heightsOf(entity.properties, polyline->vertices.size());
-            katana::terrain::Breakline breakline;
-            const auto flush = [&] {
-                if (breakline.vertices.size() >= 2) {
-                    input.breaklines.push_back(breakline);
-                }
-                breakline.vertices.clear();
-            };
-            bool whole = true;
-            for (std::size_t i = 0; i < polyline->vertices.size(); ++i) {
-                const auto& vertex = polyline->vertices[i];
-                const auto z = heightAt(heights, i);
-                if (!z) {
-                    ++withoutHeight;
-                    whole = false;
-                    flush();
-                    continue;
-                }
-                breakline.vertices.push_back(katana::geometry::Point3(vertex.x, vertex.y, *z));
-                input.points.push_back(katana::geometry::Point3(vertex.x, vertex.y, *z));
-            }
-            // Closing only makes sense for a ring that lost none of its vertices.
-            breakline.closed = polyline->closed && whole;
-            flush();
-        } else if (const auto* curved =
-                       std::get_if<katana::geometry::CurvePolyline2>(&entity.geometry)) {
-            // A 3D string with arcs holds its heights itself; its arcs go in
-            // as chords at the drawing tolerance, each chord point at the
-            // height interpolated along its segment (docs/drawing.md).
-            withElevation += curved->hasHeights() ? 1 : 0;
-            katana::terrain::Breakline breakline;
-            bool whole = true;
-            auto walk = curved->tessellateWithHeights(katana::geometry::kCurveChordTolerance);
-            if (curved->closed && walk.size() > 1) {
-                walk.pop_back();
-            }
-            for (const auto& step : walk) {
-                const auto z = curved->hasHeights() ? step.height : std::optional<double>(0.0);
-                if (!z) {
-                    ++withoutHeight;
-                    whole = false;
-                    if (breakline.vertices.size() >= 2) {
-                        input.breaklines.push_back(breakline);
-                    }
-                    breakline.vertices.clear();
-                    continue;
-                }
-                const katana::geometry::Point3 p(step.position.x, step.position.y, *z);
-                breakline.vertices.push_back(p);
-                input.points.push_back(p);
-            }
-            breakline.closed = curved->closed && whole;
-            if (breakline.vertices.size() >= 2) {
-                input.breaklines.push_back(breakline);
-            }
-        }
-    });
-    if (withoutHeight != 0) {
-        logMessage(QString("%1 vertices have no height and were left out of the surface.")
-                       .arg(grouped(withoutHeight)));
-    }
-
-    if (input.points.size() < 3) {
-        logMessage("The drawing has fewer than three points to triangulate.", true);
+    // A second surface of a name is "name (2)", as the session names a
+    // second alignment: the store keeps names unique, so SURFACE <name>
+    // finds one.
+    const std::string unique = surfaceStore_.uniqueName(name);
+    if (auto added = surfaceStore_.add(
+            {unique, std::make_shared<const katana::terrain::TinSurface>(std::move(surface)), {}});
+        !added) {
+        logMessage(QString::fromStdString(added.error().describe()), true);
         return;
     }
-    if (withElevation == 0) {
-        logMessage("No entity carries an 'elevation' property; the surface will be flat.", true);
-    }
-
-    katana::terrain::TinBuildOptions options;
-    options.duplicatePoints = katana::terrain::DuplicatePointPolicy::Average;
-    options.crossingBreaklines = katana::terrain::CrossingBreaklinePolicy::Average;
-    // The drawing was read above, on the GUI thread, because the document is
-    // single-threaded; from here the job owns the input.
-    auto owned = std::make_shared<katana::terrain::TinInput>(std::move(input));
-    startSurfaceJob(
-        katana::qt::JobRunner::of(*this), headless_, "Surface From Drawing",
-        [owned](katana::qt::JobControl&,
-                QStringList&) -> katana::core::Result<katana::terrain::TinInput> {
-            return std::move(*owned);
-        },
-        options,
-        [this](katana::terrain::TinSurface&& surface) {
-            addSurface("Drawing", std::move(surface));
-        },
-        [this](const QString& text, bool isError) { logMessage(text, isError); });
+    syncSceneSurfaces();
+    const cad::SceneSurface& item = sceneSurfaces_.back();
+    logMessage(QString("Surface '%1': %2 vertices, %3 triangles, elevation %4 to %5.")
+                   .arg(QString::fromStdString(sceneSurfaces_.back().name))
+                   .arg(item.surface->vertexCount())
+                   .arg(item.surface->triangleCount())
+                   .arg(item.surface->minElevation(), 0, 'f', 3)
+                   .arg(item.surface->maxElevation(), 0, 'f', 3));
 }
 
+void MainWindow::showSurfaceFrom(SurfaceFromKind kind)
+{
+    // The dialog writes the SURFACE FROM line and runs it through
+    // runVerbLine: the triangulation is the verb's background job, the one
+    // katana_cli and katana_mcp run (docs/terrain.md, "Surfaces on every
+    // front end").
+    if (surfaceFrom_ == nullptr) {
+        surfaceFrom_ = new SurfaceFromDialog(terrainDialogContext(*geo_), this);
+    }
+    // Reference Data's chosen cloud or raster first, as the old items took it.
+    QString chosen;
+    if (const int row = referenceTable_ != nullptr ? referenceTable_->currentRow() : -1; row >= 0) {
+        if (const QTableWidgetItem* item = referenceTable_->item(row, kRefName)) {
+            const auto id =
+                static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
+            if (kind == SurfaceFromKind::Cloud && reference_.findPointCloud(id) != nullptr) {
+                chosen = QString("CLOUD %1").arg(id);
+            } else if (kind == SurfaceFromKind::Raster && reference_.findRaster(id) != nullptr) {
+                chosen = QString("RASTER %1").arg(id);
+            }
+        }
+    }
+    surfaceFrom_->show();
+    surfaceFrom_->showKind(kind, chosen);
+    surfaceFrom_->raise();
+    surfaceFrom_->activateWindow();
+}
 
 void MainWindow::cutSectionAlongSelection()
 {

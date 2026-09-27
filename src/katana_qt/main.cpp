@@ -30,7 +30,7 @@
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
-#include "gis_dialogs.hpp"
+#include "dataset_info_dialog.hpp"
 #include "layer_manager.hpp"
 #include "style_manager.hpp"
 #include "katana/cad/plot.hpp"
@@ -188,7 +188,8 @@ QDockWidget* openSurveyDock(katana::qt::MainWindow& window, const QString& name)
 }
 
 // --fill FIELD=TEXT. False, said on stderr, for a field the dialog does not
-// have or a value it cannot take - a test that fills nothing must not pass.
+// have, one that is disabled, or a value it cannot take - a test that fills
+// nothing must not pass.
 bool fillField(QWidget& dialog, const QString& assignment)
 {
     const qsizetype equals = assignment.indexOf('=');
@@ -199,6 +200,14 @@ bool fillField(QWidget& dialog, const QString& assignment)
     const QString name = assignment.left(equals);
     QString text = assignment.mid(equals + 1);
     auto* widget = dialog.findChild<QWidget*>(name);
+    // A person cannot type into a disabled field, and what it holds is not
+    // read into the line (gridToSurface was disabled and --fill filled it,
+    // silently): refused, as --press refuses a disabled button.
+    if (widget != nullptr && !widget->isEnabled()) {
+        std::fprintf(stderr, "--fill: %s's field %s is disabled\n", qPrintable(dialog.objectName()),
+                     qPrintable(name));
+        return false;
+    }
     if (auto* line = qobject_cast<QLineEdit*>(widget)) {
         line->setText(text);
         return true;
@@ -342,7 +351,8 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 //   katana [project-directory] [data-file...] --layer-manager --screenshot out.png
 //   katana [project-directory] [data-file...] --action NAME... --screenshot out.png
 //   katana [project-directory] --dataset-info FILE --screenshot out.png
-//   katana [project-directory] --import-options FILE --screenshot out.png
+//   katana [project-directory] --import-options FILE [steps...] --screenshot out.png
+//   katana [project-directory] [steps...] --export-options FILE [steps...] --screenshot out.png
 //   katana [project-directory] [data-file...] [--select-all] [--action NAME...]
 //                 --dialog NAME [--fill FIELD=TEXT...] [--press BUTTON...]
 //                 [--report WIDGET...] [--dialog NAME ...] [--survey-dock ACTION ...]
@@ -414,6 +424,11 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 // --dataset-info and --import-options build GIS > Dataset Information and the
 // GIS menu's import dialog for FILE, and grab that window, as --style-manager
 // does: the description GDAL or PDAL gives of the file is read and painted.
+// With steps, either is the target the steps start on, so --fill, --press
+// and --report reach its fields by name. --export-options FILE is a step: it
+// opens File > Export Vector's dialog for FILE in its turn, after the
+// commands before it made the drawing, and makes it the target - a headless
+// run cannot reach it through the menu, which opens no file dialog.
 //
 // --select-all selects every entity on an unlocked layer, as Edit > Select
 // All does, before the actions run - for a command that acts on the selection
@@ -596,6 +611,8 @@ int main(int argc, char* argv[])
             datasetInfo = value();
         } else if (argument == "--import-options") {
             importOptions = value();
+        } else if (argument == "--export-options") {
+            surveySteps.emplace_back(argument, value());
         } else if (argument == "--select-all") {
             selectEverything = true;
         } else if (argument == "--survey-dialog" || argument == "--dialog") {
@@ -771,6 +788,30 @@ int main(int argc, char* argv[])
             QPointer<QWidget> target;
             QString targetName;
             std::vector<QDockWidget*> docks;
+            // Held here: the steps drive it and the grab reads it.
+            std::unique_ptr<QDialog> optionsDialog;
+            if (datasetInfo || importOptions) {
+                optionsDialog = datasetInfo
+                                    ? std::unique_ptr<QDialog>(window.makeDatasetInfo(*datasetInfo))
+                                    : window.makeImportOptions(*importOptions);
+                if (optionsDialog == nullptr) {
+                    std::fprintf(stderr, "no dialog for %s\n",
+                                 qPrintable(datasetInfo ? *datasetInfo : *importOptions));
+                    return 1;
+                }
+                optionsDialog->show();
+                target = optionsDialog.get();
+                targetName = target->objectName();
+                // Its Run pressed (vectorImportRun ...), the import runs as
+                // the menu's does once its dialog is accepted.
+                if (importOptions) {
+                    QDialog* accepted = optionsDialog.get();
+                    QObject::connect(accepted, &QDialog::accepted, &window,
+                                     [&window, accepted] { window.finishImport(*accepted); });
+                }
+                QApplication::processEvents();
+                QApplication::processEvents();
+            }
             for (const auto& [kind, text] : surveySteps) {
                 if (kind == "--trigger") {
                     // --action, in its turn among the steps: a menu command
@@ -825,10 +866,14 @@ int main(int argc, char* argv[])
                     targetName = text;
                     continue;
                 }
-                if (kind == "--dialog" || kind == "--survey-dock") {
+                if (kind == "--dialog" || kind == "--survey-dock" || kind == "--export-options") {
                     QWidget* opened = nullptr;
                     if (kind == "--dialog") {
                         opened = openDialog(window, text);
+                    } else if (kind == "--export-options") {
+                        opened = window.showExportOptions(text);
+                        std::fprintf(stderr, "--export-options %s: opened vectorExportDialog\n",
+                                     qPrintable(text));
                     } else if (QDockWidget* dock = openSurveyDock(window, text)) {
                         docks.push_back(dock);
                         opened = dock;
@@ -837,7 +882,7 @@ int main(int argc, char* argv[])
                         return 1;
                     }
                     target = opened;
-                    targetName = text;
+                    targetName = kind == "--export-options" ? opened->objectName() : text;
                     continue;
                 }
                 if (kind == "--report") {

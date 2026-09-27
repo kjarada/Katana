@@ -49,6 +49,10 @@ file(GLOB _qt_plotting_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plot
 # as it is in the application.
 file(GLOB _qt_annotation_sources CONFIGURE_DEPENDS "${_qt_src}/annotation/*.cpp")
 file(GLOB _qt_annotation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp")
+# The geoprocessing workbench and menu table (src/katana_qt/geo/) and their
+# tests: globbed, as they are in the application.
+file(GLOB _qt_geo_sources CONFIGURE_DEPENDS "${_qt_src}/geo/*.cpp")
+file(GLOB _qt_geo_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp")
 # The drawing system's front end (src/katana_qt/drawing/) and its tests:
 # globbed, as it is in the application.
 file(GLOB _qt_drawing_sources CONFIGURE_DEPENDS "${_qt_src}/drawing/*.cpp")
@@ -100,7 +104,10 @@ add_executable(katana_qt_widget_tests
     # Where an import lands: the Placement group, File > Import's step and
     # GIS > Import Vector Data's dialog (test_import_placement).
     ${_qt_src}/import_placement.cpp
-    ${_qt_src}/gis_dialogs.cpp
+    ${_qt_src}/gis_import_dialogs.cpp
+    ${_qt_src}/gis_export_dialog.cpp
+    ${_qt_src}/surface_raster_dialog.cpp
+    ${_qt_src}/dataset_info_dialog.cpp
     test_import_placement.cpp
     # The plan view's shortcut menu and Edit > Select by ID
     # (test_plan_context_menu).
@@ -128,6 +135,8 @@ add_executable(katana_qt_widget_tests
     ${_qt_plotting_tests}
     ${_qt_annotation_sources}
     ${_qt_annotation_tests}
+    ${_qt_geo_sources}
+    ${_qt_geo_tests}
     ${_qt_drawing_sources}
     ${_qt_drawing_tests}
 )
@@ -135,9 +144,11 @@ target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
                                                           "${CMAKE_CURRENT_SOURCE_DIR}")
 # katana_archive12d: the style painter names library pens through its colour table.
 # katana_surveyio and katana_survey: the survey pages read and reduce field files.
+# katana_app: the geoprocessing executor the workbench runs, and the command
+# reference's section of its verbs.
 target_link_libraries(katana_qt_widget_tests PRIVATE
     katana_cad katana_interop katana_render katana_archive12d katana_survey katana_surveyio
-    katana_ifc Qt6::Widgets Qt6::PrintSupport GTest::gtest)
+    katana_app katana_ifc Qt6::Widgets Qt6::PrintSupport GTest::gtest)
 target_compile_definitions(katana_qt_widget_tests PRIVATE
     KATANA_SURVEYIO_DATA="${PROJECT_SOURCE_DIR}/tests/surveyio/data"
     KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data"

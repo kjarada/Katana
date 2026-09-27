@@ -59,6 +59,16 @@ struct ProjectMetadata {
     // line feeds, which is why save() refuses a name that is empty or holds
     // a line break or a path separator.
     std::vector<std::string> customisation{};
+    // The reference layers the drawing is worked on top of - rasters and
+    // point clouds (interop/reference_data.hpp) - as opaque records, one a
+    // layer, in their order: where each came from and how it is shown, never
+    // its pixels or points, which are read from the source again when the
+    // project opens. Storage keeps them and does not read them; the records
+    // are interop's to write and read (referenceRecords). Stored as one
+    // `reference_layers` key, a record a line - no schema change, and a
+    // build that does not know the key keeps it (unknownKeys) - which is why
+    // save() refuses a record that is empty or holds a line break.
+    std::vector<std::string> referenceLayers{};
     // Keys a NEWER Katana wrote that this one does not read, kept and written
     // back as they were, so opening and saving a project in an older build
     // does not strip what a newer one recorded. Never a key this build reads:

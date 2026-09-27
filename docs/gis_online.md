@@ -363,8 +363,14 @@ warning text="scene date 2026-09-20, cloud cover 0%"
 error verb=IMPORT code=InvalidCRS message="the project has no coordinate system, ..."
 ```
 
-`katana_cli` does not have the verbs yet: it has no reference data to put a
-raster in, and the verbs' executor is the window's workbench.
+`katana_cli` and `katana_mcp` do not have the verbs yet ("Not done"): the
+verbs' executor is the window's workbench (`src/katana_qt/gis_online.cpp`),
+not the session's geo executor. The session holds reference data now, so
+that is no longer what stands in the way.
+
+An online raster is reopened with the project from the file it was cached
+in (`docs/interop.md`, "Reference layers"), with its web source, licence and
+attribution.
 
 ## Tests
 
@@ -468,10 +474,22 @@ published shapes.
 - Vector features that meet the area are imported whole, except from a `file`
   layer, which is clipped; an ArcGIS lot crossing the area's edge arrives
   entire, which is what a cadastre wants.
-- `katana_cli` has no `ONLINE` verbs.
+- `katana_cli` and `katana_mcp` have no `ONLINE` verbs, and there is no
+  `katana_online_*` tool. The executor has to move from the window's
+  workbench into the session's geo executor (`docs/geoprocessing.md`) - a
+  job in the window, inline in a session, the keys store and cache paths
+  passed in. The GDAL integration's plan left it out as not algorithm work;
+  it belongs with the retrofit below.
+- `area=view|drawing|selection|x0,y0,x1,y1` is a second scope grammar, where
+  every tool is to act on the one scope and filter: it should be the shared one
+  (`[SELECTION|VIEW|DRAWING|AREA x0,y0,x1,y1|LAYERS a,b [ONLY]]`,
+  `include/katana/cad/scope_verbs.hpp`), with VIEW refused headless in
+  favour of AREA, and the dialog's area choice the shared
+  `ScopeFilterWidget`. `lonlat:` has no counterpart there yet. The
+  scope-retrofit list from the shared scope's audit owns it.
 - The dialog's own lines are not echoed in the command log the way the
   window's one executor echoes a dialog's line: the dialog hands the
   workbench a parsed command, which predates the executor. The replies are
   logged.
-- Reference rasters are session data (`docs/interop.md`), so an online raster
-  is not reopened with the project; its record is in the reply and the log.
+- A cached file that is gone when the project reopens is warned of, not
+  fetched again - `ONLINE IMPORT` fetches it.

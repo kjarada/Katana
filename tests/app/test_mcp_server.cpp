@@ -7,7 +7,10 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -210,6 +213,28 @@ TEST_F(McpServer, ABatchStopsAtTheFirstFailingCommandAndSaysWhich)
               std::string::npos);
     EXPECT_TRUE(lines[1]["skipped"].get<bool>());
     EXPECT_EQ(result["structuredContent"]["status"]["entities"], 0);
+}
+
+// HELP sent as a command is the session's whole help, what katana_help and
+// --help give: CUSTOMISE and IFC are the session's, not the
+// interpreter's, and the interpreter's own HELP left them out.
+TEST_F(McpServer, HelpSentAsACommandIsTheWholeSessionHelp)
+{
+    initialize();
+    const Json result = call("katana_run_commands", Json{{"commands", {"HELP", "?"}}});
+    EXPECT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const std::string text = textOf(result);
+    // The reply's text is trimmed at its end, so the help is sought without
+    // its closing newline.
+    std::string help = Session::helpText();
+    while (!help.empty() && help.back() == '\n') {
+        help.pop_back();
+    }
+    const std::size_t first = text.find(help);
+    ASSERT_NE(first, std::string::npos) << text;
+    EXPECT_NE(text.find(help, first + help.size()), std::string::npos) << text;
+    EXPECT_NE(text.find("CUSTOMISE [REPLACE]"), std::string::npos);
+    EXPECT_NE(text.find("IMPORT <file.ifc>"), std::string::npos);
 }
 
 TEST_F(McpServer, ABatchToldToCarryOnRunsPastAFailure)
@@ -454,6 +479,272 @@ TEST_F(McpServer, ImportLocalMovesAQuotedPathsDataToTheOrigin)
     EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.x, 190.0);
     EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.y, -20.5);
 }
+
+// katana_export's cloud writes a reference point cloud to a .laz, as GIS >
+// Export Point Cloud does: the scan's 40 000 points (`pdal info`), all held,
+// so no sample and no warning.
+TEST_F(McpServer, ExportWritesAReferenceCloudByIdOrName)
+{
+    initialize();
+    const TempDir folder("export-cloud");
+    const Json imported = call(
+        "katana_import",
+        Json{{"path",
+              (std::filesystem::path(KATANA_GIS_SAMPLES) / "survey_scan.las").generic_string()}});
+    ASSERT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    const Json exported =
+        call("katana_export", Json{{"path", folder.file("scan.laz")}, {"cloud", "survey_scan"}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    const Json& record = exported["structuredContent"]["records"][0];
+    EXPECT_EQ(record["record"], "exported");
+    EXPECT_EQ(record["kind"], "cloud");
+    EXPECT_EQ(record["points"], 40000);
+    EXPECT_EQ(record["sample"], false); // yes/no is a boolean in the records
+    EXPECT_TRUE(std::filesystem::exists(folder.file("scan.laz")));
+    const Json byId = call("katana_export", Json{{"path", folder.file("again.las")}, {"cloud", 1}});
+    EXPECT_FALSE(byId["isError"].get<bool>()) << textOf(byId);
+    const Json refused =
+        call("katana_export", Json{{"path", folder.file("x.las")}, {"cloud", "nothing"}});
+    EXPECT_TRUE(refused["isError"].get<bool>()) << textOf(refused);
+}
+
+TEST_F(McpServer, ImportReturnsStructuredRecords)
+{
+    // The reply's records as objects, numbers as numbers: an agent reads the
+    // entities that came in, the move LOCAL made and the reference layer's
+    // id without reading text. parcels.geojson: 8 features, the spoil heaps
+    // a MultiPolygon of two, so 9 entities; its lower-left corner (180, 0)
+    // moved to 0,0. terrain.asc: 120 x 90 cells.
+    initialize();
+    const std::string parcels =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "parcels.geojson").generic_string();
+    const Json imported = call("katana_import", Json{{"path", parcels}, {"placement", "local"}});
+    ASSERT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    const Json records = imported["structuredContent"]["records"];
+    ASSERT_GE(records.size(), 2u) << records.dump();
+    EXPECT_EQ(records[0]["record"], "imported");
+    EXPECT_EQ(records[0]["kind"], "vector");
+    EXPECT_EQ(records[0]["entities"], 9);
+    EXPECT_EQ(records[0]["bounds"], (Json{0.0, 0.0, 185.0, 165.0}));
+    EXPECT_EQ(records[1]["record"], "placed");
+    EXPECT_EQ(records[1]["placement"], "local");
+    EXPECT_EQ(records[1]["east"], -180);
+    EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 9);
+
+    const Json raster = call(
+        "katana_import",
+        Json{{"path", (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string()}});
+    ASSERT_FALSE(raster["isError"].get<bool>()) << textOf(raster);
+    const Json layer = raster["structuredContent"]["records"][1];
+    EXPECT_EQ(layer["record"], "reference");
+    EXPECT_EQ(layer["id"], 1);
+    EXPECT_EQ(layer["kind"], "raster");
+    EXPECT_EQ(layer["width"], 120);
+    EXPECT_EQ(layer["height"], 90);
+
+    // EXPORT the same way: what was written, as numbers.
+    const TempDir dir("export records");
+    const Json exported = call("katana_export", Json{{"path", dir.file("parcels.gpkg")}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    const Json written = exported["structuredContent"]["records"][0];
+    EXPECT_EQ(written["record"], "exported");
+    EXPECT_EQ(written["driver"], "GPKG");
+    EXPECT_EQ(written["features"], 9);
+}
+
+TEST_F(McpServer, ImportTakesItsFilterScopeAndPreviewArgumentsAsTheWordsAPersonTypes)
+{
+    // tests/geo/data/lots.geojson, by hand: A and B kind=lot, 50 x 40 side by
+    // side from (0, 0); C kind=corridor across both at y = 18..22. The box
+    // (40, 10) - (60, 30) meets all three; kind = 'lot' leaves A and B.
+    initialize();
+    const std::string lots =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "../../tests/geo/data/lots.geojson")
+            .lexically_normal()
+            .generic_string();
+    const Json previewed =
+        call("katana_import", Json{{"path", lots},
+                                   {"where", "kind = 'lot'"},
+                                   {"area", Json{40, 10, 60, 30}},
+                                   {"clip", true},
+                                   {"preview", true}});
+    ASSERT_FALSE(previewed["isError"].get<bool>()) << textOf(previewed);
+    EXPECT_EQ(previewed["structuredContent"]["commands"][0]["command"],
+              "IMPORT \"" + lots + "\" where=\"kind = 'lot'\" AREA 40,10,60,30 clip PREVIEW");
+    const Json records = previewed["structuredContent"]["records"];
+    ASSERT_GE(records.size(), 2u) << records.dump(); // and any warning GDAL gave
+    EXPECT_EQ(records[0]["record"], "scope");
+    EXPECT_EQ(records[1]["record"], "import");
+    EXPECT_EQ(records[1]["features"], 2);
+    EXPECT_EQ(records[1]["of"], 3);
+    EXPECT_EQ(previewed["structuredContent"]["status"]["entities"], 0);
+
+    const Json imported = call("katana_import", Json{{"path", lots},
+                                                     {"fields", Json{"name"}},
+                                                     {"target_layer", "site"},
+                                                     {"max_features", 2}});
+    ASSERT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    EXPECT_EQ(imported["structuredContent"]["commands"][0]["command"],
+              "IMPORT \"" + lots + "\" fields=name target=site max=2");
+    EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 2);
+
+    const Json refused =
+        call("katana_import", Json{{"path", lots}, {"open_options", Json{"NOPE=1"}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("NOPE"), std::string::npos) << textOf(refused);
+}
+
+TEST_F(McpServer, ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes)
+{
+    // tests/geo/data/lots.geojson imported: three closed polylines on layer
+    // lots, the two lots and the corridor (kind=corridor).
+    initialize();
+    const std::string lots =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "../../tests/geo/data/lots.geojson")
+            .lexically_normal()
+            .generic_string();
+    ASSERT_FALSE(call("katana_import", Json{{"path", lots}})["isError"].get<bool>());
+    const TempDir dir("export options");
+    const std::string out = dir.file("lots.gpkg");
+
+    const Json previewed = call("katana_export", Json{{"path", out},
+                                                      {"scope", "layers"},
+                                                      {"layers", Json{"lots"}},
+                                                      {"where", Json{"PROP=kind:lot"}},
+                                                      {"layer_name", "parcels"},
+                                                      {"preview", true}});
+    ASSERT_FALSE(previewed["isError"].get<bool>()) << textOf(previewed);
+    EXPECT_EQ(previewed["structuredContent"]["commands"][0]["command"],
+              "EXPORT \"" + out + "\" LAYERS lots WHERE PROP=kind:lot layername=parcels PREVIEW");
+    const Json records = previewed["structuredContent"]["records"];
+    ASSERT_GE(records.size(), 2u) << records.dump();
+    EXPECT_EQ(records[0]["record"], "export");
+    EXPECT_EQ(records[0]["entities"], 2);
+    EXPECT_FALSE(std::filesystem::exists(out));
+
+    const Json written = call("katana_export", Json{{"path", out}, {"split_by_layer", true}});
+    ASSERT_FALSE(written["isError"].get<bool>()) << textOf(written);
+    EXPECT_EQ(written["structuredContent"]["records"][0]["record"], "exported");
+    EXPECT_EQ(written["structuredContent"]["records"][0]["features"], 3);
+    EXPECT_EQ(written["structuredContent"]["records"][0]["layers"], "lots");
+
+    const Json refused = call("katana_export", Json{{"path", dir.file("refused.gpkg")},
+                                                    {"layer_creation_options", Json{"NOPE=1"}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("NOPE"), std::string::npos) << textOf(refused);
+}
+
+// "where" without "scope" filters the selection, as WHERE alone does on the
+// command line - the one scope parser's rule - on katana_export and on a
+// katana_gdal_run input alike; it was refused here and taken there. Two
+// lines drawn, one selected: one line is exported, one buffered.
+TEST_F(McpServer, WhereWithoutAScopeFiltersTheSelectionAsTheLineDoes)
+{
+    initialize();
+    (void)call("katana_run_commands", Json{{"commands",
+                                            {"LINE 0,0 10,0", "LINE 0,5 10,5", "RECT 20,0 30,10",
+                                             "SELECT NONE", "SELECT 1"}}});
+    const TempDir dir("where alone");
+    const std::string out = dir.file("lines.geojson");
+    const Json exported = call("katana_export", Json{{"path", out}, {"where", Json{"TYPE=line"}}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    EXPECT_EQ(exported["structuredContent"]["commands"][0]["command"],
+              "EXPORT \"" + out + "\" SELECTION WHERE TYPE=line");
+    EXPECT_EQ(exported["structuredContent"]["records"][0]["features"], 1)
+        << exported["structuredContent"]["records"].dump();
+
+    const Json buffered =
+        call("katana_gdal_run", Json{{"algorithm", "vector buffer"},
+                                     {"arguments", {{"distance", 1}}},
+                                     {"inputs", {{"input", {{"where", {"TYPE=line"}}}}}},
+                                     {"output", {{"layer", "gis/b"}}}});
+    ASSERT_FALSE(buffered["isError"].get<bool>()) << textOf(buffered);
+    EXPECT_EQ(buffered["structuredContent"]["line"],
+              "GDAL vector buffer --distance=1 FROM input SELECTION WHERE TYPE=line TO LAYER "
+              "gis/b");
+    EXPECT_EQ(buffered["structuredContent"]["scope"][0]["matched"], 1);
+
+    const Json layersAlone = call("katana_export", Json{{"path", out}, {"layers", Json{"0"}}});
+    EXPECT_TRUE(layersAlone["isError"].get<bool>()) << textOf(layersAlone);
+}
+
+TEST_F(McpServer, AnArgumentTheToolDoesNotDeclareIsRefusedByNameAndNothingRuns)
+{
+    // "split" is not katana_export's word ("split_by_layer" is). Ignored, the
+    // call wrote one layer where the agent asked for one per drawing layer.
+    initialize();
+    const std::string lots =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "../../tests/geo/data/lots.geojson")
+            .lexically_normal()
+            .generic_string();
+    ASSERT_FALSE(call("katana_import", Json{{"path", lots}})["isError"].get<bool>());
+    const TempDir dir("undeclared argument");
+    const std::string out = dir.file("lots.gpkg");
+    const Json refused = call("katana_export", Json{{"path", out}, {"split", true}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("katana_export takes no argument \"split\""), std::string::npos)
+        << textOf(refused);
+    EXPECT_NE(textOf(refused).find("split_by_layer"), std::string::npos) << textOf(refused);
+    EXPECT_FALSE(std::filesystem::exists(out));
+    // A tool that takes no arguments refuses any, saying so.
+    const Json none = call("katana_status", Json{{"verbose", true}});
+    EXPECT_TRUE(none["isError"].get<bool>());
+    EXPECT_NE(textOf(none).find("it takes none"), std::string::npos) << textOf(none);
+}
+
+TEST_F(McpServer, DatasetInfoReturnsRecordsAndGdalsJson)
+{
+    // terrain.asc's header: 120 x 90 cells of 1.5 from (-5, -5), no-data
+    // -9999. The tool changes nothing and reads only the file.
+    initialize();
+    const std::string terrain =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string();
+    const Json described =
+        call("katana_dataset_info", Json{{"path", terrain}, {"json", true}, {"check", true}});
+    ASSERT_FALSE(described["isError"].get<bool>()) << textOf(described);
+    const Json& content = described["structuredContent"];
+    EXPECT_EQ(content["line"], "INFO \"" + terrain + "\" CHECK");
+    std::map<std::string, Json> first;
+    for (const Json& record : content["records"]) {
+        first.emplace(record["record"].get<std::string>(), record);
+    }
+    EXPECT_EQ(first["dataset"]["driver"], "AAIGrid");
+    EXPECT_EQ(first["raster"]["width"], 120);
+    EXPECT_EQ(first["raster"]["bounds"], (Json{-5.0, -5.0, 175.0, 130.0}));
+    EXPECT_EQ(first["band"]["nodata"], -9999);
+    EXPECT_EQ(first["check"]["code"], 0);
+    EXPECT_EQ(content["gdal"]["raster"]["driverShortName"], "AAIGrid");
+    EXPECT_EQ(session.document().model().entities.size(), 0u);
+}
+
+TEST_F(McpServer, ReferencesActsOnALayerByIdOrNameAndListsThemAfter)
+{
+    initialize();
+    const std::string terrain =
+        (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string();
+    ASSERT_FALSE(call("katana_import", Json{{"path", terrain}})["isError"].get<bool>());
+
+    const Json hidden = call("katana_references", Json{{"action", "hide"}, {"id", 1}});
+    ASSERT_FALSE(hidden["isError"].get<bool>()) << textOf(hidden);
+    EXPECT_EQ(hidden["structuredContent"]["line"], "REFS hide 1");
+    EXPECT_EQ(hidden["structuredContent"]["records"][0]["visible"], false);
+    ASSERT_EQ(hidden["structuredContent"]["references"].size(), 1u);
+    EXPECT_EQ(hidden["structuredContent"]["references"][0]["name"], "terrain");
+
+    const Json faded =
+        call("katana_references", Json{{"action", "opacity"}, {"id", "terrain"}, {"value", 0.25}});
+    ASSERT_FALSE(faded["isError"].get<bool>()) << textOf(faded);
+    EXPECT_EQ(faded["structuredContent"]["references"][0]["opacity"], 0.25);
+
+    // Overviews write beside the raster's file: refused unless confirmed.
+    const Json refused = call("katana_references", Json{{"action", "overviews"}, {"id", 1}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("confirm"), std::string::npos) << textOf(refused);
+
+    const Json listed = call("katana_references");
+    EXPECT_EQ(listed["structuredContent"]["line"], "REFS LIST");
+    EXPECT_EQ(listed["structuredContent"]["references"][0]["id"], 1);
+}
 #endif
 
 TEST_F(McpServer, UndoAndRedoStepThroughTheHistory)
@@ -512,7 +803,12 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
 {
     initialize();
     const Json list = request("resources/list")["result"]["resources"];
+#if defined(KATANA_TEST_WITH_INTEROP)
+    // And the formats GDAL reads and writes (McpServer.FormatsReturnsStructuredDrivers).
+    ASSERT_EQ(list.size(), 3U);
+#else
     ASSERT_EQ(list.size(), 2U);
+#endif
     const Json help = request("resources/read", Json{{"uri", "katana://help"}});
     EXPECT_NE(help["result"]["contents"][0]["text"].get<std::string>().find("CUSTOMISE"),
               std::string::npos);
@@ -760,6 +1056,367 @@ TEST_F(McpServer, AnAgentEditsAHatchPatternAndMakesAStyleThatUsesIt)
     EXPECT_TRUE(refused["isError"].get<bool>()) << "a style still hatches with it";
 }
 
+#if defined(KATANA_TEST_WITH_INTEROP)
+// ---- the geoprocessing tools (docs/mcp.md, "Geoprocessing tools") ---------------------------
+
+TEST_F(McpServer, GdalCatalogueListsHillshade)
+{
+    initialize();
+    const Json result = call("katana_gdal_catalogue", Json{{"filter", "hillshade"}, {"schemas", true}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& algorithms = result["structuredContent"]["algorithms"];
+    ASSERT_EQ(algorithms.size(), 1U) << algorithms.dump();
+    EXPECT_EQ(algorithms[0]["name"], "raster hillshade");
+    EXPECT_EQ(algorithms[0]["path"], Json({"raster", "hillshade"}));
+    EXPECT_EQ(algorithms[0]["policy"], "safe");
+    // One algorithm: few enough for its schema to come with it.
+    EXPECT_TRUE(algorithms[0]["arguments_schema"]["properties"].contains("zfactor"));
+    EXPECT_TRUE(result["structuredContent"]["gdal_version"].get<std::string>().starts_with("3."));
+    // A group lists its members and no schemas past 20 of them.
+    const Json raster = call("katana_gdal_catalogue", Json{{"filter", "raster"}, {"schemas", true}});
+    EXPECT_GT(raster["structuredContent"]["algorithms"].size(), 20U);
+    EXPECT_FALSE(raster["structuredContent"]["algorithms"][0].contains("arguments_schema"));
+}
+
+TEST_F(McpServer, GdalDescribeGivesASchemaWithBounds)
+{
+    initialize();
+    const Json result = call("katana_gdal_describe", Json{{"algorithm", "raster hillshade"}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& described = result["structuredContent"];
+    const Json& altitude = described["arguments_schema"]["properties"]["altitude"];
+    EXPECT_EQ(altitude["minimum"], 0.0);
+    EXPECT_EQ(altitude["maximum"], 90.0);
+    EXPECT_EQ(described["arguments_schema"]["properties"]["zfactor"]["exclusiveMinimum"], 0.0);
+    bool found = false;
+    for (const Json& arg : described["arguments"]) {
+        if (arg["name"] == "input") {
+            found = true;
+            EXPECT_EQ(arg["dataset"]["kinds"], Json({"raster"}));
+            EXPECT_EQ(arg["dataset"]["sources"], Json({"raster", "surface", "file"}));
+        }
+    }
+    EXPECT_TRUE(found);
+    // An alias is taken, as GDAL LIST names it.
+    const Json warp = call("katana_gdal_describe", Json{{"algorithm", "raster warp"}});
+    EXPECT_EQ(warp["structuredContent"]["algorithm"]["name"], "raster reproject");
+}
+
+TEST_F(McpServer, GdalRunBuildsTheLineAndReturnsOutputs)
+{
+    initialize();
+    (void)call("katana_run_commands", Json{{"commands", {"LINE 0,0 100,0", "TEXT 5,5 2.5 \"LOT 7\""}}});
+    const Json result = call(
+        "katana_gdal_run",
+        Json{{"algorithm", "vector buffer"},
+             {"arguments", {{"distance", 1}, {"endcap-style", "flat"}}},
+             {"inputs", {{"input", {{"scope", "drawing"}, {"where", {"TYPE=line"}}}}}},
+             {"output", {{"layer", "gis/easement"}}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& run = result["structuredContent"];
+    EXPECT_EQ(run["line"], "GDAL vector buffer --distance=1 --endcap-style=flat FROM input DRAWING "
+                           "WHERE TYPE=line TO LAYER gis/easement");
+    EXPECT_TRUE(textOf(result).starts_with("> GDAL vector buffer"));
+    ASSERT_EQ(run["scope"].size(), 1U);
+    EXPECT_EQ(run["scope"][0]["matched"], 1);
+    EXPECT_EQ(run["scope"][0]["used"], 1);
+    ASSERT_EQ(run["outputs"].size(), 1U);
+    EXPECT_EQ(run["outputs"][0]["kind"], "vector");
+    EXPECT_EQ(run["outputs"][0]["layer"], "gis/easement");
+    EXPECT_EQ(run["outputs"][0]["created"], 1);
+    EXPECT_EQ(run["cancelled"], false);
+    const Json listed = call("katana_list_entities");
+    EXPECT_NE(textOf(listed).find("layer=gis/easement  vertices=4  closed  length=204  area=200"),
+              std::string::npos)
+        << textOf(listed);
+}
+
+// An input's schema offers only the sources it reads, and a source of
+// another kind is refused before anything runs: hillshade's input reads
+// rasters, so katana_gdal_describe offers it no drawing scope, and a drawing
+// given to it anyway is refused naming what it takes, with nothing drawn or
+// kept. GDAL answered "Unable to fetch band #1" from the worker.
+TEST_F(McpServer, GdalRunRefusesASourceTheInputDoesNotRead)
+{
+    initialize();
+    const Json described =
+        call("katana_gdal_describe", Json{{"algorithm", "raster hillshade"}})["structuredContent"];
+    const Json& offered = described["inputs_schema"]["properties"]["input"]["properties"];
+    EXPECT_FALSE(offered.contains("scope")) << offered.dump();
+    EXPECT_TRUE(offered.contains("raster")) << offered.dump();
+    (void)call("katana_run_commands", Json{{"commands", {"RECT 0,0 10,10"}}});
+    const Json result =
+        call("katana_gdal_run", Json{{"algorithm", "raster hillshade"},
+                                     {"inputs", {{"input", {{"scope", "drawing"}}}}},
+                                     {"output", {{"reference", "shade"}}}});
+    EXPECT_TRUE(result["isError"].get<bool>()) << textOf(result);
+    EXPECT_NE(textOf(result).find("input reads raster datasets, and FROM gives it drawing data; "
+                                  "it takes raster,surface,file"),
+              std::string::npos)
+        << textOf(result);
+    EXPECT_EQ(call("katana_status")["structuredContent"]["entities"], 1);
+}
+
+TEST_F(McpServer, GdalRunQuotesAnOutputNamedLikeAKeyword)
+{
+    // An agent's layer "preview" was written bare: the line read PREVIEW as
+    // the flag and was refused. The one quoting rule quotes it.
+    initialize();
+    (void)call("katana_run_commands", Json{{"commands", {"LINE 0,0 100,0"}}});
+    const Json result =
+        call("katana_gdal_run", Json{{"algorithm", "vector buffer"},
+                                     {"arguments", {{"distance", 1}}},
+                                     {"inputs", {{"input", {{"scope", "drawing"}}}}},
+                                     {"output", {{"layer", "preview"}}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    EXPECT_EQ(result["structuredContent"]["line"],
+              "GDAL vector buffer --distance=1 FROM input DRAWING TO LAYER \"preview\"");
+    EXPECT_EQ(result["structuredContent"]["outputs"][0]["layer"], "preview");
+}
+
+TEST_F(McpServer, GdalRunRefusesAConfirmAlgorithmWithoutConfirm)
+{
+    initialize();
+    const TempDir folder("gdal-confirm");
+    const std::string doomed = folder.file("doomed.txt");
+    std::ofstream(doomed) << "x";
+    const Json refused =
+        call("katana_gdal_run", Json{{"algorithm", "vsi delete"}, {"tokens", {doomed}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("confirm"), std::string::npos) << textOf(refused);
+    EXPECT_TRUE(std::filesystem::exists(doomed));
+    const Json confirmed = call("katana_gdal_run", Json{{"algorithm", "vsi delete"},
+                                                        {"tokens", {doomed}},
+                                                        {"confirm", true}});
+    EXPECT_FALSE(confirmed["isError"].get<bool>()) << textOf(confirmed);
+    EXPECT_FALSE(std::filesystem::exists(doomed));
+}
+
+TEST_F(McpServer, GdalRunRefusesAPipelineThatChangesExistingDataUnlessToldTo)
+{
+    initialize();
+    const TempDir folder("gdal-pipeline");
+    const std::string source = folder.file("a.tif");
+    const std::string victim = folder.file("b.tif");
+    for (const auto& [file, burn] : {std::pair{source, "7"}, std::pair{victim, "1"}}) {
+        const Json made =
+            call("katana_gdal_run",
+                 Json{{"algorithm", "raster create"},
+                      {"tokens", {"--size", "3,3", "--bbox", "0,0,3,3", "--burn", burn, file}}});
+        ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    }
+    const auto bytes = [](const std::string& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    };
+    const std::string before = bytes(victim);
+
+    // An update step, as one quoted word: confirm.
+    const Json update =
+        call("katana_gdal_run", Json{{"algorithm", "raster pipeline"},
+                                     {"tokens", {"read " + source + " ! update " + victim}}});
+    EXPECT_TRUE(update["isError"].get<bool>());
+    EXPECT_NE(textOf(update).find("confirm"), std::string::npos) << textOf(update);
+    EXPECT_EQ(bytes(victim), before);
+    // --overwrite inside the pipeline: overwrite.
+    const Json replace = call(
+        "katana_gdal_run", Json{{"algorithm", "pipeline"},
+                                {"tokens", {"read " + source + " ! write --overwrite " + victim}}});
+    EXPECT_TRUE(replace["isError"].get<bool>());
+    EXPECT_NE(textOf(replace).find("OVERWRITE"), std::string::npos) << textOf(replace);
+    EXPECT_EQ(bytes(victim), before);
+
+    const Json confirmed =
+        call("katana_gdal_run", Json{{"algorithm", "raster pipeline"},
+                                     {"tokens", {"read " + source + " ! update " + victim}},
+                                     {"confirm", true}});
+    EXPECT_FALSE(confirmed["isError"].get<bool>()) << textOf(confirmed);
+    const std::string updated = bytes(victim);
+    EXPECT_NE(updated, before);
+    const Json replaced = call(
+        "katana_gdal_run", Json{{"algorithm", "pipeline"},
+                                {"tokens", {"read " + source + " ! write --overwrite " + victim}},
+                                {"overwrite", true}});
+    EXPECT_FALSE(replaced["isError"].get<bool>()) << textOf(replaced);
+}
+
+TEST_F(McpServer, GdalRunRefusesAnArgumentTheAlgorithmHasNot)
+{
+    initialize();
+    const Json refused = call("katana_gdal_run", Json{{"algorithm", "raster hillshade"},
+                                                      {"arguments", {{"no-such", 1}}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    EXPECT_NE(textOf(refused).find("no-such"), std::string::npos);
+}
+
+// ---- I2: katana_formats and katana://formats ----
+
+TEST_F(McpServer, FormatsReturnsStructuredDrivers)
+{
+    initialize();
+    const Json result = call("katana_formats", Json{{"kind", "vector"},
+                                                    {"capability", "write"},
+                                                    {"filter", "flatgeobuf"}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& formats = result["structuredContent"]["formats"];
+    ASSERT_EQ(formats.size(), 1U) << formats.dump();
+    EXPECT_EQ(formats[0]["driver"], "FlatGeobuf");
+    EXPECT_EQ(formats[0]["write"], Json({"vector"}));
+    EXPECT_EQ(formats[0]["extensions"], Json({"fgb"}));
+    EXPECT_TRUE(result["structuredContent"]["gdal_version"].get<std::string>().starts_with("3."));
+    // The text is the verb's records.
+    EXPECT_NE(textOf(result).find("format driver=FlatGeobuf kind=vector"), std::string::npos);
+
+    // One driver's options, as IMPORT's oo= and EXPORT's co= are checked.
+    const Json gpkg = call("katana_formats", Json{{"driver", "GPKG"}});
+    ASSERT_FALSE(gpkg["isError"].get<bool>()) << textOf(gpkg);
+    bool listAll = false;
+    for (const Json& option : gpkg["structuredContent"]["open_options"]) {
+        if (option["name"] == "LIST_ALL_TABLES") {
+            listAll = true;
+            EXPECT_EQ(option["choices"], Json({"AUTO", "YES", "NO"}));
+        }
+    }
+    EXPECT_TRUE(listAll);
+    EXPECT_TRUE(call("katana_formats", Json{{"driver", "NoSuchDriver"}})["isError"].get<bool>());
+    EXPECT_TRUE(call("katana_formats", Json{{"kind", "both"}})["isError"].get<bool>());
+
+    // The resource is FORMATS JSON: every format, the same objects.
+    const Json resource = request("resources/read", Json{{"uri", "katana://formats"}});
+    const Json all = Json::parse(resource["result"]["contents"][0]["text"].get<std::string>());
+    ASSERT_TRUE(all.is_array());
+    const auto found = std::ranges::find_if(all, [](const Json& format) {
+        return format["driver"] == "FlatGeobuf";
+    });
+    ASSERT_NE(found, all.end());
+    EXPECT_EQ(*found, formats[0]);
+}
+
+// katana_terrain_list: what SURFACE LIST JSON says, as structured content.
+// terrain.asc's least and greatest values, read from the text grid, are
+// 24.892 and 38.819, and a surface of all its 10 800 cells spans exactly
+// them; the grid is read as Float32, within 2e-6 of the text at that size.
+TEST_F(McpServer, TerrainListGivesTheSessionsSurfacesAndRasters)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json empty = call("katana_terrain_list");
+    ASSERT_FALSE(empty["isError"].get<bool>()) << textOf(empty);
+    EXPECT_TRUE(empty["structuredContent"]["surfaces"].empty());
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"IMPORT \"" + terrain + "\"",
+                                              "SURFACE FROM RASTER 1 NAME ground"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const Json listed = call("katana_terrain_list");
+    ASSERT_FALSE(listed["isError"].get<bool>()) << textOf(listed);
+    const Json& content = listed["structuredContent"];
+    ASSERT_EQ(content["surfaces"].size(), 1U) << content.dump();
+    EXPECT_EQ(content["surfaces"][0]["name"], "ground");
+    EXPECT_EQ(content["surfaces"][0]["points"], 10800);
+    EXPECT_NEAR(content["surfaces"][0]["zmin"].get<double>(), 24.892, 2e-6);
+    EXPECT_NEAR(content["surfaces"][0]["zmax"].get<double>(), 38.819, 2e-6);
+    ASSERT_EQ(content["rasters"].size(), 1U);
+    EXPECT_EQ(content["rasters"][0]["id"], 1);
+    EXPECT_EQ(content["rasters"][0]["width"], 120);
+    EXPECT_EQ(content["rasters"][0]["cell"], 1.5);
+    EXPECT_NE(textOf(listed).find("surface ground: "), std::string::npos) << textOf(listed);
+}
+
+// T1: CONTOUR is a session line, so the command tool draws contours as the
+// window's Terrain > Analysis > Contours does. terrain.asc's heights run
+// from 24.892 to 38.819, so the whole metres in it are 25 to 38: 14 levels.
+TEST_F(McpServer, ContoursOfASurfaceAreDrawnThroughTheCommandTool)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json drawn = call("katana_run_commands",
+                            Json{{"commands", {"SURFACE FROM FILE \"" + terrain + "\" NAME ground",
+                                               "CONTOUR SURFACE ground interval=1"}}});
+    ASSERT_FALSE(drawn["isError"].get<bool>()) << textOf(drawn);
+    const Json& lines = drawn["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 2U);
+    const std::string reply = lines[1]["output"].get<std::string>();
+    EXPECT_NE(reply.find("contours method=tin cell= levels=14 "), std::string::npos) << reply;
+    EXPECT_NE(reply.find("layer=terrain/contours"), std::string::npos) << reply;
+}
+
+// T2: a shading is a derived reference raster, which katana_terrain_list
+// then lists with the line that made it.
+TEST_F(McpServer, AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json shaded = call("katana_run_commands",
+                             Json{{"commands", {"RASTER SHADE FILE \"" + terrain + "\""}}});
+    ASSERT_FALSE(shaded["isError"].get<bool>()) << textOf(shaded);
+    const Json listed = call("katana_terrain_list");
+    ASSERT_FALSE(listed["isError"].get<bool>()) << textOf(listed);
+    const Json& rasters = listed["structuredContent"]["rasters"];
+    ASSERT_EQ(rasters.size(), 1U) << rasters.dump();
+    EXPECT_EQ(rasters[0]["name"], "terrain-hillshade");
+    EXPECT_EQ(rasters[0]["role"], "derived");
+    EXPECT_NE(rasters[0]["derived_from"].get<std::string>().find("RASTER SHADE"),
+              std::string::npos);
+}
+
+// T3: slope classes through the command tool, one undo step. terrain.asc's
+// heights span 24.892 to 38.819 on 1.5 m cells, so Horn's gradient, a
+// weighted difference of at most 4 x 13.927 m over 8 x 1.5 m, is at most
+// 4.64 along each axis: under 657 % however it falls. A break at 1000 puts
+// all 120 x 90 cells of 2.25 m2 in [0, 1000): 24 300 m2.
+TEST_F(McpServer, SlopeClassesMadeThroughTheCommandToolAreOneUndoStep)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"RASTER SLOPE FILE \"" + terrain + "\" classes=1000"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::string reply = made["structuredContent"]["commands"][0]["output"].get<std::string>();
+    EXPECT_NE(reply.find("class name=0-1000 from=0 to=1000 unit=percent area=24300.000"),
+              std::string::npos)
+        << reply;
+    const Json undone = call("katana_run_commands", Json{{"commands", {"UNDO", "LIST"}}});
+    ASSERT_FALSE(undone["isError"].get<bool>()) << textOf(undone);
+    EXPECT_NE(textOf(undone).find("0 entities"), std::string::npos) << textOf(undone);
+}
+
+// T4: statistics by area through the command tool, written on the drawn lot
+// in place. A 40 x 30 m lot on terrain.asc's 1.5 m cells covers
+// 1200 / 2.25 = 533.333 cells by fractional coverage, wherever it lies, and
+// the reply's zone record says so.
+TEST_F(McpServer, StatisticsByAreaThroughTheCommandToolAreWrittenOnTheLot)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json made = call("katana_run_commands",
+                           Json{{"commands", {"RECT 10,10 50,40",
+                                              "RASTER ZONAL FILE \"" + terrain +
+                                                  "\" DRAWING stats=count"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const std::string reply = made["structuredContent"]["commands"][1]["output"].get<std::string>();
+    EXPECT_NE(reply.find("zone entity=1 count=533.33"), std::string::npos) << reply;
+    EXPECT_NE(reply.find("target=in-place created=0 updated=1"), std::string::npos) << reply;
+}
+
+// T5: a sight line through the command tool. Two points a metre apart on
+// terrain.asc (1.5 m cells, heights changing by centimetres over a cell):
+// the eye 1.7 m up sees ground a metre off, whatever the slope between.
+TEST_F(McpServer, ALineOfSightThroughTheCommandToolSaysWhetherTheTargetIsSeen)
+{
+    initialize();
+    const std::string terrain = std::string(KATANA_GIS_SAMPLES) + "/terrain.asc";
+    const Json looked = call("katana_run_commands",
+                             Json{{"commands", {"LOS FILE \"" + terrain +
+                                                "\" OBSERVER 50,50 TARGET 51,50"}}});
+    ASSERT_FALSE(looked["isError"].get<bool>()) << textOf(looked);
+    const std::string reply =
+        looked["structuredContent"]["commands"][0]["output"].get<std::string>();
+    EXPECT_NE(reply.find("sight visible=yes observer=50,50 target=51,50 distance=1.000"),
+              std::string::npos)
+        << reply;
+}
+#endif
+
 // IFC through the one door an agent has: the lines File > Export IFC and
 // Import IFC write (docs/ifc.md), each answered in key=value records the
 // agent can read - the preview's objects, the file written, the file read.
@@ -800,3 +1457,23 @@ TEST_F(McpServer, AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines)
         << textOf(imported);
     EXPECT_EQ(imported["structuredContent"]["status"]["entities"], 1);
 }
+
+#if defined(KATANA_TEST_WITH_INTEROP)
+// katana_export of an .ifc hands its records as objects under their whole
+// kind: "ifc exported", with a file field - read as the kind "ifc" and a
+// field "exported file" until the kind became every word before the first
+// key=.
+TEST_F(McpServer, AnIfcExportsRecordIsItsWholeKindWithItsFields)
+{
+    initialize();
+    const TempDir dir("ifc-records");
+    (void)call("katana_run_commands", Json{{"commands", {"PL 0,0 10,0 20,5"}}});
+    const Json exported = call("katana_export", Json{{"path", dir.file("site.ifc")}});
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+    const Json& records = exported["structuredContent"]["records"];
+    ASSERT_FALSE(records.empty()) << exported.dump();
+    EXPECT_EQ(records[0]["record"], "ifc exported") << records.dump();
+    EXPECT_EQ(records[0]["file"], "site.ifc") << records.dump();
+    EXPECT_FALSE(records[0].contains("exported file")) << records.dump();
+}
+#endif

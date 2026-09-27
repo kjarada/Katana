@@ -88,6 +88,15 @@ class ImportPlacementDialog final : public QDialog {
     ImportPlacementBox* box_ = nullptr;
 };
 
+// The window's question when data that keeps its own coordinates lands far
+// from the drawing (interop::advisePlacement's `advice`): Shift Alongside,
+// Keep Survey Coordinates, or Cancel. What an IMPORT line asks through the
+// executor's farApart (src/katana_app/geo/geo_verbs.hpp), and what
+// decideImportPlacement asks for the import dialogs.
+enum class FarApartAnswer { ShiftAlongside, Keep, Cancel };
+[[nodiscard]] FarApartAnswer askFarApart(QWidget* parent, const QString& advice,
+                                         const katana::geometry::Box2& incoming);
+
 // What the window does about where data it has read lands, the one place
 // its three importers decide it. Any placement but Keep is
 // cad::resolveImportShift, whose sentence is logged. Keep asks, when the

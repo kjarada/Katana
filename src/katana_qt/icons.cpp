@@ -317,7 +317,7 @@ const std::vector<Icon>& allIcons()
         Icon::ImportVector, Icon::ImportRaster,
         Icon::ImportPointCloud, Icon::ExportPointCloud,
         Icon::ExportDem,    Icon::ConvertCopc,
-        Icon::DatasetInfo,
+        Icon::DatasetInfo,  Icon::Processing,
         Icon::Minimise,     Icon::Float,
         Icon::Dock,         Icon::Maximise,
         Icon::Restore,      Icon::Close,
@@ -648,6 +648,16 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.stroke(circle(17.5, 17.5, 4), true);
         ink.dot(17.5, 15.6, 0.9, true);
         ink.line(17.5, 17.6, 17.5, 19.8, true, 1.4);
+        break;
+    case Icon::Processing:
+        // A dataset in, the accent path of a run, and the result out: the
+        // same two boxes as any conversion, joined by the step between them.
+        ink.stroke(rectangle(3, 3, 8, 8));
+        ink.line(3, 7, 11, 7, false, 1.1);
+        ink.line(7, 3, 7, 11, false, 1.1);
+        ink.stroke(rectangle(13, 13, 8, 8));
+        ink.stroke(polyline({{7, 13}, {7, 17}, {12, 17}}), true);
+        ink.stroke(polyline({{10, 15}, {12, 17}, {10, 19}}), true);
         break;
     // ---- window buttons: neutral, and heavier than the toolbar set, because
     // they are shown at 14 px on a title bar where 1.7 units is under a pixel.

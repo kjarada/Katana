@@ -61,6 +61,15 @@ build. Some folders are globbed (`tests/cad/customisation/`,
 `tests/cad/tools/`, and the same two under `tests/qt_widgets/`) so that
 authors working at the same time do not all edit one list.
 
+`tests/geo/` is the one suite that belongs to no single module: the
+geoprocessing bridge, its bindings and its executor are three
+(`docs/geoprocessing.md`). It is configured whenever `katana_app` is built
+with the interop module, links `katana_app`, and globs its `test_*.cpp`, as
+the geoprocessing packages add theirs side by side. Its window checks are
+`tests/geo/headless/*.cmake` and its `cli.*` cases
+`src/katana_app/geo/cli/*.cmake`, each included from the file that would
+otherwise list them.
+
 ### Interactive tools: ToolDriver
 
 A drawing tool is a state machine in `katana_cad` (`docs/tools.md`), tested
@@ -99,6 +108,37 @@ beside the others, with `PATH` given the toolchain's runtime,
 `QT_QPA_PLATFORM=offscreen` and a `TIMEOUT`, because a modal box in a
 headless run is a hang.
 
+### The same suite on Linux
+
+The suite is written on Windows (MSYS2) and also run on Linux against
+conda-forge's toolchain (`tools/setup_linux_toolchain.py`). What differs,
+and how the tests hold on both:
+
+- **Qt's offscreen plugin talks.** On Linux it prints "This plugin does not
+  support raise()" and the like for each window call it stubs out.
+  `tools/check_screenshot.cmake` takes those lines out before it matches
+  `-DEXPECT=`, because they are Qt's and not the window's report
+  (`docs/headless.md` lists which).
+- **GDAL's drivers differ by build.** conda-forge's GDAL 3.13.2 has no PDF
+  driver, so its catalogue has 120 leaf algorithms where MSYS2's has 121
+  (`gdal driver pdf list-layers`); it has the CAD driver, which reads
+  `.dwg`, and MSYS2's has not. A test that counts on a driver asks
+  `gis::findFormat` whether it is there and expects what follows.
+- **A test's paths are made native.** A dialog test that hands in a Windows
+  path (`C:\out\view.png`) builds it with `QDir::toNativeSeparators`: on
+  Linux a backslash is a legal file-name character, and
+  `QDir::fromNativeSeparators` rightly leaves it alone.
+- **The GPU cases need a Vulkan driver.** With Mesa's lavapipe
+  (`mesa-vulkan-drivers`) the "OnTheDesktop" cases draw under Xvfb; on a
+  machine with no Vulkan driver at all they skip, saying why.
+- **A file dialog is answered with the name box unfocused.** The dialog
+  tests share `chooseFile` (`tests/qt_widgets/widget_harness.hpp`), which
+  takes the focus off the name box before `selectFile`; without that, a
+  late poll left the box empty and the dialog waited for ever.
+
+Each of these is explained, with the evidence, in "The eighteen tests that
+failed in the Linux cloud container" below.
+
 Choose the lighter tool: a widget test when the widget can be built alone, a
 headless check when the behaviour needs the window, its menus or the
 interplay of several parts. A headless check proves construction and what
@@ -113,6 +153,11 @@ file is tested as a user would make it; `WILL_FAIL` cases show bad input
 fails the process; fixtures (`FIXTURES_SETUP`, `FIXTURES_REQUIRED`) order the
 steps and clean up. The survey-code cases write their own small code file
 rather than depend on the git-ignored customisation.
+
+A test command that goes through `cmake -E env "PATH=...;..."` writes the
+PATH in the `add_test` itself. Kept in a variable, the semicolons in it split
+the list, and the process that runs is not the one meant: the first
+`cli.gdal_*` cases failed exactly so, with "no such file or directory".
 
 A file written for another program is also handed to an implementation that
 is not Katana's: `cli.ifc_the_scenario_export_is_valid_to_ifcopenshell` runs
