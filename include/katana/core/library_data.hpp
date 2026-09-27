@@ -42,6 +42,15 @@ loadedLibraryPath(std::string_view fileNamePrefix);
 [[nodiscard]] std::optional<std::filesystem::path>
 dataBesideLibrary(std::string_view fileNamePrefix, const std::filesystem::path& relative);
 
+// The rule dataBesideLibrary applies, given the library's file: <prefix>/<relative>
+// when the library is in <prefix>/lib (or any directory of <prefix>), and
+// <prefix>/Resources/<relative> when it is in <prefix>/Frameworks - a macOS
+// application bundle, whose libraries are in Contents/Frameworks and whose
+// data must be in Contents/Resources, where code signing expects data and
+// nothing else (docs/release.md, "macOS"). std::nullopt when neither exists.
+[[nodiscard]] std::optional<std::filesystem::path>
+dataBesideLibraryFile(const std::filesystem::path& library, const std::filesystem::path& relative);
+
 // The directory PROJ's data should be read from, when Katana should say:
 // on Linux and macOS, <prefix>/share/proj beside the loaded libproj, when it holds
 // proj.db and neither PROJ_DATA nor PROJ_LIB is set (an explicit choice

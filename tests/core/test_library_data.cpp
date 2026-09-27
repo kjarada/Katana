@@ -5,6 +5,8 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <string>
 
 #include "katana/core/library_data.hpp"
 
@@ -47,6 +49,82 @@ TEST(LibraryData, DataBesideALibraryIsTheLibrarysGrandparentJoinedToThePathAsked
 #else
     GTEST_SKIP() << "the C library is found by name on Linux only";
 #endif
+}
+
+namespace {
+
+// A throwaway prefix under the test's temporary directory, removed afterwards.
+class ScratchPrefix {
+  public:
+    explicit ScratchPrefix(const std::string& name)
+        : root_(std::filesystem::path(::testing::TempDir()) / name)
+    {
+        std::filesystem::remove_all(root_);
+        std::filesystem::create_directories(root_);
+    }
+    ~ScratchPrefix() { std::filesystem::remove_all(root_); }
+    ScratchPrefix(const ScratchPrefix&) = delete;
+    ScratchPrefix& operator=(const ScratchPrefix&) = delete;
+
+    std::filesystem::path touch(const std::filesystem::path& relative) const
+    {
+        const auto path = root_ / relative;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << "x";
+        return path;
+    }
+    const std::filesystem::path& root() const { return root_; }
+
+  private:
+    std::filesystem::path root_;
+};
+
+} // namespace
+
+TEST(LibraryData, DataOfALibraryInLibIsInTheSharedPrefix)
+{
+    const ScratchPrefix prefix("katana_library_data_lib");
+    const auto library = prefix.touch("lib/libproj.so.25");
+    prefix.touch("share/proj/proj.db");
+    const auto found = katana::core::dataBesideLibraryFile(library, "share/proj/proj.db");
+    ASSERT_TRUE(found.has_value());
+    EXPECT_TRUE(std::filesystem::equivalent(*found, prefix.root() / "share/proj/proj.db"));
+}
+
+TEST(LibraryData, DataOfALibraryInAnApplicationBundlesFrameworksIsInItsResources)
+{
+    // Katana.app/Contents/Frameworks/libproj.25.dylib, with its data in
+    // Contents/Resources/share/proj, where code signing wants data kept.
+    const ScratchPrefix bundle("katana_library_data_bundle");
+    const auto library = bundle.touch("Contents/Frameworks/libproj.25.dylib");
+    bundle.touch("Contents/Resources/share/proj/proj.db");
+    bundle.touch("Contents/Resources/ssl/cacert.pem");
+    const auto proj = katana::core::dataBesideLibraryFile(library, "share/proj/proj.db");
+    ASSERT_TRUE(proj.has_value());
+    EXPECT_TRUE(std::filesystem::equivalent(*proj, bundle.root() /
+                                                       "Contents/Resources/share/proj/proj.db"));
+    const auto certificates = katana::core::dataBesideLibraryFile(library, "ssl/cacert.pem");
+    ASSERT_TRUE(certificates.has_value());
+    EXPECT_TRUE(std::filesystem::equivalent(*certificates,
+                                            bundle.root() / "Contents/Resources/ssl/cacert.pem"));
+}
+
+TEST(LibraryData, ResourcesAreLookedInOnlyBesideAFrameworksDirectory)
+{
+    // A library in lib/ of a prefix that happens to have a Resources folder
+    // does not borrow data from it.
+    const ScratchPrefix prefix("katana_library_data_not_bundle");
+    const auto library = prefix.touch("lib/libproj.so.25");
+    prefix.touch("Resources/share/proj/proj.db");
+    EXPECT_FALSE(katana::core::dataBesideLibraryFile(library, "share/proj/proj.db"));
+}
+
+TEST(LibraryData, MissingDataBesideALibraryIsNotFound)
+{
+    const ScratchPrefix bundle("katana_library_data_missing");
+    const auto library = bundle.touch("Contents/Frameworks/libgdal.dylib");
+    EXPECT_FALSE(katana::core::dataBesideLibraryFile(library, "share/gdal"));
+    EXPECT_FALSE(katana::core::dataBesideLibraryFile(std::filesystem::path{}, "share/gdal"));
 }
 
 TEST(LibraryData, NoDataIsBesideALibraryThatIsNotLoaded)
