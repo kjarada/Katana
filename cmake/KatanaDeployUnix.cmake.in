@@ -21,6 +21,19 @@
 #                                        (core/library_data.hpp,
 #                                        gdal_adapter.cpp)
 #
+# On macOS the tree is Katana.app, with the same relative layout under
+# Contents under Apple's names, because code signing seals a bundle only
+# when code and data are where it expects them:
+#
+#   Contents/Info.plist                  what Finder reads: the program, the icon
+#   Contents/MacOS/katana, ...           bin/, RPATH @loader_path/../Frameworks
+#   Contents/Frameworks/                 lib/, plugins in Frameworks/qt6/plugins
+#   Contents/Resources/qt.conf           where Qt looks in a bundle; relative
+#                                        paths in it are relative to Contents
+#   Contents/Resources/share, ssl        the data, found beside Frameworks
+#                                        (core::dataBesideLibraryFile)
+#   Contents/Resources/katana.icns       the icon, made here from katana.png
+#
 # Why not the distribution's libraries: Katana needs GCC 15 or later, CGAL 6
 # and PROJ 9.5, which no long-term-support distribution ships (docs/building.md,
 # "Linux"), so the libraries it is built against exist only in the toolchain
@@ -32,8 +45,21 @@ if(POLICY CMP0207)
 endif()
 
 set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
-set(_bin "${_prefix}/bin")
-set(_lib "${_prefix}/lib")
+set(_bin "${_prefix}/@KATANA_INSTALL_BINDIR@")
+set(_bundle "@KATANA_APP_BUNDLE@")
+if(_bundle)
+    set(_contents "${_prefix}/${_bundle}/Contents")
+    set(_lib "${_contents}/Frameworks")
+    set(_data "${_contents}/Resources")
+    set(_qt_conf "${_contents}/Resources/qt.conf")
+    set(_qt_conf_text "[Paths]\nPlugins=Frameworks/qt6/plugins\n")
+else()
+    set(_lib "${_prefix}/lib")
+    set(_data "${_prefix}")
+    # Read relative to the program's own directory.
+    set(_qt_conf "${_bin}/qt.conf")
+    set(_qt_conf_text "[Paths]\nPrefix=..\nPlugins=lib/qt6/plugins\n")
+endif()
 set(_toolchain "@KATANA_TOOLCHAIN_PREFIX@")
 set(_qt_plugins "@KATANA_QT_PLUGIN_DIR@")
 set(_apple "@APPLE@")
@@ -70,10 +96,9 @@ if(EXISTS "${_bin}/katana" AND IS_DIRECTORY "${_qt_plugins}")
             list(APPEND _modules ${_found})
         endif()
     endforeach()
-    # Qt finds its plugins through qt.conf beside the program, read relative to
-    # the program's own directory; without it Qt asks the prefix compiled into
-    # it, which is the toolchain's on the machine that built it.
-    file(WRITE "${_bin}/qt.conf" "[Paths]\nPrefix=..\nPlugins=lib/qt6/plugins\n")
+    # Qt finds its plugins through qt.conf; without it Qt asks the prefix
+    # compiled into it, which is the toolchain's on the machine that built it.
+    file(WRITE "${_qt_conf}" "${_qt_conf_text}")
 endif()
 
 # --- 2. Every library they load ----------------------------------------------------
@@ -104,7 +129,7 @@ foreach(_name IN LISTS _conflict_FILENAMES)
     list(APPEND _resolved "${_first}")
 endforeach()
 
-file(MAKE_DIRECTORY "${_lib}" "${_prefix}/ssl")
+file(MAKE_DIRECTORY "${_lib}" "${_data}/ssl")
 set(_copied 0)
 foreach(_dependency IN LISTS _resolved)
     # Only what came from the toolchain; anything else resolved is the
@@ -151,36 +176,87 @@ if(_missing)
 endif()
 
 # --- 3. Data read at run time -------------------------------------------------------
-foreach(_data proj gdal)
-    if(IS_DIRECTORY "${_toolchain}/share/${_data}")
-        file(COPY "${_toolchain}/share/${_data}" DESTINATION "${_prefix}/share")
+foreach(_set proj gdal)
+    if(IS_DIRECTORY "${_toolchain}/share/${_set}")
+        file(COPY "${_toolchain}/share/${_set}" DESTINATION "${_data}/share")
     else()
-        message(WARNING "Katana deploy: ${_toolchain}/share/${_data} was not found; "
+        message(WARNING "Katana deploy: ${_toolchain}/share/${_set} was not found; "
                         "the bundle will lack it")
     endif()
 endforeach()
 if(EXISTS "${_toolchain}/ssl/cacert.pem")
-    file(COPY_FILE "${_toolchain}/ssl/cacert.pem" "${_prefix}/ssl/cacert.pem")
+    file(COPY_FILE "${_toolchain}/ssl/cacert.pem" "${_data}/ssl/cacert.pem")
 else()
     message(WARNING "Katana deploy: ${_toolchain}/ssl/cacert.pem was not found; "
                     "no https:// request will be trusted")
 endif()
 
-# --- 4. macOS: a signature that matches ------------------------------------------------
+# --- 4. macOS: what makes Katana.app an application ------------------------------------
+if(_bundle AND EXISTS "${_bin}/katana")
+    file(COPY_FILE "@CMAKE_BINARY_DIR@/Info.plist" "${_contents}/Info.plist")
+    # The icon, from the same 256-pixel image the window uses: an icon set at
+    # the sizes Finder and the Dock ask for, compiled by iconutil. No size
+    # above the source's is made - an upscaled icon is only a blurred one.
+    set(_iconset "@CMAKE_BINARY_DIR@/katana.iconset")
+    file(REMOVE_RECURSE "${_iconset}")
+    file(MAKE_DIRECTORY "${_iconset}")
+    foreach(_icon "16x16:16" "16x16@2x:32" "32x32:32" "32x32@2x:64" "128x128:128"
+                  "128x128@2x:256" "256x256:256")
+        string(REPLACE ":" ";" _icon "${_icon}")
+        list(GET _icon 0 _name)
+        list(GET _icon 1 _pixels)
+        execute_process(COMMAND sips -z ${_pixels} ${_pixels} "@PROJECT_SOURCE_DIR@/resources/katana.png"
+                                --out "${_iconset}/icon_${_name}.png"
+            RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_VARIABLE _err)
+        if(NOT _rc EQUAL 0)
+            message(FATAL_ERROR "sips could not make the ${_name} icon (${_rc}): ${_err}")
+        endif()
+    endforeach()
+    execute_process(COMMAND iconutil -c icns "${_iconset}" -o "${_data}/katana.icns"
+        RESULT_VARIABLE _rc ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "iconutil could not make katana.icns (${_rc}): ${_err}")
+    endif()
+endif()
+
+# --- 5. macOS: a signature that matches ------------------------------------------------
 # Apple silicon refuses to run code whose signature does not match it, and
 # `cmake --install` has just rewritten the programs' load commands (their
 # RPATH) after the linker signed them. Ad hoc, as the linker did: a
-# distributable signature needs a Developer ID, which the build does not have.
+# distributable signature needs a Developer ID, which the build does not have
+# (cmake/KatanaSign.cmake applies one when packaging, if there is one).
+#
+# In a bundle, every library is signed afresh too, and the bundle last: sealing
+# it records each nested library's signature and every resource's hash, and
+# refuses a library whose signature the copy or the install left stale.
+function(_katana_sign_ad_hoc)
+    execute_process(COMMAND codesign --force --sign - ${ARGN}
+        RESULT_VARIABLE _rc ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "codesign ${ARGN} failed (${_rc}): ${_err}")
+    endif()
+endfunction()
 if(_apple)
-    foreach(_name katana katana_cli katana_mcp)
-        set(_program "${_bin}/${_name}")
-        if(NOT EXISTS "${_program}")
-            continue()
+    if(_bundle AND EXISTS "${_bin}/katana")
+        file(GLOB_RECURSE _libraries "${_lib}/*.dylib" "${_lib}/*.so")
+        set(_real_libraries "")
+        foreach(_library IN LISTS _libraries)
+            if(NOT IS_SYMLINK "${_library}")
+                list(APPEND _real_libraries "${_library}")
+            endif()
+        endforeach()
+        if(_real_libraries)
+            _katana_sign_ad_hoc(${_real_libraries})
         endif()
-        execute_process(COMMAND codesign --force --sign - "${_program}"
-            RESULT_VARIABLE _rc ERROR_VARIABLE _err)
-        if(NOT _rc EQUAL 0)
-            message(FATAL_ERROR "codesign ${_program} failed (${_rc}): ${_err}")
+    endif()
+    # The programs the bundle's own executable is not, then the bundle, which
+    # signs its executable (katana) with the Info.plist bound to it.
+    foreach(_name katana_cli katana_mcp katana)
+        if(EXISTS "${_bin}/${_name}" AND NOT (_bundle AND _name STREQUAL "katana"))
+            _katana_sign_ad_hoc("${_bin}/${_name}")
         endif()
     endforeach()
+    if(_bundle AND EXISTS "${_bin}/katana")
+        _katana_sign_ad_hoc("${_prefix}/${_bundle}")
+    endif()
 endif()

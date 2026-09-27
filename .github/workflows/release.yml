@@ -1,6 +1,7 @@
 # Builds Katana for Windows (x86-64, ARM64), Linux (x86-64, ARM64) and macOS
-# (Apple silicon), proves each package starts on its own, signs what can be
-# signed, and publishes them as a GitHub release (docs/release.md).
+# (Apple silicon, Intel), runs the whole test suite on each, proves each
+# package and installer starts on its own, signs what can be signed, and
+# publishes them as a GitHub release (docs/release.md).
 #
 # It runs only when started by hand: Actions > Release > Run workflow. With a
 # tag (vX.Y.Z, matching project(Katana VERSION)) it publishes that release;
@@ -71,7 +72,7 @@ jobs:
             compiler: g++.exe
             packages: gcc:p nsis:p
             package: win64
-            verify: ""
+            nsis: msys2
           # MSYS2 has no GCC for ARM64; its CLANGARM64 environment is clang
           # and libc++, built for ARM64 Windows.
           - name: Windows ARM64
@@ -80,7 +81,9 @@ jobs:
             compiler: clang++.exe
             packages: clang:p
             package: win-arm64
-            verify: "^simd_"
+            # NSIS's own x86 build, which Windows on ARM runs emulated; the
+            # installer it makes puts the ARM64 programs in Program Files.
+            nsis: chocolatey
     env:
       HAS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     defaults:
@@ -101,22 +104,32 @@ jobs:
         run: |
           "${{ matrix.compiler }}" --version | head -1
           cmake --version | head -1
+      - name: NSIS
+        if: matrix.nsis == 'chocolatey'
+        shell: pwsh
+        run: |
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) { choco install nsis -y --no-progress }
+          if (-not (Test-Path $makensis)) { throw "makensis.exe is not at $makensis after installing NSIS" }
+          "KATANA_MAKENSIS=$($makensis -replace '\\','/')" >> $env:GITHUB_ENV
       # The release preset, with the compiler and prefix of the environment
       # the action installed (the preset names C:/msys64/ucrt64, a
       # developer's default).
       - name: Configure
         run: |
           prefix=$(cygpath -m "$MINGW_PREFIX")
-          tests=OFF
-          if [ -n "${{ matrix.verify }}" ]; then tests=ON; fi
           cmake --preset release \
             -DCMAKE_CXX_COMPILER="$prefix/bin/${{ matrix.compiler }}" -DCMAKE_PREFIX_PATH="$prefix" \
-            -DKATANA_BUILD_TESTS=$tests -DKATANA_BUILD_BENCHMARKS=OFF
+            ${KATANA_MAKENSIS:+-DKATANA_MAKENSIS="$KATANA_MAKENSIS"} \
+            -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF
       - name: Build
         run: cmake --build build/release --parallel
-      - name: Verify
-        if: matrix.verify != ''
-        run: ctest --test-dir build/release -R "${{ matrix.verify }}" --output-on-failure --timeout 900
+      # The whole suite, on the machine the package is for: nothing is
+      # packaged from a build with a failing test (docs/testing.md).
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build/release --parallel "$(nproc)" --output-on-failure --timeout 900
       # Signing as the publisher (cmake/KatanaSign.cmake) when the repository
       # holds a code-signing certificate: WINDOWS_CERTIFICATE (the .pfx,
       # base64) and WINDOWS_CERTIFICATE_PASSWORD.
@@ -155,6 +168,29 @@ jobs:
           # directories, `timeout` is Windows' own TIMEOUT.EXE, a pause.
           QT_QPA_PLATFORM=offscreen /usr/bin/timeout 300 "$root/bin/katana.exe" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
+      # The installer, as a user or an administrator's deployment runs it:
+      # silently into a folder of its own, where the installed command line
+      # must read a CRS through GDAL and PROJ; then its uninstaller, which
+      # must remove it. /D takes the rest of the line unquoted, so the folder
+      # has no space for Start-Process to quote. `_?=` keeps the uninstaller
+      # in place, so -Wait waits for it rather than for the copy of itself it
+      # would otherwise start.
+      - name: Smoke test the installer
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = (Resolve-Path "build/release/Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}.exe").Path
+          $target = Join-Path $env:RUNNER_TEMP "KatanaInstalled"
+          $install = Start-Process -FilePath $installer -ArgumentList "/S", "/D=$target" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "the installer exited with $($install.ExitCode)" }
+          $info = & "$target\bin\katana_cli.exe" -c "INFO samples/gis/terrain.asc" | Out-String
+          Write-Output $info
+          if ($LASTEXITCODE -ne 0) { throw "the installed katana_cli exited with $LASTEXITCODE" }
+          if ($info -notmatch "EPSG:32630") { throw "the installed katana_cli named no CRS" }
+          $uninstall = Start-Process -FilePath "$target\Uninstall.exe" -ArgumentList "/S", "_?=$target" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "the uninstaller exited with $($uninstall.ExitCode)" }
+          if (Test-Path "$target\bin\katana_cli.exe") { throw "the uninstaller left bin\katana_cli.exe" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -178,27 +214,33 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # verify: the tests run on the runner before packaging, a regular
-          # expression over ctest's names; empty builds no tests. On the ARM
-          # machines the simd_ suites run every kernel suite at the scalar
-          # and NEON levels on real hardware (elsewhere NEON runs only under
-          # qemu); on macOS the gpu. suite proves the Metal renderer against
-          # the software one on a real device.
+          # The whole suite runs on each before packaging. On the ARM machines
+          # that includes every SIMD kernel suite at the scalar and NEON
+          # levels on real hardware (elsewhere NEON runs only under qemu); on
+          # Apple silicon the gpu. suite proves the Metal renderer against the
+          # software one on a real device.
           - name: Linux x86-64
             runner: ubuntu-24.04
             preset: linux-release
             package: linux-x86_64
-            verify: ""
+            archive: tar.gz
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
             preset: linux-release
             package: linux-aarch64
-            verify: "^simd_"
+            archive: tar.gz
           - name: macOS arm64
             runner: macos-15
             preset: macos-release
             package: macos-arm64
-            verify: "^gpu[.]|^simd_"
+            archive: dmg
+          # Intel Macs, on the last Intel runner GitHub offers (supported
+          # until August 2027); the toolchain is conda-forge's osx-64 one.
+          - name: macOS x86-64
+            runner: macos-15-intel
+            preset: macos-release
+            package: macos-x86_64
+            archive: dmg
     env:
       HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
@@ -226,15 +268,32 @@ jobs:
             ln -sf "$KATANA_TOOLCHAIN/bin/$tool" "$KATANA_TOOLCHAIN/bin-tools/$tool"
           done
       - name: Configure
-        run: |
-          tests=OFF
-          if [ -n "${{ matrix.verify }}" ]; then tests=ON; fi
-          cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=$tests -DKATANA_BUILD_BENCHMARKS=OFF
+        run: cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF
       - name: Build
         run: cmake --build build/${{ matrix.preset }} --parallel
-      - name: Verify
-        if: matrix.verify != ''
-        run: ctest --test-dir build/${{ matrix.preset }} -R "${{ matrix.verify }}" --output-on-failure --timeout 600
+      # What the Linux tests need of the machine and a CI image lacks: the
+      # graphics driver's GL and EGL loaders, which the package leaves to the
+      # system (docs/release.md), and an X server with Mesa's software Vulkan
+      # driver, on which the gpu. suite runs the Vulkan renderer.
+      - name: System libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libopengl0 libfontconfig1 \
+            xvfb mesa-vulkan-drivers libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
+            libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0
+      # The whole suite, on the machine the package is for: nothing is
+      # packaged from a build with a failing test (docs/testing.md).
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          jobs=$(getconf _NPROCESSORS_ONLN)
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a ctest --test-dir build/${{ matrix.preset }} --parallel "$jobs" --output-on-failure --timeout 900
+          else
+            ctest --test-dir build/${{ matrix.preset }} --parallel "$jobs" --output-on-failure --timeout 900
+          fi
       # A Developer ID for the publisher, when the repository holds one:
       # MACOS_CERTIFICATE (the .p12, base64), MACOS_CERTIFICATE_PASSWORD and
       # MACOS_SIGN_IDENTITY ("Developer ID Application: <name> (<team>)").
@@ -258,8 +317,9 @@ jobs:
           echo "KATANA_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
       - name: Package
         run: cmake --build build/${{ matrix.preset }} --target package
-      # Apple's notary service checks the signed programs and records them,
-      # so Gatekeeper opens them without a warning. APPLE_ID,
+      # Apple's notary service checks the signed disk image and everything
+      # in it, and the ticket it issues is stapled to the image, so
+      # Gatekeeper opens Katana without a warning, even offline. APPLE_ID,
       # APPLE_APP_PASSWORD (an app-specific password) and APPLE_TEAM_ID.
       - name: Notarise
         if: runner.os == 'macOS' && env.HAS_CERTIFICATE == 'true' && env.HAS_NOTARY == 'true'
@@ -268,23 +328,15 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          package="Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}"
-          mkdir -p notarise
-          tar -xzf "build/${{ matrix.preset }}/$package.tar.gz" -C notarise
-          ditto -c -k --keepParent "notarise/$package" notarise.zip
-          xcrun notarytool submit notarise.zip --apple-id "$APPLE_ID" \
+          dmg="build/${{ matrix.preset }}/Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}.dmg"
+          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-      # What every Linux desktop has and a CI image may not: the graphics
-      # driver's GL and EGL loaders, which the package leaves to the system
-      # (docs/release.md).
-      - name: System libraries
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libopengl0 libfontconfig1
-      # The tarball is what a user downloads, so it is tested with the
-      # toolchain prefix moved out of reach: anything the package failed to
-      # carry fails to load here rather than on the user's machine.
+          xcrun stapler staple "$dmg"
+      # The tarball or disk image is what a user downloads, so it is tested
+      # with the toolchain prefix moved out of reach: anything the package
+      # failed to carry fails to load here rather than on the user's machine.
+      # The disk image is mounted and Katana.app dragged out of it, as a user
+      # installs it, and the app's seal is checked before it runs.
       # macOS has no timeout(1); the step's own limit stands in for it, so a
       # window that waits on a dialog fails the job instead of holding it.
       - name: Smoke test the package
@@ -293,20 +345,32 @@ jobs:
           set -eux
           package="Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}"
           rm -rf smoke && mkdir smoke
-          tar -xzf "build/${{ matrix.preset }}/$package.tar.gz" -C smoke
-          root="smoke/$package"
+          if [ "${{ matrix.archive }}" = dmg ]; then
+            volume="$RUNNER_TEMP/katana-volume"
+            hdiutil attach -nobrowse -readonly -mountpoint "$volume" "build/${{ matrix.preset }}/$package.dmg"
+            test -L "$volume/Applications"
+            ditto "$volume/Katana.app" smoke/Katana.app
+            hdiutil detach "$volume"
+            plutil -lint smoke/Katana.app/Contents/Info.plist
+            test -s smoke/Katana.app/Contents/Resources/katana.icns
+            codesign --verify --deep --strict --verbose=2 smoke/Katana.app
+            bin="smoke/Katana.app/Contents/MacOS"
+          else
+            tar -xzf "build/${{ matrix.preset }}/$package.tar.gz" -C smoke
+            bin="smoke/$package/bin"
+          fi
           cp -r samples/site_plan smoke/project
           mv "$KATANA_TOOLCHAIN" "$KATANA_TOOLCHAIN.away"
           trap 'mv "$KATANA_TOOLCHAIN.away" "$KATANA_TOOLCHAIN"' EXIT
-          "$root/bin/katana_cli" -c "RECT 0,0 30,20" -c "SAVE smoke/rect.katana"
+          "$bin/katana_cli" -c "RECT 0,0 30,20" -c "SAVE smoke/rect.katana"
           test -f smoke/rect.katana/project.db
           # GDAL, with PROJ's database found beside the bundled libproj: the
           # coordinate system is named from proj.db, which nothing else has.
-          "$root/bin/katana_cli" -c "INFO samples/gis/terrain.asc" | tee smoke/info.txt
+          "$bin/katana_cli" -c "INFO samples/gis/terrain.asc" | tee smoke/info.txt
           grep -q "EPSG:32630" smoke/info.txt
           # PDAL and GDAL's vector drivers.
-          "$root/bin/katana_cli" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
-          QT_QPA_PLATFORM=offscreen "$root/bin/katana" smoke/project --screenshot smoke/window.png
+          "$bin/katana_cli" -c "IMPORT samples/gis/survey_scan.las" -c "IMPORT samples/gis/parcels.geojson"
+          QT_QPA_PLATFORM=offscreen "$bin/katana" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
       # What the window drew, to look at; not part of the release.
       - uses: actions/upload-artifact@v4
@@ -318,7 +382,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: katana-${{ matrix.package }}
-          path: build/${{ matrix.preset }}/Katana-*-${{ matrix.package }}.tar.gz
+          path: build/${{ matrix.preset }}/Katana-*-${{ matrix.package }}.${{ matrix.archive }}
           if-no-files-found: error
 
   publish:

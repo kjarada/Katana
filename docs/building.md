@@ -151,6 +151,11 @@ cmake --preset release -DCMAKE_CXX_COMPILER=C:/msys64/clangarm64/bin/clang++.exe
       -DCMAKE_PREFIX_PATH=C:/msys64/clangarm64
 ```
 
+MSYS2 has no NSIS for ARM64, so `package` makes only the zip unless
+`-DKATANA_MAKENSIS="C:/Program Files (x86)/NSIS/makensis.exe"` names NSIS's
+own x86 build (`choco install nsis`), which Windows on ARM runs emulated and
+which makes the same installer.
+
 ## Linux on ARM64
 
 `tools/setup_linux_toolchain.py` run on an ARM64 machine installs
@@ -199,9 +204,9 @@ need the host's `qsb` (`QT_HOST_PATH`), which was not tried.
 
 ## macOS
 
-Katana builds on macOS on Apple silicon with the same script and the same
-libraries, from conda-forge's `osx-arm64` channel, with clang 23 and libc++
-in place of GCC:
+Katana builds on macOS with the same script and the same libraries, from
+conda-forge's `osx-arm64` channel on Apple silicon and `osx-64` on an Intel
+Mac, with clang 23 and libc++ in place of GCC:
 
 ```sh
 python3 tools/setup_linux_toolchain.py      # once: into /opt/katana-toolchain, or $KATANA_TOOLCHAIN
@@ -212,13 +217,15 @@ cmake --build build/macos-release --target bundle
 
 GCC cannot be used: every conda-forge C++ library for macOS (Qt, GDAL, PDAL)
 is built against libc++, and GCC's libstdc++ does not link with them.
-`cmake/toolchains/katana-macos.cmake` sets the compiler, macOS 13 as the
-oldest target, arm64, and the run-time paths (`@loader_path/../lib` when
-installed). What it took to make the code build with clang, the minimum
+`cmake/toolchains/katana-macos.cmake` sets the compiler and architecture by
+the host's processor (`arm64-apple-darwin20.0.0` or
+`x86_64-apple-darwin13.4.0`), macOS 13 as the oldest target, and the run-time
+paths (`@loader_path/../Frameworks`, installed in `Katana.app`). `bundle`
+makes `<build>/dist/Katana/Katana.app` and `package` a `.dmg` holding it.
+What it took to make the code build with clang, the app's layout, the minimum
 version and Gatekeeper are `docs/release.md`, "macOS". The GPU renderer draws
-on Metal there (`docs/gpu.md`). The suite has
-not yet been run on macOS; the release workflow builds and starts the
-package, nothing more.
+on Metal there (`docs/gpu.md`). The whole suite runs on both kinds of Mac in
+the release workflow (`docs/release.md`).
 
 **Claude Code cloud sessions** run `.claude/hooks/session-start.sh` when they
 start: it runs the setup script into `/opt/katana-toolchain`, installs Xvfb
@@ -271,7 +278,7 @@ failed at link time with no explanation.
 | `katana_make_icons` | no | writes `resources/katana.ico`, a 256 px PNG and `resources/icon_sheet.png` from the icon painters; the output is committed (`docs/desktop.md`) |
 | `katana_tool_icon_sheet` | no | every catalogue tool's icon with its name and aliases (`docs/tools.md`) |
 | `bundle` | no | a self-contained `<build>/dist/Katana` ("Bundling") |
-| `package` | no | that tree as `Katana-<version>-win64.zip`, and an NSIS installer when `makensis` is found; on Linux and macOS `Katana-<version>-linux-x86_64.tar.gz` or `-macos-arm64.tar.gz` |
+| `package` | no | that tree as `Katana-<version>-win64.zip` (`-win-arm64.zip`), and an NSIS installer when `makensis` is found; on Linux `Katana-<version>-linux-x86_64.tar.gz` (`-linux-aarch64`); on macOS `Katana-<version>-macos-arm64.dmg` (`-macos-x86_64`) holding `Katana.app` |
 
 ### Where things are built
 
@@ -387,7 +394,8 @@ from.
 
 `cmake --build <build> --target bundle` installs into `<build>/dist/Katana`;
 `--target package` makes `Katana-<version>-win64.zip` (and an NSIS installer
-when `makensis` is on the machine), or on Linux and macOS a `.tar.gz`. The
+when `makensis` is on the machine), on Linux a `.tar.gz`, and on macOS a
+`.dmg` holding `Katana.app`. The
 result runs with no MSYS2, Qt, GDAL or toolchain prefix installed. It holds
 `katana`, `katana_cli` and `katana_mcp`.
 
@@ -396,8 +404,9 @@ the build uses a toolchain prefix: the prefix's libraries into `lib/`, Qt's
 plugins into `lib/qt6/plugins` with a `bin/qt.conf`, and `share/proj`,
 `share/gdal` and `ssl/cacert.pem`, in the prefix's own layout so that no
 library's RPATH needs rewriting. Why that layout, and which libraries are left
-to the system, is `docs/release.md`. A build against a distribution's own
-libraries installs only Katana's programs.
+to the system, is `docs/release.md`. On macOS the same tree is laid out as
+`Katana.app` (`docs/release.md`, "macOS"). A build against a distribution's
+own libraries installs only Katana's programs.
 
 On Windows, three things make it so, and each was learned by the bundle
 failing:
