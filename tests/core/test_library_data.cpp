@@ -8,6 +8,12 @@
 #include <fstream>
 #include <string>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include "katana/core/library_data.hpp"
 
 using katana::core::loadedLibraryPath;
@@ -53,11 +59,25 @@ TEST(LibraryData, DataBesideALibraryIsTheLibrarysGrandparentJoinedToThePathAsked
 
 namespace {
 
+// The process id, so that two processes running these cases at once - the
+// core suite and its simd_* rerun under ctest --parallel - never share a
+// folder. With one fixed name, one removed the folder while the other held a
+// file in it open, and the uncaught filesystem_error ended that whole run.
+// A reused id is harmless: the folder is cleared before it is used.
+std::string processTag()
+{
+#if defined(_WIN32)
+    return std::to_string(_getpid());
+#else
+    return std::to_string(getpid());
+#endif
+}
+
 // A throwaway prefix under the test's temporary directory, removed afterwards.
 class ScratchPrefix {
   public:
     explicit ScratchPrefix(const std::string& name)
-        : root_(std::filesystem::path(::testing::TempDir()) / name)
+        : root_(std::filesystem::path(::testing::TempDir()) / (name + "_" + processTag()))
     {
         std::filesystem::remove_all(root_);
         std::filesystem::create_directories(root_);
