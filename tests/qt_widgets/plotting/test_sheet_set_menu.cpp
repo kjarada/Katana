@@ -19,6 +19,7 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QDialog>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QGuiApplication>
@@ -183,7 +184,11 @@ TEST(FileDialogAnswer, TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus)
         << "the file-name box has the focus, as it does once the dialog is active";
     katana::qt::test::chooseFile(dialog, file);
     EXPECT_EQ(dialog.result(), QDialog::Accepted);
-    EXPECT_EQ(dialog.selectedFiles().join('|').toStdString(), file.toStdString());
+    // QFileDialog gives its choice with '/', Qt's one separator on every
+    // platform (QDir: "Qt uses '/' as a universal directory separator"),
+    // while the scratch path is native, '\' on Windows.
+    EXPECT_EQ(dialog.selectedFiles().join('|').toStdString(),
+              QDir::fromNativeSeparators(file).toStdString());
 }
 
 TEST(SheetSetMenu, TheMenuComesFirstWithEveryItemByName)

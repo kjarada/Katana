@@ -175,9 +175,15 @@ if(WIN32)
     set_property(TARGET katana_qt_widget_tests PROPERTY TEST_LAUNCHER
         ${CMAKE_COMMAND} -E env --modify "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
 endif()
+# The same minute's discovery timeout as every other suite
+# (cmake/KatanaTargetDefaults.cmake says why): listing this 1073-case
+# executable took 10.7 s on its first launch after a build on a machine
+# whose virus scanner checks a new file, then 5.2 s, and the 5 s default
+# made ctest run nothing at all.
 gtest_discover_tests(katana_qt_widget_tests
     TEST_PREFIX "qt_widgets."
     DISCOVERY_MODE PRE_TEST
+    DISCOVERY_TIMEOUT 60
     PROPERTIES ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
 )

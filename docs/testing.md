@@ -403,3 +403,34 @@ What still skips in that run, and why, all for reasons outside the program:
   `gpu.GpuSceneView.UnderTheOffscreenPlatformReportsThatItCannotRenderSoTheHostFallsBack`
   under xcb, which `gpu_offscreen.*` runs, and `qt_widgets.RenderViewGpu.OnTheDesktop...`,
   which `qt_widgets_gpu.*` runs.
+
+## Three things the Windows run found in the Linux fixes (2026-09-28)
+
+The Linux-container fixes above and the GDAL work were merged and then built
+and run on Windows for the first time, on a Hyper-V guest and on the owner's
+machine. Two of the tests added above were correct only on Linux, and one
+suite could not be listed:
+
+- **`qt_widgets.FileDialogAnswer.TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus`**
+  compared `QFileDialog::selectedFiles()` with the scratch path as
+  `std::filesystem` gives it. Qt returns `/` on every platform (`QDir`: "Qt
+  uses '/' as a universal directory separator"), and on Windows the scratch
+  path has `\`, so the same file failed to compare. It now compares against
+  `QDir::fromNativeSeparators` of the path. What the dialog chose is unchanged.
+- **`LibraryData.*` and `simd_*.core`** made their scratch prefixes under one
+  fixed name. ctest runs the core suite and its `simd_*` reruns at once, so
+  one process removed a folder while another held a file in it open, and the
+  `filesystem_error` ended that run. The name now carries the process id.
+  Evidence: `ctest -R "^LibraryData\.|^simd_.*\.core$" --parallel 8
+  --repeat until-fail:10` failed in its first round before the change and
+  passed all ten after it.
+- **`katana_qt_widget_tests` was listed with the 5 s default discovery
+  timeout**, not the 60 s every other suite has (`cmake/KatanaTargetDefaults.cmake`).
+  On its first launch after a build, on a machine whose virus scanner checks
+  new files, listing it took 10.7 s, so ctest ran nothing. It now has 60 s.
+
+Four `qt_widgets` cases also died on the guest with "OpenBLAS error: Memory
+allocation still failed": 12 test processes at once, each starting OpenBLAS's
+thread pool, on a guest with about 5 GB free. All four passed when run again
+one at a time there, and they passed on the owner's machine, so the program is
+not at fault and nothing was changed for them.
