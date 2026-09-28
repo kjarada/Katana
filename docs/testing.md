@@ -434,3 +434,25 @@ allocation still failed": 12 test processes at once, each starting OpenBLAS's
 thread pool, on a guest with about 5 GB free. All four passed when run again
 one at a time there, and they passed on the owner's machine, so the program is
 not at fault and nothing was changed for them.
+
+## Not done: the clang builds' failures (Windows ARM64, macOS)
+
+The first Release run with the whole suite in every job (run 36356917571,
+2026-09-27) failed seven tests on each clang/libc++ build that GCC passes:
+
+- **`std::to_string` of a double.** C++26 makes it the shortest form, as
+  `std::format("{}")` (P2587); GCC 16's library does, libc++ still prints
+  `%f`. So `src/katana_surveyio/trimble_jobxml.cpp` says "measured
+  1.650000 m" and a refused circle "[-1.000000]" there, and
+  `TrimbleJobXml.anRtkVectorBecomesAGeocentricBaselineWithCovarianceAndBothAntennas`,
+  `TrimbleJobXml.twoCoordinateRecordsForOneNameKeepTheControlOneAndWarnWithTheOther`,
+  `qt_script_switch_stops_at_the_first_refused_line_headless` and
+  `qt_a_dialogs_script_line_gets_back_what_every_line_said_headless` fail.
+  The fix is one formatter for reals in text (`core::formatExactReal`,
+  `core/text.hpp`) wherever a double is written with `std::to_string`.
+- **`LibraryData.MissingDataBesideALibraryIsNotFound`**: on Windows ARM64
+  `dataBesideLibraryFile` of an empty path found `share/gdal`.
+- **`GenerateRotate.TheFittedDrawingIsTurnedToFillTheSheetInOneStep`**, and
+  on macOS `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless` and
+  `qt_widgets.KeyboardShortcutsDialog.EveryKeyIsListedAndAClashIsMarked`:
+  not yet diagnosed.
