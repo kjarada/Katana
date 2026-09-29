@@ -343,7 +343,7 @@ QWidget* SurveyImportWizard::buildFilePage()
         const QString path = QFileDialog::getOpenFileName(
             this, "Import Survey Points", file_->text(),
             "Survey files (*.csv *.txt *.tsv *.pnt *.xyz *.gsi *.jxl *.rw5 *.raw *.gt7 *.gt6 "
-            "*.dc *.x01 *.xcf *.rnx *.crx *.obs *.??o *.??d);;"
+            "*.dc *.sdr *.x01 *.xcf *.rnx *.crx *.obs *.??o *.??d);;"
             "Point files (*.csv *.txt *.tsv *.pnt *.xyz);;All files (*)");
         if (!path.isEmpty()) {
             file_->setText(path);

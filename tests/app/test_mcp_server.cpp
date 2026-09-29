@@ -251,6 +251,35 @@ TEST_F(McpServer, AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt)
     EXPECT_EQ(result["structuredContent"]["status"]["entities"], 4);
 }
 
+// A Sokkia SDR file reaches an agent through the same lines: the registry
+// gives SURVEY READ and SURVEY IMPORT every format surveyio reads. The file
+// is the hand-built one of the surveyio tests; its 4 points are worked by
+// hand in src/katana_app/CMakeLists.txt, beside cli.survey_import_sokkia_sdr.
+TEST_F(McpServer, AnAgentReadsAndImportsASokkiaSdrFile)
+{
+    initialize();
+    const std::string file = std::string(KATANA_SURVEYIO_DATA) + "/sdr/traverse.sdr";
+    const Json result =
+        call("katana_run_commands", Json{{"commands", {"SURVEY READ \"" + file + "\"",
+                                                       "SURVEY IMPORT \"" + file + "\""}}});
+    EXPECT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 2U);
+    const std::string read = lines[0]["output"].get<std::string>();
+    EXPECT_NE(read.find("survey file=traverse.sdr format=sokkia-sdr parser=1.0 read=40 "
+                        "skipped=7 warnings=7"),
+              std::string::npos)
+        << read;
+    EXPECT_NE(read.find("content setups=2 observations=36 points=2 unpositioned=2"),
+              std::string::npos)
+        << read;
+    const std::string imported = lines[1]["output"].get<std::string>();
+    EXPECT_NE(imported.find("imported job=job-1 entities=4 layer=survey/points"),
+              std::string::npos)
+        << imported;
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 4);
+}
+
 // HELP sent as a command is the session's whole help, what katana_help and
 // --help give: CUSTOMISE and IFC are the session's, not the
 // interpreter's, and the interpreter's own HELP left them out.
