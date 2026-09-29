@@ -95,7 +95,11 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
 
 // The band along the bottom of a view holding a prompt and what has been
 // typed for it - a tool's or a picked-up grip's, one look for both.
-void paintBand(QPainter& painter, const QRect& view, const QString& text);
+// Cut short at the left by default, so what is being typed at the end of a
+// prompt stays in sight; a hint is cut at the right, where its start says
+// what it is about.
+void paintBand(QPainter& painter, const QRect& view, const QString& text,
+               Qt::TextElideMode elide = Qt::ElideLeft);
 // Its height in pixels at the chosen text size.
 [[nodiscard]] int bandHeight();
 

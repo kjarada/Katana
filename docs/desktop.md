@@ -121,13 +121,37 @@ shares is ticked. A name is written by `namedLine`, through `commandWord`
 it is empty or holds a blank (`CHLAYER 0`, `CHLAYER "Site Boundary"`), and a
 name holding a double quote or a line break is offered disabled.
 
+**On a grip.** Opened on a selected polyline's grip (`ViewportWidget::gripAt`,
+the grip within the pick aperture of the right-click), the menu begins with
+that vertex's or segment's own items, under a section naming it ("Vertex 2
+of polyline 12"). The edits are verb lines through the same executor: Delete
+Vertex (`planContextVertex.Delete`, `VERTEX DELETE 12 2`), Insert Vertex
+After (`planContextVertex.InsertAfter`, `VERTEX INSERT 12 #12.s2 after=2`,
+the middle of the segment after it), Make It the Start
+(`planContextVertex.Start`, `STARTVERTEX 12 2`, a closed polyline's), Add
+Vertex at the Middle (`planContextSegment.AddMiddle`) and Make Straight
+(`planContextSegment.Line`, `VERTEX SET 12 1 bulge=0`, an arc's only). The
+tools - Move Vertex, Set Height, Fillet and Chamfer Corner, Straighten From
+Here, Insert Vertex and Make an Arc on a segment - start with the grip hot,
+as a click on it before choosing the tool would make it, so the tool takes
+it as its handle (`docs/drawing.md`, "What a vertex tool acts on"). An item
+that cannot apply is offered disabled with the reason as its status tip:
+Delete on a polyline with no vertex to spare, Insert After on an open
+polyline's last vertex, Fillet and Chamfer where there is no corner (an end,
+beside an arc, in line).
+
 `popup`, not `exec`: nothing waits on the menu, and it deletes itself when it
 closes. It is not built in a headless run, which has no mouse; everything on
 it is a menu action or a verb, so an agent reaches the same through
 `--trigger` and `--command`. `tests/qt_widgets/test_plan_context_menu.cpp`
 checks what it offers with and without a selection, that Put on Layer is one
 undo step, the layer tree, the ticks, and that the view raises it from a view
-made before the window set the hook (the workspace's first plan view is).
+made before the window set the hook (the workspace's first plan view is);
+and on a grip, the vertex's and the segment's items, their lines, the tool
+started with the grip, and what is offered disabled
+(`AVertexGripsItemsRunTheVertexVerbsAndStartTheToolsOnIt`,
+`AnEndVertexOffersNoCornerAndNoSegmentAfterIt`,
+`ASegmentGripOffersMakeStraightOnlyOnAnArc`).
 
 **Double click to edit.** A double click on an entity with no tool running
 (`ViewportWidget::onEntityDoubleClicked`, after its first click selected it)

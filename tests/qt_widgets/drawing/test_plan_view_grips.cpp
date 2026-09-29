@@ -7,11 +7,15 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+
+#include <QImage>
 #include <QKeyEvent>
 #include <QMouseEvent>
 
 #include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/view_set.hpp"
+#include "drawing/feedback_painter.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "widget_harness.hpp"
 
@@ -306,4 +310,80 @@ TEST(PlanViewGrips, AHotVertexFollowsItsVertexThroughAnInsertBeforeIt)
     EXPECT_EQ(f.geometry().vertices,
               (std::vector<Point2>{Point2(0, 0), Point2(5, 0), Point2(10, 0)}))
         << "the vertex made hot goes, not the one now at its old index";
+}
+
+TEST(PlanViewGrips, AHoveredGripSaysWhatItIsAndWhatCanBeDone)
+{
+    Fixture f;
+    f.select();
+    auto& grips = f.view->gripController();
+    const QString id = QString::number(f.polyline);
+    f.mouse(QEvent::MouseMove, Point2(10, 0.1), Qt::NoButton);
+    EXPECT_EQ(grips.hoverHint(),
+              "Vertex 1 of polyline " + id +
+                  ": drag to move · click to pick up · Shift+click to choose · Delete removes "
+                  "the chosen · right-click for vertex tools");
+    f.mouse(QEvent::MouseMove, Point2(5, 0.1), Qt::NoButton);
+    EXPECT_EQ(grips.hoverHint(), "Segment 0 of polyline " + id +
+                                     ": drag to stretch · Ctrl+drag to add a vertex · "
+                                     "right-click for segment tools");
+    f.mouse(QEvent::MouseMove, Point2(12, 6), Qt::NoButton);
+    EXPECT_TRUE(grips.hoverHint().isEmpty()) << "no grip under the cursor, nothing to say";
+    // A grip picked up says what to do with it instead (its prompt).
+    f.mouse(QEvent::MouseButtonPress, Point2(20, 0), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonRelease, Point2(20, 0), Qt::LeftButton);
+    EXPECT_TRUE(grips.hoverHint().isEmpty());
+    EXPECT_FALSE(grips.prompt().isEmpty());
+}
+
+TEST(PlanViewGrips, AVertexWithAHeightSaysItsHeight)
+{
+    Fixture f;
+    // Heights 100, none, 101.25: vertex 2's hint gives its own.
+    ASSERT_TRUE(f.document
+                    .execute(katana::cad::editPolyline(
+                        f.polyline, "VERTEX_Z",
+                        [](const katana::geometry::CurvePolyline2& shape) {
+                            return katana::geometry::setVertexHeight(shape, 2, 101.25);
+                        }))
+                    .ok());
+    f.select();
+    f.mouse(QEvent::MouseMove, Point2(20, 0.1), Qt::NoButton);
+    EXPECT_TRUE(f.view->gripController().hoverHint().startsWith(
+        "Vertex 2 of polyline " + QString::number(f.polyline) + ", z 101.250: "))
+        << f.view->gripController().hoverHint().toStdString();
+}
+
+TEST(PlanViewGrips, CtrlOverASegmentMiddleShowsTheVertexADragWouldAdd)
+{
+    Fixture f;
+    f.select();
+    // Without Ctrl the middle is the hovered grip's green diamond; with it,
+    // the new vertex's cyan disc: more cyan round the middle's pixel.
+    const QPointF middle = f.pixel(Point2(5, 0));
+    const QColor cyan = katana::qt::drawing::overlay::preview();
+    const auto cyanNear = [&](const QImage& image) {
+        int count = 0;
+        for (int y = int(middle.y()) - 6; y <= int(middle.y()) + 6; ++y) {
+            for (int x = int(middle.x()) - 6; x <= int(middle.x()) + 6; ++x) {
+                const QColor pixel = image.pixelColor(x, y);
+                count += std::abs(pixel.red() - cyan.red()) <= 24 &&
+                                 std::abs(pixel.green() - cyan.green()) <= 24 &&
+                                 std::abs(pixel.blue() - cyan.blue()) <= 24
+                             ? 1
+                             : 0;
+            }
+        }
+        return count;
+    };
+    f.mouse(QEvent::MouseMove, Point2(5, 0.1), Qt::NoButton);
+    const QImage plain = f.view->grab().toImage();
+    f.mouse(QEvent::MouseMove, Point2(5, 0.1), Qt::NoButton, Qt::ControlModifier);
+    ASSERT_TRUE(f.view->gripController().ctrl());
+    const QImage held = f.view->grab().toImage();
+    EXPECT_GT(cyanNear(held), cyanNear(plain));
+    // Let go of Ctrl: the diamond again.
+    QKeyEvent release(QEvent::KeyRelease, Qt::Key_Control, Qt::NoModifier);
+    QCoreApplication::sendEvent(f.view.get(), &release);
+    EXPECT_FALSE(f.view->gripController().ctrl());
 }

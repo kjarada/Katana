@@ -1,13 +1,16 @@
 #include "plan_context_menu.hpp"
 
 #include <algorithm>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include <QAction>
 
 #include "command_word.hpp"
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/entity/layer_path.hpp"
+#include "katana/geometry/polyline_vertices.hpp"
 
 namespace katana::qt {
 
@@ -86,6 +89,7 @@ PlanContextMenu::PlanContextMenu(PlanContextMenuContext context, QWidget* parent
         return;
     }
 
+    addGripItems();
     addExisting(*this, "editErase");
     addSeparator();
     for (const char* tool :
@@ -172,6 +176,105 @@ PlanContextMenu::PlanContextMenu(PlanContextMenuContext context, QWidget* parent
     }
     addSeparator();
     addExisting(*this, "editDeselect");
+}
+
+void PlanContextMenu::addGripItems()
+{
+    // A polyline's vertex or segment middle, right-clicked: what vertex
+    // editing offers for THAT vertex or segment, before the selection's
+    // items. The edits are verb lines, the tools start with the grip as their
+    // handle, so each is what a person would type or pick.
+    if (!context_.grip) {
+        return;
+    }
+    const katana::cad::Grip grip = *context_.grip;
+    const katana::entity::Entity* entity = context_.document->model().entities.find(grip.entity);
+    const auto polyline =
+        entity != nullptr ? katana::cad::readPolyline(*entity) : std::nullopt;
+    if (!polyline) {
+        return;
+    }
+    const QString id = QString::number(grip.entity);
+    const auto refuse = [](QAction* item, const std::string& why) {
+        item->setEnabled(false);
+        item->setStatusTip(QString::fromStdString(why));
+    };
+    if (grip.kind == katana::cad::GripKind::Vertex && grip.index < polyline->vertices.size()) {
+        const std::size_t v = grip.index;
+        addSection(QString("Vertex %1 of polyline %2").arg(v).arg(id));
+        QAction* remove = addLine(*this, QStringLiteral("&Delete Vertex"),
+                                  QStringLiteral("planContextVertex.Delete"),
+                                  QString("VERTEX DELETE %1 %2").arg(id).arg(v));
+        if (auto deleted = katana::geometry::deleteVertex(*polyline, v); !deleted) {
+            refuse(remove, deleted.error().message);
+        }
+        QAction* after = addLine(*this, QStringLiteral("&Insert Vertex After"),
+                                 QStringLiteral("planContextVertex.InsertAfter"),
+                                 QString("VERTEX INSERT %1 #%1.s%2 after=%2").arg(id).arg(v));
+        if (v >= polyline->segmentCount()) {
+            refuse(after, "the last vertex of an open polyline has no segment after it");
+        }
+        if (polyline->closed) {
+            QAction* start = addLine(*this, QStringLiteral("Make It the &Start"),
+                                     QStringLiteral("planContextVertex.Start"),
+                                     QString("STARTVERTEX %1 %2").arg(id).arg(v));
+            if (v == 0) {
+                refuse(start, "vertex 0 is already the start");
+            }
+        }
+        addTool(QStringLiteral("&Move Vertex..."), QStringLiteral("planContextVertex.Move"),
+                "draw.vertex.move");
+        addTool(QStringLiteral("Set &Height..."), QStringLiteral("planContextVertex.Height"),
+                "draw.vertex.height");
+        const auto corner = katana::geometry::checkCorner(*polyline, v);
+        for (const auto& [text, name, tool] :
+             {std::tuple{QStringLiteral("&Fillet Corner..."), QStringLiteral("planContextVertex.Fillet"),
+                         "draw.vertex.fillet"},
+              std::tuple{QStringLiteral("C&hamfer Corner..."),
+                         QStringLiteral("planContextVertex.Chamfer"), "draw.vertex.chamfer"}}) {
+            if (QAction* item = addTool(text, name, tool); item != nullptr && !corner) {
+                refuse(item, corner.error().message);
+            }
+        }
+        addTool(QStringLiteral("S&traighten From Here..."),
+                QStringLiteral("planContextVertex.Straighten"), "draw.vertex.straighten");
+    } else if (grip.kind == katana::cad::GripKind::SegmentMid &&
+               grip.index < polyline->segmentCount()) {
+        const std::size_t s = grip.index;
+        addSection(QString("Segment %1 of polyline %2").arg(s).arg(id));
+        addLine(*this, QStringLiteral("Add Vertex at the &Middle"),
+                QStringLiteral("planContextSegment.AddMiddle"),
+                QString("VERTEX INSERT %1 #%1.s%2 after=%2").arg(id).arg(s));
+        addTool(QStringLiteral("&Insert Vertex..."), QStringLiteral("planContextSegment.Insert"),
+                "draw.vertex.insert");
+        addTool(QStringLiteral("Make an &Arc..."), QStringLiteral("planContextSegment.Arc"),
+                "draw.vertex.arc");
+        if (polyline->isArc(s)) {
+            addLine(*this, QStringLiteral("Make &Straight"), QStringLiteral("planContextSegment.Line"),
+                    QString("VERTEX SET %1 %2 bulge=0").arg(id).arg(s));
+        }
+    } else {
+        return;
+    }
+    addSeparator();
+}
+
+QAction* PlanContextMenu::addTool(const QString& text, const QString& objectName,
+                                  const std::string& toolId)
+{
+    if (!context_.startToolOn || !context_.grip) {
+        return nullptr;
+    }
+    auto* item = addAction(text);
+    item->setObjectName(objectName);
+    item->setStatusTip(QString("Starts the tool on this %1")
+                           .arg(context_.grip->kind == katana::cad::GripKind::Vertex
+                                    ? QStringLiteral("vertex")
+                                    : QStringLiteral("segment")));
+    const katana::cad::Grip grip = *context_.grip;
+    connect(item, &QAction::triggered, this,
+            [this, grip, toolId] { context_.startToolOn(toolId, grip); });
+    return item;
 }
 
 void PlanContextMenu::addExisting(QMenu& menu, const char* objectName)

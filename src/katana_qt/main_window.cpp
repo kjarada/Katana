@@ -2415,6 +2415,20 @@ void MainWindow::showPlanContextMenu(const QPoint& globalPos)
         const QColor chosen = QColorDialog::getColor(initial, this, "Colour");
         return chosen.isValid() ? std::optional<QColor>(chosen) : std::nullopt;
     };
+    // Opened on a grip, the grip's items: its tools start with it hot, the
+    // handle a click on it before the tool would have made
+    // (ToolContext::handles).
+    if (ViewportWidget* plan = views_->activePlanView()) {
+        context.grip = plan->gripAt(QPointF(plan->mapFromGlobal(globalPos)));
+        const QPointer<ViewportWidget> view(plan);
+        context.startToolOn = [this, view](const std::string& toolId,
+                                           const katana::cad::Grip& grip) {
+            if (view != nullptr) {
+                view->gripController().setHot({grip});
+            }
+            startTool(toolId);
+        };
+    }
     // popup, not exec: nothing waits on it. It goes when it hides, by
     // deleteLater: a menu hides BEFORE it triggers the item chosen, and the
     // deferred delete waits for the item to finish - even for a colour

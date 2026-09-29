@@ -6,6 +6,7 @@
 #include <QPen>
 
 #include "drawing/feedback_painter.hpp"
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -84,6 +85,54 @@ bool GripController::hasHotVertex() const
 {
     return std::any_of(hot_.begin(), hot_.end(),
                        [](const cad::Grip& grip) { return grip.kind == cad::GripKind::Vertex; });
+}
+
+QString GripController::hoverHint() const
+{
+    if (!hovered_ || grabbed_) {
+        return {};
+    }
+    const cad::Grip& grip = *hovered_;
+    const katana::entity::Entity* entity = document_.model().entities.find(grip.entity);
+    if (entity == nullptr) {
+        return {};
+    }
+    // A polyline's vertex and segment middle, the grips vertex editing is
+    // about, say what else they offer: the shortcut menu's items, and the
+    // gestures nothing else on screen mentions (Shift to choose, Ctrl to add).
+    if (const auto polyline = cad::readPolyline(*entity)) {
+        if (grip.kind == cad::GripKind::Vertex && grip.index < polyline->vertices.size()) {
+            const auto& height = polyline->vertices[grip.index].height;
+            return QString("Vertex %1 of polyline %2%3: drag to move · click to pick up · "
+                           "Shift+click to choose · Delete removes the chosen · right-click for "
+                           "vertex tools")
+                .arg(grip.index)
+                .arg(grip.entity)
+                .arg(height ? QString(", z %1").arg(*height, 0, 'f', 3) : QString());
+        }
+        if (grip.kind == cad::GripKind::SegmentMid) {
+            return QString("Segment %1 of polyline %2: drag to stretch · Ctrl+drag to add a vertex "
+                           "· right-click for segment tools")
+                .arg(grip.index)
+                .arg(grip.entity);
+        }
+    }
+    QString kind = QString::fromUtf8(cad::toString(grip.kind));
+    if (!kind.isEmpty()) {
+        kind[0] = kind[0].toUpper();
+    }
+    return QString("%1 of %2 %3: drag to move it · click to pick it up · Shift+click to choose")
+        .arg(kind, QString::fromUtf8(std::string(katana::entity::toString(entity->type()))))
+        .arg(grip.entity);
+}
+
+void GripController::setHot(std::vector<cad::Grip> grips)
+{
+    grabbed_.reset();
+    state_ = State::Idle;
+    typed_.clear();
+    insert_ = false;
+    hot_ = std::move(grips);
 }
 
 std::optional<GripController::Point2> GripController::base() const
@@ -305,14 +354,19 @@ void GripController::paint(QPainter& painter, const std::function<QPointF(const 
                            const std::function<void(const katana::entity::Geometry&)>& drawShape,
                            const QRectF& visible) const
 {
+    FeedbackFrame frame;
+    frame.toScreen = toScreen;
+    frame.drawShape = drawShape;
+    frame.visible = visible;
     if (grabbed_ && active()) {
+        // The drag as a tool's preview is drawn (cad::gripFeedback): the
+        // edited geometry dashed, the grip's old place, and the vertex a
+        // Ctrl-drag adds.
         const cad::GripDrag drag = dragTo(target_);
-        painter.setPen(QPen(overlay::preview(), 1, Qt::DashLine));
-        painter.setBrush(Qt::NoBrush);
-        for (const auto& shape : cad::gripPreview(document_, drag)) {
-            drawShape(shape);
-        }
+        frame.cursor = toScreen(target_);
+        (void)paintFeedback(painter, cad::gripFeedback(document_, drag), {}, frame);
         painter.setPen(QPen(overlay::preview(), 1, Qt::DotLine));
+        painter.setBrush(Qt::NoBrush);
         painter.drawLine(toScreen(grabbed_->position), toScreen(target_));
     }
     painter.setBrush(Qt::NoBrush);
@@ -345,6 +399,16 @@ void GripController::paint(QPainter& painter, const std::function<QPointF(const 
         }
     }
     painter.setBrush(Qt::NoBrush);
+    // Ctrl held over a segment middle: it is drawn as the vertex a drag
+    // there adds, the gesture's only sign on screen.
+    if (ctrl_ && hovered_ && hovered_->kind == cad::GripKind::SegmentMid && !active()) {
+        cad::ToolFeedback added;
+        added.marks.push_back(cad::FeedbackMark{
+            cad::FeedbackRole::Added,
+            katana::entity::Geometry{katana::entity::PointGeometry{hovered_->position}}, {}});
+        frame.cursor = toScreen(hovered_->position);
+        (void)paintFeedback(painter, added, {}, frame);
+    }
 }
 
 } // namespace katana::qt::drawing

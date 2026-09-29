@@ -332,7 +332,7 @@ int bandHeight()
     return metrics.height() + 2 * 4;
 }
 
-void paintBand(QPainter& painter, const QRect& view, const QString& text)
+void paintBand(QPainter& painter, const QRect& view, const QString& text, Qt::TextElideMode elide)
 {
     // The prompt in the view as well as in the window's command line: the
     // eye is on the drawing, and a floating view may be far from the window.
@@ -348,7 +348,7 @@ void paintBand(QPainter& painter, const QRect& view, const QString& text)
     painter.setFont(font);
     painter.setPen(overlay::preview());
     painter.drawText(band.adjusted(pad + 2, 0, -pad, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                     metrics.elidedText(text, Qt::ElideLeft, band.width() - 2 * pad - 2));
+                     metrics.elidedText(text, elide, band.width() - 2 * pad - 2));
     painter.restore();
 }
 
