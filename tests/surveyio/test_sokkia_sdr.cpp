@@ -73,6 +73,15 @@ std::size_t warningsWith(const ReadResult& result, std::string_view words)
     return count;
 }
 
+std::size_t warningsWith(const survey::ReductionReport& report, std::string_view words)
+{
+    std::size_t count = 0;
+    for (const auto& warning : report.warnings) {
+        count += warning.text.find(words) != std::string::npos ? 1 : 0;
+    }
+    return count;
+}
+
 // A field of `width` characters, the text left-justified: [SDR] 3.2 pads an
 // alpha field on the right, and a real is written from its first column.
 std::string field(std::string_view text, std::size_t width)
@@ -358,6 +367,20 @@ TEST(SokkiaSdr, AHeaderWithSomeOddLinesStillIdentifiesTheFileAndSaysHowFewAreRec
         << detection.candidates().front().evidence;
 }
 
+TEST(SokkiaSdr, ALeadingDosEndOfFileLineIsFramingToTheProbeAsToTheReader)
+{
+    // The reader passes over a line of Ctrl-Z; so must detection, or the
+    // header behind it is not seen.
+    const std::string text = "\x1a\r\n" + file({header33(), setupOnP1()}, "\r\n");
+    const Detection detection = detectFormat(probeOf(text, "job.sdr"));
+    ASSERT_EQ(detection.outcome(), DetectionOutcome::Identified) << detection.summary();
+    EXPECT_EQ(detection.format()->id, kId);
+    const auto result = readText(text);
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->project.source.format, "SDR33");
+    EXPECT_EQ(result->recordsSkipped, 0u);
+}
+
 TEST(SokkiaSdr, AnStxGluedToTheHeaderIsFramingAndTheHeaderIsRead)
 {
     // [SDR] chapter 3 opens a transmission with STX CR LF; a writer that
@@ -401,6 +424,17 @@ TEST(SokkiaSdr, AShortOrStrayHeaderRecordIsAnAnswerAndNotACrash)
         EXPECT_NE(result.error().message.find("names no version"), kNone)
             << result.error().message;
     }
+}
+
+TEST(SokkiaSdr, ASecondHeaderOfAVersionThisReaderDoesNotReadIsSkipped)
+{
+    const auto result = readText(file(
+        {header33(), setupOnP1(),
+         "00NM" + f16("SDR44 V01-00") + "0001" + f16("28-Sep-26 08:00") + "113111"}));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->recordsSkipped, 1u);
+    EXPECT_TRUE(warned(*result, 3, "a header record that is not one this reader can read follows "
+                                   "the file's own (record 1)"));
 }
 
 TEST(SokkiaSdr, AHeaderEndingInWhiteSpaceReadsItsOptions)
@@ -500,17 +534,26 @@ TEST(SokkiaSdr, AngleOptionFourIsMilsInTheNikonHeaderFormAndDegreesOtherwiseEach
     }
 }
 
-TEST(SokkiaSdr, CoordinatesReadEastFirstUnderOptionTwoSayWhichReadingWasTaken)
+TEST(SokkiaSdr, CoordinatesAreReadEastFirstUnderOptionTwoAsDefinedAndUnderThreeWithAWarning)
 {
-    // Option 2 (and Trimble's 3): the first ordinate is the easting, as
-    // Trimble's writer puts it; a Sokkia field book may put the northing
-    // there, so the first record with coordinates says so - once.
+    // [SDR] 3.5 defines option 2 as "E-N-Elev", and Sokkia's own E-N-Elev
+    // example (chapter 2, V04-04.30) stores the easting first, as Trimble's
+    // writer does: no warning, the order in the metadata. Trimble's 3,
+    // "Y-X-Z", is east first too, but the format does not define it and the
+    // field book's third display order is south-west-elevation: one warning,
+    // at the first record that states coordinates.
     const auto point = [](std::string_view id, std::string_view first, std::string_view second) {
         return "08KI" + f16(id) + f16(first) + f16(second) + f16("") + f16("");
     };
-    for (const char* options : {"113121", "113131"}) {
-        SCOPED_TRACE(options);
-        const auto east = readText(file({header33(options),
+    const struct {
+        const char* options;
+        std::size_t warnings;
+        const char* order;
+    } cases[] = {{"113121", 0, "east, north, elevation (option 2)"},
+                 {"113131", 1, "east, north, elevation (option 3)"}};
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.options);
+        const auto east = readText(file({header33(c.options),
                                          point("A", "500000.000", "5000000.000"),
                                          point("B", "500100.000", "5000000.000")}));
         ASSERT_TRUE(east.ok()) << east.error().describe();
@@ -518,29 +561,44 @@ TEST(SokkiaSdr, CoordinatesReadEastFirstUnderOptionTwoSayWhichReadingWasTaken)
         ASSERT_NE(a, nullptr);
         EXPECT_DOUBLE_EQ(a->easting, 500000.0);
         EXPECT_DOUBLE_EQ(a->northing, 5000000.0);
-        EXPECT_TRUE(warned(*east, 2, "is read as the easting"));
-        EXPECT_TRUE(warned(*east, 2, "may hold the northing first"));
-        EXPECT_EQ(east->warnings.size(), 1u);
+        const survey::SurveyPoint* b = topcon_test::point(east->project, "B");
+        ASSERT_NE(b, nullptr);
+        EXPECT_DOUBLE_EQ(b->easting, 500100.0);
+        EXPECT_EQ(east->warnings.size(), c.warnings);
+        EXPECT_EQ(east->project.metadata.at("header: coordinate order"), c.order);
     }
-    // Option 1 is the format's own order and needs no word; nor does a file
-    // under option 2 that states no coordinates.
+    const auto three = readText(file({header33("113131"), point("A", "500000.000", "5000000.000"),
+                                      point("B", "500100.000", "5000000.000")}));
+    ASSERT_TRUE(three.ok()) << three.error().describe();
+    EXPECT_TRUE(warned(*three, 2, "coordinate order option is 3, which the format's publisher "
+                                  "does not define"));
+    EXPECT_TRUE(warned(*three, 2, "south-west-elevation"));
+    // Option 1 is the format's first order, north first, and needs no word.
     const auto north = readText(file({header33("113111"), point("A", "5000000.000", "500000.000")}));
     ASSERT_TRUE(north.ok()) << north.error().describe();
     EXPECT_EQ(north->warnings.size(), 0u);
-    const auto none = readText(file({header33("113121"), setupOnP1()}));
-    ASSERT_TRUE(none.ok()) << none.error().describe();
-    EXPECT_EQ(warningsWith(*none, "coordinate order"), 0u);
+    EXPECT_EQ(north->project.metadata.at("header: coordinate order"),
+              "north, east, elevation (option 1)");
 }
 
-TEST(SokkiaSdr, AnUndefinedAngleOrDistanceUnitIsRefusedNamingTheHeader)
+TEST(SokkiaSdr, AnUndefinedAngleOrDistanceUnitIsRefusedNamingTheHeaderAndTheOption)
 {
-    for (const char* options : {"513111", "143111", "11311", ""}) {
-        SCOPED_TRACE(options);
-        const auto result = readText(file({header33(options), "10NM" + f16("J")}));
+    // [SDR] 3.5: angles 1 to 3, distances 1 and 2 (and Trimble's 3); a
+    // header with five options or none cannot say its units at all.
+    const struct {
+        const char* options;
+        const char* reason;
+    } cases[] = {{"513111", "the header's angle unit option is '5'"},
+                 {"143111", "the header's distance unit option is '4'"},
+                 {"11311", "does not end in its six unit and order options"},
+                 {"", "does not end in its six unit and order options"}};
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.options);
+        const auto result = readText(file({header33(c.options), "10NM" + f16("J")}));
         ASSERT_FALSE(result.ok());
         EXPECT_EQ(result.error().code, ErrorCode::FileImportFailure);
-        EXPECT_NE(result.error().message.find("record 1 "), std::string::npos)
-            << result.error().message;
+        EXPECT_NE(result.error().message.find("record 1 "), kNone) << result.error().message;
+        EXPECT_NE(result.error().message.find(c.reason), kNone) << result.error().message;
     }
 }
 
@@ -605,19 +663,21 @@ TEST(SokkiaSdr, TheHeaderGivesTheUnitsAndTheJobItsNameAndSwitches)
 
 TEST(SokkiaSdr, EveryLiveRecordIsReadAndEveryDeletedOneSkipped)
 {
-    // 51 lines: 4 blank, 7 deleted (33 to 39), 40 records read. The eighth
-    // warning is the header's coordinate order, option 2, at the first
-    // record that states coordinates (8).
+    // 51 lines: 4 blank, 7 deleted (33 to 39), 40 records read, and a
+    // warning for each deleted one and nothing else. The header's
+    // coordinate order option 2 is the format's own E-N-Elev ([SDR] 3.5),
+    // said in the metadata and not warned about.
     const ReadResult result = readTraverse();
     EXPECT_EQ(result.recordsRead, 40u);
     EXPECT_EQ(result.recordsSkipped, 7u);
-    EXPECT_EQ(result.warnings.size(), 8u);
+    EXPECT_EQ(result.warnings.size(), 7u);
     for (std::size_t record = 33; record <= 39; ++record) {
         EXPECT_TRUE(warned(result, record, "deleted record")) << record;
     }
     EXPECT_TRUE(warned(result, 35, "02NM (station)"));
     EXPECT_TRUE(warned(result, 39, "'DDDD'"));
-    EXPECT_TRUE(warned(result, 8, "coordinate order option is 2"));
+    EXPECT_EQ(result.project.metadata.at("header: coordinate order"),
+              "east, north, elevation (option 2)");
 }
 
 TEST(SokkiaSdr, KeyedControlIsReadEastingFirstUnderOptionTwo)
@@ -836,7 +896,7 @@ TEST(SokkiaSdr, TheTraverseReducesToThePositionsWorkedByHand)
 {
     // From CP1 (500000 E, 5000000 N) oriented on CP2, due north at circle
     // 0, T1 at circle 90 and zenith 87, its four distances meaning
-    // 150.0015: 150.0015 sin 87 = 149.795935 east. From T1 oriented on CP1
+    // 150.0015: 150.0015 sin 87 = 149.795928 east. From T1 oriented on CP1
     // (azimuth 270 from the coordinates, circle 0 on it), T2 at circle 90 is
     // azimuth 360, due north, at zenith 91 and 80.001: 80.001 sin 91 =
     // 79.988815 north. With no curvature and refraction, those exactly.
@@ -1029,11 +1089,35 @@ TEST(SokkiaSdr, PressureAndTemperatureUnitsAreConverted)
                      1000.0);
 }
 
-TEST(SokkiaSdr, ADistanceUnitNoteThatContradictsTheHeaderIsRefused)
+TEST(SokkiaSdr, ADistanceUnitNoteThatDisagreesWithTheHeaderGovernsTheDistancesAfterIt)
 {
-    const auto result = readText(file({header33("113111"), "13DU3:US Feet:", "10NM" + f16("J")}));
-    ASSERT_FALSE(result.ok());
-    EXPECT_NE(result.error().message.find("record 2 "), std::string::npos);
+    // [SDR] 3.3.2: "All distances specified after this Note record are
+    // displayed in the specified distance units." Right after a metres
+    // header, US feet: the instrument height 10 is 10 x 1200/3937 m.
+    const auto early = readText(file({header33("113111"), "13DU3:US Feet:",
+                                       "02NM" + f16("P1") + f16("") + f16("") + f16("") +
+                                           f16("10.0")}));
+    ASSERT_TRUE(early.ok()) << early.error().describe();
+    EXPECT_TRUE(warned(*early, 2, "the distance unit note says US survey feet where the header "
+                                  "(record 1) says metres"));
+    EXPECT_EQ(early->project.units.linear, survey::LinearUnit::UsSurveyFeet);
+    EXPECT_NEAR(setupAt(early->project, 0).setup.instrumentHeight, 10.0 * 1200.0 / 3937.0,
+                kLengthTolerance);
+    // Later in a feet file, metres from the note on: the height before it
+    // stays in feet (10 ft = 3.048 m), the target height and distance after
+    // it are metres.
+    const auto late = readText(file({header33("123111"),
+                                     "02NM" + f16("P1") + f16("") + f16("") + f16("") +
+                                         f16("10.0"),
+                                     "13DU1:Meters:", "03NM" + f16("1.5"),
+                                     shot("F1", "P2", "0.0")}));
+    ASSERT_TRUE(late.ok()) << late.error().describe();
+    EXPECT_TRUE(warned(*late, 3, "so they are read in metres"));
+    const survey::SurveyStation& setup = setupAt(late->project, 0);
+    EXPECT_NEAR(setup.setup.instrumentHeight, 3.048, kLengthTolerance);
+    const auto distance = firstOf(observationsTo<survey::DistanceObservation>(setup, "P2"));
+    EXPECT_NEAR(distance.distance, 50.0, kLengthTolerance);
+    EXPECT_NEAR(distance.targetHeight, 1.5, kLengthTolerance);
 }
 
 // ---- The job and the instrument ---------------------------------------------------------
@@ -1091,7 +1175,29 @@ TEST(SokkiaSdr, CorrectionNotesOfAnSdr2xJobGiveItsSwitches)
     EXPECT_EQ(metadata.at("job: atmospheric correction"), "on");
     EXPECT_EQ(metadata.at("job: curvature and refraction correction"), "off");
     EXPECT_EQ(metadata.at("job: sea level correction"), "off");
-    EXPECT_TRUE(topcon_test::anyNotCarriedContains(*result, "(this job turns it on)"));
+    EXPECT_TRUE(topcon_test::anyNotCarriedContains(*result, "this job's switch is on"));
+}
+
+TEST(SokkiaSdr, TimeStampsInTrimblesFormPointToRawDistancesInWhatTheFileDidNotCarry)
+{
+    // Trimble's writer stamps "Time Date MM/DD/YYYY Time HH:MM:SS" and writes
+    // its distances without the atmospheric correction; the field book
+    // stamps "DD-Mon-YY HH:MM". The state stays unknown either way, but what
+    // the file did not carry says which writer's form the file is in.
+    const auto stamped = [](std::string_view stamp) {
+        return readText(file({header33(), "10NM" + f16("J") + "122211", setupOnP1(),
+                              "13TS" + std::string(stamp)}));
+    };
+    const auto trimble = stamped("Time Date 07/21/2022 Time 10:39:05");
+    ASSERT_TRUE(trimble.ok()) << trimble.error().describe();
+    EXPECT_TRUE(topcon_test::anyNotCarriedContains(
+        *trimble, "this file's time stamps are written as Trimble's writer writes them"));
+    EXPECT_EQ(setupAt(trimble->project, 0).instrument.atmosphericPpmState,
+              survey::CorrectionState::Unknown);
+    const auto fieldBook = stamped("18-Jan-80 20:14");
+    ASSERT_TRUE(fieldBook.ok()) << fieldBook.error().describe();
+    EXPECT_FALSE(topcon_test::anyNotCarriedContains(*fieldBook, "Trimble's writer writes them"));
+    EXPECT_TRUE(topcon_test::anyNotCarriedContains(*fieldBook, "this job's switch is on"));
 }
 
 TEST(SokkiaSdr, AnUndefinedVerticalAngleOptionDropsTheZenithsAfterIt)
@@ -1151,7 +1257,8 @@ TEST(SokkiaSdr, EmptyWeatherScaleCollimationAndTargetRecordsAreSkipped)
 TEST(SokkiaSdr, ACollimationRecordIsKeptWithItsSetup)
 {
     // [SDR] 3.6.2 COL: vertical then horizontal collimation, angles; 10"
-    // is 0.00277778 degrees. Kept, not applied: a face pair cancels it.
+    // is 0.00277778 degrees. Kept with the setup it falls in, as well as
+    // applied to the readings after it (the next tests).
     const auto result = readText(file({header33(), setupOnP1(),
                                        "04CL" + f16("0.00277778") + f16("-0.00138889")}));
     ASSERT_TRUE(result.ok()) << result.error().describe();
@@ -1162,6 +1269,70 @@ TEST(SokkiaSdr, ACollimationRecordIsKeptWithItsSetup)
     EXPECT_NEAR(valueOf(katana::core::parseFiniteDouble(
                     metadata.at("collimation, horizontal (radians)"))),
                 -0.00138889 * kPi / 180.0, 1e-15);
+}
+
+TEST(SokkiaSdr, ACollimationCorrectionIsAddedOnFaceOneAndTakenOffOnFaceTwo)
+{
+    // [SETX] 29.2.5: face 1 a2 = a1 + Vc, b2 = b1 + Hc; face 2 a2 = a1 - Vc,
+    // b2 = b1 - Hc, a1 the zenith equivalent of 29.2.3. Here Vc 0.02 and Hc
+    // 0.01 degrees. A shot before the 04 is not corrected; a reading with no
+    // vertical angle is face 1 (29.2.3), so an MD with none gets + Hc.
+    const auto result = readText(file({
+        header33(), instrument33(), setupOnP1(), "03NM" + f16("1.5"),
+        shot("F1", "P0", "45.0"),                                                  // 5
+        "04CL" + f16("0.02") + f16("0.01"),                                        // 6
+        shot("F1", "P2", "90.0", "88.0"), shot("F2", "P2", "270.0", "272.0"),      // 7, 8
+        "09MD" + f16("P1") + f16("P3") + f16("40.0") + f16("") + f16("30.0"),      // 9
+    }));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    const survey::SurveyStation& setup = setupAt(result->project, 0);
+    const auto before = firstOf(observationsTo<survey::HorizontalDirectionObservation>(setup, "P0"));
+    EXPECT_NEAR(before.direction, degrees(45.0), kAngleTolerance);
+    const auto directions = observationsTo<survey::HorizontalDirectionObservation>(setup, "P2");
+    const auto zeniths = observationsTo<survey::ZenithAngleObservation>(setup, "P2");
+    ASSERT_EQ(directions.size(), 2u);
+    ASSERT_EQ(zeniths.size(), 2u);
+    EXPECT_NEAR(directions[0].direction, degrees(90.01), kAngleTolerance);
+    EXPECT_NEAR(zeniths[0].angle, degrees(88.02), kAngleTolerance);
+    EXPECT_NEAR(directions[1].direction, degrees(269.99), kAngleTolerance);
+    // 272 on face 2 is 88 on face 1, less Vc.
+    EXPECT_NEAR(zeniths[1].angle, degrees(87.98), kAngleTolerance);
+    const auto md = firstOf(observationsTo<survey::HorizontalDirectionObservation>(setup, "P3"));
+    EXPECT_NEAR(md.direction, degrees(30.01), kAngleTolerance);
+    EXPECT_EQ(setup.metadata.at("collimation of record 6"), "applied to its readings ([SETX] 29.2.5)");
+}
+
+TEST(SokkiaSdr, ACollimationCorrectionMovesAShotOnOneFaceAndLeavesAFacePairsMean)
+{
+    // An instrument whose line of sight is 36" left of square: face 1 reads
+    // 0.01 degrees low, face 2 0.01 high, and its 04 gives Hc 0.01. The
+    // backsight B, due north of A, read 359.99 and 180.01: corrected, 0 and
+    // 180, a pair in agreement, whose mean - the orientation - is what the
+    // raw pair's was. C on face 1 only, at circle 90, 100 m level: azimuth
+    // 90.01, so N = 1000 + 100 cos 90.01 = 999.98254670, E = 1000 + 100 sin
+    // 90.01 = 1099.99999848 - 17.45 mm from where the raw reading puts it.
+    const auto result = readText(file({
+        header33(), instrument33(),
+        "08KI" + f16("B") + f16("1100.000") + f16("1000.000") + f16("100.000") + f16(""),
+        "02KI" + f16("A") + f16("1000.000") + f16("1000.000") + f16("100.000") + f16("0.000"),
+        "04CL" + f16("0.0") + f16("0.01"), "03NM" + f16("0.000"),
+        "07NM" + f16("A") + f16("B") + f16("0.0") + f16("0.0"),
+        "09F1" + f16("A") + f16("B") + f16("100.000") + f16("90.0") + f16("359.99"),
+        "09F2" + f16("A") + f16("B") + f16("100.000") + f16("270.0") + f16("180.01"),
+        "09F1" + f16("A") + f16("C") + f16("100.000") + f16("90.0") + f16("90.0")}));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    const auto outcome = reduced(result->project);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
+    EXPECT_NEAR(*outcome->report.setups[0].orientationCorrection, 0.0, 1e-12);
+    // The corrected faces agree: no pair is outside the reduction's
+    // tolerance, as the raw pair (72" apart) would be.
+    EXPECT_EQ(warningsWith(outcome->report, "face pair outside tolerance"), 0u);
+    const survey::ComputedPoint* c = computed(*outcome, "C");
+    ASSERT_NE(c, nullptr);
+    EXPECT_NEAR(c->northing, 1000.0 + 100.0 * std::cos(degrees(90.01)), 1e-9);
+    EXPECT_NEAR(c->easting, 1000.0 + 100.0 * std::sin(degrees(90.01)), 1e-9);
+    EXPECT_NEAR(c->northing, 999.98254670, 1e-8);
 }
 
 TEST(SokkiaSdr, RecordsThatNameNoPointOrComeBeforeAnyStationAreSkipped)
@@ -1183,6 +1354,64 @@ TEST(SokkiaSdr, RecordsThatNameNoPointOrComeBeforeAnyStationAreSkipped)
     EXPECT_TRUE(warned(*result, 6, "coordinate record names no point"));
     EXPECT_TRUE(warned(*result, 7, "reduced observation record names no point"));
     EXPECT_EQ(result->project.stations.size(), 1u);
+}
+
+TEST(SokkiaSdr, ABacksightOrObservationThatNamesNoTargetOrItsOwnPointIsSkipped)
+{
+    const auto result = readText(file({
+        header33(), instrument33(), setupOnP1(), "03NM" + f16("1.5"),
+        "07NM" + f16("P1") + f16("") + f16("0.0") + f16("0.0"),                        // 5
+        "07NM" + f16("P1") + f16("P1") + f16("0.0") + f16("0.0"),                      // 6
+        "09F1" + f16("P1") + f16("") + f16("50.0") + f16("90.0") + f16("0.0"),         // 7
+    }));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->recordsSkipped, 3u);
+    EXPECT_TRUE(warned(*result, 5, "backsight record names no backsight point"));
+    EXPECT_TRUE(warned(*result, 6, "backsight record from 'P1' to itself"));
+    EXPECT_TRUE(warned(*result, 7, "observation names no target point"));
+    EXPECT_TRUE(setupAt(result->project, 0).backsightPointId.empty());
+    EXPECT_TRUE(setupAt(result->project, 0).observations.empty());
+}
+
+TEST(SokkiaSdr, APointGivenOneOrdinateOnlyIsImportedWithoutCoordinatesAndSaysSo)
+{
+    const auto result =
+        readText(file({header33(), "08KI" + f16("A") + f16("5000.0") + f16("") + f16("10.0")}));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_TRUE(warned(*result, 2, "point 'A' is given only one of its northing and easting; it "
+                                   "is imported without coordinates"));
+    EXPECT_TRUE(result->project.points.empty());
+    EXPECT_NE(topcon_test::unpositioned(result->project, "A"), nullptr);
+}
+
+TEST(SokkiaSdr, AnElevationWithNoNorthingOrEastingIsKeptWithItsPointAndSaid)
+{
+    // A benchmark keyed with its height alone, and a setup on another with
+    // its height alone ([SDR] 3.3 (ii): blank is "not measured"). Neither
+    // can place a point; each height is kept, not dropped. With the job's
+    // "Record elev" No an elevation is a placeholder ([SETX] 4) and is not.
+    const auto kept = readText(file({
+        header33(), "08KI" + f16("BM1") + f16("") + f16("") + f16("123.456") + f16("BENCH"),
+        "02NM" + f16("BM2") + f16("") + f16("") + f16("99.0") + f16("1.5")}));
+    ASSERT_TRUE(kept.ok()) << kept.error().describe();
+    EXPECT_TRUE(warned(*kept, 2, "point 'BM1' is given an elevation (123.456 m) and no northing "
+                                 "or easting"));
+    EXPECT_TRUE(warned(*kept, 3, "point 'BM2' is given an elevation (99 m)"));
+    const survey::UnpositionedPoint* bm1 = topcon_test::unpositioned(kept->project, "BM1");
+    ASSERT_NE(bm1, nullptr);
+    EXPECT_EQ(bm1->metadata.at("height without a position"), "123.456");
+    const survey::UnpositionedPoint* bm2 = topcon_test::unpositioned(kept->project, "BM2");
+    ASSERT_NE(bm2, nullptr);
+    EXPECT_EQ(bm2->metadata.at("height without a position"), "99");
+    const auto placeholder = readText(file({
+        header33(), "10NM" + f16("J") + "111111",
+        "08KI" + f16("BM1") + f16("") + f16("") + f16("123.456") + f16("")}));
+    ASSERT_TRUE(placeholder.ok()) << placeholder.error().describe();
+    EXPECT_EQ(placeholder->warnings.size(), 0u);
+    const survey::UnpositionedPoint* unheighted =
+        topcon_test::unpositioned(placeholder->project, "BM1");
+    ASSERT_NE(unheighted, nullptr);
+    EXPECT_FALSE(unheighted->metadata.contains("height without a position"));
 }
 
 TEST(SokkiaSdr, ASetupWithNoInstrumentHeightUsesZeroAndSaysSo)
@@ -1219,6 +1448,60 @@ TEST(SokkiaSdr, CoordinatesAreEnteredObservedCalculatedOrUnknownByTheirDerivatio
         ASSERT_NE(p, nullptr) << e.id;
         EXPECT_EQ(p->coordinateSource, e.source) << e.id;
     }
+}
+
+TEST(SokkiaSdr, ThePointsLatestCoordinatesAreItsOwnAsTheFieldBookKeepsThem)
+{
+    // [SDR] chapter 2's traverse, feet, in the SDR2x records a 4-digit job
+    // is sent in ([SDR] 3.2.5): 0002 and 0003 are stored as positions (POS
+    // TP), 0003 restated by its setup (STN TP, 0.005 and 200.005), and the
+    // traverse adjustment's POS AJ records come last. [SDR] 2.3: "the latest
+    // coordinates are the best" - 0002 N -0.002 E 99.996 Elev -0.002 and
+    // 0003 N 0.004 E 199.996 Elev 0.006, the adjusted ones. The earlier ones
+    // stay in each point's metadata, each change said.
+    const auto result = readText(file({
+        "00NM" + f16("SDR20 V03-05") + "0000" + f16("06-Jan-80 00:23") + "122211",
+        "10NM" + f16("TRAVERSE"),
+        "08KI0001" + f10("0.000") + f10("0.000") + f10("0.000"),
+        "08KI0005" + f10("100.000") + f10("0.000") + f10(""),
+        "02TP0001" + f10("0.000") + f10("0.000") + f10("0.000") + f10("0.000"),
+        "07TP00010005" + f10("0.000000") + f10("0.000000"),
+        "08TP0002" + f10("0.000") + f10("100.000") + f10("0.000"),                  // 7
+        "02TP0002" + f10("0.000") + f10("100.000") + f10("0.000") + f10("0.000"),   // 8
+        "08TP0003" + f10("0.003") + f10("200.001") + f10("0.008"),                  // 9
+        "02TP0003" + f10("0.005") + f10("200.005") + f10("0.010") + f10("0.000"),   // 10
+        "08AJ0002" + f10("-0.002") + f10("99.996") + f10("-0.002"),                 // 11
+        "08AJ0003" + f10("0.004") + f10("199.996") + f10("0.006"),                  // 12
+    }));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    constexpr double kFoot = 0.3048;
+    const struct {
+        const char* id;
+        double northing;
+        double easting;
+        double elevation;
+        std::size_t record;
+        const char* superseded;
+    } adjusted[] = {{"0002", -0.002, 99.996, -0.002, 11, "coordinates of record 7, superseded"},
+                    {"0003", 0.004, 199.996, 0.006, 12, "coordinates of record 10, superseded"}};
+    for (const auto& a : adjusted) {
+        SCOPED_TRACE(a.id);
+        const survey::SurveyPoint* point = topcon_test::point(result->project, a.id);
+        ASSERT_NE(point, nullptr);
+        EXPECT_NEAR(point->northing, a.northing * kFoot, kLengthTolerance);
+        EXPECT_NEAR(point->easting, a.easting * kFoot, kLengthTolerance);
+        EXPECT_NEAR(valueOf(point->elevation), a.elevation * kFoot, kLengthTolerance);
+        EXPECT_EQ(point->coordinateSource, survey::CoordinateSource::Calculated);
+        EXPECT_EQ(point->source.recordNumber, a.record);
+        EXPECT_TRUE(point->metadata.contains(a.superseded));
+        EXPECT_TRUE(warned(*result, a.record, "these, the latest, are kept"));
+    }
+    // 0003's setup restated it differently from its POS TP; the same
+    // coordinates again (0002's setup, 0001's) are a repeat and say nothing.
+    EXPECT_TRUE(warned(*result, 10, "point '0003' is given different coordinates here"));
+    EXPECT_TRUE(topcon_test::point(result->project, "0003")
+                    ->metadata.contains("coordinates of record 9, superseded"));
+    EXPECT_EQ(warningsWith(*result, "is given different coordinates"), 3u);
 }
 
 TEST(SokkiaSdr, APointIdHoldingAControlByteIsSkippedNotMergedWithAnother)
@@ -1301,11 +1584,11 @@ TEST(SokkiaSdr, AnObservationOrAReducedOneWithNoValueIsSkippedAndNamesNothing)
 
 TEST(SokkiaSdr, ADerivedViewInASetupWithNoRawObservationSaysTheShotIsLost)
 {
-    // An SDR2x set collection from V04-02 on stores only MC records ([SDR]
-    // chapter 2); writers disagree about what an MC holds, so it is not
-    // imported - and the read says the shots are lost, not that they were
-    // counted already. After a raw observation of the same setup an MC is
-    // the raw one again.
+    // A field book set to send the MC view ([SDR] 2.1): writers disagree
+    // about what an MC holds, so it is not imported - and the read says the
+    // shots are lost, not that they were counted already. After a raw
+    // observation of the same line an MC is that raw one again; a RED of a
+    // line the setup never observed raw (0003) is still lost.
     const auto result = readText(file({
         "00NM" + f16("SDR20 V03-05") + "0000" + f16("18-Jan-80 20:34") + "113111",
         "01NM1" + field("", 16) + "000000" + f16("DT2") + "000031" + "3" + "1" + f10("") + f10("") +
@@ -1320,15 +1603,44 @@ TEST(SokkiaSdr, ADerivedViewInASetupWithNoRawObservationSaysTheShotIsLost)
     }));
     ASSERT_TRUE(result.ok()) << result.error().describe();
     EXPECT_EQ(result->recordsSkipped, 4u);
-    EXPECT_TRUE(warned(*result, 5, "in a setup with no raw observation is not imported"));
+    EXPECT_TRUE(warned(*result, 5, "which no raw observation of its setup repeats, is not "
+                                   "imported"));
     EXPECT_TRUE(warned(*result, 5, "so this shot is lost"));
-    EXPECT_TRUE(warned(*result, 6, "in a setup with no raw observation is not imported"));
+    EXPECT_TRUE(warned(*result, 6, "which no raw observation of its setup repeats, is not "
+                                   "imported"));
     EXPECT_TRUE(warned(*result, 8, "since it would count them twice"));
-    EXPECT_TRUE(warned(*result, 9, "since it would count them twice"));
+    EXPECT_TRUE(warned(*result, 9, "which no raw observation of its setup repeats"));
     EXPECT_TRUE(topcon_test::anyNotCarriedContains(
-        *result, "1 corrected (MC) observation(s) in setups with no raw observation"));
+        *result, "1 corrected (MC) observation(s) that no raw observation of their setup repeats"));
     EXPECT_TRUE(topcon_test::anyNotCarriedContains(
-        *result, "1 reduced (RED) observation(s) with distances in setups with no raw"));
+        *result, "2 reduced (RED) observation(s) with distances that no raw observation"));
+}
+
+TEST(SokkiaSdr, ADerivedViewIsCountedTwiceOnlyBesideARawObservationOfItsOwnLine)
+{
+    // The setup on P1 observes P2 raw. An MC to P3 and a RED from P9 have no
+    // raw twin, however many other shots the setup holds: each is lost, and
+    // said to be. An MC to P2 and a RED from P1 to P2 repeat the raw shot.
+    const auto result = readText(file({
+        header33(), instrument33(), setupOnP1(), "03NM" + f16("1.5"),
+        backsight("P2", "0.0", "0.0"), shot("F1", "P2", "0.0"),                         // 5, 6
+        "09MC" + f16("P1") + f16("P3") + f16("50.0") + f16("90.0") + f16("45.0"),      // 7
+        "09MC" + f16("P1") + f16("P2") + f16("50.0") + f16("90.0") + f16("0.0"),       // 8
+        "11TP" + f16("P9") + f16("P3") + f16("45.0") + f16("50.0") + f16("0.1"),       // 9
+        "11TP" + f16("P1") + f16("P2") + f16("0.0") + f16("50.0") + f16("0.1"),        // 10
+    }));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->recordsSkipped, 4u);
+    EXPECT_TRUE(warned(*result, 7, "from 'P1' to 'P3', which no raw observation of its setup "
+                                   "repeats"));
+    EXPECT_TRUE(warned(*result, 7, "so this shot is lost"));
+    EXPECT_TRUE(warned(*result, 8, "raw observations this setup holds of 'P2'"));
+    EXPECT_TRUE(warned(*result, 8, "since it would count them twice"));
+    EXPECT_TRUE(warned(*result, 9, "from 'P9' to 'P3', which no raw observation of its setup "
+                                   "repeats"));
+    EXPECT_TRUE(warned(*result, 10, "since it would count them twice"));
+    EXPECT_TRUE(topcon_test::anyNotCarriedContains(*result, "1 corrected (MC) observation(s)"));
+    EXPECT_TRUE(topcon_test::anyNotCarriedContains(*result, "1 reduced (RED) observation(s)"));
 }
 
 // ---- Setups, rounds, sets and backsights ---------------------------------------------------
@@ -1452,6 +1764,316 @@ TEST(SokkiaSdr, ABacksightRecordClosingItsSetOrientsThatSet)
     ASSERT_NE(t1, nullptr);
     EXPECT_NEAR(t1->northing, 5000000.0, 1e-6);
     EXPECT_NEAR(t1->easting, 500050.0, 1e-6);
+}
+
+namespace {
+
+// A is at N 2000 E 1000 and B 100 m due north of it, both keyed; a setup on
+// A at 1.5 m with a 1.5 m target, and 100 m level shots from A: what the
+// tests below about the order of backsight records and shots start from.
+std::vector<std::string> onA()
+{
+    return {header33(), instrument33(),
+            "08KI" + f16("A") + f16("2000.000") + f16("1000.000") + f16("50.000") + f16(""),
+            "08KI" + f16("B") + f16("2100.000") + f16("1000.000") + f16("50.000") + f16(""),
+            "02NM" + f16("A") + f16("") + f16("") + f16("") + f16("1.500"), "03NM" + f16("1.500")};
+}
+
+std::string fromA(std::string_view face, std::string_view to, std::string_view circle,
+                  std::string_view distance = "100.000")
+{
+    return "09" + std::string(face) + f16("A") + f16(to) + f16(distance) + f16("90.0") +
+           f16(circle);
+}
+
+std::string backsightFromA(std::string_view code, std::string_view to, std::string_view azimuth,
+                           std::string_view circle)
+{
+    return "07" + std::string(code) + f16("A") + f16(to) + f16(azimuth) + f16(circle);
+}
+
+std::string recordsText(const std::vector<std::string>& records)
+{
+    std::string text;
+    for (const std::string& record : records) {
+        text += record + "\n";
+    }
+    return text;
+}
+
+// Where the reduction, every correction off, puts `id`: N and E, or a
+// failure when it placed nothing there.
+void expectAt(const survey::ReductionOutcome& outcome, std::string_view id, double northing,
+              double easting)
+{
+    const survey::ComputedPoint* point = computed(outcome, id);
+    ASSERT_NE(point, nullptr) << id;
+    EXPECT_NEAR(point->northing, northing, 1e-6) << id;
+    EXPECT_NEAR(point->easting, easting, 1e-6) << id;
+}
+
+} // namespace
+
+TEST(SokkiaSdr, ShotsBeforeASetupsFirstBacksightRecordThatNoneOfThemObservesAreNotOrientedByIt)
+{
+    // [SETX] 8.2: a back-bearing record "orients subsequent observations";
+    // 8.2.1: shots taken with no backsight are azimuths. D1, D2 and D3 at
+    // circle 30, 120 and 210 come before the 07 (B at azimuth 0, circle 90),
+    // so they are azimuths: D1 at N 2000 + 100 cos 30 = 2086.6025404, E 1050;
+    // D2 at N 1950, E 1086.6025404; D3 at N 1913.3974596, E 950. After the
+    // 07 the circle reads 90 on north: C at circle 180 is azimuth 90, N 2000
+    // E 1100.
+    std::vector<std::string> records = onA();
+    for (const std::string& record :
+         {fromA("F1", "D1", "30.0"), fromA("F1", "D2", "120.0"), fromA("F1", "D3", "210.0"),
+          backsightFromA("NM", "B", "0.0", "90.0"), fromA("F1", "B", "90.0"),
+          fromA("F1", "C", "180.0")}) {
+        records.push_back(record);
+    }
+    const auto result = readText(recordsText(records));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    const survey::SurveyProject& project = result->project;
+    ASSERT_EQ(project.stations.size(), 2u);
+    EXPECT_EQ(setupAt(project, 0).observations.size(), 9u);
+    EXPECT_EQ(setupAt(project, 1).setup.id, "A (2)");
+    EXPECT_EQ(setupAt(project, 1).observations.size(), 6u);
+    EXPECT_TRUE(warned(*result, 10, "setup 'A' has 3 observation record(s) before its first "
+                                    "backsight record, and none is of its backsight 'B'"));
+    EXPECT_TRUE(warned(*result, 5, "its horizontal readings are taken as azimuths"));
+    const auto outcome = reduced(project);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const double c30 = 100.0 * std::cos(degrees(30.0));
+    expectAt(*outcome, "D1", 2000.0 + c30, 1050.0);
+    expectAt(*outcome, "D2", 1950.0, 1000.0 + c30);
+    expectAt(*outcome, "D3", 2000.0 - c30, 950.0);
+    expectAt(*outcome, "C", 2000.0, 1100.0);
+}
+
+TEST(SokkiaSdr, ABacksightRecordAfterItsOwnShotOrientsThatShotAsWell)
+{
+    // Trimble's writer puts the backsight's shot before the back-bearing
+    // record made from it: the 07 names B, which the shot before it
+    // observes, so it orients that shot and one setup holds everything. B
+    // at circle 90 on azimuth 0; C at 180 is azimuth 90: N 2000 E 1100.
+    std::vector<std::string> records = onA();
+    for (const std::string& record : {fromA("F1", "B", "90.0"),
+                                      backsightFromA("TP", "B", "0.0", "90.0"),
+                                      fromA("F1", "C", "180.0")}) {
+        records.push_back(record);
+    }
+    const auto result = readText(recordsText(records));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    ASSERT_EQ(result->project.stations.size(), 1u);
+    EXPECT_EQ(warningsWith(*result, "observation record(s) before"), 0u);
+    const auto outcome = reduced(result->project);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    expectAt(*outcome, "C", 2000.0, 1100.0);
+}
+
+TEST(SokkiaSdr, ASetupsFirstBacksightRecordLeavesAKeyedAzimuthToOrientTheShotsBeforeIt)
+{
+    // An 11 keys the azimuth A -> B, 60. B at circle 20 (80 m) and D1 at 50
+    // come before the setup's first 07, which names E: the keyed azimuth
+    // orients them, 60 - 20 = 40, so B is at azimuth 60 - N 2040, E 1000 +
+    // 80 sin 60 = 1069.2820323 - and D1 at 90, N 2000 E 1100. The 07 (E at
+    // azimuth 0, circle 90, E never observed and unplaced) orients C at
+    // circle 225 on 0 - 90: azimuth 135, N 2000 - 70.7106781, E 1070.7106781.
+    std::vector<std::string> records = onA();
+    records.insert(records.end() - 1, "11KI" + f16("A") + f16("B") + f16("60.0"));
+    for (const std::string& record :
+         {fromA("F1", "B", "20.0", "80.000"), fromA("F1", "D1", "50.0"),
+          backsightFromA("NM", "E", "0.0", "90.0"), fromA("F1", "C", "225.0")}) {
+        records.push_back(record);
+    }
+    // Here B is not keyed: the keyed azimuth, not its coordinates, orients.
+    records.erase(records.begin() + 3);
+    const auto result = readText(recordsText(records));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    ASSERT_EQ(result->project.stations.size(), 2u);
+    EXPECT_EQ(setupAt(result->project, 0).metadata.at("oriented by"),
+              "the azimuth to 'B' keyed at record 5");
+    const auto outcome = reduced(result->project);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const double s60 = 80.0 * std::sin(degrees(60.0));
+    const double r45 = 100.0 * std::cos(degrees(45.0));
+    expectAt(*outcome, "B", 2040.0, 1000.0 + s60);
+    expectAt(*outcome, "D1", 2000.0, 1100.0);
+    expectAt(*outcome, "C", 2000.0 - r45, 1000.0 + r45);
+}
+
+TEST(SokkiaSdr, ASetsClosingBacksightRecordDoesNotOrientTheShotsBeforeTheSet)
+{
+    // D1 at circle 30, then a set: B at 90 and C at 180, closed by its 07 SC
+    // (B at azimuth 0, circle 90). The 07 SC orients the set, not D1, which
+    // no backsight record orients: D1 is an azimuth, N 2086.6025404 E 1050;
+    // C is at azimuth 90, N 2000 E 1100.
+    std::vector<std::string> records = onA();
+    for (const std::string& record :
+         {fromA("F1", "D1", "30.0"), "12SC" + f16("A") + "  2" + "  1" + "111",
+          fromA("F1", "B", "90.0"), fromA("F1", "C", "180.0"),
+          backsightFromA("SC", "B", "0.0", "90.0")}) {
+        records.push_back(record);
+    }
+    const auto result = readText(recordsText(records));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    ASSERT_EQ(result->project.stations.size(), 2u);
+    EXPECT_EQ(setupAt(result->project, 0).observations.size(), 3u);
+    EXPECT_EQ(setupAt(result->project, 1).observations.size(), 6u);
+    EXPECT_TRUE(warned(*result, 11, "setup 'A' has 1 observation record(s) before the set this "
+                                    "backsight record closes (record 8)"));
+    const auto outcome = reduced(result->project);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    expectAt(*outcome, "D1", 2000.0 + 100.0 * std::cos(degrees(30.0)), 1050.0);
+    expectAt(*outcome, "C", 2000.0, 1100.0);
+}
+
+TEST(SokkiaSdr, OnlySetCollectionsBacksightRecordClosesASetAndAnyOtherOrientsWhatFollows)
+{
+    // Rounds each opened by a 07 NM and a 12: C at circle 90 on the first
+    // (B at azimuth 0, circle 0), D at 225 on the second (circle 45). The
+    // second 07 is not Set Collection's (SC), so it orients D and not C: C
+    // at azimuth 90, N 2000 E 1100; D at 225 - 45 = 180, N 1900 E 1000.
+    std::vector<std::string> records = onA();
+    for (const std::string& record :
+         {backsightFromA("NM", "B", "0.0", "0.0"), "12SC" + f16("A") + "  1" + "  1" + "111",
+          fromA("F1", "C", "90.0"), backsightFromA("NM", "B", "0.0", "45.0"),
+          "12SC" + f16("A") + "  1" + "  2" + "111", fromA("F1", "D", "225.0")}) {
+        records.push_back(record);
+    }
+    const auto result = readText(recordsText(records));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    ASSERT_EQ(result->project.stations.size(), 2u);
+    EXPECT_EQ(setupAt(result->project, 0).observations.size(), 3u);
+    EXPECT_EQ(warningsWith(*result, "replaces"), 0u);
+    const auto outcome = reduced(result->project);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    expectAt(*outcome, "C", 2000.0, 1100.0);
+    expectAt(*outcome, "D", 1900.0, 1000.0);
+}
+
+TEST(SokkiaSdr, ASetsClosingBacksightRecordReplacesOneThatOrientedNothingButTheSet)
+{
+    // A 07 NM, then a set with nothing between them, closed by a 07 SC whose
+    // circle is 10 degrees on: the set was observed on the 07 SC's circle,
+    // and the first oriented no other shot, so the second replaces it.
+    std::vector<std::string> records = onA();
+    for (const std::string& record :
+         {backsightFromA("NM", "B", "0.0", "0.0"), "12SC" + f16("A") + "  2" + "  1" + "111",
+          fromA("F1", "B", "10.0"), fromA("F1", "C", "100.0"),
+          backsightFromA("SC", "B", "0.0", "10.0")}) {
+        records.push_back(record);
+    }
+    const auto result = readText(recordsText(records));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    ASSERT_EQ(result->project.stations.size(), 1u);
+    EXPECT_TRUE(warned(*result, 11, "this backsight record, closing the set of record 8, "
+                                    "replaces the one at record 7, since no observation came "
+                                    "between that one and the set"));
+    EXPECT_NEAR(valueOf(setupAt(result->project, 0).backsightAzimuth), degrees(10.0),
+                kAngleTolerance);
+}
+
+namespace {
+
+// An SDR2x job in metres (options 111111: degrees, metres, mmHg, Celsius,
+// north first): A at N 1000 E 1000 and B 100 m due north, keyed, a setup
+// on A at 0 m with a 0 m target, so every 100 m shot at zenith 90 is 100 m
+// level from the mark.
+std::vector<std::string> sdr2xOnA()
+{
+    return {"00NM" + f16("SDR20 V03-05") + "0000" + f16("05-Mar-91 17:30") + "111111",
+            "10NM" + f16("SETS"),
+            "08KI0001" + f10("1000.0") + f10("1000.0") + f10("100.0"),
+            "08KI0002" + f10("1100.0") + f10("1000.0") + f10("100.0"),
+            "01NM1" + field("", 16) + "000000" + field("", 16) + "000031" + "3" + "1" + f10("") +
+                f10("") + f10("0.000"),
+            "02SC0001" + f10("1000.0") + f10("1000.0") + f10("100.0") + f10("0.0"),
+            "03NM" + f10("0.0")};
+}
+
+std::string sdr2xShot(std::string_view face, std::string_view to, std::string_view zenith,
+                      std::string_view circle)
+{
+    return "09" + std::string(face) + "0001" + std::string(to) + f10("100.0") + f10(zenith) +
+           f10(circle);
+}
+
+} // namespace
+
+TEST(SokkiaSdr, AnSdr2xSetRecordAfterItsObservationsClosesThemAndTheirBacksightRecordOrientsThem)
+{
+    // [SDR] chapter 2: from V04-02 on, a 4-digit-point job writes each set's
+    // SET record after its raw observations, before its MC records, and
+    // Set Collection its back-bearing (07 SC) after those. Set 1 on circle 0
+    // on B: C (0003) at circle 90 is azimuth 90, N 1000 E 1100. Set 2 on
+    // circle 45: D (0004) at circle 225 is azimuth 225 - 45 = 180, N 900 E
+    // 1000. Each set is its own setup, oriented on its own circle.
+    std::vector<std::string> records = sdr2xOnA();
+    for (const std::string& record :
+         {std::string("13SCSet #: 1"), sdr2xShot("F1", "0002", "90.0", "0.0"),
+          sdr2xShot("F1", "0003", "90.0", "90.0"), sdr2xShot("F2", "0003", "270.0", "270.0"),
+          sdr2xShot("F2", "0002", "270.0", "180.0"), std::string("12SC0001004"),
+          "09MC00010002" + f10("100.0") + f10("90.0") + f10("0.0"),
+          "09MC00010003" + f10("100.0") + f10("90.0") + f10("90.0"),
+          "07SC00010002" + f10("0.0") + f10("0.0"), std::string("13SCSet #: 2"),
+          sdr2xShot("F1", "0002", "90.0", "45.0"), sdr2xShot("F1", "0004", "90.0", "225.0"),
+          sdr2xShot("F2", "0004", "270.0", "45.0"), sdr2xShot("F2", "0002", "270.0", "225.0"),
+          std::string("12SC0001004"), "09MC00010002" + f10("100.0") + f10("90.0") + f10("0.0"),
+          "09MC00010004" + f10("100.0") + f10("90.0") + f10("180.0"),
+          "07SC00010002" + f10("0.0") + f10("45.0")}) {
+        records.push_back(record);
+    }
+    const auto result = readText(recordsText(records));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    const survey::SurveyProject& project = result->project;
+    ASSERT_EQ(project.stations.size(), 2u);
+    EXPECT_EQ(setupAt(project, 0).observations.size(), 12u);
+    const survey::SurveyStation& second = setupAt(project, 1);
+    EXPECT_EQ(second.setup.id, "0001 (2)");
+    EXPECT_EQ(second.observations.size(), 12u);
+    EXPECT_NEAR(valueOf(second.backsightAzimuth), degrees(45.0), kAngleTolerance);
+    EXPECT_EQ(second.metadata.at("set at record 22"), "004 observation(s), closing the 4 before it");
+    EXPECT_EQ(warningsWith(*result, "has no observation of its backsight"), 0u);
+    EXPECT_EQ(warningsWith(*result, "since it would count them twice"), 4u);
+    const auto outcome = reduced(project);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    expectAt(*outcome, "0003", 1000.0, 1100.0);
+    expectAt(*outcome, "0004", 900.0, 1000.0);
+}
+
+TEST(SokkiaSdr, AnSdr2xSetRecordClosesNoMoreThanItsCountOrWhatFollowsASetNote)
+{
+    // A 07 TP (B at azimuth 0, circle 0) orients E at circle 30: azimuth 30,
+    // N 1000 + 100 cos 30 = 1086.6025404, E 1050. Then a set on circle 45 -
+    // C at 135, azimuth 90, N 1000 E 1100 - closed by a 12 after it and a
+    // 07 SC. The set is the 12's count, 4, of the 5 records since the 07 TP;
+    // or, where the 12 states no count, what follows the field book's "Set
+    // #" note. Either way E keeps the first orientation.
+    for (const bool counted : {true, false}) {
+        SCOPED_TRACE(counted);
+        std::vector<std::string> records = sdr2xOnA();
+        records.push_back("07TP00010002" + f10("0.0") + f10("0.0"));
+        records.push_back(sdr2xShot("F1", "0005", "90.0", "30.0"));
+        if (!counted) {
+            records.emplace_back("13SCSet #: 1");
+        }
+        for (const std::string& record :
+             {sdr2xShot("F1", "0002", "90.0", "45.0"), sdr2xShot("F1", "0003", "90.0", "135.0"),
+              sdr2xShot("F2", "0003", "270.0", "315.0"), sdr2xShot("F2", "0002", "270.0", "225.0"),
+              std::string(counted ? "12SC0001004" : "12SC0001   "),
+              "07SC00010002" + f10("0.0") + f10("45.0")}) {
+            records.push_back(record);
+        }
+        const auto result = readText(recordsText(records));
+        ASSERT_TRUE(result.ok()) << result.error().describe();
+        ASSERT_EQ(result->project.stations.size(), 2u);
+        EXPECT_EQ(setupAt(result->project, 0).observations.size(), 3u);
+        EXPECT_EQ(setupAt(result->project, 1).observations.size(), 12u);
+        const auto outcome = reduced(result->project);
+        ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+        expectAt(*outcome, "0005", 1000.0 + 100.0 * std::cos(degrees(30.0)), 1050.0);
+        expectAt(*outcome, "0003", 1000.0, 1100.0);
+    }
 }
 
 TEST(SokkiaSdr, ABadSetEndsAfterItsCountOfObservations)
@@ -1644,6 +2266,79 @@ TEST(SokkiaSdr, ASetupWithNeitherABacksightNorAKeyedAzimuthTakesItsReadingsAsAzi
     ASSERT_NE(t, nullptr);
     EXPECT_NEAR(t->northing, 5000000.0, 1e-6);
     EXPECT_NEAR(t->easting, 500050.0, 1e-6);
+}
+
+TEST(SokkiaSdr, AStatedAzimuthIsTakenLessTheSetupsReadingOnTheBacksightOrElseLessItsCircle)
+{
+    // [SDR] chapter 2's traverse, at 0003: "BKB TP 0003-0002 Azimuth
+    // 269-59'50" H.obs 270-00'00"" and "OBS F1 0003-0004 S.Dist 100.008
+    // V.obs 90-00'10" H.obs 90-00'20"" - in decimal degrees, as the file
+    // holds them, azimuth 269.99722222, circle 270, and 90.00277778 and
+    // 90.00555556 on 0004. Here 0002 has no coordinates, so nothing but the
+    // file's azimuth orients the setup ([SETX] 29.2.6, A = H + BKB azimuth
+    // - BKB h.obs). Never observed, 0002's h.obs is the 07's circle: 0004 is
+    // at azimuth 90.00555556 + 269.99722222 - 270. Observed at 270.00138889
+    // (5" off the circle), the setup's own reading stands in: azimuth
+    // 90.00555556 + 269.99722222 - 270.00138889. Feet, 0003 keyed at N
+    // 0.005 E 200.005.
+    const auto job = [](bool observed) {
+        std::vector<std::string> records = {
+            "00NM" + f16("SDR20 V03-05") + "0000" + f16("06-Jan-80 00:23") + "122211",
+            "10NM" + f16("TRAVERSE"),
+            "08KI0003" + f10("0.005") + f10("200.005") + f10("0.010"),
+            "01NM1" + field("", 16) + "000000" + field("", 16) + "000000" + "3" + "1" + f10("") +
+                f10("") + f10("0.000"),
+            "02TP0003" + f10("0.005") + f10("200.005") + f10("0.010") + f10("0.000"),
+            "07TP00030002" + f10("269.997222") + f10("270.000000"),
+            "03NM" + f10("0.000")};
+        if (observed) {
+            records.push_back("09F100030002" + f10("") + f10("") + f10("270.001389"));
+        }
+        records.push_back("09F100030004" + f10("100.008") + f10("90.002778") + f10("90.005556"));
+        std::string text;
+        for (const std::string& record : records) {
+            text += record + "\n";
+        }
+        return text;
+    };
+    for (const bool observed : {false, true}) {
+        SCOPED_TRACE(observed);
+        const auto result = readText(job(observed));
+        ASSERT_TRUE(result.ok()) << result.error().describe();
+        const auto outcome = reduced(result->project);
+        ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+        const double onBacksight = observed ? 270.001389 : 270.0;
+        const double azimuth = degrees(90.005556 + 269.997222 - onBacksight);
+        const double horizontal = 100.008 * std::sin(degrees(90.002778)) * 0.3048;
+        expectAt(*outcome, "0004", 0.005 * 0.3048 + horizontal * std::cos(azimuth),
+                 200.005 * 0.3048 + horizontal * std::sin(azimuth));
+        ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
+        EXPECT_NEAR(*outcome->report.setups[0].orientationCorrection,
+                    degrees(269.997222 - onBacksight), 1e-12);
+    }
+}
+
+TEST(SokkiaSdr, ABacksightRecordWithNoCircleOnABacksightNeverObservedSaysOnlyCoordinatesOrientIt)
+{
+    const auto result = readText(file({header33(), instrument33(), setupOnP1(), "03NM" + f16("1.5"),
+                                       "07NM" + f16("P1") + f16("RO") + f16("45.0") + f16(""),
+                                       shot("F1", "T", "10.0")}));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_TRUE(warned(*result, 5, "has no observation of its backsight 'RO'; the backsight "
+                                   "record gives no circle reading on it either"));
+    EXPECT_FALSE(setupAt(result->project, 0).backsightAzimuth.has_value());
+}
+
+TEST(SokkiaSdr, AKeyedAzimuthToAPointTheSetupNeverObservesCannotOrientIt)
+{
+    const auto result = readText(file({header33(), instrument33(), setupOnP1(),
+                                       "11KI" + f16("P1") + f16("RO") + f16("45.0"),
+                                       "03NM" + f16("1.5"), shot("F1", "T", "10.0")}));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_TRUE(warned(*result, 4, "has no backsight record, and it does not observe 'RO', the "
+                                   "point of the azimuth keyed here; the reduction cannot orient "
+                                   "it"));
+    EXPECT_EQ(setupAt(result->project, 0).backsightPointId, "RO");
 }
 
 TEST(SokkiaSdr, ASetupThatNeverObservesItsBacksightSaysSo)
@@ -1860,6 +2555,48 @@ TEST(SokkiaSdr, TransmissionFramingIsNotARecordAndItsChecksumIsKept)
     EXPECT_EQ(result->project.metadata.at("transmission checksum"), "12345");
 }
 
+TEST(SokkiaSdr, ALastRecordWithNoLineEndIsReadAndSaidToBePerhapsCutShort)
+{
+    // [SDR] chapter 3 ends every record with CR LF. A transfer cut inside
+    // the last record leaves a real that is still a number - 1.6 of 1.65
+    // here - so the read says the file may have been cut.
+    std::string cut = file({header33(), setupOnP1(), "03NM" + f16("1.65")});
+    cut.resize(cut.size() - 14); // the line end, the 12 blanks padding the field, and the 5
+    ASSERT_TRUE(cut.ends_with("03NM1.6"));
+    const auto result = readText(cut);
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->recordsRead, 3u);
+    EXPECT_TRUE(warned(*result, 3, "the file ends inside this record, with no line end after it"));
+    // With its line end, or with framing after it, the last record is whole.
+    for (const std::string& whole :
+         {file({header33(), setupOnP1(), "03NM" + f16("1.65")}),
+          file({header33(), setupOnP1(), "03NM" + f16("1.65")}) + "\x1a",
+          file({header33(), setupOnP1(), "03NM" + f16("1.65")}, "\r\n") + "\x03" "12345"}) {
+        const auto read = readText(whole);
+        ASSERT_TRUE(read.ok()) << read.error().describe();
+        EXPECT_EQ(warningsWith(*read, "no line end"), 0u);
+    }
+}
+
+TEST(SokkiaSdr, EveryDeletionMarkIsSteppedOverAndALongRunIsQuotedByItsLength)
+{
+    // A record type is two digits, so every leading D is part of the mark:
+    // "DDD" is reported as written, with the record it deletes named, and a
+    // run of twenty by its length rather than twenty D's in the reply.
+    const std::string record = shot("F1", "P2", "0.0");
+    const auto result = readText(file({header33(), setupOnP1(), "DDD" + record,
+                                       std::string(20, 'D') + record, "D" + record}));
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->recordsSkipped, 3u);
+    EXPECT_TRUE(warned(*result, 3, "a deleted record (marked 'DDD'), 09F1 (observation), is not "
+                                   "imported"));
+    EXPECT_TRUE(warned(*result, 4, "a deleted record (marked with a run of 20 D's), 09F1 "
+                                   "(observation), is not imported"));
+    // One D is no mark: the line is not a record.
+    EXPECT_TRUE(warned(*result, 5, "is not a record"));
+    EXPECT_TRUE(setupAt(result->project, 0).observations.empty());
+}
+
 TEST(SokkiaSdr, ADosEndOfFileMarkIsFramingAndOtherControlBytesAreShownInTheirWarning)
 {
     // A file copied through MS-DOS ends in Ctrl-Z (0x1A): not a record, and
@@ -1906,10 +2643,14 @@ TEST(SokkiaSdr, TimeStampsInTheFieldBooksOwnFormsAreRead)
 TEST(SokkiaSdr, ADayThatIsNotInItsMonthDatesNothing)
 {
     // February has no 31st, and no 29th in 2023 or 1900 (divisible by 100,
-    // not by 400): each is kept as a note and dates no setup.
+    // not by 400): each is kept as a note and dates no setup. Nor is there a
+    // day 271 or a month 257, which a calendar keeping a byte of each would
+    // take for the 15th and January.
     for (const char* text : {"Time Date 02/31/2022 Time 10:00:00", "31-Feb-99 10:00",
                              "Feb-31-99 10:00", "Time Date 02/29/2023 Time 10:00:00",
-                             "Time Date 02/29/1900 Time 10:00:00", "31-Apr-21 08:00"}) {
+                             "Time Date 02/29/1900 Time 10:00:00", "31-Apr-21 08:00",
+                             "Time Date 02/271/2022 Time 10:00:00",
+                             "Time Date 257/15/2022 Time 10:00:00", "271-Feb-22 10:00"}) {
         SCOPED_TRACE(text);
         const auto result = readText(file({header33(), setupOnP1(), "13TS" + std::string(text)}));
         ASSERT_TRUE(result.ok()) << result.error().describe();

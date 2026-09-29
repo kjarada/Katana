@@ -180,7 +180,7 @@ extension.
 |---|---|---|---|---|
 | Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
 | Opcode field file (`opcode-field-file`): `.fld`, first line `{Version 6.0}`, tab-separated records opening with a numeric opcode | yes | no | 1.0 | opcodes 02, 03, 04, 05, 06, 07, 09, 29, 41, 72, 73, 100 and -2 read; every other opcode skipped with a warning naming it; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
-| Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning, a setup with nothing else said to have lost its shots; units from the header - an undefined angle or distance unit refused, an undefined pressure or temperature unit warned about and not read; coordinates east first under the header's option 2, with a warning that a Sokkia field book may write them north first; declares no coordinate system |
+| Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning, a shot with no raw twin said to be lost; units from the header - an undefined angle or distance unit refused, an undefined pressure or temperature unit warned about and not read, a `13DU` followed; coordinates in the header's order (1 N-E-Elev, 2 E-N-Elev; Trimble's 3 east first, with a warning), a point's latest kept; collimation (04) applied per face; declares no coordinate system |
 
 The matrix lists the formats that have a section in this file. The other
 readers on main - Leica GSI, TDS RW5, Topcon GTS-7 (GTS-6 recognised only),
@@ -299,15 +299,17 @@ It is read from Sokkia's "Interfacing with the SOKKIA SDR Electronic Field
 Book" (software 04-04.xx, October 1999): the example jobs of chapter 2, the
 record layouts of section 3.6.2 (SDR33: point names in 16 columns, reals of
 16) and 3.6.1 (SDR2x: 4-digit point numbers, reals of 10), the field types
-of 3.1 to 3.3, the derivation codes of 3.4 and the options of 3.5. What a
-record means comes from Sokkia's SDR Software Reference Manual (SETX),
-sections 3.5.6, 5, 8.2, 28 and 29, and its SDR Level 5 manual, appendices A
-and B; what other programs write into the format, from Trimble's published
-"SDR33 Observations.xsl" and the SDR columns in Nikon's DTM-322 manual and
-Spectra Precision's Focus 6 guide. The SDR2x layout is the SDR33 one with a
-narrower point id and real, less some fields (its JOB has no option flags,
-its SET no set number or marks), so one reader reads both, choosing by the
-header's version.
+of 3.1 to 3.3, the derivation codes of 3.4, the options of 3.5 and the
+sample files of chapter 4. What a record means comes from Sokkia's SDR
+Software Reference Manual (SETX), sections 3.5.6, 5, 8.2, 28 and 29, its SDR
+Level 5 manual, appendices A and B, and its ProLINK manual, 6.1.3.2 (how its
+office program finds a point's coordinates); what other programs write into
+the format, from Trimble's published "SDR33 Observations.xsl", the SDR
+columns in Nikon's DTM-322 manual and Spectra Precision's Focus 6 guide, and
+the LISCAD help page on Sokkia field codes (how a set collection is
+bracketed). The SDR2x layout is the SDR33 one with a narrower point id and
+real, less some fields (its JOB has no option flags, its SET no set number
+or marks), so one reader reads both, choosing by the header's version.
 
 Read: the header's units (degrees, gons or mils; metres, feet or US survey
 feet, `13DU` included; mmHg, inHg or mbar; Celsius or Fahrenheit) and its
@@ -315,7 +317,7 @@ coordinate order; the job's name and correction switches; the instrument
 (model, serial number, prism constant, zenith or horizon vertical
 readings); weather and scale factor for the setup they are written before;
 setups (02) with their instrument heights; target heights (03); collimation
-(04, kept, since a face pair cancels it); backsights (07); coordinates (08,
+(04, applied to the readings after it); backsights (07); coordinates (08,
 and a 02's); raw face 1, face 2 and multiple-distance observations (09 F1,
 F2, MD) as pointings of a direction, a zenith and a slope distance; an
 azimuth keyed with no distance (11); sets (12); notes (13), a time stamp
@@ -337,25 +339,36 @@ the circle; the reader fills both. The reduction orients a setup on the
 backsight's coordinates when it has them, as before (and with no reading on
 the backsight, less the circle); where nothing places the backsight it takes
 the stated azimuth - waiting, as it does for the circle, in case a later
-setup places the backsight - less the setup's own reading on the backsight,
-or with none less the circle: SETX 29.2.6's A = H + BKB azimuth - BKB h.obs.
-Only failing both does the circle stand in for the grid azimuth. Rejected:
-keeping one field and storing the circle there, which rotates every bearing
-of an SDR setup whose circle was zeroed on a backsight with no coordinates
-(Sokkia's chapter 4 sample: azimuth 14, circle 0); and renaming the field,
-which touches every reader for no change in meaning.
+setup places the backsight - less the setup's own mean reading on the
+backsight, or with none less the circle. That is SETX 29.2.6's A = H + BKB
+azimuth - BKB h.obs with the setup's readings standing in for the h.obs where
+there are any: for one backsight the two differ by the pointing error of its
+rounds, which the mean of all of them shares out (and Trimble's writer puts
+the face 1 reading in h.obs while its azimuth comes from the face mean, so
+the mean is the better of the two there); for a back-bearing record SETX
+8.2.2 averages over several backsights, whose h.obs is computed rather than
+read, they differ by that averaging - 1.8" in a reviewer's case - since the
+reduction orients on the one backsight the record names. Only failing both
+does the circle stand in for the grid azimuth. The reduced project keeps both
+numbers. Rejected: keeping one field and storing the circle there, which
+rotates every bearing of an SDR setup whose circle was zeroed on a backsight
+with no coordinates (Sokkia's chapter 4 sample: azimuth 14, circle 0); and
+renaming the field, which touches every reader for no change in meaning.
 
 Decisions that are the reader's own, each stated in the source:
 
 - **`DD` marks a deleted record.** No published document describes the
   prefix. After it (or after `DDDD`) every such line in the owner's file is a
-  complete record, and a record type is two digits, so the prefix cannot open
-  a live one; the two blocks that carry it are setups begun and abandoned,
-  each redone under the next live `02`. A deleted record is skipped, named in
-  a warning, and changes nothing after it: a deleted `03` sets no target
-  height, a deleted `02` begins no setup. Rejected: reading it as live, which
-  restarts a setup the surveyor abandoned, and passing over it without a
-  word, which the skipped count would then not show.
+  complete record, and a record type is two digits, so a D cannot open a
+  live one: every leading D is part of the mark, and a warning quotes it as
+  written (a run longer than eight by its length, so a line of two million
+  D's is not a two-megabyte reply). The two blocks that carry it are setups
+  begun and abandoned, each redone under the next live `02`. A deleted
+  record is skipped, named in a warning, and changes nothing after it: a
+  deleted `03` sets no target height, a deleted `02` begins no setup.
+  Rejected: reading it as live, which restarts a setup the surveyor
+  abandoned, and passing over it without a word, which the skipped count
+  would then not show.
 - **One setup per `02`, its rounds together.** The owner's file observes each
   setup in six rounds, each opened by a `07` to the same backsight at the same
   azimuth; they are one setup, and the reduction means them face pair by face
@@ -366,23 +379,54 @@ Decisions that are the reader's own, each stated in the source:
   next). The minute: the round-to-round spread in the owner's file is 6" at
   most, and a circle moved between rounds on purpose moves by degrees.
   Merging is exact when every round observes the same targets, as every
-  setup of the owner's file does (a reviewer's reduction of it round by
-  round agrees to 0.000"); a target a round missed is oriented on the mean of
-  all the rounds, off by at most half their spread. Rejected: a new setup at
-  every `07`, as the RW5 reader does for a repeated backsight - never wrong,
-  but the reduction then places a target from the first round and takes the
-  other five as checks, and a traverse adjustment sees 246 setups for 41
-  stations.
-- **A `07` after a set's observations closes that set.** Sokkia's Set
-  Collection writes each set's back-bearing (`07 SC`) after the set, its
-  circle the mean of the set's readings on the backsight (chapter 2's V04-01
-  example: face 1 0-00'00", face 2 180-00'30", BKB 0-00'15"). So a `07` read
-  after a `12` and its observations, with no `07` between, orients those
-  observations: when it begins a new setup (the circle was moved between
-  sets), the set's observations go with it, their pointings numbered anew.
-  Rejected: splitting at the `07`, which left each moved set in the setup
-  before it and an empty setup after, with a false "no observation of its
-  backsight" warning.
+  setup of the owner's file does; a target a round missed is oriented on the
+  mean of all the rounds, off by at most half their spread. Rejected: a new
+  setup at every `07`, as the RW5 reader does for a repeated backsight -
+  never wrong, but the reduction then places a target from the first round
+  and takes the other five as checks, and a traverse adjustment sees 246
+  setups for 41 stations.
+- **Set Collection's `07 SC` closes the set before it; any other `07` orients
+  what follows.** Sokkia's Set Collection writes each set's back-bearing
+  after the set, its circle the mean of the set's readings on the backsight
+  (chapter 2's V04-01 example: face 1 0-00'00", face 2 180-00'30", BKB
+  0-00'15"). So a `07 SC` read after a set's observations, with no `07`
+  between, orients them: when it begins a new setup (the circle was moved
+  between sets), the set's observations go with it, their pointings
+  numbered anew. Rejected: splitting at the `07`, which left each moved set
+  in the setup before it and an empty setup after; and letting any `07`
+  close a set, the reader's first rule, which took a plain `07` opening the
+  next round (after `12` and its shots) for the set's close and turned the
+  set's shots by the circle's move.
+- **Where a set's `12` stands depends on the layout.** Chapter 2: "The
+  standard SDR33 format [writes] a SET record before the raw observations";
+  from V04-02 on, a job with 4-digit point numbers - the SDR2x layout -
+  writes it after them, before the MC records ("the SET record precedes the
+  MC records for SDR2x format compatibility"), and LISCAD reads that order
+  (a set begun at the field book's "13SC Set #" note, completed by its
+  `12SC`). So in the SDR2x layout a `12` read after raw observations of its
+  setup closes the set they make - those since the setup began, its last
+  `07` or `12`, or a "Set #" note, the last of them as many as the `12`'s
+  count where it states one - and a `12` with none before it opens its set,
+  as V04-01 wrote it. The `07 SC` after the MC records then orients that set.
+  Rejected: taking every `12` as opening its set, the reader's first rule,
+  which read chapter 2's garbled sentence as "an SDR2x set collection from
+  V04-02 on stores only MC records" - its V04-03 paragraph says the SET
+  record precedes the MC records - and, where the circle moved between sets,
+  left the second set on the first's orientation, its directions off by
+  half the move with only a misleading warning.
+- **A setup's first `07` orients shots before it only when one of them is of
+  its backsight.** That is Trimble's writer's order: it writes the field
+  book's records in order, and a back-bearing record holds the face 1 circle
+  reading of the backsight's shot, so it follows that shot. Otherwise the
+  `07` orients what follows it (SETX 8.2): the shots before it were taken on
+  no orientation it gives, so they stay a setup of their own - oriented by a
+  keyed azimuth, or read as azimuths (next) - and the `07` begins a new setup
+  on the point, with a warning. The same holds for the shots before a set
+  that a first `07 SC` closes. Rejected: orienting the whole setup, the
+  reader's first rule, which turned such shots by the `07`'s circle without a
+  word and let a later `07` override a keyed azimuth for the shots it had
+  oriented; and splitting at every first `07` after shots, which would cut
+  Trimble's backsight shot from the record made from it.
 - **A setup with no `07` is oriented by a keyed azimuth, or reads azimuths.**
   An `11` with an azimuth and no distance from the setup's point is a keyed
   orientation, and a setup with no back-bearing record is oriented by the
@@ -390,48 +434,72 @@ Decisions that are the reader's own, each stated in the source:
   that, and its printed positions (the same job in POS view) follow A = H +
   the keyed azimuth - the reading on that point, to the printed 0.001 ft
   (`SokkiaSdr.ASetupWithNoBacksightRecordIsOrientedByItsKeyedAzimuth`
-  reduces it). A
-  setup with neither takes its readings as azimuths, as the field book does
-  when the backsight is skipped (SETX 8.2.1); in the model that is a circle
-  with no backsight named, which the reduction takes as set to azimuths and
-  says so. Rejected: leaving such setups unoriented, which drops every shot
-  of Sokkia's own example.
+  reduces it). A setup with neither takes its readings as azimuths, as the
+  field book does when the backsight is skipped (SETX 8.2.1); in the model
+  that is a circle with no backsight named, which the reduction takes as set
+  to azimuths and says so. Rejected: leaving such setups unoriented, which
+  drops every shot of Sokkia's own example.
 - **A bad set is as long as its count.** A `12` whose bad marker is 2 is
   not used, and its raw observations are skipped - as many as the record's
   "count of observations" (chapter 2's example counts 4 for its four `09`
   records), or, where it states none, up to the next set or setup. Rejected:
   always up to the next set or setup, which took the shots after a bad set
   for part of it.
+- **The collimation is applied, per face.** A `04`'s corrections apply to
+  every raw reading after it, until the next `04`, as SETX 29.2.5 applies
+  them: face 1 plus the vertical and horizontal correction, face 2 minus, a
+  reading with no vertical angle taken as face 1 (SETX 29.2.3). A face
+  pair's mean is unchanged, so a round on both faces reduces as before and
+  its faces now agree; a shot on one face moves (17.45 mm at 100 m for a 36"
+  correction). The field book corrects the zenith after the instrument and
+  target heights, the reader before them, which differs by at most the
+  correction times the height difference over the distance (0.01" for 10"
+  and 0.1 m at 100 m). The setup's metadata names the record applied.
+  Rejected: keeping it in metadata only, the reader's first rule, whose
+  reason - a face pair cancels it - holds only where every target is paired,
+  not for the common single-face side shot; and a collimation field in the
+  model for the reduction to apply, which no other reader has a value for.
 - **Whether the distances carry the atmospheric correction is Unknown.**
   Sokkia's field book applies it as each distance is accepted when the job's
   switch is on (the Level 5 manual, appendix B); Trimble's writer turns the
-  switch on and writes distances without it. The reduction then applies none
-  and says so, and Recompute or Fixed applies one from the recorded weather
-  (mmHg and inHg converted by the conventional values of NIST SP 811).
-  Rejected: Applied (Sokkia's rule) or NotApplied (Trimble's), either silently
-  wrong for files from the other writer. What it is worth on the owner's
-  file: recomputed from its weather, 6.7 to 10 ppm, moving the far end of the
-  traverse by 16.4 mm (a reviewer's reduction with the first station held) -
-  so a person whose distances are raw must choose Recompute.
+  switch on whenever it writes weather and writes distances without it. The
+  reduction then applies none and says so, and Recompute or Fixed applies
+  one from the recorded weather (mmHg and inHg converted by the conventional
+  values of NIST SP 811). Where the file's time stamps are in Trimble's
+  writer's form ("Time Date MM/DD/YYYY"), what the file did not carry says so
+  and that Recompute then applies the correction; the owner's file is such a
+  file, and its notes and job flags are that writer's too. Rejected: Applied
+  (Sokkia's rule) or NotApplied (Trimble's), either silently wrong for files
+  from the other writer - the time stamps point to a writer, they do not
+  prove it. What it is worth on the owner's file: from its weather (981.4 to
+  997.7 hPa, 9.9 to 17.0 C, 60 % humidity assumed) the IUGG 1999 group
+  refractivity at the reduction's 658 nm gives 4.3 to 12.6 ppm across its 41
+  setups, worked independently of Katana's code. Reduced with its first
+  station held at an assumed position (N 6 250 000, E 300 000), the far end
+  of the traverse, 18236, moves 16.4 mm between the default and Recompute
+  (161512 16.1 mm; measured with this round's build) - so a person whose
+  distances are raw must choose Recompute.
 - **The prism constant is in the distances**, the instrument record's value
   in millimetres: the field book applies it on acceptance, and Trimble's
   writer adds the target's constant to each distance and writes 0 there.
   Trimble's writer puts the instrument's serial number in the EDM
   description field; it is kept as that field's text (`instrument: EDM`).
-- **Option 45 is read as the coordinate order, and said to be doubtful.**
-  The writers disagree. Trimble's writer puts the easting first under 2 and
-  under its own 3. Sokkia's record layout (3.6.2) names 21-36 the northing
-  and 37-52 the easting and calls option 45 the "Coord prompt option", its
-  SETX manual (3.5.6) says the setting is "the order in which they are
-  displayed", and Nikon's manual calls it the coordinate order while its
-  tables name the columns as Sokkia does. The one writer whose output can
-  be read in full puts the easting first, so under 2 or 3 that is the
-  reading, and the first record that states coordinates warns that a file
-  from a Sokkia field book may hold the northing first. Rejected: north
-  first (every Trimble-written file's control transposed); refusing the
-  coordinates (every Trimble-written file's control lost); telling north
-  from east by magnitude (a guess). A file that states coordinates under an
-  option other than 1, 2 or 3 is refused.
+- **Option 45 is the coordinate order the format defines.** Sokkia's 3.5
+  gives 1 "N-E-Elev" and 2 "E-N-Elev"; 3.6.2 names 21-36 the northing and
+  37-52 the easting, which is option 1's order. Under 2 the easting comes
+  first: Sokkia's own E-N-Elev example (chapter 2, V04-04.30) stores in the
+  displayed order - its HORZADJ translation printed as "Trans.N" is the
+  easting's, since only that reading takes its GSTN 1005 to its printed POS
+  1005, to 0.1 mm where the other is 5.5 cm off - and Trimble's writer puts
+  the easting first under 2. Trimble's 3, "Y-X-Z", is east first too and read
+  so, with a warning: Sokkia does not define 3, and SETX 3.5.6 lists
+  south-west-elevation as the field book's third display order. The order
+  read is in the project's metadata (`header: coordinate order`). A file
+  that states coordinates under another option is refused. Rejected: a
+  warning under option 2 that a Sokkia field book may write the northing
+  first, which the reader gave after its first review - Sokkia's own example
+  shows it does not; north first (every Trimble-written file's control
+  transposed); telling north from east by magnitude (a guess).
 - **Angle option 4 is mils in the Nikon form and degrees otherwise.** Sokkia
   defines 1 to 3. Nikon's and Spectra's manuals give 4 as mils, in headers
   written with no blank before the version ("SDR33V04-01"); Trimble's writer
@@ -442,113 +510,179 @@ Decisions that are the reader's own, each stated in the source:
   which is warned about record by record. A header in the Nikon form also
   takes the refraction constant option 1 as Nikon's 0.132, not Sokkia's
   0.14.
-- **Coordinates keyed in (KI) are Entered**, an `08 TP` FieldObserved, `08
-  AJ`, `TV` and `RS` Calculated, any other Unknown; the first coordinates a
-  point is given are kept, the builder's rule, although the field book's is
-  that the latest win: control is stated before it is observed, and a later
-  position is a check, which the builder warns about and keeps in the
-  point's metadata. A file whose only later coordinates are an adjustment's
-  (`08 AJ`) therefore keeps the unadjusted ones, with that warning.
-- **Derived views are not imported.** A `09 MC` is the field software's
-  reduction of raw observations - oriented, and reduced for the heights,
-  the prism constant, the weather and curvature and refraction - and an
-  `11` with distances further for scale and sea level (SETX 5 and 29.1).
-  Beside the raw observations of their setup they would count them twice.
-  On their own - a field book set to send the MC or RED view (2.1), an SDR2x
-  set collection from V04-02 on (chapter 2: only MC records stored), or a
-  Nikon or Spectra instrument, whose only observation record is `09MC` - the
-  writers disagree about what the numbers are: Sokkia's MC is a mark-to-mark
-  vector already oriented and corrected, Trimble's the inverse of computed
-  grid coordinates, Nikon's "slope distance, vertical angle, horizontal
-  angle" with target heights in `03` records beside them. So they are
-  skipped, each with the reason, and a setup that had no raw observation is
-  said to have lost its shots, in the warning and in what the file did not
-  carry. Rejected: importing them on one writer's meaning, which would put
-  another writer's points in the wrong place without a word.
+- **A point's latest coordinates are its own.** Coordinates keyed in (KI)
+  are Entered, an `08 TP` FieldObserved, `08 AJ`, `TV` and `RS` Calculated,
+  any other Unknown; a point given coordinates more than once keeps the
+  latest, the field book's own rule (Sokkia's 2.3: "the latest coordinates
+  are the best"; ProLINK 6.1.3.2 searches from the end of the field book
+  for a point's POS, STN or POS-view record). A traverse adjustment's `08 AJ`
+  follows the positions it adjusts, and a later `02` restates the station as
+  the field book held it then. The earlier coordinates stay in the point's
+  metadata, each change warned about; the same coordinates again say
+  nothing. The shared builder gained the choice
+  (`RawProjectBuilder::RestatedCoordinates`); the RW5, GTS-7 and field-file
+  readers keep the first, their formats' later positions being checks.
+  Rejected: keeping the first, the reader's first rule, which imported
+  chapter 2's traverse with its stations unadjusted beside side shots
+  computed from the adjusted ones.
+- **A height with no position is kept.** An `08` or `02` that gives an
+  elevation and no northing or easting cannot place its point; the height
+  goes to the point's metadata (`height without a position`, as the GSI
+  reader keeps one) with a warning. With the job's "Record elev" No an
+  elevation is a placeholder (SETX 4) and is not kept.
+- **Derived views are not imported, and a shot with no raw twin is said to
+  be lost.** A `09 MC` is the field software's reduction of raw observations
+  - oriented, and reduced for the heights, the prism constant, the weather
+  and curvature and refraction - and an `11` with distances further for
+  scale and sea level (SETX 5 and 29.1). Beside a raw observation of the
+  same line in its setup they would count it twice. Without one - a field
+  book set to send the MC or RED view (2.1), an MC of a target its setup
+  never observed raw, a RED from another point, or a Nikon or Spectra
+  instrument, whose only observation record is `09MC` - the writers
+  disagree about what the numbers are: Sokkia's MC is a mark-to-mark vector
+  already oriented and corrected, Trimble's the inverse of computed grid
+  coordinates, Nikon's "slope distance, vertical angle, horizontal angle"
+  with target heights in `03` records beside them. So they are skipped, each
+  with the reason, and a shot with no raw twin is said to be lost, in its
+  warning and in what the file did not carry. Rejected: importing them on
+  one writer's meaning, which would put another writer's points in the
+  wrong place without a word; and deciding by whether the setup held any
+  raw observation, the rule after the first review, which called an MC of
+  an unobserved target "counted twice" and left its shot out of the count
+  of lost ones.
 - **A point id holding a control byte is line noise**, not a name: its
   record is skipped, naming the byte (`\x01`). Rejected: blanking it, which
   made two different corrupt ids one point, placed at neither.
 - **One stray line does not cost the file.** A second header record with no
-  version, or too short to have one, and a `13DU` with no code or one the
-  format does not define, are skipped with a warning - the first header's
-  units hold. A second header that states other units is still refused:
-  every number after it would mean something else. Trailing white space
+  version, or too short to have one, or of a version the reader does not
+  read, and a `13DU` with no code or one the format does not define, are
+  skipped with a warning - the first header's units hold. A second header
+  that states other units is still refused: every number after it would
+  mean something else. A `13DU` that disagrees with the header is followed,
+  with a warning: Sokkia's 3.3.2 has it govern "all distances specified
+  after this Note record" (it was refused at first). Trailing white space
   after the header's options (a tab included) is padding; an STX glued to
   the first record is framing; a line of DOS end-of-file marks (Ctrl-Z) is
-  passed over; any other control byte a warning quotes is written `\xNN`.
+  passed over, by the reader and by detection alike; any other control byte
+  a warning quotes is written `\xNN`.
+- **A last record with no line end is said to be perhaps cut short.**
+  Sokkia's chapter 3 ends every record with CR LF. A transfer cut inside
+  the last record leaves a real that is still a number (88.7 of
+  88.7450058), so the record is read and the read says the file may have
+  been cut there.
 
 The owner's file, read on 2026-09-30 (a local check; the file is not in the
 repository): 4 206 records read - every line but 101 blank ones and the 14
 deleted - and 14 skipped, each warning naming its deleted record; 41 setups
 (two points occupied twice), 6 372 observations: 2 124 pointings, 1 062 on
 each face, each a direction, a zenith and a slope distance; 42 points, none
-with coordinates - the file gives none, so its coordinate order option (2)
-is never used and not warned about - and one coded feature. `SURVEY IMPORT`
-therefore draws nothing: its 47 warnings are 41 setups standing on points
-with no position, three face pairs outside the default 10" horizontal
-tolerance (11.0", 13.5" and 14.8", the file's own), two about the
-atmospheric correction, and the 42 named points that are not drawn. The
-file declares no coordinate system, so none applies until the person states
-one (wizard step 4, or `CRS SET` for the drawing); nothing is transformed.
-Given coordinates for its first station in a scratch copy, the first setup
-oriented by its `07`'s azimuth less its reading on the backsight, the
-reduction places all 42 points, within 0.057 mm of an independent reduction
-of the same copy by a separate script that reads the published columns. The
-owner's four other files read and import exactly as before, and so do the
-other formats' fixtures.
+with coordinates - the file gives none, so its coordinate order (option 2,
+in the metadata) is never used - and one coded feature. After this round's
+changes a full dump of the read project is byte for byte the one before,
+but for the atmospheric note (which now says the file's time stamps are
+Trimble's writer's) and the coordinate order's metadata: the file has no
+`04`, no `12`, no MC or RED record, no restated coordinates and no shot
+before a setup's first `07`. `SURVEY IMPORT` therefore draws nothing: its
+47 warnings are 41 setups standing on points with no position, three face
+pairs outside the default 10" horizontal tolerance (11.0", 13.5" and 14.8",
+the file's own), two about the atmospheric correction, and the 42 named
+points that are not drawn. The file declares no coordinate system, so none
+applies until the person states one (wizard step 4, or `CRS SET` for the
+drawing); nothing is transformed. Given coordinates for its first station
+in a scratch copy, the first setup oriented by its `07`'s azimuth less its
+reading on the backsight, the reduction places all 42 points, within 0.057
+mm of an independent reduction of the same copy by a separate script that
+reads the published columns. The owner's four other files read and import
+exactly as before, and so do the other formats' fixtures.
 
 Tests: `tests/surveyio/test_sokkia_sdr.cpp`, on the hand-built
 `tests/surveyio/data/sdr/traverse.sdr` (its second setup's circle zeroed on
 a backsight whose azimuth is 270) and records written in the test - among
-them Sokkia's own chapter 2 example, reduced to its printed positions;
-`Reduction.ASetupWhoseBacksightNothingPlacesIsOrientedOnTheAzimuthTheFileStatesNotTheCircle`,
-`Reduction.WithNoReadingOnTheBacksightTheCircleSetOnItIsWhatTheAzimuthIsTakenFrom`
-and
-`Reduction.AStatedAzimuthOnABacksightWithNoPositionYetWaitsForTheBacksightsCoordinates`
-for the stated azimuth, and
+them Sokkia's own chapter 2 examples: the OBS-view job reduced to its
+printed positions, the traverse's `POS AJ` records kept over the positions
+before them, and its `BKB TP 0003-0002` (azimuth 269-59'50", circle
+270-00'00") orienting a shot less the circle, and less a reading 5" off it;
+the SDR2x set layout with the circle moved between sets; each order of shots
+and first backsight record; the collimation on each face.
+`Reduction.AStatedAzimuthIsTakenLessTheSetupsReadingOnTheBacksightNotLessTheCircle`
+and `Reduction.WithNoReadingOnTheBacksightTheStatedAzimuthIsTakenLessTheCircleSetOnIt`
+pin the orientation with a reading and a circle that are not zero (the
+earlier tests subtracted zero, so they could not tell the rules apart),
+beside
+`Reduction.ASetupWhoseBacksightNothingPlacesIsOrientedOnTheAzimuthTheFileStatesNotTheCircle`
+and `Reduction.AStatedAzimuthOnABacksightWithNoPositionYetWaitsForTheBacksightsCoordinates`;
 `SurveyProjects.AStatedBacksightAzimuthThatIsNotFiniteIsRejectedAndAFiniteOneIsKeptApart`
-for its validation; `cli.survey_read_sokkia_sdr` and `cli.survey_import_sokkia_sdr`,
-whose positions are worked by hand in `src/katana_app/CMakeLists.txt`;
-`McpServer.AnAgentReadsAndImportsASokkiaSdrFile`; and the wizard's content
-step, which lists the fixture's two setups. The truncation-and-noise test
-the raw readers share now fails on an `Internal` error: `readSurvey` turns
-a reader's exception into one, so it had passed with a reader that threw
-(it did, on a `00` line two characters long). The Survey Controller probe
-(`src/katana_surveyio/trimble_dc.cpp`) steps aside for an SDR header with
-any derivation code, not only `NM`: Sokkia allows `ED` as well, and such a
-file named `.dc` was claimed at 0.5. The probe identifies a file by its
-header: 0.8 on the header alone, 0.95 (0.98 named `.sdr`) when at least
-nine in ten of its first 200 lines are record-shaped - a judgement, leaving
-room for a damaged stretch the reader skips line by line. No other format writes that
-header, so a file with odd lines in it is still identified; it was 0.6, and
-refused without FORMAT.
+validates the field; `cli.survey_read_sokkia_sdr` and
+`cli.survey_import_sokkia_sdr`, whose positions are worked by hand in
+`src/katana_app/CMakeLists.txt` to the micrometre (with the reduction's
+refraction coefficient, 0.13, named); `McpServer.AnAgentReadsAndImportsASokkiaSdrFile`;
+and the wizard's content step, which lists the fixture's two setups. The
+truncation-and-noise test the raw readers share fails on an `Internal`
+error: `readSurvey` turns a reader's exception into one, so it had passed
+with a reader that threw (it did, on a `00` line two characters long). The
+Survey Controller probe (`src/katana_surveyio/trimble_dc.cpp`) steps aside
+for an SDR header with any derivation code, not only `NM`: Sokkia allows
+`ED` as well, and such a file named `.dc` was claimed at 0.5. The probe
+identifies a file by its header: 0.8 on the header alone, 0.95 (0.98 named
+`.sdr`) when at least nine in ten of its first 200 lines are record-shaped
+- a judgement, leaving room for a damaged stretch the reader skips line by
+line. No other format writes that header, so a file with odd lines in it is
+still identified; it was 0.6, and refused without FORMAT.
 
 The wizard's Browse filter is built from the registry
 (`katana::qt::surveyFileFilter`) and the few patterns no format names
 (`.pnt`, `.xyz`, `.gt6`, `.x01`, RINEX 2's `.??o` and `.??d`); it had been a
 hand-written list that lacked `.fld`, `.gts`, `.gts7` and `.dat`.
 
-Not done: the transmission checksum is kept, not checked; `09 MC`, `11` with
-distances, and road, template, GPS and levelling records are not imported,
-so a file written in those views, an SDR2x set collection from V04-02 on,
-and a Nikon or Spectra instrument's file (its only observations are `09MC`)
-keep only their points and what is raw; the person cannot yet state the
-coordinate order of an option-2 file (the read options carry no
-format-specific setting), so a Sokkia field book's file written north first
-must be corrected after the import; the RW5, GTS-7, JobXML and opcode
-field-file readers keep their files' backsight azimuths in metadata
-("backsight azimuth (radians)") rather than in `statedBacksightAzimuth`,
-so a setup of theirs whose backsight has no coordinates is still oriented
-on its circle; the reader sets no limits on what a number may be - a
-distance of 10^16 m is read as one, and the other raw readers set none
-either, so a check belongs in the model or the reduction, for all of them;
-a file padded with NULs is not recognised, since detection's shared
-`looksLikeText` takes any NUL for binary (FORMAT sokkia-sdr reads it); an
-observation from a point other than the current setup's is skipped rather
-than begun as a setup; the EDM and reflector offsets of a non-coaxial
-instrument are warned about, not applied; notes are kept with their setup,
-not with the record before or after them, since writers of the format
-disagree which.
+Not done:
+
+- The transmission checksum is kept, not checked; a truncated file is
+  signalled only by a last record with no line end.
+- `09 MC`, `11` with distances, and road, template, GPS and levelling
+  records are not imported, so a file written in those views, and a Nikon or
+  Spectra instrument's file (its only observations are `09MC`), keep only
+  their points and what is raw. The header's Nikon form would tell such a
+  file apart, but what a Nikon `09MC` holds (a circle reading or an
+  oriented one, a zenith with the job's curvature and refraction in it or
+  not) is settled by no source here and no real file.
+- The stated azimuth of a backsight whose coordinates orient the setup is
+  not compared with the azimuth between the coordinates: the comparison
+  needs a tolerance with a source, and the field software's azimuth is
+  computed from the coordinates of its day (chapter 2's traverse differs by
+  10" from its own final ones).
+- An averaged back-bearing of several backsights (SETX 8.2.2) orients on the
+  named backsight's readings, not the record's computed h.obs.
+- The RW5 and field-file readers keep their files' backsight azimuths in
+  metadata (`backsight azimuth (radians)`), the GTS-7 reader its bearing
+  (`backsight bearing (radians)`), and the JobXML reader only the
+  controller's orientation correction (`jxl.orientationCorrection_deg`) -
+  none in `statedBacksightAzimuth`, so a setup of theirs whose backsight has
+  no coordinates is still oriented on its circle. Filling the field there
+  changes those readers' reductions and needs their own formats' checks.
+- The person cannot yet state the coordinate order of an option-3 file (the
+  read options carry no format-specific setting).
+- `SURVEY IMPORT` takes control only from the file, so on the command line
+  and through MCP a file with no coordinates, as the owner's is, places
+  nothing; the window's reduction options can take control from points on
+  the drawing. A control option for the verb is not done.
+- The reader sets no limits on what a number may be - a distance of 10^16 m
+  is read as one, and the other raw readers set none either, so a check
+  belongs in the model or the reduction, for all of them.
+- A file padded with NULs, or saved as UTF-16, is not recognised, since
+  detection's shared `looksLikeText` takes any NUL for binary (FORMAT
+  sokkia-sdr reads both).
+- An observation from a point other than the current setup's is skipped
+  rather than begun as a setup; the EDM and reflector offsets of a
+  non-coaxial instrument (the Level 5 manual's B.4.4) are warned about, not
+  applied; notes are kept with their setup, not with the record before or
+  after them, since writers of the format disagree which.
+- The mil is defined twice, here and in the GSI reader (`kTwoPi / 6400`),
+  and `survey/angles.hpp` has no mil conversion to share; lifting it waits
+  for the GSI work under way beside this one. The reader's calendar is the
+  standard library's (`std::chrono::year_month_day`, its month and day
+  ranges checked first, since those types keep only a byte); the RINEX
+  reader (`isLeapYear`, `daysInMonth`) and the subsurface delivery schema
+  still write the leap-year rule out themselves.
 
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 

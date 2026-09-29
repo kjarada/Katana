@@ -253,14 +253,33 @@ void RawProjectBuilder::positionPoint(std::string_view id, double northing, doub
         (!elevation || point.elevation == elevation)) {
         return;
     }
-    std::string restated = "N " + katana::core::formatExactReal(northing) + ", E " +
-                           katana::core::formatExactReal(easting);
-    if (elevation) {
-        restated += ", elevation " + katana::core::formatExactReal(*elevation);
+    const auto text = [](double n, double e, const std::optional<double>& z) {
+        std::string written =
+            "N " + katana::core::formatExactReal(n) + ", E " + katana::core::formatExactReal(e);
+        if (z) {
+            written += ", elevation " + katana::core::formatExactReal(*z);
+        }
+        return written;
+    };
+    const std::string restated = text(northing, easting, elevation);
+    const std::size_t earlier = point.positionRecord;
+    if (restated_ == RestatedCoordinates::LatestKept) {
+        point.metadata["coordinates of record " + std::to_string(earlier) + ", superseded"] =
+            text(point.northing, point.easting, point.elevation);
+        point.northing = northing;
+        point.easting = easting;
+        point.elevation = elevation;
+        point.coordinateSource = how;
+        point.positionRecord = record;
+        point.sourceRecord = record;
+        warn(record, "point '" + point.id + "' is given different coordinates here (" +
+                         restated + " m) from those of record " + std::to_string(earlier) +
+                         "; these, the latest, are kept, and those are in the point's metadata");
+        return;
     }
     point.metadata["coordinates restated at record " + std::to_string(record)] = restated;
     warn(record, "point '" + point.id + "' is given different coordinates here (" + restated +
-                     " m) from those of record " + std::to_string(point.positionRecord) +
+                     " m) from those of record " + std::to_string(earlier) +
                      "; the first are kept and these are in the point's metadata");
 }
 
