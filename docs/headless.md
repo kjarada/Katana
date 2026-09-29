@@ -161,6 +161,7 @@ imported (anything else), in order, before any step runs.
 | `--dataset-info FILE`, `--import-options FILE` | build GIS > Dataset Information or the GIS import dialog for FILE and grab it; for a DXF or a .12da the import dialog is File > Import's placement step (`docs/interop.md`, "Placing an import"). With steps, it is the target they start on, so `--fill vectorImportWhere=...`, `--press vectorImportPreview` and `--report vectorImportMatchCount` drive it (`qt_vector_import_dialog_previews_its_line_headless`). Its Import and Cancel are `<dialog>Run` and `<dialog>Cancel` (`vectorImportRun`, `rasterImportRun`, `pointCloudImportRun`); a pressed Run imports as the menu's accepted dialog does, through `MainWindow::finishImport` (`qt_vector_import_dialog_imports_what_its_filter_takes_headless`) |
 | `--check-shortcuts` | fail the run when a key reaches more than one thing (`desktop.md`, "Every key reaches one thing") |
 | `--check-menus` | fail the run when a menu item, in any submenu, has no icon or no status tip, listing each (`desktop.md`, "Every menu item has an icon and says what it does") |
+| `--check-toolbars` | measure every icon-only toolbar button with a menu (the tool families, Undo, Redo) from its own rendering - where it draws its icon, and what its menu adds - print a `toolbar button` line for each, and fail the run when a menu's sign is drawn over the icon or not at all (`tools::menuSignClashes`; `desktop.md`, "Tool families on the toolbars") |
 | `--script FILE` | run a `katana_cli` script (`.kcs`) in the window, a step among the others: the window's `SCRIPT` verb through its one executor, each line its own undo step, stopping at the first refused (`desktop.md`, "Run Script"). A script that stops fails the run, exit 1. Without `--screenshot`, `--plot` or `--plot-sheets` the run is a batch, as `katana_cli`'s is: never shown, over when its steps are, and failed by the first step refused |
 | the steps | below |
 
@@ -222,7 +223,7 @@ Its variables:
 | `-DAPP`, `-DPROJECT`, `-DOUTPUT` | the executable, the project to copy, the PNG to write (required) |
 | `-DIMPORT=<file>` | a file to import first |
 | `-DCUSTOMISE_DIR=<dir>` | `--customise` with every `.4d` and `.mapfile` in it; absent files are reported and the run goes on |
-| `-DTOGGLE_LAYER`, `-DSTYLE_MANAGER=ON`, `-DLAYER_MANAGER=ON`, `-DATTRIBUTES=<id>`, `-DDATASET_INFO`, `-DIMPORT_OPTIONS`, `-DSELECT_ALL=ON`, `-DCHECK_SHORTCUTS=ON`, `-DCHECK_MENUS=ON` | the switches of the same names |
+| `-DTOGGLE_LAYER`, `-DSTYLE_MANAGER=ON`, `-DLAYER_MANAGER=ON`, `-DATTRIBUTES=<id>`, `-DDATASET_INFO`, `-DIMPORT_OPTIONS`, `-DSELECT_ALL=ON`, `-DCHECK_SHORTCUTS=ON`, `-DCHECK_MENUS=ON`, `-DCHECK_TOOLBARS=ON` | the switches of the same names |
 | `-DACTIONS=a,b` | `--action` for each, commas because a CMake list does not survive `cmake -D` |
 | `-DDIALOG=NAME` (or `-DSURVEY_DIALOG`) with `-DFILL=f=t\|f=t` and `-DPRESS=a,b` | one dialog, filled and pressed |
 | `-DSCRIPT=<file.kcs>` | `--script`, before the `-DDRIVE` steps, so they can list what it made |

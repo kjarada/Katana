@@ -229,7 +229,11 @@ Eighteen catalogue tools in one family (`src/katana_cad/tools/modify_vertex.cpp`
 registered in `families.hpp` as `addModifyVertexTools`), each named
 "Vertices, <tool>" so the menus gather them into a Vertices submenu of the
 Draw menu (`toolFamily.Draw.Vertices`) and the Draw toolbar into one
-drop-down button. The Vertices panel's toggle is in View > Panels.
+button (`toolFamilyButton.Draw.Vertices`): a click runs Insert Vertex, and
+the triangle in its corner, a press held or a right click offers the rest
+(`docs/desktop.md`, "Tool families on the toolbars"). At the window's first
+size it is behind the Draw toolbar's overflow arrow at the foot of the
+toolbar. The Vertices panel's toggle is in View > Panels.
 
 | Tool (id, aliases) | Steps | Command |
 |---|---|---|

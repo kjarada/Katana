@@ -18,7 +18,8 @@
 //   - tools named "Family, Variant" ("Circle, 2 Points") gathered into a
 //     submenu named by the family, each item by its variant, as AutoCAD's Draw
 //     menu gathers Circle and Arc; on a toolbar the family is ONE button that
-//     runs its first variant and drops the rest down;
+//     runs its first variant and offers the rest from the triangle in its
+//     corner, a press held or a right click (flyout_button.hpp);
 //   - a category the window gave no menu (Tools: the Inquiry and Select
 //     groups) gets one of its own, beside the window's tool menus on their
 //     menu bar, so a new category reaches the menus without an edit to the

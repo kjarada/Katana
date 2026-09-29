@@ -277,7 +277,7 @@ the widget, is set again with the rest. The drawing's own text face
 is not a theme font: a plot must print the same whatever size the window's
 text is.
 
-**`KatanaStyle` (in `theme.cpp`) - Fusion, with two things it does not do.**
+**`KatanaStyle` (in `theme.cpp`) - Fusion, with three things it does not do.**
 The Survey, Terrain and GIS menus were grouped under titled sections
 ("Surfaces", "Point Cloud - PDAL") and not one title had ever been seen:
 Fusion says it does not support sections (`SH_Menu_SupportsSections`), so
@@ -298,6 +298,9 @@ choice list that cannot be typed into, Fusion drops a popup the height of
 every item (`SH_ComboBox_Popup`), ignoring `maxVisibleItems`: a drawing's two
 hundred styles ran off the screen. The style asks for the scrolling list
 (`qt_widgets.Theme.ALongChoiceListScrollsRatherThanRunningOffTheScreen`).
+Third, a toolbar's overflow arrow: Qt's is a small dark image made for light
+toolbars, and the style draws it in the muted text colour instead ("Tool
+families on the toolbars", below, has why it was not seen at all).
 
 **`icons.hpp` - the icons are drawn in code.** Each is a vector drawing on a
 24-unit grid painted by a `QIconEngine` at whatever size and device-pixel ratio
@@ -371,6 +374,91 @@ turns the names off (`viewToolBarNames`) and sizes the icons: Small 16 px,
 Standard 20, Large 28 (`viewToolBarIconsSmall` ...). Words under every icon were
 rejected: the two top rows hold some sixty buttons, and with their words they
 would not fit in the widest window.
+
+**Tool families on the toolbars: a mark in the corner, not a split button.**
+A family of tools - Circle's six, Arc's five, Ellipse's three, the eighteen
+Vertices tools - is one button on the Draw toolbar
+(`src/katana_qt/tools/tool_menus.hpp`). Until 2026-09-30 it was Qt's split
+button (`QToolButton::MenuButtonPopup`), and the sign of its menu sat on its
+icon. The theme's `QToolButton` rule has padding and a border, and for such a
+rule `QStyleSheetStyle` reserves no width for a split button's arrow strip
+(its `PM_MenuButtonIndicator` is 0), yet still lays the strip over the
+button's right 12 px, paints it after the icon - solid under the pointer and
+while the tool runs, cutting the circle's ring - and takes presses there: a
+click on the right of the ring opened the menu instead of starting Circle.
+Undo and Redo, the window's other split buttons, had the strip over their
+icons too.
+
+The family button is now a `FlyoutButton` (`src/katana_qt/tools/flyout_button.hpp`).
+Its icon has the whole button, as on every other tool button, and a small
+triangle in the bottom-right corner - in the 5 px the centred icon leaves
+free at every toolbar icon size, inside the border - says that the button
+holds more than one tool, which is how drawing and graphics programs mark a
+tool group. It is muted at rest and lighter under the pointer; it takes the
+accent while the pointer is on its corner, the part of the button that opens
+the family, and while the button's tool runs. A click anywhere on the icon
+runs the family's first tool. The family opens from a press on the
+triangle's corner (12 px square less the icon's square, as wide as the strip
+it replaced), from a press held for the style's popup delay (Qt's
+`DelayedPopup`, 600 ms) and from a right click, and the tooltip says so and
+names the other tools. The menu is the Draw menu's own submenu, one action
+per tool, so a tool is the same object in both.
+
+The alternatives were rendered and measured on 2026-09-30 with a scratch
+prototype compiled against this theme and Qt 6.11.2:
+- reserving the strip in the stylesheet, Qt's own recipe (Qt Style Sheets
+  Examples, "Customizing QToolButton": `padding-right` on
+  `QToolButton[popupMode="MenuButtonPopup"]`) - kept for Undo and Redo,
+  rejected for the families: in the vertical Draw toolbar it widens the bar
+  by 10 px and moves the family icons 5 px left of the column of the others;
+- the arrow as a 7 px corner by the stylesheet alone (`::menu-button` at the
+  bottom right) - no code, but a 7 x 7 target and no hold or right click;
+- the arrow below the icon - every family button 7 px taller, 28 px more on
+  a Draw toolbar that already overflows the window's first size;
+- the menu on any click (`InstantPopup`) - two clicks for every circle, and a
+  headless `--press` of such a button would wait in the menu's modal loop.
+What the choice costs: a press held is found less readily than an arrow,
+which is why the corner and the right click open the menu too and the
+tooltip names all three; and a right click on a family button no longer
+shows the window's list of toolbars - anywhere else on the toolbar it still
+does.
+
+Undo and Redo stay split buttons: the button undoes one step and the arrow
+drops the history ("Undo and Redo lists", below). The theme pads a split
+button's right side by its strip's 10 px and the 4 every button has
+(`QToolButton[popupMode="MenuButtonPopup"]`), so the strip sits beside the
+icon; along the top the 10 px each cost nothing.
+
+The same padding and border hid a toolbar's OVERFLOW button. A toolbar too
+short for its buttons shows one, 12 px deep (`PM_ToolBarExtensionExtent`),
+and 4 px of padding and a 1 px border each side left its arrow 2 px: a dot
+nobody could see, so at the window's first size (1360 x 860) the Draw
+toolbar's Ellipse, Divide, Measure and Vertices tools were behind a button
+that did not show. The theme takes the padding and border off that one
+button (`QToolButton#qt_toolbar_ext_button`) and `KatanaStyle` draws its
+arrow in the muted text colour.
+
+Tested in `qt_widgets.ToolFamilyButtons.*` - the mark, its press zone and
+the icon apart at 16, 20 and 28 px icons, and drawn where they say; a family
+against a plain button with the same icon, at rest, under the pointer and
+running, differing only in the mark's square; a click on the icon, the mark,
+a held press, a right click and `QAbstractButton::click`, which `--press`
+uses; the mark lit only with the pointer on its corner; the tooltip - and in
+`qt_widgets.SplitButtons.UndosArrowHasAStripOfItsOwnBesideTheIcon`,
+`qt_widgets.ToolBarSigns.TheCheckSeesASplitButtonsArrowDrawnOverItsIcon` and
+`qt_widgets.ToolBarOverflow.AToolbarTooShortForItsButtonsShowsItsWholeOverflowArrow`.
+In the real window, `katana --check-toolbars` measures every icon-only
+toolbar button with a menu from its own rendering - with an opaque icon
+against a clear one for where the icon goes, with its menu against without
+for what the menu adds - and fails a run where the two meet
+(`qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless`: the four
+families, Undo and Redo).
+
+Not done: a family button does not remember the tool last chosen from it, nor
+show itself running while a tool other than its first runs, as some CAD
+programs' flyouts do - that changes what a click does and wants its own
+decision; and the mark is not mirrored for a right-to-left layout, which the
+window does not use.
 
 **Every key reaches one thing.** `MainWindow::shortcutClashes` gathers every
 key a person can press - each action's key sequences, any `QShortcut`, each
@@ -1368,7 +1456,8 @@ line weights times 4 and times 0.25 more and less ink than times 1.
 Edit > Undo and Redo move one step a click; `UNDO n` and `REDO n` have always
 moved several, but only for someone who typed them. The Edit toolbar's Undo
 and Redo are now split buttons (`editUndoButton`, `editRedoButton`): the
-button is one step, as before, and the arrow drops down the history
+button is one step, as before, and the arrow - in a strip of its own beside
+the icon ("Tool families on the toolbars", above) - drops down the history
 (`editUndoMenu`, `editRedoMenu`) from `CommandStack::undoNames` and
 `CommandStack::redoNames`, the next step first. The k-th entry (`undoStepK`,
 `redoStepK`, so `--trigger undoStep3` reaches it) runs `UNDO k` or `REDO k`
