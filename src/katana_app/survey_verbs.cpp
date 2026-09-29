@@ -272,6 +272,33 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
             reply += "\nreduction_warnings_more=" +
                      std::to_string(report->warnings.size() - kListedWarnings);
         }
+        // Each setup the reduction positioned by resection, as the report's
+        // Resections table has it: where, from which points, how well (one
+        // sigma, metres), its redundancy (plan + heights) and how many of its
+        // residuals the outlier test flagged.
+        for (const survey::ResectionReport& resection : report->resections) {
+            std::string from;
+            for (const std::string& target : resection.targets) {
+                from += (from.empty() ? "" : ",") + target;
+            }
+            const std::size_t flagged =
+                resection.horizontal.flaggedOutliers.size() +
+                (resection.height ? resection.height->flaggedOutliers.size() : 0);
+            reply += "\nresection setup=" + recordText(resection.stationId) +
+                     " point=" + recordText(resection.pointId) + " from=" + recordText(from) +
+                     " northing=" + recordNumber(resection.northing) +
+                     " easting=" + recordNumber(resection.easting) + " height=" +
+                     (resection.elevation ? recordNumber(*resection.elevation)
+                                          : std::string("none")) +
+                     " sigma_n=" + recordNumber(resection.sigmaNorthing) +
+                     " sigma_e=" + recordNumber(resection.sigmaEasting) + " sigma_h=" +
+                     (resection.sigmaElevation ? recordNumber(*resection.sigmaElevation)
+                                               : std::string("none")) +
+                     " redundancy=" + std::to_string(resection.horizontal.redundancy) + "+" +
+                     (resection.height ? std::to_string(resection.height->redundancy)
+                                       : std::string("0")) +
+                     " flagged=" + std::to_string(flagged);
+        }
     }
     return reply;
 }

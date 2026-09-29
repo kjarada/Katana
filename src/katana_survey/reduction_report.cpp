@@ -48,6 +48,8 @@ const char* toString(ComputationMethod method)
         return "network least squares";
     case ComputationMethod::Gnss:
         return "GNSS";
+    case ComputationMethod::Resection:
+        return "resection";
     }
     return "radiation";
 }

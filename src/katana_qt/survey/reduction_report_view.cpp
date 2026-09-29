@@ -171,6 +171,9 @@ survey::ReductionReport displayReport(const survey::ReductionReport& report, std
     take(report.setups, shown.setups, "setups");
     take(report.observations, shown.observations, "observations");
     take(report.facePairs, shown.facePairs, "face pairs");
+    // One per resected setup, each with a residual per pointing it used: a
+    // few dozen rows, where a network's residuals can be thousands.
+    take(report.resections, shown.resections, "resections");
     for (const survey::AdjustmentReport& adjustment : report.adjustments) {
         survey::AdjustmentReport cut = adjustment;
         take(adjustment.residuals, cut.residuals, "residuals");

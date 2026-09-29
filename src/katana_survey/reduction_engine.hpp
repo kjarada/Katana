@@ -160,6 +160,15 @@ struct SetupState {
     bool warnedScale = false;
     std::size_t reportIndex = 0;
     std::vector<std::size_t> pointings{}; // indices into Engine::pointings
+    // Set when resectSetup positioned the station. Such a setup is oriented
+    // by its resection, not its backsight: on the weighted mean of azimuth
+    // less reading over these pointings, each with the standard deviation its
+    // direction had in the resection - the least-squares orientation for the
+    // station where it stands, so it follows the station when an adjustment
+    // moves it. Its targets are not checks when it radiates: they were used.
+    bool resected = false;
+    std::vector<std::pair<std::size_t, double>> resectionDirections{};
+    std::unordered_set<std::string_view> resectionTargets{};
 };
 
 struct Engine {
@@ -273,6 +282,14 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
 [[nodiscard]] std::optional<double> meanDirection(const Engine& engine, std::size_t setupIndex,
                                                   std::string_view target);
 
+// A pointing's horizontal distance with phase B's factors as they would be from
+// a station at `here` (at the setup, the pointing having no azimuth yet),
+// written nowhere: what a resection solves with before its station exists.
+// Absent without a horizontal distance.
+[[nodiscard]] std::optional<double> gridDistanceFrom(Engine& engine, std::size_t setupIndex,
+                                                     const ReducedPointing& pointing,
+                                                     const Position& here);
+
 // ---- reduction_gnss.cpp ------------------------------------------------------------
 
 // The drawing's grid position of an earth-centred point, through
@@ -315,6 +332,24 @@ bool radiateGnssVectors(Engine& engine,
 // AdjustmentMethod::Network: least squares over every observation that is not
 // a side shot, then the side shots radiated from the adjusted stations.
 [[nodiscard]] katana::core::Status adjustAsNetwork(Engine& engine);
+
+// Positions the station of setup `setupIndex`, which nothing else has, by
+// resection from its reduced pointings to points already placed, held as they
+// are: the least squares of its directions (one set, one orientation unknown)
+// and horizontal distances, weighted as the network weights them, and then of
+// its trigonometric height differences to the targets with heights. Places
+// the station (ComputationMethod::Resection), marks the setup resected
+// (SetupState), reports it (ReductionReport::resections) and returns true; or
+// returns false and puts in `why`, as a clause, what refused it: too few
+// placed points, a value that is not finite, targets on one position, the
+// station and its targets on one line, the station on the circle through its
+// targets (the danger circle), or a least squares that fails.
+[[nodiscard]] bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why);
+
+// Why a setup whose station has no position was not a resection candidate, as
+// a clause - the placed points it observes against what a resection needs -
+// or empty when it observes none.
+[[nodiscard]] std::string resectionShortfall(const Engine& engine, std::size_t setupIndex);
 
 // Text helpers shared by the two.
 [[nodiscard]] std::string formatSeconds(double radians, int decimals = 1);

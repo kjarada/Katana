@@ -1052,10 +1052,23 @@ if(KATANA_BUILD_TESTS)
     # applied to the shots they follow - 2 setups, 24 observations (8
     # pointings of 3), K1 and K2 entered, S1, 101, 102 and 103 unpositioned,
     # the EB 01, NS 01 and PF strings, and what the file does not carry: S1's
-    # coordinates. IMPORT: the file does not state
-    # where S1 is and the reduction computes no resection, so nothing is
-    # radiated from it, which the report says; K1, oriented on K2 due east at
-    # circle 90 (orientation 0), radiates 103 at 45 deg, 10 m out (zenith 90):
+    # coordinates. IMPORT: the file does not state where S1 is, so the
+    # reduction resects it (docs/survey.md, "The reduction's resection"),
+    # which until then it could not, and drew only K1, K2 and 103. By hand: S1
+    # is 100 m from K1 and 141.421 = 100 sqrt 2 m from K2, which are 100 m
+    # apart due east of each other, so S1 is 100 m due north of K1 - the
+    # mirror point south of K1 is ruled out by the readings, K2 being read 45
+    # degrees left of K1 - at 1000 E, 5100 N; K1 read at 180, its azimuth, so
+    # the orientation is 0. From there 101 is read at 90, 50 m out and its
+    # tangential offset 0.25 m to the right: 1050 E, 5099.75 N; 102 at 95, its
+    # radial offset making it 50.5 m: 1000 + 50.5 sin 95 = 1050.308 E, 5100 +
+    # 50.5 cos 95 = 5095.599 N. The least squares moves S1 0.5 mm east and its
+    # orientation 0.5" (K2 is read again by the check, 135.001 at 141.420,
+    # 3.6" and 1 mm from the first), inside the millimetre the regex holds.
+    # The fixture's heights were written for the reader and disagree by 1.1 m
+    # (20.049 from K1, 21.149 and 21.449 from K2), so the resection's three
+    # height differences are flagged. K1, oriented on K2 due east at circle 90
+    # (orientation 0), still radiates 103 at 45 deg, 10 m out (zenith 90):
     # 1000 + 10 sin 45 = 1007.071 E, 5000 + 10 cos 45 = 5007.071 N.
     set(_fld_resection "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/resection.fld")
     add_test(NAME cli.survey_read_resection_field_file
@@ -1070,8 +1083,44 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_resection}\"" -c "LIST")
     set_tests_properties(cli.survey_import_resection_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "imported job=job-1 entities=3 layer=survey/points .*reduction_warning text=\"Setup S1 stands on S1, which has no position: nothing was computed from it\\.\".* at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1007\\.07[01][0-9]*,5007\\.07[01][0-9]*"
-        FAIL_REGULAR_EXPRESSION "error")
+        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=5[\r\n]+reduction_warning text=\"height difference at S1: K1 is flagged by the Baarda w.*resection setup=S1 point=S1 from=K1,K2 northing=5100\\.000[0-9]* easting=1000\\.000[0-9]* height=[^\r\n]* redundancy=3\\+2 flagged=3[\r\n]+6 entities[\r\n]+[^\r\n]+ at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1000\\.000[0-9]*,5100(\\.000[0-9]*)?[\r\n]+[^\r\n]+ at 1050(\\.000[0-9]*)?,5099\\.750[0-9]*[\r\n]+[^\r\n]+ at 1050\\.30[78][0-9]*,5095\\.59[89][0-9]*[\r\n]+[^\r\n]+ at 1007\\.07[01][0-9]*,5007\\.07[01][0-9]*"
+        FAIL_REGULAR_EXPRESSION "error|has no position")
+    # A free station in the structure of a field controller's resections,
+    # tests/surveyio/data/fld/free_station.fld, every name and number
+    # invented: M1, M2 and M3 entered; 128 sets up on FS1 (instrument height
+    # 0); each mark read on both faces with its target height (1.600, 1.600,
+    # 1.800) and level sights; 129; the controller's residual comments; M1
+    # restated; a check (06) to M1; two shots. READ: 25 records, no warning;
+    # 1 setup, 27 observations (9 pointings of 3), 3 points, FS1, 201 and 202
+    # unpositioned, the EB 01 string. IMPORT resects FS1 - by hand at 300000 E,
+    # 6200000 N, which the readings were made from: M1 100 m at azimuth
+    # atan2(60, 80) = 36.869897646, M2 100 m at 233.130102354, M3 200 m at
+    # 143.130102354 degrees, each read 12.5 less (the circle's turn) to 8
+    # decimals - and radiates 201 at reading 102.5 (azimuth 115), 50 m:
+    # 300000 + 50 sin 115 = 300045.31539 E, 6200000 + 50 cos 115 = 6199978.86909
+    # N, and 202 at 192.5 (205), 30 m: 299987.32145 E, 6199972.81077 N. Its
+    # height is the weighted mean of what the marks give with curvature and
+    # refraction (level sights, instrument height 0): M1 18.401 + 1.600 -
+    # 100^2 x 6.8278e-8 = 20.000317 (twice, the check again), M2 20.000317,
+    # M3 18.203 + 1.800 - 200^2 x 6.8278e-8 = 20.000269, weighted 1 / ((S x
+    # 3"/sqrt 2)^2 + 2 (2 mm)^2), the check 1 / ((S x 3")^2 + ...): 20.000307.
+    # Redundancy 5 in plan (4 readings and 4 distances for N, E and the
+    # orientation) and 3 in height.
+    set(_fld_free_station "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/free_station.fld")
+    add_test(NAME cli.survey_read_free_station_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_free_station}\"")
+    set_tests_properties(cli.survey_read_free_station_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=free_station\\.fld format=opcode-field-file parser=1\\.1 read=25 skipped=0 warnings=0[\r\n]+content setups=1 observations=27 points=3 unpositioned=3 features=1 control=0[\r\n]+declared crs=\"Local grid D\" epsg=none"
+        FAIL_REGULAR_EXPRESSION "error|warning record")
+    add_test(NAME cli.survey_import_free_station_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_free_station}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_free_station_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=2[\r\n]+.*resection setup=FS1 point=FS1 from=M1,M2,M3 northing=(6200000|6199999\\.9999)[0-9.]* easting=(300000|299999\\.9999)[0-9.]* height=20\\.00030[0-9]* [^\r\n]* redundancy=5\\+3 flagged=0[\r\n]+6 entities[\r\n]+[^\r\n]+ at 300060,6200080[\r\n]+[^\r\n]+ at 299920,6199940[\r\n]+[^\r\n]+ at 300120,6199840[\r\n]+[^\r\n]+ at 300000,6200000[\r\n]+[^\r\n]+ at 300045\\.3153[0-9]*,6199978\\.869[0-9]*[\r\n]+[^\r\n]+ at 299987\\.3214[0-9]*,6199972\\.8107[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error|has no position|flagged by")
     # A setup on RTK marks, tests/surveyio/data/fld/rtk_setup.fld: A (1000,
     # 5000) and B (1000, 5100), each written " 2" with its receiver's
     # solution, a setup on A reading 30 degrees on B, and two shots at circle

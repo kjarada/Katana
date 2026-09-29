@@ -215,6 +215,39 @@ struct AdjustmentReport {
     friend bool operator==(const AdjustmentReport&, const AdjustmentReport&) = default;
 };
 
+// ---- Resections ---------------------------------------------------------------------
+
+// A setup whose station nothing else positioned, positioned by resection (a
+// free station): the least squares of its reduced directions and distances to
+// points already placed, those points held, and of its trigonometric height
+// differences to the ones with heights. Each least squares is reported as an
+// adjustment is - a residual per direction, distance and height difference,
+// with its redundancy number and the outlier test the settings choose - and
+// the coordinates it gave, with their precision.
+struct ResectionReport {
+    std::string stationId; // the setup
+    std::string pointId;   // the point it stands on, which the resection positioned
+    // The placed points it was computed from, in the order the setup observed them.
+    std::vector<std::string> targets{};
+    double northing = 0.0;
+    double easting = 0.0;
+    // Absent where no target with a height was observed with a zenith angle.
+    std::optional<double> elevation{};
+    // One sigma; a posteriori (scaled by the variance factor) where the least
+    // squares has redundancy, a priori where it has none.
+    double sigmaNorthing = 0.0;
+    double sigmaEasting = 0.0;
+    std::optional<double> sigmaElevation{};
+    // Added to a circle reading to give a grid azimuth: the solution's.
+    double orientation = 0.0;
+    double sigmaOrientation = 0.0;
+    AdjustmentReport horizontal{};
+    std::optional<AdjustmentReport> height{};
+    SourceRecord source{};
+
+    friend bool operator==(const ResectionReport&, const ResectionReport&) = default;
+};
+
 // ---- Coordinates --------------------------------------------------------------------
 
 // How a coordinate came out of the reduction.
@@ -226,6 +259,7 @@ enum class ComputationMethod {
     TraverseLeastSquares,
     NetworkLeastSquares,
     Gnss,                 // a GNSS position converted to grid
+    Resection,            // a setup's station, from its pointings to placed points
 };
 
 [[nodiscard]] const char* toString(ComputationMethod method);
@@ -258,6 +292,7 @@ struct ReductionReport {
     std::vector<ReportObservation> observations{};
     std::vector<FacePairCheck> facePairs{};
     std::vector<MisclosureReport> misclosures{};
+    std::vector<ResectionReport> resections{}; // in the order they were computed
     std::vector<AdjustmentReport> adjustments{};
     std::vector<CoordinateReport> coordinates{};
     std::vector<ReportMessage> warnings{}; // the reduction's own

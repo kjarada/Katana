@@ -368,8 +368,10 @@ struct ZenithAngleObservation {
 // because a parser does not know the backsight reading of the same face when
 // it meets a shot (the backsight may be observed last, or on both faces), and
 // differencing early would throw away the face pairing the reduction needs.
-// The reduction turns directions into angles or azimuths; the network
-// adjustment does not take them (it lists them as unused).
+// The reduction turns directions into angles or azimuths for its network, and
+// gives a resection's reduced directions to the network adjustment as they
+// are, which takes the directions read at one point as a set with an
+// orientation unknown (network_adjustment.hpp).
 struct HorizontalDirectionObservation {
     std::string at;
     std::string to;
