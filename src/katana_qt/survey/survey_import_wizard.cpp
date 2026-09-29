@@ -27,7 +27,9 @@
 #include <algorithm>
 #include <filesystem>
 #include <format>
+#include <iterator>
 #include <set>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -246,6 +248,28 @@ SurveyContent surveyContentOf(const survey::SurveyProject& project)
     return content;
 }
 
+QString surveyFileFilter()
+{
+    // What no descriptor states: point lists named .pnt and .xyz, which the
+    // delimited reader takes by content; GTS-6's .gt6; the numbered files of
+    // a DBX job (.x01); and RINEX 2's names, whose extension is the year's
+    // last two digits and the file's type (.24o, .24d).
+    static constexpr std::string_view kUnregistered[] = {"*.pnt", "*.xyz", "*.gt6",
+                                                         "*.x01", "*.??o", "*.??d"};
+    std::set<std::string> patterns(std::begin(kUnregistered), std::end(kUnregistered));
+    for (const surveyio::FormatDescriptor& descriptor : surveyio::formatRegistry().formats()) {
+        for (const std::string& extension : descriptor.extensions) {
+            patterns.insert("*." + extension);
+        }
+    }
+    QStringList listed;
+    for (const std::string& pattern : patterns) {
+        listed << qs(pattern);
+    }
+    return "Survey files (" + listed.join(' ') +
+           ");;Point files (*.csv *.txt *.tsv *.pnt *.xyz);;All files (*)";
+}
+
 SurveyImportWizard::SurveyImportWizard(SurveyImportContext context, QWidget* parent)
     : QDialog(parent), context_(std::move(context))
 {
@@ -340,11 +364,8 @@ QWidget* SurveyImportWizard::buildFilePage()
     browse->setObjectName("browse");
     browse->setAutoDefault(false);
     connect(browse, &QPushButton::clicked, this, [this] {
-        const QString path = QFileDialog::getOpenFileName(
-            this, "Import Survey Points", file_->text(),
-            "Survey files (*.csv *.txt *.tsv *.pnt *.xyz *.gsi *.jxl *.rw5 *.raw *.gt7 *.gt6 "
-            "*.dc *.x01 *.xcf *.rnx *.crx *.obs *.??o *.??d);;"
-            "Point files (*.csv *.txt *.tsv *.pnt *.xyz);;All files (*)");
+        const QString path = QFileDialog::getOpenFileName(this, "Import Survey Points",
+                                                          file_->text(), surveyFileFilter());
         if (!path.isEmpty()) {
             file_->setText(path);
         }

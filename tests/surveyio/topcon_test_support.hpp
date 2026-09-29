@@ -1,7 +1,8 @@
 #pragma once
 
-// What the RW5 and GTS tests share: fixtures on disk, the angles the expected
-// values are worked in, and finding things in a read project.
+// What the tests of the readers on the raw builder share (RW5, GTS, the opcode
+// field file, Sokkia SDR): fixtures on disk, the angles the expected values
+// are worked in, and finding things in a read project.
 
 #include <gtest/gtest.h>
 
@@ -172,16 +173,23 @@ inline constexpr ForeignSample kForeignSamples[] = {
 };
 
 // Every prefix of `bytes`, and bytes of every value, must come back as an
-// error or a result - never a crash, never a hang. Returns how many reads
-// were made so a test can say it made them.
+// error or a result - never a crash, never a hang, and never an Internal
+// error: readSurvey turns an exception a reader throws into one, so a reader
+// that threw on every input would otherwise pass as having answered. Returns
+// how many reads were made so a test can say it made them.
 inline std::size_t readEveryTruncationAndNoise(std::string_view formatId, std::string_view bytes,
                                                std::string_view name)
 {
     std::size_t reads = 0;
-    for (std::size_t length = 0; length <= bytes.size(); ++length) {
-        const auto result = read(formatId, bytes.substr(0, length), name);
-        (void)result.ok();
+    const auto answered = [&](const katana::core::Result<katana::surveyio::ReadResult>& result,
+                              std::string_view what) {
+        if (!result.ok() && result.error().code == katana::core::ErrorCode::Internal) {
+            ADD_FAILURE() << result.error().describe() << " (" << what << ")";
+        }
         ++reads;
+    };
+    for (std::size_t length = 0; length <= bytes.size(); ++length) {
+        answered(read(formatId, bytes.substr(0, length), name), "a truncation");
     }
     std::mt19937 random(20260924u);
     std::uniform_int_distribution<int> byte(0, 255);
@@ -192,14 +200,12 @@ inline std::size_t readEveryTruncationAndNoise(std::string_view formatId, std::s
         for (int flips = 0; flips < 8 && !copy.empty(); ++flips) {
             copy[where(random)] = static_cast<char>(byte(random));
         }
-        (void)read(formatId, copy, name).ok();
-        ++reads;
+        answered(read(formatId, copy, name), "bytes changed at random");
         std::string noise(static_cast<std::size_t>(byte(random)) * 4, '\0');
         for (char& c : noise) {
             c = static_cast<char>(byte(random));
         }
-        (void)read(formatId, noise, name).ok();
-        ++reads;
+        answered(read(formatId, noise, name), "random bytes");
     }
     return reads;
 }

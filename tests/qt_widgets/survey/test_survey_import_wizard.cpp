@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QStringList>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTreeWidget>
@@ -192,9 +193,10 @@ TEST(SurveyImportWizard, TheContentStepShowsWhatEachFormatsReaderRead)
     // with word 84 (a station), one_setup.jxl one StationRecord,
     // setup_metres.rw5 one OC record, setup.gt7 one STN line, setup.fld one
     // 03 record, gnss.fld none (RTK coordinates only), resection.fld a 128
-    // and a 03, rtk_setup.fld one 03 on an RTK mark; a RINEX observation file
-    // has no setups and one GNSS session, and its navigation file of the same
-    // name (.24n) is read beside it.
+    // and a 03, rtk_setup.fld one 03 on an RTK mark, traverse.sdr two live
+    // 02 records (a third is deleted); a RINEX observation file has no
+    // setups and one GNSS session, and its navigation file of the same name
+    // (.24n) is read beside it.
     const struct {
         const char* file;
         const char* setups;
@@ -206,6 +208,7 @@ TEST(SurveyImportWizard, TheContentStepShowsWhatEachFormatsReaderRead)
                  {"fld/gnss.fld", "0"},
                  {"fld/resection.fld", "2"},
                  {"fld/rtk_setup.fld", "1"},
+                 {"sdr/traverse.sdr", "2"},
                  {"rinex/test2560.24o", "0"}};
     for (const auto& entry : files) {
         SCOPED_TRACE(entry.file);
@@ -217,6 +220,31 @@ TEST(SurveyImportWizard, TheContentStepShowsWhatEachFormatsReaderRead)
         EXPECT_EQ(rows.at("Setups"), entry.setups);
         expectContentAsRead(rows, readDirectly(fixture(entry.file)));
     }
+}
+
+TEST(SurveyImportWizard, TheBrowseFilterOffersEveryRegisteredExtensionAndTheUnregisteredOnes)
+{
+    // The filter was a hand-written list that had fallen behind the
+    // registry (.sdr added by hand, .fld, .gts, .gts7 and .dat missing). It
+    // is now built from the registry, so every extension a format names is
+    // in it, and the patterns no format names stay.
+    const QString filter = katana::qt::surveyFileFilter();
+    const QString surveyFiles = filter.section(";;", 0, 0);
+    ASSERT_TRUE(surveyFiles.startsWith("Survey files (") && surveyFiles.endsWith(")"))
+        << filter.toStdString();
+    QStringList offered = surveyFiles.mid(14, surveyFiles.size() - 15).split(' ');
+    for (const surveyio::FormatDescriptor& descriptor : surveyio::formatRegistry().formats()) {
+        for (const std::string& extension : descriptor.extensions) {
+            EXPECT_TRUE(offered.contains(QString::fromStdString("*." + extension)))
+                << descriptor.id << " ." << extension;
+        }
+    }
+    for (const char* pattern : {"*.sdr", "*.fld", "*.gts", "*.gts7", "*.dat", "*.pnt", "*.xyz",
+                                "*.gt6", "*.x01", "*.??o", "*.??d"}) {
+        EXPECT_TRUE(offered.contains(pattern)) << pattern;
+    }
+    EXPECT_EQ(offered.removeDuplicates(), 0);
+    EXPECT_TRUE(filter.endsWith(";;All files (*)"));
 }
 
 TEST(SurveyImportWizard, TheContentStepNamesTheFilesFoundBesideTheChosenOne)

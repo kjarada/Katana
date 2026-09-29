@@ -1704,6 +1704,7 @@ SurveyProject reducedProject(const Engine& engine)
         station.setup = from.setup;
         station.backsightPointId = from.backsightPointId;
         station.backsightAzimuth = from.backsightAzimuth;
+        station.statedBacksightAzimuth = from.statedBacksightAzimuth;
         station.metadata = from.metadata;
         station.source = from.source;
         station.instrument = from.instrument;

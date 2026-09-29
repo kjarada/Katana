@@ -456,6 +456,22 @@ at the same moment can see it; which test left it behind was not found. The
 file is git-ignored, so nothing shows it but the failure. Delete it before
 running the suite again.
 
+## Fixed scratch folders shared by parallel runs (2026-09-29, not fixed)
+
+A whole-suite run at `--parallel 6`, while two other worktrees on the same
+machine ran theirs, failed
+`PipelineVerb.APipelineEndingInWriteKeepsItsRasterAsAReference`: "could not
+keep the derived raster: No such file or directory" for `shade.tif` in
+`katana-pipeline-verb` under the system temp folder. It passed run again
+alone, with nothing changed. Its fixture empties one fixed folder,
+`temp_directory_path() / "katana-pipeline-verb"`, before and after every
+case, and ctest runs each case in a process of its own: two cases of the
+fixture at once, or the same case in another checkout's run, empty the
+folder under each other. 29 test files take a fixed `katana-...` folder
+under the system temp in the same way. A folder of each process's own (its
+id in the name) would end it; until then, a failure of such a case during
+another run is to be run again alone before it is believed.
+
 ## The clang builds' seven failures (Windows ARM64, macOS)
 
 The first Release run with the whole suite in every job (run 36356917571,
