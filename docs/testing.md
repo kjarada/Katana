@@ -498,7 +498,12 @@ fixed on 2026-09-29:
   run without MSYS2's bin on PATH, g++ could not load its DLLs, every one of
   320 files was "not checked" with no reason given, and the tool still exited
   0 - a pass that checked nothing. It now names the reason ("the compiler
-  exited 1 and printed nothing") and fails.
+  exited 1 and printed nothing") and fails. It fails too, saying "nothing to
+  check", when the compile database gives it no file at all - one that is
+  empty, or lists no source that mentions `to_string`, where the tree has
+  some 320 - which passed as "0 of 0 files checked"; and a source the
+  database names but the checkout lacks is "not checked" rather than a
+  Python traceback.
 - **`LibraryData.MissingDataBesideALibraryIsNotFound`.** libc++'s
   `weakly_canonical` makes an empty path the working directory, which is
   absolute; libstdc++ leaves it empty. `dataBesideLibraryFile` relied on the

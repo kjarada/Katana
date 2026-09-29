@@ -67,6 +67,12 @@
 //     Any other 60, seconds past 60.0 and minutes past 59 are refused, word
 //     by word, and so is a circle reading past a full circle (400 gon, 360
 //     degrees, 6400 mil) in any unit.
+//   * a NEGATIVE vertical reading (22) refused at its record: no zenith
+//     angle is negative, and an instrument set to read V from the horizon or
+//     in percent (GSI ONLINE's SET 44) writes one below the horizon, so the
+//     import also says, once, that the file's other vertical readings may not
+//     be zenith angles either. A negative horizontal reading (21) is the
+//     direction it names, read on the circle: -90 degrees is 270.
 //   * each distance's prism constant as its shot recorded it, which may
 //     differ from its setup's; the import says how many do.
 // GSI states no coordinate system: the person supplies it, and the import says

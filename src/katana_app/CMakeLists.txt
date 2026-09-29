@@ -1140,6 +1140,42 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "imported job=job-1 entities=4 layer=survey/gsi .*(${_gsi_p1}.*${_gsi_p2}|${_gsi_p2}.*${_gsi_p1})"
         FAIL_REGULAR_EXPRESSION "error")
+    # A negative vertical reading, on the hand-built GSI-8 job
+    # tests/surveyio/data/leica/negative_vertical_gsi8.gsi: no zenith angle is
+    # negative, and an instrument set to read V from the horizon or in percent
+    # (GSI ONLINE SET 44) writes one below the horizon (docs/survey.md, "Leica
+    # GSI"). READ: 5 records; 8 observations - every shot's circle reading,
+    # zenith angle and distance but P1's V of -005 00 00.0, refused at record
+    # 4 - and that one warning, with a note on what it suggests of the file's
+    # other vertical readings. IMPORT, worked by hand: STN1 (5000 E, 6000 N)
+    # is oriented on CP01, keyed in due north, at circle 0. P2 at circle -045
+    # 00 00.0, the direction 315 deg, and zenith 90 deg, 100 m, is 100 m out
+    # at 315 deg (reduceSlope's curvature and refraction term is a product
+    # with SD cos z, zero at 90 deg): 5000 - 100 sin 45 deg = 4929.2893
+    # E, 6000 + 100 cos 45 deg = 6070.7107 N. P1, with no zenith angle, is not
+    # radiated: 3 points are drawn. Wrapped onto the circle, as the reader once
+    # did, its V was 355 00 00.0, a face-right zenith of 5 deg, and P1 was
+    # drawn 100 sin 5 deg = 8.7156 m out at 225 deg: 4993.8372 E 5993.8372 N,
+    # which the FAIL expression refuses.
+    set(_gsi_negative_v
+        "${PROJECT_SOURCE_DIR}/tests/surveyio/data/leica/negative_vertical_gsi8.gsi")
+    add_test(NAME cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_gsi_negative_v}\"")
+    set_tests_properties(cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=negative_vertical_gsi8\\.gsi format=leica-gsi parser=1\\.1 read=5 skipped=0 warnings=1[\r\n]+content setups=1 observations=8 points=2 unpositioned=2 features=0 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=4 text=\"word 22 '-00500000' is negative, which no zenith angle is[^\r\n]*\\(GSI ONLINE SET 44\\)[^\r\n]*; that value was not read\".*not_carried text=\"GSI does not record the vertical angle setting: word 22 was read as a zenith angle, the instruments' usual setting; 1 reading was refused as negative, which no zenith angle is \\(the first at record 4\\)"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_gsi_draws_no_point_from_a_negative_vertical_reading
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_gsi_negative_v}\" LAYER survey/gsi"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_gsi_draws_no_point_from_a_negative_vertical_reading
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=3 layer=survey/gsi .*at 4929\\.2893[0-9]*,6070\\.7106[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error|at 4993\\.8")
     # CRS SET with a WKT - GDA2020 / MGA zone 56 as OGC WKT1, its names in
     # double quotes and one of them holding blanks - as an agent or a script
     # passes it: the verb once lost the quotes with the line's tokens, and
