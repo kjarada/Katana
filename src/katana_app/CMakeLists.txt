@@ -1017,6 +1017,42 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld}\" LAYER x")
     set_tests_properties(cli.survey_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+    # The same verbs on the hand-built GSI-16 job
+    # tests/surveyio/data/leica/rounded_seconds_gsi16.gsi, whose angle words
+    # write 60 seconds where a writer rounded up without carrying the minute
+    # (docs/survey.md, "Leica GSI"). READ: 6 records; 11 observations - every
+    # shot's circle reading, zenith angle and distance but P3's circle
+    # reading of 090 00 61.0, the one word refused; and 2 warnings, that
+    # refusal and one for the three 60-second words, each read as the next
+    # minute. IMPORT, worked by hand: STN1 (5000 E, 6000 N) is oriented on
+    # CP01, keyed in due north, at circle 0. P1 at circle 044 59 60.0 = 45 deg
+    # and zenith 089 59 60.0 = 90 deg, 100 m, is 100 m out at 45 deg: 5070.711
+    # E 6070.711 N. P2 at 135 deg and zenith 084 01 60.0 = 84 deg 02 min, 200
+    # m, is 200 sin(84 deg 02') = 198.9165 m out, less the curvature and
+    # refraction term (1 - k/2) V H / R (reduceSlope; k 0.13, R 6 371 000 m)
+    # of 0.6 mm: 198.9159 m at 135 deg, 5140.655 E 5859.345 N. Read as 084 01
+    # 00 it would be 4.3 mm nearer, and P1 read as 044 59 00 lands 2.9 cm
+    # away; refused, as they were, neither is radiated and 2 points are
+    # drawn, not 4.
+    set(_gsi "${PROJECT_SOURCE_DIR}/tests/surveyio/data/leica/rounded_seconds_gsi16.gsi")
+    add_test(NAME cli.survey_read_gsi_reads_sixty_seconds_as_the_next_minute
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_gsi}\"")
+    set_tests_properties(cli.survey_read_gsi_reads_sixty_seconds_as_the_next_minute PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=rounded_seconds_gsi16\\.gsi format=leica-gsi parser=1\\.1 read=6 skipped=0 warnings=2[\r\n]+content setups=1 observations=11 points=2 unpositioned=3 features=0 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=6 text=\"word 21 '0000000009000610' is not a sexagesimal angle: the seconds run to 59[^\r\n]*[\r\n]+warning record=4 text=\"3 angle words write 60 seconds \\(the first, word 21 '0000000004459600'\\)[^\r\n]*next minute\""
+        FAIL_REGULAR_EXPRESSION "error")
+    set(_gsi_p1 "at 5070\\.71[01][0-9]*,6070\\.71[01][0-9]*")
+    set(_gsi_p2 "at 5140\\.65[45][0-9]*,5859\\.34[45][0-9]*")
+    add_test(NAME cli.survey_import_gsi_radiates_the_shots_whose_angles_wrote_sixty_seconds
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_gsi}\" LAYER survey/gsi"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_gsi_radiates_the_shots_whose_angles_wrote_sixty_seconds
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=4 layer=survey/gsi .*(${_gsi_p1}.*${_gsi_p2}|${_gsi_p2}.*${_gsi_p1})"
+        FAIL_REGULAR_EXPRESSION "error")
     # CRS SET with a WKT - GDA2020 / MGA zone 56 as OGC WKT1, its names in
     # double quotes and one of them holding blanks - as an agent or a script
     # passes it: the verb once lost the quotes with the line's tokens, and
