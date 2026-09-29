@@ -188,3 +188,65 @@ TEST(ProjectCrs, TheCrsVerbShowsSetsFindsAndSuggests)
     EXPECT_EQ(*cleared, "crs id=none (local coordinates)");
     EXPECT_NE(CommandInterpreter::helpText().find("CRS SET"), std::string::npos);
 }
+
+// CRS SET's help says it takes WKT, and a WKT names everything in double
+// quotes. The verb once rebuilt its argument from the line's tokens, which
+// drop every quote, so a pasted WKT - the text of a .prj file - reached PROJ
+// without its quotes and every one was refused "InvalidCRS: not a coordinate
+// system". The dialog, which called Document::setCoordinateSystem itself,
+// took the same text, so only the command line, katana_cli and MCP failed.
+//
+// Both WKTs are written out by hand for GDA2020 / MGA zone 56, EPSG:7856 -
+// Transverse Mercator on GRS 1980, central meridian 153 E, scale 0.9996,
+// false origin 500 000 m E, 10 000 000 m N (the ICSM GDA2020 Technical
+// Manual, MGA2020 zone parameters): an OGC WKT1 that carries its EPSG
+// authority, stored by its code, and an ESRI-style .prj that carries none,
+// stored as typed - its quotes and all.
+TEST(ProjectCrs, TheCrsVerbTakesAWktWithItsQuotesAsTyped)
+{
+    const std::string ogc =
+        "PROJCS[\"GDA2020 / MGA zone 56\",GEOGCS[\"GDA2020\",DATUM[\"Geocentric_Datum_of_"
+        "Australia_2020\",SPHEROID[\"GRS 1980\",6378137,298.257222101]],PRIMEM[\"Greenwich\",0],"
+        "UNIT[\"degree\",0.0174532925199433]],PROJECTION[\"Transverse_Mercator\"],"
+        "PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",153],"
+        "PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],"
+        "PARAMETER[\"false_northing\",10000000],UNIT[\"metre\",1],AXIS[\"Easting\",EAST],"
+        "AXIS[\"Northing\",NORTH],AUTHORITY[\"EPSG\",\"7856\"]]";
+    const std::string prj =
+        "PROJCS[\"GDA2020_MGA_Zone_56\",GEOGCS[\"GCS_GDA2020\",DATUM[\"GDA2020\","
+        "SPHEROID[\"GRS_1980\",6378137.0,298.257222101]],PRIMEM[\"Greenwich\",0.0],"
+        "UNIT[\"Degree\",0.0174532925199433]],PROJECTION[\"Transverse_Mercator\"],"
+        "PARAMETER[\"False_Easting\",500000.0],PARAMETER[\"False_Northing\",10000000.0],"
+        "PARAMETER[\"Central_Meridian\",153.0],PARAMETER[\"Scale_Factor\",0.9996],"
+        "PARAMETER[\"Latitude_Of_Origin\",0.0],UNIT[\"Meter\",1.0]]";
+
+    Document document;
+    CommandInterpreter interpreter(document);
+    auto byAuthority = interpreter.run("CRS SET " + ogc);
+    ASSERT_TRUE(byAuthority.ok()) << byAuthority.error().describe();
+    EXPECT_EQ(*byAuthority,
+              "crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\" kind=\"projected\" units=metre");
+    EXPECT_EQ(document.metadata().coordinateSystem, "EPSG:7856");
+
+    // Blanks around it, a tab after SET and a lower-case verb change nothing.
+    auto asTyped = interpreter.run("  crs set\t" + prj + "  ");
+    ASSERT_TRUE(asTyped.ok()) << asTyped.error().describe();
+    EXPECT_EQ(document.metadata().coordinateSystem, prj) << "stored as typed, quotes and all";
+    EXPECT_NE(asTyped->find("kind=\"projected\" units=metre"), std::string::npos) << *asTyped;
+
+    // A name in quotes is still the grammar's: the quotes group it and go.
+    ASSERT_TRUE(interpreter.run("CRS CLEAR").ok());
+    auto quotedName = interpreter.run("CRS SET \"GDA2020 / MGA zone 56\"");
+    ASSERT_TRUE(quotedName.ok()) << quotedName.error().describe();
+    EXPECT_EQ(document.metadata().coordinateSystem, "EPSG:7856");
+
+    // A refusal says what PROJ made of the text, not only that it failed.
+    auto broken = interpreter.run("CRS SET PROJCS[\"half a WKT\",GEOGCS[");
+    ASSERT_FALSE(broken.ok());
+    EXPECT_EQ(broken.error().code, ErrorCode::InvalidCRS);
+    EXPECT_NE(broken.error().context.find("PROJCS[\"half a WKT\",GEOGCS["), std::string::npos)
+        << "the text as typed: " << broken.error().context;
+    EXPECT_NE(broken.error().context.find("PROJ"), std::string::npos)
+        << "PROJ's reason: " << broken.error().context;
+    EXPECT_EQ(document.metadata().coordinateSystem, "EPSG:7856");
+}

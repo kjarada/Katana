@@ -63,10 +63,17 @@ Result<geodesy::CoordinateReferenceSystem> parse(std::string_view text)
     }
     auto crs = geodesy::CoordinateReferenceSystem::fromUserInput(input);
     if (!crs) {
+        // The text, then what PROJ made of it: "not a coordinate system"
+        // alone left a person to guess whether the text or the program was
+        // wrong (a WKT that had lost its quotes looked like any other).
+        std::string reason = crs.error().message;
+        if (!crs.error().context.empty()) {
+            reason += " (" + crs.error().context + ")";
+        }
         return makeError(ErrorCode::InvalidCRS,
                          "not a coordinate system: give an EPSG code (EPSG:7856), WKT or a PROJ "
                          "string",
-                         input);
+                         input + "; " + reason);
     }
     return crs;
 }

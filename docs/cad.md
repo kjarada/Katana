@@ -406,9 +406,31 @@ it, and the sheets print it in the title block, so it is set in one place:
   Online Data's Set Project CRS still waits for it in a person's session,
   because it imports into the system chosen. A headless session gets the
   non-modal dialog there too, and Online Data reads the system again when it
-  refreshes. Set calls `Document::setCoordinateSystem` rather than running a
-  `CRS SET` line: a WKT holds double quotes, which no command line can carry
-  (`docs/desktop.md`, "One rule for a word on the line").
+  refreshes. Set builds `CRS SET <text>` (Local Coordinates `CRS CLEAR`) and
+  runs it through the window's command runner, as section 1 of the
+  contributors' rules asks of a dialog; its refusal is the verb's, shown in
+  `projectCrsCheck`.
+- **`CRS SET` takes the rest of the line as typed** (2026-09-29). The
+  interpreter's tokenizer removes every double quote, and the verb used to
+  rebuild its argument from those tokens, so a WKT - every name in it quoted -
+  reached PROJ without its quotes. Any WKT whose names hold a blank (OGC's
+  `PROJCS["GDA2020 / MGA zone 56",...]`) was then refused `InvalidCRS: not a
+  coordinate system`, from the command line, `katana_cli` and `katana_mcp`
+  alike, although the verb's help offers WKT; an ESRI `.prj`, whose names
+  have underscores, happened to survive. The dialog did not fail, because it
+  called `Document::setCoordinateSystem` itself with the text as typed - the
+  second path that let the fault go unseen, and which the documents of the
+  time defended on the ground that a WKT's quotes "no command line can
+  carry". The fix is in the verb: `CRS SET` reads its system from the line
+  after its two words, verbatim (`textAfterTokens` in
+  `src/katana_cad/command_interpreter.cpp`), and a text that opens with a
+  quote is still the grammar's quoted argument (`CRS SET "GDA2020 / MGA zone
+  56"`). Rejected: an escape for quotes in the tokenizer, which every other
+  verb would then have to be read against, for one verb whose argument is by
+  nature the whole rest of the line. A refusal now carries PROJ's own reason
+  in its context. Tests: `ProjectCrs.TheCrsVerbTakesAWktWithItsQuotesAsTyped`
+  (it fails with the old argument, the owner's message and all),
+  and `ProjectCrsDialog.SetRunsTheCrsVerbAndAPastedWktKeepsItsQuotes`.
 - Kept open, it follows the drawing (`ProjectCrsDialog::follow`): a system set
   elsewhere - a typed `CRS SET`, an undo, which says only that the history
   moved - is shown in `projectCrsCurrent`, and in `projectCrsText` unless
