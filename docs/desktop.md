@@ -1060,6 +1060,10 @@ written by `cad::annotation::commandWord`
 double-quoted when it is empty or holds a blank. A name with a double quote or
 a line break in it cannot be carried, because the tokenizer has no escape, so it
 is refused. Otherwise the line would run on the name cut short at the quote.
+One verb reads past the tokenizer: `CRS SET` takes the rest of its line
+verbatim, because a WKT is all quotes (`docs/cad.md`, "The project's
+coordinate system"), so File > Project Coordinate System writes its text onto
+the line as typed.
 An annotation text uses `annotationTextWord`, which also writes a line break
 as `\n`. `src/katana_qt/command_word.hpp` hands a QString to the same rules
 (`commandWord`, `annotationTextWord`) and names the field in the refusal, and

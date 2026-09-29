@@ -55,7 +55,9 @@ std::string upper(std::string text)
     return text;
 }
 
-// Splits on whitespace; double quotes group words and are removed.
+// Splits on whitespace; double quotes group words and are removed. The
+// blanks are core::isAsciiSpace's, never the locale's: in a Latin-1 locale
+// isspace(0xA0) is true, and 0xA0 is the second byte of a UTF-8 a-grave.
 Result<std::vector<std::string>> tokenize(std::string_view line)
 {
     std::vector<std::string> tokens;
@@ -66,7 +68,7 @@ Result<std::vector<std::string>> tokenize(std::string_view line)
         if (ch == '"') {
             inQuotes = !inQuotes;
             hasToken = true; // "" is a valid empty token
-        } else if (!inQuotes && std::isspace(static_cast<unsigned char>(ch)) != 0) {
+        } else if (!inQuotes && katana::core::isAsciiSpace(ch)) {
             if (hasToken) {
                 tokens.push_back(std::move(current));
                 current.clear();
@@ -84,6 +86,28 @@ Result<std::vector<std::string>> tokenize(std::string_view line)
         tokens.push_back(std::move(current));
     }
     return tokens;
+}
+
+// The text of `line` after its first `words` tokens, exactly as typed and
+// trimmed: quotes, commas and runs of blanks kept. tokenize() removes every
+// double quote, which is right for a name and ruinous for a WKT, whose names
+// are all in quotes; a verb that takes a WKT reads it from here. The tokens
+// are walked by tokenize()'s own rules, so "the first two words" means the
+// same here as there.
+std::string_view textAfterTokens(std::string_view line, std::size_t words)
+{
+    std::size_t at = 0;
+    for (std::size_t word = 0; word < words; ++word) {
+        while (at < line.size() && katana::core::isAsciiSpace(line[at])) {
+            ++at;
+        }
+        bool inQuotes = false;
+        while (at < line.size() && (inQuotes || !katana::core::isAsciiSpace(line[at]))) {
+            inQuotes = line[at] == '"' ? !inQuotes : inQuotes;
+            ++at;
+        }
+    }
+    return katana::core::trimmed(line.substr(at));
 }
 
 // std::from_chars is locale independent: "1.5" never becomes "1,5".
@@ -811,7 +835,7 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         return alignment(args);
     }
     if (verb == "CRS") {
-        return coordinateSystem(args);
+        return coordinateSystem(args, line);
     }
     if (verb == "PARCEL") {
         return parcel(args);
@@ -2047,7 +2071,8 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
     return usage(kUsage);
 }
 
-CommandInterpreter::Reply CommandInterpreter::coordinateSystem(const Tokens& args)
+CommandInterpreter::Reply CommandInterpreter::coordinateSystem(const Tokens& args,
+                                                               std::string_view line)
 {
     const char* const kUsage =
         "CRS | CRS SET code-or-WKT-or-PROJ | CRS CLEAR | CRS FIND words | CRS SUGGEST lon,lat";
@@ -2085,7 +2110,14 @@ CommandInterpreter::Reply CommandInterpreter::coordinateSystem(const Tokens& arg
         if (args.size() < 2) {
             return usage(kUsage);
         }
-        if (const Status status = document_.setCoordinateSystem(rest()); !status) {
+        // The system as typed after CRS SET, not rebuilt from the tokens:
+        // those have lost a WKT's quotes, and PROJ refused every pasted WKT
+        // (test_project_crs.cpp, TheCrsVerbTakesAWktWithItsQuotesAsTyped).
+        // A text that OPENS with a quote is the grammar's quoted argument -
+        // CRS SET "GDA2020 / MGA zone 56" - and its quotes only group it.
+        const std::string_view typed = textAfterTokens(line, 2);
+        const std::string system = typed.starts_with('"') ? rest() : std::string(typed);
+        if (const Status status = document_.setCoordinateSystem(system); !status) {
             return status.error();
         }
         return describeLine(document_.metadata().coordinateSystem);

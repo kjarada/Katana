@@ -1,6 +1,6 @@
 // File > Project Coordinate System (src/katana_qt/project_crs_dialog): driven
 // by its controls' object names as a person uses them, each change one undo
-// step through Document::setCoordinateSystem.
+// step through the CRS verb the dialog builds.
 
 #include <gtest/gtest.h>
 
@@ -9,6 +9,7 @@
 #include <QPushButton>
 #include <QTreeWidget>
 
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "project_crs_dialog.hpp"
@@ -62,6 +63,57 @@ TEST(ProjectCrsDialog, TypingACodeChecksItAndSetSetsItAsOneStep)
     EXPECT_EQ(document.metadata().coordinateSystem, "EPSG:7856");
     EXPECT_EQ(document.history().undoCount(), before + 1);
     EXPECT_EQ(katana::qt::projectCrsLabel(document).toStdString(), "EPSG:7856  GDA2020 / MGA zone 56");
+}
+
+// Set is the CRS verb, handed to the runner as a typed line would be: what a
+// .prj holds, pasted, goes on the line with its quotes, and the verb takes it
+// as the dialog's check did. The WKT is an ESRI-style .prj for GDA2020 / MGA
+// zone 56 written out by hand (test_project_crs.cpp says where its numbers
+// come from); it carries no authority, so it is stored as typed.
+TEST(ProjectCrsDialog, SetRunsTheCrsVerbAndAPastedWktKeepsItsQuotes)
+{
+    const QString prj =
+        "PROJCS[\"GDA2020_MGA_Zone_56\",GEOGCS[\"GCS_GDA2020\",DATUM[\"GDA2020\","
+        "SPHEROID[\"GRS_1980\",6378137.0,298.257222101]],PRIMEM[\"Greenwich\",0.0],"
+        "UNIT[\"Degree\",0.0174532925199433]],PROJECTION[\"Transverse_Mercator\"],"
+        "PARAMETER[\"False_Easting\",500000.0],PARAMETER[\"False_Northing\",10000000.0],"
+        "PARAMETER[\"Central_Meridian\",153.0],PARAMETER[\"Scale_Factor\",0.9996],"
+        "PARAMETER[\"Latitude_Of_Origin\",0.0],UNIT[\"Meter\",1.0]]";
+    Document document;
+    katana::cad::CommandInterpreter interpreter(document);
+    QStringList lines;
+    const katana::qt::CommandRunner runner = [&](const QString& line) {
+        lines << line;
+        const auto reply = interpreter.run(line.toStdString());
+        katana::qt::VerbOutcome outcome;
+        outcome.ok = reply.ok();
+        if (!reply) {
+            outcome.error = QString::fromStdString(reply.error().describe());
+        }
+        return outcome;
+    };
+    ProjectCrsDialog dialog(document, std::nullopt, nullptr, runner);
+    auto* text = child<QLineEdit>(dialog, "projectCrsText");
+    ASSERT_NE(text, nullptr);
+
+    text->setText(prj);
+    const std::size_t before = document.history().undoCount();
+    ASSERT_TRUE(dialog.apply()) << dialog.check().toStdString();
+    ASSERT_EQ(lines.size(), 1);
+    EXPECT_EQ(lines.front().toStdString(), ("CRS SET " + prj).toStdString());
+    EXPECT_EQ(document.metadata().coordinateSystem, prj.toStdString());
+    EXPECT_EQ(document.history().undoCount(), before + 1);
+
+    // A refusal is the verb's, shown in the check line; nothing changes.
+    text->setText("no such system");
+    EXPECT_FALSE(dialog.apply());
+    EXPECT_TRUE(dialog.check().startsWith("Not set: InvalidCRS")) << dialog.check().toStdString();
+    EXPECT_EQ(document.metadata().coordinateSystem, prj.toStdString());
+
+    text->clear();
+    ASSERT_TRUE(dialog.apply());
+    EXPECT_EQ(lines.back().toStdString(), "CRS CLEAR");
+    EXPECT_TRUE(document.metadata().coordinateSystem.empty());
 }
 
 TEST(ProjectCrsDialog, APlaceIsOfferedItsZoneFirstAndSearchFilters)

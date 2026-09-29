@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "katana/core/error.hpp"
+#include "katana/survey/reduction_report.hpp"
 #include "katana/surveyio/format.hpp"
 
 namespace katana::surveyio {
@@ -76,5 +77,12 @@ inline constexpr std::size_t kMaxSiblingFiles = 64;
 // The ImportResult shape the import wizard's report page already shows, for a
 // reader's result: warnings through describe(), counts as they are.
 [[nodiscard]] ImportResult toImportResult(ReadResult result);
+
+// What a reduction's report says of the file it reduced (survey::ReportInput):
+// its name and siblings, the format by its human name, the parser, the counts,
+// every warning with its record, and what the file did not carry. One place,
+// for the import wizard, the Survey Jobs dialog and SURVEY IMPORT alike.
+[[nodiscard]] katana::survey::ReportInput reportInputFor(const ReadResult& read,
+                                                         const std::string& fileName);
 
 } // namespace katana::surveyio

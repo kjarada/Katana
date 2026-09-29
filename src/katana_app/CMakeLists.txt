@@ -7,11 +7,13 @@ add_library(katana_app STATIC
     dxf_verbs.cpp dxf_verbs.hpp
     ifc_verbs.cpp ifc_verbs.hpp
     import_records.cpp import_records.hpp
+    survey_verbs.cpp survey_verbs.hpp
     mcp_server.cpp mcp_server.hpp
 )
 katana_target_defaults(katana_app)
 target_include_directories(katana_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(katana_app PUBLIC katana_cad PRIVATE katana_archive12d katana_dxf katana_ifc)
+target_link_libraries(katana_app PUBLIC katana_cad PRIVATE katana_archive12d katana_dxf katana_ifc
+                                                         katana_survey katana_surveyio)
 # The version an exported file names as the program that wrote it.
 set_source_files_properties(ifc_verbs.cpp PROPERTIES
     COMPILE_DEFINITIONS "KATANA_VERSION=\"${PROJECT_VERSION}\"")
@@ -971,5 +973,62 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.prop_tree_reads_the_attributes_one_level_at_a_time PROPERTIES
         PASS_REGULAR_EXPRESSION
         "scope=selection matched=1 under=\"\" entries=3 from=0 shown=3[\r\n]+path=Asset children=1 values=1[\r\n]+path=code value=KERB type=text[\r\n]+path=vertex children=2 values=2[\r\n]+scope=selection matched=1 under=vertex entries=2 from=0 shown=2[\r\n]+path=vertex/2 children=1 values=1[\r\n]+path=vertex/10 children=1 values=1.*scope=drawing matched=2 under=\"\" entries=3 from=0 shown=3[\r\n]+path=Asset children=1 values=1[\r\n]+path=code varies=yes holders=2"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()
+
+# SURVEY READ and SURVEY IMPORT (survey_verbs.hpp) on the hand-built field
+# file tests/surveyio/data/fld/setup.fld. READ: 16 records read and 2 skipped
+# (record 20, a 07 one value short, and record 21, opcode 42), 1 setup, 12
+# observations (4 pointings of 3), CP1 and CP2 entered, 101 and 102 observed,
+# the one EB/01 feature, and the system its header comments name. IMPORT
+# reduces it with the defaults and draws 4 points on LAYER, one undo step:
+# worked by hand from CP1 (1000 E, 5000 N) oriented on CP2 due north at circle
+# 0, shot 101 (45 deg, zenith 95 deg, 50 m) is 50 sin 95 = 49.810 m out at
+# 45 deg, so at 1035.221 E 5035.221 N; shot 102 is face right (zenith 275
+# deg), so its circle reading 90.5 deg is 270.5 deg on face left, 30 sin 85 =
+# 29.886 m out: 970.115 E 5000.261 N. The regexes hold those to the
+# millimetre, which is the error budget of that hand working: the reduction
+# also means the orientation with the check measurement to CP2 (circle 0.001
+# deg, 1.8" on the mean, 0.44 mm across at 50 m) and applies curvature and
+# refraction, which the working leaves out.
+if(KATANA_BUILD_TESTS)
+    set(_fld "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/setup.fld")
+    add_test(NAME cli.survey_read_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld}\"" -c "STATUS")
+    set_tests_properties(cli.survey_read_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=setup\\.fld format=opcode-field-file parser=1\\.0 read=16 skipped=2 warnings=2[\r\n]+content setups=1 observations=12 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Australia/GDA2020, Zone 56\" epsg=none[\r\n]+warning record=20 [^\r\n]+[\r\n]+warning record=21 text=\"opcode 42 is not one this reader imports\".*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld}\" LAYER survey/fld"
+                -c "LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.survey_import_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=4 layer=survey/fld .*layer=survey/fld  at 1000,5000[\r\n]+[^\r\n]+at 1000,5100[\r\n]+[^\r\n]+at 1035\\.22[01][0-9]*,5035\\.22[01][0-9]*[\r\n]+[^\r\n]+at 970\\.11[45][0-9]*,5000\\.26[01][0-9]*.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+    # A file that is not there, and an option SURVEY does not have: refused.
+    add_test(NAME cli.survey_refuses_a_missing_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${CMAKE_CURRENT_BINARY_DIR}/no such.fld\"")
+    set_tests_properties(cli.survey_refuses_a_missing_file PROPERTIES WILL_FAIL TRUE)
+    add_test(NAME cli.survey_refuses_an_unknown_option
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld}\" LAYER x")
+    set_tests_properties(cli.survey_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+    # CRS SET with a WKT - GDA2020 / MGA zone 56 as OGC WKT1, its names in
+    # double quotes and one of them holding blanks - as an agent or a script
+    # passes it: the verb once lost the quotes with the line's tokens, and
+    # PROJ refused the WKT "InvalidCRS: not a coordinate system"
+    # (test_project_crs.cpp). A WKT whose names hold no blank - an ESRI .prj's
+    # GDA2020_MGA_Zone_56 - PROJ reads even without its quotes, so it could
+    # not show the fault.
+    add_test(NAME cli.crs_set_takes_a_wkt_with_its_quotes
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "CRS SET PROJCS[\"GDA2020 / MGA zone 56\",GEOGCS[\"GDA2020\",DATUM[\"Geocentric_Datum_of_Australia_2020\",SPHEROID[\"GRS 1980\",6378137,298.257222101]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",153],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",10000000],UNIT[\"metre\",1],AUTHORITY[\"EPSG\",\"7856\"]]")
+    set_tests_properties(cli.crs_set_takes_a_wkt_with_its_quotes PROPERTIES
+        PASS_REGULAR_EXPRESSION "crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\" kind=\"projected\" units=metre"
         FAIL_REGULAR_EXPRESSION "error")
 endif()

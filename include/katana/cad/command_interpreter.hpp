@@ -145,8 +145,9 @@ class CommandInterpreter {
     [[nodiscard]] Reply style(const Tokens& args);
     [[nodiscard]] Reply alignment(const Tokens& args);
     // CRS: the project's coordinate system - shown, set, cleared, found in the
-    // common list, suggested for a place (project_crs.hpp).
-    [[nodiscard]] Reply coordinateSystem(const Tokens& args);
+    // common list, suggested for a place (project_crs.hpp). `line` is the
+    // whole line, which CRS SET reads its system from as typed.
+    [[nodiscard]] Reply coordinateSystem(const Tokens& args, std::string_view line);
     [[nodiscard]] Reply parcel(const Tokens& args);
     // INVERSE, FORWARD (RADIATE) and AREA: the survey tools of survey_tools.hpp,
     // printing the same report the Survey menu's dialogs print.

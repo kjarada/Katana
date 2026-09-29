@@ -29,6 +29,7 @@
 #include "plotting/sheet_checks.hpp"
 #include "plotting/sheet_tables.hpp"
 #include "project_crs_dialog.hpp"
+#include "survey_verbs.hpp" // katana_app: SURVEY READ and SURVEY IMPORT
 #include "property_panel.hpp"
 #include "render_view_widget.hpp"
 #include "style_manager.hpp"
@@ -1151,7 +1152,7 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
             showProjectCrs(place);
             return false;
         }
-        return chooseProjectCrs(this, document_, place);
+        return chooseProjectCrs(this, document_, place, commandRunner());
     };
     online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
 
@@ -2429,7 +2430,8 @@ void MainWindow::showProjectCrs(std::optional<std::pair<double, double>> place)
     // and the drawing's centre when it is made, and a place asked about is a
     // new question.
     if (!projectCrs_ || !projectCrs_->isVisible() || place) {
-        projectCrs_ = std::make_unique<ProjectCrsDialog>(document_, place, this);
+        projectCrs_ =
+            std::make_unique<ProjectCrsDialog>(document_, place, this, commandRunner());
     }
     projectCrs_->show();
     projectCrs_->raise();
@@ -2919,6 +2921,18 @@ void MainWindow::runTypedLine(const QString& line)
 
 bool MainWindow::runWorkbenchLine(const QString& line)
 {
+    // SURVEY READ and SURVEY IMPORT: the session's verb (survey_verbs.hpp),
+    // so the window, katana_cli and katana_mcp read and import a field file
+    // by one function and reply alike.
+    if (katana::app::isSurveyLine(line.toStdString())) {
+        const auto reply = katana::app::runSurveyLine(document_, line.toStdString());
+        if (reply) {
+            logMessage(QString::fromStdString(*reply));
+        } else {
+            logMessage(QString::fromStdString(reply.error().describe()), true);
+        }
+        return true;
+    }
     // A .ifc's IMPORT, EXPORT and INFO, and IFC RULES, are IFC's grammar
     // before anything else, as in the session (session.cpp): the geo
     // executor below takes IMPORT, EXPORT and INFO of every other file, and

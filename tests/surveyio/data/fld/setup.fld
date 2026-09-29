@@ -1,0 +1,22 @@
+{Version 6.0}
+100		degrees	metres	millibars	celsius
+// Field File Version 6
+// Job name     : fixture
+// Coordinate System: Australia/GDA2020
+// Zone: Zone 56
+29		Hand-built from the format description
+02				CP1			1000.000	5000.000	20.000
+02				5	CP2		1000.000	5100.000	21.500
+09		1.00000000
+03				CP1			1.500
+05		1.600
+04				CP2			0.00000000	90.00000000	100.000
+05		2.000
+07		EB	01	101			45.00000000	95.00000000	50.000
+73		Date	2026-08-26
+72		Depth	0.6
+41		Modified by hand
+07		EB	01	102		kerb	90.50000000	275.00000000	30.000
+07		EB	01	103			10.0	90.0
+42		0.5	0.0	0.0
+06				CP2			0.00100000	90.00000000	100.002
