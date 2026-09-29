@@ -1020,29 +1020,30 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.survey_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
     # An RTK job, tests/surveyio/data/fld/gnss.fld: each coordinate written
     # " 2" (a blank before the opcode) with its date and time in the column
-    # after it, attribute groups (124, 125), a bare 20. Detected without
-    # FORMAT; all 32 records read (the version line and lines 11-37 and
-    # 41-44), two warnings - the file is Windows-1252 (record 0), and R001 is
-    # measured again at record 41 - no setup, 5 points (R001 to R004 and the
-    # keyed-in CM1), 2 features (KB 1 closed by the 20, KB 1 again after it),
-    # the system the header names. IMPORT draws the 5 points where the file
-    # puts them, X the easting: nothing is reduced, as the format says an
-    # entered coordinate needs no reduction, and R001 keeps its first
-    # coordinates.
+    # after it, and its receiver's "GNSS Solution" in an attribute group (124,
+    # 125); a keyed-in 02; a bare 20. Detected without FORMAT; all 35 records
+    # read (the version line and lines 11-37 and 41-47), two warnings - the
+    # file is Windows-1252 (record 0), and R001's second GNSS position, at
+    # record 41, differs from its first - no setup; CM1, keyed in, the one
+    # point with coordinates; R001 to R004 placed by their 5 GNSS positions;
+    # 2 features (KB 1 closed by the 20, KB 1 again after it); the system the
+    # header names. IMPORT draws the 5 points where the file puts them, X the
+    # easting, R001 by its first position: the reduction's entered point CM1
+    # first, then the GNSS ones in the order the file names them.
     set(_fld_gnss "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/gnss.fld")
     add_test(NAME cli.survey_read_gnss_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_gnss}\"")
     set_tests_properties(cli.survey_read_gnss_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=gnss\\.fld format=opcode-field-file parser=1\\.1 read=32 skipped=0 warnings=2[\r\n]+content setups=0 observations=0 points=5 unpositioned=0 features=2 control=0[\r\n]+declared crs=\"Local grid A\" epsg=none[\r\n]+warning record=0 text=\"the file is not UTF-8[^\r\n]+[\r\n]+warning record=41 text=\"point 'R001' is given different coordinates here"
+        "survey file=gnss\\.fld format=opcode-field-file parser=1\\.1 read=35 skipped=0 warnings=2[\r\n]+content setups=0 observations=5 points=1 unpositioned=4 features=2 control=0[\r\n]+declared crs=\"Local grid A\" epsg=none[\r\n]+warning record=0 text=\"the file is not UTF-8[^\r\n]+[\r\n]+warning record=41 text=\"point 'R001' is given a GNSS position here"
         FAIL_REGULAR_EXPRESSION "error")
     add_test(NAME cli.survey_import_gnss_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_gnss}\"" -c "LIST")
     set_tests_properties(cli.survey_import_gnss_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "imported job=job-1 entities=5 layer=survey/points .* at 500010,6200020[\r\n]+[^\r\n]+ at 500020,6200020[\r\n]+[^\r\n]+ at 500020,6200030[\r\n]+[^\r\n]+ at 500000,6200000[\r\n]+[^\r\n]+ at 500040,6200040"
+        "imported job=job-1 entities=5 layer=survey/points .* at 500000,6200000[\r\n]+[^\r\n]+ at 500010,6200020[\r\n]+[^\r\n]+ at 500020,6200020[\r\n]+[^\r\n]+ at 500020,6200030[\r\n]+[^\r\n]+ at 500040,6200040[\r\n]"
         FAIL_REGULAR_EXPRESSION "error")
     # A resection, tests/surveyio/data/fld/resection.fld: 128 sets up on S1,
     # whose block ("5" and "7" without their zero) runs to the 129, then
@@ -1072,25 +1073,27 @@ if(KATANA_BUILD_TESTS)
         "imported job=job-1 entities=3 layer=survey/points .*reduction_warning text=\"Setup S1 stands on S1, which has no position: nothing was computed from it\\.\".* at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1007\\.07[01][0-9]*,5007\\.07[01][0-9]*"
         FAIL_REGULAR_EXPRESSION "error")
     # A setup on RTK marks, tests/surveyio/data/fld/rtk_setup.fld: A (1000,
-    # 5000) and B (1000, 5100), each written " 2" with its GNSS attributes, a
-    # setup on A reading 30 degrees on B, and two shots at circle 120, 10 m
-    # and 20 m out and level, each followed by an offset. READ: all 18 records
-    # (the version line, 100, two coordinates with a group of three records
-    # each, 03, 05, 04, 05, 07, 42, 07, 43), nothing to warn of. IMPORT: A and
-    # B are entered coordinates, which the reduction takes as known, so the
-    # setup is oriented on B, due north: 0 - 30 = -30 degrees, and circle 120
-    # is due east. 101 is 10 m east and its radial offset 0.5 m further out:
-    # 1010.5, 5000; 102 is 20 m east and its tangential offset 0.5 m to the
-    # right looking east, south: 1020, 4999.5. Read as calculated, the marks
-    # would not orient it: the circle taken as set would put 101 at 1008.66,
-    # 4995.
+    # 5000) and B (1000, 5100), each written " 2" with its receiver's
+    # solution, a setup on A reading 30 degrees on B, and two shots at circle
+    # 120, 10 m and 20 m out and level, each followed by an offset. READ: all
+    # 18 records (the version line, 100, two coordinates with a group of
+    # three records each, 03, 05, 04, 05, 07, 42, 07, 43), nothing to warn
+    # of; 11 observations - the setup's 9 and the marks' GNSS positions - and
+    # no point with coordinates of its own. IMPORT: A and B are GNSS
+    # positions, which the reduction places before any setup, so the setup is
+    # oriented on B, due north: 0 - 30 = -30 degrees, and circle 120 is due
+    # east. 101 is 10 m east and its radial offset 0.5 m further out: 1010.5,
+    # 5000; 102 is 20 m east and its tangential offset 0.5 m to the right
+    # looking east, south: 1020, 4999.5. Were the marks calculated points,
+    # which the reduction does not place, they would not orient it: the
+    # circle taken as set would put 101 at 1008.66, 4995.
     set(_fld_rtk_setup "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/rtk_setup.fld")
     add_test(NAME cli.survey_read_rtk_setup_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_rtk_setup}\"")
     set_tests_properties(cli.survey_read_rtk_setup_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=rtk_setup\\.fld format=opcode-field-file parser=1\\.1 read=18 skipped=0 warnings=0[\r\n]+content setups=1 observations=9 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Local grid C\" epsg=none"
+        "survey file=rtk_setup\\.fld format=opcode-field-file parser=1\\.1 read=18 skipped=0 warnings=0[\r\n]+content setups=1 observations=11 points=0 unpositioned=4 features=1 control=0[\r\n]+declared crs=\"Local grid C\" epsg=none"
         FAIL_REGULAR_EXPRESSION "error|warning record")
     add_test(NAME cli.survey_import_rtk_setup_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"

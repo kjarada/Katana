@@ -700,8 +700,23 @@ struct SurveyStation {
     // The horizontal circle reading set on the backsight, radians clockwise in
     // [0, 2*pi). Absent when the file does not say, and absent is not zero: a
     // setup oriented on 0 00 00 and a setup whose orientation was not recorded
-    // produce different bearings, so an importer must not invent one.
+    // produce different bearings, so an importer must not invent one. With no
+    // backsight named, the reduction takes a setup that has one as a circle
+    // set to read azimuths - its readings are its bearings - whatever the
+    // value. (The name is older than `statedBacksightAzimuth`: this is the
+    // circle, never the azimuth.)
     std::optional<double> backsightAzimuth;
+    // The azimuth of the line to the backsight as the FILE states it - keyed
+    // in, or worked out by the field software - radians clockwise from north
+    // in [0, 2*pi). Absent when the file states none. Where the backsight's
+    // coordinates orient the setup this is not used; where nothing places the
+    // backsight, the reduction orients the setup on it less the setup's own
+    // reading on the backsight, or with no reading less the circle above -
+    // the field software's own orientation correction. Not the circle: a
+    // circle set to 0 00 00 on a backsight 123 degrees away is the usual
+    // case, and taking either for the other turns every bearing by the
+    // difference.
+    std::optional<double> statedBacksightAzimuth;
     // In the order the file gives them. The backsight's own observation, where
     // the file records one, is one of these like any other.
     std::vector<Observation> observations;

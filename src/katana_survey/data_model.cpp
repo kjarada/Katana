@@ -740,6 +740,12 @@ Status validateProject(const SurveyProject& project)
                              "station " + setup.id + ": backsight azimuth is not finite",
                              describeSource(station.source));
         }
+        if (station.statedBacksightAzimuth && !std::isfinite(*station.statedBacksightAzimuth)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "station " + setup.id +
+                                 ": the azimuth the file states for the backsight is not finite",
+                             describeSource(station.source));
+        }
         const std::string context = "station " + setup.id;
         for (const Observation& observation : station.observations) {
             if (Status status = checkProjectObservation(observation, points, context);
