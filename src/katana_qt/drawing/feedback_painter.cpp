@@ -167,8 +167,12 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
         painter.setPen(dashes);
         frame.drawShape(mark.geometry);
     }
+    // A pick the tool refuses keeps its target marks, which say what the pick
+    // took, but in the refusal's red: green there promised the click the
+    // caption says is turned down.
+    const QColor targetColour = feedback.refused ? overlay::removed() : overlay::target();
     // Target pieces: a solid 3 px line along the geometry, arcs as arcs.
-    QColor targetStroke = overlay::target();
+    QColor targetStroke = targetColour;
     targetStroke.setAlpha(235);
     for (const FeedbackMark& mark : feedback.marks) {
         if (mark.role != FeedbackRole::Target || isVertex(mark)) {
@@ -215,11 +219,11 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
             continue;
         }
         const QPointF p = vertexOf(mark, frame);
-        painter.setPen(QPen(overlay::target(), 2.0));
+        painter.setPen(QPen(targetColour, 2.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawEllipse(p, kRingRadius, kRingRadius);
         painter.setPen(QPen(overlay::ground(), 1.0));
-        painter.setBrush(overlay::target());
+        painter.setBrush(targetColour);
         painter.drawRect(QRectF(p.x() - kTargetSquare / 2, p.y() - kTargetSquare / 2,
                                 kTargetSquare, kTargetSquare));
         painter.setBrush(Qt::NoBrush);
@@ -308,7 +312,7 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
             continue;
         }
         const QColor colour =
-            mark.role == FeedbackRole::Removed ? overlay::removed() : overlay::target();
+            mark.role == FeedbackRole::Removed ? overlay::removed() : targetColour;
         std::optional<QPointF> at;
         if (isVertex(mark)) {
             at = vertexOf(mark, frame) + QPointF(9.0, -9.0);

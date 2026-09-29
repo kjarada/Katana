@@ -402,11 +402,14 @@ tool's has always been; the polyline in play's vertices as the grips' cold
 squares, hollow, vertex 0 numbered - the grips are hidden while a tool runs;
 and the caption on a dark chip, 16 px right of and below the cursor, flipped
 to stay in the view and off the prompt band, its stripe red when refused.
-The prompt calls the tool by what it does ("Insert Vertex: Click on polyline
-2 where the new vertex goes"), not by its family's menu name
-(`ToolInfo::title`). Nothing is drawn until the pointer has been over the
-view: the cursor was the origin until then, and a tool started from the
-command line marked whatever vertex lay at 0,0.
+A refused pick keeps its Target marks, which say what the pick took, but
+draws them in the refusal's red: they were green, and green promised the
+click the caption said would be turned down (the ring on an open
+polyline's end under Fillet Vertex). The prompt calls the tool by what it
+does ("Insert Vertex: Click on polyline 2 where the new vertex goes"), not by
+its family's menu name (`ToolInfo::title`). Nothing is drawn until the
+pointer has been over the view: the cursor was the origin until then, and a
+tool started from the command line marked whatever vertex lay at 0,0.
 
 Rejected, and why:
 
