@@ -132,6 +132,24 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build/release --parallel 14 --output-
   the tool's 10-minute limit is moved to the background and KEEPS RUNNING.
   Wait for its notification before starting another. Two ninjas in one
   directory corrupt `.ninja_deps`.
+- **If a running Katana stops the build, kill it and build again.** This is
+  the owner's standing instruction (2026-09-30), so do not ask first.
+  - The sign is a link that fails with `cannot open output file
+    bin\katana.exe: Permission denied`, or the same for `katana_cli.exe` or
+    `katana_mcp.exe`. Windows locks a running program's file; it is usually
+    the owner's window, opened from this `build/release`.
+  - Stop only the programs started from the build directory being built,
+    from the checkout or worktree root, then run the same build again:
+
+    ```sh
+    bin="$(cygpath -w "$PWD/build/release/bin")"
+    powershell -NoProfile -Command "Get-Process katana,katana_cli,katana_mcp -ErrorAction SilentlyContinue | Where-Object { \$_.Path -like '$bin\*' } | Stop-Process -Force"
+    ```
+
+  - Never while that directory's own suite is running: its headless tests
+    run `bin/katana.exe` too, and a build there is already forbidden above.
+  - Unsaved work in the window is lost; the owner accepts that. Say in the
+    hand-off that you closed it.
 - **After editing CMake files, run `cmake --preset release` on its own first.**
   Don't let the build regenerate itself mid-run.
 - **If ninja prints "premature end of file; recovering",** ninja's own recovery
