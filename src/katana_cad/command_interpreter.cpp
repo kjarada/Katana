@@ -551,9 +551,13 @@ Views     the desktop window's views (katana_cli and katana_mcp have none, and r
           VIEWS LINK id[,id...] [TO id]   linked plan views pan and zoom together: every one
           shows the centre and scale of the one moved last; TO is the one the others come to
           VIEWS UNLINK id[,id...] | ALL
+          VIEWS HIDE id layer[,layer...] | SHOW id layer[,layer...]|ALL | ISOLATE id layer
+          the layers that view hides of its own, as its Layers button sets them
 Zoom      ZOOM (Z)   the active view's extents | ZOOM EXTENTS | IN [f] | OUT [f] | f |
           WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE pixels-per-unit]   [view=id]; IN and OUT
           are by 2 about the view's centre; linked views follow every ZOOM
+          ZOOM SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
+          [WHERE k=v ...]   frames what the scope takes (matched=0: nothing moves)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM Z ?  LE MT TS LS
 )" + annotationHelpText() + drawingHelpText();
 }
@@ -864,7 +868,7 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     // VIEWS and ZOOM: the window's views, which the Document does not hold;
     // without a window they are refused by name (view_verbs.hpp).
     if (isViewVerb(verb)) {
-        return runViewVerb(document_, verb, args, viewHost_);
+        return runViewVerb(document_, verb, args, viewHost_, scopeViews_);
     }
     return makeError(ErrorCode::ParseFailure, "unknown command; type HELP", verb);
 }

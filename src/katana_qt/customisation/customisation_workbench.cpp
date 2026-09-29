@@ -184,12 +184,9 @@ void CustomisationWorkbench::selectAndShow(const std::vector<katana::entity::Ent
     if (plan == nullptr) {
         return;
     }
-    katana::geometry::Box2 bounds;
-    for (const katana::entity::EntityId id : ids) {
-        if (const katana::entity::Entity* entity = document.model().entities.find(id)) {
-            bounds.expand(katana::entity::boundingBox(entity->geometry));
-        }
-    }
+    // The one measure of what ids take up (cad::extentOf), as ZOOM SELECTION
+    // frames them.
+    const katana::geometry::Box2 bounds = katana::cad::extentOf(document.model(), ids);
     if (!bounds.empty()) {
         plan->zoomTo(bounds);
     }

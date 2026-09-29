@@ -407,3 +407,107 @@ TEST(ViewLinks, AZoomLineOnALinkedViewMovesItAndTheViewsLinkedWithIt)
     EXPECT_EQ(w.state(a).plan.center, Point2(50, 40));
     EXPECT_EQ(w.state(c).plan.center, Point2(7, 7)) << "not linked";
 }
+
+TEST(ViewLinks, ZoomToSelectionInOneLinkedViewFramesItInBoth)
+{
+    // The as-built view's Zoom to Selection: its line, ZOOM SELECTION view=2,
+    // frames the selected line there and the design view follows. By hand the
+    // line (10,10)-(40,30) fits a 300 x 200 view at 0.84 x 300 / 30 = 8.4 px a
+    // unit, about (25, 20).
+    LinkedWorkspace w;
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(10, 10), Point2(40, 30))).ok());
+    const ViewId a = w.views->viewSet().activeId();
+    const ViewId b = w.views->openView(ViewKind::Plan).id;
+    processEvents();
+    w.place(a, 360, 240, 0, 0, 1);
+    w.place(b, 300, 200, -50, -50, 2);
+    (void)w.run("SELECT ALL");
+    (void)w.run("VIEWS LINK " + std::to_string(a) + "," + std::to_string(b));
+
+    QToolButton* zoomSelection = w.button(b, "ViewZoomSelectionButton");
+    ASSERT_NE(zoomSelection, nullptr);
+    zoomSelection->click();
+    processEvents();
+
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM SELECTION view=2");
+    EXPECT_EQ(w.state(b).plan.center, Point2(25, 20));
+    EXPECT_NEAR(w.state(b).plan.scale, 8.4, 1e-12);
+    expectSameView(w.state(a), w.state(b));
+    EXPECT_EQ(w.views->viewSet().activeId(), b) << "pressing a view's tool makes it active";
+}
+
+TEST(ViewLinks, ATransparentZoomTypedInsideLineZoomsAndLeavesLineAtItsStep)
+{
+    // Something far off to frame, so the zoom is seen: its middle (150, 125).
+    LinkedWorkspace w;
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(100, 100), Point2(200, 150)))
+            .ok());
+    const ViewId plan = w.views->viewSet().activeId();
+    w.place(plan, 300, 200, 0, 0, 10);
+    ASSERT_TRUE(w.views->startTool("draw.line").ok());
+    ASSERT_TRUE(w.views->typeIntoTool("0,0"));
+    const std::string prompt = w.plan(plan).toolHost().prompt();
+
+    // Z, as a person types it at the second point: the view's, not a point.
+    ASSERT_TRUE(w.views->typeIntoTool("Z"));
+    processEvents();
+    ASSERT_FALSE(w.ran.isEmpty());
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM");
+    EXPECT_EQ(w.state(plan).plan.center, Point2(150, 125));
+    // The tool is where it was: still Line, still asking for the next point.
+    EXPECT_EQ(w.views->activeToolId(), "draw.line");
+    EXPECT_EQ(w.plan(plan).toolExpects(), katana::cad::ToolInput::Point);
+    EXPECT_EQ(w.plan(plan).toolHost().prompt(), prompt);
+
+    // 'ZOOM IN with AutoCAD's apostrophe is the same; PAN has no verb and is
+    // refused by name, the tool untouched.
+    ASSERT_TRUE(w.views->typeIntoTool("'ZOOM IN"));
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM IN");
+    const qsizetype before = w.ran.size();
+    ASSERT_TRUE(w.views->typeIntoTool("PAN"));
+    EXPECT_EQ(w.ran.size(), before) << "PAN ran nothing";
+    EXPECT_TRUE(w.views->runsTransparently("Z"));
+    EXPECT_FALSE(w.views->runsTransparently("PAN"));
+
+    // And the line goes on from 0,0 as if nothing had been typed between: the
+    // chain is drawn at Enter, as LINE draws it, from 0,0 to 10,0.
+    const std::size_t entities = w.document.model().entities.size();
+    ASSERT_TRUE(w.views->typeIntoTool("10,0"));
+    ASSERT_TRUE(w.views->pressEnter());
+    processEvents();
+    ASSERT_EQ(w.document.model().entities.size(), entities + 1);
+    const katana::entity::Entity* drawn = nullptr;
+    w.document.model().entities.forEach([&drawn](const katana::entity::Entity& entity) {
+        drawn = &entity; // ascending ids: the last is the newest
+    });
+    ASSERT_NE(drawn, nullptr);
+    const auto* segment = std::get_if<katana::geometry::Segment2>(&drawn->geometry);
+    ASSERT_NE(segment, nullptr);
+    EXPECT_EQ(segment->start, Point2(0, 0));
+    EXPECT_EQ(segment->end, Point2(10, 0));
+    w.views->stopTool();
+    EXPECT_FALSE(w.views->runsTransparently("Z")) << "no tool runs: Z is a command";
+}
+
+TEST(ViewLinks, ASectionsZoomInIsTwiceAsCloseAboutTheMiddleOfItsPlot)
+{
+    // A section's pan and zoom are its widget's: ZOOM IN view=<section> keeps
+    // the station and elevation at the middle of the plot where they were.
+    LinkedWorkspace w;
+    const ViewId section = w.views->openView(ViewKind::Section).id;
+    processEvents();
+    katana::qt::SectionViewWidget* view = w.views->sectionView(section);
+    ASSERT_NE(view, nullptr);
+    const QPointF middle = view->plotCentre();
+    const QPointF before = view->stationElevationAt(middle);
+    const QPointF edge = view->stationElevationAt(middle + QPointF(100, 0));
+    (void)w.run("ZOOM IN view=" + std::to_string(section));
+    const QPointF after = view->stationElevationAt(middle);
+    EXPECT_NEAR(after.x(), before.x(), 1e-9);
+    EXPECT_NEAR(after.y(), before.y(), 1e-9);
+    // Twice as close: 100 px from the middle now spans half the stations.
+    const QPointF edgeAfter = view->stationElevationAt(middle + QPointF(100, 0));
+    EXPECT_NEAR(edgeAfter.x() - after.x(), 0.5 * (edge.x() - before.x()), 1e-9);
+}

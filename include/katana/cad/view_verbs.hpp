@@ -29,18 +29,31 @@
 //   ZOOM | Z                              the active view's extents, as always
 //   ZOOM EXTENTS | IN [f] | OUT [f] | <f> | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s]
 //        [view=<id>]
+//   ZOOM SELECTION | DRAWING | VIEW [<id>] [EXTENTS] | AREA x0,y0,x1,y1
+//        | LAYERS a,b [ONLY]  [WHERE key=value ...]  [view=<id>]
 //
 // An id is the window's ViewId - what a record's view= says - and never the
 // number in a view's title ("Plan 2" is numbered among the plan views, its id
-// among every view opened). view= may stand anywhere on a ZOOM line; without
-// it ZOOM acts on the active view. Linked views follow every ZOOM.
+// among every view opened). view= may stand anywhere on a ZOOM line and is
+// taken off before anything else is read, so a WHERE never reads it as a
+// condition; without it ZOOM acts on the active view. Linked views follow
+// every ZOOM.
 //
 // EXTENTS frames what the view draws, in any kind of view. IN and OUT (by 2
-// unless a factor is given) and a bare factor zoom about the view's centre;
-// WINDOW frames a box as Zoom Extents frames the drawing - a box of the
-// drawing, where the scope word AREA would be the entities found in one;
-// CENTRE puts a point in the middle, at SCALE pixels per unit when given.
-// Those four act on plan views, and elsewhere are refused naming the kind.
+// unless a factor is given) and a bare factor zoom about the view's centre,
+// in a plan view or a section; WINDOW frames a box as Zoom Extents frames the
+// drawing - a box of the drawing, where the scope word AREA would be the
+// entities found in one; CENTRE puts a point in the middle, at SCALE pixels
+// per unit when given. WINDOW and CENTRE act on plan views.
+//
+// The scope words are the shared grammar (scope_verbs.hpp), read by the one
+// parser and resolved by matchScope: ZOOM frames what they take, by
+// extentOf. ZOOM alone is still EXTENTS, where no scope word elsewhere is the
+// selection. The reply begins with the scope record; a scope that takes
+// nothing moves no view and says so (matched=0), which is not a refusal. A
+// scope frames a plan view; a 3D view's frame of what a scope takes is not
+// done (docs/cad.md), and 3D and elevation views take EXTENTS alone until
+// their zoom towards the cursor is merged.
 //
 // HIDE, SHOW and ISOLATE are the view's own layer filter, its Layers button's
 // (cad::LayerOverrides): subtractive, so a view never shows what the document
@@ -63,6 +76,11 @@
 // linked, then a line for each view that followed it:
 //
 //   view=2 kind=plan followed=1 centre=50,40 scale=8 area=x0,y0,x1,y1
+//
+// and with scope words, the scope's record first:
+//
+//   scope=selection matched=1
+//   view=2 kind=plan centre=25,20 scale=... area=...
 
 #include <functional>
 #include <optional>
@@ -71,6 +89,7 @@
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/scope_verbs.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/cad/view_transform.hpp"
 #include "katana/core/error.hpp"
@@ -87,6 +106,10 @@ struct ZoomRequest {
         Factor,  // times `factor` about the view's centre: above 1 is closer
         Window,  // frames `window` as Zoom Extents frames the drawing
         Centre,  // `centre` in the middle, at `scale` pixels per unit if given
+        // Frames `window`, the extent of what a scope took (extentOf): framed
+        // as WINDOW frames a box in a plan view; kept apart because a view of
+        // another kind would frame the entities, not a box.
+        Scope,
     };
     ViewId view = kNoView;
     Kind kind = Kind::Extents;
@@ -148,11 +171,12 @@ using ViewHostProvider = std::function<ViewVerbHost*()>;
 [[nodiscard]] bool isViewVerb(std::string_view verb);
 
 // Runs one VIEWS or ZOOM line: `verb` as isViewVerb takes it, `args` the words
-// after it as the interpreter splits them. The reply is the records above;
-// refusals name the word, the view or the kind at fault.
+// after it as the interpreter splits them. `scopeViews` answers the scope word
+// VIEW, as it does for every verb that takes the shared scope. The reply is
+// the records above; refusals name the word, the view or the kind at fault.
 [[nodiscard]] katana::core::Result<std::string>
 runViewVerb(const Document& document, std::string_view verb, const std::vector<std::string>& args,
-            const ViewHostProvider& host);
+            const ViewHostProvider& host, const ScopeViewProvider& scopeViews = {});
 
 // The record VIEWS gives for `view`, a view of `views`.
 [[nodiscard]] std::string viewRecord(const ViewSet& views, const ViewState& view);

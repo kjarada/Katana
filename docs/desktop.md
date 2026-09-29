@@ -570,6 +570,58 @@ View (`viewLinkActive`, Ctrl+Shift+L; K, as Viewport Layout has L) does the
 Link button's line for the active plan view, and View > Unlink All Views
 (`viewUnlinkAll`) runs `VIEWS UNLINK ALL`.
 
+**The zoom tools on the bar.** A plan view's bar is `[kind] Plan 1 ...
+[Link][Layers][Zoom In][Zoom Out][Zoom to Selection][Zoom Extents]
+[_][float][max][x]`; a section's has In, Out and Extents, a 3D or elevation
+view's Extents alone (below, "Not done"). Each is a plain button that runs
+its ZOOM line through the command runner - `ZOOM IN view=<id>`, `ZOOM OUT
+view=<id>`, `ZOOM SELECTION view=<id>`, `ZOOM EXTENTS view=<id>` - so a
+click is logged, the views linked with it follow, and Zoom to Selection with
+nothing selected says `matched=0` and moves nothing. A button the view's
+kind would refuse is not offered: the bar shows what ZOOM takes there, and
+follows the view's kind. The View menu has the same four for the active
+view (`viewZoomIn`, `viewZoomOut`, `viewZoomSelection`, and Zoom Extents,
+which now runs `ZOOM EXTENTS` too) and Zoom To (below).
+
+In, Out and Zoom to Selection are OPTIONAL tools (`DockTitleBar::addTool`
+with a priority): a bar shows them, highest priority first, only while they
+fit and leave the title `DockTitleBar::kTitleRoom` (56 px, "Plan 1" and a
+little over); tools of one priority come and go together. Zoom to Selection
+(2) outlasts In and Out (1), which the wheel does as well. They are never in
+the bar's least width (`DockTitleBar::minimumSizeHint` leaves them out: Qt
+asks a child's hint rather than taking its layout's minimum), so a view can
+always be narrowed past them - each tool always shown costs 23 px of the
+least width, and three more would have stopped a Quad view's bars from
+narrowing to their docks. No overflow menu: every optional tool is in the
+View menu too, and a menu opened from a title bar is a modal loop a headless
+press would wait in (`ViewChrome.TheTitleBarShowsOptionalToolsOnlyWhereTheyFitAndNoTwoOverlap`,
+`ViewChrome.OptionalToolsNeverWidenTheDocksMinimum`).
+
+**Zoom To** (View > Zoom To, `zoomToDialog`) frames what a scope takes - the
+shared "Apply to" and "Only those that match" (`ScopeFilterWidget`, prefix
+`zoomTo`) - in a chosen view (`zoomToView`: the active view, then every open
+view by its title and id). It builds `ZOOM <scope words> [view=<id>]`
+(`zoomToLine` shows it as the controls change), runs it through the command
+runner (`zoomToRun`) and shows ZOOM's answer (`zoomToStatus`). Non-modal and
+kept, as Select by ID is (`qt_zoom_to_dialog_runs_its_line_headless`).
+
+**ZOOM typed while a tool runs** - Z, ZOOM, 'ZOOM, 'Z and whatever follows -
+is the view's, not the tool's, as AutoCAD resumes LINE after 'ZOOM: the tool
+host hands it to the workspace (`ToolHost::onTransparent`), which runs it as
+its ZOOM line through the command runner, and the tool stays at its step
+with its prompt (`ViewLinks.ATransparentZoomTypedInsideLineZoomsAndLeavesLineAtItsStep`).
+The command line leaves the line's echo to the runner
+(`ViewWorkspace::runsTransparently`), so it is logged once
+(`qt_dist_typed_at_the_command_line_reports_the_inverse_headless`). PAN and
+'P have no verb, so the host goes on refusing them by name. A workspace
+built without a window runs the bars' lines through an interpreter of its
+own, answered by itself: the same verbs, unlogged.
+
+Rejected: a Zoom to Selection button greyed out while nothing is selected -
+it needs a document listener on the workspace, and ZOOM already answers an
+empty selection with `matched=0`; a second toolbar row or tools drawn over
+the drawing (above).
+
 **Rejected alternatives.** Linking by the visible extent: views of different
 shapes fit one box at different scales, and each move would round each
 view's scale differently, so they drift over a session. Qt signals from
@@ -587,7 +639,13 @@ in logical pixels first (the software view counts device pixels, the GPU
 view logical ones), a section its pan and zoom in `ViewState`. Grips are
 still shown on a selected entity that a view hides (`gripsOfSelection` takes
 no view layers). The link is not kept between sessions, as the workspace is
-not.
+not. A 3D or elevation view's bar has no Zoom In, Out or Selection yet, and
+ZOOM IN on one is refused naming its kind: its zoom is to go towards what is
+drawn at the centre, through the 3D wheel's own zoom towards the cursor
+(built on another branch; once merged, the workspace's `zoomView` hands IN
+and OUT to it at the centre pixel, and the verb's rule of which kinds take
+which zoom lets them through), and framing what a scope takes in 3D needs
+the scene to draw a set of ids.
 
 ### The dock chrome: one title bar for panels and views
 

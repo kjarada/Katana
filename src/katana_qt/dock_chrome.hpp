@@ -49,6 +49,7 @@
 // DockRole it is told.
 
 #include <functional>
+#include <limits>
 #include <vector>
 
 #include <QPointer>
@@ -95,8 +96,31 @@ class DockTitleBar final : public QWidget {
     void setIcon(Icon icon);
     // Puts `widget` where the icon was: a view's kind switcher is its icon.
     void setLeadingWidget(QWidget* widget);
-    // Adds `widget` to the slot between the title and the window buttons.
-    void addTool(QWidget* widget);
+
+    // A tool shown whatever the bar's width.
+    static constexpr int kAlways = std::numeric_limits<int>::max();
+    // What an optional tool leaves the title at the least: enough for "Plan 1"
+    // and a little over, so a narrow view keeps its name before its extras.
+    static constexpr int kTitleRoom = 56;
+    // Adds `widget` to the slot between the title and the window buttons, in
+    // the order added. With a `priority` below kAlways the tool is OPTIONAL:
+    // shown only while it fits with kTitleRoom left for the title, the
+    // highest priority first - tools of one priority come and go together -
+    // and never counted in the bar's least width, so it never stops a view
+    // being narrowed. Every optional tool is also in a menu: nothing is lost
+    // when one is hidden, and a menu of the hidden ones would be a modal loop
+    // a headless press waits in for ever.
+    void addTool(QWidget* widget, int priority = kAlways);
+    // Whether the owner wants a tool on the bar at all - a plan view's Link,
+    // a view's zoom tools where its kind has none. An optional tool that is
+    // wanted is still shown only where it fits.
+    void setToolWanted(QWidget* widget, bool wanted);
+    // Hidden for want of room, and wanted. False for any other tool.
+    [[nodiscard]] bool toolCrowdedOut(const QWidget* widget) const;
+
+    // The least width the always-shown tools, the window buttons and the
+    // title's least need: an optional tool is never in it.
+    [[nodiscard]] QSize minimumSizeHint() const override;
 
     // The active view's bar carries the accent. Panels are never active.
     void setActive(bool active);
@@ -143,6 +167,19 @@ class DockTitleBar final : public QWidget {
 
   private:
     void updateTitle();
+    // Shows the optional tools that fit, highest priority first, and hides
+    // the rest: at every resize and whenever a tool is added or wanted.
+    void fitOptionalTools();
+    // The width the shown optional tools take in the tools' row, their
+    // spacing with them.
+    [[nodiscard]] int optionalWidth() const;
+
+    struct Tool {
+        QWidget* widget = nullptr;
+        int priority = kAlways;
+        bool wanted = true;
+    };
+    std::vector<Tool> toolList_;
 
     QDockWidget& dock_;
     QPointer<DockChrome> chrome_;

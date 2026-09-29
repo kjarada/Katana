@@ -57,6 +57,8 @@
 #include "sheet_editor.hpp"
 #include "surface_raster_dialog.hpp"
 #include "view_workspace.hpp"
+// Whole, for selectById_'s reason.
+#include "zoom_to_dialog.hpp"
 #include "drawing/drawing_ui.hpp"
 
 class QAction;
@@ -238,6 +240,9 @@ class MainWindow final : public QMainWindow {
     // Edit > Select by ID (select_by_id_dialog.hpp), made the first time and
     // kept, as Format > Layers is.
     void showSelectById();
+    // View > Zoom To (zoom_to_dialog.hpp), made the first time and kept; its
+    // layers and views are read again each time it is shown.
+    void showZoomTo();
     // File > Project Coordinate System and the status bar's CRS button
     // (project_crs_dialog.hpp): non-modal, so a headless run fills it by its
     // object names instead of hanging on it; made afresh when it is opened
@@ -635,6 +640,8 @@ class MainWindow final : public QMainWindow {
     std::unique_ptr<SheetEditor> sheets_;
     // Edit > Select by ID, kept between uses for the reason layers_ is.
     std::unique_ptr<SelectByIdDialog> selectById_;
+    // View > Zoom To, kept for the same reason.
+    std::unique_ptr<ZoomToDialog> zoomTo_;
     // Terrain > Alignment Manager, kept between uses and owned here for the
     // reason layers_ is.
     std::unique_ptr<AlignmentManagerDialog> alignments_;

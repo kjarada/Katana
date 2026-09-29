@@ -235,14 +235,107 @@ void DockTitleBar::setLeadingWidget(QWidget* widget)
     leading_ = widget;
 }
 
-void DockTitleBar::addTool(QWidget* widget)
+void DockTitleBar::addTool(QWidget* widget, int priority)
 {
     if (widget == nullptr) {
         return;
     }
     widget->setParent(this);
     tools_->addWidget(widget);
+    toolList_.push_back({widget, priority, true});
     widget->show();
+    fitOptionalTools();
+}
+
+void DockTitleBar::setToolWanted(QWidget* widget, bool wanted)
+{
+    for (Tool& tool : toolList_) {
+        if (tool.widget != widget) {
+            continue;
+        }
+        tool.wanted = wanted;
+        if (tool.priority == kAlways) {
+            widget->setVisible(wanted);
+        }
+        fitOptionalTools();
+        return;
+    }
+}
+
+bool DockTitleBar::toolCrowdedOut(const QWidget* widget) const
+{
+    for (const Tool& tool : toolList_) {
+        if (tool.widget == widget) {
+            return tool.priority != kAlways && tool.wanted && tool.widget->isHidden();
+        }
+    }
+    return false;
+}
+
+int DockTitleBar::optionalWidth() const
+{
+    // Each shown tool is its width and the row's spacing before or after it:
+    // the row always keeps a tool that is always shown, so there is one.
+    int width = 0;
+    for (const Tool& tool : toolList_) {
+        if (tool.priority != kAlways && !tool.widget->isHidden()) {
+            width += tool.widget->sizeHint().width() + tools_->spacing();
+        }
+    }
+    return width;
+}
+
+QSize DockTitleBar::minimumSizeHint() const
+{
+    // The layout counts every tool shown, so an optional tool shown would
+    // raise the least width and could never be crowded out again: the view
+    // would stop narrowing at it. Qt asks a child's hint rather than taking
+    // its layout's minimum as a floor (QLayout does that for a window only),
+    // so leaving the optional tools out here is enough.
+    QSize hint = QWidget::minimumSizeHint();
+    hint.rwidth() -= optionalWidth();
+    return hint;
+}
+
+void DockTitleBar::fitOptionalTools()
+{
+    if (std::ranges::none_of(toolList_,
+                             [](const Tool& tool) { return tool.priority != kAlways; })) {
+        return;
+    }
+    // Asked afresh: a tool shown or hidden since the layout last measured it
+    // would otherwise be counted as it was.
+    layout_->invalidate();
+    // What is left once the bar has its least width and the title has
+    // kTitleRoom rather than the least it will be squeezed to.
+    int room = width() - minimumSizeHint().width() - (kTitleRoom - title_->minimumWidth());
+    std::vector<int> priorities;
+    for (const Tool& tool : toolList_) {
+        if (tool.priority != kAlways && !std::ranges::contains(priorities, tool.priority)) {
+            priorities.push_back(tool.priority);
+        }
+    }
+    std::ranges::sort(priorities, std::greater<>());
+    bool fits = true;
+    for (const int priority : priorities) {
+        int needed = 0;
+        for (const Tool& tool : toolList_) {
+            if (tool.priority == priority && tool.wanted) {
+                needed += tool.widget->sizeHint().width() + tools_->spacing();
+            }
+        }
+        // Highest first, and never a lower one past a higher one that did not
+        // fit: the tools a person reaches for most go last.
+        fits = fits && needed <= room;
+        if (fits) {
+            room -= needed;
+        }
+        for (const Tool& tool : toolList_) {
+            if (tool.priority == priority) {
+                tool.widget->setVisible(fits && tool.wanted);
+            }
+        }
+    }
 }
 
 void DockTitleBar::setActive(bool active)
@@ -319,6 +412,7 @@ void DockTitleBar::paintEvent(QPaintEvent*)
 void DockTitleBar::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
+    fitOptionalTools();
     title_->update();
 }
 

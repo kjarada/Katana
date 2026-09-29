@@ -54,7 +54,9 @@ class RecordingHost final : public ViewVerbHost {
         zooms.push_back(request);
         ViewState& view = *set.find(request.view);
         if (view.kind == ViewKind::Plan) {
-            if (!applyPlanZoom(view.plan, request) && request.kind == ZoomRequest::Kind::Window) {
+            if (!applyPlanZoom(view.plan, request) &&
+                (request.kind == ZoomRequest::Kind::Window ||
+                 request.kind == ZoomRequest::Kind::Scope)) {
                 view.plan.fit(request.window, 0.08);
             }
             view.planFramed = true;
@@ -79,6 +81,10 @@ class ViewVerbsTest : public ::testing::Test {
     ViewVerbsTest()
     {
         interpreter.setViewHost([this] { return &host; });
+        // The scope word VIEW answered as the window answers it.
+        interpreter.setScopeContext([this](std::optional<std::uint32_t> id) {
+            return scopeViewOf(host.set, id);
+        });
     }
 
     // A plan view 300 x 200 px centred on (10, 20) at 4 px a unit, framed.
@@ -441,6 +447,115 @@ TEST_F(ViewVerbsTest, HidingALayerTheDrawingLacksIsRefusedNamingIt)
     // the Layers popup offers as "design" when only design/road existed.
     addLayers(document, {"survey/points"});
     EXPECT_TRUE(ok("VIEWS HIDE 1 survey").ends_with(" hidden=survey"));
+}
+
+// ---- ZOOM on the shared scope -------------------------------------------------------------
+//
+// The line (10,10)-(40,30) fills a 300 x 200 view at 84% of either side:
+// 0.84 x 300 / 30 = 8.4 = 0.84 x 200 / 20, about its middle, (25, 20).
+
+TEST_F(ViewVerbsTest, ZoomSelectionFramesTheSelectedEntitiesAndSaysHowManyMatched)
+{
+    const ViewState& view = plan();
+    (void)ok("LINE 10,10 40,30");
+    (void)ok("LINE 100,100 110,120");
+    (void)ok("SELECT 1");
+    const std::string reply = ok("ZOOM SELECTION view=1");
+    EXPECT_TRUE(reply.starts_with("scope=selection matched=1\nview=1 kind=plan centre=25,20 "))
+        << reply;
+    EXPECT_EQ(view.plan.center, Point2(25, 20));
+    EXPECT_NEAR(view.plan.scale, 8.4, 1e-12);
+    ASSERT_FALSE(host.zooms.empty());
+    EXPECT_EQ(host.zooms.back().kind, ZoomRequest::Kind::Scope);
+    EXPECT_EQ(host.zooms.back().window.min, Point2(10, 10));
+    EXPECT_EQ(host.zooms.back().window.max, Point2(40, 30));
+}
+
+TEST_F(ViewVerbsTest, AScopeThatMatchesNothingMovesNoViewAndSaysSo)
+{
+    const ViewState& view = plan();
+    (void)ok("LINE 10,10 40,30");
+    // Nothing selected: an answer, not a refusal, and no view moves.
+    EXPECT_EQ(ok("ZOOM SELECTION"), "scope=selection matched=0");
+    EXPECT_EQ(ok("ZOOM LAYERS 0 WHERE TYPE=circle"),
+              "scope=layers layers=0 sublayers=yes where=\"TYPE=circle\" matched=0");
+    EXPECT_TRUE(host.zooms.empty());
+    EXPECT_EQ(view.plan.center, Point2(10, 20));
+    // A scope the drawing cannot answer is refused as every verb refuses it.
+    EXPECT_EQ(refused("ZOOM LAYERS nosuch").code, ErrorCode::NotFound);
+}
+
+TEST_F(ViewVerbsTest, ZoomWithNoWordsIsStillExtentsNotTheSelection)
+{
+    plan();
+    (void)ok("LINE 10,10 40,30");
+    (void)ok("SELECT ALL");
+    (void)ok("ZOOM");
+    ASSERT_EQ(host.zooms.size(), 1U);
+    EXPECT_EQ(host.zooms.back().kind, ZoomRequest::Kind::Extents);
+}
+
+TEST_F(ViewVerbsTest, ZoomAreaFramesWhatIsInTheBoxNotTheBox)
+{
+    const ViewState& view = plan();
+    (void)ok("LINE 10,10 40,30");
+    (void)ok("LINE 100,100 110,120");
+    // AREA takes the entities in the box: the first line, framed about its
+    // own middle (25, 20), not the box's (25, 25). WINDOW frames the box.
+    const std::string reply = ok("ZOOM AREA 0,0,50,50");
+    EXPECT_TRUE(reply.starts_with("scope=area area=0,0,50,50 matched=1\n")) << reply;
+    EXPECT_EQ(view.plan.center, Point2(25, 20));
+    (void)ok("ZOOM WINDOW 0,0,50,50");
+    EXPECT_EQ(view.plan.center, Point2(25, 25));
+}
+
+TEST_F(ViewVerbsTest, ViewEqualsAfterWhereIsNotTakenForACondition)
+{
+    plan();
+    plan();
+    ASSERT_TRUE(host.set.activate(2).ok());
+    (void)ok("LINE 10,10 40,30");
+    (void)ok("CIRCLE 5,5 1");
+    // view= stands after the filter, where a word with '=' would be a
+    // condition, and is taken off before the scope is read.
+    const std::string reply = ok("ZOOM DRAWING WHERE TYPE=line view=1");
+    EXPECT_TRUE(reply.starts_with("scope=drawing where=\"TYPE=line\" matched=1\nview=1 "))
+        << reply;
+    EXPECT_EQ(host.zooms.back().view, 1U);
+    EXPECT_EQ(host.set.find(1)->plan.center, Point2(25, 20));
+}
+
+TEST_F(ViewVerbsTest, ZoomOnASectionTakesExtentsInAndOutOnly)
+{
+    plan();
+    host.set.add(ViewKind::Section);
+    (void)ok("ZOOM IN view=2");
+    EXPECT_EQ(host.zooms.back().kind, ZoomRequest::Kind::In);
+    (void)ok("ZOOM OUT 3 view=2");
+    EXPECT_EQ(host.zooms.back().factor, 3.0);
+    (void)ok("ZOOM EXTENTS view=2");
+    for (const char* line : {"ZOOM WINDOW 0,0,1,1 view=2", "ZOOM CENTRE 0,0 view=2",
+                             "ZOOM SELECTION view=2"}) {
+        const auto refusal = refused(line);
+        EXPECT_EQ(refusal.code, ErrorCode::InvalidArgument) << line;
+        EXPECT_TRUE(contains(refusal.message, "a plan view: view 2 is Section")) << refusal.message;
+    }
+    EXPECT_EQ(host.zooms.size(), 3U);
+}
+
+TEST(ViewZoom, TheExtentOfIdsIsTheirBoxPassingOverIdsThatNameNothing)
+{
+    Document document;
+    CommandInterpreter lines(document);
+    ASSERT_TRUE(lines.run("LINE 10,10 40,30").ok());
+    ASSERT_TRUE(lines.run("CIRCLE 100,50 5").ok());
+    // The line and the circle's own box (95,45)-(105,55); id 7 names nothing.
+    const std::vector<katana::entity::EntityId> ids{1, 2, 7};
+    const katana::geometry::Box2 box = extentOf(document.model(), ids);
+    EXPECT_EQ(box.min, Point2(10, 10));
+    EXPECT_EQ(box.max, Point2(105, 55));
+    EXPECT_TRUE(extentOf(document.model(), std::vector<katana::entity::EntityId>{7}).empty());
+    EXPECT_TRUE(extentOf(document.model(), {}).empty());
 }
 
 TEST(ViewZoom, ApplyPlanZoomLeavesWindowAndExtentsToTheWidget)

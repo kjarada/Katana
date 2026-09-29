@@ -50,6 +50,11 @@ class SectionViewWidget final : public QWidget {
     [[nodiscard]] double verticalExaggeration() const { return state_.sectionExaggeration; }
 
     void zoomExtents();
+    // Zooms by `factor` (above 1 closer) about `position`, in this widget's
+    // pixels, keeping the station and elevation there where they are: the
+    // wheel's zoom, and ZOOM IN and OUT's about plotCentre. A factor that is
+    // not finite and above 0 does nothing.
+    void zoomAt(const QPointF& position, double factor);
 
     // Station and elevation under a point of this widget, in its own pixels:
     // the live readout, and what a headless check asks to prove that a resize

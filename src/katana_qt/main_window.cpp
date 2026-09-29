@@ -829,10 +829,35 @@ void MainWindow::buildActions()
     });
 
     // ---- View ------------------------------------------------------------------------
+    // The zoom items run their ZOOM lines for the active view through the one
+    // executor, as each view's bar runs them for itself (cad/view_verbs.hpp):
+    // logged, and followed by the views linked with it.
     QAction* extentsAction = makeAction(Icon::ZoomExtents, "Zoom &Extents",
-                                        "Fit the whole drawing in the view",
+                                        "Fit the whole drawing in the view (ZOOM EXTENTS)",
                                         QKeySequence(Qt::CTRL | Qt::Key_E), "viewZoomExtents");
-    connect(extentsAction, &QAction::triggered, this, [this] { views_->zoomExtents(); });
+    connect(extentsAction, &QAction::triggered, this,
+            [this] { (void)runVerbLine("ZOOM EXTENTS"); });
+    QAction* zoomInAction = makeAction(Icon::ZoomIn, "Zoom &In",
+                                       "Twice as close about the centre of the active view (ZOOM IN)",
+                                       {}, "viewZoomIn");
+    connect(zoomInAction, &QAction::triggered, this, [this] { (void)runVerbLine("ZOOM IN"); });
+    QAction* zoomOutAction = makeAction(Icon::ZoomOut, "Zoom &Out",
+                                        "Twice as far about the centre of the active view (ZOOM OUT)",
+                                        {}, "viewZoomOut");
+    connect(zoomOutAction, &QAction::triggered, this, [this] { (void)runVerbLine("ZOOM OUT"); });
+    QAction* zoomSelectionAction =
+        makeAction(Icon::ZoomSelection, "Zoom to Sele&ction",
+                   "Frame what is selected in the active plan view (ZOOM SELECTION)", {},
+                   "viewZoomSelection");
+    connect(zoomSelectionAction, &QAction::triggered, this,
+            [this] { (void)runVerbLine("ZOOM SELECTION"); });
+    QAction* zoomToAction = makeAction(
+        Icon::ZoomTo, "&Zoom To...",
+        "Frame what a scope takes - layers, a filter, the selection - in a view (ZOOM <scope>)", {},
+        "viewZoomTo");
+    // What the headless --dialog step opens it by (main.cpp, openDialog).
+    zoomToAction->setData(QStringLiteral("zoomToDialog"));
+    connect(zoomToAction, &QAction::triggered, this, [this] { showZoomTo(); });
     gridAction_ = makeAction(Icon::Grid, "&Grid", "Show or hide the grid", QKeySequence(Qt::Key_F7),
                              "viewGrid");
     gridAction_->setCheckable(true);
@@ -847,6 +872,7 @@ void MainWindow::buildActions()
 
     viewMenu_->addSection("Display");
     viewMenu_->addAction(extentsAction);
+    viewMenu_->addActions({zoomInAction, zoomOutAction, zoomSelectionAction, zoomToAction});
     viewMenu_->addActions({gridAction_, snapAction_});
     // Plan-view lines as a cosmetic pixel instead of the 1.5 px hairline:
     // measured 5-8x cheaper to stroke (docs/plan_view.md), so on by default,
@@ -2458,19 +2484,30 @@ void MainWindow::showSelectById()
     selectById_->activateWindow();
 }
 
+void MainWindow::showZoomTo()
+{
+    if (!zoomTo_) {
+        ZoomToContext context;
+        context.document = &document_;
+        context.views = views_;
+        context.run = commandRunner();
+        zoomTo_ = std::make_unique<ZoomToDialog>(std::move(context), this);
+    }
+    zoomTo_->refresh();
+    zoomTo_->show();
+    zoomTo_->raise();
+    zoomTo_->activateWindow();
+}
+
 void MainWindow::showSelection(bool zoom)
 {
     // Framed in the view the person is working in, as the style manager's
-    // Select Users frames what a style covers; the other views keep theirs.
+    // Select Users frames what a style covers; the other views keep theirs,
+    // but for the views linked with it.
     ViewportWidget* plan = views_->activePlanView();
     if (zoom && plan != nullptr) {
-        katana::geometry::Box2 bounds;
-        for (const katana::entity::EntityId id : document_.selection().ids()) {
-            if (const katana::entity::Entity* entity = document_.model().entities.find(id)) {
-                bounds.expand(katana::entity::boundingBox(entity->geometry));
-            }
-        }
-        plan->zoomTo(bounds);
+        const auto& ids = document_.selection().ids();
+        plan->zoomTo(cad::extentOf(document_.model(), ids));
     }
     propertyDock_->show();
     propertyDock_->raise();
@@ -2904,8 +2941,12 @@ void MainWindow::typeLinesIntoTool(const QString& text)
 
 void MainWindow::runTypedLine(const QString& line)
 {
-    // What is typed is echoed - but an ONLINE KEY's value never is.
-    commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+    // What is typed is echoed - but an ONLINE KEY's value never is, and a
+    // ZOOM typed while a tool runs is echoed by the executor that runs it
+    // (ViewWorkspace::runsTransparently): echoed here as well, it showed twice.
+    if (!views_->runsTransparently(line)) {
+        commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+    }
     // A tool waiting for typed text - a Text's string, a count - takes the
     // whole line before any verb below, as a transparent ZOOM gives way to it
     // (tools::isTransparentCommand): "Utility pit" is a label on a services
