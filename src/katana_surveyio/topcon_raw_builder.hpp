@@ -151,10 +151,13 @@ class RawProjectBuilder {
     // Coordinates for `id`, metres, kept as setRestatedCoordinates says. A
     // restatement that differs is a warning naming both records, and the
     // coordinates not kept go to the point's metadata, never dropped; one
-    // that is the same is a repeat and needs no comment.
+    // that is the same is a repeat and needs no comment. `asideBecause`, when
+    // given, is why these may place the point but never supersede its
+    // coordinates, whatever the rule (the Sokkia SDR's POS view of a shot
+    // kept in OBS view): the warning then ends with it.
     void positionPoint(std::string_view id, double northing, double easting,
                        std::optional<double> elevation, katana::survey::CoordinateSource how,
-                       std::size_t record);
+                       std::size_t record, std::string_view asideBecause = {});
     // The field code of `id` (the first word of `description` when `code` is
     // empty is the caller's business). A non-empty code strings the point into
     // the feature named by code and string number, in the order met.
