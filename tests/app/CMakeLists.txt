@@ -7,6 +7,8 @@ katana_add_test_suite(app
     SOURCES
         test_mcp_server.cpp
         test_session.cpp
+        # SURVEY IMPORT's SETTINGS and SET, read on the document they leave.
+        test_survey_verbs.cpp
 )
 # The sample GIS data an import is tried on; and whether the session has the
 # GIS module at all, as katana_app decides it (src/katana_app/CMakeLists.txt),
