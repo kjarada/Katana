@@ -180,3 +180,31 @@ TEST(FeedbackPainter, ARefusedCaptionIsInTheRefusalsColour)
     EXPECT_GT(inkNear(red.image, chip, 40, overlay::removed()),
               inkNear(plain.image, chip, 40, overlay::removed()));
 }
+
+TEST(FeedbackPainter, ARefusedPicksTargetIsDrawnInTheRefusalsRedNotTheTargetsGreen)
+{
+    // Fillet over an end vertex: the marks still say what the pick took, but
+    // green there would promise the click the caption says is turned down.
+    ToolFeedback taken;
+    taken.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{PointGeometry{Point2(5, 0)}}, "0"});
+    taken.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{Segment2{Point2(10, 5), Point2(20, 5)}}, {}});
+    ToolFeedback refused = taken;
+    refused.refused = true;
+    const Painted green = paintOver(taken, {});
+    const Painted red = paintOver(refused, {});
+    const Painted baseline = paintOver(ToolFeedback{}, {});
+    const QPointF vertex = toScreen(Point2(5, 0));
+    const QPointF piece = toScreen(Point2(15, 5));
+    for (const QPointF& at : {vertex, piece}) {
+        EXPECT_GT(inkNear(green.image, at, 9, overlay::target()),
+                  inkNear(baseline.image, at, 9, overlay::target()));
+        EXPECT_EQ(inkNear(green.image, at, 9, overlay::removed()), 0);
+        EXPECT_GT(inkNear(red.image, at, 9, overlay::removed()),
+                  inkNear(baseline.image, at, 9, overlay::removed()));
+        EXPECT_EQ(inkNear(red.image, at, 9, overlay::target()), 0);
+    }
+    // Still the target in the counts: the record says what the pick took.
+    EXPECT_EQ(red.counts.target, 2u);
+}
