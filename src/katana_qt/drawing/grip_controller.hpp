@@ -50,11 +50,16 @@ class GripController {
     explicit GripController(katana::cad::Document& document);
 
     // Rebuilds the grips from the document's selection when `generation`
-    // (the view's count of document notifications) has moved on.
+    // (the view's count of document notifications) has moved on. A hot or a
+    // grabbed grip follows its point to the index it has now - after an
+    // insert before it, vertex 2 is vertex 3 - and goes when the point does.
     void refresh(std::uint64_t generation);
     [[nodiscard]] const std::vector<katana::cad::Grip>& grips() const { return grips_; }
     [[nodiscard]] const std::vector<katana::cad::Grip>& hot() const { return hot_; }
     [[nodiscard]] std::optional<katana::cad::Grip> hovered() const { return hovered_; }
+    // Whether a vertex grip is hot: Delete is then the view's, for the
+    // vertices, and not the window's Erase for the whole polyline.
+    [[nodiscard]] bool hasHotVertex() const;
 
     // True while a grip is held (dragged) or picked up: the view then snaps
     // and constrains the cursor from base() and sends every move here.

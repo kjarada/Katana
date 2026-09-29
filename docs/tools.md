@@ -210,7 +210,8 @@ it was dealing with: a tool started from a hook was once allocated at the
 address of the one it replaced.
 
 **What the host hands a tool besides (2026-09-30).** Three more members of
-`ToolContext`, for a tool that picks as the cursor moves:
+`ToolContext`, for a tool that picks as the cursor moves (the Draw >
+Vertices tools, `docs/drawing.md`, "What a vertex tool acts on"):
 
 - `handles`: the grips hot in the view when the tool started - a vertex the
   user clicked BEFORE choosing the tool. The view sets them in `startTool`
@@ -230,8 +231,8 @@ Rejected: a new virtual `preview(cursor, pick)` (46 overrides to change, and
 `-Woverloaded-virtual` fails the build at every one left); refreshing
 `pickTolerance` on every move (it still ignores the view's hidden layers,
 and leaves the preview's pick and the click's able to disagree). Trim,
-Fillet, Offset and Leader still pick with `pickTolerance` and no view, which
-`pickUnder` would close.
+Fillet, Offset and Leader still pick with `pickTolerance` and no view
+(`docs/drawing.md`, "Not done").
 
 **Roles in a preview.** `ToolFeedback` (`include/katana/cad/tool_feedback.hpp`)
 kept `shapes` (the ghost, dashed) and `markers` (base points) and gained

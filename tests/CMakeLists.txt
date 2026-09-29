@@ -2134,9 +2134,17 @@ if(TARGET katana)
         TIMEOUT 180)
 endif()
 
-# The pointer a headless run has no mouse for - "~X,Y" hovers and "+X,Y"
-# clicks at a model point (docs/headless.md) - drawing a polyline as a
-# person's mouse does, read back from the record each pointer step prints.
+# The vertex tools in the real window, driven with the pointer a headless run
+# has no mouse for - "~X,Y" hovers and "+X,Y" clicks at a model point
+# (docs/headless.md) - and read back from the record each pointer step
+# prints: what Insert Vertex shows before the click, that the click puts the
+# vertex ON the line, and that a vertex clicked before the tool is the one it
+# works beside (docs/drawing.md, "What a vertex tool acts on"). Sample
+# polyline 2 is the square (40,35) (110,35) (110,85) (40,85), whose right
+# edge x = 110 has nothing else within reach. A pointer's model point comes
+# back from its pixel within a few units in the last place, so a coordinate
+# the view made from it is matched to ten decimals; a caption's middle dot is
+# matched as any characters, as a platform may pass it on in another encoding.
 if(TARGET katana)
     add_test(NAME qt_pointer_steps_hover_and_click_the_plan_view_headless
         COMMAND ${CMAKE_COMMAND}
@@ -2146,7 +2154,45 @@ if(TARGET katana)
             "-DEXPECT=pointer: action=hover x=110 y=115 tool=draw.polyline expects=point.*vertices=2 +open +length=10"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/pointer_steps_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_insert_vertex_shows_where_the_vertex_goes_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>INSERTVERTEX|~110.3,50"
+            "-DEXPECT=pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert [^\r\n]*target=1 added=1 removed=0 focus=4 refused=no caption=\"vertex 2 between 1 and 2 [^0-9\"]+ 15[.]000 from 1\" prompt=\"Insert Vertex: Click on polyline 2 where the new vertex goes\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/insert_vertex_hover_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_insert_vertex_puts_it_on_the_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>INSERTVERTEX|~110.3,50|+110.3,50|<VERTEX LIST 2"
+            "-DEXPECT=vertex 2 added to polyline 2 on segment 1 [(]5 vertices[)].*index=2 x=110 y=(50|49[.]9999999999[0-9]*|50[.]0000000000[0-9]*) z=none bulge=0 bearing=0 distance=(35|34[.]9999999999[0-9]*|35[.]0000000000[0-9]*)[\r\n]"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/insert_vertex_click_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_insert_vertex_beside_the_vertex_clicked_first_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85|>INSERTVERTEX|~111,70|>|<VERTEX LIST 2"
+            "-DEXPECT=pointer: action=hover x=111 y=70 tool=draw.vertex.insert [^\r\n]*target=2 added=1 [^\r\n]*caption=\"vertex 2 between 1 and 2 [^0-9\"]+ 35[.]000 from 1\" prompt=\"Insert Vertex: Click beside vertex 2 of polyline 2 where the new vertex goes, or press Enter for the middle of segment 2\".*vertices=5.*index=3 x=75 y=85 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/insert_vertex_beside_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A vertex made hot with Shift+click answers Delete Vertex: the prompt
+    # says Enter deletes it, and Enter does, leaving the square's three others.
+    add_test(NAME qt_delete_vertex_takes_the_chosen_vertex_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85,shift|>DELETEVERTEX|~110,85|>|<VERTEX LIST 2"
+            "-DEXPECT=pointer: action=hover x=110 y=85 tool=draw.vertex.delete [^\r\n]*removed=[1-9][^\r\n]*prompt=\"Delete Vertex: Press Enter to delete vertex 2 of polyline 2, or click another vertex\".*vertices=3 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/delete_vertex_chosen_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_pointer_steps_hover_and_click_the_plan_view_headless
+        qt_insert_vertex_shows_where_the_vertex_goes_headless
+        qt_insert_vertex_puts_it_on_the_line_headless
+        qt_insert_vertex_beside_the_vertex_clicked_first_headless
+        qt_delete_vertex_takes_the_chosen_vertex_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

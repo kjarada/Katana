@@ -833,6 +833,15 @@ CurvePolyline2 replaceCorner(const CurvePolyline2& polyline, std::size_t index,
 
 } // namespace
 
+katana::core::Status checkCorner(const CurvePolyline2& polyline, std::size_t index)
+{
+    // cornerAt's own checks, so the pick and the edit refuse with one sentence.
+    if (auto corner = cornerAt(polyline, index); !corner) {
+        return corner.error();
+    }
+    return {};
+}
+
 PolylineResult filletVertex(const CurvePolyline2& polyline, std::size_t index, double radius)
 {
     if (!(radius > tol::kGeometric) || !std::isfinite(radius)) {

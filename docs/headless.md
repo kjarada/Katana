@@ -212,8 +212,9 @@ A headless run echoes its command log to stderr, which is where a test reads
 what a command REPORTED.
 
 **The pointer.** A headless run has no mouse, and a tool's preview and its
-picks follow one: before the pointer steps a run could start a tool but
-never show what its preview draws, nor pick with it. `~` and
+picks follow one: before the pointer steps a run could start Insert Vertex
+but never show where a vertex would go, and a pick step (a vertex, a
+segment) refused every typed coordinate it was not written to take. `~` and
 `+` (`MainWindow::pointerAt`, `ViewWorkspace::pointerAt`,
 `ViewportWidget::pointerAt`) paint the view so its transform is the one on
 screen, map the model point to a pixel through it, send a real `QMouseEvent`
@@ -221,15 +222,21 @@ move - and for `+` a press and a release - and paint again. The view cannot
 tell them from a person's mouse, so they drive the same code: snapping, the
 grips, the tool's pick. Each prints one line, numbers exact
 (`formatExactReal`), what the view then drew of the running tool's preview
-by role (`drawing/feedback_painter.hpp`): `pointer: action=hover x= y=
-tool= expects= shapes= markers= target= added= removed= focus= refused=
-caption="" prompt=""`, with `tool=none` and zero counts when no tool runs. A point outside the view
+by role (`drawing/feedback_painter.hpp`):
+
+    pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert expects=point shapes=0 markers=0 target=1 added=1 removed=0 focus=4 refused=no caption="vertex 2 between 1 and 2 · 15.000 from 1" prompt="Insert Vertex: Click on polyline 2 where the new vertex goes"
+
+`tool=none` and zero counts with no tool running. A point outside the view
 fails the run (exit 1, "is outside the view ... zoom to it first"), as a
 spec that is not `x,y[,shift|ctrl]` does. The pointer's model point comes
-back from its pixel within a few units in the last place, so a
-coordinate made from it is matched to ten decimals, not exactly. A person
-reads the PNG for the look; the record is what a test asserts
-(`qt_pointer_steps_hover_and_click_the_plan_view_headless`).
+back from its pixel within a few units in the last place, so what a click
+made from it - a vertex put on a line - is matched to ten decimals, not
+exactly (`qt_insert_vertex_puts_it_on_the_line_headless`). A person reads
+the PNG for the look; the record is what a test asserts
+(`qt_pointer_steps_hover_and_click_the_plan_view_headless`,
+`qt_insert_vertex_shows_where_the_vertex_goes_headless`,
+`qt_insert_vertex_beside_the_vertex_clicked_first_headless`,
+`qt_delete_vertex_takes_the_chosen_vertex_headless`).
 
 ## check_screenshot.cmake: the test side
 
