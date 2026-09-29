@@ -1,5 +1,6 @@
 #include "render_view_widget.hpp"
 
+#include "katana/cad/scene_zoom.hpp"
 #include "theme.hpp"
 #include "view_focus.hpp"
 
@@ -27,9 +28,6 @@ namespace {
 // Radians per pixel of drag. A full turn in roughly 800 pixels, which is about
 // a screen width and matches what every other CAD package feels like.
 constexpr double kOrbitPerPixel = 0.008;
-// One wheel notch is 120 eighths of a degree; 1.15 per notch gives a
-// comfortable 2x in five notches.
-constexpr double kZoomPerNotch = 1.15;
 
 // The ground behind the model, and behind the empty view's message.
 const QColor kBackground(28, 30, 36);
@@ -149,6 +147,10 @@ void RenderViewWidget::makeGpuView()
     };
     // The host frames: it knows what "the scene" is, and frames what it built.
     gpuView_->onZoomExtents = [this] { zoomExtents(); };
+    // And zooms, for the same reason: towards what it built under the cursor.
+    gpuView_->onWheelZoom = [this](double notches, const QPointF& position) {
+        zoomAtPixel(notches, position);
+    };
     gpuView_->onPrepareFrame = [this](katana::render::Camera& frameCamera) {
         prepareGpuFrame(frameCamera);
     };
@@ -251,9 +253,7 @@ void RenderViewWidget::prepareGpuFrame(katana::render::Camera& frameCamera)
 
     // As cad::renderLayers: the depth range fitted to what is drawn, every
     // frame, and the edges faded for how large the triangles are now.
-    katana::math::AABB depthBox = layers_.bounds;
-    depthBox.expand(layers_.grid.bounds());
-    frameCamera.fitDepthRange(depthBox);
+    frameCamera.fitDepthRange(katana::cad::sceneDepthBox(layers_));
     std::vector<float> applied;
     applied.reserve(layers_.edgeRuns.size());
     for (const auto& run : layers_.edgeRuns) {
@@ -748,16 +748,29 @@ void RenderViewWidget::mouseDoubleClickEvent(QMouseEvent* /*event*/) { zoomExten
 
 void RenderViewWidget::wheelEvent(QWheelEvent* event)
 {
+    // One notch is 120 eighths of a degree; a fine wheel sends fractions.
     const double notches = event->angleDelta().y() / 120.0;
     if (notches == 0.0) {
         return;
     }
-    const double factor = std::pow(1.0 / kZoomPerNotch, notches);
-    const QPointF position = event->position() * pixelRatio();
-    refitOnResize_ = false;
-    camera().dollyAtPixel(factor, position.x(), position.y());
-    update();
+    zoomAtPixel(notches, event->position());
     event->accept();
+}
+
+void RenderViewWidget::zoomAtPixel(double notches, const QPointF& position)
+{
+    if (!std::isfinite(notches) || notches == 0.0) {
+        return;
+    }
+    refitOnResize_ = false;
+    // In the layers as last built, not rebuilt first: the cursor points at
+    // what the last frame drew. The camera counts in the framebuffer's device
+    // pixels here and in the GPU view's logical ones there - sceneScale, the
+    // widths' scale, is the same ratio.
+    const double scale = sceneScale();
+    katana::cad::zoomAtPixel(layers_, camera(), notches, position.x() * scale,
+                             position.y() * scale);
+    requestFrame();
 }
 
 void RenderViewWidget::keyPressEvent(QKeyEvent* event)

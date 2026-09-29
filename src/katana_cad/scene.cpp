@@ -1472,9 +1472,7 @@ renderLayers(SceneLayers& layers, katana::render::Camera& camera,
     // The depth range is fitted to what is drawn EVERY frame: after an orbit,
     // a pan or a zoom it was left where frame() put it, and eight wheel
     // notches out pushed the model past the far plane.
-    AABB depthBox = layers.bounds;
-    depthBox.expand(layers.grid.bounds());
-    camera.fitDepthRange(depthBox);
+    camera.fitDepthRange(sceneDepthBox(layers));
     const bool drawEdges = SceneBuilder::fadeEdges(layers, camera);
 
     // In this order into one depth buffer, so equal depths resolve the same
@@ -1511,6 +1509,13 @@ renderLayers(SceneLayers& layers, katana::render::Camera& camera,
         options.clear = false;
     }
     return total;
+}
+
+AABB sceneDepthBox(const SceneLayers& layers)
+{
+    AABB box = layers.bounds;
+    box.expand(layers.grid.bounds());
+    return box;
 }
 
 AABB sceneBounds(const Document& document, const std::vector<SceneSurface>& surfaces,

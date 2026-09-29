@@ -22,6 +22,7 @@ add_library(katana_cad STATIC
     plot.cpp
     dimension_draw.cpp
     scene.cpp
+    scene_zoom.cpp
     viewport_layout.cpp
     layer_overrides.cpp
     view_set.cpp

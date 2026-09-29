@@ -25,6 +25,7 @@
 
 #include <QImage>
 #include <QPoint>
+#include <QPointF>
 #include <QWidget>
 
 #include "katana/cad/scene.hpp"
@@ -109,6 +110,11 @@ class RenderViewWidget final : public QWidget {
     // options, this view's own hidden layers.
     void invalidateScene();
     void zoomExtents();
+    // Zooms by `notches` wheel notches, positive in, about `position` in this
+    // widget's logical pixels, towards what is drawn there
+    // (cad::zoomAtPixel): what the wheel does over either renderer, the GPU
+    // view's wheel arriving through its onWheelZoom.
+    void zoomAtPixel(double notches, const QPointF& position);
     void setStandardView(katana::render::StandardView view);
     void setProjection(katana::render::Projection projection);
     void setVerticalExaggeration(double factor);

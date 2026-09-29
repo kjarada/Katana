@@ -112,6 +112,7 @@ endif()
 if(TARGET katana_gpu AND NOT WIN32 AND KATANA_XVFB_RUN)
     foreach(_case IN ITEMS OnTheDesktopTheHostsLayersAreDrawnByItsGpuChild
                            OnTheDesktopAnEditReachesTheGpuView
+                           OnTheDesktopTheWheelOverTheGpuViewZoomsTowardsWhatIsUnderTheCursor
                            OnTheDesktopAFailedGpuViewLeavesTheSessionToTheSoftwareRasteriser)
         add_test(NAME qt_widgets_gpu.RenderViewGpu.${_case}
             COMMAND "${KATANA_XVFB_RUN}" -a -s "-screen 0 1280x1024x24"

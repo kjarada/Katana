@@ -195,6 +195,13 @@ site at the origin, 0 differing pixels on the GPU and on WARP; packed against a
 zero origin instead, as a GPU path without the rule would, 510-523 pixels
 differ (`ASceneAtMgaCoordinatesDrawsLikeTheSameSceneAtTheOrigin`).
 
+The origin bounds the error, it does not end it: zoomed close to a point
+hundreds of metres from the origin, the float offsets of the ground round to a
+fraction of a pixel that grows as the view closes in. So a 3D view's zoom
+stops at a ten-thousandth of the scene's depth box (`cad::minimumApproach`),
+where it measured 0.14-0.16 px on an 800 px tall view and would reach a pixel
+at an eighth of that distance (docs/render.md, "Zooming towards the cursor").
+
 ## Shaders
 
 **Windows: HLSL compiled at run time, once per process.** The shaders are HLSL
@@ -405,11 +412,16 @@ to `FrameSettings`; and the view does not yet carry reference point clouds
 (`GpuRenderer::setPointCloud` is ready for them; the `ViewContext` has none).
 
 The widget's mouse and keys are `RenderViewWidget`'s (left drag orbits, or pans
-in an elevation view; middle or Shift+left pans; the wheel zooms about the
-cursor by 1.15 a notch; double-click and E frame; 1-5 and 0 standard views; P
-the projection), in logical pixels: a pan or a zoom about the cursor moves the
-world the same distance whichever pixels it is counted in. Only the frame is
-drawn at the display's real resolution.
+in an elevation view; middle or Shift+left pans; double-click and E frame; 1-5
+and 0 standard views; P the projection), in logical pixels: a pan or a zoom
+about the cursor moves the world the same distance whichever pixels it is
+counted in. Only the frame is drawn at the display's real resolution. The
+wheel is the host's: the child hands it over through `onWheelZoom`, as it
+hands framing over through `onZoomExtents`, and the host zooms towards what
+it built under the cursor, `Camera::kZoomPerNotch` a notch
+(`RenderViewWidget::zoomAtPixel`; docs/render.md, "Zooming towards the
+cursor"). The child holds only packed lists, so without a host it zooms about
+the target's plane - which stalls over ground beyond that plane.
 
 Checked only on Linux (xcb under Xvfb, lavapipe), and to be checked on the
 Windows platform by hand: floating a 3D dock creates a new top-level window,
@@ -488,7 +500,11 @@ against survey coordinates) is compared pixel for pixel.
   skipping. ctest does not set it on Windows, so run it by hand after changing
   `gpu_scene_view.*`; the camera-pixels case can only tell the two pixel sizes
   apart on a display scaled above 100%. On Linux ctest sets
-  `KATANA_GPU_TEST_PLATFORM=xcb` itself.
+  `KATANA_GPU_TEST_PLATFORM=xcb` itself. The same holds for the widget
+  suite's `RenderViewGpu.OnTheDesktop...` cases with
+  `KATANA_WIDGET_TEST_PLATFORM=windows`, the wheel's hand-over to the host
+  among them; that the child hands the wheel over at all needs no device
+  (`TheWheelIsHandedToTheHostThatZoomsTowardsWhatIsUnderTheCursor`).
 * A `QRhiWidget` that was never shown can be grabbed ONCE. Qt gives each grab
   of such a widget a new QRhi without calling `initialize()` for it, so every
   grab after the first reads back nothing - all zeros, about 3 s a grab on this

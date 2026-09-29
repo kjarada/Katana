@@ -178,19 +178,45 @@ class Camera {
 
     // ---- interaction ------------------------------------------------------------
 
+    // What one wheel notch zooms by: 2x in five notches. Both 3D widgets and
+    // cad::zoomAtPixel count in it, so the software and GPU views cannot
+    // drift apart.
+    static constexpr double kZoomPerNotch = 1.15;
+
     void orbit(double deltaAzimuth, double deltaElevation);
-    // Slides the target in the view plane by a screen displacement in pixels.
+    // Slides the target in the view plane by a screen displacement in pixels:
+    // a point on the target's plane moves exactly with the drag.
     void panPixels(double dx, double dy);
     // Multiplies the viewing distance (and the orthographic height with it, so
     // an orthographic view zooms rather than sitting still). Values <= 0 ignored.
     void dolly(double factor);
-    // Zoom centred on a pixel: the world point under that pixel stays under it.
+    // Zoom centred on a pixel: the point under that pixel OF THE TARGET'S
+    // PLANE (through the target, facing the eye) stays under it. Under a
+    // perspective projection that point is not the ground under the pixel
+    // but in the air in front of it or under it, and notch after notch the
+    // eye closes on it - the magnification of the ground stalls, or the eye
+    // goes through the ground. So a 3D view moves the pivot to what is drawn
+    // under the cursor first (setPivotDepth, cad::zoomAtPixel;
+    // docs/render.md, "Zooming towards the cursor").
     void dollyAtPixel(double factor, double x, double y);
+    // Moves the pivot along the view axis to `depth` in front of the eye: the
+    // target to eye() + forward() * depth and the distance to `depth`. The eye
+    // stays where it is, so nothing on screen moves; what moves is everything
+    // the pivot's distance governs - the plane dollyAtPixel anchors on and a
+    // pan drags, the point an orbit turns about, the scale the edges fade by.
+    // Under a perspective projection the orthographic height becomes what
+    // the view shows at that depth, 2 depth tan(fov / 2), so switching to
+    // orthographic keeps the scale there; under an orthographic one the
+    // height is the picture and is kept, and the standoff is folded into the
+    // distance. A depth that is not positive and finite is ignored.
+    void setPivotDepth(double depth);
 
   private:
     Point3 target_{0.0, 0.0, 0.0};
     double distance_ = 100.0;
-    double azimuth_ = -0.785398163397448309616;    // -45 degrees: looking NE
+    // -45 degrees: the eye to the south-east, looking north-west (forward()),
+    // as StandardView::IsoSouthEast.
+    double azimuth_ = -0.785398163397448309616;
     double elevation_ = 0.615479708670387341067;   // ~35.264 degrees: true isometric
     Projection projection_ = Projection::Perspective;
     double fovY_ = 0.785398163397448309616;        // 45 degrees
