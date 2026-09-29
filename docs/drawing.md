@@ -445,8 +445,11 @@ and the drawing never repainted by a hover) and
 the pointer steps (`docs/headless.md`), in
 `qt_insert_vertex_shows_where_the_vertex_goes_headless`,
 `qt_insert_vertex_puts_it_on_the_line_headless`,
-`qt_insert_vertex_beside_the_vertex_clicked_first_headless` and
-`qt_delete_vertex_takes_the_chosen_vertex_headless`.
+`qt_insert_vertex_beside_the_vertex_clicked_first_headless`,
+`qt_delete_vertex_takes_the_chosen_vertex_headless`,
+`qt_straighten_shows_what_goes_headless`,
+`qt_segment_to_arc_shows_the_arc_headless` (the radius worked by hand) and
+`qt_fillet_refuses_an_end_vertex_at_the_pick_headless`.
 
 ## The Vertices panel
 
