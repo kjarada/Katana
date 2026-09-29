@@ -33,6 +33,7 @@
 #include "property_panel.hpp"
 #include "render_view_widget.hpp"
 #include "style_manager.hpp"
+#include "tools/flyout_button.hpp"
 
 #include <chrono>
 #include <QAction>
@@ -778,11 +779,11 @@ void MainWindow::buildActions()
         button->setDefaultAction(action);
         button->setPopupMode(QToolButton::MenuButtonPopup);
         button->setAutoRaise(true);
-        button->setIconSize(editBar->iconSize());
         auto* menu = new QMenu(button);
         menu->setObjectName(menuName);
         button->setMenu(menu);
         editBar->addWidget(button);
+        tools::followToolBarIconSize(*button, *editBar);
         return menu;
     };
     undoHistory_ = historyButton(undoAction_, "editUndoButton", "editUndoMenu");
@@ -2711,14 +2712,11 @@ void MainWindow::setToolBarNamesShown(bool shown)
 void MainWindow::setToolBarIconSize(int pixels)
 {
     toolBarIconSize_ = std::clamp(pixels, 12, 48);
+    // The buttons each bar made for its actions follow it, and so do the
+    // ones put on it as widgets - the tool families, Undo and Redo
+    // (tools::followToolBarIconSize).
     for (const auto& [toolbar, name] : toolBars_) {
         toolbar->setIconSize(QSize(toolBarIconSize_, toolBarIconSize_));
-    }
-    // The Undo and Redo buttons are widgets on the Edit bar, sized apart.
-    for (const char* button : {"editUndoButton", "editRedoButton"}) {
-        if (auto* history = findChild<QToolButton*>(button)) {
-            history->setIconSize(QSize(toolBarIconSize_, toolBarIconSize_));
-        }
     }
     for (QAction* action : findChildren<QAction*>()) {
         if (action->objectName().startsWith("viewToolBarIcons")) {
