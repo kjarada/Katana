@@ -1102,6 +1102,32 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "imported job=job-1 entities=4 layer=survey/points .* at 1000,5000[\r\n]+[^\r\n]+ at 1000,5100[\r\n]+[^\r\n]+ at 1010\\.5,5000[\r\n]+[^\r\n]+ at 1020,4999\\.5[\r\n]"
         FAIL_REGULAR_EXPRESSION "error|backsight has no position")
+    # One setup with two backsights to different points,
+    # tests/surveyio/data/fld/two_backsights.fld: K (1000, 5000) backsights
+    # R3, entered due north, at circle 30, then R4, which nothing places, at
+    # circle 120, 50 m out, and shoots 502 at circle 120, 10 m, level. READ:
+    # all 9 records, and one warning - the second backsight (record 12) is
+    # read as a measurement of its point. IMPORT: the first backsight orients
+    # the setup, 0 - 30 = -30 degrees, so circle 120 is due east: R4 at 1050,
+    # 5000 and 502 at 1010, 5000. The reader had taken R4, the last, for the
+    # backsight and R3's circle for its reading, so the reduction took that
+    # circle for a grid azimuth, less the reading on R4 (30 - 120 = -90), and
+    # drew 502 at 1005, 5008.66 and R4 at 1025, 5043.30.
+    set(_fld_two_backsights "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/two_backsights.fld")
+    add_test(NAME cli.survey_read_two_backsights_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_two_backsights}\"")
+    set_tests_properties(cli.survey_read_two_backsights_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "read=9 skipped=0 warnings=1[\r\n]+content setups=1 observations=9 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Local grid G\" epsg=none[\r\n]+warning record=12 text=\"a backsight to 'R4', where setup K backsighted 'R3' at record 11: the first backsight orients the setup, and this one is read as a measurement of its point\""
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_two_backsights_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_two_backsights}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_two_backsights_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=4 layer=survey/points .* at 1000,5000[\r\n]+[^\r\n]+ at 1000,5100[\r\n]+[^\r\n]+ at 1050,5000[\r\n]+[^\r\n]+ at 1010,5000[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error|backsight has no position")
     # The same verbs on the hand-built GSI-16 job
     # tests/surveyio/data/leica/rounded_seconds_gsi16.gsi, whose angle words
     # write 60 seconds where a writer rounded up without carrying the minute
