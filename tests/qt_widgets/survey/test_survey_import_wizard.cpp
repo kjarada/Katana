@@ -190,9 +190,9 @@ TEST(SurveyImportWizard, TheContentStepShowsWhatEachFormatsReaderRead)
 {
     // Setups counted by hand in each fixture: tps_gsi8.gsi has two blocks
     // with word 84 (a station), one_setup.jxl one StationRecord,
-    // setup_metres.rw5 one OC record, setup.gt7 one STN line; a RINEX
-    // observation file has no setups and one GNSS session, and its
-    // navigation file of the same name (.24n) is read beside it.
+    // setup_metres.rw5 one OC record, setup.gt7 one STN line, setup.fld one
+    // 03 record; a RINEX observation file has no setups and one GNSS session,
+    // and its navigation file of the same name (.24n) is read beside it.
     const struct {
         const char* file;
         const char* setups;
@@ -200,6 +200,7 @@ TEST(SurveyImportWizard, TheContentStepShowsWhatEachFormatsReaderRead)
                  {"trimble_jxl/one_setup.jxl", "1"},
                  {"rw5/setup_metres.rw5", "1"},
                  {"gts/setup.gt7", "1"},
+                 {"fld/setup.fld", "1"},
                  {"rinex/test2560.24o", "0"}};
     for (const auto& entry : files) {
         SCOPED_TRACE(entry.file);
@@ -284,6 +285,32 @@ TEST(SurveyImportWizard, AnImportWithANetworkAdjustmentIsOneUndoStepThatLeavesAS
     EXPECT_TRUE(session.document.surveyJobs().empty());
     ASSERT_TRUE(session.document.redo().ok());
     EXPECT_EQ(session.document.surveyJobs().size(), 1u);
+}
+
+// The opcode field file through Survey > Import Survey Data with every step
+// left at its defaults: the reduction's radiation from the entered CP1,
+// oriented on CP2, draws CP1, CP2 and the shots 101 and 102 - four points -
+// and keeps the job, as one undo step (SURVEY IMPORT does the same from a
+// line: src/katana_app/CMakeLists.txt, cli.survey_import_field_file).
+TEST(SurveyImportWizard, AnOpcodeFieldFileIsImportedAsAJobWithItsDefaults)
+{
+    Session session;
+    session.openAndRead(fixture("fld/setup.fld"));
+    QWidget& w = *session.wizard;
+    click(w, "next"); // System
+    click(w, "next"); // Reduction and adjustment
+    click(w, "next"); // Options
+    click(w, "next"); // Report
+    EXPECT_TRUE(session.step().contains("Report")) << session.step().toStdString();
+    click(w, "import");
+
+    ASSERT_EQ(session.document.surveyJobs().size(), 1u);
+    const auto& job = session.document.surveyJobs().front();
+    EXPECT_EQ(job.formatId, "opcode-field-file");
+    EXPECT_EQ(job.sourceFileName, "setup.fld");
+    EXPECT_EQ(job.placedPoints.size(), 4u);
+    ASSERT_TRUE(session.document.undo().ok());
+    EXPECT_TRUE(session.document.surveyJobs().empty());
 }
 
 TEST(SurveyImportWizard, ADelimitedCoordinateFileStillTakesItsSixSteps)

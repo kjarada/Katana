@@ -102,6 +102,16 @@ Properties panel reads them. No tool of its own was added: the verb's
 records are already the structured answer, and a tool would be a second
 spelling of it.
 
+A survey field file - any format the survey import reads, the opcode field
+file (`.fld`) among them - is read and imported the same way:
+`SURVEY READ <file>` answers what the reader made of it in records (`survey`,
+`content`, `declared`, each `warning` with its record), and `SURVEY IMPORT
+<file>` imports it as a survey job, one undo step, answering with the job and
+the reduction's warnings (`docs/survey.md`, "The opcode field file (.fld)").
+`CRS SET` takes a WKT as the agent sends it, quotes and all
+(`McpServer.AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt`); it once lost
+them and refused every WKT whose names hold a blank.
+
 The annotation styles are read and changed through `katana_run_commands`
 with the verbs the window's managers send (`docs/annotation.md`): `DIMSTYLE
 INFO name` answers one record of every field, the layers that name the style

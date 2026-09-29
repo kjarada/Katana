@@ -73,31 +73,6 @@ std::string parserVersionOf(const std::string& formatId)
     return descriptor ? descriptor->parserVersion : std::string{};
 }
 
-survey::ReportInput reportInputFor(const surveyio::ReadResult& read, const std::string& fileName)
-{
-    survey::ReportInput input;
-    input.fileName = fileName;
-    for (const surveyio::SiblingFile& sibling : read.siblingsRead) {
-        input.siblingFiles.push_back(sibling.name);
-    }
-    input.formatId = read.formatId;
-    const auto descriptor = surveyio::formatRegistry().find(read.formatId);
-    input.formatName = descriptor ? descriptor->humanName : read.formatId;
-    input.parserVersion = read.parserVersion;
-    input.recordsRead = read.recordsRead;
-    input.recordsSkipped = read.recordsSkipped;
-    input.warnings.reserve(read.warnings.size());
-    for (const surveyio::ReadWarning& warning : read.warnings) {
-        survey::SourceRecord source;
-        source.format = input.formatName;
-        source.fileName = warning.fileName.empty() ? fileName : warning.fileName;
-        source.recordNumber = warning.record;
-        input.warnings.push_back({warning.message, std::move(source)});
-    }
-    input.notCarried = read.notCarried;
-    return input;
-}
-
 std::string adjustmentSummary(const survey::ReductionReport& report)
 {
     if (report.adjustments.empty()) {

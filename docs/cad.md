@@ -430,7 +430,9 @@ it, and the sheets print it in the title block, so it is set in one place:
   nature the whole rest of the line. A refusal now carries PROJ's own reason
   in its context. Tests: `ProjectCrs.TheCrsVerbTakesAWktWithItsQuotesAsTyped`
   (it fails with the old argument, the owner's message and all),
-  and `ProjectCrsDialog.SetRunsTheCrsVerbAndAPastedWktKeepsItsQuotes`.
+  `ProjectCrsDialog.SetRunsTheCrsVerbAndAPastedWktKeepsItsQuotes`,
+  `cli.crs_set_takes_a_wkt_with_its_quotes` and
+  `McpServer.AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt`.
 - Kept open, it follows the drawing (`ProjectCrsDialog::follow`): a system set
   elsewhere - a typed `CRS SET`, an undo, which says only that the history
   moved - is shown in `projectCrsCurrent`, and in `projectCrsText` unless

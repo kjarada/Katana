@@ -179,12 +179,109 @@ extension.
 | Format (id) | Import | Export | Parser | Notes |
 |---|---|---|---|---|
 | Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
+| Opcode field file (`opcode-field-file`): `.fld`, first line `{Version 6.0}`, tab-separated records opening with a numeric opcode | yes | no | 1.0 | opcodes 02, 03, 04, 05, 06, 07, 09, 29, 41, 72, 73, 100 and -2 read; every other opcode skipped with a warning naming it; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
 
 That is the one reader on main as of 2026-09-24. The instrument parsers this
 file describes above (GSI, the Trimble and Topcon exports, LandXML survey
 data) are not in `src/katana_surveyio/`, and the import wizard refuses any
 other registered format by name; `chooseFormat` in the wizard is where their
 dispatch will go when they land.
+
+## The opcode field file (.fld)
+
+Added 2026-09-29, when the owner asked Katana to read a data collector's
+"field file" (`260825kj.fld`, a total-station job with utility attributes,
+kept on the owner's machine and not committed). Its first line is
+`{Version 6.0}`, its comments call it "Field File Version 6", and every
+record is tab-separated and opens with a numeric operation code - the format
+whose publisher documents it as the "Field File Format" (a reference manual
+chapter; the June 2025 edition was read: sections 1.2 "Structure of the .fld
+File", 1.3 "Point Description" and 1.8, one entry per opcode). Nothing in
+Katana read it before: no probe claimed a `.fld`, and the wizard called the
+file unrecognised. The reader is
+`src/katana_surveyio/opcode_field_file.cpp`, on the Topcon readers' raw
+builder (`src/katana_surveyio/topcon_raw_builder.hpp`), which already turned a
+journal of setups, backsights and shots into one `survey::SurveyProject` - a
+third copy of that bookkeeping would have been the defect section 2 of the
+contributors' rules names.
+
+What the format says, and the reader relies on: most records carry a point
+description of five tab-separated values (feature code, string number, point
+ID, point name, point comment); 02 is an entered coordinate (X, Y, Z), 03 a
+setup with its instrument height, 04 the backsight, 06 a check measurement and
+07 a shot (horizontal circle, vertical circle, slope distance, decimal
+degrees); 05 sets the target height for what follows; 09 is a scale factor for
+later slope distances; 29 a memo; 41, 72 and 73 add text, a real and a text
+attribute to the point just measured; 100 gives the units, of which the format
+allows one each - decimal degrees and metres - so any other is refused.
+
+Decisions that are the reader's own, each stated in the source:
+
+- **The column after the opcode.** Every record in the owner's file has an
+  empty value between the opcode and the description ("07, blank, KJ, 01,
+  KJ01 ..."); the manual's syntax lines do not show one. The records whose
+  opcode has a fixed number of values (02, 03, 04, 06, 07) vote, before any is
+  read, and the file is read in the layout they choose. Rejected: deciding per
+  record, because a record in the column's layout that has lost a value has
+  the plain layout's count, and a feature code left empty makes the first
+  field empty in both - one such record would read a zenith as a slope
+  distance. A record that does not fit the file's layout is skipped with a
+  warning.
+- **X is the easting.** The owner's file puts six-figure eastings in X and
+  seven-figure MGA northings in Y, as the map-grid convention does.
+- **A point is its name, else its ID** (the manual's 1.5 finds a setup by
+  either); a point with both keeps the ID in its metadata.
+- **The header comments are metadata, and the coordinate system is declared
+  by name.** "// Coordinate System: Australia/GDA2020" and "// Zone: Zone 56"
+  become the declared system "Australia/GDA2020, Zone 56", exactly as
+  written. Turning that into EPSG:7856 would be a guess from free text; the
+  person states the code in the wizard (or `CRS SET` sets the drawing's).
+- **72 "Target height" and "Prism constant" are kept as attributes, not
+  applied.** 05 is the format's target height, and the prism constant is
+  written without a unit.
+
+The owner's file, read on 2026-09-29 (a local check; the file is not in the
+repository): 13 950 records read - every line but the 16 comments - none
+skipped, no warning; 8 setups; 2 628 observations, 876 pointings of a
+direction, a zenith and a slope distance (867 shots, 8 backsights, one check
+measurement); the 5 entered control marks; 857 points without coordinates,
+each with its utility attributes (QualityLevel, Depth, Material ...); 134
+coded strings; declared "Australia/GDA2020, Zone 56". Imported with the
+drawing on EPSG:7856 - through `SURVEY IMPORT` and through the wizard with its
+defaults, the same result - it is 862 points as one survey job. KJ01, the
+second setup, lands at 328904.232 E 6253485.838 N; radiating its first
+face-left shot from GB14, oriented on GB15, by hand gives 328904.235 E
+6253485.836 N, 3.6 mm away - well inside what meaning its six pointings can
+move it, since their face pairs disagree by up to 47" (8.7 mm at 38 m). The
+reduction's 8 warnings are the
+file's: three face pairs on KJ01 from GB14 differ by 31" to 47" horizontally,
+three on KJ02 from GB16 by 80" to 83" in zenith, and the file does not say
+whether the atmospheric correction or the prism constant is in its distances.
+`tests/surveyio/test_opcode_field_file.cpp` works on a hand-built fixture,
+`tests/surveyio/data/fld/setup.fld`, in the same layout.
+
+**`SURVEY READ` and `SURVEY IMPORT`** (`src/katana_app/survey_verbs.hpp`)
+bring every format surveyio reads to `katana_cli`, `katana_mcp` and the
+window's command line, which until now reached a field file only through the
+import wizard. `SURVEY READ <file> [FORMAT <id>]` says what the reader made of
+the file and changes nothing; `SURVEY IMPORT <file> [FORMAT <id>] [LAYER
+<path>]` does what the wizard's Import does with its defaults - the reduction
+with `ReductionSettings`' defaults and the control the file declares, the
+points on `survey/points`, the job kept for Survey > Survey Jobs - as one undo
+step (`cad::ImportSurveyJobCommand`). The format is detected unless FORMAT
+names it, and a detection that is not certain is refused, naming the
+candidates. The verb lives in the session and not the interpreter because
+`cad` may not see `surveyio`; the window runs the same function
+(`MainWindow::runWorkbenchLine`). `surveyio::reportInputFor`, which the
+wizard and the Survey Jobs dialog had in the window's code, moved to
+`include/katana/surveyio/reader.hpp` so the verb uses the same one. Tests:
+`cli.survey_read_field_file`, `cli.survey_import_field_file`,
+`qt_survey_verb_headless`.
+
+Not done: opcodes 10, 11 and 12 (stadia, HA HD height, HA HD VD) and the
+string operations (joins, closes, arcs) are skipped with a warning; the format's XML
+form is not read; the verb has no reduction options - a
+person changes them in Survey > Survey Jobs, which re-adjusts the imported job.
 
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 

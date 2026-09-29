@@ -67,6 +67,31 @@ std::string nameOf(const std::filesystem::path& path)
 
 } // namespace
 
+katana::survey::ReportInput reportInputFor(const ReadResult& read, const std::string& fileName)
+{
+    katana::survey::ReportInput input;
+    input.fileName = fileName;
+    for (const SiblingFile& sibling : read.siblingsRead) {
+        input.siblingFiles.push_back(sibling.name);
+    }
+    input.formatId = read.formatId;
+    const auto descriptor = formatRegistry().find(read.formatId);
+    input.formatName = descriptor ? descriptor->humanName : read.formatId;
+    input.parserVersion = read.parserVersion;
+    input.recordsRead = read.recordsRead;
+    input.recordsSkipped = read.recordsSkipped;
+    input.warnings.reserve(read.warnings.size());
+    for (const ReadWarning& warning : read.warnings) {
+        katana::survey::SourceRecord source;
+        source.format = input.formatName;
+        source.fileName = warning.fileName.empty() ? fileName : warning.fileName;
+        source.recordNumber = warning.record;
+        input.warnings.push_back({warning.message, std::move(source)});
+    }
+    input.notCarried = read.notCarried;
+    return input;
+}
+
 std::string describe(const ReadWarning& warning)
 {
     std::string text = warning.fileName;

@@ -215,6 +215,42 @@ TEST_F(McpServer, ABatchStopsAtTheFirstFailingCommandAndSaysWhich)
     EXPECT_EQ(result["structuredContent"]["status"]["entities"], 0);
 }
 
+// An agent reaches a survey field file and a WKT through the lines it sends:
+// SURVEY IMPORT is the session's verb (survey_verbs.hpp), and CRS SET takes
+// the WKT with its quotes, which the verb once lost (test_project_crs.cpp).
+// The field file is the hand-built one of the surveyio tests; its 4 points
+// are worked by hand in src/katana_app/CMakeLists.txt, beside
+// cli.survey_import_field_file.
+TEST_F(McpServer, AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt)
+{
+    initialize();
+    const std::string file = std::string(KATANA_SURVEYIO_DATA) + "/fld/setup.fld";
+    // OGC WKT1 for EPSG:7856, a name with blanks in it: without its quotes
+    // PROJ cannot read it.
+    const std::string wkt =
+        "PROJCS[\"GDA2020 / MGA zone 56\",GEOGCS[\"GDA2020\",DATUM[\"Geocentric_Datum_of_"
+        "Australia_2020\",SPHEROID[\"GRS 1980\",6378137,298.257222101]],PRIMEM[\"Greenwich\",0],"
+        "UNIT[\"degree\",0.0174532925199433]],PROJECTION[\"Transverse_Mercator\"],"
+        "PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",153],"
+        "PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],"
+        "PARAMETER[\"false_northing\",10000000],UNIT[\"metre\",1],AUTHORITY[\"EPSG\",\"7856\"]]";
+    const Json result = call("katana_run_commands",
+                             Json{{"commands", {"SURVEY IMPORT \"" + file + "\"", "CRS SET " + wkt}}});
+    EXPECT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 2U);
+    const std::string imported = lines[0]["output"].get<std::string>();
+    EXPECT_NE(imported.find("survey file=setup.fld format=opcode-field-file"), std::string::npos)
+        << imported;
+    EXPECT_NE(imported.find("imported job=job-1 entities=4 layer=survey/points"),
+              std::string::npos)
+        << imported;
+    EXPECT_EQ(lines[1]["output"].get<std::string>(),
+              "crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\" kind=\"projected\" units=metre")
+        << lines[1];
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 4);
+}
+
 // HELP sent as a command is the session's whole help, what katana_help and
 // --help give: CUSTOMISE and IFC are the session's, not the
 // interpreter's, and the interpreter's own HELP left them out.

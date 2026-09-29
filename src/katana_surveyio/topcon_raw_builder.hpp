@@ -1,10 +1,13 @@
 #pragma once
 
-// What the RW5 and GTS-7 readers share: packed-angle parsing and the builder
+// What the RW5, GTS-7 and opcode field file readers share: packed-angle
+// parsing (RW5 and GTS-7 only) and the builder
 // that turns a stream of raw total-station records into one SurveyProject.
 //
-// Internal to surveyio (no include/ header): the two readers in topcon_rw5.cpp
-// and topcon_gts.cpp are its only users. Both formats are journals written as
+// Internal to surveyio (no include/ header): the readers in topcon_rw5.cpp,
+// topcon_gts.cpp and opcode_field_file.cpp are its users - the last reads no
+// Topcon format but a journal of the same kind, and the namespace keeps the
+// name it was given first. All three formats are journals written as
 // the field work happened - a setup, its backsight, its shots, a stored point -
 // so they need the same bookkeeping: a point is named long before (or without
 // ever) being given coordinates, a setup's observations share a numbering of
