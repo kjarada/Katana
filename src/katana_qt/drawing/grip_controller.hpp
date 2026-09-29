@@ -21,6 +21,13 @@
 //                          plain distance along the cursor, then Enter
 //   Delete                 removes the hot vertex grips' vertices (one step)
 //   Esc                    drops a grabbed grip, then the hot set
+//   hover                  the view's band says what the grip is and what
+//                          can be done with it (hoverHint)
+//   Ctrl held on a middle  the segment middle is drawn as the vertex a
+//                          Ctrl-drag there would add
+//   right-click            the grip's own items in the shortcut menu
+//                          (plan_context_menu.hpp), which hand it to a tool
+//                          through setHot
 //
 // Everything is in model coordinates except the aperture tests, which the
 // view converts; nothing here knows the view's transform.
@@ -60,6 +67,19 @@ class GripController {
     // Whether a vertex grip is hot: Delete is then the view's, for the
     // vertices, and not the window's Erase for the whole polyline.
     [[nodiscard]] bool hasHotVertex() const;
+    // What the view's band says while a grip is under the cursor and none is
+    // grabbed: what it is, and what can be done with it - "Vertex 2 of
+    // polyline 12, z 101.500: drag to move · click to pick up · ...". Empty
+    // with no grip hovered or one grabbed (prompt() speaks then).
+    [[nodiscard]] QString hoverHint() const;
+    // Ctrl held, as the view hears it from its keys and mouse moves: a
+    // hovered segment middle is drawn as the vertex a Ctrl-drag would add.
+    void setCtrl(bool held) { ctrl_ = held; }
+    [[nodiscard]] bool ctrl() const { return ctrl_; }
+    // `grips` hot and nothing grabbed: the shortcut menu opened on a grip
+    // hands it to the tool it starts, as a click on the grip before the tool
+    // would (ToolContext::handles).
+    void setHot(std::vector<katana::cad::Grip> grips);
 
     // True while a grip is held (dragged) or picked up: the view then snaps
     // and constrains the cursor from base() and sends every move here.
@@ -112,6 +132,7 @@ class GripController {
     std::optional<katana::cad::Grip> grabbed_;
     State state_ = State::Idle;
     bool insert_ = false;
+    bool ctrl_ = false;
     Point2 target_;
     Point2 rawCursor_;
     QString typed_;

@@ -118,6 +118,21 @@ mouse and keys before its own selection handling.
 | Esc, right-click | drops a picked-up grip; a second Esc cools the hot grips, a third clears the selection |
 | double-click on a grip | opens the entity's editor, as a double-click on it does, and leaves no grip picked up |
 | a vertex tool chosen with grips hot | the hot grips are the tool's handles (below, "What a vertex tool acts on"), and the grips go with the tool |
+| hover | the view's band says what the grip is and what it offers: "Vertex 2 of polyline 12, z 101.500: drag to move · click to pick up · Shift+click to choose · Delete removes the chosen · right-click for vertex tools"; a segment middle's names Ctrl+drag |
+| Ctrl held over a segment middle | the middle is drawn as the vertex a Ctrl-drag there would add |
+| right-click on a polyline's grip | the shortcut menu begins with the grip's own items (`docs/desktop.md`, "The plan view's shortcut menu") |
+
+**Grips say what they do.** The gestures that were written down only here -
+Shift to choose, Ctrl to add a vertex, Delete for the chosen, the grip's
+menu - are said in the band while a grip is hovered
+(`GripController::hoverHint`), cut at the right where a prompt is cut at the
+left, since the hint's start says which grip it is. A drag is drawn as a
+tool's preview is (`cad::gripFeedback`, through the one feedback painter):
+the edited geometry dashed, the grip's old place as the Target ring, and for
+a Ctrl-insert the new vertex as the Added disc, read from the edited
+polyline. Ctrl is heard from the view's keys and from each mouse move's
+modifiers, so a Ctrl pressed while another widget had the keyboard still
+shows.
 
 **Delete is the view's while a vertex grip is hot.** The window's Erase
 holds Delete as a shortcut, and Qt offers a shortcut's key to the focused
@@ -166,7 +181,13 @@ to fail without its fix, Delete claimed from the window's shortcut
 leaving nothing picked up (`ADoubleClickOnAGripLeavesNothingPickedUp`), a hot
 grip following its vertex (`AHotVertexFollowsItsVertexThroughAnInsertBeforeIt`)
 and a grip picked up before a tool never put down after it
-(`AGripPickedUpBeforeAToolIsDroppedNotCommittedLater`).
+(`AGripPickedUpBeforeAToolIsDroppedNotCommittedLater`). The hints
+(`AHoveredGripSaysWhatItIsAndWhatCanBeDone`,
+`AVertexWithAHeightSaysItsHeight`) are asserted as text, and the Ctrl cue
+as ink against the same view without Ctrl
+(`CtrlOverASegmentMiddleShowsTheVertexADragWouldAdd`); a Ctrl-insert's
+feedback in `tests/cad/drawing/test_grips.cpp`
+(`GripFeedbackOfACtrlInsertShowsTheNewVertex`).
 
 ## Precision input
 
@@ -606,11 +627,10 @@ tests named below):
 
 **Vertex editing (2026-09-30), what "What a vertex tool acts on" leaves.**
 
-- The grips do not yet explain themselves: no hint on a hovered grip ("drag
-  to move, Shift+click to choose, Delete removes the chosen"), no "+" while
-  Ctrl is held over a segment middle, no shortcut menu on a grip (Delete
-  this vertex, Insert after it, Make it the start), and a grip's drag draws
-  its ghost only (`gripPreview`), not the roles a tool's preview has.
+- A grip's shortcut menu is reached with the mouse only: no headless step
+  right-clicks (`+` is a left click), so its items are tested on the menu
+  itself (`tests/qt_widgets/test_plan_context_menu.cpp`) and each is a verb
+  line or a tool an agent reaches directly.
 - The Vertices panel is not joined to the view: choosing a row does not
   make that vertex hot, a hot grip does not choose the row, and its Insert
   After with no row chosen inserts after vertex 0 (`vertex_panel.cpp`).

@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/tool_feedback.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
@@ -113,5 +114,11 @@ applyGripDrag(const katana::entity::Entity& entity, const GripDrag& drag);
 // for the view's rubber band. Entities the drag cannot edit are left out.
 [[nodiscard]] std::vector<katana::entity::Geometry> gripPreview(const Document& document,
                                                                 const GripDrag& drag);
+
+// The drag as a tool's preview is (tool_feedback.hpp), so a grip and a tool
+// speak one language: gripPreview's geometry as the ghost, the grabbed grip
+// at its old place as the Target, and for a Ctrl-insert the new vertex as
+// Added - read from the edited polyline, so on an arc it is on the arc.
+[[nodiscard]] ToolFeedback gripFeedback(const Document& document, const GripDrag& drag);
 
 } // namespace katana::cad

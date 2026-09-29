@@ -152,6 +152,10 @@ class ViewportWidget final : public QWidget {
     [[nodiscard]] tools::ToolHost& toolHost() { return tools_; }
     // The grips shown on the selection while no tool runs (docs/drawing.md).
     [[nodiscard]] drawing::GripController& gripController() { return grips_; }
+    // The grip under `screen` (a pixel of this view) within the pick
+    // aperture, when the grips are showing: what the shortcut menu is
+    // opened on, when it is opened on one.
+    [[nodiscard]] std::optional<katana::cad::Grip> gripAt(const QPointF& screen);
     // The points object snap tracking has acquired, most recent first.
     [[nodiscard]] const std::vector<katana::geometry::Point2>& trackingPoints() const
     {
@@ -293,6 +297,7 @@ class ViewportWidget final : public QWidget {
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
     bool event(QEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
 

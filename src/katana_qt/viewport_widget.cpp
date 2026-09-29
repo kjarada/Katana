@@ -836,6 +836,8 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event)
     }
     lastMouse_ = event->position();
     updateCursor(event->position());
+    // Ctrl as the mouse reports it, where the key went to another widget.
+    grips_.setCtrl((event->modifiers() & Qt::ControlModifier) != 0);
     if (gripsLive()) {
         grips_.refresh(notifications_);
         const QPointF moved = event->position() - gripPress_;
@@ -975,8 +977,22 @@ bool ViewportWidget::event(QEvent* event)
     return QWidget::event(event);
 }
 
+void ViewportWidget::keyReleaseEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Control) {
+        grips_.setCtrl(false);
+        update();
+    }
+    QWidget::keyReleaseEvent(event);
+}
+
 void ViewportWidget::keyPressEvent(QKeyEvent* event)
 {
+    if (event->key() == Qt::Key_Control) {
+        // A segment middle under the cursor shows the vertex a Ctrl-drag adds.
+        grips_.setCtrl(true);
+        update();
+    }
     if (tools_.active()) {
         // While a tool runs, what is typed is ITS input - a coordinate, a
         // distance, an option letter - kept here and shown after the prompt
@@ -1546,7 +1562,20 @@ void ViewportWidget::drawGrips(QPainter& painter) const
     if (grips.base()) {
         // The grip's prompt and what has been typed for it, where a tool's goes.
         drawing::paintBand(painter, rect(), grips.prompt());
+    } else if (const QString hint = grips.hoverHint(); !hint.isEmpty()) {
+        // A grip under the cursor says what it is and what it offers.
+        drawing::paintBand(painter, rect(), hint, Qt::ElideRight);
     }
+}
+
+std::optional<cad::Grip> ViewportWidget::gripAt(const QPointF& screen)
+{
+    if (!gripsLive()) {
+        return std::nullopt;
+    }
+    grips_.refresh(notifications_);
+    // The reach a press on a grip has (mousePressEvent).
+    return cad::gripAt(grips_.grips(), toWorld(screen), pickTolerance());
 }
 
 void ViewportWidget::drawSnapMarker(QPainter& painter) const

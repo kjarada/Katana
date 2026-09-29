@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <QAction>
@@ -29,6 +30,7 @@
 #include <QPushButton>
 
 #include "katana/cad/command_interpreter.hpp"
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "plan_context_menu.hpp"
@@ -620,4 +622,80 @@ TEST(SelectByIdDialog, AnIdSelectRefusesIsSaidAndTheSelectionIsLeftAlone)
     EXPECT_EQ(f.lines, (std::vector<QString>{"SELECT 1 99", "SELECT 2"}));
     EXPECT_EQ(f.document.selection().ids(), (std::vector<EntityId>{1}));
     EXPECT_TRUE(f.selected.empty());
+}
+
+TEST(PlanContextMenu, AVertexGripsItemsRunTheVertexVerbsAndStartTheToolsOnIt)
+{
+    MenuFixture f;
+    f.action("editErase");
+    f.run("PLINE 0,0 10,0 20,0");
+    f.run("SELECT 1");
+    PlanContextMenuContext context = f.context();
+    context.grip = katana::cad::Grip{1, katana::cad::GripKind::Vertex, 1, Point2(10, 0)};
+    std::vector<std::pair<std::string, std::size_t>> started;
+    context.startToolOn = [&started](const std::string& tool, const katana::cad::Grip& grip) {
+        started.emplace_back(tool, grip.index);
+    };
+    PlanContextMenu menu(context);
+    // The vertex's own items first, before the selection's; an open
+    // polyline has no start to change.
+    const auto items = itemsOf(menu);
+    ASSERT_GE(items.size(), 8u);
+    EXPECT_EQ(std::vector<QString>(items.begin(), items.begin() + 8),
+              (std::vector<QString>{"planContextVertex.Delete", "planContextVertex.InsertAfter",
+                                    "planContextVertex.Move", "planContextVertex.Height",
+                                    "planContextVertex.Fillet", "planContextVertex.Chamfer",
+                                    "planContextVertex.Straighten", "editErase"}));
+    EXPECT_EQ(item(menu, "planContextVertex.InsertAfter")->statusTip(),
+              "VERTEX INSERT 1 #1.s1 after=1");
+    item(menu, "planContextVertex.Move")->trigger();
+    EXPECT_EQ(started, (std::vector<std::pair<std::string, std::size_t>>{{"draw.vertex.move", 1}}));
+    item(menu, "planContextVertex.Delete")->trigger();
+    EXPECT_EQ(f.lines, (std::vector<QString>{"VERTEX DELETE 1 1"}));
+    const auto after = katana::cad::readPolyline(f.entity(1));
+    ASSERT_TRUE(after.has_value());
+    EXPECT_EQ(after->vertices.size(), 2u) << "one undoable edit, run as its line";
+}
+
+TEST(PlanContextMenu, AnEndVertexOffersNoCornerAndNoSegmentAfterIt)
+{
+    MenuFixture f;
+    f.run("PLINE 0,0 10,0 20,0");
+    f.run("SELECT 1");
+    PlanContextMenuContext context = f.context();
+    context.grip = katana::cad::Grip{1, katana::cad::GripKind::Vertex, 2, Point2(20, 0)};
+    context.startToolOn = [](const std::string&, const katana::cad::Grip&) {};
+    PlanContextMenu menu(context);
+    EXPECT_FALSE(item(menu, "planContextVertex.InsertAfter")->isEnabled());
+    EXPECT_FALSE(item(menu, "planContextVertex.Fillet")->isEnabled());
+    EXPECT_EQ(item(menu, "planContextVertex.Fillet")->statusTip(),
+              "vertex 2 is an end of the polyline; a corner is where two segments meet");
+    EXPECT_TRUE(item(menu, "planContextVertex.Delete")->isEnabled());
+}
+
+TEST(PlanContextMenu, ASegmentGripOffersMakeStraightOnlyOnAnArc)
+{
+    MenuFixture f;
+    f.run("PLINE 0,0 10,0 20,0");
+    katana::entity::Entity curved;
+    auto shape = katana::geometry::CurvePolyline2::fromPoints(
+        {Point2(0, 20), Point2(10, 20), Point2(20, 20)});
+    shape.vertices[0].bulge = 1.0;
+    curved.geometry = shape;
+    ASSERT_TRUE(f.document.execute(katana::commands::createEntities({curved})).ok());
+    f.run("SELECT 1 2");
+    PlanContextMenuContext straight = f.context();
+    straight.grip = katana::cad::Grip{1, katana::cad::GripKind::SegmentMid, 0, Point2(5, 0)};
+    {
+        PlanContextMenu menu(straight);
+        EXPECT_EQ(menu.findChild<QAction*>("planContextSegment.Line"), nullptr)
+            << "a straight segment is straight already";
+        item(menu, "planContextSegment.AddMiddle")->trigger();
+        EXPECT_EQ(f.lines, (std::vector<QString>{"VERTEX INSERT 1 #1.s0 after=0"}));
+        EXPECT_EQ(katana::cad::readPolyline(f.entity(1))->vertices[1].position, Point2(5, 0));
+    }
+    PlanContextMenuContext arc = f.context();
+    arc.grip = katana::cad::Grip{2, katana::cad::GripKind::SegmentMid, 0, Point2(5, 15)};
+    PlanContextMenu menu(arc);
+    EXPECT_EQ(item(menu, "planContextSegment.Line")->statusTip(), "VERTEX SET 2 0 bulge=0");
 }
