@@ -179,7 +179,7 @@ extension.
 | Format (id) | Import | Export | Parser | Notes |
 |---|---|---|---|---|
 | Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
-| Opcode field file (`opcode-field-file`): `.fld`, first line `{Version 6.0}`, tab-separated records opening with a numeric opcode | yes | no | 1.0 | opcodes 02, 03, 04, 05, 06, 07, 09, 29, 41, 72, 73, 100 and -2 read; every other opcode skipped with a warning naming it; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
+| Opcode field file (`opcode-field-file`): `.fld`, tab-separated records opening with a numeric opcode, total-station and GNSS (RTK) jobs | yes | no | 1.1 | opcodes 02, 03, 04, 05, 06, 07, 09, 16, 20, 29, 41, 42, 43, 44, 71, 72, 73, 99, 100, 124, 125, 128, 129, 138, 139 and -2 read; every other opcode skipped with a warning naming it; RTK positions written as 02 are `Calculated`, not entered control; offsets kept, not applied; resected setups are not positioned; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
 
 That is the one reader on main as of 2026-09-24. The instrument parsers this
 file describes above (GSI, the Trimble and Topcon exports, LandXML survey
@@ -191,74 +191,198 @@ dispatch will go when they land.
 
 Added 2026-09-29, when the owner asked Katana to read a data collector's
 "field file" (`260825kj.fld`, a total-station job with utility attributes,
-kept on the owner's machine and not committed). Its first line is
-`{Version 6.0}`, its comments call it "Field File Version 6", and every
-record is tab-separated and opens with a numeric operation code - the format
-whose publisher documents it as the "Field File Format" (a reference manual
-chapter; the June 2025 edition was read: sections 1.2 "Structure of the .fld
-File", 1.3 "Point Description" and 1.8, one entry per opcode). Nothing in
-Katana read it before: no probe claimed a `.fld`, and the wizard called the
-file unrecognised. The reader is
+kept on the owner's machine and not committed), and extended the same day,
+when the owner supplied two more - an RTK job and a total-station job with
+resections - with the publisher's description of the format, and asked that
+every one be read completely. Every record is tab-separated and opens with a
+numeric operation code: the format its publisher documents as the "Field File
+Format", a reference manual chapter that also defines an XML form of the same
+records. The reader follows the edition the owner supplied - sections 44.2
+"Structure of the .fld File", 44.3 "Point Description", 44.4 "Measurements
+and Named Measurements", 44.5, 44.6's time_text, 44.7 and 44.8, one entry per
+opcode; the June 2025 edition numbers the same sections 1.2 to 1.8 and lacks
+the resection entries. The reader is
 `src/katana_surveyio/opcode_field_file.cpp`, on the Topcon readers' raw
 builder (`src/katana_surveyio/topcon_raw_builder.hpp`), which already turned a
 journal of setups, backsights and shots into one `survey::SurveyProject` - a
 third copy of that bookkeeping would have been the defect section 2 of the
 contributors' rules names.
 
-What the format says, and the reader relies on: most records carry a point
-description of five tab-separated values (feature code, string number, point
-ID, point name, point comment); 02 is an entered coordinate (X, Y, Z), 03 a
-setup with its instrument height, 04 the backsight, 06 a check measurement and
-07 a shot (horizontal circle, vertical circle, slope distance, decimal
-degrees); 05 sets the target height for what follows; 09 is a scale factor for
-later slope distances; 29 a memo; 41, 72 and 73 add text, a real and a text
-attribute to the point just measured; 100 gives the units, of which the format
-allows one each - decimal degrees and metres - so any other is refused.
+What the format says, and the reader relies on: a record is an opcode
+"followed by zero or more tabs and pieces of information", so an opcode alone
+on its line is one; most records carry a point description of five
+tab-separated values (feature code, string number, point ID, point name,
+point comment); 02 is a "directly entered coordinate" (X, Y, Z) that needs no
+reduction, 03 a setup with its instrument height, 04 the backsight, 06 a
+check measurement and 07 a shot (horizontal circle, vertical circle, slope
+distance, decimal degrees); 128 is a setup on an unknown point that a
+resection computes, 129 the end of its block; 05 sets the target height for
+what follows; 09 is a scale factor for later slope distances; 16 codes the
+current measurement point into a second string; 20 closes the current string
+(or the one its description names); 42, 43 and 44 are radial, tangential and
+height offsets of the current point; 29 is a memo; 41, 71, 72 and 73 add text,
+an integer, a real and a text attribute to the point just measured, a blank
+name making an attribute unnamed; 99 ends the file; 100 gives the units, of
+which the format allows one each - decimal degrees and metres - so any other
+is refused.
 
 Decisions that are the reader's own, each stated in the source:
 
-- **The column after the opcode.** Every record in the owner's file has an
-  empty value between the opcode and the description ("07, blank, KJ, 01,
-  KJ01 ..."); the manual's syntax lines do not show one. The records whose
-  opcode has a fixed number of values (02, 03, 04, 06, 07) vote, before any is
-  read, and the file is read in the layout they choose. Rejected: deciding per
-  record, because a record in the column's layout that has lost a value has
-  the plain layout's count, and a feature code left empty makes the first
-  field empty in both - one such record would read a zenith as a slope
-  distance. A record that does not fit the file's layout is skipped with a
-  warning.
-- **X is the easting.** The owner's file puts six-figure eastings in X and
-  seven-figure MGA northings in Y, as the map-grid convention does.
-- **A point is its name, else its ID** (the manual's 1.5 finds a setup by
-  either); a point with both keeps the ID in its metadata.
-- **The header comments are metadata, and the coordinate system is declared
-  by name.** "// Coordinate System: Australia/GDA2020" and "// Zone: Zone 56"
-  become the declared system "Australia/GDA2020, Zone 56", exactly as
-  written. Turning that into EPSG:7856 would be a guess from free text; the
-  person states the code in the wizard (or `CRS SET` sets the drawing's).
-- **72 "Target height" and "Prism constant" are kept as attributes, not
-  applied.** 05 is the format's target height, and the prism constant is
-  written without a unit.
+- **The column after the opcode.** Every record with values in the owner's
+  files has one field more than the description's syntax, at the front
+  ("07, blank, KJ, 01, KJ01 ..."). In two files it is always empty; in the RTK
+  file it holds, on every coordinate, the date and time it was measured
+  ("05/05/26 00:49:06.52", the same as the point's own Date and Time
+  attributes) - the counterpart of the time the XML form carries in its
+  op_code_properties. The records whose opcode has a fixed number of values
+  (02, 03, 04, 06, 07) vote before any is read: the column's count with the
+  first field empty or a date and time votes for it, the description's count
+  with a filled first field against. Rejected: deciding per record, because a
+  record in the column's layout that has lost a value has the plain layout's
+  count, and a feature code left empty makes the first field empty in both -
+  one such record would read a zenith as a slope distance. Rejected too:
+  taking any text in the column, which would read a plain record with one
+  stray value shifted by one. A record that does not fit the file's layout is
+  skipped with a warning. The date and time is kept as text, "time stamp", on
+  the point or setup its record makes, not turned into a `SurveyTimestamp`:
+  whether "05/05/26" is day first the file does not say.
+- **Opcodes are numbers.** " 2" (the RTK file right-aligns its opcodes) and
+  "7" (the resection blocks write 5 and 7 without their zero) are 02 and 07.
+  The probe did not trim, which is why the RTK file was "not recognised".
+- **An RTK position written as 02 is `Calculated`.** The description gives a
+  GNSS coordinate opcode 140 and says 140 does not exist in a .fld, so a .fld
+  carries an RTK position only as an 02, its "directly entered coordinate".
+  `CoordinateSource::Entered` ("keyed in or published") is what the
+  reduction seeds and holds like control, so every RTK point would have been
+  held. An 02 whose attributes say it is a GNSS solution - an attribute group
+  whose name holds "GPS" or "GNSS", or a "GNSS Solution" attribute - becomes
+  `Calculated` (the receiver computed it, as RW5's GPS records are read); one
+  without them stays Entered. Its Z is the mark's: an 02 needs "no
+  reduction", and the antenna height is only an attribute (a point measured
+  on a 2.2 m pole is 0.04 m above a neighbour 0.62 m away measured on 2.0 m,
+  not the 0.2 m more a Z at the antenna would give). `FormatContent::gnss`
+  stays false: these are grid coordinates, not GNSS observations. Rejected: a
+  grid `GnssPositionObservation` per RTK point, which would let a
+  total-station setup on an RTK mark use it but needs sigmas the description
+  does not define (the controller's quality attributes are its own).
+- **Attribute groups (124 ... 125) keep their group.** The description
+  defines them for the XML form only (a name and a level); the RTK file
+  writes 124 with an empty value, the name and the level, and 125 with the
+  level. An attribute inside a group is kept as "Group/Name", nested groups
+  as "Outer/Inner/Name" - the reference station's "Easting" and "Latitude"
+  are not the point's, and "/" is how PROP TREE and the Properties panel
+  already show a tree. A level that is not the nesting depth, an end with no
+  group open and a group never ended are warnings.
+- **A mark measured twice keeps both measurements.** The builder keeps the
+  first coordinates (a different later value is a warning and "coordinates
+  restated at record N"); the attributes and time stamp after the restating
+  02 are kept as "record N/...", where they used to overwrite the first
+  measurement's.
+- **A point is its name, else its ID** (the description's 44.5 finds a known
+  point by either); a point with both keeps the ID in its metadata.
+- **X is the easting.** The description says only "(x, y, z)"; the files put
+  six-figure eastings in X and seven-figure MGA northings in Y, and the RTK
+  file labels a reference station's Easting and Northing the same way.
+- **A record that is not read leaves nothing current.** A skipped 02, 04, 06
+  or 07 (or an unread 10, 11, 12, 140) leaves no current point, and a skipped
+  03 or 128 no setup: the attributes and shots after it are skipped naming
+  it. Before, they went to the point or setup before - in the resection job
+  some 21 000 attribute records had landed on control marks and 731 shots
+  under the wrong setup, silently.
+- **Resections (128 ... 129; 138 ... 139 for Helmert).** A 128 is a setup on
+  the point its description names; the description's .fld syntax gives only
+  the height, and the file writes the description first (as the XML form
+  carries one) and an empty value after the height; with no point named the
+  setup is on "resection at record N". The shots after the 129 are still that
+  setup's: no 03 follows any of the file's twelve. The file does not state
+  where the resected points are and the reduction does not compute a
+  resection, so these setups and what was measured from them are not
+  positioned: `notCarried` says so, and the reduction report says "Setup RE01
+  stands on RE01, which has no position". Rejected: computing the resection
+  in the reader - `surveyio` parses and computes nothing.
+- **Multiple coding (16)** strings the current measurement point into a second
+  string. The description makes a second point at the same position; Katana
+  strings the one point into both, and a 16 that names a point of its own
+  keeps the name in the metadata, with a warning.
+- **Close string (20)** marks the feature closed (`SurveyFeature::closed`) and
+  takes it off the open list, so a later point of the same code and number
+  starts a new string rather than joining a closed polygon.
+- **Offsets (42, 43, 44) are kept, not applied.** Each is read, checked and
+  kept in the point's metadata ("offset record 927" = "tangential 0.4 m from
+  setup RE01"), with a warning: the point is imported where the prism was.
+  Rejected: applying them by editing the observations, which would make the
+  model's raw observations something no instrument measured. Applying them in
+  the reduction needs a typed offset the model does not have (Not done).
+- **A check (06) does not string its target.** The description makes a check
+  a one-vertex string of its own; its code is kept in the point's "check
+  measurement" metadata, and a backsight's (04) in its setup's. With every
+  shot read, the resection job's coded checks would have made 9 strings of
+  their own (one, CHSH, joining five control marks).
+- **The header comments are metadata, the later ones notes.** Comments before
+  the first record that makes a point or a setup are the header: "Key :
+  value" is kept as "header: Key", any other line in "header", and "//
+  Coordinate System: Australia/GDA2020" with "// Zone: Zone 56" is the
+  declared system "Australia/GDA2020, Zone 56", exactly as written - turning
+  that into EPSG:7856 would be a guess from free text; the person states the
+  code in the wizard (or `CRS SET` sets the drawing's). A comment after it -
+  a resection's residuals, an antenna height change - is a note on the setup
+  it follows (the project's before the first), verbatim; a rule of dashes is
+  dropped. Before, every comment was parsed as "Key : value", so 71 of the
+  resection job's 72 residual lines overwrote one another as "header: ID".
+  Rejected: "the header is the comments before the first record", because two
+  of the files put a 100 record before their header comments.
+- **41 keeps its spaces** ("any spaces from column four onwards will be part
+  of the text") and is kept as "additional text N" rather than joined to the
+  point's comment; 29 is a note on the setup.
+- **A 09 scale factor is `Applied`.** The reader multiplies the slope
+  distances by it, so the setup's `InstrumentSettings::scaleFactorState` says
+  Applied; it said NotApplied, which a reduction reading it would apply a
+  second time. Every 09 in the three files is 1.
+- **99 stops the read**, as the description says; what follows is counted as
+  skipped, in one warning. **An opcode the description defines only for its
+  XML form** (140 GNSS coordinate, 145 GNSS offset ...) has no .fld layout and
+  is skipped, saying so; 124 and 125 are read because a real file shows their
+  layout and a misread one can only misname an attribute. Every other opcode
+  is skipped with the description's name for it ("opcode 18 (circle feature)
+  is not one this reader imports"), and one that corrects later measurements
+  (15, 127, 131) says those are read without it.
 
-The owner's file, read on 2026-09-29 (a local check; the file is not in the
-repository): 13 950 records read - every line but the 16 comments - none
-skipped, no warning; 8 setups; 2 628 observations, 876 pointings of a
-direction, a zenith and a slope distance (867 shots, 8 backsights, one check
-measurement); the 5 entered control marks; 857 points without coordinates,
-each with its utility attributes (QualityLevel, Depth, Material ...); 134
-coded strings; declared "Australia/GDA2020, Zone 56". Imported with the
-drawing on EPSG:7856 - through `SURVEY IMPORT` and through the wizard with its
-defaults, the same result - it is 862 points as one survey job. KJ01, the
-second setup, lands at 328904.232 E 6253485.838 N; radiating its first
-face-left shot from GB14, oriented on GB15, by hand gives 328904.235 E
-6253485.836 N, 3.6 mm away - well inside what meaning its six pointings can
-move it, since their face pairs disagree by up to 47" (8.7 mm at 38 m). The
-reduction's 8 warnings are the
-file's: three face pairs on KJ01 from GB14 differ by 31" to 47" horizontally,
-three on KJ02 from GB16 by 80" to 83" in zenith, and the file does not say
-whether the atmospheric correction or the prism constant is in its distances.
-`tests/surveyio/test_opcode_field_file.cpp` works on a hand-built fixture,
-`tests/surveyio/data/fld/setup.fld`, in the same layout.
+The owner's three files, read on 2026-09-29 before and after this change (a
+local check; the files are the owner's and are not in the repository):
+
+| File | Before | After |
+|---|---|---|
+| RTK job, 134 427 lines, Windows-1252 | not recognised; with FORMAT, refused: no record but the version line could be read (134 393 skipped) | 134 394 read, 0 skipped, 3 warnings (the encoding; two marks measured twice, 5/32/4 mm and 9/2/11 mm apart); 3 482 points, all `Calculated`; 209 strings, 22 closed; declared "K2W v3 260410" |
+| Total-station job, 13 966 lines | 13 950 read, 0 skipped, 0 warnings; 8 setups, 2 628 observations, 5 points, 857 unpositioned, 134 strings | the same: its project saved after `CRS SET EPSG:7856` and `SURVEY IMPORT` differs only in the parser version and the times |
+| Total-station job with resections, 35 207 lines, UTF-8 | 31 019 read, 4 065 skipped (3 406 shots from resected setups, 659 records of six opcodes unread) | 35 084 read, 0 skipped, 96 warnings (its 85 tangential and 11 radial offsets); 18 setups (12 resections), 14 739 observations, 15 points, 4 819 unpositioned, 583 strings |
+
+Each count was checked against a census of the file written from the
+description, not from the reader: every point's X and Y, coordinate source,
+strings and closures, and all 154 815 attributes and time stamps agree.
+Imported with `SURVEY IMPORT`: the RTK job is 3 482 points where the file
+puts them, whether or not `CRS SET EPSG:7856` came first - nothing transforms
+them, and "K2W v3 260410" is not MGA zone 56: the file's own grid
+coordinates for its two reference stations agree with their latitudes and
+longitudes projected to zone 56 at one (1 cm) and not at the other (+0.10 m E,
++0.45 m N), so the person must say what system the drawing is in. The
+total-station job is 862 points, as before. The resection job was 1 481
+points, 731 of them radiated from the wrong setup and TH07 oriented 12 degrees
+out on the shots of another; it is now 778 - the 15 control marks and the 763
+shots from the setups with a backsight - with TH07 oriented to 5.8" and its
+backsight distance checking to 19.3 mm (it was 1 524.4 mm). The twelve
+resected setups draw nothing until the reduction computes a resection.
+
+The fixtures are hand-built in the files' layouts, with invented names and
+numbers: `tests/surveyio/data/fld/setup.fld` (a setup),
+`tests/surveyio/data/fld/gnss.fld` (an RTK job: blank-padded opcodes, time
+stamps, groups, a close, a remeasured mark, a Windows-1252 degree sign) and
+`tests/surveyio/data/fld/resection.fld` (a resection and its residual
+comments in UTF-8, 16, 42, 43, 71, a coded check). `.gitattributes` stores
+them byte for byte, so a Linux checkout reads the same CRLF lines. Every file
+under `tests/surveyio/data` was detected before and after the probe change;
+only `gnss.fld` changed, from uncertain (0.30) to identified (0.98)
+(`OpcodeFieldFile.TheProbeClaimsNoOtherFormatsFixtureOrSample` prints the
+table and holds the rule).
 
 **`SURVEY READ` and `SURVEY IMPORT`** (`src/katana_app/survey_verbs.hpp`)
 bring every format surveyio reads to `katana_cli`, `katana_mcp` and the
@@ -276,12 +400,36 @@ candidates. The verb lives in the session and not the interpreter because
 wizard and the Survey Jobs dialog had in the window's code, moved to
 `include/katana/surveyio/reader.hpp` so the verb uses the same one. Tests:
 `cli.survey_read_field_file`, `cli.survey_import_field_file`,
-`qt_survey_verb_headless`.
+`cli.survey_read_gnss_field_file`, `cli.survey_import_gnss_field_file`,
+`cli.survey_read_resection_field_file`,
+`cli.survey_import_resection_field_file`, `qt_survey_verb_headless`, and the
+wizard's content step shows the two new fixtures as read
+(`SurveyImportWizard.TheContentStepShowsWhatEachFormatsReaderRead`).
 
-Not done: opcodes 10, 11 and 12 (stadia, HA HD height, HA HD VD) and the
-string operations (joins, closes, arcs) are skipped with a warning; the format's XML
-form is not read; the verb has no reduction options - a
-person changes them in Survey > Survey Jobs, which re-adjusts the imported job.
+Not done:
+
+- The format's XML form is not read: no sample of it, and its records are
+  the same opcodes written as elements.
+- Resections are not computed. The reduction has none, so a setup a 128 or
+  138 makes, and everything measured from it, is not positioned.
+- Offsets (42, 43, 44) are not applied. That needs a typed offset on the
+  setup's pointing in `survey::SurveyStation` and radiation that applies it;
+  RW5's off-centre shots would use the same.
+- The RTK points are coordinates only, with no `GnssPositionObservation`, so a
+  total-station setup on one falls back to the file's coordinates with a
+  warning, and a mark measured twice is a warning, not a misclosure.
+- Opcodes -3 (group), -1 (error text), 1 (job data), 10, 11 and 12 (stadia,
+  HA HD height, HA HD VD), 14, 15, 17-19, 21-24 (joins), 28, 30, 31, 37-40,
+  45-62 (string operations, templates, arcs), 68-70 and 74-79 (string and
+  segment attributes) and the other opcodes from 80 up that are not read are
+  skipped with a warning naming them; 140 in a .fld is skipped.
+- A check (06) is reduced as observations - the reduction means an
+  orientation with it - where the description only reports it; changing that
+  would change the total-station job's result.
+- `SURVEY READ`'s `warnings=` counts the warnings listed, which the builder
+  caps at 10 000 and one "more" line.
+- The verb has no reduction options - a person changes them in Survey > Survey
+  Jobs, which re-adjusts the imported job.
 
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 

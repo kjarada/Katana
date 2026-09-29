@@ -978,7 +978,8 @@ endif()
 
 # SURVEY READ and SURVEY IMPORT (survey_verbs.hpp) on the hand-built field
 # file tests/surveyio/data/fld/setup.fld. READ: 16 records read and 2 skipped
-# (record 20, a 07 one value short, and record 21, opcode 42), 1 setup, 12
+# (record 20, a 07 one value short, and record 21, opcode 18, a circle feature
+# the reader does not import), 1 setup, 12
 # observations (4 pointings of 3), CP1 and CP2 entered, 101 and 102 observed,
 # the one EB/01 feature, and the system its header comments name. IMPORT
 # reduces it with the defaults and draws 4 points on LAYER, one undo step:
@@ -998,7 +999,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld}\"" -c "STATUS")
     set_tests_properties(cli.survey_read_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=setup\\.fld format=opcode-field-file parser=1\\.0 read=16 skipped=2 warnings=2[\r\n]+content setups=1 observations=12 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Australia/GDA2020, Zone 56\" epsg=none[\r\n]+warning record=20 [^\r\n]+[\r\n]+warning record=21 text=\"opcode 42 is not one this reader imports\".*Entities: 0 "
+        "survey file=setup\\.fld format=opcode-field-file parser=1\\.1 read=16 skipped=2 warnings=2[\r\n]+content setups=1 observations=12 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Australia/GDA2020, Zone 56\" epsg=none[\r\n]+warning record=20 [^\r\n]+[\r\n]+warning record=21 text=\"opcode 18 \\(circle feature\\) is not one this reader imports\".*Entities: 0 "
         FAIL_REGULAR_EXPRESSION "error")
     add_test(NAME cli.survey_import_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -1017,6 +1018,58 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld}\" LAYER x")
     set_tests_properties(cli.survey_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+    # An RTK job, tests/surveyio/data/fld/gnss.fld: each coordinate written
+    # " 2" (a blank before the opcode) with its date and time in the column
+    # after it, attribute groups (124, 125), a bare 20. Detected without
+    # FORMAT; all 32 records read (the version line and lines 11-37 and
+    # 41-44), two warnings - the file is Windows-1252 (record 0), and R001 is
+    # measured again at record 41 - no setup, 5 points (R001 to R004 and the
+    # keyed-in CM1), 2 features (KB 1 closed by the 20, KB 1 again after it),
+    # the system the header names. IMPORT draws the 5 points where the file
+    # puts them, X the easting: nothing is reduced, as the format says an
+    # entered coordinate needs no reduction, and R001 keeps its first
+    # coordinates.
+    set(_fld_gnss "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/gnss.fld")
+    add_test(NAME cli.survey_read_gnss_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_gnss}\"")
+    set_tests_properties(cli.survey_read_gnss_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=gnss\\.fld format=opcode-field-file parser=1\\.1 read=32 skipped=0 warnings=2[\r\n]+content setups=0 observations=0 points=5 unpositioned=0 features=2 control=0[\r\n]+declared crs=\"Local grid A\" epsg=none[\r\n]+warning record=0 text=\"the file is not UTF-8[^\r\n]+[\r\n]+warning record=41 text=\"point 'R001' is given different coordinates here"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_gnss_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_gnss}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_gnss_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=5 layer=survey/points .* at 500010,6200020[\r\n]+[^\r\n]+ at 500020,6200020[\r\n]+[^\r\n]+ at 500020,6200030[\r\n]+[^\r\n]+ at 500000,6200000[\r\n]+[^\r\n]+ at 500040,6200040"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A resection, tests/surveyio/data/fld/resection.fld: 128 sets up on S1,
+    # whose block ("5" and "7" without their zero) runs to the 129, then
+    # shots with 16, 42, 43 and 71, a coded check (06), and a 03 on K1.
+    # READ: all 27 records, the two offsets warned of as not applied, 2
+    # setups, 24 observations (8 pointings of 3), K1 and K2 entered, S1, 101,
+    # 102 and 103 unpositioned, the EB 01, NS 01 and PF strings, and what the
+    # file does not carry: S1's coordinates. IMPORT: the file does not state
+    # where S1 is and the reduction computes no resection, so nothing is
+    # radiated from it, which the report says; K1, oriented on K2 due east at
+    # circle 90 (orientation 0), radiates 103 at 45 deg, 10 m out (zenith 90):
+    # 1000 + 10 sin 45 = 1007.071 E, 5000 + 10 cos 45 = 5007.071 N.
+    set(_fld_resection "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/resection.fld")
+    add_test(NAME cli.survey_read_resection_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_resection}\"")
+    set_tests_properties(cli.survey_read_resection_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=resection\\.fld format=opcode-field-file parser=1\\.1 read=27 skipped=0 warnings=2[\r\n]+content setups=2 observations=24 points=2 unpositioned=4 features=3 control=0[\r\n]+declared crs=\"Local grid B\" epsg=none[\r\n]+warning record=24 text=\"the tangential offset \\(opcode 43\\) of 0\\.25 m to point '101'[^\r\n]+[\r\n]+warning record=29 text=\"the radial offset \\(opcode 42\\) of 0\\.5 m to point '102'.*not_carried text=\"no coordinates for the 1 setup\\(s\\) made by resection"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_resection_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_resection}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_resection_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=3 layer=survey/points .*reduction_warning text=\"Setup S1 stands on S1, which has no position: nothing was computed from it\\.\".* at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1007\\.07[01][0-9]*,5007\\.07[01][0-9]*"
+        FAIL_REGULAR_EXPRESSION "error")
     # CRS SET with a WKT - GDA2020 / MGA zone 56 as OGC WKT1, its names in
     # double quotes and one of them holding blanks - as an agent or a script
     # passes it: the verb once lost the quotes with the line's tokens, and

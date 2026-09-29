@@ -234,9 +234,11 @@ bool RawProjectBuilder::hasPoint(std::string_view id) const
     return findPoint(id, std::hash<std::string_view>{}(id)) != kNotFound;
 }
 
-void RawProjectBuilder::positionPoint(std::string_view id, double northing, double easting,
-                                      std::optional<double> elevation,
-                                      survey::CoordinateSource how, std::size_t record)
+RawProjectBuilder::Positioned RawProjectBuilder::positionPoint(std::string_view id, double northing,
+                                                               double easting,
+                                                               std::optional<double> elevation,
+                                                               survey::CoordinateSource how,
+                                                               std::size_t record)
 {
     PointEntry& point = entry(id, record);
     if (!point.positioned) {
@@ -247,11 +249,11 @@ void RawProjectBuilder::positionPoint(std::string_view id, double northing, doub
         point.coordinateSource = how;
         point.positionRecord = record;
         point.sourceRecord = record;
-        return;
+        return Positioned::First;
     }
     if (point.northing == northing && point.easting == easting &&
         (!elevation || point.elevation == elevation)) {
-        return;
+        return Positioned::Repeated;
     }
     std::string restated = "N " + katana::core::formatExactReal(northing) + ", E " +
                            katana::core::formatExactReal(easting);
@@ -262,6 +264,27 @@ void RawProjectBuilder::positionPoint(std::string_view id, double northing, doub
     warn(record, "point '" + point.id + "' is given different coordinates here (" + restated +
                      " m) from those of record " + std::to_string(point.positionRecord) +
                      "; the first are kept and these are in the point's metadata");
+    return Positioned::Restated;
+}
+
+bool RawProjectBuilder::setCoordinateSource(std::string_view id, std::size_t record,
+                                            survey::CoordinateSource how)
+{
+    const std::uint32_t index = findPoint(id, std::hash<std::string_view>{}(id));
+    if (index == kNotFound || !points_[index].positioned ||
+        points_[index].positionRecord != record) {
+        return false;
+    }
+    points_[index].coordinateSource = how;
+    return true;
+}
+
+std::string RawProjectBuilder::featureKey(std::string_view code, std::string_view stringNumber)
+{
+    std::string key(code);
+    key += '\x1f';
+    key += stringNumber;
+    return key;
 }
 
 void RawProjectBuilder::codePoint(std::string_view id, std::string_view code,
@@ -280,9 +303,7 @@ void RawProjectBuilder::codePoint(std::string_view id, std::string_view code,
     }
     // A feature is one code (and string number, where the format has one),
     // strung in the order its points were observed.
-    std::string key(code);
-    key += '\x1f';
-    key += stringNumber;
+    std::string key = featureKey(code, stringNumber);
     std::uint32_t featureId = 0;
     if (const auto found = featureIndex_.find(key); found != featureIndex_.end()) {
         featureId = found->second;
@@ -303,6 +324,48 @@ void RawProjectBuilder::codePoint(std::string_view id, std::string_view code,
         point.feature = featureId;
     }
     result_.project.features[featureId].pointIds.push_back(point.id);
+}
+
+std::optional<std::size_t> RawProjectBuilder::closeFeature(std::string_view code,
+                                                           std::string_view stringNumber)
+{
+    const auto found = featureIndex_.find(featureKey(code, stringNumber));
+    if (found == featureIndex_.end()) {
+        return std::nullopt;
+    }
+    survey::SurveyFeature& feature = result_.project.features[found->second];
+    feature.closed = true;
+    featureIndex_.erase(found);
+    return feature.pointIds.size();
+}
+
+std::optional<std::size_t> RawProjectBuilder::closeFeatureOf(std::string_view id)
+{
+    const std::uint32_t index = findPoint(id, std::hash<std::string_view>{}(id));
+    if (index == kNotFound || points_[index].feature == kNoFeature) {
+        return std::nullopt;
+    }
+    // Open features are exactly those in featureIndex_: one that is not
+    // closed is the one its code and string number find.
+    const survey::SurveyFeature& feature = result_.project.features[points_[index].feature];
+    if (feature.closed) {
+        return std::nullopt;
+    }
+    return closeFeature(feature.code, feature.name);
+}
+
+std::optional<std::string> RawProjectBuilder::lastPointOf(std::string_view code,
+                                                          std::string_view stringNumber) const
+{
+    const auto found = featureIndex_.find(featureKey(code, stringNumber));
+    if (found == featureIndex_.end()) {
+        return std::nullopt;
+    }
+    const survey::SurveyFeature& feature = result_.project.features[found->second];
+    if (feature.pointIds.empty()) {
+        return std::nullopt;
+    }
+    return feature.pointIds.back();
 }
 
 void RawProjectBuilder::addPointMetadata(std::string_view id, std::string key, std::string value)
