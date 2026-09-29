@@ -3,6 +3,8 @@
 #include <cmath>
 #include <utility>
 
+#include "katana/core/text.hpp"
+
 namespace katana::survey {
 
 using katana::core::ErrorCode;
@@ -26,9 +28,8 @@ Result<double> scaledBySqrtKilometres(double factor, double lengthMetres, const 
                          std::string(factorName) + " must be finite and not negative");
     }
     if (!std::isfinite(lengthMetres) || lengthMetres < 0.0) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "length must be finite and not negative",
-                         "length " + std::to_string(lengthMetres));
+        return makeError(ErrorCode::InvalidArgument, "length must be finite and not negative",
+                         "length " + katana::core::formatExactReal(lengthMetres));
     }
     return factor * std::sqrt(lengthMetres / kMetresPerKilometre);
 }

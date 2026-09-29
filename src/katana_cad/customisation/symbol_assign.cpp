@@ -270,7 +270,7 @@ assignSymbolToPoints(const Document& document, const std::vector<EntityId>& ids,
     if (!(std::isfinite(size) && size >= 0.0)) {
         return makeError(ErrorCode::InvalidArgument,
                          "a symbol size must be a finite number of at least 0",
-                         std::to_string(size));
+                         katana::core::formatExactReal(size));
     }
     if (ids.empty()) {
         return makeError(ErrorCode::InvalidArgument, "no entities to assign the symbol to");

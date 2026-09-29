@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/core/text.hpp"
 #include "katana/surveyio/detect.hpp"
 #include "katana/surveyio/format.hpp"
 #include "katana/surveyio/reader.hpp"
@@ -1117,7 +1118,7 @@ TEST(RinexThroughput, A50MegabyteOneHertzFileIsCountedNotStored)
     std::cout << "[ RINEX    ] read " << static_cast<double>(bytes.size()) / 1e6 << " MB, "
               << epochs << " epochs in " << std::chrono::duration<double>(elapsed).count()
               << " s: " << rate << " MB/s\n";
-    RecordProperty("megabytes_per_second", std::to_string(rate));
+    RecordProperty("megabytes_per_second", katana::core::formatExactReal(rate));
 }
 
 TEST(RinexThroughput, A50MegabyteRinexTwoFileIsCountedNotStored)
@@ -1144,5 +1145,5 @@ TEST(RinexThroughput, A50MegabyteRinexTwoFileIsCountedNotStored)
     std::cout << "[ RINEX 2  ] read " << static_cast<double>(bytes.size()) / 1e6 << " MB, "
               << epochs << " epochs in " << std::chrono::duration<double>(elapsed).count()
               << " s: " << rate << " MB/s\n";
-    RecordProperty("megabytes_per_second", std::to_string(rate));
+    RecordProperty("megabytes_per_second", katana::core::formatExactReal(rate));
 }

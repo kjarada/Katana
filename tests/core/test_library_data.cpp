@@ -144,7 +144,25 @@ TEST(LibraryData, MissingDataBesideALibraryIsNotFound)
     const ScratchPrefix bundle("katana_library_data_missing");
     const auto library = bundle.touch("Contents/Frameworks/libgdal.dylib");
     EXPECT_FALSE(katana::core::dataBesideLibraryFile(library, "share/gdal"));
-    EXPECT_FALSE(katana::core::dataBesideLibraryFile(std::filesystem::path{}, "share/gdal"));
+}
+
+// An empty name is no library, wherever the process happens to stand. It is
+// asked from inside a prefix that does hold share/gdal: libc++ makes an empty
+// path the working directory, so a check that relied on the empty path
+// staying relative found the data there (as it did on the Windows ARM64
+// runner), while from a directory with nothing above it the same fault
+// passes unseen.
+TEST(LibraryData, AnEmptyNameIsRefusedWhereverTheWorkingDirectoryIs)
+{
+    const ScratchPrefix prefix("katana_library_data_empty");
+    prefix.touch("share/gdal/gdalvrt.xsd");
+    const std::filesystem::path inside = prefix.root() / "lib" / "bin";
+    std::filesystem::create_directories(inside);
+    const std::filesystem::path before = std::filesystem::current_path();
+    std::filesystem::current_path(inside);
+    const auto found = katana::core::dataBesideLibraryFile(std::filesystem::path{}, "share/gdal");
+    std::filesystem::current_path(before);
+    EXPECT_FALSE(found) << *found;
 }
 
 TEST(LibraryData, NoDataIsBesideALibraryThatIsNotLoaded)

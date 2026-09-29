@@ -23,6 +23,7 @@
 #include <string_view>
 #include <vector>
 
+#include "katana/core/text.hpp"
 #include "katana/surveyio/detect.hpp"
 #include "katana/surveyio/format.hpp"
 #include "katana/surveyio/leica.hpp"
@@ -1075,5 +1076,5 @@ TEST(LeicaGsiThroughput, ASyntheticJobIsReadAndItsSpeedReported)
               << " blocks, " << observations << " observations; reader " << seconds << " s = "
               << size / seconds << " MB/s; readSurvey (with validateProject) " << withCheck
               << " s = " << size / withCheck << " MB/s\n";
-    RecordProperty("megabytes_per_second", std::to_string(size / seconds));
+    RecordProperty("megabytes_per_second", katana::core::formatExactReal(size / seconds));
 }

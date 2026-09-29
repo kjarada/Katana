@@ -12,6 +12,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -251,8 +252,14 @@ TEST(KeyboardShortcutsDialog, EveryKeyIsListedAndAClashIsMarked)
     for (int r = 0; r < table->rowCount(); ++r) {
         keys << table->item(r, 0)->text();
     }
-    EXPECT_EQ(keys.count("Ctrl+L (clash)"), 2);
-    EXPECT_EQ(keys.count("Ctrl+S"), 1);
+    // A key is shown as the platform writes it: "Ctrl+L" on Windows and
+    // Linux, "⌘L" on macOS, where Qt's Ctrl is the Command key.
+    const auto shown = [](const char* portable) {
+        return QKeySequence(portable, QKeySequence::PortableText)
+            .toString(QKeySequence::NativeText);
+    };
+    EXPECT_EQ(keys.count(shown("Ctrl+L") + " (clash)"), 2);
+    EXPECT_EQ(keys.count(shown("Ctrl+S")), 1);
     EXPECT_TRUE(child<QLabel>(dialog, "keyboardShortcutsClashes")
                     ->text()
                     .startsWith("1 key reaches more than one command"));

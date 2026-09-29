@@ -9,6 +9,8 @@
 #include <span>
 #include <string>
 
+#include "katana/core/text.hpp"
+
 namespace katana::terrain {
 
 using katana::core::ErrorCode;
@@ -183,7 +185,7 @@ Result<std::vector<Contour>> contours(const TinSurface& surface, double interval
     if (!(interval > katana::math::tolerance::kGeometric) || !std::isfinite(interval)) {
         return makeError(ErrorCode::InvalidArgument,
                          "contour interval must be finite and larger than tolerance::kGeometric",
-                         "interval=" + std::to_string(interval));
+                         "interval=" + katana::core::formatExactReal(interval));
     }
     if (!std::isfinite(base)) {
         return makeError(ErrorCode::InvalidArgument, "contour base elevation must be finite");
@@ -217,7 +219,7 @@ Result<std::vector<Contour>> contours(const TinSurface& surface, double interval
         std::abs((surface.maxElevation() - base) / interval) > kMaxLevelIndex) {
         return makeError(ErrorCode::InvalidArgument,
                          "contour interval is too small for the elevations of the surface",
-                         "interval=" + std::to_string(interval));
+                         "interval=" + katana::core::formatExactReal(interval));
     }
     const std::int64_t firstK = firstLevelAbove(surface.minElevation());
     const std::int64_t lastK = lastLevelAtOrBelow(surface.maxElevation());

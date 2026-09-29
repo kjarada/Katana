@@ -70,6 +70,7 @@
 #include <utility>
 #include <vector>
 
+#include "katana/core/text.hpp"
 #include "katana/surveyio/detect.hpp"
 #include "katana/surveyio/format.hpp"
 #include "xml_pull.hpp"
@@ -877,10 +878,11 @@ bool JobXmlReader::addPositioned(survey::SurveyPoint point, bool control, std::s
     std::string message = "point " + point.id + " has coordinates in more than one record; kept " +
                           (replace ? std::string("the control record ") + std::string(recordId)
                                    : std::string("the first")) +
-                          " and not the one at N " + std::to_string(dropped.northing) + " E " +
-                          std::to_string(dropped.easting);
+                          " and not the one at N " +
+                          katana::core::formatExactReal(dropped.northing) + " E " +
+                          katana::core::formatExactReal(dropped.easting);
     if (dropped.elevation) {
-        message += " H " + std::to_string(*dropped.elevation);
+        message += " H " + katana::core::formatExactReal(*dropped.elevation);
     }
     warn(point.source.recordNumber, std::move(message));
     if (replace) {
@@ -934,10 +936,12 @@ survey::GnssAntenna JobXmlReader::antennaFor(std::string_view antennaId) const
         // the measured one is kept in the words.
         antenna.height = *record.reducedHeight;
         antenna.method = survey::AntennaHeightMethod::PhaseCentre;
-        antenna.measuredTo = (method.empty() ? std::string("measured") : method + ", measured") +
-                             (record.measuredHeight ? " " + std::to_string(*record.measuredHeight) + " m"
-                                                    : std::string{}) +
-                             "; height reduced to the phase centre by the controller";
+        antenna.measuredTo =
+            (method.empty() ? std::string("measured") : method + ", measured") +
+            (record.measuredHeight
+                 ? " " + katana::core::formatExactReal(*record.measuredHeight) + " m"
+                 : std::string{}) +
+            "; height reduced to the phase centre by the controller";
         return antenna;
     }
     // Without it, the words decide, and they are Trimble's own - and
@@ -1182,7 +1186,7 @@ bool JobXmlReader::readBackBearingRecord(std::string_view id, RecordBuffer& reco
         // One SurveyStation holds one orientation. A re-orientation within a
         // setup is kept in metadata for the reduction and said aloud.
         station.metadata["jxl.reorientation." + std::string(id)] =
-            backsight + " " + (face1 ? std::to_string(*face1) : std::string("-"));
+            backsight + " " + (face1 ? katana::core::formatExactReal(*face1) : std::string("-"));
         if (!state.reorientationWarned) {
             state.reorientationWarned = true;
             warn(line, "setup " + station.setup.id +
@@ -1202,7 +1206,7 @@ bool JobXmlReader::readBackBearingRecord(std::string_view id, RecordBuffer& reco
         station.backsightAzimuth = wrapTwoPi(*face1 * kRadiansPerDegree);
     }
     if (face2) {
-        station.metadata["jxl.backsightFace2Circle_deg"] = std::to_string(*face2);
+        station.metadata["jxl.backsightFace2Circle_deg"] = katana::core::formatExactReal(*face2);
     }
     if (correction && !trimmed(*correction).empty()) {
         station.metadata["jxl.orientationCorrection_deg"] = std::string(trimmed(*correction));
@@ -1732,13 +1736,15 @@ bool JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
             if (std::map<std::string, std::string>* metadata = metadataOf(name)) {
                 const std::string prefix = local ? "local" : "wgs84";
                 if (latitude) {
-                    (*metadata)[prefix + ".latitude_deg"] = std::to_string(*latitude);
+                    (*metadata)[prefix + ".latitude_deg"] =
+                        katana::core::formatExactReal(*latitude);
                 }
                 if (longitude) {
-                    (*metadata)[prefix + ".longitude_deg"] = std::to_string(*longitude);
+                    (*metadata)[prefix + ".longitude_deg"] =
+                        katana::core::formatExactReal(*longitude);
                 }
                 if (height) {
-                    (*metadata)[prefix + ".height"] = std::to_string(*height);
+                    (*metadata)[prefix + ".height"] = katana::core::formatExactReal(*height);
                 }
             }
             // Read: the values are kept (a warning at the end says where).

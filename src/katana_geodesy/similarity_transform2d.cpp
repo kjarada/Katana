@@ -4,6 +4,7 @@
 #include <cmath>
 #include <string>
 
+#include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::geodesy {
@@ -150,8 +151,8 @@ core::Result<SimilarityFit2D> fitSimilarity2D(std::span<const ControlPointPair> 
     if (sourceSpread <= tol::kCoordinate || targetSpread <= tol::kCoordinate) {
         return core::makeError(core::ErrorCode::InvalidArgument,
                                "control points coincide; scale and rotation are undetermined",
-                               "source spread=" + std::to_string(sourceSpread) +
-                                   " target spread=" + std::to_string(targetSpread));
+                               "source spread=" + katana::core::formatExactReal(sourceSpread) +
+                                   " target spread=" + katana::core::formatExactReal(targetSpread));
     }
 
     const double a = sumDot / sumSquares;

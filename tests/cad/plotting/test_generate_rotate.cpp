@@ -18,6 +18,7 @@
 #include "katana/cad/plotting/layout.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/core/text.hpp"
 
 using katana::cad::CommandInterpreter;
 using katana::cad::Document;
@@ -64,7 +65,7 @@ std::vector<Point2> stripCorners(Point2 centre, double length, double width, dou
 
 std::string pointText(const Point2& point)
 {
-    return std::to_string(point.x) + "," + std::to_string(point.y);
+    return katana::core::formatExactReal(point.x) + "," + katana::core::formatExactReal(point.y);
 }
 
 // The strip drawn as its four sides, typed.

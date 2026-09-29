@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include "katana/core/text.hpp"
 #include "katana/gis/formats.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/gis/processing.hpp"
@@ -661,7 +662,8 @@ TEST(GdalRun, AFileSourcesLayerIsTheLayerOfItsOwnDataset)
     // layer was set as --input-layer, the points' own, which have no m.
     TempDir folder("layer-of-like");
     const auto area = [](double x0, double x1) {
-        const std::string a = std::to_string(x0), b = std::to_string(x1);
+        const std::string a = katana::core::formatExactReal(x0),
+                          b = katana::core::formatExactReal(x1);
         return R"({"type":"FeatureCollection","features":[{"type":"Feature","properties":{},)"
                R"("geometry":{"type":"Polygon","coordinates":[[[)" +
                a + "," + a + "],[" + b + "," + a + "],[" + b + "," + b + "],[" + a + "," + b +

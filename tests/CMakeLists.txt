@@ -1936,14 +1936,16 @@ endif()
 # the typed HELP, which adds the window's own verbs to the interpreter's
 # list. A search for COPC finds the window's verb; the Sheets item opens the
 # reference at the sheet verbs' introduction; the shortcuts list Ctrl+L as
-# Format > Layers and no key reaching two commands.
+# Format > Layers and no key reaching two commands. The table shows a key as
+# the platform writes it, so on macOS Ctrl+L is "⌘L"; the search for Ctrl+L
+# finds it either way.
 if(TARGET katana)
     add_test(NAME qt_the_help_menu_finds_a_verb_and_lists_every_key_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>HELP|@helpCommandReference|commandReferenceSearch=COPC|?commandReferenceTree|?commandReferenceCount|@helpSheetCommands|?commandReferenceDetail|@helpKeyboardShortcuts|?keyboardShortcutsTable|keyboardShortcutsSearch=Ctrl+L|?keyboardShortcutsCount|?keyboardShortcutsClashes"
-            "-DEXPECT=History   UNDO \\[n\\].*PLOTSHEETS path\\.pdf [^\r\n]*the desktop window's alone.*Script    SCRIPT <file\\.kcs> \\[CONTINUE\\].*opened commandReferenceDialog \"Command Reference\"[\r\n]+commandReferenceTree: Commands \\| 0 of [0-9]+ ; .*Window \\| [1-9][0-9]* of [0-9]+ ; .*Draw tools \\| 0 of [0-9]+[^\r\n]*[\r\n]+commandReferenceCount: [1-9][0-9]* of [0-9]+ entries[\r\n]+[^\r\n]*opened commandReferenceDialog[^\r\n]*[\r\n]+commandReferenceDetail: Sheets on the command line.*opened keyboardShortcutsDialog \"Keyboard Shortcuts\"[\r\n]+keyboardShortcutsTable: [^\r\n]*Ctrl\\+L \\| Layers \\| Format \\|[^\r\n]*[\r\n]+keyboardShortcutsCount: 1 of [0-9]+ keys[\r\n]+keyboardShortcutsClashes: Every key reaches one command\\."
+            "-DEXPECT=History   UNDO \\[n\\].*PLOTSHEETS path\\.pdf [^\r\n]*the desktop window's alone.*Script    SCRIPT <file\\.kcs> \\[CONTINUE\\].*opened commandReferenceDialog \"Command Reference\"[\r\n]+commandReferenceTree: Commands \\| 0 of [0-9]+ ; .*Window \\| [1-9][0-9]* of [0-9]+ ; .*Draw tools \\| 0 of [0-9]+[^\r\n]*[\r\n]+commandReferenceCount: [1-9][0-9]* of [0-9]+ entries[\r\n]+[^\r\n]*opened commandReferenceDialog[^\r\n]*[\r\n]+commandReferenceDetail: Sheets on the command line.*opened keyboardShortcutsDialog \"Keyboard Shortcuts\"[\r\n]+keyboardShortcutsTable: [^\r\n]*(Ctrl\\+|⌘)L \\| Layers \\| Format \\|[^\r\n]*[\r\n]+keyboardShortcutsCount: 1 of [0-9]+ keys[\r\n]+keyboardShortcutsClashes: Every key reaches one command\\."
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/help_menu_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_help_menu_finds_a_verb_and_lists_every_key_headless

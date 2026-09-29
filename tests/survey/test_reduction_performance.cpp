@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/core/text.hpp"
 #include "katana/survey/reduction.hpp"
 #include "test_reduction_support.hpp"
 
@@ -192,7 +193,7 @@ TEST(ReductionPerformance, AHundredThousandObservationsReduceAndEveryTargetIsCom
                 observations, reduceSeconds, static_cast<double>(observations) / reduceSeconds,
                 text.size(), renderSeconds);
     RecordProperty("observations", std::to_string(observations));
-    RecordProperty("reduce_seconds", std::to_string(reduceSeconds));
+    RecordProperty("reduce_seconds", katana::core::formatExactReal(reduceSeconds));
 
     // Every target, plus the stations used as known: 17 000 radiated points.
     std::size_t radiated = 0;
@@ -236,7 +237,7 @@ TEST(ReductionPerformance, ANetworkOfSetupsWithSideShotsAdjustsOnlyTheStations)
     std::printf("[ reduction ] network: %zu raw observations, %zu adjusted in %zu unknowns, "
                 "reduced and adjusted in %.3f s\n",
                 observations, adjustment.observations, adjustment.unknowns, seconds);
-    RecordProperty("network_seconds", std::to_string(seconds));
+    RecordProperty("network_seconds", katana::core::formatExactReal(seconds));
     // S2 .. S(n+1) free: 2n unknowns. Each setup gives two distances and one
     // angle (the backsight is the reference direction).
     EXPECT_EQ(adjustment.unknowns, 2 * setups);

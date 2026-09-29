@@ -4,6 +4,7 @@
 #include <cmath>
 #include <string>
 
+#include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::survey {
@@ -73,11 +74,11 @@ Status checkSlope(double slopeDistance, double zenithAngle)
     if (!std::isfinite(slopeDistance) || slopeDistance < 0.0) {
         return makeError(ErrorCode::InvalidArgument,
                          "slope distance must be finite and not negative",
-                         "slope distance " + std::to_string(slopeDistance));
+                         "slope distance " + katana::core::formatExactReal(slopeDistance));
     }
     if (!std::isfinite(zenithAngle) || zenithAngle < 0.0 || zenithAngle > kPi) {
         return makeError(ErrorCode::InvalidArgument, "zenith angle must lie in [0, pi]",
-                         "zenith angle " + std::to_string(zenithAngle));
+                         "zenith angle " + katana::core::formatExactReal(zenithAngle));
     }
     return {};
 }
@@ -95,7 +96,7 @@ Result<InverseResult> inverse(const Coordinate2& from, const Coordinate2& to)
     if (distance <= tol::kCoordinate) {
         return makeError(ErrorCode::InvalidArgument,
                          "inverse: the points coincide, the azimuth is undefined",
-                         "separation " + std::to_string(distance) + " m");
+                         "separation " + katana::core::formatExactReal(distance) + " m");
     }
     return InverseResult{normalizeAngle(std::atan2(deltaEasting, deltaNorthing)), distance};
 }
@@ -108,7 +109,7 @@ Result<Coordinate2> forward(const Coordinate2& from, double azimuth, double dist
     if (!std::isfinite(distance) || distance < 0.0) {
         return makeError(ErrorCode::InvalidArgument,
                          "forward: distance must be finite and not negative",
-                         "distance " + std::to_string(distance));
+                         "distance " + katana::core::formatExactReal(distance));
     }
     return Coordinate2{from.northing + distance * std::cos(azimuth),
                        from.easting + distance * std::sin(azimuth)};

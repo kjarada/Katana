@@ -78,7 +78,7 @@ Status Document::setAnnotationScale(double scale)
     if (!std::isfinite(scale) || !(scale > 0.0)) {
         return makeError(ErrorCode::InvalidArgument,
                          "an annotation scale is a positive number, the N of 1 : N",
-                         std::to_string(scale));
+                         katana::core::formatExactReal(scale));
     }
     const std::string key(kAnnotationScaleKey);
     const auto found = metadata_.unknownKeys.find(key);

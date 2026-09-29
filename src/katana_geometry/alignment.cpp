@@ -4,6 +4,7 @@
 #include <cmath>
 #include <string>
 
+#include "katana/core/text.hpp"
 #include "katana/geometry/chording.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -133,14 +134,16 @@ Result<SolvedAlignment> solveAlignment(const HorizontalAlignment& definition)
         const SpiralOffsets out = spiralOffsets(radius, pis[i].spiralOut);
         double arcAngle = std::abs(deflection) - in.angle - out.angle;
         if (arcAngle < -tol::kAngular) {
-            return makeError(ErrorCode::InvalidGeometry,
-                             "the spirals use more deflection than the corner has, leaving no "
-                             "room for the curve",
-                             piLabel(i) + ": deflection " +
-                                 std::to_string(std::abs(deflection) * katana::math::kRadToDeg) +
-                                 " deg, spirals " +
-                                 std::to_string((in.angle + out.angle) * katana::math::kRadToDeg) +
-                                 " deg");
+            return makeError(
+                ErrorCode::InvalidGeometry,
+                "the spirals use more deflection than the corner has, leaving no "
+                "room for the curve",
+                piLabel(i) + ": deflection " +
+                    katana::core::formatExactReal(std::abs(deflection) * katana::math::kRadToDeg) +
+                    " deg, spirals " +
+                    katana::core::formatExactReal((in.angle + out.angle) *
+                                                  katana::math::kRadToDeg) +
+                    " deg");
         }
         arcAngle = std::max(arcAngle, 0.0);
 
@@ -173,7 +176,7 @@ Result<SolvedAlignment> solveAlignment(const HorizontalAlignment& definition)
                              "the curves overlap: their tangent lengths exceed the distance "
                              "between the PIs",
                              piLabel(i) + " and " + piLabel(i + 1) + ", short by " +
-                                 std::to_string(-available) + " m");
+                                 katana::core::formatExactReal(-available) + " m");
         }
     }
 

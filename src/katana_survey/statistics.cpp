@@ -5,6 +5,7 @@
 #include <limits>
 #include <string>
 
+#include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::survey {
@@ -131,7 +132,8 @@ Result<double> regularizedGammaP(double a, double x)
         }
     }
     return makeError(ErrorCode::Internal, "incomplete gamma expansion did not converge",
-                     "a=" + std::to_string(a) + ", x=" + std::to_string(x));
+                     "a=" + katana::core::formatExactReal(a) +
+                         ", x=" + katana::core::formatExactReal(x));
 }
 
 } // namespace
@@ -160,7 +162,7 @@ Result<double> chiSquareQuantile(double probability, std::size_t degreesOfFreedo
     if (!(probability > 0.0 && probability < 1.0)) {
         return makeError(ErrorCode::InvalidArgument,
                          "probability must lie strictly between 0 and 1",
-                         "probability " + std::to_string(probability));
+                         "probability " + katana::core::formatExactReal(probability));
     }
 
     // Bracket: the mean of the distribution is its degrees of freedom.

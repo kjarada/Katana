@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "katana/core/task_pool.hpp"
+#include "katana/core/text.hpp"
 
 namespace katana::terrain {
 
@@ -37,11 +38,11 @@ Result<TiledTerrain> TiledTerrain::create(TinInput input, const TiledTerrainOpti
 {
     if (!(options.tileSize > 0.0) || !std::isfinite(options.tileSize)) {
         return makeError(ErrorCode::InvalidArgument, "tileSize must be positive and finite",
-                         "tileSize=" + std::to_string(options.tileSize));
+                         "tileSize=" + katana::core::formatExactReal(options.tileSize));
     }
     if (!(options.bufferWidth >= 0.0) || !std::isfinite(options.bufferWidth)) {
         return makeError(ErrorCode::InvalidArgument, "bufferWidth must be finite and not negative",
-                         "bufferWidth=" + std::to_string(options.bufferWidth));
+                         "bufferWidth=" + katana::core::formatExactReal(options.bufferWidth));
     }
     if (!input.breaklines.empty() || !input.boundary.vertices.empty() || !input.holes.empty()) {
         return makeError(ErrorCode::Unsupported,
@@ -76,7 +77,7 @@ Result<TiledTerrain> TiledTerrain::create(TinInput input, const TiledTerrainOpti
     if (columns * rows > static_cast<double>(kMaxTileCount)) {
         return makeError(ErrorCode::InvalidArgument,
                          "tileSize is too small for the extent of the points",
-                         "tiles=" + std::to_string(columns * rows) +
+                         "tiles=" + katana::core::formatExactReal(columns * rows) +
                              " limit=" + std::to_string(kMaxTileCount));
     }
     terrain.columns_ = static_cast<std::size_t>(columns);

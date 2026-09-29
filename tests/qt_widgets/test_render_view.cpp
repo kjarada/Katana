@@ -23,6 +23,7 @@
 #include "katana/cad/section.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/tables.hpp"
 #include "katana/terrain/tin_builder.hpp"
 #include "view_workspace.hpp"
@@ -325,7 +326,7 @@ TEST(RenderView, TheFramebufferIsTheViewsSizeInDevicePixels)
     if (const QString factor = qEnvironmentVariable("QT_SCALE_FACTOR"); !factor.isEmpty()) {
         EXPECT_DOUBLE_EQ(ratio, factor.toDouble());
     }
-    RecordProperty("devicePixelRatio", std::to_string(ratio));
+    RecordProperty("devicePixelRatio", katana::core::formatExactReal(ratio));
     RecordProperty("framebuffer", std::to_string(view->framebuffer().width()) + "x" +
                                       std::to_string(view->framebuffer().height()));
     EXPECT_EQ(view->framebuffer().width(), static_cast<int>(std::lround(400 * ratio)));

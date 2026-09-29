@@ -65,13 +65,20 @@ std::optional<std::filesystem::path> loadedLibraryPath(std::string_view fileName
 std::optional<std::filesystem::path> dataBesideLibraryFile(const std::filesystem::path& library,
                                                            const std::filesystem::path& relative)
 {
+    // An empty name would look beside the working directory. It is refused
+    // here, not by the is_absolute test below: libstdc++'s weakly_canonical
+    // leaves an empty path empty, but libc++'s makes it the working directory,
+    // which is absolute.
+    if (library.empty()) {
+        return std::nullopt;
+    }
     std::error_code ignored;
     // The loader's name may be <prefix>/lib/./libproj.so.25 (an rpath with a
     // dot in it), or a symbolic link; canonical makes parent_path mean the
     // directory the file really is in.
     const std::filesystem::path real = std::filesystem::weakly_canonical(library, ignored);
     if (!real.is_absolute()) {
-        return std::nullopt; // an empty name would look in the working directory
+        return std::nullopt; // a relative name is not a loaded library's
     }
     const std::filesystem::path directory = real.parent_path();
     const std::filesystem::path prefix = directory.parent_path();

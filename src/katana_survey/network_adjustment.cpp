@@ -9,6 +9,7 @@
 #include <variant>
 
 #include "ellipse_core.hpp"
+#include "katana/core/text.hpp"
 #include "katana/survey/statistics.hpp"
 #include "katana/survey/traverse.hpp"
 #include "lsq_core.hpp"
@@ -194,8 +195,9 @@ void logOutcome(const AdjustmentOptions& options, std::string_view what,
          {"unknowns", std::to_string(statistics.unknownCount)},
          {"degrees_of_freedom", std::to_string(statistics.degreesOfFreedom)},
          {"iterations", std::to_string(iterations)},
-         {"variance_factor",
-          statistics.varianceFactor ? std::to_string(*statistics.varianceFactor) : "undefined"}});
+         {"variance_factor", statistics.varianceFactor
+                                 ? katana::core::formatExactReal(*statistics.varianceFactor)
+                                 : "undefined"}});
 }
 
 void logFailure(const AdjustmentOptions& options, std::string_view what, const Error& error)
@@ -569,7 +571,8 @@ Result<HorizontalAdjustmentResult> adjustHorizontal(const SurveyNetwork& network
                              "the adjustment did not converge; check the approximate coordinates "
                              "and look for gross errors",
                              "iterations " + std::to_string(result.iterations) +
-                                 ", last correction " + std::to_string(largest) + " m");
+                                 ", last correction " + katana::core::formatExactReal(largest) +
+                                 " m");
         }
     }
 

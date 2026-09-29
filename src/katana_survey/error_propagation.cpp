@@ -5,6 +5,7 @@
 #include <string>
 
 #include "ellipse_core.hpp"
+#include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::survey {
@@ -52,7 +53,7 @@ Result<double> ellipseConfidenceScale(double probability)
     if (!(probability > 0.0 && probability < 1.0)) {
         return makeError(ErrorCode::InvalidArgument,
                          "probability must lie strictly between 0 and 1",
-                         "probability " + std::to_string(probability));
+                         "probability " + katana::core::formatExactReal(probability));
     }
     // The chi-square distribution with 2 degrees of freedom has the closed-form
     // cdf 1 - exp(-x / 2).

@@ -9,6 +9,8 @@
 #include <limits>
 #include <optional>
 
+#include "katana/core/text.hpp"
+
 namespace katana::survey {
 
 using katana::core::ErrorCode;
@@ -208,7 +210,7 @@ Result<double> dmsToRadians(const DmsAngle& dms)
     }
     if (!std::isfinite(dms.seconds) || dms.seconds < 0.0 || !(dms.seconds < 60.0)) {
         return makeError(ErrorCode::InvalidArgument, "seconds must lie in [0, 60)",
-                         "seconds=" + std::to_string(dms.seconds));
+                         "seconds=" + katana::core::formatExactReal(dms.seconds));
     }
     const double arcSeconds = static_cast<double>(dms.degrees) * 3600.0 +
                               static_cast<double>(dms.minutes) * 60.0 + dms.seconds;
@@ -303,7 +305,7 @@ Result<double> bearingToAzimuth(const QuadrantBearing& bearing)
 {
     if (!std::isfinite(bearing.angle) || bearing.angle < 0.0 || bearing.angle > kHalfPi) {
         return makeError(ErrorCode::InvalidArgument, "bearing angle must lie in [0, pi/2]",
-                         "angle=" + std::to_string(bearing.angle));
+                         "angle=" + katana::core::formatExactReal(bearing.angle));
     }
     const bool north = bearing.meridian == BearingMeridian::North;
     const bool east = bearing.side == BearingSide::East;

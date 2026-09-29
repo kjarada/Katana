@@ -26,7 +26,7 @@ Status validateLineWeight(double lineWeight)
 {
     if (!(std::isfinite(lineWeight) && lineWeight >= 0.0)) {
         return makeError(ErrorCode::InvalidArgument, "line weight must be finite and not negative",
-                         std::to_string(lineWeight));
+                         katana::core::formatExactReal(lineWeight));
     }
     return {};
 }
@@ -850,9 +850,8 @@ Status validate(const Style& style)
                          "linetype or hatch pattern name is not valid UTF-8", style.name);
     }
     if (!(std::isfinite(style.symbolSize) && style.symbolSize >= 0.0)) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "symbol size must be finite and not negative",
-                         std::to_string(style.symbolSize));
+        return makeError(ErrorCode::InvalidArgument, "symbol size must be finite and not negative",
+                         katana::core::formatExactReal(style.symbolSize));
     }
     if (!isValidUtf8(style.description)) {
         return makeError(ErrorCode::InvalidArgument, "style description is not valid UTF-8",

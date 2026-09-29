@@ -476,7 +476,7 @@ Status requirePositive(double value, const char* what)
 {
     if (!(std::isfinite(value) && value > tol::kGeometric)) {
         return makeError(ErrorCode::InvalidGeometry, std::string(what) + " must be positive",
-                         std::to_string(value));
+                         katana::core::formatExactReal(value));
     }
     return {};
 }
@@ -494,7 +494,7 @@ Status validateAnchor(const AnchorRef& ref)
         if (!(std::isfinite(ref.parameter) && ref.parameter >= 0.0 && ref.parameter <= 1.0)) {
             return makeError(ErrorCode::InvalidGeometry,
                              "an anchor along an entity is a fraction from 0 to 1",
-                             std::to_string(ref.parameter));
+                             katana::core::formatExactReal(ref.parameter));
         }
     } else if (ref.parameter != 0.0) {
         return makeError(ErrorCode::InvalidGeometry,
@@ -583,7 +583,7 @@ struct Validator {
         if (!(std::isfinite(text.paperHeight) && text.paperHeight >= 0.0)) {
             return makeError(ErrorCode::InvalidGeometry,
                              "text paper height must be zero or positive",
-                             std::to_string(text.paperHeight));
+                             katana::core::formatExactReal(text.paperHeight));
         }
         if (static_cast<int>(text.justify) > static_cast<int>(TextJustify::TopRight)) {
             return makeError(ErrorCode::InvalidGeometry, "text justification is not one of the nine");
@@ -688,7 +688,8 @@ struct Validator {
         for (const double size : {leader.paperHeight, leader.arrowSize, leader.landing}) {
             if (!(std::isfinite(size) && size >= 0.0)) {
                 return makeError(ErrorCode::InvalidGeometry,
-                                 "a leader's sizes must be zero or positive", std::to_string(size));
+                                 "a leader's sizes must be zero or positive",
+                                 katana::core::formatExactReal(size));
             }
         }
         if (static_cast<int>(leader.arrow) > static_cast<int>(ArrowHead::Dot) ||
@@ -763,7 +764,7 @@ struct Validator {
               ellipse.ratio <= 1.0 + tol::kRelative)) {
             return makeError(ErrorCode::InvalidGeometry,
                              "ellipse ratio must be greater than zero and at most 1",
-                             std::to_string(ellipse.ratio));
+                             katana::core::formatExactReal(ellipse.ratio));
         }
         if (!std::isfinite(ellipse.startParameter) || !std::isfinite(ellipse.sweep) ||
             !(ellipse.sweep > tol::kAngular) ||

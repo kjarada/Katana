@@ -435,24 +435,46 @@ thread pool, on a guest with about 5 GB free. All four passed when run again
 one at a time there, and they passed on the owner's machine, so the program is
 not at fault and nothing was changed for them.
 
-## Not done: the clang builds' failures (Windows ARM64, macOS)
+## The clang builds' seven failures (Windows ARM64, macOS)
 
 The first Release run with the whole suite in every job (run 36356917571,
-2026-09-27) failed seven tests on each clang/libc++ build that GCC passes:
+2026-09-27) failed seven tests on each clang/libc++ build that GCC passes.
+Most were older than the merge: those jobs had run only part of the suite.
+They were reproduced on Windows x86-64 with MSYS2's CLANG64 environment
+(clang 22, libc++), which fails the same five that are not macOS-only, and
+fixed on 2026-09-29:
 
-- **`std::to_string` of a double.** C++26 makes it the shortest form, as
-  `std::format("{}")` (P2587); GCC 16's library does, libc++ still prints
-  `%f`. So `src/katana_surveyio/trimble_jobxml.cpp` says "measured
-  1.650000 m" and a refused circle "[-1.000000]" there, and
-  `TrimbleJobXml.anRtkVectorBecomesAGeocentricBaselineWithCovarianceAndBothAntennas`,
-  `TrimbleJobXml.twoCoordinateRecordsForOneNameKeepTheControlOneAndWarnWithTheOther`,
-  `qt_script_switch_stops_at_the_first_refused_line_headless` and
-  `qt_a_dialogs_script_line_gets_back_what_every_line_said_headless` fail.
-  The fix is one formatter for reals in text (`core::formatExactReal`,
-  `core/text.hpp`) wherever a double is written with `std::to_string`.
-- **`LibraryData.MissingDataBesideALibraryIsNotFound`**: on Windows ARM64
-  `dataBesideLibraryFile` of an empty path found `share/gdal`.
-- **`GenerateRotate.TheFittedDrawingIsTurnedToFillTheSheetInOneStep`**, and
-  on macOS `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless` and
-  `qt_widgets.KeyboardShortcutsDialog.EveryKeyIsListedAndAClashIsMarked`:
-  not yet diagnosed.
+- **`std::to_string` of a double** (four tests, and `GenerateRotate`).
+  C++26 makes it the shortest text that reads back, as `std::format("{}")`
+  (P2587); GCC 16's library does, libc++ still prints `%f`. So the JobXML
+  reader wrote "measured 1.650000 m", a refused circle said "[-1.000000]",
+  and `GenerateRotate.TheFittedDrawingIsTurnedToFillTheSheetInOneStep` typed
+  its strip's corners to the micrometre and got a turn 2.6e-9 rad off. All
+  86 such calls (65 in the program, 21 in tests) now use
+  `katana::core::formatExactReal`, the shortest round-trip text: by the
+  standard the same `to_chars` call C++26's `to_string` makes, so GCC's
+  output is unchanged. `tools/check_float_to_string.py` finds any new one; a
+  text search cannot, because it cannot tell a double from an int. One test
+  that compared against `std::to_string(-33.865)` - the same call as the code
+  under test - now compares against the literal "-33.865".
+- **`LibraryData.MissingDataBesideALibraryIsNotFound`.** libc++'s
+  `weakly_canonical` makes an empty path the working directory, which is
+  absolute; libstdc++ leaves it empty. `dataBesideLibraryFile` relied on the
+  latter to refuse an empty name, and on libc++ looked beside the working
+  directory. It now refuses an empty name first. The old check passed or
+  failed by where the test stood, so
+  `LibraryData.AnEmptyNameIsRefusedWhereverTheWorkingDirectoryIs` now stands
+  inside a prefix that does hold `share/gdal`: on clang it failed without the
+  fix and passes with it.
+- **The keyboard shortcuts on macOS** (`KeyboardShortcutsDialog.EveryKeyIsListedAndAClashIsMarked`,
+  `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`). The table
+  shows a key as the platform writes it, "⌘L" on macOS, and the search read
+  only that, so "ctrl+l" found nothing there - a fault in the dialog, not
+  only in the tests. The search now also matches the key as typed
+  ("Ctrl+L"), and the tests expect each platform's own text. The macOS half
+  is checked only by the macOS job: on Windows and Linux the two texts are
+  the same.
+
+The ARM64-only suspicion, fused multiply-adds, was ruled out: the build
+compiles with `-ffp-contract=off`, and `GenerateRotate` failed on x86-64
+clang too.

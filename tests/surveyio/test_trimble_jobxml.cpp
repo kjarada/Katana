@@ -47,6 +47,7 @@
 #include <variant>
 #include <vector>
 
+#include "katana/core/text.hpp"
 #include "katana/surveyio/detect.hpp"
 #include "katana/surveyio/format.hpp"
 #include "katana/surveyio/reader.hpp"
@@ -453,7 +454,9 @@ TEST(TrimbleJobXml, aKeyedInLatitudeLongitudeIsNamedWithItsValuesInMetadataNotPl
     const ReadResult& result = fixtureResult();
     const survey::UnpositionedPoint* base = findNamed(result.project, "BASE");
     ASSERT_NE(base, nullptr);
-    EXPECT_EQ(base->metadata.at("wgs84.latitude_deg"), std::to_string(-33.865));
+    // The value as the fixture keys it in, written back exactly - not as
+    // std::to_string would have it, which libc++ still pads to "-33.865000".
+    EXPECT_EQ(base->metadata.at("wgs84.latitude_deg"), "-33.865");
     EXPECT_TRUE(anyWarningContains(result, "keyed-in or local latitude and longitude"));
 }
 
@@ -876,24 +879,28 @@ std::string syntheticJob(std::size_t targetBytes)
         for (int shot = 0; shot < 100; ++shot) {
             for (int face = 1; face <= 2; ++face) {
                 ++record;
-                job += "<PointRecord ID=\"p" + std::to_string(record) +
-                       "\" TimeStamp=\"2024-03-05T09:05:00\">\n  <Name>P" + std::to_string(setup) +
-                       "_" + std::to_string(shot) +
-                       "</Name>\n  <Code>KB</Code>\n  <Method>DirectReading</Method>\n  "
-                       "<SurveyMethod>Fix</SurveyMethod>\n  <Classification>Normal</Classification>\n"
-                       "  <Deleted>false</Deleted>\n  <Circle>\n    <HorizontalCircle>" +
-                       std::to_string(face == 1 ? 12.3456 + shot : 192.3456 + shot) +
-                       "</HorizontalCircle>\n    <VerticalCircle>" +
-                       std::to_string(face == 1 ? 88.1234 : 271.8766) +
-                       "</VerticalCircle>\n    <EDMDistance>" + std::to_string(25.0 + shot * 0.5) +
-                       "</EDMDistance>\n    <Face>Face" + std::to_string(face) +
-                       "</Face>\n    <HorizontalCircleStandardError>0.000277777777777778"
-                       "</HorizontalCircleStandardError>\n    <VerticalCircleStandardError>"
-                       "0.000277777777777778</VerticalCircleStandardError>\n    "
-                       "<EDMDistanceStandardError>0.00105</EDMDistanceStandardError>\n  </Circle>\n"
-                       "  <StationID>" + stationId + "</StationID>\n  <TargetID>t</TargetID>\n"
-                       "  <Pressure>1013.25</Pressure>\n  <Temperature>20</Temperature>\n"
-                       "</PointRecord>\n";
+                job +=
+                    "<PointRecord ID=\"p" + std::to_string(record) +
+                    "\" TimeStamp=\"2024-03-05T09:05:00\">\n  <Name>P" + std::to_string(setup) +
+                    "_" + std::to_string(shot) +
+                    "</Name>\n  <Code>KB</Code>\n  <Method>DirectReading</Method>\n  "
+                    "<SurveyMethod>Fix</SurveyMethod>\n  <Classification>Normal</Classification>\n"
+                    "  <Deleted>false</Deleted>\n  <Circle>\n    <HorizontalCircle>" +
+                    katana::core::formatExactReal(face == 1 ? 12.3456 + shot : 192.3456 + shot) +
+                    "</HorizontalCircle>\n    <VerticalCircle>" +
+                    katana::core::formatExactReal(face == 1 ? 88.1234 : 271.8766) +
+                    "</VerticalCircle>\n    <EDMDistance>" +
+                    katana::core::formatExactReal(25.0 + shot * 0.5) +
+                    "</EDMDistance>\n    <Face>Face" + std::to_string(face) +
+                    "</Face>\n    <HorizontalCircleStandardError>0.000277777777777778"
+                    "</HorizontalCircleStandardError>\n    <VerticalCircleStandardError>"
+                    "0.000277777777777778</VerticalCircleStandardError>\n    "
+                    "<EDMDistanceStandardError>0.00105</EDMDistanceStandardError>\n  </Circle>\n"
+                    "  <StationID>" +
+                    stationId +
+                    "</StationID>\n  <TargetID>t</TargetID>\n"
+                    "  <Pressure>1013.25</Pressure>\n  <Temperature>20</Temperature>\n"
+                    "</PointRecord>\n";
             }
         }
     }
@@ -938,8 +945,9 @@ TEST(TrimbleJobXml, aLargeSyntheticJobReadsEveryShotAndReportsItsThroughput)
     std::cout << "[ throughput ] JobXML: " << mb << " MB, " << observations << " observations; reader "
               << readerSeconds << " s = " << mb / readerSeconds << " MB/s; readSurvey (validation "
               << "included) " << seconds << " s = " << mb / seconds << " MB/s\n";
-    RecordProperty("reader_megabytes_per_second", std::to_string(mb / readerSeconds));
-    RecordProperty("megabytes_per_second", std::to_string(mb / seconds));
+    RecordProperty("reader_megabytes_per_second",
+                   katana::core::formatExactReal(mb / readerSeconds));
+    RecordProperty("megabytes_per_second", katana::core::formatExactReal(mb / seconds));
 }
 
 namespace {

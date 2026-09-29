@@ -12,6 +12,7 @@
 
 #include "katana/cad/selection.hpp"
 #include "katana/cad/spatial_query.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/geometry/intersection.hpp"
 #include "katana/geometry/spatial_index.hpp"
@@ -461,7 +462,8 @@ Result<Polyline2> crossSectionLine(const Polyline2& alignment, double station, d
     if (!std::isfinite(station) || station < -tol::kGeometric ||
         station > stationing.length + tol::kGeometric) {
         return makeError(ErrorCode::InvalidArgument, "the station is outside the alignment",
-                         std::to_string(station) + " of " + std::to_string(stationing.length));
+                         katana::core::formatExactReal(station) + " of " +
+                             katana::core::formatExactReal(stationing.length));
     }
 
     const double clamped = std::clamp(station, 0.0, stationing.length);
