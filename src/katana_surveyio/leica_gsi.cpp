@@ -54,6 +54,20 @@
 // not wrapped. A full circle itself is the circle's zero, reached by rounding
 // up at the top of the circle.
 //
+// A SIGN comes with every measured value (page 6: "+: Positive value, -:
+// Negative value"), and what a negative one means differs by circle. Word 22
+// is read as a zenith angle, and no zenith angle is negative: an instrument
+// writes one when it is set to read V from the horizon or in percent (page 9,
+// the TPS100 series' SET 44, "V angle READING": 0 Zenith, 1 Horizontal, 2
+// Slope in percent), below the horizon. So a negative word 22 is refused at
+// its record; wrapped onto the circle, -005 00 00 would be a face-right zenith
+// of 5 degrees, the shot drawn near the vertical and half a turn round from
+// where it was measured. No setting gives word 21 another meaning - 171 only
+// turns the circle clockwise or counterclockwise, 178 and 179 switch the Hz
+// compensator and collimation - so a negative one is the direction it names,
+// counted the other way from the circle's zero: -090 00 00 is read as 270 00
+// 00. -0 is zero in either word.
+//
 // Everything here streams over one string_view: no regex, std::from_chars for
 // every number, and nothing allocated per record beyond the values it produces.
 
@@ -92,7 +106,9 @@ using katana::core::Result;
 // 1.1 reads 60-second angle words as the next minute, an all-zero code or
 // remark word as empty, a backsight the file positions later, and code
 // information in a point's own block; it refuses a circle reading past a full
-// circle.
+// circle, a negative vertical reading, and a sexagesimal word with no digit,
+// all of which 1.0 read as angles. (The last two joined 1.1 before a release
+// or a push had carried it.)
 constexpr const char* kParserVersion = "1.1";
 
 constexpr double kPi = std::numbers::pi;
@@ -704,7 +720,11 @@ class GsiReader {
 
     void warnWord(const Block& block, const Word& word, std::string_view problem)
     {
-        warn(block.record, "word " + std::to_string(word.index) + " " + shown(word.data) + " " +
+        // A '-' is shown, being part of the value written; the '+' nearly
+        // every word carries is not.
+        const std::string written =
+            word.sign == '-' ? "-" + std::string(word.data) : std::string(word.data);
+        warn(block.record, "word " + std::to_string(word.index) + " " + shown(written) + " " +
                                std::string(problem) + "; that value was not read");
     }
 
@@ -812,7 +832,9 @@ class GsiReader {
 
     // A circle reading (word 21 or 22) in radians, as read: not wrapped, not
     // turned into a zenith. `sixty` is set when it was a 60-second word read as
-    // the next minute (SIXTY SECONDS, at the top), and empty otherwise.
+    // the next minute (SIXTY SECONDS, at the top), and empty otherwise. A
+    // negative word 22 is refused here; a negative word 21 is returned as it
+    // is, and shotBlock wraps it onto the circle (SIGN, at the top).
     std::optional<double> angleOf(const Block& block, const Word& word,
                                   std::optional<SixtySeconds>& sixty)
     {
@@ -868,8 +890,27 @@ class GsiReader {
                      "reading is");
             return std::nullopt;
         }
+        if (refusedAsNegativeZenith(block, word, inUnit)) {
+            return std::nullopt;
+        }
         noteAngularUnit(declared, block.record);
         return inUnit * toRadians;
+    }
+
+    // A vertical reading below zero is no zenith angle (SIGN, at the top):
+    // refused at its record, and counted for the note on the vertical angle
+    // setting in finish(). `value` is the reading in any unit; -0 is not below
+    // zero, and is read.
+    bool refusedAsNegativeZenith(const Block& block, const Word& word, double value)
+    {
+        if (word.index != 22 || value >= 0.0) {
+            return false;
+        }
+        warnWord(block, word,
+                 "is negative, which no zenith angle is: an instrument set to read V from the "
+                 "horizon or in percent (GSI ONLINE SET 44) writes such a value below the horizon");
+        negativeZeniths_.add(block.record);
+        return true;
     }
 
     // DDDMMSSs: degrees, minutes, seconds and tenths - DDD.MMSSs with the point
@@ -879,6 +920,13 @@ class GsiReader {
     std::optional<double> sexagesimal(const Block& block, const Word& word,
                                       std::optional<SixtySeconds>& sixty)
     {
+        // A word with no digit - "." - writes no angle. The missing digits
+        // supplied below would make it 000 00 00.0, a reading like any other;
+        // numberOf refuses the same word in the other units.
+        if (word.data.find_first_of("0123456789") == std::string_view::npos) {
+            warnWord(block, word, "is not a sexagesimal angle: it has no digit");
+            return std::nullopt;
+        }
         std::string_view whole = word.data;
         std::string_view fraction;
         const std::size_t point = whole.find('.');
@@ -991,13 +1039,18 @@ class GsiReader {
             warnWord(block, word, "is past a full circle (360 degrees), which no circle reading is");
             return std::nullopt;
         }
-        sixty = carried;
-        noteAngularUnit(survey::AngularUnit::DegreesMinutesSeconds, block.record);
         double degreesValue = static_cast<double>(degrees) + minutes / 60.0 +
                               (seconds + finer) / 3600.0;
         if (word.sign == '-') {
             degreesValue = -degreesValue;
         }
+        // After the carry, so that -000 00 60.0 is as negative as -000 01
+        // 00.0; and before `sixty` is set, which is for a word that is read.
+        if (refusedAsNegativeZenith(block, word, degreesValue)) {
+            return std::nullopt;
+        }
+        sixty = carried;
+        noteAngularUnit(survey::AngularUnit::DegreesMinutesSeconds, block.record);
         return degreesValue * (kPi / 180.0);
     }
 
@@ -2042,6 +2095,7 @@ class GsiReader {
     // Sexagesimal words of 60.0 seconds read as the next minute, and their records.
     Tally roundedSeconds_;
     RecordList roundedSecondRecords_;
+    Tally negativeZeniths_;     // vertical readings (word 22) below zero, refused
     Tally zeroCodeWords_;       // code information and remark words of nothing but zeros
     Tally remarksInCodeBlocks_; // remark words (71-79) in a code block, not read
     Tally otherPrism_; // distances measured with another prism constant than their setup's
@@ -2346,9 +2400,23 @@ ReadResult GsiReader::finish()
                           plural(setups, "setup", "setups") +
                           ": whether their distances include one is not stated");
     }
-    if (zenithAngles_ != 0) {
-        lacking.emplace_back("GSI does not record the vertical angle setting: word 22 was read "
-                             "as a zenith angle, the instruments' usual setting");
+    if (zenithAngles_ != 0 || negativeZeniths_.count != 0) {
+        std::string setting = "GSI does not record the vertical angle setting: word 22 was read "
+                              "as a zenith angle, the instruments' usual setting";
+        if (negativeZeniths_.count != 0) {
+            // Each was warned about at its record. What they suggest about
+            // the file's OTHER vertical readings, which were read, is said
+            // here once: a positive elevation read as a zenith is no less
+            // wrong, and nothing in its word shows it.
+            setting += "; " + plural(negativeZeniths_.count, "reading was", "readings were") +
+                       " refused as negative, which no zenith angle is (the first at record " +
+                       std::to_string(negativeZeniths_.firstRecord) +
+                       "): an instrument set to read V from the horizon or in percent (GSI "
+                       "ONLINE SET 44) writes negatives below the horizon, and if this one was "
+                       "so set, the file's other word 22 readings are not zenith angles either "
+                       "and the shots read with them are wrong";
+        }
+        lacking.push_back(std::move(setting));
     }
     if (directions_ != 0) {
         // GSI ONLINE's SET/CONF 171, "Direction of horizontal circle reading

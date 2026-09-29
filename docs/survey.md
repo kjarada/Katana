@@ -306,6 +306,66 @@ reading of the zero. A letter in any field of a sexagesimal word is refused
 before the seconds are looked at, so a letter beside a 60 is never carried
 (`ALetterInAnyFieldOfASexagesimalWordRefusesItAtItsRecord`).
 
+**The sign of a reading (second review, 2026-09-30).** GSI ONLINE gives
+every measured value a sign (page 6: "+: Positive value", "-: Negative
+value"), and the two circles do not use it alike. Word 22 is read as a zenith
+angle, and no zenith angle is negative. What writes a negative V is an
+instrument set to read it another way, below the horizon: SET 44, "V angle
+READING: 0 Zenith, 1 Horizontal, 2 Slope in percent" (page 9, the TPS100
+series; the document lists no such setting for the others, but a negative
+zenith is none in any series). The circle check bounded only the magnitude,
+so V -005 00 00 was wrapped to 355 00 00 and read as a face-right zenith of 5
+degrees: on a hand-built job, a 100 m shot at 45 degrees was drawn 8.7 m out
+at 225 degrees, 108 m from where a 5-degree depression puts it, with no
+warning. A negative word 22 is now refused at its record, in every unit, as
+the opcode field file, SDR, GTS-7 and RW5 readers refuse a zenith reading
+below 0; -0 is zero, and read. A setting that writes negatives below the
+horizon writes positives above it, and those read as zeniths near the
+vertical with nothing in their words to show it, so the import's note on the
+vertical angle setting also says how many were refused and that the file's
+other vertical readings may not be zenith angles either
+(`ANegativeVerticalReadingIsRefusedAtItsRecordNotWrappedIntoAFaceRightZenith`;
+through `katana_cli`,
+`cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record` and
+`cli.survey_import_gsi_draws_no_point_from_a_negative_vertical_reading`,
+whose one radiated shot is worked by hand in `src/katana_app/CMakeLists.txt`).
+
+A negative word 21 is still read on the circle, -090 00 00 as 270 00 00, and
+GSI ONLINE supports that as far as it speaks to it: every measured value
+carries a sign, and none of the horizontal circle's settings it lists gives
+the reading another meaning - 171 turns it clockwise or counterclockwise, 178
+and 179 switch the Hz compensator and the collimation correction. A negative
+direction is the direction it names, counted the other way from the zero; the
+other readers wrap it the same way. The document shows no negative angle word
+of either kind, so neither is claimed to be common. Rejected:
+
+- reading a negative V as an elevation, a zenith of 90 degrees less it: that
+  is the Horizontal setting's value, the percent setting's is another, and
+  the file does not say which;
+- refusing every V of a file that has one negative: one damaged word would
+  cost the job its heights. The note puts the question to the person;
+- refusing a negative Hz: it discards a direction whose value is not in
+  doubt.
+
+A refused word is now shown with its '-' where it has one - "word 21
+'-40000001' is past a full circle (400 gon)" - the sign being part of the
+value written. A sexagesimal word that writes no digit, ".", read as 000 00
+00.0, the zeros supplied to a short word, with nothing at its record; it is
+refused, as the same word already was in gon, degrees and mil
+(`ASexagesimalWordOfNothingButAPointIsRefusedNotReadAsZero`).
+
+The full-circle test held only words far past the circle, and passed with
+either edge of the check removed: with `degrees > 360` alone, which reads
+360 00 00.1 as 0.1" past the zero, and with the magnitude taken without
+`std::abs`, which wraps -400.00001 gon onto the circle. It now holds a word
+just past each edge - 360 00 00.1, 360 00 01.0, 360 00 60.0 (refused after
+its carry, and not counted among the 60-second words), -360 00 00.1, and
+-400.00001 gon, -360.00001 degrees and -6400.0001 mil - and -400.00000 gon,
+which is the zero. Each of the two mutations now fails it. These changes are
+part of parser 1.1, which had been merged but not pushed or released: the
+remote's reader was still 1.0, so no import made elsewhere has a 1.1 that
+read these words otherwise.
+
 The other warnings and notes on the traverse, each checked against the data:
 
 - **Word 71 of nothing but zeros was the code "0".** Word 71 is
@@ -329,11 +389,11 @@ The other warnings and notes on the traverse, each checked against the data:
   read, and the import now says so once
   (`CodeInformationInAPointsOwnBlockIsKeptAndRemarksInACodeBlockAreSaidNotRead`).
   The traverse has neither.
-- **51 of 52 setups had a backsight.** The traverse begins on SS27898 with
-  SS27899 as its reference object, and SS27899 is keyed in only when the
-  instrument stands on it, 166 records later. A setup's first shot was its
-  backsight only if the point had coordinates EARLIER in the file, so the
-  reduction left SS27898 unoriented. It has the whole file - it already waits
+- **51 of 52 setups had a backsight.** The traverse's first setup has as
+  its reference object a mark that is keyed in only when the instrument
+  stands on it, 166 records later. A setup's first shot was its backsight
+  only if the point had coordinates EARLIER in the file, so the reduction
+  left the first setup unoriented. It has the whole file - it already waits
   for a backsight positioned later - so the rule is now that the file gives
   the point coordinates, before the setup or after it, other than by the
   setup's own shots: target coordinates (81-83) the instrument computed with
@@ -361,15 +421,20 @@ Read again with parser 1.1: 1593 records, none skipped; 4623 observations
 feature; 4 warnings, each said once for the file (the 60-second words, with
 all 24 records, the zero code words, the prism constant, the times).
 `SURVEY IMPORT` on a drawing on EPSG:7856 draws the same 57 points, rejects
-no distance where it rejected 12, and orients every setup. With SS27898
-oriented, its backsight check to SS27899 is +39.0 mm in distance and +34.1
-mm in height over 321 m, and the setup on SS27899 checks its own backsight
-at +21.7 mm, where every other setup's distance check is within 4 mm. Both
-involve SS27899, whose keyed-in coordinates the reader reads as written: a
-question for the job's control, not for the reading. The review round's
-changes (the width rule, the circle, the kept-word count, the code words in
-other blocks) read this file exactly as before but for the wording of the
-60-second note: none of its 24 words is short, long or pointed.
+no distance where it rejected 12, and orients every setup. With the first
+setup oriented, its backsight check to its reference object is +39.0 mm in
+distance and +34.1 mm in height over 321 m, and the setup on that mark
+checks its own backsight at +21.7 mm, where every other setup's distance
+check is within 4 mm. Both involve that mark, whose keyed-in coordinates the
+reader reads as written: a question for the job's control, not for the
+reading. The review round's changes (the width rule, the circle, the
+kept-word count, the code words in other blocks) read this file exactly as
+before but for the wording of the 60-second note: none of its 24 words is
+short, long or pointed. The second review's (the sign, the word of only a
+point, the warnings' '-') read it exactly as before, wording and all: it
+has no negative word 21 or 22 and no word of only a point - 1593 records, 4
+warnings, 4623 observations, and 57 points drawn by `SURVEY IMPORT`, as
+with the reader before them.
 
 Tests (`tests/surveyio/test_leica_gsi.cpp`, on the hand-built
 `tests/surveyio/data/leica/rounded_seconds_gsi16.gsi` and inline blocks):
@@ -381,6 +446,8 @@ Tests (`tests/surveyio/test_leica_gsi.cpp`, on the hand-built
 `SixtySecondsTheWordDoesNotWriteInTheirPlaceAreRefusedNotCarried`,
 `ASixtySecondWordWhoseValueIsNotKeptIsNotSaidToBeReadAsTheNextMinute`,
 `ACircleReadingPastAFullCircleIsRefusedInEveryUnitAndAFullCircleIsZero`,
+`ANegativeVerticalReadingIsRefusedAtItsRecordNotWrappedIntoAFaceRightZenith`,
+`ASexagesimalWordOfNothingButAPointIsRefusedNotReadAsZero`,
 `ALetterInAnyFieldOfASexagesimalWordRefusesItAtItsRecord`,
 `ACarriedAngleIsExactlyTheAngleWrittenWithItsCarryInEitherWidth`,
 `AnAllZeroRemarkOrCodeInformationWordIsEmptyNotTheCodeZero`,
@@ -392,9 +459,10 @@ Tests (`tests/surveyio/test_leica_gsi.cpp`, on the hand-built
 through `katana_cli`, `cli.survey_read_gsi_reads_sixty_seconds_as_the_next_minute`
 and `cli.survey_import_gsi_radiates_the_shots_whose_angles_wrote_sixty_seconds`,
 whose two radiated points are worked by hand to the millimetre in
-`src/katana_app/CMakeLists.txt`. The window's Survey > Import Survey Data
-reads a GSI file through the same reader, and `katana_mcp` runs the same
-verbs.
+`src/katana_app/CMakeLists.txt`, and the two on
+`tests/surveyio/data/leica/negative_vertical_gsi8.gsi` named above. The
+window's Survey > Import Survey Data reads a GSI file through the same
+reader, and `katana_mcp` runs the same verbs.
 
 Not done:
 
@@ -402,23 +470,34 @@ Not done:
   pointing to a target with its i-th face-right one
   (`src/katana_survey/reduction.cpp`). Each setup of the traverse has 3 to 9
   more face-left pointings than face-right ones (3 in 41 of the 52), and in
-  the setups looked at they come first, so its pairs cross rounds -
-  "SS27898, 5140: 15.0"" pairs record 10 with record 15, where record 10's
-  own round gives -3" and record 15's -1" - and some of the file's face-pair
-  warnings come from that, not from the data. Reading the 60-second words
-  moves it both ways: record 1457, whose zenith was refused before, now has
-  a face and pairs with record 1476 of another round, adding one warning
-  (setup 5181 to 5180, horizontal 19.0"), while setup 5170's pairs to 5171
-  go from three (pointings 4/7, 14/11, 18/15) to six (4/7, 6/11, 10/15,
-  14/19, 18/23, 22/27), all within tolerance. It belongs to the reduction
-  and every format that feeds it, not to this reader.
+  the setups looked at they come first, so its pairs cross rounds - the
+  first setup's first face-pair warning (15.0") pairs record 10 with record
+  15, where record 10's own round gives -3" and record 15's -1" - and some
+  of the file's face-pair warnings come from that, not from the data.
+  Reading the 60-second words moves it both ways: record 1457, whose zenith
+  was refused before, now has a face and pairs with record 1476 of another
+  round, adding one warning (horizontal 19.0"), while another setup's pairs
+  to one target go from three (pointings 4/7, 14/11, 18/15) to six (4/7,
+  6/11, 10/15, 14/19, 18/23, 22/27), all within tolerance. It belongs to the
+  reduction and every format that feeds it, not to this reader.
 - **The backsight check has no tolerance.** `src/katana_survey/reduction.cpp`
   stores each setup's backsight distance and height differences, and the
   report prints them as bare numbers, where face pairs and misclosures are
-  marked OUTSIDE TOLERANCE. So SS27898's +39.0 mm, left unoriented with a
-  warning before and oriented now, is flagged nowhere. A tolerance belongs in
-  the reduction's settings beside the face-pair ones, with a source for its
-  value; it would apply to every format, so it is not added here.
+  marked OUTSIDE TOLERANCE. So the first setup's +39.0 mm, left unoriented
+  with a warning before and oriented now, is flagged nowhere. A tolerance
+  belongs in the reduction's settings beside the face-pair ones, with a
+  source for its value; it would apply to every format, so it is not added
+  here.
+- **A later block's code information or remark replaces an earlier one's.**
+  A point named by two blocks - a target shot in two rounds - that give code
+  information (42-49) or a remark (72-79) keeps the later value under its
+  key, and the earlier goes without a word; its code (71, or a code block)
+  keeps the first instead, and its coordinates keep the first with a warning
+  when they differ. Which value is the point's when rounds disagree is a
+  choice for all three together - the first, the last, or each block's with
+  its record - not one to make for the one kind of word found, so it is
+  left as it was. No file seen has shown it: the traverse has no word 42-49
+  or 72-79.
 - **Three routines turn degrees, minutes and seconds into radians:** this
   reader's, `packedDegreesToRadians` in
   `src/katana_surveyio/topcon_raw_builder.cpp` (GTS-7 and RW5), and

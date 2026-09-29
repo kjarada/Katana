@@ -3,9 +3,9 @@
 #
 # Lists every std::to_string of a floating-point value in the tree, as
 # file:line, and exits 1 when there is one - or when a file could not be
-# checked, since a check that did not run is not a pass. Run from the
-# checkout root after a configure (it reads the build's
-# compile_commands.json and runs its compiler, with -fsyntax-only);
+# checked, or there was nothing to check, since a check that did not run is
+# not a pass. Run from the checkout root after a configure (it reads the
+# build's compile_commands.json and runs its compiler, with -fsyntax-only);
 # build/release by default. The compiler must run from this shell: on
 # Windows, MSYS2's bin first on PATH. Without it g++ cannot load its DLLs,
 # fails printing nothing, and every file is "not checked".
@@ -77,25 +77,42 @@ def main():
     jobs = int(sys.argv[2]) if len(sys.argv) > 2 else os.cpu_count() or 4
     with open(os.path.join(build, "compile_commands.json"), encoding="utf-8") as f:
         entries = json.load(f)
-    work, seen = [], set()
+    work, seen, unreadable = [], set(), []
     for entry in entries:
         source = entry["file"].replace("\\", "/")
         # Only Katana's own code: not a fetched or cached third-party library.
         if source in seen or "/_deps/" in source or "/third_party/" in source:
             continue
         seen.add(source)
-        with open(entry["file"], encoding="utf-8", errors="replace") as f:
-            if "to_string" in f.read():
-                work.append(entry)
+        try:
+            with open(entry["file"], encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError as error:
+            # A source the database names and this tree lacks: a build
+            # directory configured from another checkout. Not checked, said
+            # as such, rather than a traceback.
+            unreadable.append(f"{entry['file']}: not checked: {error.strerror}")
+            continue
+        if "to_string" in text:
+            work.append(entry)
+    if not work and not unreadable:
+        # Some 320 of the tree's own sources mention to_string, so a database
+        # that gives none - empty, or not this tree's - checked nothing, and a
+        # check that did not run is not a pass.
+        print(f"check_float_to_string: nothing to check: "
+              f"{os.path.join(build, 'compile_commands.json')} lists {len(seen)} of Katana's own "
+              f"sources and none mentions to_string; a check that checked nothing is not a pass")
+        return 1
     with ThreadPoolExecutor(jobs) as pool:
         results = list(pool.map(check, work))
     found = sorted({hit.replace("\\", "/") for hits, _ in results for hit in hits})
-    unchecked = [note for _, note in results if note]
+    unchecked = unreadable + [note for _, note in results if note]
+    total = len(work) + len(unreadable)
     for hit in found:
         print(hit)
     for note in unchecked:
         print(note)
-    print(f"check_float_to_string: {len(work) - len(unchecked)} of {len(work)} files checked, "
+    print(f"check_float_to_string: {total - len(unchecked)} of {total} files checked, "
           f"{len(found)} to_string of a floating-point value, {len(unchecked)} not checked")
     return 1 if found or unchecked else 0
 
