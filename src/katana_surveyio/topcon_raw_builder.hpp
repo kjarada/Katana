@@ -112,26 +112,14 @@ class RawProjectBuilder {
     // SurveyProject::points, each in order of first mention.
 
     void mentionPoint(std::string_view id, std::size_t record);
-    // What positionPoint made of the coordinates it was given.
-    enum class Positioned {
-        First,    // the point's first coordinates: kept
-        Repeated, // the same as those it has: nothing to say
-        Restated, // different from those it has: warned of, and in its metadata
-    };
     // Coordinates for `id`, metres. The FIRST coordinates a file states are
     // kept: control is stored before it is observed, and a later value for the
     // same name is a check or a recomputation. A later value that differs is a
     // warning naming both records and is kept in the point's metadata, never
     // dropped; one that is the same is a repeat and needs no comment.
-    Positioned positionPoint(std::string_view id, double northing, double easting,
-                             std::optional<double> elevation,
-                             katana::survey::CoordinateSource how, std::size_t record);
-    // How the coordinates `record` gave `id` came to be, for a reader that
-    // learns it from the records after them (a GNSS solution a format can
-    // only write as an entered coordinate). False, and nothing changes, when
-    // the point holds no coordinates or another record's.
-    bool setCoordinateSource(std::string_view id, std::size_t record,
-                             katana::survey::CoordinateSource how);
+    void positionPoint(std::string_view id, double northing, double easting,
+                       std::optional<double> elevation, katana::survey::CoordinateSource how,
+                       std::size_t record);
     // The field code of `id` (the first word of `description` when `code` is
     // empty is the caller's business). A non-empty code strings the point into
     // the feature named by code and string number, in the order met.

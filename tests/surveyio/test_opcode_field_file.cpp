@@ -15,12 +15,15 @@
 //   data/fld/resection.fld  a resection (128 ... 129, with "5" and "7" written
 //                           without their zero), its residuals as comments, 16,
 //                           42, 43, 71, a coded check, then a 03 setup; UTF-8.
+//   data/fld/rtk_setup.fld  two RTK marks, a setup on one backsighting the
+//                           other, and two shots with an offset each.
 // Every expected value below is worked from the record text: circle readings
 // are decimal degrees, so 45.00000000 is pi / 4.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -29,6 +32,8 @@
 #include <variant>
 #include <vector>
 
+#include "katana/core/text.hpp"
+#include "katana/survey/reduction.hpp"
 #include "surveyio/topcon_test_support.hpp"
 
 using namespace katana::surveyio;
@@ -42,6 +47,9 @@ namespace {
 constexpr std::string_view kId = "opcode-field-file";
 constexpr double kPi = std::numbers::pi;
 constexpr double kAngleTolerance = 1e-12;
+// Plan positions through the reduction: its arithmetic on six-figure
+// coordinates rounds at 1e-12 m, far inside this.
+constexpr double kPositionTolerance = 1e-6;
 
 double degrees(double value) { return value * kPi / 180.0; }
 
@@ -125,6 +133,24 @@ double fieldFileConfidence(std::string_view bytes, std::string_view name)
     return -1.0;
 }
 
+// The positions the reduction gives a read job, by point id: its defaults,
+// without curvature and refraction, so that a position is the plan geometry a
+// test works by hand.
+std::map<std::string, survey::ComputedPoint> reducedPositions(const survey::SurveyProject& project)
+{
+    survey::ReductionSettings settings;
+    settings.curvatureAndRefraction = false;
+    const auto outcome = survey::reduceAndAdjust(project, settings, survey::ReductionContext{});
+    EXPECT_TRUE(outcome.ok()) << (outcome.ok() ? "" : outcome.error().describe());
+    std::map<std::string, survey::ComputedPoint> positions;
+    if (outcome.ok()) {
+        for (const survey::ComputedPoint& point : outcome->points) {
+            positions[point.id] = point;
+        }
+    }
+    return positions;
+}
+
 } // namespace
 
 // ---- Registration and detection --------------------------------------------------------
@@ -137,8 +163,8 @@ TEST(OpcodeFieldFile, IsRegisteredAsAnImportableFormatReadingSetupsShotsAndPoint
     EXPECT_EQ(format->extensions, std::vector<std::string>{"fld"});
     EXPECT_TRUE(format->reads.points && format->reads.observations && format->reads.stations &&
                 format->reads.features && format->reads.coordinateSystem);
-    // A GNSS position written as an 02 is a grid coordinate, not a GNSS
-    // observation: the format carries none of those.
+    // A GNSS position written as an 02 is an entered grid coordinate, not a
+    // GNSS observation: the format carries none of those.
     EXPECT_FALSE(format->reads.gnss);
     EXPECT_NE(formatRegistry().reader(kId), nullptr);
 }
@@ -175,6 +201,41 @@ TEST(OpcodeFieldFile, AnotherFormatNamedFldIsNotClaimed)
             EXPECT_EQ(probed.signature.confidence, 0.0) << probed.signature.evidence;
         }
     }
+}
+
+TEST(OpcodeFieldFile, ANumberedListOfPointsIsNotTakenForAFieldFile)
+{
+    // Tab-separated rows numbered 1 to 60, right-aligned: each opens with a
+    // number, and rows 2, 3 and 7 with a coordinate's, setup's or shot's
+    // opcode - but with five fields, where those records have nine or ten
+    // (seven or eight for a setup).
+    std::string rows;
+    std::string numbers;
+    for (int row = 1; row <= 60; ++row) {
+        const std::string number = std::to_string(row);
+        rows += std::string(4 - number.size(), ' ') + number + "\t" +
+                std::to_string(300000 + row) + ".500\t" + std::to_string(6250000 + row) +
+                ".250\t50.010\tTREE\r\n";
+        numbers += number + "\r\n";
+    }
+    EXPECT_EQ(fieldFileConfidence(rows, "points.txt"), 0.0);
+    EXPECT_EQ(fieldFileConfidence(numbers, "numbers.txt"), 0.0);
+}
+
+TEST(OpcodeFieldFile, AFieldFileBehindALongHeaderOfCommentsIsIdentified)
+{
+    // 250 comment lines, past the 200 lines the probe once looked at, then
+    // a job: comments are no records, and the records decide.
+    std::string bytes = "{Version 6.0}\r\n";
+    for (int line = 0; line < 250; ++line) {
+        bytes += "// header line " + std::to_string(line) + "\r\n";
+    }
+    bytes += "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0\r\n"
+             "03\t\t\t\tK\t\t\t1.5\r\n"
+             "07\t\tEB\t01\t1\t\t\t10.0\t90.0\t5.0\r\n";
+    const Detection detection = detectFormat(probeOf(bytes, "long_header.fld"));
+    ASSERT_EQ(detection.outcome(), DetectionOutcome::Identified) << detection.summary();
+    EXPECT_EQ(detection.format()->id, kId);
 }
 
 // Every file under tests/surveyio/data, whichever format wrote it: this
@@ -287,7 +348,9 @@ TEST(OpcodeFieldFile, AStationItsBacksightAndItsShotsBecomeOneSetupsObservations
     EXPECT_DOUBLE_EQ(distances[0].targetHeight, 1.6);
     EXPECT_DOUBLE_EQ(distances[1].distance, 100.002);
     EXPECT_DOUBLE_EQ(distances[1].targetHeight, 2.0);
-    EXPECT_EQ(topcon_test::point(project, "CP2")->metadata.at("check measurement"), "record 22");
+    // CP2 was made by record 9: the check of record 22 is that record's.
+    EXPECT_EQ(topcon_test::point(project, "CP2")->metadata.at("record 22/check measurement"),
+              "from setup CP1");
 }
 
 TEST(OpcodeFieldFile, AZenithPastOneEightyIsFaceRightHeldAsItsFaceLeftEquivalent)
@@ -361,34 +424,6 @@ TEST(OpcodeFieldFile, ARecordShortOfAValueAndAnOpcodeNotReadAreSkippedByName)
     EXPECT_EQ(topcon_test::unpositioned(result.project, "103"), nullptr);
 }
 
-TEST(OpcodeFieldFile, AFileWithoutTheEmptyColumnIsReadByItsCounts)
-{
-    // [FLD]'s own syntax: the description straight after the opcode. The 07
-    // with a feature code decides it; the 02 and 03 with none fit either.
-    const std::string bytes = lines({
-        "100\tdegrees\tmetres",
-        "02\t\t\tA\t\t\t10.0\t20.0\t1.0",
-        "03\t\t\tA\t\t\t1.5",
-        "07\tTREE\t\t7\t\t\t90.0\t90.0\t12.5",
-    });
-    auto read = topcon_test::read(kId, bytes, "plain.fld");
-    ASSERT_TRUE(read.ok()) << read.error().describe();
-    const survey::SurveyPoint* a = topcon_test::point(read->project, "A");
-    ASSERT_NE(a, nullptr);
-    EXPECT_DOUBLE_EQ(a->easting, 10.0);
-    EXPECT_DOUBLE_EQ(a->northing, 20.0);
-    ASSERT_EQ(read->project.stations.size(), 1u);
-    const survey::SurveyStation& station = read->project.stations[0];
-    const auto directions = observationsTo<survey::HorizontalDirectionObservation>(station, "7");
-    ASSERT_EQ(directions.size(), 1u);
-    EXPECT_NEAR(directions[0].direction, kPi / 2.0, kAngleTolerance);
-    const auto distances = observationsTo<survey::DistanceObservation>(station, "7");
-    ASSERT_EQ(distances.size(), 1u);
-    EXPECT_DOUBLE_EQ(distances[0].distance, 12.5);
-    EXPECT_EQ(topcon_test::unpositioned(read->project, "7")->code, "TREE");
-    EXPECT_EQ(read->recordsSkipped, 0u);
-}
-
 TEST(OpcodeFieldFile, AUnitOtherThanDegreesAndMetresIsRefusedNotGuessed)
 {
     const std::string bytes = lines({
@@ -459,7 +494,7 @@ TEST(OpcodeFieldFile, TheWholeGnssJobIsReadWithNothingSkipped)
     EXPECT_EQ(project.metadata.at("notes"), "Antenna Height Change 2.000");
 }
 
-TEST(OpcodeFieldFile, AnRtkPositionWrittenAs02IsCalculatedAndAKeyedInOneStaysEntered)
+TEST(OpcodeFieldFile, AnRtkPositionWrittenAs02IsAnEnteredCoordinateLikeAKeyedInOne)
 {
     const ReadResult result = readFixture("gnss.fld");
     const survey::SurveyProject& project = result.project;
@@ -470,17 +505,17 @@ TEST(OpcodeFieldFile, AnRtkPositionWrittenAs02IsCalculatedAndAKeyedInOneStaysEnt
     EXPECT_DOUBLE_EQ(r001->northing, 6200020.0);
     ASSERT_TRUE(r001->elevation.has_value());
     EXPECT_DOUBLE_EQ(*r001->elevation, 12.5);
-    // R001 to R003 open a "GPS Information" group; R004's group is
-    // "Solution", but it holds a "GNSS Solution" attribute.
-    for (const char* id : {"R001", "R002", "R003", "R004"}) {
+    // R001 to R004 are the receiver's solutions and CM1 is keyed in: all are
+    // the format's directly entered coordinate, which the reduction takes as
+    // known (ASetupOnAnRtkMarkIsOrientedOnAnother... shows why that matters).
+    for (const char* id : {"R001", "R002", "R003", "R004", "CM1"}) {
         const survey::SurveyPoint* point = topcon_test::point(project, id);
         ASSERT_NE(point, nullptr) << id;
-        EXPECT_EQ(point->coordinateSource, survey::CoordinateSource::Calculated) << id;
+        EXPECT_EQ(point->coordinateSource, survey::CoordinateSource::Entered) << id;
     }
-    // CM1 has no GNSS attribute: keyed in.
-    const survey::SurveyPoint* cm1 = topcon_test::point(project, "CM1");
-    ASSERT_NE(cm1, nullptr);
-    EXPECT_EQ(cm1->coordinateSource, survey::CoordinateSource::Entered);
+    // The attributes say which were solved by the receiver.
+    EXPECT_EQ(valueOf(r001->metadata, "GPS Information/GNSS Solution"), "fixed");
+    EXPECT_EQ(valueOf(metadataOf(project, "CM1"), "GPS Information/GNSS Solution"), "(absent)");
     EXPECT_TRUE(project.controlPoints.empty());
 }
 
@@ -511,18 +546,62 @@ TEST(OpcodeFieldFile, ATimeStampInTheColumnAfterTheOpcodeIsKeptOnThePointItDates
     EXPECT_EQ(w3c.recordsSkipped, 0u);
 }
 
+TEST(OpcodeFieldFile, TheColumnHoldsADateOrTimeInTheFormsControllersWrite)
+{
+    // A three-point RTK job for each form a controller's clock writes, one
+    // with a blank before it as the opcodes have: every point is read, and
+    // its time stamp kept as written, less the blank.
+    for (const std::string_view stamp :
+         {"00:49:06", "05/05/2026", "5 May 2026 00:49", "2026-05-05T00:49:06+1000",
+          "05/05/2026 12:49:06 PM", " 05/05/26 00:49:06.52", "2026-05-05 00:49:06 UTC"}) {
+        SCOPED_TRACE(stamp);
+        const std::string s(stamp);
+        auto read = topcon_test::read(
+            kId,
+            lines({" 2\t" + s + "\tEP\t1\tG1\t\t\t500000.0\t6200000.0\t10.0",
+                   " 2\t" + s + "\tEP\t1\tG2\t\t\t500010.0\t6200000.0\t10.1",
+                   " 2\t" + s + "\tEP\t1\tG3\t\t\t500020.0\t6200000.0\t10.2"}),
+            "stamps.fld");
+        ASSERT_TRUE(read.ok()) << read.error().describe();
+        EXPECT_EQ(read->project.points.size(), 3u);
+        EXPECT_EQ(read->recordsSkipped, 0u);
+        EXPECT_EQ(valueOf(metadataOf(read->project, "G2"), "time stamp"),
+                  std::string(katana::core::trimmed(stamp)));
+    }
+    // A total-station job stamped on a 12-hour clock: its lone 04 fits either
+    // layout and decides nothing, so the 100 after it is read in the column's.
+    const ReadResult clock = readLines({
+        "100\t05/05/2026 12:49:00 PM\tdegrees\tmetres\tmillibars\tcelsius",
+        "02\t05/05/2026 12:49:01 PM\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "02\t05/05/2026 12:49:02 PM\t\t\tB\t\t\t1000.0\t5100.0\t20.0",
+        "03\t05/05/2026 12:49:03 PM\t\t\tK\t\t\t1.5",
+        "04\t05/05/2026 12:49:04 PM\t\t\tB\t\t\t0.0\t90.0\t100.0",
+        "07\t05/05/2026 12:49:05 PM\tEB\t01\t1\t\t\t10.0\t90.0\t5.0",
+    });
+    EXPECT_EQ(clock.recordsSkipped, 0u);
+    ASSERT_EQ(clock.project.stations.size(), 1u);
+    EXPECT_EQ(clock.project.stations[0].backsightPointId, "B");
+    EXPECT_EQ(valueOf(metadataOf(clock.project, "1"), "time stamp"), "05/05/2026 12:49:05 PM");
+}
+
 TEST(OpcodeFieldFile, AColumnHoldingTextThatIsNotADateIsSkippedNotReadAsAValue)
 {
+    // "note", a number alone and a code with a month's letters in it are no
+    // date or time.
     const ReadResult result = readLines({
         "03\t\t\t\tS\t\t\t1.5",
         "07\t\tEP\t1\t1\t\t\t10.0\t90.0\t5.0",
         "07\tnote\tEP\t1\t2\t\t\t20.0\t90.0\t5.0",
+        "07\t12\tEP\t1\t3\t\t\t30.0\t90.0\t5.0",
+        "07\tMAR1\tEP\t1\t4\t\t\t40.0\t90.0\t5.0",
     });
     EXPECT_TRUE(warned(result, 3,
-                       "holds 'note' in the column after the opcode, which is neither empty nor a "
-                       "date and time"));
+                       "holds 'note' in the column after the opcode, which is neither blank nor a "
+                       "date or time"));
+    EXPECT_TRUE(warned(result, 4, "holds '12' in the column after the opcode"));
+    EXPECT_TRUE(warned(result, 5, "holds 'MAR1' in the column after the opcode"));
     EXPECT_EQ(topcon_test::unpositioned(result.project, "2"), nullptr);
-    EXPECT_EQ(result.recordsSkipped, 1u);
+    EXPECT_EQ(result.recordsSkipped, 3u);
 }
 
 TEST(OpcodeFieldFile, AttributesInsideAGroupKeepTheGroupAndARemeasuredMarkKeepsBothMeasurements)
@@ -565,6 +644,93 @@ TEST(OpcodeFieldFile, ACloseStringRecordClosesTheCurrentStringAndALaterPointStar
     EXPECT_EQ(result.project.features.size(), 2u);
 }
 
+TEST(OpcodeFieldFile, AGroupLeftOpenEndsAtTheNextPointOrAtAGroupOfItsLevel)
+{
+    const ReadResult result = readLines({
+        " 2\t14/03/26 09:15:02.40\tKB\t1\tR1\t\t\t500010.0\t6200020.0\t12.5",
+        "124\t\t\tGPS Information\t0",
+        "73\t\tAntenna Height\t1.800",
+        // no 125: record 4 makes another point
+        " 2\t14/03/26 09:15:40.10\tKB\t1\tR2\t\t\t500020.0\t6200020.0\t12.6",
+        "124\t\t\tSurvey Attributes\t0",
+        "73\t\tMaterial\tConcrete",
+        // no 125: record 7 opens a group at level 0, where Survey Attributes is
+        "124\t\t\tReference Information\t0",
+        "73\t\tEasting\t500500.000",
+        "125\t\t\t\t0",
+    });
+    const auto r1 = metadataOf(result.project, "R1");
+    const auto r2 = metadataOf(result.project, "R2");
+    EXPECT_EQ(valueOf(r1, "GPS Information/Antenna Height"), "1.800");
+    EXPECT_EQ(valueOf(r2, "Survey Attributes/Material"), "Concrete");
+    EXPECT_EQ(valueOf(r2, "Reference Information/Easting"), "500500.000");
+    for (const auto& [key, value] : r2) {
+        EXPECT_EQ(key.find("GPS Information"), std::string::npos) << key;
+        EXPECT_EQ(key.find("Survey Attributes/Reference"), std::string::npos) << key;
+    }
+    EXPECT_TRUE(warned(result, 2,
+                       "attribute group 'GPS Information' is not ended (opcode 125) before record "
+                       "4, which makes another point or a setup; it is ended there"));
+    EXPECT_TRUE(warned(result, 5,
+                       "attribute group 'Survey Attributes' is not ended (opcode 125) before "
+                       "record 7, which opens attribute group 'Reference Information' at its "
+                       "level"));
+    EXPECT_EQ(result.recordsSkipped, 0u);
+    EXPECT_EQ(result.warnings.size(), 2u);
+}
+
+TEST(OpcodeFieldFile, GroupsThatAreNeverEndedDoNotGrowTheNamesOfLaterAttributes)
+{
+    // A job of 400 points, each with three groups and no 125 at all: each
+    // group ends at the next one of its level or at the next point, so no
+    // name holds more than one group - where nesting every unended group
+    // made names, and memory, grow with the square of the file.
+    std::string bytes;
+    for (int point = 0; point < 400; ++point) {
+        bytes += " 2\t14/03/26 09:15:02.40\tKB\t1\tP" + std::to_string(point) + "\t\t\t" +
+                 std::to_string(500000 + point) + ".0\t6200000.0\t12.5\n";
+        for (const char* group : {"Survey Attributes", "GPS Information", "Reference Information"}) {
+            bytes += std::string("124\t\t\t") + group + "\t0\n73\t\tValue\t1\n";
+        }
+    }
+    auto read = topcon_test::read(kId, bytes, "unended.fld");
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    std::size_t longest = 0;
+    for (const survey::SurveyPoint& point : read->project.points) {
+        for (const auto& [key, value] : point.metadata) {
+            longest = std::max(longest, key.size());
+        }
+    }
+    EXPECT_EQ(longest, std::string("Reference Information/Value").size());
+    EXPECT_EQ(valueOf(metadataOf(read->project, "P399"), "GPS Information/Value"), "1");
+}
+
+// ---- The RTK setup fixture -------------------------------------------------------------
+
+TEST(OpcodeFieldFile, ASetupOnAnRtkMarkIsOrientedOnAnotherAndItsOffsetShotsLandWhereTheFileSays)
+{
+    const ReadResult result = readFixture("rtk_setup.fld");
+    EXPECT_EQ(result.recordsSkipped, 0u);
+    EXPECT_TRUE(result.warnings.empty()) << result.warnings.front().message;
+    const auto positions = reducedPositions(result.project);
+    // A (1000, 5000) and B (1000, 5100) are entered coordinates, known to the
+    // reduction: the setup on A reads 30 degrees on B, due north, so its
+    // orientation is 0 - 30 = -30 degrees and its circle 120 is due east.
+    ASSERT_TRUE(positions.contains("B"));
+    EXPECT_NEAR(positions.at("B").easting, 1000.0, kPositionTolerance);
+    EXPECT_NEAR(positions.at("B").northing, 5100.0, kPositionTolerance);
+    // 101: 10 m out, level, and the radial offset of record 20 puts it 0.5 m
+    // further from the station: 1010.5, 5000.
+    ASSERT_TRUE(positions.contains("101"));
+    EXPECT_NEAR(positions.at("101").easting, 1010.5, kPositionTolerance);
+    EXPECT_NEAR(positions.at("101").northing, 5000.0, kPositionTolerance);
+    // 102: 20 m out, and the tangential offset of record 22, 0.5 m to the
+    // right looking east from the station - south: 1020, 4999.5.
+    ASSERT_TRUE(positions.contains("102"));
+    EXPECT_NEAR(positions.at("102").easting, 1020.0, kPositionTolerance);
+    EXPECT_NEAR(positions.at("102").northing, 4999.5, kPositionTolerance);
+}
+
 // ---- The resection fixture -------------------------------------------------------------
 
 TEST(OpcodeFieldFile, TheWholeResectionJobIsReadWithNothingSkipped)
@@ -574,8 +740,8 @@ TEST(OpcodeFieldFile, TheWholeResectionJobIsReadWithNothingSkipped)
     // 8-17) and the 15 records of lines 22-36: 27.
     EXPECT_EQ(result.recordsRead, 27u);
     EXPECT_EQ(result.recordsSkipped, 0u);
-    // Only the two offsets, which are not applied.
-    ASSERT_EQ(result.warnings.size(), 2u);
+    // Nothing to warn of: the two offsets are applied.
+    EXPECT_TRUE(result.warnings.empty()) << result.warnings.front().message;
     const survey::SurveyProject& project = result.project;
     ASSERT_EQ(project.stations.size(), 2u);
     EXPECT_EQ(project.points.size(), 2u); // K1 and K2
@@ -616,10 +782,11 @@ TEST(OpcodeFieldFile, AResectionStartsASetupOnItsNamedPointAndItsShotsAreItsOwn)
     EXPECT_DOUBLE_EQ(toK2[0].distance, 141.421);
     EXPECT_DOUBLE_EQ(toK2[0].targetHeight, 1.7);
     EXPECT_DOUBLE_EQ(toK2[1].distance, 141.42);
-    // After the 129 the shots are still S1's: 101 at 90 degrees, 102 at 95.
+    // After the 129 the shots are still S1's: 101 at 90 degrees (and 0.25 m
+    // to the right, the offset of record 24), 102 at 95.
     const auto to101 = observationsTo<survey::HorizontalDirectionObservation>(s1, "101");
     ASSERT_EQ(to101.size(), 1u);
-    EXPECT_NEAR(to101[0].direction, kPi / 2.0, kAngleTolerance);
+    EXPECT_NEAR(to101[0].direction, kPi / 2.0 + std::atan2(0.25, 50.0), kAngleTolerance);
     EXPECT_EQ(observationsTo<survey::HorizontalDirectionObservation>(s1, "102").size(), 1u);
     // Six pointings of three observations each.
     EXPECT_EQ(s1.observations.size(), 18u);
@@ -671,12 +838,15 @@ TEST(OpcodeFieldFile, MultipleCodingStringsTheCurrentPointIntoASecondFeature)
 TEST(OpcodeFieldFile, ACheckMeasurementKeepsItsCodeWithoutStringingItsTarget)
 {
     const ReadResult result = readFixture("resection.fld");
-    // Record 31 checks K2 and is coded BS 11: no BS string, the code kept.
+    // Record 31 checks K2 from S1 and is coded BS 11: no BS string, the code
+    // kept. K2 was made by record 10, so what the check says is under its
+    // record, with the attribute after it.
     EXPECT_EQ(topcon_test::feature(result.project, "BS"), nullptr);
     const auto k2 = metadataOf(result.project, "K2");
-    EXPECT_EQ(valueOf(k2, "check measurement"), "record 31, feature code BS, string number 11");
-    // The attribute after the check describes its target.
-    EXPECT_EQ(valueOf(k2, "Time"), "10:15:00");
+    EXPECT_EQ(valueOf(k2, "record 31/check measurement"),
+              "from setup S1, feature code BS, string number 11");
+    EXPECT_EQ(valueOf(k2, "record 31/Time"), "10:15:00");
+    EXPECT_EQ(k2.count("Time"), 0u);
     EXPECT_EQ(topcon_test::point(result.project, "K2")->code, "");
 }
 
@@ -699,16 +869,39 @@ TEST(OpcodeFieldFile, ABacksightsCodeIsKeptWithItsSetupAndStringsNothing)
     EXPECT_EQ(b->metadata.count("backsight"), 0u);
 }
 
-TEST(OpcodeFieldFile, OffsetsAreKeptWithTheirSetupAndWarnedOfNotApplied)
+TEST(OpcodeFieldFile, OffsetsMoveTheShotTheyFollowAndKeepWhatWasMeasured)
 {
     const ReadResult result = readFixture("resection.fld");
-    EXPECT_EQ(valueOf(metadataOf(result.project, "101"), "offset record 24"),
-              "tangential 0.25 m from setup S1");
+    const survey::SurveyStation& s1 = result.project.stations.at(0);
+    // 101: circle 90, zenith 90, 50 m, then record 24's tangential 0.25 m,
+    // to the right looking from S1: the circle reading of a point 50 m out
+    // and 0.25 m across, 90 + atan2(0.25, 50) degrees, hypot(50, 0.25) m
+    // away, still level.
+    const auto direction101 = observationsTo<survey::HorizontalDirectionObservation>(s1, "101");
+    ASSERT_EQ(direction101.size(), 1u);
+    EXPECT_NEAR(direction101[0].direction, kPi / 2.0 + std::atan2(0.25, 50.0), kAngleTolerance);
+    const auto distance101 = observationsTo<survey::DistanceObservation>(s1, "101");
+    ASSERT_EQ(distance101.size(), 1u);
+    EXPECT_NEAR(distance101[0].distance, std::hypot(50.0, 0.25), 1e-12);
+    const auto zenith101 = observationsTo<survey::ZenithAngleObservation>(s1, "101");
+    ASSERT_EQ(zenith101.size(), 1u);
+    EXPECT_NEAR(zenith101[0].angle, kPi / 2.0, kAngleTolerance);
+    // 102: circle 95, 50 m, then record 29's radial 0.5 m, away from S1:
+    // the same circle, 50.5 m.
+    const auto direction102 = observationsTo<survey::HorizontalDirectionObservation>(s1, "102");
+    ASSERT_EQ(direction102.size(), 1u);
+    EXPECT_NEAR(direction102[0].direction, degrees(95.0), kAngleTolerance);
+    const auto distance102 = observationsTo<survey::DistanceObservation>(s1, "102");
+    ASSERT_EQ(distance102.size(), 1u);
+    EXPECT_NEAR(distance102[0].distance, 50.5, 1e-12);
+    // What was measured, and each offset, are kept with the point.
+    const auto p101 = metadataOf(result.project, "101");
+    EXPECT_EQ(valueOf(p101, "offset record 24"),
+              "tangential 0.25 m from setup S1, applied to the shot of record 23");
+    EXPECT_EQ(valueOf(p101, "shot record 23 as measured"),
+              "horizontal circle 90.00000000, vertical circle 90.00000000, slope distance 50.000");
     EXPECT_EQ(valueOf(metadataOf(result.project, "102"), "offset record 29"),
-              "radial 0.5 m from setup S1");
-    EXPECT_TRUE(warned(result, 24, "the tangential offset (opcode 43) of 0.25 m to point '101'"));
-    EXPECT_TRUE(warned(result, 29, "the radial offset (opcode 42) of 0.5 m to point '102'"));
-    EXPECT_TRUE(warned(result, 29, "not applied"));
+              "radial 0.5 m from setup S1, applied to the shot of record 28");
 }
 
 TEST(OpcodeFieldFile, AnIntegerAttributeIsKeptLikeTheOthers)
@@ -725,6 +918,417 @@ TEST(OpcodeFieldFile, AnIntegerAttributeIsKeptLikeTheOthers)
     });
     EXPECT_TRUE(warned(notWhole, 3, "which is not a whole number; it is kept as text"));
     EXPECT_EQ(valueOf(metadataOf(notWhole.project, "1"), "Tree Spread"), "4.5");
+}
+
+// ---- A point measured more than once ---------------------------------------------------
+
+TEST(OpcodeFieldFile, EachMeasurementOfAPointKeepsItsAttributesUnderItsRecord)
+{
+    // A mark shot on both faces and checked: [FLD] makes each a point with
+    // its own attributes. The first shot's are the point's; the others'
+    // are under their records, none overwriting another.
+    const ReadResult result = readLines({
+        "03\t\t\t\tS\t\t\t1.5",
+        "07\t\tKJ\t01\tM1\t\t\t328.6\t85.2\t38.33",
+        "73\t\tTime\t11:27:49",
+        "72\t\tTarget height\t1.900",
+        "07\t\tKJ\t01\tM1\t\t\t148.6\t274.8\t38.34",
+        "73\t\tTime\t11:28:02",
+        "72\t\tTarget height\t1.900",
+        "06\t\t\t\tM1\t\t\t328.6\t85.2\t38.33",
+        "73\t\tTime\t11:30:00",
+    });
+    const auto m1 = metadataOf(result.project, "M1");
+    EXPECT_EQ(valueOf(m1, "Time"), "11:27:49");
+    EXPECT_EQ(valueOf(m1, "Target height"), "1.900");
+    EXPECT_EQ(valueOf(m1, "record 5/Time"), "11:28:02");
+    EXPECT_EQ(valueOf(m1, "record 5/Target height"), "1.900");
+    EXPECT_EQ(valueOf(m1, "record 8/Time"), "11:30:00");
+    EXPECT_EQ(valueOf(m1, "record 8/check measurement"), "from setup S");
+    EXPECT_EQ(result.recordsRead, 9u);
+    EXPECT_TRUE(result.warnings.empty()) << result.warnings.front().message;
+}
+
+TEST(OpcodeFieldFile, ANameGivenTwiceAfterOneRecordKeepsItsSecondValueWithAWarning)
+{
+    // A shot coded twice (07 then 16) followed by its attribute set twice:
+    // what follows the 16 is still the shot's, so the second set's names
+    // repeat the first's. A repeat with the same value adds nothing; one
+    // with another value is kept under its own record, and said.
+    const ReadResult result = readLines({
+        "03\t\t\t\tS\t\t\t1.5",
+        "07\t\tPI\t06\t501\t\t\t160.2\t93.3\t51.8",
+        "16\t\tUT\t06\t\t\t",
+        "73\t\tDepth\t0.860",
+        "73\t\tCondition\tGood",
+        "73\t\tDepth\t--",
+        "73\t\tCondition\tGood",
+    });
+    const auto p501 = metadataOf(result.project, "501");
+    EXPECT_EQ(valueOf(p501, "Depth"), "0.860");
+    EXPECT_EQ(valueOf(p501, "Depth (record 6)"), "--");
+    EXPECT_EQ(valueOf(p501, "Condition"), "Good");
+    EXPECT_EQ(valueOf(p501, "Condition (record 7)"), "(absent)");
+    EXPECT_TRUE(warned(result, 6,
+                       "point '501' is given 'Depth' again, as '--' after '0.860'; both are kept, "
+                       "this one as 'Depth (record 6)'"));
+    EXPECT_EQ(result.warnings.size(), 1u);
+    EXPECT_EQ(result.recordsRead, 7u);
+    EXPECT_EQ(result.recordsSkipped, 0u);
+}
+
+TEST(OpcodeFieldFile, AKeyedInMarkMeasuredAgainKeepsTheNewMeasurementsAttributesApart)
+{
+    // CM1 keyed in with no attributes, then an RTK measurement of it at the
+    // same coordinates: the solution's attributes and time are record 2's,
+    // not the keyed-in mark's own.
+    const ReadResult result = readLines({
+        "02\t\t\t\tCM1\t\t\t500000.0\t6200000.0\t10.0",
+        " 2\t14/03/26 09:15:02.40\t\t\tCM1\t\t\t500000.0\t6200000.0\t10.0",
+        "124\t\t\tGPS Information\t0",
+        "73\t\tGNSS Solution\tfixed",
+        "125\t\t\t\t0",
+    });
+    const auto cm1 = metadataOf(result.project, "CM1");
+    EXPECT_EQ(valueOf(cm1, "record 2/time stamp"), "14/03/26 09:15:02.40");
+    EXPECT_EQ(valueOf(cm1, "record 2/GPS Information/GNSS Solution"), "fixed");
+    EXPECT_EQ(valueOf(cm1, "GPS Information/GNSS Solution"), "(absent)");
+    EXPECT_EQ(valueOf(cm1, "time stamp"), "(absent)");
+    EXPECT_TRUE(result.warnings.empty()) << result.warnings.front().message;
+}
+
+TEST(OpcodeFieldFile, APointIdGivenWithItsNameIsKeptOnceAndADifferentOneUnderItsRecord)
+{
+    const ReadResult result = readLines({
+        "03\t\t\t\tS\t\t\t1.5",
+        "07\t\t\t\t11\tCP\t\t10.0\t90.0\t5.0",
+        "07\t\t\t\t12\tCP\t\t190.0\t270.0\t5.0",
+        "07\t\t\t\t11\tCP\t\t10.0\t90.0\t5.0",
+    });
+    const auto cp = metadataOf(result.project, "CP");
+    EXPECT_EQ(valueOf(cp, "point ID"), "11");
+    EXPECT_EQ(valueOf(cp, "record 3/point ID"), "12");
+    EXPECT_EQ(valueOf(cp, "record 4/point ID"), "(absent)");
+    EXPECT_EQ(topcon_test::unpositioned(result.project, "11"), nullptr);
+}
+
+// ---- The backsight -----------------------------------------------------------------------
+
+TEST(OpcodeFieldFile, ABacksightWithNoCoordinatesOrientsTheSetupByTheAzimuthTheFileGivesIt)
+{
+    // [FLD] 44.8, 04: "The azimuth_value ... may be specified when no
+    // coordinate for the backsight point exists." CP1 at (1000, 5000); BSX
+    // has no coordinates, reads 30 degrees and is given azimuth 45; the shot
+    // reads 45, zenith 95, 50 m.
+    const ReadResult result = readLines({
+        "02\t\t\t\tCP1\t\t\t1000.0\t5000.0\t20.0",
+        "03\t\t\t\tCP1\t\t\t1.5",
+        "04\t\t\t\tBSX\t\t\t30.0\t90.0\t50.0\t45.0",
+        "07\t\tEB\t01\t101\t\t\t45.0\t95.0\t50.0",
+    });
+    ASSERT_EQ(result.project.stations.size(), 1u);
+    const survey::SurveyStation& station = result.project.stations[0];
+    ASSERT_TRUE(station.backsightAzimuth.has_value());
+    EXPECT_NEAR(*station.backsightAzimuth, degrees(45.0), kAngleTolerance);
+    EXPECT_EQ(valueOf(station.metadata, "backsight azimuth"),
+              "45.0 degrees, record 3: the setup is oriented by it if its backsight has no "
+              "coordinates");
+    // The orientation is 45 - 30 = 15 degrees, so the shot's bearing is 60:
+    // 50 sin 95 m out, (1000 + that sin 60, 5000 + that cos 60) - where the
+    // circle taken as the azimuth would put it on bearing 45, 13 m away.
+    const double plan = 50.0 * std::sin(degrees(95.0));
+    const auto positions = reducedPositions(result.project);
+    ASSERT_TRUE(positions.contains("101"));
+    EXPECT_NEAR(positions.at("101").easting, 1000.0 + plan * std::sin(degrees(60.0)),
+                kPositionTolerance);
+    EXPECT_NEAR(positions.at("101").northing, 5000.0 + plan * std::cos(degrees(60.0)),
+                kPositionTolerance);
+
+    // With no azimuth the circle reading on the backsight stands in for it.
+    const ReadResult circle = readLines({
+        "02\t\t\t\tCP1\t\t\t1000.0\t5000.0\t20.0",
+        "03\t\t\t\tCP1\t\t\t1.5",
+        "04\t\t\t\tBSX\t\t\t30.0\t90.0\t50.0",
+    });
+    ASSERT_EQ(circle.project.stations.size(), 1u);
+    ASSERT_TRUE(circle.project.stations[0].backsightAzimuth.has_value());
+    EXPECT_NEAR(*circle.project.stations[0].backsightAzimuth, degrees(30.0), kAngleTolerance);
+}
+
+// ---- Layouts -----------------------------------------------------------------------------
+
+TEST(OpcodeFieldFile, AFileWithoutTheEmptyColumnIsReadByItsCounts)
+{
+    // [FLD]'s own syntax: the description straight after the opcode. The 07
+    // with a feature code decides it; the 02 and 03 with none fit either.
+    const std::string bytes = lines({
+        "100\tdegrees\tmetres",
+        "02\t\t\tA\t\t\t10.0\t20.0\t1.0",
+        "03\t\t\tA\t\t\t1.5",
+        "07\tTREE\t\t7\t\t\t90.0\t90.0\t12.5",
+    });
+    auto read = topcon_test::read(kId, bytes, "plain.fld");
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    const survey::SurveyPoint* a = topcon_test::point(read->project, "A");
+    ASSERT_NE(a, nullptr);
+    EXPECT_DOUBLE_EQ(a->easting, 10.0);
+    EXPECT_DOUBLE_EQ(a->northing, 20.0);
+    ASSERT_EQ(read->project.stations.size(), 1u);
+    const survey::SurveyStation& station = read->project.stations[0];
+    const auto directions = observationsTo<survey::HorizontalDirectionObservation>(station, "7");
+    ASSERT_EQ(directions.size(), 1u);
+    EXPECT_NEAR(directions[0].direction, kPi / 2.0, kAngleTolerance);
+    const auto distances = observationsTo<survey::DistanceObservation>(station, "7");
+    ASSERT_EQ(distances.size(), 1u);
+    EXPECT_DOUBLE_EQ(distances[0].distance, 12.5);
+    EXPECT_EQ(topcon_test::unpositioned(read->project, "7")->code, "TREE");
+    EXPECT_EQ(read->recordsSkipped, 0u);
+}
+
+TEST(OpcodeFieldFile, ABacksightOfTenFieldsFitsEitherLayoutAndDecidesNothing)
+{
+    // [FLD]'s syntax with an uncoded backsight that gives its azimuth: ten
+    // fields, the count of a backsight in the column's layout without one.
+    // It decides nothing; the coded 07 decides, and every record is read as
+    // [FLD] writes it.
+    const ReadResult result = readLines({
+        "100\tdegrees\tmetres",
+        "02\t\t\tA\t\t\t10.0\t20.0\t1.0",
+        "02\t\t\tB\t\t\t10.0\t120.0\t1.0",
+        "03\t\t\tA\t\t\t1.5",
+        "04\t\t\tB\t\t\t0.0\t90.0\t100.0\t0.0",
+        "07\tTREE\t\t7\t\t\t90.0\t90.0\t12.5",
+    });
+    EXPECT_EQ(result.recordsSkipped, 0u);
+    EXPECT_TRUE(result.warnings.empty()) << result.warnings.front().message;
+    ASSERT_EQ(result.project.stations.size(), 1u);
+    const survey::SurveyStation& station = result.project.stations[0];
+    EXPECT_EQ(station.backsightPointId, "B");
+    ASSERT_TRUE(station.backsightAzimuth.has_value());
+    EXPECT_NEAR(*station.backsightAzimuth, 0.0, kAngleTolerance);
+    EXPECT_EQ(observationsTo<survey::DistanceObservation>(station, "7").at(0).distance, 12.5);
+
+    // With no coded record at all nothing decides, and the file is read as
+    // [FLD] writes it.
+    const ReadResult uncoded = readLines({
+        "02\t\t\tA\t\t\t10.0\t20.0\t1.0",
+        "02\t\t\tB\t\t\t10.0\t120.0\t1.0",
+        "03\t\t\tA\t\t\t1.5",
+        "04\t\t\tB\t\t\t0.0\t90.0\t100.0\t0.0",
+        "07\t\t\t8\t\t\t90.0\t90.0\t12.5",
+    });
+    EXPECT_EQ(uncoded.recordsSkipped, 0u);
+    ASSERT_EQ(uncoded.project.stations.size(), 1u);
+    EXPECT_EQ(uncoded.project.stations[0].backsightPointId, "B");
+    EXPECT_EQ(observationsTo<survey::DistanceObservation>(uncoded.project.stations[0], "8").size(),
+              1u);
+}
+
+TEST(OpcodeFieldFile, InAFileOfBothLayoutsARecordThatFitsEitherIsSkipped)
+{
+    // Coded records of both layouts - records 1 to 3 without the column,
+    // record 4 with it - then a backsight of ten fields with an empty first:
+    // the column and no azimuth, or no column and the azimuth.
+    const ReadResult result = readLines({
+        "02\tK\t\tCP1\t\t\t1000.0\t5000.0\t20.0",
+        "02\tK\t\tCP2\t\t\t1000.0\t5100.0\t20.0",
+        "03\tK\t\tCP1\t\t\t1.5",
+        "07\t\tEB\t01\t1\t\t\t10.0\t90.0\t5.0",
+        "04\t\t\t\tCP2\t\t\t0.0\t90.0\t100.0",
+    });
+    EXPECT_TRUE(warned(result, 0,
+                       "1 fixed record(s) have the column after the opcode (blank or a date or "
+                       "time) and 3 do not; the file is read as not having it"));
+    // Record 4 does not fit the file's layout.
+    EXPECT_TRUE(warned(result, 4, "opcode 07 has 9 values where the format gives 8"));
+    EXPECT_TRUE(warned(result, 5,
+                       "fit the format's layout both with the column after the opcode and without "
+                       "it, in a file whose records show both"));
+    ASSERT_EQ(result.project.stations.size(), 1u);
+    EXPECT_TRUE(result.project.stations[0].backsightPointId.empty());
+}
+
+TEST(OpcodeFieldFile, AFileWithoutTheColumnReadsARecordOfFixedFormThatHasIt)
+{
+    // [FLD]'s layout, decided by its coded records, and a target height, a
+    // scale factor and the units written with the column: an empty value
+    // before a value those records never have, so it is the column.
+    const ReadResult result = readLines({
+        "100\t\tdegrees\tmetres\tmillibars\tcelsius",
+        "02\tK\t\tCP1\t\t\t1000.0\t5000.0\t20.0",
+        "03\tK\t\tCP1\t\t\t1.5",
+        "05\t\t2.500",
+        "09\t\t0.5",
+        "07\tEB\t01\t701\t\t\t10.0\t95.0\t50.0",
+    });
+    EXPECT_EQ(result.recordsSkipped, 0u);
+    ASSERT_EQ(result.project.stations.size(), 1u);
+    const survey::SurveyStation& station = result.project.stations[0];
+    const auto zeniths = observationsTo<survey::ZenithAngleObservation>(station, "701");
+    ASSERT_EQ(zeniths.size(), 1u);
+    EXPECT_DOUBLE_EQ(zeniths[0].targetHeight, 2.5);
+    const auto distances = observationsTo<survey::DistanceObservation>(station, "701");
+    ASSERT_EQ(distances.size(), 1u);
+    EXPECT_DOUBLE_EQ(distances[0].distance, 25.0); // 50 x 0.5
+}
+
+TEST(OpcodeFieldFile, ATrailingTabIsNotAValue)
+{
+    // Every fixed record ends with a tab, as the files' 128 does: one blank
+    // field past the count, which the records are read without.
+    const ReadResult result = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0\t",
+        "02\t\t\t\tB\t\t\t1000.0\t5100.0\t20.0\t",
+        "03\t\t\t\tK\t\t\t1.5\t",
+        "04\t\t\t\tB\t\t\t0.0\t90.0\t100.0\t",
+        "07\t\tEB\t01\t1\t\t\t10.0\t90.0\t5.0\t",
+    });
+    EXPECT_EQ(result.recordsSkipped, 0u);
+    EXPECT_EQ(result.project.points.size(), 2u);
+    ASSERT_EQ(result.project.stations.size(), 1u);
+    EXPECT_EQ(result.project.stations[0].backsightPointId, "B");
+    EXPECT_DOUBLE_EQ(result.project.stations[0].setup.instrumentHeight, 1.5);
+    EXPECT_EQ(observationsTo<survey::DistanceObservation>(result.project.stations[0], "1").at(0)
+                  .distance,
+              5.0);
+}
+
+// ---- Offsets ------------------------------------------------------------------------------
+
+TEST(OpcodeFieldFile, OffsetsPutTheirPointWhereTheFormatSays)
+{
+    // S at (1000, 5000, 20), instrument and target 1.5 m, oriented on B due
+    // north at circle 0: circle 90 is east, 0 north. [FLD] 44.8: a radial
+    // offset along the line from the station, positive away; a tangential
+    // one at right angles, negative to the left looking from the station; a
+    // height offset added to the height.
+    const ReadResult result = readLines({
+        "02\t\t\t\tS\t\t\t1000.0\t5000.0\t20.0",
+        "02\t\t\t\tB\t\t\t1000.0\t5100.0\t20.0",
+        "03\t\t\t\tS\t\t\t1.5",
+        "05\t\t1.5",
+        "04\t\t\t\tB\t\t\t0.0\t90.0\t100.0",
+        "07\t\tEP\t1\tP1\t\t\t90.0\t90.0\t10.0",
+        "42\t\t0.5",
+        "07\t\tEP\t1\tP2\t\t\t90.0\t90.0\t20.0",
+        "43\t\t0.5",
+        "07\t\tEP\t1\tP3\t\t\t0.0\t90.0\t30.0",
+        "43\t\t-0.5",
+        "42\t\t-1.0",
+        "07\t\tEP\t1\tP4\t\t\t45.0\t90.0\t10.0",
+        "44\t\t0.25",
+    });
+    EXPECT_TRUE(result.warnings.empty()) << result.warnings.front().message;
+    const auto positions = reducedPositions(result.project);
+    ASSERT_EQ(positions.count("P1") + positions.count("P2") + positions.count("P3") +
+                  positions.count("P4"),
+              4u);
+    // P1: 10 m east, then 0.5 m further out.
+    EXPECT_NEAR(positions.at("P1").easting, 1010.5, kPositionTolerance);
+    EXPECT_NEAR(positions.at("P1").northing, 5000.0, kPositionTolerance);
+    // P2: 20 m east, then 0.5 m to the right looking east: south.
+    EXPECT_NEAR(positions.at("P2").easting, 1020.0, kPositionTolerance);
+    EXPECT_NEAR(positions.at("P2").northing, 4999.5, kPositionTolerance);
+    // P3: 30 m north, 0.5 m to the left looking north (west) and 1 m back
+    // toward the station - each from the measured position, in either order.
+    EXPECT_NEAR(positions.at("P3").easting, 999.5, kPositionTolerance);
+    EXPECT_NEAR(positions.at("P3").northing, 5029.0, kPositionTolerance);
+    // P4: 10 m on bearing 45, its plan position unmoved, 0.25 m higher than
+    // the station's 20 + 1.5 - 1.5.
+    EXPECT_NEAR(positions.at("P4").easting, 1000.0 + 10.0 * std::sin(kPi / 4.0),
+                kPositionTolerance);
+    EXPECT_NEAR(positions.at("P4").northing, 5000.0 + 10.0 * std::cos(kPi / 4.0),
+                kPositionTolerance);
+    ASSERT_TRUE(positions.at("P4").elevation.has_value());
+    EXPECT_NEAR(*positions.at("P4").elevation, 20.25, kPositionTolerance);
+}
+
+TEST(OpcodeFieldFile, OffsetsNamingAPointOrAStringAHeightOffsetAndOffsetsThatCannotBeRead)
+{
+    const ReadResult result = readLines({
+        "03\t\t\t\tS\t\t\t1.5",
+        "07\t\tEP\t1\t1\t\t\t10.0\t90.0\t5.0",
+        "07\t\tEP\t1\t2\t\t\t20.0\t90.0\t5.0",
+        "44\t\t0.1",                // height offset of the current point, 2
+        "43\t\t\t\t1\t\t\t-0.3",     // tangential offset of point 1, by its ID
+        "42\t\tEP\t1\t\t\t\t0.2",    // radial offset of EP 1's last point, 2
+        "42\t\t0.5\t0.0\t0.0",       // three values: neither of the two forms
+        "42\t\tabc",                 // not a number
+        "42\t\tXX\t9\t\t\t\t0.1",    // a string that is not open
+        "42\t\t\t\tZZ\t\t\t0.1",     // a point no record made
+    });
+    const auto p1 = metadataOf(result.project, "1");
+    const auto p2 = metadataOf(result.project, "2");
+    EXPECT_EQ(valueOf(p2, "offset record 4"), "height 0.1 m from setup S, applied to the shot of "
+                                              "record 3");
+    EXPECT_EQ(valueOf(p1, "offset record 5"), "tangential -0.3 m from setup S, applied to the "
+                                              "shot of record 2");
+    EXPECT_EQ(valueOf(p2, "offset record 6"), "radial 0.2 m from setup S, applied to the shot of "
+                                              "record 3");
+    EXPECT_TRUE(warned(result, 7, "with 3 value(s) where the format gives the offset"));
+    EXPECT_TRUE(warned(result, 8, "radial offset (opcode 42) with no offset"));
+    EXPECT_TRUE(warned(result, 9, "radial offset (opcode 42): there is no open string XX 9"));
+    EXPECT_TRUE(warned(result, 10, "names no string and no point a record before it made"));
+    EXPECT_EQ(result.recordsSkipped, 4u);
+    // Point 2 (circle 20, zenith 90, 5 m): 0.2 m further out and 0.1 m up,
+    // so 5.2 m out on the same circle, rising 0.1 m. Point 1 (circle 10, 5 m):
+    // 0.3 m to the left, the circle less atan2(0.3, 5).
+    const survey::SurveyStation& station = result.project.stations.at(0);
+    const auto distance2 = observationsTo<survey::DistanceObservation>(station, "2");
+    ASSERT_EQ(distance2.size(), 1u);
+    EXPECT_NEAR(distance2[0].distance, std::hypot(5.2, 0.1), 1e-12);
+    const auto zenith2 = observationsTo<survey::ZenithAngleObservation>(station, "2");
+    ASSERT_EQ(zenith2.size(), 1u);
+    EXPECT_NEAR(zenith2[0].angle, std::atan2(5.2, 0.1), kAngleTolerance);
+    const auto direction1 = observationsTo<survey::HorizontalDirectionObservation>(station, "1");
+    ASSERT_EQ(direction1.size(), 1u);
+    EXPECT_NEAR(direction1[0].direction, degrees(10.0) - std::atan2(0.3, 5.0), kAngleTolerance);
+}
+
+TEST(OpcodeFieldFile, AnOffsetOfAPointMeasuredTwiceOrNotShotFromTheSetupIsKeptNotApplied)
+{
+    const ReadResult result = readLines({
+        "02\t\t\t\tC\t\t\t1000.0\t5000.0\t20.0",
+        "42\t\t0.5", // an entered coordinate
+        "03\t\t\t\tS\t\t\t1.5",
+        "07\t\tEP\t1\tA\t\t\t10.0\t90.0\t5.0",
+        "07\t\tEP\t1\tA\t\t\t190.0\t270.0\t5.0",
+        "43\t\t0.5", // A is shot twice from S: which shot, the format does not say
+        "07\t\tEP\t1\tD\t\t\t30.0\t90.0\t5.0",
+        "03\t\t\t\tT\t\t\t1.5",
+        "43\t\t\t\tD\t\t\t0.5", // D was shot from S, not from T
+        "07\t\tEP\t1\tE\t\t\t90.0\t90.0\t1.0",
+        "42\t\t-1.0", // 1 m back toward T: T's own mark, which no shot can see
+    });
+    EXPECT_TRUE(warned(result, 2,
+                       "is kept in its metadata and not applied: point 'C' is the entered "
+                       "coordinate of record 1"));
+    EXPECT_TRUE(warned(result, 6,
+                       "is kept in its metadata and not applied: point 'A' was measured 2 times "
+                       "from setup S"));
+    EXPECT_TRUE(warned(result, 9,
+                       "is kept in its metadata and not applied: point 'D' was not measured "
+                       "(opcode 07) from the current setup"));
+    EXPECT_EQ(valueOf(metadataOf(result.project, "A"), "offset record 6"),
+              "tangential 0.5 m from setup S, not applied");
+    EXPECT_EQ(valueOf(metadataOf(result.project, "D"), "offset record 9"),
+              "tangential 0.5 m, not applied");
+    EXPECT_TRUE(warned(result, 11,
+                       "is kept in its metadata and not applied: with the other offsets of its "
+                       "shot it puts point 'E' on the station"));
+    EXPECT_EQ(valueOf(metadataOf(result.project, "E"), "offset record 11"),
+              "radial -1 m from setup T, not applied");
+    // A's and E's shots are as measured.
+    const auto toA =
+        observationsTo<survey::HorizontalDirectionObservation>(result.project.stations.at(0), "A");
+    ASSERT_EQ(toA.size(), 2u);
+    EXPECT_NEAR(toA[0].direction, degrees(10.0), kAngleTolerance);
+    const auto toE =
+        observationsTo<survey::DistanceObservation>(result.project.stations.at(1), "E");
+    ASSERT_EQ(toE.size(), 1u);
+    EXPECT_DOUBLE_EQ(toE[0].distance, 1.0);
+    EXPECT_EQ(metadataOf(result.project, "E").count("shot record 10 as measured"), 0u);
+    EXPECT_EQ(result.recordsSkipped, 0u);
 }
 
 // ---- Records that are not read, and what follows them -----------------------------------
@@ -769,6 +1373,31 @@ TEST(OpcodeFieldFile, ASetupThatCannotBeReadLeavesItsShotsUnreadRatherThanFiledU
     EXPECT_EQ(result.recordsSkipped, 4u);
 }
 
+TEST(OpcodeFieldFile, AResectionAfterASetupStartsASetupOfItsOwn)
+{
+    // The resection job's 128 blocks after a 03: before the reader read 128,
+    // their shots were filed under that 03's setup and oriented by it.
+    const ReadResult result = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "03\t\t\t\tK\t\t\t1.5",
+        "07\t\tEB\t01\t1\t\t\t10.0\t90.0\t5.0",
+        "128\t\t\t\t\tRE01\t\t1.600\t",
+        "7\t\t\t\tK\tK\t\t180.0\t90.0\t100.0",
+        "129",
+        "07\t\tEB\t01\t2\t\t\t20.0\t90.0\t5.0",
+    });
+    ASSERT_EQ(result.project.stations.size(), 2u);
+    const survey::SurveyStation& k = result.project.stations[0];
+    const survey::SurveyStation& re01 = result.project.stations[1];
+    EXPECT_EQ(k.setup.pointId, "K");
+    EXPECT_EQ(k.observations.size(), 3u); // point 1 only
+    EXPECT_EQ(re01.setup.pointId, "RE01");
+    EXPECT_DOUBLE_EQ(re01.setup.instrumentHeight, 1.6);
+    EXPECT_EQ(observationsTo<survey::DistanceObservation>(re01, "K").size(), 1u);
+    EXPECT_EQ(observationsTo<survey::DistanceObservation>(re01, "2").size(), 1u);
+    EXPECT_EQ(result.recordsSkipped, 0u);
+}
+
 TEST(OpcodeFieldFile, AResectionOfTheDescriptionsOwnFormNamesNoPointAndStillOwnsItsShots)
 {
     // [FLD]'s .fld syntax: "128 instrument_height_value", no description.
@@ -790,6 +1419,51 @@ TEST(OpcodeFieldFile, AResectionOfTheDescriptionsOwnFormNamesNoPointAndStillOwns
     EXPECT_TRUE(warned(stray, 2, "end of a resection (opcode 129) with no resection open"));
 }
 
+TEST(OpcodeFieldFile, AResectionEndThatDoesNotMatchItsStartIsWarnedOf)
+{
+    const ReadResult result = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "128\t\t1.500",
+        "07\t\tEB\t01\t1\t\t\t10.0\t90.0\t5.0",
+        "139", // a Helmert end for a least squares resection
+        "138\t\t1.500",
+        "07\t\tEB\t01\t2\t\t\t20.0\t90.0\t5.0",
+        "139\t\tstray",
+    });
+    EXPECT_TRUE(warned(result, 4,
+                       "end of a resection (opcode 139) ends the resection of record 2, which is "
+                       "opcode 128"));
+    EXPECT_TRUE(warned(result, 7,
+                       "end of a resection (opcode 139) carries values the format does not give "
+                       "it; they are not kept"));
+    ASSERT_EQ(result.project.stations.size(), 2u);
+    EXPECT_EQ(valueOf(result.project.stations[1].metadata, "resection"), "Helmert, record 5");
+    EXPECT_EQ(result.recordsSkipped, 0u);
+}
+
+TEST(OpcodeFieldFile, ACodedSetupStringsNothingAndKeepsItsCodeWithTheSetup)
+{
+    // [FLD] 44.4 strings a measurement point; a setup makes none.
+    const ReadResult result = readLines({
+        "02\t\t\t\tS1\t\t\t1000.0\t5000.0\t20.0",
+        "03\t\tKB\t1\tS1\t\tnail\t1.500",
+        "07\t\tKB\t1\t101\t\t\t10.0\t90.0\t5.0",
+        "128\t\tKB\t1\t\tR1\t\t0.000\t",
+        "07\t\tKB\t1\t102\t\t\t20.0\t90.0\t5.0",
+    });
+    const survey::SurveyFeature* kb = topcon_test::feature(result.project, "KB");
+    ASSERT_NE(kb, nullptr);
+    EXPECT_EQ(kb->pointIds, (std::vector<std::string>{"101", "102"}));
+    ASSERT_EQ(result.project.stations.size(), 2u);
+    EXPECT_EQ(valueOf(result.project.stations[0].metadata, "setup coding"),
+              "feature code KB, string number 1, comment nail");
+    EXPECT_EQ(valueOf(result.project.stations[1].metadata, "setup coding"),
+              "feature code KB, string number 1");
+    // The comment still describes the point the setup stands on.
+    EXPECT_EQ(topcon_test::point(result.project, "S1")->description, "nail");
+    EXPECT_EQ(topcon_test::point(result.project, "S1")->code, "");
+}
+
 TEST(OpcodeFieldFile, CloseStringByItsCodeOrItsPointAndWhenThereIsNoneToClose)
 {
     const ReadResult result = readLines({
@@ -805,6 +1479,8 @@ TEST(OpcodeFieldFile, CloseStringByItsCodeOrItsPointAndWhenThereIsNoneToClose)
         "07\t\t\t\t6\t\t\t60.0\t90.0\t5.0",
         "20", // point 6 has no feature code: no current string
         "07\t\tEP\t1\t7\t\t\t70.0\t90.0\t5.0",
+        "20\t\t\t\t\t\tnote", // a description naming neither a string nor a point
+        "20\t\tEP\t1",         // two values
     });
     const auto ep = featuresOf(result.project, "EP");
     ASSERT_EQ(ep.size(), 2u);
@@ -818,30 +1494,11 @@ TEST(OpcodeFieldFile, CloseStringByItsCodeOrItsPointAndWhenThereIsNoneToClose)
     EXPECT_TRUE(warned(result, 6, "there is no open string EP 1"));
     EXPECT_TRUE(warned(result, 9, "is closed with 2 point(s)"));
     EXPECT_TRUE(warned(result, 11, "the point of record 10 has no feature code"));
+    EXPECT_TRUE(warned(result, 13, "whose point description names neither a string nor a point"));
+    EXPECT_TRUE(warned(result, 14,
+                       "with 2 value(s) where the format gives none, or a point description of 5"));
     EXPECT_EQ(result.recordsRead, 10u);
-    EXPECT_EQ(result.recordsSkipped, 2u);
-}
-
-TEST(OpcodeFieldFile, OffsetsNamingAPointOrAStringAHeightOffsetAndOffsetsThatCannotBeRead)
-{
-    const ReadResult result = readLines({
-        "03\t\t\t\tS\t\t\t1.5",
-        "07\t\tEP\t1\t1\t\t\t10.0\t90.0\t5.0",
-        "07\t\tEP\t1\t2\t\t\t20.0\t90.0\t5.0",
-        "44\t\t0.1",                // height offset of the current point, 2
-        "43\t\t\t\t1\t\t\t-0.3",     // tangential offset of point 1, by its ID
-        "42\t\tEP\t1\t\t\t\t0.2",    // radial offset of EP 1's last point, 2
-        "42\t\t0.5\t0.0\t0.0",       // three values: neither of the two forms
-        "42\t\tabc",                 // not a number
-    });
-    const auto p1 = metadataOf(result.project, "1");
-    const auto p2 = metadataOf(result.project, "2");
-    EXPECT_EQ(valueOf(p2, "offset record 4"), "height 0.1 m");
-    EXPECT_EQ(valueOf(p1, "offset record 5"), "tangential -0.3 m from setup S");
-    EXPECT_EQ(valueOf(p2, "offset record 6"), "radial 0.2 m from setup S");
-    EXPECT_TRUE(warned(result, 7, "with 3 value(s) where the format gives the offset"));
-    EXPECT_TRUE(warned(result, 8, "radial offset (opcode 42) with no offset"));
-    EXPECT_EQ(result.recordsSkipped, 2u);
+    EXPECT_EQ(result.recordsSkipped, 4u);
 }
 
 TEST(OpcodeFieldFile, TheFileEndRecordStopsTheReadAndCountsWhatFollows)
@@ -870,6 +1527,8 @@ TEST(OpcodeFieldFile, AnOpcodeOnlyTheXmlFormHasAndOneTheFormatDoesNotDefineAreSk
         "73\t\tDate\td",
         "8\t\tx",
         "15\t\t0.001",
+        "50\t\t\t\tS\t\t\t0.5",
+        "51\t\tkerbs\tfor",
     });
     EXPECT_TRUE(warned(result, 3,
                        "opcode 140 (GNSS coordinate) is defined only for the format's XML form"));
@@ -880,6 +1539,39 @@ TEST(OpcodeFieldFile, AnOpcodeOnlyTheXmlFormHasAndOneTheFormatDoesNotDefineAreSk
     EXPECT_TRUE(warned(result, 6,
                        "opcode 15 (vertical circle correction) is not one this reader imports; "
                        "the measurements after it are read without it"));
+    // 50 is a bearing datum difference for what follows; 51 starts a field
+    // template, from which what follows may take its codes.
+    EXPECT_TRUE(warned(result, 7,
+                       "opcode 50 (backsight bearing) is not one this reader imports; the "
+                       "measurements after it are read without it"));
+    EXPECT_TRUE(warned(result, 8,
+                       "opcode 51 (template start) is not one this reader imports; the "
+                       "measurements after it keep the codes they are written with"));
+    EXPECT_EQ(result.recordsSkipped, 6u);
+}
+
+TEST(OpcodeFieldFile, LinesThatAreNoRecordSayWhyAndIndentedCommentsAreRead)
+{
+    const ReadResult result = readLines({
+        "  {Version 6.0}",
+        "   // Coordinate System: Local grid D",
+        "\t// Job name : indented by a tab",
+        "03\t\t\t\tS\t\t\t1.5",
+        "\t07\t\tEP\t1\t1\t\t\t10.0\t90.0\t5.0", // a tab before the opcode
+        "0007\t\tEP\t1\t2\t\t\t20.0\t90.0\t5.0",
+        "+7\t\tEP\t1\t3\t\t\t30.0\t90.0\t5.0",
+        "{Version 7.0}", // not the first record
+        "\x1A",          // a DOS end-of-file byte
+    });
+    EXPECT_EQ(result.project.metadata.at("version"), "{Version 6.0}");
+    EXPECT_EQ(result.project.coordinateSystem.name, "Local grid D");
+    EXPECT_EQ(result.project.metadata.at("header: Job name"), "indented by a tab");
+    EXPECT_TRUE(warned(result, 5, "the record's first field is empty, where its opcode belongs"));
+    EXPECT_TRUE(warned(result, 6,
+                       "'0007' is not an opcode: an opcode is a number of one to three digits"));
+    EXPECT_TRUE(warned(result, 7, "'+7' is not an opcode: an opcode is a number"));
+    EXPECT_TRUE(warned(result, 8, "'{Version 7.0}' is not an opcode: a record opens with a number"));
+    EXPECT_EQ(result.recordsRead, 2u);
     EXPECT_EQ(result.recordsSkipped, 4u);
 }
 
@@ -899,6 +1591,27 @@ TEST(OpcodeFieldFile, AnUnnamedAttributeInAFileWithoutTheColumnIsKeptUnderItsRec
     EXPECT_EQ(valueOf(p7, "unnamed attribute (record 4)"), "0.5");
     EXPECT_EQ(valueOf(p7, "Depth"), "1.5");
     EXPECT_EQ(p7.count("0.5"), 0u);
+}
+
+TEST(OpcodeFieldFile, AnAttributeWithExtraValuesOrWithNothingIsWarnedOf)
+{
+    const ReadResult result = readLines({
+        "03\t\t\t\tS\t\t\t1.5",
+        "07\t\tEP\t1\t1\t\t\t10.0\t90.0\t5.0",
+        "72\t\tDepth\t0.6\t0.7",
+        "71\t\tCount\t3\t4",
+        "73\t\t",
+        "73",
+    });
+    const auto p1 = metadataOf(result.project, "1");
+    EXPECT_EQ(valueOf(p1, "Depth"), "0.6");
+    EXPECT_EQ(valueOf(p1, "Count"), "3");
+    EXPECT_TRUE(warned(result, 3, "attribute 'Depth' has values after its value; they are not "
+                                  "kept"));
+    EXPECT_TRUE(warned(result, 4, "attribute 'Count' has values after its value"));
+    EXPECT_TRUE(warned(result, 5, "attribute record (opcode 73) with neither a name nor a value"));
+    EXPECT_TRUE(warned(result, 6, "attribute record (opcode 73) with neither a name nor a value"));
+    EXPECT_EQ(result.recordsSkipped, 2u);
 }
 
 TEST(OpcodeFieldFile, AdditionalTextKeepsItsSpaces)
@@ -953,10 +1666,34 @@ TEST(OpcodeFieldFile, AttributeGroupsNestAndAGroupEndedTwiceOrLeftOpenIsWarnedOf
     EXPECT_TRUE(warned(result, 9, "gives the level '3' and opens inside 0 group(s)"));
     EXPECT_TRUE(warned(result, 9, "is not ended (opcode 125) before the file ends"));
     EXPECT_EQ(result.recordsSkipped, 1u);
-    // No group names GPS or GNSS, and no attribute is a GNSS solution: P
-    // stays a keyed-in coordinate.
-    EXPECT_EQ(topcon_test::point(result.project, "P")->coordinateSource,
-              survey::CoordinateSource::Entered);
+}
+
+TEST(OpcodeFieldFile, AGroupRecordThatDoesNotFitIsWarnedOfOrSkipped)
+{
+    const ReadResult result = readLines({
+        "02\t\t\t\tP\t\t\t1000.0\t5000.0\t10.0",
+        "124\t\ta\tb\tc\td",     // four values: which is the name?
+        "124\t\tx\tNamed\t0",    // text before the name
+        "73\t\tA\t1",
+        "125\t\t\t\t5",          // not the open group's level
+        "124\t\t\t\t0",          // no name
+        "73\t\tB\t2",
+        "125\t\t\tOther\t0",     // names another group
+    });
+    EXPECT_TRUE(warned(result, 2, "attribute group (opcode 124) with 4 value(s); which is its name "
+                                  "cannot be told"));
+    EXPECT_TRUE(warned(result, 3, "attribute group 'Named' has 'x' before its name"));
+    EXPECT_TRUE(warned(result, 5,
+                       "the end of attribute group 'Named' gives the level '5', which is not the "
+                       "group's"));
+    EXPECT_TRUE(warned(result, 6, "attribute group with no name: its attributes are kept without "
+                                  "one"));
+    EXPECT_TRUE(warned(result, 8, "the end of attribute group '' names 'Other'; the open group is "
+                                  "ended"));
+    const auto p = metadataOf(result.project, "P");
+    EXPECT_EQ(valueOf(p, "Named/A"), "1");
+    EXPECT_EQ(valueOf(p, "B"), "2");
+    EXPECT_EQ(result.recordsSkipped, 1u);
 }
 
 TEST(OpcodeFieldFile, MultipleCodingThatNamesItsOwnPointOrHasNoCodeIsWarnedOf)
@@ -985,9 +1722,9 @@ TEST(OpcodeFieldFile, MultipleCodingThatNamesItsOwnPointOrHasNoCodeIsWarnedOf)
 TEST(OpcodeFieldFile, ReadsEveryTruncationAndNoiseOfItsFixturesWithoutCrashing)
 {
     std::size_t reads = 0;
-    for (const char* name : {"setup.fld", "gnss.fld", "resection.fld"}) {
+    for (const char* name : {"setup.fld", "gnss.fld", "resection.fld", "rtk_setup.fld"}) {
         reads += topcon_test::readEveryTruncationAndNoise(
             kId, fixture(std::filesystem::path("fld") / name), name);
     }
-    EXPECT_GT(reads, 3000u);
+    EXPECT_GT(reads, 4000u);
 }

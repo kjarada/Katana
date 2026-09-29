@@ -192,8 +192,9 @@ TEST(SurveyImportWizard, TheContentStepShowsWhatEachFormatsReaderRead)
     // with word 84 (a station), one_setup.jxl one StationRecord,
     // setup_metres.rw5 one OC record, setup.gt7 one STN line, setup.fld one
     // 03 record, gnss.fld none (RTK coordinates only), resection.fld a 128
-    // and a 03; a RINEX observation file has no setups and one GNSS session,
-    // and its navigation file of the same name (.24n) is read beside it.
+    // and a 03, rtk_setup.fld one 03 on an RTK mark; a RINEX observation file
+    // has no setups and one GNSS session, and its navigation file of the same
+    // name (.24n) is read beside it.
     const struct {
         const char* file;
         const char* setups;
@@ -204,6 +205,7 @@ TEST(SurveyImportWizard, TheContentStepShowsWhatEachFormatsReaderRead)
                  {"fld/setup.fld", "1"},
                  {"fld/gnss.fld", "0"},
                  {"fld/resection.fld", "2"},
+                 {"fld/rtk_setup.fld", "1"},
                  {"rinex/test2560.24o", "0"}};
     for (const auto& entry : files) {
         SCOPED_TRACE(entry.file);
