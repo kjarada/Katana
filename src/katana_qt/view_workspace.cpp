@@ -104,6 +104,7 @@ class ViewWorkspace::VerbHost final : public katana::cad::ViewVerbHost {
         return workspace_.zoomView(request);
     }
     void changed(const std::vector<ViewId>& ids) override { workspace_.linkChanged(ids); }
+    void layersChanged(ViewId id) override { workspace_.viewLayersChanged(id); }
 
   private:
     ViewWorkspace& workspace_;

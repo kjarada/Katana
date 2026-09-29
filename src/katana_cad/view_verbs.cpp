@@ -10,6 +10,8 @@
 
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/text.hpp"
+#include "katana/entity/layer_path.hpp"
+#include "katana/entity/tables.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad {
@@ -25,7 +27,8 @@ namespace {
 
 constexpr const char* kViewsUsage =
     "VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id | LINK id[,id...] [TO id] | "
-    "UNLINK id[,id...]|ALL";
+    "UNLINK id[,id...]|ALL | HIDE id layer[,layer...] | SHOW id layer[,layer...]|ALL | "
+    "ISOLATE id layer";
 constexpr const char* kZoomUsage = "ZOOM [EXTENTS | IN [f] | OUT [f] | factor | WINDOW x0,y0,x1,y1 "
                                    "| CENTRE x,y [SCALE s]] [view=id]";
 
@@ -120,6 +123,56 @@ Result<std::vector<ViewId>> parseIds(const std::vector<std::string>& args, std::
     return ids;
 }
 
+// The layers of HIDE and SHOW: comma lists in one word or several, each once,
+// each a layer of the drawing or a node of the layer tree above one - what
+// the Layers popup lists. A name with a blank in it is quoted, as the
+// interpreter's words are.
+Result<std::vector<std::string>> parseLayers(const Document& document,
+                                             const std::vector<std::string>& args,
+                                             std::size_t from)
+{
+    std::vector<std::string> layers;
+    for (std::size_t at = from; at < args.size(); ++at) {
+        std::string_view word = args[at];
+        std::size_t start = 0;
+        while (start <= word.size()) {
+            const std::size_t comma = std::min(word.find(',', start), word.size());
+            if (comma > start) {
+                std::string layer(word.substr(start, comma - start));
+                if (!std::ranges::contains(layers, layer)) {
+                    layers.push_back(std::move(layer));
+                }
+            }
+            start = comma + 1;
+        }
+    }
+    const std::vector<std::string> names = document.model().layers.names();
+    for (const std::string& layer : layers) {
+        const bool exists = std::ranges::any_of(names, [&layer](const std::string& name) {
+            return katana::entity::isLayerUnder(name, layer);
+        });
+        if (!exists) {
+            return makeError(ErrorCode::NotFound,
+                             "no layer '" + layer + "' in the drawing (LAYER LIST lists them)",
+                             layer);
+        }
+    }
+    return layers;
+}
+
+// The layers a view hides of its own, for its record: none, or hidden=a,b.
+std::string hiddenOf(const ViewState& view)
+{
+    if (view.layers.empty()) {
+        return {};
+    }
+    std::string text;
+    for (const std::string& layer : view.layers.hidden()) {
+        text += (text.empty() ? "" : ",") + layer;
+    }
+    return " hidden=" + recordValue(text);
+}
+
 // Where a view is looking, after its id, kind and (for VIEWS) title and
 // active: a plan view's centre, scale and area; a 3D or elevation view's
 // camera; nothing for a section, whose pan and zoom its widget keeps.
@@ -157,7 +210,8 @@ std::string placeOf(const ViewState& view, bool withLinked)
 
 // ---- VIEWS --------------------------------------------------------------------------------
 
-Result<std::string> viewsVerb(ViewVerbHost& host, const std::vector<std::string>& args)
+Result<std::string> viewsVerb(const Document& document, ViewVerbHost& host,
+                              const std::vector<std::string>& args)
 {
     ViewSet& views = host.views();
     const std::string action = args.empty() ? "LIST" : upper(args[0]);
@@ -271,6 +325,56 @@ Result<std::string> viewsVerb(ViewVerbHost& host, const std::vector<std::string>
         }
         host.changed(left);
         return "unlinked=" + listed(left) + " linked=" + listed(views.linkedViews());
+    }
+    if (action == "HIDE" || action == "SHOW" || action == "ISOLATE") {
+        // The view's own filter: what its Layers button sets, by a line an
+        // agent can type and a test can run - a design view hiding the
+        // as-built layers beside an as-built view hiding the design ones.
+        if (args.size() < 3) {
+            return makeError(ErrorCode::ParseFailure,
+                             "VIEWS " + action + " takes a view id and the layers: VIEWS " +
+                                 action + (action == "ISOLATE" ? " <id> <layer>"
+                                                               : " <id> <layer>[,<layer>...]"));
+        }
+        auto id = parseViewId(args[1]);
+        if (!id) {
+            return id.error();
+        }
+        ViewState* view = views.find(*id);
+        if (view == nullptr) {
+            return notOpen(*id);
+        }
+        if (action == "SHOW" && args.size() == 3 && upper(args[2]) == "ALL") {
+            view->layers.clear();
+        } else {
+            auto layers = parseLayers(document, args, 2);
+            if (!layers) {
+                return layers.error();
+            }
+            if (action == "ISOLATE") {
+                if (layers->size() != 1) {
+                    return makeError(ErrorCode::ParseFailure,
+                                     "VIEWS ISOLATE takes one layer: the one the view is to show",
+                                     args[2]);
+                }
+                // parseLayers found it, so isolate has a branch to keep.
+                if (auto status =
+                        view->layers.isolate(layers->front(), document.model().layers.names());
+                    !status) {
+                    return status.error();
+                }
+            } else {
+                for (const std::string& layer : *layers) {
+                    if (action == "HIDE") {
+                        (void)view->layers.hide(layer);
+                    } else {
+                        (void)view->layers.show(layer);
+                    }
+                }
+            }
+        }
+        host.layersChanged(*id);
+        return viewRecord(views, *view);
     }
     return refuseWord(args[0]);
 }
@@ -541,7 +645,7 @@ bool applyPlanZoom(ViewTransform& view, const ZoomRequest& request)
 
 bool isViewVerb(std::string_view verb) { return verb == "VIEWS" || verb == "ZOOM"; }
 
-Result<std::string> runViewVerb(const Document& /*document*/, std::string_view verb,
+Result<std::string> runViewVerb(const Document& document, std::string_view verb,
                                 const std::vector<std::string>& args,
                                 const ViewHostProvider& provider)
 {
@@ -554,7 +658,7 @@ Result<std::string> runViewVerb(const Document& /*document*/, std::string_view v
                              "command line or with katana --command");
     }
     if (verb == "VIEWS") {
-        return viewsVerb(*host, args);
+        return viewsVerb(document, *host, args);
     }
     return zoomVerb(*host, args);
 }
@@ -563,7 +667,8 @@ std::string viewRecord(const ViewSet& views, const ViewState& view)
 {
     return "view=" + std::to_string(view.id) + " kind=" + kindWord(view.kind) +
            " title=" + recordValue(ViewSet::title(view)) +
-           " active=" + (views.activeId() == view.id ? "yes" : "no") + placeOf(view, true);
+           " active=" + (views.activeId() == view.id ? "yes" : "no") + placeOf(view, true) +
+           hiddenOf(view);
 }
 
 } // namespace katana::cad

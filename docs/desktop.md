@@ -489,7 +489,15 @@ no payload, so a view cannot follow a layer rename; every view's overrides are
 pruned of names that no longer exist after each change, which is what stops a
 later layer reusing the name from being born hidden. A view's Layers button
 (`view_layers_popup.*`) is where they are set: it filters that view alone,
-and isolating a tree node hides everything but that node's path.
+and isolating a tree node hides everything but that node's path. The same
+filter has lines - `VIEWS HIDE <id> <layers>`, `VIEWS SHOW <id> <layers>|ALL`
+and `VIEWS ISOLATE <id> <layer>` (`docs/cad.md`, "The window's views: VIEWS
+and ZOOM") - so an agent, a script and a test set up a design view hiding the
+as-built layers beside an as-built view hiding the design ones
+(`qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless`).
+Not done: the popup's rows still edit the view's state directly rather than
+run those lines, and a view's hidden reference layers have no line, since
+cad cannot name a reference layer.
 
 ### Linked views: a design view and an as-built view that move together
 

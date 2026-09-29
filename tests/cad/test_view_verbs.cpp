@@ -17,7 +17,9 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/cad/view_verbs.hpp"
+#include "katana/commands/entity_commands.hpp"
 #include "katana/core/text.hpp"
+#include "katana/entity/tables.hpp"
 
 using namespace katana::cad;
 using katana::core::ErrorCode;
@@ -37,6 +39,7 @@ class RecordingHost final : public ViewVerbHost {
     ViewSet set;
     std::vector<ZoomRequest> zooms;
     std::vector<std::vector<ViewId>> changes;
+    std::vector<ViewId> layerChanges;
 
     ViewSet& views() override { return set; }
     Result<ViewId> open(ViewKind kind) override
@@ -64,6 +67,7 @@ class RecordingHost final : public ViewVerbHost {
         return moved;
     }
     void changed(const std::vector<ViewId>& ids) override { changes.push_back(ids); }
+    void layersChanged(ViewId id) override { layerChanges.push_back(id); }
 };
 
 class ViewVerbsTest : public ::testing::Test {
@@ -358,6 +362,85 @@ TEST_F(ViewVerbsTest, ZoomRepliesWithTheViewThenEveryViewThatFollowed)
     EXPECT_EQ(lines[1],
               "view=1 kind=plan followed=2 centre=10,20 scale=8 area=-8.75,7.5,28.75,32.5");
     EXPECT_EQ(host.set.find(3)->plan.scale, 3.0);
+}
+
+// ---- a view's own layers: HIDE, SHOW, ISOLATE ---------------------------------------------
+//
+// The drawing: the default layer 0, design with design/road beneath it, and
+// asbuilt. What each line leaves hidden is worked out from LayerOverrides'
+// contract (layer_overrides.hpp), not read back.
+
+namespace {
+
+void addLayers(Document& document, std::initializer_list<const char*> names)
+{
+    for (const char* name : names) {
+        katana::entity::Layer layer;
+        layer.name = name;
+        ASSERT_TRUE(document.execute(katana::commands::createLayer(layer)).ok()) << name;
+    }
+}
+
+} // namespace
+
+TEST_F(ViewVerbsTest, ViewsHideShowIsolateChangeOnlyThatView)
+{
+    addLayers(document, {"design", "design/road", "asbuilt"});
+    const ViewState& design = plan();
+    const ViewState& asBuilt = plan();
+
+    // The design view hides the as-built layer, the as-built view the design
+    // one - and with it design/road, beneath it.
+    EXPECT_TRUE(ok("VIEWS HIDE 1 asbuilt").ends_with(" hidden=asbuilt"));
+    EXPECT_TRUE(ok("VIEWS HIDE 2 design").ends_with(" hidden=design"));
+    EXPECT_TRUE(design.layers.hides("asbuilt"));
+    EXPECT_FALSE(design.layers.hides("design/road"));
+    EXPECT_TRUE(asBuilt.layers.hides("design/road"));
+    EXPECT_FALSE(asBuilt.layers.hides("asbuilt"));
+    EXPECT_EQ(host.layerChanges, (std::vector<ViewId>{1, 2})) << "each view redrawn, alone";
+
+    // SHOW takes back exactly the entries named; a record with nothing
+    // hidden says nothing about it.
+    const std::string shown = ok("VIEWS SHOW 1 asbuilt");
+    EXPECT_EQ(shown.find("hidden="), std::string::npos) << shown;
+    EXPECT_TRUE(design.layers.empty());
+
+    // ISOLATE design/road: at each level of the path, the siblings of the
+    // next segment - 0 and asbuilt at the root; design has no child but road.
+    EXPECT_TRUE(ok("VIEWS ISOLATE 1 design/road").ends_with(" hidden=0,asbuilt"));
+    EXPECT_TRUE(ok("VIEWS SHOW 1 ALL").ends_with("area=-27.5,-5,47.5,45"));
+    EXPECT_TRUE(design.layers.empty());
+    // The as-built view was never touched by any of that.
+    EXPECT_EQ(asBuilt.layers.hidden().size(), 1U);
+
+    // Two layers in one list, and in two words.
+    (void)ok("VIEWS HIDE 1 design,asbuilt 0");
+    EXPECT_EQ(design.layers.size(), 3U);
+    // VIEWS lists the hidden layers in every record.
+    const std::string listed = ok("VIEWS");
+    EXPECT_NE(listed.find("hidden=0,asbuilt,design\n"), std::string::npos) << listed;
+}
+
+TEST_F(ViewVerbsTest, HidingALayerTheDrawingLacksIsRefusedNamingIt)
+{
+    addLayers(document, {"design", "design/road"});
+    const ViewState& view = plan();
+    const auto missing = refused("VIEWS HIDE 1 design,roads");
+    EXPECT_EQ(missing.code, ErrorCode::NotFound);
+    EXPECT_EQ(missing.message, "no layer 'roads' in the drawing (LAYER LIST lists them)");
+    // Refused whole: design, which exists, was not hidden either.
+    EXPECT_TRUE(view.layers.empty());
+    EXPECT_TRUE(host.layerChanges.empty());
+    EXPECT_EQ(refused("VIEWS ISOLATE 1 roads").code, ErrorCode::NotFound);
+    EXPECT_EQ(refused("VIEWS SHOW 1 roads").code, ErrorCode::NotFound);
+    EXPECT_TRUE(contains(refused("VIEWS ISOLATE 1 design design/road").message,
+                         "ISOLATE takes one layer"));
+    EXPECT_EQ(refused("VIEWS HIDE 9 design").code, ErrorCode::NotFound);
+    EXPECT_TRUE(contains(refused("VIEWS HIDE 1").message, "takes a view id and the layers"));
+    // A node of the tree with no layer of its own is a layer to hide: what
+    // the Layers popup offers as "design" when only design/road existed.
+    addLayers(document, {"survey/points"});
+    EXPECT_TRUE(ok("VIEWS HIDE 1 survey").ends_with(" hidden=survey"));
 }
 
 TEST(ViewZoom, ApplyPlanZoomLeavesWindowAndExtentsToTheWidget)
