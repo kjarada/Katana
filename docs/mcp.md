@@ -103,7 +103,9 @@ records are already the structured answer, and a tool would be a second
 spelling of it.
 
 A survey field file - any format the survey import reads, the opcode field
-file (`.fld`) among them - is read and imported the same way:
+file (`.fld`) and the Sokkia SDR file (`.sdr`,
+`McpServer.AnAgentReadsAndImportsASokkiaSdrFile`) among them - is read and
+imported the same way:
 `SURVEY READ <file>` answers what the reader made of it in records (`survey`,
 `content`, `declared`, each `warning` with its record), and `SURVEY IMPORT
 <file>` imports it as a survey job, one undo step, answering with the job and

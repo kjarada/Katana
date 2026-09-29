@@ -180,12 +180,14 @@ extension.
 |---|---|---|---|---|
 | Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
 | Opcode field file (`opcode-field-file`): `.fld`, first line `{Version 6.0}`, tab-separated records opening with a numeric opcode | yes | no | 1.0 | opcodes 02, 03, 04, 05, 06, 07, 09, 29, 41, 72, 73, 100 and -2 read; every other opcode skipped with a warning naming it; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
+| Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning; units from the header, an undefined one refused; declares no coordinate system |
 
-That is the one reader on main as of 2026-09-24. The instrument parsers this
-file describes above (GSI, the Trimble and Topcon exports, LandXML survey
-data) are not in `src/katana_surveyio/`, and the import wizard refuses any
-other registered format by name; `chooseFormat` in the wizard is where their
-dispatch will go when they land.
+The matrix lists the formats that have a section in this file. The other
+readers on main - Leica GSI, TDS RW5, Topcon GTS-7 (GTS-6 recognised only),
+Trimble JobXML, RINEX observation, and Leica DBX and the Survey Controller
+DC recognised and refused - register the same way and reach the wizard,
+`SURVEY READ` and `SURVEY IMPORT` through the registry, but have no row or
+section here yet; that is not done.
 
 ## The opcode field file (.fld)
 
@@ -282,6 +284,134 @@ Not done: opcodes 10, 11 and 12 (stadia, HA HD height, HA HD VD) and the
 string operations (joins, closes, arcs) are skipped with a warning; the format's XML
 form is not read; the verb has no reduction options - a
 person changes them in Survey > Survey Jobs, which re-adjusts the imported job.
+
+## The Sokkia SDR file (.sdr)
+
+Added 2026-09-29, when the owner asked that every example survey file be
+read. The SDR file among them - a traverse of 41 setups in the SDR33 layout,
+written by another program's converter, kept on the owner's machine and not
+committed - was not recognised at all: `SURVEY READ` answered "no registered
+format recognises this file". The reader is
+`src/katana_surveyio/sokkia_sdr.cpp`, on the raw builder the field file
+uses (`src/katana_surveyio/topcon_raw_builder.hpp`).
+
+It is read from Sokkia's "Interfacing with the SOKKIA SDR Electronic Field
+Book" (software 04-04.xx, October 1999): the record layouts of section
+3.6.2 (SDR33, 16-character point names and reals) and 3.6.1 (SDR2x, 4-digit
+point numbers and 10-character reals), the field types of 3.1 to 3.3, the
+derivation codes of 3.4 and the options of 3.5. What a record means comes
+from Sokkia's SDR Software Reference Manual (SETX), chapters 8, 28 and 29,
+and its SDR Level 5 manual, appendices A and B; what other programs write
+into the format, from Trimble's published "SDR33 Observations.xsl" and the
+SDR columns in Nikon's DTM-322 manual. The two layouts list the same fields
+in the same order - only a point id and a real differ in width - so one
+reader reads both, choosing by the header's version.
+
+Read: the header's units (degrees, gons or mils; metres, feet or US survey
+feet, `13DU` included; mmHg, inHg or mbar; Celsius or Fahrenheit) and its
+coordinate order; the job's name and correction switches; the instrument
+(model, serial number, prism constant, zenith or horizon vertical
+readings); weather and scale factor for the setup they are written before;
+setups (02) with their instrument heights; target heights (03); backsights
+(07); coordinates (08, and a 02's); raw face 1, face 2 and multiple-distance
+observations (09 F1, F2, MD) as pointings of a direction, a zenith and a
+slope distance; an azimuth keyed with no distance (11); sets (12); notes
+(13), a time stamp also dating its setup. Every other record is skipped with
+a warning naming it and its type.
+
+Decisions that are the reader's own, each stated in the source:
+
+- **`DD` marks a deleted record.** No published document describes the
+  prefix. After it (or after `DDDD`) every such line in the owner's file is a
+  complete record, and a record type is two digits, so the prefix cannot open
+  a live one; the two blocks that carry it are setups begun and abandoned,
+  each redone under the next live `02`. A deleted record is skipped, named in
+  a warning, and changes nothing after it: a deleted `03` sets no target
+  height, a deleted `02` begins no setup. Rejected: reading it as live, which
+  restarts a setup the surveyor abandoned, and passing over it without a
+  word, which the skipped count would then not show.
+- **The 07's azimuth orients the setup.** SETX 29.2.6 orients an observation
+  by the back-bearing's azimuth less its horizontal observation; the
+  reduction orients a setup by `SurveyStation::backsightAzimuth` less the
+  mean of its own readings on the backsight. So the azimuth goes there, and
+  the circle readings, one a round, into the setup's metadata. Rejected: the
+  circle reading, which the model's comment names and the RW5 and field-file
+  readers store for their formats - for an SDR file whose circle was not set
+  to the azimuth it drops the orientation correction silently (Sokkia's own
+  chapter 4 sample: azimuth 14 degrees, circle 0). Where the circle was set to
+  the azimuth, as in every round of the owner's file, the two are equal.
+- **One setup per `02`, its rounds together.** The owner's file observes each
+  setup in six rounds, each opened by a `07` to the same backsight at the same
+  azimuth; they are one setup, and the reduction means them face pair by face
+  pair. A `07` that names another backsight or azimuth, or whose circle
+  reading on the backsight is more than a minute of arc from the first
+  round's, begins a new setup on the same point: the circle was oriented
+  anew. The minute: the round-to-round spread in the owner's file is 6" at
+  most, and a circle moved between rounds on purpose moves by degrees.
+  Rejected: a new setup at every `07`, as the RW5 reader does for a repeated
+  backsight - never wrong, but the reduction then places a target from the
+  first round and takes the other five as checks, and a traverse adjustment
+  sees 246 setups for 41 stations.
+- **Whether the distances carry the atmospheric correction is Unknown.**
+  Sokkia's field book applies it as each distance is accepted when the job's
+  switch is on (the Level 5 manual, appendix B); Trimble's writer turns the
+  switch on and writes distances without it. The reduction then applies none
+  and says so, and Recompute or Fixed applies one from the recorded weather
+  (mmHg and inHg converted by the conventional values of NIST SP 811).
+  Rejected: Applied (Sokkia's rule) or NotApplied (Trimble's), either silently
+  wrong for files from the other writer.
+- **The prism constant is in the distances**, the instrument record's value
+  in millimetres: the field book applies it on acceptance, and Trimble's
+  writer adds the target's constant to each distance and writes 0 there.
+- **Option 45 is the coordinate order** of `02` and `08`: 1 north first, 2
+  east first (and Trimble's 3). Nikon's manual calls it the coordinate order
+  and Trimble's writer follows it; Sokkia names the fields "Northing" and
+  "Easting" but prints East first under E-N-Elev. A file that states
+  coordinates under any other option is refused.
+- **Coordinates keyed in (KI) are Entered**, an `08 TP` FieldObserved, `08
+  AJ`, `TV` and `RS` Calculated, any other Unknown; the first coordinates a
+  point is given are kept, the builder's rule, although the field book's is
+  that the latest win.
+- **Derived views are not imported.** A `09 MC` (oriented, reduced for the
+  heights) and an `11` with distances are computed from raw observations;
+  beside the raw ones they would count them twice.
+
+The owner's file, read on 2026-09-29 (a local check; the file is not in the
+repository): 4 206 records read - every line but 101 blank ones and the 14
+deleted - and 14 skipped, each warning naming its deleted record; 41 setups
+(two points occupied twice), 6 372 observations: 2 124 pointings, 1 062 on
+each face, each a direction, a zenith and a slope distance; 42 points, none
+with coordinates - the file gives none - and one coded feature. `SURVEY
+IMPORT` therefore draws nothing: its 47 warnings are 41 setups standing on
+points with no position, three face pairs outside the default 10"
+horizontal tolerance (11.0", 13.5" and 14.8", the file's own), two about the
+atmospheric correction, and the 42 named points that are not drawn. The
+file declares no coordinate system, so none applies until the person states
+one (wizard step 4, or `CRS SET` for the drawing); nothing is transformed.
+Given coordinates for its first station in a scratch copy, oriented by the
+circle as set, the reduction places all 42 points, within 0.06 mm of an
+independent reduction of the same copy by a separate script that reads the
+published columns.
+
+Tests: `tests/surveyio/test_sokkia_sdr.cpp`, on the hand-built
+`tests/surveyio/data/sdr/traverse.sdr` and records written in the test;
+`cli.survey_read_sokkia_sdr` and `cli.survey_import_sokkia_sdr`, whose
+positions are worked by hand in `src/katana_app/CMakeLists.txt`;
+`McpServer.AnAgentReadsAndImportsASokkiaSdrFile`; and the wizard's content
+step, which lists the fixture's two setups. The Survey Controller probe
+(`src/katana_surveyio/trimble_dc.cpp`) now steps aside for an SDR header with
+any derivation code, not only `NM`: Sokkia allows `ED` as well, and such a
+file named `.dc` was claimed at 0.5.
+
+Not done: the transmission checksum is kept, not checked; `09 MC`, `11` with
+distances, and road, template, GPS and levelling records are not imported,
+so a file written in those views keeps only what it has raw; an observation
+from a point other than the current setup's is skipped rather than begun as
+a setup; the EDM and reflector offsets of a non-coaxial instrument are warned
+about, not applied; notes are kept with their setup, not with the record
+before or after them, since writers of the format disagree which; the
+wizard's file filter still lists extensions by hand, and has drifted from the
+registered ones (it now has `.sdr`, but not `.fld`, `.gts` or `.gts7`).
 
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 
