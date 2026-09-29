@@ -32,6 +32,18 @@
 // A file that writes a point anyway (the owner's "84..00+8085.844") is read as
 // written, and the import says it met one.
 //
+// SIXTY SECONDS. A sexagesimal word's minutes and seconds run to 59; GSI
+// ONLINE shows nothing else ("21.104+12149400" is 121 49 40.0). A writer that
+// rounds the seconds field on its own - Leica's Format Manager builds such an
+// angle from separate degree, minute and second fields (its Reference Guide,
+// V1.0, 8.3) - leaves 59.95" as 60 and does not carry the minute. 60.0 seconds
+// IS the next minute, exactly, so a word whose seconds are 60 with nothing
+// after them is read as the next minute, carried in whole numbers before the
+// angle becomes a real, and the import says once how many there were. Each of
+// the 24 such words in a traverse the owner sent agrees with the other face
+// of its round only when read so (docs/survey.md, "Leica GSI"). No rounding
+// writes more: seconds past 60.0 and minutes past 59 are still refused.
+//
 // Everything here streams over one string_view: no regex, std::from_chars for
 // every number, and nothing allocated per record beyond the values it produces.
 
@@ -67,7 +79,9 @@ using katana::core::Result;
 
 // The version of THIS code (format.hpp). Bump it when a file would import
 // differently, so the SourceRecords of old imports say which reading they had.
-constexpr const char* kParserVersion = "1.0";
+// 1.1 reads 60-second angle words as the next minute, an all-zero code or
+// remark word as empty, and a backsight the file positions later.
+constexpr const char* kParserVersion = "1.1";
 
 constexpr double kPi = std::numbers::pi;
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
@@ -303,6 +317,18 @@ struct Tally {
             example = std::string(text);
         }
     }
+
+    // add(), with an example that has to be built: `make` runs for the first
+    // occurrence only, so a thousand of them cost one string.
+    template <class Make>
+    void addMade(std::size_t record, const Make& make)
+    {
+        if (count == 0) {
+            add(record, make());
+        } else {
+            add(record);
+        }
+    }
 };
 
 std::string plural(std::size_t count, std::string_view one, std::string_view many)
@@ -499,6 +525,17 @@ struct PointSlot {
     std::size_t record = 0; // where the point was first named, or given its position
     bool wide = false;      // ... and whether that block was GSI-16
     std::size_t setups = 0; // setups made on it so far, for their ids (stationIdFor)
+    // 1 + the setup whose shot gave the position (words 81-83, which the
+    // instrument computed with that setup's orientation), else 0: such a
+    // position cannot orient that setup (GsiReader::shotBlock, the backsight).
+    std::size_t positionedByShotOf = 0;
+};
+
+// A setup whose first shot was to a point with no position yet: it is the
+// setup's backsight if the file positions the point later (GsiReader::finish).
+struct FirstShot {
+    std::size_t station = 0; // index into project.stations
+    std::size_t slot = 0;
 };
 
 struct CodeBlock {
@@ -726,6 +763,7 @@ class GsiReader {
 
     // DDDMMSSs: degrees, minutes, seconds and tenths - DDD.MMSSs with the point
     // unwritten. A file that writes the point is read the same way around it.
+    // Seconds of 60.0 are the next minute (SIXTY SECONDS, at the top).
     std::optional<double> sexagesimal(const Block& block, const Word& word)
     {
         std::string_view whole = word.data;
@@ -770,21 +808,46 @@ class GsiReader {
             }
             degrees = degrees * 10 + (c - '0');
         }
-        const int minutes = digitsOf(fraction, 0, 2);
-        const int seconds = digitsOf(fraction, 2, 2);
+        int minutes = digitsOf(fraction, 0, 2);
+        int seconds = digitsOf(fraction, 2, 2);
         // Tenths and anything finer, as the decimal part of the seconds.
         double finer = 0.0;
         double scale = 0.1;
+        bool pastWholeSeconds = false; // a digit other than 0 after the seconds
         for (std::size_t i = 4; i < fraction.size(); ++i, scale /= 10.0) {
             if (!isDigit(fraction[i])) {
                 warnWord(block, word, "is not a sexagesimal angle");
                 return std::nullopt;
             }
             finer += (fraction[i] - '0') * scale;
+            pastWholeSeconds = pastWholeSeconds || fraction[i] != '0';
         }
-        if (minutes < 0 || seconds < 0 || minutes >= 60 || seconds >= 60) {
-            warnWord(block, word, "is not a sexagesimal angle: minutes and seconds run to 59");
+        if (minutes < 0 || seconds < 0) {
+            warnWord(block, word, "is not a sexagesimal angle");
             return std::nullopt;
+        }
+        if (minutes >= 60) {
+            warnWord(block, word, "is not a sexagesimal angle: the minutes run to 59");
+            return std::nullopt;
+        }
+        if (seconds > 60 || (seconds == 60 && pastWholeSeconds)) {
+            warnWord(block, word,
+                     "is not a sexagesimal angle: the seconds run to 59, and to 60.0 only where "
+                     "a writer rounded up without carrying the minute");
+            return std::nullopt;
+        }
+        if (seconds == 60) {
+            // Carried in whole numbers, so that the angle is the same double
+            // as the word written with its carry made; adding 60/3600 of a
+            // degree as a real is not.
+            seconds = 0;
+            if (++minutes == 60) {
+                minutes = 0;
+                ++degrees;
+            }
+            roundedSeconds_.addMade(block.record, [&] {
+                return "word " + std::to_string(word.index) + " " + shown(word.data);
+            });
         }
         noteAngularUnit(survey::AngularUnit::DegreesMinutesSeconds, block.record);
         double degreesValue = static_cast<double>(degrees) + minutes / 60.0 +
@@ -814,6 +877,24 @@ class GsiReader {
         }
         block.ppm = ppm->value;
         block.prismConstant = millimetres->value / 1000.0;
+    }
+
+    // The text of a code information (42-49) or remark (71-79) word. One of
+    // nothing but zeros is EMPTY, not the code "0": GSI right-justifies text
+    // and pads it with '0', so that is how an empty value is written - Leica's
+    // Format Manager writes an unset code information word "43....+00000000"
+    // (Reference Guide V1.0, Annex 2) - and read as "0" it gives every point
+    // of a job that records word 71 empty on each shot one code, and one
+    // feature through all of them. The code "0" would be written the same,
+    // so the import says how many it read as empty.
+    std::string_view codeText(const Block& block, const Word& word)
+    {
+        if (word.data.find_first_not_of('0') == std::string_view::npos) {
+            zeroCodeWords_.addMade(block.record,
+                                   [&] { return "word " + std::to_string(word.index); });
+            return {};
+        }
+        return textOf(word.data);
     }
 
     void heightWord(Block& block, const Word& word, std::optional<double>& into)
@@ -931,11 +1012,11 @@ class GsiReader {
             break;
         }
         if (word.index >= 42 && word.index <= 49) {
-            block.codeInfo[static_cast<std::size_t>(word.index - 42)] = textOf(word.data);
+            block.codeInfo[static_cast<std::size_t>(word.index - 42)] = codeText(block, word);
             return;
         }
         if (word.index >= 71 && word.index <= 79) {
-            block.remarks[static_cast<std::size_t>(word.index - 71)] = textOf(word.data);
+            block.remarks[static_cast<std::size_t>(word.index - 71)] = codeText(block, word);
             return;
         }
         if (word.index >= 100) {
@@ -1560,19 +1641,32 @@ class GsiReader {
         // GSI has no backsight word. A setup is made on the instrument as a
         // station and then an orientation shot, and the file records them in
         // that order; so a setup's FIRST shot, when it is to a point the file
-        // had already given coordinates, is taken as its backsight. Orienting
-        // on a point of known position is sound whatever the observer called
-        // the shot; a first shot to an unknown point orients nothing and is
-        // not named. The import says how many setups this gave (finish()).
-        if (pointings_ == 0 && slots_[target].positioned && station.backsightPointId.empty()) {
-            station.backsightPointId = slots_[target].id;
-            station.metadata.emplace("backsight",
-                                     "the setup's first shot, to a point with coordinates "
-                                     "earlier in the file (GSI marks no backsight)");
-            ++backsighted_;
+        // gives coordinates, is taken as its backsight. Orienting on a point
+        // of known position is sound whatever the observer called the shot; a
+        // first shot to an unknown point orients nothing and is not named.
+        // The coordinates may come LATER in the file - a traverse is often
+        // begun on a mark keyed in only when the instrument stands on it -
+        // since a reduction has the whole file; finish() settles those. They
+        // may not come from this setup's own shots, which the instrument
+        // computed with the orientation the backsight is to give. The import
+        // says how many setups this gave.
+        if (pointings_ == 0 && station.backsightPointId.empty()) {
+            if (slots_[target].positioned) {
+                station.backsightPointId = slots_[target].id;
+                station.metadata.emplace("backsight",
+                                         "the setup's first shot, to a point with coordinates "
+                                         "earlier in the file (GSI marks no backsight)");
+                ++backsighted_;
+            } else {
+                firstShots_.push_back(FirstShot{*active_, target});
+            }
         }
         if (block.targetCoordinates()) {
+            const bool positioned = slots_[target].positioned;
             placePoint(target, block.e, block.n, block.h, block.targetInputMode, false, block);
+            if (!positioned && slots_[target].positioned) {
+                slots_[target].positionedByShotOf = *active_ + 1;
+            }
         }
         pointCode(target, block);
         // slotFor may have grown the vector: take the names again.
@@ -1647,6 +1741,15 @@ class GsiReader {
             if (prism_) {
                 distance.target.prismConstant = prism_;
                 distance.target.prismConstantState = survey::CorrectionState::Applied;
+                // Another constant than the setup began with: a changed prism
+                // or a wrong setting, which the person has to tell apart.
+                const std::optional<double>& began = station.instrument.prismConstant;
+                if (began && *began != *prism_) {
+                    otherPrism_.addMade(block.record, [&] {
+                        return metresText(*prism_) + " m in setup " + station.setup.id +
+                               ", which began with " + metresText(*began) + " m";
+                    });
+                }
             }
         };
         const auto usable = [&](const std::optional<double>& value, const char* what) {
@@ -1733,6 +1836,7 @@ class GsiReader {
     std::size_t codeBlocks_ = 0; // code blocks read as point codes
 
     std::optional<PendingSetup> pending_;
+    std::vector<FirstShot> firstShots_; // first shots to points not yet positioned
     std::optional<std::size_t> active_; // index into project.stations
     std::size_t activeSlot_ = 0;
     std::optional<double> activeHeight_;
@@ -1759,6 +1863,9 @@ class GsiReader {
     // apart, as `levelling_`, before a word reaches this table.
     std::array<Tally, 100> unread_{};
     Tally explicitPoints_;
+    Tally roundedSeconds_; // sexagesimal words of 60.0 seconds, read as the next minute
+    Tally zeroCodeWords_;  // code information and remark words of nothing but zeros
+    Tally otherPrism_;     // distances measured with another prism constant than their setup's
     std::size_t pointedLengths_ = 0; // length words with a written decimal point
     Tally unpointedLengths_;         // ... and without one, as the specification has them
     Tally oddWidth_;
@@ -1776,6 +1883,7 @@ class GsiReader {
     Tally levelling_;
     Tally specialCodes_; // a digital level's '?' code blocks
     std::size_t backsighted_ = 0; // setups given a backsight by their first shot
+    std::size_t backsightedLater_ = 0; // ... to a point positioned later in the file
     std::size_t setupsWithoutHeight_ = 0;
     std::size_t setupsWithoutPpm_ = 0;
     std::size_t setupsWithoutPrism_ = 0;
@@ -1790,6 +1898,21 @@ ReadResult GsiReader::finish()
 {
     discardPendingSetup();
     closeSetup();
+    // A first shot to a point positioned since is its setup's backsight,
+    // unless the position came from that setup's own shots (shotBlock).
+    for (const FirstShot& first : firstShots_) {
+        const PointSlot& slot = slots_[first.slot];
+        if (!slot.positioned || slot.positionedByShotOf == first.station + 1) {
+            continue;
+        }
+        survey::SurveyStation& station = result_.project.stations[first.station];
+        station.backsightPointId = slot.id;
+        station.metadata.emplace("backsight", "the setup's first shot, to a point given "
+                                              "coordinates later in the file (GSI marks no "
+                                              "backsight)");
+        ++backsighted_;
+        ++backsightedLater_;
+    }
     if (!pendingCodes_.empty()) {
         // Nothing followed the last code block(s): the point before is the only
         // one they can belong to - the point of the last block that named one,
@@ -1867,6 +1990,13 @@ ReadResult GsiReader::finish()
                "), which the GSI specification places by the unit digit instead; the values "
                "were read as written";
     });
+    once(roundedSeconds_, [&] {
+        return plural(roundedSeconds_.count, "angle word writes", "angle words write") +
+               " 60 seconds (the first, " + roundedSeconds_.example +
+               "), where a sexagesimal angle's seconds run to 59: a writer that rounds the "
+               "seconds on their own leaves 59.95 as 60 without carrying the minute, and 60 "
+               "seconds is exactly the next minute, so each was read as the next minute";
+    });
     if (unpointedLengths_.count < pointedLengths_) {
         // Both readings of such a word are guesses but one: the unit digit's
         // is the specification's, and it is the one taken. A real export has
@@ -1894,6 +2024,13 @@ ReadResult GsiReader::finish()
                " text in a height word beside a code of its own; the text is in the point's "
                "metadata";
     });
+    once(zeroCodeWords_, [&] {
+        return plural(zeroCodeWords_.count, "remark or code information word is",
+                      "remark or code information words are") +
+               " all zeros (the first, " + zeroCodeWords_.example +
+               "), which is how GSI writes an empty value, padding text with '0': they were "
+               "read as empty, not as the code '0', which would be written the same";
+    });
     once(coordinateRecords_, [&] {
         return plural(coordinateRecords_.count, "block gives", "blocks give") +
                " station coordinates (words 84-86) or an instrument height with no measurement "
@@ -1905,6 +2042,14 @@ ReadResult GsiReader::finish()
         return plural(zeroDistances_.count, "block records", "blocks record") +
                " a distance of zero, Leica's way of saying none was measured; those shots have "
                "no distance";
+    });
+    once(otherPrism_, [&] {
+        return plural(otherPrism_.count, "distance was", "distances were") +
+               " measured with a prism constant other than the one " +
+               (otherPrism_.count == 1 ? "its" : "their") + " setup began with (the first, " +
+               otherPrism_.example +
+               "): each keeps the constant the instrument applied to it, so if the prism was "
+               "not changed, those distances are long or short by the difference";
     });
     once(oddWidth_, [&] {
         return plural(oddWidth_.count, "word is", "words are") +
@@ -1979,11 +2124,15 @@ ReadResult GsiReader::finish()
         lacking.push_back(
             "GSI does not mark a backsight: " +
             (backsighted_ == 0
-                 ? std::string("no setup's first shot is to a point with coordinates earlier in "
-                               "the file, so no setup has one")
+                 ? std::string("no setup's first shot is to a point the file gives coordinates, "
+                               "other than by that setup's own shots, so no setup has one")
                  : std::to_string(backsighted_) + " of " + plural(setups, "setup", "setups") +
                        " took the point of their first shot as the backsight, because the "
-                       "file had already given it coordinates") +
+                       "file gives it coordinates" +
+                       (backsightedLater_ == 0
+                            ? std::string()
+                            : " (" + std::to_string(backsightedLater_) +
+                                  " of them from coordinates later in the file)")) +
             (backsighted_ == setups ? std::string()
                                     : "; a setup without one cannot be oriented until its "
                                       "backsight is known"));

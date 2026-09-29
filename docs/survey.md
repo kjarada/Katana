@@ -1,7 +1,7 @@
 # The Survey module and instrument interoperability
 
-`PLAN.MD` section 45 is the programme; this file is the record of *why* it is
-shaped the way it is. The short version: a survey that is read slightly wrong
+This file is the record of *why* the survey module is shaped the way it is.
+The short version: a survey that is read slightly wrong
 looks exactly like a survey that is read right, so almost every decision here
 buys the ability to fail loudly instead of quietly.
 
@@ -128,7 +128,7 @@ The brief's section 23 is the rule and the UI carries it. A `FormatDescriptor`
 states the exact variant, what it can carry, whether import and export work, and
 the version of *this parser*. So the application says
 
-> Leica GSI-16 - import: yes, export: yes, parser 1.0
+> Leica GSI (GSI-8, GSI-16) - import: yes, export: no, parser 1.1
 
 and never "all Leica files supported". Three consequences:
 
@@ -146,14 +146,15 @@ and never "all Leica files supported". Three consequences:
 
 ## The two ways survey data gets silently corrupted
 
-Both are called out here, and in `PLAN.MD` 45.5, because a test that does not
-aim at them will pass straight over the bug.
+Both are called out here because a test that does not aim at them will pass
+straight over the bug.
 
 **GSI encodes the decimal position inside the word.** It is not a decimal point
 in the data. Read the data block as a plain integer and the coordinate comes out
 wrong by orders of magnitude - and still looks like a survey coordinate. Every
 expected metre value in the GSI tests is worked out by hand from the
-specification with the arithmetic in a comment, per `CLAUDE.md` section 3.
+specification with the arithmetic in a comment, never taken from what the
+reader returned.
 
 **Coordinate order differs between families.** LandXML `CgPoint` content and
 Trimble exports are northing-first; much else is easting-first. A transposed
@@ -179,13 +180,154 @@ extension.
 | Format (id) | Import | Export | Parser | Notes |
 |---|---|---|---|---|
 | Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
+| Leica GSI (`leica-gsi`): GSI-8 and GSI-16, mixed or not; any extension when every line is a GSI block | yes | no | 1.1 | total station words only (a digital level's are counted, not read); declares no coordinate system; a sexagesimal angle of 60 seconds is read as the next minute (see "Leica GSI" below) |
 | Opcode field file (`opcode-field-file`): `.fld`, first line `{Version 6.0}`, tab-separated records opening with a numeric opcode | yes | no | 1.0 | opcodes 02, 03, 04, 05, 06, 07, 09, 29, 41, 72, 73, 100 and -2 read; every other opcode skipped with a warning naming it; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
 
-That is the one reader on main as of 2026-09-24. The instrument parsers this
-file describes above (GSI, the Trimble and Topcon exports, LandXML survey
-data) are not in `src/katana_surveyio/`, and the import wizard refuses any
-other registered format by name; `chooseFormat` in the wizard is where their
-dispatch will go when they land.
+The rows are the readers written up here so far. `src/katana_surveyio/` also
+registers readers for Trimble JobXML, Topcon GTS-7 raw, RW5 and RINEX
+observation files, and recognises Leica DBX, Trimble DC and Topcon GTS-6 in
+order to refuse them by name with the export to make instead; their rows are
+still to be written. LandXML survey data has no reader. The import wizard
+reads every format with a reader of its own through that reader
+(`SurveyImportWizard::chooseFormat`), as `SURVEY READ` and `SURVEY IMPORT`
+do, and refuses a format without one by name.
+
+## Leica GSI
+
+The reader is `src/katana_surveyio/leica_gsi.cpp`; what an import makes of a
+file is set out in `include/katana/surveyio/leica.hpp`. The specification
+followed is Leica's "GSI ONLINE for Leica TPS and DNA" (November 2003): the
+data word and the word information table on its pages 5-6, the word indices
+in the PUT and GET tables. Every expected value in
+`tests/surveyio/test_leica_gsi.cpp` is worked by hand from a fixture word and
+that table.
+
+### Sixty seconds, and the rest of one traverse (2026-09-29)
+
+The owner sent a traverse, `260713LUNCHTRAV-v2.txt` (GSI-16, 1593 blocks
+over 52 setups, kept on the owner's machine and not committed), asking that
+it be read correctly and completely. It read with 25 warnings, and 24 of them
+threw an observation away: an angle word, 21 or 22 in unit 4 (sexagesimal),
+whose seconds were exactly 60 with a tenths digit of 0 - `084 01 60.0` and
+the like - refused because minutes and seconds run to 59.
+
+GSI ONLINE shows DDD MM SS s with nothing past 59 (page 6's "4: 360°
+sexagesimal" and its GET example `21.104+12149400`, 121 49 40.0) and says
+nothing of 60. What decided the reading:
+
+- **60.0 seconds is exactly the next minute.** D MM 60.0 and D (MM+1) 00.0
+  are one angle; there is nothing to guess.
+- **The file shows how it came to be.** All 3082 of its angle words have a
+  tenths digit of 0. Seconds of "00" occur 24 times and "60" 24 times, where
+  each value 01 to 59 occurs about 51 times: the writer split the second
+  either side of the minute between "60" and "00", which a writer that
+  rounds the seconds field on its own and does not carry the minute does.
+  Leica's Format Manager builds a sexagesimal angle from separate degree,
+  minute and second fields, each an integer "range [0..59]" (its Reference
+  Guide, V1.0, 8.3 and 10); whether it wrote this "-v2" file is not known.
+- **The other face agrees only with the carry.** Each of the 24, read as the
+  next minute, agrees with the other face of its own round - 2C of -1" to
+  +8" and 2i of +6" to +12", where the file's 833 other pairs run from -1"
+  to +6" and from +3" to +14" (5th to 95th percentile) - and each would be
+  48" to 62" out read as 00 seconds of the same minute.
+
+So a sexagesimal word whose seconds are 60 with nothing after them is read as
+the next minute, carried in whole numbers before the angle becomes a real,
+and the file gets ONE warning, with the count and the first such word. The
+whole-number carry makes the angle the same double as the word written with
+its carry; adding 60/3600 of a degree as a real does not (1.8e-15 rad apart
+at 267 46 60.0), and
+`ACarriedAngleIsExactlyTheAngleWrittenWithItsCarryInEitherWidth` fails when
+it is done that way. Rejected:
+
+- refusing the word, as 1.0 did: it discards an observation whose value is
+  not in doubt, and a lost zenith angle takes its pointing's slope distance
+  with it - the reduction rejected 12 of the traverse's distances for want of
+  one;
+- reading it as 00 seconds of the same minute: a minute wrong;
+- carrying anything else past 59: seconds past 60.0 (60.1, 61) are not what a
+  rounding writes, and minutes of 60 would need a second carry to have been
+  dropped as well; no file has shown either, so each is still refused at its
+  record ("the seconds run to 59", "the minutes run to 59"), where the
+  evidence can be weighed if one appears.
+
+The other warnings and notes on the traverse, each checked against the data:
+
+- **Word 71 of nothing but zeros was the code "0".** Word 71 is
+  `0000000000000000` on all 1541 shots. GSI right-justifies text and pads it
+  with '0' (GET 11 and 41), so that is an empty value - the Format Manager
+  writes an unset code information word "43....+00000000" (its Annex 2) - but
+  the reader took it as the code "0", gave every target that code and ran one
+  feature through all of them in shot order. Words 42-49 and 71-79 of nothing
+  but zeros are now empty, and the import says how many it read so; a code
+  "0" would be written the same way and cannot be told from one. Words 11 and
+  41 keep "0": a point needs an id, and a code block exists to give a code.
+- **51 of 52 setups had a backsight.** The traverse begins on SS27898 with
+  SS27899 as its reference object, and SS27899 is keyed in only when the
+  instrument stands on it, 166 records later. A setup's first shot was its
+  backsight only if the point had coordinates EARLIER in the file, so the
+  reduction left SS27898 unoriented. It has the whole file - it already waits
+  for a backsight positioned later - so the rule is now that the file gives
+  the point coordinates, before the setup or after it, other than by the
+  setup's own shots: target coordinates (81-83) the instrument computed with
+  the orientation the backsight is to give would orient the setup on itself
+  (`AFirstShotToAPointOnlyItsOwnSetupPositionsNamesNoBacksight`). The note
+  says how many backsights came from coordinates later in the file.
+- **One distance was measured with another prism constant.** Record 1526's
+  word 51 is +23 mm where every other shot's is 0, and its slope distance is
+  23 mm longer than the other 14 from that setup to the same mark (78.526 m
+  against 78.502 and 78.503). The distance keeps the
+  constant it was measured with (`TargetInfo`), as before; the import now
+  says how many distances were measured with a constant other than their
+  setup's and names the first, as it already said of a changed ppm. A changed
+  prism or a wrong setting is for the person to decide.
+- **Right as they were:** 1489 blocks record a time the model has no place
+  for (it keeps one per setup, and an observation has no time); GSI states no
+  coordinate system; word 22 was read as a zenith angle - over the 1474 shots
+  to keyed-in stations, HI + SD cos z - HR closes on their height difference
+  to a median of -1.8 mm and SD sin z on their distance to +0.4 mm - and word
+  21 as clockwise, which all 51 setups with two positioned targets fit
+  (median misfit 3.4"; read counterclockwise, 37 degrees).
+
+Read again with parser 1.1: 1593 records, none skipped; 4623 observations
+(1541 shots of three), 24 more than before; 52 points and 5 unpositioned; no
+feature; 4 warnings, each said once for the file (the 60-second words, the
+zero code words, the prism constant, the times). `SURVEY IMPORT` on a drawing
+on EPSG:7856 draws the same 57 points, rejects no distance where it rejected
+12, and orients every setup. With SS27898 oriented, its backsight check to
+SS27899 is +39.0 mm in distance and +34.1 mm in height over 321 m, and the
+setup on SS27899 checks its own backsight at +21.7 mm, where every other
+setup's distance check is within 4 mm. Both involve SS27899, whose keyed-in
+coordinates the reader reads as written: a question for the job's control,
+not for the reading.
+
+Tests (`tests/surveyio/test_leica_gsi.cpp`, on the hand-built
+`tests/surveyio/data/leica/rounded_seconds_gsi16.gsi` and inline blocks):
+`SixtySecondsWithNothingAfterThemAreReadAsTheNextMinute` (084 01 60.0 is
+1.466658348092568288 rad, worked in exact rationals),
+`TheImportSaysOnceHowManyAngleWordsWroteSixtySecondsAndWhereTheFirstIs`,
+`SecondsPastSixtyAreNoRoundingAndTheirWordIsStillRefusedByRecord`,
+`SixtySecondsWithTenthsOrMinutesOfSixtyAreNoRoundingAndAreRefused`,
+`ACarriedAngleIsExactlyTheAngleWrittenWithItsCarryInEitherWidth`,
+`AnAllZeroRemarkOrCodeInformationWordIsEmptyNotTheCodeZero`,
+`AFirstShotToAPointTheFileGivesCoordinatesOnlyLaterIsStillTheBacksight`,
+`AFirstShotToAPointOnlyItsOwnSetupPositionsNamesNoBacksight` and
+`DistancesMeasuredWithAnotherPrismConstantThanTheirSetupsAreCountedAndKeepTheirOwn`;
+through `katana_cli`, `cli.survey_read_gsi_reads_sixty_seconds_as_the_next_minute`
+and `cli.survey_import_gsi_radiates_the_shots_whose_angles_wrote_sixty_seconds`,
+whose two radiated points are worked by hand to the millimetre in
+`src/katana_app/CMakeLists.txt`. The window's Survey > Import Survey Data
+reads a GSI file through the same reader, and `katana_mcp` runs the same
+verbs.
+
+Not done: the reduction pairs a setup's i-th face-left pointing to a target
+with its i-th face-right one (`src/katana_survey/reduction.cpp`). Each setup
+of the traverse has 3 to 9 more face-left pointings than face-right ones (3
+in 41 of the 52), and in the setups looked at they come first, so its pairs
+cross rounds - "SS27898, 5140: 15.0"" pairs record 10 with record 15, where
+record 10's own round gives -3" and record 15's -1" - and some of the
+file's face-pair warnings come from that, not from the data. It belongs to
+the reduction and every format that feeds it, not to this reader.
 
 ## The opcode field file (.fld)
 
