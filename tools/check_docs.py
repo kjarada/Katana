@@ -53,7 +53,6 @@ NOT_YET_CHECKED = {
     'render.md',
     'performance.md',
     'terrain.md',
-    'survey.md',
     'survey_coding.md',
     'plan_view.md',
     'plotting.md',

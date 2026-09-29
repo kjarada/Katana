@@ -180,7 +180,7 @@ extension.
 | Format (id) | Import | Export | Parser | Notes |
 |---|---|---|---|---|
 | Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
-| Leica GSI (`leica-gsi`): GSI-8 and GSI-16, mixed or not; any extension when every line is a GSI block | yes | no | 1.1 | total station words only (a digital level's are counted, not read); declares no coordinate system; a sexagesimal angle of 60 seconds is read as the next minute (see "Leica GSI" below) |
+| Leica GSI (`leica-gsi`): GSI-8 and GSI-16, mixed or not; any extension when every line is a GSI block | yes | no | 1.1 | total station words only (a digital level's are counted, not read); declares no coordinate system; a sexagesimal angle whose word writes 60 seconds in their place is read as the next minute, and a circle reading past a full circle is refused (see "Leica GSI" below) |
 | Opcode field file (`opcode-field-file`): `.fld`, first line `{Version 6.0}`, tab-separated records opening with a numeric opcode | yes | no | 1.0 | opcodes 02, 03, 04, 05, 06, 07, 09, 29, 41, 72, 73, 100 and -2 read; every other opcode skipped with a warning naming it; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
 
 The rows are the readers written up here so far. `src/katana_surveyio/` also
@@ -202,7 +202,7 @@ in the PUT and GET tables. Every expected value in
 `tests/surveyio/test_leica_gsi.cpp` is worked by hand from a fixture word and
 that table.
 
-### Sixty seconds, and the rest of one traverse (2026-09-29)
+### Sixty seconds, and the rest of one traverse (2026-09-29, reviewed 2026-09-30)
 
 The owner sent a traverse, `260713LUNCHTRAV-v2.txt` (GSI-16, 1593 blocks
 over 52 setups, kept on the owner's machine and not committed), asking that
@@ -211,45 +211,97 @@ threw an observation away: an angle word, 21 or 22 in unit 4 (sexagesimal),
 whose seconds were exactly 60 with a tenths digit of 0 - `084 01 60.0` and
 the like - refused because minutes and seconds run to 59.
 
-GSI ONLINE shows DDD MM SS s with nothing past 59 (page 6's "4: 360°
-sexagesimal" and its GET example `21.104+12149400`, 121 49 40.0) and says
+GSI ONLINE names the unit ("4: 360° sexagesimal", page 6), and its GET
+examples on page 7, `21.104+12149400` and `22.104+08832420`, read as DDD MM
+SS s - 121 49 40.0 and 088 32 42.0. It states the layout no further and says
 nothing of 60. What decided the reading:
 
 - **60.0 seconds is exactly the next minute.** D MM 60.0 and D (MM+1) 00.0
   are one angle; there is nothing to guess.
 - **The file shows how it came to be.** All 3082 of its angle words have a
-  tenths digit of 0. Seconds of "00" occur 24 times and "60" 24 times, where
-  each value 01 to 59 occurs about 51 times: the writer split the second
-  either side of the minute between "60" and "00", which a writer that
-  rounds the seconds field on its own and does not carry the minute does.
-  Leica's Format Manager builds a sexagesimal angle from separate degree,
-  minute and second fields, each an integer "range [0..59]" (its Reference
-  Guide, V1.0, 8.3 and 10); whether it wrote this "-v2" file is not known.
-- **The other face agrees only with the carry.** Each of the 24, read as the
-  next minute, agrees with the other face of its own round - 2C of -1" to
-  +8" and 2i of +6" to +12", where the file's 833 other pairs run from -1"
-  to +6" and from +3" to +14" (5th to 95th percentile) - and each would be
-  48" to 62" out read as 00 seconds of the same minute.
+  tenths digit of 0: its writer wrote whole seconds. Seconds of "00" occur
+  24 times and "60" 24 times; the values 01 to 59 occur 51 times each on
+  average, from 19 (32) to 90 (26). Together "00" and "60" are about one
+  value's share, as the second either side of the minute split between them
+  would be when a writer rounds the seconds on their own and does not carry
+  the minute. The counts alone would not single them out - 02 occurs 25
+  times and 32 19 times - so the next point is what decides. Leica's Format
+  Manager builds a sexagesimal angle from separate integer fields, degrees
+  "range [0..359]" and minutes and seconds "range [0..59]" (its Reference
+  Guide, V1.0, 8.3 and 10), so one working as documented never writes 60;
+  what wrote this "-v2" file is not known.
+- **Each word's other readings agree only with the carry.** 19 of the 24
+  have an opposite face in their own round (the face-right pointing to the
+  target next after a face-left one, with no other face-left to it between).
+  Read as the next minute they give 2C of -1" to +8" and 2i of +6" to +11",
+  where the file's 663 round pairs without a 60-second word run from 0" to
+  +5" and from +4" to +14" (5th to 95th percentile); read as 00 seconds of
+  the same minute they are 49" to 62" out. The other 5 (records 73, 576,
+  879, 1457 and 1466) are extra face-left pointings with no face right in
+  their round: read as the next minute each is within 5" of the same face's
+  other readings of its target, and 56" to 65" out read as 00 seconds. (The
+  file has 857 face-left shots and 684 face-right.)
 
 So a sexagesimal word whose seconds are 60 with nothing after them is read as
 the next minute, carried in whole numbers before the angle becomes a real,
-and the file gets ONE warning, with the count and the first such word. The
-whole-number carry makes the angle the same double as the word written with
-its carry; adding 60/3600 of a degree as a real does not (1.8e-15 rad apart
-at 267 46 60.0), and
+and the file gets ONE warning: the count, every record (up to 100), and the
+first word as written and as read - "at records 14, 46, ...; the first, word
+21, 354 02 60.0, read as 354 03 00.0". It says the reading is "within the
+writer's rounding of what was measured", not a figure: this writer rounded
+to whole seconds, so its 60 stood for anything from 59.5, and another may
+round to tenths. The whole-number carry makes the angle the same double as
+the word written with its carry; adding 60/3600 of a degree as a real does
+not (1.8e-15 rad apart at 267 46 60.0), and
 `ACarriedAngleIsExactlyTheAngleWrittenWithItsCarryInEitherWidth` fails when
-it is done that way. Rejected:
+it is done that way.
+
+The carry is made only where the word writes both digits of the seconds in
+their place: at its block's full width (8 or 16 characters), or with four
+digits or more after a written point. A word of another width is aligned from
+the right, and a written point's missing digits are supplied as zeros; either
+can make a 60 of digits that were never the seconds. `000000000841600`,
+084 16 00.0 with its last digit lost, reads from the right as 008 41 60.0,
+and `084.016` is 60 only with the 0 the reader supplies. 1.0 refused both at
+their record; carrying them, as the first version of 1.1 did, turned a
+damaged word into an angle - 75 degrees wrong in the first example - with
+nothing at its record to say so. They are refused there again, with the reason
+(`SixtySecondsTheWordDoesNotWriteInTheirPlaceAreRefusedNotCarried`). The note
+counts only the words whose values became observations: one in a code block,
+whose measurement words are not read, or in a shot at the occupied point is
+not said to be read as the next minute
+(`ASixtySecondWordWhoseValueIsNotKeptIsNotSaidToBeReadAsTheNextMinute`).
+
+Rejected:
 
 - refusing the word, as 1.0 did: it discards an observation whose value is
   not in doubt, and a lost zenith angle takes its pointing's slope distance
   with it - the reduction rejected 12 of the traverse's distances for want of
   one;
 - reading it as 00 seconds of the same minute: a minute wrong;
-- carrying anything else past 59: seconds past 60.0 (60.1, 61) are not what a
-  rounding writes, and minutes of 60 would need a second carry to have been
-  dropped as well; no file has shown either, so each is still refused at its
-  record ("the seconds run to 59", "the minutes run to 59"), where the
-  evidence can be weighed if one appears.
+- carrying anything else past 59: seconds past 60.0 (60.1, 61) and minutes of
+  60, which would need a second carry to have been dropped as well. No file
+  has shown either, so each is still refused at its record ("the seconds run
+  to 59", "the minutes run to 59"), where the evidence can be weighed if one
+  appears. That no writer makes them is not claimed: GSI ONLINE's SET 55,
+  "Angle rounding [0..10] e.g. n=3: 0.3, 0.6, 0.9" (TPS110C/300/400/700,
+  page 19), rounds the last digit in steps, and what such a rounding writes
+  at the top of a minute is not stated.
+
+**A circle reading runs to one full circle.** Checking what else the
+rewritten check let through found that a word past a full circle was wrapped
+onto it without a word: a zenith of 365 00 00 read as 5 degrees, a direction
+of 450 00 00 as 90, and 9999 59 60 as 280. The unit digit names the circle
+(page 6: "400 gon", "360° decimal", "360° sexagesimal", "6400 mil"), so such
+a word is damaged, and it is now refused at its record in every unit. A full
+circle itself - 400.00000 gon, 360 00 00.0, or 359 59 60.0 carried - is read
+as the zero, which it is exactly, as a rounding up at the top of the circle
+writes it
+(`ACircleReadingPastAFullCircleIsRefusedInEveryUnitAndAFullCircleIsZero`).
+Rejected: refusing 360 degrees itself, as the Format Manager's [0..359] might
+suggest; that is the range of its display field, and 360 00 00.0 is a true
+reading of the zero. A letter in any field of a sexagesimal word is refused
+before the seconds are looked at, so a letter beside a 60 is never carried
+(`ALetterInAnyFieldOfASexagesimalWordRefusesItAtItsRecord`).
 
 The other warnings and notes on the traverse, each checked against the data:
 
@@ -261,7 +313,19 @@ The other warnings and notes on the traverse, each checked against the data:
   feature through all of them in shot order. Words 42-49 and 71-79 of nothing
   but zeros are now empty, and the import says how many it read so; a code
   "0" would be written the same way and cannot be told from one. Words 11 and
-  41 keep "0": a point needs an id, and a code block exists to give a code.
+  41 keep "0": a point needs an id, and a code block exists to give a code
+  (`AnAllZeroPointIdOrCodeBlockCodeIsZeroNotEmpty`). Looking at which blocks
+  read those words found two that none did, each dropped without a word:
+  code information (42-49) in a point's own block, and remark words (71-79)
+  in a code block. GSI ONLINE's PUT 41-49 give code information with a code
+  block, but "one may create any kind of GSI formats" (the Format Manager's
+  Reference Guide, Annex 2), and in a point's block it can be about nothing
+  but that point, so it is now in the point's metadata as "code information
+  N". A remark word in a code block could be the point's code and remarks or
+  more about the block's own code, and nothing tells which, so it is not
+  read, and the import now says so once
+  (`CodeInformationInAPointsOwnBlockIsKeptAndRemarksInACodeBlockAreSaidNotRead`).
+  The traverse has neither.
 - **51 of 52 setups had a backsight.** The traverse begins on SS27898 with
   SS27899 as its reference object, and SS27899 is keyed in only when the
   instrument stands on it, 166 records later. A setup's first shot was its
@@ -274,9 +338,9 @@ The other warnings and notes on the traverse, each checked against the data:
   (`AFirstShotToAPointOnlyItsOwnSetupPositionsNamesNoBacksight`). The note
   says how many backsights came from coordinates later in the file.
 - **One distance was measured with another prism constant.** Record 1526's
-  word 51 is +23 mm where every other shot's is 0, and its slope distance is
-  23 mm longer than the other 14 from that setup to the same mark (78.526 m
-  against 78.502 and 78.503). The distance keeps the
+  word 51 is +23 mm where every other shot's is 0, and its slope distance,
+  78.526 m, is 24 mm longer than the setup's 10 others to that mark at
+  78.502 m and 23 mm longer than its 4 at 78.503 m. The distance keeps the
   constant it was measured with (`TargetInfo`), as before; the import now
   says how many distances were measured with a constant other than their
   setup's and names the first, as it already said of a changed ppm. A changed
@@ -291,25 +355,34 @@ The other warnings and notes on the traverse, each checked against the data:
 
 Read again with parser 1.1: 1593 records, none skipped; 4623 observations
 (1541 shots of three), 24 more than before; 52 points and 5 unpositioned; no
-feature; 4 warnings, each said once for the file (the 60-second words, the
-zero code words, the prism constant, the times). `SURVEY IMPORT` on a drawing
-on EPSG:7856 draws the same 57 points, rejects no distance where it rejected
-12, and orients every setup. With SS27898 oriented, its backsight check to
-SS27899 is +39.0 mm in distance and +34.1 mm in height over 321 m, and the
-setup on SS27899 checks its own backsight at +21.7 mm, where every other
-setup's distance check is within 4 mm. Both involve SS27899, whose keyed-in
-coordinates the reader reads as written: a question for the job's control,
-not for the reading.
+feature; 4 warnings, each said once for the file (the 60-second words, with
+all 24 records, the zero code words, the prism constant, the times).
+`SURVEY IMPORT` on a drawing on EPSG:7856 draws the same 57 points, rejects
+no distance where it rejected 12, and orients every setup. With SS27898
+oriented, its backsight check to SS27899 is +39.0 mm in distance and +34.1
+mm in height over 321 m, and the setup on SS27899 checks its own backsight
+at +21.7 mm, where every other setup's distance check is within 4 mm. Both
+involve SS27899, whose keyed-in coordinates the reader reads as written: a
+question for the job's control, not for the reading. The review round's
+changes (the width rule, the circle, the kept-word count, the code words in
+other blocks) read this file exactly as before but for the wording of the
+60-second note: none of its 24 words is short, long or pointed.
 
 Tests (`tests/surveyio/test_leica_gsi.cpp`, on the hand-built
 `tests/surveyio/data/leica/rounded_seconds_gsi16.gsi` and inline blocks):
 `SixtySecondsWithNothingAfterThemAreReadAsTheNextMinute` (084 01 60.0 is
 1.466658348092568288 rad, worked in exact rationals),
-`TheImportSaysOnceHowManyAngleWordsWroteSixtySecondsAndWhereTheFirstIs`,
+`TheImportSaysOnceHowManyAngleWordsWroteSixtySecondsAndWhereTheyAre`,
 `SecondsPastSixtyAreNoRoundingAndTheirWordIsStillRefusedByRecord`,
 `SixtySecondsWithTenthsOrMinutesOfSixtyAreNoRoundingAndAreRefused`,
+`SixtySecondsTheWordDoesNotWriteInTheirPlaceAreRefusedNotCarried`,
+`ASixtySecondWordWhoseValueIsNotKeptIsNotSaidToBeReadAsTheNextMinute`,
+`ACircleReadingPastAFullCircleIsRefusedInEveryUnitAndAFullCircleIsZero`,
+`ALetterInAnyFieldOfASexagesimalWordRefusesItAtItsRecord`,
 `ACarriedAngleIsExactlyTheAngleWrittenWithItsCarryInEitherWidth`,
 `AnAllZeroRemarkOrCodeInformationWordIsEmptyNotTheCodeZero`,
+`AnAllZeroPointIdOrCodeBlockCodeIsZeroNotEmpty`,
+`CodeInformationInAPointsOwnBlockIsKeptAndRemarksInACodeBlockAreSaidNotRead`,
 `AFirstShotToAPointTheFileGivesCoordinatesOnlyLaterIsStillTheBacksight`,
 `AFirstShotToAPointOnlyItsOwnSetupPositionsNamesNoBacksight` and
 `DistancesMeasuredWithAnotherPrismConstantThanTheirSetupsAreCountedAndKeepTheirOwn`;
@@ -320,14 +393,36 @@ whose two radiated points are worked by hand to the millimetre in
 reads a GSI file through the same reader, and `katana_mcp` runs the same
 verbs.
 
-Not done: the reduction pairs a setup's i-th face-left pointing to a target
-with its i-th face-right one (`src/katana_survey/reduction.cpp`). Each setup
-of the traverse has 3 to 9 more face-left pointings than face-right ones (3
-in 41 of the 52), and in the setups looked at they come first, so its pairs
-cross rounds - "SS27898, 5140: 15.0"" pairs record 10 with record 15, where
-record 10's own round gives -3" and record 15's -1" - and some of the
-file's face-pair warnings come from that, not from the data. It belongs to
-the reduction and every format that feeds it, not to this reader.
+Not done:
+
+- **The reduction's face pairing.** It pairs a setup's i-th face-left
+  pointing to a target with its i-th face-right one
+  (`src/katana_survey/reduction.cpp`). Each setup of the traverse has 3 to 9
+  more face-left pointings than face-right ones (3 in 41 of the 52), and in
+  the setups looked at they come first, so its pairs cross rounds -
+  "SS27898, 5140: 15.0"" pairs record 10 with record 15, where record 10's
+  own round gives -3" and record 15's -1" - and some of the file's face-pair
+  warnings come from that, not from the data. Reading the 60-second words
+  moves it both ways: record 1457, whose zenith was refused before, now has
+  a face and pairs with record 1476 of another round, adding one warning
+  (setup 5181 to 5180, horizontal 19.0"), while setup 5170's pairs to 5171
+  go from three (pointings 4/7, 14/11, 18/15) to six (4/7, 6/11, 10/15,
+  14/19, 18/23, 22/27), all within tolerance. It belongs to the reduction
+  and every format that feeds it, not to this reader.
+- **The backsight check has no tolerance.** `src/katana_survey/reduction.cpp`
+  stores each setup's backsight distance and height differences, and the
+  report prints them as bare numbers, where face pairs and misclosures are
+  marked OUTSIDE TOLERANCE. So SS27898's +39.0 mm, left unoriented with a
+  warning before and oriented now, is flagged nowhere. A tolerance belongs in
+  the reduction's settings beside the face-pair ones, with a source for its
+  value; it would apply to every format, so it is not added here.
+- **Three routines turn degrees, minutes and seconds into radians:** this
+  reader's, `packedDegreesToRadians` in
+  `src/katana_surveyio/topcon_raw_builder.cpp` (GTS-7 and RW5), and
+  `dmsToRadians` in `src/katana_survey/angles.cpp`. Only this one reads 60
+  seconds as the next minute; the other two refuse it. Carrying it there
+  needs evidence from those formats' writers, not this file's. They should
+  become one helper with the carry as a choice its caller makes.
 
 ## The opcode field file (.fld)
 

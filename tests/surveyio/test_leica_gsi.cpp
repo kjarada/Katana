@@ -496,14 +496,13 @@ TEST(LeicaGsi, TheStationBlocksSerialTypeAndTimeFillTheInstrumentSettings)
 // ---- Sixty seconds (data/leica/rounded_seconds_gsi16.gsi) ------------------------------
 //
 // A sexagesimal angle's minutes and seconds run to 59, and 60.0 seconds is
-// exactly the next minute. A writer that rounds the seconds field on its own
-// and does not carry the minute writes 59.95" as 60 - Leica's Format Manager
-// builds such an angle from separate degree, minute and second fields
-// (Reference Guide V1.0, 8.3), and one file seen had 24 words so, each agreeing
-// with the other face of its round only when read as the next minute
+// exactly the next minute. A writer that rounds the seconds on their own,
+// without carrying into the minutes, writes 60 for a value within its
+// rounding of the next minute; one file seen had 24 words so, each agreeing
+// with its target's other readings only when read as the next minute
 // (docs/survey.md, "Leica GSI"). In the fixture, CP01 is keyed in 100 m due
-// north of STN1; P1 and P2 are measured with such words, P3 with a word no
-// rounding writes.
+// north of STN1; P1 and P2 are measured with such words, P3 with 61 seconds,
+// which no file has shown a writer make.
 
 TEST(LeicaGsi, SixtySecondsWithNothingAfterThemAreReadAsTheNextMinute)
 {
@@ -541,16 +540,25 @@ TEST(LeicaGsi, SixtySecondsWithNothingAfterThemAreReadAsTheNextMinute)
     EXPECT_EQ(read.recordsSkipped, 0U);
 }
 
-TEST(LeicaGsi, TheImportSaysOnceHowManyAngleWordsWroteSixtySecondsAndWhereTheFirstIs)
+TEST(LeicaGsi, TheImportSaysOnceHowManyAngleWordsWroteSixtySecondsAndWhereTheyAre)
 {
     const ReadResult read = readFixture("rounded_seconds_gsi16.gsi");
     // Three words write 60 seconds - record 4's two and record 5's V - and
-    // they are one warning, at the first of them, which it names.
+    // they are one warning, at the first of them. It lists their records, so
+    // each can be found, and shows the first as written and as read: record
+    // 4's Hz "0000000004459600" is 044 59 60.0, which is 045 00 00.0.
     const ReadWarning* summary = warningAbout(read, 4, "3 angle words write 60 seconds");
     ASSERT_NE(summary, nullptr) << allWarnings(read);
-    EXPECT_NE(summary->message.find("word 21 '0000000004459600'"), std::string::npos)
+    EXPECT_NE(summary->message.find("(at records 4, 5; the first, word 21, 044 59 60.0, read as "
+                                    "045 00 00.0)"),
+              std::string::npos)
         << summary->message;
     EXPECT_NE(summary->message.find("next minute"), std::string::npos) << summary->message;
+    // The file writes whole seconds and tenths; the reading is as near what
+    // was measured as the writer's rounding, whatever its last digit.
+    EXPECT_NE(summary->message.find("within the writer's rounding of what was measured"),
+              std::string::npos)
+        << summary->message;
     const auto aboutSixty = std::ranges::count_if(read.warnings, [](const ReadWarning& warning) {
         return warning.message.find("60 seconds") != std::string::npos;
     });
@@ -563,9 +571,9 @@ TEST(LeicaGsi, SecondsPastSixtyAreNoRoundingAndTheirWordIsStillRefusedByRecord)
 {
     const ReadResult read = readFixture("rounded_seconds_gsi16.gsi");
     const survey::SurveyStation& setup = read.project.stations.at(0);
-    // Record 6, P3: Hz "21.324+0000000009000610" = 090 00 61.0. No rounding of
-    // seconds under 60 reaches 61, so the word is refused where it is, and
-    // only it: the shot's zenith and distance are read.
+    // Record 6, P3: Hz "21.324+0000000009000610" = 090 00 61.0. No file has
+    // shown a writer make 61, so the word is refused where it is, and only
+    // it: the shot's zenith and distance are read.
     const ReadWarning* refused = warningAbout(read, 6, "the seconds run to 59");
     ASSERT_NE(refused, nullptr) << allWarnings(read);
     EXPECT_NE(refused->message.find("word 21 '0000000009000610'"), std::string::npos)
@@ -924,12 +932,12 @@ TEST(LeicaGsi, ACarriedAngleIsExactlyTheAngleWrittenWithItsCarryInEitherWidth)
 
 TEST(LeicaGsi, SixtySecondsWithTenthsOrMinutesOfSixtyAreNoRoundingAndAreRefused)
 {
-    // What a rounding of the seconds does not write, each refused at its
+    // What no file has shown a writer's rounding make, each refused at its
     // record, with nothing carried:
     //   record 2: 084 01 60.1 - the seconds past 60.0;
     //   record 3: 084 60 00.0 - minutes of 60, which a rounding of the
-    //             seconds leaves only if a second carry was also dropped,
-    //             and no file has shown one (docs/survey.md, "Leica GSI");
+    //             seconds leaves only if a second carry was also dropped
+    //             (docs/survey.md, "Leica GSI");
     //   record 4: 084 01 99.0.
     const std::string text =
         "*110001+000000000000STN1 88..10+0000000000001500 \r\n"
@@ -946,6 +954,210 @@ TEST(LeicaGsi, SixtySecondsWithTenthsOrMinutesOfSixtyAreNoRoundingAndAreRefused)
     EXPECT_NE(warningAbout(*read, 2, "the seconds run to 59"), nullptr) << allWarnings(*read);
     EXPECT_NE(warningAbout(*read, 3, "the minutes run to 59"), nullptr) << allWarnings(*read);
     EXPECT_NE(warningAbout(*read, 4, "the seconds run to 59"), nullptr) << allWarnings(*read);
+    EXPECT_FALSE(says(std::vector<std::string>{allWarnings(*read)}, "60 seconds"));
+}
+
+// 60 seconds are the next minute only when the word itself writes both digits
+// of the seconds where the format puts them. A word that is not its block's
+// width is aligned from the right, and a written point's missing digits are
+// supplied as zeros: either can make a 60 of digits that were never the
+// seconds, and carrying it would turn a damaged word, refused at its record,
+// into an angle degrees wrong with no warning of its own.
+TEST(LeicaGsi, SixtySecondsTheWordDoesNotWriteInTheirPlaceAreRefusedNotCarried)
+{
+    //   record 2: GSI-16 "000000000841600", 15 characters - 084 16 00.0 with
+    //             its last digit lost - reads from the right as 008 41 60.0;
+    //   record 3: "000000000084.016" writes one digit of the seconds after
+    //             its point, and is 60 only with the 0 supplied after it;
+    //   record 4: GSI-8 "1600", 4 characters, filled from the left to
+    //             000 01 60.0;
+    //   record 5: "00000000084.0160", four digits after its point, 084 01
+    //             60.0 with both digits written: carried;
+    //   record 6: GSI-8 "08401600", its block's width: carried.
+    const std::string text =
+        "*110001+000000000000STN1 88..10+0000000000001500 \r\n"
+        "*110002+00000000000000P1 21.324+000000000841600 22.324+0000000009000000 "
+        "31..00+0000000000100000 \r\n"
+        "*110003+00000000000000P2 21.324+000000000084.016 22.324+0000000009000000 "
+        "31..00+0000000000100000 \r\n"
+        "110004+000000P3 21.324+1600 22.324+09000000 31..00+00100000 \r\n"
+        "*110005+00000000000000P4 21.324+00000000084.0160 22.324+0000000009000000 "
+        "31..00+0000000000100000 \r\n"
+        "110006+000000P5 21.324+08401600 22.324+09000000 31..00+00100000 \r\n";
+    Result<ReadResult> read = readText(text);
+    ASSERT_TRUE(read.ok()) << read.error().message;
+    const survey::SurveyStation& setup = read->project.stations.at(0);
+    // Refused where they are, and only those words: each shot keeps its
+    // zenith angle and its distance.
+    for (const char* id : {"P1", "P2", "P3"}) {
+        EXPECT_TRUE(toTarget<survey::HorizontalDirectionObservation>(setup, id).empty()) << id;
+        EXPECT_EQ(toTarget<survey::ZenithAngleObservation>(setup, id).size(), 1U) << id;
+        EXPECT_EQ(toTarget<survey::DistanceObservation>(setup, id).size(), 1U) << id;
+    }
+    const ReadWarning* wide =
+        warningAbout(*read, 2, "only in a word of its block's width, 16 characters");
+    ASSERT_NE(wide, nullptr) << allWarnings(*read);
+    EXPECT_NE(wide->message.find("word 21 '000000000841600'"), std::string::npos) << wide->message;
+    EXPECT_NE(wide->message.find("this one has 15; that value was not read"), std::string::npos)
+        << wide->message;
+    const ReadWarning* pointed =
+        warningAbout(*read, 3, "it writes one digit of the seconds after its point");
+    ASSERT_NE(pointed, nullptr) << allWarnings(*read);
+    EXPECT_NE(pointed->message.find("word 21 '000000000084.016'"), std::string::npos)
+        << pointed->message;
+    const ReadWarning* narrow =
+        warningAbout(*read, 4, "only in a word of its block's width, 8 characters");
+    ASSERT_NE(narrow, nullptr) << allWarnings(*read);
+    EXPECT_NE(narrow->message.find("this one has 4;"), std::string::npos) << narrow->message;
+    // Records 5 and 6 write both digits: 084 02 00.0 = 84 + 2/60 deg =
+    // 1.466658348092568288 rad (exact rationals and a 50-digit pi).
+    for (const char* id : {"P4", "P5"}) {
+        const auto hz = toTarget<survey::HorizontalDirectionObservation>(setup, id);
+        ASSERT_EQ(hz.size(), 1U) << id;
+        EXPECT_NEAR(hz[0]->direction, 1.466658348092568288, kAngleTolerance) << id;
+    }
+    // And only those two are said to have been read as the next minute.
+    const ReadWarning* summary = warningAbout(*read, 5, "2 angle words write 60 seconds");
+    ASSERT_NE(summary, nullptr) << allWarnings(*read);
+    EXPECT_NE(summary->message.find("(at records 5, 6; the first, word 21, 084 01 60, read as "
+                                    "084 02 00)"),
+              std::string::npos)
+        << summary->message;
+}
+
+// The note counts the 60-second words whose values became observations. One
+// in a code block, whose measurement words are not read, or in a shot at the
+// point the instrument stands on, which is not read, is not among them: the
+// import would otherwise say at one record both that the word was read as
+// the next minute and that it was not read.
+TEST(LeicaGsi, ASixtySecondWordWhoseValueIsNotKeptIsNotSaidToBeReadAsTheNextMinute)
+{
+    const std::string text =
+        "*110001+000000000000STN1 84..10+0000000000100000 85..10+0000000000200000 "
+        "88..10+0000000000001500 \r\n"
+        "*410002+000000000000KERB 21.324+0000000004459600 \r\n"
+        "*110003+000000000000STN1 21.324+0000000004459600 22.324+0000000009000000 "
+        "31..00+0000000000100000 \r\n"
+        "*110004+00000000000000P1 21.324+0000000001000000 22.324+0000000008959600 "
+        "31..00+0000000000100000 \r\n";
+    Result<ReadResult> read = readText(text);
+    ASSERT_TRUE(read.ok()) << read.error().message;
+    EXPECT_NE(warningAbout(*read, 2, "a code block holds measurement words"), nullptr)
+        << allWarnings(*read);
+    EXPECT_NE(warningAbout(*read, 3, "the point the instrument stands on"), nullptr)
+        << allWarnings(*read);
+    // Record 4's V "0000000008959600", 089 59 60.0, is the one kept: 090 00
+    // 00.0 = pi/2 = 1.570796326794896619 rad, face left.
+    const auto v = toTarget<survey::ZenithAngleObservation>(read->project.stations.at(0), "P1");
+    ASSERT_EQ(v.size(), 1U);
+    EXPECT_NEAR(v[0]->angle, 1.570796326794896619, kAngleTolerance);
+    EXPECT_EQ(v[0]->pointing.face, survey::Face::Left);
+    const ReadWarning* summary = warningAbout(*read, 4, "1 angle word writes 60 seconds");
+    ASSERT_NE(summary, nullptr) << allWarnings(*read);
+    EXPECT_NE(summary->message.find("(at record 4: word 22, 089 59 60.0, read as 090 00 00.0)"),
+              std::string::npos)
+        << summary->message;
+    EXPECT_NE(summary->message.find("so it was read as the next minute"), std::string::npos)
+        << summary->message;
+    const auto aboutSixty = std::ranges::count_if(read->warnings, [](const ReadWarning& warning) {
+        return warning.message.find("60 seconds") != std::string::npos;
+    });
+    EXPECT_EQ(aboutSixty, 1) << allWarnings(*read);
+}
+
+// The unit digit names the circle - 400 gon, 360 degrees decimal or
+// sexagesimal, 6400 mil (GSI ONLINE, page 6) - and no circle reading is past
+// it. Such a word is damaged: refused at its record, not wrapped onto
+// the circle as a direction that looks like any other. A full circle is the
+// circle's zero, as a rounding up at the top of the circle writes it.
+TEST(LeicaGsi, ACircleReadingPastAFullCircleIsRefusedInEveryUnitAndAFullCircleIsZero)
+{
+    //   record 2: Hz 450 00 00.0      record 6: Hz 360.00001 degrees
+    //   record 3: V 365 00 00.0       record 7: Hz 6400.0001 mil
+    //   record 4: Hz 9999 59 60.0     record 8: Hz 360 00 00.0 - zero
+    //   record 5: Hz 400.00001 gon    record 9: Hz 359 59 60.0 - zero
+    //                                 record 10: Hz 400.00000 gon - zero
+    const std::string text =
+        "110001+0000STN1 88..10+00001500 \r\n"
+        "110002+000000P1 21.324+45000000 22.324+09000000 \r\n"
+        "110003+000000P2 21.324+04500000 22.324+36500000 \r\n"
+        "*110004+00000000000000P3 21.324+0000000999959600 22.324+0000000009000000 \r\n"
+        "110005+000000P4 21.102+40000001 22.102+10000000 \r\n"
+        "110006+000000P5 21.103+36000001 22.103+09000000 \r\n"
+        "110007+000000P6 21.105+64000001 22.105+16000000 \r\n"
+        "110008+000000P7 21.324+36000000 22.324+09000000 \r\n"
+        "110009+000000P8 21.324+35959600 22.324+09000000 \r\n"
+        "110010+000000P9 21.102+40000000 22.102+10000000 \r\n";
+    Result<ReadResult> read = readText(text);
+    ASSERT_TRUE(read.ok()) << read.error().message;
+    const survey::SurveyStation& setup = read->project.stations.at(0);
+    const struct {
+        const char* id;
+        std::size_t record;
+        const char* circle;
+    } refused[] = {{"P1", 2, "(360 degrees)"}, {"P3", 4, "(360 degrees)"},
+                   {"P4", 5, "(400 gon)"},     {"P5", 6, "(360 degrees)"},
+                   {"P6", 7, "(6400 mil)"}};
+    for (const auto& word : refused) {
+        EXPECT_TRUE(toTarget<survey::HorizontalDirectionObservation>(setup, word.id).empty())
+            << word.id;
+        EXPECT_EQ(toTarget<survey::ZenithAngleObservation>(setup, word.id).size(), 1U) << word.id;
+        EXPECT_NE(warningAbout(*read, word.record,
+                               std::string("is past a full circle ") + word.circle),
+                  nullptr)
+            << word.id << "\n"
+            << allWarnings(*read);
+    }
+    EXPECT_TRUE(toTarget<survey::ZenithAngleObservation>(setup, "P2").empty());
+    EXPECT_EQ(toTarget<survey::HorizontalDirectionObservation>(setup, "P2").size(), 1U);
+    EXPECT_NE(warningAbout(*read, 3, "word 22 '36500000' is past a full circle (360 degrees)"),
+              nullptr)
+        << allWarnings(*read);
+    for (const char* id : {"P7", "P8", "P9"}) {
+        const auto hz = toTarget<survey::HorizontalDirectionObservation>(setup, id);
+        ASSERT_EQ(hz.size(), 1U) << id;
+        // Zero on the circle, from either side of it.
+        EXPECT_LT(std::min(hz[0]->direction, 2.0 * kPi - hz[0]->direction), kAngleTolerance)
+            << id << ": " << hz[0]->direction;
+    }
+    // 9999 59 60.0 was refused, so the one word read as the next minute is P8's.
+    const ReadWarning* summary = warningAbout(*read, 9, "1 angle word writes 60 seconds");
+    ASSERT_NE(summary, nullptr) << allWarnings(*read);
+    EXPECT_NE(summary->message.find("word 21, 359 59 60.0, read as 360 00 00.0"), std::string::npos)
+        << summary->message;
+}
+
+// A letter anywhere in a sexagesimal word refuses it at its record, before
+// the seconds are looked at: a letter beside a 60 must not be carried into
+// an angle, nor a letter's place taken for a number.
+TEST(LeicaGsi, ALetterInAnyFieldOfASexagesimalWordRefusesItAtItsRecord)
+{
+    //   record 2: in the degrees, "X4459600";
+    //   record 3: in the minutes, beside seconds of 60, "044X6600";
+    //   record 4: in the seconds, "04459A00";
+    //   record 5: in the tenths, after seconds of 60, "0445960A".
+    const std::string text = "110001+0000STN1 88..10+00001500 \r\n"
+                             "110002+000000P1 21.324+X4459600 22.324+09000000 \r\n"
+                             "110003+000000P2 21.324+044X6600 22.324+09000000 \r\n"
+                             "110004+000000P3 21.324+04459A00 22.324+09000000 \r\n"
+                             "110005+000000P4 21.324+0445960A 22.324+09000000 \r\n";
+    Result<ReadResult> read = readText(text);
+    ASSERT_TRUE(read.ok()) << read.error().message;
+    const survey::SurveyStation& setup = read->project.stations.at(0);
+    const struct {
+        const char* id;
+        std::size_t record;
+    } words[] = {{"P1", 2}, {"P2", 3}, {"P3", 4}, {"P4", 5}};
+    for (const auto& word : words) {
+        EXPECT_TRUE(toTarget<survey::HorizontalDirectionObservation>(setup, word.id).empty())
+            << word.id;
+        EXPECT_EQ(toTarget<survey::ZenithAngleObservation>(setup, word.id).size(), 1U) << word.id;
+        EXPECT_NE(warningAbout(*read, word.record,
+                               "is not a sexagesimal angle; that value was not read"),
+                  nullptr)
+            << word.id << "\n"
+            << allWarnings(*read);
+    }
     EXPECT_FALSE(says(std::vector<std::string>{allWarnings(*read)}, "60 seconds"));
 }
 
@@ -995,6 +1207,62 @@ TEST(LeicaGsi, AnAllZeroRemarkOrCodeInformationWordIsEmptyNotTheCodeZero)
         warningAbout(*read, 2, "3 remark or code information words are all zeros");
     ASSERT_NE(note, nullptr) << allWarnings(*read);
     EXPECT_NE(note->message.find("word 71"), std::string::npos) << note->message;
+}
+
+// The other side of that rule: a point's id (11) and a code block's code (41)
+// of nothing but zeros are "0". A point needs an id and a code block exists to
+// give a code, so neither is read as empty.
+TEST(LeicaGsi, AnAllZeroPointIdOrCodeBlockCodeIsZeroNotEmpty)
+{
+    // Record 1 names point "0" and keys it in at 100 E 200 N; record 2 is a
+    // code block of code "0"; the file begins and ends with a point block, so
+    // it reads Before Point and that code is P1's, the point after it.
+    const std::string text = "110001+00000000 81..10+00100000 82..10+00200000 \r\n"
+                             "410002+00000000 \r\n"
+                             "110003+000000P1 81..10+00300000 82..10+00400000 \r\n";
+    Result<ReadResult> read = readText(text);
+    ASSERT_TRUE(read.ok()) << read.error().message;
+    const survey::SurveyPoint* zero = point(read->project, "0");
+    ASSERT_NE(zero, nullptr);
+    EXPECT_DOUBLE_EQ(zero->easting, 100.0); // "81..10+00100000": unit 0, mm: 100.000 m
+    EXPECT_DOUBLE_EQ(zero->northing, 200.0);
+    const survey::SurveyPoint* p1 = point(read->project, "P1");
+    ASSERT_NE(p1, nullptr);
+    EXPECT_EQ(p1->code, "0");
+    EXPECT_FALSE(says(std::vector<std::string>{allWarnings(*read)}, "all zeros"))
+        << allWarnings(*read);
+}
+
+// Code information (42-49) comes in a code block as GSI ONLINE's PUT 41-49
+// give it, but "one may create any kind of GSI formats" (Leica's Format
+// Manager Reference Guide V1.0, Annex 2), and in a point's own block it can
+// only be about that point: it is kept in the point's metadata. A remark word
+// (71-79) in a code block could be the point's code and remarks or more about
+// the block's own code; it is not read, and the import says so rather than
+// dropping it without a word.
+TEST(LeicaGsi, CodeInformationInAPointsOwnBlockIsKeptAndRemarksInACodeBlockAreSaidNotRead)
+{
+    const std::string text =
+        "110001+000000P1 81..10+00100000 82..10+00200000 42....+0000CAT2 43....+00000000 \r\n"
+        "410002+0000TREE 71....+00000OAK 72....+00000012 \r\n"
+        "110003+000000P2 81..10+00300000 82..10+00400000 \r\n";
+    Result<ReadResult> read = readText(text);
+    ASSERT_TRUE(read.ok()) << read.error().message;
+    const survey::SurveyPoint* p1 = point(read->project, "P1");
+    ASSERT_NE(p1, nullptr);
+    ASSERT_TRUE(p1->metadata.contains("code information 1"));
+    EXPECT_EQ(p1->metadata.at("code information 1"), "CAT2");
+    EXPECT_FALSE(p1->metadata.contains("code information 2")); // all zeros: empty
+    EXPECT_TRUE(p1->code.empty()) << p1->code;
+    // The code block codes P2, the point after it; OAK and 12 went nowhere.
+    const survey::SurveyPoint* p2 = point(read->project, "P2");
+    ASSERT_NE(p2, nullptr);
+    EXPECT_EQ(p2->code, "TREE");
+    EXPECT_TRUE(p2->metadata.empty());
+    const ReadWarning* note = warningAbout(*read, 2, "2 remark words (71-79) are in a code block");
+    ASSERT_NE(note, nullptr) << allWarnings(*read);
+    EXPECT_NE(note->message.find("(the first, word 71)"), std::string::npos) << note->message;
+    EXPECT_NE(note->message.find("they were not read"), std::string::npos) << note->message;
 }
 
 // TargetInfo keeps the prism constant each distance was measured with, and

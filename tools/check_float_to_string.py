@@ -2,9 +2,13 @@
 # tools/check_float_to_string.py [build-dir] [jobs]
 #
 # Lists every std::to_string of a floating-point value in the tree, as
-# file:line, and exits 1 when there is one. Run from the checkout root after
-# a configure (it reads the build's compile_commands.json and runs its
-# compiler, with -fsyntax-only); build/release by default.
+# file:line, and exits 1 when there is one - or when a file could not be
+# checked, since a check that did not run is not a pass. Run from the
+# checkout root after a configure (it reads the build's
+# compile_commands.json and runs its compiler, with -fsyntax-only);
+# build/release by default. The compiler must run from this shell: on
+# Windows, MSYS2's bin first on PATH. Without it g++ cannot load its DLLs,
+# fails printing nothing, and every file is "not checked".
 #
 # Why: C++26 makes std::to_string of a double the shortest text that reads
 # back, as std::format("{}") does (P2587). GCC 16's library already does;
@@ -61,7 +65,10 @@ def check(entry):
         return found, None
     if run.returncode != 0:
         errors = [line for line in run.stderr.splitlines() if "error" in line]
-        return [], f"{entry['file']}: not checked: {(errors or [run.stderr])[0][:300]}"
+        reason = (errors or [run.stderr.strip()])[0][:300]
+        # A compiler that could not start says nothing at all.
+        reason = reason or f"the compiler exited {run.returncode} and printed nothing"
+        return [], f"{entry['file']}: not checked: {reason}"
     return [], None
 
 
@@ -88,9 +95,9 @@ def main():
         print(hit)
     for note in unchecked:
         print(note)
-    print(f"check_float_to_string: {len(work)} files checked, {len(found)} to_string of a "
-          f"floating-point value, {len(unchecked)} not checked")
-    return 1 if found else 0
+    print(f"check_float_to_string: {len(work) - len(unchecked)} of {len(work)} files checked, "
+          f"{len(found)} to_string of a floating-point value, {len(unchecked)} not checked")
+    return 1 if found or unchecked else 0
 
 
 if __name__ == "__main__":

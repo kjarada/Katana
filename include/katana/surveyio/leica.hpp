@@ -33,12 +33,14 @@
 //   * every point the file names: with coordinates (81-83, or 84-86 when the
 //     block measures nothing) as a SurveyPoint, without as an UnpositionedPoint;
 //   * a point's code from word 71, else from its code block (41); remarks
-//     72-79 and code information 42-49 in the point's metadata. Any of those
-//     words written as nothing but zeros is EMPTY - GSI pads text with '0',
-//     so that is how an empty value is written - not the code "0", and the
-//     import says how many there were. Whether a
-//     code block comes before or after its point is an INSTRUMENT SETTING
-//     that GSI does not record: <Rec Free Code: Before Point / After Point>
+//     72-79 and code information 42-49 - its code block's, or its own
+//     block's - in the point's metadata. Any of those words written as
+//     nothing but zeros is EMPTY - GSI pads text with '0', so that is how an
+//     empty value is written - not the code "0", and the import says how many
+//     there were. Words 71-79 in a code block are not read, and the import
+//     says so: nothing tells whether they are the point's or the code's.
+//     Whether a code block comes before or after its point is an INSTRUMENT
+//     SETTING that GSI does not record: <Rec Free Code: Before Point / After Point>
 //     (Leica TPS1200 Technical Reference Manual, version 5.0, 16.3 "Coding &
 //     Linework Settings"). A file that begins with a point block and ends
 //     with a code block has the shape only After Point gives, and its code
@@ -59,8 +61,12 @@
 //     positions names none.
 //   * a sexagesimal angle (unit 4) whose seconds are exactly 60 - a writer
 //     that rounded the seconds up without carrying the minute - as the next
-//     minute, which it is exactly, with one warning for the file; seconds
-//     past 60.0 and minutes past 59 are refused, word by word.
+//     minute, which it is exactly, with one warning for the file naming their
+//     records; only where the word writes both digits of the seconds in their
+//     place (its block's full width, or four digits after a written point).
+//     Any other 60, seconds past 60.0 and minutes past 59 are refused, word
+//     by word, and so is a circle reading past a full circle (400 gon, 360
+//     degrees, 6400 mil) in any unit.
 //   * each distance's prism constant as its shot recorded it, which may
 //     differ from its setup's; the import says how many do.
 // GSI states no coordinate system: the person supplies it, and the import says
