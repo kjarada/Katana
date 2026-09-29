@@ -51,10 +51,15 @@ katana_add_test_suite(geodesy
 `katana_add_test_suite(<module> LIBS <targets...> SOURCES <files...>)`
 (`tests/CMakeLists.txt`) builds `katana_<module>_tests` into
 `<build>/bin/tests`, links GoogleTest's main, applies the project's compiler
-settings and registers every case with `gtest_discover_tests` (at test time,
-with a 60 s discovery timeout, since the first run after a runtime redeploy
-loads freshly copied DLLs slowly). One executable per module keeps link
-dependencies honest: the math tests cannot rely on SQLite, the geometry tests
+settings and registers every case with `katana_discover_tests`
+(`cmake/KatanaTargetDefaults.cmake`): each case is a test that starts the
+executable directly with `--gtest_filter`. The cases are listed at test time,
+by running the executable, with a 60 s timeout, since the first run after a
+runtime redeploy loads freshly copied DLLs slowly; the list is kept beside the
+suite's `CTestTestfile.cmake` and made again only when the executable is
+rebuilt. Why this and not `gtest_discover_tests` itself is in
+`docs/building.md`, "Build and test speed". One executable per module keeps
+link dependencies honest: the math tests cannot rely on SQLite, the geometry tests
 cannot rely on Qt. `tests/<name>/` is configured only when module
 `katana_<name>` is, so `KATANA_MODULE_FILTER` narrows the tests with the
 build. Some folders are globbed (`tests/cad/customisation/`,
@@ -81,10 +86,11 @@ The test then asserts on the document against geometry worked out by hand.
 
 ### The widgets: qt_widgets
 
-`katana_qt_widget_tests` compiles the view widgets, the workspace, the dock
-chrome, the managers and the tool host from `src/katana_qt` into one
-executable - the application has no library of its own - and runs on Qt's
-offscreen platform. `tests/qt_widgets/widget_harness.hpp` paints a widget,
+`katana_qt_widget_tests` links the view widgets, the workspace, the dock
+chrome, the managers and the tool host - the application's own objects,
+`katana_qt_ui` in `src/katana_qt/CMakeLists.txt`, compiled once and linked
+into the application too - into one executable, and runs on Qt's offscreen
+platform. `tests/qt_widgets/widget_harness.hpp` paints a widget,
 runs the event loop twice (an activation queued by the first pass is
 delivered by the second), makes a window the active one and builds any of the
 three views; the managers' tests find their fields and buttons by object name
@@ -434,6 +440,21 @@ allocation still failed": 12 test processes at once, each starting OpenBLAS's
 thread pool, on a guest with about 5 GB free. All four passed when run again
 one at a time there, and they passed on the owner's machine, so the program is
 not at fault and nothing was changed for them.
+
+## A sidecar left in samples/gis (2026-09-29, not fixed)
+
+A whole-suite run at `--parallel 4` left `terrain.asc.aux.xml` beside
+`samples/gis/terrain.asc`: GDAL's statistics sidecar, which
+`InfoVerb.InfoOfTheSampleTerrainDescribesItsRasterAndBand` and
+`qt_widgets.DatasetInfoDialog.ItRunsTheInfoLinesAndShowsTheRasterItsBandsAndGdalsJson`
+assert is absent (no min or max without statistics being asked for). Both
+passed in that run and failed when run again while the file was there. The
+headless check `tests/geo/headless/info.cmake` asks for the same file's
+statistics, and the sidecar guard in `src/katana_io/geo/processing.cpp`
+removes what a run made only after the run ends, so a case reading the file
+at the same moment can see it; which test left it behind was not found. The
+file is git-ignored, so nothing shows it but the failure. Delete it before
+running the suite again.
 
 ## The clang builds' seven failures (Windows ARM64, macOS)
 

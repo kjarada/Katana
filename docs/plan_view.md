@@ -280,7 +280,8 @@ to QPainter whole when a sliver of them showed.
 ### The benchmark
 
 `katana_qt_benchmarks` (`benchmarks/qt/`, built with `KATANA_BUILD_BENCHMARKS`
-where the application is built) links the plan view's sources and paints a
+where the application is built) links the application's objects
+(`katana_qt_ui`, the plan view among them) and paints a
 generated survey drawing (`benchmarks/qt/survey_drawing.*`): 27 600 entities
 in the make-up of the owner's 28k-entity archive - 16 000 coded points in
 library symbols, 10 000 strings in library linestyles, 250 long contours,

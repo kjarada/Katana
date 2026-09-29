@@ -162,9 +162,9 @@ if(TARGET katana_cad_tests)
 endif()
 
 # The view widgets on their own, headlessly (tests/qt_widgets/). Not found by
-# the loop above: the application has no katana_qt library, so the suite
-# compiles the widgets' sources itself and is configured whenever the
-# application is.
+# the loop above: the suite links the application's objects (katana_qt_ui,
+# src/katana_qt/CMakeLists.txt) rather than a module library, and is
+# configured whenever the application is.
 if(TARGET katana)
     add_subdirectory(qt_widgets)
 endif()
