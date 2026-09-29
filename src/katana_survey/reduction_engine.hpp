@@ -140,12 +140,17 @@ struct SetupState {
     bool positioned = false;
     std::optional<double> orientation{}; // added to a circle reading to give an azimuth
     bool orientationAssumed = false;     // from a set circle, not from coordinates
+    // Of those, the ones oriented on the azimuth the file states for the
+    // backsight (SurveyStation::statedBacksightAzimuth) rather than the circle.
+    bool orientationStated = false;
     // Whether a circle set on a NAMED backsight that has no position may
-    // stand in for its grid azimuth. Off until nothing else can place the
-    // backsight: a controller records the circle it set (often 0 00 00)
-    // whether or not it is a grid azimuth, so taking it at once would orient
-    // the setup wrongly and leave the right orientation, which a later setup
-    // may give by radiating the backsight, unused.
+    // stand in for its grid azimuth - or the azimuth the file states for it
+    // be used. Off until nothing else can place the backsight: a controller
+    // records the circle it set (often 0 00 00) whether or not it is a grid
+    // azimuth, so taking it at once would orient the setup wrongly and leave
+    // the right orientation, which a later setup may give by radiating the
+    // backsight, unused; and coordinates, where they come, are the
+    // reduction's own azimuth, so a stated one waits for them as well.
     bool acceptCircleAsSet = false;
     // Notices already given for this setup: orientAndRadiate runs again
     // after the backsight is placed and after an adjustment, and the report
@@ -253,11 +258,13 @@ struct Engine {
 // stations, `reradiate` names the side shots, and only those are placed again
 // (overwriting what the first pass gave them).
 //
-// The orientation comes from the backsight's coordinates. The circle set on
-// the backsight stands in for its grid azimuth only where no coordinates can
-// come: no backsight is named, or SetupState::acceptCircleAsSet says the
-// named one will not be placed. Otherwise a setup whose backsight has no
-// position yet is left unoriented and radiates nothing, to be tried again.
+// The orientation comes from the backsight's coordinates. Only where no
+// coordinates can come - no backsight is named, or
+// SetupState::acceptCircleAsSet says the named one will not be placed - does
+// the azimuth the file states for the backsight give it, or failing that the
+// circle set on the backsight, standing in for its grid azimuth. Otherwise a
+// setup whose backsight has no position yet is left unoriented and radiates
+// nothing, to be tried again.
 void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                       const std::unordered_set<std::string_view>* reradiate = nullptr);
 

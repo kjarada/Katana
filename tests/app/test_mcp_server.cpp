@@ -218,8 +218,8 @@ TEST_F(McpServer, ABatchStopsAtTheFirstFailingCommandAndSaysWhich)
 // What an agent is told of a field file whose setup stands on RTK marks, and
 // where the import puts the shots: the hand-built file of the surveyio tests,
 // its positions worked by hand in src/katana_app/CMakeLists.txt beside
-// cli.survey_import_rtk_setup_field_file - the marks orient the setup, and
-// each shot's offset is applied.
+// cli.survey_import_rtk_setup_field_file - the marks, two GNSS positions,
+// orient the setup, and each shot's offset is applied.
 TEST_F(McpServer, AnAgentImportsAFieldFileWhoseSetupStandsOnRtkMarks)
 {
     initialize();
@@ -235,7 +235,9 @@ TEST_F(McpServer, AnAgentImportsAFieldFileWhoseSetupStandsOnRtkMarks)
                         "skipped=0 warnings=0"),
               std::string::npos)
         << read;
-    EXPECT_NE(read.find("content setups=1 observations=9 points=2 unpositioned=2"),
+    // Nine observations of the setup and the marks' two GNSS positions; the
+    // marks and the shots are all placed by the reduction.
+    EXPECT_NE(read.find("content setups=1 observations=11 points=0 unpositioned=4"),
               std::string::npos)
         << read;
     EXPECT_NE(lines[1]["output"].get<std::string>().find(
@@ -243,8 +245,16 @@ TEST_F(McpServer, AnAgentImportsAFieldFileWhoseSetupStandsOnRtkMarks)
               std::string::npos)
         << lines[1];
     const std::string list = lines[2]["output"].get<std::string>();
-    EXPECT_NE(list.find(" at 1010.5,5000"), std::string::npos) << list;
-    EXPECT_NE(list.find(" at 1020,4999.5"), std::string::npos) << list;
+    // The whole coordinate, not the start of a longer one: the line ends
+    // after it.
+    const auto listed = [&list](std::string_view at) {
+        const std::size_t found = list.find(at);
+        const std::size_t end = found == std::string::npos ? found : found + at.size();
+        return found != std::string::npos &&
+               (end == list.size() || list[end] == '\n' || list[end] == '\r');
+    };
+    EXPECT_TRUE(listed(" at 1010.5,5000")) << list;
+    EXPECT_TRUE(listed(" at 1020,4999.5")) << list;
     EXPECT_EQ(result["structuredContent"]["status"]["entities"], 4);
 }
 

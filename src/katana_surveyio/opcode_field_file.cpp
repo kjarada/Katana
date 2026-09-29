@@ -1,7 +1,7 @@
 // The opcode field file (.fld): a survey job as tab-separated records, each
 // opening with a numeric operation code - total-station setups, resections
-// and shots, entered coordinates (RTK positions among them), coded strings and
-// their attributes.
+// and shots, entered coordinates and RTK positions, coded strings and their
+// attributes.
 //
 // Specification this reader implements:
 //   [FLD] "Field File Format", the format publisher's reference manual
@@ -25,6 +25,10 @@
 //     number": a feature is a code and a string number, strung in the order
 //     measured. The CURRENT MEASUREMENT POINT is the last one made, and the
 //     CURRENT STRING the string it was appended to.
+//   * 44.5: a setup, a backsight and a check find their point by its point
+//     name among the names, then the point IDs, of the directly entered
+//     coordinates and then of the measurements before, and by its point ID
+//     among their point IDs.
 //   * 44.8, per opcode ("Optional information is enclosed in square
 //     brackets"):
 //       100 units, "only one choice for each": decimal degrees, metres, and
@@ -44,8 +48,8 @@
 //       05  the target height for 04, 06 and 07 after it; 09 a scale factor
 //           "to apply to subsequent slope distances".
 //       16  "Additional coding for the current measurement point": "A new
-//           measurement point is created at the same position", strung by
-//           this record's code and string number.
+//           measurement point is created at the same position", with this
+//           record's code and string number.
 //       20  close string: with no description "the current string is
 //           closed"; with one, the string its code and number (else its
 //           point) names.
@@ -54,8 +58,11 @@
 //           "along the plan line joining the current station to the specified
 //           point", positive away from the station; tangential: "at rights
 //           angles" to that line, "negative ... to the left (looking from the
-//           station)"; height: added to a height that "is not null". Each is
-//           "from the specified points original position".
+//           station)" - each "from the specified points original position".
+//           Height: it "adjusts the height of the point" where that height "is
+//           not null".
+//       47, 48  end the current string, without (47) or with (48) the current
+//           measurement point.
 //       29  a memo; 41 text for the current measurement point, "any spaces
 //           from column four onwards" being part of it; 71, 72, 73 an
 //           integer, a real and a text attribute (name, value) of it, an
@@ -67,39 +74,53 @@
 // Readings that are this reader's own, stated so they can be checked:
 //   * THE COLUMN AFTER THE OPCODE. The files this reader was written against
 //     put one field more than [FLD]'s syntax at the front of every record
-//     with values ("07<tab><tab>KJ<tab>01..."): their 04 has as many fields as
+//     with values ("07<tab><tab>EB<tab>01..."): their 04 has as many fields as
 //     [FLD]'s 04 with its azimuth, and their 128 a description and a value
 //     [FLD]'s .fld syntax does not give it. Where the column is filled it
-//     holds the date and time the record was made ("05/05/26 00:49:06.52" on
-//     each coordinate of the RTK job) - the counterpart of the XML form's
-//     time_surveyed, though [FLD] gives the op_code_properties that carry it
-//     to the XML form only. The records whose opcode has a fixed
-//     number of values (02, 03, 04, 06, 07) decide the file's layout before
-//     any is read: one whose field count fits only the column's layout, its
-//     first field blank or a date or time, votes for the column; one whose
-//     count fits only [FLD]'s, its first field filled, votes against. A 04 of
-//     ten fields fits both (the column and no azimuth, or the azimuth and no
-//     column), as does a record one field longer than [FLD]'s whose last is
-//     blank (a trailing tab, or the column and a blank last value): neither
-//     votes. A record is not trusted to decide alone because one of each can
-//     look the same: a record in the column's layout that has lost a value
-//     has [FLD]'s count, and a feature code left empty makes its first field
-//     empty. A fixed record that does not fit the file's layout is a warning
-//     and is skipped - a guess at which value is the slope distance reads a
-//     plausible survey that is wrong - and so is one that fits both layouts
-//     in a file whose records show both, unless its first field is a date or
-//     time. One blank field past a layout's count is a trailing tab. A record
-//     of free text takes the file's layout: in a file with the column, a
-//     filled first field that is not a date or time is read as a record
-//     written without it; in a file without it, a record of fixed form (05,
-//     09, 100, the offsets, 16, 20, 128) whose first value is blank and that
-//     fits only without that value carries the column. A date or time is
-//     known by its shape (isDateOrTime) and kept as text, "time stamp", on the
-//     point or setup its record makes: which of "05/05/26" is the day the
-//     file does not say.
-//   * An opcode may have a blank before it (" 2") or lack its leading zero
-//     ("7"): [FLD] calls it numeric and writes 1 to 9 as 01 to 09, and
-//     nothing makes 07 differ from 7.
+//     holds the date and time the record was made (the RTK job's, on each of
+//     its coordinates, equal to the point's own Date and Time attributes) -
+//     the counterpart of the XML form's time_surveyed, though [FLD] gives the
+//     op_code_properties that carry it to the XML form only. A record whose
+//     first field is a date or time has the column: only the column holds
+//     one. A record whose first field is filled otherwise has not: that is a
+//     feature code, and the column holds nothing else. A record whose first
+//     field is blank cannot say - a record in the column's layout that has
+//     lost a value has [FLD]'s count, and a feature code left empty makes the
+//     first field empty - so the file decides it: the records whose opcode has
+//     a fixed number of values (02, 03, 04, 06, 07) vote before any is read, a
+//     count that fits only the column's layout, with the first field blank or
+//     a date or time, for it, and a count that fits only [FLD]'s, with the
+//     first field filled, against, and most votes win. Two kinds of record fit
+//     both layouts: a 04 of ten fields (the column and no azimuth, or the
+//     azimuth and no column) and a record one field longer than [FLD]'s whose
+//     last field is blank (a trailing tab, or the column and a blank last
+//     value); they vote only with a date or time first. Such a record with a
+//     blank first field is read in the file's layout, unless that leaves its
+//     first measured value (the horizontal circle, X, the instrument height)
+//     blank where the other layout reads one - the one sign which layout
+//     wrote it: it is then skipped, saying so. A fixed record that does not
+//     fit the layout it is read in is a warning and is skipped - a guess at
+//     which value is the slope distance reads a plausible survey that is
+//     wrong. One blank field past a layout's count is a trailing tab. A record
+//     of free text takes the same rules: in a file with the column, a filled
+//     first field that is not a date or time is read as a record written
+//     without it; in a file without it (or one no fixed record decided, read
+//     as [FLD] writes it), a record of fixed form (05, 09, 100, the offsets,
+//     16, 20, 128) whose first value is blank and that fits only without that
+//     value carries the column. A date or time is known by its shape
+//     (isDateOrTime) and kept as text, "time stamp", on the point or setup its
+//     record makes: which of the first two numbers of a date such as 03/04/26
+//     is the day the file does not say.
+//   * An opcode may have blanks or tabs before it (" 2") or lack its leading
+//     zero ("7"): [FLD] calls it numeric and writes 1 to 9 as 01 to 09, and
+//     nothing makes 07 differ from 7. The probe reads a line the same way.
+//   * A LINE THAT IS NO RECORD (its first field is not an opcode) may have
+//     been one, and what it made is not known: it ends the current point and
+//     measurement, so what follows it that would describe them is skipped,
+//     naming it. A number the reader does not take as an opcode ("0007",
+//     "+3") is taken for the one it would be, for that bookkeeping only: one
+//     that starts a setup leaves no setup, so the shots after it are not filed
+//     under the setup before.
 //   * The first line of the files is "{Version 6.0}", which [FLD] does not
 //     mention: kept as "version". A line like it after the first record is no
 //     record.
@@ -107,67 +128,94 @@
 //     files put six-figure eastings in X and seven-figure MGA northings in Y,
 //     and one labels a reference station's Easting and Northing so.
 //   * A point is identified by its point name where it has one and by its
-//     point ID otherwise ([FLD] 44.5 finds a known point by either). A fixed
-//     record with neither is skipped.
+//     point ID otherwise. A setup, a backsight and a check (03, 04, 06) find
+//     the point they name that way and then, as 44.5 searches, by their name
+//     or ID among the point IDs the coordinates and shots before them gave:
+//     a 03 that names only the ID a coordinate was given with its name stands
+//     on that coordinate. A fixed record naming neither is skipped.
 //   * The vertical circle is a zenith reading: [FLD] never states its zero,
 //     and the files' readings near 90 and 270 degrees are zeniths on the two
 //     faces. One past 180 degrees is face right, held as 360 - z.
-//   * AN RTK POSITION WRITTEN AS 02 IS AN ENTERED COORDINATE. [FLD] gives a
-//     GNSS coordinate opcode 140 and says 140 "does not exist in the fld
-//     file", so a .fld carries an RTK position as an 02, its "directly entered
-//     coordinate", with attributes after it that say what the receiver solved
-//     ("GPS Information/GNSS Solution"). It is CoordinateSource::Entered like
-//     every 02: the reduction takes an entered coordinate as a known point, as
-//     it takes a GNSS position, so a total-station setup on an RTK mark
-//     orients on another. Its Z is the mark's, as [FLD]'s 02 needs "No
-//     reduction"; an antenna height among its attributes is kept, not
-//     subtracted again.
+//   * AN RTK POSITION IS A GNSS POSITION. [FLD] gives a GNSS coordinate
+//     opcode 140 and says 140 "does not exist in the fld file", so a .fld
+//     writes an RTK position as an 02, its "directly entered coordinate", with
+//     the receiver's attributes after it. An 02 whose own attributes - those
+//     after it, before the next record that makes a point or a setup -
+//     include one named "GNSS Solution" (what the receiver solved) is a
+//     survey::GnssPositionObservation of an unpositioned point, in the file's
+//     grid, with the a-priori GNSS precision of ReadOptions: the receiver's
+//     quality attributes are its own words, kept as attributes. Every other
+//     02 is an entered coordinate. The reduction seeds a GNSS position before
+//     any setup, as it seeds an entered coordinate, so a total-station setup
+//     on an RTK mark orients on another; it reports the point as GNSS, not as
+//     held control; and it checks a mark's second position against its
+//     first. The Z is the mark's, as [FLD]'s 02 needs "No reduction": an
+//     antenna height among the attributes is kept, not subtracted again. An
+//     02 with no Z stays an entered coordinate (a GNSS position has a
+//     height), with a warning.
 //   * THE ATTRIBUTES OF A POINT MEASURED MORE THAN ONCE. [FLD] makes every
 //     measurement a point of its own; Katana makes one point of a name and
 //     keeps every measurement's attributes on it. The first record that makes
-//     a point current (02, 04, 06, 07) owns the plain names; the time stamp
-//     and attributes after each later record about the same point - a face
-//     pair, a mark measured again, a check, a backsight - are kept under
-//     "record N/", N that record. 16 makes no second point here (see below),
-//     so what follows it is still the current record's; a name given twice
-//     there keeps its second value, where it differs, as "Name (record M)",
-//     M the attribute's record, with a warning.
+//     a point current (02, 04, 06, 07) owns the plain names; the time stamp,
+//     the comment and the attributes after each later record about the same
+//     point - a face pair, a mark measured again, a check, a backsight - are
+//     kept under "record N/", N that record. 16 makes no second point here
+//     (see below), so what follows it is still the current record's; a name
+//     given twice there keeps its second value, where it differs, as "Name
+//     (record M)", M the attribute's record, with a warning.
 //   * ATTRIBUTE GROUPS (124 and 125). [FLD] defines them for the XML form
-//     only (a name and a level, the group running "until" 125); the files
-//     write 124 with an empty value, the name and the level, and 125 with an
-//     empty name and the level. An attribute inside a group is kept as
-//     "Group/Name" - a reference station's "Easting" is not the point's - and
-//     nested groups as "Outer/Inner/Name", "/" being how Katana's properties
-//     show a tree. A group still open when a record makes another point or a
-//     setup, or when a 124 gives the level of a group still open, is ended
-//     there, with a warning.
-//   * 04 and 06 targets take the attributes after them as a shot's does: the
-//     files record the date, time and target height of a backsight and of a
-//     check that way. A check (06) does not string its target ([FLD] makes a
-//     check a one-vertex string of its own): "check measurement" on the point
-//     names the setup and the check's coding. A backsight's (04) coding is
-//     kept in its setup's metadata, and a setup's (03, 128): [FLD] strings a
-//     measurement point, which neither makes.
-//   * THE BACKSIGHT'S AZIMUTH. SurveyStation::backsightAzimuth is what the
-//     reduction orients a setup by when its backsight has no coordinates:
-//     the 04's azimuth_value where the file gives one (the orientation is then
-//     that azimuth less the circle reading on the backsight), and the circle
-//     reading otherwise (the circle taken as set to a grid azimuth).
+//     only: a name and a level, the attributes after it being in the group
+//     until its end, 125. The files write 124 with an empty value, the name
+//     and the level, and 125 with an empty name and the level. An attribute
+//     inside a group is kept as "Group/Name" - a reference station's
+//     "Easting" is not the point's - and nested groups as "Outer/Inner/Name",
+//     "/" being how Katana's properties show a tree. A group still open when
+//     a record makes another point or a setup, or when a 124 gives the level
+//     of a group still open, is ended there, with a warning. A group nested
+//     past kGroupDepth named groups, or whose name would take the groups' part
+//     of a name past kGroupPathLength characters, is read but not named in its
+//     attributes' names, with a warning: named, K groups nested under one
+//     point gave its K attributes names, and memory, that grew with K squared.
+//   * 04 and 06 targets take the attributes after them as a shot's does.
+//     [FLD] gives 41 and 71 to 73 to the current measurement point, which
+//     neither makes, so this is the reader's reading: the files write a
+//     check's date, time and target height after its 06, and a 04's are taken
+//     the same way (the files write none). A check (06) does not string its
+//     target ([FLD] makes a check a one-vertex string of its own): "check
+//     measurement" on the point names the setup and the check's coding. A
+//     backsight's (04) coding is kept in its setup's metadata, and a setup's
+//     (03, 128): [FLD] strings a measurement point, which neither makes.
+//   * THE BACKSIGHT. SurveyStation::backsightAzimuth is the circle reading on
+//     the backsight: the horizontal circle of the setup's first 04 that gives
+//     one, as its face-left reading (a face-right one less 180 degrees, as
+//     the reduction means the pointings to the backsight). A later 04 changes
+//     it no more than a later pointing would. The 04's azimuth_value is
+//     SurveyStation::statedBacksightAzimuth, the first a setup's 04s give; a
+//     later one that differs is kept in the setup's metadata, with a warning.
+//     The reduction orients the setup on it, less the reading on the
+//     backsight, only where nothing places the backsight - [FLD]'s "when no
+//     coordinate for the backsight point exists".
 //   * A record that makes a point but is not read leaves no current point,
 //     and a setup that is not read leaves no setup: what follows is skipped,
-//     naming that record, rather than given to the point or setup before.
+//     naming that record, rather than given to the point or setup before. So
+//     does a record about a point this reader does not read (10, 11, 12, 14,
+//     140) and an opcode [FLD] does not define.
 //   * OFFSETS (42, 43, 44) are applied to the one shot (07) of their point
-//     from the current setup: its direction, zenith and slope distance become
-//     those of the offset position, worked from what was measured with every
-//     offset of that shot so far, and what was measured is kept in the
-//     point's metadata ("shot record N as measured"). They are applied when
-//     the setup ends, because a later shot or check of the same point from
-//     the setup would make it one of several, and which of those an offset
-//     corrects [FLD] does not say: an offset of such a point, or of a point
-//     not shot from the current setup (an entered coordinate, a shot from an
-//     earlier setup), or one that puts its point on the station, is kept in
-//     the point's metadata and not applied, with a warning. The arithmetic
-//     and its error are at applyOffsets.
+//     from the current setup, through the builder's offsetShot: the shot's
+//     direction, zenith and slope distance become those of the offset
+//     position, and what was measured is kept in the point's metadata ("shot
+//     record N as measured"). A radial, a tangential and a height offset of
+//     one shot combine, each from the measured position; two of one kind
+//     apply to none of the shot, since whether the second adds to the first or
+//     replaces it [FLD] does not say. They are applied when the setup ends.
+//     [FLD] moves the measurement an offset follows, a point of its own there;
+//     Katana makes one point of every measurement of a name, and moving one
+//     of several pointings the reduction means would put the point between
+//     them. So an offset of a point measured more than once from the setup is
+//     kept in the point's metadata and not applied, with a warning, and so is
+//     one of a point not shot from the current setup (a coordinate, a shot
+//     from an earlier setup) and one that would put its point on the station.
+//     The arithmetic's error is at applyOffsets.
 //   * 128 (and 138) starts a setup on the point its description names:
 //     [FLD]'s .fld syntax has the height only, and the files write the
 //     description first, as the XML form carries one, and an empty value
@@ -176,8 +224,9 @@
 //     computes no resection, which notCarried says.
 //   * 16 strings the current measurement point into the second string as
 //     well, rather than making a second point at its position: one position,
-//     as [FLD]'s two are. A point ID or name the 16 gives is kept with the
-//     point, with a warning.
+//     as [FLD]'s two are. The second string is then the current string, as
+//     [FLD]'s new point would make it, so a 20 after it closes that string. A
+//     point ID or name the 16 gives is kept with the point, with a warning.
 //   * 29 is a note on the setup (the project's before the first): [FLD] puts
 //     a memo in its check-measurement model, which Katana does not have, and
 //     a setup's notes are where a person reads a job. 41 is kept whole as
@@ -185,15 +234,23 @@
 //     and the point's description is already its comment.
 //   * COMMENTS ("//", which [FLD] does not mention). Those before the first
 //     record that makes a point or a setup are the header: a "Key : value"
-//     one is kept in the project's metadata as "header: Key", any other in
-//     "header", and "Coordinate System" (with its "Zone") is the system the
-//     file declares - by name, exactly as written, never turned into an EPSG
-//     code here. A later comment (a resection's residuals, an antenna height
-//     change) is a note on the setup it follows, verbatim. A rule of dashes
-//     is decoration either way.
+//     one is kept in the project's metadata as "header: Key" (a key given
+//     again, with another value, as "header: Key (record N)", with a
+//     warning), any other in "header", and "Coordinate System" (with its
+//     "Zone") is the system the file declares - by name, exactly as written,
+//     never turned into an EPSG code here. A later comment (a resection's
+//     residuals, an antenna height change) is a note on the setup it follows,
+//     verbatim. A rule of dashes is decoration either way.
 //   * 72 "Target height" and "Prism constant" are attributes of the point like
 //     any other: the target height that applies is 05's, which the format
 //     defines as such, and the prism constant has no unit in the file.
+//   * 09 IS THE SCALE FACTOR. [FLD]'s entry for 15 (vertical circle
+//     correction) gives its .fld syntax as "09 Vertical_circle_in_decimal_
+//     degrees", 09 being entry 9's own opcode: every other entry's record
+//     opens with the entry's number, so that line is read as a slip for 15,
+//     and every 09 as a scale factor. The reader multiplies the slope
+//     distances after it by the factor, so a setup whose every distance it
+//     scales says so (InstrumentSettings: the factor, Applied).
 //   * An opcode [FLD] defines only for its XML form (140, 145 ...) has no .fld
 //     layout to read and is skipped, saying so. 124 and 125 are read because
 //     the files show their layout, and one misread can only misname an
@@ -207,6 +264,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -234,8 +292,10 @@ using katana::surveyio::ProbeInput;
 using katana::surveyio::ReadOptions;
 using katana::surveyio::ReadResult;
 using katana::surveyio::topcon::faceOfZenithReading;
+using katana::surveyio::topcon::offsetShot;
 using katana::surveyio::topcon::parseReal;
 using katana::surveyio::topcon::RawProjectBuilder;
+using katana::surveyio::topcon::ShotReading;
 using katana::surveyio::topcon::wrapToCircle;
 using katana::surveyio::topcon::zenithInModelRange;
 namespace survey = katana::survey;
@@ -245,9 +305,17 @@ constexpr std::string_view kFormatId = "opcode-field-file";
 constexpr std::string_view kSpecification = "Field File Format 44.8";
 constexpr double kPi = std::numbers::pi;
 constexpr double kRadiansPerDegree = kPi / 180.0;
-// Records the probe reads before it decides: enough to pass a header of
-// comments and reach the survey (kProbeBytes caps the lines it is given).
-constexpr std::size_t kProbeRecords = 200;
+// How many attribute groups an attribute's name nests, and how long the
+// groups' part of it grows: the bounds Katana gives its other '/'-separated
+// tree name, a layer path (kMaximumLayerDepth and kMaximumLayerNameLength in
+// katana/entity/layer_path.hpp, which surveyio may not include). Past them a
+// group is read but not named, so names - and memory - grow no faster than
+// the file.
+constexpr std::size_t kGroupDepth = 16;
+constexpr std::size_t kGroupPathLength = 512;
+// The attribute that says an 02 is a receiver's solution (see the top of this
+// file): what the RTK job writes under each coordinate.
+constexpr std::string_view kGnssSolution = "GNSS Solution";
 
 // The tab-separated fields of one line, the opcode first.
 std::vector<std::string_view> splitTabs(std::string_view line)
@@ -262,6 +330,13 @@ std::vector<std::string_view> splitTabs(std::string_view line)
         }
         start = tab + 1;
     }
+}
+
+// A line from its first character that is not a blank or a tab: the opcode
+// may have either before it (" 2"), and so may a comment.
+std::string_view withoutIndent(std::string_view line)
+{
+    return line.substr(std::min(line.size(), line.find_first_not_of(" \t")));
 }
 
 bool isDigit(char c)
@@ -288,6 +363,28 @@ std::optional<int> opcodeOf(std::string_view text)
     return negative ? -value : value;
 }
 
+// The opcode a first field that is not one would be, read loosely - a plus,
+// or zeros before three digits ("+7", "0007") - for the bookkeeping of a line
+// that is no record; nullopt when it is no number at all.
+std::optional<int> looseOpcode(std::string_view text)
+{
+    const bool negative = text.starts_with('-');
+    if (negative || text.starts_with('+')) {
+        text.remove_prefix(1);
+    }
+    while (text.size() > 1 && text.front() == '0') {
+        text.remove_prefix(1);
+    }
+    if (text.empty() || !isDigit(text.front())) {
+        return std::nullopt;
+    }
+    const std::optional<int> value = opcodeOf(text);
+    if (!value) {
+        return std::nullopt;
+    }
+    return negative ? -*value : *value;
+}
+
 // "07", "42", "-2": an opcode as [FLD]'s syntax lines write it, whatever
 // padding the file gave it.
 std::string opcodeText(int opcode)
@@ -305,15 +402,22 @@ bool isLetter(char c)
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
+bool isUpper(char c)
+{
+    return c >= 'A' && c <= 'Z';
+}
+
 // Whether `text` reads as a date, a time or both, the way a controller writes
-// one: "05/05/26 00:49:06.52" (the RTK job), [FLD] 44.6's time_text
-// "2015-09-28T06:42:45Z", "00:49:06", "05/05/2026", "5 May 2026 12:49 PM",
-// "2026-05-05T00:49:06+1000". Digits; the separators / - : . , + and blanks;
-// and only the words of a date or time - T, Z, AM, PM, UTC, GMT, and a month
-// standing apart from any digit. At least one digit, and a / - or : between
-// two digits or a month, so that a number alone ("12", "1.5") and a feature
-// code ("KB", "MAR1") are not one. Nothing is read out of it (see the top of
-// this file).
+// one: "03/04/26 10:49:06.52", [FLD] 44.6's time_text "2015-09-28T06:42:45Z",
+// "10:49:06", "03/04/2026", "3 Apr 2026 12:49 PM", "2026-04-03T10:49:06+1000",
+// the basic ISO form "20260403T104906Z", a zone after the time ("10:49:06
+// AEST", "UTC+10"). A time is two numbers joined by ':'; a date three joined
+// by one of / - . , or a month's name standing apart from any digit and a
+// number, or eight digits, T and four or six more. The words may only be a
+// date's or a time's: T, Z, AM, PM, UTC, GMT, a month, and after the time a
+// zone's two to five capitals. So a number alone ("12", "1.5", "1-2") and a
+// feature code ("KB", "MAR1", "T1-2") are not one. Nothing is read out of it
+// (see the top of this file).
 bool isDateOrTime(std::string_view text)
 {
     static constexpr std::array<std::string_view, 6> kWords = {"t", "z", "am", "pm", "utc", "gmt"};
@@ -322,41 +426,81 @@ bool isDateOrTime(std::string_view text)
         "jul",   "aug",     "sep",      "sept",    "oct",     "nov",
         "dec",   "january", "february", "march",   "april",   "june",
         "july",  "august",  "september", "october", "november", "december"};
+    constexpr std::string_view kSeparators = "/-:.,+ ";
+    // Numbers ('n'), words ('w') and the separators, each its own character.
+    struct Token {
+        char kind = 0;
+        std::string_view text;
+    };
     text = trimmed(text);
-    bool digit = false;
-    bool separated = false;
-    bool month = false;
+    std::vector<Token> tokens;
     for (std::size_t i = 0; i < text.size();) {
-        const char c = text[i];
-        if (isDigit(c)) {
-            digit = true;
-            ++i;
-        } else if (c == '/' || c == '-' || c == ':') {
-            if (i > 0 && i + 1 < text.size() && isDigit(text[i - 1]) && isDigit(text[i + 1])) {
-                separated = true;
+        std::size_t end = i + 1;
+        char kind = text[i];
+        if (isDigit(text[i])) {
+            while (end < text.size() && isDigit(text[end])) {
+                ++end;
             }
-            ++i;
-        } else if (c == '.' || c == ',' || c == '+' || c == ' ') {
-            ++i;
-        } else if (isLetter(c)) {
-            std::size_t end = i;
+            kind = 'n';
+        } else if (isLetter(text[i])) {
             while (end < text.size() && isLetter(text[end])) {
                 ++end;
             }
-            const std::string word = katana::core::lowered(text.substr(i, end - i));
-            const bool apart = (i == 0 || !isDigit(text[i - 1])) &&
-                               (end == text.size() || !isDigit(text[end]));
-            if (apart && std::find(kMonths.begin(), kMonths.end(), word) != kMonths.end()) {
-                month = true;
-            } else if (std::find(kWords.begin(), kWords.end(), word) == kWords.end()) {
-                return false;
+            kind = 'w';
+        } else if (kSeparators.find(text[i]) == std::string_view::npos) {
+            return false;
+        }
+        tokens.push_back({kind, text.substr(i, end - i)});
+        i = end;
+    }
+    // Out of range reads as nothing, so i - 1 at the start is no token.
+    const auto is = [&](std::size_t i, char kind) {
+        return i < tokens.size() && tokens[i].kind == kind;
+    };
+    bool time = false;
+    bool date = false;
+    bool digits = false;
+    std::size_t timeAt = tokens.size();
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        digits = digits || is(i, 'n');
+        if (is(i, 'n') && is(i + 1, ':') && is(i + 2, 'n')) {
+            timeAt = std::min(timeAt, i);
+            time = true;
+        }
+        for (const char separator : {'/', '-', '.'}) {
+            if (is(i, 'n') && is(i + 1, separator) && is(i + 2, 'n') && is(i + 3, separator) &&
+                is(i + 4, 'n')) {
+                date = true;
             }
-            i = end;
+        }
+        if (is(i, 'n') && tokens[i].text.size() == 8 && is(i + 1, 'w') &&
+            katana::core::equalsIgnoringCase(tokens[i + 1].text, "t") && is(i + 2, 'n') &&
+            (tokens[i + 2].text.size() == 4 || tokens[i + 2].text.size() == 6)) {
+            date = true;
+            time = true;
+            timeAt = std::min(timeAt, i);
+        }
+    }
+    bool month = false;
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i].kind != 'w') {
+            continue;
+        }
+        const std::string word = katana::core::lowered(tokens[i].text);
+        const bool apart = !is(i - 1, 'n') && !is(i + 1, 'n');
+        if (apart && std::find(kMonths.begin(), kMonths.end(), word) != kMonths.end()) {
+            month = true;
+        } else if (std::find(kWords.begin(), kWords.end(), word) != kWords.end()) {
+            continue;
+        } else if (time && i > timeAt && apart && tokens[i].text.size() >= 2 &&
+                   tokens[i].text.size() <= 5 &&
+                   std::all_of(tokens[i].text.begin(), tokens[i].text.end(), isUpper)) {
+            continue; // a zone's abbreviation after the time
         } else {
             return false;
         }
     }
-    return digit && (separated || month);
+    return time || date || (month && digits);
 }
 
 // A comment that is only a rule ("//------") or nothing.
@@ -376,6 +520,16 @@ std::optional<std::size_t> valuesAfterDescription(int opcode)
     case 6: return 3;  // HA VA SD
     case 7: return 3;  // HA VA SD
     default: return std::nullopt;
+    }
+}
+
+// What the first value after a fixed record's description is, for a message.
+std::string_view firstValueName(int opcode)
+{
+    switch (opcode) {
+    case 2: return "X";
+    case 3: return "the instrument height";
+    default: return "the horizontal circle";
     }
 }
 
@@ -410,6 +564,14 @@ LayoutFit layoutFit(int opcode, const std::vector<std::string_view>& fields)
     return {fits(1), fits(0)};
 }
 
+// The first value after a fixed record's description, read with the column
+// (`columns` 1) or without it; empty when the record is too short for it.
+std::string_view firstValue(const std::vector<std::string_view>& fields, std::size_t columns)
+{
+    const std::size_t at = 1 + columns + 5;
+    return at < fields.size() ? fields[at] : std::string_view{};
+}
+
 // For a record of free fields whose values nonetheless have a fixed form - a
 // number, a list of units, the offsets' and 128's optional description, 16's
 // and 20's - whether `values` fit that form; nullopt for text, whose first
@@ -440,8 +602,8 @@ std::optional<bool> fixedFormFits(int opcode, const std::vector<std::string_view
 bool makesPointOrSetup(int opcode)
 {
     switch (opcode) {
-    case 2: case 3: case 4: case 6: case 7: case 10: case 11: case 12: case 128: case 138:
-    case 140:
+    case 2: case 3: case 4: case 6: case 7: case 10: case 11: case 12: case 14: case 128:
+    case 138: case 140:
         return true;
     default:
         return false;
@@ -453,6 +615,17 @@ bool startsSetup(int opcode)
     return opcode == 3 || opcode == 128 || opcode == 138;
 }
 
+// [FLD] 44.4's measurement points: what 16, 20 and the offsets act on.
+bool makesMeasurement(int opcode)
+{
+    switch (opcode) {
+    case 2: case 7: case 10: case 11: case 12: case 140:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // [FLD] 44.8's name for each opcode this reader does not read, so a skipped
 // record says what it was.
 struct UnreadOpcode {
@@ -460,25 +633,29 @@ struct UnreadOpcode {
     std::string_view name;
     // "This opcode does not exist in the fld file": defined for the XML form.
     bool xmlOnly = false;
-    // A measurement point [FLD] 44.4 counts as current: nothing after it may
-    // be given to the point before.
-    bool makesPoint = false;
+    // A record about a point of its own - a measurement [FLD] 44.4 counts as
+    // current, or a check to a named coordinate: what follows it describes
+    // that point, so nothing after it may be given to the point before.
+    bool aboutAPoint = false;
     // A correction to the measurements after it.
     bool correctsLater = false;
     // A field template, from which the measurements after it may take their
     // feature codes and string numbers.
     bool codesLater = false;
+    // Ends the current string, so the points after it of that code and string
+    // number start another.
+    bool endsString = false;
 };
 
 constexpr UnreadOpcode kUnreadOpcodes[] = {
     {.opcode = -3, .name = "group"},
     {.opcode = -1, .name = "error text"},
     {.opcode = 1, .name = "job data"},
-    {.opcode = 10, .name = "stadia measurement", .makesPoint = true},
-    {.opcode = 11, .name = "measurement by horizontal distance and height", .makesPoint = true},
+    {.opcode = 10, .name = "stadia measurement", .aboutAPoint = true},
+    {.opcode = 11, .name = "measurement by horizontal distance and height", .aboutAPoint = true},
     {.opcode = 12, .name = "measurement by horizontal distance and height difference",
-     .makesPoint = true},
-    {.opcode = 14, .name = "check coordinate"},
+     .aboutAPoint = true},
+    {.opcode = 14, .name = "check coordinate", .aboutAPoint = true},
     {.opcode = 15, .name = "vertical circle correction", .correctsLater = true},
     {.opcode = 17, .name = "arc through the last three points"},
     {.opcode = 18, .name = "circle feature"},
@@ -496,8 +673,8 @@ constexpr UnreadOpcode kUnreadOpcodes[] = {
     {.opcode = 40, .name = "non-tinable vertex"},
     {.opcode = 45, .name = "parallelogram"},
     {.opcode = 46, .name = "breakline"},
-    {.opcode = 47, .name = "new string"},
-    {.opcode = 48, .name = "end string"},
+    {.opcode = 47, .name = "new string", .endsString = true},
+    {.opcode = 48, .name = "end string", .endsString = true},
     {.opcode = 49, .name = "distances"},
     // "used as the bearing datum difference for the current instrument set up
     // for all measurements ... that follow"
@@ -557,7 +734,7 @@ constexpr UnreadOpcode kUnreadOpcodes[] = {
     {.opcode = 127, .name = "distance correction", .correctsLater = true},
     {.opcode = 130, .name = "field file", .xmlOnly = true},
     {.opcode = 131, .name = "PPM correction", .correctsLater = true},
-    {.opcode = 140, .name = "GNSS coordinate", .xmlOnly = true, .makesPoint = true},
+    {.opcode = 140, .name = "GNSS coordinate", .xmlOnly = true, .aboutAPoint = true},
     {.opcode = 141, .name = "non-tinable string", .xmlOnly = true},
     {.opcode = 142, .name = "extend the next segment", .xmlOnly = true},
     {.opcode = 143, .name = "extend the previous segment", .xmlOnly = true},
@@ -592,7 +769,7 @@ struct Description {
         return {values[at], values[at + 1], values[at + 2], values[at + 3], values[at + 4]};
     }
 
-    // [FLD] 44.5: a known point is found by its name or its ID.
+    // The point the record names: its name, else its ID.
     [[nodiscard]] std::string_view id() const
     {
         return pointName.empty() ? pointId : pointName;
@@ -634,6 +811,17 @@ bool anyFilled(const std::vector<std::string_view>& values, std::size_t from = 0
     return false;
 }
 
+// "N 6200020, E 500010, elevation 12.5": coordinates as a restatement says them.
+std::string coordinatesText(double northing, double easting, std::optional<double> elevation)
+{
+    std::string text = "N " + katana::core::formatExactReal(northing) + ", E " +
+                       katana::core::formatExactReal(easting);
+    if (elevation) {
+        text += ", elevation " + katana::core::formatExactReal(*elevation);
+    }
+    return text;
+}
+
 class FieldFileReader {
   public:
     FieldFileReader(std::string_view fileName, const ReadOptions& options)
@@ -663,15 +851,20 @@ class FieldFileReader {
 
     void record(int opcode, const std::vector<std::string_view>& fields, std::size_t n);
     void fixedRecord(int opcode, const std::vector<std::string_view>& fields, std::size_t n);
+    void notARecord(std::string_view first, std::size_t n);
     void unread(int opcode, std::size_t n);
-    void comment(std::string_view line);
+    void comment(std::string_view line, std::size_t n);
     void units(const std::vector<std::string_view>& values, std::size_t n);
+    void scaleFactor(double factor, std::size_t n);
     void coordinate(const Description& d, const std::vector<std::string_view>& v,
                     std::string_view stamp, std::size_t n);
     void station(const Description& d, const std::vector<std::string_view>& v,
                  std::string_view stamp, std::size_t n);
     void measurement(int opcode, const Description& d, const std::vector<std::string_view>& v,
                      std::string_view stamp, std::size_t n);
+    void backsight(survey::SurveyStation& setup, const Description& d,
+                   const std::vector<std::string_view>& v, std::optional<double> horizontal,
+                   survey::Face face, std::size_t n);
     void resection(int opcode, const Values& v, std::size_t n);
     void resectionEnd(int opcode, const Values& v, std::size_t n);
     void multipleCoding(const Values& v, std::size_t n);
@@ -684,6 +877,7 @@ class FieldFileReader {
     // Ends the open groups from depth `from` inward, each a warning that
     // says `why` (record n).
     void endGroups(std::size_t from, std::size_t n, std::string_view why);
+    void popGroup();
 
     // The bookkeeping of the current point (see the members below).
     void pointRecordStarts(std::size_t n, bool isMeasurement);
@@ -697,11 +891,23 @@ class FieldFileReader {
     // prefix; a key the record has given already keeps a different value as
     // "key (record n)", with a warning.
     void putPointValue(const std::string& key, std::string value, std::size_t n);
-    // The point ID a record gives a point it names by its name.
+    // What a record about a point says besides its code: the point ID it
+    // gives with a name, and a later record's comment.
     void keepPointId(const Description& d, std::size_t n);
+    void keepLaterComment(const Description& d, std::size_t n);
+    // [FLD] 44.5: the point a setup, a backsight or a check names.
+    [[nodiscard]] std::string knownPoint(const Description& d) const;
+    // The point IDs a coordinate or a shot gives, by the point it made.
+    void registerPointId(const Description& d, const std::string& id);
+    // Positions the point of the 02 whose record group ends here, or gives it
+    // its GNSS position (see the top of this file).
+    void finishCoordinate();
     survey::SurveyStation& beginSetup(std::string_view pointId, std::optional<double> height,
                                       std::string_view stamp, std::size_t n);
     void setupNotRead(std::size_t n, std::string message);
+    // The setup that ends where another begins, or the file ends: its
+    // offsets, and the scale factor its settings state.
+    void endSetup();
     // The current setup's offsets, applied or said not to be (applyOffsets).
     void applyOffsets();
 
@@ -710,12 +916,14 @@ class FieldFileReader {
     RawProjectBuilder builder_;
     std::optional<katana::core::Error> fatal_;
     Layout layout_ = Layout::Undecided;
-    // Fixed records voted both ways: one that fits both layouts is skipped.
-    bool mixedLayout_ = false;
     double targetHeight_ = 0.0;
     bool targetHeightSeen_ = false;
     double distanceScale_ = 1.0;
     bool scaleWarned_ = false;
+    // The factor the current setup's first slope distance was multiplied by,
+    // and the first record of it whose factor was another (0 when none).
+    std::optional<double> setupFactor_;
+    std::size_t mixedFactorRecord_ = 0;
     // Comments before the first record that makes a point or a setup are the
     // file's header.
     bool header_ = true;
@@ -736,6 +944,9 @@ class FieldFileReader {
     // with each point name.
     std::unordered_set<std::string> describedPoints_;
     std::unordered_map<std::string, std::string> pointIds_;
+    // Every point ID a coordinate or a shot gave, and the point it made then:
+    // what 44.5's search finds a point ID in.
+    std::unordered_map<std::string, std::string> idOwners_;
     // [FLD] 44.4's current measurement point - the point of the last 02 or 07
     // - with the record, the feature code and the string number that made
     // it: 16, 20 and the offsets act on it and its string.
@@ -745,9 +956,37 @@ class FieldFileReader {
     std::string currentCode_;
     std::string currentString_;
     std::size_t unreadMeasurementRecord_ = 0;
-    // Open attribute groups, outermost first, with the records that opened them.
+    // The 02 whose record group is being read: its point is positioned, or
+    // given its GNSS position, when the next record that makes a point or a
+    // setup begins or the file ends, once its attributes have said which.
+    struct PendingCoordinate {
+        std::string id;
+        double easting = 0.0;
+        double northing = 0.0;
+        std::optional<double> elevation;
+        std::size_t record = 0;
+        bool gnss = false;
+    };
+    std::optional<PendingCoordinate> coordinate_;
+    // The first coordinates each point was given, for a later 02 of it.
+    struct GivenCoordinate {
+        double easting = 0.0;
+        double northing = 0.0;
+        std::optional<double> elevation;
+        std::size_t record = 0;
+        bool gnss = false;
+    };
+    std::unordered_map<std::string, GivenCoordinate> givenCoordinates_;
+    // Open attribute groups, outermost first, with the records that opened
+    // them, whether each is named in its attributes' names, and the length
+    // of groupPrefix_ before it.
     std::vector<std::string> groups_;
     std::vector<std::size_t> groupRecords_;
+    std::vector<bool> groupNamed_;
+    std::vector<std::size_t> groupPrefixLengths_;
+    // "Outer/Inner/": the names of the open groups that are named.
+    std::string groupPrefix_;
+    std::size_t namedGroups_ = 0;
     // A setup record (03, 128, 138) that was not read: the measurements after
     // it are not filed under the setup before it.
     std::size_t unreadSetupRecord_ = 0;
@@ -768,9 +1007,7 @@ class FieldFileReader {
         std::optional<std::size_t> direction; // indices in the setup's observations
         std::optional<std::size_t> zenith;
         std::optional<std::size_t> distance;
-        double circle = 0.0; // radians, as read
-        double zenithAngle = 0.0; // radians, FL-equivalent
-        double slope = 0.0; // metres, scaled
+        ShotReading measuredReading; // radians and metres, as read and scaled
         std::string measured; // the values as the file writes them
         double radial = 0.0; // the offsets applied, metres
         double tangential = 0.0;
@@ -808,24 +1045,20 @@ FieldFileReader::Values FieldFileReader::valuesOf(int opcode,
         return result; // the opcode alone
     }
     const std::string_view first = fields[1];
-    const bool columnLike = blank(first) || isDateOrTime(first);
     bool column = false;
-    switch (layout_) {
-    case Layout::Column: column = columnLike; break;
-    case Layout::NoColumn:
-        // A record of fixed form that fits only with its blank first value
-        // taken as the column carries it: an empty target height, factor or
+    if (isDateOrTime(first)) {
+        column = true; // only the column holds a date or time
+    } else if (layout_ == Layout::Column) {
+        column = blank(first);
+    } else if (blank(first) && fields.size() > 2) {
+        // Without the column (or undecided, read as [FLD] writes it): a
+        // record of fixed form that fits only with its blank first value
+        // taken as the column carries it - an empty target height, factor or
         // unit followed by one is no value.
-        if (blank(first) && fields.size() > 2) {
-            const std::vector<std::string_view> all(fields.begin() + 1, fields.end());
-            const std::vector<std::string_view> rest(fields.begin() + 2, fields.end());
-            const std::optional<bool> whole = fixedFormFits(opcode, all);
-            column = whole.has_value() && !*whole && fixedFormFits(opcode, rest).value_or(false);
-        }
-        break;
-    // No fixed record decided the file: a record with more than one value and
-    // a blank (or dated) first is taken to have the column.
-    case Layout::Undecided: column = columnLike && fields.size() > 2; break;
+        const std::vector<std::string_view> all(fields.begin() + 1, fields.end());
+        const std::vector<std::string_view> rest(fields.begin() + 2, fields.end());
+        const std::optional<bool> whole = fixedFormFits(opcode, all);
+        column = whole.has_value() && !*whole && fixedFormFits(opcode, rest).value_or(false);
     }
     if (column) {
         result.stamp = trimmed(first);
@@ -836,7 +1069,7 @@ FieldFileReader::Values FieldFileReader::valuesOf(int opcode,
     return result;
 }
 
-void FieldFileReader::comment(std::string_view line)
+void FieldFileReader::comment(std::string_view line, std::size_t n)
 {
     const std::string_view text = trimmed(line.substr(2));
     if (isDecoration(text)) {
@@ -856,7 +1089,20 @@ void FieldFileReader::comment(std::string_view line)
             if (value.empty()) {
                 return; // a heading the writer left blank ("Surveyor : ")
             }
-            builder_.project().metadata["header: " + std::string(key)] = std::string(value);
+            const std::string name = "header: " + std::string(key);
+            std::map<std::string, std::string>& metadata = builder_.project().metadata;
+            const auto [given, first] = metadata.try_emplace(name, std::string(value));
+            if (!first && given->second != value) {
+                const std::string again = name + " (record " + std::to_string(n) + ")";
+                builder_.warn(n, "the header gives '" + std::string(key) + "' again, as '" +
+                                     std::string(value.substr(0, 40)) + "' after '" +
+                                     given->second.substr(0, 40) +
+                                     "'; both are kept, this one as '" + again + "'");
+                metadata[again] = std::string(value);
+            }
+            if (!first) {
+                return;
+            }
             if (key == "Coordinate System") {
                 coordinateSystem_ = std::string(value);
             } else if (key == "Zone") {
@@ -885,8 +1131,50 @@ void FieldFileReader::units(const std::vector<std::string_view>& values, std::si
     builder_.countRead();
 }
 
+void FieldFileReader::scaleFactor(double factor, std::size_t n)
+{
+    if (factor != 1.0 && !scaleWarned_) {
+        scaleWarned_ = true;
+        builder_.warn(n, "slope distances after this record are multiplied by the file's scale "
+                         "factor " +
+                             katana::core::formatExactReal(factor) + ", as the format says to");
+    }
+    distanceScale_ = factor;
+    builder_.countRead();
+}
+
+void FieldFileReader::endSetup()
+{
+    applyOffsets();
+    // The factor every slope distance of the setup was multiplied by is what
+    // its settings say, Applied (see beginSetup); one that changed within the
+    // setup leaves them saying none.
+    survey::SurveyStation* setup = builder_.currentStation();
+    if (setup != nullptr && setupFactor_) {
+        survey::InstrumentSettings& settings = setup->instrument;
+        if (mixedFactorRecord_ != 0) {
+            settings.scaleFactor.reset();
+            settings.scaleFactorState = survey::CorrectionState::Unknown;
+            builder_.warn(mixedFactorRecord_,
+                          "the scale factor changed within setup " + setup->setup.id +
+                              ": its slope distances from this record on are multiplied by " +
+                              "another factor than those before, so its instrument settings "
+                              "state none");
+        } else if (*setupFactor_ != 1.0) {
+            settings.scaleFactor = *setupFactor_;
+            settings.scaleFactorState = survey::CorrectionState::Applied;
+        } else {
+            settings.scaleFactor.reset();
+            settings.scaleFactorState = survey::CorrectionState::Unknown;
+        }
+    }
+    setupFactor_.reset();
+    mixedFactorRecord_ = 0;
+}
+
 void FieldFileReader::pointRecordStarts(std::size_t n, bool isMeasurement)
 {
+    finishCoordinate();
     currentPoint_.clear();
     unreadPointRecord_ = n;
     attributePrefix_.clear();
@@ -979,6 +1267,92 @@ void FieldFileReader::keepPointId(const Description& d, std::size_t n)
     }
 }
 
+void FieldFileReader::keepLaterComment(const Description& d, std::size_t n)
+{
+    // The first record's comment is the point's description (codePoint); a
+    // later record's is its own, kept under it.
+    if (!attributePrefix_.empty() && !blank(d.comment)) {
+        putPointValue("comment", std::string(trimmed(d.comment)), n);
+    }
+}
+
+std::string FieldFileReader::knownPoint(const Description& d) const
+{
+    const std::string named(d.id());
+    // A name among the names (or an ID among the IDs of points that have no
+    // name), and then among the point IDs given before: 44.5's order.
+    if (!blank(d.pointName) && builder_.hasPoint(named)) {
+        return named;
+    }
+    if (const auto owner = idOwners_.find(named); owner != idOwners_.end()) {
+        return owner->second;
+    }
+    return named;
+}
+
+void FieldFileReader::registerPointId(const Description& d, const std::string& id)
+{
+    if (!blank(d.pointId)) {
+        idOwners_.try_emplace(std::string(d.pointId), id);
+    }
+}
+
+void FieldFileReader::finishCoordinate()
+{
+    if (!coordinate_) {
+        return;
+    }
+    const PendingCoordinate c = std::move(*coordinate_);
+    coordinate_.reset();
+    if (c.gnss && !c.elevation) {
+        builder_.warn(c.record, "point '" + c.id + "' is a receiver's solution (its '" +
+                                    std::string(kGnssSolution) +
+                                    "' attribute) with no height, which a GNSS position has; "
+                                    "it is kept as an entered coordinate");
+    }
+    const bool gnss = c.gnss && c.elevation.has_value();
+    const auto [given, first] = givenCoordinates_.try_emplace(
+        c.id, GivenCoordinate{c.easting, c.northing, c.elevation, c.record, gnss});
+    // The builder compares an entered coordinate with an earlier one; a GNSS
+    // position it does not hold, so it is compared here.
+    const bool differs = !first && (given->second.easting != c.easting ||
+                                    given->second.northing != c.northing ||
+                                    (c.elevation && given->second.elevation != c.elevation));
+    if (differs && (gnss || given->second.gnss)) {
+        const std::string restated = coordinatesText(c.northing, c.easting, c.elevation);
+        builder_.addPointMetadata(c.id, "coordinates restated at record " + std::to_string(c.record),
+                                  restated);
+        const std::string before = "record " + std::to_string(given->second.record);
+        builder_.warn(c.record,
+                      "point '" + c.id + "' is given " +
+                          (gnss ? "a GNSS position" : "an entered coordinate") + " here (" +
+                          restated + " m) that differs from the " +
+                          (given->second.gnss ? "GNSS position" : "entered coordinate") + " of " +
+                          before + "; " +
+                          (gnss && given->second.gnss
+                               ? "both are kept as positions, and the reduction checks this one "
+                                 "against the first"
+                               : "the reduction holds the entered one, and the other is kept "
+                                 "beside it"));
+    }
+    if (gnss) {
+        survey::GnssPositionObservation position;
+        position.point = c.id;
+        position.northing = c.northing;
+        position.easting = c.easting;
+        position.elevation = *c.elevation;
+        const survey::ObservationPrecision& precision = builder_.options().precision;
+        position.sigmaNorthing = precision.gnssHorizontal;
+        position.sigmaEasting = precision.gnssHorizontal;
+        position.sigmaElevation = precision.gnssVertical;
+        position.source = builder_.source(c.record);
+        builder_.addLooseObservation(std::move(position));
+        return;
+    }
+    builder_.positionPoint(c.id, c.northing, c.easting, c.elevation,
+                           survey::CoordinateSource::Entered, c.record);
+}
+
 survey::SurveyStation& FieldFileReader::beginSetup(std::string_view pointId,
                                                    std::optional<double> height,
                                                    std::string_view stamp, std::size_t n)
@@ -1025,33 +1399,75 @@ void FieldFileReader::coordinate(const Description& d, const std::vector<std::st
         return;
     }
     const std::string id(d.id());
-    builder_.positionPoint(id, *y, *x, z, survey::CoordinateSource::Entered, n);
+    // Positioned when its record group ends (finishCoordinate), once the
+    // attributes after it have said whether it is a GNSS position.
     builder_.codePoint(id, d.featureCode, d.comment, d.stringNumber, n);
+    coordinate_ = PendingCoordinate{id, *x, *y, z, n, false};
     pointRecordRead(id, d, n, true);
     if (!stamp.empty()) {
         putPointValue("time stamp", std::string(stamp), n);
     }
+    keepLaterComment(d, n);
     keepPointId(d, n);
+    registerPointId(d, id);
     builder_.countRead();
 }
 
 void FieldFileReader::station(const Description& d, const std::vector<std::string_view>& v,
                               std::string_view stamp, std::size_t n)
 {
-    survey::SurveyStation& setup =
-        beginSetup(d.id(), number(v[0], "instrument height", n), stamp, n);
+    const std::string at = knownPoint(d);
+    survey::SurveyStation& setup = beginSetup(at, number(v[0], "instrument height", n), stamp, n);
     // A setup makes no measurement point, so its code strings nothing
     // ([FLD] 44.4); its comment still describes the point it stands on.
     if (const std::string coding = d.coding(); !coding.empty()) {
         setup.metadata["setup coding"] = coding;
     }
     if (!blank(d.comment)) {
-        builder_.codePoint(d.id(), {}, d.comment, {}, n);
+        builder_.codePoint(at, {}, d.comment, {}, n);
     }
-    if (!blank(d.pointName) && !blank(d.pointId)) {
+    if (!blank(d.pointId) && std::string(d.pointId) != at) {
         setup.metadata["point ID"] = std::string(d.pointId);
     }
     builder_.countRead();
+}
+
+void FieldFileReader::backsight(survey::SurveyStation& setup, const Description& d,
+                                const std::vector<std::string_view>& v,
+                                std::optional<double> horizontal, survey::Face face, std::size_t n)
+{
+    // The circle reading on the backsight: the setup's first, as its face-left
+    // reading, which the reduction means the backsight's pointings to.
+    if (horizontal && !setup.backsightAzimuth) {
+        const double circle = *horizontal * kRadiansPerDegree;
+        setup.backsightAzimuth = wrapToCircle(face == survey::Face::Right ? circle - kPi : circle);
+    }
+    // The azimuth the file states for the backsight ("may be specified when
+    // no coordinate for the backsight point exists"): the first; a later one
+    // that differs is kept beside it.
+    std::optional<double> azimuth;
+    if (v.size() > 3) {
+        azimuth = number(v[3], "backsight azimuth", n);
+    }
+    if (azimuth) {
+        const double stated = wrapToCircle(*azimuth * kRadiansPerDegree);
+        if (!setup.statedBacksightAzimuth) {
+            setup.statedBacksightAzimuth = stated;
+        } else if (*setup.statedBacksightAzimuth != stated) {
+            setup.metadata["backsight azimuth record " + std::to_string(n)] =
+                std::string(trimmed(v[3])) + " degrees";
+            builder_.warn(n, "the backsight gives the azimuth " + std::string(trimmed(v[3])) +
+                                 " degrees, where an earlier backsight of setup " + setup.setup.id +
+                                 " gave another; the first is the setup's, and this one is kept "
+                                 "in its metadata");
+        }
+    }
+    // A backsight's own code strings nothing ([FLD] finds the backsight by
+    // its name): kept with the setup it orients rather than on the point,
+    // whose drawn properties are its shots'.
+    if (const std::string coding = d.coding(); !coding.empty()) {
+        setup.metadata["backsight record " + std::to_string(n)] = coding;
+    }
 }
 
 void FieldFileReader::measurement(int opcode, const Description& d,
@@ -1070,7 +1486,8 @@ void FieldFileReader::measurement(int opcode, const Description& d,
         builder_.skip(n, std::string(kind) + " with no setup (opcode 03 or 128) before it");
         return;
     }
-    const std::string target(d.id());
+    // A shot names its own point; a backsight and a check search for theirs.
+    const std::string target = opcode == 7 ? std::string(d.id()) : knownPoint(d);
     if (target == setup->setup.pointId) {
         builder_.skip(n, std::string("a ") + kind + " from '" + target + "' to itself");
         return;
@@ -1117,28 +1534,7 @@ void FieldFileReader::measurement(int opcode, const Description& d,
         builder_.codePoint(target, d.featureCode, d.comment, d.stringNumber, n);
     } else if (opcode == 4) {
         setup->backsightPointId = target;
-        // What the reduction orients the setup by when the backsight has no
-        // coordinates: the file's azimuth to it where the 04 gives one ("may
-        // be specified when no coordinate for the backsight point exists"),
-        // else the circle reading, taken as set to a grid azimuth.
-        std::optional<double> azimuth;
-        if (v.size() > 3) {
-            azimuth = number(v[3], "backsight azimuth", n);
-        }
-        if (azimuth) {
-            setup->backsightAzimuth = wrapToCircle(*azimuth * kRadiansPerDegree);
-            setup->metadata["backsight azimuth"] =
-                std::string(trimmed(v[3])) + " degrees, record " + std::to_string(n) +
-                ": the setup is oriented by it if its backsight has no coordinates";
-        } else if (horizontal) {
-            setup->backsightAzimuth = wrapToCircle(*horizontal * kRadiansPerDegree);
-        }
-        // A backsight's own code strings nothing ([FLD] finds the backsight
-        // by its name): kept with the setup it orients rather than on the
-        // point, whose drawn properties are its shots'.
-        if (const std::string coding = d.coding(); !coding.empty()) {
-            setup->metadata["backsight record " + std::to_string(n)] = coding;
-        }
+        backsight(*setup, d, v, horizontal, face, n);
     }
 
     const survey::ObservationPrecision& precision = builder_.options().precision;
@@ -1165,7 +1561,7 @@ void FieldFileReader::measurement(int opcode, const Description& d,
         observation.pointing = pointing;
         if (firstShot) {
             shot.direction = setup->observations.size() - 1;
-            shot.circle = observation.direction;
+            shot.measuredReading.circle = observation.direction;
         }
     }
     if (hasZenith) {
@@ -1179,7 +1575,7 @@ void FieldFileReader::measurement(int opcode, const Description& d,
         observation.pointing = pointing;
         if (firstShot) {
             shot.zenith = setup->observations.size() - 1;
-            shot.zenithAngle = zenith;
+            shot.measuredReading.zenith = zenith;
         }
     }
     if (hasDistance) {
@@ -1192,14 +1588,20 @@ void FieldFileReader::measurement(int opcode, const Description& d,
         observation.instrumentHeight = hi;
         observation.targetHeight = targetHeight_;
         observation.pointing = pointing;
+        if (!setupFactor_) {
+            setupFactor_ = distanceScale_;
+        } else if (*setupFactor_ != distanceScale_ && mixedFactorRecord_ == 0) {
+            mixedFactorRecord_ = n;
+        }
         if (firstShot) {
             shot.distance = setup->observations.size() - 1;
-            shot.slope = distance;
+            shot.measuredReading.slope = distance;
         }
     }
     pointRecordRead(target, d, n, opcode == 7);
     if (opcode == 7) {
         measurementIsShot_ = true;
+        registerPointId(d, target);
     }
     if (!stamp.empty()) {
         putPointValue("time stamp", std::string(stamp), n);
@@ -1208,6 +1610,8 @@ void FieldFileReader::measurement(int opcode, const Description& d,
         const std::string coding = d.coding();
         putPointValue("check measurement",
                       "from setup " + setup->setup.id + (coding.empty() ? "" : ", " + coding), n);
+    } else if (opcode == 7) {
+        keepLaterComment(d, n);
     }
     keepPointId(d, n);
     builder_.countRead();
@@ -1245,6 +1649,9 @@ void FieldFileReader::resection(int opcode, const Values& v, std::size_t n)
     }
     if (!blank(d.comment)) {
         builder_.codePoint(pointId, {}, d.comment, {}, n);
+    }
+    if (!blank(d.pointId) && std::string(d.pointId) != pointId) {
+        setup.metadata["point ID"] = std::string(d.pointId);
     }
     openResection_ = n;
     openResectionOpcode_ = opcode;
@@ -1295,6 +1702,10 @@ void FieldFileReader::multipleCoding(const Values& v, std::size_t n)
     // into that string - one position, as [FLD]'s is - and keeps what this
     // record says of the second point with it.
     builder_.codePoint(currentMeasurement_, d.featureCode, "", d.stringNumber, n);
+    // [FLD]'s second point is the current measurement point now, and its
+    // string the current string: a 20 after this closes it.
+    currentCode_ = std::string(d.featureCode);
+    currentString_ = std::string(d.stringNumber);
     if (!blank(d.id()) || !blank(d.comment)) {
         std::string said = featureName(d.featureCode, d.stringNumber);
         if (!blank(d.pointId)) {
@@ -1384,7 +1795,7 @@ void FieldFileReader::pointOffset(int opcode, const Values& v, std::size_t n)
         target = currentMeasurement_;
         amountText = values[0];
         if (!measurementIsShot_) {
-            notApplied = "point '" + target + "' is the entered coordinate of record " +
+            notApplied = "point '" + target + "' is the coordinate of record " +
                          std::to_string(measurementRecord_) + ", which is kept as the file states it";
         }
     } else if (values.size() == 6) {
@@ -1435,45 +1846,45 @@ void FieldFileReader::pointOffset(int opcode, const Values& v, std::size_t n)
     builder_.countRead();
 }
 
-// The current setup's offsets. An offset moves the one shot of its point
-// from the setup; one of a point measured more than once from it (a face
-// pair, a check, a backsight), of a shot with no slope distance or zenith,
-// or one that with the shot's other offsets puts the point on the station,
-// is kept and not applied, with a warning.
+// The current setup's offsets: each shot moved once for all of its own (see
+// the top of this file for which are not applied, and why).
 //
-// The arithmetic ([FLD] 44.8, 42 to 44): what was measured gives the plan
-// distance h = s sin z and the rise v = s cos z along the line of the circle
-// reading a. With every radial offset r, tangential t and height offset u of
-// the shot so far - each "from the specified points original position", so
-// their sum - the offset position is at plan distance h' = hypot(h + r, t)
-// on the circle reading a + atan2(t, h + r) (t to the right looking from the
-// station, which a clockwise circle reads as more), and rises v' = v + u. The
-// shot becomes that reading, the zenith atan2(h', v') and the slope distance
-// hypot(h', v'); the target height is the prism's, as measured. The
-// reduction then applies its grid scale factor k and its curvature to h'
-// rather than to h, so the offset is scaled by k with the rest: (k - 1) of
-// it, under a millimetre for a metre's offset anywhere in a six-degree
+// The arithmetic is offsetShot's. The reduction then applies its grid scale
+// factor k and its curvature to the offset position's plan distance h' rather
+// than to the measured h, so the offset is scaled by k with the rest: (k - 1)
+// of it, under a millimetre for a metre's offset anywhere in a six-degree
 // transverse Mercator zone (k from 0.9996 on the central meridian to about
 // 1.001 at a zone's edge, k0 (1 + (dl cos phi)^2 / 2) for dl up to 3
 // degrees); the change in curvature is h (h' - h) (1 - k_r) / R, a few
 // micrometres.
 void FieldFileReader::applyOffsets()
 {
+    // How many offsets of each kind each shot has.
+    std::unordered_map<std::string, std::array<std::size_t, 3>> kinds;
+    for (const PendingOffset& offset : pendingOffsets_) {
+        ++kinds[offset.target][static_cast<std::size_t>(offset.opcode - 42)];
+    }
     // Why each offset is not applied; empty for one that is.
     std::vector<std::string> notApplied(pendingOffsets_.size());
     for (std::size_t i = 0; i < pendingOffsets_.size(); ++i) {
         const PendingOffset& offset = pendingOffsets_[i];
         Shot& shot = shots_.at(offset.target);
+        const std::array<std::size_t, 3>& count = kinds.at(offset.target);
         if (shot.pointings > 1) {
             notApplied[i] = "point '" + offset.target + "' was measured " +
                             std::to_string(shot.pointings) + " times from setup " +
                             builder_.project().stations[shot.station].setup.id +
-                            ", and which of the measurements the offset corrects the format does "
-                            "not say";
+                            ": the format moves only the measurement an offset follows, a point "
+                            "of its own there, and Katana, which makes one point of them, would "
+                            "put it between the moved and the unmoved";
         } else if (!shot.distance || !shot.zenith) {
             notApplied[i] = "the shot of record " + std::to_string(shot.record) +
                             " has no slope distance or no zenith, so the point has no plan " +
                             "distance or height to offset";
+        } else if (count[0] > 1 || count[1] > 1 || count[2] > 1) {
+            notApplied[i] = "the shot of record " + std::to_string(shot.record) +
+                            " has two offsets of one kind, and whether the second adds to the "
+                            "first or replaces it the format does not say";
         } else if (offset.opcode == 42) {
             shot.radial += offset.amount;
         } else if (offset.opcode == 43) {
@@ -1482,7 +1893,6 @@ void FieldFileReader::applyOffsets()
             shot.height += offset.amount;
         }
     }
-    // Each shot an offset applies to, moved once for all of its offsets.
     const survey::ObservationPrecision& precision = builder_.options().precision;
     std::unordered_set<std::string> moved;
     std::unordered_set<std::string> onStation;
@@ -1492,30 +1902,22 @@ void FieldFileReader::applyOffsets()
             continue;
         }
         const Shot& shot = shots_.at(target);
-        const double plan = shot.slope * std::sin(shot.zenithAngle);
-        const double rise = shot.slope * std::cos(shot.zenithAngle);
-        const double along = plan + shot.radial;
-        const double planAfter = std::hypot(along, shot.tangential);
-        const double riseAfter = rise + shot.height;
-        const double slopeAfter = std::hypot(planAfter, riseAfter);
-        // Within kCoordinate of the instrument it is the station's own mark,
-        // to which no shot has a direction or zenith: kept as measured.
-        if (!(slopeAfter >= katana::math::tolerance::kCoordinate)) {
+        const std::optional<ShotReading> reading =
+            offsetShot(shot.measuredReading, shot.radial, shot.tangential, shot.height);
+        if (!reading) {
             onStation.insert(target);
             continue;
         }
         std::vector<survey::Observation>& observations =
             builder_.project().stations[shot.station].observations;
         if (shot.direction) {
-            auto& direction =
-                std::get<survey::HorizontalDirectionObservation>(observations[*shot.direction]);
-            direction.direction = wrapToCircle(shot.circle + std::atan2(shot.tangential, along));
+            std::get<survey::HorizontalDirectionObservation>(observations[*shot.direction])
+                .direction = reading->circle;
         }
-        auto& zenith = std::get<survey::ZenithAngleObservation>(observations[*shot.zenith]);
-        zenith.angle = std::atan2(planAfter, riseAfter);
+        std::get<survey::ZenithAngleObservation>(observations[*shot.zenith]).angle = reading->zenith;
         auto& distance = std::get<survey::DistanceObservation>(observations[*shot.distance]);
-        distance.distance = slopeAfter;
-        distance.sigma = survey::distanceSigma(precision, slopeAfter);
+        distance.distance = reading->slope;
+        distance.sigma = survey::distanceSigma(precision, reading->slope);
         builder_.addPointMetadata(target, "shot record " + std::to_string(shot.record) +
                                               " as measured",
                                   shot.measured);
@@ -1583,15 +1985,16 @@ void FieldFileReader::attribute(int opcode, const std::vector<std::string_view>&
         builder_.warn(n, "integer attribute '" + label + "' holds '" + value.substr(0, 40) +
                              "', which is not a whole number; it is kept as text");
     }
-    std::string key;
-    for (const std::string& group : groups_) {
-        if (!group.empty()) {
-            key += group + "/";
-        }
+    // An 02 whose own attributes say what the receiver solved is a GNSS
+    // position: coordinate_ is set only while the 02's record group lasts.
+    if (coordinate_ && katana::core::equalsIgnoringCase(name, kGnssSolution)) {
+        coordinate_->gnss = true;
     }
     // [FLD] 44.8, opcodes 68 to 79: a blank name makes the attribute unnamed.
-    key += name.empty() ? "unnamed attribute (record " + std::to_string(n) + ")" : std::string(name);
-    putPointValue(key, std::move(value), n);
+    putPointValue(groupPrefix_ + (name.empty() ? "unnamed attribute (record " +
+                                                     std::to_string(n) + ")"
+                                               : std::string(name)),
+                  std::move(value), n);
     builder_.countRead();
 }
 
@@ -1611,6 +2014,18 @@ void FieldFileReader::additionalText(const std::vector<std::string_view>& values
     builder_.countRead();
 }
 
+void FieldFileReader::popGroup()
+{
+    if (groupNamed_.back()) {
+        --namedGroups_;
+    }
+    groupPrefix_.resize(groupPrefixLengths_.back());
+    groups_.pop_back();
+    groupRecords_.pop_back();
+    groupNamed_.pop_back();
+    groupPrefixLengths_.pop_back();
+}
+
 void FieldFileReader::endGroups(std::size_t from, std::size_t n, std::string_view why)
 {
     while (groups_.size() > from) {
@@ -1618,8 +2033,7 @@ void FieldFileReader::endGroups(std::size_t from, std::size_t n, std::string_vie
                                                 "' is not ended (opcode 125) before record " +
                                                 std::to_string(n) + ", which " + std::string(why) +
                                                 "; it is ended there");
-        groups_.pop_back();
-        groupRecords_.pop_back();
+        popGroup();
     }
 }
 
@@ -1633,6 +2047,10 @@ void FieldFileReader::groupStart(const std::vector<std::string_view>& values, st
         before = trimmed(values[0]);
         name = trimmed(values[1]);
         level = trimmed(values[2]);
+    } else if (values.size() == 2 && blank(values[0]) &&
+               !katana::core::parseInteger(trimmed(values[1]))) {
+        // The files' form without its level: the empty value and the name.
+        name = trimmed(values[1]);
     } else if (values.size() == 2) {
         name = trimmed(values[0]);
         level = trimmed(values[1]);
@@ -1666,8 +2084,24 @@ void FieldFileReader::groupStart(const std::vector<std::string_view>& values, st
                                  " group(s); it is nested as the records open and end it");
         }
     }
+    const bool named = !name.empty() && namedGroups_ < kGroupDepth &&
+                       groupPrefix_.size() + name.size() + 1 <= kGroupPathLength;
+    if (!name.empty() && !named) {
+        builder_.warn(n, "attribute group '" + std::string(name.substr(0, 40)) + "' opens inside " +
+                             std::to_string(namedGroups_) +
+                             " named group(s), past the " + std::to_string(kGroupDepth) +
+                             " levels or " + std::to_string(kGroupPathLength) +
+                             " characters an attribute's name nests: its attributes are kept "
+                             "under the groups around it");
+    }
     groups_.emplace_back(name);
     groupRecords_.push_back(n);
+    groupNamed_.push_back(named);
+    groupPrefixLengths_.push_back(groupPrefix_.size());
+    if (named) {
+        groupPrefix_ += std::string(name) + "/";
+        ++namedGroups_;
+    }
     builder_.countRead();
 }
 
@@ -1693,16 +2127,18 @@ void FieldFileReader::groupEnd(const std::vector<std::string_view>& values, std:
         builder_.warn(n, "the end of attribute group '" + groups_.back() + "' names '" +
                              std::string(name.substr(0, 40)) + "'; the open group is ended");
     }
-    groups_.pop_back();
-    groupRecords_.pop_back();
+    popGroup();
     builder_.countRead();
 }
 
 void FieldFileReader::unread(int opcode, std::size_t n)
 {
     const UnreadOpcode* known = unreadOpcode(opcode);
-    if (known != nullptr && known->makesPoint) {
-        pointRecordStarts(n, true);
+    // What follows a record about a point of its own describes that point,
+    // and what follows an opcode the format does not define may: neither is
+    // given to the point before.
+    if (known == nullptr || known->aboutAPoint) {
+        pointRecordStarts(n, known == nullptr || makesMeasurement(opcode));
     }
     std::string message = "opcode " + opcodeText(opcode);
     if (known == nullptr) {
@@ -1719,8 +2155,47 @@ void FieldFileReader::unread(int opcode, std::size_t n)
     } else if (known != nullptr && known->codesLater) {
         message += "; the measurements after it keep the codes they are written with, which a "
                    "field template may have changed";
+    } else if (known != nullptr && known->endsString) {
+        message += "; the points after it are strung as if the string had not ended, a later "
+                   "point of its code and string number joining it";
     }
     builder_.skip(n, std::move(message));
+}
+
+void FieldFileReader::notARecord(std::string_view first, std::size_t n)
+{
+    // `first` is never empty: a line is read from its first character that is
+    // not a blank or a tab.
+    std::string why;
+    if (first.find_first_not_of("+-0123456789") == std::string_view::npos) {
+        why = "'" + std::string(first.substr(0, 20)) +
+              "' is not an opcode: an opcode is a number of one to three digits, a minus before "
+              "the negative ones";
+    } else {
+        why = "'" + std::string(first.substr(0, 20)) +
+              "' is not an opcode: a record opens with a number";
+    }
+    // What the line made is not known. A number is taken for the opcode it
+    // would be, for the bookkeeping alone; anything else may have made a
+    // point, so what follows is not given to the point before.
+    const std::optional<int> loose = looseOpcode(first);
+    if (loose && makesPointOrSetup(*loose)) {
+        header_ = false;
+        endGroups(0, n, "is taken for the record that makes a point or a setup it would be");
+    }
+    if (loose && startsSetup(*loose)) {
+        finishCoordinate();
+        endSetup();
+        setupNotRead(n, why + "; it is taken for the setup (opcode " + opcodeText(*loose) +
+                            ") it would be");
+        return;
+    }
+    if (!loose) {
+        pointRecordStarts(n, true);
+    } else if (makesPointOrSetup(*loose)) {
+        pointRecordStarts(n, makesMeasurement(*loose));
+    }
+    builder_.skip(n, std::move(why));
 }
 
 void FieldFileReader::decideLayout(const std::vector<std::string_view>& lines)
@@ -1728,20 +2203,21 @@ void FieldFileReader::decideLayout(const std::vector<std::string_view>& lines)
     std::size_t column = 0;
     std::size_t noColumn = 0;
     for (const std::string_view line : lines) {
-        const std::size_t tab = line.find('\t');
+        const std::string_view lead = withoutIndent(line);
+        const std::size_t tab = lead.find('\t');
         if (tab == std::string_view::npos) {
             continue;
         }
-        const std::optional<int> opcode = opcodeOf(trimmed(line.substr(0, tab)));
+        const std::optional<int> opcode = opcodeOf(trimmed(lead.substr(0, tab)));
         if (!opcode || !valuesAfterDescription(*opcode)) {
             continue;
         }
-        const std::vector<std::string_view> fields = splitTabs(line);
+        const std::vector<std::string_view> fields = splitTabs(lead);
         const LayoutFit fit = layoutFit(*opcode, fields);
+        const bool dated = isDateOrTime(fields[1]);
         if (fit.column && fit.plain) {
-            continue; // either layout's
-        }
-        if (fit.column && (blank(fields[1]) || isDateOrTime(fields[1]))) {
+            column += dated ? 1 : 0; // only the column holds a date or time
+        } else if (fit.column && (blank(fields[1]) || dated)) {
             ++column;
         } else if (fit.plain && !blank(fields[1])) {
             ++noColumn;
@@ -1750,13 +2226,13 @@ void FieldFileReader::decideLayout(const std::vector<std::string_view>& lines)
     if (column > 0 || noColumn > 0) {
         layout_ = column >= noColumn ? Layout::Column : Layout::NoColumn;
     }
-    mixedLayout_ = column > 0 && noColumn > 0;
-    if (mixedLayout_) {
+    if (column > 0 && noColumn > 0) {
         builder_.warn(0, std::to_string(column) + " fixed record(s) have the column after the "
                              "opcode (blank or a date or time) and " +
-                             std::to_string(noColumn) + " do not; the file is read as " +
-                             (layout_ == Layout::Column ? "having it" : "not having it") +
-                             ", and a record that does not fit, or fits either way, is skipped");
+                             std::to_string(noColumn) +
+                             " do not: each is read in the layout its fields show, and one whose "
+                             "first field is blank in the layout most have, " +
+                             (layout_ == Layout::Column ? "with" : "without") + " it");
     }
 }
 
@@ -1774,41 +2250,56 @@ void FieldFileReader::fixedRecord(int opcode, const std::vector<std::string_view
             builder_.skip(n, std::move(message));
         }
     };
+    const std::string counted =
+        "opcode " + opcodeText(opcode) + " has " + std::to_string(fields.size() - 1) + " values";
     const LayoutFit fit = layoutFit(opcode, fields);
-    // A file no fixed record decided (none has an unambiguous count) is read
-    // as [FLD] writes it, without the column.
-    std::size_t columns = layout_ == Layout::Column ? 1 : 0;
-    if (fit.column && fit.plain) {
-        // A 04 of ten fields, or a record with a blank last field: a date or
-        // time first says which; else the file's layout does, unless the
-        // file has both.
-        if (isDateOrTime(fields[1])) {
-            columns = 1;
-        } else if (mixedLayout_) {
-            fail("opcode " + opcodeText(opcode) + " has " + std::to_string(fields.size() - 1) +
-                 " values, which fit the format's layout both with the column after the opcode "
-                 "and without it, in a file whose records show both; which value is which "
-                 "cannot be told");
+    const std::string_view first = fields.size() > 1 ? fields[1] : std::string_view{};
+    std::size_t columns = 0;
+    if (isDateOrTime(first)) {
+        // Only the column holds a date or time.
+        if (!fit.column) {
+            fail(counted + ", a date or time first, as the column after the opcode holds, where "
+                           "the format gives " + std::to_string(6 + arity) +
+                 " with it; which value is which cannot be told");
             return;
         }
-    }
-    if (!(columns == 1 ? fit.column : fit.plain)) {
-        fail("opcode " + opcodeText(opcode) + " has " + std::to_string(fields.size() - 1) +
-             " values where the format gives " + std::to_string(5 + arity + columns) +
-             (columns == 1 ? " in this file (with the column after the opcode)"
-                           : (layout_ == Layout::Undecided
-                                  ? " (no record shows the column after the opcode as blank or "
-                                    "a date or time, so the file is read without it)"
-                                  : "")) +
-             "; which value is which cannot be told");
-        return;
-    }
-    if (columns == 1 && !blank(fields[1]) && !isDateOrTime(fields[1])) {
-        fail("opcode " + opcodeText(opcode) + " holds '" +
-             std::string(trimmed(fields[1]).substr(0, 40)) +
-             "' in the column after the opcode, which is neither blank nor a date or time; "
-             "which value is which cannot be told");
-        return;
+        columns = 1;
+    } else if (!blank(first)) {
+        // A feature code: the column holds nothing else.
+        if (!fit.plain) {
+            fail(fit.column ? "opcode " + opcodeText(opcode) + " holds '" +
+                                  std::string(trimmed(first).substr(0, 40)) +
+                                  "' in the column after the opcode, which is neither blank nor "
+                                  "a date or time; which value is which cannot be told"
+                            : counted + " where the format gives " + std::to_string(5 + arity) +
+                                  "; which value is which cannot be told");
+            return;
+        }
+    } else {
+        // Blank: the file's layout says which (one no fixed record decided
+        // is read as [FLD] writes it), unless its reading leaves the first
+        // value blank where the other reads one.
+        columns = layout_ == Layout::Column ? 1 : 0;
+        if (fit.column && fit.plain && blank(firstValue(fields, columns)) &&
+            !blank(firstValue(fields, 1 - columns))) {
+            fail(counted + ", which fit the format's layout both with the column after the "
+                           "opcode and without it: read " +
+                 (columns == 1 ? "with" : "without") + " it, as this file's records are, " +
+                 std::string(firstValueName(opcode)) + " is blank, and read " +
+                 (columns == 1 ? "without" : "with") +
+                 " it, it is not; which value is which cannot be told");
+            return;
+        }
+        if (!(columns == 1 ? fit.column : fit.plain)) {
+            fail(counted + " where the format gives " + std::to_string(5 + arity + columns) +
+                 (columns == 1 ? " in this file (with the column after the opcode)"
+                               : (layout_ == Layout::Undecided
+                                      ? " (no record shows the column after the opcode as blank "
+                                        "or a date or time, so the file is read without it)"
+                                      : "")) +
+                 "; which value is which cannot be told");
+            return;
+        }
     }
     // One blank field past the count is a trailing tab.
     const std::size_t count =
@@ -1818,7 +2309,7 @@ void FieldFileReader::fixedRecord(int opcode, const std::vector<std::string_view
     const std::vector<std::string_view> values(
         fields.begin() + static_cast<std::ptrdiff_t>(offset + 5),
         fields.begin() + static_cast<std::ptrdiff_t>(count));
-    const std::string_view stamp = columns == 1 ? trimmed(fields[1]) : std::string_view{};
+    const std::string_view stamp = columns == 1 ? trimmed(first) : std::string_view{};
     if (blank(d.id())) {
         fail("opcode " + opcodeText(opcode) +
              " names its point by neither a point name nor a point ID");
@@ -1836,10 +2327,11 @@ void FieldFileReader::record(int opcode, const std::vector<std::string_view>& fi
 {
     if (makesPointOrSetup(opcode)) {
         header_ = false;
+        finishCoordinate();
         endGroups(0, n, "makes another point or a setup");
     }
     if (startsSetup(opcode)) {
-        applyOffsets();
+        endSetup();
     }
     if (valuesAfterDescription(opcode)) {
         fixedRecord(opcode, fields, n);
@@ -1870,15 +2362,7 @@ void FieldFileReader::record(int opcode, const std::vector<std::string_view>& fi
     case 9:
         if (const std::optional<double> factor = number(first, "scale factor", n);
             factor && *factor > 0.0) {
-            distanceScale_ = *factor;
-            if (*factor != 1.0 && !scaleWarned_) {
-                scaleWarned_ = true;
-                builder_.warn(n, "slope distances after this record are multiplied by the "
-                                 "file's scale factor " +
-                                     katana::core::formatExactReal(*factor) +
-                                     ", as the format says to");
-            }
-            builder_.countRead();
+            scaleFactor(*factor, n);
         } else {
             builder_.skip(n, "scale factor record without a positive factor the reader can read");
         }
@@ -1949,16 +2433,12 @@ Result<ReadResult> FieldFileReader::read(std::string_view bytes)
     decideLayout(lines);
     for (std::size_t i = 0; i < lines.size() && !fatal_; ++i) {
         const std::size_t n = i + 1;
-        const std::string_view line = lines[i];
-        // A line is read from its first character that is not a blank: the
-        // opcode may have one before it, and so may a comment.
-        const std::string_view lead =
-            line.substr(std::min(line.size(), line.find_first_not_of(" \t")));
+        const std::string_view lead = withoutIndent(lines[i]);
         if (blank(lead) || lead == "\x1A") {
             continue; // nothing, or a DOS end-of-file byte
         }
         if (lead.starts_with("//")) {
-            comment(lead);
+            comment(lead, n);
             continue;
         }
         if (firstRecord_ && lead.starts_with("{Version")) {
@@ -1969,22 +2449,11 @@ Result<ReadResult> FieldFileReader::read(std::string_view bytes)
             continue;
         }
         firstRecord_ = false;
-        const std::vector<std::string_view> fields = splitTabs(line);
+        const std::vector<std::string_view> fields = splitTabs(lead);
         const std::string_view first = trimmed(fields[0]);
         const std::optional<int> opcode = opcodeOf(first);
         if (!opcode) {
-            std::string why;
-            if (first.empty()) {
-                why = "the record's first field is empty, where its opcode belongs";
-            } else if (first.find_first_not_of("+-0123456789") == std::string_view::npos) {
-                why = "'" + std::string(first.substr(0, 20)) +
-                      "' is not an opcode: an opcode is a number of one to three digits, a "
-                      "minus before the negative ones";
-            } else {
-                why = "'" + std::string(first.substr(0, 20)) +
-                      "' is not an opcode: a record opens with a number";
-            }
-            builder_.skip(n, std::move(why));
+            notARecord(first, n);
             continue;
         }
         if (*opcode == 99) {
@@ -2008,7 +2477,8 @@ Result<ReadResult> FieldFileReader::read(std::string_view bytes)
     if (fatal_) {
         return *fatal_;
     }
-    applyOffsets();
+    finishCoordinate();
+    endSetup();
     for (std::size_t g = 0; g < groups_.size(); ++g) {
         builder_.warn(groupRecords_[g], "attribute group '" + groups_[g] +
                                             "' is not ended (opcode 125) before the file ends");
@@ -2066,12 +2536,9 @@ FormatSignature probe(const ProbeInput& input)
     std::size_t records = 0;
     std::size_t measurements = 0;
     bool first = true;
-    // Every line kProbeBytes holds, so that a long header of comments does not
-    // hide the records after it; kProbeRecords of them decide.
+    // Every line kProbeBytes holds, comments passed over, so that a long
+    // header of comments does not hide the records after it.
     for (std::string_view line : katana::surveyio::probeLines(input, katana::surveyio::kProbeBytes)) {
-        if (lines == kProbeRecords) {
-            break;
-        }
         line = trimmed(line);
         if (line.empty() || line.starts_with("//")) {
             continue;
@@ -2123,19 +2590,20 @@ FormatDescriptor descriptor()
     format.id = std::string(kFormatId);
     format.humanName = "Opcode field file (.fld)";
     format.manufacturer = katana::surveyio::Manufacturer::Other;
-    // gnss stays false: a GNSS position written as an 02 arrives as an entered
-    // grid coordinate, not as a GNSS observation.
+    // gnss: an RTK position written as an 02 with its receiver's solution is
+    // a GNSS position (see the top of this file).
     format.reads = {.points = true,
                     .observations = true,
                     .stations = true,
                     .features = true,
                     .coordinateSystem = true,
                     .instrumentSettings = false,
-                    .gnss = false};
+                    .gnss = true};
     format.canImport = true;
     // 1.1: the column's date and time, blank-padded opcodes, resections,
-    // multiple coding, strings closed, offsets applied, attribute groups, and
-    // every measurement's attributes kept.
+    // multiple coding, strings closed, offsets applied, attribute groups,
+    // every measurement's attributes kept, RTK positions as GNSS positions and
+    // the backsight's stated azimuth.
     format.parserVersion = "1.1";
     format.extensions = {"fld"};
     return format;

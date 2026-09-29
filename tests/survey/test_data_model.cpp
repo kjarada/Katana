@@ -571,6 +571,25 @@ TEST(SurveyProjects, ABacksightPointThatIsNotInTheProjectIsRejected)
     EXPECT_TRUE(validateProject(project).ok());
 }
 
+TEST(SurveyProjects, AStatedBacksightAzimuthThatIsNotFiniteIsRejectedAndAFiniteOneIsKeptApart)
+{
+    // The azimuth a file states for the backsight and the circle set on it
+    // are two values: a circle zeroed on a backsight 123 degrees away is the
+    // usual case, and the two must not compare equal as one field.
+    SurveyProject project = twoPointProject();
+    project.stations.front().statedBacksightAzimuth = 123.0 * kPi / 180.0;
+    EXPECT_TRUE(validateProject(project).ok());
+    EXPECT_NE(project.stations.front(), twoPointProject().stations.front());
+    for (const double bad : {kNaN, kInf}) {
+        project.stations.front().statedBacksightAzimuth = bad;
+        const katana::core::Status status = validateProject(project);
+        ASSERT_FALSE(status.ok());
+        EXPECT_EQ(status.error().code, ErrorCode::InvalidArgument);
+        EXPECT_NE(status.error().message.find("azimuth the file states"), std::string::npos)
+            << status.error().message;
+    }
+}
+
 TEST(SurveyProjects, DuplicateOrUnnamedSetupsAreRejected)
 {
     SurveyProject project = twoPointProject();

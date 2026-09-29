@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "katana/core/text.hpp"
+#include "katana/math/numerics.hpp"
 
 namespace katana::surveyio::topcon {
 
@@ -121,6 +122,20 @@ survey::Face faceOfZenithReading(double zenithRadians) noexcept
 double zenithInModelRange(double zenithRadians) noexcept
 {
     return zenithRadians > std::numbers::pi ? kTwoPi - zenithRadians : zenithRadians;
+}
+
+std::optional<ShotReading> offsetShot(const ShotReading& measured, double radial, double tangential,
+                                      double height) noexcept
+{
+    const double along = measured.slope * std::sin(measured.zenith) + radial;
+    const double plan = std::hypot(along, tangential);
+    const double rise = measured.slope * std::cos(measured.zenith) + height;
+    const double slope = std::hypot(plan, rise);
+    if (!(slope >= katana::math::tolerance::kCoordinate)) {
+        return std::nullopt;
+    }
+    return ShotReading{wrapToCircle(measured.circle + std::atan2(tangential, along)),
+                       std::atan2(plan, rise), slope};
 }
 
 // ---- RawProjectBuilder --------------------------------------------------------

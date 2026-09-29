@@ -69,6 +69,34 @@ inline constexpr double kMetresPerUsSurveyFoot = 1200.0 / 3937.0;
 // z > pi is the same line of sight as 2*pi - z on face left.
 [[nodiscard]] double zenithInModelRange(double zenithRadians) noexcept;
 
+// ---- Offsets ------------------------------------------------------------------
+
+// What a shot reads: a circle reading (radians, clockwise), a zenith in the
+// model's range [0, pi] and a slope distance (metres).
+struct ShotReading {
+    double circle = 0.0;
+    double zenith = 0.0;
+    double slope = 0.0;
+};
+
+// The reading of the point a shot's offsets put it at, from what was measured:
+// `radial` along the plan line from the instrument to the target, positive
+// away from it; `tangential` at right angles to that line, positive to the
+// right looking from the instrument (a clockwise circle reads it as more);
+// `height` added to the target's rise. With plan distance h = s sin z and
+// rise v = s cos z, the point is at plan distance h' = hypot(h + radial,
+// tangential) on the circle a + atan2(tangential, h + radial), rising
+// v' = v + height: the reading is that circle, the zenith atan2(h', v') and
+// the slope distance hypot(h', v'). nullopt when that point is within
+// math::tolerance::kCoordinate of the instrument - its own mark, to which no
+// shot has a direction or a zenith.
+//
+// One home for the arithmetic of every reader on this builder whose format
+// records offsets. The opcode field file applies its 42, 43 and 44 through it;
+// the GTS-7 reader keeps its OFFSET records unapplied (topcon_gts.cpp).
+[[nodiscard]] std::optional<ShotReading> offsetShot(const ShotReading& measured, double radial,
+                                                    double tangential, double height) noexcept;
+
 class RawProjectBuilder {
   public:
     // `source` is copied into every SourceRecord with the record number set.
