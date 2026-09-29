@@ -453,10 +453,12 @@ user had just clicked there to select the alignment. `ensureView(kind)` raises
 the view of that kind used most recently, or opens a new one beside the active
 view.
 
-**Zoom Extents frames the active view only**; one view's zoom is not another's
-business, and the old container did one thing while its header said another.
-After New, Open and an import every view is framed (`zoomExtentsAll`), because
-all of them are looking at a drawing that has just changed under them.
+**Zoom Extents frames the active view only** - and the views linked with it
+follow (below, "Linked views"); one view's zoom is not another's business
+unless the user has linked them, and the old container did one thing while
+its header said another. After New, Open and an import every view is framed
+(`zoomExtentsAll`), because all of them are looking at a drawing that has
+just changed under them; the link is framed once there, as below.
 
 **Per-view layers extend THE visibility rule rather than adding a second.**
 `cad::isDrawn` and `isSelectable` take a `const LayerOverrides&` - the layers
@@ -488,6 +490,96 @@ pruned of names that no longer exist after each change, which is what stops a
 later layer reusing the name from being born hidden. A view's Layers button
 (`view_layers_popup.*`) is where they are set: it filters that view alone,
 and isolating a tree node hides everything but that node's path.
+
+### Linked views: a design view and an as-built view that move together
+
+The owner's request of 2026-09-30: "sync views together so i can zoom in a
+design view and as-built view zoom in too", with the control "as toolbar on
+the view widget itself". A plan view is linked or not; every linked view
+shows the centre and the scale (pixels per unit) of the linked view moved
+last, each at its own size and through its own hidden layers - the design
+view hiding the as-built layers and the as-built view the design ones, both
+looking at the same place. The model is `cad::ViewSet`'s link and
+`include/katana/cad/view_link.hpp`; the verbs are `VIEWS LINK`, `VIEWS
+UNLINK` and every `ZOOM` (`docs/cad.md`, "The window's views: VIEWS and
+ZOOM").
+
+**What moves the link.** A wheel notch, a middle-drag pan, a frame (Zoom
+Extents from the bar, the menu or a line, the program's own framing, a
+`ZOOM`) and a first paint's frame: each raises the plan view's
+`ViewportWidget::onViewMoved`, and the workspace's `viewMoved` has the others
+take its centre and scale in the same pass, with one repaint each. The
+follow is STAR-SHAPED: a view moved by the link never reports that move -
+`ViewportWidget::holdView` raises nothing - and the workspace's guard flag
+makes sure of it, so no echo can run between two views. **A linked view
+never refits on a resize**: a view framed by Zoom Extents refits its frame
+whenever it is resized until the user moves it, which in a linked view would
+change its scale behind the link's back, so every member forgets its frame
+when the link moves it or it moves the link. Resizing a dock never breaks the
+link (`ViewLinks.ALinkedViewKeepsTheLinksViewWhenResized`, shown failing with
+`holdView` emptied).
+
+**Who comes to whom when views are linked.** `VIEWS LINK ids TO id` brings
+the others to TO; without TO the joining views come to the link (its lowest
+id), or with no link yet to the first id listed. The Link button always
+sends TO: the view the user panned or zoomed most recently of the one clicked
+and the link's members (`ViewSet::linkLeaderFor`, on a clock of the user's
+moves, `ViewState::lastMoved`), else a member, else the view clicked.
+Clicking the two views' buttons in either order then keeps the zoom just
+made (`ViewSet.AJoiningViewComesToTheViewTheUserMovedLast`). Rejected:
+"the joining view always follows", which loses that zoom whenever the view
+zoomed is clicked second; and one click linking to an implicit "previous"
+view, which surprises with three views open. The first click makes a link of
+one, which waits for the second ("Linked, waiting"); an unlink, a close or a
+change of kind that leaves one member dissolves the link, and none of them
+moves a view.
+
+**Zoom Extents on every view** (`zoomExtentsAll`, after New, Open and an
+import) and `ViewWorkspace::zoomTo` frame the link ONCE, in the member moved
+last (else the lowest id), on the union of what the members draw; the others
+follow. Framed one by one, each on what it alone draws, a design view and an
+as-built view would come apart the moment a drawing opened
+(`ViewLinks.ZoomExtentsAllFramesTheLinkOnceOnTheUnionOfWhatItsViewsDraw`).
+
+**The bar.** A plan view's bar is `[kind] Plan 1 ... [Link][Layers][Zoom
+Extents] [_][float][max][x]`. `ViewLinkButton` is checkable and never a menu
+(a title bar's menu is a modal loop, which a headless press waits in for
+ever): an open chain in the neutral colour while the view moves alone, a
+closed chain in the accent inside an accent frame while it is linked, and a
+tooltip that names the views it moves with. A click builds `VIEWS LINK <id>
+TO <id>` or `VIEWS UNLINK <id>` and runs it through the window's command
+runner, so it is logged as the line it is; afterwards every Link button is
+set from the link with its signals blocked, so a refused line leaves the
+button as it was (`ViewLinks.ARefusedLinkLeavesTheButtonAsItWas`). The
+button shows on plan views only and follows the view's kind; each tool
+always on the bar costs 23 px of the dock's least width (22 px and the bar's
+1 px spacing), which the Link button's test holds to
+(`ViewLinks.ThePlanDocksMinimumWidthGrowsByTheLinkButtonAlone`). A checked
+title-bar button had no frame at all: the rule for every chrome button came
+after `QToolButton:checked` with the same weight and took it away, so
+`theme.cpp` now has a `:checked` rule of its own for them. View > Link This
+View (`viewLinkActive`, Ctrl+Shift+L; K, as Viewport Layout has L) does the
+Link button's line for the active plan view, and View > Unlink All Views
+(`viewUnlinkAll`) runs `VIEWS UNLINK ALL`.
+
+**Rejected alternatives.** Linking by the visible extent: views of different
+shapes fit one box at different scales, and each move would round each
+view's scale differently, so they drift over a session. Qt signals from
+widget to widget, and document notifications: a notification repaints every
+plan view's whole kept drawing, and signals between widgets would be a
+second way of saying who follows whom, outside the tested model. A toolbar
+drawn over the drawing, or a second row under the title bar: the first
+covers geometry and catches picks, the second costs 26 px of height in
+every view, while the title bar had room. Link groups (several links, each
+with a colour): one link is what design against as-built needs, and the
+model changes cheaply when groups are asked for.
+
+**Not done.** Only plan views link: a 3D or elevation view needs its camera
+in logical pixels first (the software view counts device pixels, the GPU
+view logical ones), a section its pan and zoom in `ViewState`. Grips are
+still shown on a selected entity that a view hides (`gripsOfSelection` takes
+no view layers). The link is not kept between sessions, as the workspace is
+not.
 
 ### The dock chrome: one title bar for panels and views
 

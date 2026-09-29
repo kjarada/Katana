@@ -8,10 +8,13 @@
 #include <QCoreApplication>
 #include <QKeyEvent>
 #include <QMenu>
+#include <QScopedValueRollback>
+#include <QSignalBlocker>
 #include <QStyle>
 #include <QTimer>
 #include <QToolButton>
 
+#include "katana/cad/view_link.hpp"
 #include "view_layers_popup.hpp"
 
 namespace katana::qt {
@@ -21,6 +24,7 @@ using katana::cad::ViewKind;
 using katana::cad::ViewState;
 using katana::core::ErrorCode;
 using katana::core::makeError;
+using katana::core::Result;
 using katana::core::Status;
 
 namespace {
@@ -86,8 +90,27 @@ QWidget* ViewWorkspace::View::widget() const
     return section;
 }
 
+// What VIEWS and ZOOM ask of the window (cad::ViewVerbHost), answered by the
+// workspace's own operations, so a line and a click move a view the same way.
+class ViewWorkspace::VerbHost final : public katana::cad::ViewVerbHost {
+  public:
+    explicit VerbHost(ViewWorkspace& workspace) : workspace_(workspace) {}
+
+    katana::cad::ViewSet& views() override { return workspace_.views_; }
+    Result<ViewId> open(ViewKind kind) override { return workspace_.openView(kind).id; }
+    Status activate(ViewId id) override { return workspace_.showAndActivate(id); }
+    Result<std::vector<ViewId>> zoom(const katana::cad::ZoomRequest& request) override
+    {
+        return workspace_.zoomView(request);
+    }
+    void changed(const std::vector<ViewId>& ids) override { workspace_.linkChanged(ids); }
+
+  private:
+    ViewWorkspace& workspace_;
+};
+
 ViewWorkspace::ViewWorkspace(katana::cad::Document& document, QWidget* parent)
-    : QMainWindow(parent), document_(document)
+    : QMainWindow(parent), document_(document), verbHost_(std::make_unique<VerbHost>(*this))
 {
     // QMainWindow makes itself a top-level window whatever parent it is given,
     // and a window placed as another main window's central widget is an EMPTY
@@ -187,6 +210,8 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
         };
         wireTools(*plan, id);
         plan->onActivated = [this, id] { activate(id); };
+        // What a linked view follows (cad/view_link.hpp).
+        plan->onViewMoved = [this, id](bool byUser) { viewMoved(id, byUser); };
         // The plan view's frame time, as the 3D and section views report theirs.
         plan->onFrameStats = [this](const QString& text) {
             if (onFrameStats) {
@@ -249,6 +274,8 @@ void ViewWorkspace::updateTitle(const View& view)
     if (view.kindButton != nullptr) {
         view.kindButton->setIcon(icon(kindIcon(state->kind)));
     }
+    // Which tools the bar shows follows what the view shows.
+    updateLinkButton(view);
 }
 
 void ViewWorkspace::setChrome(DockChrome* chrome)
@@ -307,6 +334,19 @@ void ViewWorkspace::installChrome(View& view)
     bar->setLeadingWidget(kind);
     view.kindButton = kind;
 
+    // Linked views (cad/view_link.hpp), first among the view's tools: the
+    // one a person reaches for while working across two views. Checkable, so
+    // it shows the link; a click runs VIEWS LINK or UNLINK through the
+    // command runner (toggleLink) and the check is then set from the link.
+    // A plain button, never a menu: a menu opened from a title bar is a
+    // modal loop, which a headless press would wait in for ever.
+    QToolButton* link = makeTitleBarButton(bar, Icon::ViewUnlinked, "ViewLinkButton",
+                                           "Link this view", {});
+    link->setCheckable(true);
+    connect(link, &QToolButton::clicked, this, [this, id] { toggleLink(id); });
+    bar->addTool(link);
+    view.linkButton = link;
+
     QToolButton* layers = makeTitleBarButton(bar, Icon::Layers, "ViewLayersButton", "Layers", {});
     connect(layers, &QToolButton::clicked, this, [this, id] { (void)showLayersPopup(id); });
     bar->addTool(layers);
@@ -326,7 +366,7 @@ void ViewWorkspace::installChrome(View& view)
     // view they act on. On `pressed`, not `clicked`, so that the view is
     // active before the button acts. Not Minimise or Close: they put it away.
     for (QToolButton* button :
-         {kind, layers, extents, bar->floatButton(), bar->maximiseButton()}) {
+         {kind, link, layers, extents, bar->floatButton(), bar->maximiseButton()}) {
         if (button != nullptr) {
             connect(button, &QToolButton::pressed, this, [this, id] { activate(id); });
         }
@@ -346,6 +386,7 @@ void ViewWorkspace::installChrome(View& view)
     };
 
     updateLayersButton(view);
+    updateLinkButton(view);
 }
 
 bool ViewWorkspace::onScreen(const View& view) const
@@ -560,6 +601,8 @@ Status ViewWorkspace::closeView(ViewId id)
     removeDockWidget(dock);
     delete dock;
     (void)views_.remove(id);
+    // It left the link, and a view it leaves alone left with it.
+    updateLinkButtons();
     if (wasActive == id) {
         // ViewSet hands on to the view used most recently, which knows
         // nothing of docks: it may be minimised, or a tab page parked behind
@@ -597,6 +640,8 @@ Status ViewWorkspace::setViewKind(ViewId id, ViewKind kind)
         return status;
     }
     buildContent(*view, *state);
+    // A linked view that changed kind left the link (ViewSet::setKind).
+    updateLinkButtons();
     if (onActiveChanged) {
         onActiveChanged();
     }
@@ -1062,16 +1107,243 @@ Status ViewWorkspace::zoomExtents(ViewId id)
 
 void ViewWorkspace::zoomExtentsAll()
 {
+    // The link, once: on everything its views draw between them, each hiding
+    // layers of its own, so none of them is framed off what it shows.
+    const ViewId framer = linkFramer();
+    katana::geometry::Box2 linkBounds;
+    for (const ViewId member : views_.linkedViews()) {
+        if (const ViewportWidget* plan = planView(member)) {
+            linkBounds.expand(plan->drawnBounds());
+        }
+    }
     for (const View& view : docks_) {
+        const ViewState* state = views_.find(view.id);
+        if (state != nullptr && state->linked) {
+            if (view.id == framer && view.plan != nullptr) {
+                // An empty box frames nothing, as Zoom Extents on nothing
+                // always has: zoomExtents goes to the origin at one pixel a
+                // unit, and zoomTo would refuse it.
+                if (linkBounds.empty()) {
+                    view.plan->zoomExtents();
+                } else {
+                    view.plan->zoomTo(linkBounds);
+                }
+            }
+            continue; // the others follow the framer
+        }
         (void)zoomExtents(view.id);
     }
 }
 
 void ViewWorkspace::zoomTo(const katana::geometry::Box2& bounds)
 {
-    for (ViewportWidget* plan : planViews()) {
-        plan->zoomTo(bounds);
+    const ViewId framer = linkFramer();
+    for (const View& view : docks_) {
+        if (view.plan == nullptr) {
+            continue;
+        }
+        const ViewState* state = views_.find(view.id);
+        if (state != nullptr && state->linked && view.id != framer) {
+            continue; // follows the framer
+        }
+        view.plan->zoomTo(bounds);
     }
+}
+
+// ---- linked views and the verbs -------------------------------------------------------------
+
+katana::cad::ViewVerbHost& ViewWorkspace::verbHost() { return *verbHost_; }
+
+void ViewWorkspace::setCommandRunner(CommandRunner runner) { runner_ = std::move(runner); }
+
+void ViewWorkspace::toggleLink(ViewId id)
+{
+    const ViewState* state = views_.find(id);
+    if (state == nullptr) {
+        return;
+    }
+    if (runner_) {
+        // The view the user moved last leads, whichever of the two is clicked
+        // first: "the joining view follows" would throw away the zoom just
+        // made in whichever order that was not.
+        const QString line =
+            state->linked ? QString("VIEWS UNLINK %1").arg(id)
+                          : QString("VIEWS LINK %1 TO %2").arg(id).arg(views_.linkLeaderFor(id));
+        // What it did, or why it was refused, is in the log the runner writes.
+        (void)runner_(line);
+    }
+    updateLinkButtons();
+}
+
+void ViewWorkspace::updateLinkButton(const View& view)
+{
+    if (view.linkButton == nullptr) {
+        return;
+    }
+    const ViewState* state = views_.find(view.id);
+    view.linkButton->setVisible(state != nullptr && katana::cad::linkable(state->kind));
+    const bool linked = state != nullptr && state->linked;
+    {
+        // From the link, never from the click that toggled it: a refused
+        // line must leave the button as it was.
+        const QSignalBlocker quiet(view.linkButton);
+        view.linkButton->setChecked(linked);
+    }
+    view.linkButton->setIcon(icon(linked ? Icon::ViewLinked : Icon::ViewUnlinked));
+    view.linkButton->setProperty("linked", linked);
+    view.linkButton->style()->unpolish(view.linkButton);
+    view.linkButton->style()->polish(view.linkButton);
+
+    QStringList others;
+    for (const ViewId member : views_.linkedViews()) {
+        if (const ViewState* other = views_.find(member); other != nullptr && member != view.id) {
+            others << QString::fromStdString(katana::cad::ViewSet::title(*other));
+        }
+    }
+    QString label;
+    QString tip;
+    if (!linked) {
+        label = "Link this view";
+        tip = "Linked plan views pan and zoom together. Link a second view to keep them in step; "
+              "the view you last panned or zoomed is the one the others come to.";
+    } else if (others.isEmpty()) {
+        label = "Linked, waiting";
+        tip = "Link another plan view to keep them in step. Click to unlink.";
+    } else {
+        label = "Linked";
+        const QString with = others.size() == 1
+                                 ? others.front()
+                                 : others.mid(0, others.size() - 1).join(", ") + " and " +
+                                       others.back();
+        tip = "Pans and zooms with " + with + ". Click to unlink.";
+    }
+    view.linkButton->setToolTip(QString("<b>%1</b><br>%2").arg(label, tip));
+    view.linkButton->setAccessibleName(label);
+    view.linkButton->setAccessibleDescription(tip);
+}
+
+void ViewWorkspace::updateLinkButtons()
+{
+    for (const View& view : docks_) {
+        updateLinkButton(view);
+    }
+    if (onLinksChanged) {
+        onLinksChanged();
+    }
+}
+
+void ViewWorkspace::viewMoved(ViewId id, bool byUser)
+{
+    if (following_) {
+        return;
+    }
+    const QScopedValueRollback<bool> guard(following_, true);
+    if (byUser) {
+        views_.noteMoved(id);
+    }
+    const ViewState* state = views_.find(id);
+    if (state == nullptr || !state->linked) {
+        return;
+    }
+    for (const ViewId follower : views_.follow(id)) {
+        if (ViewportWidget* plan = planView(follower)) {
+            plan->holdView();
+        }
+    }
+    // The view that moved holds it too: a frame refitted on its next resize
+    // would change its scale, which no follower would hear of.
+    if (ViewportWidget* plan = planView(id)) {
+        plan->holdView();
+    }
+}
+
+ViewId ViewWorkspace::linkFramer() const
+{
+    const std::vector<ViewId> members = views_.linkedViews();
+    // Of the members, the one moved last, else the lowest id: linkLeaderFor
+    // asked about a member considers exactly the members.
+    return members.empty() ? katana::cad::kNoView : views_.linkLeaderFor(members.front());
+}
+
+Result<std::vector<ViewId>> ViewWorkspace::zoomView(const katana::cad::ZoomRequest& request)
+{
+    View* view = find(request.view);
+    ViewState* state = views_.find(request.view);
+    if (view == nullptr || state == nullptr) {
+        return makeError(ErrorCode::NotFound, "no such view", std::to_string(request.view));
+    }
+    using Kind = katana::cad::ZoomRequest::Kind;
+    switch (request.kind) {
+    case Kind::Extents:
+        // Through the view's own Zoom Extents; a plan view's frame() tells
+        // the link (viewMoved).
+        (void)zoomExtents(request.view);
+        break;
+    case Kind::Window:
+        if (view->plan == nullptr) {
+            return makeError(ErrorCode::InvalidArgument, "ZOOM WINDOW frames a plan view",
+                             std::to_string(request.view));
+        }
+        view->plan->zoomTo(request.window);
+        break;
+    case Kind::In:
+    case Kind::Out:
+    case Kind::Factor:
+    case Kind::Centre:
+        if (view->plan == nullptr) {
+            return makeError(ErrorCode::InvalidArgument, "only a plan view zooms that way here",
+                             std::to_string(request.view));
+        }
+        (void)katana::cad::applyPlanZoom(state->plan, request);
+        state->planFramed = true;
+        // The user's view now: kept on a resize, as after the wheel.
+        view->plan->holdView();
+        viewMoved(request.view, true);
+        break;
+    }
+    std::vector<ViewId> moved{request.view};
+    if (state->linked) {
+        for (const ViewId member : views_.linkedViews()) {
+            if (member != request.view) {
+                moved.push_back(member);
+            }
+        }
+    }
+    return moved;
+}
+
+void ViewWorkspace::linkChanged(const std::vector<ViewId>& ids)
+{
+    for (const ViewId id : ids) {
+        const ViewState* state = views_.find(id);
+        ViewportWidget* plan = planView(id);
+        if (plan == nullptr || state == nullptr) {
+            continue;
+        }
+        if (state->linked) {
+            // Moved to the leader behind its back, or leading: either way it
+            // now shows the link's view, which a refit on resize would lose.
+            plan->holdView();
+        } else {
+            plan->update();
+        }
+    }
+    updateLinkButtons();
+}
+
+Status ViewWorkspace::showAndActivate(ViewId id)
+{
+    const View* view = find(id);
+    if (view == nullptr) {
+        return makeError(ErrorCode::NotFound, "no such view", std::to_string(id));
+    }
+    // Through the tray when it is there, as ensureView brings a view back.
+    if (chrome_ == nullptr || !chrome_->restore(view->dock)) {
+        view->dock->show();
+        view->dock->raise();
+    }
+    activate(id);
+    return {};
 }
 
 void ViewWorkspace::invalidateReferenceCache()

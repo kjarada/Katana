@@ -595,10 +595,11 @@ const std::vector<Tool>& tools()
             "inspection (LIST, INFO), UNDO/REDO, "
             "and files (NEW, OPEN, SAVE, IMPORT, EXPORT). Each command is one undoable step. By "
             "default the batch stops at the first command that fails. Returns each command's "
-            "output and the drawing's status afterwards. PLOT, PLOTSHEETS, SNAPSHOT, ONLINE and "
-            "SCRIPT are the desktop window's verbs and are refused here, saying so: plotting, "
-            "view pictures and online data need the window (or katana run headless); a script "
-            "file is katana_run_script's.",
+            "output and the drawing's status afterwards. PLOT, PLOTSHEETS, SNAPSHOT, ONLINE, "
+            "SCRIPT, GRID, EXAGGERATION, VIEWS and ZOOM are the desktop window's verbs and are "
+            "refused here, saying so: plotting, view pictures, online data and the views need "
+            "the window (or katana run headless with --command); a script file is "
+            "katana_run_script's.",
             objectSchema(
                 Json{{"commands",
                       {{"type", "array"},

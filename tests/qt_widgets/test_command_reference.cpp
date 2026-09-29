@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "command_reference_dialog.hpp"
+#include "katana/cad/command_interpreter.hpp"
 #include "keyboard_shortcuts_dialog.hpp"
 
 namespace {
@@ -166,9 +167,17 @@ TEST(CommandReference, TheWindowSectionNamesEveryVerbTheWindowRunsItself)
     // interpreter: the list the typed HELP adds to the interpreter's.
     const QString help = katana::qt::windowHelpText();
     for (const char* verb : {"SCRIPT", "IMPORT", "EXPORT", "INFO <file>", "REFS", "COPC",
-                             "CUSTOMISE", "PLOTSHEETS", "PLOT <file.pdf>", "SNAPSHOT", "ZOOM", "GRID", "SNAP", "ONLINE", "UTILITY",
-                             "QUIT", "LABELSTYLE"}) {
+                             "CUSTOMISE", "PLOTSHEETS", "PLOT <file.pdf>", "SNAPSHOT", "GRID",
+                             "SNAP", "ONLINE", "UTILITY", "QUIT", "LABELSTYLE"}) {
         EXPECT_TRUE(help.contains(verb)) << verb;
+    }
+    // ZOOM went to the interpreter with VIEWS (cad/view_verbs.hpp): the
+    // window no longer runs it itself, and the interpreter's help says both.
+    EXPECT_FALSE(help.contains("ZOOM (Z)"));
+    const QString commands = QString::fromStdString(katana::cad::CommandInterpreter::helpText());
+    for (const char* verb : {"VIEWS [LIST]", "VIEWS LINK", "VIEWS UNLINK", "ZOOM (Z)",
+                             "CENTRE x,y [SCALE"}) {
+        EXPECT_TRUE(commands.contains(verb)) << verb;
     }
 }
 

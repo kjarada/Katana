@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "katana/cad/view_set.hpp"
@@ -629,4 +630,325 @@ TEST(ViewSet, AViewsStateStaysAtOneAddressWhateverElseOpensOrCloses)
     EXPECT_EQ(set.find(2), model);
     EXPECT_TRUE(plan->layers.hidesDirectly("survey"));
     EXPECT_EQ(model->kind, ViewKind::Elevation);
+}
+
+// ---- linked views (view_link.hpp) -------------------------------------------------------
+//
+// The link keeps plan views showing the same centre at the same scale. Every
+// number below is worked by hand from ViewTransform's definitions: a view W
+// by H pixels centred on c at s pixels a unit puts screen (x, y) at world
+// (c.x + (x - W/2) / s, c.y - (y - H/2) / s), and zoomAt(p, k) keeps the world
+// point under p where it was while the scale goes to k s.
+
+namespace {
+
+// A plan view W x H pixels, centred on (x, y) at `scale`, framed as a widget
+// that has painted it would be.
+ViewState& framedPlan(ViewSet& set, double width, double height, double x, double y,
+                      double scale)
+{
+    ViewState& view = set.add(ViewKind::Plan);
+    view.plan.resize(width, height);
+    view.plan.center = katana::geometry::Point2(x, y);
+    view.plan.scale = scale;
+    view.planFramed = true;
+    return view;
+}
+
+void expectShowing(const ViewState& view, double x, double y, double scale)
+{
+    EXPECT_EQ(view.plan.center.x, x) << "view " << view.id;
+    EXPECT_EQ(view.plan.center.y, y) << "view " << view.id;
+    EXPECT_EQ(view.plan.scale, scale) << "view " << view.id;
+}
+
+} // namespace
+
+TEST(ViewSet, LinkedPlanViewsTakeTheCentreAndScaleOfTheViewThatMovedAndKeepTheirOwnSize)
+{
+    ViewSet set;
+    ViewState& a = framedPlan(set, 300, 200, 10, 20, 4);
+    ViewState& b = framedPlan(set, 600, 400, 0, 0, 1);
+    const std::vector<ViewId> both{a.id, b.id};
+    ASSERT_TRUE(set.link(both, a.id).ok());
+
+    // A zoomed 2x at its top-left pixel (0, 0). By hand: the anchor there is
+    // (10 + (0 - 150) / 4, 20 - (0 - 100) / 4) = (-27.5, 45); at scale 8 the
+    // centre that keeps it at (0, 0) is (-27.5 + 150 / 8, 45 - 100 / 8) =
+    // (-8.75, 32.5). Quarters and eighths: exact in binary, so compared equal.
+    a.plan.zoomAt(katana::geometry::Point2(0, 0), 2.0);
+    expectShowing(a, -8.75, 32.5, 8);
+    set.noteMoved(a.id);
+    EXPECT_EQ(set.follow(a.id), (std::vector<ViewId>{b.id}));
+
+    expectShowing(b, -8.75, 32.5, 8);
+    // Its own size: twice as wide, it shows twice as much about the same
+    // centre.
+    EXPECT_EQ(b.plan.widthPixels, 600.0);
+    EXPECT_EQ(b.plan.heightPixels, 400.0);
+}
+
+TEST(ViewSet, AJoiningViewComesToTheViewTheUserMovedLast)
+{
+    // The Link button sends TO = linkLeaderFor(the view clicked). The user
+    // zoomed the design view A and then linked the two in either order: the
+    // as-built view B comes to A both times, and the zoom is never lost.
+    for (const bool designFirst : {true, false}) {
+        ViewSet set;
+        ViewState& a = framedPlan(set, 300, 200, 100, 100, 3);
+        ViewState& b = framedPlan(set, 300, 200, 0, 0, 1);
+        set.noteMoved(a.id);
+        const ViewId first = designFirst ? a.id : b.id;
+        const ViewId second = designFirst ? b.id : a.id;
+
+        auto waiting = set.link(std::vector<ViewId>{first}, set.linkLeaderFor(first));
+        ASSERT_TRUE(waiting.ok()) << waiting.error().describe();
+        EXPECT_TRUE(waiting->moved.empty()) << "a link of one moves nothing";
+        auto joined = set.link(std::vector<ViewId>{second}, set.linkLeaderFor(second));
+        ASSERT_TRUE(joined.ok()) << joined.error().describe();
+
+        EXPECT_EQ(joined->leader, a.id) << (designFirst ? "design first" : "as-built first");
+        EXPECT_EQ(joined->moved, (std::vector<ViewId>{b.id}));
+        expectShowing(a, 100, 100, 3);
+        expectShowing(b, 100, 100, 3);
+    }
+}
+
+TEST(ViewSet, TwoViewsNobodyMovedFollowTheFirstListed)
+{
+    ViewSet set;
+    ViewState& one = framedPlan(set, 300, 200, 1, 2, 3);
+    ViewState& two = framedPlan(set, 300, 200, 4, 5, 6);
+    // No TO and no link yet: the first id listed leads, whatever its number.
+    auto change = set.link(std::vector<ViewId>{two.id, one.id});
+    ASSERT_TRUE(change.ok()) << change.error().describe();
+    EXPECT_EQ(change->leader, two.id);
+    EXPECT_EQ(change->linked, (std::vector<ViewId>{one.id, two.id})) << "creation order";
+    EXPECT_EQ(change->moved, (std::vector<ViewId>{one.id}));
+    expectShowing(one, 4, 5, 6);
+    // Nobody moved either, so the Link button of a third view would name the
+    // link's lowest id.
+    EXPECT_EQ(set.linkLeaderFor(framedPlan(set, 10, 10, 0, 0, 1).id), one.id);
+}
+
+TEST(ViewSet, LinkToNamesTheViewTheOthersComeTo)
+{
+    ViewSet set;
+    ViewState& one = framedPlan(set, 300, 200, 1, 2, 3);
+    ViewState& two = framedPlan(set, 300, 200, 4, 5, 6);
+    ViewState& three = framedPlan(set, 300, 200, 7, 8, 9);
+    ASSERT_TRUE(set.link(std::vector<ViewId>{one.id, two.id}).ok());
+    expectShowing(two, 1, 2, 3);
+
+    // Three joins and leads: the members already linked come to it too.
+    auto change = set.link(std::vector<ViewId>{three.id}, three.id);
+    ASSERT_TRUE(change.ok()) << change.error().describe();
+    EXPECT_EQ(change->leader, three.id);
+    EXPECT_EQ(change->moved, (std::vector<ViewId>{one.id, two.id}));
+    expectShowing(one, 7, 8, 9);
+    expectShowing(two, 7, 8, 9);
+
+    // Without TO, a view joining a link comes to the link's lowest id.
+    ViewState& four = framedPlan(set, 300, 200, -1, -1, 1);
+    one.plan.center = katana::geometry::Point2(70, 80); // moved, not yet followed
+    auto joined = set.link(std::vector<ViewId>{four.id});
+    ASSERT_TRUE(joined.ok());
+    EXPECT_EQ(joined->leader, one.id);
+    expectShowing(four, 70, 80, 9);
+}
+
+TEST(ViewSet, ALinkRefusesAViewNotOpenOrALeaderOutsideItAndChangesNothing)
+{
+    ViewSet set;
+    ViewState& one = framedPlan(set, 300, 200, 1, 2, 3);
+    ViewState& two = framedPlan(set, 300, 200, 4, 5, 6);
+    ViewState& three = framedPlan(set, 300, 200, 7, 8, 9);
+
+    auto unknown = set.link(std::vector<ViewId>{one.id, 99});
+    ASSERT_FALSE(unknown.ok());
+    EXPECT_EQ(unknown.error().code, ErrorCode::NotFound);
+    EXPECT_NE(unknown.error().message.find("no view 99 is open"), std::string::npos)
+        << unknown.error().message;
+
+    auto outside = set.link(std::vector<ViewId>{one.id, two.id}, three.id);
+    ASSERT_FALSE(outside.ok());
+    EXPECT_EQ(outside.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(outside.error().message.find("view 3 is neither"), std::string::npos)
+        << outside.error().message;
+
+    auto none = set.link(std::vector<ViewId>{});
+    ASSERT_FALSE(none.ok());
+    EXPECT_EQ(none.error().code, ErrorCode::InvalidArgument);
+
+    EXPECT_TRUE(set.linkedViews().empty());
+    expectShowing(one, 1, 2, 3);
+    expectShowing(two, 4, 5, 6);
+
+    auto unlinkUnknown = set.unlink(std::vector<ViewId>{42});
+    ASSERT_FALSE(unlinkUnknown.ok());
+    EXPECT_EQ(unlinkUnknown.error().code, ErrorCode::NotFound);
+}
+
+TEST(ViewSet, ALinkOfOneWaitsAndAnUnlinkThatLeavesOneDissolvesIt)
+{
+    ViewSet set;
+    ViewState& one = framedPlan(set, 300, 200, 1, 2, 3);
+    ViewState& two = framedPlan(set, 300, 200, 4, 5, 6);
+    ViewState& three = framedPlan(set, 300, 200, 7, 8, 9);
+
+    auto waiting = set.link(std::vector<ViewId>{one.id});
+    ASSERT_TRUE(waiting.ok());
+    EXPECT_EQ(waiting->linked, (std::vector<ViewId>{one.id}));
+    EXPECT_TRUE(waiting->moved.empty());
+    // Unlinking a view that is not linked is no error, and leaves the
+    // waiting link waiting.
+    auto nothing = set.unlink(std::vector<ViewId>{three.id});
+    ASSERT_TRUE(nothing.ok());
+    EXPECT_TRUE(nothing->empty());
+    EXPECT_EQ(set.linkedViews(), (std::vector<ViewId>{one.id}));
+
+    ASSERT_TRUE(set.link(std::vector<ViewId>{two.id}).ok());
+    expectShowing(two, 1, 2, 3);
+
+    // Two leaves; one is left alone, and a link of one it did not ask for is
+    // no link: both have left.
+    auto left = set.unlink(std::vector<ViewId>{two.id});
+    ASSERT_TRUE(left.ok());
+    EXPECT_EQ(*left, (std::vector<ViewId>{one.id, two.id}));
+    EXPECT_TRUE(set.linkedViews().empty());
+    EXPECT_FALSE(one.linked);
+}
+
+TEST(ViewSet, A3DOrSectionViewCannotJoinAndTheRefusalNamesItsKind)
+{
+    ViewSet set;
+    ViewState& plan = framedPlan(set, 300, 200, 1, 2, 3);
+    const ViewId model = set.add(ViewKind::Model3D).id;
+    const ViewId section = set.add(ViewKind::Section).id;
+
+    auto refused3d = set.link(std::vector<ViewId>{plan.id, model});
+    ASSERT_FALSE(refused3d.ok());
+    EXPECT_EQ(refused3d.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(refused3d.error().message, "only plan views link: view 2 is 3D");
+
+    auto refusedSection = set.link(std::vector<ViewId>{section});
+    ASSERT_FALSE(refusedSection.ok());
+    EXPECT_EQ(refusedSection.error().message, "only plan views link: view 3 is Section");
+    // Refused whole: the plan view listed with the 3D one did not join.
+    EXPECT_TRUE(set.linkedViews().empty());
+}
+
+TEST(ViewSet, ChangingALinkedViewsKindTakesItOutOfTheLink)
+{
+    ViewSet set;
+    ViewState& one = framedPlan(set, 300, 200, 1, 2, 3);
+    ViewState& two = framedPlan(set, 300, 200, 4, 5, 6);
+    ViewState& three = framedPlan(set, 300, 200, 7, 8, 9);
+    ASSERT_TRUE(set.link(std::vector<ViewId>{one.id, two.id, three.id}).ok());
+
+    ASSERT_TRUE(set.setKind(two.id, ViewKind::Model3D).ok());
+    EXPECT_FALSE(two.linked);
+    EXPECT_EQ(set.linkedViews(), (std::vector<ViewId>{one.id, three.id}));
+
+    // Back to plan it stays out: joining is always asked for.
+    ASSERT_TRUE(set.setKind(two.id, ViewKind::Plan).ok());
+    EXPECT_FALSE(two.linked);
+
+    // This change leaves one member, which is no link.
+    ASSERT_TRUE(set.setKind(three.id, ViewKind::Section).ok());
+    EXPECT_TRUE(set.linkedViews().empty());
+}
+
+TEST(ViewSet, ClosingALinkedViewLeavesTheOthersLinked)
+{
+    ViewSet set;
+    ViewState& one = framedPlan(set, 300, 200, 1, 2, 3);
+    const ViewId two = framedPlan(set, 300, 200, 4, 5, 6).id;
+    const ViewId three = framedPlan(set, 300, 200, 7, 8, 9).id;
+    ASSERT_TRUE(set.link(std::vector<ViewId>{one.id, two, three}).ok());
+
+    ASSERT_TRUE(set.remove(two).ok());
+    EXPECT_EQ(set.linkedViews(), (std::vector<ViewId>{one.id, three}));
+
+    // A state handed over by take() is out of the link as well, and so is
+    // the view it leaves alone.
+    std::unique_ptr<ViewState> taken = set.take(three);
+    ASSERT_NE(taken, nullptr);
+    EXPECT_FALSE(taken->linked);
+    EXPECT_TRUE(set.linkedViews().empty());
+    EXPECT_FALSE(one.linked);
+}
+
+TEST(ViewSet, FollowReturnsOnlyTheLinkedViewsItChanged)
+{
+    ViewSet set;
+    ViewState& one = framedPlan(set, 300, 200, 1, 2, 3);
+    ViewState& two = framedPlan(set, 300, 200, 4, 5, 6);
+    ViewState& three = framedPlan(set, 300, 200, 7, 8, 9);
+    ASSERT_TRUE(set.link(std::vector<ViewId>{one.id, three.id}).ok());
+
+    one.plan.center = katana::geometry::Point2(-3, -4);
+    one.plan.scale = 0.5;
+    EXPECT_EQ(set.follow(one.id), (std::vector<ViewId>{three.id}));
+    expectShowing(three, -3, -4, 0.5);
+    expectShowing(two, 4, 5, 6); // not linked: untouched
+
+    // A view outside the link moves nobody, and neither does one not open.
+    EXPECT_TRUE(set.follow(two.id).empty());
+    EXPECT_TRUE(set.follow(99).empty());
+    expectShowing(one, -3, -4, 0.5);
+}
+
+TEST(ViewSet, UnlinkingMovesNothing)
+{
+    ViewSet set;
+    ViewState& one = framedPlan(set, 300, 200, 1, 2, 3);
+    ViewState& two = framedPlan(set, 300, 200, 4, 5, 6);
+    ASSERT_TRUE(set.link(std::vector<ViewId>{one.id, two.id}).ok());
+    expectShowing(two, 1, 2, 3);
+
+    one.plan.center = katana::geometry::Point2(50, 60);
+    auto left = set.unlink(std::vector<ViewId>{one.id});
+    ASSERT_TRUE(left.ok());
+    expectShowing(two, 1, 2, 3);
+    expectShowing(one, 50, 60, 3);
+    EXPECT_TRUE(set.unlinkAll().empty()) << "nothing was left to unlink";
+}
+
+TEST(ViewSet, AnUnframedLeaderMovesNobodyUntilItIsFramed)
+{
+    ViewSet set;
+    ViewState& fresh = set.add(ViewKind::Plan); // opened, never painted
+    ViewState& shown = framedPlan(set, 300, 200, 4, 5, 6);
+
+    auto change = set.link(std::vector<ViewId>{fresh.id, shown.id});
+    ASSERT_TRUE(change.ok());
+    EXPECT_EQ(change->leader, fresh.id);
+    EXPECT_TRUE(change->moved.empty());
+    expectShowing(shown, 4, 5, 6);
+
+    // Its first paint frames it; the widget reports that as a move.
+    fresh.plan.center = katana::geometry::Point2(9, 9);
+    fresh.plan.scale = 7;
+    fresh.planFramed = true;
+    EXPECT_EQ(set.follow(fresh.id), (std::vector<ViewId>{shown.id}));
+    expectShowing(shown, 9, 9, 7);
+}
+
+TEST(ViewSet, TheViewMovedMostRecentlyLeadsAndNoteMovedIgnoresAViewNotOpen)
+{
+    ViewSet set;
+    const ViewId one = framedPlan(set, 300, 200, 1, 2, 3).id;
+    const ViewId two = framedPlan(set, 300, 200, 4, 5, 6).id;
+    EXPECT_EQ(set.linkLeaderFor(two), two) << "no link and no move: the view clicked";
+    set.noteMoved(one);
+    set.noteMoved(two);
+    set.noteMoved(99);
+    // No link: only the view asked about counts.
+    EXPECT_EQ(set.linkLeaderFor(one), one);
+    ASSERT_TRUE(set.link(std::vector<ViewId>{two}).ok());
+    EXPECT_EQ(set.linkLeaderFor(one), two) << "two, the member, was moved after one";
+    set.noteMoved(one);
+    EXPECT_EQ(set.linkLeaderFor(one), one);
+    EXPECT_GT(set.find(one)->lastMoved, set.find(two)->lastMoved);
 }

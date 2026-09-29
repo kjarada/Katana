@@ -23,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -82,6 +83,16 @@ struct ViewState {
     // Section: what was cut, and how it is drawn.
     std::optional<Section> section;
     double sectionExaggeration = 10.0;
+
+    // Linked views (view_link.hpp): every linked view shows the same centre
+    // and scale, so a design view zoomed takes the as-built view with it.
+    // One link per workspace; plan views only. Like the zoom it keeps in
+    // step, view state: not saved, not undoable, not a document change.
+    bool linked = false;
+    // When the user last panned or zoomed this view, on ViewSet's clock of
+    // such moves (noteMoved); 0 when never. It decides which view the others
+    // come to when views are linked (ViewSet::linkLeaderFor).
+    std::uint64_t lastMoved = 0;
 };
 
 class ViewSet {
@@ -97,7 +108,8 @@ class ViewSet {
     [[nodiscard]] katana::core::Result<ViewState*> restore(ViewId id, ViewKind kind);
 
     // Fails with NotFound for an id that is not open. Removing the active view
-    // activates the most recently active of the rest.
+    // activates the most recently active of the rest. A linked view leaves
+    // the link, which is dissolved when one member is left (unlink).
     [[nodiscard]] katana::core::Status remove(ViewId id);
     // remove(), handing the state to the caller instead of destroying it; null
     // for an id that is not open. For a widget that is being torn down after
@@ -109,7 +121,9 @@ class ViewSet {
     // its new kind. Reconfigures the camera only for a model kind it was not
     // already set up for (ViewState::cameraKind): a 3D view's orbit is not
     // reset by choosing 3D again, nor by a trip through Section and back.
-    // Reconfiguring clears cameraFramed. NotFound for an unknown id.
+    // Reconfiguring clears cameraFramed. A linked view that changes kind
+    // leaves the link, as a closed one does (remove). NotFound for an unknown
+    // id.
     [[nodiscard]] katana::core::Status setKind(ViewId id, ViewKind kind);
 
     // NotFound, and nothing changes, for an unknown id: activating some other
@@ -139,15 +153,74 @@ class ViewSet {
     // "Plan 1", "3D 2", "Section 1", "Elevation 1".
     [[nodiscard]] static std::string title(const ViewState& view);
 
+    // ---- linked views (view_link.hpp; docs/desktop.md, "Linked views") --------
+    //
+    // One link: a view is in it or not. Every member shows the centre and
+    // scale of the member that moved last, each at its own size and with its
+    // own hidden layers. Joining, closing, a change of kind and an unlink are
+    // the only ways in and out; none of them moves a view but joining.
+
+    // What link() did.
+    struct LinkChange {
+        // The view the others came to.
+        ViewId leader = kNoView;
+        // Every member afterwards, in creation order.
+        std::vector<ViewId> linked;
+        // The members brought to the leader, in creation order: every other
+        // member, or none while the leader has never been framed (a view
+        // framed at its first paint moves the link then, ViewSet::follow).
+        std::vector<ViewId> moved;
+    };
+    // Puts `ids` in the link and brings every other member to the leader:
+    // `to` when given, else the link's lowest-id member, else - the link was
+    // empty - the first of `ids`. Duplicate ids count once, and a view
+    // already linked stays. Refused, with nothing changed: NotFound naming an
+    // id that is not open; InvalidArgument naming a view whose kind does not
+    // link (linkable), or when `ids` is empty, or for a `to` that is neither
+    // among `ids` nor already a member.
+    [[nodiscard]] katana::core::Result<LinkChange> link(std::span<const ViewId> ids,
+                                                        std::optional<ViewId> to = std::nullopt);
+    // Takes `ids` out of the link and returns every view that left, in
+    // creation order: an unlink that leaves one member dissolves the link,
+    // and that member is among them. An id that is not linked is no error and
+    // not returned. NotFound, with nothing changed, for an id that is not
+    // open. Moves nothing.
+    [[nodiscard]] katana::core::Result<std::vector<ViewId>>
+    unlink(std::span<const ViewId> ids);
+    // Every member leaves; returned in creation order.
+    std::vector<ViewId> unlinkAll();
+    // The members, in creation order.
+    [[nodiscard]] std::vector<ViewId> linkedViews() const;
+
+    // The user panned or zoomed `id`: it is now the view moved most recently.
+    // Nothing for an id that is not open.
+    void noteMoved(ViewId id);
+    // The view the others should come to when `joining` is linked: of
+    // `joining` and the members, the one the user moved most recently; when
+    // none was ever moved, the lowest-id member; with no member, `joining`.
+    // Linking in either order then never throws away the zoom the user has
+    // just made. What the Link button sends as VIEWS LINK ... TO.
+    [[nodiscard]] ViewId linkLeaderFor(ViewId joining) const;
+    // `source` moved: every other member takes its centre and scale
+    // (followView) and counts as framed. Returns them in creation order.
+    // Nothing, and an empty list, unless `source` is linked and has been
+    // framed. Star-shaped: a follower is never a source in the same pass.
+    std::vector<ViewId> follow(ViewId source);
+
   private:
     [[nodiscard]] int lowestFreeNumber(ViewKind kind, ViewId except) const;
     void touch(ViewId id);
+    // `view` leaves the link, and a link left with one member is dissolved.
+    // The views that left, in creation order; empty when `view` was not in it.
+    std::vector<ViewId> leaveLink(ViewState& view);
 
     std::vector<std::unique_ptr<ViewState>> views_;
     // Every open view, least recently active first.
     std::vector<ViewId> recent_;
     ViewId active_ = kNoView;
     ViewId next_ = 1;
+    // The clock ViewState::lastMoved is read on: one tick per user move.
+    std::uint64_t moves_ = 0;
 };
 
 } // namespace katana::cad

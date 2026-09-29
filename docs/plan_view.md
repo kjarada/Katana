@@ -293,6 +293,8 @@ index is an opened project's. At 1600 x 1000:
   zoomed in five times, panned a pixel each iteration so nothing is reused,
   through the widget; `...ThickLines` the same at the 1.5 px look.
 * `BM_PlanPaintCursorMove` - the mouse moving over an unchanged drawing.
+* `BM_PlanLinkedPan` - a pan step of the zoomed view with a second view
+  linked to it, both drawn (below, "Linked views").
 * `BM_PlanPlotA1` - one A1 sheet at 1 : 2500, 300 dpi.
 * `BM_PlanPainter/<zoom>_<measures>` - the painter alone with the thin pen,
   clipping and sprites switched on one at a time, with counters of what each
@@ -400,6 +402,27 @@ The plan view reports each paint in the status bar, as the 3D view does:
 `Plan  27886 drawn  192.9 ms (kept, 0.4 ms)` when a frame only laid the kept
 drawing down. `lastFrameMilliseconds`, `lastDrawingMilliseconds` and
 `drawingPaintCount` give the same to a test.
+
+### Linked views
+
+Two plan views linked (`docs/desktop.md`, "Linked views") share every pan
+and zoom, so each step of a pan in one draws the other whole as well: its
+centre moved, and its kept drawing is keyed on the centre. `BM_PlanLinkedPan`
+measures one step of a middle-drag pan with a second view linked - the pan,
+the link's `ViewSet::follow` and both views drawn, each 1600 x 1000 on the
+generated drawing zoomed in five times - against `BM_PlanPaintZoomed`, the
+same step of the same view alone. Measured on 2026-09-30 in the view-sync
+worktree's Release build, three repetitions of at least 2 s, medians, with
+another workflow's builds running on the machine:
+
+| | one view | two views linked |
+|---|---|---|
+| a pan step (1 914 entities drawn in each) | 10.3 ms | 23.3 ms |
+
+The second view costs a second whole paint, about what the first costs; the
+follow itself is copying two numbers into each member. Nothing is optimised:
+a pan at 43 steps a second in two views is still smooth, and the kept drawing
+(and not the link) is where a drawing too slow to pan would be worked on.
 
 ## Tests
 

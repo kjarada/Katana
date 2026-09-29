@@ -221,6 +221,11 @@ enum class Icon {
     LayerVisible,
     LayerLocked,
     LayerColour,
+    // A view's Link button (cad/view_link.hpp): an open chain, its two links
+    // apart, while the view pans and zooms on its own; a closed chain in the
+    // accent while it moves with the views linked to it.
+    ViewUnlinked,
+    ViewLinked,
 };
 
 // Every value of Icon, in declaration order, for the contact sheet and for

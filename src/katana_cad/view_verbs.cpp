@@ -1,0 +1,569 @@
+#include "katana/cad/view_verbs.hpp"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "katana/cad/scope_verbs.hpp"
+#include "katana/core/text.hpp"
+#include "katana/math/numerics.hpp"
+
+namespace katana::cad {
+
+using katana::core::ErrorCode;
+using katana::core::makeError;
+using katana::core::Result;
+using katana::core::Status;
+using katana::geometry::Box2;
+using katana::geometry::Point2;
+
+namespace {
+
+constexpr const char* kViewsUsage =
+    "VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id | LINK id[,id...] [TO id] | "
+    "UNLINK id[,id...]|ALL";
+constexpr const char* kZoomUsage = "ZOOM [EXTENTS | IN [f] | OUT [f] | factor | WINDOW x0,y0,x1,y1 "
+                                   "| CENTRE x,y [SCALE s]] [view=id]";
+
+std::string upper(std::string_view text)
+{
+    std::string out(text);
+    for (char& c : out) {
+        if (c >= 'a' && c <= 'z') {
+            c = static_cast<char>(c - 'a' + 'A');
+        }
+    }
+    return out;
+}
+
+// The word a record and VIEWS OPEN use for a kind: the title's word, lower
+// case, so "3D 1" is kind=3d.
+std::string kindWord(ViewKind kind) { return katana::core::lowered(toString(kind)); }
+
+std::optional<ViewKind> kindFrom(std::string_view word)
+{
+    for (const ViewKind kind :
+         {ViewKind::Plan, ViewKind::Model3D, ViewKind::Section, ViewKind::Elevation}) {
+        if (katana::core::equalsIgnoringCase(word, toString(kind))) {
+            return kind;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string real(double value) { return katana::core::formatExactReal(value); }
+
+std::string pointText(const Point2& point) { return real(point.x) + "," + real(point.y); }
+
+std::string listed(const std::vector<ViewId>& ids)
+{
+    if (ids.empty()) {
+        return "none";
+    }
+    std::string text;
+    for (const ViewId id : ids) {
+        text += (text.empty() ? "" : ",") + std::to_string(id);
+    }
+    return text;
+}
+
+katana::core::Error notOpen(ViewId id)
+{
+    return makeError(ErrorCode::NotFound,
+                     "no view " + std::to_string(id) + " is open (VIEWS lists them)",
+                     std::to_string(id));
+}
+
+// A view id as typed: a whole number from 1.
+Result<ViewId> parseViewId(std::string_view word)
+{
+    const bool digits = !word.empty() && std::ranges::all_of(word, [](char c) {
+        return c >= '0' && c <= '9';
+    });
+    const auto value = digits ? katana::core::parseInteger(word) : std::nullopt;
+    if (!value || *value < 1 || *value > std::numeric_limits<ViewId>::max()) {
+        return makeError(ErrorCode::ParseFailure,
+                         "a view id is a whole number from 1: the view= a record gives (VIEWS "
+                         "lists them), not the number in a view's title",
+                         std::string(word));
+    }
+    return static_cast<ViewId>(*value);
+}
+
+// "1,2" and "1 2", up to TO or the end of the line; each at most once.
+Result<std::vector<ViewId>> parseIds(const std::vector<std::string>& args, std::size_t& at)
+{
+    std::vector<ViewId> ids;
+    while (at < args.size() && upper(args[at]) != "TO") {
+        std::string_view word = args[at];
+        std::size_t start = 0;
+        while (start <= word.size()) {
+            const std::size_t comma = std::min(word.find(',', start), word.size());
+            // "1,,2" and a trailing comma are stray commas, not ids.
+            if (comma > start) {
+                auto id = parseViewId(word.substr(start, comma - start));
+                if (!id) {
+                    return id.error();
+                }
+                if (!std::ranges::contains(ids, *id)) {
+                    ids.push_back(*id);
+                }
+            }
+            start = comma + 1;
+        }
+        ++at;
+    }
+    return ids;
+}
+
+// Where a view is looking, after its id, kind and (for VIEWS) title and
+// active: a plan view's centre, scale and area; a 3D or elevation view's
+// camera; nothing for a section, whose pan and zoom its widget keeps.
+std::string placeOf(const ViewState& view, bool withLinked)
+{
+    std::string text;
+    switch (view.kind) {
+    case ViewKind::Plan: {
+        if (withLinked) {
+            text += std::string(" linked=") + (view.linked ? "yes" : "no");
+        }
+        const Box2 area = view.plan.visibleWorldBounds();
+        text += " centre=" + pointText(view.plan.center) + " scale=" + real(view.plan.scale) +
+                " area=" + pointText(area.min) + "," + pointText(area.max);
+        break;
+    }
+    case ViewKind::Model3D:
+    case ViewKind::Elevation: {
+        const katana::render::Camera& camera = view.camera;
+        const katana::geometry::Point3& target = camera.target();
+        text += " target=" + real(target.x) + "," + real(target.y) + "," + real(target.z) +
+                " distance=" + real(camera.distance()) +
+                " azimuth=" + real(camera.azimuth() * katana::math::kRadToDeg) +
+                " elevation=" + real(camera.elevation() * katana::math::kRadToDeg) +
+                " projection=" +
+                (camera.projection() == katana::render::Projection::Perspective ? "perspective"
+                                                                                : "orthographic");
+        break;
+    }
+    case ViewKind::Section:
+        break;
+    }
+    return text;
+}
+
+// ---- VIEWS --------------------------------------------------------------------------------
+
+Result<std::string> viewsVerb(ViewVerbHost& host, const std::vector<std::string>& args)
+{
+    ViewSet& views = host.views();
+    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const auto refuseWord = [](const std::string& word) {
+        return makeError(ErrorCode::ParseFailure,
+                         "VIEWS does not take '" + word + "': " + kViewsUsage, word);
+    };
+
+    if (action == "LIST") {
+        if (args.size() > 1) {
+            return refuseWord(args[1]);
+        }
+        std::string reply;
+        for (const ViewState* view : views.views()) {
+            reply += viewRecord(views, *view) + "\n";
+        }
+        return reply + "views=" + std::to_string(views.size()) +
+               " linked=" + std::to_string(views.linkedViews().size());
+    }
+    if (action == "OPEN") {
+        if (args.size() != 2) {
+            return makeError(
+                ErrorCode::ParseFailure,
+                "VIEWS OPEN takes what the view shows: plan, 3d, section or elevation");
+        }
+        const auto kind = kindFrom(args[1]);
+        if (!kind) {
+            return makeError(ErrorCode::ParseFailure,
+                             "VIEWS OPEN takes plan, 3d, section or elevation, not '" + args[1] +
+                                 "'",
+                             args[1]);
+        }
+        auto opened = host.open(*kind);
+        if (!opened) {
+            return opened.error();
+        }
+        const ViewState* view = views.find(*opened);
+        if (view == nullptr) {
+            return makeError(ErrorCode::Internal, "the window opened a view it does not list",
+                             std::to_string(*opened));
+        }
+        return viewRecord(views, *view);
+    }
+    if (action == "ACTIVATE") {
+        if (args.size() != 2) {
+            return makeError(ErrorCode::ParseFailure, "VIEWS ACTIVATE takes one view id");
+        }
+        auto id = parseViewId(args[1]);
+        if (!id) {
+            return id.error();
+        }
+        if (views.find(*id) == nullptr) {
+            return notOpen(*id);
+        }
+        if (auto status = host.activate(*id); !status) {
+            return status.error();
+        }
+        return viewRecord(views, *views.find(*id));
+    }
+    if (action == "LINK") {
+        std::size_t at = 1;
+        auto ids = parseIds(args, at);
+        if (!ids) {
+            return ids.error();
+        }
+        std::optional<ViewId> to;
+        if (at < args.size()) {
+            // parseIds stopped at TO.
+            if (at + 2 != args.size()) {
+                return makeError(ErrorCode::ParseFailure,
+                                 "TO takes the one view the others come to: VIEWS LINK "
+                                 "<id>[,<id>...] [TO <id>]",
+                                 args[at]);
+            }
+            auto leader = parseViewId(args[at + 1]);
+            if (!leader) {
+                return leader.error();
+            }
+            to = *leader;
+        }
+        auto change = views.link(*ids, to);
+        if (!change) {
+            return change.error();
+        }
+        host.changed(change->linked);
+        return "leader=" + std::to_string(change->leader) + " linked=" + listed(change->linked) +
+               " moved=" + listed(change->moved);
+    }
+    if (action == "UNLINK") {
+        std::vector<ViewId> left;
+        if (args.size() == 2 && upper(args[1]) == "ALL") {
+            left = views.unlinkAll();
+        } else {
+            std::size_t at = 1;
+            auto ids = parseIds(args, at);
+            if (!ids) {
+                return ids.error();
+            }
+            if (at < args.size()) {
+                return refuseWord(args[at]);
+            }
+            if (ids->empty()) {
+                return makeError(ErrorCode::ParseFailure,
+                                 "name the views to unlink: VIEWS UNLINK <id>[,<id>...] | ALL");
+            }
+            auto unlinked = views.unlink(*ids);
+            if (!unlinked) {
+                return unlinked.error();
+            }
+            left = std::move(unlinked).value();
+        }
+        host.changed(left);
+        return "unlinked=" + listed(left) + " linked=" + listed(views.linkedViews());
+    }
+    return refuseWord(args[0]);
+}
+
+// ---- ZOOM ---------------------------------------------------------------------------------
+
+std::optional<Point2> parsePoint(std::string_view word)
+{
+    const std::size_t comma = word.find(',');
+    if (comma == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto x = katana::core::parseFiniteDouble(word.substr(0, comma));
+    const auto y = katana::core::parseFiniteDouble(word.substr(comma + 1));
+    if (!x || !y) {
+        return std::nullopt;
+    }
+    return Point2(*x, *y);
+}
+
+// "x0,y0,x1,y1" in one word, or "x0,y0 x1,y1" in two: the corners in either
+// order. `at` is left after what was read.
+Result<Box2> parseWindow(const std::vector<std::string>& args, std::size_t& at)
+{
+    const auto refuse = [&args, at] {
+        return makeError(ErrorCode::ParseFailure,
+                         "ZOOM WINDOW takes two corners: x0,y0,x1,y1",
+                         at < args.size() ? args[at] : std::string());
+    };
+    if (at >= args.size()) {
+        return refuse();
+    }
+    std::vector<double> numbers;
+    std::string_view word = args[at];
+    std::size_t start = 0;
+    while (start <= word.size()) {
+        const std::size_t comma = std::min(word.find(',', start), word.size());
+        const auto value = katana::core::parseFiniteDouble(word.substr(start, comma - start));
+        if (!value) {
+            return refuse();
+        }
+        numbers.push_back(*value);
+        start = comma + 1;
+    }
+    std::size_t used = 1;
+    if (numbers.size() == 2 && at + 1 < args.size()) {
+        const auto second = parsePoint(args[at + 1]);
+        if (!second) {
+            return refuse();
+        }
+        numbers.push_back(second->x);
+        numbers.push_back(second->y);
+        used = 2;
+    }
+    if (numbers.size() != 4) {
+        return refuse();
+    }
+    const Point2 a(numbers[0], numbers[1]);
+    const Point2 b(numbers[2], numbers[3]);
+    if (a == b) {
+        return makeError(ErrorCode::InvalidArgument, "a window needs two different corners",
+                         args[at]);
+    }
+    at += used;
+    return Box2(Point2(std::min(a.x, b.x), std::min(a.y, b.y)),
+                Point2(std::max(a.x, b.x), std::max(a.y, b.y)));
+}
+
+// A zoom factor: finite and above 0.
+Result<double> parseFactor(const std::string& word)
+{
+    const auto factor = katana::core::parseFiniteDouble(word);
+    if (!factor || !(*factor > 0.0)) {
+        return makeError(ErrorCode::ParseFailure,
+                         "a zoom factor is a number above 0: above 1 is closer, below 1 farther",
+                         word);
+    }
+    return *factor;
+}
+
+// The word the refusal of a kind names the request by.
+std::string requestWord(const ZoomRequest& request)
+{
+    switch (request.kind) {
+    case ZoomRequest::Kind::Extents:
+        return "EXTENTS";
+    case ZoomRequest::Kind::In:
+        return "IN";
+    case ZoomRequest::Kind::Out:
+        return "OUT";
+    case ZoomRequest::Kind::Factor:
+        return "by a factor";
+    case ZoomRequest::Kind::Window:
+        return "WINDOW";
+    case ZoomRequest::Kind::Centre:
+        return "CENTRE";
+    }
+    return "";
+}
+
+Result<std::string> zoomVerb(ViewVerbHost& host, std::vector<std::string> args)
+{
+    ViewSet& views = host.views();
+    ZoomRequest request;
+
+    // view= first, wherever it stands, so nothing after reads it as a word of
+    // its own.
+    std::optional<ViewId> named;
+    for (auto word = args.begin(); word != args.end();) {
+        if (word->size() >= 5 && katana::core::equalsIgnoringCase(word->substr(0, 5), "view=")) {
+            if (named) {
+                return makeError(ErrorCode::ParseFailure, "give view= once", *word);
+            }
+            auto id = parseViewId(std::string_view(*word).substr(5));
+            if (!id) {
+                return id.error();
+            }
+            named = *id;
+            word = args.erase(word);
+        } else {
+            ++word;
+        }
+    }
+    if (named) {
+        if (views.find(*named) == nullptr) {
+            return notOpen(*named);
+        }
+        request.view = *named;
+    } else {
+        request.view = views.activeId();
+        if (request.view == kNoView) {
+            return makeError(ErrorCode::InvalidState,
+                             "no view is open to zoom: VIEWS OPEN plan opens one");
+        }
+    }
+
+    const auto refuseWord = [](const std::string& word) {
+        return makeError(ErrorCode::ParseFailure,
+                         "ZOOM does not take '" + word + "': " + kZoomUsage, word);
+    };
+    std::size_t at = 0;
+    if (!args.empty()) {
+        const std::string word = upper(args[0]);
+        at = 1;
+        if (word == "EXTENTS" || word == "E") {
+            request.kind = ZoomRequest::Kind::Extents;
+        } else if (word == "IN" || word == "OUT") {
+            request.kind = word == "IN" ? ZoomRequest::Kind::In : ZoomRequest::Kind::Out;
+            if (at < args.size() && katana::core::parseFiniteDouble(args[at])) {
+                auto factor = parseFactor(args[at]);
+                if (!factor) {
+                    return factor.error();
+                }
+                request.factor = *factor;
+                ++at;
+            }
+        } else if (word == "WINDOW" || word == "W") {
+            request.kind = ZoomRequest::Kind::Window;
+            auto box = parseWindow(args, at);
+            if (!box) {
+                return box.error();
+            }
+            request.window = *box;
+        } else if (word == "CENTRE" || word == "CENTER" || word == "C") {
+            request.kind = ZoomRequest::Kind::Centre;
+            const auto centre = at < args.size() ? parsePoint(args[at]) : std::nullopt;
+            if (!centre) {
+                return makeError(ErrorCode::ParseFailure,
+                                 "ZOOM CENTRE takes the point to centre on: x,y",
+                                 at < args.size() ? args[at] : std::string());
+            }
+            request.centre = *centre;
+            ++at;
+            if (at < args.size() && upper(args[at]) == "SCALE") {
+                const auto scale =
+                    at + 1 < args.size() ? katana::core::parseFiniteDouble(args[at + 1])
+                                         : std::nullopt;
+                if (!scale || *scale < ViewTransform::kMinimumScale ||
+                    *scale > ViewTransform::kMaximumScale) {
+                    // The limits a plan view clamps to, read from there so the
+                    // message cannot drift from them.
+                    return makeError(ErrorCode::InvalidArgument,
+                                     "SCALE is pixels per unit from " +
+                                         real(ViewTransform::kMinimumScale) + " to " +
+                                         real(ViewTransform::kMaximumScale),
+                                     at + 1 < args.size() ? args[at + 1] : args[at]);
+                }
+                request.scale = *scale;
+                at += 2;
+            }
+        } else if (katana::core::parseFiniteDouble(args[0])) {
+            request.kind = ZoomRequest::Kind::Factor;
+            auto factor = parseFactor(args[0]);
+            if (!factor) {
+                return factor.error();
+            }
+            request.factor = *factor;
+        } else {
+            return refuseWord(args[0]);
+        }
+    }
+    if (at < args.size()) {
+        return refuseWord(args[at]);
+    }
+
+    const ViewState& view = *views.find(request.view);
+    if (request.kind != ZoomRequest::Kind::Extents && view.kind != ViewKind::Plan) {
+        const char* does = request.kind == ZoomRequest::Kind::Window   ? "frames"
+                           : request.kind == ZoomRequest::Kind::Centre ? "centres"
+                                                                       : "zooms";
+        return makeError(ErrorCode::InvalidArgument,
+                         "ZOOM " + requestWord(request) + " " + does + " a plan view: view " +
+                             std::to_string(view.id) + " is " + toString(view.kind) +
+                             " (ZOOM EXTENTS frames any view)",
+                         std::to_string(view.id));
+    }
+
+    auto moved = host.zoom(request);
+    if (!moved) {
+        return moved.error();
+    }
+    std::string reply;
+    for (const ViewId id : *moved) {
+        const ViewState* each = views.find(id);
+        if (each == nullptr) {
+            continue;
+        }
+        if (!reply.empty()) {
+            reply += "\n";
+        }
+        reply += "view=" + std::to_string(id) + " kind=" + kindWord(each->kind);
+        if (id != request.view) {
+            reply += " followed=" + std::to_string(request.view);
+        }
+        reply += placeOf(*each, false);
+    }
+    return reply;
+}
+
+} // namespace
+
+bool applyPlanZoom(ViewTransform& view, const ZoomRequest& request)
+{
+    // About the centre pixel, where screenToWorld gives the centre back
+    // exactly: ViewTransform::zoomAt then leaves the centre where it was and
+    // clamps the scale as the wheel's zoom does.
+    const Point2 middle(0.5 * view.widthPixels, 0.5 * view.heightPixels);
+    switch (request.kind) {
+    case ZoomRequest::Kind::In:
+    case ZoomRequest::Kind::Factor:
+        view.zoomAt(middle, request.factor);
+        return true;
+    case ZoomRequest::Kind::Out:
+        view.zoomAt(middle, 1.0 / request.factor);
+        return true;
+    case ZoomRequest::Kind::Centre:
+        view.center = request.centre;
+        if (request.scale) {
+            view.scale = *request.scale;
+        }
+        return true;
+    case ZoomRequest::Kind::Extents:
+    case ZoomRequest::Kind::Window:
+        return false;
+    }
+    return false;
+}
+
+bool isViewVerb(std::string_view verb) { return verb == "VIEWS" || verb == "ZOOM"; }
+
+Result<std::string> runViewVerb(const Document& /*document*/, std::string_view verb,
+                                const std::vector<std::string>& args,
+                                const ViewHostProvider& provider)
+{
+    ViewVerbHost* host = provider ? provider() : nullptr;
+    if (host == nullptr) {
+        return makeError(ErrorCode::Unsupported,
+                         std::string(verb) +
+                             " is the desktop window's: it acts on the window's views, which "
+                             "katana_cli and katana_mcp do not have; run it on the window's "
+                             "command line or with katana --command");
+    }
+    if (verb == "VIEWS") {
+        return viewsVerb(*host, args);
+    }
+    return zoomVerb(*host, args);
+}
+
+std::string viewRecord(const ViewSet& views, const ViewState& view)
+{
+    return "view=" + std::to_string(view.id) + " kind=" + kindWord(view.kind) +
+           " title=" + recordValue(ViewSet::title(view)) +
+           " active=" + (views.activeId() == view.id ? "yes" : "no") + placeOf(view, true);
+}
+
+} // namespace katana::cad

@@ -449,15 +449,21 @@ watching the window:
 * **`QUIT` is not a command here.** The client ends the session by closing it;
   a `QUIT` in a batch is reported and skipped.
 * **The window's own verbs are refused by name.** `PLOT`, `PLOTSHEETS`,
-  `SNAPSHOT`, `ONLINE` and `SCRIPT` run only in the desktop window (its
-  painter is Qt's; its online workbench keeps the provider keys; a script is
-  `katana_run_script`'s here). The session answers each with `Unsupported:
-  <VERB> is the desktop window's` and where to run it instead - in
-  `katana_cli` too - where it once said "unknown command", which a model
-  cannot tell from a typo; `katana_run_commands`' description says so as well
+  `SNAPSHOT`, `ONLINE`, `SCRIPT`, `GRID` and `EXAGGERATION` run only in the
+  desktop window (its painter is Qt's; its online workbench keeps the
+  provider keys; a script is `katana_run_script`'s here; the grid and the
+  exaggeration are how its views draw), and so do `VIEWS` and `ZOOM`, which
+  act on its views (`docs/cad.md`, "The window's views: VIEWS and ZOOM") -
+  the interpreter refuses those two itself, having no views here. The
+  session answers each with `Unsupported: <VERB> is the desktop window's` and
+  where to run it instead - in `katana_cli` too - where it once said "unknown
+  command", which a model cannot tell from a typo (`GRID` and `EXAGGERATION`
+  did until 2026-09-30); `katana_run_commands`' description says so as well
   (`McpServer.TheWindowsOwnVerbsAreRefusedSayingWhereTheyRun`, a `cli.` test
   for each verb in `src/katana_app/CMakeLists.txt`, and
-  `cli.a_window_verb_in_a_batch_fails_it`).
+  `cli.a_window_verb_in_a_batch_fails_it`). An agent that needs linked views
+  drives the window with `katana --command "VIEWS LINK 1,2"`
+  (`docs/headless.md`).
 
 IFC 4.3 is reached as the window's IFC dialogs reach it, by lines: `EXPORT
 <file.ifc> ... PREVIEW` for the class each object would become, `EXPORT`,

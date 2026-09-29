@@ -161,7 +161,8 @@ TEST(Icons, TheListHoldsEveryIconOnceAndEachPaintsSomething)
     // Declaration order, one of each: the contact sheet and this test see
     // every icon only if the list does.
     const auto& icons = katana::qt::allIcons();
-    ASSERT_EQ(icons.size(), static_cast<std::size_t>(Icon::LayerColour) + 1);
+    // The last enumerator, which moves whenever an icon is added at the end.
+    ASSERT_EQ(icons.size(), static_cast<std::size_t>(Icon::ViewLinked) + 1);
     for (std::size_t i = 0; i < icons.size(); ++i) {
         EXPECT_EQ(static_cast<std::size_t>(icons[i]), i);
     }

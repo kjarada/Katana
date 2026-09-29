@@ -268,9 +268,13 @@ if(KATANA_BUILD_TESTS)
         FAIL_REGULAR_EXPRESSION "error")
     # The window's own verbs are refused by name, saying where they run,
     # rather than as unknown commands: a script written for File > Run Script
-    # that plots fails here saying so. Each stops the batch (exit 1).
+    # that plots fails here saying so. Each stops the batch (exit 1). GRID and
+    # EXAGGERATION were unknown commands here until 2026-09-30; VIEWS and ZOOM
+    # the interpreter refuses itself, having no window to act on
+    # (cad/view_verbs.hpp).
     foreach(_verb IN ITEMS "PLOT a.pdf" "PLOTSHEETS" "SNAPSHOT a.png" "ONLINE PROVIDERS"
-                           "SCRIPT a.kcs")
+                           "SCRIPT a.kcs" "GRID ON" "EXAGGERATION 2" "VIEWS LINK 1,2"
+                           "ZOOM IN")
         string(REGEX REPLACE " .*" "" _name "${_verb}")
         string(TOLOWER "${_name}" _name)
         add_test(NAME cli.the_windows_${_name}_verb_is_refused_saying_where_it_runs

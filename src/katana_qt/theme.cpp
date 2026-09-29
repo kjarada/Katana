@@ -215,6 +215,12 @@ QString styleSheet()
         QToolButton[chrome="close"]:hover { background: %error%; }
         QToolButton[chrome="button"]:focus, QToolButton[chrome="close"]:focus {
             border: 1px solid %accent%; }
+        /* A checked title-bar button (a view's Link) framed as a checked
+           toolbar button is. The rule for every chrome button above has the
+           same weight as QToolButton:checked and comes later, so without
+           this one it took the frame away and a checked button looked like
+           any other. */
+        QToolButton[chrome="button"]:checked { background: %raised%; border: 1px solid %accent%; }
         QToolButton[chrome="button"]::menu-indicator { subcontrol-position: right center;
                                                        subcontrol-origin: padding; }
         QToolButton[filtered="true"] { border: 1px solid %accent%; }

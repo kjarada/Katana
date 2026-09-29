@@ -423,10 +423,13 @@ TEST_F(McpServer, TheWindowsOwnVerbsAreRefusedSayingWhereTheyRun)
 {
     // PLOT, SNAPSHOT, ONLINE and SCRIPT run only in the desktop window; an
     // agent once met "unknown command" and could not tell a typo from a verb
-    // this surface lacks. The tool's description says so too.
+    // this surface lacks. The tool's description says so too. GRID and
+    // EXAGGERATION were unknown commands here until 2026-09-30; VIEWS and
+    // ZOOM are refused by the interpreter itself, which has no views here.
     initialize();
     for (const char* line : {"PLOT a.pdf", "PLOTSHEETS", "SNAPSHOT a.png", "ONLINE PROVIDERS",
-                             "SCRIPT a.kcs"}) {
+                             "SCRIPT a.kcs", "GRID ON", "EXAGGERATION 2", "VIEWS",
+                             "VIEWS LINK 1,2", "ZOOM IN", "Z"}) {
         const Json ran = call("katana_run_commands", Json{{"commands", {line}}});
         EXPECT_TRUE(ran["isError"].get<bool>()) << line;
         EXPECT_NE(textOf(ran).find("is the desktop window's"), std::string::npos) << textOf(ran);

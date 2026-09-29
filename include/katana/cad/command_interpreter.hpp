@@ -30,6 +30,7 @@
 #include "katana/cad/import_placement.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/cad/scope_verbs.hpp"
+#include "katana/cad/view_verbs.hpp"
 #include "katana/core/error.hpp"
 
 namespace katana::cad {
@@ -111,6 +112,10 @@ class CommandInterpreter {
     // shared scope (the geoprocessing verbs above katana_cad): empty
     // headless, so VIEW is refused there exactly as MODIFY refuses it.
     [[nodiscard]] const ScopeViewProvider& scopeContext() const { return scopeViews_; }
+    // What VIEWS and ZOOM act on (view_verbs.hpp): the window's views. The
+    // window supplies its workspace; headless there is none, and both verbs
+    // are refused by name.
+    void setViewHost(ViewHostProvider provider) { viewHost_ = std::move(provider); }
 
     // Forgets the "last point" that relative (@dx,dy) and polar (@d<a) points
     // resolve against. The interpreter cannot see a document being replaced
@@ -208,6 +213,7 @@ class CommandInterpreter {
     katana::cad::plotting::SheetVerbContextProvider sheetContext_;
     ColourLookup colourOf_;
     ScopeViewProvider scopeViews_;
+    ViewHostProvider viewHost_;
 };
 
 } // namespace katana::cad

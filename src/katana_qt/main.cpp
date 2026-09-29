@@ -152,9 +152,16 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
         };
         walk(QModelIndex());
         text = rows.join(" ; ");
+    } else if (const auto* button = qobject_cast<const QAbstractButton*>(widget)) {
+        // A button: the name a screen reader gives it and, when it can be
+        // checked, whether it is - a view bar's Link button says the link.
+        text = (button->accessibleName().isEmpty() ? QString(button->text()).remove('&')
+                                                   : button->accessibleName()) +
+               (button->isCheckable() ? (button->isChecked() ? ", checked" : ", unchecked")
+                                      : QString());
     } else {
         std::fprintf(stderr,
-                     "--report: there is no label, field, text, list, action or menu %s\n",
+                     "--report: there is no label, field, text, list, button, action or menu %s\n",
                      qPrintable(name));
         return false;
     }

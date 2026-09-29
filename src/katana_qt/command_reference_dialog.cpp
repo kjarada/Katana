@@ -172,11 +172,11 @@ Plot      PLOT <file.pdf> [paper=A0..A4] [landscape|portrait] [fit|scale=N] [dpi
 Snapshot  SNAPSHOT <file.png|.jpg|.tif> | CLIPBOARD [width=N] [height=N] [scale=F]
           [bg=theme|white|none] [view=plan|3d]   a picture of a view (File > Export View
           as Image, Edit > Copy View as Image)
-View      ZOOM (Z)   the drawing's extents | GRID [ON|OFF] | SNAP [ON|OFF] (OSNAP) |
-          SNAP <mode> [ON|OFF]   one of View > Snap Modes: Endpoint, Midpoint, Center,
-          Intersection, Perpendicular, Tangent, Nearest, Grid | EXAGGERATION [factor]
-          elevations in the 3D and section views times 0.01 to 1000 (View > Vertical
-          Exaggeration); alone, the factor now
+View      GRID [ON|OFF] | SNAP [ON|OFF] (OSNAP) | SNAP <mode> [ON|OFF]   one of View > Snap
+          Modes: Endpoint, Midpoint, Center, Intersection, Perpendicular, Tangent, Nearest,
+          Grid | EXAGGERATION [factor]   elevations in the 3D and section views times 0.01
+          to 1000 (View > Vertical Exaggeration); alone, the factor now. VIEWS and ZOOM are
+          the interpreter's, answered by this window's views (Commands, Views and Zoom)
 Online    ONLINE PROVIDERS | LAYERS | INFO | IMPORT | CUSTOM | KEY   online data (GIS >
           Online Data); the usage of each is under Online data
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK|DRAW|REGRADE|SCHEDULE   subsurface

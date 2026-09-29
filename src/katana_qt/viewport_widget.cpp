@@ -311,6 +311,9 @@ void ViewportWidget::frame(const Box2& bounds)
     state_.planFramed = true;
     framedBox_ = bounds;
     update();
+    if (onViewMoved) {
+        onViewMoved(true);
+    }
 }
 
 void ViewportWidget::frameOnFirstPaint()
@@ -323,7 +326,18 @@ void ViewportWidget::frameOnFirstPaint()
     if (!bounds.empty()) {
         state_.plan.fit(bounds, kFrameMargin);
         framedBox_ = bounds;
+        // Not the user's move: a view linked while it had never been seen
+        // leads the link from here (cad::ViewSet::follow).
+        if (onViewMoved) {
+            onViewMoved(false);
+        }
     }
+}
+
+void ViewportWidget::holdView()
+{
+    framedBox_.reset();
+    update();
 }
 
 void ViewportWidget::setReferenceData(katana::interop::ReferenceData* reference)
@@ -746,6 +760,9 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event)
         const QPointF delta = event->position() - lastMouse_;
         state_.plan.panByPixels(delta.x(), delta.y());
         framedBox_.reset(); // the user's view now, kept on a resize
+        if (onViewMoved) {
+            onViewMoved(true);
+        }
     } else if (boxStart_) {
         boxEnd_ = event->position();
     }
@@ -826,6 +843,9 @@ void ViewportWidget::wheelEvent(QWheelEvent* event)
         framedBox_.reset(); // the user's view now, kept on a resize
         updateCursor(event->position());
         update();
+        if (onViewMoved) {
+            onViewMoved(true);
+        }
     }
     event->accept();
 }

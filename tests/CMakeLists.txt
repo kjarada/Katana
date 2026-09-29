@@ -1405,6 +1405,33 @@ if(TARGET katana)
             "-DEXPECT=1 entity selected: Lines on any layer, in the drawing"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/quick_select_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Linked plan views (cad/view_link.hpp, docs/desktop.md "Linked views"):
+    # a second plan view opened and linked with the first, the first zoomed
+    # by its line, and the second is where the first is - the ZOOM's reply
+    # says it followed, and VIEWS lists it there. The Link button of the
+    # second view's bar is checked from the link the lines made; the grab is
+    # that view's dock, bar and all.
+    add_test(NAME qt_linked_plan_views_zoom_together_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN plan|>VIEWS LINK 1,2|>ZOOM CENTRE 50,40 SCALE 8 view=1|>VIEWS|%View2|?ViewLinkButton"
+            "-DEXPECT=leader=1 linked=1,2 moved=2.*view=1 kind=plan centre=50,40 scale=8[^\r\n]*[\r\n]+view=2 kind=plan followed=1 centre=50,40 scale=8.*view=2 kind=plan title=\"Plan 2\" active=[a-z]+ linked=yes centre=50,40 scale=8.*ViewLinkButton: Linked, checked"
+            "-DFORBID=unknown command"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/linked_plan_views_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # And out again: UNLINK of one of two leaves the other alone, which is no
+    # link, so both leave, a ZOOM moves one view only and the buttons show
+    # the open chain.
+    add_test(NAME qt_unlinking_one_of_two_views_unlinks_both_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN plan|>VIEWS LINK 1,2|>VIEWS UNLINK 2|>ZOOM IN view=1|%View2|?ViewLinkButton"
+            "-DEXPECT=unlinked=1,2 linked=none.*view=1 kind=plan centre=.*ViewLinkButton: Link this view, unchecked"
+            "-DFORBID=followed="
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/unlinked_plan_views_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every key sequence the window answers to reaches one thing: Qt
     # disables an ambiguous shortcut for BOTH actions, so a clash is two
     # keys that silently do nothing; and within each menu every underlined
@@ -1458,6 +1485,8 @@ if(TARGET katana)
                          qt_the_modify_menu_offers_lengthen_reverse_and_match_properties_headless
                          qt_dist_typed_at_the_command_line_reports_the_inverse_headless
                          qt_quick_select_is_answered_at_the_command_line_headless
+                         qt_linked_plan_views_zoom_together_headless
+                         qt_unlinking_one_of_two_views_unlinks_both_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
                          qt_every_menu_item_has_an_icon_and_a_status_tip_headless
                          qt_the_window_section_sizes_the_text_and_toolbars_and_resets_the_layout_headless
