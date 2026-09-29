@@ -129,7 +129,7 @@ class ViewWorkspace::VerbHost final : public katana::cad::ViewVerbHost {
         return workspace_.zoomView(request);
     }
     void changed(const std::vector<ViewId>& ids) override { workspace_.linkChanged(ids); }
-    void layersChanged(ViewId id) override { workspace_.viewLayersChanged(id); }
+    void settingsChanged(ViewId id) override { workspace_.viewSettingsChanged(id); }
 
   private:
     ViewWorkspace& workspace_;
@@ -272,6 +272,9 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
     }
     case ViewKind::Section: {
         auto* section = new SectionViewWidget(state, view.dock);
+        // For the selection on its crossings (docs/desktop.md, "The selection
+        // in every view").
+        section->setDocument(&document_);
         section->onActivated = [this, id] { activate(id); };
         section->onStatus = [this](const QString& text) {
             if (onStatus) {
@@ -1513,7 +1516,7 @@ void ViewWorkspace::repaintViews()
     }
 }
 
-void ViewWorkspace::viewLayersChanged(ViewId id)
+void ViewWorkspace::viewSettingsChanged(ViewId id)
 {
     View* view = find(id);
     if (view == nullptr) {
@@ -1530,11 +1533,16 @@ void ViewWorkspace::viewLayersChanged(ViewId id)
     updateLayersButton(*view);
 }
 
+void ViewWorkspace::setSelectionGhosts(ViewId id, bool on)
+{
+    runViewLine(QString("VIEWS SET %1 ghosts=%2").arg(id).arg(on ? "on" : "off"));
+}
+
 void ViewWorkspace::pruneViewLayers()
 {
     for (ViewState* state : views_.views()) {
         if (state->layers.pruneMissing(document_.model().layers) > 0) {
-            viewLayersChanged(state->id);
+            viewSettingsChanged(state->id);
         }
     }
 }

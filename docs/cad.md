@@ -1232,6 +1232,7 @@ VIEWS UNLINK <id>[,<id>...] | ALL     unlinked=1,2 linked=none
 VIEWS HIDE <id> <layer>[,<layer>...]  the layers that view hides of its own; its record
 VIEWS SHOW <id> <layer>[,<layer>...] | ALL
 VIEWS ISOLATE <id> <layer>
+VIEWS SET <id> ghosts=on|off          whether it shows the selection where it hides the layer
 ZOOM | Z                              the active view's extents, as always
 ZOOM EXTENTS | IN [f] | OUT [f] | <f> | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s]  [view=<id>]
 ZOOM SELECTION | DRAWING | VIEW [<id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
@@ -1274,20 +1275,21 @@ Records, one per line, `key=value`, reals by `core::formatExactReal` and
 angles in degrees:
 
 ```
-view=1 kind=plan title="Plan 1" active=yes linked=yes centre=50,40 scale=8 area=31.25,27.5,68.75,52.5
-view=3 kind=3d title="3D 1" active=no target=x,y,z distance=d azimuth=a elevation=e projection=perspective
-view=4 kind=section title="Section 1" active=no
+view=1 kind=plan title="Plan 1" active=yes linked=yes centre=50,40 scale=8 area=31.25,27.5,68.75,52.5 ghosts=on
+view=3 kind=3d title="3D 1" active=no target=x,y,z distance=d azimuth=a elevation=e projection=perspective ghosts=on
+view=4 kind=section title="Section 1" active=no ghosts=on
 ```
 
-A record ends with `hidden=a,b` when its view hides layers of its own - left
-out when it hides none - so `VIEWS` says which view is the design view and
-which the as-built one.
+Every record carries `ghosts=on|off`, the view's switch for the selection's
+ghosts (below), and ends with `hidden=a,b` when its view hides layers of its
+own - left out when it hides none - so `VIEWS` says which view is the design
+view and which the as-built one.
 
 **`HIDE`, `SHOW` and `ISOLATE` are a view's own layer filter**, what its
 Layers button sets (`cad::LayerOverrides`; `docs/desktop.md`, "The
 workspace"): subtractive, so a view never shows what the document hides; view
 state, so not saved, not undoable and no document change - the window redraws
-that one view (`ViewVerbHost::layersChanged`). Without them an agent could not
+that one view (`ViewVerbHost::settingsChanged`). Without them an agent could not
 set up a design view beside an as-built view, and no test could either: the
 popup edited the state directly. A layer is a layer of the drawing or a node
 of the tree above one (`design` when only `design/road` is a layer), as the
@@ -1298,6 +1300,17 @@ lies beneath it; `SHOW ALL` shows everything the document shows
 (`ViewVerbsTest.ViewsHideShowIsolateChangeOnlyThatView`). The popup's own
 rows still edit the state directly rather than run these lines; that and the
 reference layers, which cad cannot name, are `docs/desktop.md`'s "Not done".
+
+**`SET <id> ghosts=on|off` is a view's switch for the selection's ghosts**
+(`ViewState::selectionGhosts`, on when a view opens): a selected entity on a
+layer the document shows and that view hides is drawn there faint, never
+picked, snapped to or plotted (`docs/desktop.md`, "The selection in every
+view"). The Layers popup's box runs this line. Every word is read before any
+is applied, so `ghosts=off ghosts=maybe` changes nothing; a key other than
+`ghosts`, or a value other than on and off, is refused naming it
+(`ViewVerbsTest.ViewsSetRefusesWhatItDoesNotTakeAndChangesNothing`). `SET`
+and not a word of its own, so the next switch a view gains is a key, not a
+verb.
 
 `ZOOM` replies the record of the view it moved without `title`, `active` and
 `linked`, then a line for each view that followed it

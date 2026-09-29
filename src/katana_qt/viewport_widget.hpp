@@ -102,6 +102,10 @@ class ViewportWidget final : public QWidget {
     // headless checks, which cannot look at pixels, to prove that a layer
     // hidden in one view is gone from that view and from no other.
     [[nodiscard]] std::size_t lastDrawnEntityCount() const { return lastDrawnEntities_; }
+    // Of the selection, how many the last paint drew as ghosts: selected, on
+    // a layer the document shows and this view hides
+    // (PlanPaintStats::ghostsDrawn; ViewState::selectionGhosts).
+    [[nodiscard]] std::size_t lastGhostCount() const { return lastGhosts_; }
 
     // ---- what a frame costs -------------------------------------------------
     // The drawing is painted into an image kept between paints, and a paint
@@ -373,6 +377,7 @@ class ViewportWidget final : public QWidget {
         std::set<std::uint64_t> hiddenReferences;
         bool grid = false;
         bool thinLines = false;
+        bool ghosts = false; // ViewState::selectionGhosts
         friend bool operator==(const DrawingKey&, const DrawingKey&) = default;
     };
     [[nodiscard]] DrawingKey drawingKey(double deviceRatio) const;
@@ -389,6 +394,7 @@ class ViewportWidget final : public QWidget {
     katana::cad::Document& document_;
     katana::cad::ViewState& state_;
     mutable std::size_t lastDrawnEntities_ = 0;
+    mutable std::size_t lastGhosts_ = 0;
     // Declared after document_ and destroyed before anything else here: the
     // listener it owns captures this widget.
     katana::cad::Document::ListenerHandle documentListener_;

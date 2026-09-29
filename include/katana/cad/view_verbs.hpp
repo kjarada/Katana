@@ -156,10 +156,11 @@ class ViewVerbHost {
     // from refitting its old frame on a resize, and bring every view's bar up
     // to date.
     virtual void changed(const std::vector<ViewId>& ids) = 0;
-    // The verbs changed the layers `id` hides of its own (ViewState::layers):
+    // The verbs changed what `id` draws of its own - the layers it hides
+    // (ViewState::layers) or its ghosts of the selection (selectionGhosts):
     // no document change, so nothing else hears of it. Redraw that view and
     // bring its Layers button up to date.
-    virtual void layersChanged(ViewId id) = 0;
+    virtual void settingsChanged(ViewId id) = 0;
 };
 
 // Asked at each VIEWS or ZOOM line, so a front end can hand over a host that

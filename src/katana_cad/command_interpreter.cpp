@@ -553,6 +553,8 @@ Views     the desktop window's views (katana_cli and katana_mcp have none, and r
           VIEWS UNLINK id[,id...] | ALL
           VIEWS HIDE id layer[,layer...] | SHOW id layer[,layer...]|ALL | ISOLATE id layer
           the layers that view hides of its own, as its Layers button sets them
+          VIEWS SET id ghosts=on|off   whether that view shows the selection faintly where it
+          hides the layer (on when a view opens)
 Zoom      ZOOM (Z)   the active view's extents | ZOOM EXTENTS | IN [f] | OUT [f] | f |
           WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE pixels-per-unit]   [view=id]; IN and OUT
           are by 2 about the view's centre; linked views follow every ZOOM

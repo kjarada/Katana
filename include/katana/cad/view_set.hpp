@@ -93,6 +93,11 @@ struct ViewState {
     // such moves (noteMoved); 0 when never. It decides which view the others
     // come to when views are linked (ViewSet::linkLeaderFor).
     std::uint64_t lastMoved = 0;
+    // Whether a selected entity on a layer this view hides (and the document
+    // shows) is drawn here as a ghost (cad/selection_style.hpp): on, so a
+    // selection made in the design view shows in the as-built view that hides
+    // its layer. Its Layers popup and VIEWS SET <id> ghosts=on|off set it.
+    bool selectionGhosts = true;
 };
 
 class ViewSet {

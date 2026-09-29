@@ -5,9 +5,10 @@
 // rule a view's hidden layers take part in).
 //
 // Opened from the Layers button on a view's title bar. It edits that view's
-// cad::ViewState - its LayerOverrides and hiddenReferences - and nothing
-// else: never a command, never the document's modified flag, never the undo
-// history. What a view hides is how the user is LOOKING at the drawing, like
+// cad::ViewState - its LayerOverrides and hiddenReferences, and through
+// VIEWS SET its ghosts of the selection (selectionGhosts) - and nothing
+// else: never an undoable command, never the document's modified flag,
+// never the undo history. What a view hides is how the user is LOOKING at the drawing, like
 // its zoom; the Layers panel, which edits the document, is where a layer is
 // switched off for every view and saved with the project.
 //
@@ -28,6 +29,7 @@
 #include "katana/cad/view_set.hpp"
 #include "katana/core/error.hpp"
 
+class QCheckBox;
 class QLabel;
 class QLineEdit;
 class QToolButton;
@@ -60,6 +62,10 @@ class ViewLayersPopup final : public QFrame {
     [[nodiscard]] QTreeWidget* layerTree() const { return layers_; }
     [[nodiscard]] QTreeWidget* referenceTree() const { return references_; }
     [[nodiscard]] QLineEdit* filterBox() const { return filter_; }
+    // "Show the selection on hidden layers": the view's ghosts
+    // (ViewState::selectionGhosts), set by VIEWS SET through the command
+    // runner, as a typed line is.
+    [[nodiscard]] QCheckBox* ghostsBox() const { return ghosts_; }
     // The layer item for `path`, or null.
     [[nodiscard]] QTreeWidgetItem* itemFor(const QString& path) const;
 
@@ -101,6 +107,7 @@ class ViewLayersPopup final : public QFrame {
     QTreeWidget* references_ = nullptr;
     QToolButton* isolate_ = nullptr;
     QToolButton* hideOthers_ = nullptr;
+    QCheckBox* ghosts_ = nullptr;
     // True while the lists are being written from the view, so that the
     // itemChanged those writes raise is not taken for a click.
     bool updating_ = false;

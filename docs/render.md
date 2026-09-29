@@ -115,9 +115,9 @@ a 25 m building showed through all of it. Two parts replace it:
   - orthographic: d = (f - z) / (f - n), a footprint is orthoHeight / H, and
     the pull is the constant `pixels · (orthoHeight / H) / (f - n)`.
 
-  The scene uses 1.5 footprints for linework, 1.0 for surface edges and 2.5
+  The scene uses 1.5 footprints for linework, 1.0 for surface edges, 2.5
   for the selection overlay (which must win the tie with the entity's own
-  first drawing).
+  first drawing) and 2.0 for the overlay's casing, between the two.
 * **Filled triangles are pushed away by one pixel of their own depth slope**
   (the slope-scaled offset a GPU calls polygon offset): a 1-2 px line samples
   the surface up to a pixel off its centre line, and at a grazing angle the
@@ -250,7 +250,7 @@ about a datum as the scene is built, so framing, draping and depth all agree.
 
 ### The scene in layers
 
-`SceneLayers` holds five draw lists, each rebuilt only when what it depends on
+`SceneLayers` holds six draw lists, each rebuilt only when what it depends on
 changes, drawn in this order into one depth buffer:
 
 | Layer | Holds | Rebuilt when |
@@ -259,7 +259,8 @@ changes, drawn in this order into one depth buffer:
 | `terrain` | surfaces and meshes | surfaces, meshes, options or exaggeration change |
 | `edges` | surface edges that fade | with the terrain; recoloured (not rebuilt) by `fadeEdges` |
 | `entities` | the drawing | the document's `modelRevision` moves (any command, undo, redo, open) |
-| `selection` | the selected entities again, in the selection style | any document notification |
+| `selectionCasing` | the dark casing under each selected line and point | with `selection` |
+| `selection` | the selected entities again, in the selection style, and the ghosts | any document notification |
 
 A document notification that leaves `Document::modelRevision` where it was is a
 selection or current-layer change, so the widget rebuilds the overlay alone
@@ -271,9 +272,11 @@ cannot carry the depth rules below, so there a surface flat at the datum shows
 the grid through it.
 
 `cad::renderLayers` draws one frame of the layers: it fits the depth range to
-them and the grid, fades the edges, then draws the five in the order above.
-The widget calls it and nothing else, so the tests draw exactly what the view
-does. Two of the passes **write no depth**:
+them, the grid and the selection (a ghost lies where the view draws nothing,
+so outside the rest: `SceneFrame.TheDepthRangeTakesInAGhostOutsideWhatTheViewDraws`),
+fades the edges, then draws the six in the order above. The widget calls it
+and nothing else, so the tests draw exactly what the view does. Three of the
+passes **write no depth**:
 
 * **The grid is a backdrop.** It stands on the datum, exactly in the plane of
   a surface that is flat at its lowest (a pad, a pond or basin floor). Drawn
@@ -301,9 +304,32 @@ does. Two of the passes **write no depth**:
   (`SceneFrame.OfTwoCoincidentSurfacesTheEdgesShownAreThoseOfTheSurfaceShown`;
   without it, `plot_PW_example_data`'s dark edges went pale under the design
   surface's weaker ones).
+* **The selection's casing is tested but not written**, so the core drawn
+  next covers it wherever the two overlap and the casing shows a pixel
+  either side: a 3 px core of #FF9F1C over a 5 px casing of (16, 18, 22),
+  and a selected point 9 px over 11 (`cad/selection_style.hpp`;
+  `SceneFrame.ASelectedLineIsDrawnInTheSelectionColourBetweenTwoEdgesOfItsCasing`).
+  In the core's own list, the software view drew it right by the bias alone
+  (2.0 under the core's 2.5), but the GPU pulls a mark nearer by its width
+  and reads no bias, so there the wider casing won and a selected line was
+  dark (`GpuLayers.ASelectionCoreDrawnAfterACasingThatWritesNoDepthKeepsItsColour`,
+  its control).
 
-A GPU renderer must draw the layers in this order, with the same two passes'
-depth writes off.
+**The selection overlay** walks the selection's ids alone, in ascending id
+order (the order a walk of the drawing visits), through the one emitter: the
+selected entities the view draws, as the core, then - when the view's
+`SceneOptions::selectionGhosts` is on - its GHOSTS: selected entities on a
+layer the document shows and the view (`SceneOptions::layers`) hides, each
+one 1 px line of (130, 88, 32), the selection colour at 45 % mixed over the
+view's ground beforehand, with no casing (`docs/desktop.md`, "The selection
+in every view"). The one-list build (`SceneBuilder::build`) keeps its
+colour-only selection, so the 3D snapshots on sheets are unchanged. Walking
+the ids rather than the drawing took `BM_SceneSelectionBuild` from 0.039 /
+0.028 ms to 0.006 / 0.005 ms (256 / 512 cells; medians of three, main
+against the view-sync worktree, both Release, 2026-09-30), casing and all.
+
+A GPU renderer must draw the layers in this order, with the same three
+passes' depth writes off.
 
 ### Linework in 3D
 
@@ -503,8 +529,8 @@ read them as sizes, not ratios). What changed, looking at the pictures:
   large flat site fills more of the view than the far half.
 * `draw_list.hpp` still describes `DrawLine::depthBias` as NDC depth; it is
   pixel footprints of view distance (above).
-* The GPU renderer must match four rules of this path: the grid and edges
-  passes write no depth; the edges come surface by surface in reverse (as
+* The GPU renderer must match four rules of this path: the grid, edges and
+  selection-casing passes write no depth; the edges come surface by surface in reverse (as
   `buildTerrain` emits them); a point sprite is decided at its centre against
   the solids before it, not its own pass's lines, and drawn whole (a larger
   pull instead shows points through thin walls); and the layers are drawn in
@@ -512,6 +538,15 @@ read them as sizes, not ratios). What changed, looking at the pictures:
 * A mesh styled ShadedWithEdges (meshes default to Shaded) keeps its edges in
   the terrain list, where they write depth: linework at its own heights lying
   exactly in a mesh face can still lose pixels where it crosses a mesh edge.
+* A drawing flat in one plane and seen face-on - the top view of a drawing
+  with no heights - has a depth range thinner than one pixel's pull, so every
+  line's pull stops at the near plane (`pullTowardsEye`'s clamp), the pulls
+  tie and the one drawn first wins: there a selected line shows its own
+  colour down the middle of the overlay's core. A depth range kept a few
+  pixel footprints deep (`Camera::fitDepthRange`) would keep the pulls
+  apart; not done with the selection work, since it moves every flat view's
+  depths (`SceneFrame.ASelectedLineIsDrawnInTheSelectionColourBetweenTwoEdgesOfItsCasing`
+  is drawn from the iso view for that reason).
 * The open render defects of the audit are in `docs/audit/2026-09-23-defects.md`,
   section REN; REN-02, 05, 06, 07, 08 and 10 are fixed here and need their
   status changed there.

@@ -24,6 +24,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/cad/selection_style.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/draw_list.hpp"
@@ -120,8 +121,9 @@ struct SceneOptions {
     // show a line through a building.
     float entityDepthBias = 1.5f;
     // The selection overlay draws the selected entities again, over the
-    // drawing, and must win the tie with their own first drawing.
-    float selectionDepthBias = 2.5f;
+    // drawing, and must win the tie with their own first drawing; its casing
+    // sits between the two (selection_style.hpp).
+    float selectionDepthBias = kSelectionCoreBias;
     float edgeDepthBias = 1.0f;
 
     // Vertical exaggeration. Applied to Z about `exaggerationDatum` as the
@@ -135,7 +137,15 @@ struct SceneOptions {
     double chordTolerance = 0.01;
 
     katana::render::Rgba defaultColor = katana::render::rgba(220, 220, 220);
-    katana::render::Rgba selectionColor = katana::render::rgba(255, 190, 60);
+    // The one selection colour (selection_style.hpp). It was (255, 190, 60),
+    // beside the BOUNDARY layer's (255, 213, 79) and the top of the elevation
+    // ramp, and apart from the plan view's.
+    katana::render::Rgba selectionColor = kSelectionColor;
+    // Whether the selection overlay draws a selected entity on a layer the
+    // view hides (`layers`) and the document shows, as a ghost: one faint line
+    // (selection_style.hpp). Off unless the view asks - its own switch,
+    // ViewState::selectionGhosts.
+    bool selectionGhosts = false;
     katana::render::Rgba gridColor = katana::render::rgba(70, 72, 82);
     katana::render::Rgba gridMajorColor = katana::render::rgba(92, 95, 108);
     // What the grid fades into at its rim: the view's background.
@@ -193,6 +203,13 @@ struct SceneLayers {
     katana::render::DrawList terrain;   // surfaces and meshes
     katana::render::DrawList edges;     // surface edges, faded per frame (fadeEdges)
     katana::render::DrawList entities;  // the drawing
+    // The selection's dark casing (selection_style.hpp), a list of its own
+    // drawn before `selection` and writing no depth, so the core drawn after
+    // it always covers it. In the one list, the GPU - which pulls a mark
+    // nearer by its width and reads no draw-list bias - drew the wider casing
+    // over the core, and a selection was a dark line
+    // (GpuLayers.ASelectionCoreDrawnAfterACasingThatWritesNoDepthKeepsItsColour).
+    katana::render::DrawList selectionCasing;
     katana::render::DrawList selection; // the selected entities, over the drawing
 
     // Per surface whose edges fade: its vertices in `edges`, and the typical
@@ -217,9 +234,11 @@ struct SceneLayers {
     // terrainDatum when a surface or mesh decided it (buildTerrain).
     double datum = 0.0;
     bool terrainDatum = false;
-    // Every vertex of terrain, edges, entities and selection: what a view
-    // frames and fits its depth range to. The grid is left out on purpose -
-    // it is sized from this.
+    // Every vertex of terrain, edges and entities (and so of the selection's
+    // core, which draws entities again): what a view frames. Its depth range
+    // is fitted to this, the grid and the selection, whose ghosts lie outside
+    // the drawn entities. The grid is left out on purpose - it is sized from
+    // this.
     katana::math::AABB bounds;
     // The part of `bounds` buildTerrain found (terrain and edges), kept so a
     // rebuild of the drawing alone need not walk the terrain again: on a
@@ -276,7 +295,12 @@ class SceneBuilder {
                     katana::render::DrawList& out);
 
   private:
-    enum class Selected { AsDrawn, Only, Styled };
+    // Which entities an emit draws, and how: every one as drawn; the selected
+    // ones drawn in the view, as the overlay's core (selection_style.hpp);
+    // every one, the selected in the selection colour (the one-list build);
+    // the selected ones the view alone hides, as ghosts. Only and Ghosts walk
+    // the selection's ids rather than the drawing.
+    enum class Selected { AsDrawn, Only, Styled, Ghosts };
     void emitEntities(const Document& document, const std::vector<SceneSurface>& surfaces,
                       const SceneOptions& options, Selected which, double datumHint,
                       bool datumKnown, katana::render::DrawList& out, double* lowestHeight);
@@ -293,9 +317,9 @@ class SceneBuilder {
 };
 
 // One frame of `layers` as the 3D view draws it: the depth range fitted to
-// the layers and the grid, the edges faded for `camera` (fadeEdges), then one
-// pass per layer in declaration order into one depth buffer, each with its
-// own depth rule:
+// the layers, the grid and the selection (whose ghosts may lie outside the
+// rest), the edges faded for `camera` (fadeEdges), then one pass per layer in
+// declaration order into one depth buffer, each with its own depth rule:
 //
 //   grid       a backdrop, writing no depth, so the model always covers it.
 //              It stands on the datum, exactly in the plane of a surface
@@ -310,6 +334,9 @@ class SceneBuilder {
 //              footprint between their biases at a low angle, so the edge
 //              drawn first broke every draped line it crossed.
 //   entities   written.
+//   selectionCasing
+//              tested but not written, so the core drawn next covers it
+//              wherever the two overlap, whatever either's pull.
 //   selection  written.
 //
 // `options.clear` is honoured by the first pass only. Stops at, and returns,

@@ -275,10 +275,15 @@ class ViewWorkspace final : public QMainWindow {
     // Repaints every view without rebuilding anything. A floating dock is a
     // window of its own, so update() on this widget no longer reaches it.
     void repaintViews();
-    // Repaints one view after its own hidden layers or references changed:
-    // not a document change, so no listener hears it. Also what keeps the
-    // view's Layers button saying whether the view hides anything.
-    void viewLayersChanged(katana::cad::ViewId id);
+    // Repaints one view after its own hidden layers or references, or its
+    // ghosts of the selection, changed: not a document change, so no
+    // listener hears it. Also what keeps the view's Layers button saying
+    // whether the view hides anything.
+    void viewSettingsChanged(katana::cad::ViewId id);
+    // What the Layers popup's "Show the selection on hidden layers" box does:
+    // VIEWS SET <id> ghosts=on|off, through the command runner, so the change
+    // is logged as a typed line is. The box is then set from the view.
+    void setSelectionGhosts(katana::cad::ViewId id, bool on);
     // Drops per-view hidden layers that name no layer any more (after a delete
     // or a rename), in every view. See LayerOverrides::pruneMissing.
     void pruneViewLayers();

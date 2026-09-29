@@ -659,6 +659,34 @@ TEST(ViewLayerRule, SnappingHonoursTheViewTheCursorIsIn)
     }
 }
 
+TEST(ViewLayerRule, AGhostIsNeitherPickedNorSnappedTo)
+{
+    // Selected, the tin line is drawn in the plan view as a ghost
+    // (cad/selection_style.hpp) - drawn, but still on a layer that view
+    // hides: a click or a snap there must not reach what the view hides, or
+    // Delete would erase something the user cannot see.
+    TwoViews views;
+    views.document.selection().add(views.tin);
+    const auto& model = views.document.model();
+    SelectionFilter inPlan;
+    inPlan.view = &views.plan;
+    SnapRequest request;
+    request.cursor = Point2(10.0, 0.0);
+    request.aperture = 1.0;
+    request.modes = static_cast<katana::cad::SnapModes>(SnapMode::Endpoint);
+    request.view = &views.plan;
+    const Box2 around(Point2(-1.0, -1.0), Point2(11.0, 1.0));
+    for (const auto* index : {static_cast<const katana::geometry::SpatialIndex*>(nullptr),
+                              &views.document.spatialIndex()}) {
+        EXPECT_FALSE(
+            katana::cad::pickEntity(model, Point2(5.0, 0.0), 1.0, inPlan, index).has_value());
+        EXPECT_FALSE(katana::cad::snap(model, request, index).has_value());
+        EXPECT_TRUE(
+            katana::cad::pickInBox(model, around, BoxSelectionMode::Crossing, inPlan, index)
+                .empty());
+    }
+}
+
 TEST(ViewLayerRule, AHiddenLineIsNotHalfOfAnIntersectionSnap)
 {
     // An intersection needs two drawn curves. A vertical survey line crosses

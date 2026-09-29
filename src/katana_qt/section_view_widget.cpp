@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include <QMouseEvent>
 #include <QPainter>
 #include <QResizeEvent>
 #include <QWheelEvent>
 
+#include "katana/cad/selection_style.hpp"
 #include "theme.hpp"
 #include "view_focus.hpp"
 
@@ -22,6 +24,12 @@ constexpr int kTopMargin = 10;
 constexpr int kRightMargin = 12;
 
 constexpr double kZoomPerNotch = 1.15;
+
+// A selected entity's crossing: the selection colour, solid and 2 px against
+// the others' 1 px dashes, with a dot of 3.5 px radius at its level - a
+// little wider than the 1.8 px surface lines it sits on.
+constexpr double kSelectedCrossingPixels = 2.0;
+constexpr double kSelectedCrossingDot = 3.5;
 
 const QColor kBackground(24, 26, 32);
 const QColor kGrid(48, 52, 62);
@@ -58,6 +66,22 @@ SectionViewWidget::SectionViewWidget(katana::cad::ViewState& state, QWidget* par
             onActivated();
         }
     });
+}
+
+void SectionViewWidget::setDocument(katana::cad::Document* document)
+{
+    if (document == document_) {
+        return;
+    }
+    documentListener_.reset();
+    document_ = document;
+    if (document_ != nullptr) {
+        // A selection change, and a layer shown or hidden in the drawing,
+        // change which crossings are marked; the section itself is cut again
+        // only when asked (Terrain > Cut Section), so this only repaints.
+        documentListener_ = document_->addListener([this] { update(); });
+    }
+    update();
 }
 
 void SectionViewWidget::setSection(katana::cad::Section section)
@@ -302,8 +326,7 @@ void SectionViewWidget::drawCrossings(QPainter& painter) const
     if (!section.has_value() || section->crossings.empty()) {
         return;
     }
-    const QRectF plot(kLeftMargin, kTopMargin, width() - kLeftMargin - kRightMargin,
-                      height() - kTopMargin - kBottomMargin);
+    const QRectF plot = plotRect();
     painter.setClipRect(plot);
     painter.setPen(QPen(QColor(210, 90, 90), 1.0, Qt::DashLine));
 
@@ -320,10 +343,77 @@ void SectionViewWidget::drawCrossings(QPainter& painter) const
         if (x < plot.left() || x > plot.right()) {
             continue;
         }
-        painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
         ++lastDrawnCrossings_;
+        // A selected one is drawn by drawSelectedCrossings, over the surfaces.
+        if (!isSelected(crossing)) {
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+        }
     }
     painter.setClipping(false);
+}
+
+void SectionViewWidget::drawSelectedCrossings(QPainter& painter) const
+{
+    lastSelectedCrossings_ = 0;
+    lastGhostCrossings_ = 0;
+    const std::optional<katana::cad::Section>& section = state_.section;
+    if (document_ == nullptr || document_->selection().empty() || !section.has_value()) {
+        return;
+    }
+    const QRectF plot = plotRect();
+    painter.setClipRect(plot);
+    const QColor selection(katana::cad::kSelectionRed, katana::cad::kSelectionGreen,
+                           katana::cad::kSelectionBlue);
+    QColor faint = selection;
+    faint.setAlpha(katana::cad::kGhostAlpha);
+    const QPen ghostPen(faint, katana::cad::kGhostCrossingPixels, Qt::DotLine, Qt::FlatCap);
+    // Solid where every other crossing is dashed, and twice as wide, with a
+    // dot where it has a level: the one the user picked, at a glance.
+    const QPen selectedPen(selection, kSelectedCrossingPixels);
+    painter.setBrush(selection);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    for (const auto& crossing : section->crossings) {
+        if (!isSelected(crossing)) {
+            continue;
+        }
+        const double x = toScreen(crossing.station, 0.0).x();
+        if (x < plot.left() || x > plot.right()) {
+            continue;
+        }
+        if (state_.layers.hides(crossing.layer)) {
+            // A ghost where only this view hides the layer; the drawing's own
+            // switched-off layer stays off (cad/selection_style.hpp).
+            if (!state_.selectionGhosts ||
+                !document_->model().layers.effectivelyVisible(crossing.layer)) {
+                continue;
+            }
+            painter.setPen(ghostPen);
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+            ++lastGhostCrossings_;
+            continue;
+        }
+        painter.setPen(selectedPen);
+        painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+        if (crossing.elevation.has_value()) {
+            painter.drawEllipse(toScreen(crossing.station, *crossing.elevation),
+                                kSelectedCrossingDot, kSelectedCrossingDot);
+        }
+        ++lastSelectedCrossings_;
+    }
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setBrush(Qt::NoBrush);
+    painter.setClipping(false);
+}
+
+bool SectionViewWidget::isSelected(const katana::cad::SectionCrossing& crossing) const
+{
+    return document_ != nullptr && document_->selection().contains(crossing.entity);
+}
+
+QRectF SectionViewWidget::plotRect() const
+{
+    return QRectF(kLeftMargin, kTopMargin, width() - kLeftMargin - kRightMargin,
+                  height() - kTopMargin - kBottomMargin);
 }
 
 void SectionViewWidget::drawLegend(QPainter& painter) const
@@ -365,6 +455,8 @@ void SectionViewWidget::paintEvent(QPaintEvent* /*event*/)
     if (!section.has_value()) {
         lastDrawnCrossings_ = 0;
         lastHiddenCrossings_ = 0;
+        lastSelectedCrossings_ = 0;
+        lastGhostCrossings_ = 0;
         painter.setPen(theme::textMuted());
         painter.drawText(rect().adjusted(12, 12, -12, -12), Qt::AlignCenter | Qt::TextWordWrap,
                          QStringLiteral("No section yet.\nSelect a line or polyline, then "
@@ -375,6 +467,7 @@ void SectionViewWidget::paintEvent(QPaintEvent* /*event*/)
     drawGrid(painter);
     drawCrossings(painter);
     drawSurfaces(painter);
+    drawSelectedCrossings(painter);
     drawLegend(painter);
 
     if (onFrameStats) {
@@ -383,6 +476,9 @@ void SectionViewWidget::paintEvent(QPaintEvent* /*event*/)
                            .arg(section->crossings.size());
         if (lastHiddenCrossings_ > 0) {
             text += QString(", %1 hidden in this view").arg(lastHiddenCrossings_);
+        }
+        if (lastSelectedCrossings_ + lastGhostCrossings_ > 0) {
+            text += QString(", %1 selected").arg(lastSelectedCrossings_ + lastGhostCrossings_);
         }
         onFrameStats(text);
     }
