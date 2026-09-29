@@ -962,16 +962,27 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
     const Position* backsightPosition = namedBacksight ? engine.find(backsight) : nullptr;
     std::optional<double> backsightAzimuth;
     state.orientationAssumed = false;
+    state.orientationStated = false;
+    // No backsight named, one placed on top of the setup, or one nothing
+    // will place: its coordinates will never orient this setup.
+    const bool coordinatesWillNotOrient =
+        !namedBacksight || backsightPosition != nullptr || state.acceptCircleAsSet;
     if (backsightPosition != nullptr &&
         std::hypot(backsightPosition->northing - here.northing,
                    backsightPosition->easting - here.easting) > 1e-4) {
         backsightAzimuth = normalizeAngle(std::atan2(backsightPosition->easting - here.easting,
                                                      backsightPosition->northing - here.northing));
-    } else if (station.backsightAzimuth &&
-               (!namedBacksight || backsightPosition != nullptr || state.acceptCircleAsSet)) {
-        // The circle as set, taken as the grid azimuth: only where no
+    } else if (station.statedBacksightAzimuth && coordinatesWillNotOrient) {
+        // The azimuth the file states for the backsight: only where no
         // coordinates of the backsight can orient the setup (see
-        // SetupState::acceptCircleAsSet for why not sooner).
+        // SetupState::acceptCircleAsSet for why not sooner). Less the
+        // reading on the backsight below, it is the field software's own
+        // orientation correction.
+        backsightAzimuth = normalizeAngle(*station.statedBacksightAzimuth);
+        state.orientationAssumed = true;
+        state.orientationStated = true;
+    } else if (station.backsightAzimuth && coordinatesWillNotOrient) {
+        // The circle as set, taken as the grid azimuth, on the same terms.
         backsightAzimuth = normalizeAngle(*station.backsightAzimuth);
         state.orientationAssumed = true;
     }
@@ -1033,7 +1044,10 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
             for (std::size_t i = 0; i < pointing.directionRowCount; ++i) {
                 const std::size_t index = pointing.directionRows[i];
                 correct(engine, index, CorrectionKind::Orientation, *state.orientation,
-                        std::nullopt, state.orientationAssumed ? "circle as set" : std::string{});
+                        std::nullopt,
+                        state.orientationStated     ? "azimuth as the file states"
+                        : state.orientationAssumed ? "circle as set"
+                                                   : std::string{});
                 setReduced(engine, index, *pointing.azimuth);
             }
         }
@@ -1527,7 +1541,17 @@ void placeSetups(Engine& engine)
         done[s] = true;
         --remaining;
         const SetupState& state = engine.setups[s];
-        if (state.orientationAssumed) {
+        if (state.orientationAssumed && state.orientation && state.orientationStated) {
+            engine.warnSetup(
+                stations[s],
+                state.acceptCircleAsSet
+                    ? "its backsight has no position, so its directions were oriented on the "
+                      "azimuth the file states for the backsight, less the reading on it: the "
+                      "bearings are the file's, not ones computed from coordinates."
+                    : "no backsight coordinates orient it, so its directions were oriented on "
+                      "the azimuth the file states for its backsight, less the reading on it: "
+                      "the bearings are the file's, not ones computed from coordinates.");
+        } else if (state.orientationAssumed && state.orientation) {
             engine.warnSetup(
                 stations[s],
                 state.acceptCircleAsSet
@@ -1550,7 +1574,7 @@ void placeSetups(Engine& engine)
         orientAndRadiate(engine, s);
         if (waitsForBacksight(s)) {
             waitingFor[stations[s].backsightPointId].push_back(s);
-            if (stations[s].backsightAzimuth) {
+            if (stations[s].backsightAzimuth || stations[s].statedBacksightAzimuth) {
                 circleCandidates.push(s);
             }
             return;
@@ -1617,7 +1641,8 @@ void placeSetups(Engine& engine)
             continue;
         }
 
-        // 2. The circle as set, for the first setup still waiting that has one.
+        // 2. The circle as set - or the azimuth the file states for the backsight -
+        // for the first setup still waiting that has one.
         while (!circleCandidates.empty() && done[circleCandidates.top()]) {
             circleCandidates.pop();
         }

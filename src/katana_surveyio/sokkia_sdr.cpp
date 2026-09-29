@@ -1,21 +1,28 @@
 // Sokkia SDR (.sdr): the SDR electronic field book's Comms output - a job as
 // fixed-width ASCII records, in either of the two layouts the field book
-// writes: SDR33 (14-character point names) and SDR2x (4-digit point numbers).
+// writes: SDR33 (point names in a 16-character field; the field book lets a
+// name be 14 characters, [SDR] chapter 2) and SDR2x (4-digit point numbers).
 //
 // Specifications this reader implements:
 //   [SDR]   Sokkia Technology, "Interfacing with the SOKKIA SDR Electronic
-//           Field Book", software version 04-04.xx, October 1999. Chapter 3:
-//           the transmission and the record structure; 3.1-3.3 the field
-//           types (a field of blanks is null, "not measured"); 3.3.2 the
-//           13DU distance-unit note; 3.4 the derivation codes; 3.5 the
-//           option values; 3.6.1 and 3.6.2 the SDR2x and SDR33 record
-//           layouts. Chapter 5, "General notes on SDR files".
-//   [SETX]  Sokkia, "SDR Software Reference Manual (SETX)": 8.2 (the
-//           back-bearing record "orients subsequent observations until
-//           another back-bearing record is stored"), chapter 28 "SDR
-//           Database" (what each record is) and chapter 29 "Observational
-//           Calculations" (29.2.3 the faces, 29.2.6 the orientation
-//           correction A = H + BKB azimuth - BKB h.obs).
+//           Field Book", software version 04-04.xx, October 1999. Chapter 2:
+//           the views an observation is stored and sent in, and printed
+//           example jobs; chapter 3: the transmission and the record
+//           structure; 3.1-3.3 the field types (a field of blanks is null,
+//           "not measured"); 3.3.2 the 13DU distance-unit note; 3.4 the
+//           derivation codes; 3.5 the option values; 3.6.1 and 3.6.2 the
+//           SDR2x and SDR33 record layouts. Chapter 5, "General notes on SDR
+//           files".
+//   [SETX]  Sokkia, "SDR Software Reference Manual (SETX)": 3.5.6 (the
+//           units: quadrant bearings are degrees underneath, and the
+//           coordinate setting is "the order in which they are displayed"),
+//           chapter 5 (the OBS, MC, RED and POS views), 8.2 (the back-bearing
+//           record "orients subsequent observations until another
+//           back-bearing record is stored"), 8.2.1 (a skipped backsight),
+//           chapter 28 "SDR Database" (what each record is) and chapter 29
+//           "Observational Calculations" (29.1 the corrections between the
+//           views, 29.2.3 the faces, 29.2.6 the orientation correction A = H
+//           + BKB azimuth - BKB h.obs).
 //   [L5]    Sokkia, "SDR Level 5 Reference Manual" (750-1-0073 rev 1),
 //           appendix A.1 (the atmospheric correction is set "either on the
 //           instrument or via SDR pressure and temperature entries at the
@@ -25,27 +32,39 @@
 //   [TA]    Trimble, "SDR33 Observations.xsl" (2022), a published writer of
 //           the format: its header leaves out the serial number (42
 //           characters), it writes 3 in the distance-unit option for US
-//           survey feet and in the coordinate-order option for east first,
-//           its time stamp note is "Time Date MM/DD/YYYY Time HH:MM:SS",
-//           and its slope distances carry the prism constant and no
-//           atmospheric correction.
+//           survey feet and in the coordinate-order option for "Y-X-Z", its
+//           time stamp note is "Time Date MM/DD/YYYY Time HH:MM:SS", its
+//           slope distances carry the prism constant and no atmospheric
+//           correction, and it puts the instrument's serial number in the
+//           EDM description field. Its notes give the angle-unit option 4 as
+//           "Quadrant bearings (stored as degrees ...)", a value it never
+//           writes.
 //   [NIKON] Nikon, "Total Station DTM-322 Instruction Manual", pages
-//           169-172, the SDR2x and SDR33 columns side by side: 4 in the
-//           angle-unit option for mils, and the coordinate-order option
-//           named as such ("1 NEZ, 2 ENZ").
+//           169-172, the SDR2x and SDR33 columns side by side, and the same
+//           tables in Spectra Precision's "Focus 6" user guide, pages
+//           183-186: a header version written with no blank ("SDR33V04-01",
+//           "SDR20V03-05"), 4 in the angle-unit option for mils, the
+//           coordinate-order option named as such ("1 NEZ, 2 ENZ"), a
+//           refraction constant of 0.132 for option 1, and 09MC as the only
+//           observation record.
 //
 // What those say, and this reader relies on:
-//   * Bytes 1-2 are the record type, 3-4 the derivation code. The SDR33 and
-//     SDR2x layouts list the same fields in the same order: a point id is 16
-//     characters or 4, a real 16 or 10, and every other field is the same
-//     width in both. The header's version ("SDR33 ...", "SDR20 ...") says
-//     which layout the rest of the file is in ([SDR] 3.2.5 and chapter 5).
+//   * Bytes 1-2 are the record type, 3-4 the derivation code. The SDR2x
+//     layout is the SDR33 one with a point id of 4 characters rather than
+//     16 and a real of 10 rather than 16, less some fields - its JOB has no
+//     option flags, its SET no set number or marks - and a few records
+//     (GPS and projection ones, none imported here) with 16-character reals.
+//     The header's version ("SDR33 ...", "SDR20 ...") says which layout the
+//     rest of the file is in ([SDR] 3.2.5 and chapter 5).
 //   * The header's options are the units of everything after it: angles in
 //     degrees, gons or mils (decimal - [SDR] 3.3.1 gives angles 8 decimal
 //     places, and 6400 mils to the circle), distances in metres or feet,
 //     pressure in mmHg, inHg or mbar, temperature in Celsius or Fahrenheit.
 //     13DU names the distance unit again, and can narrow feet to US survey
-//     feet ([SDR] 3.3.2). Any unit the format does not define is refused.
+//     feet ([SDR] 3.3.2). An angle or distance unit the format does not
+//     define is refused, since every number after the header depends on it
+//     - all but the angle option 4, below. An undefined pressure or
+//     temperature unit costs only those values, and is warned about.
 //   * 01 is the instrument, 02 a setup (point, coordinates, instrument
 //     height), 03 the target height for what follows, 04 the collimation
 //     corrections, 05 the pressure and temperature, 06 the job's scale
@@ -54,8 +73,7 @@
 //     reading), 10 the job, 11 a reduced observation, 12 a set, 13 a note.
 //   * 09 F1 and F2 are the two faces; MD, a mean of several distances, is
 //     on the face its vertical reading says ([SETX] 29.2.3: 0 to 180
-//     degrees is face 1, 180 to 360 face 2). MC is a CORRECTED observation
-//     - oriented, reduced for the heights - derived from the raw ones.
+//     degrees is face 1, 180 to 360 face 2).
 //   * The vertical reading is a zenith angle or one "measured upwards from
 //     horizontal", as the latest instrument record says ([SDR] 3.5); the
 //     second is taken to its zenith equivalent, 90 degrees less it
@@ -69,29 +87,47 @@
 //     one. A deleted record is not imported, is counted as skipped with a
 //     warning naming it, and changes nothing: a deleted 03 sets no target
 //     height, a deleted 02 begins no setup. "DDDD" is read the same way.
-//   * 07's AZIMUTH is the setup's backsightAzimuth, and its horizontal
-//     observation is kept in the setup's metadata, one per round. The
-//     reduction takes backsightAzimuth as the backsight's azimuth when no
-//     coordinates give one and orients the setup by it less the mean of the
-//     setup's own readings on the backsight; [SETX] 29.2.6 orients an
-//     observation by the 07's azimuth less its horizontal observation - the
-//     same correction, since that observation is the circle reading on the
-//     backsight. Taking the horizontal observation as backsightAzimuth would
-//     turn the correction to nothing: the ten seconds of [SDR] chapter 2's
-//     traverse (azimuth 269 59 50, circle 270 00 00) and the 14 degrees of
-//     its chapter 4 sample (azimuth 14, circle 0) would be lost without a
-//     word. Where the circle was set to the azimuth - every round of the
-//     files this reader was written against - the two agree.
+//   * A 07 gives two numbers, and the model has a field for each: its
+//     AZIMUTH is the setup's statedBacksightAzimuth and its horizontal
+//     observation - the circle reading on the backsight - its
+//     backsightAzimuth, the model's circle. Where the backsight has no
+//     coordinates the reduction then orients the setup on the azimuth less
+//     the setup's reading on the backsight, or with no reading less the
+//     07's circle reading: [SETX] 29.2.6's A = H + BKB azimuth - BKB h.obs.
+//     One field for both would drop the difference - the ten seconds of
+//     [SDR] chapter 2's traverse (azimuth 269 59 50, circle 270 00 00), the
+//     14 degrees of its chapter 4 sample (azimuth 14, circle 0).
 //   * One setup per 02, with every 07 after it that names the same
 //     backsight, the same azimuth and a circle reading within one minute of
-//     arc of the first as another ROUND of that setup: rounds on one
-//     orientation are what the reduction means together, face by face
-//     ([SETX] 8.2: a 07 orients what follows until the next). A 07 that
-//     names another backsight or azimuth, or a circle moved further, begins
-//     a new setup on the same point, as the TDS RW5 reader does for a
-//     repeated backsight. The minute: the face-mean circle readings on one
-//     backsight across six rounds spread by 6" at most in the files met,
-//     while a circle moved between rounds on purpose moves by degrees.
+//     arc of the first as another ROUND of that setup. [SETX] 8.2 has a
+//     back-bearing record orient what follows until the next, so rounds on
+//     one circle setting share one orientation, and the reduction means
+//     them together, face pair by face pair. A 07 that names another
+//     backsight or azimuth, or a circle moved further, begins a new setup on
+//     the same point, as the TDS RW5 reader does for a repeated backsight.
+//     The minute: the face-mean circle readings on one backsight across six
+//     rounds spread by 6" at most in the files met, while a circle moved
+//     between rounds on purpose moves by degrees. Merging is exact when
+//     every round observes the same targets (every setup of the files met
+//     does); a target missed by a round is oriented on the mean of all of
+//     them, off by at most half their spread.
+//   * Sokkia's Set Collection writes a set's back-bearing (07 SC) AFTER the
+//     set's observations ([SDR] chapter 2's V04-01 example: "BKB SC ... H.obs
+//     0-00'15"", the mean of the set's face 1 and face 2 readings on the
+//     backsight). So a 07 read after a 12 and the set's observations, with
+//     no 07 between, orients the set it closes: when it begins a new setup,
+//     the set's observations go with it.
+//   * A setup with no 07 is oriented by a keyed azimuth: an 11 with an
+//     azimuth and no distance from the setup's point ([SDR] chapter 2's
+//     "RED KI 0100-0101 Azimuth 23-56'15" H.dist <Null> V.Dist <Null> Code
+//     BS AZ"), the first to a point the setup observes. That chapter's
+//     OBS-view example has no back-bearing record, and its printed
+//     positions follow A = H + the keyed azimuth - the reading on that
+//     point. A setup with neither takes its readings as azimuths, as the
+//     field book does when the backsight is skipped ([SETX] 8.2.1:
+//     "Horizontal angles stored are treated as azimuths with no orientation
+//     correction applied"): its backsightAzimuth, with no backsight named,
+//     is the model's circle set to read azimuths, and the reduction says so.
 //   * The atmospheric correction's state is Unknown whatever the job says.
 //     [L5] has the field book apply it to each distance as it is accepted
 //     when the job turns it on (and the instrument apply it when the job
@@ -103,52 +139,91 @@
 //     distance and writes 0 in the instrument record. The instrument
 //     record's value (mm, [SDR] 3.3.4) is the constant.
 //   * Raw distances carry no scale factor and no curvature and refraction:
-//     [SETX] 29 applies those between an observation and its corrected
+//     [SETX] 29.1 applies those between an observation and its corrected
 //     (MC) and reduced (RED) views.
-//   * Option 45 is the order of the coordinates in 02 and 08: 1 north
-//     first, 2 east first ([NIKON] "coordinate order"; [TA] writes east
-//     first for 2, and for its own 3, "Y-X-Z"). [SDR] calls the fields
-//     "Northing" and "Easting" and the option a "prompt" order; its printed
-//     report of a file set to E-N-Elev lists East first. A file that states
-//     coordinates under any other option is refused.
+//   * Option 45 is read as the order of the coordinates in 02 and 08: 1
+//     north first, 2 east first, and [TA]'s 3 ("Y-X-Z", east first). The
+//     writers disagree. [TA] writes the easting first under 2 and 3.
+//     [SDR] 3.6.2 names 21-36 the northing and 37-52 the easting and calls
+//     option 45 the "Coord prompt option", [SETX] 3.5.6 calls the setting
+//     the order coordinates are displayed in, and [NIKON] names the option
+//     the coordinate order while its tables name the columns as [SDR] does.
+//     The one writer whose output can be read in full, [TA], puts the
+//     easting first, so that is the reading, and because a Sokkia field
+//     book set to display E-N-Elev may still write the northing first, the
+//     first record that states coordinates under 2 or 3 says so in a
+//     warning naming both readings. A file that states coordinates under
+//     any other option is refused.
+//   * The angle-unit option 4, which [SDR] does not define, is mils in a
+//     header written as [NIKON] writes its own (no blank between "SDR33" or
+//     "SDR20" and the version), whose manuals define 4 so; in any other it
+//     is degrees - [TA]'s quadrant bearings, which [SETX] 3.5.6 says are
+//     degrees underneath. Either way it is warned about, naming the other
+//     reading. A header in [NIKON]'s form also takes the refraction
+//     constant option 1 as [NIKON]'s 0.132 rather than [SDR] 3.5's 0.14.
 //   * Coordinates keyed in - a 02 or 08 whose derivation code is KI - are
 //     Entered; an 08 TP (a shot stored as a position) FieldObserved; an 08
 //     AJ, TV or RS (the traverse adjustment, the traverse, the resection)
 //     Calculated; any other Unknown. The FIRST coordinates a file gives a
-//     point are kept, as the shared builder keeps them, although the field
-//     book's own rule is that the latest win ([SDR] 2.3): the reduction
-//     recomputes observed points itself, and control is stated first.
-//   * 11 with an azimuth and no distance (a keyed orientation, [SDR] 2.4's
-//     "RED KI ... Azimuth ... H.dist <Null> V.Dist <Null> Code BS AZ") is
-//     kept in the setup's metadata. An 11 with distances, and a 09 MC, are
-//     not imported: both are derived views of observations, and read beside
-//     the raw ones they would count them twice.
-//   * A 12 SET whose bad marker is 2 ("Bad set", [SDR] 3.5) is not used
-//     "for further averaging" ([SDR] chapter 2): its observations, up to
-//     the next set or setup, are skipped with a warning.
+//     point are kept, the shared builder's rule, although the field book's
+//     own is that the latest win ([SDR] 2.3): control is stated before it
+//     is observed, and a raw observation is reduced again here, so a later
+//     position is a check, which the builder warns about and keeps in the
+//     point's metadata. A file whose only later coordinates are an
+//     adjustment's (08 AJ) keeps the unadjusted ones, with that warning.
+//   * A 09 MC and an 11 with distances are not imported. Each is the field
+//     software's reduction of a raw observation - MC oriented and reduced
+//     for the heights, the prism constant, the weather, and curvature and
+//     refraction, RED further for the scale factor and sea level ([SETX]
+//     chapter 5 and 29.1) - so beside the raw observations of its setup it
+//     would count them twice. On their own - a field book set to send the
+//     MC or RED view ([SDR] 2.1), an SDR2x set collection from V04-02 on,
+//     which stores only MC records ([SDR] chapter 2), or a [NIKON]
+//     instrument, whose only observation record is 09MC - the writers
+//     disagree about what the numbers are: Sokkia's MC is a mark-to-mark
+//     vector already oriented and corrected, [TA]'s the inverse of the
+//     computed grid coordinates, [NIKON]'s "slope distance, vertical angle,
+//     horizontal angle" with target heights in 03 records beside them. So
+//     they are skipped with the reason, and a setup that had nothing else
+//     says so in what the file did not carry.
+//   * A 12 SET whose bad marker is 2 ("Bad set", [SDR] 3.5) is not used "for
+//     further averaging" ([SDR] chapter 2): its raw observations are
+//     skipped with a warning - as many as the record's count ([SDR] 3.6.2
+//     "Count of observations"; chapter 2's example counts 4 for its four 09
+//     records), or up to the next set or setup where it states none.
 //   * A 13 note is kept in the notes of the setup it falls in (the
 //     project's before the first); a 13TS time stamp also dates the setup
-//     it is the first of. Its text is read as [TA]'s "Time Date MM/DD/YYYY
+//     it is the first of - a time during the setup, which a writer may
+//     stamp at any round. Its text is read as [TA]'s "Time Date MM/DD/YYYY
 //     Time HH:MM:SS" or as the field book's "DD-Mon-YY HH:MM" ([SDR]
 //     chapters 2 and 4) or "Mon-DD-YY HH:MM" (its V04-04.30 example), a
 //     two-digit year by the POSIX strptime %y rule (69-99 are 1969-1999,
-//     00-68 2000-2068).
+//     00-68 2000-2068), and a day that is not in its month's Gregorian
+//     calendar is not a date.
 //   * Blank lines are not records and are passed over; the record numbers
-//     in warnings are line numbers, blank lines counted.
+//     in warnings are line numbers, blank lines counted. So is a line of
+//     DOS end-of-file marks (0x1A), which a file copied through MS-DOS
+//     keeps. An STX that opens a transmission ([SDR] chapter 3) is framing
+//     whether or not the writer ended its line.
 //   * Point ids are trimmed at both ends: [SDR] 3.2 pads alpha fields on the
-//     right, and writers are met that pad them on the left.
+//     right, and writers are met that pad them on the left. An id that
+//     holds a control byte is line noise, not a name - blanked, two
+//     different ids would become one - so its record is skipped, naming the
+//     byte.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <initializer_list>
+#include <iterator>
 #include <map>
 #include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "katana/core/text.hpp"
@@ -195,6 +270,13 @@ constexpr double kHectopascalsPerInchOfMercury = 25.4 * kHectopascalsPerMillimet
 // than this were not observed on one orientation (see the top of this file).
 constexpr double kSameCircle = kPi / 10800.0; // one minute of arc
 
+// The refraction constants of the job record's option: [SDR] 3.5 ("1 0.14,
+// 2 0.20") and, for a header in [NIKON]'s form, [NIKON] page 172 ("0.132 or
+// 0.200").
+constexpr double kRefractionOption1 = 0.14;
+constexpr double kNikonRefractionOption1 = 0.132;
+constexpr double kRefractionOption2 = 0.20;
+
 enum class Variant { Sdr33, Sdr2x };
 enum class AngleUnit { Degrees, Gons, Mils };
 enum class PressureUnit { Unknown, MillimetresOfMercury, InchesOfMercury, Millibars };
@@ -210,6 +292,12 @@ bool isDigit(char c)
 bool isCodeChar(char c)
 {
     return (c >= 'A' && c <= 'Z') || isDigit(c) || c == ' ';
+}
+
+bool isControl(char c)
+{
+    const auto byte = static_cast<unsigned char>(c);
+    return byte < 0x20 || byte == 0x7F;
 }
 
 // Two digits of record type and two characters of derivation code ([SDR]
@@ -229,6 +317,14 @@ std::string_view withoutDeletionMarks(std::string_view line, std::size_t& marks)
         ++marks;
     }
     return line;
+}
+
+// `line` without the STX ([SDR] chapter 3) a transmission opens with: on a
+// line of its own, or glued to the first record by a writer that left out
+// the line end after it.
+std::string_view withoutStx(std::string_view line)
+{
+    return line.starts_with('\x02') ? line.substr(1) : line;
 }
 
 // What each record type is, in [SDR] 3.6.2's words, for the warnings that
@@ -315,6 +411,38 @@ std::string recordLabel(std::string_view record)
            (name.empty() ? std::string{} : " (" + std::string(name) + ")");
 }
 
+// `text` as a warning quotes it: each control byte written "\xNN", since a
+// byte a person cannot see must not become a blank they cannot tell from one.
+std::string shown(std::string_view text)
+{
+    static constexpr std::string_view kHex = "0123456789ABCDEF";
+    std::string out;
+    for (const char c : text) {
+        if (isControl(c)) {
+            const auto byte = static_cast<unsigned char>(c);
+            out += "\\x";
+            out += kHex[byte >> 4];
+            out += kHex[byte & 0x0F];
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+// A text field as something to keep: control bytes blanked, THEN trimmed, so
+// a field of nothing but line noise is empty rather than a blank.
+std::string cleaned(std::string_view field)
+{
+    std::string text(field);
+    for (char& c : text) {
+        if (isControl(c)) {
+            c = ' ';
+        }
+    }
+    return std::string(trimmed(text));
+}
+
 // `text` with every run of blanks made one: "SDR33     V04-03" is
 // "SDR33 V04-03".
 std::string collapsedBlanks(std::string_view text)
@@ -326,6 +454,14 @@ std::string collapsedBlanks(std::string_view text)
         }
     }
     return collapsed;
+}
+
+// A header record's version (columns 5-20), its runs of blanks made one - the
+// one reading of it, for the metadata and the provenance alike. Empty for a
+// record too short to have one.
+std::string versionOf(std::string_view header)
+{
+    return header.size() > 4 ? collapsedBlanks(cleaned(header.substr(4, 16))) : std::string{};
 }
 
 // The fields of one record, read left to right from its fifth character
@@ -381,19 +517,6 @@ class Fields {
     bool ascii_ = true;
     std::vector<std::size_t> starts_;
 };
-
-// A text field as something to keep: trimmed, control characters blanked.
-std::string cleaned(std::string_view field)
-{
-    std::string text(trimmed(field));
-    for (char& c : text) {
-        const auto byte = static_cast<unsigned char>(c);
-        if (byte < 0x20 || byte == 0x7F) {
-            c = ' ';
-        }
-    }
-    return text;
-}
 
 // The first word of a description, which is its field code.
 std::string_view firstWord(std::string_view description)
@@ -454,9 +577,18 @@ bool readClock(std::string_view text, survey::SurveyTimestamp& time)
     return true;
 }
 
+// A day of the Gregorian calendar: February has 29 days in a year divisible
+// by 4 but not by 100, or by 400, and 28 otherwise (ISO 8601's calendar).
 bool plausibleDate(int year, int month, int day)
 {
-    return year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= 31;
+    static constexpr std::array<int, 12> kDays = {31, 28, 31, 30, 31, 30,
+                                                  31, 31, 30, 31, 30, 31};
+    if (year <= 0 || month < 1 || month > 12 || day < 1) {
+        return false;
+    }
+    const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    const int days = month == 2 && leap ? 29 : kDays[static_cast<std::size_t>(month - 1)];
+    return day <= days;
 }
 
 // A 13TS note's date and time (see the top of this file for the forms).
@@ -538,18 +670,26 @@ struct Orientation {
     std::size_t record = 0;
 };
 
+// An azimuth keyed from the setup's point with no distance (an 11): what
+// orients a setup that has no 07.
+struct KeyedAzimuth {
+    std::string to;
+    double azimuth = 0.0; // radians
+    std::size_t record = 0;
+};
+
 class SdrReader {
   public:
     SdrReader(std::string_view fileName, survey::SourceRecord source, const ReadOptions& options)
         : builder_(fileName, std::move(source), options)
     {
-        // [SETX] 29: curvature and refraction are applied between a raw
+        // [SETX] 29.1: curvature and refraction are applied between a raw
         // observation and its corrected (MC) view, so never in an F1, F2 or
         // MD reading - whatever the job's switch, which is about that view.
         settings_.curvatureRefractionState = survey::CorrectionState::NotApplied;
     }
 
-    Result<ReadResult> read(std::string_view text, bool guessedEncoding,
+    Result<ReadResult> read(const std::vector<std::string_view>& lines, bool guessedEncoding,
                             katana::core::TextEncoding encoding);
 
   private:
@@ -574,14 +714,24 @@ class SdrReader {
     std::optional<double> number(std::string_view field, std::string_view what, std::size_t n);
     std::optional<double> angle(std::string_view field, std::string_view what, std::size_t n);
     std::optional<double> length(std::string_view field, std::string_view what, std::size_t n);
-    std::string pointIdOf(std::string_view field);
+    // True, with the record skipped and the byte named, when one of the
+    // point id fields holds a control byte.
+    bool refusedIds(std::size_t n, std::initializer_list<std::string_view> fields);
     void coordinates(std::string_view id, std::string_view first, std::string_view second,
                      std::string_view elevation, survey::CoordinateSource how, std::size_t n);
     // The settings a setup begun now starts with, and the current setup's
     // when it has no observation yet (an 01, 05 or 06 read between its 02
     // and its first shot belongs to it).
     void settingsChanged(std::size_t n, std::string_view what);
+    // What a setup's records have not said about its orientation, said
+    // before the next one begins: a keyed azimuth, or none at all.
     void finishSetup();
+    void resetSetup();
+    // A setup on the current one's point, with its instrument height and the
+    // settings in force now, taking the current one's observations from
+    // `first` on, their pointings numbered anew: they were read on the
+    // orientation the record at `n` gives.
+    survey::SurveyStation& splitSetup(std::size_t first, std::size_t n);
     void refuse(std::size_t n, std::string message);
 
     RawProjectBuilder builder_;
@@ -592,6 +742,8 @@ class SdrReader {
     std::size_t headerRecord_ = 0;
     std::string headerOptions_;
     Variant variant_ = Variant::Sdr33;
+    // Written as [NIKON] writes its header: no blank before the version.
+    bool nikonForm_ = false;
     std::size_t pointIdWidth_ = 16;
     std::size_t realWidth_ = 16;
     AngleUnit angleUnit_ = AngleUnit::Degrees;
@@ -601,6 +753,7 @@ class SdrReader {
     TemperatureUnit temperatureUnit_ = TemperatureUnit::Unknown;
     CoordinateOrder order_ = CoordinateOrder::Unknown;
     char orderOption_ = ' ';
+    bool eastFirstWarned_ = false;
 
     // The job.
     bool jobRead_ = false;
@@ -616,18 +769,30 @@ class SdrReader {
     bool targetHeightSeen_ = false;
     bool targetHeightWarned_ = false;
     bool badSet_ = false;
+    std::optional<std::size_t> badSetRemaining_; // the bad set's raw observations still to come
     std::string badSetName_;
     std::size_t badSetRecord_ = 0;
 
     // The current setup.
     Orientation orientation_{};
+    std::vector<KeyedAzimuth> keyed_;
+    // Its raw (F1, F2, MD) observation records read.
     std::size_t setupObservations_ = 0;
-    // An 01, 05 or 06 read after the current setup's first observation:
-    // it belongs to the next setup unless another shot of this one follows.
-    std::string pendingChange_;
-    std::size_t pendingChangeRecord_ = 0;
+    // Where its latest set began among its observations, and whether a 07
+    // has been read since: a 07 after a set's shots closes that set.
+    std::optional<std::size_t> setStart_;
+    std::size_t setStartRecord_ = 0;
+    bool backsightSinceSet_ = false;
+    // Each 01, 05 or 06 read after the setup's first observation: it belongs
+    // to the next setup unless another shot of this one follows.
+    std::vector<std::pair<std::string, std::size_t>> pendingChanges_;
     bool weatherSeen_ = false;
     bool nonAscii_ = false;
+
+    // Derived views skipped where their setup had no raw observation: the
+    // shots are lost, which the file's summary says.
+    std::size_t lostCorrected_ = 0;
+    std::size_t lostReduced_ = 0;
 };
 
 void SdrReader::refuse(std::size_t n, std::string message)
@@ -674,7 +839,7 @@ std::optional<double> SdrReader::number(std::string_view field, std::string_view
     const std::optional<double> value =
         isSdrReal(text) ? parseReal(text) : std::optional<double>{};
     if (!value) {
-        builder_.warn(n, std::string(what) + " '" + cleaned(field).substr(0, 40) +
+        builder_.warn(n, std::string(what) + " '" + shown(text.substr(0, 40)) +
                              "' is not a number; it is read as not measured");
     }
     return value;
@@ -708,9 +873,25 @@ std::optional<double> SdrReader::length(std::string_view field, std::string_view
     return katana::math::toMetres(*value, metres_);
 }
 
-std::string SdrReader::pointIdOf(std::string_view field)
+// Trimmed at both ends ([SDR] 3.2 pads alpha fields on the right, and
+// writers are met that pad them on the left).
+std::string pointIdOf(std::string_view field)
 {
-    return cleaned(field);
+    return std::string(trimmed(field));
+}
+
+bool SdrReader::refusedIds(std::size_t n, std::initializer_list<std::string_view> fields)
+{
+    for (const std::string_view field : fields) {
+        for (const char c : field) {
+            if (isControl(c)) {
+                builder_.skip(n, "a point id holds the control byte " + shown(std::string(1, c)) +
+                                     ", which no point name can; the record is not imported");
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 void SdrReader::coordinates(std::string_view id, std::string_view first, std::string_view second,
@@ -724,12 +905,23 @@ void SdrReader::coordinates(std::string_view id, std::string_view first, std::st
     }
     if (order_ == CoordinateOrder::Unknown) {
         refuse(n, "the record states coordinates, and the header's coordinate order option is '" +
-                      std::string(1, orderOption_) +
+                      shown(std::string(1, orderOption_)) +
                       "'; the format defines 1 (north first) and 2 (east first), and Katana "
                       "will not guess which ordinate is the northing");
         return;
     }
     const bool northFirst = order_ == CoordinateOrder::NorthFirst;
+    if (!northFirst && !eastFirstWarned_) {
+        eastFirstWarned_ = true;
+        builder_.warn(n, "the header's coordinate order option is " +
+                             std::string(1, orderOption_) +
+                             ", so the first coordinate of a record is read as the easting, as "
+                             "Trimble's published writer of the format writes it; Sokkia's "
+                             "record layout names that field the northing and its manuals call "
+                             "the option the order coordinates are displayed in, so a file from "
+                             "a Sokkia field book may hold the northing first - check a known "
+                             "point");
+    }
     const std::optional<double> a = length(first, northFirst ? "northing" : "easting", n);
     const std::optional<double> b = length(second, northFirst ? "easting" : "northing", n);
     // [SETX] 4: with the job's "Record elev" No every point has "the same
@@ -759,51 +951,164 @@ void SdrReader::settingsChanged(std::size_t n, std::string_view what)
     // Between one setup's shots and the next 02 is where the field book
     // writes the next setup's instrument and weather; only a shot of the
     // SAME setup after it says the values changed in the middle of one.
+    // Every such record is kept, so each is reported.
     if (station != nullptr) {
-        pendingChange_ = std::string(what);
-        pendingChangeRecord_ = n;
+        pendingChanges_.emplace_back(std::string(what), n);
     }
+}
+
+void SdrReader::resetSetup()
+{
+    orientation_ = Orientation{};
+    keyed_.clear();
+    setupObservations_ = 0;
+    setStart_.reset();
+    setStartRecord_ = 0;
+    backsightSinceSet_ = false;
+    pendingChanges_.clear();
 }
 
 void SdrReader::finishSetup()
 {
     survey::SurveyStation* station = builder_.currentStation();
-    if (station == nullptr || !orientation_.set) {
+    if (station == nullptr) {
         return;
     }
-    bool observed = false;
-    for (const survey::Observation& o : station->observations) {
-        if (const auto* direction = std::get_if<survey::HorizontalDirectionObservation>(&o)) {
-            observed = observed || direction->to == orientation_.backsight;
+    const auto directionTo = [&](std::string_view target) {
+        for (const survey::Observation& o : station->observations) {
+            if (const auto* direction = std::get_if<survey::HorizontalDirectionObservation>(&o)) {
+                if (target.empty() || direction->to == target) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    if (orientation_.set) {
+        if (!directionTo(orientation_.backsight)) {
+            builder_.warn(orientation_.record,
+                          "setup '" + station->setup.id + "' has no observation of its backsight '" +
+                              orientation_.backsight + "'; " +
+                              (orientation_.reading
+                                   ? std::string("the reduction orients it by the backsight "
+                                                 "record's azimuth less its circle reading on the "
+                                                 "backsight ([SETX] 29.2.6)")
+                                   : std::string("the backsight record gives no circle reading "
+                                                 "on it either, so only the backsight's "
+                                                 "coordinates can orient it")));
+        }
+        return;
+    }
+    if (!keyed_.empty()) {
+        const KeyedAzimuth* chosen = &keyed_.front();
+        for (const KeyedAzimuth& keyed : keyed_) {
+            if (directionTo(keyed.to)) {
+                chosen = &keyed;
+                break;
+            }
+        }
+        station->backsightPointId = chosen->to;
+        station->statedBacksightAzimuth = chosen->azimuth;
+        station->metadata["oriented by"] = "the azimuth to '" + chosen->to + "' keyed at record " +
+                                           std::to_string(chosen->record);
+        if (!directionTo(chosen->to)) {
+            builder_.warn(chosen->record,
+                          "setup '" + station->setup.id +
+                              "' has no backsight record, and it does not observe '" + chosen->to +
+                              "', the point of the azimuth keyed here; the reduction cannot "
+                              "orient it");
+        }
+        return;
+    }
+    if (directionTo({})) {
+        // [SETX] 8.2.1: with the backsight skipped, "Horizontal angles
+        // stored are treated as azimuths". A circle with no backsight named
+        // is, to the model, one set to read azimuths; 0 is its reading on
+        // north.
+        station->backsightAzimuth = 0.0;
+        station->metadata["oriented by"] =
+            "no backsight record: its horizontal readings are azimuths ([SETX] 8.2.1)";
+        builder_.warn(station->source.recordNumber,
+                      "setup '" + station->setup.id +
+                          "' has no backsight record and no keyed azimuth; its horizontal "
+                          "readings are taken as azimuths, as the field book takes them when the "
+                          "backsight is skipped ([SETX] 8.2.1)");
+    }
+}
+
+survey::SurveyStation& SdrReader::splitSetup(std::size_t first, std::size_t n)
+{
+    std::vector<survey::SurveyStation>& stations = builder_.project().stations;
+    const std::size_t index = stations.size() - 1;
+    std::vector<survey::Observation> moved(
+        std::make_move_iterator(stations[index].observations.begin() +
+                                static_cast<std::ptrdiff_t>(first)),
+        std::make_move_iterator(stations[index].observations.end()));
+    stations[index].observations.erase(stations[index].observations.begin() +
+                                           static_cast<std::ptrdiff_t>(first),
+                                       stations[index].observations.end());
+    const std::string point = stations[index].setup.pointId;
+    const double height = stations[index].setup.instrumentHeight;
+    const std::string previous = stations[index].setup.id;
+    std::string setMetadata;
+    if (first > 0 && setStart_ && *setStart_ == first) {
+        const std::string key = "set at record " + std::to_string(setStartRecord_);
+        if (const auto it = stations[index].metadata.find(key);
+            it != stations[index].metadata.end()) {
+            setMetadata = it->second;
+            stations[index].metadata.erase(it);
         }
     }
-    if (!observed) {
-        builder_.warn(orientation_.record,
-                      "setup '" + station->setup.id + "' has no observation of its backsight '" +
-                          orientation_.backsight +
-                          "'; the reduction orients it on the backsight record's azimuth, as "
-                          "though the circle read that on the backsight");
+    // beginStation may move `stations`: nothing above is used past here.
+    survey::SurveyStation& station = builder_.beginStation(point, height, settings_, n);
+    station.metadata["begun by"] =
+        "a backsight record re-orienting setup '" + previous + "' after its observations";
+    if (!setMetadata.empty()) {
+        station.metadata["set at record " + std::to_string(setStartRecord_)] = setMetadata;
     }
+    // One record was one pointing; its observations keep sharing one.
+    std::map<std::size_t, std::size_t> renumbered;
+    for (survey::Observation& observation : moved) {
+        std::visit(
+            [&](auto& o) {
+                if constexpr (requires { o.pointing.index; }) {
+                    if (o.pointing.index != 0) {
+                        const auto [it, added] = renumbered.try_emplace(o.pointing.index, 0);
+                        if (added) {
+                            it->second = builder_.nextPointing();
+                        }
+                        o.pointing.index = it->second;
+                    }
+                }
+            },
+            observation);
+        station.observations.push_back(std::move(observation));
+    }
+    const std::optional<std::size_t> setStart =
+        setStart_ && *setStart_ == first ? std::optional<std::size_t>(0) : std::nullopt;
+    const std::size_t setRecord = setStartRecord_;
+    const bool backsightSinceSet = backsightSinceSet_;
+    resetSetup();
+    setupObservations_ = renumbered.size();
+    setStart_ = setStart;
+    setStartRecord_ = setRecord;
+    backsightSinceSet_ = backsightSinceSet;
+    return station;
 }
 
 void SdrReader::readHeader(std::string_view line, std::size_t n)
 {
+    // White space after the options pads the record: [SDR] chapter 5 lets a
+    // writer drop trailing blanks, and one that adds them, or a tab, says
+    // nothing more.
     std::string_view text = line;
-    while (!text.empty() && text.back() == ' ') {
+    while (!text.empty() && katana::core::isAsciiSpace(text.back())) {
         text.remove_suffix(1);
     }
-    const std::string version = cleaned(text.substr(4, 16));
-    Variant variant = Variant::Sdr33;
-    if (version.starts_with("SDR33")) {
-        variant = Variant::Sdr33;
-    } else if (version.starts_with("SDR2")) {
-        variant = Variant::Sdr2x;
-    } else {
-        refuse(n, "the header names the version '" + version.substr(0, 20) +
-                      "'; Katana reads the two layouts the format's publisher documents, SDR33 "
-                      "and SDR2x ([SDR] 3.2.5: 'SDR33 V04-..' and 'SDR20 V03-05')");
-        return;
-    }
+    const std::string version = versionOf(text);
+    const bool sdr33 = version.starts_with("SDR33");
+    const bool sdr2x = !sdr33 && version.starts_with("SDR2");
+    const Variant variant = sdr33 ? Variant::Sdr33 : Variant::Sdr2x;
     // [SDR] 3.6: 46 characters, the serial number in 21-24, the date and
     // time in 25-40 and the six options in 41-46. [TA] writes no serial
     // number, so its header is 42 characters with the options in 37-42.
@@ -811,6 +1116,37 @@ void SdrReader::readHeader(std::string_view line, std::size_t n)
     // header of another length is read that way too, and said to be odd.
     const bool optionsLast =
         text.size() >= 42 && std::all_of(text.end() - 6, text.end(), isDigit);
+    if (headerRead_) {
+        // A second header: a second transmission appended, or a stray line.
+        if (!(sdr33 || sdr2x) || !optionsLast) {
+            builder_.skip(n, std::string("a header record that ") +
+                                 (version.empty() ? "names no version"
+                                                  : "is not one this reader can read") +
+                                 " follows the file's own (record " +
+                                 std::to_string(headerRecord_) +
+                                 "); the units and layout that one gives hold");
+            return;
+        }
+        // The same layout and units read on; any other would change what
+        // every number after it means.
+        if (text.substr(text.size() - 6) != headerOptions_ || variant != variant_) {
+            refuse(n, "a second header record states other units or another layout than the "
+                      "first (record " +
+                          std::to_string(headerRecord_) + ")");
+            return;
+        }
+        builder_.countRead();
+        return;
+    }
+    if (!(sdr33 || sdr2x)) {
+        refuse(n, version.empty()
+                      ? std::string("the header record names no version, so the layout of the "
+                                    "file cannot be told")
+                      : "the header names the version '" + shown(version.substr(0, 20)) +
+                            "'; Katana reads the two layouts the format's publisher documents, "
+                            "SDR33 and SDR2x ([SDR] 3.2.5: 'SDR33 V04-..' and 'SDR20 V03-05')");
+        return;
+    }
     if (!optionsLast) {
         refuse(n, "the header record does not end in its six unit and order options ([SDR] "
                   "3.6: 46 characters, the options in 41-46), so the units cannot be told");
@@ -830,22 +1166,12 @@ void SdrReader::readHeader(std::string_view line, std::size_t n)
                                  "as the options");
         }
     }
-    if (headerRead_) {
-        // A second transmission appended: the same layout and units read on;
-        // any other would change what every number after it means.
-        if (options != headerOptions_ || variant != variant_) {
-            refuse(n, "a second header record states other units or another layout than the "
-                      "first (record " +
-                          std::to_string(headerRecord_) + ")");
-            return;
-        }
-        builder_.countRead();
-        return;
-    }
     headerRead_ = true;
     headerRecord_ = n;
     headerOptions_ = options;
     variant_ = variant;
+    // [NIKON]: "SDR33V04-01", "SDR20V03-05" - the version with no blank.
+    nikonForm_ = version.size() > 5 && version[5] == 'V';
     pointIdWidth_ = variant == Variant::Sdr33 ? 16 : 4;
     realWidth_ = variant == Variant::Sdr33 ? 16 : 10;
 
@@ -860,12 +1186,32 @@ void SdrReader::readHeader(std::string_view line, std::size_t n)
         angular = survey::AngularUnit::Gons;
         break;
     case '3': // [SDR] 3.5
-    case '4': // [NIKON]
         angleUnit_ = AngleUnit::Mils;
         angular = survey::AngularUnit::Mils;
         break;
+    case '4':
+        // Not [SDR]'s; two writers define it, and the header's form tells
+        // them apart (see the top of this file).
+        if (nikonForm_) {
+            angleUnit_ = AngleUnit::Mils;
+            angular = survey::AngularUnit::Mils;
+            builder_.warn(n, "the header's angle unit option is 4, which the format's publisher "
+                             "does not define; this header is written as the Nikon and Spectra "
+                             "manuals write theirs (no blank before the version), and they give "
+                             "4 as mils, so the angles are read in mils - Trimble's writer uses 4 "
+                             "for quadrant bearings in degrees");
+        } else {
+            angleUnit_ = AngleUnit::Degrees;
+            angular = survey::AngularUnit::DecimalDegrees;
+            builder_.warn(n, "the header's angle unit option is 4, which the format's publisher "
+                             "does not define; Trimble's writer uses it for quadrant bearings, "
+                             "which are degrees underneath, so the angles are read in degrees - "
+                             "the Nikon and Spectra manuals give 4 as mils, but in a header "
+                             "written with no blank before the version, and this one has one");
+        }
+        break;
     default:
-        refuse(n, "the header's angle unit option is '" + std::string(1, options[0]) +
+        refuse(n, "the header's angle unit option is '" + shown(std::string(1, options[0])) +
                       "'; the format defines 1 degrees, 2 gons and 3 mils, and Katana will not "
                       "guess what another means");
         return;
@@ -881,7 +1227,7 @@ void SdrReader::readHeader(std::string_view line, std::size_t n)
         linearUnit_ = survey::LinearUnit::UsSurveyFeet;
         break;
     default:
-        refuse(n, "the header's distance unit option is '" + std::string(1, options[1]) +
+        refuse(n, "the header's distance unit option is '" + shown(std::string(1, options[1])) +
                       "'; the format defines 1 metres and 2 feet, and Katana will not guess "
                       "what another means");
         return;
@@ -981,10 +1327,12 @@ void SdrReader::readJob(Fields& fields, std::size_t n)
         if (!seaLevel.empty()) {
             project.metadata["job: sea level correction"] = seaLevel;
         }
-        // [SDR] 3.5: the refraction constant, 1 = 0.14, 2 = 0.20; [SETX] 4
-        // makes it available "only when C and R crn is set to Yes".
+        // [SETX] 4 makes the constant available "only when C and R crn is
+        // set to Yes".
         if (curvature == "on" && (flag(4) == '1' || flag(4) == '2')) {
-            settings_.refractionCoefficient = flag(4) == '1' ? 0.14 : 0.20;
+            settings_.refractionCoefficient =
+                flag(4) == '2' ? kRefractionOption2
+                               : (nikonForm_ ? kNikonRefractionOption1 : kRefractionOption1);
         }
     }
     builder_.countRead();
@@ -1062,6 +1410,8 @@ void SdrReader::readInstrument(Fields& fields, std::size_t n)
     if (!edmType.empty()) {
         project.metadata["instrument: EDM type option"] = edmType;
     }
+    // [TA] writes the instrument's serial number here; it is kept as the
+    // field's text, the format's EDM description.
     if (!edm.empty() && edm != settings_.model) {
         project.metadata["instrument: EDM"] = edm;
     }
@@ -1164,12 +1514,16 @@ void SdrReader::readCollimation(Fields& fields, std::size_t n)
 
 void SdrReader::readStation(Fields& fields, std::string_view derivation, std::size_t n)
 {
-    const std::string id = pointIdOf(fields.pointId());
+    const std::string_view idField = fields.pointId();
     const std::string_view first = fields.real();
     const std::string_view second = fields.real();
     const std::string_view elevation = fields.real();
     const std::optional<double> height = length(fields.real(), "instrument height", n);
     const std::string description = cleaned(fields.take(16));
+    if (refusedIds(n, {idField})) {
+        return;
+    }
+    const std::string id = pointIdOf(idField);
     if (id.empty()) {
         builder_.skip(n, "station record names no point");
         return;
@@ -1179,10 +1533,9 @@ void SdrReader::readStation(Fields& fields, std::string_view derivation, std::si
         builder_.warn(n, "the setup states no instrument height; 0 is used");
     }
     builder_.beginStation(id, height.value_or(0.0), settings_, n);
-    orientation_ = Orientation{};
-    setupObservations_ = 0;
-    pendingChange_.clear();
+    resetSetup();
     badSet_ = false;
+    badSetRemaining_.reset();
     coordinates(id, first, second, elevation,
                 derivation == "KI" ? survey::CoordinateSource::Entered
                                    : survey::CoordinateSource::Unknown,
@@ -1210,10 +1563,15 @@ void SdrReader::readTarget(Fields& fields, std::size_t n)
 
 void SdrReader::readBacksight(Fields& fields, std::size_t n)
 {
-    const std::string from = pointIdOf(fields.pointId());
-    const std::string to = pointIdOf(fields.pointId());
+    const std::string_view fromField = fields.pointId();
+    const std::string_view toField = fields.pointId();
     const std::optional<double> azimuth = angle(fields.real(), "backsight azimuth", n);
     const std::optional<double> reading = angle(fields.real(), "backsight circle reading", n);
+    if (refusedIds(n, {fromField, toField})) {
+        return;
+    }
+    const std::string from = pointIdOf(fromField);
+    const std::string to = pointIdOf(toField);
     survey::SurveyStation* station = builder_.currentStation();
     if (station == nullptr) {
         builder_.skip(n, "backsight record with no station record before it");
@@ -1233,6 +1591,11 @@ void SdrReader::readBacksight(Fields& fields, std::size_t n)
         azimuth ? std::optional<double>(wrapToCircle(*azimuth)) : std::nullopt;
     const std::optional<double> wrappedReading =
         reading ? std::optional<double>(wrapToCircle(*reading)) : std::nullopt;
+    // A 07 read after a set's observations, with no 07 since the set began,
+    // closes that set: it is what those observations were oriented on.
+    const bool closesSet =
+        setStart_ && !backsightSinceSet_ && *setStart_ < station->observations.size();
+    backsightSinceSet_ = true;
     if (orientation_.set) {
         const auto sameCircle = [&]() {
             if (!wrappedReading || !orientation_.reading) {
@@ -1254,32 +1617,32 @@ void SdrReader::readBacksight(Fields& fields, std::size_t n)
             builder_.countRead();
             return;
         }
-        if (setupObservations_ > 0) {
-            // The circle was oriented anew: what follows is read against
-            // another zero, so it is a setup of its own ([SETX] 8.2).
-            // The instrument height is the setup's: no 02 has moved it. The
-            // settings are those in force now, which an 01 or 05 between
-            // the rounds may have changed.
+        // The observations this record orients: those of the set it closes,
+        // or what follows it.
+        const std::size_t first = closesSet ? *setStart_ : station->observations.size();
+        if (first > 0) {
+            // The circle was oriented anew: those observations are read
+            // against another zero, so they are a setup of their own
+            // ([SETX] 8.2). The instrument height is the setup's: no 02 has
+            // moved it. The settings are those in force now, which an 01 or
+            // 05 between the rounds may have changed.
             finishSetup();
-            const std::string point = station->setup.pointId;
-            const double height = station->setup.instrumentHeight;
-            const std::string previous = station->setup.id;
-            station = &builder_.beginStation(point, height, settings_, n);
-            station->metadata["begun by"] = "a backsight record re-orienting setup '" + previous +
-                                            "' after its observations";
-            setupObservations_ = 0;
-            pendingChange_.clear();
+            station = &splitSetup(first, n);
         } else {
-            builder_.warn(n, "a second backsight record before any observation replaces the "
-                             "first (record " +
-                                 std::to_string(orientation_.record) + ")");
+            builder_.warn(n, std::string(closesSet ? "a backsight record closing a set"
+                                                   : "a second backsight record") +
+                                 " before any observation on the first (record " +
+                                 std::to_string(orientation_.record) + ") replaces it");
             station->metadata.erase("backsight circle readings (radians)");
         }
     }
     orientation_ = Orientation{true, to, wrappedAzimuth, wrappedReading, 1, n};
+    keyed_.clear(); // a backsight record orients the setup; a keyed azimuth no longer does
     builder_.mentionPoint(to, n);
     station->backsightPointId = to;
-    station->backsightAzimuth = wrappedAzimuth;
+    station->backsightAzimuth = wrappedReading;       // the model's circle
+    station->statedBacksightAzimuth = wrappedAzimuth; // and the azimuth, beside it
+    station->metadata.erase("oriented by");
     station->metadata["backsight rounds"] = "1";
     if (wrappedReading) {
         station->metadata["backsight circle readings (radians)"] = formatExactReal(*wrappedReading);
@@ -1289,11 +1652,15 @@ void SdrReader::readBacksight(Fields& fields, std::size_t n)
 
 void SdrReader::readPosition(Fields& fields, std::string_view derivation, std::size_t n)
 {
-    const std::string id = pointIdOf(fields.pointId());
+    const std::string_view idField = fields.pointId();
     const std::string_view first = fields.real();
     const std::string_view second = fields.real();
     const std::string_view elevation = fields.real();
     const std::string description = cleaned(fields.take(16));
+    if (refusedIds(n, {idField})) {
+        return;
+    }
+    const std::string id = pointIdOf(idField);
     if (id.empty()) {
         builder_.skip(n, "coordinate record names no point");
         return;
@@ -1319,23 +1686,40 @@ void SdrReader::readPosition(Fields& fields, std::string_view derivation, std::s
 
 void SdrReader::readObservation(Fields& fields, std::string_view derivation, std::size_t n)
 {
-    const std::string from = pointIdOf(fields.pointId());
-    const std::string to = pointIdOf(fields.pointId());
+    const std::string_view fromField = fields.pointId();
+    const std::string_view toField = fields.pointId();
     const std::string_view slopeField = fields.real();
     const std::string_view verticalField = fields.real();
     const std::string_view horizontalField = fields.real();
     const std::string description = cleaned(fields.take(16));
-    survey::SurveyStation* setup = builder_.currentStation();
     if (derivation == "MC") {
-        builder_.skip(n, "a corrected observation (MC) is derived from the raw face 1 and face 2 "
-                         "observations the reduction works from; it is not imported");
+        if (setupObservations_ > 0) {
+            builder_.skip(n, "a corrected observation (MC) is the field software's reduction of "
+                             "raw observations this setup holds - oriented, and reduced for the "
+                             "heights, the prism constant and the weather ([SETX] 29.1); it is "
+                             "not imported, since it would count them twice");
+        } else {
+            ++lostCorrected_;
+            builder_.skip(n, "a corrected observation (MC) in a setup with no raw observation is "
+                             "not imported: writers of the format put different numbers in one "
+                             "(Sokkia's field book a mark-to-mark vector already oriented and "
+                             "corrected, Trimble's writer the inverse of computed coordinates, "
+                             "the Nikon and Spectra manuals the instrument's slope distance and "
+                             "angles), so this shot is lost");
+        }
         return;
     }
     if (derivation != "F1" && derivation != "F2" && derivation != "MD") {
-        builder_.skip(n, "an observation with derivation code '" + std::string(derivation) +
+        builder_.skip(n, "an observation with derivation code '" + shown(derivation) +
                              "', which the format does not define for one");
         return;
     }
+    if (refusedIds(n, {fromField, toField})) {
+        return;
+    }
+    const std::string from = pointIdOf(fromField);
+    const std::string to = pointIdOf(toField);
+    survey::SurveyStation* setup = builder_.currentStation();
     if (setup == nullptr) {
         builder_.skip(n, "observation with no station record before it");
         return;
@@ -1354,28 +1738,16 @@ void SdrReader::readObservation(Fields& fields, std::string_view derivation, std
         builder_.skip(n, "observation in " + badSetName_ + " (record " +
                              std::to_string(badSetRecord_) +
                              "), which the field book marks bad and does not use");
+        if (badSetRemaining_ && --*badSetRemaining_ == 0) {
+            badSet_ = false;
+            badSetRemaining_.reset();
+        }
         return;
     }
     const std::optional<double> slope = length(slopeField, "slope distance", n);
     const std::optional<double> vertical = angle(verticalField, "vertical reading", n);
     const std::optional<double> horizontal = angle(horizontalField, "horizontal reading", n);
 
-    if (!pendingChange_.empty()) {
-        // One setup holds one set of settings, and the shots before this
-        // record were made under the old ones.
-        builder_.warn(pendingChangeRecord_,
-                      pendingChange_ + " changes in the middle of setup '" + setup->setup.id +
-                          "'; the setup keeps the values it began with, and these apply from "
-                          "the next setup");
-        setup->metadata[pendingChange_ + " changed at record " +
-                        std::to_string(pendingChangeRecord_)] = "not applied to this setup";
-        pendingChange_.clear();
-    }
-    if (!instrumentSeen_ && !instrumentWarned_) {
-        instrumentWarned_ = true;
-        builder_.warn(n, "no instrument record comes before the first observation; vertical "
-                         "readings are read as zenith angles, the format's first option");
-    }
     // A plain double and a flag, not a reassigned optional: GCC 16 at -O3
     // reports the optional's payload "maybe uninitialized" (a false positive
     // that -Werror turns into a build failure).
@@ -1406,6 +1778,33 @@ void SdrReader::readObservation(Fields& fields, std::string_view derivation, std
             hasZenith = true;
         }
     }
+    const bool distanceMeasured = slope && *slope > 0.0;
+    if (slope && !distanceMeasured) {
+        builder_.warn(n, "slope distance of " + formatExactReal(*slope) +
+                             " read as no distance measured");
+    }
+    if (!horizontal && !hasZenith && !distanceMeasured) {
+        // Not a shot: it changes nothing and names no point, so a skipped
+        // record leaves no target behind that nothing observed.
+        builder_.skip(n, "observation with no readable value");
+        return;
+    }
+
+    for (const auto& [what, record] : pendingChanges_) {
+        // One setup holds one set of settings, and the shots before this
+        // record were made under the old ones.
+        builder_.warn(record, what + " changes in the middle of setup '" + setup->setup.id +
+                                  "'; the setup keeps the values it began with, and these apply "
+                                  "from the next setup");
+        setup->metadata[what + " changed at record " + std::to_string(record)] =
+            "not applied to this setup";
+    }
+    pendingChanges_.clear();
+    if (!instrumentSeen_ && !instrumentWarned_) {
+        instrumentWarned_ = true;
+        builder_.warn(n, "no instrument record comes before the first observation; vertical "
+                         "readings are read as zenith angles, the format's first option");
+    }
     if (!targetHeightSeen_ && !targetHeightWarned_) {
         targetHeightWarned_ = true;
         builder_.warn(n, "no target height record comes before this observation; 0 is used "
@@ -1421,7 +1820,6 @@ void SdrReader::readObservation(Fields& fields, std::string_view derivation, std
     const survey::ObservationPrecision& precision = builder_.options().precision;
     const double hi = setup->setup.instrumentHeight;
     const survey::Pointing pointing{builder_.nextPointing(), face};
-    bool any = false;
     if (horizontal) {
         auto& observation = builder_.stationObservation<survey::HorizontalDirectionObservation>(n);
         observation.at = setup->setup.pointId;
@@ -1429,7 +1827,6 @@ void SdrReader::readObservation(Fields& fields, std::string_view derivation, std
         observation.direction = wrapToCircle(*horizontal);
         observation.sigma = precision.direction;
         observation.pointing = pointing;
-        any = true;
     }
     if (hasZenith) {
         auto& observation = builder_.stationObservation<survey::ZenithAngleObservation>(n);
@@ -1440,28 +1837,17 @@ void SdrReader::readObservation(Fields& fields, std::string_view derivation, std
         observation.instrumentHeight = hi;
         observation.targetHeight = targetHeight_;
         observation.pointing = pointing;
-        any = true;
     }
-    if (slope) {
-        if (!(*slope > 0.0)) {
-            builder_.warn(n, "slope distance of " + formatExactReal(*slope) +
-                                 " read as no distance measured");
-        } else {
-            auto& observation = builder_.stationObservation<survey::DistanceObservation>(n);
-            observation.from = setup->setup.pointId;
-            observation.to = to;
-            observation.distance = *slope;
-            observation.sigma = survey::distanceSigma(precision, *slope);
-            observation.kind = survey::DistanceKind::Slope;
-            observation.instrumentHeight = hi;
-            observation.targetHeight = targetHeight_;
-            observation.pointing = pointing;
-            any = true;
-        }
-    }
-    if (!any) {
-        builder_.skip(n, "observation with no readable value");
-        return;
+    if (distanceMeasured) {
+        auto& observation = builder_.stationObservation<survey::DistanceObservation>(n);
+        observation.from = setup->setup.pointId;
+        observation.to = to;
+        observation.distance = *slope;
+        observation.sigma = survey::distanceSigma(precision, *slope);
+        observation.kind = survey::DistanceKind::Slope;
+        observation.instrumentHeight = hi;
+        observation.targetHeight = targetHeight_;
+        observation.pointing = pointing;
     }
     ++setupObservations_;
     builder_.countRead();
@@ -1469,20 +1855,35 @@ void SdrReader::readObservation(Fields& fields, std::string_view derivation, std
 
 void SdrReader::readReduced(Fields& fields, std::size_t n)
 {
-    const std::string from = pointIdOf(fields.pointId());
-    const std::string to = pointIdOf(fields.pointId());
+    const std::string_view fromField = fields.pointId();
+    const std::string_view toField = fields.pointId();
     const std::optional<double> azimuth = angle(fields.real(), "azimuth", n);
     const std::string_view horizontalField = fields.real();
     const std::string_view verticalField = fields.real();
     const std::string description = cleaned(fields.take(16));
+    if (refusedIds(n, {fromField, toField})) {
+        return;
+    }
+    const std::string from = pointIdOf(fromField);
+    const std::string to = pointIdOf(toField);
     if (from.empty() || to.empty()) {
         builder_.skip(n, "reduced observation record names no point");
         return;
     }
     if (!trimmed(horizontalField).empty() || !trimmed(verticalField).empty()) {
-        builder_.skip(n, "a reduced observation (azimuth, horizontal and vertical distance) is "
-                         "derived from the raw observations the reduction works from; it is not "
-                         "imported");
+        if (setupObservations_ > 0) {
+            builder_.skip(n, "a reduced observation (azimuth, horizontal and vertical distance) "
+                             "is the field software's reduction of raw observations this setup "
+                             "holds, the scale factor and sea level applied ([SETX] 29.1); it is "
+                             "not imported, since it would count them twice");
+        } else {
+            ++lostReduced_;
+            builder_.skip(n, "a reduced observation (azimuth, horizontal and vertical distance) "
+                             "in a setup with no raw observation is not imported: it carries "
+                             "the scale factor and the sea-level reduction the reduction would "
+                             "apply again, and writers of the format differ in what else, so "
+                             "this shot is lost");
+        }
         return;
     }
     if (!azimuth) {
@@ -1501,12 +1902,16 @@ void SdrReader::readReduced(Fields& fields, std::size_t n)
     if (!description.empty()) {
         metadata[key + ", description"] = description;
     }
+    if (here && !orientation_.set) {
+        // What orients the setup if no 07 does (see finishSetup).
+        keyed_.push_back(KeyedAzimuth{to, wrapToCircle(*azimuth), n});
+    }
     builder_.countRead();
 }
 
 void SdrReader::readSet(Fields& fields, std::size_t n)
 {
-    const std::string from = pointIdOf(fields.pointId());
+    const std::string_view fromField = fields.pointId();
     const std::string count = cleaned(fields.take(3));
     std::string setNumber;
     std::string bad;
@@ -1515,17 +1920,35 @@ void SdrReader::readSet(Fields& fields, std::size_t n)
         setNumber = cleaned(fields.take(3));
         bad = cleaned(fields.take(1));
     }
-    badSet_ = bad == "2";
+    if (refusedIds(n, {fromField})) {
+        return;
+    }
+    const std::string from = pointIdOf(fromField);
+    const std::optional<int> counted = digitsValue(count);
+    const bool markedBad = bad == "2";
+    badSetRemaining_ = markedBad && counted
+                           ? std::optional<std::size_t>(static_cast<std::size_t>(*counted))
+                           : std::nullopt;
+    // A set of none has nothing to skip, and must not take the next shots.
+    badSet_ = markedBad && badSetRemaining_ != std::optional<std::size_t>(0);
     badSetRecord_ = n;
     badSetName_ =
         "set " + (setNumber.empty() ? std::string("?") : setNumber) + " at '" + from + "'";
-    if (badSet_) {
-        builder_.warn(n, badSetName_ + " is marked bad; its observations are not imported");
+    if (markedBad) {
+        builder_.warn(n, badSetName_ + " is marked bad; its " +
+                             (badSetRemaining_ ? count + " " : std::string{}) +
+                             "observation(s) are not imported" +
+                             (badSetRemaining_ ? std::string{}
+                                               : ", up to the next set or setup, since it "
+                                                 "states no count of them"));
     }
     if (survey::SurveyStation* station = builder_.currentStation(); station != nullptr) {
         station->metadata["set at record " + std::to_string(n)] =
             (setNumber.empty() ? std::string{} : "number " + setNumber + ", ") + count +
-            " observation(s)" + (badSet_ ? ", marked bad" : "");
+            " observation(s)" + (markedBad ? ", marked bad" : "");
+        setStart_ = station->observations.size();
+        setStartRecord_ = n;
+        backsightSinceSet_ = false;
     }
     builder_.countRead();
 }
@@ -1549,8 +1972,13 @@ void SdrReader::readDistanceUnitNote(std::string_view text, std::size_t n)
         unit = survey::LinearUnit::UsSurveyFeet;
         break;
     default:
-        refuse(n, "the distance unit note gives the code '" + std::string(1, code) +
-                      "'; the format defines 1 metres, 2 feet and 3 US feet");
+        // It says nothing the header has not: the header's unit holds.
+        builder_.skip(n, "the distance unit note gives " +
+                             (text.empty() ? std::string("no code")
+                                           : "the code '" + shown(std::string(1, code)) + "'") +
+                             ", and the format defines 1 metres, 2 feet and 3 US feet; the "
+                             "header's unit, " +
+                             std::string(survey::toString(linearUnit_)) + ", holds");
         return;
     }
     const bool agrees = unit == linearUnit_ || (unit == survey::LinearUnit::UsSurveyFeet &&
@@ -1590,8 +2018,8 @@ void SdrReader::readNote(Fields& fields, std::string_view derivation, std::size_
             }
         } else {
             builder_.warn(n, "time stamp '" + text.substr(0, 60) +
-                                 "' is not in a form the format's writers use; it is kept as a "
-                                 "note");
+                                 "' is not a date and time in a form the format's writers use; "
+                                 "it is kept as a note");
         }
     }
     builder_.addStationNote(derivation == "NM" ? text : std::string(derivation) + ": " + text);
@@ -1619,7 +2047,7 @@ void SdrReader::dispatch(std::string_view line, std::size_t n)
         return;
     }
     if (!isRecord(line)) {
-        builder_.skip(n, "'" + cleaned(line.substr(0, 12)) +
+        builder_.skip(n, "'" + shown(trimmed(line.substr(0, 12))) +
                              "' is not a record: a record opens with a two-digit type and a "
                              "derivation code");
         return;
@@ -1671,40 +2099,35 @@ void SdrReader::dispatch(std::string_view line, std::size_t n)
     }
 }
 
-Result<ReadResult> SdrReader::read(std::string_view text, bool guessedEncoding,
-                                   katana::core::TextEncoding encoding)
+Result<ReadResult> SdrReader::read(const std::vector<std::string_view>& lines,
+                                   bool guessedEncoding, katana::core::TextEncoding encoding)
 {
     if (guessedEncoding) {
         builder_.warn(0, "the file is not UTF-8; it was read as " +
                              std::string(katana::core::toString(encoding)) +
                              ", so an accented name may be wrong");
     }
-    std::size_t n = 0;
-    std::size_t start = 0;
-    while (start < text.size() && !fatal_) {
-        // CR LF ([SDR] chapter 3), LF or a lone CR: files are copied between
-        // systems, and the probe (probeLines) takes all three.
-        std::size_t end = text.find_first_of("\r\n", start);
-        if (end == std::string_view::npos) {
-            end = text.size();
-        }
-        const std::string_view line = text.substr(start, end - start);
-        start = end + 1;
-        if (end < text.size() && text[end] == '\r' && start < text.size() && text[start] == '\n') {
-            ++start;
-        }
-        ++n;
+    // Record numbers are line numbers: splitLines keeps a blank line in the
+    // middle, and takes CR LF ([SDR] chapter 3), LF or a lone CR alike.
+    for (std::size_t i = 0; i < lines.size() && !fatal_; ++i) {
+        const std::size_t n = i + 1;
+        std::string_view line = lines[i];
         if (trimmed(line).empty()) {
             continue;
         }
         // [SDR] chapter 3: a transmission may open with STX and close with
         // ETX and a checksum. Neither is a record; the checksum is kept as
         // written and not checked.
-        if (line.front() == '\x02') {
+        line = withoutStx(line);
+        if (trimmed(line).empty()) {
             continue;
         }
         if (line.front() == '\x03') {
             builder_.project().metadata["transmission checksum"] = cleaned(line.substr(1));
+            continue;
+        }
+        // DOS end-of-file marks (Ctrl-Z): framing, not a record.
+        if (trimmed(line).find_first_not_of('\x1a') == std::string_view::npos) {
             continue;
         }
         dispatch(line, n);
@@ -1720,6 +2143,17 @@ Result<ReadResult> SdrReader::read(std::string_view text, bool guessedEncoding,
     }
     finishSetup();
     survey::SurveyProject& project = builder_.project();
+    if (lostCorrected_ > 0) {
+        builder_.notCarried(std::to_string(lostCorrected_) +
+                            " corrected (MC) observation(s) in setups with no raw observation: "
+                            "writers of the format disagree about what an MC holds, so they are "
+                            "not imported and their shots are lost");
+    }
+    if (lostReduced_ > 0) {
+        builder_.notCarried(std::to_string(lostReduced_) +
+                            " reduced (RED) observation(s) with distances in setups with no raw "
+                            "observation: they are not imported and their shots are lost");
+    }
     if (!project.stations.empty()) {
         std::string atmospheric =
             "whether the distances carry the atmospheric correction: the field book applies it "
@@ -1765,6 +2199,11 @@ bool isHeader(std::string_view line)
            (line[7] == '2' || line.substr(7, 2) == "33");
 }
 
+// How many lines of the probe's bytes are judged: 200 records of at most 100
+// characters ([SDR] 3.6.2's longest) fit inside kProbeBytes, so every file
+// long enough is judged on the same number.
+constexpr std::size_t kProbedLines = 200;
+
 FormatSignature probe(const ProbeInput& input)
 {
     const std::string_view bytes = katana::surveyio::withoutByteOrderMark(input.bytes);
@@ -1774,8 +2213,9 @@ FormatSignature probe(const ProbeInput& input)
     std::size_t lines = 0;
     std::size_t shaped = 0;
     std::string_view first;
-    for (const std::string_view line : katana::surveyio::probeLines(input, 200)) {
-        if (trimmed(line).empty() || line.front() == '\x02' || line.front() == '\x03') {
+    for (std::string_view line : katana::surveyio::probeLines(input, kProbedLines)) {
+        line = withoutStx(line);
+        if (trimmed(line).empty() || line.front() == '\x03') {
             continue;
         }
         if (lines == 0) {
@@ -1792,16 +2232,23 @@ FormatSignature probe(const ProbeInput& input)
     }
     const bool sdr = input.extension == "sdr";
     const bool header = isHeader(first);
+    // A judgement, not a measurement: an SDR file is records and nothing
+    // else, and a tenth leaves room for a damaged stretch or a converter's
+    // unmarked notes.
     const bool mostlyRecords = shaped * 10 >= lines * 9;
     const std::string counted = std::to_string(shaped) + " of " + std::to_string(lines) +
                                 " lines open with a record type and derivation code";
     if (header) {
-        const std::string version = collapsedBlanks(first.substr(4, 16));
+        const std::string version = versionOf(first);
         if (mostlyRecords) {
             return {sdr ? 0.98 : 0.95, std::string(sdr ? "extension .sdr, " : "") + "header " +
                                            version + ", " + counted};
         }
-        return {0.6, "header " + version + " but only " + counted};
+        // No other format writes this header (the Survey Controller probe
+        // steps aside for it), so it identifies the file even with odd lines
+        // in it, which the reader skips, each with a warning - but less
+        // surely than a clean one.
+        return {0.8, "header " + version + " but only " + counted};
     }
     if (sdr && mostlyRecords) {
         return {0.4, "extension .sdr and " + counted + ", but no SDR header record"};
@@ -1838,22 +2285,17 @@ Result<ReadResult> readSdr(std::string_view bytes, std::string_view fileName,
     if (!decoded) {
         return decoded.error();
     }
-    const std::string_view text = decoded->text;
+    const std::vector<std::string_view> lines = katana::core::splitLines(decoded->text);
     // The header names the variant, which every record's provenance carries.
     std::string variant = "SDR";
     std::string version;
-    for (std::size_t start = 0; start < text.size();) {
-        std::size_t end = text.find_first_of("\r\n", start);
-        if (end == std::string_view::npos) {
-            end = text.size();
-        }
-        const std::string_view line = trimmed(text.substr(start, end - start));
-        start = end + 1;
-        if (line.empty() || line.front() == '\x02') {
+    for (std::string_view line : lines) {
+        line = withoutStx(line);
+        if (trimmed(line).empty()) {
             continue;
         }
         if (isHeader(line)) {
-            version = collapsedBlanks(cleaned(line.substr(4, 16)));
+            version = versionOf(line);
             variant = version.starts_with("SDR33") ? "SDR33" : "SDR2x";
         }
         break;
@@ -1861,7 +2303,7 @@ Result<ReadResult> readSdr(std::string_view bytes, std::string_view fileName,
     SdrReader reader(fileName,
                      survey::SourceRecord{"Sokkia", variant, version, std::string(fileName), 0},
                      options);
-    return reader.read(text, decoded->guessed, decoded->encoding);
+    return reader.read(lines, decoded->guessed, decoded->encoding);
 }
 
 const katana::surveyio::FormatRegistration kRegistration{descriptor(), &probe, &readSdr};
