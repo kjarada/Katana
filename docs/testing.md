@@ -493,7 +493,12 @@ fixed on 2026-09-29:
   output is unchanged. `tools/check_float_to_string.py` finds any new one; a
   text search cannot, because it cannot tell a double from an int. One test
   that compared against `std::to_string(-33.865)` - the same call as the code
-  under test - now compares against the literal "-33.865".
+  under test - now compares against the literal "-33.865". The tool exits 1
+  when any file could not be checked, as well as on a hit: on 2026-09-30,
+  run without MSYS2's bin on PATH, g++ could not load its DLLs, every one of
+  320 files was "not checked" with no reason given, and the tool still exited
+  0 - a pass that checked nothing. It now names the reason ("the compiler
+  exited 1 and printed nothing") and fails.
 - **`LibraryData.MissingDataBesideALibraryIsNotFound`.** libc++'s
   `weakly_canonical` makes an empty path the working directory, which is
   absolute; libstdc++ leaves it empty. `dataBesideLibraryFile` relied on the

@@ -12,6 +12,10 @@ CMakeUserPresets.json
 aqtinstall.log
 legacy-scaffold-*.zip
 
+# Python's bytecode cache, written beside a tools/*.py module that another
+# script imports: a by-product of running the tools, never source.
+__pycache__/
+
 # Running the application against a sample writes a backup beside its project.
 # The samples are inputs, not working directories.
 samples/*/backups/
