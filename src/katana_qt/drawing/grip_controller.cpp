@@ -7,6 +7,7 @@
 
 #include "drawing/feedback_painter.hpp"
 #include "katana/core/text.hpp"
+#include "katana/math/numerics.hpp"
 
 namespace katana::qt::drawing {
 
@@ -24,6 +25,33 @@ constexpr double kDragPixels = 4.0;
 
 GripController::GripController(cad::Document& document) : document_(document) {}
 
+namespace {
+
+// The grip that is `old` after the drawing changed: the same point of the
+// same entity, by its position - an index names another vertex once a vertex
+// is inserted or deleted before it, and the next Delete would take that one.
+// The same index first, where a twin vertex lies on the same point.
+std::optional<cad::Grip> follow(const cad::Grip& old, const std::vector<cad::Grip>& grips)
+{
+    const auto at = [&](const cad::Grip& grip) {
+        return grip.entity == old.entity && grip.kind == old.kind &&
+               grip.position.distanceTo(old.position) <= katana::math::tolerance::kGeometric;
+    };
+    for (const cad::Grip& grip : grips) {
+        if (grip.index == old.index && at(grip)) {
+            return grip;
+        }
+    }
+    for (const cad::Grip& grip : grips) {
+        if (at(grip)) {
+            return grip;
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
 void GripController::refresh(std::uint64_t generation)
 {
     if (generation == generation_) {
@@ -31,25 +59,31 @@ void GripController::refresh(std::uint64_t generation)
     }
     generation_ = generation;
     grips_ = cad::gripsOfSelection(document_, document_.selection().ids());
-    // A hot grip survives a refresh only if its handle still exists (an
-    // undo, a selection change or another view's edit may have taken it).
-    std::erase_if(hot_, [&](const cad::Grip& hot) {
-        return std::none_of(grips_.begin(), grips_.end(),
-                            [&](const cad::Grip& grip) { return grip.sameHandle(hot); });
-    });
-    for (cad::Grip& hot : hot_) {
-        for (const cad::Grip& grip : grips_) {
-            if (grip.sameHandle(hot)) {
-                hot.position = grip.position;
-            }
+    // A hot grip survives a refresh only while its point does (an undo, a
+    // selection change or another view's edit may have taken it), and it
+    // follows its point to the index that point has now.
+    std::vector<cad::Grip> kept;
+    for (const cad::Grip& hot : hot_) {
+        if (auto now = follow(hot, grips_)) {
+            kept.push_back(*now);
         }
     }
-    if (grabbed_ && std::none_of(grips_.begin(), grips_.end(),
-                                 [&](const cad::Grip& grip) { return grip.sameHandle(*grabbed_); })) {
-        grabbed_.reset();
-        state_ = State::Idle;
-        typed_.clear();
+    hot_ = std::move(kept);
+    if (grabbed_) {
+        if (auto now = follow(*grabbed_, grips_)) {
+            grabbed_ = *now;
+        } else {
+            grabbed_.reset();
+            state_ = State::Idle;
+            typed_.clear();
+        }
     }
+}
+
+bool GripController::hasHotVertex() const
+{
+    return std::any_of(hot_.begin(), hot_.end(),
+                       [](const cad::Grip& grip) { return grip.kind == cad::GripKind::Vertex; });
 }
 
 std::optional<GripController::Point2> GripController::base() const

@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/cad/annotation/dimension_build.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/drawing/draw_shapes.hpp"
 #include "katana/cad/drawing/drafting.hpp"
@@ -416,7 +417,8 @@ std::string CommandInterpreter::drawingHelpText()
           quadrant bearing N45d30'E); a z is the vertex's height.  Each edit is one undo step.
 Vertex    VERTEX LIST id   a summary record, then one per vertex: index x y z bulge
           bearing (whole-circle degrees) distance (the segment's chord)
-          VERTEX INSERT id p [after=N] | DELETE id N [N...] | MOVE id N p (@ is from the vertex)
+          VERTEX INSERT id p|#id@x,y|#id.sN [after=N]   #id@x,y: on the line nearest x,y
+          VERTEX DELETE id N [N...] | MOVE id N p (@ is from the vertex)
           VERTEX SET id N [x= y= z=|none bulge= bearing= distance=]   as the Vertices panel
 Polyline  WEED target tolerance= [keep=on|off]   (keep: survey-point vertices stay)
           DENSIFY target interval= [chord=]  | STRAIGHTEN id N N | CLOSE target | OPEN [target]
@@ -558,11 +560,35 @@ CommandInterpreter::Reply CommandInterpreter::vertexVerb(const Tokens& args)
             return parsed.error();
         }
         if (parsed->positional.size() != 1) {
-            return usageError("VERTEX INSERT id x,y[,z] [after=N]");
+            return usageError("VERTEX INSERT id x,y[,z] | #id@x,y | #id.sN [after=N]");
         }
-        auto at = parseDrawingPoint(parsed->positional[0]);
-        if (!at) {
-            return at.error();
+        // A point, or a point OF an entity (parseAnchoredPoint): "#12@x,y" is
+        // the place on #12 nearest x,y - ON the line, as the window's Insert
+        // Vertex puts a click - and "#12.s3" segment 3's middle. On this
+        // polyline the anchor names its segment itself, where nearestSegment
+        // could take a neighbour at a vertex.
+        const std::string& given = parsed->positional[0];
+        Point2 where;
+        std::optional<double> z;
+        std::optional<std::size_t> anchoredSegment;
+        if (!given.empty() && given.front() == '#') {
+            auto anchored = parseAnchoredPoint(given);
+            if (!anchored) {
+                return anchored.error();
+            }
+            where = anchored->point;
+            if (anchored->ref.entity == *id &&
+                (anchored->ref.point == katana::entity::AnchorPoint::Along ||
+                 anchored->ref.point == katana::entity::AnchorPoint::SegmentMid)) {
+                anchoredSegment = anchored->ref.index;
+            }
+        } else {
+            auto at = parseDrawingPoint(given);
+            if (!at) {
+                return at.error();
+            }
+            where = at->point;
+            z = at->z;
         }
         std::size_t segment = 0;
         if (const std::string* after = parsed->find("after")) {
@@ -577,11 +603,11 @@ CommandInterpreter::Reply CommandInterpreter::vertexVerb(const Tokens& args)
                                  "there is no segment after vertex " + std::to_string(*index));
             }
             segment = *index;
-        } else if (const auto nearest = geo::nearestSegment(*polyline, at->point)) {
+        } else if (anchoredSegment) {
+            segment = *anchoredSegment;
+        } else if (const auto nearest = geo::nearestSegment(*polyline, where)) {
             segment = *nearest;
         }
-        const Point2 where = at->point;
-        const std::optional<double> z = at->z;
         auto status = document_.execute(editPolyline(
             *id, "VERTEX_INSERT", [segment, where, z](const CurvePolyline2& p) {
                 return geo::insertVertex(p, segment, where, z);

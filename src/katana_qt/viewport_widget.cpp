@@ -895,6 +895,13 @@ void ViewportWidget::mouseDoubleClickEvent(QMouseEvent* event)
         mousePressEvent(event);
         return;
     }
+    // The first click of the two picked a grip up; the double click asks for
+    // the entity's editor, not a grip following the cursor until the next
+    // click puts it down somewhere.
+    if (event->button() == Qt::LeftButton && gripsLive() && grips_.base()) {
+        grips_.escape();
+        update();
+    }
     if (event->button() == Qt::LeftButton && onEntityDoubleClicked) {
         if (const auto id = entityAt(event->position())) {
             onEntityDoubleClicked(*id);
@@ -951,6 +958,19 @@ bool ViewportWidget::event(QEvent* event)
         static_cast<QKeyEvent*>(event)->matches(QKeySequence::Undo)) {
         event->accept();
         return true;
+    }
+    // Delete with a vertex grip hot is the VIEW's: it removes those vertices
+    // (keyPressEvent, GripController::deleteHot). The window's Erase holds
+    // Delete as a shortcut, and taking it there erased the whole polyline.
+    if (event->type() == QEvent::ShortcutOverride && gripsLive()) {
+        const auto* key = static_cast<QKeyEvent*>(event);
+        if (key->key() == Qt::Key_Delete && key->modifiers() == Qt::NoModifier) {
+            grips_.refresh(notifications_);
+            if (grips_.hasHotVertex()) {
+                event->accept();
+                return true;
+            }
+        }
     }
     return QWidget::event(event);
 }

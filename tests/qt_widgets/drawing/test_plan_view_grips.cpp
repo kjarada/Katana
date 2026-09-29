@@ -10,6 +10,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "widget_harness.hpp"
@@ -237,4 +238,72 @@ TEST(PlanViewGrips, AGripPickedUpBeforeAToolIsDroppedNotCommittedLater)
     f.mouse(QEvent::MouseButtonRelease, Point2(25, 5), Qt::LeftButton);
     EXPECT_EQ(f.document.history().undoCount(), before);
     EXPECT_EQ(f.geometry().vertices[2], Point2(20, 0));
+}
+
+TEST(PlanViewGrips, DeleteWithAHotVertexIsTheViewsKeyNotTheWindowsErase)
+{
+    // The window's Erase holds Delete as a shortcut. Qt offers the key to
+    // the view first (ShortcutOverride, ignored until someone claims it); a
+    // view that let it go had the whole polyline erased instead of the vertex.
+    Fixture f;
+    f.select();
+    const auto claimed = [&f] {
+        QKeyEvent offer(QEvent::ShortcutOverride, Qt::Key_Delete, Qt::NoModifier);
+        offer.ignore();
+        QCoreApplication::sendEvent(f.view.get(), &offer);
+        return offer.isAccepted();
+    };
+    EXPECT_FALSE(claimed()) << "nothing hot: Delete is the window's Erase";
+    f.mouse(QEvent::MouseButtonPress, Point2(10, 0), Qt::LeftButton, Qt::ShiftModifier);
+    f.mouse(QEvent::MouseButtonRelease, Point2(10, 0), Qt::LeftButton, Qt::ShiftModifier);
+    ASSERT_EQ(f.view->gripController().hot().size(), 1u);
+    EXPECT_TRUE(claimed()) << "a hot vertex: Delete is the view's";
+    f.key(Qt::Key_Delete);
+    EXPECT_EQ(f.geometry().vertices, (std::vector<Point2>{Point2(0, 0), Point2(20, 0)}));
+    EXPECT_NE(f.document.model().entities.find(f.polyline), nullptr) << "the polyline stays";
+}
+
+TEST(PlanViewGrips, ADoubleClickOnAGripLeavesNothingPickedUp)
+{
+    Fixture f;
+    f.select();
+    int opened = 0;
+    f.view->onEntityDoubleClicked = [&opened](EntityId) { ++opened; };
+    const std::size_t before = f.document.history().undoCount();
+    // Qt's double click: press, release, DOUBLE CLICK, release. The first
+    // click picks the grip up.
+    f.mouse(QEvent::MouseButtonPress, Point2(10, 0), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonRelease, Point2(10, 0), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonDblClick, Point2(10, 0), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonRelease, Point2(10, 0), Qt::LeftButton);
+    EXPECT_EQ(opened, 1) << "the double click still opens the polyline's editor";
+    EXPECT_FALSE(f.view->gripController().active()) << "and leaves no grip following the cursor";
+    f.mouse(QEvent::MouseMove, Point2(14, 6), Qt::NoButton);
+    f.mouse(QEvent::MouseButtonPress, Point2(14, 6), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonRelease, Point2(14, 6), Qt::LeftButton);
+    EXPECT_EQ(f.document.history().undoCount(), before) << "no GRIP_EDIT";
+    EXPECT_EQ(f.geometry().vertices[1], Point2(10, 0));
+}
+
+TEST(PlanViewGrips, AHotVertexFollowsItsVertexThroughAnInsertBeforeIt)
+{
+    Fixture f;
+    f.select();
+    f.mouse(QEvent::MouseButtonPress, Point2(20, 0), Qt::LeftButton, Qt::ShiftModifier);
+    f.mouse(QEvent::MouseButtonRelease, Point2(20, 0), Qt::LeftButton, Qt::ShiftModifier);
+    ASSERT_EQ(f.view->gripController().hot().size(), 1u);
+    // Another edit - a tool, the panel, an agent - puts a vertex before it:
+    // (20,0) is vertex 3 now, and vertex 2 is (10,0).
+    ASSERT_TRUE(f.document
+                    .execute(katana::cad::editPolyline(
+                        f.polyline, "VERTEX_INSERT",
+                        [](const katana::geometry::CurvePolyline2& shape) {
+                            return katana::geometry::insertVertex(shape, 0, Point2(5, 0));
+                        }))
+                    .ok());
+    paint(*f.view);
+    f.key(Qt::Key_Delete);
+    EXPECT_EQ(f.geometry().vertices,
+              (std::vector<Point2>{Point2(0, 0), Point2(5, 0), Point2(10, 0)}))
+        << "the vertex made hot goes, not the one now at its old index";
 }

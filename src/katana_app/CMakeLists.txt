@@ -67,6 +67,27 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "2 entities.*Polyline.*layer=Survey.*area=600")
     set_tests_properties(cli.rejects_bad_input PROPERTIES WILL_FAIL TRUE)
 
+    # VERTEX INSERT with a point OF the polyline (docs/drawing.md, "What a
+    # vertex tool acts on"): "#1@4,0.3" is the place on it nearest (4,0.3),
+    # ON the line, as the window's Insert Vertex puts a click; "#1.s1" with
+    # after=1 is segment 1's middle. By hand on (0,0) (10,0) (10,10): the
+    # first is (4,0), the new vertex 1; segment 1 is (10,0)-(10,10), and its
+    # middle (10,5) the new vertex 2.
+    add_test(NAME cli.vertex_insert_takes_a_point_on_the_polyline
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLINE 0,0 10,0 10,10" -c "VERTEX INSERT 1 #1@4,0.3"
+                -c "VERTEX LIST 1")
+    set_tests_properties(cli.vertex_insert_takes_a_point_on_the_polyline PROPERTIES
+        PASS_REGULAR_EXPRESSION "vertices=4 [^\r\n]* inserted=1.*index=1 x=4 y=0 z=none"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.vertex_insert_takes_a_segments_middle
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLINE 0,0 10,0 10,10"
+                -c "VERTEX INSERT 1 #1.s1 after=1" -c "VERTEX LIST 1")
+    set_tests_properties(cli.vertex_insert_takes_a_segments_middle PROPERTIES
+        PASS_REGULAR_EXPRESSION "vertices=4 [^\r\n]* inserted=2.*index=2 x=10 y=5 z=none"
+        FAIL_REGULAR_EXPRESSION "error")
+
     # The survey-code verbs, on a mapfile of the tests' own: its shape is the
     # reference mapfile's, its codes are not. REPLACE puts it in place of the
     # compiled-in map, so what is expected does not depend on whether this

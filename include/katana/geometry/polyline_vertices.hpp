@@ -144,6 +144,13 @@ using PolylineResult = katana::core::Result<CurvePolyline2>;
 
 // ---- corners ----------------------------------------------------------------------------------
 
+// Whether vertex `index` is a corner that can be rounded or cut at all -
+// where two straight segments of some length meet at an angle - with the
+// sentence filletVertex and chamferVertex refuse it with when it is not: an
+// end of an open polyline, beside an arc, a segment of no length, in line.
+// What the Fillet and Chamfer Vertex tools refuse a pick with, before they
+// ask for a radius that could never fit.
+[[nodiscard]] katana::core::Status checkCorner(const CurvePolyline2& polyline, std::size_t index);
 // Rounds vertex `index`, where two straight segments meet, with a tangent arc
 // of `radius`: the vertex is replaced by the two tangent points. Refused at
 // the ends of an open polyline, beside an arc, for collinear segments, or
