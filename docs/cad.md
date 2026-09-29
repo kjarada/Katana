@@ -1216,6 +1216,82 @@ to" and "Only those that match" as one widget every dialog shares, whose
 `verbWords()` are these words (`docs/desktop.md`, "Global Modify"), and the
 window answering `VIEW` through `scopeViewOf`.
 
+## The window's views: VIEWS and ZOOM
+
+The owner asked on 2026-09-30 for views that pan and zoom together - "zoom in
+a design view and the as-built view zooms in too" - with the controls on each
+view's own bar. The views are the window's (`cad::ViewSet`, held by the
+workspace), so two verbs reach them (`include/katana/cad/view_verbs.hpp`):
+
+```
+VIEWS [LIST]                          a record per open view, then views=N linked=M
+VIEWS OPEN plan|3d|section|elevation  opens one, active; its record
+VIEWS ACTIVATE <id>                   its record
+VIEWS LINK <id>[,<id>...] [TO <id>]   leader=1 linked=1,2 moved=2
+VIEWS UNLINK <id>[,<id>...] | ALL     unlinked=1,2 linked=none
+ZOOM | Z                              the active view's extents, as always
+ZOOM EXTENTS | IN [f] | OUT [f] | <f> | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s]  [view=<id>]
+```
+
+An id is the `ViewId` a record's `view=` gives, as for the scope word `VIEW`,
+never the number in the title. `view=` may stand anywhere on a `ZOOM` line and
+is taken off before anything else is read. `EXTENTS` frames what the view
+draws, in any kind of view; `IN` and `OUT` (by 2 unless a factor is given)
+and a bare factor zoom about the view's centre; `WINDOW` frames a box as Zoom
+Extents frames the drawing - the margin is the widget's - and `CENTRE` puts
+a point in the middle, at `SCALE` pixels per unit when given. Those four act
+on plan views, and on any other are refused naming the kind (`ZOOM WINDOW
+frames a plan view: view 3 is 3D`). `WINDOW` is a box of the drawing; the
+scope word `AREA` would mean the entities found in one, which is why it is
+not the word here. `SCALE` outside `ViewTransform`'s limits is refused, not
+clamped, because a scale the view cannot show is not the one asked for.
+
+Records, one per line, `key=value`, reals by `core::formatExactReal` and
+angles in degrees:
+
+```
+view=1 kind=plan title="Plan 1" active=yes linked=yes centre=50,40 scale=8 area=31.25,27.5,68.75,52.5
+view=3 kind=3d title="3D 1" active=no target=x,y,z distance=d azimuth=a elevation=e projection=perspective
+view=4 kind=section title="Section 1" active=no
+```
+
+`ZOOM` replies the record of the view it moved without `title`, `active` and
+`linked`, then a line for each view that followed it
+(`view=2 kind=plan followed=1 centre=... scale=... area=...`), so the reply
+says the whole of what one line did. `ZOOM` alone is still the active view's
+extents; with words it once zoomed to the extents whatever they were
+(`ZOOM FOO BAR` said nothing), and now refuses a word it does not know,
+naming it with the usage. An `UNLINK` lists every view that left: an unlink
+that leaves one member dissolves the link (a link of one follows nothing),
+and that member left too.
+
+**The window's side is a `cad::ViewVerbHost`**, handed over by
+`CommandInterpreter::setViewHost` as `setScopeContext` hands over `VIEW`: the
+open views, and opening, activating and zooming one through its widget,
+which frames at its own size. The plan zoom's arithmetic that needs no
+widget - `IN`, `OUT`, a factor and `CENTRE` - is `cad::applyPlanZoom`, here
+and tested, and the window's host applies it and then tells the link. A
+test's host does the same with a `ViewSet` of its own, so the grammar, the
+records and the refusals are tested without Qt
+(`tests/cad/test_view_verbs.cpp`). With no host - `katana_cli`, `katana_mcp`
+- both verbs are refused by name, "VIEWS is the desktop window's", never as
+unknown commands (`ViewVerbsTest.ViewsAndZoomAreRefusedByNameWithoutAWindow`,
+and a `cli.` test for each in `src/katana_app/CMakeLists.txt`).
+
+**The link is `ViewSet`'s** (`link`, `unlink`, `follow`; `ViewState::linked`
+and `lastMoved`), and the rule for one pair of views is
+`include/katana/cad/view_link.hpp`: plan to plan, the follower takes the
+centre and the scale in pixels per unit, EXACTLY, and keeps its own size,
+hidden layers and reference layers - a wider view shows more of the same
+place. Every other pair of kinds returns false, and only plan views may join
+for now (`only plan views link: view 3 is 3D`). Plain data like the rest of
+a view's state: not saved, not undoable, never a document notification - a
+notification repaints every plan view's whole kept drawing. The leader rule,
+the resize rule and the rejected alternatives are `docs/desktop.md`'s
+"Linked views"; the tests are `tests/cad/test_view_set.cpp`
+(`ViewSet.LinkedPlanViewsTakeTheCentreAndScaleOfTheViewThatMovedAndKeepTheirOwnSize`
+and the tests after it).
+
 ## What the managers stand on
 
 

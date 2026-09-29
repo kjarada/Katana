@@ -336,6 +336,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     interpreter_.setScopeContext([this](std::optional<std::uint32_t> id) {
         return cad::scopeViewOf(views_->viewSet(), id);
     });
+    // VIEWS and ZOOM (cad/view_verbs.hpp) act on this window's views; the
+    // controls on a view's bar build those lines and run them through the
+    // one executor, so a click is logged as the line it is.
+    interpreter_.setViewHost([this] { return &views_->verbHost(); });
+    views_->setCommandRunner(commandRunner());
+    views_->onLinksChanged = [this] { refreshViewMenu(); };
 
     views_->onPrompt = [this](const QString& prompt) {
         statusBar()->showMessage(prompt);
@@ -3015,11 +3021,8 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
     const QString verb = words.front().toUpper();
     const QString argument = words.size() > 1 ? words[1].toUpper() : QString();
 
-    // Commands that concern the view rather than the document.
-    if (verb == "ZOOM" || verb == "Z") {
-        views_->zoomExtents();
-        return;
-    }
+    // ZOOM (Z) is the interpreter's now (cad/view_verbs.hpp), answered by the
+    // workspace: it was taken here, and whatever followed it was ignored.
     // ON, OFF, or nothing to toggle - and anything else refused: every other
     // word once meant OFF, so SNAP ENDPOINT OFF turned object snap off
     // altogether and said nothing.
@@ -4821,6 +4824,31 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
         kindActions_.push_back(action);
     }
 
+    // Linked views (cad/view_link.hpp): the Link button of the active plan
+    // view's bar, and every view out of the link at once - the same lines,
+    // through the same executor. K, not L: Viewport Layout has L.
+    linkAction_ = viewMenu->addAction(katana::qt::icon(Icon::ViewLinked), "Lin&k This View");
+    linkAction_->setObjectName("viewLinkActive");
+    linkAction_->setCheckable(true);
+    linkAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    linkAction_->setStatusTip("Pan and zoom the active plan view together with the other linked "
+                              "views, or take it out of the link (VIEWS LINK, VIEWS UNLINK)");
+    connect(linkAction_, &QAction::triggered, this, [this] {
+        if (ViewportWidget* plan = views_->activePlanView()) {
+            views_->toggleLink(plan->state().id);
+        } else {
+            logMessage("No plan view is open to link. VIEWS OPEN plan opens one.", true);
+        }
+        refreshViewMenu();
+    });
+    QAction* unlinkAll = viewMenu->addAction(katana::qt::icon(Icon::ViewUnlinked),
+                                             "U&nlink All Views");
+    unlinkAll->setObjectName("viewUnlinkAll");
+    unlinkAll->setStatusTip(
+        "Take every view out of the link, so each pans and zooms on its own (VIEWS UNLINK ALL)");
+    connect(unlinkAll, &QAction::triggered, this,
+            [this] { (void)runVerbLine("VIEWS UNLINK ALL"); });
+
     viewMenu->addSection("3D Views");
     QMenu* standard = viewMenu->addMenu("Standard &3D Views");
     standard->setIcon(katana::qt::icon(Icon::ViewIsoSouthWest));
@@ -4892,6 +4920,11 @@ void MainWindow::refreshViewMenu()
 {
     for (QAction* action : kindActions_) {
         action->setChecked(action->data().toInt() == static_cast<int>(views_->activeViewKind()));
+    }
+    if (linkAction_ != nullptr) {
+        const ViewportWidget* plan = views_->activePlanView();
+        linkAction_->setEnabled(plan != nullptr);
+        linkAction_->setChecked(plan != nullptr && plan->state().linked);
     }
 }
 

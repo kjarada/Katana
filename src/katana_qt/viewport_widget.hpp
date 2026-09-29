@@ -177,6 +177,18 @@ class ViewportWidget final : public QWidget {
     // The box zoomExtents frames. Empty when this view has nothing to show.
     [[nodiscard]] katana::geometry::Box2 drawnBounds() const;
 
+    // Raised when this view's pan or zoom has just changed: a wheel notch, a
+    // middle-drag pan and a frame (Zoom Extents, zoomTo) with `byUser` true,
+    // the first paint's frame with false. What linked views follow
+    // (ViewWorkspace::viewMoved). Never raised by holdView or by a change
+    // made to the state from outside, so a view following another never
+    // reports the move it was given.
+    std::function<void(bool byUser)> onViewMoved;
+    // Keeps the view where its state now says, as a linked view must: forgets
+    // the box it was framed on, so a resize keeps the centre and scale rather
+    // than refitting that box, and repaints. Raises nothing.
+    void holdView();
+
     // Reference data (imported imagery and point clouds) belongs to the window;
     // the viewport only paints it, and never mutates it (Rule 3). Null until the
     // window supplies one.

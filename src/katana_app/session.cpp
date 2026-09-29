@@ -90,6 +90,13 @@ const char* windowOnlyVerb(const std::string& verb)
         return "is the desktop window's: katana_cli runs a script given as its argument, and "
                "katana_mcp with katana_run_script";
     }
+    // They were unknown commands here, although the help said the window's
+    // verbs are refused by name. VIEWS and ZOOM are the interpreter's, which
+    // refuses them by name itself when no window answers for the views.
+    if (verb == "GRID" || verb == "EXAGGERATION") {
+        return "is the desktop window's: it sets how the window's views draw, and katana_cli and "
+               "katana_mcp have no views; run katana headless with --command";
+    }
     return nullptr;
 }
 
@@ -617,9 +624,10 @@ std::string Session::helpText()
     text += "Interop   IMPORT <file.dxf> [LOCAL | ALONGSIDE | OFFSET=dE,dN] | EXPORT <file.dxf>\n"
             "          (this build has no GDAL: DXF only)\n";
 #endif
-    text += "Window    PLOT, PLOTSHEETS, SNAPSHOT, ONLINE and SCRIPT are the desktop window's\n"
-            "          verbs, refused here: katana --plot, --plot-sheets and --command run\n"
-            "          them headless; a script is katana_cli's argument, or katana_mcp's\n"
+    text += "Window    PLOT, PLOTSHEETS, SNAPSHOT, ONLINE, SCRIPT, GRID and EXAGGERATION are the\n"
+            "          desktop window's verbs, and VIEWS and ZOOM act on its views: all are\n"
+            "          refused here. katana --plot, --plot-sheets and --command run them\n"
+            "          headless; a script is katana_cli's argument, or katana_mcp's\n"
             "          katana_run_script\n";
     return text;
 }

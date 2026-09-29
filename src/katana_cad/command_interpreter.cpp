@@ -232,7 +232,7 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"}, {"PARC", "PARCEL"}, {"ST", "STYLE"},
         {"RADIATE", "FORWARD"}, {"?", "HELP"}, {"LE", "LEADER"}, {"MT", "MTEXT"},
         {"TS", "TEXTSTYLE"}, {"LS", "LABELSTYLE"}, {"GM", "MODIFY"}, {"GMODIFY", "MODIFY"},
-        {"GLOBALMODIFY", "MODIFY"},
+        {"GLOBALMODIFY", "MODIFY"}, {"Z", "ZOOM"},
     };
     return table;
 }
@@ -545,7 +545,16 @@ Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS:
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK schedule.csv|scope ...  AS 5488 subsurface utilities:
           grade, verify, clear, check against a schema, on a schedule or what is drawn;
           DRAW schedule.csv, REGRADE scope, SCHEDULE out.csv scope (HELP UTILITY)
-Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM ?  LE MT TS LS
+Views     the desktop window's views (katana_cli and katana_mcp have none, and refuse these):
+          VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id   a record per view;
+          id is the view= a record gives, not its title's number
+          VIEWS LINK id[,id...] [TO id]   linked plan views pan and zoom together: every one
+          shows the centre and scale of the one moved last; TO is the one the others come to
+          VIEWS UNLINK id[,id...] | ALL
+Zoom      ZOOM (Z)   the active view's extents | ZOOM EXTENTS | IN [f] | OUT [f] | f |
+          WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE pixels-per-unit]   [view=id]; IN and OUT
+          are by 2 about the view's centre; linked views follow every ZOOM
+Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM Z ?  LE MT TS LS
 )" + annotationHelpText() + drawingHelpText();
 }
 
@@ -851,6 +860,11 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (verb == "LIST" || verb == "INFO" || verb == "STATUS") {
         return inspect(verb, args);
+    }
+    // VIEWS and ZOOM: the window's views, which the Document does not hold;
+    // without a window they are refused by name (view_verbs.hpp).
+    if (isViewVerb(verb)) {
+        return runViewVerb(document_, verb, args, viewHost_);
     }
     return makeError(ErrorCode::ParseFailure, "unknown command; type HELP", verb);
 }

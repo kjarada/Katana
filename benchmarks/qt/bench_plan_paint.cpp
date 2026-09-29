@@ -210,6 +210,72 @@ void BM_PlanPaintCursorMove(benchmark::State& state)
 }
 BENCHMARK(BM_PlanPaintCursorMove)->Unit(benchmark::kMillisecond)->UseRealTime();
 
+// Two plan views of the fixture in one ViewSet, linked (cad/view_link.hpp):
+// a design view and an as-built view that pan and zoom together. The second
+// starts elsewhere and is brought to the first by the link, as VIEWS LINK
+// brings it.
+struct LinkedPair {
+    katana::cad::ViewSet views;
+    katana::cad::ViewState* leader = nullptr;
+    katana::cad::ViewState* follower = nullptr;
+    std::unique_ptr<katana::qt::ViewportWidget> leaderWidget;
+    std::unique_ptr<katana::qt::ViewportWidget> followerWidget;
+    QImage leaderImage{kWidth, kHeight, QImage::Format_ARGB32_Premultiplied};
+    QImage followerImage{kWidth, kHeight, QImage::Format_ARGB32_Premultiplied};
+
+    LinkedPair(double zoom, Point2 centreFraction)
+    {
+        Fixture& f = fixture();
+        const Box2 extent = f.summary.extent;
+        for (katana::cad::ViewState** made : {&leader, &follower}) {
+            katana::cad::ViewState& view = views.add(katana::cad::ViewKind::Plan);
+            view.plan.resize(kWidth, kHeight);
+            view.plan.fit(extent, 0.02);
+            view.planFramed = true;
+            *made = &view;
+        }
+        leader->plan.scale *= zoom;
+        leader->plan.center =
+            Point2(extent.min.x + centreFraction.x * (extent.max.x - extent.min.x),
+                   extent.min.y + centreFraction.y * (extent.max.y - extent.min.y));
+        const katana::cad::ViewId both[] = {leader->id, follower->id};
+        (void)views.link(both, leader->id);
+        leaderWidget = std::make_unique<katana::qt::ViewportWidget>(f.document, *leader);
+        followerWidget = std::make_unique<katana::qt::ViewportWidget>(f.document, *follower);
+        for (katana::qt::ViewportWidget* widget : {leaderWidget.get(), followerWidget.get()}) {
+            widget->resize(kWidth, kHeight);
+            widget->setGridVisible(false);
+        }
+    }
+};
+
+// One step of a middle-drag pan in a view with a second linked to it: the
+// pan, the link's follow (ViewSet::follow, what ViewWorkspace::viewMoved
+// runs) and both views drawn. Against BM_PlanPaintZoomed, the same pan of
+// the same view at the same zoom on its own, it is what linking costs: the
+// second view drawn whole, since its centre moved (docs/plan_view.md,
+// "Linked views"). Measured, not optimised.
+void BM_PlanLinkedPan(benchmark::State& state)
+{
+    if (!fixture().ok) {
+        state.SkipWithError("the survey drawing could not be built");
+        return;
+    }
+    LinkedPair pair(5.0, Point2(0.45, 0.55));
+    double direction = 1.0;
+    for (auto _ : state) {
+        pair.leader->plan.panByPixels(direction, 0.0);
+        direction = -direction;
+        (void)pair.views.follow(pair.leader->id);
+        pair.leaderWidget->render(&pair.leaderImage);
+        pair.followerWidget->render(&pair.followerImage);
+    }
+    setCounters(state, *pair.leaderWidget);
+    state.counters["followerDrawn"] =
+        static_cast<double>(pair.followerWidget->lastDrawnEntityCount());
+}
+BENCHMARK(BM_PlanLinkedPan)->Unit(benchmark::kMillisecond)->UseRealTime();
+
 // One A1 sheet at 1 : 2500 about the drawing's centre, at 300 dpi.
 void BM_PlanPlotA1(benchmark::State& state)
 {

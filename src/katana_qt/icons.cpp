@@ -6,6 +6,7 @@
 #include <QPainterPath>
 #include <QPixmap>
 #include <QPolygonF>
+#include <QTransform>
 
 #include <cmath>
 
@@ -277,6 +278,20 @@ void drawOrthographicView(const Ink& ink, double dx, double dy)
     drawHead(ink, tipX, tipY, dx, dy);
 }
 
+// A link of a chain: a stadium `length` long and `width` wide about (x, y),
+// lying on the diagonal that rises to the right, as the Link button's chain
+// lies.
+QPainterPath chainLink(double x, double y, double length, double width)
+{
+    QPainterPath link;
+    link.addRoundedRect(QRectF(-0.5 * length, -0.5 * width, length, width), 0.5 * width,
+                        0.5 * width);
+    QTransform turn;
+    turn.translate(x, y);
+    turn.rotate(-45.0);
+    return turn.map(link);
+}
+
 // An isometric standard view: the cube, and the eye's arrow from its corner
 // along (dx, dy) - both components +-1, so the arrow runs on a diagonal.
 void drawIsometricView(const Ink& ink, double dx, double dy)
@@ -366,6 +381,7 @@ const std::vector<Icon>& allIcons()
         Icon::DimensionStyles,
         Icon::LayerVisible, Icon::LayerLocked,
         Icon::LayerColour,
+        Icon::ViewUnlinked, Icon::ViewLinked,
     };
     return icons;
 }
@@ -1271,6 +1287,17 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.fill(rectangle(12, 12, 9, 9, 1.5), true);
         ink.stroke(rectangle(12, 3, 9, 9, 1.5));
         ink.stroke(rectangle(3, 12, 9, 9, 1.5), true);
+        break;
+    case Icon::ViewUnlinked:
+        // Two links a gap apart: at 14 px the gap is two pixels, which is
+        // what tells the pair from the closed chain beside it.
+        ink.stroke(chainLink(7.2, 16.8, 9.0, 6.0));
+        ink.stroke(chainLink(16.8, 7.2, 9.0, 6.0));
+        break;
+    case Icon::ViewLinked:
+        // Interlocked: each link runs a third of its length into the other.
+        ink.stroke(chainLink(9.3, 14.7, 11.5, 6.2), true);
+        ink.stroke(chainLink(14.7, 9.3, 11.5, 6.2), true);
         break;
     }
     painter.restore();
