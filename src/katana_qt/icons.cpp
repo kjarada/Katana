@@ -382,6 +382,8 @@ const std::vector<Icon>& allIcons()
         Icon::LayerVisible, Icon::LayerLocked,
         Icon::LayerColour,
         Icon::ViewUnlinked, Icon::ViewLinked,
+        Icon::ZoomIn,       Icon::ZoomOut,
+        Icon::ZoomSelection,
     };
     return icons;
 }
@@ -1298,6 +1300,22 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         // Interlocked: each link runs a third of its length into the other.
         ink.stroke(chainLink(9.3, 14.7, 11.5, 6.2), true);
         ink.stroke(chainLink(14.7, 9.3, 11.5, 6.2), true);
+        break;
+    case Icon::ZoomIn:
+    case Icon::ZoomOut:
+        // Zoom To's lens and handle, with the sign where its square was.
+        ink.stroke(circle(10, 10, 6.5));
+        ink.line(14.8, 14.8, 20.5, 20.5, false, 2.6);
+        ink.line(7, 10, 13, 10, true);
+        if (which == Icon::ZoomIn) {
+            ink.line(10, 7, 10, 13, true);
+        }
+        break;
+    case Icon::ZoomSelection:
+        // The selection's dashed box, as Select All draws it, under the lens.
+        ink.dashed(rectangle(3, 3, 12.5, 12.5), true);
+        ink.stroke(circle(15, 15, 4.6));
+        ink.line(18.3, 18.3, 21.5, 21.5, false, 2.4);
         break;
     }
     painter.restore();

@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -81,6 +82,15 @@ class SelectionSet {
 // point audit REN-03 made for the 3D view, made here for every view.
 [[nodiscard]] katana::geometry::Box2 drawnExtent(const katana::entity::Model& model,
                                                  const LayerOverrides& view);
+
+// The box round the entities `ids` names, measured as drawnExtent measures
+// one: what ZOOM frames for a scope (view_verbs.hpp), and what the window
+// frames for a selection (Select by ID, a style's users) - one measure, so
+// the three cannot frame the same entities differently. Ids that name no
+// entity are passed over, and so are construction lines, which drawnExtent
+// leaves out for the same reason; empty when nothing is left.
+[[nodiscard]] katana::geometry::Box2 extentOf(const katana::entity::Model& model,
+                                              std::span<const katana::entity::EntityId> ids);
 
 // Nearest selectable entity whose geometry lies within `tolerance` (model units)
 // of `point`. Ties go to the higher id: the entity drawn last, i.e. on top.

@@ -292,6 +292,93 @@ TEST(ViewChrome, PressingAViewsZoomExtentsMakesItTheActiveView)
     EXPECT_EQ(w.active(), plan);
 }
 
+namespace {
+
+// The buttons a bar shows, by name, with their rectangles in the bar.
+std::vector<std::pair<QString, QRect>> shownButtons(const QWidget& bar)
+{
+    std::vector<std::pair<QString, QRect>> shown;
+    for (const QToolButton* button : bar.findChildren<QToolButton*>()) {
+        if (button->isVisible()) {
+            shown.emplace_back(button->objectName(), button->geometry());
+        }
+    }
+    return shown;
+}
+
+} // namespace
+
+TEST(ViewChrome, TheTitleBarShowsOptionalToolsOnlyWhereTheyFitAndNoTwoOverlap)
+{
+    // A plan view's bar has three optional tools: Zoom to Selection
+    // (priority 2), and Zoom In and Out (1, a pair). Each shows only while
+    // it fits with DockTitleBar::kTitleRoom left for the title, the highest
+    // first: each is 22 px and the row's 1 px spacing. Worked from the bar's
+    // least width, which leaves the optional tools out.
+    ChromedWorkspace w;
+    const ViewId plan = w.active();
+    katana::qt::DockTitleBar* bar = w.chrome->titleBar(w.dock(plan));
+    ASSERT_NE(bar, nullptr);
+    for (const int windowWidth : {300, 600}) {
+        w.window.resize(windowWidth, 400);
+        processEvents();
+        const int width = bar->width();
+        const int least = bar->minimumSizeHint().width();
+        const int room =
+            width - least - (katana::qt::DockTitleBar::kTitleRoom - 24 /* the title's least */);
+        const bool selection = room >= 23;
+        const bool inAndOut = selection && room - 23 >= 2 * 23;
+
+        const auto* zoomIn = bar->findChild<QToolButton*>("ViewZoomInButton");
+        const auto* zoomOut = bar->findChild<QToolButton*>("ViewZoomOutButton");
+        const auto* zoomSelection = bar->findChild<QToolButton*>("ViewZoomSelectionButton");
+        ASSERT_NE(zoomIn, nullptr);
+        ASSERT_NE(zoomOut, nullptr);
+        ASSERT_NE(zoomSelection, nullptr);
+        EXPECT_EQ(zoomSelection->isVisible(), selection) << "bar " << width << " px";
+        EXPECT_EQ(zoomIn->isVisible(), inAndOut) << "bar " << width << " px";
+        EXPECT_EQ(zoomOut->isVisible(), inAndOut) << "bar " << width << " px";
+        if (windowWidth == 600) {
+            EXPECT_TRUE(inAndOut) << "at 600 px every tool fits";
+        } else {
+            EXPECT_FALSE(inAndOut) << "at 300 px In and Out go first";
+        }
+
+        // Every button shown lies in the bar and clear of every other.
+        const auto shown = shownButtons(*bar);
+        ASSERT_GE(shown.size(), 7U);
+        for (std::size_t i = 0; i < shown.size(); ++i) {
+            EXPECT_TRUE(bar->rect().contains(shown[i].second))
+                << shown[i].first.toStdString() << " leaves the " << width << " px bar";
+            for (std::size_t j = i + 1; j < shown.size(); ++j) {
+                EXPECT_FALSE(shown[i].second.intersects(shown[j].second))
+                    << shown[i].first.toStdString() << " overlaps "
+                    << shown[j].first.toStdString() << " at " << width << " px";
+            }
+        }
+    }
+}
+
+TEST(ViewChrome, OptionalToolsNeverWidenTheDocksMinimum)
+{
+    ChromedWorkspace w;
+    const ViewId plan = w.active();
+    katana::qt::DockTitleBar* bar = w.chrome->titleBar(w.dock(plan));
+    ASSERT_NE(bar, nullptr);
+    w.window.resize(900, 400);
+    processEvents();
+    ASSERT_TRUE(bar->findChild<QToolButton*>("ViewZoomInButton")->isVisible());
+    const int wide = bar->minimumSizeHint().width();
+    const int dockWide = w.dock(plan)->minimumSizeHint().width();
+    w.window.resize(300, 400);
+    processEvents();
+    ASSERT_FALSE(bar->findChild<QToolButton*>("ViewZoomInButton")->isVisible());
+    // The least width does not depend on which optional tools are shown, so
+    // a view can always be narrowed past them.
+    EXPECT_EQ(bar->minimumSizeHint().width(), wide);
+    EXPECT_EQ(w.dock(plan)->minimumSizeHint().width(), dockWide);
+}
+
 TEST(ViewChrome, OpeningAViewSplitsTheActiveViewIntoEqualHalvesAlongItsLongerSide)
 {
     ChromedWorkspace w;

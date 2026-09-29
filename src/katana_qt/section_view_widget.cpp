@@ -471,12 +471,21 @@ void SectionViewWidget::wheelEvent(QWheelEvent* event)
     if (notches == 0.0) {
         return;
     }
-    // Zoom about the cursor: the station and elevation under it must not move.
-    const QPointF position = event->position();
+    // About the cursor.
+    zoomAt(event->position(), std::pow(kZoomPerNotch, notches));
+    event->accept();
+}
+
+void SectionViewWidget::zoomAt(const QPointF& position, double factor)
+{
+    if (!std::isfinite(factor) || factor <= 0.0) {
+        return;
+    }
+    // The station and elevation under `position` must not move.
     const double station = stationAt(position.x());
     const double elevation = elevationAt(position.y());
 
-    scale_ = std::clamp(scale_ * std::pow(kZoomPerNotch, notches), 1e-9, 1e9);
+    scale_ = std::clamp(scale_ * factor, 1e-9, 1e9);
 
     originStation_ = station - (position.x() - kLeftMargin) / scale_;
     originElevation_ = elevation - (static_cast<double>(height() - kBottomMargin) - position.y()) /
@@ -484,7 +493,6 @@ void SectionViewWidget::wheelEvent(QWheelEvent* event)
     framed_ = true;
     userMoved_ = true; // the user's view now, kept on a resize
     update();
-    event->accept();
 }
 
 } // namespace katana::qt

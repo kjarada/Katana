@@ -1378,19 +1378,21 @@ if(TARGET katana)
     # points, and the inverse of the 3-4-5 leg in the log - 5.000 by hand.
     # ZOOM typed between them is taken by the tool host as the view's
     # command (ToolHost::onTransparent), never handed to the tool as a
-    # malformed point, and the tool carries on at the same step. No view
-    # runs it yet, so the host refuses it aloud; the EXPECT holds that
-    # refusal before the inverse, because a ZOOM wrongly sent to the tool
-    # is refused by the tool instead ("'ZOOM' is not an input this tool
-    # takes now") and the inverse still follows, which the result alone
-    # cannot tell apart. When the view sets onTransparent the refusal
-    # becomes the prompt shown again, and this EXPECT with it.
+    # malformed point, and the tool carries on at the same step. The view
+    # runs it (ViewWorkspace::wireTools) as its ZOOM line through the one
+    # executor, so its record comes before the inverse, and the line is
+    # logged once: the command line leaves the echo to the executor. Before
+    # the view ran it the host refused it aloud ("cannot run inside"); a
+    # ZOOM wrongly sent to the tool would be refused by the tool instead and
+    # the inverse would still follow, which the result alone cannot tell
+    # apart - hence the record, and the refusals forbidden.
     add_test(NAME qt_dist_typed_at_the_command_line_reports_the_inverse_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>DIST|>0,0|>ZOOM|>3,4"
-            "-DEXPECT=! ZOOM cannot run inside Distance; press Esc to end the tool first[.].*Horizontal distance 5[.]000"
+            "-DDRIVE=>DIST|>0,0|>ZOOM|>3,4|?commandLog"
+            "-DEXPECT=view=1 kind=plan[^\r\n]*.*Horizontal distance 5[.]000.*commandLog: .*> ZOOM view=1 kind=plan"
+            "-DFORBID=cannot run inside|not an input this tool takes|> ZOOM > ZOOM"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dist_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Quick Select is a form asked at the command line, one question at a
@@ -1445,6 +1447,32 @@ if(TARGET katana)
             "-DEXPECT=view=1 kind=plan title=\"Plan 1\"[^\r\n]*linked=yes[^\r\n]*hidden=asbuilt[\r\n]+view=2 kind=plan title=\"Plan 2\"[^\r\n]*linked=yes[^\r\n]*hidden=design[\r\n]+views=2 linked=2"
             "-DFORBID=unknown command|no layer '"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/design_and_as_built_views_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ZOOM on the shared scope (cad/view_verbs.hpp): the selection framed in
+    # the second view, the first following it. By hand the line's middle is
+    # (25, 20); the reply is the scope's record, then the view moved, then
+    # the one that followed.
+    add_test(NAME qt_zoom_to_selection_moves_the_linked_views_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN plan|>VIEWS LINK 1,2|>LINE 10,10 40,30|>SELECT ALL|>ZOOM SELECTION view=2|>VIEWS"
+            "-DEXPECT=scope=selection matched=1[\r\n]+view=2 kind=plan centre=25,20[^\r\n]*[\r\n]+view=1 kind=plan followed=2 centre=25,20"
+            "-DFORBID=unknown command|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zoom_to_selection_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # View > Zoom To: the shared scope and filter controls build the ZOOM
+    # line and hand it to the one executor; the status says what ZOOM
+    # answered. The design line alone is taken: the whole drawing, filtered
+    # to the design layer.
+    add_test(NAME qt_zoom_to_dialog_runs_its_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW other|>LAYER SET other|>CIRCLE 100,100 5|@viewZoomTo|!zoomToScopeDrawing|zoomToFilterLayer=design|?zoomToLine|!zoomToRun|?zoomToStatus"
+            "-DEXPECT=zoomToLine: ZOOM DRAWING WHERE LAYER=design[\r\n].*zoomToStatus: scope=drawing where=\"LAYER=design\" matched=1 view=1 kind=plan centre=25,20"
+            "-DFORBID=unknown command|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zoom_to_dialog_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every key sequence the window answers to reaches one thing: Qt
     # disables an ambiguous shortcut for BOTH actions, so a clash is two
@@ -1502,6 +1530,8 @@ if(TARGET katana)
                          qt_linked_plan_views_zoom_together_headless
                          qt_unlinking_one_of_two_views_unlinks_both_headless
                          qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless
+                         qt_zoom_to_selection_moves_the_linked_views_headless
+                         qt_zoom_to_dialog_runs_its_line_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
                          qt_every_menu_item_has_an_icon_and_a_status_tip_headless
                          qt_the_window_section_sizes_the_text_and_toolbars_and_resets_the_layout_headless

@@ -90,6 +90,18 @@ Box2 drawnExtent(const Model& model, const LayerOverrides& view)
     return extent;
 }
 
+Box2 extentOf(const Model& model, std::span<const EntityId> ids)
+{
+    Box2 extent;
+    for (const EntityId id : ids) {
+        const Entity* entity = model.entities.find(id);
+        if (entity != nullptr && !isConstructionLayer(entity->layer)) {
+            extent.expand(katana::entity::boundingBox(entity->geometry));
+        }
+    }
+    return extent;
+}
+
 namespace {
 
 const LayerOverrides& viewOf(const SelectionFilter& filter)

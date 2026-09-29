@@ -162,7 +162,7 @@ TEST(Icons, TheListHoldsEveryIconOnceAndEachPaintsSomething)
     // every icon only if the list does.
     const auto& icons = katana::qt::allIcons();
     // The last enumerator, which moves whenever an icon is added at the end.
-    ASSERT_EQ(icons.size(), static_cast<std::size_t>(Icon::ViewLinked) + 1);
+    ASSERT_EQ(icons.size(), static_cast<std::size_t>(Icon::ZoomSelection) + 1);
     for (std::size_t i = 0; i < icons.size(); ++i) {
         EXPECT_EQ(static_cast<std::size_t>(icons[i]), i);
     }

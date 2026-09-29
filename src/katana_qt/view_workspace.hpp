@@ -52,6 +52,10 @@
 
 class QToolButton;
 
+namespace katana::cad {
+class CommandInterpreter;
+}
+
 namespace katana::qt {
 
 class ViewLayersPopup;
@@ -114,10 +118,17 @@ class ViewWorkspace final : public QMainWindow {
     // through its widget, and the views linked with it follow.
     [[nodiscard]] katana::cad::ViewVerbHost& verbHost();
     // The window's one executor. A view bar's controls build their lines
-    // (VIEWS LINK, VIEWS UNLINK) and run them through it, logged as a typed
-    // line is. Without one - a workspace built on its own - they do nothing
-    // but show the link as it is.
+    // (VIEWS LINK, VIEWS UNLINK, ZOOM IN view=2 ...) and run them through it,
+    // logged as a typed line is; so does a ZOOM typed while a tool runs.
+    // Until one is given, or given empty, they run through an interpreter of
+    // the workspace's own, unlogged.
     void setCommandRunner(CommandRunner runner);
+    // Whether `line`, typed now, is a ZOOM for the view rather than an answer
+    // for the tool running in a plan view: ZOOM, Z, 'ZOOM or 'Z while a tool
+    // runs (tools::isTransparentCommand). The tool host hands it to the
+    // command runner and the tool stays at its step, so the command line
+    // leaves its echo to the runner, which logs the line once.
+    [[nodiscard]] bool runsTransparently(const QString& line) const;
     // What a view's Link button does: VIEWS UNLINK <id> when the view is
     // linked, else VIEWS LINK <id> TO <the view the user moved last>
     // (ViewSet::linkLeaderFor), through the command runner. Every Link button
@@ -321,6 +332,9 @@ class ViewWorkspace final : public QMainWindow {
         QToolButton* kindButton = nullptr;
         QToolButton* linkButton = nullptr;
         QToolButton* layersButton = nullptr;
+        QToolButton* zoomInButton = nullptr;
+        QToolButton* zoomOutButton = nullptr;
+        QToolButton* zoomSelectionButton = nullptr;
         [[nodiscard]] QWidget* widget() const;
     };
     // The workspace as the verbs' host (verbHost), apart so that its
@@ -362,6 +376,12 @@ class ViewWorkspace final : public QMainWindow {
     void updateLinkButton(const View& view);
     // Every view's, and the View menu's (onLinksChanged).
     void updateLinkButtons();
+    // The zoom tools a view's kind takes (cad/view_verbs.hpp): In and Out on
+    // a plan view and a section, Zoom to Selection on a plan view.
+    void updateZoomTools(const View& view);
+    // A bar's line, through the command runner; what it did or why it was
+    // refused is in the log the runner writes.
+    void runViewLine(const QString& line);
     // A plan view's pan or zoom changed (ViewportWidget::onViewMoved): the
     // move is noted when the user made it, and when the view is linked the
     // others take its centre and scale (ViewSet::follow) and every member
@@ -403,6 +423,11 @@ class ViewWorkspace final : public QMainWindow {
     bool gridVisible_ = true;
 
     std::unique_ptr<VerbHost> verbHost_;
+    // Until the window hands over its executor, the bars' lines run through
+    // an interpreter of this workspace's own, answered by this workspace: a
+    // workspace built on its own (a test, a harness) has working bars, and
+    // they still go by the verbs, never around them.
+    std::unique_ptr<katana::cad::CommandInterpreter> ownInterpreter_;
     CommandRunner runner_;
     // True while viewMoved is moving the link: a view moved by it never
     // reports that move (holdView raises nothing), and this makes sure of it

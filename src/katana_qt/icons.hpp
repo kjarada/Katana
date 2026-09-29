@@ -226,6 +226,11 @@ enum class Icon {
     // accent while it moves with the views linked to it.
     ViewUnlinked,
     ViewLinked,
+    // A view's zoom tools: the lens of Zoom To with the accent plus and minus,
+    // and the lens over the dashed accent box of a selection.
+    ZoomIn,
+    ZoomOut,
+    ZoomSelection,
 };
 
 // Every value of Icon, in declaration order, for the contact sheet and for

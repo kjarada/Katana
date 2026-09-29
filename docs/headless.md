@@ -217,7 +217,11 @@ followed it, then every view's record; `%View2` then makes that view's dock
 the target, so the grab is the view with its bar
 (`qt_linked_plan_views_zoom_together_headless`,
 `qt_unlinking_one_of_two_views_unlinks_both_headless`). A dock is named
-`View` and its id, the id a record's `view=` gives.
+`View` and its id, the id a record's `view=` gives. `ZOOM SELECTION view=2`
+frames the selection in view 2 and says what the scope took
+(`qt_zoom_to_selection_moves_the_linked_views_headless`), and View > Zoom
+To is driven by its own names - `@viewZoomTo|!zoomToScopeDrawing|zoomToFilterLayer=design|?zoomToLine|!zoomToRun|?zoomToStatus`
+(`qt_zoom_to_dialog_runs_its_line_headless`).
 
 ## check_screenshot.cmake: the test side
 

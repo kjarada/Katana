@@ -1234,20 +1234,41 @@ VIEWS SHOW <id> <layer>[,<layer>...] | ALL
 VIEWS ISOLATE <id> <layer>
 ZOOM | Z                              the active view's extents, as always
 ZOOM EXTENTS | IN [f] | OUT [f] | <f> | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s]  [view=<id>]
+ZOOM SELECTION | DRAWING | VIEW [<id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
+     [WHERE key=value ...]  [view=<id>]
 ```
 
 An id is the `ViewId` a record's `view=` gives, as for the scope word `VIEW`,
 never the number in the title. `view=` may stand anywhere on a `ZOOM` line and
-is taken off before anything else is read. `EXTENTS` frames what the view
-draws, in any kind of view; `IN` and `OUT` (by 2 unless a factor is given)
-and a bare factor zoom about the view's centre; `WINDOW` frames a box as Zoom
-Extents frames the drawing - the margin is the widget's - and `CENTRE` puts
-a point in the middle, at `SCALE` pixels per unit when given. Those four act
-on plan views, and on any other are refused naming the kind (`ZOOM WINDOW
-frames a plan view: view 3 is 3D`). `WINDOW` is a box of the drawing; the
-scope word `AREA` would mean the entities found in one, which is why it is
-not the word here. `SCALE` outside `ViewTransform`'s limits is refused, not
-clamped, because a scale the view cannot show is not the one asked for.
+is taken off before anything else is read - after `WHERE` it would otherwise
+be read as a condition and refused. `EXTENTS` frames what the view draws, in
+any kind of view; `IN` and `OUT` (by 2 unless a factor is given) and a bare
+factor zoom about the view's centre, in a plan view or a section (a
+section's about the middle of its plot, `SectionViewWidget::zoomAt`);
+`WINDOW` frames a box as Zoom Extents frames the drawing - the margin is the
+widget's - and `CENTRE` puts a point in the middle, at `SCALE` pixels per
+unit when given. A request a view's kind does not take is refused naming the
+kind (`ZOOM WINDOW frames a plan view: view 3 is 3D`); 3D and elevation views
+take `EXTENTS` alone until the 3D zoom towards the cursor is merged
+(`docs/desktop.md`, "Linked views", Not done). `WINDOW` is a box of the
+drawing; the scope word `AREA` means the entities found in one, which is why
+it is not the word here. `SCALE` outside `ViewTransform`'s limits is refused,
+not clamped, because a scale the view cannot show is not the one asked for.
+
+**`ZOOM` takes the shared scope** (above, "Scope and filter"): the scope
+words, read by the one parser and resolved by `matchScope`, then framed by
+`cad::extentOf` - the box of the ids, measured as `drawnExtent` measures one,
+construction lines left out; `MainWindow::showSelection` (Select by ID's
+zoom) and the Format managers' Select Users frame by it too, so the three
+cannot frame the same entities differently. `ZOOM` alone is still
+`EXTENTS`, where no scope word elsewhere means the selection, so the
+decision is made before the parser is called. The reply begins with the
+scope's record (`scope=selection matched=1`, then the view moved and the
+views that followed); a scope that takes nothing moves no view and says
+`matched=0`, which is an answer, not a refusal
+(`ViewVerbsTest.AScopeThatMatchesNothingMovesNoViewAndSaysSo`). A scope
+frames a plan view; framing what a scope takes in a 3D view needs the scene
+to draw a set of ids, and is not done.
 
 Records, one per line, `key=value`, reals by `core::formatExactReal` and
 angles in degrees:
