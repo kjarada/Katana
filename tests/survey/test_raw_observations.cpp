@@ -166,10 +166,14 @@ TEST(RawObservations, AStationWithRawDirectionsAndGnssPassesProjectValidation)
     EXPECT_TRUE(validateProject(project).ok()) << validateProject(project).error().describe();
 }
 
-TEST(RawObservations, TheHorizontalAdjustmentListsRawKindsAsUnusedRatherThanFailing)
+TEST(RawObservations, TheHorizontalAdjustmentSetsAGlobalGnssValueAsideAndTakesADirection)
 {
-    // Directions and global GNSS values need the reduction first; an
-    // adjustment handed them must set them aside and say so, not crash.
+    // A global GNSS value needs the reduction's conversion to grid first; an
+    // adjustment handed one must set it aside and say so, not crash. A
+    // direction it takes, as one of the set read at A with an orientation
+    // unknown of its own (network_adjustment.hpp) - here that unknown and
+    // the reading add nothing else. B is due north of A, so the reading 0.3
+    // there turns into an orientation of 0 - 0.3 = 2 pi - 0.3.
     SurveyNetwork network;
     ASSERT_TRUE(network.addPoint(positioned("A", 0.0, 0.0)).ok());
     ASSERT_TRUE(network.addPoint(positioned("B", 100.0, 0.0)).ok());
@@ -179,9 +183,16 @@ TEST(RawObservations, TheHorizontalAdjustmentListsRawKindsAsUnusedRatherThanFail
     ASSERT_TRUE(network.addObservation(AzimuthObservation{"A", "B", 0.0, 1e-5, {}}).ok());
     ASSERT_TRUE(
         network.addObservation(HorizontalDirectionObservation{"A", "B", 0.3, 1e-5, {}, {}}).ok());
+    GnssGlobalPositionObservation global;
+    global.point = "B";
+    global.geodetic = GeodeticCoordinate{-0.59, 2.64, 45.0};
+    ASSERT_TRUE(network.addObservation(global).ok());
     const auto result = adjustHorizontalNetwork(network);
     ASSERT_TRUE(result.ok()) << result.error().describe();
-    EXPECT_EQ(result->unusedObservations, (std::vector<std::size_t>{2}));
+    EXPECT_EQ(result->unusedObservations, (std::vector<std::size_t>{3}));
+    ASSERT_EQ(result->orientations.size(), 1U);
+    EXPECT_EQ(result->orientations[0].pointId, "A");
+    EXPECT_NEAR(result->orientations[0].orientation, 2.0 * kPi - 0.3, 1e-12);
 }
 
 TEST(RawObservations, TimestampsPrintAsIso8601WithTheirTimeSystem)

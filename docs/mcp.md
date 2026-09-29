@@ -109,7 +109,14 @@ imported the same way:
 `SURVEY READ <file>` answers what the reader made of it in records (`survey`,
 `content`, `declared`, each `warning` with its record), and `SURVEY IMPORT
 <file>` imports it as a survey job, one undo step, answering with the job and
-the reduction's warnings (`docs/survey.md`, "The opcode field file (.fld)").
+the reduction's warnings (`docs/survey.md`, "The opcode field file (.fld)"),
+and with a `resection` record for each setup the reduction positioned by
+resection: the setup, its point, the points it was computed `from`, its
+northing, easting and height, their one-sigma precision, its redundancy (plan
++ heights) and how many of its residuals were `flagged`
+(`cli.survey_import_free_station_field_file`; `docs/survey.md`, "The
+reduction's resection"). No tool of its own: the report the window shows is
+kept with the job, and the record is what an agent acts on.
 `CRS SET` takes a WKT as the agent sends it, quotes and all
 (`McpServer.AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt`); it once lost
 them and refused every WKT whose names hold a blank.

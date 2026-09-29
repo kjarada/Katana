@@ -181,7 +181,7 @@ extension.
 |---|---|---|---|---|
 | Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
 | Leica GSI (`leica-gsi`): GSI-8 and GSI-16, mixed or not; any extension when every line is a GSI block | yes | no | 1.1 | total station words only (a digital level's are counted, not read); declares no coordinate system; a sexagesimal angle whose word writes 60 seconds in their place is read as the next minute, and a circle reading past a full circle is refused (see "Leica GSI" below) |
-| Opcode field file (`opcode-field-file`): `.fld`, tab-separated records opening with a numeric opcode, total-station and GNSS (RTK) jobs | yes | no | 1.1 | opcodes 02, 03, 04, 05, 06, 07, 09, 16, 20, 29, 41, 42, 43, 44, 71, 72, 73, 99, 100, 124, 125, 128, 129, 138, 139 and -2 read; every other opcode skipped with a warning naming it; an RTK position written as 02 with its receiver's "GNSS Solution" is a GNSS position, any other 02 an entered coordinate; a backsight's stated azimuth kept apart from its circle reading; every measurement of a point keeps its attributes; offsets move the shot they follow; resected setups are not positioned; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
+| Opcode field file (`opcode-field-file`): `.fld`, tab-separated records opening with a numeric opcode, total-station and GNSS (RTK) jobs | yes | no | 1.1 | opcodes 02, 03, 04, 05, 06, 07, 09, 16, 20, 29, 41, 42, 43, 44, 71, 72, 73, 99, 100, 124, 125, 128, 129, 138, 139 and -2 read; every other opcode skipped with a warning naming it; an RTK position written as 02 with its receiver's "GNSS Solution" is a GNSS position, any other 02 an entered coordinate; a backsight's stated azimuth kept apart from its circle reading; every measurement of a point keeps its attributes; offsets move the shot they follow; a resected setup's station is computed by the reduction's resection (the file states none); the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
 | Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning, a shot with no raw twin said to be lost; units from the header - an undefined angle or distance unit refused, an undefined pressure or temperature unit warned about and not read, a `13DU` followed; coordinates in the header's order (1 N-E-Elev, 2 E-N-Elev; Trimble's 3 east first, with a warning), a point's latest kept; collimation (04) applied per face; declares no coordinate system |
 
 The matrix lists the formats that have a section in this file.
@@ -663,14 +663,14 @@ Decisions that are the reader's own, each stated in the source:
   setup is on "resection at record N". A point ID given with the name is
   kept, as a 03's is. The shots after the 129 are still that setup's: no 03
   follows any of the file's twelve. The file does not state where the
-  resected points are and the reduction does not compute a resection, so
-  these setups and what was measured from them are not positioned:
-  `notCarried` says so, and the reduction report names each setup that
-  "stands on" a point "which has no position". Rejected: computing the
-  resection in the reader. A resection is an estimate from several pointings
-  that needs the reduction's grid scale factor, curvature and refraction, and
-  its weights and its report - the reader knows none of them - and the same
-  step serves every format with a setup on an unknown point (Not done). An
+  resected points are, so the reader gives none, and the reduction computes
+  each resection from the setup's pointings to placed points ("The
+  reduction's resection", below), then radiates the rest from it. Rejected:
+  computing the resection in the reader. A resection is an estimate from
+  several pointings that needs the reduction's grid scale factor, curvature
+  and refraction, and its weights and its report - the reader knows none of
+  them - and the same step serves every format with a setup on an unknown
+  point. An
   offset (below) is not that: a fixed correction to one shot, applied in the
   instrument's frame before the reduction applies any of those.
 - **Multiple coding (16)** strings the current measurement point into a second
@@ -822,8 +822,9 @@ the line from it by the offset's amount (checked from the drawn
 coordinates). Its backsight distance now checks to 19.3 mm, where it was
 1 524.4 mm; 13.4 mm of that is the grid scale factor, which `SURVEY IMPORT`
 does not apply (its defaults reduce with none) at an easting where the
-combined factor is about 0.99979. The twelve resected setups draw nothing
-until the reduction computes a resection.
+combined factor is about 0.99979. The twelve resected setups drew nothing
+until the reduction computed a resection (2026-09-30, "The reduction's
+resection" below); the job is now all 4 834 of its points.
 
 The fixtures are hand-built in the files' layouts, with invented names and
 numbers: `tests/surveyio/data/fld/setup.fld` (a setup),
@@ -871,17 +872,12 @@ Not done:
 
 - The format's XML form is not read: no sample of it, and its records are
   the same opcodes written as elements.
-- Resections are not computed. The reduction has none, so a setup a 128 or
-  138 makes, and everything measured from it, is not positioned: 12 setups
-  and 4 056 points of the resection job. The file holds what a resection
-  needs - each block measures three known marks on both faces, with
-  distances - and in review a plain least-squares resection from those
-  pointings (directions, and plan distances times the site's combined
-  factor), worked outside Katana, placed all twelve with misfits of 4 to
-  14 mm, close to the residuals the controller wrote after each block. It is
-  a step of the reduction, which would place a setup on an unknown point from
-  its pointings to placed ones for every format, with its own weights and
-  report - not a reading of this format.
+- The reader does not tell the reduction where a resection's block ends
+  (129): a check (06) after it to one of the block's marks, or to another
+  placed point, is one more pointing of the reduction's resection, where the
+  field software's resection took the block alone - it moves the resection
+  job's stations by up to 3.4 mm ("The reduction's resection", below). A
+  Helmert resection (138) is computed as the least squares a 128's is.
 - Offsets are applied by changing the shot they move; a typed offset on the
   pointing, which RW5's off-centre shots and GTS-7's OFFSET records would use
   too, would keep the measured values in the observation. The GTS-7 reader
@@ -921,11 +917,9 @@ Not done:
   skipped with a warning naming them; 140 in a .fld is skipped.
 - `SURVEY READ`'s `warnings=` counts the warnings listed, which the builder
   caps at 10 000 and one "more" line. `SURVEY IMPORT`'s reply lists the first
-  20 reduction warnings, so for the resection job the twelve "stands on ...,
-  which has no position" lines are among those it only counts, and the line
-  it ends with ("reducing the observations is what gives them a position",
-  cad's words for every format) does not say that the setups they were
-  measured from have no position.
+  20 reduction warnings: for the resection job the face-pair ones, and not
+  the residuals its resections flag, which it only counts; its `resection`
+  records say how many each flagged.
 - `SURVEY IMPORT` reduces with no grid scale factor and no height reduction
   unless a person sets them in Survey > Survey Jobs, so a total-station job
   imported into a projected drawing is radiated with ground distances.
@@ -1334,6 +1328,177 @@ Not done:
   ranges checked first, since those types keep only a byte); the RINEX
   reader (`isLeapYear`, `daysInMonth`) and the subsurface delivery schema
   still write the leap-year rule out themselves.
+
+## The reduction's resection
+
+Added 2026-09-30. A setup on a point that nothing else positions - a free
+station, which a field controller calls a resection (the opcode field file's
+128 and 138) - used to be given up ("stands on ..., which has no position:
+nothing was computed from it"), and everything measured from it with it: the
+owner's resection job has twelve such setups, and they held 4 056 of its
+4 834 points. The reduction now computes such a station from the setup's
+reduced pointings to points already placed. It looks at nothing but the
+reduced pointings, so it serves every format with such a setup, not the
+field file alone: `resectSetup` in `src/katana_survey/reduction_adjust.cpp`,
+tried from `placeSetups` in `src/katana_survey/reduction.cpp`.
+
+**When it is tried.** When no setup is left whose station or backsight has
+just been placed, the reduction falls back, one setup at a time, on: 0. the
+resection of the first setup in the file that has what one needs; 1. the
+file's own coordinates for a station nothing positions; 2. the circle as set
+on a backsight nothing positions; 3. giving up, saying why. A fallback and not
+a first choice: a station that another setup radiates keeps that position, as
+it always did, and its setup's pointings to placed points are checks of it
+(`ReductionResection.AStationAnotherSetupRadiatesIsNotResected`), so no file
+that reduced before reduces differently unless a setup of it could not be
+placed at all - the owner's second field file, the SDR traverse, the GSI
+traverse and the RTK job import byte for byte as before. Before the file's own
+coordinates, because a resection is computed from what was measured, which is
+what the reduction is for, where the file's coordinates of a station are a
+controller's or a person's and unchecked
+(`ReductionResection.AResectionComesBeforeTheFilesOwnCoordinatesForTheStation`);
+before the circle as set, which is an assumption about the instrument. A
+setup is tried once its targets are placed, whichever setup places them
+(`ReductionResection.AResectionWaitsForTargetsALaterSetupPlaces`): the
+candidates are counted as points are placed, each placement touching only the
+setups that observe that point, so the step adds nothing per placement and
+`ReductionPerformance.SetupsPlacedOneAtATimeCostLinearlyInTheirNumber` holds
+its ratio. A refusal leaves the setup to the later steps, which name it.
+
+**What it needs.** Two placed points each observed with a direction and a
+horizontal distance, or three observed with a direction: the fewest that fix
+north, east and the orientation (four observations or three of three
+unknowns). Points at one position count once. Any placed point serves -
+control, entered, GNSS, radiated, even a station on the file's own coordinates
+- and is held as it is. Face pairs are meaned as the reduction means them, and
+each reduced pointing is one observation.
+
+**How it is solved.** By the network adjustment itself
+(`adjustHorizontalNetwork`): the station free, the targets held, each
+pointing's direction one of a set with an orientation unknown, each
+horizontal distance with phase B's factors taken at the approximate station;
+then by the level adjustment of its trigonometric height differences - the
+instrument and target heights, the reduction's curvature and refraction - to
+the targets with heights. The weights are the reduction's one policy: the
+settings' a-priori precision, meaned over the faces in phase A, and the
+centring of instrument and target over the line, shared with the network
+(`withCentring`, `distanceSigmaOf`, `heightDifferenceSigmaOf`). Both go through
+the network's outlier loop, so the settings' test - Baarda's w at
+`outlierSignificance` (critical value 3.29 at the default 0.001) or Pope's
+tau - flags a resection's residual as it flags a network's, with a warning,
+and automatic rejection rejects as there. Gauss-Newton starts from a closed
+form: the rigid (Helmert, no scale) fit of the station's own frame onto the
+targets with distances, or else the two-circle construction from three
+directions. The orientation is the solution's: `orientAndRadiate` orients a
+resected setup on the weighted mean of azimuth less reading over the
+directions the resection used - the least-squares orientation for where the
+station stands, which follows the station when a network adjustment moves it
+(`ReductionResection.AResectedStationIsAdjustedWithTheRestOfANetwork`) - and
+radiates the rest; the targets it used are not also checks of it.
+
+The direction sets are new in the network adjustment
+(`SurveyHorizontalNetwork.ThreeDirectionsFixAFreePointAndTheOrientationOfItsSet`,
+`SurveyHorizontalNetwork.ADirectionSetWithDistancesIsAdjustedToAnIndependentSolution`):
+every direction read at one point is one set. Rejected: the angles from a
+reference pointing that the reduction's network builds. They share that
+pointing's error, which uncorrelated weights ignore, so a short first sight -
+its centring error in every angle - spoils all of them; three of the
+resection job's twelve blocks read a mark 3 to 5 m away. Rejected too: a resection
+formula (Tienstra's, Collins') for the answer. It takes three directions
+exactly, and so uses neither a fourth nor a distance, nor weights, nor says
+how well the station is fixed.
+
+**What refuses it,** each named in the warning that the setup was not
+resected, and in the file's-own-coordinates warning where that follows: too
+few placed points (saying what it observes and what a resection needs);
+a value that is not finite; targets on one position, which count once; the
+station on one line with its targets; the station on the circle through three
+targets - the danger circle, found where the construction's two circles are
+one to the project's relative tolerance; and a least squares that fails (rank
+deficient, diverging). Never a position from any of them
+(`ReductionResection.TooFewPlacedPointsAreRefusedSayingWhatAResectionNeeds`,
+`ReductionResection.PointsOnOnePositionCountOnce`,
+`ReductionResection.AStationOnOneLineWithItsTargetsIsRefused`,
+`ReductionResection.AStationOnTheDangerCircleIsRefused`,
+`ReductionResection.AReadingThatIsNotANumberIsRefusedNotComputed`,
+`ReductionResection.ARefusedResectionFallsBackOnTheFilesOwnCoordinatesAndSaysWhy`).
+
+**What it reports.** `ReductionReport::resections`: per resected setup the
+station, the points it was computed from, its coordinates and one-sigma
+precision (a posteriori where there is redundancy, a priori where there is
+none), its orientation and that orientation's precision, and each least
+squares as an adjustment is reported - a residual per direction, distance and
+height difference with its redundancy number and standardised value. The
+report prints a Resections table and each resection's residuals ("Residuals:
+resection at S1 (horizontal)"), a row FLAGGED as a network's is; the station's
+coordinate row says "resection". A resection with no redundancy is warned
+about ("nothing checks the position it gives"), and one with no height too.
+`SURVEY IMPORT` answers one `resection` record each, so an agent reads it
+without the report (`docs/mcp.md`).
+
+**Checked.** `tests/survey/test_reduction_resection.cpp`: two placed points
+with distances and three directions alone, each recovering the station they
+were made from; a perturbed resection whose position, orientation, residuals,
+variance factor and a-posteriori precision match a separate script of the
+textbook model (normal equations, not Katana's code) to 1e-8 m and 0.0001";
+the height as a weighted mean of trigonometric heights with curvature and
+refraction, worked by hand; every refusal; the order; the fallbacks. Two
+fixtures: `tests/surveyio/data/fld/resection.fld`, whose free station
+`cli.survey_import_resection_field_file` now expects where a hand
+calculation puts it and its shots (its heights, written for the reader,
+disagree by 1.1 m, and are flagged), and `tests/surveyio/data/fld/free_station.fld`,
+a free station in the structure of a controller's resections - 128, target
+heights, three marks on both faces, 129, the residual comments, a check, then
+shots - with invented names and numbers (`cli.survey_read_free_station_field_file`,
+`cli.survey_import_free_station_field_file`).
+
+The owner's resection job, `CRS SET EPSG:7856` and `SURVEY IMPORT` (a local
+check; the file is the owner's): before, 778 points and 42 reduction
+warnings, twelve of them "stands on ..., which has no position"; after, all
+4 834 points and 78 warnings - the 27 face-pair warnings as before, two
+notices, and 49 residuals the resections flag: 35 distances, every one
+computed shorter than measured, 13 directions and a height. The import's
+defaults apply no grid scale factor, and the marks are MGA grid coordinates
+where the zone's point scale factor is 0.99980 (200 ppm, 33 mm on the job's
+longest resection sight of 162 m); with that factor (Survey > Survey Jobs
+sets one), 9 are flagged. The controller wrote its own residuals after each block, one line
+per face per mark: another program's numbers, so an independent check. With
+the factor, over the 36 marks and against the mean of each mark's two faces,
+Katana's distance residuals agree with the controller's to 2.0 mm RMS (at
+most 4.3 mm), its height residuals to 1.7 mm RMS (at most 5.4 mm), and its
+direction residuals to 3.4" RMS over the 24 directions weighted under 10" (at
+most 8.7"); the other 12, to marks 3 to 30 m away, differ by up to 59", inside
+the 10" to 100" their centring gives them. They differ at all because the
+controller adjusts each face as an observation where the reduction means the
+pair first; because its weights are its own; because the checks (06) after
+each block are pointings of the reduction's resection and not of the
+controller's (they move the stations by up to 3.4 mm); and because the scale factor it
+used is not in the file. A separate script of the textbook model computed the
+same twelve stations from the same pointings to within 0.05 mm. The reduction
+of the job took 13.1 to 13.5 ms before and 18.0 to 19.4 ms after (Release,
+the reduction alone, best of five in each of three runs) - the twelve least
+squares, and the 4 056 points they let it radiate and report; the whole
+command, now drawing 6.2 times the points, 1.1 to 1.2 s before and 1.2 to
+2.4 s after, timed on a machine running four other builds, so loosely.
+
+Not done:
+
+- A station near the danger circle, but not on it, is computed; its a-priori
+  precision says how weak it is, and nothing refuses it: no tolerance with a
+  source was found to refuse a weak one by.
+- The targets are held: their own errors do not reach the station's
+  precision. A resected station is not computed again when an adjustment
+  moves its targets - the network adjustment adjusts it with the rest, a
+  traverse adjustment leaves it.
+- A setup whose station fell back on the file's own coordinates before its
+  targets were placed is not resected once they are.
+- The reduction's network still turns a setup's directions into angles from
+  a reference pointing: the network adjustment knows no setups, so two setups
+  on one point would be one set there.
+- The report gives no per-mark coordinate misfit (dE, dN, dZ), which the
+  controller prints beside its residuals.
+- `SURVEY IMPORT` applies no grid scale factor, so a resection in a projected
+  drawing fits ground distances to grid coordinates and flags the difference.
 
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 
