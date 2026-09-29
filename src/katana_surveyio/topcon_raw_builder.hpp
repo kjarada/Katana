@@ -69,6 +69,34 @@ inline constexpr double kMetresPerUsSurveyFoot = 1200.0 / 3937.0;
 // z > pi is the same line of sight as 2*pi - z on face left.
 [[nodiscard]] double zenithInModelRange(double zenithRadians) noexcept;
 
+// ---- Offsets ------------------------------------------------------------------
+
+// What a shot reads: a circle reading (radians, clockwise), a zenith in the
+// model's range [0, pi] and a slope distance (metres).
+struct ShotReading {
+    double circle = 0.0;
+    double zenith = 0.0;
+    double slope = 0.0;
+};
+
+// The reading of the point a shot's offsets put it at, from what was measured:
+// `radial` along the plan line from the instrument to the target, positive
+// away from it; `tangential` at right angles to that line, positive to the
+// right looking from the instrument (a clockwise circle reads it as more);
+// `height` added to the target's rise. With plan distance h = s sin z and
+// rise v = s cos z, the point is at plan distance h' = hypot(h + radial,
+// tangential) on the circle a + atan2(tangential, h + radial), rising
+// v' = v + height: the reading is that circle, the zenith atan2(h', v') and
+// the slope distance hypot(h', v'). nullopt when that point is within
+// math::tolerance::kCoordinate of the instrument - its own mark, to which no
+// shot has a direction or a zenith.
+//
+// One home for the arithmetic of every reader on this builder whose format
+// records offsets. The opcode field file applies its 42, 43 and 44 through it;
+// the GTS-7 reader keeps its OFFSET records unapplied (topcon_gts.cpp).
+[[nodiscard]] std::optional<ShotReading> offsetShot(const ShotReading& measured, double radial,
+                                                    double tangential, double height) noexcept;
+
 class RawProjectBuilder {
   public:
     // `source` is copied into every SourceRecord with the record number set.
@@ -99,6 +127,9 @@ class RawProjectBuilder {
     // A record that was not imported: a warning and one more skipped record.
     void skip(std::size_t record, std::string message);
     void countRead() { ++result_.recordsRead; }
+    // Records not imported that one warning already accounts for (the lines
+    // after a file's own end marker).
+    void countSkipped(std::size_t count) { result_.recordsSkipped += count; }
     [[nodiscard]] std::size_t recordsSkipped() const { return result_.recordsSkipped; }
     void notCarried(std::string text);
 
@@ -122,6 +153,16 @@ class RawProjectBuilder {
     // the feature named by code and string number, in the order met.
     void codePoint(std::string_view id, std::string_view code, std::string_view description,
                    std::string_view stringNumber, std::size_t record);
+    // Closes the open feature of `code` and `stringNumber`
+    // (SurveyFeature::closed) and takes it off the open list, so a later point
+    // of that code and string number starts a new feature rather than joining
+    // a closed one. The number of points in it; nullopt when none is open.
+    std::optional<std::size_t> closeFeature(std::string_view code, std::string_view stringNumber);
+    // The same for the feature `id` was first strung into, if still open.
+    std::optional<std::size_t> closeFeatureOf(std::string_view id);
+    // The last point of the open feature of `code` and `stringNumber`.
+    [[nodiscard]] std::optional<std::string> lastPointOf(std::string_view code,
+                                                         std::string_view stringNumber) const;
     void addPointMetadata(std::string_view id, std::string key, std::string value);
     [[nodiscard]] bool hasPoint(std::string_view id) const;
 
@@ -187,6 +228,8 @@ class RawProjectBuilder {
     PointEntry& entry(std::string_view id, std::size_t record);
     [[nodiscard]] std::uint32_t findPoint(std::string_view id, std::size_t hash) const;
     void placePoint(std::uint32_t index);
+    // featureIndex_'s key: the code and the string number.
+    [[nodiscard]] static std::string featureKey(std::string_view code, std::string_view stringNumber);
 
     std::string fileName_;
     katana::survey::SourceRecord sourceTemplate_;
@@ -204,7 +247,7 @@ class RawProjectBuilder {
     std::size_t firstUnlistedRecord_ = 0;
     IdIndex stationIndex_;
     IdIndex occupations_; // setups begun on each point
-    IdIndex featureIndex_;
+    IdIndex featureIndex_; // the OPEN feature of each code and string number
     std::vector<std::size_t> pointingCounters_;
 };
 

@@ -563,6 +563,95 @@ TEST(Reduction, ASetupWhoseBacksightNothingPlacesIsOrientedOnTheCircleAsSetAndTh
               1U);
 }
 
+TEST(Reduction, ASetupWhoseBacksightNothingPlacesIsOrientedOnTheAzimuthTheFileStatesNotTheCircle)
+{
+    // S1 on A backsights RO, which nothing places. The file states the
+    // azimuth A -> RO, 30 00 00, and the circle set on RO, 0 00 00 - a circle
+    // zeroed on the backsight. The field software's orientation (Sokkia SETX
+    // 29.2.6, A = H + BKB azimuth - BKB h.obs) is then 30 - 0:
+    //   Q at reading 90 is azimuth 120, 20 m:
+    //     N = 1000 + 20 cos 120 = 990, E = 1000 + 20 sin 120 = 1017.320508.
+    // Taking the circle for the grid azimuth instead would put Q at azimuth
+    // 90, N 1000 E 1020.
+    SurveyProject project;
+    project.points.push_back(point("A", 1000.0, 1000.0, 50.0));
+    project.unpositionedPoints.push_back(unpositioned("RO"));
+    project.unpositionedPoints.push_back(unpositioned("Q"));
+    project.stations.push_back(setup("S1", "A", 1.5, "RO",
+                                     {Shot{"RO", 1, Face::Left, deg(0), deg(90), 100.0, 1.5},
+                                      Shot{"Q", 2, Face::Left, deg(90), deg(90), 20.0, 1.5}}));
+    project.stations[0].backsightAzimuth = deg(0);
+    project.stations[0].statedBacksightAzimuth = deg(30);
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* q = findPoint(*outcome, "Q");
+    ASSERT_NE(q, nullptr);
+    EXPECT_NEAR(q->northing, 990.0, 1e-9);
+    EXPECT_NEAR(q->easting, 1017.320508, 1e-6);
+    ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
+    EXPECT_NEAR(*outcome->report.setups[0].orientationCorrection, deg(30), 1e-12);
+    EXPECT_EQ(warningsWith(outcome->report, "Setup S1: its backsight has no position, so its "
+                                            "directions were oriented on the azimuth the file "
+                                            "states for the backsight"),
+              1U);
+    EXPECT_EQ(warningsWith(outcome->report, "taken as a grid azimuth"), 0U);
+}
+
+TEST(Reduction, WithNoReadingOnTheBacksightTheCircleSetOnItIsWhatTheAzimuthIsTakenFrom)
+{
+    // S1 on A never observes its backsight RO. The file states the azimuth
+    // A -> RO, 90 00 00, and the circle set on RO, 0 00 00: the orientation
+    // is 90 - 0 = 90, so Q at reading 0, 100 m, is azimuth 90: N 1000,
+    // E 1100 - not due north, where the circle alone would put it.
+    SurveyProject project;
+    project.points.push_back(point("A", 1000.0, 1000.0, 50.0));
+    project.unpositionedPoints.push_back(unpositioned("RO"));
+    project.unpositionedPoints.push_back(unpositioned("Q"));
+    project.stations.push_back(setup("S1", "A", 1.5, "RO",
+                                     {Shot{"Q", 1, Face::Left, deg(0), deg(90), 100.0, 1.5}}));
+    project.stations[0].backsightAzimuth = deg(0);
+    project.stations[0].statedBacksightAzimuth = deg(90);
+    const auto stated = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(stated.ok()) << stated.error().describe();
+    const ComputedPoint* q = findPoint(*stated, "Q");
+    ASSERT_NE(q, nullptr);
+    EXPECT_NEAR(q->northing, 1000.0, 1e-9);
+    EXPECT_NEAR(q->easting, 1100.0, 1e-9);
+
+    // RO given coordinates, N 1000 E 1200 - azimuth 90 from A - and the
+    // circle set on it 10 00 00. The file's azimuth, 45 on purpose, is not
+    // used: coordinates orient the setup, less the circle set on RO, 90 - 10
+    // = 80, so Q at reading 0 is azimuth 80:
+    //   N = 1000 + 100 cos 80 = 1017.364818, E = 1000 + 100 sin 80 = 1098.480775.
+    project.unpositionedPoints.erase(project.unpositionedPoints.begin());
+    project.points.push_back(point("RO", 1000.0, 1200.0, 50.0));
+    project.stations[0].backsightAzimuth = deg(10);
+    project.stations[0].statedBacksightAzimuth = deg(45);
+    const auto placed = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(placed.ok()) << placed.error().describe();
+    const ComputedPoint* q2 = findPoint(*placed, "Q");
+    ASSERT_NE(q2, nullptr);
+    EXPECT_NEAR(q2->northing, 1017.364818, 1e-6);
+    EXPECT_NEAR(q2->easting, 1098.480775, 1e-6);
+    EXPECT_EQ(warningsWith(placed->report, "azimuth the file states"), 0U);
+}
+
+TEST(Reduction, AStatedAzimuthOnABacksightWithNoPositionYetWaitsForTheBacksightsCoordinates)
+{
+    // As ACircleSetOnABacksightWithNoPositionYetWaits..., with an azimuth the
+    // file states for S1's backsight P1 as well, 200 00 00 - wrong on
+    // purpose. P1 is placed by S2 later, and its coordinates orient S1: the
+    // stated azimuth is the last resort, as the circle is.
+    SurveyProject project = laterBacksight();
+    project.stations[0].backsightAzimuth = 0.0;
+    project.stations[0].statedBacksightAzimuth = deg(200);
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    expectLaterBacksightCoordinates(*outcome);
+    EXPECT_EQ(warningsWith(outcome->report, "azimuth the file states"), 0U);
+    EXPECT_TRUE(outcome->report.misclosures.empty());
+}
+
 TEST(Reduction, ASetupTriedAgainForItsBacksightSaysEachThingOnce)
 {
     // laterBacksight() with no heights and distances reduced to the geoid:
