@@ -22,6 +22,10 @@
 //   VIEWS ACTIVATE <id>
 //   VIEWS LINK <id>[,<id>...] [TO <id>]   leader=1 linked=1,2 moved=2
 //   VIEWS UNLINK <id>[,<id>...] | ALL     unlinked=1,2 linked=none
+//   VIEWS HIDE <id> <layer>[,<layer>...]  the layers that view hides of its own
+//   VIEWS SHOW <id> <layer>[,<layer>...] | ALL
+//   VIEWS ISOLATE <id> <layer>            that layer, its parents and what lies
+//                                         beneath it, and nothing else
 //   ZOOM | Z                              the active view's extents, as always
 //   ZOOM EXTENTS | IN [f] | OUT [f] | <f> | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s]
 //        [view=<id>]
@@ -38,10 +42,19 @@
 // CENTRE puts a point in the middle, at SCALE pixels per unit when given.
 // Those four act on plan views, and elsewhere are refused naming the kind.
 //
+// HIDE, SHOW and ISOLATE are the view's own layer filter, its Layers button's
+// (cad::LayerOverrides): subtractive, so a view never shows what the document
+// hides, and like the rest of a view's state not saved and not undoable. A
+// layer is a layer of the drawing or a node of the layer tree above one
+// ("design" when only "design/road" is a layer); one the drawing lacks is
+// refused, naming it, and nothing changes. The reply is the view's record.
+//
 // Records, one per line, key=value, reals as core::formatExactReal writes
-// them and angles in degrees:
+// them and angles in degrees; hidden= is the layers a view hides of its own,
+// left out when it hides none:
 //
 //   view=1 kind=plan title="Plan 1" active=yes linked=yes centre=50,40 scale=8 area=x0,y0,x1,y1
+//          hidden=asbuilt
 //   view=3 kind=3d title="3D 1" active=no target=x,y,z distance=d azimuth=a elevation=e
 //          projection=perspective
 //   view=4 kind=section title="Section 1" active=no
@@ -120,6 +133,10 @@ class ViewVerbHost {
     // from refitting its old frame on a resize, and bring every view's bar up
     // to date.
     virtual void changed(const std::vector<ViewId>& ids) = 0;
+    // The verbs changed the layers `id` hides of its own (ViewState::layers):
+    // no document change, so nothing else hears of it. Redraw that view and
+    // bring its Layers button up to date.
+    virtual void layersChanged(ViewId id) = 0;
 };
 
 // Asked at each VIEWS or ZOOM line, so a front end can hand over a host that

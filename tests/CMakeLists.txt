@@ -1432,6 +1432,20 @@ if(TARGET katana)
             "-DFORBID=followed="
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/unlinked_plan_views_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The owner's case: a design view hiding the as-built layer beside an
+    # as-built view hiding the design one (VIEWS HIDE), linked, framed on the
+    # works from the design view, the design line selected. Each record says
+    # what its view hides; the PNG shows the design line selected on the left
+    # and the as-built line alone on the right, both at the one scale.
+    add_test(NAME qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS LINK 1,2|>ZOOM WINDOW 0,0,50,40 view=1|>SELECT LAYER design|>VIEWS"
+            "-DEXPECT=view=1 kind=plan title=\"Plan 1\"[^\r\n]*linked=yes[^\r\n]*hidden=asbuilt[\r\n]+view=2 kind=plan title=\"Plan 2\"[^\r\n]*linked=yes[^\r\n]*hidden=design[\r\n]+views=2 linked=2"
+            "-DFORBID=unknown command|no layer '"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/design_and_as_built_views_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every key sequence the window answers to reaches one thing: Qt
     # disables an ambiguous shortcut for BOTH actions, so a clash is two
     # keys that silently do nothing; and within each menu every underlined
@@ -1487,6 +1501,7 @@ if(TARGET katana)
                          qt_quick_select_is_answered_at_the_command_line_headless
                          qt_linked_plan_views_zoom_together_headless
                          qt_unlinking_one_of_two_views_unlinks_both_headless
+                         qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
                          qt_every_menu_item_has_an_icon_and_a_status_tip_headless
                          qt_the_window_section_sizes_the_text_and_toolbars_and_resets_the_layout_headless
