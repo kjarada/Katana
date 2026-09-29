@@ -1448,6 +1448,31 @@ if(TARGET katana)
             "-DFORBID=unknown command|no layer '"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/design_and_as_built_views_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The selection in every view (docs/desktop.md): the design line selected
+    # is drawn dashed in the design view and as a dotted ghost in the as-built
+    # view that hides its layer; each record says the view's switch is on.
+    # The PNG is what to look at: the ghost in the right-hand view, where the
+    # as-built line crosses it.
+    add_test(NAME qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS LINK 1,2|>ZOOM WINDOW 0,0,50,40 view=1|>SELECT LAYER design|>VIEWS"
+            "-DEXPECT=view=1 kind=plan[^\r\n]*ghosts=on hidden=asbuilt[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on hidden=design[\r\n]+views=2"
+            "-DFORBID=unknown command|no layer '"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/selection_ghost_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The as-built view's switch off, by the line its Layers popup runs: the
+    # PNG shows no trace of the design line there.
+    add_test(NAME qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS LINK 1,2|>ZOOM WINDOW 0,0,50,40 view=1|>SELECT LAYER design|>VIEWS SET 2 ghosts=off"
+            "-DEXPECT=view=2 kind=plan[^\r\n]*ghosts=off hidden=design"
+            "-DFORBID=unknown command|no layer '|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/selection_ghost_off_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # ZOOM on the shared scope (cad/view_verbs.hpp): the selection framed in
     # the second view, the first following it. By hand the line's middle is
     # (25, 20); the reply is the scope's record, then the view moved, then
@@ -1530,6 +1555,8 @@ if(TARGET katana)
                          qt_linked_plan_views_zoom_together_headless
                          qt_unlinking_one_of_two_views_unlinks_both_headless
                          qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless
+                         qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless
+                         qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless
                          qt_zoom_to_selection_moves_the_linked_views_headless
                          qt_zoom_to_dialog_runs_its_line_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless

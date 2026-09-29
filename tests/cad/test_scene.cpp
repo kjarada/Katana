@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <string>
 #include <utility>
@@ -1018,6 +1019,138 @@ TEST(SceneLayersBuild, TheSelectionOverlayHoldsOnlyTheSelectedEntities)
         << "the overlay must win the tie with the entity's own first drawing";
 }
 
+TEST(SceneLayersBuild, TheSelectionOverlayIsTheSelectionColourOverADarkCasing)
+{
+    // selection_style.hpp: a 3 px core in #FF9F1C over a 5 px casing of
+    // (16, 18, 22), in a list of its own. The casing's bias is between the
+    // core's and the drawing's, so it is not lost behind the line it frames.
+    Document document;
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0.0, 0.0), Point2(10.0, 0.0))).ok());
+    document.selection().add(document.model().entities.ids().back());
+    const SceneOptions options = plainOptions();
+    const SceneLayers layers = layersOf(document, {}, options);
+    ASSERT_EQ(layers.selection.lines.size(), 1u);
+    ASSERT_EQ(layers.selectionCasing.lines.size(), 1u);
+    const katana::render::DrawLine& core = layers.selection.lines[0];
+    const katana::render::DrawLine& casing = layers.selectionCasing.lines[0];
+    EXPECT_EQ(layers.selection.colors[core.a], katana::render::rgba(0xFF, 0x9F, 0x1C));
+    EXPECT_EQ(layers.selection.colors[core.b], katana::render::rgba(0xFF, 0x9F, 0x1C));
+    EXPECT_EQ(layers.selectionCasing.colors[casing.a], katana::render::rgba(16, 18, 22));
+    EXPECT_EQ(layers.selectionCasing.colors[casing.b], katana::render::rgba(16, 18, 22));
+    EXPECT_EQ(core.width, 3.0f);
+    EXPECT_EQ(casing.width, 5.0f);
+    EXPECT_GT(core.depthBias, casing.depthBias);
+    EXPECT_GT(casing.depthBias, layers.entities.lines.front().depthBias);
+    // The same span.
+    EXPECT_EQ(layers.selectionCasing.positions[casing.a], layers.selection.positions[core.a]);
+    EXPECT_EQ(layers.selectionCasing.positions[casing.b], layers.selection.positions[core.b]);
+}
+
+TEST(SceneLayersBuild, ASelectedPointIsDrawnLargerThanAnUnselectedOne)
+{
+    // An unselected point is SceneOptions::pointSize, 5 px; a selected one a
+    // 9 px core over an 11 px casing (selection_style.hpp).
+    Document document;
+    ASSERT_TRUE(document.execute(katana::commands::createPoint(Point2(3.0, 4.0))).ok());
+    document.selection().add(document.model().entities.ids().back());
+    const SceneOptions options = plainOptions();
+    const SceneLayers layers = layersOf(document, {}, options);
+    ASSERT_EQ(layers.entities.points.size(), 1u);
+    EXPECT_EQ(layers.entities.points[0].size, 5.0f);
+    ASSERT_EQ(layers.selection.points.size(), 1u);
+    EXPECT_EQ(layers.selection.points[0].size, 9.0f);
+    EXPECT_EQ(layers.selection.colors[layers.selection.points[0].a],
+              katana::render::rgba(0xFF, 0x9F, 0x1C));
+    ASSERT_EQ(layers.selectionCasing.points.size(), 1u);
+    EXPECT_EQ(layers.selectionCasing.points[0].size, 11.0f);
+    EXPECT_EQ(layers.selectionCasing.colors[layers.selectionCasing.points[0].a],
+              katana::render::rgba(16, 18, 22));
+}
+
+namespace {
+
+// A line on "design" and one on "asbuilt", the design one selected; the view
+// hides "design" of its own.
+struct GhostScene {
+    Document document;
+    katana::cad::LayerOverrides view;
+    SceneOptions options = plainOptions();
+
+    GhostScene()
+    {
+        for (const char* name : {"design", "asbuilt"}) {
+            katana::entity::Layer layer;
+            layer.name = name;
+            EXPECT_TRUE(document.execute(katana::commands::createLayer(layer)).ok());
+        }
+        katana::commands::EntityAttributes design;
+        design.layer = "design";
+        EXPECT_TRUE(document
+                        .execute(katana::commands::createLine(Point2(0.0, 0.0),
+                                                              Point2(10.0, 0.0), design))
+                        .ok());
+        katana::commands::EntityAttributes asBuilt;
+        asBuilt.layer = "asbuilt";
+        EXPECT_TRUE(document
+                        .execute(katana::commands::createLine(Point2(0.0, 5.0),
+                                                              Point2(10.0, 5.0), asBuilt))
+                        .ok());
+        document.selection().add(document.model().entities.ids().front());
+        EXPECT_TRUE(view.hide("design"));
+        options.layers = &view;
+        options.selectionGhosts = true;
+    }
+};
+
+} // namespace
+
+TEST(SceneLayersBuild, ASelectedEntityOnALayerTheViewHidesIsOneFaintLineInTheOverlay)
+{
+    // selection_style.hpp: one 1 px line of (130, 88, 32) - the selection
+    // colour at 45 % over the 3D view's ground - with no casing.
+    const GhostScene scene;
+    const SceneLayers layers = layersOf(scene.document, {}, scene.options);
+    ASSERT_EQ(layers.entities.lines.size(), 1u) << "the drawing: the as-built line alone";
+    EXPECT_EQ(layers.entities.positions[layers.entities.lines[0].a].y, 5.0);
+    ASSERT_EQ(layers.selection.lines.size(), 1u);
+    EXPECT_TRUE(layers.selectionCasing.lines.empty()) << "a ghost has no casing";
+    const katana::render::DrawLine& ghost = layers.selection.lines[0];
+    EXPECT_EQ(layers.selection.colors[ghost.a], katana::render::rgba(130, 88, 32));
+    EXPECT_EQ(ghost.width, 1.0f);
+    EXPECT_EQ(layers.selection.positions[ghost.a].y, 0.0) << "the design line";
+    EXPECT_EQ(layers.selection.positions[ghost.b].y, 0.0);
+}
+
+TEST(SceneLayersBuild, NoGhostWhereTheDocumentHidesTheLayerOrTheViewTurnedGhostsOff)
+{
+    {
+        GhostScene scene;
+        scene.options.selectionGhosts = false;
+        const SceneLayers layers = layersOf(scene.document, {}, scene.options);
+        EXPECT_TRUE(layers.selection.lines.empty()) << "ghosts off";
+    }
+    {
+        GhostScene scene;
+        katana::entity::Layer design = *scene.document.model().layers.find("design");
+        design.visible = false;
+        ASSERT_TRUE(scene.document.execute(katana::commands::updateLayer(design)).ok());
+        const SceneLayers layers = layersOf(scene.document, {}, scene.options);
+        EXPECT_TRUE(layers.selection.lines.empty())
+            << "a layer the drawing hides stays hidden in every view";
+    }
+    {
+        // No view: the document rule alone, which draws it, selected.
+        GhostScene scene;
+        scene.options.layers = nullptr;
+        const SceneLayers layers = layersOf(scene.document, {}, scene.options);
+        ASSERT_EQ(layers.selection.lines.size(), 1u);
+        EXPECT_EQ(layers.selection.colors[layers.selection.lines[0].a],
+                  scene.options.selectionColor);
+        EXPECT_EQ(layers.selectionCasing.lines.size(), 1u);
+    }
+}
+
 // ---- one frame: the layers drawn as the 3D view draws them -----------------------
 
 namespace {
@@ -1247,4 +1380,117 @@ TEST(SceneFrame, OfTwoCoincidentSurfacesTheEdgesShownAreThoseOfTheSurfaceShown)
     }
     EXPECT_GT(countOf(firstInk), 2000u) << "the first surface's edges were not drawn";
     EXPECT_EQ(countOf(secondInk), 0u);
+}
+
+TEST(SceneFrame, ASelectedLineIsDrawnInTheSelectionColourBetweenTwoEdgesOfItsCasing)
+{
+    // A line along x through the middle of the default iso view, selected:
+    // down the middle column the first and last pixels drawn are the
+    // casing's (16, 18, 22), with the core's #FF9F1C between them and none
+    // of the line's own white - the casing drawn first writes no depth, so
+    // the core covers it, and the core's pull beats the line's (scene.hpp,
+    // renderLayers). Not the top view: a flat drawing seen face-on has a
+    // depth range thinner than one pixel's pull, every pull stops at the
+    // near plane and the line's own drawing wins the tie (docs/render.md,
+    // "Outstanding").
+    Document document;
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0.0, 0.0), Point2(100.0, 0.0))).ok());
+    document.selection().add(document.model().entities.ids().back());
+    SceneLayers layers = layersOf(document, {}, plainOptions());
+    Camera camera;
+    camera.setViewportSize(200, 100);
+    camera.setProjection(Projection::Perspective);
+    camera.setStandardView(StandardView::IsoSouthWest);
+    ASSERT_TRUE(camera.frame(layers.bounds));
+    const Framebuffer seen = frameOf(layers, camera);
+    const Rgba core = katana::render::rgba(0xFF, 0x9F, 0x1C);
+    const Rgba casing = katana::render::rgba(16, 18, 22);
+    std::vector<Rgba> column;
+    for (int row = 0; row < 100; ++row) {
+        const Rgba c = seen.colorAt(100, row);
+        if (c != kBlack) {
+            column.push_back(c);
+        }
+    }
+    std::string drawn;
+    for (const Rgba c : column) {
+        drawn += std::format(" {:06x}", c & 0xFFFFFFu);
+    }
+    ASSERT_GE(column.size(), 5u) << "a 5 px casing is at least 5 rows:" << drawn;
+    EXPECT_EQ(column.front(), casing) << drawn;
+    EXPECT_EQ(column.back(), casing) << drawn;
+    EXPECT_GE(std::count(column.begin(), column.end(), core), 2) << "the 3 px core:" << drawn;
+    // Nothing but the two, and the core in one run between the casing's.
+    const auto first = std::find(column.begin(), column.end(), core);
+    const auto last = std::find(column.rbegin(), column.rend(), core).base();
+    EXPECT_TRUE(std::all_of(first, last, [core](Rgba c) { return c == core; })) << drawn;
+    EXPECT_TRUE(std::all_of(column.begin(), first, [casing](Rgba c) { return c == casing; }))
+        << drawn;
+    EXPECT_TRUE(std::all_of(last, column.end(), [casing](Rgba c) { return c == casing; }))
+        << drawn;
+}
+
+TEST(SceneFrame, TheDepthRangeTakesInAGhostOutsideWhatTheViewDraws)
+{
+    // The view draws the as-built line at the origin and hides "design",
+    // where the selected line lies a kilometre further along the view
+    // direction. Framed on what is drawn, the depth range fitted to that
+    // alone ends short of the ghost; with the overlay taken in it reaches it.
+    Document document;
+    for (const char* name : {"design", "asbuilt"}) {
+        katana::entity::Layer layer;
+        layer.name = name;
+        ASSERT_TRUE(document.execute(katana::commands::createLayer(layer)).ok());
+    }
+    katana::commands::EntityAttributes asBuilt;
+    asBuilt.layer = "asbuilt";
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(0.0, 0.0), Point2(10.0, 0.0),
+                                                          asBuilt))
+                    .ok());
+    katana::commands::EntityAttributes design;
+    design.layer = "design";
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(1000.0, 1000.0),
+                                                          Point2(1010.0, 1000.0), design))
+                    .ok());
+    document.selection().add(document.model().entities.ids().back());
+    katana::cad::LayerOverrides view;
+    ASSERT_TRUE(view.hide("design"));
+    SceneOptions options = plainOptions();
+    options.layers = &view;
+
+    const auto depthsOfTheGhost = [](const Camera& camera) {
+        const katana::math::Vec3 f = camera.forward();
+        const katana::math::Vec3 e = camera.eye();
+        return std::pair{(katana::math::Vec3(1000.0, 1000.0, 0.0) - e).dot(f),
+                         (katana::math::Vec3(1010.0, 1000.0, 0.0) - e).dot(f)};
+    };
+    const auto fitted = [&document, &options](bool ghosts) {
+        options.selectionGhosts = ghosts;
+        SceneLayers layers = layersOf(document, {}, options);
+        Camera camera;
+        camera.setViewportSize(400, 300);
+        camera.setStandardView(StandardView::IsoSouthWest);
+        EXPECT_TRUE(camera.frame(layers.bounds));
+        auto target = Framebuffer::create(400, 300);
+        EXPECT_TRUE(target.ok());
+        katana::core::TaskPool pool(0);
+        katana::render::RenderOptions render;
+        render.pool = &pool;
+        katana::render::Rasterizer rasterizer;
+        EXPECT_TRUE(katana::cad::renderLayers(layers, camera, rasterizer, *target, render).ok());
+        return camera;
+    };
+
+    const Camera without = fitted(false);
+    const auto [nearWithout, farWithout] = depthsOfTheGhost(without);
+    ASSERT_GT(std::max(nearWithout, farWithout), without.farPlane())
+        << "the ghost is inside the drawn box's range anyway, so this proves nothing";
+
+    const Camera with = fitted(true);
+    const auto [a, b] = depthsOfTheGhost(with);
+    EXPECT_LE(std::max(a, b), with.farPlane());
+    EXPECT_GE(std::min(a, b), with.nearPlane());
 }

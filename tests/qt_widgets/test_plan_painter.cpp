@@ -20,7 +20,9 @@
 #include <QWheelEvent>
 #include <QPainter>
 
+#include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/plot.hpp"
+#include "katana/cad/selection.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/model.hpp"
@@ -1256,4 +1258,179 @@ TEST(PlanPainter, TwoThreadsPaintingTheSameDrawingAtOnceEachPaintWhatTheGuiThrea
     }
     EXPECT_TRUE(first == expected);
     EXPECT_TRUE(second == expected);
+}
+
+// ---- the selection's ghosts (cad/selection_style.hpp) --------------------------------
+
+namespace {
+
+// A white line from (10, 50) to (90, 50) on "design", selected, through a
+// frame 100 x 100 px at 1 px a unit about (50, 50): along row 50 from column
+// 10 to 90, the frame's y running down. The view hides "design" of its own.
+struct GhostPlan {
+    Model model;
+    katana::cad::SelectionSet selection;
+    katana::cad::LayerOverrides view;
+    PlanFrame frame = frameOf(100.0, 100.0, 1.0, Point2(50.0, 50.0));
+    PlanPaintOptions options;
+
+    GhostPlan()
+    {
+        katana::entity::Layer layer;
+        layer.name = "design";
+        layer.color = katana::entity::Color{255, 255, 255, 255};
+        EXPECT_TRUE(model.layers.add(layer));
+        auto id = model.entities.add(entityOf(Segment2{Point2(10, 50), Point2(90, 50)}, "design"));
+        EXPECT_TRUE(id.ok());
+        selection.add(*id);
+        EXPECT_TRUE(view.hide("design"));
+        frame.layers = &view;
+        options.selectionGhosts = true;
+    }
+
+    QImage paint(PlanPaintStats& stats, bool selected = true) const
+    {
+        PlanSource source;
+        source.model = &model;
+        const katana::cad::SelectionSet none;
+        source.selection = selected ? &selection : &none;
+        return paintedSource(source, frame, options, kBlack, &stats);
+    }
+};
+
+// Pixels of the line's rows, 48 to 52, in the selection's orange: red well
+// above green, green well above blue - never the layer's white, the black
+// ground or grey.
+std::size_t orangeInk(const QImage& image)
+{
+    std::size_t ink = 0;
+    for (int y = 48; y <= 52; ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QRgb c = image.pixel(x, y);
+            ink += qRed(c) > qGreen(c) + 30 && qGreen(c) > qBlue(c) + 30 ? 1 : 0;
+        }
+    }
+    return ink;
+}
+
+} // namespace
+
+TEST(PlanPainter, ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost)
+{
+    // The ghost pen: #FF9F1C at alpha 153, 2 px, dotted (selection_style.hpp).
+    // Over black a fully covered pixel is 153/255 of it: (153, 95.4, 16.8).
+    // A 2 px pen about row 50 covers rows 49 and 50 whole. Qt's dot is one
+    // pen width on and two off (QPen::dashPattern for Qt::DotLine is 1, 2),
+    // so a third of the 80 px run is lit: 26.7 px a row.
+    GhostPlan plan;
+    PlanPaintStats unselected;
+    const QImage bare = plan.paint(unselected, false);
+    PlanPaintStats selected;
+    const QImage ghosted = plan.paint(selected);
+
+    EXPECT_EQ(selected.ghostsDrawn, 1u);
+    EXPECT_EQ(unselected.ghostsDrawn, 0u);
+    EXPECT_EQ(selected.entitiesDrawn, unselected.entitiesDrawn) << "a ghost is not an entity drawn";
+    EXPECT_EQ(selected.entitiesDrawn, 0u) << "the layer is hidden in this view";
+    EXPECT_EQ(orangeInk(bare), 0u);
+    EXPECT_GT(orangeInk(ghosted), orangeInk(bare));
+
+    // Along row 50, the ink in units of a whole ghost pixel's red, 153: the
+    // length lit, whatever the antialiasing does at each dot's ends.
+    double lit = 0.0;
+    int exact = 0;
+    for (int x = 0; x < 100; ++x) {
+        const QRgb c = ghosted.pixel(x, 50);
+        lit += qRed(c) / 153.0;
+        exact += std::abs(qRed(c) - 153) <= 2 && std::abs(qGreen(c) - 95) <= 2 &&
+                         std::abs(qBlue(c) - 17) <= 2
+                     ? 1
+                     : 0;
+    }
+    EXPECT_NEAR(lit, 80.0 / 3.0, 6.0) << "dotted: a third of the 80 px run";
+    EXPECT_GE(exact, 8) << "the selection colour at 60 % over black";
+}
+
+TEST(PlanPainter, NoGhostWhereTheDocumentHidesTheLayer)
+{
+    // A layer the drawing switches off stays off in every view: a ghost says
+    // "selected, but hidden in this view", never "selected, though off".
+    GhostPlan plan;
+    katana::entity::Layer design = *plan.model.layers.find("design");
+    design.visible = false;
+    ASSERT_TRUE(plan.model.layers.update(design));
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u);
+    EXPECT_EQ(orangeInk(image), 0u);
+}
+
+TEST(PlanPainter, NoGhostOnPaper)
+{
+    GhostPlan plan;
+    PlotSettings settings;
+    plan.options = paperOptions(settings, 4.0);
+    plan.options.selectionGhosts = true;
+    PlanPaintStats stats;
+    (void)plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u) << "a plot draws what the drawing shows, never a ghost";
+}
+
+TEST(PlanPainter, NoGhostWithGhostsOff)
+{
+    // PlanPaintOptions::selectionGhosts defaults to false, so every caller
+    // but the plan view - which sets it from ViewState::selectionGhosts - is
+    // unchanged.
+    GhostPlan plan;
+    plan.options = PlanPaintOptions{};
+    ASSERT_FALSE(plan.options.selectionGhosts);
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u);
+    EXPECT_EQ(orangeInk(image), 0u);
+}
+
+TEST(PlanPainter, ASelectedEntityTheViewShowsIsDrawnSelectedAndNotAsAGhost)
+{
+    // The view hiding nothing: the line is drawn, in the selection's 2 px
+    // orange dashes, once.
+    GhostPlan plan;
+    plan.frame.layers = nullptr;
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u);
+    EXPECT_EQ(stats.entitiesDrawn, 1u);
+    EXPECT_GT(orangeInk(image), 0u);
+}
+
+TEST(PlanPainter, AGhostLongerThanTheViewIsDottedAcrossItFromItsOwnStart)
+{
+    // A line from (-1e6, 50) to (1e6, 50), both ends far outside the frame,
+    // which shows x from 0 to 100 at 1 px a unit: the dots are laid only
+    // where it crosses the view, and in step with the line's own start. A
+    // dot every 6 px from x = -1e6 puts one at every x = 6k - 1e6, and
+    // -1e6 = 2 - 6 x 166 667, so at x = 2, 8, 14 ... 98: 17 dots. A dot
+    // 2 px square about x covers the columns x - 1 and x, so columns 1 and
+    // 2 are lit and 3 to 6 are not.
+    GhostPlan plan;
+    auto id = plan.model.entities.add(
+        entityOf(Segment2{Point2(-1.0e6, 50), Point2(1.0e6, 50)}, "design"));
+    ASSERT_TRUE(id.ok());
+    plan.selection.set({*id});
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 1u);
+    const auto lit = [&image](int x) { return qRed(image.pixel(x, 50)) > 0; };
+    EXPECT_TRUE(lit(1));
+    EXPECT_TRUE(lit(2));
+    for (int x = 3; x <= 6; ++x) {
+        EXPECT_FALSE(lit(x)) << "column " << x;
+    }
+    EXPECT_TRUE(lit(7));
+    EXPECT_TRUE(lit(8));
+    int columns = 0;
+    for (int x = 0; x < 100; ++x) {
+        columns += lit(x) ? 1 : 0;
+    }
+    EXPECT_EQ(columns, 17 * 2);
 }

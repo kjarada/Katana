@@ -647,6 +647,85 @@ and OUT to it at the centre pixel, and the verb's rule of which kinds take
 which zoom lets them through), and framing what a scope takes in 3D needs
 the scene to draw a set of ids.
 
+### The selection in every view
+
+The owner's request of 2026-09-30: "when selecting a feature in 2d it gets
+highlighted in other views". Plan views already drew the selection in every
+plan view that shows its layer; the rule is now the same for every kind of
+view:
+
+- **Selected and drawn in the view: highlighted.** A plan view keeps the 2 px
+  dashed #FF9F1C it always drew. A 3D or elevation view draws a selected line
+  as a 3 px core of the same orange over a 5 px dark casing (16, 18, 22),
+  which shows a pixel either side on the light face of a hill and the dark
+  sky alike, and a selected point 9 px over 11 (an unselected one is 5). A
+  section draws the selected entity's crossing solid, 2 px, in the orange,
+  with a dot at its level, where the other crossings are 1 px red dashes.
+- **Selected, on a layer the drawing shows and the view hides: a ghost** -
+  drawn faint, and never picked, snapped to or plotted there
+  (`ViewLayerRule.AGhostIsNeitherPickedNorSnappedTo`). A feature selected in
+  the design view shows where it is in the as-built view that hides the
+  design layers. In plan it is DOTS of the orange at 60 % (alpha 153), 2 px
+  square and 6 px apart, where a selection is dashed, with no fill, hatch,
+  linestyle or symbol; a point is a ring of dots; a text, note, leader or
+  dimension the outline of the box it draws; a label is not ghosted
+  (`docs/plan_view.md`, "Ghosts of the selection", for how and what it
+  costs). In 3D and elevation
+  it is one 1 px line of (130, 88, 32) - the orange at 45 % mixed over the
+  view's ground beforehand, since the software rasteriser draws no alpha -
+  with no casing. In a section it is the crossing, 1 px, dotted, at 60 %.
+- **A layer the drawing hides stays hidden everywhere.** A ghost says
+  "selected, but hidden in this view", never "selected, though switched
+  off".
+
+One colour and every size are in `include/katana/cad/selection_style.hpp`,
+each with its reason. The 3D selection was (255, 190, 60), beside the
+BOUNDARY layer's (255, 213, 79) and the top of the elevation ramp, and apart
+from the plan's; the sheet editor's blue stays, since it selects sheet
+items, not entities.
+
+**Each view has its own switch**, on when the view opens
+(`ViewState::selectionGhosts`): "Show the selection on hidden layers"
+(`ViewLayersShowSelection`) in the view's Layers popup, beside the layer
+filter it belongs with, and `VIEWS SET <id> ghosts=on|off`, which the box
+runs through the command runner, so a click is logged as its line
+(`ViewSelection.TheLayersPopupsBoxRunsViewsSetThroughTheRunner`). VIEWS
+reports it in every record, `ghosts=on|off` (`docs/cad.md`, "The window's
+views"). Not a bar button: every tool always on the bar costs 23 px of every
+view's least width.
+
+**What it costs.** The plan painter draws ghosts in a pass after the
+entities, over the selection's ids alone - nothing when the selection is
+empty, and never a test in the entity loop every entity passes - into the
+view's kept drawing, whose key already held the selection and the view's
+hidden layers and now holds the switch. The 3D overlay walks the selection's
+ids the same way (it used to walk the whole drawing and keep the selected),
+and a section repaints on a document change without cutting again
+(`SectionViewWidget::setDocument`).
+
+**The casing in 3D is a draw list of its own** (`SceneLayers::selectionCasing`),
+drawn just before the core's and writing no depth, so the core covers it
+wherever they overlap. In one list with the core the software view was
+right, by the draw lists' depth bias, but the GPU view - which pulls a mark
+nearer by its width and reads no bias - drew the wider casing over the core,
+and a selected line was a dark line (the control in
+`GpuLayers.ASelectionCoreDrawnAfterACasingThatWritesNoDepthKeepsItsColour`).
+A frame's depth range takes in the selection's box too, because a ghost lies
+where the view draws nothing (`SceneFrame.TheDepthRangeTakesInAGhostOutsideWhatTheViewDraws`);
+what a view frames is unchanged.
+
+Rejected: ghosting layers the drawing hides (a switched-off layer would
+linger in every view); a halo in plan (the dashed orange already reads
+apart from every layer colour); the ghost switch on the view's bar (the width
+above); the casing by draw order in one list (the GPU's pull decides, not
+the order).
+
+Not done: grips are still drawn, and can be dragged, on a ghost - as on any
+selected entity on a layer its view hides, because `gripsOfSelection` takes
+no view layers; it is to take the view's `LayerOverrides` with no default,
+as `isDrawn` does. A selected line buried under the ground in 3D is hidden
+by it, as any line is; an x-ray pass over everything is the next step.
+
 ### The dock chrome: one title bar for panels and views
 
 The same request asked for panels and views that minimise, float, maximise

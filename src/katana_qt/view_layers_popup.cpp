@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 
+#include <QCheckBox>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -139,6 +140,17 @@ ViewLayersPopup::ViewLayersPopup(ViewWorkspace& workspace, ViewId view, QWidget*
     buttons->addWidget(hideOthers_);
     buttons->addStretch();
 
+    // The view's own switch for the selection's ghosts (docs/desktop.md, "The
+    // selection in every view"): here because it is about what this view
+    // hides.
+    ghosts_ = new QCheckBox("Show the selection on hidden layers", this);
+    ghosts_->setObjectName("ViewLayersShowSelection");
+    ghosts_->setToolTip(
+        "<b>Show the selection on hidden layers</b><br>A selected feature on a layer this "
+        "view hides is drawn here faint and dotted, so a selection made in another view "
+        "shows where it is. It is never picked, snapped to or plotted here. VIEWS SET "
+        "&lt;id&gt; ghosts=on|off on the command line.");
+
     referenceHeading_ = new QLabel("Reference data", this);
     referenceHeading_->setFont(bold);
     references_ = new QTreeWidget(this);
@@ -157,6 +169,7 @@ ViewLayersPopup::ViewLayersPopup(ViewWorkspace& workspace, ViewId view, QWidget*
     layout->addWidget(filter_);
     layout->addWidget(layers_, 1);
     layout->addLayout(buttons);
+    layout->addWidget(ghosts_);
     layout->addWidget(referenceHeading_);
     layout->addWidget(references_);
     setMinimumWidth(300);
@@ -168,6 +181,12 @@ ViewLayersPopup::ViewLayersPopup(ViewWorkspace& workspace, ViewId view, QWidget*
             [this](QTreeWidgetItem* item, int) { onReferenceChanged(item); });
     connect(layers_, &QTreeWidget::currentItemChanged, this, [this] { refreshStates(); });
     connect(showAllButton, &QToolButton::clicked, this, [this] { showAll(); });
+    // clicked, not toggled: only the user's click runs the line, never the
+    // box being set from the view.
+    connect(ghosts_, &QCheckBox::clicked, this, [this](bool on) {
+        workspace_.setSelectionGhosts(view_, on);
+        refreshStates();
+    });
     // The buttons are enabled only when there is a selection, so a failure
     // here is a layer deleted under an open popup - nothing to report but
     // the rebuild that shows it has gone.
@@ -335,6 +354,7 @@ void ViewLayersPopup::refreshStates()
                                                "\nHidden in every view by the Reference Data "
                                                "panel.");
     }
+    ghosts_->setChecked(view->selectionGhosts);
     const QTreeWidgetItem* current = layers_->currentItem();
     const bool selectable = current != nullptr && current->flags().testFlag(Qt::ItemIsEnabled);
     isolate_->setEnabled(selectable);
@@ -342,7 +362,7 @@ void ViewLayersPopup::refreshStates()
     updating_ = was;
 }
 
-void ViewLayersPopup::changed() { workspace_.viewLayersChanged(view_); }
+void ViewLayersPopup::changed() { workspace_.viewSettingsChanged(view_); }
 
 void ViewLayersPopup::onLayerChanged(QTreeWidgetItem* item)
 {

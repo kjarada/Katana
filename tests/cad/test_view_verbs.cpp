@@ -39,7 +39,7 @@ class RecordingHost final : public ViewVerbHost {
     ViewSet set;
     std::vector<ZoomRequest> zooms;
     std::vector<std::vector<ViewId>> changes;
-    std::vector<ViewId> layerChanges;
+    std::vector<ViewId> settingChanges;
 
     ViewSet& views() override { return set; }
     Result<ViewId> open(ViewKind kind) override
@@ -69,7 +69,7 @@ class RecordingHost final : public ViewVerbHost {
         return moved;
     }
     void changed(const std::vector<ViewId>& ids) override { changes.push_back(ids); }
-    void layersChanged(ViewId id) override { layerChanges.push_back(id); }
+    void settingsChanged(ViewId id) override { settingChanges.push_back(id); }
 };
 
 class ViewVerbsTest : public ::testing::Test {
@@ -143,9 +143,11 @@ TEST_F(ViewVerbsTest, ViewsListsEveryOpenViewAsOneRecordInCreationOrder)
     const std::string reply = ok("VIEWS");
     const auto lines = katana::core::splitLines(reply);
     ASSERT_EQ(lines.size(), 4U) << reply;
-    // 300 x 200 at 4 px a unit about (10, 20): x 10 -+ 37.5, y 20 -+ 25.
+    // 300 x 200 at 4 px a unit about (10, 20): x 10 -+ 37.5, y 20 -+ 25. And
+    // every kind of view ghosts the selection until told not to
+    // (ViewState::selectionGhosts).
     EXPECT_EQ(lines[0], "view=1 kind=plan title=\"Plan 1\" active=yes linked=no centre=10,20 "
-                        "scale=4 area=-27.5,-5,47.5,45");
+                        "scale=4 area=-27.5,-5,47.5,45 ghosts=on");
     EXPECT_TRUE(lines[1].starts_with(
         "view=2 kind=3d title=\"3D 1\" active=no target=1,2,3 distance=50 azimuth="))
         << lines[1];
@@ -154,7 +156,7 @@ TEST_F(ViewVerbsTest, ViewsListsEveryOpenViewAsOneRecordInCreationOrder)
         *katana::core::parseFiniteDouble(field(std::string(lines[1]), "azimuth"));
     EXPECT_NEAR(azimuth, model.camera.azimuth() * 180.0 / 3.14159265358979323846, 1e-12);
     EXPECT_EQ(field(std::string(lines[1]), "projection"), "perspective");
-    EXPECT_EQ(lines[2], "view=3 kind=section title=\"Section 1\" active=no");
+    EXPECT_EQ(lines[2], "view=3 kind=section title=\"Section 1\" active=no ghosts=on");
     EXPECT_EQ(lines[3], "views=3 linked=0");
     // LIST is the same.
     EXPECT_EQ(ok("VIEWS LIST"), reply);
@@ -403,7 +405,7 @@ TEST_F(ViewVerbsTest, ViewsHideShowIsolateChangeOnlyThatView)
     EXPECT_FALSE(design.layers.hides("design/road"));
     EXPECT_TRUE(asBuilt.layers.hides("design/road"));
     EXPECT_FALSE(asBuilt.layers.hides("asbuilt"));
-    EXPECT_EQ(host.layerChanges, (std::vector<ViewId>{1, 2})) << "each view redrawn, alone";
+    EXPECT_EQ(host.settingChanges, (std::vector<ViewId>{1, 2})) << "each view redrawn, alone";
 
     // SHOW takes back exactly the entries named; a record with nothing
     // hidden says nothing about it.
@@ -414,7 +416,7 @@ TEST_F(ViewVerbsTest, ViewsHideShowIsolateChangeOnlyThatView)
     // ISOLATE design/road: at each level of the path, the siblings of the
     // next segment - 0 and asbuilt at the root; design has no child but road.
     EXPECT_TRUE(ok("VIEWS ISOLATE 1 design/road").ends_with(" hidden=0,asbuilt"));
-    EXPECT_TRUE(ok("VIEWS SHOW 1 ALL").ends_with("area=-27.5,-5,47.5,45"));
+    EXPECT_TRUE(ok("VIEWS SHOW 1 ALL").ends_with("area=-27.5,-5,47.5,45 ghosts=on"));
     EXPECT_TRUE(design.layers.empty());
     // The as-built view was never touched by any of that.
     EXPECT_EQ(asBuilt.layers.hidden().size(), 1U);
@@ -436,7 +438,7 @@ TEST_F(ViewVerbsTest, HidingALayerTheDrawingLacksIsRefusedNamingIt)
     EXPECT_EQ(missing.message, "no layer 'roads' in the drawing (LAYER LIST lists them)");
     // Refused whole: design, which exists, was not hidden either.
     EXPECT_TRUE(view.layers.empty());
-    EXPECT_TRUE(host.layerChanges.empty());
+    EXPECT_TRUE(host.settingChanges.empty());
     EXPECT_EQ(refused("VIEWS ISOLATE 1 roads").code, ErrorCode::NotFound);
     EXPECT_EQ(refused("VIEWS SHOW 1 roads").code, ErrorCode::NotFound);
     EXPECT_TRUE(contains(refused("VIEWS ISOLATE 1 design design/road").message,
@@ -447,6 +449,48 @@ TEST_F(ViewVerbsTest, HidingALayerTheDrawingLacksIsRefusedNamingIt)
     // the Layers popup offers as "design" when only design/road existed.
     addLayers(document, {"survey/points"});
     EXPECT_TRUE(ok("VIEWS HIDE 1 survey").ends_with(" hidden=survey"));
+}
+
+TEST_F(ViewVerbsTest, ViewsSetGhostsOffTurnsThatViewsGhostsOffAndOnAgain)
+{
+    const ViewState& design = plan();
+    const ViewState& asBuilt = plan();
+    ASSERT_TRUE(design.selectionGhosts) << "a view ghosts the selection when it opens";
+
+    const std::string off = ok("VIEWS SET 2 ghosts=off");
+    EXPECT_TRUE(off.starts_with("view=2 kind=plan ")) << off;
+    EXPECT_TRUE(contains(off, " ghosts=off")) << off;
+    EXPECT_FALSE(asBuilt.selectionGhosts);
+    EXPECT_TRUE(design.selectionGhosts) << "only the view named";
+    EXPECT_EQ(host.settingChanges, (std::vector<ViewId>{2})) << "that view redrawn, alone";
+
+    // The words as a person types them.
+    EXPECT_TRUE(contains(ok("views set 2 GHOSTS=On"), " ghosts=on"));
+    EXPECT_TRUE(asBuilt.selectionGhosts);
+    // VIEWS says so of every view.
+    EXPECT_TRUE(contains(ok("VIEWS SET 1 ghosts=off"), " ghosts=off"));
+    const auto lines = katana::core::splitLines(ok("VIEWS"));
+    ASSERT_EQ(lines.size(), 3U);
+    EXPECT_TRUE(lines[0].ends_with(" ghosts=off")) << lines[0];
+    EXPECT_TRUE(lines[1].ends_with(" ghosts=on")) << lines[1];
+}
+
+TEST_F(ViewVerbsTest, ViewsSetRefusesWhatItDoesNotTakeAndChangesNothing)
+{
+    const ViewState& view = plan();
+    EXPECT_EQ(refused("VIEWS SET 9 ghosts=off").code, ErrorCode::NotFound);
+    const auto bare = refused("VIEWS SET 1");
+    EXPECT_TRUE(contains(bare.message, "VIEWS SET <id> ghosts=on|off")) << bare.message;
+    const auto value = refused("VIEWS SET 1 ghosts=maybe");
+    EXPECT_EQ(value.message, "ghosts= is on or off, not 'maybe'");
+    const auto key = refused("VIEWS SET 1 grid=on");
+    EXPECT_TRUE(contains(key.message, "does not take 'grid=on'")) << key.message;
+    EXPECT_TRUE(contains(refused("VIEWS SET 1 ghosts").message, "does not take 'ghosts'"));
+    // Read whole before any of it is applied: the good word before the bad
+    // one changed nothing.
+    EXPECT_EQ(refused("VIEWS SET 1 ghosts=off ghosts=maybe").code, ErrorCode::ParseFailure);
+    EXPECT_TRUE(view.selectionGhosts);
+    EXPECT_TRUE(host.settingChanges.empty());
 }
 
 // ---- ZOOM on the shared scope -------------------------------------------------------------

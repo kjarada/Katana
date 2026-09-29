@@ -131,9 +131,9 @@ and current-layer change), the model revision, the library generation, a
 fingerprint of the selection's ids (a caller that changes the selection and
 only repaints still sees it), fingerprints of the reference layers' and
 meshes' visibility and style (the panels change those without a
-notification), the view's hidden layers and references, the grid and the
-line option. A mouse move, a snap marker or a rubber band then costs the
-furniture, not the drawing.
+notification), the view's hidden layers and references, the grid, the
+line option and the view's ghost switch (below). A mouse move, a snap marker
+or a rubber band then costs the furniture, not the drawing.
 
 ## Screen and paper
 
@@ -145,6 +145,7 @@ place, the painter:
 | Line width | a hairline: 1.5 px, or 1 px with Thin screen lines | the line weight in millimetres |
 | White pens | white | black (decision D7, `cad::paperColour`) |
 | Selection, locked-layer fading | shown | not printed (audit QT-26) |
+| Ghosts of the selection | drawn when the view asks (below) | never |
 | Plain point cross | 4 px either side | 1 mm either side |
 | Alignment overlay | 2 px line, 1 px ticks 6 px long, 11 px labels | 0.5 mm line, 0.25 mm ticks 1.5 mm long, 2.5 mm labels |
 | Hatch lines | cosmetic hairline | 0.13 mm |
@@ -394,6 +395,57 @@ one click away. A process-wide choice (`ViewportWidget::setThinScreenLines`)
 that every plan view reads at its next paint. Plots keep their
 paper-millimetre weights either way. The headless `--trigger
 ThinScreenLinesAction` turns it off for a screenshot.
+
+### Ghosts of the selection
+
+A selected entity on a layer the document shows and the frame's layers hide
+(`PlanFrame::layers`) is drawn as a GHOST when `PlanPaintOptions::selectionGhosts`
+is on - the plan view sets it from its view's switch, `ViewState::selectionGhosts`;
+every other caller leaves it off and draws what it always drew, and a plot
+never draws one. A ghost is DOTS of the selection's orange at 60 % (alpha
+153), 2 px square, one every 6 px from the line's start
+(`cad/selection_style.hpp`), with no fill, hatch, linestyle or symbol, so it
+never reads as the entity drawn; a point is a ring of dots 6 px about it, a
+text, note, leader or dimension the outline of the box it draws, and a label
+is not ghosted. The pass runs after the entity loop and before the labels,
+over the selection's ids alone: O(selection), nothing with no selection,
+and no test added to the loop every entity passes. It is drawn into the
+kept drawing. `PlanPaintStats::ghostsDrawn` counts them apart from
+`entitiesDrawn`, which the tests use to prove a hidden layer is gone
+(`PlanPainter.ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost`, and none
+where the document hides the layer, on paper, or with the switch off). Why
+and how every view shows the selection: `docs/desktop.md`, "The selection
+in every view".
+
+The dots are laid down by the painter (`dotPath`), not by Qt's dotted pen.
+The first version stroked each ghost with `Qt::DotLine`: antialiased, every
+dot of a long line seen in part was made and thrown away (a dash pattern
+cannot be clipped without moving its dashes), and every selected note in the
+drawing was laid out before the cull; without antialiasing Qt drew crosses
+and Ts for dots along a diagonal. `dotPath` puts a square dot every pitch,
+carrying the phase from segment to segment and through the segments that
+miss the view - so a pan moves no dot along the line - and keeps only the
+dots in the view; a note is laid out only when its own box is near the view.
+`BM_PlanPainterGhosts` paints the generated drawing (27 600 entities) at
+1600 x 1000 with EVERY entity selected and every other layer hidden - the
+worst case, a Select All seen from a view hiding half the layers - with the
+ghosts off (the paint as before) and on, each pair in one run. Measured on
+2026-09-30 in the view-sync worktree's Release build, medians of three (the
+first version) and five (dots) repetitions of at least 1 and 2 s, other
+workflows' builds running on the machine, which moves the ghosts-off paint
+by a third between runs:
+
+| ghosts off / on | the first version | dots |
+|---|---|---|
+| at extents (10 800 ghosts) | 189 / 752 ms | 95.1 / 158 ms |
+| zoomed in five times (827 ghosts) | 17.2 / 191 ms | 10.2 / 31.4 ms |
+
+A segment is walked only where it crosses the view (Liang-Barsky on the
+screen): zoomed in, one segment of a long string can be millions of pixels
+long (`PlanPainter.AGhostLongerThanTheViewIsDottedAcrossItFromItsOwnStart`,
+which also pins the phase to the line's own start). What is left zoomed in
+is mostly the walk of the 27 600 selected ids; a selection of the usual size
+costs nothing that can be measured.
 
 ### The frame statistic
 

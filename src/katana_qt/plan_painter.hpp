@@ -205,12 +205,22 @@ struct PlanPaintOptions {
     // What an annotation's mask is painted in on screen: the plan view's
     // ground. On paper it is the paper.
     QColor screenBackground = QColor(0x1e, 0x23, 0x29);
+    // Screen only. A selected entity on a layer the document shows and the
+    // frame's layers hide is drawn as a GHOST - faint, dotted, in the
+    // selection colour, never picked or snapped to (cad/selection_style.hpp)
+    // - so a selection made in another view shows where it is here. Off by
+    // default: plots and every caller but the plan view draw what they
+    // always drew; the plan view sets it from its own switch.
+    bool selectionGhosts = false;
 };
 
 // What one paint did, for a view's statistics and for tests that cannot
 // look at pixels.
 struct PlanPaintStats {
     std::size_t entitiesDrawn = 0; // passed the visibility rule and lay in view
+    // Selected entities drawn as ghosts (PlanPaintOptions::selectionGhosts):
+    // kept apart from entitiesDrawn, which proves a hidden layer is gone.
+    std::size_t ghostsDrawn = 0;
     std::size_t symbolsStamped = 0;
     std::size_t spritesDrawn = 0; // of those, from a cached image
     // Distinct layer/style/colour combinations resolved to pens this paint:

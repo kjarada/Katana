@@ -84,7 +84,7 @@ class RenderViewWidget final : public QWidget {
     {
         return layers_.grid.lines.size() + layers_.terrain.lines.size() +
                layers_.edges.lines.size() + layers_.entities.lines.size() +
-               layers_.selection.lines.size();
+               layers_.selectionCasing.lines.size() + layers_.selection.lines.size();
     }
     // The scene as last built, by layer.
     [[nodiscard]] const katana::cad::SceneLayers& sceneLayers() const { return layers_; }

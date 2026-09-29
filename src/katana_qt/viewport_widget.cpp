@@ -1071,6 +1071,7 @@ PlanPaintOptions ViewportWidget::screenOptions() const
     // docs/annotation.md); a change of it is a command, so the kept drawing
     // is repainted by the model revision it moves.
     options.annotationScale = document_.annotationScale();
+    options.selectionGhosts = state_.selectionGhosts;
     return options;
 }
 
@@ -1167,6 +1168,7 @@ ViewportWidget::DrawingKey ViewportWidget::drawingKey(double deviceRatio) const
     key.hiddenReferences = state_.hiddenReferences;
     key.grid = gridVisible_;
     key.thinLines = thinScreenLines();
+    key.ghosts = state_.selectionGhosts;
     return key;
 }
 
@@ -1202,6 +1204,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
             paintPlan(layer, paintSource(), paintFrame(), screenOptions(), paintCache_);
         layer.end();
         lastDrawnEntities_ = stats.entitiesDrawn;
+        lastGhosts_ = stats.ghostsDrawn;
         drawingKey_ = std::move(key);
         ++drawingPaints_;
         lastDrawingMs_ = static_cast<double>(drawingTimer.nsecsElapsed()) / 1.0e6;

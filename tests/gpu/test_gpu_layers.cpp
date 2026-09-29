@@ -230,3 +230,60 @@ TEST_P(GpuLayers, ALayerUpdatedAloneIsTheOnlyOneUploaded)
     ASSERT_TRUE(third.ok());
     EXPECT_FALSE(third->uploaded);
 }
+
+// The 3D view's selection (cad/selection_style.hpp): a 3 px core of #FF9F1C
+// over a 5 px casing of (16, 18, 22), both over the entity's own 1 px line.
+// The GPU pulls a mark towards the eye by its size (gpu_renderer.cpp,
+// kMarkPull) and reads no draw-list bias, so in ONE layer writing depth the
+// wider casing is nearer than the core wherever they overlap and covers it,
+// whichever is drawn first: the selection was a dark line. In a layer of its
+// own, before the core's and writing no depth, the casing is covered by the
+// core drawn after it and shows only either side (scene.hpp, SceneLayers).
+TEST_P(GpuLayers, ASelectionCoreDrawnAfterACasingThatWritesNoDepthKeepsItsColour)
+{
+    auto gpu = device();
+    if (!gpu) {
+        GTEST_SKIP() << skipReason;
+    }
+    const Rgba orange = rgba(0xFF, 0x9F, 0x1C);
+    const Rgba dark = rgba(16, 18, 22);
+    const Vec3 from(-10.5, 0.5, 0.0);
+    const Vec3 to(10.5, 0.5, 0.0);
+    const DrawList surface = flatSurface();
+    const DrawList drawing = lineAt(from, to, rgba(220, 220, 220), 1.0f);
+    const DrawList casing = lineAt(from, to, dark, 5.0f);
+    const DrawList core = lineAt(from, to, orange, 3.0f);
+
+    const std::array<LayerSource, 4> layered{LayerSource{&surface, true},
+                                             LayerSource{&drawing, true},
+                                             LayerSource{&casing, false},
+                                             LayerSource{&core, true}};
+    const Image drawn = render(*gpu, layered);
+    saveForLooking(label("layers_selection_casing"), drawn, kWidth, kHeight);
+    // The line is on row 23 (world y = 0.5). The core covers rows 22-24, the
+    // casing rows 21-25.
+    const Rgba centre = pixelAt(drawn, 32, 23);
+    EXPECT_GT(katana::render::redOf(centre), 220);
+    EXPECT_GT(katana::render::greenOf(centre), 120);
+    EXPECT_LT(katana::render::greenOf(centre), 190);
+    EXPECT_LT(katana::render::blueOf(centre), 80);
+    // Two rows off the centre, inside the casing and outside the core: dark,
+    // well under half the core's brightness (255 + 159 + 28 = 442).
+    for (const int row : {21, 25}) {
+        EXPECT_LT(katana::qt::gpu::testing::brightness(pixelAt(drawn, 32, row)), 221)
+            << "row " << row;
+    }
+
+    // The control: core then casing in one layer writing depth, as a scene
+    // with no casing layer of its own would send them.
+    DrawList both;
+    both.addSegment(from, to, orange, 3.0f);
+    both.addSegment(from, to, dark, 5.0f);
+    const std::array<LayerSource, 3> oneLayer{LayerSource{&surface, true},
+                                              LayerSource{&drawing, true},
+                                              LayerSource{&both, true}};
+    const Image control = render(*gpu, oneLayer);
+    EXPECT_LT(katana::qt::gpu::testing::brightness(pixelAt(control, 32, 23)), 221)
+        << "without the rule the casing is expected to cover the core; if it no longer does, "
+           "this case no longer tests the rule";
+}

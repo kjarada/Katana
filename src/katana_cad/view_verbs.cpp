@@ -29,7 +29,7 @@ namespace {
 constexpr const char* kViewsUsage =
     "VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id | LINK id[,id...] [TO id] | "
     "UNLINK id[,id...]|ALL | HIDE id layer[,layer...] | SHOW id layer[,layer...]|ALL | "
-    "ISOLATE id layer";
+    "ISOLATE id layer | SET id ghosts=on|off";
 constexpr const char* kZoomUsage =
     "ZOOM [EXTENTS | IN [f] | OUT [f] | factor | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s] | "
     "SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY] "
@@ -376,7 +376,44 @@ Result<std::string> viewsVerb(const Document& document, ViewVerbHost& host,
                 }
             }
         }
-        host.layersChanged(*id);
+        host.settingsChanged(*id);
+        return viewRecord(views, *view);
+    }
+    if (action == "SET") {
+        // A view's own switches, as its Layers popup sets them. Every word
+        // is read before any is applied, so a refused line changes nothing.
+        constexpr const char* kSetUsage = "VIEWS SET <id> ghosts=on|off";
+        if (args.size() < 3) {
+            return makeError(ErrorCode::ParseFailure,
+                             std::string("VIEWS SET takes a view id and what to set: ") +
+                                 kSetUsage);
+        }
+        auto id = parseViewId(args[1]);
+        if (!id) {
+            return id.error();
+        }
+        ViewState* view = views.find(*id);
+        if (view == nullptr) {
+            return notOpen(*id);
+        }
+        bool ghosts = view->selectionGhosts;
+        for (std::size_t at = 2; at < args.size(); ++at) {
+            const std::string& word = args[at];
+            const std::size_t equals = word.find('=');
+            if (equals == std::string::npos || upper(word.substr(0, equals)) != "GHOSTS") {
+                return makeError(ErrorCode::ParseFailure,
+                                 "VIEWS SET does not take '" + word + "': " + kSetUsage, word);
+            }
+            const std::string value = upper(word.substr(equals + 1));
+            if (value != "ON" && value != "OFF") {
+                return makeError(ErrorCode::ParseFailure,
+                                 "ghosts= is on or off, not '" + word.substr(equals + 1) + "'",
+                                 word);
+            }
+            ghosts = value == "ON";
+        }
+        view->selectionGhosts = ghosts;
+        host.settingsChanged(*id);
         return viewRecord(views, *view);
     }
     return refuseWord(args[0]);
@@ -733,7 +770,7 @@ std::string viewRecord(const ViewSet& views, const ViewState& view)
     return "view=" + std::to_string(view.id) + " kind=" + kindWord(view.kind) +
            " title=" + recordValue(ViewSet::title(view)) +
            " active=" + (views.activeId() == view.id ? "yes" : "no") + placeOf(view, true) +
-           hiddenOf(view);
+           " ghosts=" + (view.selectionGhosts ? "on" : "off") + hiddenOf(view);
 }
 
 } // namespace katana::cad

@@ -41,11 +41,12 @@ const QColor kBackground(28, 30, 36);
 bool gpuFailedThisSession = false;
 
 // The layers in cad::renderLayers' order, with its depth rules (scene.hpp:
-// the grid and the edges test depth and write none).
+// the grid, the edges and the selection's casing test depth and write none).
 constexpr std::size_t kGridLayer = 0;
 constexpr std::size_t kEdgesLayer = 2;
 constexpr std::size_t kEntitiesLayer = 3;
-constexpr std::size_t kSelectionLayer = 4;
+constexpr std::size_t kSelectionCasingLayer = 4;
+constexpr std::size_t kSelectionLayer = 5;
 #endif
 
 } // namespace
@@ -253,6 +254,7 @@ void RenderViewWidget::prepareGpuFrame(katana::render::Camera& frameCamera)
     // frame, and the edges faded for how large the triangles are now.
     katana::math::AABB depthBox = layers_.bounds;
     depthBox.expand(layers_.grid.bounds());
+    depthBox.expand(layers_.selection.bounds()); // its ghosts (SceneLayers::bounds)
     frameCamera.fitDepthRange(depthBox);
     std::vector<float> applied;
     applied.reserve(layers_.edgeRuns.size());
@@ -279,11 +281,12 @@ void RenderViewWidget::sendLayersToGpu(bool drawEdges, bool edgesChanged)
     static const katana::render::DrawList kNothing;
     const katana::render::DrawList& edges = drawEdges ? layers_.edges : kNothing;
     if (gpuLayersStale_) {
-        const std::array<gpu::LayerSource, 5> layers{{
+        const std::array<gpu::LayerSource, 6> layers{{
             {&layers_.grid, false},
             {&layers_.terrain, true},
             {&edges, false},
             {&layers_.entities, true},
+            {&layers_.selectionCasing, false},
             {&layers_.selection, true},
         }};
         gpuView_->setLayers(layers);
@@ -296,6 +299,7 @@ void RenderViewWidget::sendLayersToGpu(bool drawEdges, bool edgesChanged)
             gpuView_->updateLayer(kEntitiesLayer, layers_.entities);
         }
         if (gpuDrawingStale_ || gpuSelectionStale_) {
+            gpuView_->updateLayer(kSelectionCasingLayer, layers_.selectionCasing);
             gpuView_->updateLayer(kSelectionLayer, layers_.selection);
         }
         if (edgesChanged) {
@@ -402,6 +406,12 @@ void RenderViewWidget::rebuildIfNeeded()
     if (ratio != context_.options.pixelScale) {
         context_.options.pixelScale = ratio;
         terrainDirty_ = entitiesDirty_ = selectionDirty_ = true;
+    }
+    // The view's own ghost switch (ViewState::selectionGhosts), which only
+    // the selection overlay reads.
+    if (state_.selectionGhosts != context_.options.selectionGhosts) {
+        context_.options.selectionGhosts = state_.selectionGhosts;
+        selectionDirty_ = true;
     }
     if (!terrainDirty_ && !entitiesDirty_ && !selectionDirty_) {
         return;

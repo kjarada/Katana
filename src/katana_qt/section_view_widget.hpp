@@ -16,9 +16,11 @@
 #include <optional>
 
 #include <QPoint>
+#include <QRectF>
 #include <QSize>
 #include <QWidget>
 
+#include "katana/cad/document.hpp"
 #include "katana/cad/section.hpp"
 #include "katana/cad/view_set.hpp"
 
@@ -33,6 +35,13 @@ class SectionViewWidget final : public QWidget {
     explicit SectionViewWidget(katana::cad::ViewState& state, QWidget* parent = nullptr);
 
     [[nodiscard]] katana::cad::ViewState& state() const { return state_; }
+
+    // The drawing whose selection this view marks on its crossings, each of
+    // which names the entity it cuts: a selected one in the selection colour,
+    // and one on a layer this view hides as a ghost (cad/selection_style.hpp).
+    // Repaints on every change of it, which Qt folds into one paint. Without
+    // one (the default) every crossing is drawn as it always was.
+    void setDocument(katana::cad::Document* document);
 
     // Replaces what is shown. An empty section draws the "no section" message
     // rather than an empty grid, so it is obvious nothing has been cut yet.
@@ -69,6 +78,11 @@ class SectionViewWidget final : public QWidget {
     [[nodiscard]] std::size_t lastDrawnCrossingCount() const { return lastDrawnCrossings_; }
     // Crossings the last paint left out because this view hides their layer.
     [[nodiscard]] std::size_t lastHiddenCrossingCount() const { return lastHiddenCrossings_; }
+    // Of the drawn crossings, those of a selected entity, drawn as selected.
+    [[nodiscard]] std::size_t lastSelectedCrossingCount() const { return lastSelectedCrossings_; }
+    // Of the hidden crossings, those of a selected entity drawn as ghosts
+    // (ViewState::selectionGhosts), whose layer the document shows.
+    [[nodiscard]] std::size_t lastGhostCrossingCount() const { return lastGhostCrossings_; }
 
     // Raised when this view is clicked or the user moves the keyboard focus
     // into it (view_focus.hpp).
@@ -77,7 +91,8 @@ class SectionViewWidget final : public QWidget {
     // the window's wiring and for a failure this view may one day report.
     std::function<void(const QString&)> onStatus;
     // What the view shows now: after every paint the length and the crossings
-    // ("Section  length 120.00  7 crossings, 2 hidden in this view"), and on a
+    // ("Section  length 120.00  7 crossings, 2 hidden in this view, 1
+    // selected" - a ghost counts as selected), and on a
     // mouse move the station and elevation under the cursor. Transient text,
     // kept apart from onStatus so that it never writes over a prompt or an
     // error in the status bar.
@@ -110,7 +125,13 @@ class SectionViewWidget final : public QWidget {
     void drawGrid(QPainter& painter) const;
     void drawSurfaces(QPainter& painter) const;
     void drawCrossings(QPainter& painter) const;
+    // The selected entities' crossings and their ghosts, after the surfaces
+    // so that no line is drawn over them.
+    void drawSelectedCrossings(QPainter& painter) const;
     void drawLegend(QPainter& painter) const;
+    [[nodiscard]] bool isSelected(const katana::cad::SectionCrossing& crossing) const;
+    // Inside the axes and their labels, in pixels.
+    [[nodiscard]] QRectF plotRect() const;
 
     katana::cad::ViewState& state_;
 
@@ -131,6 +152,11 @@ class SectionViewWidget final : public QWidget {
     QSize lastSize_;
     mutable std::size_t lastDrawnCrossings_ = 0;
     mutable std::size_t lastHiddenCrossings_ = 0;
+    mutable std::size_t lastSelectedCrossings_ = 0;
+    mutable std::size_t lastGhostCrossings_ = 0;
+
+    katana::cad::Document* document_ = nullptr;
+    katana::cad::Document::ListenerHandle documentListener_;
 
     bool panning_ = false;
     QPoint lastMouse_;

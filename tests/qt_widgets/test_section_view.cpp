@@ -11,11 +11,16 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
+
+#include <QImage>
 #include <QMouseEvent>
 #include <QWheelEvent>
 
+#include "katana/cad/document.hpp"
 #include "katana/cad/section.hpp"
 #include "katana/cad/view_set.hpp"
+#include "katana/commands/entity_commands.hpp"
 #include "widget_harness.hpp"
 
 using katana::cad::Section;
@@ -207,4 +212,135 @@ TEST(SectionView, MovingTheMouseReportsTheStationAndElevationUnderIt)
                      Qt::NoButton, Qt::NoModifier);
     QCoreApplication::sendEvent(&view, &move);
     EXPECT_EQ(readout, QStringLiteral("Station 500.000   Elevation 15.000   (V x10.0)"));
+}
+
+// ---- the selection on the crossings (cad/selection_style.hpp) -------------------------
+
+namespace {
+
+// A cut from (0, 40) to (100, 40) and a line from (20, 0) to (20, 100) on
+// "pipes" crossing it: by hand, at station 20. No surface, so the view frames
+// the stations alone (frameExtents): the 726 px plot of an 800 px view (800 -
+// 62 - 12) for 100 m, station 20 at x = 62 + 20 x 7.26 = 207.2.
+struct CutPipe {
+    katana::cad::Document document;
+    ViewSet views;
+    ViewState& state = views.add(ViewKind::Section);
+    katana::entity::EntityId pipe = katana::entity::kInvalidEntityId;
+    std::optional<SectionViewWidget> view;
+
+    CutPipe()
+    {
+        katana::entity::Layer layer;
+        layer.name = "pipes";
+        EXPECT_TRUE(document.execute(katana::commands::createLayer(layer)).ok());
+        katana::commands::EntityAttributes attributes;
+        attributes.layer = "pipes";
+        EXPECT_TRUE(document
+                        .execute(katana::commands::createLine(Point2(20.0, 0.0),
+                                                              Point2(20.0, 100.0), attributes))
+                        .ok());
+        pipe = document.model().entities.ids().back();
+        katana::geometry::Polyline2 cut;
+        cut.vertices = {Point2(0.0, 40.0), Point2(100.0, 40.0)};
+        auto section = katana::cad::extractSection(cut, {}, &document.model());
+        EXPECT_TRUE(section.ok());
+        view.emplace(state);
+        view->setDocument(&document);
+        view->resize(800, 300);
+        if (section.ok()) {
+            EXPECT_EQ(section->crossings.size(), 1u);
+            if (!section->crossings.empty()) {
+                EXPECT_NEAR(section->crossings.front().station, 20.0, 1e-9);
+                EXPECT_EQ(section->crossings.front().entity, pipe);
+            }
+            view->setSection(std::move(*section));
+        }
+    }
+
+    void select()
+    {
+        document.selection().add(pipe);
+        document.notifySelectionChanged();
+    }
+
+    // Pixels of columns 204 to 210, top to bottom of the plot, in the
+    // selection's orange: red above 200, green 120 to 200, blue under 90 -
+    // never the crossings' dashed (210, 90, 90), the grid's greys or the
+    // ground.
+    std::size_t orangeInk()
+    {
+        const QImage image = view->grab().toImage();
+        std::size_t ink = 0;
+        for (int y = 10; y < image.height() - 26; ++y) {
+            for (int x = 204; x <= 210; ++x) {
+                const QRgb c = image.pixel(x, y);
+                ink += qRed(c) > 200 && qGreen(c) >= 120 && qGreen(c) <= 200 && qBlue(c) < 90
+                           ? 1
+                           : 0;
+            }
+        }
+        return ink;
+    }
+};
+
+} // namespace
+
+TEST(SectionView, ASelectedEntitysCrossingIsDrawnSolidInTheSelectionColour)
+{
+    CutPipe cut;
+    const std::size_t unselected = cut.orangeInk();
+    EXPECT_EQ(cut.view->lastSelectedCrossingCount(), 0u);
+    EXPECT_EQ(cut.view->lastDrawnCrossingCount(), 1u);
+
+    cut.select();
+    const std::size_t selected = cut.orangeInk();
+    EXPECT_EQ(cut.view->lastSelectedCrossingCount(), 1u);
+    EXPECT_EQ(cut.view->lastDrawnCrossingCount(), 1u) << "drawn once, as selected";
+    EXPECT_EQ(cut.view->lastGhostCrossingCount(), 0u);
+    // Solid down the 264 px plot (300 - 10 - 26), 2 px wide: hundreds of
+    // pixels, where the dashed crossing had none of this colour.
+    EXPECT_EQ(unselected, 0u);
+    EXPECT_GT(selected, 264u);
+}
+
+TEST(SectionView, ASelectedCrossingOnALayerTheViewHidesIsAGhost)
+{
+    CutPipe cut;
+    ASSERT_TRUE(cut.state.layers.hide("pipes"));
+    cut.select();
+    (void)cut.orangeInk();
+    EXPECT_EQ(cut.view->lastHiddenCrossingCount(), 1u);
+    EXPECT_EQ(cut.view->lastDrawnCrossingCount(), 0u);
+    EXPECT_EQ(cut.view->lastSelectedCrossingCount(), 0u);
+    EXPECT_EQ(cut.view->lastGhostCrossingCount(), 1u);
+
+    // The view's switch off: no ghost.
+    cut.state.selectionGhosts = false;
+    (void)cut.orangeInk();
+    EXPECT_EQ(cut.view->lastGhostCrossingCount(), 0u);
+
+    // On again, but the drawing hides the layer: hidden everywhere.
+    cut.state.selectionGhosts = true;
+    katana::entity::Layer pipes = *cut.document.model().layers.find("pipes");
+    pipes.visible = false;
+    ASSERT_TRUE(cut.document.execute(katana::commands::updateLayer(pipes)).ok());
+    (void)cut.orangeInk();
+    EXPECT_EQ(cut.view->lastGhostCrossingCount(), 0u);
+}
+
+TEST(SectionView, AnUnselectedCrossingOnAHiddenLayerStaysOutWithAnotherSelected)
+{
+    // Only a selected entity's crossing is ghosted: another selection leaves
+    // the hidden crossing out, as before.
+    CutPipe cut;
+    ASSERT_TRUE(cut.state.layers.hide("pipes"));
+    ASSERT_TRUE(cut.document
+                    .execute(katana::commands::createLine(Point2(60.0, 0.0), Point2(70.0, 0.0)))
+                    .ok());
+    cut.document.selection().add(cut.document.model().entities.ids().back());
+    cut.document.notifySelectionChanged();
+    (void)cut.orangeInk();
+    EXPECT_EQ(cut.view->lastHiddenCrossingCount(), 1u);
+    EXPECT_EQ(cut.view->lastGhostCrossingCount(), 0u);
 }
