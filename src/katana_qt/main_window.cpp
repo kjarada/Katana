@@ -1151,7 +1151,7 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
             showProjectCrs(place);
             return false;
         }
-        return chooseProjectCrs(this, document_, place);
+        return chooseProjectCrs(this, document_, place, commandRunner());
     };
     online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
 
@@ -2429,7 +2429,8 @@ void MainWindow::showProjectCrs(std::optional<std::pair<double, double>> place)
     // and the drawing's centre when it is made, and a place asked about is a
     // new question.
     if (!projectCrs_ || !projectCrs_->isVisible() || place) {
-        projectCrs_ = std::make_unique<ProjectCrsDialog>(document_, place, this);
+        projectCrs_ =
+            std::make_unique<ProjectCrsDialog>(document_, place, this, commandRunner());
     }
     projectCrs_->show();
     projectCrs_->raise();
