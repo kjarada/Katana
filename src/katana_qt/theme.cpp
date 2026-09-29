@@ -3,8 +3,11 @@
 #include <QApplication>
 #include <QFontDatabase>
 #include <QFontMetrics>
+#include <QIcon>
 #include <QPainter>
 #include <QPalette>
+#include <QPixmap>
+#include <QPolygonF>
 #include <QProxyStyle>
 #include <QString>
 #include <QStyleOptionMenuItem>
@@ -62,7 +65,7 @@ QFont sectionFont(const QFont& base)
     return font;
 }
 
-// Fusion, with two things it does not do.
+// Fusion, with three things it does not do.
 //
 // Menu sections. The Survey, Terrain and GIS menus are grouped under titled
 // sections ("Surfaces", "Point Cloud - PDAL") and not one title was ever
@@ -75,6 +78,11 @@ QFont sectionFont(const QFont& base)
 // the height of every item (SH_ComboBox_Popup), ignoring maxVisibleItems - a
 // drawing's two hundred styles in the Style box ran off the screen. This
 // style asks for the scrolling list instead.
+//
+// A toolbar's overflow arrow. Qt's is a small dark image made for light
+// toolbars (QCommonStyle's toolbar-ext resources), barely there on this one;
+// this style draws it in the muted text colour, pointing the way the hidden
+// buttons are.
 class KatanaStyle final : public QProxyStyle {
   public:
     KatanaStyle() : QProxyStyle(QStringLiteral("Fusion")) {}
@@ -104,6 +112,16 @@ class KatanaStyle final : public QProxyStyle {
                     metrics.height() + kSectionPadding};
         }
         return QProxyStyle::sizeFromContents(type, option, size, widget);
+    }
+
+    QIcon standardIcon(StandardPixmap which, const QStyleOption* option,
+                       const QWidget* widget) const override
+    {
+        if (which == SP_ToolBarHorizontalExtensionButton ||
+            which == SP_ToolBarVerticalExtensionButton) {
+            return overflowArrow(which == SP_ToolBarVerticalExtensionButton);
+        }
+        return QProxyStyle::standardIcon(which, option, widget);
     }
 
     void drawControl(ControlElement element, const QStyleOption* option, QPainter* painter,
@@ -140,6 +158,35 @@ class KatanaStyle final : public QProxyStyle {
     static constexpr int kSeparatorHeight = 9;
     static constexpr int kSectionPadding = 10;
     static constexpr int kIndent = 12;
+
+    // Two chevrons pointing down (a vertical toolbar's hidden buttons are
+    // below its end) or right, on a 12-unit grid: the arrow's button is
+    // 12 px deep (PM_ToolBarExtensionExtent). Drawn at twice the size too,
+    // for a scaled screen.
+    static QIcon overflowArrow(bool down)
+    {
+        QIcon icon;
+        for (const int side : {12, 24}) {
+            QPixmap pixmap(side, side);
+            pixmap.fill(Qt::transparent);
+            QPainter painter(&pixmap);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.scale(side / 12.0, side / 12.0);
+            painter.setPen(QPen(textMuted(), 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            for (const double at : {2.5, 6.5}) {
+                QPolygonF chevron;
+                if (down) {
+                    chevron << QPointF(3.0, at) << QPointF(6.0, at + 3.0) << QPointF(9.0, at);
+                } else {
+                    chevron << QPointF(at, 3.0) << QPointF(at + 3.0, 6.0) << QPointF(at, 9.0);
+                }
+                painter.drawPolyline(chevron);
+            }
+            painter.end();
+            icon.addPixmap(pixmap);
+        }
+        return icon;
+    }
 
     static const QStyleOptionMenuItem* separatorOf(ContentsType type, const QStyleOption* option)
     {
@@ -195,6 +242,27 @@ QString styleSheet()
         QToolButton:pressed { background: %raised%; }
         QToolButton:checked { background: %raised%; border: 1px solid %accent%; }
         QToolButton:disabled { color: %textDisabled%; }
+        /* A split button - Undo and Redo, each with its history beside it.
+           Qt's own recipe (Qt Style Sheets Examples, "Customizing
+           QToolButton"): padding makes room for the arrow's strip, so the
+           strip sits beside the icon. Without it the padding and border
+           above make Qt reserve no width for the strip
+           (PM_MenuButtonIndicator is 0 under such a rule), yet the strip is
+           still laid, painted and pressed over the icon's right side. 14 px
+           is the strip's 10 and the 4 every button has. The tool families
+           are not split buttons: they mark their menus in a corner
+           (tools/flyout_button.hpp). */
+        QToolButton[popupMode="MenuButtonPopup"] { padding-right: 14px; }
+        QToolButton::menu-button { border: none; width: 10px; border-top-right-radius: 5px;
+                                   border-bottom-right-radius: 5px; }
+        QToolButton::menu-button:hover { background: %raised%; }
+        /* The arrow a toolbar shows when the window is too small for all its
+           buttons. The button is 12 px deep (PM_ToolBarExtensionExtent), and
+           the 4 px padding and 1 px border every tool button has left its
+           arrow 2 px: a dot nobody saw, with the Draw toolbar's Ellipse and
+           Vertices tools behind it at the window's first size. KatanaStyle
+           draws the arrow in the muted text colour. */
+        QToolButton#qt_toolbar_ext_button { padding: 0px; border: none; }
 
         /* Every dock wears a DockTitleBar (dock_chrome.hpp), which draws its
            own buttons; the ::title rule is for a dock made without one.

@@ -12,9 +12,9 @@
 #include <QMenuBar>
 #include <QString>
 #include <QToolBar>
-#include <QToolButton>
 
 #include "katana/core/text.hpp"
+#include "tools/flyout_button.hpp"
 #include "tools/tool_icons.hpp"
 
 namespace katana::qt::tools {
@@ -471,13 +471,13 @@ ToolActions fillToolMenus(const cad::ToolCatalog& catalog, const ToolMenuTargets
                     }
                     if (bar != nullptr) {
                         // One button for the family: a click runs its first
-                        // variant, the arrow offers the others.
-                        auto* button = new QToolButton(bar);
+                        // variant; its corner triangle, a press held or a
+                        // right click offers the others (flyout_button.hpp).
+                        auto* button = new FlyoutButton(bar);
                         button->setObjectName(qs("toolFamilyButton." + category + "." +
                                                  parts->first));
                         button->setDefaultAction(action);
                         button->setMenu(family);
-                        button->setPopupMode(QToolButton::MenuButtonPopup);
                         bar->addWidget(button);
                     }
                 }

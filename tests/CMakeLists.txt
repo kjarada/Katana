@@ -1440,6 +1440,27 @@ if(TARGET katana)
             "-DEXPECT=menus: [0-9]+ items, each with an icon and a status tip"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/menus_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Every icon-only toolbar button with a menu draws the sign of its menu
+    # clear of its icon (--check-toolbars, tools::menuSignClashes), each
+    # measured from its own rendering against itself - with its menu and
+    # without, with an opaque icon and a clear one. Until 2026-09-30 the tool
+    # families were split buttons whose arrow strip the stylesheet drew over
+    # the icon. Six buttons: the catalogue's four families, all on the Draw
+    # toolbar (Circle, Arc, Ellipse; Vertices, which the window's first size
+    # hides behind the overflow arrow), and Edit's Undo and Redo. By hand, a
+    # family at the standard 20 px icons is 33 px (20, Qt's 3, the theme's
+    # 4 px padding and 1 px border each side), its icon's square centred at
+    # 6..25 and its 5 px mark at 26..30, inside the border and a pixel of
+    # air. The grab is the Draw toolbar, for a person to look at.
+    add_test(NAME qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DCHECK_TOOLBARS=ON"
+            "-DDRIVE=%DrawToolBar"
+            "-DEXPECT=toolbar button EditToolBar > editUndoButton: sign [^\r\n]* clear of its icon [^\r\n]*[\r\n]+toolbar button EditToolBar > editRedoButton: sign [^\r\n]* clear of its icon .*toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolbars: 6 buttons with a menu, each drawing its sign clear of its icon"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_signs_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_format_menu_opens_the_style_manager_headless
                          qt_the_style_manager_lists_a_library_group_s_linestyles_headless
                          qt_format_menu_opens_the_symbol_library_headless
@@ -1460,6 +1481,7 @@ if(TARGET katana)
                          qt_quick_select_is_answered_at_the_command_line_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
                          qt_every_menu_item_has_an_icon_and_a_status_tip_headless
+                         qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless
                          qt_the_window_section_sizes_the_text_and_toolbars_and_resets_the_layout_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
