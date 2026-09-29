@@ -1047,10 +1047,11 @@ if(KATANA_BUILD_TESTS)
     # A resection, tests/surveyio/data/fld/resection.fld: 128 sets up on S1,
     # whose block ("5" and "7" without their zero) runs to the 129, then
     # shots with 16, 42, 43 and 71, a coded check (06), and a 03 on K1.
-    # READ: all 27 records, the two offsets warned of as not applied, 2
-    # setups, 24 observations (8 pointings of 3), K1 and K2 entered, S1, 101,
-    # 102 and 103 unpositioned, the EB 01, NS 01 and PF strings, and what the
-    # file does not carry: S1's coordinates. IMPORT: the file does not state
+    # READ: all 27 records and nothing to warn of - the two offsets are
+    # applied to the shots they follow - 2 setups, 24 observations (8
+    # pointings of 3), K1 and K2 entered, S1, 101, 102 and 103 unpositioned,
+    # the EB 01, NS 01 and PF strings, and what the file does not carry: S1's
+    # coordinates. IMPORT: the file does not state
     # where S1 is and the reduction computes no resection, so nothing is
     # radiated from it, which the report says; K1, oriented on K2 due east at
     # circle 90 (orientation 0), radiates 103 at 45 deg, 10 m out (zenith 90):
@@ -1061,8 +1062,8 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_resection}\"")
     set_tests_properties(cli.survey_read_resection_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=resection\\.fld format=opcode-field-file parser=1\\.1 read=27 skipped=0 warnings=2[\r\n]+content setups=2 observations=24 points=2 unpositioned=4 features=3 control=0[\r\n]+declared crs=\"Local grid B\" epsg=none[\r\n]+warning record=24 text=\"the tangential offset \\(opcode 43\\) of 0\\.25 m to point '101'[^\r\n]+[\r\n]+warning record=29 text=\"the radial offset \\(opcode 42\\) of 0\\.5 m to point '102'.*not_carried text=\"no coordinates for the 1 setup\\(s\\) made by resection"
-        FAIL_REGULAR_EXPRESSION "error")
+        "survey file=resection\\.fld format=opcode-field-file parser=1\\.1 read=27 skipped=0 warnings=0[\r\n]+content setups=2 observations=24 points=2 unpositioned=4 features=3 control=0[\r\n]+declared crs=\"Local grid B\" epsg=none[\r\n]+not_carried .*not_carried text=\"no coordinates for the 1 setup\\(s\\) made by resection"
+        FAIL_REGULAR_EXPRESSION "error|warning record")
     add_test(NAME cli.survey_import_resection_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_resection}\"" -c "LIST")
@@ -1070,6 +1071,34 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "imported job=job-1 entities=3 layer=survey/points .*reduction_warning text=\"Setup S1 stands on S1, which has no position: nothing was computed from it\\.\".* at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1007\\.07[01][0-9]*,5007\\.07[01][0-9]*"
         FAIL_REGULAR_EXPRESSION "error")
+    # A setup on RTK marks, tests/surveyio/data/fld/rtk_setup.fld: A (1000,
+    # 5000) and B (1000, 5100), each written " 2" with its GNSS attributes, a
+    # setup on A reading 30 degrees on B, and two shots at circle 120, 10 m
+    # and 20 m out and level, each followed by an offset. READ: all 18 records
+    # (the version line, 100, two coordinates with a group of three records
+    # each, 03, 05, 04, 05, 07, 42, 07, 43), nothing to warn of. IMPORT: A and
+    # B are entered coordinates, which the reduction takes as known, so the
+    # setup is oriented on B, due north: 0 - 30 = -30 degrees, and circle 120
+    # is due east. 101 is 10 m east and its radial offset 0.5 m further out:
+    # 1010.5, 5000; 102 is 20 m east and its tangential offset 0.5 m to the
+    # right looking east, south: 1020, 4999.5. Read as calculated, the marks
+    # would not orient it: the circle taken as set would put 101 at 1008.66,
+    # 4995.
+    set(_fld_rtk_setup "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/rtk_setup.fld")
+    add_test(NAME cli.survey_read_rtk_setup_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_rtk_setup}\"")
+    set_tests_properties(cli.survey_read_rtk_setup_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=rtk_setup\\.fld format=opcode-field-file parser=1\\.1 read=18 skipped=0 warnings=0[\r\n]+content setups=1 observations=9 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Local grid C\" epsg=none"
+        FAIL_REGULAR_EXPRESSION "error|warning record")
+    add_test(NAME cli.survey_import_rtk_setup_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_rtk_setup}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_rtk_setup_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=4 layer=survey/points .* at 1000,5000[\r\n]+[^\r\n]+ at 1000,5100[\r\n]+[^\r\n]+ at 1010\\.5,5000[\r\n]+[^\r\n]+ at 1020,4999\\.5[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error|backsight has no position")
     # CRS SET with a WKT - GDA2020 / MGA zone 56 as OGC WKT1, its names in
     # double quotes and one of them holding blanks - as an agent or a script
     # passes it: the verb once lost the quotes with the line's tokens, and

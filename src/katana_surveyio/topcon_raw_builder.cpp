@@ -234,11 +234,9 @@ bool RawProjectBuilder::hasPoint(std::string_view id) const
     return findPoint(id, std::hash<std::string_view>{}(id)) != kNotFound;
 }
 
-RawProjectBuilder::Positioned RawProjectBuilder::positionPoint(std::string_view id, double northing,
-                                                               double easting,
-                                                               std::optional<double> elevation,
-                                                               survey::CoordinateSource how,
-                                                               std::size_t record)
+void RawProjectBuilder::positionPoint(std::string_view id, double northing, double easting,
+                                      std::optional<double> elevation,
+                                      survey::CoordinateSource how, std::size_t record)
 {
     PointEntry& point = entry(id, record);
     if (!point.positioned) {
@@ -249,11 +247,11 @@ RawProjectBuilder::Positioned RawProjectBuilder::positionPoint(std::string_view 
         point.coordinateSource = how;
         point.positionRecord = record;
         point.sourceRecord = record;
-        return Positioned::First;
+        return;
     }
     if (point.northing == northing && point.easting == easting &&
         (!elevation || point.elevation == elevation)) {
-        return Positioned::Repeated;
+        return;
     }
     std::string restated = "N " + katana::core::formatExactReal(northing) + ", E " +
                            katana::core::formatExactReal(easting);
@@ -264,19 +262,6 @@ RawProjectBuilder::Positioned RawProjectBuilder::positionPoint(std::string_view 
     warn(record, "point '" + point.id + "' is given different coordinates here (" + restated +
                      " m) from those of record " + std::to_string(point.positionRecord) +
                      "; the first are kept and these are in the point's metadata");
-    return Positioned::Restated;
-}
-
-bool RawProjectBuilder::setCoordinateSource(std::string_view id, std::size_t record,
-                                            survey::CoordinateSource how)
-{
-    const std::uint32_t index = findPoint(id, std::hash<std::string_view>{}(id));
-    if (index == kNotFound || !points_[index].positioned ||
-        points_[index].positionRecord != record) {
-        return false;
-    }
-    points_[index].coordinateSource = how;
-    return true;
 }
 
 std::string RawProjectBuilder::featureKey(std::string_view code, std::string_view stringNumber)

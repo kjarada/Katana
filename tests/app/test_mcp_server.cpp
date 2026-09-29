@@ -215,6 +215,39 @@ TEST_F(McpServer, ABatchStopsAtTheFirstFailingCommandAndSaysWhich)
     EXPECT_EQ(result["structuredContent"]["status"]["entities"], 0);
 }
 
+// What an agent is told of a field file whose setup stands on RTK marks, and
+// where the import puts the shots: the hand-built file of the surveyio tests,
+// its positions worked by hand in src/katana_app/CMakeLists.txt beside
+// cli.survey_import_rtk_setup_field_file - the marks orient the setup, and
+// each shot's offset is applied.
+TEST_F(McpServer, AnAgentImportsAFieldFileWhoseSetupStandsOnRtkMarks)
+{
+    initialize();
+    const std::string file = std::string(KATANA_SURVEYIO_DATA) + "/fld/rtk_setup.fld";
+    const Json result = call("katana_run_commands",
+                             Json{{"commands", {"SURVEY READ \"" + file + "\"",
+                                                "SURVEY IMPORT \"" + file + "\"", "LIST"}}});
+    EXPECT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 3U);
+    const std::string read = lines[0]["output"].get<std::string>();
+    EXPECT_NE(read.find("survey file=rtk_setup.fld format=opcode-field-file parser=1.1 read=18 "
+                        "skipped=0 warnings=0"),
+              std::string::npos)
+        << read;
+    EXPECT_NE(read.find("content setups=1 observations=9 points=2 unpositioned=2"),
+              std::string::npos)
+        << read;
+    EXPECT_NE(lines[1]["output"].get<std::string>().find(
+                  "imported job=job-1 entities=4 layer=survey/points"),
+              std::string::npos)
+        << lines[1];
+    const std::string list = lines[2]["output"].get<std::string>();
+    EXPECT_NE(list.find(" at 1010.5,5000"), std::string::npos) << list;
+    EXPECT_NE(list.find(" at 1020,4999.5"), std::string::npos) << list;
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 4);
+}
+
 // An agent reaches a survey field file and a WKT through the lines it sends:
 // SURVEY IMPORT is the session's verb (survey_verbs.hpp), and CRS SET takes
 // the WKT with its quotes, which the verb once lost (test_project_crs.cpp).
