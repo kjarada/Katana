@@ -18,7 +18,7 @@
 #include "katana/cad/survey_job.hpp"
 #include "katana/core/error.hpp"
 #include "katana/survey/reduction.hpp"
-#include "katana/surveyio/format.hpp"
+#include "katana/surveyio/reader.hpp"
 
 class QString;
 
@@ -47,9 +47,9 @@ inline constexpr std::size_t kReportRowsOnScreen = 2'000;
 // SurveyJobReadjustment::parserVersion; empty for an unknown format.
 [[nodiscard]] std::string parserVersionOf(const std::string& formatId);
 
-// What the reduction's report input says about a file that was read.
-[[nodiscard]] katana::survey::ReportInput reportInputFor(const katana::surveyio::ReadResult& read,
-                                                         const std::string& fileName);
+// What the reduction's report input says about a file that was read: in
+// surveyio, where katana_cli's SURVEY IMPORT finds it too.
+using katana::surveyio::reportInputFor;
 
 // "network least squares (horizontal): variance factor 1.023, global test
 // passed" / "radiation: nothing adjusted" - an outcome in a line.

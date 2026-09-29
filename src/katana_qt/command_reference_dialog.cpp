@@ -22,6 +22,7 @@
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
 #include "geo/geo_verbs.hpp"
+#include "survey_verbs.hpp"
 #include "katana/interop/online_verbs.hpp"
 #include "theme.hpp"
 
@@ -200,6 +201,9 @@ std::vector<ReferenceSection> commandReferenceSections()
     // GDAL and the geoprocessing verbs, from the executor's own table, so the
     // window and katana_help cannot list them differently.
     sections.push_back({"Geoprocessing", referenceEntries(qs(katana::app::geo::helpText()))});
+    // SURVEY READ and IMPORT, from the session's own help, as katana_help says them.
+    sections.push_back(
+        {"Survey field files", referenceEntries(qs(katana::app::surveyHelpText()))});
     sections.push_back({"Window", referenceEntries(windowHelpText())});
     // The tools, a section a menu, in the menus' order: what each is called,
     // the words that start it, its key and what it does.

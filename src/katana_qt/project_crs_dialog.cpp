@@ -12,6 +12,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/project_crs.hpp"
 #include "katana/gis/reproject.hpp"
 
@@ -75,8 +76,9 @@ QString projectCrsLabel(const katana::cad::Document& document)
 }
 
 ProjectCrsDialog::ProjectCrsDialog(katana::cad::Document& document,
-                                   std::optional<std::pair<double, double>> place, QWidget* parent)
-    : QDialog(parent), document_(document), place_(place)
+                                   std::optional<std::pair<double, double>> place, QWidget* parent,
+                                   CommandRunner runner)
+    : QDialog(parent), document_(document), runner_(std::move(runner)), place_(place)
 {
     setObjectName(QStringLiteral("projectCrsDialog"));
     setWindowTitle(QStringLiteral("Project Coordinate System"));
@@ -309,9 +311,24 @@ QString ProjectCrsDialog::check() const { return check_->text(); }
 
 bool ProjectCrsDialog::apply()
 {
-    const auto status = document_.setCoordinateSystem(text_->text().toStdString());
-    if (!status) {
-        check_->setText(QStringLiteral("Not set: ") + qs(status.error().describe()));
+    // The text goes on the line as typed: CRS SET reads everything after SET
+    // verbatim, so a WKT keeps its quotes.
+    const QString typed = text_->text().trimmed();
+    const QString line =
+        typed.isEmpty() ? QStringLiteral("CRS CLEAR") : QStringLiteral("CRS SET ") + typed;
+    VerbOutcome outcome;
+    if (runner_) {
+        outcome = runner_(line);
+    } else {
+        katana::cad::CommandInterpreter interpreter(document_);
+        const auto reply = interpreter.run(line.toStdString());
+        outcome.ok = reply.ok();
+        if (!reply) {
+            outcome.error = qs(reply.error().describe());
+        }
+    }
+    if (!outcome.ok) {
+        check_->setText(QStringLiteral("Not set: ") + outcome.error);
         return false;
     }
     // projectCrsCurrent is follow's to update, from the step just taken.
@@ -319,10 +336,10 @@ bool ProjectCrsDialog::apply()
 }
 
 bool chooseProjectCrs(QWidget* parent, katana::cad::Document& document,
-                      std::optional<std::pair<double, double>> place)
+                      std::optional<std::pair<double, double>> place, CommandRunner runner)
 {
     const std::string before = document.metadata().coordinateSystem;
-    ProjectCrsDialog dialog(document, place, parent);
+    ProjectCrsDialog dialog(document, place, parent, std::move(runner));
     dialog.exec();
     return document.metadata().coordinateSystem != before;
 }

@@ -783,6 +783,18 @@ if(TARGET katana)
             "-DEXPECT=Records read: 12.*Points to create: 12.*Imported 12 point\\(s\\) from survey_points_pnezd\\.csv.*SurveyPointsDock: 12 points, 2 shown"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # SURVEY IMPORT typed on the window's command line runs the session's
+    # verb (src/katana_app/survey_verbs.hpp): the hand-built field file's 4
+    # points come in as job-1, as katana_cli's cli.survey_import_field_file
+    # has them.
+    add_test(NAME qt_survey_verb_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SURVEY IMPORT \"${_survey_data}/fld/setup.fld\"|>STATUS"
+            "-DEXPECT=survey file=setup\\.fld format=opcode-field-file .*imported job=job-1 entities=4 layer=survey/points.*Entities: 4 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_verb_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # A headerless file does not say which column is the northing: Next on the
     # layout page is refused until the order is confirmed, and then its 3
     # points import.
@@ -1466,6 +1478,7 @@ if(TARGET katana)
                          qt_survey_forward_headless qt_survey_angle_headless
                          qt_survey_traverse_headless qt_survey_level_book_headless
                          qt_survey_converter_headless qt_survey_import_headless
+                         qt_survey_verb_headless
                          qt_survey_import_uncertain_headless
                          qt_survey_import_role_boxes_swap_headless
                          qt_survey_export_round_trip_headless
@@ -2214,13 +2227,16 @@ endif()
 # names instead of hanging on exec() as it once did. Perth, 115.86 E, is in
 # UTM zone 50 (114 to 120 E), which GDA2020 names EPSG:7850, "GDA2020 / MGA
 # zone 50" in the EPSG registry; Set is one step, which one UNDO takes back.
+# Set runs CRS SET through the window's command runner (since 2026-09-29), so
+# its reply is logged as a typed line's is: the first "crs id" line is Set's,
+# the second the >CRS step's.
 if(TARGET katana)
     add_test(NAME qt_the_project_crs_dialog_is_driven_and_sets_one_step_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@fileProjectCrs|?projectCrsCurrent|projectCrsPlace=115.86,-31.95|!projectCrsSuggest|?projectCrsList|projectCrsText=EPSG:7850|?projectCrsCheck|!projectCrsApply|>CRS|>UNDO|>CRS"
-            "-DEXPECT=--dialog fileProjectCrs opened projectCrsDialog \"Project Coordinate System\"[\r\n]+projectCrsCurrent: Now: no coordinate system[\r\n]+projectCrsList: Suggested for this place [^\r\n]*[\r\n]+projectCrsCheck: EPSG:7850 GDA2020 / MGA zone 50 - projected, metre[^\r\n]*[\r\n]+crs id=EPSG:7850 name=\"GDA2020 / MGA zone 50\"[^\r\n]*[\r\n]+1 undone[\r\n]+crs id=none"
+            "-DEXPECT=--dialog fileProjectCrs opened projectCrsDialog \"Project Coordinate System\"[\r\n]+projectCrsCurrent: Now: no coordinate system[\r\n]+projectCrsList: Suggested for this place [^\r\n]*[\r\n]+projectCrsCheck: EPSG:7850 GDA2020 / MGA zone 50 - projected, metre[^\r\n]*[\r\n]+crs id=EPSG:7850 name=\"GDA2020 / MGA zone 50\"[^\r\n]*[\r\n]+crs id=EPSG:7850 name=\"GDA2020 / MGA zone 50\"[^\r\n]*[\r\n]+1 undone[\r\n]+crs id=none"
             "-DFORBID=\\(modal\\)"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/project_crs_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")

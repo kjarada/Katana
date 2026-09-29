@@ -29,6 +29,7 @@
 #include "katana/entity/tables.hpp"
 #include "dxf_verbs.hpp"
 #include "ifc_verbs.hpp"
+#include "survey_verbs.hpp"
 #include "import_records.hpp"
 #include "session.hpp"
 
@@ -402,6 +403,17 @@ bool runLine(SessionState& session, const std::string& line)
         return runCustomise(session.document, session.customisation,
                             session.customisationMissingAtOpen, paths, replace);
     }
+    // SURVEY READ and SURVEY IMPORT: a survey field file, through surveyio,
+    // which the interpreter (cad) may not see (survey_verbs.hpp).
+    if (katana::app::isSurveyLine(line)) {
+        const auto reply = katana::app::runSurveyLine(session.document, line);
+        if (!reply) {
+            std::cerr << "error: " << reply.error().describe() << '\n';
+            return false;
+        }
+        std::cout << *reply << '\n';
+        return true;
+    }
     // A .ifc is read, written and described natively, with or without GDAL
     // (ifc_verbs.hpp). The rest of the line goes as it is, not through
     // argumentOf: the IFC grammar reads its own quotes, and a line may quote
@@ -596,6 +608,7 @@ std::string Session::helpText()
             "          libraries (.4d) and survey code files (.mapfile), merged\n"
             "          into what is loaded; CUSTOMISE alone reports what is loaded\n";
     text += katana::app::ifcHelpText();
+    text += katana::app::surveyHelpText();
 #if defined(KATANA_WITH_INTEROP)
     // IMPORT, EXPORT, INFO <file>, REFS and COPC are the executor's, so its
     // table says them, as it does in the window's HELP.
