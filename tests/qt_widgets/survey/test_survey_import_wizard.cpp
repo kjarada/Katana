@@ -191,7 +191,8 @@ TEST(SurveyImportWizard, TheContentStepShowsWhatEachFormatsReaderRead)
     // Setups counted by hand in each fixture: tps_gsi8.gsi has two blocks
     // with word 84 (a station), one_setup.jxl one StationRecord,
     // setup_metres.rw5 one OC record, setup.gt7 one STN line, setup.fld one
-    // 03 record; a RINEX observation file has no setups and one GNSS session,
+    // 03 record, gnss.fld none (RTK coordinates only), resection.fld a 128
+    // and a 03; a RINEX observation file has no setups and one GNSS session,
     // and its navigation file of the same name (.24n) is read beside it.
     const struct {
         const char* file;
@@ -201,6 +202,8 @@ TEST(SurveyImportWizard, TheContentStepShowsWhatEachFormatsReaderRead)
                  {"rw5/setup_metres.rw5", "1"},
                  {"gts/setup.gt7", "1"},
                  {"fld/setup.fld", "1"},
+                 {"fld/gnss.fld", "0"},
+                 {"fld/resection.fld", "2"},
                  {"rinex/test2560.24o", "0"}};
     for (const auto& entry : files) {
         SCOPED_TRACE(entry.file);

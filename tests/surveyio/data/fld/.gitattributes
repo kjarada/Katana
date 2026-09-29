@@ -1,0 +1,4 @@
+# The fixtures are exact bytes: CRLF line ends, as the field files they stand
+# for have, and gnss.fld's Windows-1252 degree sign. A checkout that rewrote
+# the line ends would test something else.
+*.fld -text
