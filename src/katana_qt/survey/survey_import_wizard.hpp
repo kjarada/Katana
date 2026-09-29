@@ -137,6 +137,11 @@ struct SurveyContent {
 };
 [[nodiscard]] SurveyContent surveyContentOf(const katana::survey::SurveyProject& project);
 
+// The File step's Browse filter: every extension a registered format names
+// (FormatDescriptor::extensions), so a format added to the registry is
+// offered without editing this, and the patterns no descriptor states.
+[[nodiscard]] QString surveyFileFilter();
+
 struct SurveyImportContext {
     katana::cad::Document* document = nullptr;
     ViewWorkspace* views = nullptr;

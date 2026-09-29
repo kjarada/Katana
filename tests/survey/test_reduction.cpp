@@ -636,6 +636,63 @@ TEST(Reduction, WithNoReadingOnTheBacksightTheCircleSetOnItIsWhatTheAzimuthIsTak
     EXPECT_EQ(warningsWith(placed->report, "azimuth the file states"), 0U);
 }
 
+TEST(Reduction, AStatedAzimuthIsTakenLessTheSetupsReadingOnTheBacksightNotLessTheCircle)
+{
+    // S1 on A backsights RO, which nothing places. The file states the
+    // azimuth A -> RO, 30 00 00, the circle set on RO, 5 00 00, and the
+    // setup reads RO at 10 00 00: the orientation is 30 - 10 = 20 (SETX
+    // 29.2.6, the setup's reading standing in for the BKB h.obs), so Q at
+    // reading 100, 20 m, is azimuth 120:
+    //   N = 1000 + 20 cos 120 = 990, E = 1000 + 20 sin 120 = 1017.320508.
+    // Less the circle it would be azimuth 125 (N 988.528, E 1016.383); the
+    // stated azimuth alone, 130 (N 987.144, E 1015.321).
+    SurveyProject project;
+    project.points.push_back(point("A", 1000.0, 1000.0, 50.0));
+    project.unpositionedPoints.push_back(unpositioned("RO"));
+    project.unpositionedPoints.push_back(unpositioned("Q"));
+    project.stations.push_back(setup("S1", "A", 1.5, "RO",
+                                     {Shot{"RO", 1, Face::Left, deg(10), deg(90), 100.0, 1.5},
+                                      Shot{"Q", 2, Face::Left, deg(100), deg(90), 20.0, 1.5}}));
+    project.stations[0].backsightAzimuth = deg(5);
+    project.stations[0].statedBacksightAzimuth = deg(30);
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
+    EXPECT_NEAR(*outcome->report.setups[0].orientationCorrection, deg(20), 1e-12);
+    const ComputedPoint* q = findPoint(*outcome, "Q");
+    ASSERT_NE(q, nullptr);
+    EXPECT_NEAR(q->northing, 990.0, 1e-9);
+    EXPECT_NEAR(q->easting, 1017.320508, 1e-6);
+    // The reduced project keeps both of the file's numbers.
+    ASSERT_EQ(outcome->reduced.stations.size(), 1U);
+    EXPECT_EQ(outcome->reduced.stations[0].statedBacksightAzimuth, deg(30));
+    EXPECT_EQ(outcome->reduced.stations[0].backsightAzimuth, deg(5));
+}
+
+TEST(Reduction, WithNoReadingOnTheBacksightTheStatedAzimuthIsTakenLessTheCircleSetOnIt)
+{
+    // S1 never observes RO. The file states the azimuth A -> RO, 30 00 00,
+    // and the circle set on RO, 10 00 00: the orientation is 30 - 10 = 20,
+    // so Q at reading 100, 20 m, is azimuth 120: N 990, E 1017.320508. The
+    // stated azimuth alone would give azimuth 130.
+    SurveyProject project;
+    project.points.push_back(point("A", 1000.0, 1000.0, 50.0));
+    project.unpositionedPoints.push_back(unpositioned("RO"));
+    project.unpositionedPoints.push_back(unpositioned("Q"));
+    project.stations.push_back(setup("S1", "A", 1.5, "RO",
+                                     {Shot{"Q", 1, Face::Left, deg(100), deg(90), 20.0, 1.5}}));
+    project.stations[0].backsightAzimuth = deg(10);
+    project.stations[0].statedBacksightAzimuth = deg(30);
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
+    EXPECT_NEAR(*outcome->report.setups[0].orientationCorrection, deg(20), 1e-12);
+    const ComputedPoint* q = findPoint(*outcome, "Q");
+    ASSERT_NE(q, nullptr);
+    EXPECT_NEAR(q->northing, 990.0, 1e-9);
+    EXPECT_NEAR(q->easting, 1017.320508, 1e-6);
+}
+
 TEST(Reduction, AStatedAzimuthOnABacksightWithNoPositionYetWaitsForTheBacksightsCoordinates)
 {
     // As ACircleSetOnABacksightWithNoPositionYetWaits..., with an azimuth the

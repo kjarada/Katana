@@ -1,13 +1,13 @@
 #pragma once
 
-// What the RW5, GTS-7 and opcode field file readers share: packed-angle
-// parsing (RW5 and GTS-7 only) and the builder
+// What the RW5, GTS-7, opcode field file and Sokkia SDR readers share:
+// packed-angle parsing (RW5 and GTS-7 only) and the builder
 // that turns a stream of raw total-station records into one SurveyProject.
 //
 // Internal to surveyio (no include/ header): the readers in topcon_rw5.cpp,
-// topcon_gts.cpp and opcode_field_file.cpp are its users - the last reads no
-// Topcon format but a journal of the same kind, and the namespace keeps the
-// name it was given first. All three formats are journals written as
+// topcon_gts.cpp, opcode_field_file.cpp and sokkia_sdr.cpp are its users -
+// the last two read no Topcon format but journals of the same kind, and the
+// namespace keeps the name it was given first. All four formats are journals written as
 // the field work happened - a setup, its backsight, its shots, a stored point -
 // so they need the same bookkeeping: a point is named long before (or without
 // ever) being given coordinates, a setup's observations share a numbering of
@@ -140,11 +140,18 @@ class RawProjectBuilder {
     // SurveyProject::points, each in order of first mention.
 
     void mentionPoint(std::string_view id, std::size_t record);
-    // Coordinates for `id`, metres. The FIRST coordinates a file states are
-    // kept: control is stored before it is observed, and a later value for the
-    // same name is a check or a recomputation. A later value that differs is a
-    // warning naming both records and is kept in the point's metadata, never
-    // dropped; one that is the same is a repeat and needs no comment.
+    // Which coordinates of a point a file states twice are its own, by the
+    // format's rule. FirstKept, the default: control is stored before it is
+    // observed, and a later value for the same name is a check or a
+    // recomputation. LatestKept: the format's own rule is that the latest
+    // coordinates are the best (the Sokkia SDR's, whose traverse adjustment
+    // writes its results after the positions it adjusts).
+    enum class RestatedCoordinates { FirstKept, LatestKept };
+    void setRestatedCoordinates(RestatedCoordinates rule) { restated_ = rule; }
+    // Coordinates for `id`, metres, kept as setRestatedCoordinates says. A
+    // restatement that differs is a warning naming both records, and the
+    // coordinates not kept go to the point's metadata, never dropped; one
+    // that is the same is a repeat and needs no comment.
     void positionPoint(std::string_view id, double northing, double easting,
                        std::optional<double> elevation, katana::survey::CoordinateSource how,
                        std::size_t record);
@@ -243,6 +250,7 @@ class RawProjectBuilder {
     // 0 is an empty slot; otherwise index + 1. Kept at most half full.
     std::vector<std::uint32_t> pointSlots_;
     std::uint32_t lastPoint_ = kNotFound; // the point entry() found or made last
+    RestatedCoordinates restated_ = RestatedCoordinates::FirstKept;
     std::size_t unlistedWarnings_ = 0;
     std::size_t firstUnlistedRecord_ = 0;
     IdIndex stationIndex_;

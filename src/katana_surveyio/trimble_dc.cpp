@@ -27,8 +27,10 @@
 // The refusal lists the record types the file holds, counted, so a person or
 // a support request can see what the file contained.
 //
-// A Sokkia SDR file (header "00NMSDR") is NOT claimed: a controller can write
-// SDR33 into a file named .dc, and that is another format's business.
+// A Sokkia SDR file (a header "00", a derivation code, then "SDR") is NOT
+// claimed: a controller can write SDR33 into a file named .dc, and
+// sokkia_sdr.cpp reads it. The derivation code is not only NM - Sokkia's
+// SDR33 layout allows ED as well - so this probe steps aside for any.
 
 #include <cstddef>
 #include <map>
@@ -78,7 +80,7 @@ FormatSignature probeDc(const ProbeInput& input)
         return ruledOut();
     }
     const std::string_view header = lines.front();
-    if (header.starts_with("00NMSDR")) {
+    if (header.starts_with("00") && header.size() >= 7 && header.substr(4).starts_with("SDR")) {
         return ruledOut(); // Sokkia SDR, even when named .dc
     }
     std::size_t shaped = 0;
