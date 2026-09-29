@@ -167,6 +167,31 @@ class ViewportWidget final : public QWidget {
     // How many rubber-band shapes and markers the last paint drew, for the
     // headless tests that cannot look at pixels.
     [[nodiscard]] std::size_t lastPreviewCount() const { return lastPreviewCount_; }
+    // What the last paint drew of the running tool's preview, by role
+    // (drawing/feedback_painter.hpp), with its caption: what the headless
+    // pointer record prints and the widget tests assert.
+    struct PreviewCounts {
+        std::size_t shapes = 0;
+        std::size_t markers = 0;
+        std::size_t target = 0;
+        std::size_t added = 0;
+        std::size_t removed = 0;
+        std::size_t focus = 0;
+        bool refused = false;
+        std::string caption;
+    };
+    [[nodiscard]] const PreviewCounts& lastPreviewCounts() const { return lastPreviewCounts_; }
+    // The pointer at model point `at` as a person's mouse is: the view is
+    // painted, `at` mapped through its transform, a real move sent there and,
+    // with `click`, a left press and release with `modifiers`; then painted
+    // again. For the headless --hover and --click steps (docs/headless.md),
+    // which have no mouse. Answers the record they print - "pointer:
+    // action=hover x= y= tool= expects= shapes= markers= target= added=
+    // removed= focus= refused= caption= prompt=". InvalidArgument for a point
+    // outside the view.
+    [[nodiscard]] katana::core::Result<std::string>
+    pointerAt(const katana::geometry::Point2& at, bool click,
+              Qt::KeyboardModifiers modifiers = Qt::NoModifier);
 
     // Frames what THIS view draws: the entities its layers let through
     // (cad::drawnExtent with this view's hidden layers), the reference layers
@@ -300,6 +325,11 @@ class ViewportWidget final : public QWidget {
     void toolEnter();
     // The view's pick aperture in model units at the current zoom.
     [[nodiscard]] double pickTolerance() const;
+    // Its snap aperture, the reach of an Endpoint snap and of a vertex pick.
+    [[nodiscard]] double snapAperture() const;
+    // The running tool's prompt as the band and the command line show it:
+    // "Insert Vertex: Click on polyline 2 where the new vertex goes".
+    [[nodiscard]] QString promptLine() const;
     // The entity under `screen` that this view lets be picked, if any.
     [[nodiscard]] std::optional<katana::entity::EntityId> entityAt(const QPointF& screen) const;
     void wireToolHost();
@@ -406,7 +436,13 @@ class ViewportWidget final : public QWidget {
     // until one has run here.
     std::string lastToolId_;
     mutable std::size_t lastPreviewCount_ = 0;
+    mutable PreviewCounts lastPreviewCounts_;
     Point2 cursorWorld_; // after snapping
+    // Whether the pointer has been over this view since it was made: until
+    // then cursorWorld_ is a place nobody pointed at - the model's origin -
+    // and a preview there (a started tool's, a headless run's) would mark
+    // whatever vertex lies at 0,0.
+    bool pointerSeen_ = false;
     std::optional<katana::cad::SnapResult> activeSnap_;
     // What constrained the cursor (Ortho, Polar 45°, a lock): its tooltip.
     QString trackingLabel_;

@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -28,15 +29,26 @@ class ToolDriver {
     // Starts catalogue tool `id` on the current selection (select entities in
     // document() first for a Modify tool). Fails the test if there is no such
     // tool.
-    void start(std::string_view id)
+    void start(std::string_view id) { start(id, {}); }
+    // The same with the grips hot when the tool starts (ToolContext::handles):
+    // given to the first make only, as the tool host gives them, so a restart
+    // after an edit sees none.
+    void start(std::string_view id, std::vector<Grip> handles)
     {
         const ToolInfo* info = toolCatalog().find(id);
         ASSERT_NE(info, nullptr) << "no tool " << id;
         info_ = info;
+        handles_ = std::move(handles);
         restartTool();
     }
+    // The pick aperture a tool is made with (ToolContext::pickTolerance),
+    // 0.01 unless set - before start(). The vertex tools reach a vertex
+    // within 1.5 times it and a segment within it, as the view's 12 and 8 px.
+    void setPickTolerance(double tolerance) { pickTolerance_ = tolerance; }
 
     ToolStep click(double x, double y) { return apply(tool_->point({x, y})); }
+    // What the view would draw with the cursor at (x, y).
+    [[nodiscard]] ToolFeedback preview(double x, double y) const { return tool_->preview({x, y}); }
     // A click the plan view would snap: to the nearest end, middle, centre
     // or intersection (the default modes) within 0.5 of (x, y), handed on
     // as the view hands it (routeSnappedPoint) - a point of an entity
@@ -95,7 +107,8 @@ class ToolDriver {
         context.document = &document_;
         context.attributes = document_.currentAttributes();
         context.selection = document_.selection().ids();
-        context.pickTolerance = 0.01;
+        context.pickTolerance = pickTolerance_;
+        context.handles = std::exchange(handles_, {});
         tool_ = info_->make(context);
         finished_ = false;
     }
@@ -127,6 +140,8 @@ class ToolDriver {
     Document document_;
     const ToolInfo* info_ = nullptr;
     std::unique_ptr<InteractiveTool> tool_;
+    std::vector<Grip> handles_;
+    double pickTolerance_ = 0.01;
     std::vector<std::string> messages_;
     int executed_ = 0;
     bool finished_ = false;

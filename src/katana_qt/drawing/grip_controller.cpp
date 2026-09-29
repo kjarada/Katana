@@ -5,6 +5,7 @@
 #include <QPainter>
 #include <QPen>
 
+#include "drawing/feedback_painter.hpp"
 #include "katana/core/text.hpp"
 
 namespace katana::qt::drawing {
@@ -13,12 +14,9 @@ namespace cad = katana::cad;
 
 namespace {
 
-// AutoCAD's grip colours, which a drafter's eye already reads: blue cold,
-// green under the cursor, red hot.
-const QColor kCold(0x3f, 0x7f, 0xff);
-const QColor kHover(0x3c, 0xd0, 0x70);
-const QColor kHot(0xf0, 0x40, 0x40);
-const QColor kRubber(0x4c, 0xc9, 0xf0);
+// AutoCAD's grip colours, which a drafter's eye already reads - blue cold,
+// green under the cursor, red hot - are the overlay's (feedback_painter.hpp),
+// as is the rubber band's cyan, a tool preview's.
 constexpr double kGripHalfPixels = 4.0;
 constexpr double kDragPixels = 4.0;
 
@@ -275,12 +273,12 @@ void GripController::paint(QPainter& painter, const std::function<QPointF(const 
 {
     if (grabbed_ && active()) {
         const cad::GripDrag drag = dragTo(target_);
-        painter.setPen(QPen(kRubber, 1, Qt::DashLine));
+        painter.setPen(QPen(overlay::preview(), 1, Qt::DashLine));
         painter.setBrush(Qt::NoBrush);
         for (const auto& shape : cad::gripPreview(document_, drag)) {
             drawShape(shape);
         }
-        painter.setPen(QPen(kRubber, 1, Qt::DotLine));
+        painter.setPen(QPen(overlay::preview(), 1, Qt::DotLine));
         painter.drawLine(toScreen(grabbed_->position), toScreen(target_));
     }
     painter.setBrush(Qt::NoBrush);
@@ -289,11 +287,11 @@ void GripController::paint(QPainter& painter, const std::function<QPointF(const 
         if (!visible.contains(p)) {
             continue;
         }
-        QColor colour = kCold;
+        QColor colour = overlay::gripCold();
         if (isHot(grip)) {
-            colour = kHot;
+            colour = overlay::gripHot();
         } else if (hovered_ && hovered_->sameHandle(grip)) {
-            colour = kHover;
+            colour = overlay::gripHover();
         }
         painter.setPen(QPen(colour.darker(150), 1));
         painter.setBrush(colour);

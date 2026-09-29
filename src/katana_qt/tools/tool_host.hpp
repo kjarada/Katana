@@ -20,6 +20,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/interactive_tool.hpp"
@@ -67,6 +69,20 @@ class ToolHost {
     // The view's pick aperture in model units, given to a tool when it starts
     // or restarts (ToolContext::pickTolerance). The view sets it from its zoom.
     void setPickTolerance(double tolerance) { pickTolerance_ = tolerance; }
+    // The grips hot in the view when the next tool starts
+    // (ToolContext::handles). Taken by the next tool made and by no other:
+    // a restart after an edit gets none, since the edit may have renumbered
+    // the vertices they name.
+    void setHandles(std::vector<katana::cad::Grip> handles) { handles_ = std::move(handles); }
+    // The view's own pick and its apertures, read NOW whenever a tool asks
+    // (ToolContext::pick, pickAperture, vertexAperture): copied into every
+    // tool's context, so a zoom inside a tool is followed.
+    void setPick(katana::cad::ViewPick pick) { pick_ = std::move(pick); }
+    void setApertures(std::function<double()> pick, std::function<double()> vertex)
+    {
+        pickAperture_ = std::move(pick);
+        vertexAperture_ = std::move(vertex);
+    }
 
     // ---- what the user did ---------------------------------------------------
     // Each answers what the tool made of it. With no tool running the answer
@@ -144,6 +160,10 @@ class ToolHost {
     // hook replaced the tool it was dealing with (see apply).
     std::uint64_t generation_ = 0;
     double pickTolerance_ = 0.0;
+    std::vector<katana::cad::Grip> handles_;
+    katana::cad::ViewPick pick_;
+    std::function<double()> pickAperture_;
+    std::function<double()> vertexAperture_;
 };
 
 // True for text typed while a tool runs that is a command for the view, not

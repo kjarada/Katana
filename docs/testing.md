@@ -106,7 +106,8 @@ window with switches built from its `-D` variables and checks the exit code,
 the log and the PNG. The switches and the variables are `docs/headless.md`:
 `-DDRIVE=` drives dialogs, docks and the command line step by step with a
 sigil per step (`@` a dialog, `#` a dock, `%` a panel, `>` a command, `?` a
-report, `*` a menu item, `!` a button, anything else a fill), `-DEXPECT=`
+report, `*` a menu item, `!` a button, `~` the pointer moved to a model
+point and `+` a click there, anything else a fill), `-DEXPECT=`
 checks what the run printed, `-DFORBID=` what it must never print,
 `-DREFUSED=` that it was refused (exit 1, never a crash), and `-DCOMPARE=`
 the files it wrote. A new check is an `add_test` in `tests/CMakeLists.txt`

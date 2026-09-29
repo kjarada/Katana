@@ -2134,6 +2134,24 @@ if(TARGET katana)
         TIMEOUT 180)
 endif()
 
+# The pointer a headless run has no mouse for - "~X,Y" hovers and "+X,Y"
+# clicks at a model point (docs/headless.md) - drawing a polyline as a
+# person's mouse does, read back from the record each pointer step prints.
+if(TARGET katana)
+    add_test(NAME qt_pointer_steps_hover_and_click_the_plan_view_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>PLINE|+100,110|+110,110|~110,115|>|<LIST"
+            "-DEXPECT=pointer: action=hover x=110 y=115 tool=draw.polyline expects=point.*vertices=2 +open +length=10"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/pointer_steps_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_pointer_steps_hover_and_click_the_plan_view_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
 # The text and dimension styles in the real window (docs/annotation.md, "In
 # the window"): each dialog builds the verb line and runs it through the
 # window's one executor, so its reply is logged as a typed line's is and one
