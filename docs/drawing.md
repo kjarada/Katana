@@ -230,10 +230,12 @@ registered in `families.hpp` as `addModifyVertexTools`), each named
 "Vertices, <tool>" so the menus gather them into a Vertices submenu of the
 Draw menu (`toolFamily.Draw.Vertices`) and the Draw toolbar into one
 button (`toolFamilyButton.Draw.Vertices`): a click runs Insert Vertex, and
-the triangle in its corner, a press held or a right click offers the rest
-(`docs/desktop.md`, "Tool families on the toolbars"). At the window's first
-size it is behind the Draw toolbar's overflow arrow at the foot of the
-toolbar. The Vertices panel's toggle is in View > Panels.
+the triangle in its corner, a press held or a right click offers the rest.
+While any of the eighteen runs - Delete Vertex from the command line as
+well as Insert Vertex from the button - the button is framed as running and
+its triangle is lit (`docs/desktop.md`, "Tool families on the toolbars"). At
+the window's first size it is behind the Draw toolbar's overflow arrow at
+the foot of the toolbar. The Vertices panel's toggle is in View > Panels.
 
 | Tool (id, aliases) | Steps | Command |
 |---|---|---|

@@ -34,16 +34,21 @@ constexpr int kMinLeg = 3;
 // air. Only the mark's right-angled tip reaches the border's 5 px rounded
 // corner, where the border is the accent too while the tool runs.
 constexpr int kInset = 2;
-// The corner a press opens the menu from: as wide as the drop-down strip the
-// mark replaced (a stylesheet's default ::menu-button is the base style's
-// PM_MenuButtonIndicator, 12 px in QCommonStyle), so the menu is as easy to
-// hit as it was.
+// The corner a press opens the menu from, 12 px each way: the width of the
+// drop-down strip the mark replaced (a stylesheet's default ::menu-button is
+// the base style's PM_MenuButtonIndicator, 12 px in QCommonStyle). Less than
+// the strip's area all the same - the icon keeps its whole square, so at
+// 20 px icons the zone is an L of 119 square pixels against the strip's
+// 12 x 33 = 396 - and the press held and the right click, anywhere on the
+// button, make up for it.
 constexpr int kZone = 12;
+// A family names this many of its other tools in its tooltip, or one fewer
+// and how many more: the Vertices family's seventeen others, all named, were
+// a wall of six lines under the tool's own two, and the menu lists them.
+constexpr qsizetype kNamedInTooltip = 4;
 
-// The box, in the widget's own pixels, of the pixels where two grabs of it
-// differ; null for none. A grab is in device pixels, which on a scaled
-// screen are not the widget's, so the box is taken back to the widget's,
-// rounded outwards.
+// The box, in device pixels, of the pixels where two grabs of a widget
+// differ; null for none.
 QRect differenceBox(const QPixmap& a, const QPixmap& b)
 {
     const QImage first = a.toImage().convertToFormat(QImage::Format_ARGB32);
@@ -70,12 +75,20 @@ QRect differenceBox(const QPixmap& a, const QPixmap& b)
     if (right < 0) {
         return {};
     }
-    const double scale = a.devicePixelRatio();
-    const auto down = [scale](int device) { return static_cast<int>(std::floor(device / scale)); };
-    const auto up = [scale](int device) {
-        return static_cast<int>(std::ceil((device + 1) / scale)) - 1;
-    };
-    return {QPoint(down(left), down(top)), QPoint(up(right), up(bottom))};
+    return {QPoint(left, top), QPoint(right, bottom)};
+}
+
+// A box of device pixels taken back to the widget's pixels at `ratio`,
+// rounded outwards: every widget pixel a device pixel of the box falls in.
+QRect widgetPixels(const QRect& device, double ratio)
+{
+    if (device.isNull()) {
+        return {};
+    }
+    const auto down = [ratio](int at) { return static_cast<int>(std::floor(at / ratio)); };
+    const auto up = [ratio](int at) { return static_cast<int>(std::ceil((at + 1) / ratio)) - 1; };
+    return {QPoint(down(device.left()), down(device.top())),
+            QPoint(up(device.right()), up(device.bottom()))};
 }
 
 QString rectText(const QRect& r)
@@ -85,15 +98,40 @@ QString rectText(const QRect& r)
 
 } // namespace
 
-FlyoutButton::FlyoutButton(QWidget* parent) : QToolButton(parent)
+FlyoutButton::FlyoutButton(QMenu& family, QWidget* parent) : QToolButton(parent), family_(&family)
 {
     // Qt's own default, said here because it is the point: a click runs the
     // default action, a press held past SH_ToolButton_PopupDelay (600 ms in
     // QCommonStyle) opens the menu.
     setPopupMode(QToolButton::DelayedPopup);
+    setMenu(&family);
     // Hover moves, to light the mark while the pointer is on its corner.
     // Fusion and the stylesheet ask for them too; this does not rely on it.
     setAttribute(Qt::WA_Hover);
+    // A tool of the family starting or stopping checks or unchecks its
+    // action, and the menu, holding the action, is told (ActionChanged);
+    // the button is told only of its default action's.
+    family.installEventFilter(this);
+}
+
+bool FlyoutButton::familyRunning() const
+{
+    if (isChecked()) {
+        return true;
+    }
+    return family_ != nullptr && std::ranges::any_of(family_->actions(), [](const QAction* tool) {
+               return tool->isChecked();
+           });
+}
+
+bool FlyoutButton::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == family_ &&
+        (event->type() == QEvent::ActionChanged || event->type() == QEvent::ActionAdded ||
+         event->type() == QEvent::ActionRemoved)) {
+        update();
+    }
+    return QToolButton::eventFilter(watched, event);
 }
 
 QRect FlyoutButton::iconRect() const
@@ -140,9 +178,18 @@ QString FlyoutButton::toolTipWithMenu() const
     if (others.isEmpty()) {
         return toolTip();
     }
+    // Slashes between them, as the family's status tip has: a variant's
+    // name may hold a comma.
+    QString named = others.join(" / ");
+    if (others.size() > kNamedInTooltip) {
+        named = others.first(kNamedInTooltip - 1).join(" / ") +
+                QString(" and %1 more").arg(others.size() - (kNamedInTooltip - 1));
+    }
+    // "for its other tools:" before the names, so that the triangle does not
+    // read as the first of them ("the corner triangle for Delete Vertex").
     return toolTip() + QString("<br><span style='color:%1'>Hold, right-click or press the "
-                               "corner triangle for %2</span>")
-                           .arg(theme::textMuted().name(), others.join(" / "));
+                               "corner triangle for its other tools: %2</span>")
+                           .arg(theme::textMuted().name(), named);
 }
 
 bool FlyoutButton::event(QEvent* event)
@@ -155,7 +202,8 @@ bool FlyoutButton::event(QEvent* event)
         return true;
     }
     // The corner is a target of its own, so the mark says so under the
-    // pointer, as a split button's strip lights up under it.
+    // pointer. (A stylesheet's split button cannot: its SC_ToolButton is the
+    // whole button, so the strip is never the hovered part.)
     if (event->type() == QEvent::HoverEnter || event->type() == QEvent::HoverMove ||
         event->type() == QEvent::HoverLeave) {
         const bool onMark =
@@ -178,31 +226,56 @@ void FlyoutButton::paintEvent(QPaintEvent* /*event*/)
     // its ::menu-indicator arrow in the same corner, Fusion its arrow over
     // the icon. The mark below is the one sign.
     option.features &= ~QStyleOptionToolButton::HasMenu;
+    // Running while any of the family's tools runs, not only the one a click
+    // starts: the button's checked state is its default action's, and with
+    // Delete Vertex running no button on the toolbar was framed at all. The
+    // state a checked button's option has (QToolButton::initStyleOption),
+    // so the frame is the stylesheet's :checked one.
+    const bool running = familyRunning();
+    if (running) {
+        option.state |= QStyle::State_On;
+        option.state &= ~QStyle::State_Raised;
+    }
     painter.drawComplexControl(QStyle::CC_ToolButton, option);
     if (menu() == nullptr) {
         return;
+    }
+    // Quiet at rest, brighter under the pointer, the accent with the pointer
+    // on it - a press there opens the family - and while a tool of the
+    // family runs (the checked frame is the accent too), and disabled with
+    // the button.
+    QColor ink = theme::textMuted();
+    if (!isEnabled()) {
+        ink = theme::textDisabled();
+    } else if (running || pointerOnMark_) {
+        ink = theme::accent();
+    } else if (underMouse() || isDown()) {
+        ink = theme::text();
     }
     // A right-angled triangle filling the mark's square on and below its
     // diagonal, the right angle in the corner: row by row, one pixel wider
     // each, so that it is the same pixels on every platform. A polygon fill
     // was not: without antialiasing Qt leaves out the pixels whose centres lie
     // on the diagonal, and a 5 px triangle came out 4 px; antialiased, at
-    // five pixels its edge is a smudge.
-    const QRect mark = markRect();
-    // Quiet at rest, brighter under the pointer, the accent with the pointer
-    // on it - a press there opens the family - and while the tool runs (the
-    // checked frame is the accent too), and disabled with the button.
-    QColor ink = theme::textMuted();
-    if (!isEnabled()) {
-        ink = theme::textDisabled();
-    } else if (isChecked() || pointerOnMark_) {
-        ink = theme::accent();
-    } else if (underMouse() || isDown()) {
-        ink = theme::text();
+    // five pixels its edge is a smudge. The rows are the DEVICE's: the
+    // square is taken to the device and snapped to its pixels, and painted
+    // there. Rows of the widget's pixels were whole at a ratio of 1 and 2,
+    // but at 1.25 and 1.5 each became one device row or two and the
+    // staircase came out uneven (rows 1, 2, 3, 3, 5, 6 at 125%).
+    const QRectF onDevice = painter.deviceTransform().mapRect(QRectF(markRect()));
+    const QRect square(QPoint(qRound(onDevice.left()), qRound(onDevice.top())),
+                       QPoint(qRound(onDevice.right()) - 1, qRound(onDevice.bottom()) - 1));
+    const int leg = std::min(square.width(), square.height());
+    painter.save();
+    // World coordinates that are device pixels: the inverse of what maps the
+    // widget's pixels to the device (the screen's ratio, and the offset of
+    // the button in the window it is painted into).
+    painter.setWorldTransform(painter.deviceTransform().inverted() * painter.worldTransform());
+    for (int row = 0; row < leg; ++row) {
+        painter.fillRect(QRect(square.right() - row, square.bottom() - leg + 1 + row, row + 1, 1),
+                         ink);
     }
-    for (int row = 0; row < mark.height(); ++row) {
-        painter.fillRect(QRect(mark.right() - row, mark.top() + row, row + 1, 1), ink);
-    }
+    painter.restore();
 }
 
 void FlyoutButton::mousePressEvent(QMouseEvent* event)
@@ -254,7 +327,20 @@ DrawnParts drawnParts(QToolButton& button)
     button.setMenu(nullptr);
     const QPixmap withoutMenu = button.grab();
     button.setMenu(menu);
-    return {differenceBox(withSolid, withClear), differenceBox(withMenu, withoutMenu)};
+
+    DrawnParts parts;
+    parts.ratio = withMenu.devicePixelRatio();
+    parts.iconDevice = differenceBox(withSolid, withClear);
+    parts.signDevice = differenceBox(withMenu, withoutMenu);
+    parts.icon = widgetPixels(parts.iconDevice, parts.ratio);
+    parts.sign = widgetPixels(parts.signDevice, parts.ratio);
+    return parts;
+}
+
+void followToolBarIconSize(QToolButton& button, QToolBar& bar)
+{
+    button.setIconSize(bar.iconSize());
+    QObject::connect(&bar, &QToolBar::iconSizeChanged, &button, &QToolButton::setIconSize);
 }
 
 QStringList menuSignClashes(QWidget& root, QStringList* checked, int* buttons)
@@ -270,20 +356,26 @@ QStringList menuSignClashes(QWidget& root, QStringList* checked, int* buttons)
             ++measured;
             const QString where = bar->objectName() + " > " + button->objectName();
             const DrawnParts parts = drawnParts(*button);
+            // Judged, and so said, in device pixels on a scaled screen.
+            const bool scaled = parts.ratio != 1.0;
+            const QRect sign = scaled ? parts.signDevice : parts.sign;
+            const QRect icon = scaled ? parts.iconDevice : parts.icon;
+            const QString unit =
+                scaled ? QString(" (device pixels at a ratio of %1)").arg(parts.ratio) : QString();
             QString line;
-            if (parts.sign.isNull()) {
+            if (sign.isNull()) {
                 line = where + ": draws no sign of its menu";
                 clashes << line;
-            } else if (parts.icon.isNull()) {
+            } else if (icon.isNull()) {
                 line = where + ": draws no icon";
                 clashes << line;
-            } else if (parts.sign.intersects(parts.icon)) {
-                line = where + ": its menu's sign (" + rectText(parts.sign) +
-                       ") is drawn over its icon (" + rectText(parts.icon) + ")";
+            } else if (sign.intersects(icon)) {
+                line = where + ": its menu's sign (" + rectText(sign) + ") is drawn over its icon (" +
+                       rectText(icon) + ")" + unit;
                 clashes << line;
             } else {
-                line = where + ": sign " + rectText(parts.sign) + " clear of its icon " +
-                       rectText(parts.icon);
+                line = where + ": sign " + rectText(sign) + " clear of its icon " + rectText(icon) +
+                       unit;
             }
             if (checked != nullptr) {
                 *checked << line;

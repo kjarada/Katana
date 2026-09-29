@@ -248,14 +248,22 @@ QString styleSheet()
            strip sits beside the icon. Without it the padding and border
            above make Qt reserve no width for the strip
            (PM_MenuButtonIndicator is 0 under such a rule), yet the strip is
-           still laid, painted and pressed over the icon's right side. 14 px
-           is the strip's 10 and the 4 every button has. The tool families
+           still laid, painted and pressed over the icon's right side. The
+           padding is the strip's 10 px and no more, so the strip - laid in
+           the border rectangle, ::menu-button's origin in QStyleSheetStyle -
+           starts a pixel past the icon's contents: with the 4 px every
+           button has added, each arrow sat 11 px from its own icon and 12
+           from the next button's, and the row read as four things - undo,
+           arrow, redo, arrow - where it now reads as two (7 px, and 12). The
+           strip has no hover shade of its own: the stylesheet gives it the
+           whole button's hover, never the pointer's part (its SC_ToolButton
+           is the whole button), so a shade lay on it with the pointer on the
+           icon too - a darker band that read as pressed. The tool families
            are not split buttons: they mark their menus in a corner
            (tools/flyout_button.hpp). */
-        QToolButton[popupMode="MenuButtonPopup"] { padding-right: 14px; }
+        QToolButton[popupMode="MenuButtonPopup"] { padding-right: 10px; }
         QToolButton::menu-button { border: none; width: 10px; border-top-right-radius: 5px;
                                    border-bottom-right-radius: 5px; }
-        QToolButton::menu-button:hover { background: %raised%; }
         /* The arrow a toolbar shows when the window is too small for all its
            buttons. The button is 12 px deep (PM_ToolBarExtensionExtent), and
            the 4 px padding and 1 px border every tool button has left its

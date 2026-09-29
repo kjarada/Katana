@@ -473,12 +473,12 @@ ToolActions fillToolMenus(const cad::ToolCatalog& catalog, const ToolMenuTargets
                         // One button for the family: a click runs its first
                         // variant; its corner triangle, a press held or a
                         // right click offers the others (flyout_button.hpp).
-                        auto* button = new FlyoutButton(bar);
+                        auto* button = new FlyoutButton(*family, bar);
                         button->setObjectName(qs("toolFamilyButton." + category + "." +
                                                  parts->first));
                         button->setDefaultAction(action);
-                        button->setMenu(family);
                         bar->addWidget(button);
+                        followToolBarIconSize(*button, *bar);
                     }
                 }
                 // In the submenu the variant alone, "Circle > 2 Points". The

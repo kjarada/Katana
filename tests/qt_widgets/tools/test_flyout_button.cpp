@@ -15,6 +15,8 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cmath>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -24,6 +26,7 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QElapsedTimer>
+#include <QHelpEvent>
 #include <QHoverEvent>
 #include <QImage>
 #include <QMainWindow>
@@ -35,6 +38,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QToolTip>
 
 #include "icons.hpp"
 #include "katana/cad/interactive_tool.hpp"
@@ -227,36 +231,182 @@ TEST(ToolFamilyButtons, TheCornerMarkAndItsPressZoneStayOffTheIconAtEveryToolbar
 TEST(ToolFamilyButtons, AFamilyButtonLooksLikeAPlainButtonWithItsIconSaveForTheCornerMark)
 {
     // Ink against a baseline: the Circle family beside a plain button with
-    // the same icon, at rest, under the pointer and running. They may differ
-    // only inside the mark's square. As a split button the family differed
-    // over the icon's right third, where the arrow's strip was painted on it.
+    // the same icon, at rest, under the pointer, running its first tool and
+    // running another of its tools - the plain button running in both. They
+    // may differ only inside the mark's square. As a split button the family
+    // differed over the icon's right third, where the arrow's strip was
+    // painted on it; and with a tool other than its first running (2 Points,
+    // or Delete Vertex in the Vertices family) it was not framed at all, so
+    // no button on the toolbar said a tool was running.
     DrawBar built;
     FlyoutButton* circle = built.family("Circle");
     ASSERT_NE(circle, nullptr);
     ASSERT_NE(built.twin, nullptr);
     ASSERT_EQ(circle->size(), built.twin->size());
-    QAction* running = circle->defaultAction();
+    QAction* first = circle->defaultAction();
+    ASSERT_GE(circle->menu()->actions().size(), 2);
+    QAction* other = circle->menu()->actions().at(1);
+    ASSERT_NE(other, first);
     QAction* plainRunning = built.twin->defaultAction();
     ASSERT_NE(plainRunning, nullptr);
-    for (const char* state : {"at rest", "under the pointer", "running"}) {
-        const bool hover = std::string(state) == "under the pointer";
-        const bool checked = std::string(state) == "running";
+    const std::string another = "running another of its tools";
+    for (const std::string state : {"at rest", "under the pointer", "running", another.c_str()}) {
+        const bool hover = state == "under the pointer";
+        const bool running = state == "running" || state == another;
         for (QToolButton* each : {static_cast<QToolButton*>(circle), built.twin}) {
             each->setAttribute(Qt::WA_UnderMouse, hover);
         }
-        running->setChecked(checked);
-        plainRunning->setChecked(checked);
+        first->setChecked(state == "running");
+        other->setChecked(state == another);
+        plainRunning->setChecked(running);
         katana::qt::test::processEvents();
-        const QRect differs = differenceBox(shot(*circle), shot(*built.twin));
+        EXPECT_EQ(circle->familyRunning(), running) << state;
+        const QImage family = shot(*circle);
+        const QRect differs = differenceBox(family, shot(*built.twin));
         EXPECT_FALSE(differs.isNull()) << state << ": the mark is not drawn";
         EXPECT_TRUE(circle->markRect().contains(differs))
             << state << ": the family differs from the plain button at x " << differs.left()
             << ".." << differs.right() << " y " << differs.top() << ".." << differs.bottom();
+        // Running, the mark is the accent, as the frame is.
+        if (running) {
+            EXPECT_EQ(family.pixelColor(circle->markRect().bottomRight()), theme::accent()) << state;
+        }
     }
     for (QToolButton* each : {static_cast<QToolButton*>(circle), built.twin}) {
         each->setAttribute(Qt::WA_UnderMouse, false);
     }
-    running->setChecked(false);
+    other->setChecked(false);
+    plainRunning->setChecked(false);
+}
+
+TEST(ToolFamilyButtons, TheButtonIsPaintedAgainWhenAnyOfItsToolsStartsOrStops)
+{
+    // A grab paints afresh, so the test above cannot see this: the screen
+    // repaints only what is marked for it. A tool of the family started from
+    // the command line checks its action and the menu holding it is told;
+    // the button, told only of its own default action, must be told too, or
+    // it stays unframed on the screen until the pointer passes over it.
+    DrawBar built;
+    FlyoutButton* circle = built.family("Circle");
+    ASSERT_NE(circle, nullptr);
+    QAction* other = circle->menu()->actions().at(1);
+    ASSERT_NE(other, circle->defaultAction());
+    struct PaintCount final : QObject {
+        int painted = 0;
+        bool eventFilter(QObject* /*watched*/, QEvent* event) override
+        {
+            if (event->type() == QEvent::Paint) {
+                ++painted;
+            }
+            return false;
+        }
+    } count;
+    circle->installEventFilter(&count);
+    katana::qt::test::processEvents();
+    count.painted = 0;
+    other->setChecked(true);
+    katana::qt::test::processEvents();
+    EXPECT_GT(count.painted, 0) << "not painted again when its second tool started";
+    count.painted = 0;
+    other->setChecked(false);
+    katana::qt::test::processEvents();
+    EXPECT_GT(count.painted, 0) << "not painted again when its second tool stopped";
+    circle->removeEventFilter(&count);
+}
+
+TEST(ToolFamilyButtons, AFamilyTakesItsToolbarsNewIconSizeAsTheToolbarsOwnButtonsDo)
+{
+    // View > Toolbars changes a bar's icon size after its buttons are made
+    // (MainWindow::setToolBarIconSize calls QToolBar::setIconSize and nothing
+    // more). The bar's own buttons follow it; a family, a widget on the bar,
+    // must too. By hand, as in the test above that builds each size: a
+    // button is its icon and 13 px, the icon's square at 6, the 5 px mark
+    // at the icon's size and 6. Made at 20 px and switched, a family kept
+    // its 33 x 33 - at 28 its icon was drawn at 23 px beside the others'
+    // 28, its mark 3 px against the icon's corner.
+    for (const int size : {16, 28}) {
+        DrawBar built(20);
+        built.bar->setIconSize(QSize(size, size));
+        katana::qt::test::processEvents();
+        ASSERT_EQ(built.twin->size(), QSize(size + 13, size + 13)) << "the bar's own button at " << size;
+        for (const QString& name : kFamilies) {
+            const std::string where = name.toStdString() + " switched to " + std::to_string(size) + " px";
+            FlyoutButton* button = built.family(name);
+            ASSERT_NE(button, nullptr) << where;
+            EXPECT_EQ(button->size(), QSize(size + 13, size + 13)) << where;
+            EXPECT_EQ(button->iconRect(), QRect(6, 6, size, size)) << where;
+            EXPECT_EQ(button->markRect(), QRect(size + 6, size + 6, 5, 5)) << where;
+            const auto parts = drawnParts(*button);
+            EXPECT_EQ(parts.icon, QRect(6, 6, size, size)) << where;
+            EXPECT_EQ(parts.sign, QRect(size + 6, size + 6, 5, 5)) << where;
+        }
+    }
+}
+
+TEST(ToolFamilyButtons, TheMarkIsAWholeStaircaseOfDevicePixelsAtEveryScreenScale)
+{
+    // At 125% and 150% - where Windows puts most laptop screens, and where
+    // the owner's is (qt_render_view_at_125_percent) - a row of the widget's
+    // pixels is one device row or two, and the triangle painted a widget row
+    // at a time came out uneven: rows 1, 2, 3, 3, 5, 6 wide at 125%. Painted
+    // a device row at a time it is whole at every ratio: the k-th row from
+    // its top is k pixels ending at its right column, and its legs are the
+    // 5 px mark at that ratio, give or take the rounding of its two edges to
+    // the device's pixels. Rendered here at each ratio (as the screen's grab
+    // at 125% renders it: the same rows, measured apart), and grabbed at the
+    // screen's own, which qt_toolbar_signs_at_125_percent makes 125%.
+    DrawBar built;
+    FlyoutButton* circle = built.family("Circle");
+    ASSERT_NE(circle, nullptr);
+    QMenu* family = circle->menu();
+    const double screen = circle->devicePixelRatio();
+    for (const double ratio : {1.0, 1.25, 1.5, 2.0, 0.0}) {
+        const auto render = [&] {
+            if (ratio == 0.0) {
+                return shot(*circle); // the screen's own grab
+            }
+            QImage image((QSizeF(circle->size()) * ratio).toSize(), QImage::Format_ARGB32);
+            image.setDevicePixelRatio(ratio);
+            image.fill(Qt::transparent);
+            circle->render(&image);
+            return image;
+        };
+        const QImage with = render();
+        circle->setMenu(nullptr);
+        const QImage without = render();
+        circle->setMenu(family);
+        // Each row of the mark: how many pixels, the first and last, where.
+        std::vector<std::array<int, 4>> rows;
+        for (int y = 0; y < with.height(); ++y) {
+            int count = 0;
+            int left = -1;
+            int right = -1;
+            for (int x = 0; x < with.width(); ++x) {
+                if (with.pixel(x, y) != without.pixel(x, y)) {
+                    ++count;
+                    left = left < 0 ? x : left;
+                    right = x;
+                }
+            }
+            if (count > 0) {
+                rows.push_back({count, left, right, y});
+            }
+        }
+        const double at = ratio == 0.0 ? screen : ratio;
+        const std::string where = (ratio == 0.0 ? "grabbed at the screen's ratio of "
+                                                : "rendered at a ratio of ") +
+                                  QString::number(at).toStdString();
+        const int leg = static_cast<int>(rows.size());
+        EXPECT_GE(leg, static_cast<int>(std::floor(5 * at))) << where;
+        EXPECT_LE(leg, static_cast<int>(std::ceil(5 * at))) << where;
+        for (int k = 0; k < leg; ++k) {
+            const auto& [count, left, right, y] = rows[static_cast<std::size_t>(k)];
+            EXPECT_EQ(count, k + 1) << where << ", row " << k;
+            EXPECT_EQ(right - left + 1, count) << where << ", row " << k << " has a gap";
+            EXPECT_EQ(right, rows.front()[2]) << where << ", row " << k << " off the right column";
+            EXPECT_EQ(y, rows.front()[3] + k) << where << ", row " << k << " not below the last";
+        }
+    }
 }
 
 TEST(ToolFamilyButtons, AClickOnTheIconRunsTheToolWhileTheMarkAHoldOrARightClickOpensTheFamily)
@@ -319,12 +469,12 @@ TEST(ToolFamilyButtons, AClickOnTheIconRunsTheToolWhileTheMarkAHoldOrARightClick
     EXPECT_EQ(built.started.size(), 3u) << "a held press that opened the menu also ran the tool";
 }
 
-TEST(ToolFamilyButtons, TheMarkIsLitInTheAccentOnlyWhileThePointerIsOnItsCorner)
+TEST(ToolFamilyButtons, WithNoToolRunningTheMarkIsLitInTheAccentOnlyWhileThePointerIsOnItsCorner)
 {
     // The corner opens the family where the rest of the button runs the
-    // tool, so the mark says which the pointer is over, as a split button's
-    // strip lights up under it. Its right-angled corner pixel is inked by
-    // every row of the triangle, and is the mark's colour exactly.
+    // tool, so the mark says which the pointer is over. Its right-angled
+    // corner pixel is inked by every row of the triangle, and is the mark's
+    // colour exactly.
     DrawBar built;
     FlyoutButton* circle = built.family("Circle");
     ASSERT_NE(circle, nullptr);
@@ -352,90 +502,238 @@ TEST(ToolFamilyButtons, TheMarkIsLitInTheAccentOnlyWhileThePointerIsOnItsCorner)
     EXPECT_FALSE(circle->pointerOnMark());
 }
 
-TEST(ToolFamilyButtons, TheTooltipNamesTheFamilysOtherToolsAndHowToReachThem)
+namespace {
+
+// The tooltip a person sees: the event the pointer resting on the button
+// sends, and what the tooltip then shows.
+QString tooltipShown(QToolButton& button)
 {
-    DrawBar built;
-    FlyoutButton* circle = built.family("Circle");
-    ASSERT_NE(circle, nullptr);
-    const QString tip = circle->toolTipWithMenu();
-    // The tool's own first - its name and aliases, as every tool's - and the
-    // property itself left the tool's, as setDefaultAction keeps setting it.
-    EXPECT_EQ(circle->toolTip(), circle->defaultAction()->toolTip());
-    EXPECT_TRUE(tip.startsWith(circle->toolTip())) << tip.toStdString();
-    EXPECT_TRUE(tip.contains("Hold, right-click or press the corner triangle"))
-        << tip.toStdString();
-    const QString others = tip.mid(tip.indexOf("corner triangle"));
-    int listed = 0;
-    for (const QAction* item : circle->menu()->actions()) {
-        const QString text = QString(item->text()).remove('&').toHtmlEscaped();
-        if (item == circle->defaultAction()) {
-            EXPECT_FALSE(others.contains(text)) << "the tool the click runs is not an other";
-        } else {
-            EXPECT_TRUE(others.contains(text)) << text.toStdString();
-            ++listed;
-        }
-    }
-    EXPECT_EQ(listed, circle->menu()->actions().size() - 1);
+    const QPoint at = button.rect().center();
+    QHelpEvent help(QEvent::ToolTip, at, button.mapToGlobal(at));
+    QCoreApplication::sendEvent(&button, &help);
+    const QString text = QToolTip::isVisible() ? QToolTip::text() : QString();
+    QToolTip::hideText();
+    return text;
 }
 
-TEST(SplitButtons, UndosArrowHasAStripOfItsOwnBesideTheIcon)
+// The family's line of the tooltip, what follows the tool's own.
+QString familyLine(const QString& tip)
 {
-    // Undo as MainWindow::buildActions makes it, on a horizontal toolbar with
-    // the theme. The strip the menu opens from, and the arrow drawn in it,
-    // are clear of the icon's square: the stylesheet pads the split button
-    // by the strip's width. Without that rule the strip was the button's
-    // right 12 px, over the icon.
+    const qsizetype from = tip.indexOf("<br><span");
+    return from < 0 ? QString() : tip.mid(from);
+}
+
+} // namespace
+
+TEST(ToolFamilyButtons, TheTooltipShownSaysHowToReachTheOtherToolsAndNamesFourAtMost)
+{
+    // By hand, on a family of letters: with four others each is named, in
+    // the menu's order, slashes between; with five, three are and "and 2
+    // more" stands for the rest. The tool the click runs is the tooltip's
+    // own, never an other.
     const std::unique_ptr<QStyle> style(theme::makeStyle());
     QMainWindow window;
     window.setStyle(style.get());
     window.setStyleSheet(theme::styleSheet());
-    window.setCentralWidget(new QWidget);
-    auto* bar = new QToolBar("Edit", &window);
-    bar->setObjectName("EditToolBar");
-    bar->setIconSize(QSize(20, 20));
-    window.addToolBar(Qt::TopToolBarArea, bar);
-    auto* undo = new QAction(katana::qt::icon(katana::qt::Icon::Undo), "Undo", &window);
-    int undone = 0;
-    QObject::connect(undo, &QAction::triggered, &window, [&undone] { ++undone; });
-    auto* button = new QToolButton(bar);
-    button->setObjectName("editUndoButton");
-    button->setDefaultAction(undo);
-    button->setPopupMode(QToolButton::MenuButtonPopup);
-    button->setAutoRaise(true);
-    button->setIconSize(bar->iconSize());
-    auto* history = new QMenu(button);
-    history->addAction("1 CREATE_POINT");
-    button->setMenu(history);
-    bar->addWidget(button);
-    window.resize(640, 200);
+    auto* bar = new QToolBar("Draw", &window);
+    window.addToolBar(Qt::LeftToolBarArea, bar);
+    const auto familyOf = [&](const QString& letters) {
+        auto* menu = new QMenu("Letters", &window);
+        for (const QChar letter : letters) {
+            menu->addAction(QString(letter));
+        }
+        auto* button = new FlyoutButton(*menu, bar);
+        auto* own = menu->actions().front();
+        own->setToolTip("<b>A</b> (LETTER)");
+        button->setDefaultAction(own);
+        bar->addWidget(button);
+        return button;
+    };
+    FlyoutButton* five = familyOf("ABCDE");
+    FlyoutButton* six = familyOf("ABCDEF");
     window.show();
     katana::qt::test::processEvents();
+    // Compared as std::string, which a failure prints as text.
+    const std::string muted = theme::textMuted().name().toStdString();
+    EXPECT_EQ(tooltipShown(*five).toStdString(),
+              "<b>A</b> (LETTER)<br><span style='color:" + muted +
+                  "'>Hold, right-click or press the corner triangle for its other tools: "
+                  "B / C / D / E</span>");
+    EXPECT_EQ(tooltipShown(*six).toStdString(),
+              "<b>A</b> (LETTER)<br><span style='color:" + muted +
+                  "'>Hold, right-click or press the corner triangle for its other tools: "
+                  "B / C / D and 2 more</span>");
+    // Shown, not only built: the button's own tooltip property is the
+    // tool's, as setDefaultAction keeps setting it, and the family's line
+    // is added when the tooltip is asked for.
+    EXPECT_EQ(six->toolTip().toStdString(), "<b>A</b> (LETTER)");
+}
 
-    const auto parts = drawnParts(*button);
+TEST(ToolFamilyButtons, EachFamilysTooltipShownNamesItsOtherToolsOrThreeAndACount)
+{
+    // The catalogue's families, as the window makes them: the rule above
+    // on each - Circle's six tools, Ellipse's three, the eighteen of
+    // Vertices, whose seventeen others were a wall of six lines under the
+    // tool's own two when every one was named.
+    DrawBar built;
+    for (const QString& name : kFamilies) {
+        const std::string where = name.toStdString();
+        FlyoutButton* button = built.family(name);
+        ASSERT_NE(button, nullptr) << where;
+        const QString tip = tooltipShown(*button);
+        ASSERT_FALSE(tip.isEmpty()) << where << ": no tooltip shown";
+        EXPECT_TRUE(tip.startsWith(button->defaultAction()->toolTip())) << tip.toStdString();
+        QStringList others;
+        for (const QAction* item : button->menu()->actions()) {
+            if (item != button->defaultAction()) {
+                others << QString(item->text()).remove('&').toHtmlEscaped();
+            }
+        }
+        ASSERT_FALSE(others.isEmpty()) << where;
+        const QString named = others.size() <= 4
+                                  ? others.join(" / ")
+                                  : others.first(3).join(" / ") +
+                                        QString(" and %1 more").arg(others.size() - 3);
+        EXPECT_EQ(familyLine(tip).toStdString(),
+                  ("<br><span style='color:" + theme::textMuted().name() +
+                   "'>Hold, right-click or press the corner triangle for its other tools: " +
+                   named + "</span>")
+                      .toStdString())
+            << where;
+    }
+    // The Vertices family names three and counts the rest: its fourth other
+    // is in the menu, not the tooltip.
+    FlyoutButton* vertices = built.family("Vertices");
+    ASSERT_GT(vertices->menu()->actions().size(), 5);
+    const QString fourthOther = QString(vertices->menu()->actions().at(4)->text()).remove('&');
+    EXPECT_FALSE(familyLine(tooltipShown(*vertices)).contains(fourthOther.toHtmlEscaped()))
+        << fourthOther.toStdString();
+}
+
+namespace {
+
+// Undo as MainWindow::buildActions makes it - a split button with its
+// history, following its bar's icon size - on a horizontal Edit toolbar with
+// the theme's look on its window.
+struct EditBar {
+    // Before the window, so it outlives every widget drawn with it.
+    std::unique_ptr<QStyle> style{theme::makeStyle()};
+    QMainWindow window;
+    QToolBar* bar = nullptr;
+    QToolButton* undo = nullptr;
+    QMenu* history = nullptr;
+    int undone = 0;
+
+    EditBar()
+    {
+        window.setStyle(style.get());
+        window.setStyleSheet(theme::styleSheet());
+        window.setCentralWidget(new QWidget);
+        bar = new QToolBar("Edit", &window);
+        bar->setObjectName("EditToolBar");
+        bar->setIconSize(QSize(20, 20));
+        window.addToolBar(Qt::TopToolBarArea, bar);
+        auto* action = new QAction(katana::qt::icon(katana::qt::Icon::Undo), "Undo", &window);
+        QObject::connect(action, &QAction::triggered, &window, [this] { ++undone; });
+        undo = new QToolButton(bar);
+        undo->setObjectName("editUndoButton");
+        undo->setDefaultAction(action);
+        undo->setPopupMode(QToolButton::MenuButtonPopup);
+        undo->setAutoRaise(true);
+        history = new QMenu(undo);
+        history->addAction("1 CREATE_POINT");
+        undo->setMenu(history);
+        bar->addWidget(undo);
+        katana::qt::tools::followToolBarIconSize(*undo, *bar);
+        window.resize(640, 200);
+        window.show();
+        katana::qt::test::processEvents();
+    }
+    EditBar(const EditBar&) = delete;
+    EditBar& operator=(const EditBar&) = delete;
+
+    // The strip the history opens from, as the style lays it.
+    QRect strip() const
+    {
+        QStyleOptionToolButton option;
+        option.initFrom(undo);
+        option.rect = undo->rect();
+        option.subControls = QStyle::SC_ToolButton | QStyle::SC_ToolButtonMenu;
+        option.features = QStyleOptionToolButton::MenuButtonPopup | QStyleOptionToolButton::HasMenu;
+        option.iconSize = bar->iconSize();
+        return undo->style()->subControlRect(QStyle::CC_ToolButton, &option,
+                                             QStyle::SC_ToolButtonMenu, undo);
+    }
+};
+
+} // namespace
+
+TEST(SplitButtons, UndosArrowHasAStripOfItsOwnBesideTheIcon)
+{
+    // The strip the menu opens from, and the arrow drawn in it, are clear of
+    // the icon's square: the stylesheet pads the split button by the strip's
+    // width. Without that rule the strip was the button's right 12 px, over
+    // the icon. By hand: 20 px of icon, Qt's 3 (QStyleSheetStyle,
+    // CT_ToolButton), 4 px of padding on the left and the strip's 10 on the
+    // right, a 1 px border each side - 39 px, the contents at 5..27 with the
+    // icon's square centred at 6..25. The strip is laid in the BORDER
+    // rectangle (QStyleSheetStyle's defaultOrigin gives ::menu-button
+    // Origin_Border), its right 10 px: 29..38, a pixel of padding past the
+    // contents. With the 4 px every button has added to the 10, the strip was
+    // 33..42 and each arrow sat 11 px from its own icon's ink and 12 from the
+    // next button's, halfway between the two.
+    EditBar built;
+    QToolButton& button = *built.undo;
+    EXPECT_EQ(button.size(), QSize(39, 33));
+    const auto parts = drawnParts(button);
     ASSERT_FALSE(parts.icon.isNull());
     ASSERT_FALSE(parts.sign.isNull()) << "no arrow drawn";
+    EXPECT_EQ(parts.icon, QRect(6, 6, 20, 20));
     EXPECT_FALSE(parts.sign.intersects(parts.icon));
 
-    QStyleOptionToolButton option;
-    option.initFrom(button);
-    option.rect = button->rect();
-    option.subControls = QStyle::SC_ToolButton | QStyle::SC_ToolButtonMenu;
-    option.features = QStyleOptionToolButton::MenuButtonPopup | QStyleOptionToolButton::HasMenu;
-    option.iconSize = bar->iconSize();
-    const QRect strip =
-        button->style()->subControlRect(QStyle::CC_ToolButton, &option, QStyle::SC_ToolButtonMenu, button);
+    const QRect strip = built.strip();
     ASSERT_TRUE(strip.isValid());
+    EXPECT_EQ(strip.left(), 29);
+    EXPECT_EQ(strip.right(), 38);
     EXPECT_FALSE(strip.intersects(parts.icon));
     EXPECT_TRUE(strip.contains(parts.sign));
 
     // A click on the icon's right edge undoes; the strip opens the history.
-    const MenuWatch watch(*history);
-    click(*button, QPoint(parts.icon.right(), parts.icon.center().y()));
-    EXPECT_EQ(undone, 1);
+    const MenuWatch watch(*built.history);
+    click(button, QPoint(parts.icon.right(), parts.icon.center().y()));
+    EXPECT_EQ(built.undone, 1);
     EXPECT_EQ(watch.shown, 0);
-    click(*button, strip.center());
+    click(button, strip.center());
     EXPECT_EQ(watch.shown, 1);
-    EXPECT_EQ(undone, 1);
+    EXPECT_EQ(built.undone, 1);
+}
+
+TEST(SplitButtons, UndosStripTakesTheButtonsHoverWithNoShadeOfItsOwn)
+{
+    // The stylesheet gives the strip the whole button's hover, never the
+    // pointer's part of it (its SC_ToolButton is the whole button), so a
+    // hover shade of the strip's own lay on it with the pointer on the icon
+    // too: a band of the pressed colour, darker than the rest of the button,
+    // that read as pressed. Under the pointer the strip is the button's
+    // hover colour. Compared beside the arrow (the strip's upper rows, below
+    // its rounded corner) and in the padding left of the icon.
+    EditBar built;
+    QToolButton& button = *built.undo;
+    const QRect strip = built.strip();
+    const auto parts = drawnParts(button);
+    ASSERT_GT(parts.sign.top(), strip.top() + 6) << "no room above the arrow";
+    const QPoint inStrip(strip.center().x() - 1, strip.top() + 5);
+    const QPoint inBody(3, button.height() / 2);
+    ASSERT_FALSE(parts.icon.contains(inBody));
+    button.setAttribute(Qt::WA_UnderMouse, true);
+    const QPointF at(parts.icon.center());
+    QHoverEvent enter(QEvent::HoverEnter, at, QPointF(button.mapToGlobal(parts.icon.center())), at);
+    QCoreApplication::sendEvent(&button, &enter);
+    katana::qt::test::processEvents();
+    const QImage hovered = shot(button);
+    EXPECT_EQ(hovered.pixelColor(inBody), theme::hover());
+    EXPECT_EQ(hovered.pixelColor(inStrip), theme::hover());
+    button.setAttribute(Qt::WA_UnderMouse, false);
 }
 
 TEST(ToolBarSigns, TheCheckSeesASplitButtonsArrowDrawnOverItsIcon)
@@ -491,6 +789,39 @@ TEST(ToolBarSigns, TheCheckSeesASplitButtonsArrowDrawnOverItsIcon)
         EXPECT_TRUE(clashes.isEmpty()) << clashes.join("\n").toStdString();
         ASSERT_EQ(checked.size(), 1);
         EXPECT_TRUE(checked.front().contains("clear of its icon")) << checked.front().toStdString();
+    }
+}
+
+TEST(ToolBarSigns, TheCheckJudgesAFamilysMarkAgainstItsIconInTheScreensOwnPixels)
+{
+    // A family's mark starts the pixel after its icon's square ends, so on a
+    // scaled screen the two meet at a widget pixel: at 125% the icon ends at
+    // device column 32 and the mark starts at 33, and each box taken back to
+    // the widget's pixels, rounded outwards, reached pixel 26 - four clashes
+    // that were not on the screen. The check judges in device pixels. At a
+    // ratio of 1 the two are the same; qt_toolbar_signs_at_125_percent runs
+    // this at the owner's 125%.
+    DrawBar built;
+    int buttons = 0;
+    QStringList checked;
+    const QStringList clashes = menuSignClashes(built.window, &checked, &buttons);
+    EXPECT_EQ(buttons, static_cast<int>(kFamilies.size()));
+    EXPECT_TRUE(clashes.isEmpty()) << clashes.join("\n").toStdString();
+    const double ratio = built.window.devicePixelRatio();
+    for (const QString& line : checked) {
+        EXPECT_EQ(line.contains("(device pixels at a ratio of"), ratio != 1.0) << line.toStdString();
+    }
+    // The boxes themselves, both ways: in device pixels apart, and on a
+    // scaled screen meeting in the widget's.
+    FlyoutButton* circle = built.family("Circle");
+    ASSERT_NE(circle, nullptr);
+    const auto parts = drawnParts(*circle);
+    EXPECT_DOUBLE_EQ(parts.ratio, ratio);
+    EXPECT_FALSE(parts.signDevice.intersects(parts.iconDevice));
+    EXPECT_EQ(parts.signDevice.left(), parts.iconDevice.right() + 1);
+    if (ratio == 1.0) {
+        EXPECT_EQ(parts.icon, parts.iconDevice);
+        EXPECT_EQ(parts.sign, parts.signDevice);
     }
 }
 
