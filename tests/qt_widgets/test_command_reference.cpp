@@ -116,9 +116,15 @@ TEST(CommandReference, TheReferenceHoldsEveryFamilyOfVerbsAndTheTools)
 {
     const auto sections = katana::qt::commandReferenceSections();
     for (const char* name : {"Commands", "Sheets", "Subsurface utilities", "Online data", "Window",
-                             "Draw tools", "Modify tools"}) {
+                             "Survey field files", "Draw tools", "Modify tools"}) {
         EXPECT_NE(sectionNamed(sections, name), nullptr) << name;
     }
+    // SURVEY READ and IMPORT are the session's, and the window runs them too.
+    const ReferenceSection* surveyFiles = sectionNamed(sections, "Survey field files");
+    ASSERT_NE(surveyFiles, nullptr);
+    const ReferenceEntry* surveyVerb = entryTitled(*surveyFiles, "Survey");
+    ASSERT_NE(surveyVerb, nullptr);
+    EXPECT_EQ(surveyVerb->verb, "SURVEY");
     const ReferenceSection* commands = sectionNamed(sections, "Commands");
     ASSERT_NE(commands, nullptr);
     const ReferenceEntry* dimStyle = entryTitled(*commands, "DimStyle");
