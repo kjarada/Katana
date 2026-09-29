@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "katana/core/text.hpp"
+#include "katana/math/numerics.hpp"
 
 namespace katana::surveyio::topcon {
 
@@ -121,6 +122,20 @@ survey::Face faceOfZenithReading(double zenithRadians) noexcept
 double zenithInModelRange(double zenithRadians) noexcept
 {
     return zenithRadians > std::numbers::pi ? kTwoPi - zenithRadians : zenithRadians;
+}
+
+std::optional<ShotReading> offsetShot(const ShotReading& measured, double radial, double tangential,
+                                      double height) noexcept
+{
+    const double along = measured.slope * std::sin(measured.zenith) + radial;
+    const double plan = std::hypot(along, tangential);
+    const double rise = measured.slope * std::cos(measured.zenith) + height;
+    const double slope = std::hypot(plan, rise);
+    if (!(slope >= katana::math::tolerance::kCoordinate)) {
+        return std::nullopt;
+    }
+    return ShotReading{wrapToCircle(measured.circle + std::atan2(tangential, along)),
+                       std::atan2(plan, rise), slope};
 }
 
 // ---- RawProjectBuilder --------------------------------------------------------
@@ -264,6 +279,14 @@ void RawProjectBuilder::positionPoint(std::string_view id, double northing, doub
                      "; the first are kept and these are in the point's metadata");
 }
 
+std::string RawProjectBuilder::featureKey(std::string_view code, std::string_view stringNumber)
+{
+    std::string key(code);
+    key += '\x1f';
+    key += stringNumber;
+    return key;
+}
+
 void RawProjectBuilder::codePoint(std::string_view id, std::string_view code,
                                   std::string_view description, std::string_view stringNumber,
                                   std::size_t record)
@@ -280,9 +303,7 @@ void RawProjectBuilder::codePoint(std::string_view id, std::string_view code,
     }
     // A feature is one code (and string number, where the format has one),
     // strung in the order its points were observed.
-    std::string key(code);
-    key += '\x1f';
-    key += stringNumber;
+    std::string key = featureKey(code, stringNumber);
     std::uint32_t featureId = 0;
     if (const auto found = featureIndex_.find(key); found != featureIndex_.end()) {
         featureId = found->second;
@@ -303,6 +324,48 @@ void RawProjectBuilder::codePoint(std::string_view id, std::string_view code,
         point.feature = featureId;
     }
     result_.project.features[featureId].pointIds.push_back(point.id);
+}
+
+std::optional<std::size_t> RawProjectBuilder::closeFeature(std::string_view code,
+                                                           std::string_view stringNumber)
+{
+    const auto found = featureIndex_.find(featureKey(code, stringNumber));
+    if (found == featureIndex_.end()) {
+        return std::nullopt;
+    }
+    survey::SurveyFeature& feature = result_.project.features[found->second];
+    feature.closed = true;
+    featureIndex_.erase(found);
+    return feature.pointIds.size();
+}
+
+std::optional<std::size_t> RawProjectBuilder::closeFeatureOf(std::string_view id)
+{
+    const std::uint32_t index = findPoint(id, std::hash<std::string_view>{}(id));
+    if (index == kNotFound || points_[index].feature == kNoFeature) {
+        return std::nullopt;
+    }
+    // Open features are exactly those in featureIndex_: one that is not
+    // closed is the one its code and string number find.
+    const survey::SurveyFeature& feature = result_.project.features[points_[index].feature];
+    if (feature.closed) {
+        return std::nullopt;
+    }
+    return closeFeature(feature.code, feature.name);
+}
+
+std::optional<std::string> RawProjectBuilder::lastPointOf(std::string_view code,
+                                                          std::string_view stringNumber) const
+{
+    const auto found = featureIndex_.find(featureKey(code, stringNumber));
+    if (found == featureIndex_.end()) {
+        return std::nullopt;
+    }
+    const survey::SurveyFeature& feature = result_.project.features[found->second];
+    if (feature.pointIds.empty()) {
+        return std::nullopt;
+    }
+    return feature.pointIds.back();
 }
 
 void RawProjectBuilder::addPointMetadata(std::string_view id, std::string key, std::string value)
