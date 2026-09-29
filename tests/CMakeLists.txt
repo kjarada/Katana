@@ -2188,11 +2188,47 @@ if(TARGET katana)
             "-DEXPECT=pointer: action=hover x=110 y=85 tool=draw.vertex.delete [^\r\n]*removed=[1-9][^\r\n]*prompt=\"Delete Vertex: Press Enter to delete vertex 2 of polyline 2, or click another vertex\".*vertices=3 "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/delete_vertex_chosen_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Straighten on the closed boundary, polyline 1 (0,0) (160,0) (175,90)
+    # (80,130) (0,100), from vertex 1 to vertex 3: forward that takes out
+    # vertex 2 alone, the other way 4 and 0, so the shorter side goes - its X
+    # and its two segments, the three removed marks.
+    add_test(NAME qt_straighten_shows_what_goes_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 1|>STRAIGHTEN|+160,0|~80.5,129.5"
+            "-DEXPECT=pointer: action=hover x=80[.]5 y=129[.]5 tool=draw.vertex.straighten [^\r\n]*target=2 added=0 removed=3 [^\r\n]*caption=\"straighten 1 to 3 [^0-9\"]+ removes 1 vertex\" prompt=\"Straighten: Click the other vertex to keep [[]Other side[]]\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/straighten_shows_what_goes_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Segment to Arc on the square's right edge, (110,35)-(110,85), through
+    # (125,62): the centre (cx,60) with (cx-110)^2 + 625 = (cx-125)^2 + 4, so
+    # cx = 96.8 and the radius sqrt(799.24) = 28.271.
+    add_test(NAME qt_segment_to_arc_shows_the_arc_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>SEGMENTARC|+110.2,60|~125,62"
+            "-DEXPECT=pointer: action=hover x=125 y=62 tool=draw.vertex.arc expects=point shapes=1 [^\r\n]*target=1 [^\r\n]*caption=\"segment 1 [^0-9\"]+ radius 28[.]271\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/segment_to_arc_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Fillet Vertex refuses an end of the open polyline 3 at the pick, in the
+    # preview and at the click, and asks for no radius: still the pick.
+    add_test(NAME qt_fillet_refuses_an_end_vertex_at_the_pick_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 3|>FILLETVERTEX|~60.2,35|+60.2,35"
+            "-DEXPECT=pointer: action=hover x=60[.]2 y=35 tool=draw.vertex.fillet [^\r\n]*refused=yes caption=\"vertex 0 is an end of the polyline; a corner is where two segments meet\" prompt=\"Fillet Vertex: Click the corner vertex of polyline 3 to round\".*pointer: action=click x=60[.]2 y=35 tool=draw.vertex.fillet expects=entity [^\r\n]*prompt=\"Fillet Vertex: Click the corner vertex of polyline 3 to round\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fillet_refuses_an_end_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_pointer_steps_hover_and_click_the_plan_view_headless
         qt_insert_vertex_shows_where_the_vertex_goes_headless
         qt_insert_vertex_puts_it_on_the_line_headless
         qt_insert_vertex_beside_the_vertex_clicked_first_headless
         qt_delete_vertex_takes_the_chosen_vertex_headless
+        qt_straighten_shows_what_goes_headless
+        qt_segment_to_arc_shows_the_arc_headless
+        qt_fillet_refuses_an_end_vertex_at_the_pick_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
