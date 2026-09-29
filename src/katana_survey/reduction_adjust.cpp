@@ -910,13 +910,18 @@ Status adjustAsNetwork(Engine& engine)
                 referenceSigma = std::hypot(referenceSigma, centring / distance);
             }
             if (state.orientationAssumed && state.orientation && horizontalHere) {
-                // The circle was set on a backsight with no position: the set
-                // orientation is the only one this setup has.
+                // The circle was set, or the file states an azimuth, on a
+                // backsight with no position: that orientation is the only
+                // one this setup has.
                 horizontalInputs.observations.push_back(NetworkObservation{
                     AzimuthObservation{at, std::string(reference),
                                        normalizeAngle(*referenceDirection + *state.orientation),
                                        referenceSigma, station.source},
-                    label(s, "azimuth (circle as set)", {}, reference), station.source, nullptr});
+                    label(s,
+                          state.orientationStated ? "azimuth (as the file states)"
+                                                  : "azimuth (circle as set)",
+                          {}, reference),
+                    station.source, nullptr});
             }
         }
 
