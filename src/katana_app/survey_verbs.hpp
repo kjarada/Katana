@@ -8,16 +8,30 @@
 // window give one reply.
 //
 //   SURVEY READ <file> [FORMAT <id>]
-//   SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>]
+//   SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>] [SETTINGS <file>]
+//                 [SET <key>=<value> ...]
 //
 // READ reads the file and says what the reader made of it, changing nothing.
-// IMPORT does what the import wizard's Import does with its defaults: the
-// reduction with ReductionSettings' defaults and the control the file
-// declares, the points drawn on LAYER (survey/points), and the job kept on
-// the drawing (Survey > Survey Jobs) - ONE undo step
-// (cad::ImportSurveyJobCommand). The format is detected unless FORMAT names
-// it; a detection that is not certain is refused, naming the candidates, so
-// that a file is never read with a reader that only thinks it fits.
+// IMPORT does what the import wizard's Import does: the reduction, the points
+// drawn on LAYER (survey/points), and the job kept on the drawing (Survey >
+// Survey Jobs) - ONE undo step (cad::ImportSurveyJobCommand). The format is
+// detected unless FORMAT names it; a detection that is not certain is
+// refused, naming the candidates, so that a file is never read with a reader
+// that only thinks it fits. Each option is given at most once.
+//
+// The reduction runs with the wizard's starting settings - ReductionSettings'
+// defaults, holding the control the file declares - or, with SETTINGS, the
+// settings a file holds in their stable text form (the one a job keeps,
+// survey/reduction_settings.hpp), whole: its control lines are all the
+// control. SET's items are lines of that same text, each changing the key it
+// names; a control item (control=<id>;<file|drawing>;then constraint;sigma
+// for northing, easting and elevation) holds its point as the wizard's Hold
+// does, in place of the point of that id or after the others. A point held
+// from the drawing is found among the drawing's survey points, as the
+// wizard's are (cad::reductionContextFor). Both are read by
+// survey::parseReductionSettings and refused with its words; a key SET names
+// that this version does not know is refused, where a SETTINGS file's is
+// skipped and reported, as the text form's versioning has it.
 //
 // The reply is records, one per line:
 //
@@ -26,6 +40,10 @@
 //   declared crs="Australia/GDA2020, Zone 56" epsg=none
 //   warning record=20 text="..."           (the first 20; then warnings_more=<n>)
 //   not_carried text="no atmospheric settings"
+//   settings file=held.txt set=1 differ=2   (IMPORT only; file= empty without SETTINGS)
+//   setting key=control value=CP1;drawing;fixed;0;fixed;0;fixed;0
+//                                          (each line that is not the defaults')
+//   settings_warning text="line 3: ..."    (a SETTINGS key this version skipped)
 //   imported job=job-1 entities=4 layer=survey/points reduction_warnings=2  (IMPORT only)
 //   reduction_warning text="..."           (the first 20; then reduction_warnings_more=<n>)
 
@@ -41,8 +59,8 @@ namespace katana::app {
 [[nodiscard]] bool isSurveyLine(std::string_view line);
 
 // Runs a SURVEY line on `document`. InvalidArgument for a line the grammar
-// above does not take; the detection's, the reader's or the import's own
-// error otherwise, with the drawing unchanged.
+// above does not take; the settings parser's, the detection's, the reader's
+// or the import's own error otherwise, with the drawing unchanged.
 [[nodiscard]] katana::core::Result<std::string> runSurveyLine(katana::cad::Document& document,
                                                               std::string_view line);
 

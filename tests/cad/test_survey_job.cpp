@@ -41,6 +41,10 @@ struct Coordinates {
 // called is what the "reduction" computes, and every call is recorded.
 struct FakeReduction {
     std::map<std::string, Coordinates> points;
+    // Named by the file with no coordinates and left so by the "reduction",
+    // as survey::reduceAndAdjust leaves a point it does not compute - and a
+    // control point it takes from the drawing, which it does not compute.
+    std::vector<std::string> unpositioned{};
     std::optional<katana::core::Error> failure{};
     int calls = 0;
     survey::ReductionSettings lastSettings{};
@@ -76,6 +80,11 @@ ReductionFunction reductionOf(const std::shared_ptr<FakeReduction>& fake)
             computed.easting = at.easting;
             computed.elevation = at.elevation;
             outcome.points.push_back(computed);
+        }
+        for (const std::string& id : fake->unpositioned) {
+            survey::UnpositionedPoint point;
+            point.id = id;
+            outcome.reduced.unpositionedPoints.push_back(point);
         }
         outcome.report.createdUtc = context.createdUtc;
         outcome.report.input = context.input;
@@ -338,6 +347,38 @@ TEST(SurveyJobImportCommand, AControlPointTakenFromTheDrawingIsNotDrawnAgain)
     EXPECT_EQ(job.placedPoints.front().pointId, "201");
     EXPECT_EQ(drawingSurveyPoints(document).size(), 2U); // CP1 once, and 201
     EXPECT_TRUE(document.model().entities.contains(control));
+}
+
+// A file that gives no coordinates for the point it is held at - a traverse
+// whose first station is taken from the drawing - leaves that point among the
+// reduction's unpositioned ones, since the drawing, not the reduction, placed
+// it. It has a position, so it is not one of the points the import says it
+// could not draw for want of one: that sentence once counted it, and told the
+// person to reduce the observations to place a point already held.
+TEST(SurveyJobImportCommand, AControlPointTakenFromTheDrawingIsNotCountedAsHavingNoPosition)
+{
+    Document document;
+    drawForeignPoint(document, "CP1", 6'249'990.0, 299'990.0);
+    auto fake = std::make_shared<FakeReduction>();
+    fake->points = {{"201", {6'250'001.0, 300'001.0, {}}}};
+    fake->unpositioned = {"CP1", "205"};
+    SurveyJobImport request = importRequest();
+    request.job.settings.control.push_back(survey::ControlSelection{
+        survey::ControlPoint::fixedHorizontal("CP1"), survey::ControlOrigin::Drawing});
+    auto command = std::make_unique<ImportSurveyJobCommand>(document, request, reductionOf(fake));
+    const ImportSurveyJobCommand* job = command.get();
+    ASSERT_TRUE(document.execute(std::move(command)).ok());
+    ASSERT_NE(job->report(), nullptr);
+    std::vector<std::string> unplaced;
+    for (const auto& warning : job->report()->warnings) {
+        if (warning.text.find("named in the source with no coordinates") != std::string::npos) {
+            unplaced.push_back(warning.text);
+        }
+    }
+    // 205 alone: the file names it, and nothing placed it.
+    ASSERT_EQ(unplaced.size(), 1U);
+    EXPECT_TRUE(unplaced.front().starts_with("1 point(s) are named")) << unplaced.front();
+    EXPECT_EQ(document.surveyJobs().front().placedPoints.size(), 1U);
 }
 
 TEST(SurveyJobImportCommand, APointTheDrawingAlreadyHasFollowsTheChosenPolicyAndIsReported)

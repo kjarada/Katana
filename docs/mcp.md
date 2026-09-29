@@ -110,6 +110,16 @@ imported the same way:
 `content`, `declared`, each `warning` with its record), and `SURVEY IMPORT
 <file>` imports it as a survey job, one undo step, answering with the job and
 the reduction's warnings (`docs/survey.md`, "The opcode field file (.fld)").
+The import takes every reduction option of the wizard's Reduction step
+through `SETTINGS <file>` and `SET <key>=<value> ...`, the settings' own text
+form, and answers which settings it ran with (`settings`, and a `setting`
+record for each that is not a default). A file that gives no coordinates is
+imported by holding a point of the drawing: `FORWARD` puts a named point
+there, and `SET control=<id>;drawing;fixed;0;fixed;0;fixed;0` holds it
+(`McpServer.AnAgentImportsAFileWithNoCoordinatesHoldingAPointOfTheDrawing`;
+`docs/survey.md`, "The reduction settings of SURVEY IMPORT"). No tool of its
+own: the lines are the whole of it, and the reply's records are the
+structured answer.
 `CRS SET` takes a WKT as the agent sends it, quotes and all
 (`McpServer.AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt`); it once lost
 them and refused every WKT whose names hold a blank.
