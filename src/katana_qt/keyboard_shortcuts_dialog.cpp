@@ -60,6 +60,11 @@ KeyboardShortcutsDialog::KeyboardShortcutsDialog(std::vector<ShortcutRow> rows,
              {std::pair{kKey, key}, std::pair{kCommand, row.command}, std::pair{kMenu, row.menu},
               std::pair{kTip, row.tip}}) {
             auto* cell = new QTableWidgetItem(text);
+            if (column == kKey) {
+                // The key as typed, "Ctrl+L", for the search: on macOS the
+                // cell shows the native "⌘L", which "ctrl+l" would not find.
+                cell->setData(Qt::UserRole, row.key);
+            }
             if (clash) {
                 cell->setForeground(theme::error());
             }
@@ -117,7 +122,7 @@ void KeyboardShortcutsDialog::setFilter(const QString& text)
         QString haystack;
         for (int column = 0; column < kColumns; ++column) {
             if (const QTableWidgetItem* cell = table_->item(r, column)) {
-                haystack += cell->text() + ' ';
+                haystack += cell->text() + ' ' + cell->data(Qt::UserRole).toString() + ' ';
             }
         }
         const bool match = std::ranges::all_of(words, [&haystack](const QString& word) {

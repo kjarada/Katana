@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "../../src/katana_surveyio/rinex_internal.hpp"
+#include "katana/core/text.hpp"
 #include "katana/surveyio/detect.hpp"
 #include "katana/surveyio/format.hpp"
 #include "katana/surveyio/reader.hpp"
@@ -812,5 +813,5 @@ TEST(CompactRinexThroughput, ALargeCompactFileIsExpandedAndCountedAtSpeed)
               << " MB of RINEX), " << epochs << " epochs in " << seconds << " s: " << compactRate
               << " MB/s compact, " << expandedRate << " MB/s of RINEX; the expansion alone "
               << expandSeconds << " s\n";
-    RecordProperty("compact_megabytes_per_second", std::to_string(compactRate));
+    RecordProperty("compact_megabytes_per_second", katana::core::formatExactReal(compactRate));
 }

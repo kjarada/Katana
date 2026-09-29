@@ -348,7 +348,10 @@ core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> 
   share. The desktop window drives the same `CommandInterpreter`.
 - **Text and units have one home each:** `core/text_encoding.hpp`,
   `core/text.hpp` (locale-independent; never `std::isspace` or `strtod` on
-  file text) and `math/unit_ratio.hpp`.
+  file text) and `math/unit_ratio.hpp`. A real becomes text through
+  `core::formatExactReal`, never `std::to_string`: libc++ still pads that to
+  six decimals, so it passes on GCC and fails the clang builds
+  (`tools/check_float_to_string.py` finds one).
 - **Absent is not zero.** A missing height is `std::optional`, never a
   placeholder number.
 - **The entity geometry variant is append-only.** Its index is the on-disk

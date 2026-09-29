@@ -19,6 +19,7 @@
 #include "import_alignment.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "katana/geometry/curves2d.hpp"
@@ -2024,7 +2025,7 @@ class Reader {
                 horizontal.reset();
             } else if (const double off = detail::checkHorizontal(*solved, hSegments);
                        off > kAlignmentTolerance) {
-                why = "its reconstruction stands " + std::to_string(off) +
+                why = "its reconstruction stands " + katana::core::formatExactReal(off) +
                       " m from the geometry the file states";
                 horizontal.reset();
             }
@@ -2040,7 +2041,8 @@ class Reader {
                     vertical.reset();
                 } else if (const double off = detail::checkVertical(*solved, vSegments, station);
                            off > kAlignmentTolerance) {
-                    verticalWhy = "its reconstruction stands " + std::to_string(off) +
+                    verticalWhy = "its reconstruction stands " +
+                                  katana::core::formatExactReal(off) +
                                   " m from the levels the file states";
                     vertical.reset();
                 }

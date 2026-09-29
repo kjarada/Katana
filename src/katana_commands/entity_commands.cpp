@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "katana/commands/change_set.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/geometry/editing.hpp"
 
@@ -340,7 +341,7 @@ CommandPtr scaleEntities(std::vector<EntityId> ids, const Point2& center, double
     if (!(std::isfinite(factor) && factor > 0.0)) {
         return makeCommand("SCALE", [factor](const CommandContext&) -> Result<ChangeSet> {
             return makeError(ErrorCode::InvalidArgument, "scale factor must be positive",
-                             std::to_string(factor));
+                             katana::core::formatExactReal(factor));
         });
     }
     return transformEntities("SCALE", std::move(ids), Mat3::scalingAbout(center, factor, factor));

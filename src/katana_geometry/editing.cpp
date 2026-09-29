@@ -4,6 +4,8 @@
 #include <cmath>
 #include <string>
 
+#include "katana/core/text.hpp"
+
 namespace katana::geometry {
 
 namespace tol = katana::math::tolerance;
@@ -420,7 +422,7 @@ Result<FilletResult> fillet(const Segment2& first, const Segment2& second, doubl
 {
     if (!(radius >= 0.0)) {
         return makeError(ErrorCode::InvalidArgument, "fillet radius must not be negative",
-                         "radius=" + std::to_string(radius));
+                         "radius=" + katana::core::formatExactReal(radius));
     }
     const auto found = findCorner(first, second);
     if (!found) {
@@ -451,7 +453,7 @@ Result<FilletResult> fillet(const Segment2& first, const Segment2& second, doubl
     if (!(corner.reachFirst - tangentDistance > tol::kGeometric) ||
         !(corner.reachSecond - tangentDistance > tol::kGeometric)) {
         return makeError(ErrorCode::InvalidGeometry, "fillet radius is too large for the segments",
-                         "radius=" + std::to_string(radius));
+                         "radius=" + katana::core::formatExactReal(radius));
     }
 
     const Point2 tangentFirst = corner.apex + corner.alongFirst * tangentDistance;

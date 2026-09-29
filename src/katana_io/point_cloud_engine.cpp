@@ -196,12 +196,12 @@ Result<PointCloud> PointCloudEngine::read(const std::filesystem::path& path,
             if (options.clip.has_value()) {
                 const PointCloudBounds& box = *options.clip;
                 pdal::Options cropOptions;
-                cropOptions.add("bounds", "([" + std::to_string(box.minX) + "," +
-                                              std::to_string(box.maxX) + "],[" +
-                                              std::to_string(box.minY) + "," +
-                                              std::to_string(box.maxY) + "],[" +
-                                              std::to_string(box.minZ) + "," +
-                                              std::to_string(box.maxZ) + "])");
+                cropOptions.add("bounds", "([" + katana::core::formatExactReal(box.minX) + "," +
+                                              katana::core::formatExactReal(box.maxX) + "],[" +
+                                              katana::core::formatExactReal(box.minY) + "," +
+                                              katana::core::formatExactReal(box.maxY) + "],[" +
+                                              katana::core::formatExactReal(box.minZ) + "," +
+                                              katana::core::formatExactReal(box.maxZ) + "])");
                 stage = &pipeline.makeFilter("filters.crop", *stage, cropOptions);
             }
             if (options.classification.has_value()) {

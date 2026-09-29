@@ -131,7 +131,7 @@ Status checkPositive(std::string_view field, double value)
 {
     if (!(std::isfinite(value) && value > 0.0)) {
         return makeError(ErrorCode::InvalidArgument, std::string(field) + " must be above 0",
-                         std::to_string(value));
+                         katana::core::formatExactReal(value));
     }
     return {};
 }
@@ -140,7 +140,7 @@ Status checkNotNegative(std::string_view field, double value)
 {
     if (!(std::isfinite(value) && value >= 0.0)) {
         return makeError(ErrorCode::InvalidArgument, std::string(field) + " must be 0 or more",
-                         std::to_string(value));
+                         katana::core::formatExactReal(value));
     }
     return {};
 }

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <string>
 
+#include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::geometry {
@@ -80,7 +81,7 @@ Result<SolvedProfile> solveProfile(const VerticalAlignment& definition)
                              "the vertical curves overlap: their half-lengths exceed the "
                              "distance between the PVIs",
                              pviLabel(i) + " and " + pviLabel(i + 1) + ", short by " +
-                                 std::to_string(-available) + " m");
+                                 katana::core::formatExactReal(-available) + " m");
         }
     }
 

@@ -17,6 +17,7 @@
 #include "katana/cad/scene.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/task_pool.hpp"
+#include "katana/core/text.hpp"
 
 using katana::cad::Document;
 using katana::cad::SceneBuilder;
@@ -1173,7 +1174,7 @@ TEST(SceneFrame, DrawingLinesDrapedOnASurfaceCrossItsEdgesUnbroken)
     for (Projection projection : {Projection::Perspective, Projection::Orthographic}) {
         for (double elevation : {0.61, 0.25, 0.12}) {
             SCOPED_TRACE(std::to_string(static_cast<int>(projection)) + " at " +
-                         std::to_string(elevation));
+                         katana::core::formatExactReal(elevation));
             Camera camera;
             camera.setViewportSize(1200, 800);
             camera.setProjection(projection);

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "geodesy_test_support.hpp"
+#include "katana/core/text.hpp"
 #include "katana/geodesy/coordinate_transformer.hpp"
 #include "katana/math/numerics.hpp"
 #include "support/property.hpp"
@@ -149,7 +150,7 @@ TEST(GeodesyTransformerProperty, Utm30NAgreesWithKruegerSeriesAcrossTheZone)
         worst = std::max({worst, std::abs(grid->easting - expected.easting),
                           std::abs(grid->northing - expected.northing)});
     }
-    RecordProperty("worst_difference_metres", std::to_string(worst));
+    RecordProperty("worst_difference_metres", katana::core::formatExactReal(worst));
 }
 
 TEST(GeodesyTransformer, OrdnanceSurveyWorkedExample)
@@ -646,7 +647,7 @@ TEST(GeodesyTransformerProperty, ProjectedRoundTripIsFarBelowTheCoordinateTolera
         worst = std::max({worst, std::abs(back->easting - grid.easting),
                           std::abs(back->northing - grid.northing)});
     }
-    RecordProperty("worst_round_trip_metres", std::to_string(worst));
+    RecordProperty("worst_round_trip_metres", katana::core::formatExactReal(worst));
 }
 
 TEST(GeodesyTransformerProperty, GeographicRoundTripIsBelowOneNanodegree)
@@ -777,7 +778,7 @@ TEST(GeodesyTransformerDatum, Wgs84ToBritishNationalGridReportsItsOperation)
     ASSERT_OK(back);
     const double residual = groundSeparationMetres(*back, position);
     EXPECT_LT(residual, kHeightlessDatumRoundTripMetres);
-    RecordProperty("datum_round_trip_residual_metres", std::to_string(residual));
+    RecordProperty("datum_round_trip_residual_metres", katana::core::formatExactReal(residual));
 }
 
 TEST(GeodesyTransformerDatum, RequiredAccuracyFiltersCandidates)

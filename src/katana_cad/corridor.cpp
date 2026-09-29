@@ -5,10 +5,11 @@
 #include <cmath>
 #include <string>
 
+#include "katana/core/text.hpp"
 #include "katana/geometry/primitives3d.hpp"
-#include "katana/terrain/tin_builder.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/math/summation.hpp"
+#include "katana/terrain/tin_builder.hpp"
 
 namespace katana::cad {
 
@@ -209,11 +210,11 @@ Result<CorridorSection> corridorSection(const geometry::SolvedAlignment& alignme
     const auto elevation = profile.elevationAt(station);
     if (!centre || !direction) {
         return makeError(ErrorCode::InvalidArgument, "the station is outside the alignment",
-                         std::to_string(station));
+                         katana::core::formatExactReal(station));
     }
     if (!elevation) {
         return makeError(ErrorCode::InvalidArgument, "the station is outside the design profile",
-                         std::to_string(station));
+                         katana::core::formatExactReal(station));
     }
 
     CorridorSection section;

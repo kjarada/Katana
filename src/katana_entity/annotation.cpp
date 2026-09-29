@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/core/text.hpp"
 #include "katana/entity/label_text.hpp"
 #include "katana/math/numerics.hpp"
 #include "validation.hpp"
@@ -69,7 +70,7 @@ Status requireFiniteAtLeast(double value, double minimum, const char* what, cons
     if (!std::isfinite(value) || value < minimum) {
         return makeError(ErrorCode::InvalidArgument,
                          std::string(what) + " must be finite and at least " +
-                             std::to_string(minimum),
+                             katana::core::formatExactReal(minimum),
                          name);
     }
     return {};

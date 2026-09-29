@@ -5,6 +5,8 @@
 #include <cmath>
 #include <string>
 
+#include "katana/core/text.hpp"
+
 namespace katana::cad {
 
 using katana::core::ErrorCode;
@@ -56,9 +58,9 @@ core::Result<Printable> printableArea(const PlotSettings& settings)
     if (!(area.widthMm > 0.0) || !(area.heightMm > 0.0)) {
         return makeError(ErrorCode::InvalidArgument,
                          "the margins leave no printable area on the sheet",
-                         std::to_string(settings.marginMm) + " mm on " +
-                             std::to_string(paper.widthMm) + " x " +
-                             std::to_string(paper.heightMm));
+                         katana::core::formatExactReal(settings.marginMm) + " mm on " +
+                             katana::core::formatExactReal(paper.widthMm) + " x " +
+                             katana::core::formatExactReal(paper.heightMm));
     }
     return area;
 }
@@ -204,7 +206,7 @@ Result<double> sheetScaleAtLeast(double needed)
 {
     if (!(needed > 0.0) || !std::isfinite(needed)) {
         return makeError(ErrorCode::InvalidArgument, "the scale denominator must be positive",
-                         std::to_string(needed));
+                         katana::core::formatExactReal(needed));
     }
     for (const double standard : kSheetScales) {
         if (standard >= needed) {

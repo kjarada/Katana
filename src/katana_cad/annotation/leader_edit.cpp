@@ -192,7 +192,7 @@ Status checkLeaderChange(const Model& model, const LeaderChange& change)
         if (size && !(std::isfinite(*size) && *size >= 0.0)) {
             return makeError(ErrorCode::InvalidArgument,
                              std::string(key) + "= must be a size of 0 mm or more",
-                             std::to_string(*size));
+                             katana::core::formatExactReal(*size));
         }
     }
     return {};
@@ -457,7 +457,7 @@ Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
     }
     if (!(options.length > 0.0) || !std::isfinite(options.length)) {
         return makeError(ErrorCode::InvalidArgument, "length= must be more than zero",
-                         std::to_string(options.length));
+                         katana::core::formatExactReal(options.length));
     }
     if (!std::isfinite(options.angle) || !(scale > 0.0)) {
         return makeError(ErrorCode::InvalidArgument, "the angle and the scale must be numbers");

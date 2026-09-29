@@ -408,7 +408,7 @@ Result<ForwardResult> computeForward(const ForwardInput& input)
     if (!std::isfinite(input.distance) || !(input.distance > 0.0)) {
         return makeError(ErrorCode::InvalidArgument,
                          "the horizontal distance must be a positive number",
-                         std::to_string(input.distance));
+                         katana::core::formatExactReal(input.distance));
     }
     if (input.heightDifference) {
         if (!std::isfinite(*input.heightDifference)) {

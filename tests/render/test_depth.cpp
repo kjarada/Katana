@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "katana/core/task_pool.hpp"
+#include "katana/core/text.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/rasterizer.hpp"
 
@@ -442,7 +443,7 @@ TEST(RenderDepth, SurveyPointsLyingOnASlopedSurfaceAreDrawnWhole)
     for (Projection projection : {Projection::Perspective, Projection::Orthographic}) {
         for (double elevation : {0.61, 0.25, 0.12}) {
             SCOPED_TRACE(std::to_string(static_cast<int>(projection)) + " at " +
-                         std::to_string(elevation));
+                         katana::core::formatExactReal(elevation));
             Camera camera;
             camera.setViewportSize(1200, 800);
             camera.setProjection(projection);
@@ -657,7 +658,7 @@ TEST(RenderDepth, SurveyPointsOnTheVerticesOfDrapedStringsAreDrawnWholeOverThem)
     for (Projection projection : {Projection::Perspective, Projection::Orthographic}) {
         for (double elevation : {0.61, 0.25, 0.12}) {
             SCOPED_TRACE(std::to_string(static_cast<int>(projection)) + " at " +
-                         std::to_string(elevation));
+                         katana::core::formatExactReal(elevation));
             Camera camera;
             camera.setViewportSize(1200, 800);
             camera.setProjection(projection);
