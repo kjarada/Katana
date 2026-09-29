@@ -10,6 +10,7 @@
 #include <cmath>
 #include <limits>
 #include <utility>
+#include <vector>
 
 #include "katana/render/camera.hpp"
 
@@ -300,6 +301,11 @@ TEST(RenderCamera, ElevationIsClampedOffThePolesSoTheBasisNeverCollapses)
 
 TEST(RenderCamera, ZoomAtAPixelKeepsThatWorldPointUnderTheCursor)
 {
+    // dollyAtPixel's own anchor: the point of the TARGET'S plane under the
+    // pixel. That is all this pins - it passed while the 3D view's zoom
+    // stalled, because the ground under the cursor is not on that plane. The
+    // view moves the pivot to the ground first (setPivotDepth), pinned by
+    // AfterMovingThePivotToAPointEachDollyMagnifiesItByExactlyTheFactor.
     for (Projection projection : {Projection::Perspective, Projection::Orthographic}) {
         Camera camera = defaultCamera();
         camera.setProjection(projection);
@@ -322,6 +328,106 @@ TEST(RenderCamera, ZoomAtAPixelKeepsThatWorldPointUnderTheCursor)
         EXPECT_NEAR(after->x, px + 0.5, 1e-6);
         EXPECT_NEAR(after->y, py + 0.5, 1e-6);
     }
+}
+
+TEST(RenderCamera, MovingThePivotAlongTheViewAxisMovesNothingOnScreen)
+{
+    // setPivotDepth puts the target `depth` in front of the eye on the view
+    // axis and the distance to `depth`: by its definition the eye does not
+    // move, so no point projects anywhere else. Under a perspective
+    // projection the orthographic height becomes what the view shows at that
+    // depth, 2 x 30 x tan(22.5 deg) = 24.852813742385702 (tan 22.5 deg =
+    // sqrt 2 - 1); under an orthographic one it is the picture, and stays.
+    for (Projection projection : {Projection::Perspective, Projection::Orthographic}) {
+        SCOPED_TRACE(static_cast<int>(projection));
+        Camera camera = defaultCamera();
+        camera.setProjection(projection);
+        camera.setStandardView(StandardView::IsoNorthEast);
+        camera.setTarget(Vec3(5.0, -3.0, 2.0));
+        camera.setDistance(80.0);
+        camera.setOrthographicHeight(60.0);
+        // A box reaching behind the orthographic eye gives it a standoff,
+        // which the move must fold in rather than lose.
+        ASSERT_TRUE(camera.fitDepthRange(
+            katana::math::AABB(Vec3(-200.0, -200.0, -50.0), Vec3(200.0, 200.0, 50.0))));
+        const Vec3 probes[] = {Vec3(0.0, 0.0, 0.0), Vec3(12.0, 7.0, -4.0), Vec3(-9.0, 15.0, 6.0)};
+        std::vector<Vec3> before;
+        for (const Vec3& probe : probes) {
+            const auto screen = camera.project(probe);
+            ASSERT_TRUE(screen.has_value());
+            before.push_back(*screen);
+        }
+        const Vec3 eye = camera.eye();
+        const Vec3 forward = camera.forward();
+
+        camera.setPivotDepth(30.0);
+
+        EXPECT_NEAR((camera.eye() - eye).length(), 0.0, 1e-12);
+        EXPECT_NEAR((camera.target() - (eye + forward * 30.0)).length(), 0.0, 1e-12);
+        EXPECT_DOUBLE_EQ(camera.distance(), 30.0);
+        EXPECT_NEAR(camera.orthographicHeight(),
+                    projection == Projection::Perspective ? 24.852813742385702 : 60.0, 1e-12);
+        for (std::size_t k = 0; k < before.size(); ++k) {
+            const auto after = camera.project(probes[k]);
+            ASSERT_TRUE(after.has_value());
+            EXPECT_NEAR(after->x, before[k].x, 1e-9);
+            EXPECT_NEAR(after->y, before[k].y, 1e-9);
+        }
+    }
+}
+
+TEST(RenderCamera, APivotDepthThatIsNotPositiveAndFiniteIsIgnored)
+{
+    for (const double depth : {0.0, -5.0, std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::infinity()}) {
+        Camera camera = defaultCamera();
+        camera.setStandardView(StandardView::IsoSouthWest);
+        const Vec3 target = camera.target();
+        camera.setPivotDepth(depth);
+        EXPECT_EQ(camera.target().x, target.x) << depth;
+        EXPECT_EQ(camera.target().y, target.y) << depth;
+        EXPECT_EQ(camera.target().z, target.z) << depth;
+        EXPECT_EQ(camera.distance(), 100.0) << depth;
+    }
+}
+
+TEST(RenderCamera, AfterMovingThePivotToAPointEachDollyMagnifiesItByExactlyTheFactor)
+{
+    // Ground at z = -10 under a target at the origin 100 from the eye, seen
+    // from the south-west at 1200 x 800: the ground under pixel (700, 150)
+    // lies beyond the target's plane. Anchored on that plane, a notch
+    // magnified the ground there by less each time, tending to depth /
+    // (depth - distance), and it stopped: the stall. With the pivot moved to
+    // the ground's depth first, each dolly by 1 / 1.15 divides the ground's
+    // depth, and so its footprint, by exactly 1.15, and the same point of
+    // the ground stays at the pixel's centre.
+    Camera camera = defaultCamera(1200, 800);
+    camera.setStandardView(StandardView::IsoSouthWest);
+    const double px = 700.0;
+    const double py = 150.0;
+    const auto groundUnder = [&camera, px, py] {
+        const katana::math::Ray ray = camera.rayThroughPixel(px, py);
+        return ray.at((-10.0 - ray.origin.z) / ray.direction.z);
+    };
+    const auto depthOf = [&camera](const Vec3& p) {
+        return (p - camera.eye()).dot(camera.forward());
+    };
+    const Vec3 ground = groundUnder();
+    const double first = depthOf(ground);
+    ASSERT_GT(first, 1.2 * camera.distance()) << "not beyond the target's plane: proves nothing";
+    double depth = first;
+    for (int notch = 1; notch <= 50; ++notch) {
+        camera.setPivotDepth(depthOf(groundUnder()));
+        camera.dollyAtPixel(1.0 / 1.15, px, py);
+        const double now = depthOf(groundUnder());
+        ASSERT_NEAR(depth / now, 1.15, 1e-9) << "notch " << notch;
+        depth = now;
+        const auto screen = camera.project(ground);
+        ASSERT_TRUE(screen.has_value());
+        ASSERT_NEAR(screen->x, px + 0.5, 1e-6) << "notch " << notch;
+        ASSERT_NEAR(screen->y, py + 0.5, 1e-6) << "notch " << notch;
+    }
+    EXPECT_NEAR(first / depth, std::pow(1.15, 50.0), 1e-6 * std::pow(1.15, 50.0));
 }
 
 TEST(RenderCamera, PanningMovesTheSceneWithTheDrag)

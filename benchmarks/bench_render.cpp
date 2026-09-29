@@ -35,6 +35,7 @@
 #include "katana/archive12d/domain.hpp"
 #include "katana/archive12d/reader.hpp"
 #include "katana/cad/scene.hpp"
+#include "katana/cad/scene_zoom.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/task_pool.hpp"
 #include "katana/render/rasterizer.hpp"
@@ -434,6 +435,50 @@ void BM_SceneLayersFrame(benchmark::State& state)
     state.counters["edges"] = static_cast<double>(layers.edges.lines.size());
 }
 BENCHMARK(BM_SceneLayersFrame)->Arg(64)->Arg(256)->Arg(512)->Unit(benchmark::kMillisecond);
+
+// What a wheel notch costs the 3D view before it moves the camera: finding
+// what is drawn under the cursor (cad::pickDrawnPoint) in the survey's
+// layers, framed as BM_SceneLayersFrame frames them. Four pixels a round -
+// the middle, the far ground, the near ground and a corner off the site -
+// with the cull (second argument 1) and with every primitive tested (0), so
+// that what the cull saves is measured where it is claimed
+// (docs/render.md, "Zooming towards the cursor"). A notch is a quarter of
+// a round.
+void BM_PickUnderCursor(benchmark::State& state)
+{
+    const auto survey = syntheticSurvey(static_cast<int>(state.range(0)));
+    katana::cad::SceneBuilder builder;
+    katana::cad::SceneOptions options;
+    katana::cad::SceneLayers layers;
+    builder.buildTerrain(survey->surfaces, {}, options, layers);
+    builder.buildEntities(survey->document, survey->surfaces, options, layers);
+    builder.buildGrid(options, layers);
+
+    Camera camera;
+    camera.setViewportSize(1600, 1000);
+    camera.setStandardView(katana::render::StandardView::IsoSouthWest);
+    if (!camera.frame(layers.bounds)) {
+        std::abort();
+    }
+    katana::cad::PickOptions pick;
+    pick.cull = state.range(1) != 0;
+    constexpr double kPixels[4][2] = {{800.0, 500.0}, {800.0, 250.0}, {800.0, 850.0}, {40.0, 40.0}};
+    for (auto _ : state) {
+        for (const auto& pixel : kPixels) {
+            auto hit = katana::cad::pickDrawnPoint(layers, camera, pixel[0], pixel[1], pick);
+            benchmark::DoNotOptimize(hit);
+        }
+    }
+    state.counters["triangles"] = static_cast<double>(layers.terrain.triangles.size());
+    state.counters["lines"] = static_cast<double>(layers.entities.lines.size());
+    state.counters["points"] = static_cast<double>(layers.entities.points.size());
+}
+BENCHMARK(BM_PickUnderCursor)
+    ->Args({256, 1})
+    ->Args({256, 0})
+    ->Args({512, 1})
+    ->Args({512, 0})
+    ->Unit(benchmark::kMillisecond);
 
 // A real archive's frame, drawn as the 3D view draws it (cad::renderLayers) at
 // 1600x1000 from the isometric eye framed on the scene. Synthetic ground is

@@ -144,6 +144,144 @@ again on every resize until the user moves the camera, because the window zooms
 a new view to extents before the dock has laid it out; a frame fitted to that
 size cut the sides off a tall view.
 
+### Zooming towards the cursor
+
+Reported on 2026-09-30: "when I zoom in 3D, zooming stops". It did, and it could
+also go blank.
+
+**The cause.** A wheel notch was `Camera::dollyAtPixel` alone: it anchors on the
+point under the cursor OF THE TARGET'S PLANE - the plane through the orbit
+target, facing the eye - multiplies the distance by 1/1.15 and slides the
+target so that point stays under the cursor. Neither the plane nor the view
+direction moves, so the anchor is the same point every notch, and the eye
+covers 13% of what is left of its way to it each time. The ground under the
+cursor is not on that plane (except at the one pixel that looks at the
+target). With the ground at depth zS and the anchor at zA, the distance:
+
+* **zS > zA**, ground beyond the plane (the upper part of an isometric view):
+  the ground's magnification tends to zS / (zS - zA) and stops. On the sample
+  terrain (`samples/gis/terrain.asc`) framed at 1200 x 800, with the cursor at
+  (625, 275), it was 4.1x after 20 notches, 4.8x after 30 (1.0087 that notch)
+  and 5.07x after 60 (1.0001). The pan and the orbit, which go by the same
+  collapsed distance, died with it: in the widget test's scene, after 30
+  notches a 100 px drag moved the ground under the cursor 4.75 px, and one
+  notch out undid 0.7% where it should undo 15%.
+* **zS < zA**, ground nearer than the plane: the anchor lay under the ground,
+  and the eye went through the ground after -ln(1 - zS / zA) / ln 1.15 notches
+  (10.1 on the sample terrain at (600, 650)). The view was blank from then on -
+  the ground behind the eye, nothing in front of it.
+
+Of 80 pixels probed over the framed sample terrain, 20 stalled and 60 dived
+(after 8.7 to 33 notches). The near plane was not the cause: it is fitted
+every frame (`cad::renderLayers`, and the GPU view's frame), and in no notch of
+any case measured did it clip the point under the cursor.
+
+**The fix** (`include/katana/cad/scene_zoom.hpp`): each notch zooms towards
+what is DRAWN under the cursor.
+
+1. `cad::pickDrawnPoint` finds it: the nearest of a terrain or drawing
+   triangle the pixel's ray passes through, and a line or point within three
+   pixels of the ray. It works in a frame about the ray, where the ray is an
+   axis: a triangle is hit when its shadow along the ray covers the origin, by
+   three 2D edge functions, and two triangles that share an edge compute it
+   from the same two vertices exactly negated (`-ffp-contract=off`), so a ray
+   cannot slip between them. A line is clipped to the aperture (Liang-Barsky)
+   and its point nearest the ray taken. With nothing drawn there, the pick is
+   the datum's plane - where the grid stands and linework without a height
+   lies - but only inside `cad::sceneDepthBox` in plan, so a pixel near the
+   horizon does not anchor kilometres off on ground nothing is drawn on. With
+   neither (the sky), there is nothing to magnify, and the notch anchors on
+   the target's plane as before.
+2. `Camera::setPivotDepth` moves the target along the view axis to that
+   depth and the distance to it. The eye does not move, so nothing on screen
+   does; in perspective the orthographic height becomes what the view shows at
+   that depth, 2 d tan(fov/2), so P keeps the scale there.
+3. `dollyAtPixel` then anchors on the picked depth: the point stays under the
+   cursor, its footprint shrinks by exactly 1.15 a notch, and the eye closes
+   13% of the way each notch and never arrives. The pan drags that depth's
+   plane, so the ground follows the cursor one to one; the orbit turns about
+   the view axis at that depth; the edges fade by it.
+4. **A minimum approach** (`cad::minimumApproach`): the eye comes no nearer
+   than 1e-4 of the diagonal of the scene's depth box, 3.3 cm on the sample
+   terrain and 20 cm on a 1.2 x 0.8 km site at MGA coordinates. The GPU draws
+   in float relative to the scene's origin, and its error grows as the view
+   closes on a point away from it; measured with the GPU's own matrix code
+   (`src/katana_qt/gpu/scene_origin.cpp`) on an 800 px tall view, it is
+   0.14-0.16 px at the limit, 0.3-0.4 px at half of it and 1.1-1.7 px at an
+   eighth, on the sample (80 m from the origin) and the site (460 m). The near
+   plane, at most a millionth of the box's diagonal once the eye is inside it,
+   measured 160-450 times nearer than the anchored point there, so nothing
+   zoomed into is clipped. An orthographic zoom never stalled - every point of
+   an orthographic pixel's ray stays under it, so there is no depth to pick -
+   and it stops at the height a perspective view shows at the limit. Zooming
+   out is not limited.
+
+`cad::zoomAtPixel` is all four, headless; `RenderViewWidget::zoomAtPixel` calls
+it for the wheel over either renderer, and the GPU child hands its wheel to the
+host through `GpuSceneView::onWheelZoom`, as it hands framing through
+`onZoomExtents`: only the host holds the scene, and `gpu` may not see `cad`.
+The factor is one constant, `Camera::kZoomPerNotch`, where each widget had a
+copy.
+
+**Rejected:**
+
+* Refitting the near plane: it is fitted every frame already and never
+  clipped the point zoomed into.
+* Clamping the distance and stopping: that turns the stall into a hard stop,
+  at the same wrong point.
+* A dolly of a fixed length: it goes through the ground, and a length right
+  for a 12 km corridor is wrong for a culvert.
+* Reading the depth under the cursor back from the depth buffer: free in the
+  software view, but the GPU's is multisampled D32F, which Direct3D 11 cannot
+  resolve, so the GPU view would need a second mechanism. The CPU pick serves
+  both, and is testable without a device.
+* Putting the orbit target on the picked point itself: the camera keeps its
+  target on the view axis, so the view would jump to centre it.
+* An index for the pick (a BVH or boxes of triangle runs): measured
+  unnecessary. The cull alone - one pass finding which side of the ray each
+  vertex lies, then skipping every primitive whose vertices all lie beyond one
+  side - makes a notch 0.45 ms on the 131k-triangle survey and 1.45 ms on the
+  524k one (below), against a frame of 6 and 10 ms. An index would have to be
+  rebuilt with the terrain.
+* Keeping the pick while the cursor stays still (the anchored point stays
+  under it at depth times the factor): at those costs it is not worth the
+  invalidation an orbit, a pan, a rebuild or a resize would need.
+
+**Measured** (`BM_PickUnderCursor`, `benchmarks/bench_render.cpp`: the
+synthetic survey's layers framed at 1600 x 1000, four pixels a round; median
+CPU of five repetitions on the owner's machine, with other builds running;
+a notch is a quarter of a round):
+
+| Survey | Triangles, lines | Culled, a notch | Every primitive, a notch | `BM_SceneLayersFrame`, wall |
+|---|---|---|---|---|
+| 256 cells | 131 072, 47 804 | 0.45 ms | 1.04 ms | 6.1 ms |
+| 512 cells | 524 288, 58 852 | 1.45 ms | 3.5 ms | 10.2 ms |
+
+The culled pick finds exactly what the full one does: every sixth pixel of
+four views of a survey, both ways, 1 261 terrain, 1 611 drawing, 3 752 datum
+and 10 656 empty answers, all equal to the bit
+(`ScenePick.TheCulledPickFindsExactlyWhatTheFullOneDoes`) - the cull tests the
+signs of the very numbers the full test uses.
+
+**Tests.** The widget's, driving wheel events on the software view
+(`RenderView.EveryWheelNotchMagnifiesTheGroundUnderTheCursorByTheSameFactor`,
+`WheelNotchesOverTheNearGroundNeverTakeTheEyeThroughIt`,
+`AfterZoomingInADragStillCarriesTheGroundUnderTheCursorWithIt`,
+`ANotchOutAfterZoomingInShrinksTheGroundUnderTheCursorByTheSameFactor`), each
+finding the ground under the cursor by hand. Before the fix they failed with
+the numbers above: a gain of 1.111 at notch 1 falling to 1.0018 at notch 40,
+4.25x in all where 1.15^40 = 267.9x is due; the eye under the ground and the
+view blank from notch 10; a 100 px drag moving the ground 4.75 px; a notch
+out undoing 0.7%. With `setPivotDepth` made a no-op, those and the camera's
+and the zoom's own tests fail the same way - 11 of the 15. The first also runs
+at `QT_SCALE_FACTOR=1.25` (`qt_render_view_zoom_at_125_percent`), where the
+cursor's logical pixels must become the camera's device pixels. The GPU child's
+hand-over is `GpuSceneView.TheWheelIsHandedToTheHostThatZoomsTowardsWhatIsUnderTheCursor`
+(no device needed) and, where a GPU view can be shown,
+`RenderViewGpu.OnTheDesktopTheWheelOverTheGpuViewZoomsTowardsWhatIsUnderTheCursor`.
+`KATANA_RENDER_VIEW_IMAGES=<dir>` saves the software view's frames at chosen
+notches, to look at.
+
 ## The rasteriser, in three stages (`rasterizer.hpp`)
 
 1. **Transform** every vertex once, in parallel, into clip space, and classify
@@ -496,7 +634,16 @@ read them as sizes, not ratios). What changed, looking at the pictures:
 * A vertical exaggeration change rebuilds every layer; making it a transform
   (and re-lighting only) would make it free.
 * No anti-aliasing, no transparency, no text in 3D (text is a point marker),
-  no point clouds in 3D, no picking in 3D.
+  no point clouds in 3D, no selecting in 3D: the zoom finds what is drawn
+  under the cursor (`cad::pickDrawnPoint`), a click does not.
+* No verb reaches a 3D view's camera, so its zoom cannot be driven headless
+  or by an agent; `RenderViewWidget::zoomAtPixel` is what one would call.
+* The 3D pick's aperture is an angle about the pixel's ray: three pixels in
+  the middle of the view and more towards its edges, up to 1.5 times in the
+  corner of a 4:3 view and 1.7 in a 16:9 one (`PickOptions::aperture`).
+* In the GPU view the camera the view keeps holds the near and far planes
+  `frame()` gave it; each frame fits a copy. Nothing reads them - which is why
+  the zoom's limit comes from the scene's box and not from the near plane.
 * The rasteriser's fill loop is scalar (a SIMD rewrite is its own wave); a
   dense TIN at extents is still bound by triangle setup and binning.
 * Zoom-extents centres the scene's box, so in perspective the near half of a

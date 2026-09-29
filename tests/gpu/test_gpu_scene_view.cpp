@@ -185,6 +185,37 @@ TEST(GpuSceneView, DraggingOrbitsPansAndTheWheelZoomsTheHostsCameraAsTheSoftware
     EXPECT_NEAR(camera.distance(), distance / 1.15, 1e-9);
 }
 
+// The widget holds only packed lists, so the host - which has the scene -
+// does the zoom: the wheel reaches onWheelZoom with its notches (a fine
+// wheel's fraction too) and the cursor in logical pixels, and the widget
+// leaves the camera alone. Needs no device: no frame is drawn.
+TEST(GpuSceneView, TheWheelIsHandedToTheHostThatZoomsTowardsWhatIsUnderTheCursor)
+{
+    Camera camera;
+    camera.setViewportSize(200, 100);
+    camera.setDistance(100.0);
+    GpuSceneView view(camera);
+    view.resize(200, 100);
+    double notches = 0.0;
+    QPointF at;
+    int calls = 0;
+    view.onWheelZoom = [&](double turned, const QPointF& position) {
+        notches = turned;
+        at = position;
+        ++calls;
+    };
+    const auto target = camera.target();
+    QWheelEvent wheel(QPointF(30, 70), view.mapToGlobal(QPointF(30, 70)), QPoint(),
+                      QPoint(0, 180), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(&view, &wheel);
+    EXPECT_EQ(calls, 1);
+    EXPECT_DOUBLE_EQ(notches, 1.5);
+    EXPECT_EQ(at, QPointF(30, 70));
+    EXPECT_EQ(camera.distance(), 100.0);
+    EXPECT_EQ(camera.target(), target);
+    EXPECT_TRUE(wheel.isAccepted());
+}
+
 // Framing an empty draw list frames nothing and leaves the view unframed, so
 // the first frame after a list arrives frames that list. It used to count as
 // framed before it found the list empty, and a view first drawn before its

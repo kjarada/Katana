@@ -20,6 +20,7 @@
 
 #include <QApplication>
 #include <QImage>
+#include <QWheelEvent>
 
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -180,6 +181,47 @@ TEST(RenderViewGpu, OnTheDesktopAnEditReachesTheGpuView)
     (void)gpuView->grabFramebuffer();
     EXPECT_GT(view.entityBuilds(), builds);
     EXPECT_GT(gpuView->lastStats().lines, before);
+}
+
+// The wheel over the GPU child zooms through the host, towards what the host
+// built under the cursor: the line's middle, (50, 25, 0), is where the framed
+// camera looks, so the cursor put over it has the line's own point under it,
+// and each notch divides that point's depth by 1.15 (docs/render.md,
+// "Zooming towards the cursor"). The GPU child's camera counts in its
+// logical pixels, which are the wheel's.
+TEST(RenderViewGpu, OnTheDesktopTheWheelOverTheGpuViewZoomsTowardsWhatIsUnderTheCursor)
+{
+    if (const std::string why = whyNotShown(); !why.empty()) {
+        GTEST_SKIP() << why;
+    }
+    OneLine scene;
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(320, 200);
+    view.show();
+    processEvents();
+    ASSERT_TRUE(view.drawnOnGpu()) << view.rendererReason().toStdString();
+    auto* gpuView = view.gpuView();
+    ASSERT_NE(gpuView, nullptr);
+    (void)gpuView->grabFramebuffer();
+    const katana::math::Vec3 middle(50.0, 25.0, 0.0);
+    const auto depthOf = [&state](const katana::math::Vec3& p) {
+        return (p - state.camera.eye()).dot(state.camera.forward());
+    };
+    const auto screen = state.camera.project(middle);
+    ASSERT_TRUE(screen.has_value());
+    const QPointF cursor(screen->x - 0.5, screen->y - 0.5);
+    double depth = depthOf(middle);
+    for (int notch = 1; notch <= 30; ++notch) {
+        QWheelEvent wheel(cursor, gpuView->mapToGlobal(cursor), QPoint(), QPoint(0, 120),
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(gpuView, &wheel);
+        const double now = depthOf(middle);
+        ASSERT_NEAR(depth / now, 1.15, 1e-9) << "notch " << notch;
+        depth = now;
+    }
+    (void)gpuView->grabFramebuffer();
+    EXPECT_FALSE(gpuView->failed());
 }
 
 // A GPU view that fails hands the view to the software rasteriser, and no

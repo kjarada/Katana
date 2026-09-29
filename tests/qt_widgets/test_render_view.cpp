@@ -12,11 +12,16 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include <QApplication>
+#include <QDir>
+#include <QImage>
 #include <QMainWindow>
+#include <QMouseEvent>
 #include <QWheelEvent>
 
 #include "katana/cad/scene.hpp"
@@ -384,4 +389,324 @@ TEST(RenderView, ANewDrawingLeavesNoSurfaceOfThePreviousOneInTheThreeDView)
     EXPECT_TRUE(render->sceneLayers().terrain.empty())
         << "the previous drawing's surface is still in the 3D view";
     EXPECT_FALSE(cut->section.has_value()) << "the previous drawing's section is still shown";
+}
+
+// ---- zooming with the wheel (docs/render.md, "Zooming towards the cursor") ------------
+//
+// The wheel anchored every notch on the plane through the orbit target, facing
+// the eye - not on what is drawn under the cursor. Over ground beyond that
+// plane the eye closed in on the anchor and the zoom stalled: each notch took
+// 13% of what was left of the way, so after about 30 notches nothing on screen
+// moved, and the pan, scaled by that collapsed distance, died with it. Over
+// ground nearer than the plane the eye went through the ground and the view
+// went blank. The cases below find the ground under the cursor by hand - the
+// ray through the cursor's pixel met with the plane z = 10 - and never ask the
+// view what it zoomed towards.
+
+namespace {
+
+constexpr double kGroundHeight = 10.0;
+// One wheel notch in eighths of a degree, and the magnification it stands for
+// (2x in five notches).
+constexpr int kNotch = 120;
+constexpr double kPerNotch = 1.15;
+// The view's background (render_view_widget.cpp, kBackground).
+constexpr katana::render::Rgba kViewBackground = katana::render::rgba(28, 30, 36);
+
+// Flat ground 200 m square at z = 10, from an 11 x 11 grid of points 20 m
+// apart, and nothing else: the datum is its floor, so the navigation grid
+// stands in the same plane. Framed from the south-west, as a 3D view opens,
+// the target is the middle of the ground, (100, 100, 10), ON the ground: the
+// ground above the middle of the view lies beyond the target's plane and the
+// ground below the middle nearer than it.
+struct FlatGround {
+    Document document;
+    ViewSet views;
+    std::optional<katana::terrain::TinBuildResult> built;
+    std::vector<katana::cad::SceneSurface> surfaces;
+
+    FlatGround()
+    {
+        katana::terrain::TinInput input;
+        for (int j = 0; j <= 10; ++j) {
+            for (int i = 0; i <= 10; ++i) {
+                input.points.emplace_back(20.0 * i, 20.0 * j, kGroundHeight);
+            }
+        }
+        auto tin = katana::terrain::buildTin(input);
+        EXPECT_TRUE(tin.ok()) << tin.error().describe();
+        if (tin.ok()) {
+            built = std::move(*tin);
+            surfaces.resize(1);
+            surfaces.front().name = "Ground";
+            surfaces.front().surface = &built->surface;
+        }
+    }
+    FlatGround(const FlatGround&) = delete;
+    FlatGround& operator=(const FlatGround&) = delete;
+
+    [[nodiscard]] ViewContext context()
+    {
+        ViewContext context;
+        context.document = &document;
+        context.surfaces = &surfaces;
+        return context;
+    }
+};
+
+// Where the ray through the cursor meets the ground; nothing when it does
+// not. The cursor is in the widget's logical pixels, the camera counts in its
+// device pixels.
+std::optional<katana::math::Vec3> groundUnder(const katana::render::Camera& camera,
+                                              QPointF cursor, double ratio)
+{
+    const katana::math::Ray ray = camera.rayThroughPixel(cursor.x() * ratio, cursor.y() * ratio);
+    if (ray.direction.z == 0.0) {
+        return std::nullopt;
+    }
+    const double t = (kGroundHeight - ray.origin.z) / ray.direction.z;
+    if (!(t > 0.0)) {
+        return std::nullopt;
+    }
+    return ray.at(t);
+}
+
+// How far in front of the eye `point` is along the view direction. A pixel's
+// footprint there is proportional to it, so the ratio of two depths of one
+// point is how much a zoom magnified it.
+double depthOf(const katana::render::Camera& camera, const katana::math::Vec3& point)
+{
+    return (point - camera.eye()).dot(camera.forward());
+}
+
+void turnWheel(QWidget& view, QPointF at, int eighths)
+{
+    QWheelEvent wheel(at, view.mapToGlobal(at), QPoint(), QPoint(0, eighths), Qt::NoButton,
+                      Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(&view, &wheel);
+}
+
+void middleDrag(QWidget& view, QPointF from, QPointF to)
+{
+    QMouseEvent press(QEvent::MouseButtonPress, from, view.mapToGlobal(from), Qt::MiddleButton,
+                      Qt::MiddleButton, Qt::NoModifier);
+    QApplication::sendEvent(&view, &press);
+    QMouseEvent move(QEvent::MouseMove, to, view.mapToGlobal(to), Qt::NoButton, Qt::MiddleButton,
+                     Qt::NoModifier);
+    QApplication::sendEvent(&view, &move);
+    QMouseEvent release(QEvent::MouseButtonRelease, to, view.mapToGlobal(to), Qt::MiddleButton,
+                        Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(&view, &release);
+}
+
+// Pixels of the last paint that are anything but the view's background.
+std::size_t paintedPixels(const RenderViewWidget& view)
+{
+    const auto& fb = view.framebuffer();
+    return static_cast<std::size_t>(std::count_if(
+        fb.color().begin(), fb.color().end(), [](auto c) { return c != kViewBackground; }));
+}
+
+// With KATANA_RENDER_VIEW_IMAGES set to a directory, saves what the view last
+// painted there as <name>.png: a zoom looked at rather than read in numbers.
+void saveForLooking(const RenderViewWidget& view, const std::string& name)
+{
+    const QString directory = qEnvironmentVariable("KATANA_RENDER_VIEW_IMAGES");
+    const auto& fb = view.framebuffer();
+    if (directory.isEmpty() || fb.empty()) {
+        return;
+    }
+    QDir().mkpath(directory);
+    const QImage image(reinterpret_cast<const uchar*>(fb.color().data()), fb.width(), fb.height(),
+                       fb.width() * static_cast<int>(sizeof(katana::render::Rgba)),
+                       QImage::Format_ARGB32);
+    (void)image.copy().save(QDir(directory).filePath(QString::fromStdString(name) + ".png"));
+}
+
+std::string twoDigits(int n) { return (n < 10 ? "0" : "") + std::to_string(n); }
+
+} // namespace
+
+TEST(RenderView, EveryWheelNotchMagnifiesTheGroundUnderTheCursorByTheSameFactor)
+{
+    // Above the middle of the view the ground lies beyond the target's plane.
+    // Anchored on that plane, the magnification of the ground under the
+    // cursor tended to depth / (depth - distance) and stopped there. Every
+    // notch must magnify it by 1.15, and the same point of the ground must
+    // stay under the cursor.
+    FlatGround scene;
+    ASSERT_TRUE(scene.built.has_value());
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(400, 300);
+    paint(view);
+    const double ratio = view.devicePixelRatioF();
+    // ctest runs this again at QT_SCALE_FACTOR=1.25
+    // (qt_render_view_zoom_at_125_percent), where the zoom must pick at the
+    // cursor times 1.25; a ratio Qt did not apply would prove nothing there.
+    if (const QString factor = qEnvironmentVariable("QT_SCALE_FACTOR"); !factor.isEmpty()) {
+        ASSERT_DOUBLE_EQ(ratio, factor.toDouble());
+    }
+    const QPointF cursor(200.0, 90.0);
+    const auto start = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(start.has_value());
+    ASSERT_GT(depthOf(state.camera, *start), 1.1 * state.camera.distance())
+        << "the ground under the cursor is not beyond the target's plane, so this proves nothing";
+    saveForLooking(view, "zoom_far_00");
+
+    const double first = depthOf(state.camera, *start);
+    double depth = first;
+    double worstGain = kPerNotch;
+    double drift = 0.0;
+    std::ostringstream gains;
+    for (int notch = 1; notch <= 40; ++notch) {
+        turnWheel(view, cursor, kNotch);
+        const auto under = groundUnder(state.camera, cursor, ratio);
+        ASSERT_TRUE(under.has_value()) << "no ground under the cursor after notch " << notch;
+        const double now = depthOf(state.camera, *under);
+        const double gain = depth / now;
+        if (std::abs(gain - kPerNotch) > std::abs(worstGain - kPerNotch)) {
+            worstGain = gain;
+        }
+        drift = std::max(drift, (*under - *start).length());
+        if (notch == 1 || notch % 10 == 0) {
+            gains << " notch " << notch << ": x" << gain << " (x" << first / now << " in all);";
+            paint(view);
+            saveForLooking(view, "zoom_far_" + twoDigits(notch));
+        }
+        depth = now;
+    }
+    EXPECT_NEAR(worstGain, kPerNotch, 1e-9) << gains.str();
+    const double expected = std::pow(kPerNotch, 40.0);
+    EXPECT_NEAR(first / depth, expected, 1e-6 * expected) << gains.str();
+    // A micrometre, on ground some 300 m from where the eye started.
+    EXPECT_LT(drift, 1e-6) << "the ground under the cursor slid by " << drift << " m;"
+                           << gains.str();
+}
+
+TEST(RenderView, WheelNotchesOverTheNearGroundNeverTakeTheEyeThroughIt)
+{
+    // Below the middle of the view the ground is nearer than the target's
+    // plane: the old anchor lay under the ground, so the eye went through it
+    // and the view was blank from then on - the ground behind the eye and
+    // nothing in front of it. The eye must stay above the ground, the ground
+    // under the cursor in front of it and magnified by 1.15 a notch, and the
+    // view must go on drawing it.
+    FlatGround scene;
+    ASSERT_TRUE(scene.built.has_value());
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(400, 300);
+    paint(view);
+    const double ratio = view.devicePixelRatioF();
+    const QPointF cursor(200.0, 250.0);
+    const auto start = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(start.has_value());
+    ASSERT_LT(depthOf(state.camera, *start), 0.9 * state.camera.distance())
+        << "the ground under the cursor is not nearer than the target's plane, so this proves "
+           "nothing";
+    saveForLooking(view, "zoom_near_00");
+
+    int eyeUnder = 0;
+    int blank = 0;
+    int lost = 0;
+    double depth = depthOf(state.camera, *start);
+    double worstGain = kPerNotch;
+    for (int notch = 1; notch <= 40; ++notch) {
+        turnWheel(view, cursor, kNotch);
+        paint(view);
+        if (eyeUnder == 0 && !(state.camera.eye().z > kGroundHeight)) {
+            eyeUnder = notch;
+        }
+        if (blank == 0 && paintedPixels(view) == 0) {
+            blank = notch;
+        }
+        const auto under = groundUnder(state.camera, cursor, ratio);
+        if (!under) {
+            lost = lost == 0 ? notch : lost;
+        } else if (lost == 0) {
+            const double now = depthOf(state.camera, *under);
+            if (std::abs(depth / now - kPerNotch) > std::abs(worstGain - kPerNotch)) {
+                worstGain = depth / now;
+            }
+            depth = now;
+        }
+        if (notch % 5 == 0) {
+            saveForLooking(view, "zoom_near_" + twoDigits(notch));
+        }
+    }
+    EXPECT_EQ(eyeUnder, 0) << "the eye went under the ground at notch " << eyeUnder;
+    EXPECT_EQ(blank, 0) << "the view drew nothing but its background from notch " << blank;
+    EXPECT_EQ(lost, 0) << "no ground under the cursor from notch " << lost;
+    EXPECT_NEAR(worstGain, kPerNotch, 1e-9);
+}
+
+TEST(RenderView, AfterZoomingInADragStillCarriesTheGroundUnderTheCursorWithIt)
+{
+    // A pan moves the target's plane by the drag, scaled by the camera's
+    // distance. Stalled, the distance had shrunk to centimetres while the
+    // ground stayed far off, and a 100 px drag moved the ground under the
+    // cursor a tenth of a pixel. Zoomed towards the ground, the target's
+    // plane is the ground's, and the ground under the cursor follows the drag
+    // exactly: 100 logical pixels, which the camera counts in device pixels.
+    FlatGround scene;
+    ASSERT_TRUE(scene.built.has_value());
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(400, 300);
+    paint(view);
+    const double ratio = view.devicePixelRatioF();
+    const QPointF cursor(200.0, 90.0);
+    for (int notch = 0; notch < 30; ++notch) {
+        turnWheel(view, cursor, kNotch);
+    }
+    const auto under = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(under.has_value());
+    const auto before = state.camera.project(*under);
+    ASSERT_TRUE(before.has_value());
+
+    middleDrag(view, cursor, cursor + QPointF(100.0, 0.0));
+    const auto after = state.camera.project(*under);
+    ASSERT_TRUE(after.has_value());
+    EXPECT_NEAR(after->x - before->x, 100.0 * ratio, 1e-6 * 100.0 * ratio);
+    EXPECT_NEAR(after->y - before->y, 0.0, 1e-6 * 100.0 * ratio);
+}
+
+TEST(RenderView, ANotchOutAfterZoomingInShrinksTheGroundUnderTheCursorByTheSameFactor)
+{
+    // Stalled, the eye sat almost on the old anchor and a notch out moved it
+    // back 15% of almost nothing: the ground under the cursor barely shrank.
+    // A notch out must undo a notch in, and as many notches out as went in
+    // must bring the eye back to where it started.
+    FlatGround scene;
+    ASSERT_TRUE(scene.built.has_value());
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(400, 300);
+    paint(view);
+    const double ratio = view.devicePixelRatioF();
+    const QPointF cursor(200.0, 90.0);
+    const katana::math::Vec3 eye = state.camera.eye();
+    const auto start = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(start.has_value());
+    const double startDepth = depthOf(state.camera, *start);
+
+    for (int notch = 0; notch < 30; ++notch) {
+        turnWheel(view, cursor, kNotch);
+    }
+    const auto in = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(in.has_value());
+    const double inDepth = depthOf(state.camera, *in);
+    turnWheel(view, cursor, -kNotch);
+    const auto out = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(out.has_value());
+    EXPECT_NEAR(depthOf(state.camera, *out) / inDepth, kPerNotch, 1e-9);
+
+    for (int notch = 1; notch < 30; ++notch) {
+        turnWheel(view, cursor, -kNotch);
+    }
+    EXPECT_NEAR((state.camera.eye() - eye).length(), 0.0, 1e-9 * startDepth);
+    const auto back = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(back.has_value());
+    EXPECT_NEAR(depthOf(state.camera, *back), startDepth, 1e-9 * startDepth);
 }

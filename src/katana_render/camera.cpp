@@ -467,4 +467,28 @@ void Camera::dollyAtPixel(double factor, double x, double y)
     setTarget(target_ + (anchor - moved));
 }
 
+void Camera::setPivotDepth(double depth)
+{
+    if (!std::isfinite(depth) || !(depth > 0.0)) {
+        return;
+    }
+    // setDistance's floor, applied before the target is placed so that the
+    // eye stays exactly where it was.
+    const double distance = std::max(depth, tol::kGeometric);
+    const Point3 pivot = eye() + forward() * distance;
+    if (!pivot.isFinite()) {
+        return;
+    }
+    target_ = pivot;
+    distance_ = distance;
+    if (projection_ == Projection::Perspective) {
+        setOrthographicHeight(2.0 * distance_ * std::tan(fovY_ * 0.5));
+    } else {
+        // eye() is target - forward * (distance + standoff): with the standoff
+        // folded into the depth it is the same point. fitDepthRange works
+        // the standoff out again at the next frame.
+        standoff_ = 0.0;
+    }
+}
+
 } // namespace katana::render

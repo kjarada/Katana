@@ -1686,6 +1686,17 @@ if(TARGET katana_qt_widget_tests)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
         TIMEOUT 120)
+    # The wheel at 125%: the cursor comes in logical pixels and the camera
+    # counts in device ones, so the zoom must pick at the cursor times 1.25 -
+    # at ratio 1 a missing scale would pass unseen (docs/render.md,
+    # "Zooming towards the cursor").
+    add_test(NAME qt_render_view_zoom_at_125_percent
+        COMMAND katana_qt_widget_tests
+            --gtest_filter=RenderView.EveryWheelNotchMagnifiesTheGroundUnderTheCursorByTheSameFactor)
+    set_tests_properties(qt_render_view_zoom_at_125_percent PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
+        TIMEOUT 120)
 endif()
 
 # The session verbs on the window's command line and the window's one
