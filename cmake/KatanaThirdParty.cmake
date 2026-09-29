@@ -50,6 +50,18 @@ function(katana_provide_benchmark)
     set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
     set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
     set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+    # Two of Google Benchmark's feature checks ask about what the C++ standard
+    # guarantees - std::regex ([re]) and std::chrono::steady_clock
+    # ([time.clock.steady]), both C++11, and Katana needs C++23 - and each is a
+    # try_run: a program compiled, linked and started. On a machine whose virus
+    # scanner inspects every new executable, answering them instead took a
+    # fresh configure from 41 s to 28 s (docs/building.md, "Build and test
+    # speed"). Benchmark's own cxx_feature_check takes a defined
+    # HAVE_<feature> as the answer and adds the same -DHAVE_<feature> a
+    # passing check would. The checks whose answer the standard does not give
+    # (the POSIX regex engines, pthread affinity) still run.
+    set(HAVE_STD_REGEX 1)
+    set(HAVE_STEADY_CLOCK 1)
     _katana_fetch(benchmark
         https://github.com/google/benchmark/archive/refs/tags/v1.9.1.zip)
 endfunction()

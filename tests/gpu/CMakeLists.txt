@@ -29,10 +29,6 @@ target_link_libraries(katana_gpu_tests PRIVATE katana_gpu katana_render GTest::g
 katana_target_defaults(katana_gpu_tests)
 set_target_properties(katana_gpu_tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
-if(WIN32)
-    set_property(TARGET katana_gpu_tests PROPERTY TEST_LAUNCHER
-        ${CMAKE_COMMAND} -E env --modify "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
-endif()
 # The platform the suite runs on (tests/gpu/main.cpp reads it). Windows:
 # offscreen, where raw QRhi on Direct3D 11 still renders into textures.
 # Linux: Qt's offscreen platform cannot make a Vulkan instance, so the suite
@@ -53,12 +49,9 @@ if(NOT WIN32 AND NOT APPLE)
         message(STATUS "xvfb-run not found: the Vulkan GPU tests will skip their device cases")
     endif()
 endif()
-gtest_discover_tests(katana_gpu_tests
-    TEST_PREFIX "gpu."
-    DISCOVERY_MODE PRE_TEST
-    DISCOVERY_TIMEOUT 60
-    PROPERTIES ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_GPU_TEST_PLATFORM=set:${_katana_gpu_platform}"
+katana_discover_tests(katana_gpu_tests
+    PREFIX "gpu."
+    ENVIRONMENT "QT_QPA_PLATFORM=set:offscreen" "KATANA_GPU_TEST_PLATFORM=set:${_katana_gpu_platform}"
 )
 if(NOT _katana_gpu_platform STREQUAL "offscreen")
     # What the widget tells its host under the offscreen platform, where every

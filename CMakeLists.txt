@@ -37,6 +37,25 @@ option(KATANA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(KATANA_ENABLE_SANITIZERS "Instrument with ASan/UBSan where the toolchain supports it" OFF)
 option(KATANA_ENABLE_CLANG_TIDY "Run clang-tidy during compilation (requires clang-tidy)" OFF)
 option(KATANA_ENABLE_CPPCHECK "Run cppcheck during compilation (requires cppcheck)" OFF)
+# Compile through ccache when it is installed (MSYS2:
+# mingw-w64-ucrt-x86_64-ccache), unless the configure names a launcher of its
+# own: a fresh build tree of a checkout, or a branch switched away from and
+# back, then compiles only what the cache has not seen. docs/building.md,
+# "Build and test speed", has what a cold and a warm cache measured.
+#
+# Without ccache's base_dir, so a second worktree does not share the first
+# one's entries. base_dir makes ccache hand the compiler paths relative to the
+# build tree, and __FILE__ with them: the survey-format and customisation
+# tests that find their fixtures beside __FILE__ then looked in the wrong
+# place, and 160 cases failed.
+option(KATANA_CCACHE "Compile through ccache when it is found" ON)
+if(KATANA_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
+    find_program(KATANA_CCACHE_PROGRAM ccache)
+    if(KATANA_CCACHE_PROGRAM)
+        set(CMAKE_CXX_COMPILER_LAUNCHER "${KATANA_CCACHE_PROGRAM}")
+        message(STATUS "Compiling through ${KATANA_CCACHE_PROGRAM} (KATANA_CCACHE=OFF to stop)")
+    endif()
+endif()
 # Who publishes the build: the company in katana.exe's version resource, the
 # installer's publisher, and the name the packages are signed under
 # (cmake/KatanaSign.cmake, docs/release.md "Signing").

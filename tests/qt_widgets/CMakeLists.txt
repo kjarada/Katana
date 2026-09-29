@@ -2,60 +2,27 @@
 # _widget), driven headlessly on Qt's offscreen platform: what they frame, what
 # they draw, what their hooks report and when their focus makes them the
 # active view; and the workspace that docks them, with the chrome it shares
-# with the main window's panels. The application is one executable with no library of its own,
-# so the widgets' sources are compiled in here as they are into katana.
+# with the main window's panels. The widgets' objects are the application's
+# own: katana_qt_ui (src/katana_qt/CMakeLists.txt), compiled once and linked
+# into katana and here alike.
 #
 # Registered with the prefix "qt_widgets." so that `ctest -R qt_` runs these
 # with the application's headless checks.
 # Found in src/katana_qt's own directory scope, which this one does not see.
 find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport)
 
-set(_qt_src "${PROJECT_SOURCE_DIR}/src/katana_qt")
-# The customisation managers' shared pieces (the style painter the plan view
-# now draws library linestyles and symbols with, the thumbnails, the pickers) and
-# their dialogs, with the tests written for them: globbed, as they are in the
-# application, so their authors add files without editing this list.
-file(GLOB _qt_customisation_sources CONFIGURE_DEPENDS "${_qt_src}/customisation/*.cpp")
+# The tests of the customisation managers, the tools, the survey pages, the
+# sheets, the annotation front end, the geoprocessing workbench and the
+# drawing front end: globbed, as their sources are in the application, so
+# their authors add files without editing this list. The survey pages are
+# driven by their object names as a person clicks them, on the fixtures of
+# tests/surveyio/data and tests/qt_widgets/survey/data.
 file(GLOB _qt_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.cpp")
-# The interactive tools hosted in the plan view (src/katana_qt/tools/: the host,
-# the menus built from the catalogue, the tools' icons) and their tests: globbed
-# for the same reason.
-file(GLOB _qt_tool_sources CONFIGURE_DEPENDS "${_qt_src}/tools/*.cpp")
 file(GLOB _qt_tool_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp")
-# The survey import wizard, the reduction options and report, Survey Jobs
-# and the Subsurface Utilities dialog and workbench (src/katana_qt/survey/),
-# with their tests: the pages are driven by their object names as a person
-# clicks them, on the fixtures of tests/surveyio/data and
-# tests/qt_widgets/survey/data.
 file(GLOB _qt_survey_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/survey/*.cpp")
-set(_qt_survey_sources
-    ${_qt_src}/survey/survey_import_wizard.cpp
-    ${_qt_src}/survey/survey_templates.cpp
-    ${_qt_src}/survey/reduction_options_widget.cpp
-    ${_qt_src}/survey/reduction_report_view.cpp
-    ${_qt_src}/survey/survey_task.cpp
-    ${_qt_src}/survey/survey_job_support.cpp
-    ${_qt_src}/survey/survey_jobs_dialog.cpp
-    ${_qt_src}/survey/utility_dialog.cpp
-    ${_qt_src}/survey/utility_workbench.cpp
-    # Survey > Parcel Report (test_parcel_dialog) and the frame it is built on.
-    ${_qt_src}/survey/survey_dialogs.cpp
-    ${_qt_src}/survey/survey_parcel_dialog.cpp)
-# The sheets' dialogs, panels and output (src/katana_qt/plotting/) and their
-# tests: globbed, as they are in the application.
-file(GLOB _qt_plotting_sources CONFIGURE_DEPENDS "${_qt_src}/plotting/*.cpp")
 file(GLOB _qt_plotting_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.cpp")
-# The annotation front end (src/katana_qt/annotation/) and its tests: globbed,
-# as it is in the application.
-file(GLOB _qt_annotation_sources CONFIGURE_DEPENDS "${_qt_src}/annotation/*.cpp")
 file(GLOB _qt_annotation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp")
-# The geoprocessing workbench and menu table (src/katana_qt/geo/) and their
-# tests: globbed, as they are in the application.
-file(GLOB _qt_geo_sources CONFIGURE_DEPENDS "${_qt_src}/geo/*.cpp")
 file(GLOB _qt_geo_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp")
-# The drawing system's front end (src/katana_qt/drawing/) and its tests:
-# globbed, as it is in the application.
-file(GLOB _qt_drawing_sources CONFIGURE_DEPENDS "${_qt_src}/drawing/*.cpp")
 file(GLOB _qt_drawing_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp")
 add_executable(katana_qt_widget_tests
     main.cpp
@@ -71,94 +38,50 @@ add_executable(katana_qt_widget_tests
     test_view_chrome.cpp
     # The background job runner (test_jobs).
     test_jobs.cpp
-    ${_qt_src}/jobs.cpp
     # GIS > Online Data's dialog (test_gis_online).
     test_gis_online.cpp
-    ${_qt_src}/gis_online_dialog.cpp
-    ${_qt_src}/viewport_widget.cpp
-    ${_qt_src}/plan_painter.cpp
-    ${_qt_src}/sheet_painter.cpp
-    ${_qt_src}/sheet_editor.cpp
-    ${_qt_src}/render_view_widget.cpp
-    ${_qt_src}/section_view_widget.cpp
-    ${_qt_src}/theme.cpp
-    # The workspace and the dock chrome its views wear (test_view_chrome).
-    ${_qt_src}/view_workspace.cpp
-    ${_qt_src}/view_layers_popup.cpp
-    ${_qt_src}/dock_chrome.cpp
-    ${_qt_src}/icons.cpp
-    # The styles and linetypes manager and the layer manager, built on the
-    # customisation widgets (tests/qt_widgets/customisation/test_style_manager*).
-    ${_qt_src}/style_manager.cpp
-    ${_qt_src}/layer_manager.cpp
     # File > Project Coordinate System (test_project_crs_dialog).
-    ${_qt_src}/project_crs_dialog.cpp
     test_project_crs_dialog.cpp
     # File > Run Script and the SCRIPT verb's reading and running (test_script_runner).
-    ${_qt_src}/script_runner.cpp
     test_script_runner.cpp
     # Help > Command Reference and Keyboard Shortcuts (test_command_reference).
-    ${_qt_src}/command_reference_dialog.cpp
-    ${_qt_src}/keyboard_shortcuts_dialog.cpp
     test_command_reference.cpp
     # Where an import lands: the Placement group, File > Import's step and
     # GIS > Import Vector Data's dialog (test_import_placement).
-    ${_qt_src}/import_placement.cpp
-    ${_qt_src}/gis_import_dialogs.cpp
-    ${_qt_src}/gis_export_dialog.cpp
-    ${_qt_src}/surface_raster_dialog.cpp
-    ${_qt_src}/dataset_info_dialog.cpp
     test_import_placement.cpp
     # The plan view's shortcut menu and Edit > Select by ID
     # (test_plan_context_menu).
-    ${_qt_src}/plan_context_menu.cpp
-    ${_qt_src}/select_by_id_dialog.cpp
     test_plan_context_menu.cpp
     # The theme's style, stylesheet and fonts, and the icons (test_theme).
     test_theme.cpp
     # The Properties panel's tree (test_property_panel).
-    ${_qt_src}/property_panel.cpp
     test_property_panel.cpp
     # Terrain > Alignment Manager (test_alignment_manager).
-    ${_qt_src}/alignment_manager.cpp
     test_alignment_manager.cpp
     # File > Import IFC and Export IFC (test_ifc_dialogs).
-    ${_qt_src}/ifc_dialogs.cpp
     test_ifc_dialogs.cpp
-    ${_qt_customisation_sources}
     ${_qt_customisation_tests}
-    ${_qt_tool_sources}
     ${_qt_tool_tests}
-    ${_qt_survey_sources}
     ${_qt_survey_tests}
-    ${_qt_plotting_sources}
     ${_qt_plotting_tests}
-    ${_qt_annotation_sources}
     ${_qt_annotation_tests}
-    ${_qt_geo_sources}
     ${_qt_geo_tests}
-    ${_qt_drawing_sources}
     ${_qt_drawing_tests}
 )
-target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
-                                                          "${CMAKE_CURRENT_SOURCE_DIR}")
-# katana_archive12d: the style painter names library pens through its colour table.
-# katana_surveyio and katana_survey: the survey pages read and reduce field files.
-# katana_app: the geoprocessing executor the workbench runs, and the command
-# reference's section of its verbs.
-target_link_libraries(katana_qt_widget_tests PRIVATE
-    katana_cad katana_interop katana_render katana_archive12d katana_survey katana_surveyio
-    katana_app katana_ifc Qt6::Widgets Qt6::PrintSupport GTest::gtest)
+target_include_directories(katana_qt_widget_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+# katana_qt_ui brings the window's objects and, PUBLIC, everything they link
+# and the src/katana_qt include path.
+target_link_libraries(katana_qt_widget_tests PRIVATE katana_qt_ui GTest::gtest)
 target_compile_definitions(katana_qt_widget_tests PRIVATE
     KATANA_SURVEYIO_DATA="${PROJECT_SOURCE_DIR}/tests/surveyio/data"
     KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data"
     KATANA_QT_WIDGET_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data"
     KATANA_SAMPLES="${PROJECT_SOURCE_DIR}/samples")
 katana_target_defaults(katana_qt_widget_tests)
-# The 3D view hosts the GPU renderer where it is built, so the widget tests
-# compile what the application does; offscreen, the rules choose software.
+# The 3D view hosts the GPU renderer where it is built (katana_qt_ui links
+# katana_gpu), so the widget tests run what the application does; offscreen,
+# the rules choose software.
 if(TARGET katana_gpu)
-    target_link_libraries(katana_qt_widget_tests PRIVATE katana_gpu)
     # The GPU suite's support, for its whyNoVulkanDriver: the OnTheDesktop
     # cases of test_render_view_gpu.cpp skip on it as the gpu suite's do.
     target_sources(katana_qt_widget_tests PRIVATE
@@ -171,21 +94,11 @@ set_target_properties(katana_qt_widget_tests PROPERTIES
 # katana_register_tests, with the prefix and the offscreen platform. main.cpp
 # forces the platform as well; the environment says so to anyone reading the
 # test's properties.
-if(WIN32)
-    set_property(TARGET katana_qt_widget_tests PROPERTY TEST_LAUNCHER
-        ${CMAKE_COMMAND} -E env --modify "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
-endif()
 # The same minute's discovery timeout as every other suite
-# (cmake/KatanaTargetDefaults.cmake says why): listing this 1073-case
-# executable took 10.7 s on its first launch after a build on a machine
-# whose virus scanner checks a new file, then 5.2 s, and the 5 s default
-# made ctest run nothing at all.
-gtest_discover_tests(katana_qt_widget_tests
-    TEST_PREFIX "qt_widgets."
-    DISCOVERY_MODE PRE_TEST
-    DISCOVERY_TIMEOUT 60
-    PROPERTIES ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+# (cmake/KatanaTargetDefaults.cmake says why).
+katana_discover_tests(katana_qt_widget_tests
+    PREFIX "qt_widgets."
+    ENVIRONMENT "QT_QPA_PLATFORM=set:offscreen"
 )
 # The 3D view drawn on the GPU (test_render_view_gpu.cpp) needs a platform a
 # QRhiWidget can be shown on: on Linux, xcb under Xvfb, with KATANA_RENDERER=gpu

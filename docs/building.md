@@ -191,7 +191,8 @@ ARM"). The recipe used on 2026-09-26, with py-rattler as
    `-Wl,-rpath-link` to its `lib/` in the exe and shared linker flags, its
    `lib/` as `CMAKE_BUILD_RPATH`, `KATANA_FIND_TEST_FRAMEWORKS ON`, and
    `CMAKE_CROSSCOMPILING_EMULATOR` `qemu-aarch64;-L;<the sysroot>`, which
-   ctest and gtest discovery then run every test executable through.
+   ctest and the listing of each suite's cases (`katana_discover_tests`,
+   `cmake/KatanaTargetDefaults.cmake`) then run every test executable through.
 5. `cmake -S . -B build/aarch64 -G Ninja -DCMAKE_BUILD_TYPE=Release
    -DCMAKE_TOOLCHAIN_FILE=<that file> -DKATANA_BUILD_QT_APP=OFF
    -DKATANA_BUILD_IO=OFF -DKATANA_BUILD_BENCHMARKS=OFF`, build, and
@@ -253,6 +254,7 @@ Every `KATANA_*` cache variable, with its default:
 | `KATANA_MODULE_FILTER` | empty | configure only the listed modules and their suites, e.g. `"katana_core;katana_math;katana_geometry"`; the configure fails, naming the module, when a listed module needs one that is not listed |
 | `KATANA_DEPLOY_RUNTIME` | `ON` | copy the runtime DLLs and the GDAL and PROJ data beside the programs ("The build tree runs on its own too") |
 | `KATANA_CUSTOMISATION_DIR` | `resources/customisation` | the folder whose customisation is compiled in ("The customisation folder") |
+| `KATANA_CCACHE` | `ON` | compile through ccache when it is installed and no `CMAKE_CXX_COMPILER_LAUNCHER` is given ("Build and test speed") |
 
 `KATANA_MODULE_FILTER` makes a small build quick: the numerics and survey
 modules alone are a few minutes, the whole application most of an hour of
@@ -526,6 +528,129 @@ So "part of the program" is delivered as: every library in `bin/` beside the
 executable, found first by Windows' DLL search order, and never the
 toolchain's at run time. A single statically linked executable remains
 possible as a packaging project of its own.
+
+## Build and test speed
+
+Measured on 2026-09-29 on the owner's Windows 11 machine (24 threads, GCC
+16.2, CMake 4.4, Ninja), with Microsoft Defender Antivirus and Defender for
+Endpoint running, as they always do there. Every build at `-j4` and every
+suite run at `--parallel 4`, one at a time, each build into a fresh tree; a
+sampler counted the machine's `ninja.exe` processes every 30 s and found no
+other build running during the builds and suite runs in the table. The baseline is commit 09121dd in a
+worktree of its own; the change is the same tree with what this section
+describes.
+
+| | Baseline | Now |
+|---|---|---|
+| configure, fresh tree (twice each, alternating) | 40.6 s, 41.3 s | 28.5 s, 28.1 s |
+| clean build, first time (ccache empty) | 1377 s, 1136 steps | 1135 s, 958 steps |
+| clean build, ccache warm | - | 70 s |
+| compile time summed over every step | 5457 s | 4489 s |
+| whole suite, 5916 tests (two runs each) | 1064 s, 924 s | 375 s, 524 s |
+| median time of one test | 0.40 s, 0.39 s | 0.07 s, 0.10 s |
+| `ctest -N`, first after the build, then again | 50.7 s, 11.2 s | 0.8 s, 0.6 s |
+
+Every run passed every test (28 skipped in each, the same 28), exit 0. Two
+runs of the same tree differ by up to 40% with nothing else running; the
+scanner is the likely cause, not an established one.
+
+**Why the suite was slow.** Defender inspects a program as it starts, and an
+executable it has not seen before much longer: listing the cases of a freshly
+copied `katana_qt_widget_tests.exe` (48 MB) took 8.96 s the first time and
+0.24 s the next. The suite starts over 5 700 processes for its GoogleTest cases
+alone. With `gtest_discover_tests` in PRE_TEST mode, CMake 4.4 registers each
+case as `cmake -P GoogleTest/LaunchTest.cmake`, which starts the test; the
+Windows toolchain PATH was a TEST_LAUNCHER, `cmake -E env --modify`, which
+made it three processes per case (`ctest --show-only=json-v1` shows the
+chain). One `cmake.exe` start measured 0.09 s against 0.02 s for a test
+executable listing nothing (0.46 s on an earlier, busier day). And every
+`ctest` - `ctest -N` and `ctest -R` included - listed all 21 executables
+again before running anything.
+
+**What changed.**
+
+- `katana_discover_tests` (`cmake/KatanaTargetDefaults.cmake`, with
+  `cmake/KatanaGoogleTests.cmake.in`) registers each case as the executable
+  itself with `--gtest_filter`: one process per case. It still lists the
+  cases at test time, with CMake's own lister, and keeps the list until the
+  executable is rebuilt. The toolchain is put on PATH for the listing only;
+  each case keeps its `ENVIRONMENT_MODIFICATION`, which `ctest --show-only`
+  reports. The function's comment says why neither of `gtest_discover_tests`'
+  modes was kept. A listing that fails fails `ctest` (exit 8, `ctest -N`
+  included), as it did before: checked by putting a program that exits 1 in
+  place of `katana_math_tests.exe`. The three places that registered cases (the module suites,
+  `tests/gpu`, `tests/qt_widgets`) call the one function.
+- `katana_qt_ui` (`src/katana_qt/CMakeLists.txt`) is an OBJECT library of
+  everything the window is made of except `MainWindow` and the files only it
+  reaches. `katana`, `katana_qt_widget_tests` and `katana_qt_benchmarks` link
+  it, where the widget tests and the benchmark used to compile 178 of the same
+  sources again, with the same flags: 897 s of compile time. OBJECT, not
+  STATIC, so that a file whose only effect is a static initialiser is linked
+  into every program as it was when each listed the sources. The widget tests
+  now also carry the window files they did not list before, and all pass.
+- Google Benchmark's two feature checks that ask what C++11 guarantees
+  (`HAVE_STD_REGEX`, `HAVE_STEADY_CLOCK`) are answered instead of compiled,
+  linked and run (`cmake/KatanaThirdParty.cmake`): the 12.7 s of the
+  configure above.
+- ccache, when installed (`KATANA_CCACHE`, on by default; MSYS2:
+  `pacman -S mingw-w64-ucrt-x86_64-ccache`). A cold cache cost nothing
+  measurable: the 776 compile steps both builds have took 3885 s without it
+  and 3741 s through it. A fresh tree of the same checkout, or a branch
+  switched away from and back, then builds in about a minute.
+
+**Rejected, with the measurement.**
+
+- **ccache's `base_dir`**, which would let a second worktree reuse the first
+  one's entries. It makes ccache give the compiler paths relative to the
+  build tree, and `__FILE__` with them; the survey-format, survey-job-storage
+  and customisation tests that find their fixtures beside `__FILE__` then
+  looked in the wrong place, and 160 cases failed. Those tests would first
+  have to take their fixture folders from a compile definition, as
+  `KATANA_SURVEYIO_DATA` is given to the widget tests.
+- **`gtest_discover_tests` in POST_BUILD mode**, which also registers the
+  executable directly. It lists the cases while building, when nothing puts
+  the toolchain on PATH; where the PATH has an older MinGW first (Git for
+  Windows' bash) the listing dies with STATUS_ENTRYPOINT_NOT_FOUND and fails
+  the build.
+- **Precompiled headers.** A header of the 17 Qt headers and 10
+  standard headers the window's sources include most, on `katana_qt_ui`:
+  its 127 objects compiled in 95 s at `-j4` against 131 s without, about 3%
+  of a clean build, for a 257 MB `.gch`. A precompiled header is included
+  into every file of the target, so a file missing an `#include` compiles
+  here and fails where the header is not precompiled, and ccache caches such
+  a build only with `sloppiness` relaxed. A warm ccache does far better.
+- **lld.** The 52 link and archive steps took 28 s of the build's 4489 s,
+  the longest link 1.8 s (`katana_qt_widget_tests`).
+- **Splitting the slowest files.** The slowest compile took 17 s
+  (`src/katana_terrain/cdt_backend.cpp`), in a build that kept 3.65 of
+  its 4 compilers busy on average: the build is bound by the total compile
+  time, which splitting does not reduce.
+
+**Not done.**
+
+- **Fewer test processes.** Run whole, one process per executable and one
+  after another, the 21 test executables took 34 s, against 1170 s of
+  per-case time in the suite above: nearly all of what is left is starting
+  processes. Registering one test per GoogleTest suite (825 of them) instead
+  of per case would claw much of that back, but a case would then share its
+  process with the rest of its suite, and `ctest -R Suite.Case` would no
+  longer select one case. Not measured as a change.
+- **The virus scanner.** What IT could exclude, for the reasons above:
+  - folders: the checkouts and worktrees with their build trees
+    (`D:\01_PROGRAMMING\01_Katana`), the toolchain (`C:\msys64`), and the
+    ccache folder (`%LOCALAPPDATA%\ccache`);
+  - processes: `ninja.exe`, `cmake.exe`, `ctest.exe`, `ccache.exe`,
+    `g++.exe`, `cc1plus.exe`, `as.exe`, `ld.exe` (all under
+    `C:\msys64\ucrt64`), so that the files they read and write are not
+    scanned as they are opened;
+  - or instead a Dev Drive for the checkouts, where Defender's performance
+    mode scans asynchronously - Microsoft's arrangement for exactly this.
+  A folder exclusion is what spares the first start of a newly linked test
+  executable, which a process exclusion does not: a process exclusion covers
+  what the process opens, not the process's own image. On a Hyper-V guest
+  with 12 virtual CPUs and no scanner the suite before this change took 168 s
+  at `--parallel 12`, against 750-1030 s here at `--parallel 14` (measured
+  before this work); that guest was not measured with this change.
 
 ## Continuous integration
 

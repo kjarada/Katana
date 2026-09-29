@@ -1,0 +1,43 @@
+# Read by CTest, not by CMake: a TEST_INCLUDE_FILES entry written by
+# katana_discover_tests (cmake/KatanaTargetDefaults.cmake says why it exists).
+# Configured with @ONLY and then by file(GENERATE), so each ${...} is evaluated
+# when CTest reads the file.
+#
+# Lists the cases of @_katana_target@ and registers each as a test that starts
+# the executable directly. The list is kept in @_katana_tests_file@ and made
+# again only when the executable, or this file, is newer than it.
+set(_katana_exe [==[$<TARGET_FILE:@_katana_target@>]==])
+set(_katana_tests [==[@_katana_tests_file@]==])
+if(NOT EXISTS "${_katana_exe}")
+    add_test(@_katana_target@_NOT_BUILT @_katana_target@_NOT_BUILT)
+else()
+    if(NOT EXISTS "${_katana_tests}"
+       OR "${_katana_exe}" IS_NEWER_THAN "${_katana_tests}"
+       OR [==[@_katana_include_file@]==] IS_NEWER_THAN "${_katana_tests}")
+        # Listing RUNS the executable, so it needs the DLLs a case needs. The
+        # cases get them from their own ENVIRONMENT_MODIFICATION; the listing,
+        # which CTest runs in its own process, gets them here, and CTest's
+        # PATH is put back afterwards.
+        set(_katana_path "$ENV{PATH}")
+        if(@_katana_windows@)
+            set(ENV{PATH} "@KATANA_RUNTIME_BIN@;${_katana_path}")
+        endif()
+        include([==[@CMAKE_ROOT@/Modules/GoogleTestAddTests.cmake]==])
+        gtest_discover_tests_impl(
+            NO_PRETTY_TYPES [==[FALSE]==]
+            NO_PRETTY_VALUES [==[FALSE]==]
+            TEST_TARGET [==[@_katana_target@]==]
+            TEST_EXECUTABLE "${_katana_exe}"
+            TEST_EXECUTOR @_katana_executor@
+            TEST_WORKING_DIR [==[@CMAKE_CURRENT_BINARY_DIR@]==]
+            TEST_PREFIX [==[@_katana_prefix@]==]
+            TEST_PROPERTIES [==[ENVIRONMENT_MODIFICATION]==] [==[@_katana_environment@]==]
+            TEST_LIST [==[@_katana_target@_TESTS]==]
+            CTEST_FILE "${_katana_tests}"
+            TEST_DISCOVERY_TIMEOUT [==[60]==]
+            TEST_JSON_OUTPUT_DIR [==[@CMAKE_CURRENT_BINARY_DIR@]==]
+        )
+        set(ENV{PATH} "${_katana_path}")
+    endif()
+    include("${_katana_tests}")
+endif()
