@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <tuple>
 
+#include "katana/cad/selection.hpp"
 #include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 #include "tools/families.hpp"
@@ -28,6 +29,51 @@ const char* toString(ToolInput input)
         return "value";
     }
     return "unknown";
+}
+
+const char* toString(FeedbackRole role)
+{
+    switch (role) {
+    case FeedbackRole::Target:
+        return "target";
+    case FeedbackRole::Added:
+        return "added";
+    case FeedbackRole::Removed:
+        return "removed";
+    }
+    return "unknown";
+}
+
+double pickReach(const ToolContext& context)
+{
+    return context.pickAperture ? context.pickAperture() : context.pickTolerance;
+}
+
+double vertexReach(const ToolContext& context)
+{
+    // 12 px over 8 px: the view's snap aperture over its pick aperture
+    // (viewport_widget.cpp, kSnapAperturePixels and kPickAperturePixels), so
+    // a test's tolerance gives the two reaches in the view's proportion.
+    constexpr double kVertexOverPick = 12.0 / 8.0;
+    return context.vertexAperture ? context.vertexAperture()
+                                  : kVertexOverPick * context.pickTolerance;
+}
+
+std::optional<katana::entity::EntityId> pickUnder(const ToolContext& context, const Point2& at,
+                                                  const std::set<katana::entity::EntityType>& types,
+                                                  std::optional<double> reach)
+{
+    const double within = reach.value_or(pickReach(context));
+    if (context.pick) {
+        return context.pick(at, within, types);
+    }
+    if (context.document == nullptr) {
+        return std::nullopt;
+    }
+    SelectionFilter filter;
+    filter.types = types;
+    return pickEntity(context.document->model(), at, within, filter,
+                      &context.document->spatialIndex());
 }
 
 ToolStep ToolStep::next(std::string message)

@@ -146,7 +146,9 @@ endif()
 # executor as a dialog does (--run-line), "?WIDGET" prints what the target's WIDGET
 # shows, or whether the window's action of that name is checked (--report),"*NAME" triggers the menu item NAME in its turn
 # (--trigger), "!BUTTON" presses a button, "^FILE" opens File > Export
-# Vector's dialog for FILE (--export-options), and anything else is a FIELD=TEXT
+# Vector's dialog for FILE (--export-options), "~X,Y" moves the pointer to
+# model point X,Y in the plan view (--hover) and "+X,Y" clicks there, with
+# ",shift" or ",ctrl" held (--click), and anything else is a FIELD=TEXT
 # fill. '|' between steps, for FILL's reason.
 if(DEFINED DRIVE)
     string(REPLACE "|" ";" _steps "${DRIVE}")
@@ -177,6 +179,12 @@ if(DEFINED DRIVE)
             # File > Export Vector's dialog for that file, in its turn: the
             # menu's file dialog is not opened headless.
             list(APPEND extra --export-options "${_rest}")
+        elseif(_sigil STREQUAL "~")
+            # The pointer, which a headless run has no mouse for: a tool's
+            # preview follows it, and a click picks with it.
+            list(APPEND extra --hover "${_rest}")
+        elseif(_sigil STREQUAL "+")
+            list(APPEND extra --click "${_rest}")
         else()
             list(APPEND extra --fill "${_step}")
         endif()

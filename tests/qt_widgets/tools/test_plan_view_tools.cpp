@@ -249,6 +249,22 @@ TEST(PlanViewTools, TheRubberBandIsDrawnWhileHoveringAfterTheFirstPoint)
     EXPECT_EQ(band->end, Point2(10, 0));
 }
 
+TEST(PlanViewTools, NoPreviewIsDrawnBeforeThePointerHasMoved)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.type("5,5");
+    plan.enter();
+    paint(plan.view);
+    // The pointer has never been over the view: the cursor is the model's
+    // origin, where nobody pointed, and a band to it would lead nowhere.
+    EXPECT_EQ(plan.view.lastPreviewCount(), 0u);
+    plan.move(300, 150); // (10, 0)
+    paint(plan.view);
+    // The band from (5, 5) to the cursor and the marker on (5, 5): 1 + 1.
+    EXPECT_EQ(plan.view.lastPreviewCount(), 2u);
+}
+
 TEST(PlanViewTools, ARightClickIsEnterWhileAToolRuns)
 {
     PlanFixture plan;

@@ -185,6 +185,8 @@ every action, field, button and tab gets one. In a test they are one
 | `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`) |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
 | `--export-options FILE` | `^FILE` | opens File > Export Vector's dialog for FILE, in its turn, and makes it the target - what the menu opens once its file dialog has answered, which a headless run never opens. A step rather than a switch, so the `--command` lines before it have made the drawing whose layers and scope it offers (`qt_vector_export_dialog_writes_what_its_filter_takes_headless`) |
+| `--hover X,Y` | `~X,Y` | moves the pointer to model point X,Y in the plan view Enter goes to (the one running a tool, else the active one), as a real mouse move: a tool's preview follows it. Prints the pointer record (below) |
+| `--click X,Y[,shift\|,ctrl]` | `+X,Y[,shift\|,ctrl]` | the same, then a left press and release there with the key held: a tool's pick or point, or with no tool a grip picked up (plain) or made hot (`,shift`) as a person's click does. Prints the record as the view shows it after the click |
 
 What the target is at the end is what `--screenshot` grabs; steps that were
 all commands leave the window. A dialog that deletes itself when a step
@@ -208,6 +210,26 @@ reply (`MainWindow::runIfcCommand`), so a test reads which line a press ran.
 
 A headless run echoes its command log to stderr, which is where a test reads
 what a command REPORTED.
+
+**The pointer.** A headless run has no mouse, and a tool's preview and its
+picks follow one: before the pointer steps a run could start a tool but
+never show what its preview draws, nor pick with it. `~` and
+`+` (`MainWindow::pointerAt`, `ViewWorkspace::pointerAt`,
+`ViewportWidget::pointerAt`) paint the view so its transform is the one on
+screen, map the model point to a pixel through it, send a real `QMouseEvent`
+move - and for `+` a press and a release - and paint again. The view cannot
+tell them from a person's mouse, so they drive the same code: snapping, the
+grips, the tool's pick. Each prints one line, numbers exact
+(`formatExactReal`), what the view then drew of the running tool's preview
+by role (`drawing/feedback_painter.hpp`): `pointer: action=hover x= y=
+tool= expects= shapes= markers= target= added= removed= focus= refused=
+caption="" prompt=""`, with `tool=none` and zero counts when no tool runs. A point outside the view
+fails the run (exit 1, "is outside the view ... zoom to it first"), as a
+spec that is not `x,y[,shift|ctrl]` does. The pointer's model point comes
+back from its pixel within a few units in the last place, so a
+coordinate made from it is matched to ten decimals, not exactly. A person
+reads the PNG for the look; the record is what a test asserts
+(`qt_pointer_steps_hover_and_click_the_plan_view_headless`).
 
 ## check_screenshot.cmake: the test side
 
@@ -315,6 +337,13 @@ A modal box in a headless run is a hang until the test's timeout. So
 
 ## Not done
 
+- No step presses a key into a view (`&KEY` was proposed for a view's own
+  keys: Delete on a hot vertex, Ctrl held over a grip). Enter reaches a view
+  through `>` alone; the rest is tested in `tests/qt_widgets` with real key
+  events, where Qt's shortcut map is not in the way, so Delete through the
+  window's shortcut map is not driven end to end.
+- No step drags: `+` is a press and a release at one point. A grip drag is
+  a click to pick the grip up and a second click to put it down.
 - A `--fill` of a list selects the row, as a click on its text does, but never
   ticks a checkable row: the shared scope widget's "The checked layers" list
   (`vectorExportLayers`, `globalModifyLayers`) cannot be ticked by a step. A

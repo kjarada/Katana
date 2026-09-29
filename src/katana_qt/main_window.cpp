@@ -2852,6 +2852,35 @@ bool MainWindow::runCommand(const QString& line)
     return errorsLogged_ == errors;
 }
 
+katana::core::Result<std::string> MainWindow::pointerAt(const QString& spec, bool click)
+{
+    const QStringList parts = spec.split(',');
+    const auto coordinate = [&](int i) {
+        return i < parts.size() ? katana::core::parseFiniteDouble(parts[i].trimmed().toStdString())
+                                : std::nullopt;
+    };
+    const auto x = coordinate(0);
+    const auto y = coordinate(1);
+    Qt::KeyboardModifiers modifiers = Qt::NoModifier;
+    bool understood = x.has_value() && y.has_value() && parts.size() <= 3;
+    if (understood && parts.size() == 3) {
+        const QString key = parts[2].trimmed().toLower();
+        if (key == "shift") {
+            modifiers = Qt::ShiftModifier;
+        } else if (key == "ctrl") {
+            modifiers = Qt::ControlModifier;
+        } else {
+            understood = false;
+        }
+    }
+    if (!understood) {
+        return katana::core::makeError(katana::core::ErrorCode::ParseFailure,
+                                       "a pointer step is x,y or x,y,shift or x,y,ctrl",
+                                       spec.toStdString());
+    }
+    return views_->pointerAt(katana::geometry::Point2(*x, *y), click, modifiers);
+}
+
 void MainWindow::runCommandLine()
 {
     const QString line = commandInput_->text().trimmed();

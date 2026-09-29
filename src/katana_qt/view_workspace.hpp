@@ -194,6 +194,13 @@ class ViewWorkspace final : public QMainWindow {
     // active plan view, which starts the last tool again. False when no plan
     // view is open.
     bool pressEnter();
+    // The pointer at model point `at`, as a mouse moves it there (and, with
+    // `click`, clicks): in the plan view running a tool, else the active
+    // plan view - where pressEnter sends Enter. What the headless --hover
+    // and --click steps do (ViewportWidget::pointerAt, whose record it
+    // answers). InvalidState when no plan view is open.
+    [[nodiscard]] katana::core::Result<std::string>
+    pointerAt(const katana::geometry::Point2& at, bool click, Qt::KeyboardModifiers modifiers);
 
     // ---- settings every plan view shares -------------------------------------
     void setGridVisible(bool visible);

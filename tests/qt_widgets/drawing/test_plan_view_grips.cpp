@@ -216,3 +216,25 @@ TEST(PlanViewGrips, OrthoHoldsAGripDragSquareToItsBase)
     f.drag(Point2(10, 0), Point2(11, 8));
     EXPECT_EQ(f.geometry().vertices[1], Point2(10, 8));
 }
+
+TEST(PlanViewGrips, AGripPickedUpBeforeAToolIsDroppedNotCommittedLater)
+{
+    // Click a vertex, then choose a tool - the owner's way in. The grip the
+    // click picked up used to stay attached under the tool, and the first
+    // click after the tool ended put it down: a GRIP_EDIT nobody asked for.
+    Fixture f;
+    f.select();
+    f.mouse(QEvent::MouseButtonPress, Point2(20, 0), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonRelease, Point2(20, 0), Qt::LeftButton);
+    ASSERT_TRUE(f.view->gripController().active()) << "picked up";
+    const std::size_t before = f.document.history().undoCount();
+    ASSERT_TRUE(f.view->startTool("draw.vertex.insert").ok());
+    EXPECT_FALSE(f.view->gripController().active()) << "the tool took the grips";
+    f.key(Qt::Key_Escape);
+    ASSERT_FALSE(f.view->toolActive());
+    f.mouse(QEvent::MouseMove, Point2(25, 5), Qt::NoButton);
+    f.mouse(QEvent::MouseButtonPress, Point2(25, 5), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonRelease, Point2(25, 5), Qt::LeftButton);
+    EXPECT_EQ(f.document.history().undoCount(), before);
+    EXPECT_EQ(f.geometry().vertices[2], Point2(20, 0));
+}

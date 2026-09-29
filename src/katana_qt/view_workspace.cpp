@@ -966,6 +966,28 @@ bool ViewWorkspace::pressEnter()
     return true;
 }
 
+katana::core::Result<std::string> ViewWorkspace::pointerAt(const katana::geometry::Point2& at,
+                                                           bool click,
+                                                           Qt::KeyboardModifiers modifiers)
+{
+    // The view Enter goes to (pressEnter): the one running a tool, else the
+    // active one.
+    ViewportWidget* target = nullptr;
+    for (ViewportWidget* plan : planViews()) {
+        if (plan->toolActive()) {
+            target = plan;
+            break;
+        }
+    }
+    if (target == nullptr) {
+        target = activePlanView();
+    }
+    if (target == nullptr) {
+        return makeError(ErrorCode::InvalidState, "there is no plan view to point in");
+    }
+    return target->pointerAt(at, click, modifiers);
+}
+
 void ViewWorkspace::setGridVisible(bool visible)
 {
     gridVisible_ = visible;

@@ -357,6 +357,7 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 //                 --dialog NAME [--fill FIELD=TEXT...] [--press BUTTON...]
 //                 [--report WIDGET...] [--dialog NAME ...] [--survey-dock ACTION ...]
 //                 [--command TEXT...] [--run-line TEXT...] [--enter] [--trigger NAME...]
+//                 [--hover X,Y...] [--click X,Y[,shift|,ctrl]...]
 //                 [--script FILE...] --screenshot out.png
 //   katana [project-directory] [data-file...] --script FILE... [--command TEXT...]
 //   katana --check-shortcuts --screenshot out.png
@@ -465,6 +466,15 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 // line it logged. --report WIDGET prints what the target's WIDGET shows (reportWidget).
 // --trigger NAME is --action in its turn among these steps, for a menu
 // command that acts on what the steps before it made (formatPurge).
+//
+// --hover X,Y moves the pointer to model point X,Y in the plan view Enter
+// goes to - the one running a tool, else the active one - and --click X,Y
+// clicks there, with ",shift" or ",ctrl" for the key held (a grip made hot);
+// both as real mouse events (MainWindow::pointerAt), since a headless run
+// has no mouse and a tool's preview and picks need one. Each prints what the
+// view then showed: "pointer: action= x= y= tool= expects= shapes= markers=
+// target= added= removed= focus= refused= caption= prompt=". A point outside
+// the view fails the run.
 //
 // --script FILE runs a katana_cli script (.kcs) in the window, a step among the
 // others: the window's SCRIPT verb through its one executor, each line echoed
@@ -620,7 +630,7 @@ int main(int argc, char* argv[])
         } else if (argument == "--survey-dock" || argument == "--fill" || argument == "--press" ||
                    argument == "--panel" || argument == "--command" || argument == "--report" ||
                    argument == "--trigger" || argument == "--run-line" ||
-                   argument == "--script") {
+                   argument == "--script" || argument == "--hover" || argument == "--click") {
             surveySteps.emplace_back(argument, value());
         } else if (argument == "--enter") {
             // Enter on an empty command line, a step of its own: an empty
@@ -843,6 +853,21 @@ int main(int argc, char* argv[])
                     if (!runScriptFile(window, text)) {
                         return 1;
                     }
+                    QApplication::processEvents();
+                    QApplication::processEvents();
+                    continue;
+                }
+                if (kind == "--hover" || kind == "--click") {
+                    // The pointer, where a headless run has no mouse: moved
+                    // to a model point in the plan view, and clicked, as
+                    // real events; what the view then showed is printed.
+                    const auto pointed = window.pointerAt(text, kind == "--click");
+                    if (!pointed) {
+                        std::fprintf(stderr, "%s %s: %s\n", qPrintable(kind), qPrintable(text),
+                                     pointed.error().describe().c_str());
+                        return 1;
+                    }
+                    std::fprintf(stderr, "%s\n", pointed->c_str());
                     QApplication::processEvents();
                     QApplication::processEvents();
                     continue;

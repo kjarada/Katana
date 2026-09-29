@@ -137,6 +137,11 @@ void ToolHost::make()
     context.attributes = document_.currentAttributes();
     context.selection = document_.selection().ids();
     context.pickTolerance = pickTolerance_;
+    // Once: taken by this tool, so a restart after its edit has none.
+    context.handles = std::exchange(handles_, {});
+    context.pick = pick_;
+    context.pickAperture = pickAperture_;
+    context.vertexAperture = vertexAperture_;
     tool_ = info_->make(context);
     ++generation_;
 }

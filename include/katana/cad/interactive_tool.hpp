@@ -23,12 +23,15 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/drawing/grips.hpp"
 #include "katana/cad/snapping.hpp"
+#include "katana/cad/tool_feedback.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/error.hpp"
@@ -80,13 +83,16 @@ struct ToolStep {
                                        std::string message = {}, bool restart = false);
 };
 
-// The rubber band: what the view draws for the current cursor position, in
-// model coordinates, over the drawing and in a distinct pen.
-struct ToolFeedback {
-    std::vector<katana::entity::Geometry> shapes;
-    // Points worth marking: a base point, a polygon's centre, a picked vertex.
-    std::vector<katana::geometry::Point2> markers;
-};
+// The rubber band (ToolFeedback) is in tool_feedback.hpp: the ghost of the
+// result, the base points, and marks by role - what a click takes, adds and
+// removes.
+
+// The view's own pick: the entity of one of `types` (any, when empty) nearest
+// `at` within `reach` model units that the VIEW lets be picked - through its
+// hidden layers - or nullopt. What a click there gives entity().
+using ViewPick = std::function<std::optional<katana::entity::EntityId>(
+    const katana::geometry::Point2& at, double reach,
+    const std::set<katana::entity::EntityType>& types)>;
 
 // What a tool is given when it starts. Everything is by value or const: a tool
 // never changes the document itself, it returns a command that does.
@@ -97,10 +103,40 @@ struct ToolContext {
     // The selection when the tool started, in ascending id order. Transform and
     // edit tools act on it; when it is empty they begin by asking for one.
     std::vector<katana::entity::EntityId> selection;
-    // The view's pick aperture in model units, for a tool that finds geometry
-    // near a point itself (the view does the picking for ToolInput::Entity).
+    // The view's pick aperture in model units when the tool was made (at its
+    // start or restart), for a tool that finds geometry near a point itself.
+    // A tool that picks as the cursor moves reads pickReach() instead, which
+    // follows a zoom inside the tool.
     double pickTolerance = 0.0;
+    // The grips hot in the view when the tool started: a vertex or a segment
+    // the user chose BEFORE choosing the tool (docs/drawing.md, "What a
+    // vertex tool acts on"). Given to the first make() only - a restarted
+    // tool never sees them, since the edit it follows may have renumbered
+    // the vertices they name.
+    std::vector<Grip> handles;
+    // The view's pick and apertures NOW (unset in a test: pickUnder,
+    // pickReach and vertexReach then fall back to the model and to
+    // pickTolerance). One pick for the preview and the click, so what a
+    // preview promises is what the click takes.
+    ViewPick pick;
+    std::function<double()> pickAperture;   // the view's 8 px, in model units
+    std::function<double()> vertexAperture; // the view's 12 px (its snap aperture)
 };
+
+// The entity of one of `types` nearest `at` within `reach` (pickReach when
+// not given): through the view's pick when the context has one, else through
+// the model and its spatial index with no view's hidden layers.
+[[nodiscard]] std::optional<katana::entity::EntityId>
+pickUnder(const ToolContext& context, const katana::geometry::Point2& at,
+          const std::set<katana::entity::EntityType>& types,
+          std::optional<double> reach = std::nullopt);
+// How near a pick of a piece must be: the view's pick aperture now, else
+// pickTolerance.
+[[nodiscard]] double pickReach(const ToolContext& context);
+// How near a pick of a VERTEX must be: the view's snap aperture now (the reach
+// an Endpoint snap has), else 1.5 times pickTolerance - the 12 : 8 ratio of
+// the view's two apertures.
+[[nodiscard]] double vertexReach(const ToolContext& context);
 
 class InteractiveTool {
   public:
@@ -196,6 +232,11 @@ struct ToolInfo {
     // tests name a tool by it, so it never changes once shipped.
     std::string id;
     std::string name;     // as the menu shows it: "Line"
+    // What the prompt calls the tool, when not its name: a family's variant
+    // named for what it does ("Insert Vertex", not "Vertices, Insert
+    // Vertex"). Empty for the name. promptTitle() chooses. Initialised here,
+    // so a designated initialiser that leaves it out is not a missing field.
+    std::string title{};
     std::string category; // the menu it goes in: "Draw", "Modify", "Annotate", "Inquiry"
     std::string group;    // the section within that menu: "Lines", "Curves", "Transform", ...
     int order = 0;        // position within the group, ascending
@@ -207,6 +248,10 @@ struct ToolInfo {
     std::string shortcut;
     std::string tip; // one sentence: what it does and how
     std::function<std::unique_ptr<InteractiveTool>(const ToolContext&)> make;
+
+    // What the view's prompt band and the command line's placeholder put
+    // before the prompt: the title, or the name when there is none.
+    [[nodiscard]] const std::string& promptTitle() const { return title.empty() ? name : title; }
 };
 
 class ToolCatalog {

@@ -200,12 +200,52 @@ of any one tool. It starts a tool with the document's current attributes
 snapped point, a picked entity, typed text, Enter, Esc, Undo - and when the
 tool finishes executes its ONE command through the Document. It restarts the
 tool when the tool asks (Circle, Point), and gives the tool the view's pick
-aperture in model units, so Trim's preview and picks match the zoom. It
-reports through hooks and opens nothing, so a test drives it by calling it
+aperture in model units (`ToolContext::pickTolerance`) - read when the tool
+starts or restarts only, so after a zoom inside the tool Trim's and Fillet's
+own picks can differ from the view's until the next restart. It reports
+through hooks and opens nothing, so a test drives it by calling it
 (`tests/qt_widgets/tools/`). A generation count, bumped whenever a tool is
 made, remade or dropped, is how the host knows that a hook replaced the tool
 it was dealing with: a tool started from a hook was once allocated at the
 address of the one it replaced.
+
+**What the host hands a tool besides (2026-09-30).** Three more members of
+`ToolContext`, for a tool that picks as the cursor moves:
+
+- `handles`: the grips hot in the view when the tool started - a vertex the
+  user clicked BEFORE choosing the tool. The view sets them in `startTool`
+  (`ToolHost::setHandles`, from `GripController::hot`) and the host gives
+  them to the next tool it makes and to no other (`std::exchange` in
+  `make()`), so a tool restarted after an edit never sees a vertex index the
+  edit has renumbered. The view then drops its grips (`GripController::reset`):
+  a grip picked up before the tool was otherwise put down by the first click
+  after it, a `GRIP_EDIT` nobody asked for.
+- `pick`: the view's own pick NOW, `(at, reach, types)`, through the view's
+  hidden layers; `pickUnder` falls back to the model when a test has none.
+- `pickAperture`, `vertexAperture`: the view's 8 px and 12 px in model units
+  NOW, read at every preview and click; `pickReach` and `vertexReach` fall
+  back to `pickTolerance` and 1.5 times it (the 12 : 8 ratio).
+
+Rejected: a new virtual `preview(cursor, pick)` (46 overrides to change, and
+`-Woverloaded-virtual` fails the build at every one left); refreshing
+`pickTolerance` on every move (it still ignores the view's hidden layers,
+and leaves the preview's pick and the click's able to disagree). Trim,
+Fillet, Offset and Leader still pick with `pickTolerance` and no view, which
+`pickUnder` would close.
+
+**Roles in a preview.** `ToolFeedback` (`include/katana/cad/tool_feedback.hpp`)
+kept `shapes` (the ghost, dashed) and `markers` (base points) and gained
+`marks` - geometry by ROLE: Target (what a click takes), Added (what it makes,
+read from the result), Removed (what it takes away) - a `caption` for beside
+the cursor, `refused` when a click there would be refused, and `focus`, the
+polyline whose vertices the view shows while the grips are hidden. The view
+draws a role its own way (`drawing/feedback_painter.hpp`), so no tool picks a
+colour; a tool that fills only `shapes` and `markers` is drawn as before. The
+new members have default initialisers, so the tools that build one as
+`{shapes, markers}` still compile under `-Wmissing-field-initializers`.
+`ToolInfo::title` names a family's variant in the prompt ("Insert Vertex:
+..."), where the menus still gather the family by its name ("Vertices, Insert
+Vertex").
 
 **Esc keeps collected work.** Esc ends the tool, but a tool holding work
 that its Enter only ever COMMITS - a Line or Polyline chain, the cuts of a
