@@ -231,7 +231,7 @@ TEST_F(McpServer, AnAgentImportsAFieldFileWhoseSetupStandsOnRtkMarks)
     const Json& lines = result["structuredContent"]["commands"];
     ASSERT_EQ(lines.size(), 3U);
     const std::string read = lines[0]["output"].get<std::string>();
-    EXPECT_NE(read.find("survey file=rtk_setup.fld format=opcode-field-file parser=1.1 read=18 "
+    EXPECT_NE(read.find("survey file=rtk_setup.fld format=opcode-field-file parser=1.2 read=18 "
                         "skipped=0 warnings=0"),
               std::string::npos)
         << read;

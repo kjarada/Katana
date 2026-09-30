@@ -181,7 +181,7 @@ extension.
 |---|---|---|---|---|
 | Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
 | Leica GSI (`leica-gsi`): GSI-8 and GSI-16, mixed or not; any extension when every line is a GSI block | yes | no | 1.1 | total station words only (a digital level's are counted, not read); declares no coordinate system; a sexagesimal angle whose word writes 60 seconds in their place is read as the next minute, and a circle reading past a full circle is refused (see "Leica GSI" below) |
-| Opcode field file (`opcode-field-file`): `.fld`, tab-separated records opening with a numeric opcode, total-station and GNSS (RTK) jobs | yes | no | 1.1 | opcodes 02, 03, 04, 05, 06, 07, 09, 16, 20, 29, 41, 42, 43, 44, 71, 72, 73, 99, 100, 124, 125, 128, 129, 138, 139 and -2 read; every other opcode skipped with a warning naming it; an RTK position written as 02 with its receiver's "GNSS Solution" is a GNSS position, any other 02 an entered coordinate; a backsight's stated azimuth kept apart from its circle reading; every measurement of a point keeps its attributes; offsets move the shot they follow; resected setups are not positioned; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
+| Opcode field file (`opcode-field-file`): `.fld`, tab-separated records opening with a numeric opcode, total-station and GNSS (RTK) jobs | yes | no | 1.2 | opcodes 02, 03, 04, 05, 06, 07, 09, 16, 20, 29, 41, 42, 43, 44, 71, 72, 73, 99, 100, 124, 125, 128, 129, 138, 139 and -2 read; every other opcode skipped with a warning naming it; an RTK position written as 02 with its receiver's "GNSS Solution" is a GNSS position, any other 02 an entered coordinate; a setup's backsight is its first 04 that can orient it; a backsight's stated azimuth kept apart from its circle reading; every measurement of a point keeps its attributes; offsets move the shot they follow; resected setups are not positioned; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
 | Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning, a shot with no raw twin said to be lost; units from the header - an undefined angle or distance unit refused, an undefined pressure or temperature unit warned about and not read, a `13DU` followed; coordinates in the header's order (1 N-E-Elev, 2 E-N-Elev; Trimble's 3 east first, with a warning), a point's latest kept; collimation (04) applied per face; declares no coordinate system |
 
 The matrix lists the formats that have a section in this file.
@@ -467,15 +467,22 @@ names); 42 and 43 are radial and tangential offsets of the current point (or
 a named one), "from the specified points original position" - radial along
 the line from the station, positive away from it, tangential at right angles
 to it, negative to the left looking from the station - and 44 adjusts its
-height; 47 and 48 end the current string; 29 is a memo; 41, 71, 72 and 73 add
+height; 47 ends the current string before the current point, which "becomes
+the first point of a new string" of the same code and number, and 48 ends it
+after that point; 29 is a memo; 41, 71, 72 and 73 add
 text, an integer, a real and a text attribute to the point just measured, a
 blank name making an attribute unnamed; 99 ends the file; 100 gives the
 units, of which the format allows one each (decimal degrees, metres,
 millimetres of pressure, celsius). 124 and 125 (attribute groups) and 140 (a
 GNSS coordinate) "do not exist in the fld file". 44.5 finds the point a
-setup, a backsight or a check names by its point name among the names, then
-the point IDs, of the coordinates and measurements before it, and by its
-point ID among their point IDs.
+setup, a backsight or a check names by a search that stops at the first
+found: the directly entered coordinates before it, then the measurements
+before it, and in each its point name among their point names, then its
+point name among their point IDs, then its point ID among their point IDs
+(steps 4 to 9; steps 1 to 3 search the reducing program's own models, and
+step 10 asks the person). A 20 and an offset that give a point description
+act on the string its code and number name, else on "the point with that
+point ID".
 
 Decisions that are the reader's own, each stated in the source:
 
@@ -502,11 +509,19 @@ Decisions that are the reader's own, each stated in the source:
   description's whose last field is blank (a trailing tab, or the column and
   a blank last value). Such a record with a blank first field is read in the
   file's layout, unless that leaves its first measured value (the horizontal
-  circle, X, the instrument height) blank where the other layout reads one -
-  the one sign of which layout wrote it: it is then skipped, saying so. A
-  record that does not fit the layout it is read in is skipped with a
-  warning, and one blank field past a layout's count is a trailing tab.
-  Rejected, as this reader once did: skipping, in a file whose records show
+  circle, X, the instrument height) blank where the other layout reads a
+  whole record - a number there, and a point named - the one sign of which
+  layout wrote it: it is then skipped, saying so. Text there, or a reading
+  that names no point, is no such sign: a setup with a comment and no
+  instrument height, read without the column, has the comment where its
+  height would be, or names no point, and it is read as the file's records
+  are. A record that does not fit the layout it is read in is skipped with a
+  warning, and one blank field past a layout's count is a trailing tab - as
+  it is on a 16, a 20 and an offset, which until 2026-09-30 were skipped for
+  it (a 16 so skipped took its string, and a bare 20 after it, with it).
+  Rejected, as this reader had it until 2026-09-30: any value there as the
+  sign, which skipped such a setup and every measurement after it until the
+  next. Rejected, as this reader once did: skipping, in a file whose records show
   both layouts, every record that fits both - in a job with the column, one
   shot written without it then cost every backsight, and so every setup's
   orientation; reading such a record in the file's layout whatever it leaves
@@ -576,10 +591,19 @@ Decisions that are the reader's own, each stated in the source:
   `tests/surveyio/data/fld/rtk_setup.fld` drawn 51.8 m from where the file
   puts it. The one attribute named is the evidence, read only in the 02's own
   records: a total-station job's coordinates (none of the other two files has
-  it) stay entered, and a solution after a setup record is not the 02's.
-  Rejected too: sigmas from the receiver's quality attributes (its quality
-  and positional-uncertainty figures), which are its own words for its own
-  statistics.
+  it) stay entered, and a solution after a setup record does not make the 02
+  a GNSS position - its own records end at the setup - though the attribute
+  is still kept on the current measurement point, the 02's, to which the
+  description gives 71 to 73. Rejected too: sigmas from the receiver's quality
+  attributes (its quality and positional-uncertainty figures), which are its
+  own words for its own statistics. A mark given a GNSS position and an
+  entered coordinate that differ holds the entered one, whichever came first,
+  and the one it does not hold goes beside it in its metadata: a later GNSS
+  position as "coordinates restated at record N", an earlier one as "GNSS
+  position of record N". Until 2026-09-30 an entered coordinate after the
+  GNSS position was put there as "restated" - the held coordinates, under a
+  name that said they were not held - and the GNSS position's values were
+  nowhere on the point.
 - **Every measurement of a point keeps its attributes.** The description makes
   every measurement a point of its own, with its own attributes; Katana makes
   one point of a name and keeps every observation of it. So the first record
@@ -621,13 +645,46 @@ Decisions that are the reader's own, each stated in the source:
   layout without its level keeps its name. A level that is not the nesting
   depth, an end with no group open and a group never ended are warnings.
 - **A point is its name, else its ID**, and a setup, a backsight or a check
-  finds the point it names as 44.5 searches: by the name, else by the name
-  or the ID among the point IDs the coordinates and shots before it gave. A
-  03 that names only the ID a coordinate was given with its name stands on
-  that coordinate; before, it stood on a new point with no position, and
-  nothing was radiated from it. A point with a name and an ID keeps the first
-  ID given it in its metadata, and a different one a later record gives under
-  that record.
+  finds the point it names as 44.5 searches, among the coordinates (02) and
+  then the shots (07) before it - the name among their names, the name among
+  their IDs, the ID among their IDs, in each - and stands on or measures a
+  point of its own name, else ID, only where that finds none (step 10, which
+  asks the person, has no counterpart in a file read). A 03 that names the ID
+  a coordinate was given, alone or with a name of its own, stands on that
+  coordinate, and a check whose name is a shot's and whose ID is a
+  coordinate's checks the coordinate, as step 6 comes before step 7. What
+  such a record calls the point is kept, not made a point of its own: a
+  setup's name and ID with the setup ("point name", "point ID"), a
+  backsight's or a check's on the point under its record ("record N/point
+  name"). A point only a setup, a backsight or a check made is in neither of
+  44.5's lists, which hold the directly entered coordinates and the
+  measurements, so a record naming it with the ID of a coordinate or a shot
+  finds that coordinate or shot; a record whose name is another point than
+  the one found is warned of ("the setup names point 'T1' with point ID 5,
+  and the format's search for its point (44.5) finds point '5' first").
+  Rejected: searching the points those records made first, as if step 10 had
+  put each in a model steps 1 to 3 search - the description's program adds
+  it to one only where the person says so. A 20 and an offset find the point
+  their description's point ID names, as the description's entries for them
+  say: the shot's (07) where a shot and a coordinate (02) were both given the
+  ID - the description calls a point ID "normally unique", the ID a
+  measurement is given, and an offset moves a shot - saying so, and for a 20
+  the coordinate's where only its string is open; else, the reader's own
+  reading, the point of its name. A point with a name and an ID keeps the
+  first ID given it in its metadata, and a different one a later record gives
+  under that record. Rejected, each as this reader had it until 2026-09-30:
+  searching the ID only for a record that gave no name - a setup, backsight
+  or check that gave both a name of its own and a coordinate's ID stood on
+  or measured a new point of that name, with no position, and nothing was
+  radiated from the setup, or a check made a second point on top of the one
+  it checked; looking a 20's or an offset's ID up among the names, which
+  skipped both for a named shot, saying no record had made the point; the
+  coordinate's before the shot's for a 20 and an offset, as 44.5 has them for
+  a setup - an offset of the shot was then kept unapplied, as one of a
+  coordinate, and the 20 skipped; keeping what a backsight called a point it
+  found by another name as a point of that name, which the reduction then
+  reported as not drawn; and the coordinates and the shots as one list, name
+  first - 44.5 checks a coordinate's ID before a shot's name.
 - **X is the easting.** The description says only "(x, y, z)"; the files put
   six-figure eastings in X and seven-figure MGA northings in Y, and the RTK
   file labels a reference station's Easting and Northing the same way.
@@ -638,24 +695,72 @@ Decisions that are the reader's own, each stated in the source:
   skipped naming it. Before, they went to the point or setup before - in the
   resection job some 21 000 attribute records had landed on control marks and
   731 shots under the wrong setup, silently.
-- **The backsight.** `SurveyStation::backsightAzimuth` is the circle reading
-  on the backsight, as the model defines it: the horizontal circle of the
-  setup's first 04 that gives one, as its face-left reading (a face-right
-  one less 180 degrees, as the reduction means the pointings to the
-  backsight); a later 04 changes it no more than a later pointing would. The
-  04's azimuth is `SurveyStation::statedBacksightAzimuth` - the first a
-  setup's 04s give; a later one that differs is kept in the setup's metadata,
-  with a warning - which the reduction orients the setup on, less the reading
-  on the backsight, only where nothing places the backsight: the
+- **The backsight.** A setup's backsight (`SurveyStation::backsightPointId`)
+  is the point of its first 04 that can orient it: a 04 that gives a
+  horizontal circle to a point with a position the reduction will find -
+  coordinates an 02 gives it anywhere in the file, for the reduction places
+  every one before any setup, or a direction and a distance measured to it
+  from an earlier setup - or to a point a 04 gives an azimuth. Where no 04's
+  point can, it is the first point a 04 gives a horizontal circle to, and the
+  reduction takes that circle as set to the grid, saying so; where no 04
+  gives one, the first 04's point. The reader settles it when the file ends,
+  so an 02 after the setup, or after the next one begins, still counts. The
+  circle and the azimuth are that point's. `SurveyStation::backsightAzimuth`
+  is the circle reading on it, as the model defines it: the horizontal circle
+  of the first 04 to it that gives one, as its face-left reading (a
+  face-right one less 180 degrees, as the reduction means the pointings to
+  the backsight); a later 04 to it changes it no more than a later pointing
+  would. The 04's azimuth is `SurveyStation::statedBacksightAzimuth` - the
+  first a 04 to it gives; a later one that differs is kept in the setup's
+  metadata, with a warning - which the reduction orients the setup on, less
+  the reading on the backsight, only where nothing places the backsight: the
   description's "when no coordinate for the backsight point exists". It is
   one field for every reader whose file states an azimuth on its backsight,
-  not a second one for this format. Rejected, as this reader once did: the
-  04's azimuth in
-  `backsightAzimuth`. The report then said the circle had been taken for a
-  grid azimuth; a backsight with coordinates and no circle reading was
+  not a second one for this format. A 04 to any other point is read as a
+  measurement of that point, with a warning naming the backsight and why it
+  was taken, its azimuth kept in the setup's metadata: the reduction
+  radiates the point, or, where it has a position, checks it. Where their
+  formats leave the choice to them, two other readers also weigh whether a
+  candidate can orient the setup: the GSI reader takes a setup's first shot
+  for its backsight only where that shot is to a point the file gives
+  coordinates, before or after it ("a first shot to an unknown point orients
+  nothing and is not named"), and looks at no later shot; the SDR reader
+  orients a setup with no backsight record by the first keyed azimuth to a
+  point it observes, else the first. The GTS-7 reader takes the first BS
+  header's point, whatever it is. Why the first that can orient, and not
+  simply the first or the last: with two 04s to different points, one to
+  control and one to a point nothing places, with no azimuth, either fixed
+  rule orients the setup on the unplaced point's circle taken as a grid
+  azimuth in one of the two orders - the last 04 where the control comes
+  first, the first 04 where it comes second - turning every shot by the
+  difference and reporting the control point as a misclosure of its own
+  (51.8 m in the case the tests work); and a first 04 with no horizontal
+  circle left the setup with no direction to orient on, its shots not drawn.
+  Rejected, each once this reader's: the first 04, whatever it could do; the
+  point of the setup's last 04 with the circle and azimuth of its first
+  (until 2026-09-30), which oriented the setup on one point's circle less the
+  reading on another's and turned every direction by the difference - a
+  setup whose first backsight had coordinates and whose second had none drew
+  its shots 60 degrees round, with no reader warning; the last 04 naming the
+  backsight with its own circle and azimuth; and the 04's azimuth in
+  `backsightAzimuth`: the report then said the circle had been taken for a
+  grid azimuth, a backsight with coordinates and no circle reading was
   oriented on the azimuth taken for the circle (a shot at 90 degrees drawn on
-  bearing 45); and a face-right 04 after it replaced the azimuth with its
+  bearing 45), and a face-right 04 after it replaced the azimuth with its
   circle, turning every shot by 180 degrees.
+  Rejected too: of the 04s that can orient, the one of the best kind -
+  coordinates before an azimuth - rather than the first. Where a first 04's
+  azimuth and a later one's coordinates disagree, the first orients the
+  setup and the later one's coordinates check it, a misclosure in the report;
+  taking the later one, nothing would check the azimuth. And a later 04
+  re-orienting the measurements after it: the description's 04 entry says
+  only that its reducing program shows each 04's "bearing datum difference";
+  that the difference holds for the measurements after that 04 is an
+  inference from the entry for 50, which says so of its own bearing. The
+  model orients a setup once, on one point, so that would split the setup in
+  two - as the SDR reader's `splitSetup` does, where its format says a
+  backsight record orients what follows it - and each part would still need
+  a backsight that can orient it.
 - **Resections (128 ... 129; 138 ... 139 for Helmert).** A 128 is a setup on
   the point its description names; the description's .fld syntax gives only
   the height, and the file writes the description first (as the XML form
@@ -678,10 +783,16 @@ Decisions that are the reader's own, each stated in the source:
   strings the one point into both, and a 16 that names a point of its own
   keeps the name in the metadata, with a warning. The second string is then
   the current string, as the description's new point would make it, so a 20
-  after the 16 closes it rather than the shot's first string.
+  after the 16 closes it rather than the shot's first string. A 16 that is
+  not read (one value too many, or no feature code) leaves which string is
+  current unknown until a measurement or a 16 is read: a bare 20 after it is
+  skipped, naming it, where it closed the string of the shot before.
 - **Close string (20)** marks the feature closed (`SurveyFeature::closed`) and
   takes it off the open list, so a later point of the same code and number
-  starts a new string rather than joining a closed polygon.
+  starts a new string rather than joining a closed polygon. A description
+  closes the string its code and number name, else the string of the point
+  its point ID names (above); an offset's description finds its point the
+  same way, the last point of that string, else the point of that ID.
 - **Offsets (42, 43, 44) move the shot they follow.** An offset applies to the
   one shot (07) of its point from the current setup: the shot's circle
   reading, zenith and slope distance become those of the offset position,
@@ -766,7 +877,10 @@ Decisions that are the reader's own, each stated in the source:
   not - and none, with a warning, where the factor changed within the setup.
   It said NotApplied, which a reduction reading it would apply a second time.
 - **99 stops the read**, as the description says; what follows is counted as
-  skipped, in one warning. **An opcode the description defines only for its
+  skipped, in one warning, and does not vote on the layout: it did, and five
+  records without the column after a 99 outvoted four with it before, so the
+  file was read without it and every record before the 99 refused. **An
+  opcode the description defines only for its
   XML form** (140 GNSS coordinate, 145 GNSS offset ...) has no .fld layout and
   is skipped, saying so; 124 and 125 are read because a real file shows their
   layout and a misread one can only misname an attribute. Every other opcode
@@ -776,7 +890,8 @@ Decisions that are the reader's own, each stated in the source:
   it"), the field-template opcodes 51, 53, 54 and 56 to 59 (the measurements
   after them "keep the codes they are written with, which a field template may
   have changed") and 47 and 48 (the points after them "are strung as if the
-  string had not ended").
+  string had not ended"; for 47, too, the current point "is not moved into a
+  new string of its own").
 - **Lines that are no record say why**: an opcode of more than three digits or
   with a plus, text. An attribute record with neither a name nor a value is
   skipped. "{Version 6.0}", which the description does not mention, is the
@@ -794,7 +909,7 @@ the owner's and are not in the repository):
 
 | File | Before | After |
 |---|---|---|
-| RTK job, 134 427 lines, Windows-1252 | not recognised; with FORMAT, refused: no record but the version line could be read (134 393 skipped) | 134 394 read, 0 skipped, 3 warnings (the encoding; two marks given a second GNSS position, 5/32/4 mm and 9/2/11 mm from their first); 3 482 points placed by 3 484 GNSS positions; 209 strings, 22 closed; the system its header names |
+| RTK job, 134 427 lines, Windows-1252 when first read, UTF-8 since the owner saved it again on 2026-09-30 | not recognised; with FORMAT, refused: no record but the version line could be read (134 393 skipped) | 134 394 read, 0 skipped, 2 warnings (two marks given a second GNSS position, 5/32/4 mm and 9/2/11 mm from their first; the Windows-1252 copy had a third, the encoding); 3 482 points placed by 3 484 GNSS positions; 209 strings, 22 closed; the system its header names |
 | Total-station job, 13 966 lines | 13 950 read, 0 skipped, 0 warnings; 8 setups, 2 628 observations, 5 points, 857 unpositioned, 134 strings | the same counts; imported after `CRS SET EPSG:7856`, the same 862 points at the same positions, with the same 8 reduction warnings (the whole reply the same but the parser's version); the two marks shot six and seven times now keep every shot's Date, Time, Target height and Prism constant |
 | Total-station job with resections, 35 207 lines, UTF-8 | 31 019 read, 4 065 skipped (3 406 shots from resected setups, 659 records of six opcodes unread) | 35 084 read, 0 skipped, 8 warnings (a name given again with another value after one shot, on three doubly coded utility points); 18 setups (12 resections), 14 739 observations, 15 points, 4 819 unpositioned, 583 strings; its 96 offsets applied |
 
@@ -825,6 +940,31 @@ does not apply (its defaults reduce with none) at an easting where the
 combined factor is about 0.99979. The twelve resected setups draw nothing
 until the reduction computes a resection.
 
+The second review's fixes (2026-09-30: the first backsight, 44.5's search by
+ID and its order, 20 and the offsets by ID, a record whose other layout
+reads no whole record, an unread 16, the votes after a 99, a GNSS position
+before an entered coordinate) change nothing in the three files, which have
+none of those cases - no setup with 04s to two points, no 03, 04 or 06 that
+gives both a name and an ID, no 20 or offset with a description, no 99, and
+every 16 whole. Checked, not assumed: a dump of everything the reader made
+of each file - every point with its coordinates and metadata, every feature,
+observation, setup and warning - is identical before and after, and so is
+the whole reply of `SURVEY READ` and of `CRS SET EPSG:7856` then `SURVEY
+IMPORT` and `LIST`: 3 482, 862 and 778 points at the same positions.
+
+The third review's fixes (2026-09-30: the backsight is the first 04 that can
+orient its setup, a 20 or an offset by an ID a shot and a coordinate share,
+a record whose name is another point than 44.5 finds, 16, 20 and the offsets
+with a trailing tab) change nothing in the three files either - still no
+setup with more than one 04, no 03, 04 or 06 with both a name and an ID, no
+20 or offset with a description, and no 16 with a trailing tab, counted on
+the copies the owner saved again that day. The whole reply of `SURVEY READ`
+and of `CRS SET EPSG:7856`, `SURVEY IMPORT` and `LIST` is the same before
+(main's build) and after but for the parser's version, now 1.2: 3 482, 862
+and 778 points at the same positions. The version is what a saved job's
+report carries to say which reader made it (`FormatDescriptor::parserVersion`),
+and these fixes and the second review's change what some files import.
+
 The fixtures are hand-built in the files' layouts, with invented names and
 numbers: `tests/surveyio/data/fld/setup.fld` (a setup),
 `tests/surveyio/data/fld/gnss.fld` (an RTK job: blank-padded opcodes, time
@@ -833,7 +973,10 @@ coordinate, a close, a mark measured again, a Windows-1252 degree sign),
 `tests/surveyio/data/fld/resection.fld` (a resection and its residual
 comments in UTF-8, 16, 42, 43, 71, a coded check) and
 `tests/surveyio/data/fld/rtk_setup.fld` (a setup on one RTK mark backsighting
-another, and two shots with an offset each). `.gitattributes` stores them byte
+another, and two shots with an offset each) and
+`tests/surveyio/data/fld/two_backsights.fld` (two setups, each backsighting
+an entered mark and a point nothing places, one in each order).
+`.gitattributes` stores them byte
 for byte, so a Linux checkout reads the same CRLF lines. Every file under
 `tests/surveyio/data` is detected by
 `OpcodeFieldFile.TheProbeClaimsNoOtherFormatsFixtureOrSample`, which prints
@@ -860,7 +1003,9 @@ the reader's `OpcodeFieldFile` cases in
 `cli.survey_import_gnss_field_file`, `cli.survey_read_resection_field_file`,
 `cli.survey_import_resection_field_file`,
 `cli.survey_read_rtk_setup_field_file`,
-`cli.survey_import_rtk_setup_field_file`, `qt_survey_verb_headless`, an agent
+`cli.survey_import_rtk_setup_field_file`,
+`cli.survey_read_two_backsights_field_file`,
+`cli.survey_import_two_backsights_field_file`, `qt_survey_verb_headless`, an agent
 through MCP (`McpServer.AnAgentImportsAFieldFileWhoseSetupStandsOnRtkMarks`),
 the wizard's content step, which shows the fixtures as read
 (`SurveyImportWizard.TheContentStepShowsWhatEachFormatsReaderRead`), and the
@@ -896,6 +1041,30 @@ Not done:
   moves the setup's orientation (8.3" at one of the resection job's setups),
   and one to a shot point moves the point (in the total-station job). The
   model has no observation that only checks.
+- A 04 to another point than the setup's backsight does not re-orient the
+  measurements after it, as a bearing datum difference of each 04 would, if
+  that is what the description means: the model orients a setup once (The
+  backsight, above). Two backsights that disagree - a circle reset between
+  them - show as a misclosure where the one read as a measurement is to a
+  point with a position. Where it is to a point with none, only the reader's
+  warning says so, and an azimuth it gives is kept in the setup's metadata
+  that nothing checks against the orientation. A point an earlier setup
+  measured counts as having a position whether or not that setup is placed
+  and oriented - a resected setup's shots have none until the reduction
+  computes resections - so a first backsight to such a point is taken over a
+  later one to control, and the reduction, finding it unplaced, takes its
+  circle as set to the grid.
+- A 16's point name and point ID are not searched for: the description adds
+  the name to the named points 44.5 searches and records the ID as the point
+  ID of its vertex, which 44.5 and the entries for 20 and 42 to 44 search,
+  and this reader makes no point of a 16 (it strings the current point into
+  the 16's string, above). So a setup, backsight or check that names either
+  stands on or measures a point of that name with no position, and a 20 or an
+  offset that names the ID finds no point by it.
+- A mark first given an entered coordinate with no height, and then a GNSS
+  position with one, holds the entered coordinate - the reduction holds
+  entered control over a GNSS position - and so has no height; the GNSS
+  position's is not used for it.
 - The reduction does not seed a file's calculated coordinates
   (`seedEntered` in `src/katana_survey/reduction.cpp` seeds entered ones), so
   a backsight on one - RW5's GPS-derived records, a JobXML point a COGO

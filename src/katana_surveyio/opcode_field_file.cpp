@@ -25,10 +25,13 @@
 //     number": a feature is a code and a string number, strung in the order
 //     measured. The CURRENT MEASUREMENT POINT is the last one made, and the
 //     CURRENT STRING the string it was appended to.
-//   * 44.5: a setup, a backsight and a check find their point by its point
-//     name among the names, then the point IDs, of the directly entered
-//     coordinates and then of the measurements before, and by its point ID
-//     among their point IDs.
+//   * 44.5: a setup, a backsight and a check find their point by a search
+//     that stops at the first found: the directly entered coordinates before
+//     them, then the measurements before them, and in each the record's point
+//     name among their point names, then its point name among their point
+//     IDs, then its point ID among their point IDs (steps 4 to 9; steps 1 to
+//     3 search the reducing program's own models, and step 10 asks the
+//     person).
 //   * 44.8, per opcode ("Optional information is enclosed in square
 //     brackets"):
 //       100 units, "only one choice for each": decimal degrees, metres, and
@@ -51,18 +54,21 @@
 //           measurement point is created at the same position", with this
 //           record's code and string number.
 //       20  close string: with no description "the current string is
-//           closed"; with one, the string its code and number (else its
-//           point) names.
+//           closed"; with one, the string its code and number name, else
+//           "the string containing that point ID".
 //       42, 43, 44  a radial, tangential or height offset of "the current
-//           measured point", or of the point a description names. Radial:
+//           measured point", or of the last point of the string a
+//           description's code and number name, else of "the point with that
+//           point ID". Radial:
 //           "along the plan line joining the current station to the specified
 //           point", positive away from the station; tangential: "at rights
 //           angles" to that line, "negative ... to the left (looking from the
 //           station)" - each "from the specified points original position".
 //           Height: it "adjusts the height of the point" where that height "is
 //           not null".
-//       47, 48  end the current string, without (47) or with (48) the current
-//           measurement point.
+//       47  ends the current string before the current measurement point,
+//           which "becomes the first point of a new string with the same
+//           feature code and string number"; 48 ends it after that point.
 //       29  a memo; 41 text for the current measurement point, "any spaces
 //           from column four onwards" being part of it; 71, 72, 73 an
 //           integer, a real and a text attribute (name, value) of it, an
@@ -97,8 +103,11 @@
 //     value); they vote only with a date or time first. Such a record with a
 //     blank first field is read in the file's layout, unless that leaves its
 //     first measured value (the horizontal circle, X, the instrument height)
-//     blank where the other layout reads one - the one sign which layout
-//     wrote it: it is then skipped, saying so. A fixed record that does not
+//     blank where the other layout reads a whole record - a number there, and
+//     a point named - the one sign which layout wrote it: it is then skipped,
+//     saying so. Text there (a setup's comment, read without the column, is
+//     where its instrument height would be) or a reading that names no point
+//     is no such sign, and the record is read. A fixed record that does not
 //     fit the layout it is read in is a warning and is skipped - a guess at
 //     which value is the slope distance reads a plausible survey that is
 //     wrong. One blank field past a layout's count is a trailing tab. A record
@@ -129,10 +138,24 @@
 //     and one labels a reference station's Easting and Northing so.
 //   * A point is identified by its point name where it has one and by its
 //     point ID otherwise. A setup, a backsight and a check (03, 04, 06) find
-//     the point they name that way and then, as 44.5 searches, by their name
-//     or ID among the point IDs the coordinates and shots before them gave:
-//     a 03 that names only the ID a coordinate was given with its name stands
-//     on that coordinate. A fixed record naming neither is skipped.
+//     their point as 44.5 searches, among the coordinates (02) and then the
+//     shots (07) before them, and stand on or measure a point of their own
+//     name (else ID) only where the search finds none: a 03 that names the
+//     ID a coordinate was given - alone, or with a name of its own - stands
+//     on that coordinate. What such a record calls the point is kept, a
+//     setup's with the setup ("point name", "point ID") and a backsight's or
+//     a check's on the point under its record, rather than made a point of
+//     its own. A point that only a setup, a backsight or a check made is in
+//     neither of 44.5's lists, so a record whose name is such a point and
+//     whose ID a coordinate or a shot gave finds that coordinate or shot; a
+//     record whose name is another point than the one found is warned of. A
+//     20 and an offset (42 to 44) find the point their description's point ID
+//     names, as [FLD] 44.8 says: the shot's (07) where a shot and a coordinate
+//     (02) were both given it - [FLD] calls a point ID "normally unique", the
+//     ID a measurement is given, and an offset moves a shot - with a warning,
+//     and for a 20 the coordinate's where only its string is open. Else, the
+//     reader's own reading, they find the point of its name. A fixed record
+//     naming neither is skipped.
 //   * The vertical circle is a zenith reading: [FLD] never states its zero,
 //     and the files' readings near 90 and 270 degrees are zeniths on the two
 //     faces. One past 180 degrees is face right, held as 360 - z.
@@ -185,16 +208,38 @@
 //     measurement" on the point names the setup and the check's coding. A
 //     backsight's (04) coding is kept in its setup's metadata, and a setup's
 //     (03, 128): [FLD] strings a measurement point, which neither makes.
-//   * THE BACKSIGHT. SurveyStation::backsightAzimuth is the circle reading on
-//     the backsight: the horizontal circle of the setup's first 04 that gives
-//     one, as its face-left reading (a face-right one less 180 degrees, as
-//     the reduction means the pointings to the backsight). A later 04 changes
-//     it no more than a later pointing would. The 04's azimuth_value is
-//     SurveyStation::statedBacksightAzimuth, the first a setup's 04s give; a
-//     later one that differs is kept in the setup's metadata, with a warning.
-//     The reduction orients the setup on it, less the reading on the
+//   * THE BACKSIGHT. A setup's backsight (SurveyStation::backsightPointId) is
+//     the point of its first 04 that can orient it: one a 04 gives a
+//     horizontal circle to, and which has a position the reduction will find -
+//     coordinates an 02 gives it anywhere in the file (the reduction places
+//     every one before any setup), or a direction and a distance measured to
+//     it from an earlier setup - or which a 04 gives an azimuth. Where no 04's
+//     point can, it is the first point a 04 gives a horizontal circle to, the
+//     reduction then taking that circle as set to the grid and saying so; where
+//     no 04 gives one, the first 04's point. It is settled when the file ends
+//     (settleBacksights), so an 02 after the setup still counts. The circle and
+//     the azimuth are that point's: SurveyStation::backsightAzimuth is the
+//     circle reading on it, the horizontal circle of the first 04 to it that
+//     gives one, as its face-left reading (a face-right one less 180 degrees,
+//     as the reduction means the pointings to the backsight), and a later 04 to
+//     it changes it no more than a later pointing would; the 04's azimuth_value
+//     is SurveyStation::statedBacksightAzimuth, the first a 04 to it gives, a
+//     later one that differs kept in the setup's metadata, with a warning. The
+//     reduction orients the setup on that azimuth, less the reading on the
 //     backsight, only where nothing places the backsight - [FLD]'s "when no
-//     coordinate for the backsight point exists".
+//     coordinate for the backsight point exists". A 04 to any other point is
+//     read as a measurement of that point, with a warning, its azimuth kept in
+//     the setup's metadata: the model orients a setup once, on one point, and
+//     the circle or azimuth of one 04 less the reading on another's point turns
+//     every direction of the setup by the difference. Not simply the first 04
+//     or the last: where that one is to a point nothing places, with no
+//     azimuth, either rule orients the setup on its circle taken as a grid
+//     azimuth although another 04 of the setup is to control, and a first one
+//     with no horizontal circle leaves the setup unoriented. [FLD]'s 04 entry
+//     says only that the reducing program shows each 04's "bearing datum
+//     difference"; that it holds for the measurements after that 04 is an
+//     inference from opcode 50's entry, which says so of its own bearing, and
+//     re-orienting them so would split the setup in two.
 //   * A record that makes a point but is not read leaves no current point,
 //     and a setup that is not read leaves no setup: what follows is skipped,
 //     naming that record, rather than given to the point or setup before. So
@@ -227,6 +272,10 @@
 //     as [FLD]'s two are. The second string is then the current string, as
 //     [FLD]'s new point would make it, so a 20 after it closes that string. A
 //     point ID or name the 16 gives is kept with the point, with a warning.
+//     A 16 that is not read leaves the current string unknown, so a bare 20
+//     after it is skipped, naming it, rather than closing the string before.
+//     A 16, a 20 or an offset with one blank value past its count has a
+//     trailing tab, as a fixed record may.
 //   * 29 is a note on the setup (the project's before the first): [FLD] puts
 //     a memo in its check-measurement model, which Katana does not have, and
 //     a setup's notes are where a person reads a job. 41 is kept whole as
@@ -264,6 +313,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <numbers>
 #include <optional>
@@ -597,6 +647,20 @@ std::optional<bool> fixedFormFits(int opcode, const std::vector<std::string_view
     }
 }
 
+// How many of `values` a record of free fields gives, one blank value past
+// one of `counts` - its form's - being a trailing tab, as a fixed record's is
+// (layoutFit).
+std::size_t givenValues(const std::vector<std::string_view>& values,
+                        std::initializer_list<std::size_t> counts)
+{
+    const std::size_t count = values.size();
+    if (count > 0 && blank(values.back()) &&
+        std::find(counts.begin(), counts.end(), count - 1) != counts.end()) {
+        return count - 1;
+    }
+    return count;
+}
+
 // Opcodes that make a point or a setup, read or not: the header comments end
 // at the first of them, and so does an attribute group left open.
 bool makesPointOrSetup(int opcode)
@@ -849,6 +913,14 @@ class FieldFileReader {
     };
     [[nodiscard]] Values valuesOf(int opcode, const std::vector<std::string_view>& fields) const;
 
+    // One of 44.5's lists: the point names and the point IDs the directly
+    // entered coordinates (02), or the measurements (07), before a record
+    // gave, each ID with the point it made then (the first kept).
+    struct GivenPoints {
+        std::unordered_set<std::string> names;
+        std::unordered_map<std::string, std::string> ids;
+    };
+
     void record(int opcode, const std::vector<std::string_view>& fields, std::size_t n);
     void fixedRecord(int opcode, const std::vector<std::string_view>& fields, std::size_t n);
     void notARecord(std::string_view first, std::size_t n);
@@ -862,9 +934,16 @@ class FieldFileReader {
                  std::string_view stamp, std::size_t n);
     void measurement(int opcode, const Description& d, const std::vector<std::string_view>& v,
                      std::string_view stamp, std::size_t n);
-    void backsight(survey::SurveyStation& setup, const Description& d,
+    // A 04 to `target` from `setup`, kept for settleBacksights: its setup's
+    // backsight, or a measurement of another point (see the top of this
+    // file).
+    void backsight(survey::SurveyStation& setup, const std::string& target, const Description& d,
                    const std::vector<std::string_view>& v, std::optional<double> horizontal,
                    survey::Face face, std::size_t n);
+    // Names each setup's backsight, with its circle and azimuth, once the
+    // file has said which points have a position.
+    void settleBacksights();
+    void settleBacksight(std::size_t station, std::size_t begin, std::size_t end);
     void resection(int opcode, const Values& v, std::size_t n);
     void resectionEnd(int opcode, const Values& v, std::size_t n);
     void multipleCoding(const Values& v, std::size_t n);
@@ -891,14 +970,33 @@ class FieldFileReader {
     // prefix; a key the record has given already keeps a different value as
     // "key (record n)", with a warning.
     void putPointValue(const std::string& key, std::string value, std::size_t n);
-    // What a record about a point says besides its code: the point ID it
-    // gives with a name, and a later record's comment.
-    void keepPointId(const Description& d, std::size_t n);
+    // What a record about `point` says besides its code: the point ID it
+    // gives with the point's name - or, where 44.5 found the point by
+    // another name or by its ID, the name and ID it gives - and a later
+    // record's comment.
+    void keepPointId(const Description& d, const std::string& point, std::size_t n);
     void keepLaterComment(const Description& d, std::size_t n);
     // [FLD] 44.5: the point a setup, a backsight or a check names.
     [[nodiscard]] std::string knownPoint(const Description& d) const;
-    // The point IDs a coordinate or a shot gives, by the point it made.
-    void registerPointId(const Description& d, const std::string& id);
+    // Warns of a setup, backsight or check (`what`, which `acts` on the point
+    // found) whose point name is a point other than the one 44.5 `found`.
+    void warnOfAnotherNamedPoint(const Description& d, const std::string& found,
+                                 std::string_view what, std::string_view acts, std::size_t n);
+    // [FLD] 44.8, 20 and 42 to 44: the points a description names by its
+    // point ID - a shot's, then a coordinate's - else (the reader's own
+    // reading) the point of its name; empty when no record before made one.
+    [[nodiscard]] std::vector<std::string> describedPoints(const Description& d) const;
+    // Warns of a 20 or an offset (`what`) whose point ID a shot and a
+    // coordinate both gave (`points`, as describedPoints has them), saying
+    // which it `took` and why.
+    void warnOfSharedId(const Description& d, const std::vector<std::string>& points,
+                        std::string_view what, const std::string& took, std::string_view why,
+                        std::size_t n);
+    // Whether a coordinate or a shot gave `point` the point ID `pointId`.
+    [[nodiscard]] bool gaveId(std::string_view pointId, const std::string& point) const;
+    // The point name and the point ID a coordinate or a shot gives, with
+    // the point it made.
+    static void registerPoint(GivenPoints& given, const Description& d, const std::string& id);
     // Positions the point of the 02 whose record group ends here, or gives it
     // its GNSS position (see the top of this file).
     void finishCoordinate();
@@ -944,9 +1042,10 @@ class FieldFileReader {
     // with each point name.
     std::unordered_set<std::string> describedPoints_;
     std::unordered_map<std::string, std::string> pointIds_;
-    // Every point ID a coordinate or a shot gave, and the point it made then:
-    // what 44.5's search finds a point ID in.
-    std::unordered_map<std::string, std::string> idOwners_;
+    // The names and point IDs the coordinates (02) and the shots (07) gave:
+    // 44.5's two lists, searched in that order.
+    GivenPoints coordinatesGiven_;
+    GivenPoints shotsGiven_;
     // [FLD] 44.4's current measurement point - the point of the last 02 or 07
     // - with the record, the feature code and the string number that made
     // it: 16, 20 and the offsets act on it and its string.
@@ -956,6 +1055,26 @@ class FieldFileReader {
     std::string currentCode_;
     std::string currentString_;
     std::size_t unreadMeasurementRecord_ = 0;
+    // A 16 that was not read: [FLD]'s 16 makes its own string the current
+    // string, so which string is current is not known until a measurement or
+    // a 16 is read. 0 when it is known.
+    std::size_t unreadStringRecord_ = 0;
+    // Every 04 read, in file order, for settleBacksights: the setup it is of
+    // (its index in SurveyProject::stations), its record and point, the
+    // circle it reads as its face-left reading, and the azimuth it states.
+    struct BacksightRecord {
+        std::size_t station = 0;
+        std::size_t record = 0;
+        std::string target;
+        std::optional<double> circle;
+        std::optional<double> azimuth;
+        std::string azimuthText; // as written
+    };
+    std::vector<BacksightRecord> backsights_;
+    // The first setup (its index) that measured each point a direction and a
+    // distance - a 04, 06 or 07 the reduction radiates - so that a later
+    // setup's backsight to it has a position.
+    std::unordered_map<std::string, std::size_t> firstMeasuredFrom_;
     // The 02 whose record group is being read: its point is positioned, or
     // given its GNSS position, when the next record that makes a point or a
     // setup begins or the file ends, once its attributes have said which.
@@ -1186,6 +1305,7 @@ void FieldFileReader::pointRecordStarts(std::size_t n, bool isMeasurement)
         currentCode_.clear();
         currentString_.clear();
         unreadMeasurementRecord_ = n;
+        unreadStringRecord_ = 0;
     }
 }
 
@@ -1205,6 +1325,7 @@ void FieldFileReader::pointRecordRead(const std::string& id, const Description& 
         currentCode_ = std::string(d.featureCode);
         currentString_ = std::string(d.stringNumber);
         unreadMeasurementRecord_ = 0;
+        unreadStringRecord_ = 0;
     }
 }
 
@@ -1250,8 +1371,19 @@ void FieldFileReader::putPointValue(const std::string& key, std::string value, s
     builder_.addPointMetadata(currentPoint_, std::move(again), std::move(value));
 }
 
-void FieldFileReader::keepPointId(const Description& d, std::size_t n)
+void FieldFileReader::keepPointId(const Description& d, const std::string& point, std::size_t n)
 {
+    if (!blank(d.pointName) && d.pointName != point) {
+        // 44.5 found the point by another name or by its ID: what this
+        // record calls it is kept with the point, under the record, rather
+        // than made a point of its own. The ID, unless it is one a
+        // coordinate or a shot gave the point.
+        putPointValue("point name", std::string(trimmed(d.pointName)), n);
+        if (!blank(d.pointId) && !gaveId(d.pointId, point)) {
+            putPointValue("point ID", std::string(trimmed(d.pointId)), n);
+        }
+        return;
+    }
     if (blank(d.pointName) || blank(d.pointId)) {
         return;
     }
@@ -1278,22 +1410,116 @@ void FieldFileReader::keepLaterComment(const Description& d, std::size_t n)
 
 std::string FieldFileReader::knownPoint(const Description& d) const
 {
-    const std::string named(d.id());
-    // A name among the names (or an ID among the IDs of points that have no
-    // name), and then among the point IDs given before: 44.5's order.
-    if (!blank(d.pointName) && builder_.hasPoint(named)) {
-        return named;
+    // 44.5, steps 4 to 9: the coordinates, then the shots; in each the
+    // name among their names, the name among their IDs, the ID among their
+    // IDs. A named point is its name, so the name found is the point.
+    const bool named = !blank(d.pointName);
+    const bool numbered = !blank(d.pointId);
+    for (const GivenPoints* given : {&coordinatesGiven_, &shotsGiven_}) {
+        if (named) {
+            const std::string name(d.pointName);
+            if (given->names.contains(name)) {
+                return name;
+            }
+            if (const auto owner = given->ids.find(name); owner != given->ids.end()) {
+                return owner->second;
+            }
+        }
+        if (numbered) {
+            if (const auto owner = given->ids.find(std::string(d.pointId));
+                owner != given->ids.end()) {
+                return owner->second;
+            }
+        }
     }
-    if (const auto owner = idOwners_.find(named); owner != idOwners_.end()) {
-        return owner->second;
-    }
-    return named;
+    // Step 10 asks the person; the file's own name for it stands instead -
+    // a point no record gave coordinates, or one only a setup or a backsight
+    // named before.
+    return std::string(d.id());
 }
 
-void FieldFileReader::registerPointId(const Description& d, const std::string& id)
+void FieldFileReader::warnOfAnotherNamedPoint(const Description& d, const std::string& found,
+                                              std::string_view what, std::string_view acts,
+                                              std::size_t n)
 {
+    // 44.5 found the point by an ID, or by the name among the IDs, before it
+    // reached the point of that name - or the point of that name is one only
+    // a setup, a backsight or a check made, which its lists do not hold.
+    const std::string name(d.pointName);
+    if (blank(name) || name == found || !builder_.hasPoint(name)) {
+        return;
+    }
+    const std::string kind(what);
+    builder_.warn(n, "the " + kind + " names point '" + std::string(trimmed(name)) + "'" +
+                         (blank(d.pointId) ? std::string{}
+                                           : " with point ID " + std::string(trimmed(d.pointId))) +
+                         ", and the format's search for its point (44.5) finds point '" + found +
+                         "' first: the " + kind + " " + std::string(acts) + " '" + found +
+                         "', not the point of that name");
+}
+
+std::vector<std::string> FieldFileReader::describedPoints(const Description& d) const
+{
+    std::vector<std::string> points;
+    // "the point with that point ID": the ID a measurement was given, so the
+    // shot's before the coordinate's where both were given it.
     if (!blank(d.pointId)) {
-        idOwners_.try_emplace(std::string(d.pointId), id);
+        const std::string id(d.pointId);
+        for (const GivenPoints* given : {&shotsGiven_, &coordinatesGiven_}) {
+            if (const auto owner = given->ids.find(id);
+                owner != given->ids.end() &&
+                std::find(points.begin(), points.end(), owner->second) == points.end()) {
+                points.push_back(owner->second);
+            }
+        }
+    }
+    if (!points.empty()) {
+        return points;
+    }
+    // Not what [FLD] says, which names only the point ID here: a point of
+    // the description's name (else of its ID, as a point that has no name
+    // is known) that a record before made.
+    if (const std::string named(d.id()); !blank(named) && builder_.hasPoint(named)) {
+        points.push_back(named);
+    }
+    return points;
+}
+
+void FieldFileReader::warnOfSharedId(const Description& d, const std::vector<std::string>& points,
+                                     std::string_view what, const std::string& took,
+                                     std::string_view why, std::size_t n)
+{
+    // Two points only when a shot and a coordinate were both given the ID:
+    // [FLD] calls a point ID "normally unique", and says nothing of which.
+    if (points.size() < 2) {
+        return;
+    }
+    builder_.warn(n, std::string(what) + " names point ID " + std::string(trimmed(d.pointId)) +
+                         ", which a shot gave point '" + points[0] + "' and a coordinate point '" +
+                         points[1] + "': it is taken for point '" + took + "', " +
+                         std::string(why));
+}
+
+bool FieldFileReader::gaveId(std::string_view pointId, const std::string& point) const
+{
+    const std::string id(pointId);
+    for (const GivenPoints* given : {&coordinatesGiven_, &shotsGiven_}) {
+        if (const auto owner = given->ids.find(id);
+            owner != given->ids.end() && owner->second == point) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void FieldFileReader::registerPoint(GivenPoints& given, const Description& d,
+                                    const std::string& id)
+{
+    if (!blank(d.pointName)) {
+        given.names.insert(id); // a named point is its name
+    }
+    if (!blank(d.pointId)) {
+        given.ids.try_emplace(std::string(d.pointId), id);
     }
 }
 
@@ -1320,8 +1546,21 @@ void FieldFileReader::finishCoordinate()
                                     (c.elevation && given->second.elevation != c.elevation));
     if (differs && (gnss || given->second.gnss)) {
         const std::string restated = coordinatesText(c.northing, c.easting, c.elevation);
-        builder_.addPointMetadata(c.id, "coordinates restated at record " + std::to_string(c.record),
-                                  restated);
+        // What goes beside the point is the position it does not hold: this
+        // GNSS position, where an entered coordinate or the first GNSS one
+        // is held; the earlier GNSS position, where this entered coordinate
+        // is - not this one, which is the point's own.
+        if (gnss) {
+            builder_.addPointMetadata(
+                c.id, "coordinates restated at record " + std::to_string(c.record), restated);
+        } else {
+            builder_.addPointMetadata(c.id,
+                                      "GNSS position of record " +
+                                          std::to_string(given->second.record),
+                                      coordinatesText(given->second.northing,
+                                                      given->second.easting,
+                                                      given->second.elevation));
+        }
         const std::string before = "record " + std::to_string(given->second.record);
         builder_.warn(c.record,
                       "point '" + c.id + "' is given " +
@@ -1408,8 +1647,8 @@ void FieldFileReader::coordinate(const Description& d, const std::vector<std::st
         putPointValue("time stamp", std::string(stamp), n);
     }
     keepLaterComment(d, n);
-    keepPointId(d, n);
-    registerPointId(d, id);
+    keepPointId(d, id, n);
+    registerPoint(coordinatesGiven_, d, id);
     builder_.countRead();
 }
 
@@ -1417,6 +1656,7 @@ void FieldFileReader::station(const Description& d, const std::vector<std::strin
                               std::string_view stamp, std::size_t n)
 {
     const std::string at = knownPoint(d);
+    warnOfAnotherNamedPoint(d, at, "setup", "stands on", n);
     survey::SurveyStation& setup = beginSetup(at, number(v[0], "instrument height", n), stamp, n);
     // A setup makes no measurement point, so its code strings nothing
     // ([FLD] 44.4); its comment still describes the point it stands on.
@@ -1426,47 +1666,169 @@ void FieldFileReader::station(const Description& d, const std::vector<std::strin
     if (!blank(d.comment)) {
         builder_.codePoint(at, {}, d.comment, {}, n);
     }
-    if (!blank(d.pointId) && std::string(d.pointId) != at) {
-        setup.metadata["point ID"] = std::string(d.pointId);
+    // What the record calls the point, where 44.5 found it by another name
+    // or by its ID: kept with the setup, not made a point of its own.
+    if (!blank(d.pointName) && d.pointName != at) {
+        setup.metadata["point name"] = std::string(trimmed(d.pointName));
+    }
+    if (!blank(d.pointId) && d.pointId != at) {
+        setup.metadata["point ID"] = std::string(trimmed(d.pointId));
     }
     builder_.countRead();
 }
 
-void FieldFileReader::backsight(survey::SurveyStation& setup, const Description& d,
-                                const std::vector<std::string_view>& v,
+void FieldFileReader::backsight(survey::SurveyStation& setup, const std::string& target,
+                                const Description& d, const std::vector<std::string_view>& v,
                                 std::optional<double> horizontal, survey::Face face, std::size_t n)
 {
-    // The circle reading on the backsight: the setup's first, as its face-left
-    // reading, which the reduction means the backsight's pointings to.
-    if (horizontal && !setup.backsightAzimuth) {
-        const double circle = *horizontal * kRadiansPerDegree;
-        setup.backsightAzimuth = wrapToCircle(face == survey::Face::Right ? circle - kPi : circle);
-    }
-    // The azimuth the file states for the backsight ("may be specified when
-    // no coordinate for the backsight point exists"): the first; a later one
-    // that differs is kept beside it.
-    std::optional<double> azimuth;
-    if (v.size() > 3) {
-        azimuth = number(v[3], "backsight azimuth", n);
-    }
-    if (azimuth) {
-        const double stated = wrapToCircle(*azimuth * kRadiansPerDegree);
-        if (!setup.statedBacksightAzimuth) {
-            setup.statedBacksightAzimuth = stated;
-        } else if (*setup.statedBacksightAzimuth != stated) {
-            setup.metadata["backsight azimuth record " + std::to_string(n)] =
-                std::string(trimmed(v[3])) + " degrees";
-            builder_.warn(n, "the backsight gives the azimuth " + std::string(trimmed(v[3])) +
-                                 " degrees, where an earlier backsight of setup " + setup.setup.id +
-                                 " gave another; the first is the setup's, and this one is kept "
-                                 "in its metadata");
-        }
-    }
     // A backsight's own code strings nothing ([FLD] finds the backsight by
     // its name): kept with the setup it orients rather than on the point,
     // whose drawn properties are its shots'.
     if (const std::string coding = d.coding(); !coding.empty()) {
         setup.metadata["backsight record " + std::to_string(n)] = coding;
+    }
+    BacksightRecord kept;
+    kept.station = builder_.project().stations.size() - 1;
+    kept.record = n;
+    kept.target = target;
+    // The circle reading on its point as its face-left reading, which the
+    // reduction means the pointings to the backsight to.
+    if (horizontal) {
+        const double circle = *horizontal * kRadiansPerDegree;
+        kept.circle = wrapToCircle(face == survey::Face::Right ? circle - kPi : circle);
+    }
+    // The azimuth the file states for its point ("may be specified when no
+    // coordinate for the backsight point exists").
+    if (v.size() > 3) {
+        if (const std::optional<double> azimuth = number(v[3], "backsight azimuth", n)) {
+            kept.azimuth = wrapToCircle(*azimuth * kRadiansPerDegree);
+            kept.azimuthText = std::string(trimmed(v[3]));
+        }
+    }
+    backsights_.push_back(std::move(kept));
+}
+
+void FieldFileReader::settleBacksights()
+{
+    // backsights_ is in file order, so each setup's 04s are together.
+    for (std::size_t begin = 0; begin < backsights_.size();) {
+        std::size_t end = begin;
+        while (end < backsights_.size() && backsights_[end].station == backsights_[begin].station) {
+            ++end;
+        }
+        settleBacksight(backsights_[begin].station, begin, end);
+        begin = end;
+    }
+}
+
+void FieldFileReader::settleBacksight(std::size_t station, std::size_t begin, std::size_t end)
+{
+    survey::SurveyStation& setup = builder_.project().stations[station];
+    // Each point the setup's 04s are to, in the order of its first 04, with
+    // its first 04 to give a circle and its first to give an azimuth.
+    struct Candidate {
+        std::size_t first = 0;
+        std::optional<std::size_t> circle;
+        std::optional<std::size_t> azimuth;
+    };
+    std::vector<Candidate> candidates;
+    // By point, so that a setup of many 04s is settled in linear time.
+    std::unordered_map<std::string_view, std::size_t> index;
+    for (std::size_t i = begin; i < end; ++i) {
+        const BacksightRecord& b = backsights_[i];
+        const auto [slot, added] = index.try_emplace(b.target, candidates.size());
+        if (added) {
+            candidates.push_back(Candidate{i, {}, {}});
+        }
+        Candidate& known = candidates[slot->second];
+        if (b.circle && !known.circle) {
+            known.circle = i;
+        }
+        if (b.azimuth && !known.azimuth) {
+            known.azimuth = i;
+        }
+    }
+    // What gives a candidate's point a position the reduction will find:
+    // coordinates, or a setup before this one that measured it. Empty when
+    // nothing does.
+    const auto position = [&](const Candidate& c) -> std::string {
+        const std::string& point = backsights_[c.first].target;
+        if (givenCoordinates_.contains(point)) {
+            return "coordinates the file gives";
+        }
+        const auto measured = firstMeasuredFrom_.find(point);
+        if (measured != firstMeasuredFrom_.end() && measured->second < station) {
+            return "measured from setup " + builder_.project().stations[measured->second].setup.id;
+        }
+        return {};
+    };
+    // The first that can orient the setup: a circle to it, and a position or
+    // a stated azimuth. Else the first with a circle, which the reduction
+    // takes as set to the grid; else the first.
+    const Candidate* chosen = nullptr;
+    std::string why;
+    for (const Candidate& c : candidates) {
+        if (!c.circle) {
+            continue;
+        }
+        if (std::string placed = position(c); !placed.empty()) {
+            why = "the first that can orient it, with a horizontal circle, and " + placed;
+        } else if (c.azimuth) {
+            why = "the first that can orient it, with a horizontal circle and a stated azimuth";
+        } else {
+            continue;
+        }
+        chosen = &c;
+        break;
+    }
+    if (chosen == nullptr) {
+        const auto withCircle = std::find_if(candidates.begin(), candidates.end(),
+                                             [](const Candidate& c) { return c.circle.has_value(); });
+        if (withCircle != candidates.end()) {
+            chosen = &*withCircle;
+            why = "the first with a horizontal circle, as none with one is to a point with a "
+                  "position or states an azimuth";
+        } else {
+            chosen = &candidates.front();
+            why = "its first, as none gives a horizontal circle";
+        }
+    }
+    const std::string& point = backsights_[chosen->first].target;
+    setup.backsightPointId = point;
+    if (chosen->circle) {
+        setup.backsightAzimuth = backsights_[*chosen->circle].circle;
+    }
+    if (chosen->azimuth) {
+        setup.statedBacksightAzimuth = backsights_[*chosen->azimuth].azimuth;
+    }
+    for (std::size_t i = begin; i < end; ++i) {
+        const BacksightRecord& b = backsights_[i];
+        const std::string key = "backsight azimuth record " + std::to_string(b.record);
+        if (b.target == point) {
+            // A later azimuth for the backsight that differs is kept beside
+            // the first.
+            if (b.azimuth && *b.azimuth != *setup.statedBacksightAzimuth) {
+                setup.metadata[key] = b.azimuthText + " degrees";
+                builder_.warn(b.record, "the backsight gives the azimuth " + b.azimuthText +
+                                            " degrees, where an earlier backsight of setup " +
+                                            setup.setup.id +
+                                            " gave another; the first is the setup's, and this "
+                                            "one is kept in its metadata");
+            }
+            continue;
+        }
+        // Its observations make it a measurement of its point, which the
+        // reduction radiates, or checks where the point has a position.
+        std::string azimuth;
+        if (b.azimuth) {
+            setup.metadata[key] = b.azimuthText + " degrees";
+            azimuth = "; its azimuth, " + b.azimuthText + " degrees, is kept in the setup's metadata";
+        }
+        builder_.warn(b.record, "a backsight to '" + b.target + "', where setup " + setup.setup.id +
+                                    " backsights '" + point + "' (record " +
+                                    std::to_string(backsights_[chosen->first].record) + "), " +
+                                    why + ": this one is read as a measurement of its point" +
+                                    azimuth);
     }
 }
 
@@ -1528,13 +1890,22 @@ void FieldFileReader::measurement(int opcode, const Description& d,
         builder_.skip(n, std::string(kind) + " with no readable value");
         return;
     }
+    if (opcode == 4) {
+        warnOfAnotherNamedPoint(d, target, "backsight", "measures", n);
+    } else if (opcode == 6) {
+        warnOfAnotherNamedPoint(d, target, "check", "checks", n);
+    }
 
     builder_.mentionPoint(target, n);
     if (opcode == 7) {
         builder_.codePoint(target, d.featureCode, d.comment, d.stringNumber, n);
     } else if (opcode == 4) {
-        setup->backsightPointId = target;
-        backsight(*setup, d, v, horizontal, face, n);
+        backsight(*setup, target, d, v, horizontal, face, n);
+    }
+    // A direction and a distance: what the reduction radiates the point
+    // from, so a later setup's backsight to it has a position.
+    if (horizontal && hasDistance) {
+        firstMeasuredFrom_.try_emplace(target, builder_.project().stations.size() - 1);
     }
 
     const survey::ObservationPrecision& precision = builder_.options().precision;
@@ -1601,7 +1972,7 @@ void FieldFileReader::measurement(int opcode, const Description& d,
     pointRecordRead(target, d, n, opcode == 7);
     if (opcode == 7) {
         measurementIsShot_ = true;
-        registerPointId(d, target);
+        registerPoint(shotsGiven_, d, target);
     }
     if (!stamp.empty()) {
         putPointValue("time stamp", std::string(stamp), n);
@@ -1613,7 +1984,7 @@ void FieldFileReader::measurement(int opcode, const Description& d,
     } else if (opcode == 7) {
         keepLaterComment(d, n);
     }
-    keepPointId(d, n);
+    keepPointId(d, target, n);
     builder_.countRead();
 }
 
@@ -1684,7 +2055,10 @@ void FieldFileReader::resectionEnd(int opcode, const Values& v, std::size_t n)
 void FieldFileReader::multipleCoding(const Values& v, std::size_t n)
 {
     const std::string what = "multiple coding (opcode 16)";
-    if (v.values.size() != 5) {
+    // One not read would have made its own string the current one, so which
+    // string is current is not known after it (see the top of this file).
+    if (givenValues(v.values, {5}) != 5) {
+        unreadStringRecord_ = n;
         builder_.skip(n, what + " with " + std::to_string(v.values.size()) +
                              " value(s) where the format gives a point description of 5");
         return;
@@ -1694,6 +2068,7 @@ void FieldFileReader::multipleCoding(const Values& v, std::size_t n)
     }
     const Description d = Description::of(v.values, 0);
     if (blank(d.featureCode)) {
+        unreadStringRecord_ = n;
         builder_.skip(n, what + " with no feature code: there is no string to add the point to");
         return;
     }
@@ -1706,6 +2081,7 @@ void FieldFileReader::multipleCoding(const Values& v, std::size_t n)
     // string the current string: a 20 after this closes it.
     currentCode_ = std::string(d.featureCode);
     currentString_ = std::string(d.stringNumber);
+    unreadStringRecord_ = 0;
     if (!blank(d.id()) || !blank(d.comment)) {
         std::string said = featureName(d.featureCode, d.stringNumber);
         if (!blank(d.pointId)) {
@@ -1741,6 +2117,13 @@ void FieldFileReader::closeString(const Values& v, std::size_t n)
         if (!hasCurrentMeasurement(what, n)) {
             return;
         }
+        if (unreadStringRecord_ != 0) {
+            builder_.skip(n, what + ": the current string is the one the multiple coding of "
+                                    "record " +
+                                 std::to_string(unreadStringRecord_) +
+                                 " made current, which was not read");
+            return;
+        }
         if (currentCode_.empty()) {
             builder_.skip(n, what + ": the point of record " + std::to_string(measurementRecord_) +
                                  " has no feature code, so there is no current string");
@@ -1748,14 +2131,33 @@ void FieldFileReader::closeString(const Values& v, std::size_t n)
         }
         which = featureName(currentCode_, currentString_);
         points = builder_.closeFeature(currentCode_, currentString_);
-    } else if (values.size() == 5) {
+    } else if (givenValues(values, {5}) == 5) {
         const Description d = Description::of(values, 0);
         if (!blank(d.featureCode)) {
             which = featureName(d.featureCode, d.stringNumber);
             points = builder_.closeFeature(d.featureCode, d.stringNumber);
         } else if (!blank(d.id())) {
-            which = "of point '" + std::string(d.id()) + "'";
-            points = builder_.closeFeatureOf(d.id());
+            // "the string containing that point ID": of the points records
+            // before gave the ID (or the name) the description gives, the
+            // first on an open string.
+            const std::vector<std::string> candidates = describedPoints(d);
+            std::string point = candidates.empty() ? std::string(d.id()) : candidates.front();
+            for (const std::string& candidate : candidates) {
+                if ((points = builder_.closeFeatureOf(candidate))) {
+                    point = candidate;
+                    break;
+                }
+            }
+            which = "of point '" + point + "'";
+            if (!candidates.empty() && !blank(d.pointId) && d.pointId != point) {
+                which += " (point ID " + std::string(trimmed(d.pointId)) + ")";
+            }
+            if (points) {
+                warnOfSharedId(d, candidates, what, point,
+                               point == candidates.front() ? "the shot's"
+                                                           : "the one on an open string",
+                               n);
+            }
         } else {
             builder_.skip(n, what + " whose point description names neither a string nor a point");
             return;
@@ -1786,7 +2188,8 @@ void FieldFileReader::pointOffset(int opcode, const Values& v, std::size_t n)
     std::string_view amountText;
     // Why the offset cannot move a shot, when that is already known.
     std::string notApplied;
-    if (values.size() == 1) {
+    const std::size_t given = givenValues(values, {1, 6});
+    if (given == 1) {
         // "If no point description is given, the offset is used to adjust
         // the position of the current measured point."
         if (!hasCurrentMeasurement(what, n)) {
@@ -1798,7 +2201,7 @@ void FieldFileReader::pointOffset(int opcode, const Values& v, std::size_t n)
             notApplied = "point '" + target + "' is the coordinate of record " +
                          std::to_string(measurementRecord_) + ", which is kept as the file states it";
         }
-    } else if (values.size() == 6) {
+    } else if (given == 6) {
         const Description d = Description::of(values, 0);
         amountText = values[5];
         if (!blank(d.featureCode)) {
@@ -1812,8 +2215,12 @@ void FieldFileReader::pointOffset(int opcode, const Values& v, std::size_t n)
                 return;
             }
             target = *last;
-        } else if (!blank(d.id()) && builder_.hasPoint(d.id())) {
-            target = std::string(d.id());
+        } else if (const std::vector<std::string> candidates = describedPoints(d);
+                   !candidates.empty()) {
+            // "If the point ID exists, then the point with that point ID is
+            // adjusted": the shot's, where a coordinate was given it too.
+            target = candidates.front();
+            warnOfSharedId(d, candidates, what, target, "the shot's", n);
         } else {
             builder_.skip(n, what + " names no string and no point a record before it made");
             return;
@@ -2156,7 +2563,11 @@ void FieldFileReader::unread(int opcode, std::size_t n)
         message += "; the measurements after it keep the codes they are written with, which a "
                    "field template may have changed";
     } else if (known != nullptr && known->endsString) {
-        message += "; the points after it are strung as if the string had not ended, a later "
+        // 47 also moves the current point, the first of the new string.
+        message += std::string(opcode == 47 ? "; the current point is not moved into a new string "
+                                              "of its own, and"
+                                            : ";") +
+                   " the points after it are strung as if the string had not ended, a later "
                    "point of its code and string number joining it";
     }
     builder_.skip(n, std::move(message));
@@ -2205,11 +2616,11 @@ void FieldFileReader::decideLayout(const std::vector<std::string_view>& lines)
     for (const std::string_view line : lines) {
         const std::string_view lead = withoutIndent(line);
         const std::size_t tab = lead.find('\t');
-        if (tab == std::string_view::npos) {
-            continue;
-        }
         const std::optional<int> opcode = opcodeOf(trimmed(lead.substr(0, tab)));
-        if (!opcode || !valuesAfterDescription(*opcode)) {
+        if (opcode == 99) {
+            break; // "Stop processing ... at this line": what follows is not read, so no vote
+        }
+        if (tab == std::string_view::npos || !opcode || !valuesAfterDescription(*opcode)) {
             continue;
         }
         const std::vector<std::string_view> fields = splitTabs(lead);
@@ -2278,10 +2689,13 @@ void FieldFileReader::fixedRecord(int opcode, const std::vector<std::string_view
     } else {
         // Blank: the file's layout says which (one no fixed record decided
         // is read as [FLD] writes it), unless its reading leaves the first
-        // value blank where the other reads one.
+        // value blank where the other reads a whole record - a number there
+        // and a point named. Text there, or no point, is no other reading.
         columns = layout_ == Layout::Column ? 1 : 0;
+        const std::size_t other = 1 - columns;
         if (fit.column && fit.plain && blank(firstValue(fields, columns)) &&
-            !blank(firstValue(fields, 1 - columns))) {
+            parseReal(firstValue(fields, other)).has_value() &&
+            !blank(Description::of(fields, 1 + other).id())) {
             fail(counted + ", which fit the format's layout both with the column after the "
                            "opcode and without it: read " +
                  (columns == 1 ? "with" : "without") + " it, as this file's records are, " +
@@ -2479,6 +2893,8 @@ Result<ReadResult> FieldFileReader::read(std::string_view bytes)
     }
     finishCoordinate();
     endSetup();
+    // Every coordinate is read now, so each setup's backsight can be named.
+    settleBacksights();
     for (std::size_t g = 0; g < groups_.size(); ++g) {
         builder_.warn(groupRecords_[g], "attribute group '" + groups_[g] +
                                             "' is not ended (opcode 125) before the file ends");
@@ -2603,8 +3019,13 @@ FormatDescriptor descriptor()
     // 1.1: the column's date and time, blank-padded opcodes, resections,
     // multiple coding, strings closed, offsets applied, attribute groups,
     // every measurement's attributes kept, RTK positions as GNSS positions and
-    // the backsight's stated azimuth.
-    format.parserVersion = "1.1";
+    // the backsight's stated azimuth. 1.2: the backsight is the setup's first
+    // 04 that can orient it, 44.5's search by point ID and in its order, 20
+    // and the offsets by point ID, a record whose other layout reads no whole
+    // record, 16, 20 and the offsets with a trailing tab, an unread 16, the
+    // records after a 99 voting on no layout, a GNSS position then an entered
+    // coordinate of one point - a job with any of those imports differently.
+    format.parserVersion = "1.2";
     format.extensions = {"fld"};
     return format;
 }
