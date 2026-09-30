@@ -58,14 +58,18 @@
 // so a relative zoom never starts from the place a new view holds until then.
 //
 // The scope words are the shared grammar (scope_verbs.hpp), read by the one
-// parser and resolved by matchScope: ZOOM frames what they take, by
-// extentOf. ZOOM alone is still EXTENTS, where no scope word elsewhere is the
-// selection. The reply begins with the scope record; a scope that takes
-// nothing moves no view and says so (matched=0), which is not a refusal. A
-// plan view frames the box of what the scope took; a 3D or elevation view the
-// box its scene puts those entities in - the ones it draws and, with its
-// ghosts on, the ones it ghosts - and when it draws none of them it moves
-// and says nothing more than the scope record. A section frames no scope.
+// parser and resolved by matchScope. ZOOM alone is still EXTENTS, where no
+// scope word elsewhere is the selection. The reply begins with the scope
+// record; a scope that takes nothing moves no view and says so (matched=0),
+// which is not a refusal. Every kind of view frames what it SHOWS of what the
+// scope took, by one rule: the entities it draws - by its own layers as well
+// as the drawing's - and, with its ghosts on, the selected ones it ghosts (a
+// plan view ghosts no label). A plan view frames their box (extentOf); a 3D
+// or elevation view the box its scene puts them in. So a view never frames
+// empty ground: a selection on a layer it hides with its ghosts off, or on
+// one the drawing hides, is shown nowhere there, and the view does not move -
+// its record says so after the scope's, shown=0 moved=no. A section frames
+// no scope.
 //
 // HIDE, SHOW and ISOLATE are the view's own layer filter, its Layers button's
 // (cad::LayerOverrides): subtractive, so a view never shows what the document
@@ -98,10 +102,16 @@
 //
 //   view=2 kind=plan followed=1 centre=50,40 scale=8 area=x0,y0,x1,y1
 //
-// and with scope words, the scope's record first:
+// and with scope words, the scope's record first, and shown= on the record
+// of the view framed - how many of what matched it shows, and framed:
 //
 //   scope=selection matched=1
-//   view=2 kind=plan centre=25,20 scale=... area=...
+//   view=2 kind=plan centre=25,20 scale=... area=... shown=1
+//
+// or, when the view shows none of it, no place, since it did not move:
+//
+//   scope=selection matched=1
+//   view=2 kind=plan shown=0 moved=no
 
 #include <functional>
 #include <optional>
@@ -127,9 +137,10 @@ struct ZoomRequest {
         Factor,  // times `factor` about the view's centre: above 1 is closer
         Window,  // frames `window` as Zoom Extents frames the drawing
         Centre,  // `centre` in the middle, at `scale` pixels per unit if given
-        // What a scope took: `window`, their extent (extentOf), framed as
-        // WINDOW frames a box in a plan view; `ids` themselves in a 3D or
-        // elevation view, which frames the box its scene puts them in.
+        // What a scope took that the view shows: `window`, their extent
+        // (extentOf), framed as WINDOW frames a box in a plan view; `ids`
+        // themselves in a 3D or elevation view, which frames the box its
+        // scene puts them in.
         Scope,
     };
     ViewId view = kNoView;
@@ -137,7 +148,8 @@ struct ZoomRequest {
     // In, Out and Factor: finite and above 0.
     double factor = 2.0;
     katana::geometry::Box2 window{};
-    // Scope: what it took, in ascending order.
+    // Scope: what it took that the view shows (drawn, or ghosted), in
+    // ascending order; `window` is their extent.
     std::vector<katana::entity::EntityId> ids{};
     katana::geometry::Point2 centre{};
     // Within ViewTransform's limits: SCALE outside them is refused, not

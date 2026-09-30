@@ -223,6 +223,49 @@ TEST(Theme, ALinkWaitingForASecondViewIsFramedDashedNotSolid)
     EXPECT_LT(dashes, straight) << "and the gaps";
 }
 
+TEST(Theme, ACheckedMenuItemWithAnIconIsFramedAndAnUncheckedOneIsNot)
+{
+    // Grid, Object Snap, Link This View: the stylesheet drew a checkable item
+    // that has an icon with no check mark at all, and on looked exactly like
+    // off, pixel for pixel. Two items alike but for the check, one above the
+    // other, the unchecked one the baseline: what differs is the checked
+    // one's frame - the accent's blue, round the icon, which is 16 px across
+    // (Fusion's small icon) - and nothing else.
+    const std::unique_ptr<QStyle> style(theme::makeStyle());
+    QMenu menu;
+    menu.setStyle(style.get());
+    menu.setStyleSheet(theme::styleSheet());
+    QAction* on = menu.addAction(katana::qt::icon(Icon::Grid), "Grid");
+    on->setCheckable(true);
+    on->setChecked(true);
+    QAction* off = menu.addAction(katana::qt::icon(Icon::Grid), "Grid");
+    off->setCheckable(true);
+    menu.adjustSize();
+    const QImage shot = menu.grab().toImage();
+    const QRect onRow = menu.actionGeometry(on);
+    const QRect offRow = menu.actionGeometry(off);
+    ASSERT_EQ(onRow.size(), offRow.size());
+    int differ = 0;
+    int blue = 0;
+    QRect framed;
+    for (int y = 0; y < onRow.height(); ++y) {
+        for (int x = 0; x < onRow.width(); ++x) {
+            const QRgb a = shot.pixel(onRow.left() + x, onRow.top() + y);
+            if (a == shot.pixel(offRow.left() + x, offRow.top() + y)) {
+                continue;
+            }
+            ++differ;
+            blue += qBlue(a) > 2 * qRed(a) && qBlue(a) > 40 ? 1 : 0;
+            framed = framed.united(QRect(x, y, 1, 1));
+        }
+    }
+    EXPECT_GT(differ, 0) << "checked and unchecked look alike";
+    EXPECT_GT(blue, 0) << "the frame is the accent";
+    EXPECT_GE(framed.width(), 16) << "round the icon";
+    EXPECT_GE(framed.height(), 16) << "round the icon";
+    EXPECT_LT(framed.right(), onRow.width() / 2) << "the icon's cell, not the words";
+}
+
 TEST(Icons, TheListHoldsEveryIconOnceAndEachPaintsSomething)
 {
     // Declaration order, one of each: the contact sheet and this test see

@@ -331,11 +331,13 @@ void ViewportWidget::frameOnFirstPaint()
     if (!bounds.empty()) {
         state_.plan.fit(bounds, kFrameMargin);
         framedBox_ = bounds;
-        // Not the user's move: a view linked while it had never been seen
-        // leads the link from here (cad::ViewSet::follow).
-        if (onViewMoved) {
-            onViewMoved(false);
-        }
+    }
+    // Not the user's move: a view linked while it had never been seen leads
+    // the link from here (cad::ViewSet::follow) - or, framed on nothing,
+    // takes the link's place (ViewWorkspace::viewMoved): it said nothing
+    // then, and the link it led showed two places, both views linked=yes.
+    if (onViewMoved) {
+        onViewMoved(false);
     }
 }
 

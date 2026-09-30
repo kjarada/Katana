@@ -8,12 +8,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <format>
 #include <functional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "katana/cad/scene.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -1211,6 +1213,97 @@ TEST(SceneLayersBuild, OverlayBoundsAreWhereTheOverlayWouldDrawTheIds)
     // The ids asked about are framed, not the selection: the as-built line
     // is not selected.
     EXPECT_FALSE(scene.document.selection().contains(ids.back()));
+}
+
+TEST(SceneLayersBuild, TheOverlayWalkingTheSelectionFindsExactlyWhatAWalkOfTheDrawingFinds)
+{
+    // CLAUDE.md section 5: the overlay was culled from a walk of the whole
+    // drawing, keeping the selected, to a walk of the selection's ids alone
+    // (BM_SceneSelectionBuild, docs/render.md). The one-list build still
+    // walks the drawing, and draws each selected entity it meets in the
+    // selection colour: its selection-coloured lines and points, in order,
+    // are what the exhaustive walk kept. The overlay is exactly those - the
+    // same vertices, in the same order - with unselected entities between
+    // the selected ones, a selected entity on a layer the drawing hides, and
+    // a selected id whose entity has been deleted.
+    Document document;
+    katana::entity::Layer off;
+    off.name = "off";
+    off.visible = false;
+    ASSERT_TRUE(document.execute(katana::commands::createLayer(off)).ok());
+    katana::commands::EntityAttributes hidden;
+    hidden.layer = "off";
+    const auto made = [&document] { return document.model().entities.ids().back(); };
+    std::vector<katana::entity::EntityId> selected;
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0, 0), Point2(10, 0))).ok());
+    selected.push_back(made());
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0, 5), Point2(10, 5))).ok());
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createPolyline(katana::geometry::Polyline2{
+                        {Point2(20, 0), Point2(30, 0), Point2(30, 10), Point2(20, 10)}, true}))
+                    .ok());
+    selected.push_back(made());
+    ASSERT_TRUE(document.execute(katana::commands::createCircle(Point2(50, 50), 5)).ok());
+    selected.push_back(made());
+    ASSERT_TRUE(document.execute(katana::commands::createPoint(Point2(60, 60))).ok());
+    ASSERT_TRUE(document.execute(katana::commands::createPoint(Point2(70, 70))).ok());
+    selected.push_back(made());
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0, 20), Point2(5, 25), hidden))
+            .ok());
+    selected.push_back(made());
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(80, 0), Point2(90, 0))).ok());
+    const katana::entity::EntityId gone = made();
+    ASSERT_TRUE(document.execute(katana::commands::deleteEntities({gone})).ok());
+    for (const katana::entity::EntityId id : selected) {
+        document.selection().add(id);
+    }
+    document.selection().add(gone); // an id the drawing no longer holds
+
+    const SceneOptions options = plainOptions();
+    SceneBuilder builder;
+    DrawList walked;
+    builder.build(document, {}, options, walked);
+    const SceneLayers layers = layersOf(document, {}, options);
+    const DrawList& culled = layers.selection;
+
+    using Ends = std::array<double, 6>;
+    const auto endsOf = [](const DrawList& list, katana::render::VertexIndex a,
+                           katana::render::VertexIndex b) {
+        const auto& p = list.positions[a];
+        const auto& q = list.positions[b];
+        return Ends{p.x, p.y, p.z, q.x, q.y, q.z};
+    };
+    std::vector<Ends> walkedLines;
+    std::vector<Ends> walkedPoints;
+    for (const katana::render::DrawLine& line : walked.lines) {
+        if (walked.colors[line.a] == options.selectionColor) {
+            walkedLines.push_back(endsOf(walked, line.a, line.b));
+        }
+    }
+    for (const katana::render::DrawPoint& point : walked.points) {
+        if (walked.colors[point.a] == options.selectionColor) {
+            walkedPoints.push_back(endsOf(walked, point.a, point.a));
+        }
+    }
+    std::vector<Ends> culledLines;
+    std::vector<Ends> culledPoints;
+    for (const katana::render::DrawLine& line : culled.lines) {
+        culledLines.push_back(endsOf(culled, line.a, line.b));
+    }
+    for (const katana::render::DrawPoint& point : culled.points) {
+        culledPoints.push_back(endsOf(culled, point.a, point.a));
+    }
+    // It reaches what it claims to: the line, the closed polyline's four
+    // sides, the circle's chords and the point - and nothing of the hidden
+    // line or of the deleted one.
+    EXPECT_GT(walkedLines.size(), 1u + 4u + 8u);
+    EXPECT_EQ(walkedPoints.size(), 1u);
+    EXPECT_EQ(culledLines, walkedLines);
+    EXPECT_EQ(culledPoints, walkedPoints);
 }
 
 // ---- one frame: the layers drawn as the 3D view draws them -----------------------

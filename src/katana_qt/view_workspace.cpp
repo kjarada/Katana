@@ -81,6 +81,21 @@ QString transparentZoomLine(const QString& typed)
     return "ZOOM" + (blank < 0 ? QString() : text.mid(blank));
 }
 
+// `line` for view `id`, unless it names a view of its own. A ZOOM typed at a
+// tool's prompt is for the view the tool picks its points in: without its
+// view= it zoomed the ACTIVE view, which a click on another view's bar or
+// drawing - to look at it - had made another, and the tool's view, where
+// the next point is picked, stayed where it was.
+QString forView(const QString& line, ViewId id)
+{
+    for (const QString& word : line.split(' ', Qt::SkipEmptyParts)) {
+        if (word.startsWith(QStringLiteral("view="), Qt::CaseInsensitive)) {
+            return line;
+        }
+    }
+    return line + QString(" view=%1").arg(id);
+}
+
 } // namespace
 
 ViewDock::ViewDock(ViewId id, QWidget* parent) : QDockWidget(parent), id_(id)
@@ -350,9 +365,8 @@ void ViewWorkspace::installChrome(View& view)
         action->setCheckable(true);
         action->setData(static_cast<int>(choice));
         group->addAction(action);
-        // setViewKind and zoomExtents(id) below fail only for an id that is
-        // not open, and this menu and that button are deleted with the view's
-        // dock: there is no failure here to report.
+        // setViewKind fails only for an id that is not open, and this menu is
+        // deleted with the view's dock: there is no failure here to report.
         connect(action, &QAction::triggered, this, [this, id, choice] {
             (void)setViewKind(id, choice);
             activate(id);
@@ -990,14 +1004,15 @@ void ViewWorkspace::wireTools(ViewportWidget& plan, ViewId id)
     };
     // ZOOM typed while a tool runs - Z, 'ZOOM - is the view's, not the tool's:
     // it runs as its ZOOM line through the command runner and the tool stays
-    // at its step, as AutoCAD resumes LINE after 'ZOOM. PAN has no verb, so
-    // the host goes on refusing it by name.
-    plan.toolHost().onTransparent = [this](const std::string& command) {
+    // at its step, as AutoCAD resumes LINE after 'ZOOM. The line names this
+    // view, the one the tool runs in, whichever is active (forView). PAN has
+    // no verb, so the host goes on refusing it by name.
+    plan.toolHost().onTransparent = [this, id](const std::string& command) {
         const QString line = transparentZoomLine(QString::fromStdString(command));
         if (line.isEmpty()) {
             return false;
         }
-        runViewLine(line);
+        runViewLine(forView(line, id));
         return true;
     };
 }
@@ -1154,13 +1169,6 @@ void ViewWorkspace::drawingReplaced()
     }
 }
 
-void ViewWorkspace::zoomExtents()
-{
-    if (const ViewState* state = views_.active()) {
-        (void)zoomExtents(state->id);
-    }
-}
-
 Status ViewWorkspace::zoomExtents(ViewId id)
 {
     const View* view = find(id);
@@ -1311,9 +1319,13 @@ void ViewWorkspace::updateZoomTools(const View& view)
                    QStringLiteral("Twice as close %1%2.").arg(about, follow));
     setTitleBarTip(view.zoomOutButton, QStringLiteral("Zoom Out"),
                    QStringLiteral("Twice as far %1%2.").arg(about, follow));
+    // True of every kind by one rule (ZOOM frames what the view shows of a
+    // scope): a plan view framed all of the selection, and jumped to empty
+    // ground for one on a layer it hides with its ghosts off.
     setTitleBarTip(view.zoomSelectionButton, QStringLiteral("Zoom to Selection"),
-                   QStringLiteral("Frame what is selected, as this view draws it%1. Nothing "
-                                  "selected, or none of it drawn here: nothing moves.")
+                   QStringLiteral("Frame what is selected, as this view shows it, faint ghosts "
+                                  "included%1. Nothing selected, or none of it shown here: "
+                                  "nothing moves.")
                        .arg(follow));
     if (view.zoomExtentsButton != nullptr) {
         setTitleBarTip(view.zoomExtentsButton, QStringLiteral("Zoom Extents"),
@@ -1416,16 +1428,49 @@ void ViewWorkspace::viewMoved(ViewId id, bool byUser)
     if (state == nullptr || !state->linked) {
         return;
     }
-    for (const ViewId follower : views_.follow(id)) {
+    ViewId source = id;
+    if (const ViewportWidget* plan = planView(id);
+        !byUser && plan != nullptr && plan->drawnBounds().empty()) {
+        // Framed at its first paint on nothing - it hides every layer with
+        // anything on it: the place it holds is the one every new view
+        // starts at, no place to lead the link to, and leading from it the
+        // link showed two places. It takes the link's place instead, from
+        // the member moved last that has framed; with none framed yet, it
+        // waits for the first that frames, which brings it along.
+        source = framedMemberBesides(id);
+        if (source == katana::cad::kNoView) {
+            return;
+        }
+    }
+    for (const ViewId follower : views_.follow(source)) {
         if (ViewportWidget* plan = planView(follower)) {
             plan->holdView();
         }
     }
     // The view that moved holds it too: a frame refitted on its next resize
     // would change its scale, which no follower would hear of.
-    if (ViewportWidget* plan = planView(id)) {
+    if (ViewportWidget* plan = planView(source)) {
         plan->holdView();
     }
+}
+
+ViewId ViewWorkspace::framedMemberBesides(ViewId id) const
+{
+    ViewId best = katana::cad::kNoView;
+    std::uint64_t latest = 0;
+    for (const ViewId member : views_.linkedViews()) {
+        const ViewState* state = views_.find(member);
+        if (member == id || state == nullptr || !state->planFramed) {
+            continue;
+        }
+        // The first framed member, in the order the views were opened, until
+        // one moved by the user later.
+        if (best == katana::cad::kNoView || state->lastMoved > latest) {
+            best = member;
+            latest = state->lastMoved;
+        }
+    }
+    return best;
 }
 
 ViewId ViewWorkspace::linkFramer() const
@@ -1459,13 +1504,17 @@ Result<std::vector<ViewId>> ViewWorkspace::zoomView(const katana::cad::ZoomReque
         (void)zoomExtents(request.view);
         break;
     case Kind::Scope:
-        // What a scope took, in 3D: the box its scene puts them in. None of
-        // them drawn there, nothing to frame, and no view moved.
+        // What a scope took that the view shows (the verb has kept those
+        // alone): in 3D, the box its scene puts them in; in plan, their
+        // extent. Nothing of them to frame, and no view moved.
         if (view->render != nullptr) {
             if (!view->render->zoomToEntities(request.ids)) {
                 return std::vector<ViewId>{};
             }
             break;
+        }
+        if (request.window.empty()) {
+            return std::vector<ViewId>{};
         }
         [[fallthrough]];
     case Kind::Window:

@@ -258,6 +258,42 @@ TEST(ViewLinks, AViewLinkedBeforeItWasEverSeenLeadsFromItsFirstPaint)
     expectSameView(w.state(a), w.state(b));
 }
 
+TEST(ViewLinks, ALinkLedByAViewThatFramesNothingAtItsFirstPaintTakesTheOthersPlace)
+{
+    // As above, but B hides the drawing's one layer: its first paint frames
+    // nothing and leaves it where every new view starts, the origin at 10 px
+    // a unit. That frame led nobody, and the link showed two places - A on
+    // the line, B at the origin - with both views saying linked=yes. B has no
+    // place of its own worth leading to; it takes A's, the place the user
+    // put A: the line's middle (1050, 1025) at 2 px a unit.
+    LinkedWorkspace w;
+    ASSERT_TRUE(w.document.execute(katana::commands::createLayer(layerNamed("design"))).ok());
+    katana::commands::EntityAttributes design = w.document.currentAttributes();
+    design.layer = "design";
+    ASSERT_TRUE(w.document
+                    .execute(katana::commands::createLine(Point2(1000, 1000),
+                                                          Point2(1100, 1050), design))
+                    .ok());
+    const ViewId a = w.views->viewSet().activeId();
+    w.place(a, 300, 200, 1050, 1025, 2);
+    const ViewId b = w.views->openView(ViewKind::Plan).id;
+    // Straight to the interpreter, as a script runs its lines: the event
+    // loop would paint B at once.
+    const std::string ids = std::to_string(a) + "," + std::to_string(b);
+    ASSERT_TRUE(w.interpreter.run("VIEWS HIDE " + std::to_string(b) + " design").ok());
+    const auto linked = w.interpreter.run("VIEWS LINK " + ids + " TO " + std::to_string(b));
+    ASSERT_TRUE(linked.ok());
+    EXPECT_EQ(*linked, "leader=2 linked=1,2 moved=none");
+
+    paint(w.plan(b));
+    processEvents();
+
+    ASSERT_TRUE(w.plan(b).drawnBounds().empty()) << "B draws nothing";
+    EXPECT_EQ(w.state(a).plan.center, Point2(1050, 1025)) << "A stays where it was put";
+    EXPECT_EQ(w.state(a).plan.scale, 2.0);
+    expectSameView(w.state(b), w.state(a));
+}
+
 TEST(ViewLinks, AWheelInAnUnlinkedViewMovesNoOtherView)
 {
     LinkedWorkspace w;
@@ -540,11 +576,13 @@ TEST(ViewLinks, ATransparentZoomTypedInsideLineZoomsAndLeavesLineAtItsStep)
     ASSERT_TRUE(w.views->typeIntoTool("0,0"));
     const std::string prompt = w.plan(plan).toolHost().prompt();
 
-    // Z, as a person types it at the second point: the view's, not a point.
+    // Z, as a person types it at the second point: the view's, not a point -
+    // the view the tool runs in, which the line names.
+    const std::string inView = " view=" + std::to_string(plan);
     ASSERT_TRUE(w.views->typeIntoTool("Z"));
     processEvents();
     ASSERT_FALSE(w.ran.isEmpty());
-    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM");
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM" + inView);
     EXPECT_EQ(w.state(plan).plan.center, Point2(150, 125));
     // The tool is where it was: still Line, still asking for the next point.
     EXPECT_EQ(w.views->activeToolId(), "draw.line");
@@ -554,7 +592,7 @@ TEST(ViewLinks, ATransparentZoomTypedInsideLineZoomsAndLeavesLineAtItsStep)
     // 'ZOOM IN with AutoCAD's apostrophe is the same; PAN has no verb and is
     // refused by name, the tool untouched.
     ASSERT_TRUE(w.views->typeIntoTool("'ZOOM IN"));
-    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM IN");
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM IN" + inView);
     const qsizetype before = w.ran.size();
     ASSERT_TRUE(w.views->typeIntoTool("PAN"));
     EXPECT_EQ(w.ran.size(), before) << "PAN ran nothing";
@@ -579,6 +617,42 @@ TEST(ViewLinks, ATransparentZoomTypedInsideLineZoomsAndLeavesLineAtItsStep)
     EXPECT_EQ(segment->end, Point2(10, 0));
     w.views->stopTool();
     EXPECT_FALSE(w.views->runsTransparently("Z")) << "no tool runs: Z is a command";
+}
+
+TEST(ViewLinks, AZoomTypedAtAToolsPromptZoomsTheViewTheToolRunsInNotTheActiveOne)
+{
+    // Line runs in view 1 when view 2 is made the active one - clicked to be
+    // looked at. The Z typed at Line's prompt zoomed view 2, and view 1, where
+    // Line picks its next point, stayed where it was. It is view 1's now,
+    // framed on the line's middle (150, 125); a view= typed is kept.
+    LinkedWorkspace w;
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(100, 100), Point2(200, 150)))
+            .ok());
+    const ViewId drawing = w.views->viewSet().activeId();
+    const ViewId other = w.views->openView(ViewKind::Plan).id;
+    processEvents();
+    w.place(drawing, 300, 200, 0, 0, 10);
+    w.place(other, 300, 200, -40, -40, 3);
+    (void)w.run("VIEWS ACTIVATE " + std::to_string(drawing));
+    ASSERT_TRUE(w.views->startTool("draw.line").ok());
+    ASSERT_NE(w.plan(drawing).activeToolId(), "") << "Line runs in view 1";
+    ASSERT_TRUE(w.views->typeIntoTool("0,0"));
+    (void)w.run("VIEWS ACTIVATE " + std::to_string(other));
+    ASSERT_EQ(w.views->viewSet().activeId(), other);
+    ASSERT_EQ(w.views->activeToolId(), "draw.line");
+
+    ASSERT_TRUE(w.views->typeIntoTool("'Z"));
+    processEvents();
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM view=" + std::to_string(drawing));
+    EXPECT_EQ(w.state(drawing).plan.center, Point2(150, 125));
+    EXPECT_EQ(w.state(other).plan.center, Point2(-40, -40)) << "the view looked at stays put";
+    EXPECT_EQ(w.plan(drawing).toolExpects(), katana::cad::ToolInput::Point);
+
+    ASSERT_TRUE(w.views->typeIntoTool("ZOOM IN view=" + QString::number(other)));
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM IN view=" + std::to_string(other));
+    EXPECT_EQ(w.state(other).plan.scale, 6.0) << "twice as close, where it was asked";
+    w.views->stopTool();
 }
 
 TEST(ViewLinks, ASectionsZoomInIsTwiceAsCloseAboutTheMiddleOfItsPlot)
@@ -749,6 +823,42 @@ TEST(ViewLinks, AThreeDViewsZoomInIsTwiceAsCloseAboutItsMiddle)
     EXPECT_NEAR(w.state(model).camera.distance(), before.distance(), 1e-12 * before.distance());
 }
 
+TEST(ViewLinks, AnEnormousZoomOutOfAThreeDViewStopsWhereTheSceneIsAPixelAcross)
+{
+    // ZOOM 1e-300 took the eye 4.7e302 units off, where the camera's
+    // arithmetic had no digits left for where it looked: the target, the
+    // middle of the view, moved from (87.5, 68.69) to (175, 137.38). It goes
+    // out no farther than where the scene is a pixel across. The line
+    // (0,0)-(100,50) on the datum 0 is the whole scene, whose diagonal,
+    // sqrt(100^2 + 50^2), is a pixel across at that times (H / 2) /
+    // tan(fov / 2), H the camera's height in pixels and fov its 45 degrees.
+    // Out there, a further zoom out does nothing, and a zoom in halves the
+    // distance as ever.
+    LinkedWorkspace w;
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(0, 0), Point2(100, 50))).ok());
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    processEvents();
+    paint(*w.views->renderView(model));
+    const katana::render::Camera before = w.state(model).camera;
+    const double farthest = std::hypot(100.0, 50.0) * 0.5 * before.viewportHeight() /
+                            std::tan(0.5 * before.fieldOfView());
+    ASSERT_LT(before.distance(), farthest);
+
+    const std::string line = " view=" + std::to_string(model);
+    (void)w.run("ZOOM 1e-300" + line);
+    const katana::render::Camera& after = w.state(model).camera;
+    EXPECT_NEAR(after.distance(), farthest, 1e-9 * farthest);
+    EXPECT_NEAR(after.target().x, before.target().x, 1e-9 * farthest);
+    EXPECT_NEAR(after.target().y, before.target().y, 1e-9 * farthest);
+    EXPECT_NEAR(after.target().z, before.target().z, 1e-9 * farthest);
+
+    (void)w.run("ZOOM OUT" + line);
+    EXPECT_NEAR(w.state(model).camera.distance(), farthest, 1e-9 * farthest);
+    (void)w.run("ZOOM IN" + line);
+    EXPECT_NEAR(w.state(model).camera.distance(), 0.5 * farthest, 1e-9 * farthest);
+}
+
 TEST(ViewLinks, AThreeDViewNotYetPaintedFramesTheSceneBeforeItZooms)
 {
     // As a plan view: VIEWS OPEN 3d and ZOOM IN back to back. The zoom was
@@ -818,13 +928,57 @@ TEST(ViewLinks, ZoomToSelectionInAThreeDViewFramesWhatItDrawsOfTheSelection)
     EXPECT_LT(w.state(model).camera.distance(), start.distance()) << "closer: 45 units, not 500";
 
     // Hidden in that view, and not ghosted there: nothing of it is drawn,
-    // nothing to frame.
+    // nothing to frame, and the view's record says so.
     (void)w.run("VIEWS HIDE " + std::to_string(model) + " far");
     (void)w.run("VIEWS SET " + std::to_string(model) + " ghosts=off");
     const katana::render::Camera shown = w.state(model).camera;
-    EXPECT_EQ(w.run(line), "scope=selection matched=1");
+    EXPECT_EQ(w.run(line), "scope=selection matched=1\nview=" + std::to_string(model) +
+                               " kind=3d shown=0 moved=no");
     EXPECT_EQ(w.state(model).camera.target(), shown.target());
     EXPECT_EQ(w.state(model).camera.distance(), shown.distance());
+}
+
+TEST(ViewLinks, APlanViewsZoomToSelectionMovesNothingWhereItShowsNoneOfTheSelection)
+{
+    // The as-built view hides the design layer with its ghosts off, and the
+    // design line is selected: its bar's Zoom to Selection framed the line
+    // it does not show - empty ground there - and took the design view
+    // along, where its tip says nothing moves. Its ghosts on, it shows the
+    // line faintly and frames it: by hand (10,10)-(40,30) in 300 x 200 at
+    // 0.84 x 300 / 30 = 8.4 px a unit, about (25, 20).
+    LinkedWorkspace w;
+    ASSERT_TRUE(w.document.execute(katana::commands::createLayer(layerNamed("design"))).ok());
+    katana::commands::EntityAttributes design = w.document.currentAttributes();
+    design.layer = "design";
+    ASSERT_TRUE(w.document
+                    .execute(katana::commands::createLine(Point2(10, 10), Point2(40, 30), design))
+                    .ok());
+    const ViewId a = w.views->viewSet().activeId();
+    const ViewId b = w.views->openView(ViewKind::Plan).id;
+    processEvents();
+    w.place(a, 300, 200, -500, -500, 2);
+    w.place(b, 300, 200, -500, -500, 2);
+    (void)w.run("VIEWS LINK " + std::to_string(a) + "," + std::to_string(b));
+    (void)w.run("VIEWS HIDE " + std::to_string(b) + " design");
+    (void)w.run("VIEWS SET " + std::to_string(b) + " ghosts=off");
+    (void)w.run("SELECT ALL");
+    ASSERT_EQ(w.document.selection().size(), 1U);
+
+    QToolButton* zoomSelection = w.button(b, "ViewZoomSelectionButton");
+    ASSERT_NE(zoomSelection, nullptr);
+    zoomSelection->click();
+    processEvents();
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM SELECTION view=2");
+    EXPECT_EQ(w.state(b).plan.center, Point2(-500, -500)) << "nothing of it shown there";
+    EXPECT_EQ(w.state(b).plan.scale, 2.0);
+    EXPECT_EQ(w.state(a).plan.center, Point2(-500, -500)) << "and the link stayed put";
+
+    (void)w.run("VIEWS SET " + std::to_string(b) + " ghosts=on");
+    zoomSelection->click();
+    processEvents();
+    EXPECT_EQ(w.state(b).plan.center, Point2(25, 20));
+    EXPECT_NEAR(w.state(b).plan.scale, 8.4, 1e-12);
+    expectSameView(w.state(a), w.state(b));
 }
 
 TEST(ViewLinks, TheBarsZoomInAndOutRunTheirLinesAndZoomTheView)
@@ -991,9 +1145,17 @@ TEST(ZoomTo, TheStatusSaysWhatZoomAnsweredAsASentenceAndARefusalInTheErrorColour
                                         "view=3 kind=plan followed=2 centre=1,2 scale=3")
                   .toStdString(),
               "5 matched, framed in view 2; views 1 and 3 followed.");
-    // A 3D view that draws none of what the scope took.
-    EXPECT_EQ(ZoomToDialog::spokenReply("scope=selection matched=2").toStdString(),
-              "2 matched, none of them drawn in that view: nothing moved.");
+    // A view that shows none of what the scope took: it said "framed in
+    // view 2" of a plan view showing none of it.
+    EXPECT_EQ(ZoomToDialog::spokenReply("scope=selection matched=2\n"
+                                        "view=2 kind=plan shown=0 moved=no")
+                  .toStdString(),
+              "2 matched, but view 2 shows none of them: nothing moved.");
+    // One that shows some of them, which it frames.
+    EXPECT_EQ(ZoomToDialog::spokenReply("scope=layers layers=a,b sublayers=yes matched=5\n"
+                                        "view=3 kind=3d target=1,2,3 distance=4 shown=2")
+                  .toStdString(),
+              "5 matched, 2 of them shown and framed in view 3.");
 
     katana::qt::ZoomToContext context;
     context.run = [](const QString&) {

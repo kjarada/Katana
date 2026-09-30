@@ -1380,8 +1380,9 @@ if(TARGET katana)
     # command (ToolHost::onTransparent), never handed to the tool as a
     # malformed point, and the tool carries on at the same step. The view
     # runs it (ViewWorkspace::wireTools) as its ZOOM line through the one
-    # executor, so its record comes before the inverse, and the line is
-    # logged once: the command line leaves the echo to the executor. Before
+    # executor - naming the view the tool runs in, ZOOM view=1, whichever
+    # view is active - so its record comes before the inverse, and the line
+    # is logged once: the command line leaves the echo to the executor. Before
     # the view ran it the host refused it aloud ("cannot run inside"); a
     # ZOOM wrongly sent to the tool would be refused by the tool instead and
     # the inverse would still follow, which the result alone cannot tell
@@ -1391,7 +1392,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>DIST|>0,0|>ZOOM|>3,4|?commandLog"
-            "-DEXPECT=view=1 kind=plan[^\r\n]*.*Horizontal distance 5[.]000.*commandLog: .*> ZOOM view=1 kind=plan"
+            "-DEXPECT=view=1 kind=plan[^\r\n]*.*Horizontal distance 5[.]000.*commandLog: .*> ZOOM view=1 view=1 kind=plan"
             "-DFORBID=cannot run inside|not an input this tool takes|> ZOOM > ZOOM"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dist_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -1578,6 +1579,22 @@ if(TARGET katana)
             "-DFORBID=unknown command|does not take"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zoom_to_selection_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A view frames what it shows of the selection, in plan as in 3D: the
+    # as-built view hides the design layer with its ghosts off, so its bar's
+    # Zoom to Selection, with the design line selected, moves nothing and
+    # says so. It framed the line it does not show - empty ground there, the
+    # design line's middle (25, 20) - and took the design view along. Both
+    # stay on the as-built line's middle, (70, 20), where ZOOM WINDOW put
+    # them; the PNG is view 2 still showing the as-built line.
+    add_test(NAME qt_a_plan_views_zoom_to_selection_moves_nothing_it_does_not_show_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 60,30 90,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS SET 2 ghosts=off|>VIEWS LINK 1,2|>ZOOM WINDOW 40,0,100,40 view=2|>SELECT LAYER design|%View2|!ViewZoomSelectionButton|>VIEWS"
+            "-DEXPECT=scope=selection matched=1[\r\n]+view=2 kind=plan shown=0 moved=no[\r\n]+.*view=1 kind=plan title=\"Plan 1\"[^\r\n]* linked=yes centre=70,20 [^\r\n]*[\r\n]+view=2 kind=plan title=\"Plan 2\"[^\r\n]* linked=yes centre=70,20 "
+            "-DFORBID=unknown command|no layer '|centre=25,20"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zoom_to_selection_shows_none_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # View > Zoom To: the shared scope and filter controls build the ZOOM
     # line and hand it to the one executor; the status says what ZOOM
     # answered. The design line alone is taken: the whole drawing, filtered
@@ -1670,6 +1687,7 @@ if(TARGET katana)
                          qt_link_this_view_is_disabled_while_a_3d_view_is_active_headless
                          qt_a_press_of_a_hidden_bar_tool_is_refused_headless
                          qt_zoom_to_selection_moves_the_linked_views_headless
+                         qt_a_plan_views_zoom_to_selection_moves_nothing_it_does_not_show_headless
                          qt_zoom_to_dialog_runs_its_line_headless
                          qt_zoom_to_frames_the_scope_in_the_view_chosen_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless

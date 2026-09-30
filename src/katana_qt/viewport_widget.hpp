@@ -186,10 +186,11 @@ class ViewportWidget final : public QWidget {
 
     // Raised when this view's pan or zoom has just changed: a wheel notch, a
     // middle-drag pan and a frame (Zoom Extents, zoomTo) with `byUser` true,
-    // the first paint's frame with false. What linked views follow
-    // (ViewWorkspace::viewMoved). Never raised by holdView or by a change
-    // made to the state from outside, so a view following another never
-    // reports the move it was given.
+    // the first paint's frame with false - on nothing too, when the view
+    // draws nothing and keeps the place it started at. What linked views
+    // follow (ViewWorkspace::viewMoved). Never raised by holdView or by a
+    // change made to the state from outside, so a view following another
+    // never reports the move it was given.
     std::function<void(bool byUser)> onViewMoved;
     // The Zoom Extents a middle double-click asks for, done by the host when
     // it sets this: it knows the link, and a linked view that draws nothing

@@ -665,6 +665,140 @@ TEST_F(ViewVerbsTest, AScopeThatMatchesNothingMovesNoViewAndSaysSo)
     EXPECT_EQ(refused("ZOOM LAYERS nosuch").code, ErrorCode::NotFound);
 }
 
+// ---- what a view shows of what a scope took ------------------------------------------------
+//
+// The design line (10,10)-(40,30) on "design" and the as-built line
+// (100,100)-(110,120) on "asbuilt". A view frames what it shows of what a
+// scope took (view_verbs.hpp): the design line alone is framed about its
+// middle (25, 20) - at 8.4 px a unit in the 300 x 200 view, as above - and
+// the two lines together are the box (10,10)-(110,120).
+
+TEST_F(ViewVerbsTest, APlanViewFramesWhatItShowsOfTheSelectionAndSaysHowManyThatIs)
+{
+    addLayers(document, {"design", "asbuilt"});
+    const ViewState& view = plan();
+    (void)ok("LAYER SET design");
+    (void)ok("LINE 10,10 40,30");
+    (void)ok("LAYER SET asbuilt");
+    (void)ok("LINE 100,100 110,120");
+    const std::vector<katana::entity::EntityId> ids = document.model().entities.ids();
+    ASSERT_EQ(ids.size(), 2U);
+    (void)ok("SELECT ALL");
+    ASSERT_EQ(document.selection().size(), 2U);
+
+    // The view hides the as-built layer with its ghosts off: it shows the
+    // design line alone, and frames that.
+    (void)ok("VIEWS HIDE 1 asbuilt");
+    (void)ok("VIEWS SET 1 ghosts=off");
+    const std::string one = ok("ZOOM SELECTION view=1");
+    EXPECT_TRUE(one.starts_with("scope=selection matched=2\nview=1 kind=plan centre=25,20 "))
+        << one;
+    EXPECT_TRUE(one.ends_with(" shown=1")) << one;
+    ASSERT_EQ(host.zooms.size(), 1U);
+    EXPECT_EQ(host.zooms.back().ids, (std::vector<katana::entity::EntityId>{ids[0]}));
+    EXPECT_EQ(host.zooms.back().window.min, Point2(10, 10));
+    EXPECT_EQ(host.zooms.back().window.max, Point2(40, 30));
+    EXPECT_EQ(view.plan.center, Point2(25, 20));
+
+    // Its ghosts on, it shows the as-built line too, faintly, and frames both.
+    (void)ok("VIEWS SET 1 ghosts=on");
+    const std::string both = ok("ZOOM SELECTION view=1");
+    EXPECT_TRUE(both.ends_with(" shown=2")) << both;
+    EXPECT_EQ(host.zooms.back().ids, ids);
+    EXPECT_EQ(host.zooms.back().window.min, Point2(10, 10));
+    EXPECT_EQ(host.zooms.back().window.max, Point2(110, 120));
+    EXPECT_EQ(view.plan.center, Point2(60, 65));
+}
+
+TEST_F(ViewVerbsTest, AViewThatShowsNoneOfWhatTheScopeTookMovesNothingAndSaysSo)
+{
+    // It framed the box of everything the scope took and jumped - and took
+    // its link - to empty ground, where nothing selected was drawn or
+    // ghosted, while its tip promised nothing would move.
+    addLayers(document, {"design"});
+    const ViewState& view = plan();
+    (void)ok("LAYER SET design");
+    (void)ok("LINE 10,10 40,30");
+    (void)ok("LAYER SET 0");
+    (void)ok("SELECT ALL");
+    ASSERT_EQ(document.selection().size(), 1U);
+    const std::string none = "scope=selection matched=1\nview=1 kind=plan shown=0 moved=no";
+
+    // The view hides the layer, its ghosts off.
+    (void)ok("VIEWS HIDE 1 design");
+    (void)ok("VIEWS SET 1 ghosts=off");
+    EXPECT_EQ(ok("ZOOM SELECTION view=1"), none);
+
+    // The drawing hides it: hidden in every view, a ghost or not.
+    (void)ok("VIEWS SHOW 1 ALL");
+    (void)ok("VIEWS SET 1 ghosts=on");
+    (void)ok("LAYER HIDE design");
+    EXPECT_EQ(ok("ZOOM SELECTION view=1"), none);
+
+    // A ghost is of the selection alone: the design layer's line, taken by
+    // LAYERS and not selected, is shown nowhere in a view that hides it.
+    (void)ok("LAYER SHOW design");
+    (void)ok("VIEWS HIDE 1 design");
+    (void)ok("SELECT NONE");
+    EXPECT_EQ(ok("ZOOM LAYERS design view=1"),
+              "scope=layers layers=design sublayers=yes matched=1\n"
+              "view=1 kind=plan shown=0 moved=no");
+
+    EXPECT_TRUE(host.zooms.empty()) << "nothing was asked of the window";
+    EXPECT_EQ(view.plan.center, Point2(10, 20));
+    EXPECT_EQ(view.plan.scale, 4.0);
+}
+
+TEST_F(ViewVerbsTest, AThreeDViewAndAPlanViewFrameTheSelectionByOneRule)
+{
+    // The same rule for a 3D view, whose widget frames where its scene puts
+    // what it is handed: nothing it does not show is handed to it. And the
+    // one difference of kind: a plan view ghosts no label (the plan painter
+    // places labels among the others), where a 3D view marks where a
+    // ghosted one attaches.
+    addLayers(document, {"design"});
+    plan();
+    host.set.add(ViewKind::Model3D);
+    (void)ok("LAYER SET design");
+    (void)ok("LINE 10,10 40,30");
+    const katana::entity::EntityId line = document.model().entities.ids().back();
+    katana::entity::LabelStyle style;
+    style.name = "any";
+    ASSERT_TRUE(document.execute(katana::commands::createLabelStyle(style)).ok());
+    katana::entity::Entity label;
+    label.layer = "design";
+    label.geometry = katana::entity::LabelGeometry{
+        .target = line, .style = "any", .anchor = Point2(25, 20)};
+    ASSERT_TRUE(document.execute(katana::commands::createEntities({label})).ok());
+    const katana::entity::EntityId labelId = document.model().entities.ids().back();
+    ASSERT_NE(labelId, line);
+    (void)ok("VIEWS HIDE 1 design");
+    (void)ok("VIEWS HIDE 2 design");
+
+    // Ghosts off: neither view shows the selected line, and neither moves.
+    (void)ok("VIEWS SET 2 ghosts=off");
+    (void)ok("SELECT " + std::to_string(line));
+    EXPECT_EQ(ok("ZOOM SELECTION view=2"),
+              "scope=selection matched=1\nview=2 kind=3d shown=0 moved=no");
+    EXPECT_TRUE(host.zooms.empty());
+
+    // Ghosts on, the 3D view is handed the line it ghosts.
+    (void)ok("VIEWS SET 2 ghosts=on");
+    (void)ok("ZOOM SELECTION view=2");
+    ASSERT_EQ(host.zooms.size(), 1U);
+    EXPECT_EQ(host.zooms.back().ids, (std::vector<katana::entity::EntityId>{line}));
+
+    // The label alone, selected, on the layer both views hide with their
+    // ghosts on: the 3D view shows it, the plan view does not.
+    (void)ok("SELECT " + std::to_string(labelId));
+    (void)ok("ZOOM SELECTION view=2");
+    ASSERT_EQ(host.zooms.size(), 2U);
+    EXPECT_EQ(host.zooms.back().ids, (std::vector<katana::entity::EntityId>{labelId}));
+    EXPECT_EQ(ok("ZOOM SELECTION view=1"),
+              "scope=selection matched=1\nview=1 kind=plan shown=0 moved=no");
+    EXPECT_EQ(host.zooms.size(), 2U);
+}
+
 TEST_F(ViewVerbsTest, ZoomWithNoWordsIsStillExtentsNotTheSelection)
 {
     plan();
