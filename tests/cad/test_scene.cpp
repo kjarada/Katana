@@ -261,6 +261,29 @@ TEST(CadScene, SelectedEntitiesAreDrawnInTheSelectionColour)
     EXPECT_EQ(list.colors.front(), options.selectionColor);
 }
 
+TEST(CadScene, TheOneListBuildDrawsASelectedLineAtTheSelectionsOneWidth)
+{
+    // One width for a selected line in every build: the selection's core,
+    // 3 px (selection_style.hpp). The one-list build drew it at 2 px, from an
+    // option of its own that no view read.
+    Document document;
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(0.0, 0.0), Point2(10.0, 5.0),
+                                                           document.currentAttributes()))
+                    .ok());
+    const SceneOptions options = plainOptions();
+    SceneBuilder builder;
+    DrawList list;
+    builder.build(document, {}, options, list);
+    ASSERT_EQ(list.lines.size(), 1u);
+    EXPECT_EQ(list.lines[0].width, 1.0f) << "unselected, the entity width";
+
+    document.selection().add(document.model().entities.ids().back());
+    builder.build(document, {}, options, list);
+    ASSERT_EQ(list.lines.size(), 1u);
+    EXPECT_EQ(list.lines[0].width, 3.0f);
+}
+
 TEST(CadScene, TheGridIsBoundedHoweverFineASpacingIsAskedFor)
 {
     Document document;
@@ -1149,6 +1172,45 @@ TEST(SceneLayersBuild, NoGhostWhereTheDocumentHidesTheLayerOrTheViewTurnedGhosts
                   scene.options.selectionColor);
         EXPECT_EQ(layers.selectionCasing.lines.size(), 1u);
     }
+}
+
+TEST(SceneLayersBuild, OverlayBoundsAreWhereTheOverlayWouldDrawTheIds)
+{
+    // What a 3D view frames for ZOOM on a scope (SceneBuilder::overlayBounds):
+    // the ids where buildSelection would draw them were they the selection.
+    // By hand: the as-built line (0, 5)-(10, 5), and while the view ghosts
+    // what it hides, the design line (0, 0)-(10, 0) too - both on the datum
+    // a drawing with no heights and no surface stands on, entityElevation 0.
+    GhostScene scene;
+    const std::vector<katana::entity::EntityId> ids = scene.document.model().entities.ids();
+    ASSERT_EQ(ids.size(), 2u); // design, then as-built
+    SceneBuilder builder;
+    const SceneLayers layers = layersOf(scene.document, {}, scene.options);
+    ASSERT_EQ(layers.datum, 0.0);
+
+    const katana::math::AABB both =
+        builder.overlayBounds(scene.document, {}, scene.options, layers, ids);
+    EXPECT_EQ(both.min.x, 0.0);
+    EXPECT_EQ(both.min.y, 0.0);
+    EXPECT_EQ(both.max.x, 10.0);
+    EXPECT_EQ(both.max.y, 5.0);
+    EXPECT_EQ(both.min.z, 0.0);
+    EXPECT_EQ(both.max.z, 0.0);
+
+    // Ghosts off, the design line is nowhere this view draws: the as-built
+    // line alone, and nothing for the design line alone.
+    scene.options.selectionGhosts = false;
+    const katana::math::AABB shown =
+        builder.overlayBounds(scene.document, {}, scene.options, layers, ids);
+    EXPECT_EQ(shown.min.y, 5.0);
+    EXPECT_EQ(shown.max.y, 5.0);
+    const std::vector<katana::entity::EntityId> designOnly{ids.front()};
+    EXPECT_TRUE(builder.overlayBounds(scene.document, {}, scene.options, layers, designOnly)
+                    .empty());
+    EXPECT_TRUE(builder.overlayBounds(scene.document, {}, scene.options, layers, {}).empty());
+    // The ids asked about are framed, not the selection: the as-built line
+    // is not selected.
+    EXPECT_FALSE(scene.document.selection().contains(ids.back()));
 }
 
 // ---- one frame: the layers drawn as the 3D view draws them -----------------------

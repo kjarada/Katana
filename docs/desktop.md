@@ -555,11 +555,24 @@ an unlink, a close or a change of kind that leaves one member dissolves the
 link, and none of them moves a view.
 
 **Zoom Extents on every view** (`zoomExtentsAll`, after New, Open and an
-import) and `ViewWorkspace::zoomTo` frame the link ONCE, in the member moved
-last (else the lowest id), on the union of what the members draw; the others
-follow. Framed one by one, each on what it alone draws, a design view and an
-as-built view would come apart the moment a drawing opened
+import) frames the link ONCE, in the member moved last (else the lowest id),
+on the union of what the members draw (`ViewWorkspace::linkDrawnBounds`);
+the others follow. Framed one by one, each on what it alone draws, a design
+view and an as-built view would come apart the moment a drawing opened
 (`ViewLinks.ZoomExtentsAllFramesTheLinkOnceOnTheUnionOfWhatItsViewsDraw`).
+`ViewWorkspace::zoomTo` frames the box it is given, once, in that same
+member, and the others follow it. A linked view's own Zoom Extents frames
+what it draws; when it draws nothing - the design view hiding the drawing's
+only layer - it frames what the link draws instead: Zoom Extents on nothing
+goes to the origin at a pixel a unit, as it always has for a view alone,
+and a linked view took the as-built view there too, millions of units off
+a survey (`ViewLinks.ZoomExtentsInALinkedViewThatDrawsNothingFramesWhatTheLinkDraws`).
+The rule lives in `ViewWorkspace::zoomExtents(id)`, where every Zoom Extents
+of one view comes: `ZOOM EXTENTS`, the bar's button, Ctrl+E, and a plan
+view's middle double-click, which the widget hands to the workspace
+(`ViewportWidget::onZoomExtents`, as a GPU 3D view hands its own) - it went
+to the widget's own Zoom Extents, around the rule
+(`ViewLinks.AMiddleDoubleClickInALinkedViewThatDrawsNothingFramesWhatTheLinkDraws`).
 
 **The bar.** A plan view's bar is `[kind] Plan 1 ... [Link][Layers][Zoom
 Extents] [_][float][max][x]`. `ViewLinkButton` is checkable and never a menu
@@ -579,13 +592,19 @@ title-bar button had no frame at all: the rule for every chrome button came
 after `QToolButton:checked` with the same weight and took it away, so
 `theme.cpp` now has a `:checked` rule of its own for them. View > Link This
 View (`viewLinkActive`, Ctrl+Shift+L; K, as Viewport Layout has L) does the
-Link button's line for the active plan view, and View > Unlink All Views
-(`viewUnlinkAll`) runs `VIEWS UNLINK ALL`.
+Link button's line for the ACTIVE view, and is checked from its link; it is
+disabled while the active view is of a kind that cannot be linked. It took
+the plan view used last instead, so with a 3D view active it linked a view
+out of sight and showed itself checked for the 3D view
+(`qt_link_this_view_is_disabled_while_a_3d_view_is_active_headless`). View >
+Unlink All Views (`viewUnlinkAll`) runs `VIEWS UNLINK ALL`; both items are
+run by a test through the window
+(`qt_the_view_menus_link_items_link_the_active_view_and_unlink_all_headless`).
 
 **The zoom tools on the bar.** A plan view's bar is `[kind] Plan 1 ...
 [Link][Layers][Zoom In][Zoom Out][Zoom to Selection][Zoom Extents]
-[_][float][max][x]`; a section's has In, Out and Extents, a 3D or elevation
-view's Extents alone (below, "Not done"). Each is a plain button that runs
+[_][float][max][x]`; a 3D or elevation view's the same without the Link,
+and a section's has In, Out and Extents. Each is a plain button that runs
 its ZOOM line through the command runner - `ZOOM IN view=<id>`, `ZOOM OUT
 view=<id>`, `ZOOM SELECTION view=<id>`, `ZOOM EXTENTS view=<id>` - so a
 click is logged, the views linked with it follow, and Zoom to Selection with
@@ -594,10 +613,63 @@ kind would refuse is not offered: the bar shows what ZOOM takes there, and
 follows the view's kind, by ZOOM's own rule (`cad::zoomTakes`). The View
 menu has the same four for the active view (`viewZoomIn`, `viewZoomOut`,
 `viewZoomSelection`, and Zoom Extents, which now runs `ZOOM EXTENTS` too),
-enabled by the same rule for the active view's kind - a 3D view's Zoom In
-was offered and only refused
-(`qt_the_view_menus_zoom_in_is_disabled_for_a_3d_view_headless`) - and Zoom
-To (below).
+enabled by the same rule for the active view's kind - a section frames no
+scope, so its Zoom to Selection is disabled
+(`qt_the_view_menus_zoom_to_selection_is_disabled_for_a_section_headless`) -
+and Zoom To (below). The menu items and the bar's buttons are run by a test
+through the window, each line in the log and its view moved as asked
+(`qt_the_view_menus_zoom_items_and_the_bars_buttons_run_their_lines_headless`,
+`ViewLinks.TheBarsZoomInAndOutRunTheirLinesAndZoomTheView`). Each tool's tip
+says what it does in that kind of view, and only a view that can be linked
+says its linked views follow: one tip per tool promised a link to a section
+and a 3D view, which cannot have one
+(`ViewLinks.AZoomToolsTipSaysLinkedViewsFollowOnlyWhereTheViewCanBeLinked`).
+
+**In a 3D or elevation view** Zoom In and Out are its wheel turned over the
+middle of it: `RenderViewWidget::zoomBy` turns the notches that make the
+factor at the wheel's 1.15 a notch, over the pixel the view's axis passes
+through (`Camera::rayThroughPixel` samples pixel centres), by
+`RenderViewWidget::zoomAtPixel`, the function the wheel itself calls - so a
+zoom from the bar can never be a different zoom from the wheel's, and it
+goes wherever the wheel goes, towards what is drawn under the cursor once
+that is merged (render.md). Twice as close: the eye half as far from the
+target, which stays the middle of the view
+(`ViewLinks.AThreeDViewsZoomInIsTwiceAsCloseAboutItsMiddle`). Zoom to
+Selection - and ZOOM on any scope - frames the camera on the entities it
+took where the view's scene draws them, draped and on the datum, the ones
+it shows and, with its ghosts on, the ones it ghosts
+(`SceneBuilder::overlayBounds`, the selection overlay's own emit over the
+ids, so a 3D view has no second rule for where an entity stands); none of
+them drawn there, nothing moves and the reply is the scope's record
+(`ViewLinks.ZoomToSelectionInAThreeDViewFramesWhatItDrawsOfTheSelection`).
+Select by ID's zoom and a style manager's Select Users run the active plan
+view's Zoom to Selection line (`ViewWorkspace::zoomToSelection`), where they
+framed the view directly, outside the log.
+
+**A view not yet painted.** A view frames what it draws at its first paint,
+and until then holds the place every new view starts at: a plan view the
+origin at 10 px a unit, a 3D view a target at the origin 100 away. A script
+runs its lines back to back with no paint between, so `VIEWS OPEN plan` then
+`ZOOM IN` zoomed about the origin and marked the view framed - it never
+framed the drawing, and a link took its other views there too. A zoom now
+does what the first paint would first (`ViewportWidget::frameIfUnframed`;
+`RenderViewWidget::zoomBy` frames a 3D view)
+(`ViewLinks.AZoomOfAViewNotYetPaintedStartsFromWhatItDraws`,
+`ViewLinks.AThreeDViewNotYetPaintedFramesTheSceneBeforeItZooms`,
+`qt_a_script_that_opens_a_view_and_zooms_it_zooms_about_what_it_draws_headless`).
+And first the layout Qt has queued is done (`ViewWorkspace::zoomView`): a
+new view's bar fits its tools to the width the split gave it, a tool it
+drops queues one more layout, and that moves the split by a pixel or two -
+in the headless window, `tests/qt_widgets/data/scripts/open_and_zoom.kcs`
+framed the new view at 330 px, scale 5.544, where it is seen at 328 px,
+scale 5.5104, so the reply's area was not the one shown
+(`ViewLinks.AZoomStraightAfterAViewOpensIsFramedAtTheWidthTheViewIsSeenAt`,
+over the window widths at which the tools come and go).
+A view's record says `framed=no` until it has framed (`docs/cad.md`): VIEWS
+OPEN's record gave the placeholder as though the view looked there.
+Rejected: framing a plan view as it opens - a view opened on an empty
+drawing would then never frame what is drawn next, which the first paint
+does.
 
 In, Out and Zoom to Selection are OPTIONAL tools (`DockTitleBar::addTool`
 with a priority): a bar shows them, highest priority first, only while they
@@ -643,11 +715,19 @@ where they were 34 and 33 px narrower.
 **Zoom To** (View > Zoom To, `zoomToDialog`) frames what a scope takes - the
 shared "Apply to" and "Only those that match" (`ScopeFilterWidget`, prefix
 `zoomTo`) - in a chosen view (`zoomToView`: the active view, then every open
-plan view by its title and id - the kinds that frame a scope, by
-`cad::zoomTakes`; a 3D view or a section was offered and ZOOM refused it). It builds `ZOOM <scope words> [view=<id>]`
-(`zoomToLine` shows it as the controls change), runs it through the command
-runner (`zoomToRun`) and shows ZOOM's answer (`zoomToStatus`). Non-modal and
-kept, as Select by ID is (`qt_zoom_to_dialog_runs_its_line_headless`).
+plan, 3D and elevation view by its title and id - the kinds that frame a
+scope, by `cad::zoomTakes`; a section was offered and ZOOM refused it). It
+builds `ZOOM <scope words> [view=<id>]` (`zoomToLine` shows it as the
+controls change), runs it through the command runner (`zoomToRun`) and says
+what ZOOM answered as a sentence (`zoomToStatus`: "2 matched, framed in view
+1; view 2 followed.", `ZoomToDialog::spokenReply`), a refusal in the error
+colour, as Online Data words its status. The raw records - long reals among
+them - wrapped over five lines there, and the dialog, grown only to its
+least height, pressed its type grid until the captions lost their
+descenders; they are in the command log. Non-modal and kept, as Select by ID
+is (`qt_zoom_to_dialog_runs_its_line_headless`,
+`qt_zoom_to_frames_the_scope_in_the_view_chosen_headless`, which chooses a
+plan view and a 3D view; `ZoomTo.TheStatusSaysWhatZoomAnsweredAsASentenceAndARefusalInTheErrorColour`).
 
 **ZOOM typed while a tool runs** - Z, ZOOM, 'ZOOM, 'Z and whatever follows -
 is the view's, not the tool's, as AutoCAD resumes LINE after 'ZOOM (and
@@ -655,6 +735,10 @@ is the view's, not the tool's, as AutoCAD resumes LINE after 'ZOOM (and
 host hands it to the workspace (`ToolHost::onTransparent`), which runs it as
 its ZOOM line through the command runner, and the tool stays at its step
 with its prompt (`ViewLinks.ATransparentZoomTypedInsideLineZoomsAndLeavesLineAtItsStep`).
+Which words are ZOOM is the interpreter's reading - its alias table and its
+apostrophe rule, `CommandInterpreter::verbOf` - not a list of the window's,
+so an alias added there reaches a line typed inside a tool too
+(`CommandVerb.TheVerbOfALineIsTheInterpretersOwnReading`).
 The command line leaves the line's echo to the runner
 (`ViewWorkspace::runsTransparently`), so it is logged once
 (`qt_dist_typed_at_the_command_line_reports_the_inverse_headless`). PAN and
@@ -682,17 +766,21 @@ model changes cheaply when groups are asked for.
 **Not done.** Only plan views link: a 3D or elevation view needs its camera
 in logical pixels first (the software view counts device pixels, the GPU
 view logical ones), a section its pan and zoom in `ViewState`. The link is
-not kept between sessions, as the workspace is not. A 3D or elevation view's
-bar has no Zoom In, Out or Selection yet, and ZOOM IN on one is refused
-naming its kind: its zoom is to go towards what is drawn at the centre,
-through the 3D wheel's own zoom towards the cursor (built on another branch;
-once merged, the workspace's `zoomView` hands IN and OUT to it at the centre
-pixel, and widening `cad::zoomTakes` lets them through - the bar, the View
-menu and Zoom To follow that one rule), and framing what a scope takes in 3D
-needs the scene to draw a set of ids. A checked Link and a Layers button
-that filters wear the same accent frame side by side, and the unlinked chain
-is the faintest icon on the bar; a look of their own for each is polish not
-yet done.
+not kept between sessions, as the workspace is not. A checked Link and a
+Layers button that filters wear the same accent frame side by side, and the
+unlinked chain is the faintest icon on the bar; a look of their own for each
+is polish not yet done. The Link is always on a plan view's bar, so a plan
+dock's least width is 23 px more than another kind's: six views, four of
+them in one row with two plan views, need 1388 px where the window has 1360,
+and the Properties panel goes to its least (five views fit). Letting the
+Link drop off a narrow bar as the zoom tools do was rejected for now: the
+checked Link is what says a view is linked, and a linked view would not show
+it. The Layers popup's layer rows still set the view's layers directly
+rather than run `VIEWS HIDE` and `SHOW`: `VIEWS HIDE` reads a comma as a
+list separator, and a layer name may hold one, so a line cannot name every
+layer the popup lists - the scope widget refuses to build a line for such a
+layer, which a row the person clicked cannot do - until the verb takes one
+quoted name.
 
 ### The selection in every view
 
@@ -728,6 +816,13 @@ view:
 **One rule, beside the drawn rule.** `cad::isGhost(model, entity, view)`
 (`selection.hpp`) is true where `view` alone hides an entity the document
 draws; the plan painter, the 3D scene and a section ask it and nothing else.
+A section asks both of its questions of a crossing - does this view hide
+it, and how is its selection marked - of the layer its entity is on NOW
+(`SectionViewWidget::layerOf`): the hidden rule read the layer the cut
+found, so the design line moved onto the as-built layer the section hides
+was drawn as a plain crossing and as a ghost at one station, and a line
+moved off it was counted hidden and drawn selected
+(`ViewSelection.ASectionHidesAndMarksACrossingByTheLayerItsEntityIsOnNow`).
 It was written three ways - the scene's by `isDrawn`, the painter's inline,
 the section's a third way that read the layer the cut found and never the
 entity - and the copies had drifted: a selected entity made invisible, or

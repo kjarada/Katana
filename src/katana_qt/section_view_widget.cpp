@@ -339,7 +339,8 @@ void SectionViewWidget::drawCrossings(QPainter& painter) const
         // a layer hidden in this view takes its crossings out of it too. At
         // paint time rather than by cutting the section again: the section
         // is shared, and which layers a view hides changes far more often.
-        if (state_.layers.hides(crossing.layer)) {
+        // The layer the entity is on now, as markOf reads it (layerOf).
+        if (state_.layers.hides(layerOf(crossing))) {
             ++lastHiddenCrossings_;
             continue;
         }
@@ -424,6 +425,17 @@ SectionViewWidget::Mark SectionViewWidget::markOf(const katana::cad::SectionCros
     return state_.selectionGhosts && katana::cad::isGhost(model, *entity, state_.layers)
                ? Mark::Ghost
                : Mark::None;
+}
+
+const std::string& SectionViewWidget::layerOf(const katana::cad::SectionCrossing& crossing) const
+{
+    if (document_ != nullptr) {
+        if (const katana::entity::Entity* entity =
+                document_->model().entities.find(crossing.entity)) {
+            return entity->layer;
+        }
+    }
+    return crossing.layer;
 }
 
 QRectF SectionViewWidget::plotRect() const

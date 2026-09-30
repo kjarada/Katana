@@ -1,7 +1,6 @@
 #include "katana/cad/survey_coding.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <map>
 #include <set>
 #include <tuple>
@@ -11,6 +10,7 @@
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/display.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/tables.hpp"
 
 namespace katana::cad {
@@ -42,14 +42,7 @@ using katana::entity::SurveyMatchKind;
     return field.name.empty() ? code : std::move(field.name);
 }
 
-[[nodiscard]] std::string lowered(std::string_view text)
-{
-    std::string out(text);
-    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return out;
-}
+using katana::core::lowered;
 
 // What a code looks like on the page (decision D4): the linestyle or a plain
 // line, the symbol and its size, and the colour. Two codes with the same

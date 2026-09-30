@@ -18,6 +18,8 @@
 // one list for a caller that wants that.
 
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -160,9 +162,11 @@ struct SceneOptions {
     // whole path is drawn solid instead - all or nothing, because a truncated
     // dashed line is a shorter line with nothing to say so.
     std::size_t maximumDashSpans = 20000;
-    // In LOGICAL pixels; pixelScale turns them into the framebuffer's.
+    // In LOGICAL pixels; pixelScale turns them into the framebuffer's. A
+    // selected line's width is the selection's own (kSelectionCoreWidth,
+    // selection_style.hpp), in the overlay and the one-list build alike: an
+    // option of its own here was a second selection width no view read.
     float entityLineWidth = 1.0f;
-    float selectedLineWidth = 2.0f;
     float pointSize = 5.0f;
     // Device pixels per logical pixel (QWidget::devicePixelRatioF). A 3D view
     // on a 125% display renders at its physical resolution, so a 1 px line
@@ -276,6 +280,17 @@ class SceneBuilder {
     // From layers.bounds and layers.datum, so after the others.
     void buildGrid(const SceneOptions& options, SceneLayers& layers);
 
+    // The box the entities `ids` take in the scene built into `layers` with
+    // `options`: where buildSelection would draw them were they the
+    // selection - the ones the view draws, and with its ghosts on the ones
+    // it ghosts - draped and on the datum as the drawing is. What a 3D view
+    // frames for ZOOM on a scope (view_verbs.hpp). Empty when the view draws
+    // none of them, or draws no entities at all.
+    [[nodiscard]] katana::math::AABB overlayBounds(
+        const Document& document, const std::vector<SceneSurface>& surfaces,
+        const SceneOptions& options, const SceneLayers& layers,
+        std::span<const katana::entity::EntityId> ids);
+
     // Recolours the fading edges for how big the triangles now are on screen
     // through `camera`: gone below about 4 px, full above about 12. Touches
     // edges.colors only when a surface's strength changes by a step. False
@@ -297,13 +312,15 @@ class SceneBuilder {
   private:
     // Which entities an emit draws, and how: every one as drawn; the selected
     // ones drawn in the view, as the overlay's core (selection_style.hpp);
-    // every one, the selected in the selection colour (the one-list build);
-    // the selected ones the view alone hides, as ghosts. Only and Ghosts walk
-    // the selection's ids rather than the drawing.
+    // every one, the selected in the core's colour and width (the one-list
+    // build); the selected ones the view alone hides, as ghosts. Only and
+    // Ghosts walk ids rather than the drawing: `walk` when given, else the
+    // selection's.
     enum class Selected { AsDrawn, Only, Styled, Ghosts };
     void emitEntities(const Document& document, const std::vector<SceneSurface>& surfaces,
                       const SceneOptions& options, Selected which, double datumHint,
-                      bool datumKnown, katana::render::DrawList& out, double* lowestHeight);
+                      bool datumKnown, katana::render::DrawList& out, double* lowestHeight,
+                      std::optional<std::span<const katana::entity::EntityId>> walk = {});
     void emitGrid(const SceneOptions& options, const katana::math::AABB& around, double z,
                   katana::render::DrawList& out);
 

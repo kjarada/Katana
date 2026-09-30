@@ -191,10 +191,22 @@ class ViewportWidget final : public QWidget {
     // made to the state from outside, so a view following another never
     // reports the move it was given.
     std::function<void(bool byUser)> onViewMoved;
+    // The Zoom Extents a middle double-click asks for, done by the host when
+    // it sets this: it knows the link, and a linked view that draws nothing
+    // frames what the link draws rather than the origin
+    // (ViewWorkspace::zoomExtents), as GpuSceneView::onZoomExtents hands a 3D
+    // view's to its host. Unset, zoomExtents().
+    std::function<void()> onZoomExtents;
     // Keeps the view where its state now says, as a linked view must: forgets
     // the box it was framed on, so a resize keeps the centre and scale rather
     // than refitting that box, and repaints. Raises nothing.
     void holdView();
+    // Frames the view as its first paint would, unless it has been framed:
+    // for a ZOOM asked of a view not yet painted - a script's VIEWS OPEN plan
+    // then ZOOM IN, which run with no paint between - so the zoom starts
+    // from what the view draws and not from the place a new view holds
+    // until then (ViewWorkspace::zoomView).
+    void frameIfUnframed();
 
     // Reference data (imported imagery and point clouds) belongs to the window;
     // the viewport only paints it, and never mutates it (Rule 3). Null until the

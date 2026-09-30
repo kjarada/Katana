@@ -169,10 +169,14 @@ std::string hiddenOf(const ViewState& view)
 
 // Where a view is looking, after its id, kind and (for VIEWS) title and
 // active: a plan view's centre, scale and area; a 3D or elevation view's
-// camera; nothing for a section, whose pan and zoom its widget keeps.
+// camera; nothing for a section, whose pan and zoom its widget keeps. Then
+// framed=no while the view has framed nothing: the place is the one every
+// new view starts at, and the view's first paint will leave it - an agent
+// reading VIEWS OPEN's record took it for where the view looks.
 std::string placeOf(const ViewState& view, bool withLinked)
 {
     std::string text;
+    bool framed = true;
     switch (view.kind) {
     case ViewKind::Plan: {
         if (withLinked) {
@@ -181,6 +185,7 @@ std::string placeOf(const ViewState& view, bool withLinked)
         const Box2 area = view.plan.visibleWorldBounds();
         text += " centre=" + pointText(view.plan.center) + " scale=" + real(view.plan.scale) +
                 " area=" + pointText(area.min) + "," + pointText(area.max);
+        framed = view.planFramed;
         break;
     }
     case ViewKind::Model3D:
@@ -194,12 +199,13 @@ std::string placeOf(const ViewState& view, bool withLinked)
                 " projection=" +
                 (camera.projection() == katana::render::Projection::Perspective ? "perspective"
                                                                                 : "orthographic");
+        framed = view.cameraFramed;
         break;
     }
     case ViewKind::Section:
         break;
     }
-    return text;
+    return framed ? text : text + " framed=no";
 }
 
 // ---- VIEWS --------------------------------------------------------------------------------
@@ -344,6 +350,16 @@ Result<std::string> viewsVerb(const Document& document, ViewVerbHost& host,
             auto layers = parseLayers(document, args, 2);
             if (!layers) {
                 return layers.error();
+            }
+            // Commas alone ("VIEWS HIDE 1 ,") name no layer: refused, where
+            // the line changed nothing and replied as though it had worked.
+            if (layers->empty()) {
+                return makeError(ErrorCode::ParseFailure,
+                                 "VIEWS " + action + " names no layer in '" + args[2] +
+                                     "': VIEWS " + action +
+                                     (action == "ISOLATE" ? " <id> <layer>"
+                                                          : " <id> <layer>[,<layer>...]"),
+                                 args[2]);
             }
             if (action == "ISOLATE") {
                 if (layers->size() != 1) {
@@ -613,6 +629,7 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
         scope = std::move(matched).value();
         request.kind = ZoomRequest::Kind::Scope;
         request.window = extentOf(document.model(), scope->matched);
+        request.ids = scope->matched;
     } else if (!args.empty()) {
         const std::string word = uppered(args[0]);
         at = 1;
@@ -680,19 +697,28 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
 
     const ViewState& view = *views.find(request.view);
     if (!zoomTakes(view.kind, request.kind)) {
+        // The kinds that take it, read from zoomTakes itself so the message
+        // cannot drift from the rule. A plan view takes every request, so
+        // the list is never empty and "a plan" leads it.
+        std::vector<std::string> takers;
+        for (const ViewKind kind :
+             {ViewKind::Plan, ViewKind::Model3D, ViewKind::Elevation, ViewKind::Section}) {
+            if (zoomTakes(kind, request.kind)) {
+                takers.push_back(kind == ViewKind::Model3D ? "3D" : kindWord(kind));
+            }
+        }
+        std::string which = "a " + takers.front();
+        for (std::size_t i = 1; i < takers.size(); ++i) {
+            which += (i + 1 == takers.size() ? " or " : ", ") + takers[i];
+        }
         const char* does = request.kind == ZoomRequest::Kind::Window ||
                                    request.kind == ZoomRequest::Kind::Scope
                                ? "frames"
                            : request.kind == ZoomRequest::Kind::Centre ? "centres"
                                                                        : "zooms";
-        const char* which = request.kind == ZoomRequest::Kind::In ||
-                                    request.kind == ZoomRequest::Kind::Out ||
-                                    request.kind == ZoomRequest::Kind::Factor
-                                ? "a plan view or a section"
-                                : "a plan view";
         return makeError(ErrorCode::InvalidArgument,
                          "ZOOM " + requestWord(request) + " " + does + " " + which +
-                             ": view " + std::to_string(view.id) + " is " +
+                             " view: view " + std::to_string(view.id) + " is " +
                              toString(view.kind) + " (ZOOM EXTENTS frames any view)",
                          std::to_string(view.id));
     }
@@ -733,14 +759,14 @@ bool zoomTakes(ViewKind kind, ZoomRequest::Kind request)
 {
     switch (request) {
     case ZoomRequest::Kind::Extents:
-        return true;
     case ZoomRequest::Kind::In:
     case ZoomRequest::Kind::Out:
     case ZoomRequest::Kind::Factor:
-        return kind == ViewKind::Plan || kind == ViewKind::Section;
+        return true;
+    case ZoomRequest::Kind::Scope:
+        return kind != ViewKind::Section;
     case ZoomRequest::Kind::Window:
     case ZoomRequest::Kind::Centre:
-    case ZoomRequest::Kind::Scope:
         return kind == ViewKind::Plan;
     }
     return false;

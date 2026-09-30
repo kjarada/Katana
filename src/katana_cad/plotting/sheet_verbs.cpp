@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <format>
@@ -52,9 +51,10 @@ using katana::core::uppered;
 std::string folded(std::string_view text)
 {
     std::string out;
-    for (const unsigned char c : text) {
-        if (std::isalnum(c) != 0) {
-            out += static_cast<char>(std::tolower(c));
+    for (const char c : text) {
+        const char lower = katana::core::asciiLower(c);
+        if ((lower >= 'a' && lower <= 'z') || (c >= '0' && c <= '9')) {
+            out += lower;
         }
     }
     return out;
@@ -2527,7 +2527,7 @@ std::string checkReplyLine(const Finding& finding)
 Result<std::size_t> sheetIndexFrom(const SheetSet& set, std::string_view text)
 {
     const bool digits =
-        !text.empty() && std::ranges::all_of(text, [](unsigned char c) { return std::isdigit(c) != 0; });
+        !text.empty() && std::ranges::all_of(text, [](char c) { return c >= '0' && c <= '9'; });
     if (digits) {
         std::size_t number = 0;
         const auto [parsed, error] = std::from_chars(text.data(), text.data() + text.size(), number);

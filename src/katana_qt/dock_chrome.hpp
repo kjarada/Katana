@@ -83,6 +83,10 @@ enum class DockRole {
 // `label`, which is also its accessible name for a screen reader.
 [[nodiscard]] QToolButton* makeTitleBarButton(QWidget* parent, Icon icon, const QString& name,
                                               const QString& label, const QString& tip);
+// Sets such a button's tooltip - `tip` under `label` - and its accessible
+// name and description, for a button whose words change with what it does
+// (a view's Link and zoom tools).
+void setTitleBarTip(QToolButton* button, const QString& label, const QString& tip);
 
 // The title bar of one dock: [icon] title ... [tools] [_] [float] [max] [x].
 class DockTitleBar final : public QWidget {

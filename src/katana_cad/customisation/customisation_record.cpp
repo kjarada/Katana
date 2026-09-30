@@ -2,9 +2,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <set>
 #include <system_error>
+
+#include "katana/core/text.hpp"
 
 namespace katana::cad {
 
@@ -298,7 +299,7 @@ bool typedSaveHasDestination(std::string_view line, bool hasProject)
         if (ch == '"') {
             inQuotes = !inQuotes;
             inWord = true;
-        } else if (!inQuotes && std::isspace(static_cast<unsigned char>(ch)) != 0) {
+        } else if (!inQuotes && katana::core::isAsciiSpace(ch)) {
             if (inWord) {
                 ++words;
                 inWord = false;

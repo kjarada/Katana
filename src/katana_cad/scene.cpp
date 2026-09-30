@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <span>
 #include <type_traits>
 #include <variant>
 
@@ -911,7 +912,8 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
 void SceneBuilder::emitEntities(const Document& document,
                                 const std::vector<SceneSurface>& surfaces,
                                 const SceneOptions& options, Selected which, double datumHint,
-                                bool datumKnown, DrawList& out, double* lowestHeight)
+                                bool datumKnown, DrawList& out, double* lowestHeight,
+                                std::optional<std::span<const katana::entity::EntityId>> walk)
 {
     const SelectionSet& selection = document.selection();
     const Heights heights(surfaces, options);
@@ -1015,8 +1017,7 @@ void SceneBuilder::emitEntities(const Document& document,
                            : styled ? options.selectionColor
                                     : colorOf(document.model(), entity, display, options);
         const float width = (which == Selected::Ghosts ? kGhostWidth3d
-                             : which == Selected::Only ? kSelectionCoreWidth
-                             : styled                  ? options.selectedLineWidth
+                             : styled                  ? kSelectionCoreWidth
                                                        : options.entityLineWidth) *
                             scale;
         // A selected entity is drawn in the selection style, dashes and all.
@@ -1175,7 +1176,12 @@ void SceneBuilder::emitEntities(const Document& document,
     if (overlay) {
         // Ascending, as forEach visits: the overlay is the same list, in the
         // same order, as a walk of the drawing that kept the selected.
-        for (const katana::entity::EntityId id : selection.ids()) {
+        // SelectionSet::ids() is a copy, held here for the loop: a span of
+        // the temporary would dangle.
+        const std::vector<katana::entity::EntityId> selected =
+            walk ? std::vector<katana::entity::EntityId>{} : selection.ids();
+        for (const katana::entity::EntityId id :
+             walk ? *walk : std::span<const katana::entity::EntityId>(selected)) {
             if (const Entity* entity = document.model().entities.find(id)) {
                 emitOne(*entity);
             }
@@ -1409,6 +1415,28 @@ void SceneBuilder::buildSelection(const Document& document,
         emitEntities(document, surfaces, options, Selected::Ghosts, layers.datum, true, overlay,
                      nullptr);
     }
+}
+
+katana::math::AABB SceneBuilder::overlayBounds(const Document& document,
+                                               const std::vector<SceneSurface>& surfaces,
+                                               const SceneOptions& options,
+                                               const SceneLayers& layers,
+                                               std::span<const katana::entity::EntityId> ids)
+{
+    if (!options.drawEntities || ids.empty()) {
+        return {};
+    }
+    // Through the overlay's own emits, on the datum the drawing was put at,
+    // so the box is where the view draws them - draped, lifted, exaggerated
+    // - and never a second rule for where an entity stands in 3D.
+    DrawList scratch;
+    emitEntities(document, surfaces, options, Selected::Only, layers.datum, true, scratch,
+                 nullptr, ids);
+    if (options.selectionGhosts && options.layers != nullptr && !options.layers->empty()) {
+        emitEntities(document, surfaces, options, Selected::Ghosts, layers.datum, true, scratch,
+                     nullptr, ids);
+    }
+    return scratch.bounds(used_);
 }
 
 void SceneBuilder::buildGrid(const SceneOptions& options, SceneLayers& layers)

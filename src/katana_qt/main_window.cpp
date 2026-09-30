@@ -111,6 +111,7 @@
 #include "katana/archive12d/domain.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
+#include "katana/cad/view_link.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/dxf/reader.hpp"
 #include "katana/entity/anchor.hpp"
@@ -848,7 +849,7 @@ void MainWindow::buildActions()
     connect(zoomOutAction, &QAction::triggered, this, [this] { (void)runVerbLine("ZOOM OUT"); });
     QAction* zoomSelectionAction =
         makeAction(Icon::ZoomSelection, "Zoom to Sele&ction",
-                   "Frame what is selected in the active plan view (ZOOM SELECTION)", {},
+                   "Frame what is selected in the active view (ZOOM SELECTION)", {},
                    "viewZoomSelection");
     connect(zoomSelectionAction, &QAction::triggered, this,
             [this] { (void)runVerbLine("ZOOM SELECTION"); });
@@ -2504,11 +2505,11 @@ void MainWindow::showSelection(bool zoom)
 {
     // Framed in the view the person is working in, as the style manager's
     // Select Users frames what a style covers; the other views keep theirs,
-    // but for the views linked with it.
+    // but for the views linked with it. By the view's Zoom to Selection
+    // line, through the one executor, so the log says what moved the view.
     ViewportWidget* plan = views_->activePlanView();
     if (zoom && plan != nullptr) {
-        const auto& ids = document_.selection().ids();
-        plan->zoomTo(cad::extentOf(document_.model(), ids));
+        views_->zoomToSelection(plan->state().id);
     }
     propertyDock_->show();
     propertyDock_->raise();
@@ -4876,10 +4877,16 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
     linkAction_->setStatusTip("Pan and zoom the active plan view together with the other linked "
                               "views, or take it out of the link (VIEWS LINK, VIEWS UNLINK)");
     connect(linkAction_, &QAction::triggered, this, [this] {
-        if (ViewportWidget* plan = views_->activePlanView()) {
-            views_->toggleLink(plan->state().id);
+        // The ACTIVE view, as the item says, and only a kind that links
+        // (refreshViewMenu disables it otherwise): it took the plan view used
+        // last while a 3D view was active, and linked a view out of sight.
+        const cad::ViewState* active = views_->viewSet().active();
+        if (active != nullptr && cad::linkable(active->kind)) {
+            views_->toggleLink(active->id);
         } else {
-            logMessage("No plan view is open to link. VIEWS OPEN plan opens one.", true);
+            logMessage("Only a plan view links, and the active view is not one. Click a plan "
+                       "view, or VIEWS OPEN plan to open one.",
+                       true);
         }
         refreshViewMenu();
     });
@@ -4982,19 +4989,20 @@ void MainWindow::refreshViewMenu()
     for (QAction* action : kindActions_) {
         action->setChecked(action->data().toInt() == static_cast<int>(views_->activeViewKind()));
     }
-    if (linkAction_ != nullptr) {
-        const ViewportWidget* plan = views_->activePlanView();
-        linkAction_->setEnabled(plan != nullptr);
-        linkAction_->setChecked(plan != nullptr && plan->state().linked);
-    }
     const cad::ViewState* active = views_->viewSet().find(views_->viewSet().activeId());
+    if (linkAction_ != nullptr) {
+        // The active view's link, as the zoom items below follow its kind.
+        const bool linkable = active != nullptr && cad::linkable(active->kind);
+        linkAction_->setEnabled(linkable);
+        linkAction_->setChecked(linkable && active->linked);
+    }
     if (ghostsAction_ != nullptr) {
         ghostsAction_->setEnabled(active != nullptr);
         ghostsAction_->setChecked(active != nullptr && active->selectionGhosts);
     }
     // The zoom items the active view's kind takes, as its bar offers them
-    // (cad::zoomTakes, ZOOM's own rule): a 3D view's Zoom In was offered, and
-    // only refused.
+    // (cad::zoomTakes, ZOOM's own rule): an item offered that ZOOM would
+    // refuse - a section's Zoom to Selection - is disabled, not refused.
     using Request = cad::ZoomRequest::Kind;
     for (const auto& [name, request] :
          {std::pair{"viewZoomIn", Request::In}, std::pair{"viewZoomOut", Request::Out},

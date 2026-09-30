@@ -1265,19 +1265,25 @@ never the number in the title. `view=` may stand anywhere on a `ZOOM` line and
 is taken off before anything else is read - after `WHERE` it would otherwise
 be read as a condition and refused. `EXTENTS` frames what the view draws, in
 any kind of view; `IN` and `OUT` (by 2 unless a factor is given) and a bare
-factor zoom about the view's centre, in a plan view or a section (a
-section's about the middle of its plot, `SectionViewWidget::zoomAt`);
-`WINDOW` frames a box as Zoom Extents frames the drawing - the margin is the
-widget's - and `CENTRE` puts a point in the middle, at `SCALE` pixels per
-unit when given. A request a view's kind does not take is refused naming the
-kind (`ZOOM WINDOW frames a plan view: view 3 is 3D`); 3D and elevation views
-take `EXTENTS` alone until the 3D zoom towards the cursor is merged
-(`docs/desktop.md`, "Linked views", Not done). Which kind takes which zoom is
-ONE rule, `cad::zoomTakes`: the verb refuses by it, and a view's bar, the
-View menu's zoom items and the Zoom To dialog's list of views offer only what
-it allows. It was written twice - the verb's and the bar's - and widening the
-verb's alone for 3D would have left the bar without In and Out
-(`ViewZoom.TheKindsEachZoomTakesAreTheVerbsOneRule`). `WINDOW` is a box of the
+factor zoom any view about its middle - a plan view about its centre, a
+section about the middle of its plot (`SectionViewWidget::zoomAt`), a 3D or
+elevation view as its wheel zooms, turned that many notches over its middle
+pixel (`docs/desktop.md`, "In a 3D or elevation view"); `WINDOW` frames a
+box as Zoom Extents frames the drawing - the margin is the widget's - and
+`CENTRE` puts a point in the middle, at `SCALE` pixels per unit when given,
+both in a plan view. A request a view's kind does not take is refused naming
+the kinds that take it (`ZOOM WINDOW frames a plan view: view 3 is 3D`,
+`ZOOM on a scope frames a plan, 3D or elevation view: view 4 is Section`).
+Which kind takes which zoom is ONE rule, `cad::zoomTakes`: the verb refuses
+by it, the refusal names its kinds from it, and a view's bar, the View
+menu's zoom items and the Zoom To dialog's list of views offer only what it
+allows. It was written twice - the verb's and the bar's - and widening the
+verb's alone for 3D would have left the bar without In and Out; widened
+once, for 3D and elevation, the four followed together
+(`ViewZoom.TheKindsEachZoomTakesAreTheVerbsOneRule`). A view that has not
+framed anything yet frames what it draws before a zoom, as its first paint
+would: a script's `VIEWS OPEN plan` then `ZOOM IN`, with no paint between,
+zoomed about the origin (`docs/desktop.md`, "A view not yet painted"). `WINDOW` is a box of the
 drawing; the scope word `AREA` means the entities found in one, which is why
 it is not the word here. `SCALE` outside `ViewTransform`'s limits is refused,
 not clamped, because a scale the view cannot show is not the one asked for.
@@ -1293,9 +1299,14 @@ decision is made before the parser is called. The reply begins with the
 scope's record (`scope=selection matched=1`, then the view moved and the
 views that followed); a scope that takes nothing moves no view and says
 `matched=0`, which is an answer, not a refusal
-(`ViewVerbsTest.AScopeThatMatchesNothingMovesNoViewAndSaysSo`). A scope
-frames a plan view; framing what a scope takes in a 3D view needs the scene
-to draw a set of ids, and is not done.
+(`ViewVerbsTest.AScopeThatMatchesNothingMovesNoViewAndSaysSo`). A plan view
+frames the scope's extent; a 3D or elevation view frames the entities
+themselves where its scene draws them, so the request carries them too
+(`ZoomRequest::ids`, ascending; `cad::SceneBuilder::overlayBounds`), and a
+3D view that draws none of them moves nothing and the reply is the scope's
+record alone. A section frames no scope: it shows where entities cross it,
+which is no box of them
+(`ViewVerbsTest.AScopeZoomOnA3DViewCarriesWhatTheScopeTookAndASectionRefusesIt`).
 
 Records, one per line, `key=value`, reals by `core::formatExactReal` and
 angles in degrees:
@@ -1309,7 +1320,13 @@ view=4 kind=section title="Section 1" active=no ghosts=on
 Every record carries `ghosts=on|off`, the view's switch for the selection's
 ghosts (below), and ends with `hidden=a,b` when its view hides layers of its
 own - left out when it hides none - so `VIEWS` says which view is the design
-view and which the as-built one.
+view and which the as-built one. `framed=no` follows the place of a plan, 3D
+or elevation view that has framed nothing yet (`ViewState::planFramed`,
+`cameraFramed`): it frames what it draws at its first paint, and until then
+its centre and scale, or target and distance, are the place every new view
+starts at, which `VIEWS OPEN`'s record gave as though the view looked there
+(`ViewVerbsTest.TheRecordOfAViewThatHasFramedNothingYetSaysSo`). Left out
+once it has framed, as `hidden=` is when there is nothing to say.
 
 **`HIDE`, `SHOW` and `ISOLATE` are a view's own layer filter**, what its
 Layers button sets (`cad::LayerOverrides`; `docs/desktop.md`, "The
@@ -1321,8 +1338,11 @@ popup edited the state directly. A layer is a layer of the drawing or a node
 of the tree above one (`design` when only `design/road` is a layer), as the
 popup lists them; one the drawing lacks is refused naming it
 (`no layer 'roads' in the drawing (LAYER LIST lists them)`), and a list with
-one such is refused whole. `ISOLATE` keeps one layer, its parents and what
-lies beneath it; `SHOW ALL` shows everything the document shows
+one such is refused whole, and so is a list of commas alone (`VIEWS HIDE 1
+,`), which named no layer and replied the unchanged record as though it had
+worked (`ViewVerbsTest.HideOrShowOfCommasAloneIsRefusedAndChangesNothing`).
+`ISOLATE` keeps one layer, its parents and what lies beneath it; `SHOW ALL`
+shows everything the document shows
 (`ViewVerbsTest.ViewsHideShowIsolateChangeOnlyThatView`). `SHOW` of a layer
 beneath one the view hides is refused, naming what holds it (`view 1 hides
 'design', which holds 'design/road': show 'design' (VIEWS SHOW 1 design)`),
