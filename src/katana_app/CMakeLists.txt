@@ -1300,4 +1300,45 @@ if(KATANA_BUILD_TESTS)
     katana_survey_refusal(a_control_point_held_twice
         "SET ${_hold_cp1} control=CP1${_s}drawing${_s}free${_s}0${_s}free${_s}0${_s}fixed${_s}0"
         "InvalidArgument: control point 'CP1' is listed twice")
+    # CP1 drawn twice, 100 km apart: the reduction would hold whichever was
+    # drawn first, so the import refuses to hold it and names both places,
+    # to a tenth of a millimetre (cad::reduceForDrawing).
+    add_test(NAME cli.survey_import_refuses_a_point_the_drawing_has_at_two_places
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_place_cp1}"
+                -c "FORWARD 600000,4999999,100 0 1 0 CP1"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SET ${_hold_cp1}" -c "STATUS")
+    set_tests_properties(cli.survey_import_refuses_a_point_the_drawing_has_at_two_places
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "error: InvalidArgument: Control point CP1 is on the drawing 2 times, at E 500000\\.0000 N 5000000\\.0000 Z 100\\.0000 and E 600000\\.0000 N 5000000\\.0000 Z 100\\.0000, so which one to hold is not known. rename or delete all but one\\."
+        FAIL_REGULAR_EXPRESSION "Entities:|imported job")
+    # After the import, where CP1 was held - the drawing's entity 1, the
+    # point FORWARD made - and what the adjustment made of the data: nothing
+    # adjusted and nothing rejected, as the defaults have it. A number is the
+    # shortest text that reads back exactly, so 5 000 000 is 5e+06.
+    add_test(NAME cli.survey_import_says_where_it_held_and_what_it_adjusted
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_place_cp1}"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SET ${_hold_cp1}")
+    set_tests_properties(cli.survey_import_says_where_it_held_and_what_it_adjusted PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-2 entities=3 layer=survey/points reduction_warnings=3[\r\n]+held id=CP1 from=drawing entity=1 northing=5e\\+06 easting=5e\\+05 height=100[\r\n]+reduction method=radiation adjustments=0 rejected=0[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A network, the import wizard's own fixture: two setups, on A and on B,
+    # each with a direction and a distance to the other and to P and Q. The
+    # network takes a setup's directions as angles from its backsight: 4
+    # angles and 6 distances, 10 observations; A and B held in plan, the
+    # unknowns are P and Q, 4; a redundancy of 6 (worked in
+    # tests/app/test_survey_verbs.cpp, which holds the variance factor and
+    # the global test to the reduction's own report).
+    add_test(NAME cli.survey_import_says_what_a_network_adjustment_made_of_the_data
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "SURVEY IMPORT \"${PROJECT_SOURCE_DIR}/tests/qt_widgets/survey/data/network_gsi8.gsi\" SET adjustment.method=network control=A${_s}file${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0 control=B${_s}file${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0")
+    set_tests_properties(cli.survey_import_says_what_a_network_adjustment_made_of_the_data
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "reduction method=\"network, horizontal\" adjustments=1 rejected=[0-9]+[\r\n]+adjustment method=\"network least squares \\(horizontal\\)\" observations=10 unknowns=4 redundancy=6 variance_factor=[0-9][0-9.e+-]* global_test=(passed|failed) flagged=[0-9]+ rejected=[0-9]+[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
 endif()

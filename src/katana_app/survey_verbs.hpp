@@ -28,10 +28,13 @@
 // for northing, easting and elevation) holds its point as the wizard's Hold
 // does, in place of the point of that id or after the others. A point held
 // from the drawing is found among the drawing's survey points, as the
-// wizard's are (cad::reductionContextFor). Both are read by
-// survey::parseReductionSettings and refused with its words; a key SET names
-// that this version does not know is refused, where a SETTINGS file's is
-// skipped and reported, as the text form's versioning has it.
+// wizard's are (cad::reductionContextFor), and the import reduces as the
+// wizard's does (cad::reduceForDrawing): an id the drawing has at two places
+// is refused. Both are read by survey::parseReductionSettings and refused
+// with its words; a key SET names that this version does not know is
+// refused, where a SETTINGS file's is skipped and reported, as the text
+// form's versioning has it. A SETTINGS file is decoded as any text file is
+// (core::decodeText), so a byte order mark or UTF-16 reads the same.
 //
 // The reply is records, one per line:
 //
@@ -45,6 +48,12 @@
 //                                          (each line that is not the defaults')
 //   settings_warning text="line 3: ..."    (a SETTINGS key this version skipped)
 //   imported job=job-1 entities=4 layer=survey/points reduction_warnings=2  (IMPORT only)
+//   held id=CP1 from=drawing entity=7 northing=5e+06 easting=5e+05 height=100
+//                                          (each point held; from=file has no entity)
+//   reduction method=radiation adjustments=0 rejected=0
+//   adjustment method="network least squares (horizontal)" observations=10 unknowns=4
+//     redundancy=6 variance_factor=0.1697573300133813 global_test=failed flagged=0 rejected=0
+//                                          (each adjustment run; none where absent)
 //   reduction_warning text="..."           (the first 20; then reduction_warnings_more=<n>)
 
 #include <string>
@@ -52,6 +61,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/core/error.hpp"
+#include "katana/survey/reduction_report.hpp"
 
 namespace katana::app {
 
@@ -63,6 +73,12 @@ namespace katana::app {
 // or the import's own error otherwise, with the drawing unchanged.
 [[nodiscard]] katana::core::Result<std::string> runSurveyLine(katana::cad::Document& document,
                                                               std::string_view line);
+
+// The reply's records of a reduction's outcome, each after a line break: the
+// reduction (the settings' method in words, how many adjustments ran, the
+// observations rejected - survey::rejectedObservations, the count the wizard
+// shows), then each adjustment's statistics as its report holds them.
+[[nodiscard]] std::string reductionRecords(const katana::survey::ReductionReport& report);
 
 // The lines --help prints for it.
 [[nodiscard]] const char* surveyHelpText();

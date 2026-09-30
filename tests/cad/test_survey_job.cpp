@@ -1215,3 +1215,208 @@ TEST(SurveyJobContext, ACoordinateSystemThatCannotBeReadIsAnErrorNotALocalDrawin
     ASSERT_FALSE(context.ok());
     EXPECT_NE(context.error().message.find("EPSG:999999"), std::string::npos);
 }
+
+// ---- The reduction a job on the drawing runs ------------------------------------------
+
+namespace {
+
+survey::SurveyPoint surveyPoint(std::string id, double northing, double easting,
+                                std::optional<double> elevation)
+{
+    survey::SurveyPoint point;
+    point.id = std::move(id);
+    point.northing = northing;
+    point.easting = easting;
+    point.elevation = elevation;
+    return point;
+}
+
+// CP1 held from the drawing, fixed in all three.
+survey::ReductionSettings holdingFromTheDrawing(std::string id)
+{
+    survey::ReductionSettings settings;
+    settings.control.push_back(
+        survey::ControlSelection{survey::ControlPoint::fixed3d(std::move(id)),
+                                 survey::ControlOrigin::Drawing});
+    return settings;
+}
+
+// A file that names CP1 and gives it no coordinates, and gives A some: all a
+// reduction of control and entered points needs.
+survey::SurveyProject namingCp1()
+{
+    survey::SurveyProject raw;
+    raw.points.push_back(surveyPoint("A", 5'000'050.0, 500'050.0, 101.0));
+    survey::UnpositionedPoint cp1;
+    cp1.id = "CP1";
+    raw.unpositionedPoints.push_back(cp1);
+    return raw;
+}
+
+// A survey point drawn beside whatever the drawing has, one of its id included.
+void drawAlongside(Document& document, std::string id, double northing, double easting,
+                   std::optional<double> elevation)
+{
+    survey::SurveyProject project;
+    project.points.push_back(surveyPoint(std::move(id), northing, easting, elevation));
+    SurveyImportOptions options;
+    options.layer = "control";
+    auto command = importSurveyPoints(document, project, options, ExistingPointPolicy::KeepBoth);
+    ASSERT_TRUE(command.ok()) << command.error().describe();
+    ASSERT_TRUE(document.execute(std::move(*command)).ok());
+}
+
+std::vector<std::string> warningsOf(const survey::ReductionOutcome& outcome)
+{
+    std::vector<std::string> texts;
+    for (const survey::ReportMessage& warning : outcome.report.warnings) {
+        texts.push_back(warning.text);
+    }
+    return texts;
+}
+
+} // namespace
+
+// The reduction holds the first point of an id, and which is first is only
+// the order the points were drawn in: held from a drawing that has CP1 at two
+// places, a job would sit on either with nothing to say which (100 km apart
+// here). Refused instead, with both places, in the drawing's order.
+TEST(SurveyJobDrawingReduction, AnIdTheDrawingHasAtTwoPlacesIsNotHeldAndBothPlacesAreNamed)
+{
+    survey::ReductionContext context;
+    context.drawingPoints = {surveyPoint("CP1", 5'000'000.0, 500'000.0, 100.0),
+                             surveyPoint("CP1", 5'000'000.0, 600'000.0, 100.0)};
+    const auto outcome = reduceForDrawing(namingCp1(), holdingFromTheDrawing("CP1"), context);
+    ASSERT_FALSE(outcome.ok());
+    EXPECT_EQ(outcome.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(outcome.error().message,
+              "Control point CP1 is on the drawing 2 times, at E 500000.0000 N 5000000.0000 "
+              "Z 100.0000 and E 600000.0000 N 5000000.0000 Z 100.0000, so which one to hold "
+              "is not known; rename or delete all but one.");
+
+    // Three, one with no height - a mark of its own, since a height held from
+    // one would not be held from it.
+    context.drawingPoints = {surveyPoint("CP1", 5'000'000.0, 500'000.0, 100.0),
+                             surveyPoint("CP1", 5'000'000.0, 500'000.0, std::nullopt),
+                             surveyPoint("CP1", 5'000'000.0, 500'000.0, 100.0)};
+    const auto three = reduceForDrawing(namingCp1(), holdingFromTheDrawing("CP1"), context);
+    ASSERT_FALSE(three.ok());
+    EXPECT_EQ(three.error().message,
+              "Control point CP1 is on the drawing 3 times, at E 500000.0000 N 5000000.0000 "
+              "Z 100.0000, E 500000.0000 N 5000000.0000 (no height) and E 500000.0000 "
+              "N 5000000.0000 Z 100.0000, so which one to hold is not known; rename or delete "
+              "all but one.");
+}
+
+// Points of one id that are one ground mark - closer than
+// math::tolerance::kCoordinate, 0.1 mm, across and in height - hold the same
+// job whichever is taken, so they are held. 0.05 mm apart is one mark; 0.15
+// mm apart, across or in height, is two.
+TEST(SurveyJobDrawingReduction, PointsOfOneIdAtOneMarkAreHeldAndTwoMarksAreNot)
+{
+    survey::ReductionContext context;
+    context.drawingPoints = {surveyPoint("CP1", 5'000'000.0, 500'000.0, 100.0),
+                             surveyPoint("CP1", 5'000'000.00005, 500'000.0, 100.00005)};
+    const auto one = reduceForDrawing(namingCp1(), holdingFromTheDrawing("CP1"), context);
+    ASSERT_TRUE(one.ok()) << one.error().describe();
+    for (const std::string& warning : warningsOf(*one)) {
+        EXPECT_EQ(warning.find("Control point CP1"), std::string::npos) << warning;
+    }
+
+    for (const auto& [northing, height] :
+         {std::pair{5'000'000.00015, 100.0}, std::pair{5'000'000.0, 100.00015}}) {
+        SCOPED_TRACE(height);
+        context.drawingPoints = {surveyPoint("CP1", 5'000'000.0, 500'000.0, 100.0),
+                                 surveyPoint("CP1", northing, 500'000.0, height)};
+        const auto two = reduceForDrawing(namingCp1(), holdingFromTheDrawing("CP1"), context);
+        ASSERT_FALSE(two.ok());
+        EXPECT_EQ(two.error().code, ErrorCode::InvalidArgument);
+    }
+}
+
+// Held from the drawing, a point the file never names - measured to or from
+// by nothing in it - changes nothing, which the report says before anything
+// else: an id typed wrong is the likely reason.
+TEST(SurveyJobDrawingReduction, AHeldIdTheFileNeverNamesIsReportedFirstAsChangingNothing)
+{
+    survey::ReductionContext context;
+    context.drawingPoints = {surveyPoint("BM1", 7'000'000.0, 700'000.0, 10.0)};
+    const auto outcome = reduceForDrawing(namingCp1(), holdingFromTheDrawing("BM1"), context);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const std::vector<std::string> warnings = warningsOf(*outcome);
+    ASSERT_FALSE(warnings.empty());
+    EXPECT_EQ(warnings.front(), "Control point BM1 is held from the drawing, but the file names "
+                                "no point BM1, so holding it changes nothing.");
+
+    // Named with no coordinates, as CP1 is: holding it is what places it.
+    context.drawingPoints = {surveyPoint("CP1", 5'000'000.0, 500'000.0, 100.0)};
+    const auto named = reduceForDrawing(namingCp1(), holdingFromTheDrawing("CP1"), context);
+    ASSERT_TRUE(named.ok()) << named.error().describe();
+    for (const std::string& warning : warningsOf(*named)) {
+        EXPECT_EQ(warning.find("Control point CP1"), std::string::npos) << warning;
+    }
+}
+
+// Held from the drawing, a point the file gives other coordinates is held
+// where the drawing has it; the report says so with both, first, since the
+// file's other coordinates stay in the file's own frame.
+TEST(SurveyJobDrawingReduction, AHeldIdTheFileGivesOtherCoordinatesIsReportedWithBoth)
+{
+    survey::SurveyProject raw = namingCp1();
+    raw.unpositionedPoints.clear();
+    raw.points.push_back(surveyPoint("CP1", 5'000'000.0, 500'000.0, 100.0));
+    survey::ReductionContext context;
+    context.drawingPoints = {surveyPoint("CP1", 6'000'000.0, 600'000.0, 200.0)};
+    const auto moved = reduceForDrawing(raw, holdingFromTheDrawing("CP1"), context);
+    ASSERT_TRUE(moved.ok()) << moved.error().describe();
+    ASSERT_FALSE(warningsOf(*moved).empty());
+    EXPECT_EQ(warningsOf(*moved).front(),
+              "Control point CP1 is held where the drawing has it, E 600000.0000 "
+              "N 6000000.0000 Z 200.0000, not where the file gives it, E 500000.0000 "
+              "N 5000000.0000 Z 100.0000.");
+
+    // The drawing's with no height is not the file's with one.
+    context.drawingPoints = {surveyPoint("CP1", 5'000'000.0, 500'000.0, std::nullopt)};
+    survey::ReductionSettings plan = holdingFromTheDrawing("CP1");
+    plan.control.front().point.elevation.constraint = survey::ControlConstraint::Free;
+    const auto flat = reduceForDrawing(raw, plan, context);
+    ASSERT_TRUE(flat.ok()) << flat.error().describe();
+    ASSERT_FALSE(warningsOf(*flat).empty());
+    EXPECT_EQ(warningsOf(*flat).front(),
+              "Control point CP1 is held where the drawing has it, E 500000.0000 "
+              "N 5000000.0000 (no height), not where the file gives it, E 500000.0000 "
+              "N 5000000.0000 Z 100.0000.");
+
+    // One mark with the file's: nothing to say.
+    context.drawingPoints = {surveyPoint("CP1", 5'000'000.00005, 500'000.0, 100.0)};
+    const auto same = reduceForDrawing(raw, holdingFromTheDrawing("CP1"), context);
+    ASSERT_TRUE(same.ok()) << same.error().describe();
+    for (const std::string& warning : warningsOf(*same)) {
+        EXPECT_EQ(warning.find("Control point CP1"), std::string::npos) << warning;
+    }
+}
+
+// The import command's own reduction is that one, so the refusal reaches
+// every import that does not hand it another - the SURVEY IMPORT line's -
+// with the drawing as it was.
+TEST(SurveyJobImportCommand, ItsReductionRefusesAnIdTheDrawingHasAtTwoPlaces)
+{
+    Document document;
+    drawAlongside(document, "CP1", 5'000'000.0, 500'000.0, 100.0);
+    drawAlongside(document, "CP1", 5'000'000.0, 600'000.0, 100.0);
+    const std::size_t entities = document.model().entities.size();
+    SurveyJobImport request = importRequest();
+    request.job.settings = holdingFromTheDrawing("CP1");
+    request.raw = namingCp1();
+    auto context = reductionContextFor(document);
+    ASSERT_TRUE(context.ok()) << context.error().describe();
+    request.context = *context;
+    const auto status = document.execute(std::make_unique<ImportSurveyJobCommand>(document, request));
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(status.error().message.find("Control point CP1 is on the drawing 2 times"),
+              std::string::npos)
+        << status.error().describe();
+    EXPECT_TRUE(document.surveyJobs().empty());
+    EXPECT_EQ(document.model().entities.size(), entities);
+}

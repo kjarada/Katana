@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/survey_job.hpp"
 #include "katana/survey/reduction_report.hpp"
@@ -284,4 +285,32 @@ TEST(SurveyJobsDialog, AStoredReportTooLongToLayOutIsCutAtARowAndSaysSo)
     EXPECT_EQ(cut.substr(end - 5, 5), "</tr>");
     EXPECT_NE(cut.find("export it"), std::string::npos);
     EXPECT_EQ(katana::qt::viewableReportHtml(html, html.size()), html);
+}
+
+// The dialog re-adjusts as the import reduces (cad::reduceForDrawing): B held
+// from the drawing where the drawing has it twice - the job's own B, and
+// another FORWARD put at the origin - would sit the job on whichever was
+// drawn first, so the preview refuses, naming both, and the job is as it was.
+TEST(SurveyJobsDialog, ItsPreviewRefusesToHoldAPointTheDrawingHasAtTwoPlaces)
+{
+    Session session;
+    {
+        katana::cad::CommandInterpreter interpreter(session.document);
+        const auto placed = interpreter.run("FORWARD 0,-1,0 0 1 0 B");
+        ASSERT_TRUE(placed.ok()) << placed.error().describe();
+    }
+    QWidget& d = *session.dialog;
+    const cad::SurveyJob before = session.document.surveyJobs().front();
+    click(d, "editAdjustment");
+    choose(d, "controlFrom", "the drawing");
+    choose(d, "controlPick", "B");
+    click(d, "addControl");
+    click(d, "previewAdjustment");
+    const QString message = child<QLabel>(d, "message")->text();
+    EXPECT_TRUE(message.contains("Control point B is on the drawing 2 times, at "))
+        << message.toStdString();
+    EXPECT_TRUE(message.contains(" and E 0.0000 N 0.0000 Z 0.0000, so which one to hold is not "
+                                 "known"))
+        << message.toStdString();
+    EXPECT_EQ(session.document.surveyJobs().front(), before);
 }

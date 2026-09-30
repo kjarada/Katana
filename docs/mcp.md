@@ -117,7 +117,15 @@ record for each that is not a default). A file that gives no coordinates is
 imported by holding a point of the drawing: `FORWARD` puts a named point
 there, and `SET control=<id>;drawing;fixed;0;fixed;0;fixed;0` holds it
 (`McpServer.AnAgentImportsAFileWithNoCoordinatesHoldingAPointOfTheDrawing`;
-`docs/survey.md`, "The reduction settings of SURVEY IMPORT"). No tool of its
+`docs/survey.md`, "The reduction settings of SURVEY IMPORT"). The reply then
+says where each point was held (`held`, with the drawing's entity) and what
+the adjustment made of the data (`reduction`, and an `adjustment` record of
+each run: its observations, unknowns and redundancy, variance factor, global
+test, and the outliers flagged and rejected), so an agent is told of a
+network whose global test failed as a person is; an id the drawing has at
+two places is refused, naming both. The command tool's description names
+these verbs, so an agent finds them from the tool list
+(`McpServer.TheCommandToolNamesTheSurveyFieldFileVerbs`). No tool of its
 own: the lines are the whole of it, and the reply's records are the
 structured answer.
 `CRS SET` takes a WKT as the agent sends it, quotes and all

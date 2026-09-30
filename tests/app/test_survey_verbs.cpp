@@ -1,21 +1,29 @@
 // SURVEY IMPORT's reduction settings (src/katana_app/survey_verbs.hpp):
 // SETTINGS, a file of the settings' text form, and SET, lines of it on the
 // line - what they start from, what each changes, what the reply says of
-// them and every refusal, with the drawing unchanged by one. The cli.*
-// tests in src/katana_app/CMakeLists.txt run the same lines through
-// katana_cli; these read the document the line leaves behind.
+// them and every refusal, with the drawing unchanged by one - and what the
+// reply says of the control it held and of the adjustment. The cli.* tests
+// in src/katana_app/CMakeLists.txt run the same lines through katana_cli;
+// these read the document the line leaves behind.
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/survey_job.hpp"
 #include "katana/cad/survey_points.hpp"
+#include "katana/core/text.hpp"
+#include "katana/survey/reduction_report.hpp"
 #include "katana/survey/reduction_settings.hpp"
+#include "katana/survey/report_summary.hpp"
+#include "katana/surveyio/reader.hpp"
 #include "survey_verbs.hpp"
 
 namespace {
@@ -394,6 +402,14 @@ TEST(SurveyImportSettings, EveryRefusalSaysWhyAndLeavesTheDrawingAsItWas)
          "line 3 of the reduction settings: 'atmospheric' is given twice"},
         {bare + "SETTINGS \"" + (scratch.path / "absent.txt").generic_string() + "\"",
          ErrorCode::FileImportFailure, "the settings file cannot be read"},
+        // The settings before the survey file: a mistyped key costs no read
+        // of the file, so one that is not there is not what is refused.
+        {"SURVEY IMPORT \"" + (scratch.path / "no survey.sdr").generic_string() +
+             "\" SET bogus=1",
+         ErrorCode::InvalidArgument, "'bogus' is not a reduction setting"},
+        {"SURVEY IMPORT \"" + (scratch.path / "no survey.sdr").generic_string() +
+             "\" SETTINGS " + newer,
+         ErrorCode::Unsupported, "written by a newer Katana (settings version 2)"},
         // The reduction, on control neither the file nor the drawing places.
         {bare + "SET control=CP9;drawing;fixed;0;fixed;0;free;0", ErrorCode::NotFound,
          "Control point CP9 is not on the drawing, so it cannot be held."},
@@ -410,7 +426,11 @@ TEST(SurveyImportSettings, EveryRefusalSaysWhyAndLeavesTheDrawingAsItWas)
         // A point with no height: FORWARD from a start with none.
         placePoint(document, "CP0", "500010,4999999", "-");
         const auto reply = runSurveyLine(document, refusal.line);
-        ASSERT_FALSE(reply.ok()) << *reply;
+        // Every row reported, not the first alone.
+        EXPECT_FALSE(reply.ok()) << *reply;
+        if (reply.ok()) {
+            continue;
+        }
         EXPECT_EQ(reply.error().code, refusal.code) << reply.error().describe();
         EXPECT_NE(reply.error().describe().find(refusal.said), std::string::npos)
             << reply.error().describe();
@@ -418,5 +438,304 @@ TEST(SurveyImportSettings, EveryRefusalSaysWhyAndLeavesTheDrawingAsItWas)
         EXPECT_EQ(katana::cad::drawingSurveyPoints(document).size(), 2U);
         // Nothing to undo but the two placings.
         EXPECT_EQ(document.history().undoCount(), 2U);
+    }
+}
+
+// ---- Held control, and what the adjustment made of the data ------------------------
+
+// The reduction holds the first point of an id, and which is first is only the
+// order they were drawn in: CP1 drawn at two places 100 km apart, either
+// order, the line refuses to hold it and names both, in the drawing's order,
+// with the drawing as it was. Before, the job sat on whichever came first.
+TEST(SurveyImportSettings, AnIdTheDrawingHasAtTwoPlacesIsNotHeldAndBothAreNamed)
+{
+    const struct {
+        const char* first;
+        const char* second;
+        const char* said;
+    } orders[] = {
+        {"500000,4999999,100", "600000,4999999,100",
+         "Control point CP1 is on the drawing 2 times, at E 500000.0000 N 5000000.0000 "
+         "Z 100.0000 and E 600000.0000 N 5000000.0000 Z 100.0000, so which one to hold is not "
+         "known; rename or delete all but one."},
+        {"600000,4999999,100", "500000,4999999,100",
+         "Control point CP1 is on the drawing 2 times, at E 600000.0000 N 5000000.0000 "
+         "Z 100.0000 and E 500000.0000 N 5000000.0000 Z 100.0000, so which one to hold is not "
+         "known; rename or delete all but one."},
+    };
+    for (const auto& order : orders) {
+        SCOPED_TRACE(order.first);
+        Document document;
+        placePoint(document, "CP1", order.first);
+        placePoint(document, "CP1", order.second);
+        const auto reply = runSurveyLine(document, "SURVEY IMPORT \"" + bareTraverse() +
+                                                       "\" SET control=CP1;drawing;fixed;0;"
+                                                       "fixed;0;fixed;0");
+        ASSERT_FALSE(reply.ok()) << *reply;
+        EXPECT_EQ(reply.error().code, ErrorCode::InvalidArgument);
+        EXPECT_EQ(reply.error().message, order.said);
+        EXPECT_TRUE(document.surveyJobs().empty());
+        EXPECT_EQ(katana::cad::drawingSurveyPoints(document).size(), 2U);
+        EXPECT_EQ(document.history().undoCount(), 2U);
+    }
+}
+
+// Two points of one id at one mark - FORWARD twice from the same start - give
+// the same job whichever is held, so they are held: the positions worked by
+// hand at the top of this file, and the reply naming the first, as the
+// reduction takes it.
+TEST(SurveyImportSettings, PointsOfOneIdAtOneMarkAreHeldAsOne)
+{
+    Document document;
+    placePoint(document, "CP1", "500000,4999999,100");
+    placePoint(document, "CP1", "500000,4999999,100");
+    const auto reply = runSurveyLine(
+        document, "SURVEY IMPORT \"" + bareTraverse() +
+                      "\" SET control=CP1;drawing;fixed;0;fixed;0;fixed;0");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_NE(reply->find("\nheld id=CP1 from=drawing entity=1 "), std::string::npos) << *reply;
+    const DrawingSurveyPoint* t1 = pointNamed(katana::cad::drawingSurveyPoints(document), "T1");
+    ASSERT_NE(t1, nullptr);
+    EXPECT_NEAR(t1->easting, 500149.7957556, 1e-6);
+    EXPECT_NEAR(t1->northing, 5000000.0, 1e-6);
+}
+
+// The reply says where each held point was held, as the reduction took it:
+// the drawing's first point of the id - FORWARD made CP1 the drawing's first
+// entity, 1 m north of 500000,4999999 and level at 100 - or the file's own
+// coordinates, which one_setup.jxl gives A as North 10, East 20, Elevation 3
+// (read from the fixture). A number is written as every record writes one,
+// the shortest text that reads back exactly: 5000000 is "5e+06".
+TEST(SurveyImportSettings, TheReplySaysWhereEachHeldPointWasHeld)
+{
+    Document document;
+    placePoint(document, "CP1", "500000,4999999,100");
+    const auto held = runSurveyLine(
+        document, "SURVEY IMPORT \"" + bareTraverse() +
+                      "\" SET control=CP1;drawing;fixed;0;fixed;0;fixed;0");
+    ASSERT_TRUE(held.ok()) << held.error().describe();
+    EXPECT_NE(held->find("\nimported job=job-2 entities=3 layer=survey/points "
+                         "reduction_warnings=3\n"
+                         "held id=CP1 from=drawing entity=1 northing=5e+06 easting=5e+05 "
+                         "height=100\n"
+                         "reduction method=radiation adjustments=0 rejected=0\n"),
+              std::string::npos)
+        << *held;
+
+    Document other;
+    const auto declared =
+        runSurveyLine(other, "SURVEY IMPORT \"" + fixture("trimble_jxl/one_setup.jxl") + "\"");
+    ASSERT_TRUE(declared.ok()) << declared.error().describe();
+    EXPECT_NE(declared->find("\nheld id=A from=file northing=10 easting=20 height=3\n"),
+              std::string::npos)
+        << *declared;
+}
+
+// Held from the drawing, a point the file never names changes nothing - the
+// file's own coordinates place its points, where cli.survey_import_sokkia_sdr
+// has them - and the reply's first reduction warning says so.
+TEST(SurveyImportSettings, AHeldPointTheFileNeverNamesIsSaidToChangeNothing)
+{
+    Document document;
+    placePoint(document, "BM1", "700000,6999999,10");
+    const auto reply = runSurveyLine(document, "SURVEY IMPORT \"" + fixture("sdr/traverse.sdr") +
+                                                   "\" SET control=BM1;drawing;fixed;0;fixed;0;"
+                                                   "fixed;0");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_NE(reply->find("\nreduction method=radiation adjustments=0 rejected=0\n"
+                          "reduction_warning text=\"Control point BM1 is held from the drawing, "
+                          "but the file names no point BM1, so holding it changes nothing.\"\n"),
+              std::string::npos)
+        << *reply;
+    const DrawingSurveyPoint* t1 = pointNamed(katana::cad::drawingSurveyPoints(document), "T1");
+    ASSERT_NE(t1, nullptr);
+    EXPECT_NEAR(t1->easting, 500149.7957556, 1e-6);
+}
+
+// Held from the drawing, a point the file gives other coordinates - CP1, which
+// traverse.sdr keys in at 500000 E 5000000 N 100 Z, drawn 1 000 km away - is
+// held where the drawing has it, and the first reduction warning gives both.
+TEST(SurveyImportSettings, AHeldPointTheFileGivesOtherCoordinatesIsSaidWithBoth)
+{
+    Document document;
+    placePoint(document, "CP1", "600000,5999999,200");
+    const auto reply = runSurveyLine(document, "SURVEY IMPORT \"" + fixture("sdr/traverse.sdr") +
+                                                   "\" SET control=CP1;drawing;fixed;0;fixed;0;"
+                                                   "fixed;0");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_NE(reply->find("\nheld id=CP1 from=drawing entity=1 northing=6e+06 easting=6e+05 "
+                          "height=200\n"),
+              std::string::npos)
+        << *reply;
+    EXPECT_NE(reply->find("\nreduction_warning text=\"Control point CP1 is held where the "
+                          "drawing has it, E 600000.0000 N 6000000.0000 Z 200.0000, not where "
+                          "the file gives it, E 500000.0000 N 5000000.0000 Z 100.0000.\"\n"),
+              std::string::npos)
+        << *reply;
+}
+
+// The adjustment's outcome, record by record, from a report whose every value
+// is set here: the rows rejected before the adjustment count with the
+// outliers it rejected, a variance factor and a global test a run has not got
+// are "none", and the method is the settings' in words.
+TEST(SurveyImportSettings, EachAdjustmentIsARecordOfWhatItsReportHolds)
+{
+    survey::ReductionReport report;
+    report.settings.method = survey::AdjustmentMethod::Network;
+    report.settings.networkDimension = survey::NetworkDimension::HorizontalAndLevels;
+    survey::ReportObservation kept;
+    survey::ReportObservation dropped;
+    dropped.rejected = true;
+    report.observations = {kept, dropped, dropped};
+    survey::AdjustmentReport horizontal;
+    horizontal.method = "network least squares (horizontal)";
+    horizontal.observations = 12;
+    horizontal.unknowns = 6;
+    horizontal.redundancy = 6;
+    horizontal.varianceFactor = 0.25;
+    horizontal.globalTest = survey::ReportGlobalTest{1.5, 1.24, 14.45, 0.05, false};
+    horizontal.flaggedOutliers = {"direction A -> P", "distance A -> P"};
+    horizontal.rejectedOutliers = {"distance B -> P"};
+    survey::AdjustmentReport levels;
+    levels.method = "network least squares (levels)";
+    levels.observations = 4;
+    levels.unknowns = 2;
+    levels.redundancy = 2;
+    levels.varianceFactor = 1.5;
+    levels.globalTest = survey::ReportGlobalTest{3.0, 0.05, 7.38, 0.05, true};
+    survey::AdjustmentReport once;
+    once.method = "network least squares (levels)";
+    once.observations = 2;
+    once.unknowns = 2;
+    report.adjustments = {horizontal, levels, once};
+    EXPECT_EQ(katana::app::reductionRecords(report),
+              "\nreduction method=\"network, horizontal and levels\" adjustments=3 rejected=3"
+              "\nadjustment method=\"network least squares (horizontal)\" observations=12 "
+              "unknowns=6 redundancy=6 variance_factor=0.25 global_test=failed flagged=2 "
+              "rejected=1"
+              "\nadjustment method=\"network least squares (levels)\" observations=4 unknowns=2 "
+              "redundancy=2 variance_factor=1.5 global_test=passed flagged=0 rejected=0"
+              "\nadjustment method=\"network least squares (levels)\" observations=2 unknowns=2 "
+              "redundancy=0 variance_factor=none global_test=none flagged=0 rejected=0");
+
+    EXPECT_EQ(katana::app::reductionRecords(survey::ReductionReport{}),
+              "\nreduction method=radiation adjustments=0 rejected=0");
+    survey::ReductionReport unrun;
+    unrun.settings.method = survey::AdjustmentMethod::Traverse;
+    EXPECT_EQ(katana::app::reductionRecords(unrun),
+              "\nreduction method=\"traverse, Bowditch\" adjustments=0 rejected=0");
+}
+
+// A network through the line says what the adjustment made of it, as the
+// wizard's message does. network_gsi8.gsi (the wizard's own fixture) has two
+// setups, on A and on B, each observing the other and P and Q with a
+// direction and a distance. The reduction's network takes a setup's
+// directions as angles from its backsight (reduction_adjust.cpp), not as
+// directions with an orientation unknown each: at A, B to P and B to Q; at
+// B, A to P and A to Q - 4 angles - and the 6 distances: 10 observations.
+// A and B held in plan, the unknowns are P and Q, 2 each: 4. The redundancy
+// is 6, as the directions' form counts it too (12 directions and distances
+// less 4 coordinates and 2 orientations): a setup's n directions with an
+// orientation unknown are its n - 1 angles, one adjustment either way. The
+// variance factor and the global test are the adjustment's: the reply must
+// carry them as the reduction run on the same file and settings reports
+// them, to the last bit.
+TEST(SurveyImportSettings, ANetworkThroughTheLineSaysWhatItsAdjustmentMadeOfTheData)
+{
+    const std::string file = std::string(KATANA_SURVEY_UI_DATA) + "/network_gsi8.gsi";
+    Document document;
+    const auto reply = runSurveyLine(
+        document, "SURVEY IMPORT \"" + file +
+                      "\" SET adjustment.method=network control=A;file;fixed;0;fixed;0;free;0 "
+                      "control=B;file;fixed;0;fixed;0;free;0");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    ASSERT_EQ(document.surveyJobs().size(), 1U);
+
+    survey::ReductionSettings settings;
+    settings.method = survey::AdjustmentMethod::Network;
+    settings.control = {
+        held("A", survey::ControlOrigin::File, kFixed, kFree),
+        held("B", survey::ControlOrigin::File, kFixed, kFree),
+    };
+    ASSERT_TRUE(document.surveyJobs().front().settings == settings)
+        << survey::serialiseReductionSettings(document.surveyJobs().front().settings);
+    std::ifstream stream(file, std::ios::binary);
+    const std::string bytes{std::istreambuf_iterator<char>(stream),
+                            std::istreambuf_iterator<char>()};
+    auto read = katana::surveyio::readSurvey(katana::surveyio::formatRegistry(), "leica-gsi",
+                                             bytes, "network_gsi8.gsi", {});
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    const auto direct = katana::cad::reduceForDrawing(read->project, settings, {});
+    ASSERT_TRUE(direct.ok()) << direct.error().describe();
+    ASSERT_EQ(direct->report.adjustments.size(), 1U);
+    const survey::AdjustmentReport& adjustment = direct->report.adjustments.front();
+    ASSERT_TRUE(adjustment.varianceFactor.has_value());
+    ASSERT_TRUE(adjustment.globalTest.has_value());
+
+    const std::size_t at = reply->find("\nadjustment ");
+    ASSERT_NE(at, std::string::npos) << *reply;
+    const auto record = katana::core::readReplyRecord(
+        std::string_view(*reply).substr(at + 1, reply->find('\n', at + 1) - at - 1));
+    ASSERT_TRUE(record.has_value()) << *reply;
+    EXPECT_EQ(record->value("method"), "network least squares (horizontal)");
+    EXPECT_EQ(record->value("observations"), "10");
+    EXPECT_EQ(record->value("unknowns"), "4");
+    EXPECT_EQ(record->value("redundancy"), "6");
+    const auto variance = katana::core::parseFiniteDouble(record->value("variance_factor").value_or(""));
+    ASSERT_TRUE(variance.has_value()) << *reply;
+    EXPECT_EQ(*variance, *adjustment.varianceFactor);
+    EXPECT_EQ(record->value("global_test"), adjustment.globalTest->passed ? "passed" : "failed");
+    EXPECT_EQ(record->value("flagged"), std::to_string(adjustment.flaggedOutliers.size()));
+    EXPECT_NE(reply->find("\nreduction method=\"network, horizontal\" adjustments=1 rejected=" +
+                          std::to_string(katana::survey::rejectedObservations(direct->report)) +
+                          "\n"),
+              std::string::npos)
+        << *reply;
+}
+
+// A SETTINGS file is read as every text file is: saved with a byte order mark,
+// or as UTF-16, it is the same settings, where the parser alone called it
+// not settings at all. One that is not UTF-8 - a degree sign in Windows-1252
+// in a note - is read, and the guess is said.
+TEST(SurveyImportSettings, ASettingsFileIsDecodedAsAnyTextFileIs)
+{
+    ScratchDirectory scratch("encodings");
+    const std::string lines =
+        "katana-reduction-settings=1\r\ncontrol=CP1;drawing;fixed;0;fixed;0;fixed;0\r\n";
+    std::string utf16 = "\xFF\xFE";
+    for (const char c : lines) {
+        utf16 += c;
+        utf16 += '\0';
+    }
+    const struct {
+        const char* name;
+        std::string bytes;
+        const char* warning;
+    } files[] = {
+        {"bom.txt", "\xEF\xBB\xBF" + lines, nullptr},
+        {"utf16.txt", utf16, nullptr},
+        {"ansi.txt", "# measured at 20\xB0" "C\r\n" + lines,
+         "\nsettings_warning text=\"the settings file is not UTF-8; it was read as "},
+    };
+    for (const auto& entry : files) {
+        SCOPED_TRACE(entry.name);
+        Document document;
+        placePoint(document, "CP1", "500000,4999999,100");
+        const auto reply =
+            runSurveyLine(document, "SURVEY IMPORT \"" + bareTraverse() + "\" SETTINGS " +
+                                        scratch.file(entry.name, entry.bytes));
+        ASSERT_TRUE(reply.ok()) << reply.error().describe();
+        EXPECT_NE(reply->find("\nsettings file=" + std::string(entry.name) +
+                              " set=0 differ=1\n"
+                              "setting key=control value=CP1;drawing;fixed;0;fixed;0;fixed;0\n"),
+                  std::string::npos)
+            << *reply;
+        EXPECT_EQ(reply->find("settings_warning") != std::string::npos, entry.warning != nullptr)
+            << *reply;
+        if (entry.warning != nullptr) {
+            EXPECT_NE(reply->find(entry.warning), std::string::npos) << *reply;
+        }
+        ASSERT_EQ(document.surveyJobs().size(), 1U);
+        EXPECT_EQ(document.surveyJobs().front().placedPoints.size(), 3U);
     }
 }
