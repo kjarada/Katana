@@ -40,6 +40,7 @@
 #include "main_window.hpp"
 #include "plotting/plot_output.hpp"
 #include "script_runner.hpp"
+#include "tools/flyout_button.hpp"
 #if defined(KATANA_GPU_D3D11)
 #include "gpu/renderer_choice.hpp"
 #include "gpu/shader_compiler.hpp"
@@ -361,6 +362,7 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 //   katana [project-directory] [data-file...] --script FILE... [--command TEXT...]
 //   katana --check-shortcuts --screenshot out.png
 //   katana --check-menus --screenshot out.png
+//   katana --check-toolbars --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -481,6 +483,14 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 // --check-menus lists every menu item with no icon or no status tip
 // (MainWindow::menuGaps), and fails the run when there is one.
 //
+// --check-toolbars measures every icon-only button with a menu on a toolbar
+// or in a dock's title bar - the tool families, Undo and Redo, each view's
+// kind switcher - from its own rendering, prints where it draws its icon and
+// its menu's sign, and fails the run when a sign is drawn over the icon or
+// not at all (tools::menuSignClashes). It measures once the --action switches
+// and the steps have run, so --trigger viewToolBarIconsLarge before it is
+// measured at 28 px.
+//
 // --survey-dialog may be given again: the next dialog opens and the fills and
 // presses after it go to it, so one run can import a file and export it again.
 // --survey-dock ACTION shows the dock that action shows (the Point Manager,
@@ -543,6 +553,7 @@ int main(int argc, char* argv[])
     std::vector<std::pair<QString, QString>> surveySteps;
     bool checkShortcuts = false;
     bool checkMenus = false;
+    bool checkToolBars = false;
     long long attributeEntity = 0;
     bool fit = true;
     katana::cad::PlotSettings settings;
@@ -630,6 +641,8 @@ int main(int argc, char* argv[])
             checkShortcuts = true;
         } else if (argument == "--check-menus") {
             checkMenus = true;
+        } else if (argument == "--check-toolbars") {
+            checkToolBars = true;
         } else if (argument == "--attributes") {
             attributeManager = true;
             // An optional entity id: with one entity selected the manager
@@ -768,6 +781,32 @@ int main(int argc, char* argv[])
             }
             std::fprintf(stderr, "menus: %d items, each with an icon and a status tip\n", items);
         }
+        // --check-toolbars measures the toolbars and the docks' title bars as
+        // the actions and steps leave them, so a step can set up what it
+        // measures: the icon size View > Toolbars chose (--trigger
+        // viewToolBarIconsLarge), a tool running. Every button measured is
+        // listed, clear or not ("toolbar button ..." or "title bar button
+        // ..."), so a test sees which ones the check reached.
+        const auto toolBarSignsClear = [&window] {
+            int buttons = 0;
+            QStringList measured;
+            const QStringList clashes =
+                katana::qt::tools::menuSignClashes(window, &measured, &buttons);
+            for (const QString& line : measured) {
+                std::fprintf(stderr, "%s\n", qPrintable(line));
+            }
+            for (const QString& clash : clashes) {
+                std::fprintf(stderr, "menu sign clash: %s\n", qPrintable(clash));
+            }
+            if (!clashes.isEmpty()) {
+                return false;
+            }
+            std::fprintf(stderr,
+                         "toolbars and title bars: %d buttons with a menu, each drawing its sign "
+                         "clear of its icon\n",
+                         buttons);
+            return true;
+        };
         if (selectEverything) {
             window.selectAll();
         }
@@ -779,6 +818,10 @@ int main(int argc, char* argv[])
                 return 1;
             }
             QApplication::processEvents();
+        }
+        // With steps, after them (below).
+        if (checkToolBars && surveySteps.empty() && !toolBarSignsClear()) {
+            return 1;
         }
         if (!surveySteps.empty()) {
             // Guarded: a dialog opened with open() may delete itself when a
@@ -928,6 +971,9 @@ int main(int argc, char* argv[])
             }
             QApplication::processEvents();
             QApplication::processEvents();
+            if (checkToolBars && !toolBarSignsClear()) {
+                return 1;
+            }
             for (const QDockWidget* dock : docks) {
                 const auto* status = dock->findChild<QLabel*>("status");
                 std::fprintf(stderr, "%s: %s\n", qPrintable(dock->objectName()),

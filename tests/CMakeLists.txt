@@ -1440,6 +1440,98 @@ if(TARGET katana)
             "-DEXPECT=menus: [0-9]+ items, each with an icon and a status tip"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/menus_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Every icon-only button with a menu on a toolbar or in a dock's title
+    # bar draws the sign of its menu clear of its icon (--check-toolbars,
+    # tools::menuSignClashes), each measured from its own rendering against
+    # itself - with its menu and without, with an opaque icon and a clear
+    # one. Until 2026-09-30 the tool families were split buttons whose arrow
+    # strip the stylesheet drew over the icon, and a view's kind switcher's
+    # arrow sat on its icon's frame where no check looked. Seven buttons: the
+    # catalogue's four families, all on the Draw toolbar (Circle, Arc,
+    # Ellipse; Vertices, which the window's first size hides behind the
+    # overflow arrow), Edit's Undo and Redo, and the sample's one view's
+    # kind switcher. By hand, from Qt 6.11's qstylesheetstyle.cpp and
+    # qfusionstyle.cpp:
+    #  - a family at the standard 20 px icons is 33 px (20, Qt's 3, the
+    #    theme's 4 px padding and 1 px border each side), its icon's square
+    #    centred at 6..25 and its 5 px mark at 26..30, inside the border and
+    #    a pixel of air;
+    #  - Undo and Redo are split buttons padded on the right by 13 px instead
+    #    of 4: 20 + 3 + 4 + 13 + 2 = 42 px wide, the icon's square at 6..25;
+    #    the 12 px strip is laid in the border rectangle (defaultOrigin gives
+    #    ::menu-button Origin_Border), 30..41, and Fusion's arrow, 8 x 4 px,
+    #    is (12 - 8) / 2 = 2 px into it and (33 - 4) / 2 = 14.5 down
+    #    (qt_fusion_draw_arrow): 32..39 across, antialiased over rows 14..18;
+    #  - the kind switcher is 34 x 22 with a 1 px border; its arrow's box is
+    #    a ::menu-indicator's default 13 x 13 (defaultSize), set right and
+    #    centred in the padding box 1..32 x 1..20: 20..32 across, 5..17 down.
+    #    Fusion's arrow is 2.5 px in and 4.5 down, 22.5..30.5 x 9.5..13.5,
+    #    antialiased over 22..30 x 9..13. Padded on the right by the box's
+    #    13 px, the contents are 3..19 x 3..18 and the 14 px icon is centred
+    #    at 4..17 both ways.
+    # The grab is the Draw toolbar, for a person to look at.
+    add_test(NAME qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DCHECK_TOOLBARS=ON"
+            "-DDRIVE=%DrawToolBar"
+            "-DEXPECT=toolbar button EditToolBar > editUndoButton: sign x 32[.][.]39 y 14[.][.]18 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n]+toolbar button EditToolBar > editRedoButton: sign x 32[.][.]39 y 14[.][.]18 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*title bar button View[0-9]+ > ViewKindButton: sign x 22[.][.]30 y 9[.][.]13 clear of its icon x 4[.][.]17 y 4[.][.]17[\r\n].*toolbars and title bars: 7 buttons with a menu, each drawing its sign clear of its icon"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_signs_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The same after View > Toolbars > Large Icons and with Delete Vertex -
+    # a tool of the Vertices family other than its first - started at the
+    # command line; the check measures once the steps have run. The families
+    # and Undo and Redo take the bars' new 28 px as the bars' own buttons do
+    # (tools::followToolBarIconSize): until 2026-09-30 a family kept the
+    # 33 px it was made at, its icon drawn at 23 px beside the others' 28
+    # and its mark 3 px against the icon. By hand at 28 px a family is 41 px,
+    # its icon's square at 6..33 and its 5 px mark at 34..38; Undo is
+    # 28 + 3 + 4 + 13 + 2 = 50 px wide, its icon at 6..33, its strip 38..49
+    # and its arrow 2 px in, 40..47, and (41 - 4) / 2 = 18.5 down, rows
+    # 18..22. The kind switcher is sized by its title bar, not the toolbars.
+    # A family's frame is its own tool's alone (FlyoutButton::paintEvent), so
+    # with Delete Vertex running the Vertices family is unframed, its mark
+    # lit, and what its menu adds is the mark alone.
+    add_test(NAME qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_with_large_icons_and_a_tool_running_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DCHECK_TOOLBARS=ON"
+            "-DDRIVE=*viewToolBarIconsLarge|>DELETEVERTEX|?draw.vertex.delete|?draw.vertex.insert|%DrawToolBar"
+            "-DEXPECT=draw[.]vertex[.]delete: Delete Vertex, checked[\r\n]+draw[.]vertex[.]insert: Insert Vertex, unchecked[\r\n].*toolbar button EditToolBar > editUndoButton: sign x 40[.][.]47 y 18[.][.]22 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n]+toolbar button EditToolBar > editRedoButton: sign x 40[.][.]47 y 18[.][.]22 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*title bar button View[0-9]+ > ViewKindButton: sign x 22[.][.]30 y 9[.][.]13 clear of its icon x 4[.][.]17 y 4[.][.]17[\r\n].*toolbars and title bars: 7 buttons with a menu, each drawing its sign clear of its icon"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_signs_large_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The check at the owner's display scale, 125% (as
+    # qt_render_view_at_125_percent): judged in device pixels, where a
+    # family's mark starts the pixel after its icon's square ends. By hand at
+    # a ratio of 1.25:
+    #  - a family's icon's square at 6..25 spans device 7.5 to 32.5 and is
+    #    drawn from pixel 8 for its 25 pixels, 8..32; the mark, 5 px times
+    #    1.25 taken down, 6, ends 2 x 1.25 taken down, 2, short of the
+    #    button's last device pixel, 40 of its 41.25: 33..38;
+    #  - the kind switcher's 14 px icon at 4 spans 5 to 22.5, drawn over
+    #    5..22; its arrow's box, 20..32 x 5..17, is device 25..41.25 x
+    #    6.25..22.5, and Fusion's arrow, 22.5..30.5 x 9.5..13.5, is
+    #    28.125..38.125 x 11.875..16.875 - columns 28..38, and rows 11..17,
+    #    the cached arrow set at the box's quarter pixel spreading into one
+    #    more row.
+    # Until 2026-09-30 the check took each box back to the widget's pixels,
+    # rounded outwards; both reached pixel 26, and the run failed with all
+    # four families "drawn over" icons nothing was drawn over.
+    add_test(NAME qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_at_125_percent_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DCHECK_TOOLBARS=ON"
+            "-DDRIVE=%DrawToolBar"
+            "-DEXPECT=toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*title bar button View[0-9]+ > ViewKindButton: sign x 28[.][.]38 y 11[.][.]17 clear of its icon x 5[.][.]22 y 5[.][.]22 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolbars and title bars: 7 buttons with a menu, each drawing its sign clear of its icon"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_signs_125_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_at_125_percent_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
+        TIMEOUT 180)
     set_tests_properties(qt_format_menu_opens_the_style_manager_headless
                          qt_the_style_manager_lists_a_library_group_s_linestyles_headless
                          qt_format_menu_opens_the_symbol_library_headless
@@ -1460,6 +1552,8 @@ if(TARGET katana)
                          qt_quick_select_is_answered_at_the_command_line_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
                          qt_every_menu_item_has_an_icon_and_a_status_tip_headless
+                         qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless
+                         qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_with_large_icons_and_a_tool_running_headless
                          qt_the_window_section_sizes_the_text_and_toolbars_and_resets_the_layout_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
@@ -1686,6 +1780,25 @@ if(TARGET katana_qt_widget_tests)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
         TIMEOUT 120)
+    # The menu signs of the toolbars and title bars at the same 125%
+    # (docs/desktop.md, "Tool families on the toolbars"), every case of their
+    # five suites, a process a suite: the mark, the arrows and the icons
+    # measured in device pixels - where a family's mark meets its icon's
+    # square without overlapping it, and where rounded outwards to the
+    # widget's pixels the two met - the mark the same whole staircase on
+    # every button, the overflow arrow whole pixels. At ratio 1, where the
+    # suite runs them, a widget pixel is a device pixel: until 2026-09-30
+    # six of these cases held only there, comparing widget rectangles with
+    # device grabs.
+    foreach(_suite IN ITEMS ToolFamilyButtons SplitButtons TitleBarButtons ToolBarSigns
+                            ToolBarOverflow)
+        add_test(NAME qt_toolbar_signs_at_125_percent.${_suite}
+            COMMAND katana_qt_widget_tests "--gtest_filter=${_suite}.*")
+        set_tests_properties(qt_toolbar_signs_at_125_percent.${_suite} PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
+            TIMEOUT 120)
+    endforeach()
 endif()
 
 # The session verbs on the window's command line and the window's one
