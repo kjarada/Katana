@@ -44,13 +44,7 @@ constexpr std::uintmax_t kMaximumImageBytes = 32u * 1024u * 1024u;
 
 // ---- words ---------------------------------------------------------------------------
 
-std::string upper(std::string_view text)
-{
-    std::string out(text);
-    std::ranges::transform(out, out.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-    return out;
-}
+using katana::core::uppered;
 
 // Letters and digits only, lower case: "Project_Line_1", "project line 1" and
 // "PROJECTLINE1" are one key, so neither a person nor an agent has to
@@ -568,7 +562,7 @@ std::optional<std::pair<std::size_t, std::size_t>> findViewport(const SheetSet& 
         for (std::size_t s = 0; s < set.sheets.size(); ++s) {
             const auto& viewports = set.sheets[s].viewports;
             for (std::size_t v = 0; v < viewports.size(); ++v) {
-                if (exact ? viewports[v].id == id : upper(viewports[v].id) == upper(id)) {
+                if (exact ? viewports[v].id == id : uppered(viewports[v].id) == uppered(id)) {
                     return std::pair(s, v);
                 }
             }
@@ -879,7 +873,7 @@ Result<std::string> sheetsVerb(Document& document, const Words& args,
     constexpr std::string_view kUsage =
         "SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | APPEND path | CHECK [sheets=] [json] "
         "| PAGESETUP [option=value ...]";
-    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const std::string action = args.empty() ? "LIST" : uppered(args[0]);
     if (action == "LIST") {
         if (args.size() > 1) {
             return usage(kUsage);
@@ -1220,7 +1214,7 @@ Result<std::string> sheetVerb(Document& document, const Words& args,
     if (args.empty()) {
         return usage(kUsage);
     }
-    const std::string action = upper(args[0]);
+    const std::string action = uppered(args[0]);
     if (action == "NEW" || action == "ADD") {
         return newSheet(document, args);
     }
@@ -1536,7 +1530,7 @@ Result<std::string> viewVerb(Document& document, const Words& args,
     if (args.empty()) {
         return usage(kUsage);
     }
-    const std::string action = upper(args[0]);
+    const std::string action = uppered(args[0]);
     if (action == "ADD" || action == "NEW") {
         return viewAdd(document, args);
     }
@@ -1692,7 +1686,7 @@ Result<std::string> arrangeVerb(Document& document, const Words& args,
         return usage(kUsage);
     }
     const SheetSet& set = document.sheetSet();
-    const std::string action = upper(args[0]);
+    const std::string action = uppered(args[0]);
     if (action == "ALIGN") {
         if (args.size() < 3) {
             return usage("ARRANGE ALIGN left|right|top|bottom|hcentre|vcentre id id ...");
@@ -1894,7 +1888,7 @@ Result<GenerateOptions> generateOptions(std::string_view kind, const Words& args
         if (!option) {
             return makeError(ErrorCode::InvalidArgument,
                              std::format("expected option=value; GENERATE {} takes {} replace",
-                                         upper(kind), keys),
+                                         uppered(kind), keys),
                              args[i]);
         }
         const std::string& key = option->key;
@@ -1908,7 +1902,7 @@ Result<GenerateOptions> generateOptions(std::string_view kind, const Words& args
         if (!takesKey(keys, key)) {
             return makeError(ErrorCode::InvalidArgument,
                              std::format("GENERATE {} takes no option {}=; it takes {} replace",
-                                         upper(kind), key, keys),
+                                         uppered(kind), key, keys),
                              option->word);
         }
         Status status;
@@ -2276,7 +2270,7 @@ Result<std::string> revisionVerb(Document& document, const Words& args)
     constexpr std::string_view kUsage =
         "TITLEBLOCK REVISION [LIST] | REVISION ADD code date description [by] | "
         "REVISION REMOVE code";
-    const std::string action = args.size() < 2 ? "LIST" : upper(args[1]);
+    const std::string action = args.size() < 2 ? "LIST" : uppered(args[1]);
     if (action == "LIST") {
         if (args.size() > 2) {
             return usage(kUsage);
@@ -2345,10 +2339,10 @@ Result<std::string> revisionVerb(Document& document, const Words& args)
 
 Result<std::string> titleBlockVerb(Document& document, const Words& args)
 {
-    if (args.empty() || (args.size() == 1 && upper(args[0]) == "LIST")) {
+    if (args.empty() || (args.size() == 1 && uppered(args[0]) == "LIST")) {
         return titleBlockList(document);
     }
-    const std::string action = upper(args[0]);
+    const std::string action = uppered(args[0]);
     if (action == "REVISION" || action == "REVISIONS") {
         return revisionVerb(document, args);
     }
@@ -2401,7 +2395,7 @@ Result<std::string> titleBlockVerb(Document& document, const Words& args)
 
 bool isSheetVerb(std::string_view verb)
 {
-    const std::string word = upper(verb);
+    const std::string word = uppered(verb);
     return word == "SHEETS" || word == "SHEET" || word == "VIEW" || word == "VIEWPORT" ||
            word == "TILE" || word == "ARRANGE" || word == "GENERATE" || word == "TITLEBLOCK";
 }
@@ -2413,13 +2407,13 @@ Result<std::string> runSheetVerb(Document& document, const std::vector<std::stri
         return makeError(ErrorCode::ParseFailure, "not a sheet command; type HELP SHEETS",
                          tokens.empty() ? std::string{} : tokens.front());
     }
-    const std::string verb = upper(tokens.front());
+    const std::string verb = uppered(tokens.front());
     const Words args(tokens.begin() + 1, tokens.end());
     // Stored sheets that cannot be read are not an empty set: an edit made
     // on the empty set the document falls back to would replace them all as
     // one step. So every verb is refused while they cannot be read, but
     // SHEETS LOAD, which replaces them on purpose (and can be undone).
-    const bool loads = verb == "SHEETS" && !args.empty() && upper(args.front()) == "LOAD";
+    const bool loads = verb == "SHEETS" && !args.empty() && uppered(args.front()) == "LOAD";
     if (!loads) {
         if (auto set = readable(document); !set) {
             return set.error();
@@ -2554,9 +2548,9 @@ Result<std::size_t> sheetIndexFrom(const SheetSet& set, std::string_view text)
             return i;
         }
     }
-    const std::string wanted = upper(text);
+    const std::string wanted = uppered(text);
     for (std::size_t i = 0; i < set.sheets.size(); ++i) {
-        if (upper(set.sheets[i].id) == wanted) {
+        if (uppered(set.sheets[i].id) == wanted) {
             return i;
         }
     }

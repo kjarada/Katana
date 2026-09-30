@@ -12,7 +12,8 @@
 //
 // Object names: zoomToDialog; the scope and filter controls with the prefix
 // zoomTo (zoomToScopeSelection, zoomToScopeDrawing, zoomToFilterLayer ...);
-// zoomToView (the active view, then every open view by its title and id);
+// zoomToView (the active view, then every open plan view by its title and
+// id: the kinds that frame a scope, cad::zoomTakes);
 // zoomToLine (the line the controls say, updated as they change);
 // zoomToRun; zoomToStatus (what ZOOM answered); zoomToClose.
 

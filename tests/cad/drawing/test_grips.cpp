@@ -9,6 +9,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/drawing/grips.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/tables.hpp"
 #include "katana/math/numerics.hpp"
 
 using namespace katana::cad;
@@ -304,10 +305,53 @@ TEST(GripCommands, TheSelectionsGripsSkipLockedLayersAndHonourTheLimit)
 {
     Document document;
     const EntityId id = add(document, Segment2{Point2(0, 0), Point2(1, 0)});
-    EXPECT_EQ(gripsOfSelection(document, {id}).size(), 3u);
-    EXPECT_TRUE(gripsOfSelection(document, {id}, 2).empty()) << "past the limit, none";
+    EXPECT_EQ(gripsOfSelection(document, {id}, kNoLayerOverrides).size(), 3u);
+    EXPECT_TRUE(gripsOfSelection(document, {id}, kNoLayerOverrides, 2).empty())
+        << "past the limit, none";
     const auto preview = gripPreview(
         document, GripDrag{gripsOf(*document.model().entities.find(id))[1], Point2(1, 1), {}, false});
     ASSERT_EQ(preview.size(), 1u);
     EXPECT_EQ(std::get<Segment2>(preview[0]).end, Point2(1, 1));
+}
+
+TEST(GripCommands, AViewOffersNoGripOnWhatItHidesAndTheOthersKeepTheirs)
+{
+    // A design line and an as-built line, both selected; a view hiding the
+    // design layer - the as-built view - offers the as-built line's three
+    // grips (two ends and the middle) and none of the design line's, which
+    // it shows as a ghost at most. The document's rule alone offers all six.
+    Document document;
+    for (const char* name : {"design", "asbuilt"}) {
+        katana::entity::Layer layer;
+        layer.name = name;
+        ASSERT_TRUE(document.execute(katana::commands::createLayer(layer)).ok());
+    }
+    katana::commands::EntityAttributes onDesign;
+    onDesign.layer = "design";
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(10, 10), Point2(40, 30), onDesign))
+                    .ok());
+    const EntityId design = document.lastCreatedEntities().front();
+    katana::commands::EntityAttributes onAsBuilt;
+    onAsBuilt.layer = "asbuilt";
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(10, 30), Point2(40, 10), onAsBuilt))
+                    .ok());
+    const EntityId asBuilt = document.lastCreatedEntities().front();
+
+    LayerOverrides asBuiltView;
+    ASSERT_TRUE(asBuiltView.hide("design"));
+    const auto offered = gripsOfSelection(document, {design, asBuilt}, asBuiltView);
+    ASSERT_EQ(offered.size(), 3u);
+    for (const Grip& grip : offered) {
+        EXPECT_EQ(grip.entity, asBuilt);
+    }
+    // Where the two cross, (25, 20), both lines have their middles: in the
+    // as-built view the grip there is the as-built line's.
+    const auto atCrossing = gripAt(offered, Point2(25, 20), 0.5);
+    ASSERT_TRUE(atCrossing.has_value());
+    EXPECT_EQ(atCrossing->entity, asBuilt);
+    // The design line alone selected, the as-built view offers nothing.
+    EXPECT_TRUE(gripsOfSelection(document, {design}, asBuiltView).empty());
+    EXPECT_EQ(gripsOfSelection(document, {design, asBuilt}, kNoLayerOverrides).size(), 6u);
 }

@@ -1269,12 +1269,13 @@ void ViewWorkspace::updateZoomTools(const View& view)
     }
     const ViewState* state = views_.find(view.id);
     const ViewKind kind = state != nullptr ? state->kind : ViewKind::Plan;
-    // What ZOOM takes on each kind (cad/view_verbs.hpp): a tool the view's
-    // kind would refuse is not offered.
-    const bool zoomsAboutCentre = kind == ViewKind::Plan || kind == ViewKind::Section;
-    view.titleBar->setToolWanted(view.zoomInButton, zoomsAboutCentre);
-    view.titleBar->setToolWanted(view.zoomOutButton, zoomsAboutCentre);
-    view.titleBar->setToolWanted(view.zoomSelectionButton, kind == ViewKind::Plan);
+    // What ZOOM takes on each kind (cad::zoomTakes, the verb's own rule): a
+    // tool the view's kind would refuse is not offered.
+    using Request = katana::cad::ZoomRequest::Kind;
+    view.titleBar->setToolWanted(view.zoomInButton, katana::cad::zoomTakes(kind, Request::In));
+    view.titleBar->setToolWanted(view.zoomOutButton, katana::cad::zoomTakes(kind, Request::Out));
+    view.titleBar->setToolWanted(view.zoomSelectionButton,
+                                 katana::cad::zoomTakes(kind, Request::Scope));
 }
 
 void ViewWorkspace::toggleLink(ViewId id)
@@ -1313,17 +1314,20 @@ void ViewWorkspace::updateLinkButton(const View& view)
         const QSignalBlocker quiet(view.linkButton);
         view.linkButton->setChecked(linked);
     }
-    view.linkButton->setIcon(icon(linked ? Icon::ViewLinked : Icon::ViewUnlinked));
-    view.linkButton->setProperty("linked", linked);
-    view.linkButton->style()->unpolish(view.linkButton);
-    view.linkButton->style()->polish(view.linkButton);
-
     QStringList others;
     for (const ViewId member : views_.linkedViews()) {
         if (const ViewState* other = views_.find(member); other != nullptr && member != view.id) {
             others << QString::fromStdString(katana::cad::ViewSet::title(*other));
         }
     }
+    view.linkButton->setIcon(icon(linked ? Icon::ViewLinked : Icon::ViewUnlinked));
+    view.linkButton->setProperty("linked", linked);
+    // A link of one waits for a second view and moves nothing: its frame is
+    // dashed (theme.cpp), where it looked exactly like a working link.
+    view.linkButton->setProperty("waiting", linked && others.isEmpty());
+    view.linkButton->style()->unpolish(view.linkButton);
+    view.linkButton->style()->polish(view.linkButton);
+
     QString label;
     QString tip;
     if (!linked) {
@@ -1531,6 +1535,9 @@ void ViewWorkspace::viewSettingsChanged(ViewId id)
         view->section->update();
     }
     updateLayersButton(*view);
+    if (onViewSettingsChanged) {
+        onViewSettingsChanged();
+    }
 }
 
 void ViewWorkspace::setSelectionGhosts(ViewId id, bool on)

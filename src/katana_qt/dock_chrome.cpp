@@ -86,6 +86,7 @@ class ElidedTitle final : public QWidget {
         text_ = text;
         update();
     }
+    [[nodiscard]] const QString& text() const { return text_; }
     void setColor(const QColor& color)
     {
         color_ = color;
@@ -262,16 +263,6 @@ void DockTitleBar::setToolWanted(QWidget* widget, bool wanted)
     }
 }
 
-bool DockTitleBar::toolCrowdedOut(const QWidget* widget) const
-{
-    for (const Tool& tool : toolList_) {
-        if (tool.widget == widget) {
-            return tool.priority != kAlways && tool.wanted && tool.widget->isHidden();
-        }
-    }
-    return false;
-}
-
 int DockTitleBar::optionalWidth() const
 {
     // Each shown tool is its width and the row's spacing before or after it:
@@ -297,18 +288,34 @@ QSize DockTitleBar::minimumSizeHint() const
     return hint;
 }
 
+void DockTitleBar::remeasure()
+{
+    // Hiding a widget invalidates its parent's layout, which is layout_, and
+    // not the tools' row nested in it: the row goes on counting a tool just
+    // hidden until the bar's next activation, and minimumSizeHint reads it.
+    tools_->invalidate();
+    layout_->invalidate();
+}
+
 void DockTitleBar::fitOptionalTools()
 {
+    // Asked afresh: a tool shown or hidden since the layout last measured it
+    // would otherwise be counted as it was - an always-shown tool that
+    // setToolWanted has just hidden, whose room is now the optional tools'
+    // (ViewChrome test
+    // AnAlwaysShownToolNoLongerWantedGivesItsRoomToTheOptionalOnesAtOnce).
+    remeasure();
     if (std::ranges::none_of(toolList_,
                              [](const Tool& tool) { return tool.priority != kAlways; })) {
         return;
     }
-    // Asked afresh: a tool shown or hidden since the layout last measured it
-    // would otherwise be counted as it was.
-    layout_->invalidate();
-    // What is left once the bar has its least width and the title has
-    // kTitleRoom rather than the least it will be squeezed to.
-    int room = width() - minimumSizeHint().width() - (kTitleRoom - title_->minimumWidth());
+    // What is left once the bar has its least width and the title, rather
+    // than the least it will be squeezed to, the room to be read whole: its
+    // text and kTitleGap, up to kTitleRoom.
+    const int least = title_->minimumWidth();
+    const int titleRoom = std::clamp(title_->sizeHint().width() + kTitleGap, least,
+                                     std::max(least, kTitleRoom));
+    int room = width() - minimumSizeHint().width() - (titleRoom - least);
     std::vector<int> priorities;
     for (const Tool& tool : toolList_) {
         if (tool.priority != kAlways && !std::ranges::contains(priorities, tool.priority)) {
@@ -336,6 +343,16 @@ void DockTitleBar::fitOptionalTools()
             }
         }
     }
+    // And again for the tools this hid, which the next fit and the dock both
+    // count before the bar's next activation. A 3D view turned plan wants
+    // In, Out and Selection one after another: In, hidden for want of room,
+    // was still counted, which left no room for Selection - and nothing
+    // refitted the bar, whose size had not changed. A view split at once
+    // after its bar was narrowed kept a least width counting the tools just
+    // hidden: 308 px of a 554 px row, where half was 277 (ViewChrome tests
+    // AViewTurnedIntoAPlanShowsTheToolsAPlanOpenedAtItsWidthShows and
+    // OpeningAViewSplitsItIntoEqualHalvesWhateverToolsItsBarShows).
+    remeasure();
 }
 
 void DockTitleBar::setActive(bool active)
@@ -390,12 +407,17 @@ void DockTitleBar::refresh()
 
 void DockTitleBar::updateTitle()
 {
+    const bool renamed = title_->text() != dock_.windowTitle();
     title_->setText(dock_.windowTitle());
     // Panels are always readable; views are muted unless active, so the one
     // the menus act on stands out without the others fading away.
     const bool bright = role_ == DockRole::Panel || active_;
     title_->setColor(bright ? theme::text() : theme::textMuted());
     title_->setToolTip(dock_.windowTitle());
+    // The room the optional tools leave the title is the title's own width.
+    if (renamed) {
+        fitOptionalTools();
+    }
 }
 
 void DockTitleBar::paintEvent(QPaintEvent*)

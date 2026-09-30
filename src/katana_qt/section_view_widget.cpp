@@ -38,9 +38,13 @@ const QColor kAxis(150, 158, 175);
 const QColor kText(196, 202, 214);
 
 // A distinct colour per surface, in the order they were cut. Existing ground
-// first, then design: the two a section almost always carries.
-const QColor kSurfaceColors[] = {QColor(120, 200, 120), QColor(235, 170, 80),
-                                 QColor(130, 175, 245), QColor(220, 120, 200),
+// first, then design: the two a section almost always carries. None near the
+// selection's orange (cad/selection_style.hpp), which marks a selected
+// crossing and its dot: the second was (235, 170, 80), CIE76 22.9 from it, so
+// the usual design surface's vertex dots hid the selected crossing's. The
+// nearest now is the yellow, 50.9.
+const QColor kSurfaceColors[] = {QColor(120, 200, 120), QColor(130, 175, 245),
+                                 QColor(220, 120, 200), QColor(100, 205, 205),
                                  QColor(230, 230, 130)};
 
 // The plot area - inside the axes and their labels - of a widget this size.
@@ -345,7 +349,7 @@ void SectionViewWidget::drawCrossings(QPainter& painter) const
         }
         ++lastDrawnCrossings_;
         // A selected one is drawn by drawSelectedCrossings, over the surfaces.
-        if (!isSelected(crossing)) {
+        if (markOf(crossing) != Mark::Selected) {
             painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
         }
     }
@@ -373,20 +377,15 @@ void SectionViewWidget::drawSelectedCrossings(QPainter& painter) const
     painter.setBrush(selection);
     painter.setRenderHint(QPainter::Antialiasing, true);
     for (const auto& crossing : section->crossings) {
-        if (!isSelected(crossing)) {
+        const Mark mark = markOf(crossing);
+        if (mark == Mark::None) {
             continue;
         }
         const double x = toScreen(crossing.station, 0.0).x();
         if (x < plot.left() || x > plot.right()) {
             continue;
         }
-        if (state_.layers.hides(crossing.layer)) {
-            // A ghost where only this view hides the layer; the drawing's own
-            // switched-off layer stays off (cad/selection_style.hpp).
-            if (!state_.selectionGhosts ||
-                !document_->model().layers.effectivelyVisible(crossing.layer)) {
-                continue;
-            }
+        if (mark == Mark::Ghost) {
             painter.setPen(ghostPen);
             painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
             ++lastGhostCrossings_;
@@ -405,9 +404,26 @@ void SectionViewWidget::drawSelectedCrossings(QPainter& painter) const
     painter.setClipping(false);
 }
 
-bool SectionViewWidget::isSelected(const katana::cad::SectionCrossing& crossing) const
+SectionViewWidget::Mark SectionViewWidget::markOf(const katana::cad::SectionCrossing& crossing) const
 {
-    return document_ != nullptr && document_->selection().contains(crossing.entity);
+    if (document_ == nullptr || !document_->selection().contains(crossing.entity)) {
+        return Mark::None;
+    }
+    // The entity as it is now, not as the cut found it: the plan and 3D
+    // views' rules (cad/selection.hpp), so an entity the document hides -
+    // its layer switched off, or it made invisible since the cut - is marked
+    // in no view, and one on a layer only this view hides is a ghost.
+    const katana::entity::Model& model = document_->model();
+    const katana::entity::Entity* entity = model.entities.find(crossing.entity);
+    if (entity == nullptr) {
+        return Mark::None;
+    }
+    if (katana::cad::isDrawn(model, *entity, state_.layers)) {
+        return Mark::Selected;
+    }
+    return state_.selectionGhosts && katana::cad::isGhost(model, *entity, state_.layers)
+               ? Mark::Ghost
+               : Mark::None;
 }
 
 QRectF SectionViewWidget::plotRect() const

@@ -1,12 +1,13 @@
 #include "katana/cad/plotting/section_annotation.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <format>
 #include <numeric>
 #include <type_traits>
 #include <variant>
+
+#include "katana/core/text.hpp"
 
 namespace katana::cad::plotting {
 
@@ -19,14 +20,7 @@ std::string twoDecimals(double value)
     return std::format("{:.2f}", std::abs(value) < 0.005 ? 0.0 : value);
 }
 
-std::string upper(std::string_view text)
-{
-    std::string out(text);
-    for (char& c : out) {
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    }
-    return out;
-}
+using katana::core::uppered;
 
 std::optional<double> between(std::optional<double> a, std::optional<double> b, double t)
 {
@@ -57,7 +51,7 @@ bool inside(const Box2& bounds, const Box2& box)
 bool isDesignSeries(std::string_view name)
 {
     constexpr std::string_view design = "design";
-    return name.size() >= design.size() && upper(name.substr(0, design.size())) == "DESIGN";
+    return name.size() >= design.size() && uppered(name.substr(0, design.size())) == "DESIGN";
 }
 
 const SectionSurface* designSeries(const Section& section)
@@ -339,7 +333,7 @@ CrossingNote crossingNote(const Section& section, const SectionCrossing& crossin
                           const entity::Model* model)
 {
     CrossingNote note;
-    note.shortText = upper(crossing.layer);
+    note.shortText = uppered(crossing.layer);
     if (model != nullptr) {
         if (const auto own = ownLevel(*model, crossing)) {
             note.level = own;

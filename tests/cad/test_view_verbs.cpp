@@ -231,6 +231,106 @@ TEST_F(ViewVerbsTest, ZoomAloneIsTheActiveViewsExtents)
     }
 }
 
+TEST_F(ViewVerbsTest, ZoomAllAndTheApostropheFormsAreTheExtentsAsInEveryCadProgram)
+{
+    // A script's commonest zoom lines. The old window zoomed the extents for
+    // any ZOOM line; ZOOM A was then refused here, and a script that ran to
+    // the end there stopped at it.
+    plan();
+    for (const char* line :
+         {"ZOOM A", "Z A", "zoom all", "Z ALL", "'ZOOM", "'Z", "'zoom a", "'Z E"}) {
+        const std::size_t before = host.zooms.size();
+        (void)ok(line);
+        ASSERT_EQ(host.zooms.size(), before + 1) << line;
+        EXPECT_EQ(host.zooms.back().kind, ZoomRequest::Kind::Extents) << line;
+    }
+    // ALL with a filter after it is the scope word for the drawing: what it
+    // matches, framed.
+    (void)ok("LINE 10,10 40,30");
+    const std::string filtered = ok("ZOOM ALL WHERE TYPE=line");
+    EXPECT_TRUE(filtered.starts_with("scope=drawing where=\"TYPE=line\" matched=1\n")) << filtered;
+    EXPECT_EQ(host.zooms.back().kind, ZoomRequest::Kind::Scope);
+    // Only the view verbs have an apostrophe form.
+    const auto other = refused("'LINE 0,0 1,1");
+    EXPECT_EQ(other.message, "unknown command; type HELP");
+}
+
+TEST_F(ViewVerbsTest, AFactorWithAutoCadsXIsRelativeToTheView)
+{
+    // AutoCAD's "2X" is twice the current view's scale: what a bare factor
+    // is here.
+    const ViewState& view = plan(10, 20, 4);
+    (void)ok("ZOOM 2X");
+    EXPECT_EQ(view.plan.scale, 8.0);
+    (void)ok("Z 0.5x");
+    EXPECT_EQ(view.plan.scale, 4.0);
+    EXPECT_EQ(view.plan.center, Point2(10, 20));
+    // Relative to paper space means nothing in a plan view; no number, or a
+    // factor not above 0, is refused as a bare one is.
+    for (const char* line : {"ZOOM 2XP", "ZOOM X", "ZOOM 0X", "ZOOM -2X"}) {
+        EXPECT_EQ(refused(line).code, ErrorCode::ParseFailure) << line;
+    }
+    EXPECT_EQ(view.plan.scale, 4.0);
+}
+
+TEST_F(ViewVerbsTest, DegenerateZoomAndViewsLinesAreRefusedNamingWhatIsMissing)
+{
+    // No view open at all.
+    const auto none = refused("ZOOM");
+    EXPECT_EQ(none.code, ErrorCode::InvalidState);
+    EXPECT_EQ(none.message, "no view is open to zoom: VIEWS OPEN plan opens one");
+
+    plan();
+    const auto centre = refused("ZOOM CENTRE");
+    EXPECT_EQ(centre.message, "ZOOM CENTRE takes the point to centre on: x,y");
+    EXPECT_EQ(refused("ZOOM CENTRE 5").message, "ZOOM CENTRE takes the point to centre on: x,y");
+    EXPECT_EQ(refused("VIEWS UNLINK").message,
+              "name the views to unlink: VIEWS UNLINK <id>[,<id>...] | ALL");
+    EXPECT_EQ(refused("VIEWS OPEN").message,
+              "VIEWS OPEN takes what the view shows: plan, 3d, section or elevation");
+    EXPECT_EQ(refused("VIEWS OPEN plan 3d").message,
+              "VIEWS OPEN takes what the view shows: plan, 3d, section or elevation");
+    EXPECT_EQ(refused("VIEWS OPEN map").message,
+              "VIEWS OPEN takes plan, 3d, section or elevation, not 'map'");
+    EXPECT_EQ(refused("VIEWS ACTIVATE").message, "VIEWS ACTIVATE takes one view id");
+    EXPECT_EQ(refused("VIEWS ACTIVATE 1 2").message, "VIEWS ACTIVATE takes one view id");
+    EXPECT_TRUE(host.zooms.empty()) << "nothing refused was asked of the window";
+    EXPECT_EQ(host.set.size(), 1U) << "nothing opened";
+}
+
+TEST_F(ViewVerbsTest, ZoomSelectionOfOnePointCentresOnItAndKeepsTheScale)
+{
+    // A point has no extent to fit (ViewTransform::fit): the view centres on
+    // it at the scale it had, and the scope says it took one.
+    const ViewState& view = plan(10, 20, 4);
+    (void)ok("POINT 70,80");
+    (void)ok("SELECT ALL");
+    const std::string reply = ok("ZOOM SELECTION");
+    EXPECT_TRUE(reply.starts_with("scope=selection matched=1\nview=1 kind=plan centre=70,80 "))
+        << reply;
+    EXPECT_EQ(view.plan.center, Point2(70, 80));
+    EXPECT_EQ(view.plan.scale, 4.0);
+}
+
+TEST(ViewZoom, TheKindsEachZoomTakesAreTheVerbsOneRule)
+{
+    // The table the bars, the View menu and the Zoom To dialog read
+    // (cad::zoomTakes), as view_verbs.hpp states it.
+    using Kind = ZoomRequest::Kind;
+    for (const ViewKind kind :
+         {ViewKind::Plan, ViewKind::Model3D, ViewKind::Section, ViewKind::Elevation}) {
+        const bool plan = kind == ViewKind::Plan;
+        const bool aboutCentre = plan || kind == ViewKind::Section;
+        EXPECT_TRUE(zoomTakes(kind, Kind::Extents));
+        EXPECT_EQ(zoomTakes(kind, Kind::In), aboutCentre);
+        EXPECT_EQ(zoomTakes(kind, Kind::Out), aboutCentre);
+        EXPECT_EQ(zoomTakes(kind, Kind::Factor), aboutCentre);
+        EXPECT_EQ(zoomTakes(kind, Kind::Window), plan);
+        EXPECT_EQ(zoomTakes(kind, Kind::Centre), plan);
+        EXPECT_EQ(zoomTakes(kind, Kind::Scope), plan);
+    }
+}
+
 TEST_F(ViewVerbsTest, ZoomCentreScaleSetsThePlanViewExactly)
 {
     plan();
@@ -449,6 +549,30 @@ TEST_F(ViewVerbsTest, HidingALayerTheDrawingLacksIsRefusedNamingIt)
     // the Layers popup offers as "design" when only design/road existed.
     addLayers(document, {"survey/points"});
     EXPECT_TRUE(ok("VIEWS HIDE 1 survey").ends_with(" hidden=survey"));
+}
+
+TEST_F(ViewVerbsTest, ShowingALayerBeneathOneTheViewHidesIsRefusedNamingWhatHoldsIt)
+{
+    // design hidden hides design/road with it (LayerOverrides): SHOW of the
+    // road alone would leave it hidden and answer with the same record, as
+    // if it had done something.
+    addLayers(document, {"design", "design/road", "asbuilt"});
+    const ViewState& view = plan();
+    (void)ok("VIEWS HIDE 1 design,asbuilt");
+    host.settingChanges.clear();
+
+    const auto held = refused("VIEWS SHOW 1 asbuilt,design/road");
+    EXPECT_EQ(held.code, ErrorCode::CommandRejected);
+    EXPECT_EQ(held.message,
+              "view 1 hides 'design', which holds 'design/road': show 'design' (VIEWS SHOW 1 "
+              "design)");
+    // Read whole before any of it is shown: asbuilt, before it, is hidden still.
+    EXPECT_TRUE(view.layers.hidesDirectly("asbuilt"));
+    EXPECT_TRUE(host.settingChanges.empty());
+
+    // With what holds it on the same line, both are shown.
+    EXPECT_TRUE(ok("VIEWS SHOW 1 design/road,design").ends_with(" hidden=asbuilt"));
+    EXPECT_FALSE(view.layers.hides("design/road"));
 }
 
 TEST_F(ViewVerbsTest, ViewsSetGhostsOffTurnsThatViewsGhostsOffAndOnAgain)

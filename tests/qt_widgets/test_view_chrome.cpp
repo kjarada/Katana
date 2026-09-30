@@ -306,43 +306,61 @@ std::vector<std::pair<QString, QRect>> shownButtons(const QWidget& bar)
     return shown;
 }
 
+// Which of a bar's optional zoom tools it shows, by object name.
+std::vector<std::string> shownZoomTools(const QWidget& bar)
+{
+    std::vector<std::string> shown;
+    for (const char* name : {"ViewZoomInButton", "ViewZoomOutButton", "ViewZoomSelectionButton"}) {
+        const auto* button = bar.findChild<QToolButton*>(name);
+        if (button != nullptr && button->isVisible()) {
+            shown.emplace_back(name);
+        }
+    }
+    return shown;
+}
+
+// What a plan view's bar should show of the same three, worked from the rule
+// DockTitleBar::addTool states: Zoom to Selection (priority 2), then Zoom In
+// and Out (1, a pair), each only while it fits beside the bar's least width -
+// which leaves the optional tools out - with the title left the room to be
+// read whole: its text's width and kTitleGap, from the title's least (24 px)
+// to kTitleRoom. Each tool is 22 px and the row's 1 px spacing.
+std::vector<std::string> zoomToolsByTheRule(const katana::qt::DockTitleBar& bar)
+{
+    using katana::qt::DockTitleBar;
+    constexpr int kTitleLeast = 24;
+    const int text = bar.fontMetrics().horizontalAdvance(bar.dock().windowTitle());
+    const int titleRoom =
+        std::clamp(text + DockTitleBar::kTitleGap, kTitleLeast, DockTitleBar::kTitleRoom);
+    const int room = bar.width() - bar.minimumSizeHint().width() - (titleRoom - kTitleLeast);
+    constexpr int kTool = 22 + 1;
+    if (room < kTool) {
+        return {};
+    }
+    if (room - kTool < 2 * kTool) {
+        return {"ViewZoomSelectionButton"};
+    }
+    return {"ViewZoomInButton", "ViewZoomOutButton", "ViewZoomSelectionButton"};
+}
+
 } // namespace
 
 TEST(ViewChrome, TheTitleBarShowsOptionalToolsOnlyWhereTheyFitAndNoTwoOverlap)
 {
-    // A plan view's bar has three optional tools: Zoom to Selection
-    // (priority 2), and Zoom In and Out (1, a pair). Each shows only while
-    // it fits with DockTitleBar::kTitleRoom left for the title, the highest
-    // first: each is 22 px and the row's 1 px spacing. Worked from the bar's
-    // least width, which leaves the optional tools out.
     ChromedWorkspace w;
     const ViewId plan = w.active();
     katana::qt::DockTitleBar* bar = w.chrome->titleBar(w.dock(plan));
     ASSERT_NE(bar, nullptr);
-    for (const int windowWidth : {300, 600}) {
+    for (const int windowWidth : {250, 300, 600}) {
         w.window.resize(windowWidth, 400);
         processEvents();
         const int width = bar->width();
-        const int least = bar->minimumSizeHint().width();
-        const int room =
-            width - least - (katana::qt::DockTitleBar::kTitleRoom - 24 /* the title's least */);
-        const bool selection = room >= 23;
-        const bool inAndOut = selection && room - 23 >= 2 * 23;
-
-        const auto* zoomIn = bar->findChild<QToolButton*>("ViewZoomInButton");
-        const auto* zoomOut = bar->findChild<QToolButton*>("ViewZoomOutButton");
-        const auto* zoomSelection = bar->findChild<QToolButton*>("ViewZoomSelectionButton");
-        ASSERT_NE(zoomIn, nullptr);
-        ASSERT_NE(zoomOut, nullptr);
-        ASSERT_NE(zoomSelection, nullptr);
-        EXPECT_EQ(zoomSelection->isVisible(), selection) << "bar " << width << " px";
-        EXPECT_EQ(zoomIn->isVisible(), inAndOut) << "bar " << width << " px";
-        EXPECT_EQ(zoomOut->isVisible(), inAndOut) << "bar " << width << " px";
-        if (windowWidth == 600) {
-            EXPECT_TRUE(inAndOut) << "at 600 px every tool fits";
-        } else {
-            EXPECT_FALSE(inAndOut) << "at 300 px In and Out go first";
-        }
+        const std::vector<std::string> expected = zoomToolsByTheRule(*bar);
+        EXPECT_EQ(shownZoomTools(*bar), expected) << "bar " << width << " px";
+        // Each step of the fit is reached: nothing at 250, Selection alone
+        // at 300, everything at 600.
+        EXPECT_EQ(expected.size(), windowWidth == 250 ? 0U : windowWidth == 300 ? 1U : 3U)
+            << "bar " << width << " px";
 
         // Every button shown lies in the bar and clear of every other.
         const auto shown = shownButtons(*bar);
@@ -355,6 +373,17 @@ TEST(ViewChrome, TheTitleBarShowsOptionalToolsOnlyWhereTheyFitAndNoTwoOverlap)
                     << shown[i].first.toStdString() << " overlaps "
                     << shown[j].first.toStdString() << " at " << width << " px";
             }
+        }
+        // Where an optional tool was fitted, the title between the kind
+        // button and the first tool still has the room to be read whole.
+        if (!expected.empty()) {
+            const auto* kind = bar->findChild<QToolButton*>("ViewKindButton");
+            const auto* link = bar->findChild<QToolButton*>("ViewLinkButton");
+            ASSERT_NE(kind, nullptr);
+            ASSERT_NE(link, nullptr);
+            const int text = bar->fontMetrics().horizontalAdvance(w.dock(plan)->windowTitle());
+            EXPECT_GE(link->geometry().left() - kind->geometry().right() - 1, text)
+                << "bar " << width << " px";
         }
     }
 }
@@ -377,6 +406,145 @@ TEST(ViewChrome, OptionalToolsNeverWidenTheDocksMinimum)
     // a view can always be narrowed past them.
     EXPECT_EQ(bar->minimumSizeHint().width(), wide);
     EXPECT_EQ(w.dock(plan)->minimumSizeHint().width(), dockWide);
+}
+
+TEST(ViewChrome, AViewTurnedIntoAPlanShowsTheToolsAPlanOpenedAtItsWidthShows)
+{
+    // A 3D view's bar has no In, Out or Selection. Made a plan - the kind
+    // button, View > Active Viewport Shows, the only way a mouse user gets a
+    // second plan - its bar wants the three one after another, and keeps
+    // whatever fit that made: its size does not change, so no resize refits
+    // it. It must show what a plan opened at the same width shows, which is
+    // what the rule gives. Two views side by side, over the window widths at
+    // which the tools come and go (each view about 250 to 380 px).
+    std::set<std::vector<std::string>> seen;
+    for (int windowWidth = 500; windowWidth <= 760; windowWidth += 5) {
+        // The window sized first: a view opened splits the active one into
+        // halves of what it has then, so both windows split alike.
+        ChromedWorkspace turned;
+        turned.window.resize(windowWidth, 400);
+        processEvents();
+        const ViewId model = turned.views->openView(ViewKind::Model3D).id;
+        processEvents();
+        ASSERT_TRUE(turned.views->setViewKind(model, ViewKind::Plan).ok());
+        processEvents();
+
+        ChromedWorkspace opened;
+        opened.window.resize(windowWidth, 400);
+        processEvents();
+        const ViewId plan = opened.views->openView(ViewKind::Plan).id;
+        processEvents();
+
+        const katana::qt::DockTitleBar* turnedBar = turned.chrome->titleBar(turned.dock(model));
+        const katana::qt::DockTitleBar* openedBar = opened.chrome->titleBar(opened.dock(plan));
+        ASSERT_NE(turnedBar, nullptr);
+        ASSERT_NE(openedBar, nullptr);
+        ASSERT_EQ(turnedBar->width(), openedBar->width()) << "window " << windowWidth << " px";
+        EXPECT_EQ(shownZoomTools(*turnedBar), shownZoomTools(*openedBar))
+            << "bars " << openedBar->width() << " px (window " << windowWidth << " px)";
+        EXPECT_EQ(shownZoomTools(*openedBar), zoomToolsByTheRule(*openedBar))
+            << "bars " << openedBar->width() << " px (window " << windowWidth << " px)";
+        seen.insert(shownZoomTools(*openedBar));
+    }
+    // The widths reach every step of the fit: none of the three, Selection
+    // alone, and all three.
+    EXPECT_TRUE(seen.contains({}));
+    EXPECT_TRUE(seen.contains({"ViewZoomSelectionButton"}));
+    EXPECT_TRUE(seen.contains({"ViewZoomInButton", "ViewZoomOutButton", "ViewZoomSelectionButton"}));
+}
+
+TEST(ViewChrome, AnAlwaysShownToolNoLongerWantedGivesItsRoomToTheOptionalOnesAtOnce)
+{
+    // Link is always shown where it is wanted; taken off (a view whose kind
+    // has none), its 23 px go to the optional tools in the same call, as the
+    // rule counts them - and stay so, the bar's size being unchanged. Over
+    // widths where those 23 px are the difference.
+    std::set<std::size_t> seen;
+    for (int windowWidth = 250; windowWidth <= 360; windowWidth += 2) {
+        ChromedWorkspace w;
+        w.window.resize(windowWidth, 400);
+        processEvents();
+        katana::qt::DockTitleBar* bar = w.chrome->titleBar(w.dock(w.active()));
+        ASSERT_NE(bar, nullptr);
+        auto* link = bar->findChild<QToolButton*>("ViewLinkButton");
+        ASSERT_NE(link, nullptr);
+        const std::size_t before = shownZoomTools(*bar).size();
+
+        bar->setToolWanted(link, false);
+
+        EXPECT_FALSE(link->isVisible());
+        EXPECT_EQ(shownZoomTools(*bar), zoomToolsByTheRule(*bar))
+            << "a " << bar->width() << " px bar";
+        processEvents();
+        EXPECT_EQ(shownZoomTools(*bar), zoomToolsByTheRule(*bar))
+            << "a " << bar->width() << " px bar, after the events";
+        if (shownZoomTools(*bar).size() > before) {
+            seen.insert(before);
+        }
+    }
+    // Widths at which Link's room let Selection in, and In and Out.
+    EXPECT_TRUE(seen.contains(0U));
+    EXPECT_TRUE(seen.contains(1U));
+}
+
+TEST(ViewChrome, OpeningAViewSplitsItIntoEqualHalvesWhateverToolsItsBarShows)
+{
+    // At 560 px the lone plan's bar shows every optional tool and a half's
+    // bar does not, so the plan's bar hides them as the split narrows it. A
+    // least width still counting them held the plan at 308 px of the 554
+    // left by the separator, where half is 277.
+    ChromedWorkspace w;
+    w.window.resize(560, 400);
+    processEvents();
+    const ViewId plan = w.active();
+    const katana::qt::DockTitleBar* bar = w.chrome->titleBar(w.dock(plan));
+    ASSERT_NE(bar, nullptr);
+    ASSERT_EQ(shownZoomTools(*bar).size(), 3U) << "the lone plan's bar shows all three";
+    const QRect whole = w.dock(plan)->geometry();
+
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    processEvents();
+
+    ASSERT_LT(shownZoomTools(*bar).size(), 3U) << "a half's bar has no room for all three";
+    const QRect left = w.dock(plan)->geometry();
+    const QRect right = w.dock(model)->geometry();
+    EXPECT_EQ(left.width() + w.separator() + right.width(), whole.width());
+    EXPECT_LE(std::abs(left.width() - right.width()), 1)
+        << "plan " << left.width() << " px, 3D " << right.width() << " px";
+}
+
+TEST(ViewChrome, QuadPutsTheViewsInQuartersWhateverToolsTheirBarsShow)
+{
+    // The quad layout at widths where a quarter's bar has room for some of
+    // its tools and not others, made by the same splits as above: held to
+    // the same quarters, and the plan's bar (the one with In, Out and
+    // Selection) showing what the rule gives it. A least width that
+    // counted tools no longer shown, or left out tools shown, gave the plan
+    // a quarter of the wrong width and the wrong tools.
+    std::set<std::size_t> seen;
+    for (const int windowWidth : {560, 600, 660}) {
+        ChromedWorkspace w;
+        w.window.resize(windowWidth, 500);
+        processEvents();
+        const ViewId plan = w.active();
+        w.views->arrange(LayoutKind::Quad);
+        processEvents();
+        ASSERT_EQ(w.views->viewSet().size(), 4U);
+        const QRect area = w.views->rect();
+        const int halfWidth = (area.width() - w.separator()) / 2;
+        for (const ViewId id : {plan, plan + 1, plan + 2, plan + 3}) {
+            EXPECT_LE(std::abs(w.dock(id)->width() - halfWidth), 1)
+                << "view " << id << " is " << w.dock(id)->width() << " px of " << area.width();
+        }
+        const katana::qt::DockTitleBar* bar = w.chrome->titleBar(w.dock(plan));
+        ASSERT_NE(bar, nullptr);
+        EXPECT_EQ(shownZoomTools(*bar), zoomToolsByTheRule(*bar))
+            << "a " << bar->width() << " px bar (window " << windowWidth << " px)";
+        seen.insert(zoomToolsByTheRule(*bar).size());
+    }
+    // A quarter with room for all three, and one without.
+    EXPECT_TRUE(seen.contains(3U));
+    EXPECT_TRUE(seen.contains(0U) || seen.contains(1U));
 }
 
 TEST(ViewChrome, OpeningAViewSplitsTheActiveViewIntoEqualHalvesAlongItsLongerSide)

@@ -24,14 +24,7 @@ static_assert(std::is_same_v<ViewId, std::uint32_t>,
 
 namespace {
 
-std::string upper(std::string_view text)
-{
-    std::string out(text);
-    for (char& c : out) {
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    }
-    return out;
-}
+using katana::core::uppered;
 
 // "a,b,,c" -> a b c: an empty item is a stray comma, not a name.
 std::vector<std::string> splitList(std::string_view text)
@@ -56,14 +49,14 @@ Result<EntityType> parseTypeName(std::string_view text)
 // A WHERE condition: a word holding '=', or DRAWN.
 bool isConditionWord(std::string_view word)
 {
-    return upper(word) == "DRAWN" || word.find('=') != std::string_view::npos;
+    return uppered(word) == "DRAWN" || word.find('=') != std::string_view::npos;
 }
 
 } // namespace
 
 Status parseWhereCondition(const std::string& word, ModifyFilter& filter)
 {
-    if (upper(word) == "DRAWN") {
+    if (uppered(word) == "DRAWN") {
         filter.drawnOnly = true;
         return {};
     }
@@ -71,7 +64,7 @@ Status parseWhereCondition(const std::string& word, ModifyFilter& filter)
     if (equals == std::string::npos) {
         return makeError(ErrorCode::ParseFailure, "a WHERE condition is key=value", word);
     }
-    const std::string key = upper(word.substr(0, equals));
+    const std::string key = uppered(word.substr(0, equals));
     const std::string value = word.substr(equals + 1);
     if (key == "TYPE") {
         for (const std::string& name : splitList(value)) {
@@ -238,7 +231,7 @@ std::string areaText(const katana::geometry::Box2& area)
 
 bool isScopeWord(std::string_view word)
 {
-    const std::string folded = upper(word);
+    const std::string folded = uppered(word);
     for (const char* name :
          {"SELECTION", "SEL", "DRAWING", "ALL", "VIEW", "AREA", "LAYERS", "LAYER", "WHERE"}) {
         if (folded == name) {
@@ -251,7 +244,7 @@ bool isScopeWord(std::string_view word)
 bool isWhereKey(std::string_view key)
 {
     // The keys parseWhereCondition reads.
-    const std::string folded = upper(key);
+    const std::string folded = uppered(key);
     for (const char* name : {"TYPE", "LAYER", "STYLE", "COLOUR", "COLOR", "PROP", "TEXT"}) {
         if (folded == name) {
             return true;
@@ -262,7 +255,7 @@ bool isWhereKey(std::string_view key)
 
 Result<std::optional<katana::entity::Color>> parseColourOrByLayer(std::string_view text)
 {
-    if (upper(text) == "BYLAYER") {
+    if (uppered(text) == "BYLAYER") {
         return std::optional<katana::entity::Color>{};
     }
     auto colour = katana::entity::Color::fromHex(text);
@@ -287,7 +280,7 @@ Result<ScopeWords> parseScopeWords(const std::vector<std::string>& words, std::s
     };
     while (i < words.size()) {
         const std::string& word = words[i];
-        const std::string folded = upper(word);
+        const std::string folded = uppered(word);
         if (folded == "WHERE") {
             break;
         }
@@ -325,7 +318,7 @@ Result<ScopeWords> parseScopeWords(const std::vector<std::string>& words, std::s
                 result.view = static_cast<std::uint32_t>(*id);
                 ++i;
             }
-            if (i < words.size() && upper(words[i]) == "EXTENTS") {
+            if (i < words.size() && uppered(words[i]) == "EXTENTS") {
                 result.extents = true;
                 ++i;
             }
@@ -349,7 +342,7 @@ Result<ScopeWords> parseScopeWords(const std::vector<std::string>& words, std::s
             result.source = ScopeSource::Layers;
             result.layers = splitList(words[i]);
             ++i;
-            if (i < words.size() && upper(words[i]) == "ONLY") {
+            if (i < words.size() && uppered(words[i]) == "ONLY") {
                 result.sublayers = false;
                 ++i;
             }
@@ -357,10 +350,10 @@ Result<ScopeWords> parseScopeWords(const std::vector<std::string>& words, std::s
     }
     // WHERE, and its conditions up to the first word that is not one. A
     // second WHERE reads on, so "WHERE TYPE=point WHERE DRAWN" is one filter.
-    if (i < words.size() && upper(words[i]) == "WHERE") {
+    if (i < words.size() && uppered(words[i]) == "WHERE") {
         ++i;
         while (i < words.size()) {
-            if (upper(words[i]) == "WHERE") {
+            if (uppered(words[i]) == "WHERE") {
                 ++i;
                 continue;
             }

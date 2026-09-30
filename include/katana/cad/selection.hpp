@@ -74,6 +74,15 @@ class SelectionSet {
 // colour too, so it resolves once and asks this.
 [[nodiscard]] bool isDrawn(const katana::entity::ResolvedLayer& layer,
                            const katana::entity::Entity& entity, const LayerOverrides& view);
+// The ghost rule, the drawn rule's other half: `view` alone hides the entity -
+// the document draws it and a layer the view hides of its own takes it out.
+// Where a view shows a SELECTED entity faintly instead of not at all
+// (selection_style.hpp; docs/desktop.md, "The selection in every view"): the
+// plan painter, the 3D scene and a section ask this one rule, so none of
+// them ghosts what the document hides - a layer switched off in the drawing,
+// an entity made invisible - which stays hidden in every view.
+[[nodiscard]] bool isGhost(const katana::entity::Model& model,
+                           const katana::entity::Entity& entity, const LayerOverrides& view);
 
 // The box round everything `view` draws: each entity passing the rule, by its
 // true geometry (entity::boundingBox - an arc's own extent, not its circle's).

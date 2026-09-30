@@ -1000,15 +1000,11 @@ void SceneBuilder::emitEntities(const Document& document,
     };
 
     const auto emitOne = [&](const Entity& entity) {
-        // The plan view's rule, so a layer switched off disappears here too.
-        const bool drawnHere = isDrawn(document.model(), entity, viewOf(options));
-        if (which == Selected::Ghosts) {
-            // A ghost is what THIS view hides and the document shows: a layer
-            // the document hides stays hidden everywhere.
-            if (drawnHere || !isDrawn(document.model(), entity, kNoLayerOverrides)) {
-                return;
-            }
-        } else if (!drawnHere) {
+        // The plan view's rules, so a layer switched off disappears here too:
+        // drawn where this view draws it, a ghost where only this view hides
+        // it (selection.hpp).
+        if (which == Selected::Ghosts ? !isGhost(document.model(), entity, viewOf(options))
+                                      : !isDrawn(document.model(), entity, viewOf(options))) {
             return;
         }
         // The overlay walks the selection, so everything it meets is selected.

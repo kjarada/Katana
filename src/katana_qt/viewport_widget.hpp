@@ -106,6 +106,9 @@ class ViewportWidget final : public QWidget {
     // a layer the document shows and this view hides
     // (PlanPaintStats::ghostsDrawn; ViewState::selectionGhosts).
     [[nodiscard]] std::size_t lastGhostCount() const { return lastGhosts_; }
+    // The grips this view offers on the selection as its last paint built
+    // them: none on an entity on a layer this view hides, however selected.
+    [[nodiscard]] std::size_t gripCount() const { return grips_.grips().size(); }
 
     // ---- what a frame costs -------------------------------------------------
     // The drawing is painted into an image kept between paints, and a paint

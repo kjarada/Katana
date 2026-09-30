@@ -157,6 +157,9 @@ std::optional<Tool> legacyTool(std::string_view id)
 ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, QWidget* parent)
     : QWidget(parent), document_(document), state_(state), tools_(document), grips_(document)
 {
+    // What a headless run reports it by (docs/headless.md), as its dock is
+    // View<id>.
+    setObjectName(QString("PlanView%1").arg(state.id));
     setMinimumSize(kMinimumWidth, kMinimumHeight);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -171,6 +174,8 @@ ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, Q
         update();
     });
     wireToolHost();
+    // No grip on what this view hides: a ghost is never picked here.
+    grips_.setView(&state_.layers);
     grips_.onError = [this](const QString& error) {
         if (onError) {
             onError(error);

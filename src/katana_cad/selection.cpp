@@ -69,6 +69,13 @@ bool isDrawn(const katana::entity::ResolvedLayer& layer, const Entity& entity,
     return entity.visible && layer.shown && !view.hides(entity.layer);
 }
 
+bool isGhost(const Model& model, const Entity& entity, const LayerOverrides& view)
+{
+    // The view's test first: it answers at once for a view that hides
+    // nothing of its own, which is most views, before the layer is resolved.
+    return view.hides(entity.layer) && isDrawn(model, entity, kNoLayerOverrides);
+}
+
 bool isSelectable(const Model& model, const Entity& entity, const LayerOverrides& view)
 {
     // The drawn test once, here, rather than repeated inline: it used to be

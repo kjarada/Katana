@@ -137,6 +137,10 @@ class ViewWorkspace final : public QMainWindow {
     void toggleLink(katana::cad::ViewId id);
     // Raised whenever the link changes, for the View menu's check mark.
     std::function<void()> onLinksChanged;
+    // Raised whenever a view's own settings change - the layers it hides,
+    // its ghosts of the selection (VIEWS HIDE, SHOW, ISOLATE, SET) - for the
+    // View menu's Show the Selection on Hidden Layers check mark.
+    std::function<void()> onViewSettingsChanged;
 
     // ---- views ---------------------------------------------------------------
     [[nodiscard]] katana::cad::ViewSet& viewSet() { return views_; }

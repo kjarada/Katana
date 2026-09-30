@@ -26,9 +26,11 @@
 //   VIEWS SHOW <id> <layer>[,<layer>...] | ALL
 //   VIEWS ISOLATE <id> <layer>            that layer, its parents and what lies
 //                                         beneath it, and nothing else
-//   ZOOM | Z                              the active view's extents, as always
-//   ZOOM EXTENTS | IN [f] | OUT [f] | <f> | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s]
-//        [view=<id>]
+//   VIEWS SET <id> ghosts=on|off          whether that view shows the selection
+//                                         faintly where it hides the layer
+//   ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
+//   ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
+//        | CENTRE x,y [SCALE s]  [view=<id>]
 //   ZOOM SELECTION | DRAWING | VIEW [<id>] [EXTENTS] | AREA x0,y0,x1,y1
 //        | LAYERS a,b [ONLY]  [WHERE key=value ...]  [view=<id>]
 //
@@ -39,12 +41,16 @@
 // condition; without it ZOOM acts on the active view. Linked views follow
 // every ZOOM.
 //
-// EXTENTS frames what the view draws, in any kind of view. IN and OUT (by 2
-// unless a factor is given) and a bare factor zoom about the view's centre,
-// in a plan view or a section; WINDOW frames a box as Zoom Extents frames the
+// EXTENTS frames what the view draws, in any kind of view; ALL and A alone
+// are the same, every CAD program's Zoom All (with a filter after it, ALL is
+// the scope word for the whole drawing). IN and OUT (by 2 unless a factor is
+// given) and a bare factor zoom about the view's centre, in a plan view or a
+// section - a factor may carry AutoCAD's X, "2X", relative to the view as a
+// bare one always is; WINDOW frames a box as Zoom Extents frames the
 // drawing - a box of the drawing, where the scope word AREA would be the
 // entities found in one; CENTRE puts a point in the middle, at SCALE pixels
-// per unit when given. WINDOW and CENTRE act on plan views.
+// per unit when given. WINDOW and CENTRE act on plan views. 'ZOOM and 'Z,
+// AutoCAD's transparent form, are ZOOM whether or not a tool runs.
 //
 // The scope words are the shared grammar (scope_verbs.hpp), read by the one
 // parser and resolved by matchScope: ZOOM frames what they take, by
@@ -60,20 +66,23 @@
 // hides, and like the rest of a view's state not saved and not undoable. A
 // layer is a layer of the drawing or a node of the layer tree above one
 // ("design" when only "design/road" is a layer); one the drawing lacks is
-// refused, naming it, and nothing changes. The reply is the view's record.
+// refused, naming it, and nothing changes. SHOW of a layer beneath one the
+// view hides is refused, naming what holds it: it would stay hidden. The
+// reply is the view's record.
 //
 // Records, one per line, key=value, reals as core::formatExactReal writes
-// them and angles in degrees; hidden= is the layers a view hides of its own,
-// left out when it hides none:
+// them and angles in degrees; ghosts= is the view's switch (VIEWS SET), and
+// hidden= the layers a view hides of its own, left out when it hides none:
 //
 //   view=1 kind=plan title="Plan 1" active=yes linked=yes centre=50,40 scale=8 area=x0,y0,x1,y1
-//          hidden=asbuilt
+//          ghosts=on hidden=asbuilt
 //   view=3 kind=3d title="3D 1" active=no target=x,y,z distance=d azimuth=a elevation=e
-//          projection=perspective
-//   view=4 kind=section title="Section 1" active=no
+//          projection=perspective ghosts=on
+//   view=4 kind=section title="Section 1" active=no ghosts=on
 //
-// ZOOM replies the record of the view it moved without title, active and
-// linked, then a line for each view that followed it:
+// ZOOM replies the record of the view it moved without title, active,
+// linked, ghosts and hidden - where it looks, not what it shows - then a line
+// for each view that followed it:
 //
 //   view=2 kind=plan followed=1 centre=50,40 scale=8 area=x0,y0,x1,y1
 //
@@ -121,6 +130,15 @@ struct ZoomRequest {
     // clamped, because a scale the view cannot show is not the one asked for.
     std::optional<double> scale{};
 };
+
+// Whether a view of `kind` takes `request`: EXTENTS any view; IN, OUT and a
+// factor a plan view and a section, which zoom about their centres; WINDOW,
+// CENTRE and a scope a plan view, whose plan position they are. A 3D or
+// elevation view zooms by the wheel towards what is under the cursor, which
+// ZOOM IN is to use at its centre once that zoom is merged (docs/cad.md).
+// The one rule: ZOOM refuses by it, and a view's bar, the View menu and the
+// Zoom To dialog offer only what it allows, so widening it widens all four.
+[[nodiscard]] bool zoomTakes(ViewKind kind, ZoomRequest::Kind request);
 
 // In, Out, Factor and Centre applied to a plan view's transform: arithmetic
 // about the view's centre, which needs neither the widget nor its size. The

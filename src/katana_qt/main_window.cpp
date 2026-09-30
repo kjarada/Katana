@@ -342,6 +342,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     interpreter_.setViewHost([this] { return &views_->verbHost(); });
     views_->setCommandRunner(commandRunner());
     views_->onLinksChanged = [this] { refreshViewMenu(); };
+    views_->onViewSettingsChanged = [this] { refreshViewMenu(); };
 
     views_->onPrompt = [this](const QString& prompt) {
         statusBar()->showMessage(prompt);
@@ -4890,6 +4891,25 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
     connect(unlinkAll, &QAction::triggered, this,
             [this] { (void)runVerbLine("VIEWS UNLINK ALL"); });
 
+    // The active view's ghosts of the selection (docs/desktop.md, "The
+    // selection in every view"): the box in its Layers popup, by the same
+    // line through the same executor. D: every other letter of it is taken.
+    ghostsAction_ = viewMenu->addAction(katana::qt::icon(Icon::LayerVisible),
+                                        "Show the Selection on Hi&dden Layers");
+    ghostsAction_->setObjectName("viewSelectionGhosts");
+    ghostsAction_->setCheckable(true);
+    ghostsAction_->setStatusTip("Draw what is selected faintly in the active view where it hides "
+                                "the layer, or not at all (VIEWS SET <id> ghosts=on|off)");
+    connect(ghostsAction_, &QAction::triggered, this, [this](bool on) {
+        const cad::ViewId active = views_->viewSet().activeId();
+        if (active == cad::kNoView) {
+            logMessage("No view is open. VIEWS OPEN plan opens one.", true);
+        } else {
+            views_->setSelectionGhosts(active, on);
+        }
+        refreshViewMenu();
+    });
+
     viewMenu->addSection("3D Views");
     QMenu* standard = viewMenu->addMenu("Standard &3D Views");
     standard->setIcon(katana::qt::icon(Icon::ViewIsoSouthWest));
@@ -4966,6 +4986,22 @@ void MainWindow::refreshViewMenu()
         const ViewportWidget* plan = views_->activePlanView();
         linkAction_->setEnabled(plan != nullptr);
         linkAction_->setChecked(plan != nullptr && plan->state().linked);
+    }
+    const cad::ViewState* active = views_->viewSet().find(views_->viewSet().activeId());
+    if (ghostsAction_ != nullptr) {
+        ghostsAction_->setEnabled(active != nullptr);
+        ghostsAction_->setChecked(active != nullptr && active->selectionGhosts);
+    }
+    // The zoom items the active view's kind takes, as its bar offers them
+    // (cad::zoomTakes, ZOOM's own rule): a 3D view's Zoom In was offered, and
+    // only refused.
+    using Request = cad::ZoomRequest::Kind;
+    for (const auto& [name, request] :
+         {std::pair{"viewZoomIn", Request::In}, std::pair{"viewZoomOut", Request::Out},
+          std::pair{"viewZoomSelection", Request::Scope}}) {
+        if (QAction* action = findChild<QAction*>(name)) {
+            action->setEnabled(active != nullptr && cad::zoomTakes(active->kind, request));
+        }
     }
 }
 

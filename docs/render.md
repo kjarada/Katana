@@ -318,8 +318,9 @@ passes **write no depth**:
 **The selection overlay** walks the selection's ids alone, in ascending id
 order (the order a walk of the drawing visits), through the one emitter: the
 selected entities the view draws, as the core, then - when the view's
-`SceneOptions::selectionGhosts` is on - its GHOSTS: selected entities on a
-layer the document shows and the view (`SceneOptions::layers`) hides, each
+`SceneOptions::selectionGhosts` is on - its GHOSTS: selected entities the
+document draws and the view (`SceneOptions::layers`) hides (`cad::isGhost`,
+the rule the plan painter and a section ask too), each
 one 1 px line of (130, 88, 32), the selection colour at 45 % mixed over the
 view's ground beforehand, with no casing (`docs/desktop.md`, "The selection
 in every view"). The one-list build (`SceneBuilder::build`) keeps its

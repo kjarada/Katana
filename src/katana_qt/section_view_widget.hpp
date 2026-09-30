@@ -78,10 +78,11 @@ class SectionViewWidget final : public QWidget {
     [[nodiscard]] std::size_t lastDrawnCrossingCount() const { return lastDrawnCrossings_; }
     // Crossings the last paint left out because this view hides their layer.
     [[nodiscard]] std::size_t lastHiddenCrossingCount() const { return lastHiddenCrossings_; }
-    // Of the drawn crossings, those of a selected entity, drawn as selected.
+    // Crossings the last paint drew as selected: a selected entity this
+    // view draws (cad::isDrawn).
     [[nodiscard]] std::size_t lastSelectedCrossingCount() const { return lastSelectedCrossings_; }
-    // Of the hidden crossings, those of a selected entity drawn as ghosts
-    // (ViewState::selectionGhosts), whose layer the document shows.
+    // Crossings the last paint drew as ghosts (ViewState::selectionGhosts): a
+    // selected entity the document draws and this view hides (cad::isGhost).
     [[nodiscard]] std::size_t lastGhostCrossingCount() const { return lastGhostCrossings_; }
 
     // Raised when this view is clicked or the user moves the keyboard focus
@@ -129,7 +130,11 @@ class SectionViewWidget final : public QWidget {
     // so that no line is drawn over them.
     void drawSelectedCrossings(QPainter& painter) const;
     void drawLegend(QPainter& painter) const;
-    [[nodiscard]] bool isSelected(const katana::cad::SectionCrossing& crossing) const;
+    // How this view marks a crossing: its entity selected and drawn here, a
+    // ghost of one selected where only this view hides it (with the view's
+    // switch on), or not at all.
+    enum class Mark { None, Selected, Ghost };
+    [[nodiscard]] Mark markOf(const katana::cad::SectionCrossing& crossing) const;
     // Inside the axes and their labels, in pixels.
     [[nodiscard]] QRectF plotRect() const;
 

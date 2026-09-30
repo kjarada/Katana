@@ -40,6 +40,7 @@
 #include "main_window.hpp"
 #include "plotting/plot_output.hpp"
 #include "script_runner.hpp"
+#include "viewport_widget.hpp"
 #if defined(KATANA_GPU_D3D11)
 #include "gpu/renderer_choice.hpp"
 #include "gpu/shader_compiler.hpp"
@@ -91,7 +92,10 @@ QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
 // two - so a test can read everything a menu says without opening it. A NAME
 // that is none of these may be any widget of the window's, so what a dialog
 // did to the window - framing the views - is read with the dialog still the
-// target. False, said, for none of these.
+// target. A plan view (PlanView2 is view 2's, as its dock is View2) is what
+// it drew, painted afresh first - drawn=, the entities; ghosts=, the
+// selection's ghosts on layers it hides; grips=, the grips it offers - which
+// a screenshot shows only to a person. False, said, for none of these.
 bool reportWidget(const QWidget& target, const QWidget& window, const QString& name)
 {
     const QWidget* widget = target.findChild<QWidget*>(name);
@@ -159,6 +163,14 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
                                                    : button->accessibleName()) +
                (button->isCheckable() ? (button->isChecked() ? ", checked" : ", unchecked")
                                       : QString());
+    } else if (const auto* plan = dynamic_cast<const katana::qt::ViewportWidget*>(widget)) {
+        // Painting is logically const here as in the view's own paint: it
+        // brings the counts up to what the view shows now.
+        (void)const_cast<katana::qt::ViewportWidget*>(plan)->grab();
+        text = QString("drawn=%1 ghosts=%2 grips=%3")
+                   .arg(plan->lastDrawnEntityCount())
+                   .arg(plan->lastGhostCount())
+                   .arg(plan->gripCount());
     } else {
         std::fprintf(stderr,
                      "--report: there is no label, field, text, list, button, action or menu %s\n",
@@ -858,14 +870,20 @@ int main(int argc, char* argv[])
                     auto* panel = window.findChild<QWidget*>(text);
                     // A menu is opened under its title, as a click on the
                     // menu bar opens it, so a grab shows what it offers.
+                    // A popup a step opened - a view bar's Layers popup,
+                    // whose box is a view's ghost switch - is a window of
+                    // its own, shown: that is a panel too.
+                    const bool popup = panel != nullptr && panel->isWindow() && panel->isVisible();
                     if (auto* menu = qobject_cast<QMenu*>(panel)) {
                         menu->popup(window.mapToGlobal(QPoint(0, 0)));
                         QApplication::processEvents();
                         QApplication::processEvents();
                     } else if (panel == nullptr || (qobject_cast<QDockWidget*>(panel) == nullptr &&
-                                                    qobject_cast<QToolBar*>(panel) == nullptr)) {
+                                                    qobject_cast<QToolBar*>(panel) == nullptr &&
+                                                    !popup)) {
                         std::fprintf(stderr,
-                                     "--panel: the window has no dock, toolbar or menu %s\n",
+                                     "--panel: the window has no dock, toolbar, menu or open "
+                                     "popup %s\n",
                                      qPrintable(text));
                         return 1;
                     }
@@ -927,6 +945,14 @@ int main(int argc, char* argv[])
                 // nothing must not pass.
                 if (!button->isEnabled()) {
                     std::fprintf(stderr, "--press: %s's button %s is disabled\n",
+                                 qPrintable(targetName), qPrintable(text));
+                    return 1;
+                }
+                // Nor can a person click a button its owner has hidden: a
+                // view's bar hides the tools it has no room for, and a press
+                // of one passed a test of a tool nobody could see.
+                if (button->testAttribute(Qt::WA_WState_ExplicitShowHide) && button->isHidden()) {
+                    std::fprintf(stderr, "--press: %s's button %s is hidden\n",
                                  qPrintable(targetName), qPrintable(text));
                     return 1;
                 }
