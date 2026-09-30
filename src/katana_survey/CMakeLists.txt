@@ -13,6 +13,7 @@ add_library(katana_survey STATIC
     error_propagation.cpp
     least_squares.cpp
     network_adjustment.cpp
+    report_summary.cpp
 )
 # The reduction (reduction*.cpp) is globbed so that the files implementing it -
 # corrections, pairing, the adjustment driver, the report renderers - can be

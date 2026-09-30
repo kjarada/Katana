@@ -1,0 +1,8 @@
+katana-reduction-settings=1
+# Reduction settings in the text form a survey job keeps
+# (include/katana/survey/reduction_settings.hpp), as SURVEY IMPORT's SETTINGS
+# reads them: CP1 held where the drawing has it, in position and height, and
+# every other setting at its default. The last key is one a later Katana
+# might write: this one skips it and says so.
+control=CP1;drawing;fixed;0;fixed;0;fixed;0
+later.setting=1

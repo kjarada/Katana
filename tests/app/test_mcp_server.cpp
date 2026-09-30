@@ -174,6 +174,26 @@ TEST_F(McpServer, TheCommandToolNamesEveryUtilityActionAndTheScopeWords)
     }
 }
 
+// And the survey field-file verbs, with the way to hold a point of the
+// drawing, so an agent finds how to import a file with no coordinates from
+// the tool list alone.
+TEST_F(McpServer, TheCommandToolNamesTheSurveyFieldFileVerbs)
+{
+    initialize();
+    const Json tools = request("tools/list")["result"]["tools"];
+    std::string description;
+    for (const Json& tool : tools) {
+        if (tool["name"] == "katana_run_commands") {
+            description = tool["description"].get<std::string>();
+        }
+    }
+    ASSERT_FALSE(description.empty());
+    for (const char* words : {"SURVEY READ <file>", "SURVEY IMPORT <file>", "SETTINGS <file>",
+                              "SET key=value", "SET control=<id>;drawing;", "FORWARD"}) {
+        EXPECT_NE(description.find(words), std::string::npos) << words;
+    }
+}
+
 TEST_F(McpServer, AnUnknownToolIsInvalidParams)
 {
     EXPECT_EQ(request("tools/call", Json{{"name", "katana_nothing"}})["error"]["code"], -32602);
@@ -329,6 +349,59 @@ TEST_F(McpServer, AnAgentReadsAndImportsASokkiaSdrFile)
     EXPECT_NE(imported.find("imported job=job-1 entities=4 layer=survey/points"),
               std::string::npos)
         << imported;
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 4);
+}
+
+// An agent imports a field file that gives no coordinates by holding a point
+// of the drawing, as the wizard's control can: FORWARD puts CP1 there, and
+// SURVEY IMPORT's SET holds it (survey_verbs.hpp). The file is traverse.sdr
+// less its coordinate records; alone it places nothing. Held, it places CP2,
+// T1 and T2 where src/katana_app/CMakeLists.txt works them by hand beside
+// cli.survey_import_holds_a_point_of_the_drawing, and CP1 stays the
+// drawing's, not drawn again.
+TEST_F(McpServer, AnAgentImportsAFileWithNoCoordinatesHoldingAPointOfTheDrawing)
+{
+    initialize();
+    const std::string file =
+        std::string(KATANA_SURVEYIO_DATA) + "/sdr/traverse_without_coordinates.sdr";
+    const Json result = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"SURVEY IMPORT \"" + file + "\"", "FORWARD 500000,4999999,100 0 1 0 CP1",
+               "SURVEY IMPORT \"" + file + "\" SET control=CP1;drawing;fixed;0;fixed;0;fixed;0",
+               "LIST"}}});
+    EXPECT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 4U);
+    const std::string alone = lines[0]["output"].get<std::string>();
+    EXPECT_NE(alone.find("imported job=job-1 entities=0 layer=survey/points"), std::string::npos)
+        << alone;
+    const std::string held = lines[2]["output"].get<std::string>();
+    EXPECT_NE(held.find("\nsettings file= set=1 differ=1\n"
+                        "setting key=control value=CP1;drawing;fixed;0;fixed;0;fixed;0\n"
+                        "imported job=job-3 entities=3 layer=survey/points"),
+              std::string::npos)
+        << held;
+    // Where CP1 was held: the drawing's point FORWARD made, entity 2 - the
+    // first import's job took number 1 (a job is numbered with the next
+    // entity number) - and nothing adjusted, as the defaults have it.
+    EXPECT_NE(held.find("\nheld id=CP1 from=drawing entity=2 northing=5e+06 easting=5e+05 "
+                        "height=100\nreduction method=radiation adjustments=0 rejected=0\n"),
+              std::string::npos)
+        << held;
+    const std::string list = lines[3]["output"].get<std::string>();
+    // The whole coordinate, not the start of a longer one: the line ends
+    // after it.
+    const auto listed = [&list](std::string_view at) {
+        const std::size_t found = list.find(at);
+        const std::size_t end = found == std::string::npos ? found : found + at.size();
+        return found != std::string::npos &&
+               (end == list.size() || list[end] == '\n' || list[end] == '\r');
+    };
+    EXPECT_TRUE(listed(" at 500000,5000000")) << list;
+    EXPECT_TRUE(listed(" at 500000,5000099.99993")) << list;
+    EXPECT_TRUE(listed(" at 500149.795756,5000000")) << list;
+    EXPECT_TRUE(listed(" at 500149.795756,5000079.98883")) << list;
     EXPECT_EQ(result["structuredContent"]["status"]["entities"], 4);
 }
 

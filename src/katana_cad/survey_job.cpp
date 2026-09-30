@@ -134,7 +134,11 @@ std::set<std::string, std::less<>> drawingControlIds(const survey::ReductionSett
 // a project whose observations name a missing point is not a valid one; they
 // are the job's raw data, kept in its bytes, not drawing. The unpositioned
 // points stay in: the import's warning about them is the person's answer to
-// "why was point 205 not drawn".
+// "why was point 205 not drawn". The drawing's control goes from that list
+// too: a file with no coordinates for the point held there leaves it among
+// the reduction's unpositioned points, since the drawing placed it and not
+// the observations, and "no coordinates, reduce to place it" is not why it
+// is not drawn.
 survey::SurveyProject drawableProject(const survey::SurveyProject& reduced,
                                       const std::set<std::string, std::less<>>& leaveOut)
 {
@@ -150,7 +154,11 @@ survey::SurveyProject drawableProject(const survey::SurveyProject& reduced,
             out.points.push_back(point);
         }
     }
-    out.unpositionedPoints = reduced.unpositionedPoints;
+    for (const survey::UnpositionedPoint& point : reduced.unpositionedPoints) {
+        if (!leaveOut.contains(point.id)) {
+            out.unpositionedPoints.push_back(point);
+        }
+    }
     return out;
 }
 

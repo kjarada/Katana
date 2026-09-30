@@ -1149,7 +1149,9 @@ the file and changes nothing; `SURVEY IMPORT <file> [FORMAT <id>] [LAYER
 <path>]` does what the wizard's Import does with its defaults - the reduction
 with `ReductionSettings`' defaults and the control the file declares, the
 points on `survey/points`, the job kept for Survey > Survey Jobs - as one undo
-step (`cad::ImportSurveyJobCommand`). The format is detected unless FORMAT
+step (`cad::ImportSurveyJobCommand`); `SETTINGS` and `SET` give it the
+wizard's other reduction options and control from the drawing ("The
+reduction settings of SURVEY IMPORT", below). The format is detected unless FORMAT
 names it, and a detection that is not certain is refused, naming the
 candidates. The verb lives in the session and not the interpreter because
 `cad` may not see `surveyio`; the window runs the same function
@@ -1255,14 +1257,13 @@ Not done:
   cad's words for every format) does not say that the setups they were
   measured from have no position.
 - `SURVEY IMPORT` reduces with no grid scale factor and no height reduction
-  unless a person sets them in Survey > Survey Jobs, so a total-station job
-  imported into a projected drawing is radiated with ground distances.
+  unless its line sets them (`SET grid_scale=projection`) or a person does in
+  Survey > Survey Jobs, so a total-station job imported into a projected
+  drawing with the defaults is radiated with ground distances.
 - surveyio has eight file-local digit tests (`isDigit` in leica_dbx.cpp,
   leica_gsi.cpp, rinex.cpp, rinex_common.cpp, rinex_compact.cpp,
   topcon_raw_builder.cpp, opcode_field_file.cpp and sokkia_sdr.cpp), and
   `include/katana/core/text.hpp`, which would be their one home, has none.
-- The verb has no reduction options - a person changes them in Survey > Survey
-  Jobs, which re-adjusts the imported job.
 
 ## The Sokkia SDR file (.sdr)
 
@@ -1838,10 +1839,6 @@ Not done:
   available from that record"), which supports the first, but no source
   says whether a blank elevation there means "no height" or "the height
   unchanged", and no file met has either case.
-- `SURVEY IMPORT` takes control only from the file, so on the command line
-  and through MCP a file with no coordinates, as the owner's is, places
-  nothing; the window's reduction options can take control from points on
-  the drawing. A control option for the verb is not done.
 - The reader sets no limits on what a number may be - a distance of 10^16 m
   is read as one, and the other raw readers set none either, so a check
   belongs in the model or the reduction, for all of them.
@@ -1861,6 +1858,356 @@ Not done:
   ranges checked first, since those types keep only a byte); the RINEX
   reader (`isLeapYear`, `daysInMonth`) and the subsurface delivery schema
   still write the leap-year rule out themselves.
+
+## The reduction settings of SURVEY IMPORT, control from the drawing among them
+
+The owner's Sokkia traverse (above) gives no coordinates, so `SURVEY IMPORT`
+placed nothing from `katana_cli` or `katana_mcp`, while the wizard's
+Reduction step could hold a point of the drawing. Since 2026-09-30 the verb
+takes every reduction option that step offers:
+
+```
+SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>] [SETTINGS <file>] [SET <key>=<value> ...]
+```
+
+**One grammar, the job's own.** Both options are the stable text form of the
+settings (`include/katana/survey/reduction_settings.hpp`) that a survey job
+keeps in the project: `SETTINGS` names a file of it, and each `SET` item is
+one line of it. Both are read by `survey::parseReductionSettings`, which
+checks what it read with `survey::validateReductionSettings`, and a refusal
+is in their words. `src/katana_app/survey_verbs.cpp` spells nothing of the
+form: its first line and its keys are taken from what
+`survey::serialiseReductionSettings` writes, so a setting added there is one
+`SET` takes at once. A job's settings written out are a `SETTINGS` file that
+imports the same way again
+(`SurveyImportSettings.AJobsSettingsWrittenOutImportTheSameWayAgain`).
+
+**Where the settings start, and what changes them.**
+
+- Without `SETTINGS` the import starts where the wizard's step does: the
+  defaults, holding the control the file declares (`survey::controlFromFile`).
+- `SETTINGS <file>` replaces that start whole, as a job's stored settings are
+  whole: a key it does not give keeps its default, and its control lines are
+  all the control there is. A file with none holds nothing, not even what the
+  survey file declares.
+- `SET` then changes the keys its items name. An item
+  `control=<id>;<file|drawing>;` followed by a constraint (`fixed`,
+  `weighted` or `free`) and a standard deviation in metres for the northing,
+  the easting and the elevation holds that point as the wizard's Hold button
+  does: in place of the point of that id, or after the others.
+- The items run to the next option word or the end of the line; one holding a
+  blank is quoted, as a path is. Each option is given once: a second `FORMAT`
+  or `LAYER` was taken over the first without a word.
+
+The keys, in the text form's order (the refusal of a key the settings do not
+have lists them as the build has them):
+
+| Keys | Values |
+|------|--------|
+| `atmospheric` | `none`, `auto`, `recompute`, `fixed` |
+| `prism_constant.policy` | `auto`, `override`, `none` |
+| `faces` | `average`, `face-left-only`, `separate` |
+| `height_reduction` | `none`, `ellipsoid`, `geoid` |
+| `grid_scale` | `none`, `fixed`, `projection` |
+| `adjustment.method` | `none`, `traverse`, `network` |
+| `adjustment.traverse_rule` | `bowditch`, `transit`, `least-squares` |
+| `adjustment.network` | `horizontal`, `levels`, `horizontal-and-levels` |
+| `outliers.test` | `none`, `baarda`, `tau` |
+| `atmospheric.fixed_ppm`, `prism_constant.m`, `faces.tolerance.horizontal_rad`, `faces.tolerance.zenith_rad`, `faces.tolerance.distance_m`, `refraction.k`, `earth_radius_m`, `grid_scale.fixed_factor`, `combined_factor.value`, `apriori.direction_rad`, `apriori.zenith_rad`, `apriori.distance_constant_m`, `apriori.distance_ppm`, `apriori.instrument_centring_m`, `apriori.target_centring_m`, `apriori.height_m`, `apriori.levelling_per_sqrt_km_m`, `apriori.gnss_horizontal_m`, `apriori.gnss_vertical_m` | a number, in metres, radians and parts per million as the settings hold them - the wizard shows seconds of arc and millimetres |
+| `confidence_level`, `outliers.significance` | a fraction strictly between 0 and 1 (`0.95`, `0.001`) - the wizard shows the confidence level as a percentage |
+| `curvature_refraction`, `faces.tolerance.exclude`, `slope_to_horizontal`, `combined_factor.use`, `apriori.use_file_covariances`, `outliers.auto_reject` | `true`, `false` |
+| `iterations.max` | a whole number |
+| `control` | as above; an id holding `;`, `=` or `%` is percent-encoded |
+
+**Holding a point of the drawing.** The point is one of the drawing's survey
+points - a point entity with the import's point-number property - found as
+the wizard finds it (`cad::reductionContextFor`), and it is the drawing's:
+not drawn again. On a line, `FORWARD` puts a named one there:
+`FORWARD 300000,6249999,50 0 1 0 BM1` makes BM1 at 300 000 E, 6 250 000 N,
+50 Z, one metre due north of the start and level. Then
+`SURVEY IMPORT <file> SET control=BM1;drawing;fixed;0;fixed;0;fixed;0`.
+Under the default radiation (`adjustment.method=none`) a held point places
+the setups on it, and what they observe, whatever its constraints - `free`
+does not release it - since the constraints and standard deviations are
+what a traverse or a network adjustment weighs, and radiation weighs
+nothing.
+
+The import reduces with `cad::reduceForDrawing`, as the wizard's preview and
+Import and the Survey Jobs dialog do, which checks what the settings hold
+from the drawing before the reduction takes it:
+
+- An id the drawing has at two places is refused (InvalidArgument), naming
+  each place in the drawing's order, to a tenth of a millimetre: "Control
+  point CP1 is on the drawing 2 times, at E 500000.0000 N 5000000.0000 Z
+  100.0000 and E 600000.0000 N 5000000.0000 Z 100.0000, so which one to hold
+  is not known; rename or delete all but one." The reduction holds the
+  first point of an id, and which is first is only the order the points
+  were drawn in: `FORWARD` twice, or the wizard's "keep both", gives a
+  drawing two CP1s, and the job sat on whichever came first - 100 km out in
+  the review's case - with nothing in the reply to say so. Points of one id
+  closer than `math::tolerance::kCoordinate` (0.1 mm) across and in height
+  are one mark, and hold the same job whichever is taken, so they are held;
+  one with a height and one without are two.
+- An id the file never names changes nothing, and the first reduction
+  warning says so: "Control point BM1 is held from the drawing, but the file
+  names no point BM1, so holding it changes nothing." A file read by
+  surveyio lists every point a setup, an observation or a feature refers to
+  among its points or its points without coordinates
+  (`survey::validateProject`), so an id in neither is one nothing in it
+  measures.
+- An id the file gives other coordinates is held where the drawing has it,
+  and the first warning gives both: "Control point CP1 is held where the
+  drawing has it, E 600000.0000 N 6000000.0000 Z 200.0000, not where the
+  file gives it, E 500000.0000 N 5000000.0000 Z 100.0000."
+
+**The reply** gains, before `imported`:
+
+```
+settings file=held.txt set=1 differ=2
+setting key=faces value=separate
+setting key=control value=BM1;drawing;fixed;0;fixed;0;fixed;0
+settings_warning text="line 8: setting 'later.setting' is not known to this version and was ignored"
+```
+
+`file=` names the `SETTINGS` file, empty without one, and `set=` counts the
+items. A `setting` record is each line of the settings' text that is not the
+defaults', in the text form's order and words, so each reads back as a `SET`
+item; a `settings_warning` is each key of the `SETTINGS` file this version
+skipped, and the encoding it was read in where that was a guess.
+
+After `imported`, where each point was held and what the adjustment made of
+the data (`katana::app::reductionRecords`):
+
+```
+held id=BM1 from=drawing entity=1 northing=6250000 easting=3e+05 height=50
+held id=A from=file northing=1000 easting=1000 height=50
+held id=B from=file northing=1100 easting=1000 height=50
+reduction method="network, horizontal" adjustments=1 rejected=0
+adjustment method="network least squares (horizontal)" observations=10 unknowns=4 redundancy=6 variance_factor=0.1697573300133813 global_test=failed flagged=0 rejected=0
+```
+
+(the last four from `tests/qt_widgets/survey/data/network_gsi8.gsi` with
+`SET adjustment.method=network` and A and B held in plan: the network takes
+a setup's directions as angles from its backsight, so its two setups give 4
+angles and 6 distances and it has P and Q to find; a variance factor of 0.17
+is smaller than the default a-priori precisions expect, which the two-sided
+global test calls a failure too)
+
+A `held` record is each point the settings hold: at the drawing's point of
+its id, with its entity - the first of the id, as the reduction takes it -
+or at the file's own coordinates (`from=file`); `height=none` for a point
+with no height. `reduction` gives the settings' method in words, how many
+adjustments ran and how many observations were rejected, and an
+`adjustment` record is each adjustment run, as its report has it: its
+observations, unknowns and redundancy, the a-posteriori variance factor and
+the chi-square global test (`none` where it had no redundancy), and how many
+outliers were flagged and rejected. A number is the shortest text that reads
+back exactly, as every record writes one, so 300 000 is `3e+05`. Until
+2026-09-30 the reply said nothing of the adjustment, so an agent could run a
+network whose global test failed and not be told: the wizard's words for the
+outcome (`adjustmentSummary`), its rejected count (`rejectedObservations`)
+and the method's words (`methodText`) moved from the window's code
+(`src/katana_qt/survey/survey_job_support.cpp`) to
+`include/katana/survey/report_summary.hpp`, so the reply's `rejected=` is
+the count the wizard's message gives, taken one way.
+
+**Refused**, each with the drawing as it was
+(`SurveyImportSettings.EveryRefusalSaysWhyAndLeavesTheDrawingAsItWas`): a
+line with `SET` and no item, an option given twice, `SET` or `SETTINGS` on
+`SURVEY READ`; an item with no `=`, a note (`#`), a line break, a key the
+settings do not have, a value that does not read or lies outside its range,
+a key or a control point given twice; a `SETTINGS` file that cannot be read,
+is not a settings text or was written by a newer version (Unsupported); an
+id held from the drawing that the drawing has at two places; and the
+reduction's own refusals of a control point that is not on the drawing,
+that the file gives no coordinates for, or that is held in height and has
+none. The settings are refused before the survey file is read: a line
+naming a survey file that is not there is refused for its settings first.
+
+**Decisions.**
+
+- An unknown key is refused in `SET` and skipped in a `SETTINGS` file. The
+  text form skips a key it does not know because a later Katana may have
+  written it; an item typed on the line now is a misspelling, and a setting
+  silently not made is the worst answer an import can give.
+- No shorthand for control, such as `HOLD BM1 FROM DRAWING`: it would need
+  defaults of its own for the three constraints and standard deviations a
+  control line states, so it could not map one to one onto a control line,
+  and the line is one token an agent writes as easily.
+- `SET control=` merges by id rather than replacing the list, as the
+  wizard's Hold does, so holding a drawing point keeps what the file
+  declares; the whole list is `SETTINGS`' to give. Replacing the list would
+  drop the file's control whenever a point was added, which the wizard never
+  does.
+- Each item is read alone, as a settings text of the version line and the
+  item, so a malformed one is refused naming "line 2 of the reduction
+  settings" - the parser's own words - with the item in the refusal's
+  context: `[SET refraction.k=abc]`.
+- The settings are read before the survey file, so a mistyped key costs no
+  read of a large file.
+- A `SETTINGS` file is decoded as every text file Katana reads is
+  (`core::decodeText`): saved with a byte order mark, or as UTF-16 by an
+  editor, it is the same settings, where the parser alone called the text
+  not settings at all. A file that is not UTF-8 is read as Windows-1252 and a
+  `settings_warning` says the guess.
+- An id the drawing has at two places is refused, not held at the first
+  with a warning: a warning an agent may pass over leaves the job 100 km
+  out, while the refusal names both places, so the person renames or
+  deletes one. A control line names an id, not an entity, so the wizard -
+  whose pick box lists the id twice - cannot say which was meant either;
+  holding an entity would change the settings' stored text form.
+- The checks are `cad::reduceForDrawing`'s, made before the reduction runs
+  and not in it: whether the drawing has an id twice is the drawing's to
+  know, and every path that reduces a job against the drawing - the import
+  and re-adjustment commands' default, the wizard's and the Survey Jobs
+  dialog's previews, `precomputedReduction`'s fall-back - goes through that
+  one function, so the window and the line refuse and warn alike
+  (`SurveyImportWizard.ItsPreviewRefusesToHoldAPointTheDrawingHasAtTwoPlaces`,
+  `SurveyJobsDialog.ItsPreviewRefusesToHoldAPointTheDrawingHasAtTwoPlaces`).
+  `survey::reduceAndAdjust` keeps its rule of the first of an id for a
+  context handed to it directly.
+- An id the file never names is a warning, not a refusal: a `SETTINGS` file
+  may list a site's whole control, of which one job's file names some.
+- An id the file gives other coordinates is a warning, not a refusal:
+  holding a drawing point the file also coordinates is how a job keyed in a
+  local frame is put on the drawing's. What is wrong is a job that mixes the
+  two - held at the drawing's CP1 and oriented on the file's CP2 - which the
+  backsight check should catch (Not done, below).
+
+**The owner's file.** The Sokkia traverse above, through `katana_cli` on
+2026-09-30 (a local check; the file is not in the repository): its first
+setup's station put on the drawing with `FORWARD` at invented coordinates
+(6 250 000 N, 300 000 E, 50 Z) and held fixed in all three components by
+`SET`, `SURVEY IMPORT` places 41 points - every point the file names but the
+held one - with 6 reduction warnings: the three face pairs outside the
+default tolerance, the humidity and the atmospheric correction, and the
+first setup oriented on the azimuth the file states. Before: none, with 47
+warnings, and `SET` refused as no option of the verb. The reply says where
+the station was held (`held ... from=drawing entity=1 northing=6250000
+easting=3e+05 height=50`) and that nothing was adjusted or rejected. The
+window run headless (`--dialog surveyImport`, the point picked among the
+drawing's) imports the same 41 points, `LIST` line for `LIST` line, entity
+ids and all, and logs the same counts; so does the line typed on its
+command line after an `UNDO`. Adjusted as a network in plan and in height,
+face left only, the station weighted (5 mm, 5 mm, 10 mm), the reply gives
+what the wizard's message gives: variance factors 0.321 in plan and 0.571
+in height, both global tests failed, 3 height differences flagged, and
+3 186 observations rejected - the 1 062 face-right pointings, three values
+each, that face left only leaves unused. Before, it said nothing of the
+adjustment. With the station drawn twice, 10 m apart, the line and the
+wizard's preview refuse alike, naming both places.
+
+**A held point is not a point without coordinates.** Found on the way: the
+reduction places a point held from the drawing as control, not as a
+computed point, so a file that gives it no coordinates leaves it among the
+unpositioned ones, and the import counted it in "N point(s) are named in the
+source with no coordinates ... reducing the observations is what gives them
+a position" - wrong for a point that has one, and said by the wizard too.
+`drawableProject` (`src/katana_cad/survey_job.cpp`) now leaves the drawing's
+control out of that list as it leaves it out of the points drawn.
+`SurveyJobImportCommand.AControlPointTakenFromTheDrawingIsNotCountedAsHavingNoPosition`
+failed ("2 point(s)") without the change.
+
+**The wizard does not hand the line over.** A dialog's work should be the
+line it builds, run by the window's executor (`MainWindow::runVerbLine`) as
+if typed. The wizard's Import still runs `cad::ImportSurveyJobCommand`
+itself, because:
+
+1. Import reuses the reduction its preview ran (`precomputedReduction`,
+   `src/katana_qt/survey/survey_job_support.hpp`), which for a job of more
+   than 20 000 observations and points (`kBackgroundObservations`) ran on a
+   pool thread with a busy bar and Cancel, and the wizard reads a file of
+   more than 1 MiB (`kBackgroundReadBytes`) off the GUI thread too. A line
+   the executor runs is synchronous and cannot be handed an outcome: the
+   verb would read the file and reduce it a second time on the GUI thread,
+   and a large job would freeze the window where it now shows its progress.
+2. The line reads the file from disk again, so a file changed after the
+   preview would import other data than the report showed.
+3. The wizard's control can drop a point the file declares (Release), which
+   `SET` does not say. The line would need a `SETTINGS` file written
+   somewhere to name, and a logged line naming a temporary file cannot be
+   run again.
+
+Handing it over needs the executor to run `SURVEY IMPORT` as a background
+job, as the window runs the geoprocessing verbs
+(`src/katana_qt/geo/geo_workbench.hpp`), and a way for the line to take the
+outcome the preview made. Until then one mechanism holds the two together
+below the line - the same command, the same `cad::reductionContextFor`, the
+same settings value - and
+`SurveyImportWizard.ItsImportIsTheSurveyImportLinesForTheSameSettings`
+imports the file with no coordinates both ways, CP1 held from the drawing
+and two settings changed from the defaults, and requires the same job - its
+report but for its time - and the same points on the drawing, bit for bit.
+
+Tests: `cli.survey_import_holds_a_point_of_the_drawing` (the file alone
+places nothing; held, its three points where they are worked by hand beside
+the test), `cli.survey_import_takes_its_settings_from_a_file`,
+`cli.survey_import_set_changes_a_key_the_settings_file_leaves` (T1 without
+curvature and refraction: 500000 + 150.0015 sin 87 E), eleven runs named
+cli.survey_import_refuses_..., each of which must stop the batch before its
+`STATUS` (the id the drawing has at two places among them),
+`cli.survey_import_says_where_it_held_and_what_it_adjusted` and
+`cli.survey_import_says_what_a_network_adjustment_made_of_the_data`; the
+`SurveyImportSettings` cases in `tests/app/test_survey_verbs.cpp` (the
+heights too, worked by hand to the micrometre; the start, `SETTINGS` taken
+whole, the merge by id, the reply's order, the refusals, the settings
+refused before a survey file that is not there; the id at two places and at
+one mark, the `held` records, the warnings of an id the file never names or
+gives other coordinates, the `reduction` and `adjustment` records from a
+report built by hand and from the network fixture, held there to the
+reduction's own report bit for bit, and a `SETTINGS` file with a byte order
+mark, in UTF-16 and in Windows-1252);
+`McpServer.AnAgentImportsAFileWithNoCoordinatesHoldingAPointOfTheDrawing`
+and `McpServer.TheCommandToolNamesTheSurveyFieldFileVerbs`; the wizard's
+equivalence above and its preview's refusal, and the Survey Jobs dialog's;
+`SurveyJobDrawingReduction` and
+`SurveyJobImportCommand.ItsReductionRefusesAnIdTheDrawingHasAtTwoPlaces`
+beside the earlier regression in `tests/cad/test_survey_job.cpp`; and
+`ReportSummary` in `tests/survey/test_report_summary.cpp`. The survey file is
+`tests/surveyio/data/sdr/traverse_without_coordinates.sdr`, `traverse.sdr`
+with its two 08 coordinate records taken out; the settings files are in
+`tests/app/data/survey_settings/`.
+
+Not done:
+
+- The wizard's Import hands no line to the executor (above).
+- The verb has neither of the wizard's two other import options: what to do
+  with an id the drawing already has (`cad::ExistingPointPolicy`; the verb
+  refuses the import, as the wizard's default does) and a layer per field
+  code. Apply Survey Codes is the window's action; `CODE` does it on a line,
+  to the whole drawing.
+- The window can neither save the settings to a file nor load them from one,
+  so a `SETTINGS` file is written by hand or by a program, in the form above.
+- The wizard's Import logs a sentence, not the `SURVEY IMPORT` line it
+  equals, so the window's import cannot be run again from the log. The
+  settings' lines that are not the defaults' are the reply's `setting`
+  records, which a line could carry, but for a point the file declares that
+  Release dropped (above).
+- The reduction does not warn when a setup's backsight disagrees with its
+  coordinates. Held at the drawing's CP1 against a file that keys in CP1
+  and CP2 in another frame, a setup is oriented from the one to the other -
+  1 000 km away for a measured 100 m in the review's case - and the
+  report's setups table has the backsight check
+  (`ReportSetup::backsightDistanceDifference`), but no warning names it; the
+  new warning of the held point's other coordinates is the only word. A
+  backsight check outside a tolerance is the reduction's to warn of
+  (`src/katana_survey/reduction.cpp`).
+- `survey::rejectedObservations` counts an outlier an adjustment rejects
+  twice: once as its rows, which the rejection marks, and once in the
+  adjustment's list, so the wizard's "N observation(s) rejected" and the
+  reply's `reduction ... rejected=` read 2 for one distance (a scratch copy
+  of `network_gsi8.gsi` with one distance 0.3 m long and
+  `outliers.auto_reject=true`: the adjustment's `rejected=1`, the
+  reduction's `rejected=2`). Counting only the rows would lose an outlier
+  that has none - a stated backsight azimuth - so the fix wants the report
+  to say which rejected outliers marked rows, in the reduction's report.
+- `survey::validateReductionSettings` takes any finite positive factor or
+  radius and any prism constant, which `SET` now reaches in one token:
+  `grid_scale=fixed grid_scale.fixed_factor=1e300` or `earth_radius_m=1e-300`
+  puts points some 1e302 m out, `prism_constant.policy=override
+  prism_constant.m=-1e6` 1 000 km, each with no warning. Bounds a surveyor
+  would accept belong to that validation
+  (`src/katana_survey/reduction_settings.cpp`).
 
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 

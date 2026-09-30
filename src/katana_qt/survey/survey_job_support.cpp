@@ -9,7 +9,6 @@
 #include <QString>
 #include <QTextDocument>
 
-#include <format>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -71,72 +70,6 @@ std::string parserVersionOf(const std::string& formatId)
 {
     const auto descriptor = surveyio::formatRegistry().find(formatId);
     return descriptor ? descriptor->parserVersion : std::string{};
-}
-
-std::string adjustmentSummary(const survey::ReductionReport& report)
-{
-    if (report.adjustments.empty()) {
-        return report.settings.method == survey::AdjustmentMethod::None
-                   ? "radiation: nothing adjusted"
-                   : methodText(report.settings) + ": no adjustment was run";
-    }
-    std::string text;
-    for (const survey::AdjustmentReport& adjustment : report.adjustments) {
-        std::string line = adjustment.method + ": ";
-        line += adjustment.varianceFactor
-                    ? std::format("variance factor {:.3f}", *adjustment.varianceFactor)
-                    : std::string("no redundancy, so no variance factor");
-        if (adjustment.globalTest) {
-            line += adjustment.globalTest->passed ? ", global test passed"
-                                                  : ", global test FAILED";
-        }
-        if (!adjustment.flaggedOutliers.empty()) {
-            line += std::format(", {} flagged outlier(s)", adjustment.flaggedOutliers.size());
-        }
-        text += text.empty() ? line : "; " + line;
-    }
-    return text;
-}
-
-std::size_t rejectedObservations(const survey::ReductionReport& report)
-{
-    std::size_t rejected = 0;
-    for (const survey::ReportObservation& observation : report.observations) {
-        rejected += observation.rejected ? 1 : 0;
-    }
-    for (const survey::AdjustmentReport& adjustment : report.adjustments) {
-        rejected += adjustment.rejectedOutliers.size();
-    }
-    return rejected;
-}
-
-std::string methodText(const survey::ReductionSettings& settings)
-{
-    switch (settings.method) {
-    case survey::AdjustmentMethod::None:
-        return "radiation";
-    case survey::AdjustmentMethod::Traverse:
-        switch (settings.traverseRule) {
-        case survey::TraverseRule::Bowditch:
-            return "traverse, Bowditch";
-        case survey::TraverseRule::Transit:
-            return "traverse, Transit";
-        case survey::TraverseRule::LeastSquares:
-            return "traverse, least squares";
-        }
-        return "traverse";
-    case survey::AdjustmentMethod::Network:
-        switch (settings.networkDimension) {
-        case survey::NetworkDimension::Horizontal:
-            return "network, horizontal";
-        case survey::NetworkDimension::Levels:
-            return "network, levels";
-        case survey::NetworkDimension::HorizontalAndLevels:
-            return "network, horizontal and levels";
-        }
-        return "network";
-    }
-    return "radiation";
 }
 
 JobAdjustmentLine adjustmentFromReportText(const std::string& reportText)
@@ -235,7 +168,7 @@ cad::ReductionFunction precomputedReduction(PrecomputedReduction done)
             outcome.report.input = context.input;
             return outcome;
         }
-        return survey::reduceAndAdjust(raw, settings, context);
+        return cad::reduceForDrawing(raw, settings, context);
     };
 }
 

@@ -17,6 +17,7 @@ katana_add_test_suite(survey
         test_least_squares.cpp
         test_leveling.cpp
         test_network_adjustment.cpp
+        test_report_summary.cpp
         test_statistics.cpp
         test_traverse.cpp
 )

@@ -18,6 +18,7 @@
 #include "katana/cad/survey_job.hpp"
 #include "katana/core/error.hpp"
 #include "katana/survey/reduction.hpp"
+#include "katana/survey/report_summary.hpp"
 #include "katana/surveyio/reader.hpp"
 
 class QString;
@@ -51,15 +52,11 @@ inline constexpr std::size_t kReportRowsOnScreen = 2'000;
 // surveyio, where katana_cli's SURVEY IMPORT finds it too.
 using katana::surveyio::reportInputFor;
 
-// "network least squares (horizontal): variance factor 1.023, global test
-// passed" / "radiation: nothing adjusted" - an outcome in a line.
-[[nodiscard]] std::string adjustmentSummary(const katana::survey::ReductionReport& report);
-// How many observations the report says were rejected.
-[[nodiscard]] std::size_t rejectedObservations(const katana::survey::ReductionReport& report);
-
-// The adjustment's method as a person reads it ("network least squares,
-// horizontal").
-[[nodiscard]] std::string methodText(const katana::survey::ReductionSettings& settings);
+// An outcome in a line, the rejected count and the method's words: in
+// survey, where SURVEY IMPORT's reply takes the same count.
+using katana::survey::adjustmentSummary;
+using katana::survey::methodText;
+using katana::survey::rejectedObservations;
 
 // The last adjustment of a job as its stored plain-text report states it.
 // The job keeps the report as text, not as values (storage::SurveyJob), so
@@ -82,7 +79,7 @@ enum class ReportFileFormat { Html, Text, Pdf };
 // to a command as its ReductionFunction so the command does not run it a
 // second time on the GUI thread. Used only when the command asks with the
 // very settings, previous coordinates and drawing points the outcome was made
-// with; anything else runs survey::reduceAndAdjust. The raw project is the
+// with; anything else runs cad::reduceForDrawing. The raw project is the
 // caller's to keep the same: the one the outcome was made from.
 struct PrecomputedReduction {
     std::shared_ptr<const katana::survey::ReductionOutcome> outcome;
