@@ -142,16 +142,39 @@ Delete path was never reached, and only a bare view in a test ever took it.
 The view now claims Delete when a vertex grip is hot
 (`GripController::hasHotVertex`), and leaves it to Erase otherwise.
 
+**Delete inside a vertex tool is the tool's.** A vertex tool works on a
+SELECTED polyline - a vertex's grips are there only while it is, and the
+tool selects what it has just edited (R5, below) - so Delete pressed inside
+the tool went to Erase and took the whole string from under it: "Press
+Enter to delete vertex 2 of polyline 2", Delete pressed instead, and
+polyline 2 was gone. The view claims Delete while a tool runs that takes it
+(`InteractiveTool::takesDelete`, the vertex tools): Delete Vertex with
+vertices chosen reads it as its Enter and deletes them; every other vertex
+tool, and Delete Vertex with nothing chosen, does nothing with it and says
+why ("Delete erases nothing while Insert Vertex runs - it would take the
+polyline being edited; press Esc first to erase the selection"). The other
+tools leave Delete to Erase, as they always did. Rejected: Delete as Enter
+in every vertex tool - Enter makes Change Start's start and Straighten's
+straight line, and a key named Delete must never do those; and leaving the
+polyline unselected after an edit when nothing was selected before - the
+chosen-vertex path selects it all the same, and R5's one-click chain goes.
+
 **A hot grip follows its vertex.** A hot or picked-up grip is matched again
 after every change by its POSITION on the same entity (the same index
 first, where twin vertices share a point), not by its index: a vertex
 inserted before a hot vertex made the grip name the vertex before it, and
 the next Delete took that one. Where nothing is at its point, its own
 vertex may have been moved (`VERTEX MOVE`, a Vertices panel cell, another
-view): with as many grips of its kind on the entity as before, nothing was
-inserted or deleted ahead of it, so it keeps its index - matched by
-position alone, such a move silently unchose it. A grip whose vertex has
-gone - deleted, undone - goes too.
+view), and matched by position alone such a move silently unchose it: a
+polyline's vertex (or segment middle) then keeps its index only when every
+OTHER vertex of the polyline is where it was, index for index - the move
+was its own. Anything more and it goes: two edits between one repaint and
+the next (a `SCRIPT`, lines pasted, an agent) can delete the chosen vertex
+and insert another ahead of it, leaving as many vertices as before, and
+kept by its index the grip named a vertex nobody chose, which Enter or
+Delete then removed. A grip whose vertex has gone - deleted, undone - goes
+too. A grip of another kind (a centre, a quadrant, a line's end), which no
+edit renumbers, keeps its index while its entity has as many of its kind.
 
 **A grip says what its drag does.** An arc segment's middle keeps both ends
 and bends the arc, and its hint says so ("drag to bend the arc"), where a
@@ -190,10 +213,15 @@ to fail without its fix, Delete claimed from the window's shortcut
 (`DeleteWithAHotVertexIsTheViewsKeyNotTheWindowsErase`), a double-click
 leaving nothing picked up (`ADoubleClickOnAGripLeavesNothingPickedUp`), a hot
 grip following its vertex (`AHotVertexFollowsItsVertexThroughAnInsertBeforeIt`)
+and going where two edits leave no telling which it was
+(`AHotVertexWhoseVertexWentInTwoEditsBetweenPaintsGoesToo`), Delete inside
+a vertex tool the tool's (`InsideAVertexToolDeleteNeverErasesThePolylineItIsEditing`)
 and a grip picked up before a tool never put down after it
 (`AGripPickedUpBeforeAToolIsDroppedNotCommittedLater`). The hints
 (`AHoveredGripSaysWhatItIsAndWhatCanBeDone`,
-`AVertexWithAHeightSaysItsHeight`) are asserted as text, and the Ctrl cue
+`AVertexWithAHeightSaysItsHeight`, which also holds the band to the vertex
+tools' way of writing a height, `cad::heightText`: it wrote "z -0.000"
+where a tool's label wrote "z 0.000") are asserted as text, and the Ctrl cue
 as ink against the same view without Ctrl
 (`CtrlOverASegmentMiddleShowsTheVertexADragWouldAdd`); a Ctrl-insert's
 feedback in `tests/cad/drawing/test_grips.cpp`
@@ -213,7 +241,7 @@ delegates to, so the tools and the command line read one grammar):
 | Form | Meaning |
 |---|---|
 | `x,y` / `x,y,z` | absolute; a z is a height at a step that takes one (`InteractiveTool::takesHeights`: Point, Polyline 3D, Move Vertex's new place, Insert Vertex's), and dropped at any other |
-| `@dx,dy` / `@dx,dy,dz` | relative to the last point. At a step that takes heights, dz CHANGES the last point's height (`InteractiveTool::lastHeight`), and is refused where it has none - it was handed on as the height itself, so Move Vertex's `@0,0,1` set a surveyed 101.5 to 1. At any other it is dropped, as the z of `x,y,z` is: that rule first applied to every tool, and `@0,5,0` at MOVE or LINE was refused |
+| `@dx,dy` / `@dx,dy,dz` | relative to the last point. At a step that takes heights, dz is read as the tool's verb reads it: the vertex's height at Polyline 3D, as `PLINE3D` has it; a CHANGE of the picked vertex's height at Move Vertex (`InteractiveTool::dzIsAChange`, `lastHeight`), as `VERTEX MOVE` has it, refused where it has none - handed on as the height itself, Move Vertex's `@0,0,1` set a surveyed 101.5 to 1. At any other step it is dropped, as the z of `x,y,z` is: the change rule first applied to every tool, and `@0,5,0` at MOVE or LINE was refused; then Polyline 3D climbed dz in the window while `PLINE3D` put the same vertex at dz |
 | `@distance<angle` | polar from the last point |
 | `@distance<N45d30'15"E` | the direction as a quadrant bearing, always read as a bearing |
 
@@ -294,21 +322,21 @@ drop-down button. The Vertices panel's toggle is in View > Panels.
 | Tool (id, aliases) | Steps | Shows before the click | Command |
 |---|---|---|---|
 | Insert Vertex (`draw.vertex.insert`, `INSERTVERTEX`) | ONE click on the polyline where the vertex goes: always on the line (on an arc, on the arc); `x,y` typed is put on it too, and `x,y,z` keeps z as its height. Beside a hot vertex, on whichever of its segments is nearer; Enter there takes the middle of the segment after it, marked. A typed point or number and Enter's middle are exact: taken however few pixels the segment is | the segment that splits (Target), the new vertex (Added), "new vertex between 1 and 2 · 15.000 from 1"; beside a hot vertex, the vertex and where Enter would add (a ring round a dot, "Enter"), and Enter's caption where a click takes nothing - on the chosen vertex, past a segment's end; a POINTED click within the pick aperture of a vertex is refused, that vertex struck | `VERTEX_INSERT` |
-| Delete Vertex (`draw.vertex.delete`, `DELETEVERTEX`) | click the vertex; or Enter for the hot vertices, any number, on any polylines | an X on it, its segments dashed red, the segment that joins its neighbours; with the pointer on another vertex, the chosen ones still marked as Enter's ("2 · Enter") | `VERTEX_DELETE` |
+| Delete Vertex (`draw.vertex.delete`, `DELETEVERTEX`) | click the vertex; or Enter - or the Delete key - for the hot vertices, any number, on any polylines | an X on it, its segments dashed red, the segment that joins its neighbours; with the pointer on another vertex, the chosen ones still marked as Enter's ("2 · Enter") | `VERTEX_DELETE` |
 | Move Vertex (`draw.vertex.move`, `MOVEVERTEX`) | click the vertex (or one hot), then a point; `@dx,dy` is from the vertex, `x,y,z` sets its height and `@dx,dy,dz` changes it by dz (refused on a vertex with none) | the vertex where it was and where it goes, the segments either side as they will be, "moves 3.000 at 0°00'00"" | `VERTEX_MOVE` |
 | Edit Vertices (`draw.vertex.edit`, `EDITVERTICES`, `VERTEX`) | the selected polyline (or a hot grip's) is in the panel already: Enter, or click another; a hot grip of another selected polyline is shown by Enter ("Press Enter to show polyline 13 in the Vertices panel") | the polyline, "polyline 12 · 5 vertices, open" | - |
-| Straighten (`draw.vertex.straighten`, `STRAIGHTEN`) | click one vertex to keep, then the other (or two hot vertices and Enter); `O` takes a closed polyline's other side | both labelled "keep", an X on every vertex between and the path that goes, the straight segment left | `STRAIGHTEN` |
+| Straighten (`draw.vertex.straighten`, `STRAIGHTEN`) | click one vertex to keep, then the other (or two hot vertices and Enter, the prompt naming them in the order walked: "from vertex 1 to 3"); a closed polyline's shorter side, `O` its other side | both labelled "keep", an X on the vertices between (thinned on a dense string, and never over a "keep" ring) and the path that goes, the straight segment left | `STRAIGHTEN` |
 | Weed (`draw.vertex.weed`, `WEED`, `SIMPLIFY`) | select, the tolerance, keep survey-point vertices Yes/No | - | `WEED` |
 | Densify (`draw.vertex.densify`, `DENSIFY`) | select, the interval, the chord tolerance for arcs (0 keeps them) | - | `DENSIFY` |
 | Close or Open (`draw.vertex.close`, `CLOSEOPEN`) | select; each open one closes, each closed one opens | - | `CLOSE_OPEN` |
-| Change Start Vertex (`draw.vertex.start`, `STARTVERTEX`) | click the vertex of a closed polyline (or one hot, then Enter) | "new 0" on it; refused on an open polyline or vertex 0 | `START_VERTEX` |
-| Set Vertex Height (`draw.vertex.height`, `VERTEXZ`) | click the vertex, then the height, None, or a click on anything with a height; Enter takes its own height (no undo step), else the height interpolated along the polyline | its height ("z 101.500", "no height") | `VERTEX_Z` |
+| Change Start Vertex (`draw.vertex.start`, `STARTVERTEX`) | click the vertex of a closed polyline (or one hot, then Enter) | "new 0" on it; refused on an open polyline or vertex 0, the vertex struck with its number | `START_VERTEX` |
+| Set Vertex Height (`draw.vertex.height`, `VERTEXZ`) | click the vertex, then the height, None, or a click on anything with a height; Enter takes its own height (no undo step), else the height interpolated along the polyline | its height ("z 101.500", "no height") and what it becomes ("vertex 1 · no height → 5.000"); at the height, over something with one, what a click there takes ("→ 7.500"), and elsewhere Enter's, captioned "Enter: " - a click on nothing is refused | `VERTEX_Z` |
 | Interpolate Heights (`draw.vertex.interpolate`, `INTERPOLATEZ`) | select | - | `INTERPOLATE_Z` |
 | Grade Between Vertices (`draw.vertex.grade`, `GRADE`) | click one vertex, then the other (both need heights; or two hot vertices and Enter); `O` for a closed polyline's other side | their heights, "→ 100.500" on each vertex between, "grade 0 → 2: 1 vertex, 100.000 to 101.000 (10.000 %)" | `GRADE` |
 | Segment to Arc (`draw.vertex.arc`, `SEGMENTARC`) | click the segment (or a hot segment middle, or two hot neighbours), then a point the arc passes through | the segment, then the arc and its radius; refused for a point in line, and at the pick for a segment with no length | `SEGMENT_ARC` |
 | Segment to Line (`draw.vertex.line`, `SEGMENTLINE`) | click the arc segment | the arc and the chord it becomes; refused on a straight segment | `SEGMENT_LINE` |
-| Fillet Vertex (`draw.vertex.fillet`, `FILLETVERTEX`) | click the corner, the radius (the last one typed is offered) | the fillet at the last radius: an X in a ring on the corner, the two tangent points, the arc; refused at the pick at an end, beside an arc or in line | `FILLET_VERTEX` |
-| Chamfer Vertex (`draw.vertex.chamfer`, `CHAMFERVERTEX`) | click the corner, the distance along the segment marked "d1", then along the one marked "d2" (the last ones typed are offered) | the two segments labelled d1 and d2, and the bevel at the last distances | `CHAMFER_VERTEX` |
+| Fillet Vertex (`draw.vertex.fillet`, `FILLETVERTEX`) | click the corner, the radius (the last one typed is offered) | the fillet at the last radius: the two segments the arc is tangent to, an X on the corner that goes, the two tangent points, the arc; refused at the pick at an end, beside an arc or in line, the vertex struck with its number | `FILLET_VERTEX` |
+| Chamfer Vertex (`draw.vertex.chamfer`, `CHAMFERVERTEX`) | click the corner, the distance along the segment marked "d1", then along the one marked "d2" (the last ones typed are offered) | the two segments labelled d1 and d2, an X on the corner, and the bevel at the last distances; refused at the pick as Fillet is | `CHAMFER_VERTEX` |
 | Merge Near Vertices (`draw.vertex.merge`, `MERGEVERTICES`) | select, the tolerance | - | `MERGE_VERTICES` |
 | Snap Vertices to Grid (`draw.vertex.grid`, `SNAPVERTICES`) | select, the spacing | - | `SNAP_VERTICES` |
 
@@ -375,12 +403,22 @@ and Segment to Arc drew a straight line. The rules now, in
 - **R2, reach.** A vertex within the view's 12 px (its snap aperture, the
   reach of an Endpoint snap), a segment or a point on the line within its
   8 px; only a handle reaches at any distance, because the user chose it.
-  These are rules about what a POINTER meant. A place given exactly - a
-  typed point or number, Enter's marked middle (`Chosen::exact`,
-  `InteractiveTool::exactPoint`) - is refused only where geometry refuses
-  it: Insert's "too close to vertex N" turned down the marked middle of
-  every segment 16 px long or less, the one the prompt had just offered,
-  while the verb inserted there.
+  A typed `x,y` at a pick is taken as a click there is (R1): within the
+  same reach, at the zoom of the moment - a typed number names a vertex at
+  any zoom - and one that misses says so, with the reach in drawing units
+  ("116,85 is not within 0.923 of a vertex the tool can take: a typed point
+  is taken as a click there is, within the view's 12 px at this zoom; type
+  the vertex's number, or zoom out"); it said the prompt alone, and the
+  typist cannot see the reach. What a place given exactly - a typed point
+  or number, Enter's marked middle (`Chosen::exact`,
+  `InteractiveTool::exactPoint`) - is spared is the one rule about what a
+  POINTER meant, Insert's "too close to vertex N": there only geometry's
+  own refusal, a point on a vertex, applies. That rule turned down the
+  marked middle of every segment 16 px long or less, the one the prompt
+  had just offered, while the verb inserted there. (This paragraph, and
+  the tool's header, said a typed point was refused ONLY where geometry
+  refused it; it never was, at a pick.) Rejected: a typed point taking the
+  nearest vertex at any distance - the 50 m delete, typed.
 - **R3, the preview is the click.** Each one-polyline tool PLANS its edit
   with the same `geo::` call the commit makes, and the preview draws the
   plan by role (`tool_feedback.hpp`): Target, what the click takes; Added,
@@ -447,11 +485,18 @@ and Segment to Arc drew a straight line. The rules now, in
   polyline nearest x,y, on the line, with z its height. Such a point names
   its segment, so an `after=` naming another is refused - it put a point
   of segment 0 after vertex 1, and the polyline folded back. A rule the tools
-  add is the verbs' too: Straighten's and Grade's side of a closed
-  polyline is `cad::vertexRange`, which `STRAIGHTEN` and `VERTEXZ GRADE`
-  walk as well (`side=short`, the default, or `side=other`, the window's
-  O) - the verbs walked forward from the first number, and the same two
-  numbers took out three vertices where the window took out one.
+  add is the verbs' too, as an option: Straighten's and Grade's side of a
+  closed polyline is `cad::vertexRange` - the side with fewer vertices
+  between, O the other - which `STRAIGHTEN` and `VERTEXZ GRADE` walk when
+  asked (`side=short`, `side=long`). Their default stays what it always
+  was, forward from the first number to the second. Rejected: the shorter
+  side as the verbs' default (the first fix of this review took it): the
+  same line - `STRAIGHTEN 1 3 1` on a closed hexagon - then took out one
+  vertex where it had taken out three, and `VERTEXZ ... GRADE` regraded
+  surveyed heights on the other side, with nothing in the reply to say so:
+  an existing script's or agent's line changed meaning silently. A verb
+  line names the order it walks, so forward is exact; the window's picks
+  have no order a user means, so the shorter side is the window's.
 
 **Handles.** The grips hot when a tool starts (a plain click on a grip makes
 it hot, Shift+click adds one) answer its steps, and the prompt says what
@@ -471,7 +516,8 @@ vertices are chosen, and this tool moves one. Click the vertex of polyline
 segments meet. Click the corner vertex of polyline 3 to round", and for
 Delete with so many that too few would be left, the arithmetic's sentence.
 
-**Typed at a pick.** `x,y` is a click there (R1), but exact (R2); a whole
+**Typed at a pick.** `x,y` is a click there (R1), within the view's reach,
+spared only Insert's pointer rule (R2), and a miss says why; a whole
 number names vertex N (or segment N) of the polyline in play, read as the
 verbs read an index (`core::parseInteger`), so a headless run can drive
 every pick by typing. `#12.v3` typed into the window's command line at a
@@ -491,19 +537,38 @@ as arcs; a Target vertex a green ring round a filled square, with its number
 or "keep" beside it; an Added vertex a cyan disc with a dark "+"; what Enter
 would act on (the `Enter` role) the disc's circle round a dot, its middle
 the dark ground, with "Enter" or "2 · Enter" beside it - hollow, the segment
-through it read as a circled minus beside the new vertex's circled plus; a
-Removed vertex a red X on a dark disc, both inside a Target ring's pen, so
-a fillet's corner - taken and going - shows both; a removed piece red dashes
-over a dim stroke, so they read over the orange selection dashes; the ghost
-of what changes, dashed cyan as every tool's has always been; the polyline
-in play's vertices as the grips' cold squares, hollow, vertex 0 numbered -
-the grips are hidden while a tool runs - drawn FIRST, under every mark, and
-thinned so no two are nearer than 10 px (each end kept): a survey string's
-hundreds were a solid blue band over the target; and the caption on a dark
-chip, its stripe red when refused, at the first corner of the cursor - below
-right, above right, below left, above left - that is in the view, off the
-prompt band and clear of every mark and label; it sat below right whatever
-was there, and hid Enter's place.
+through it read as a circled minus beside the new vertex's circled plus. The
+Enter role is what Enter acts on, whatever Enter does there: the place
+Insert adds at, and the vertex chosen before Delete, Straighten or Change
+Start while the pointer is on another - the one Enter deletes, keeps or
+makes the start, as its label and the prompt say; with the pointer off the
+vertices that same vertex shows Enter's plan itself (Delete's X), since the
+preview is then Enter's. It is drawn before the Target vertices, so on a
+short segment the chosen vertex's ring and square lie over Enter's place a
+few pixels off: Enter's opaque ring, drawn after, had hidden them. A
+Removed vertex is a red X on a dark disc, smaller than a ring, and never
+drawn over a Target vertex's ring - an X inside a ring is a circled X,
+"cancel", the near twin of the refusal's struck ring - and a run of them is
+thinned as the focus squares are (a dense string's Straighten was one red
+rope, the X beside each end across its "keep" ring). Fillet's corner is an
+X, as Chamfer's is, with the two segments the arc is tangent to as its
+Target: a Target ring on the corner with the X over it was that circled X,
+and at the default radius - the arc a pixel or two across - all the
+preview showed. A removed piece is red dashes over a dim stroke, so they
+read over the orange selection dashes; the ghost of what changes, dashed
+cyan as every tool's has always been; the polyline in play's vertices as
+the grips' cold squares, hollow, vertex 0 numbered - the grips are hidden
+while a tool runs - drawn FIRST, under every mark, and thinned so no two are
+nearer than 10 px (each end kept): a survey string's hundreds were a solid
+blue band over the target. Labels are DemiBold: at the regular weight a
+digit's one-pixel stem fell across two columns at about half ink, and a
+refused red "1" read at 2.9:1 against its chip (4.9:1 now). The caption is
+on a dark chip, its stripe red when refused, at the first corner of the
+cursor - below right, above right, below left, above left - that is in the
+view, off the prompt band and clear of every mark, label and piece along
+its length; it sat below right whatever was there, and hid Enter's place,
+and at the view's edge it was pushed onto the very segment the preview
+marked, since only a piece's middle was kept off.
 **A refusal has its own shape as well as its colour**: the marks that say
 why a click is refused (`FeedbackMark::refused`; when a refused preview
 flags none, its Target marks) are a red ring struck through, the sign for
@@ -596,6 +661,23 @@ Rejected, and why:
 - **The prompt said again after every refusal.** The window's status bar
   shows the refusal for six seconds, and the prompt said after it wiped it;
   it is said again only when the refusal changed it.
+- **Straighten's refused first pick named by its number** (the review's
+  suggestion, as Change Start's and Fillet's refused vertices now are).
+  Back on the vertex its first pick took, the struck ring keeps "keep":
+  that vertex IS kept - the first pick stands, and the strike and the
+  caption ("vertex 0 is picked already; click the other one") refuse only a
+  second click there - and the host's hold shows the same mark, unstruck,
+  as the pick just taken. Change Start's "new 0" on an open polyline, and
+  Chamfer's "d1" on an end, promised what the refusal turned down, and are
+  the vertex's number now.
+- **A whole-pixel origin for the labels** (the review's suggested cure for
+  the dim "1"). Tried and measured: the renderer places text on whole
+  pixels already, and the stem read the same, 2.9:1, from any origin; so
+  did full hinting. The weight is what changes it.
+- **The Enter glyph only for a place, a Target ring for a chosen vertex.**
+  With the pointer on another vertex the preview is that click's, and a
+  second Target ring would read as the click taking both; the label ("2 ·
+  Enter") and the prompt say what Enter does to the vertex it marks.
 
 Tested in `tests/cad/tools/test_modify_vertex.cpp`, each tool driven as a
 user drives it, and `tests/cad/tools/test_vertex_tool_feedback.cpp`: every
@@ -607,9 +689,18 @@ choice refused), the reach, and two properties over grids - an Insert
 preview is exactly the vertex the click makes, and no pick tool's preview
 promises what its click does not (`TheInsertPreviewIsWhatTheClickCommits`,
 `APreviewNeverPromisesWhatTheClickDoesNot`, which print how many cases of
-each kind they reached - the second now with handles too, where a preview
-said to be Enter's must be a refused click and then Enter's edit). The
-review of 2026-09-30, each test shown to fail without its fix:
+each kind they reached). The second covers every pick tool but Insert
+(whose own grid is the first), 25 cases of 81 points, with and without
+chosen vertices and at the step after a first pick: a preview refused, with
+no mark, or the tool's idle picture is a refused click; one captioned
+"Enter: " a refused click, then Enter's edit; ANY other a click the tool
+takes. Once an edit is done it is the one shown - Added points vertices,
+Removed ones gone, each ghost a piece of the result, "new 0" the start, a
+"→ z" label the height, Set Height's caption the height set, Edit
+Vertices' polyline selected - and no vertex is marked both taken and gone.
+It had checked only previews showing an Added, a Removed or a ghost, over
+five tools, and so nothing of Change Start, Set Height or Edit Vertices.
+The review of 2026-09-30, each test shown to fail without its fix:
 `WithAChosenVertexAClickIsPreviewedWhereItTakesSomethingAndEnterElsewhere`,
 `BesideAChosenVertexThePlaceEnterAddsAtIsMarked`,
 `FilletAndChamferRememberWhatWasTypedForTheNextUse`,
@@ -621,9 +712,9 @@ review of 2026-09-30, each test shown to fail without its fix:
 `AChosenVertexTheToolCannotUseIsExplainedNotDropped` and
 `TheToolStaysOnThePolylineLastEditedNotTheFirst`; the verbs' side and
 anchored forms in `tests/cad/drawing/test_drawing_verbs.cpp`
-(`StraightenAndGradeTakeAClosedPolylinesShorterSideAsTheWindowDoes`,
+(`StraightenAndGradeWalkForwardUnlessTheShortOrLongSideIsAskedFor`,
 `VertexInsertAtAPointOfThePolylineTakesThatSegmentAndAHeight`) and
-`cli.straighten_takes_the_shorter_side_as_the_window_does`,
+`cli.straighten_walks_forward_and_takes_the_short_side_when_asked`,
 `cli.vertex_insert_on_the_line_takes_a_height`. The drawn cues in
 `tests/qt_widgets/tools/test_vertex_tool_hover.cpp` (ink against a baseline,
 and the drawing never repainted by a hover) and
@@ -683,6 +774,27 @@ grips in `PlanViewGrips.AHotVertexStaysChosenWhenItIsItselfMoved`,
 `qt_pointer_record_quotes_a_bearing_as_a_reply_does_headless`,
 `qt_close_or_open_leaves_a_selected_polyline_on_a_hidden_layer_headless`
 and `qt_move_takes_a_relative_point_with_a_dz_in_plan_headless`.
+
+The third review of 2026-09-30, each test shown to fail with its own fix
+taken out and the others in place: in `test_vertex_tool_feedback.cpp`,
+`AFilletsCornerIsMarkedAsTheVertexThatGoesNotAsATakenOne` (and Chamfer's
+refused end), `ChangeStartShowsTheNewFirstVertexAndRefusesAnOpenPolyline`
+(the refused vertex named), `AThreeDPolylineReadsARelativeDzAsThePLINE3DVerbDoes`
+(the tool against the verb, one line), `ATypedPointOutOfReachSaysSoRatherThanRepeatingThePrompt`,
+`StraightenAndGradeSayTheSideEnterTakesAndOtherSideFlipsIt`,
+`EditVerticesMarksNoVertexForEnterWhereTheClickTakesTheSamePolyline`,
+`SetHeightsValueStepPreviewsTheHeightAClickTakesAndEntersElsewhere` and the
+widened `APreviewNeverPromisesWhatTheClickDoesNot`; the verbs'
+forward walk in `DrawingVerbs.StraightenAndGradeWalkForwardUnlessTheShortOrLongSideIsAskedFor`
+and `cli.straighten_walks_forward_and_takes_the_short_side_when_asked`;
+the view in `PlanViewGrips.InsideAVertexToolDeleteNeverErasesThePolylineItIsEditing`,
+`AHotVertexWhoseVertexWentInTwoEditsBetweenPaintsGoesToo` and
+`AVertexWithAHeightSaysItsHeight` (the "-0.000"); the drawing in
+`FeedbackPainter.ARunOfVerticesThatGoIsThinnedAndNeverCrossesOutAKeptVertex`,
+`AChosenVertexIsDrawnOverEntersPlaceBesideIt`,
+`ARefusedVertexsNumberReadsAtThreeToOneAgainstItsChip` (WCAG 2.1's
+contrast, from the pixels) and
+`TheCaptionKeepsOffAPieceAlongItsLengthNotOnlyItsMiddle`.
 
 ## The Vertices panel
 
@@ -748,8 +860,10 @@ snapped onto a vertex, point or line end that carries a height takes it
 (`cad::heightAtPoint`, of what the view draws: a hidden point's height is not
 taken); otherwise the current height applies. The typed input router hands a
 tool a height through `InteractiveTool::point3d`; a 3D polyline's
-`@dx,dy,dz` climbs dz from the last vertex's height, and is refused after a
-vertex with none.
+`@dx,dy,dz` puts the vertex at a height of dz, as the `PLINE3D` verb reads
+it - the window's tool and the verb make one polyline of one line. (For a
+while the tool climbed dz from the last vertex while the verb did not;
+whether both should climb is under Not done.)
 
 **Construction lines are layer-marked.** The model has no infinite line, so
 a construction line or ray is a line `kConstructionReach` (100 km) long on
@@ -796,10 +910,10 @@ in the ANGLES convention or as a quadrant bearing; a z is a vertex's height.
 | `VERTEX SET` | id N `x= y= z=\|none bulge= bearing= distance=` | the record and the vertex's; the fields apply in turn, as typed into the Vertices panel |
 | `WEED` | target `tolerance= [keep=on\|off]` | a record per polyline with `before=`; keep (on by default) keeps survey-point vertices |
 | `DENSIFY` | target `interval= [chord=]` | a record per polyline |
-| `STRAIGHTEN` | id N N `[side=short\|other]` | the record; on a closed polyline the side with fewer vertices between the two (a tie walks forward from the first), or with `side=other` the other side - the window's rule and its O (`cad::vertexRange`); `side=other` on an open polyline is refused |
+| `STRAIGHTEN` | id N N `[side=short\|long]` | the record; forward from the first N to the second, round through vertex 0 of a closed polyline when the second is lower, as it always walked; with `side=short` a closed polyline's side with fewer vertices between the two (a tie walks forward from the first), the window's rule, and with `side=long` the other side, its O (`cad::vertexRange`); `side=long` on an open polyline is refused |
 | `CLOSE`, `OPEN` | target (none: the selection) | a record per polyline; `OPEN` takes `#ids` or `SELECTION`, since `OPEN directory` opens a project |
 | `STARTVERTEX` | id N | the record |
-| `VERTEXZ` | id N z or none, target `INTERPOLATE`, or id `GRADE` N N `[side=short\|other]` | the record(s); GRADE takes a closed polyline's side as `STRAIGHTEN` does |
+| `VERTEXZ` | id N z or none, target `INTERPOLATE`, or id `GRADE` N N `[side=short\|long]` | the record(s); GRADE walks a closed polyline as `STRAIGHTEN` does |
 | `PLINE` (`PL`, `POLYLINE`) | p p `[ARC p...] [LINE p...] [CLOSE]` | the new polyline's record; in ARC each point ends a tangent arc, and CLOSE in ARC closes with one |
 | `PLINE3D` (`3DPOLY`) | p p `[p...] [CLOSE] [z=]` | the record; z= is the height of points given without one |
 | `SPLINE` (`SPL`) | p p `[p...] [control=on\|off] [degree=3]` | `id kind layer` |
@@ -882,19 +996,26 @@ tests named below):
   where the vertex goes (`cad::gripFeedback` takes `gripPreview`); Move
   Vertex draws only the two segments that change and a disc at the new
   place. The two should look alike.
-- The caption chip keeps off every mark and label, and the view's edges
-  and band, but not the polyline in play's own lines: on a small or
-  continuing string it can still lie over a segment no mark is on.
+- The caption chip keeps off every mark, piece and label, and the view's
+  edges and band, but not the polyline in play's own lines: on a small or
+  continuing string it can still lie over a segment no mark is on. Where
+  every corner round the cursor covers something - a caption wider than
+  the room left of the cursor, a piece crossing all four - it takes the one
+  over the fewest.
 - With the pointer off the view (over a menu or a toolbar) no preview is
   drawn at all, so a tool started from the menu with a vertex chosen shows
   nothing of the chosen vertex until the pointer is back over the view:
   the preview is a function of the cursor, and a tool has no way to say
   what it would show with none.
-- The fixes of the first review of 2026-09-30 were shown to fail taken out
-  together, not one at a time (the second round's were each shown alone);
-  and commit c710852 went in with one test failing under the machine's
-  memory limit. A squash when the branch is merged keeps both out of main's
-  history.
+- A 3D polyline's `@dx,dy,dz` puts the vertex at a height of dz, in the
+  window as in `PLINE3D`; Move Vertex's (and `VERTEX MOVE`'s) raises the
+  vertex by dz. Relative in all three is the drafting convention, and the
+  one the vertex tools follow, but making Polyline 3D climb means changing
+  what an existing `PLINE3D` line draws, on every surface at once - the
+  owner's call, not a review fix's. The tool alone was made to climb for a
+  while, and the window and `katana_cli` drew two polylines from one line.
+- Labels were measured in the headless (offscreen) renderer only: its
+  DemiBold "1" reads at 4.9:1. The window's own renderer was not measured.
 - Colours still shift meaning in one place: a hot grip is red, the colour a
   tool's preview gives what goes, and turns green once a tool takes it; and
   Move Vertex's new place wears the Added "+" though nothing is added.

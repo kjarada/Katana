@@ -219,46 +219,67 @@ TEST(DrawingVerbs, VertexInsertRefusesAnAfterThatIsNotTheSegmentOfItsPoint)
               (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(10, 5), Point2(10, 10)}));
 }
 
-TEST(DrawingVerbs, StraightenAndGradeTakeAClosedPolylinesShorterSideAsTheWindowDoes)
+TEST(DrawingVerbs, StraightenAndGradeWalkForwardUnlessTheShortOrLongSideIsAskedFor)
 {
     // The hexagon (0,0) (10,0) (20,0) (20,10) (10,10) (0,10): from vertex 3
-    // to vertex 1, forward is 4, 5 and 0 and the other way only 2. The
-    // window's picks 3 then 1 take out vertex 2 alone; the verb walked
-    // forward and took out three. side=other is the window's O.
+    // to vertex 1, forward is 4, 5 and 0 and the other way only 2. The verbs
+    // walk forward from the first number, as they always have, so a line
+    // written for them takes out the three it did; the window's rule - the
+    // shorter side, and O for the other - is side=short and side=long.
+    // Made the verbs' default, it silently changed which vertices an
+    // existing script or agent line took out.
     Session s;
     const EntityId h = idOf(s.ok("PLINE 0,0 10,0 20,0 20,10 10,10 0,10 CLOSE"));
     const std::string id = std::to_string(h);
-    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 3 1"), "vertices"), "5");
-    EXPECT_EQ(s.polyline(h).positions(), (std::vector<Point2>{Point2(0, 0), Point2(10, 0),
-                                                              Point2(20, 10), Point2(10, 10),
-                                                              Point2(0, 10)}));
+    const std::vector<Point2> forward{Point2(10, 0), Point2(20, 0), Point2(20, 10)};
+    const std::vector<Point2> shortSide{Point2(0, 0), Point2(10, 0), Point2(20, 10),
+                                        Point2(10, 10), Point2(0, 10)};
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 3 1"), "vertices"), "3");
+    EXPECT_EQ(s.polyline(h).positions(), forward);
     ASSERT_TRUE(s.document.undo());
-    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 3 1 side=other"), "vertices"), "3");
-    EXPECT_EQ(s.polyline(h).positions(),
-              (std::vector<Point2>{Point2(10, 0), Point2(20, 0), Point2(20, 10)}));
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 3 1 side=short"), "vertices"), "5");
+    EXPECT_EQ(s.polyline(h).positions(), shortSide);
+    ASSERT_TRUE(s.document.undo());
+    // The long side from 1 to 3 is the forward walk from 3 to 1.
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 1 3 side=long"), "vertices"), "3");
+    EXPECT_EQ(s.polyline(h).positions(), forward);
+    ASSERT_TRUE(s.document.undo());
+    // And forward from 1 to 3 is the short side here.
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 1 3"), "vertices"), "5");
+    EXPECT_EQ(s.polyline(h).positions(), shortSide);
     EXPECT_EQ(s.fails("STRAIGHTEN " + id + " 0 1 side=sideways"), ErrorCode::InvalidArgument);
-    // An open polyline has one way between two vertices.
+    EXPECT_EQ(s.fails("STRAIGHTEN " + id + " 0 3 side=other"), ErrorCode::InvalidArgument)
+        << "short or long, not the window's letter";
+    // An open polyline has one way between two vertices: side=short walks
+    // it, side=long has nothing to walk.
     const EntityId open = idOf(s.ok("PLINE 0,0 10,0 20,0"));
-    EXPECT_EQ(s.fails("STRAIGHTEN " + std::to_string(open) + " 0 2 side=other"),
+    EXPECT_EQ(s.fails("STRAIGHTEN " + std::to_string(open) + " 0 2 side=long"),
               ErrorCode::InvalidArgument);
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + std::to_string(open) + " 2 0 side=short"), "vertices"),
+              "2");
 
     // Grade on the same hexagon with heights: 0 at vertex 1, 10 at vertex 3.
-    // The short way, 1 to 3, puts vertex 2 halfway by length, at 5. The
-    // other way, 3 to 1 through 4, 5 and 0, 40 long in four steps of 10:
-    // 7.5, 5 and 2.5.
+    // Forward from 3 to 1 through 4, 5 and 0 is 40 long in four steps of
+    // 10: 7.5, 5 and 2.5. The short way, 1 to 3, puts vertex 2 halfway by
+    // length, at 5.
     const EntityId z = idOf(s.ok("PLINE3D 0,0,0 10,0,0 20,0,0 20,10,10 10,10,0 0,10,0 CLOSE"));
     const std::string zid = std::to_string(z);
     s.ok("VERTEXZ " + zid + " GRADE 3 1");
     auto graded = s.polyline(z);
-    EXPECT_DOUBLE_EQ(*graded.vertices[2].height, 5.0);
-    EXPECT_DOUBLE_EQ(*graded.vertices[4].height, 0.0) << "the long way is left alone";
-    ASSERT_TRUE(s.document.undo());
-    s.ok("VERTEXZ " + zid + " GRADE 3 1 side=other");
-    graded = s.polyline(z);
     EXPECT_DOUBLE_EQ(*graded.vertices[4].height, 7.5);
     EXPECT_DOUBLE_EQ(*graded.vertices[5].height, 5.0);
     EXPECT_DOUBLE_EQ(*graded.vertices[0].height, 2.5);
     EXPECT_DOUBLE_EQ(*graded.vertices[2].height, 0.0) << "the short way is left alone";
+    ASSERT_TRUE(s.document.undo());
+    s.ok("VERTEXZ " + zid + " GRADE 3 1 side=short");
+    graded = s.polyline(z);
+    EXPECT_DOUBLE_EQ(*graded.vertices[2].height, 5.0);
+    EXPECT_DOUBLE_EQ(*graded.vertices[4].height, 0.0) << "the long way is left alone";
+    ASSERT_TRUE(s.document.undo());
+    s.ok("VERTEXZ " + zid + " GRADE 1 3 side=long");
+    graded = s.polyline(z);
+    EXPECT_DOUBLE_EQ(*graded.vertices[4].height, 7.5);
+    EXPECT_DOUBLE_EQ(*graded.vertices[0].height, 2.5);
 }
 
 TEST(DrawingVerbs, VertexDeleteRemovesSeveralAtOnceAsOneUndoStep)

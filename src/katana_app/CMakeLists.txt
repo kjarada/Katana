@@ -96,18 +96,18 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.vertex_insert_on_the_line_takes_a_height PROPERTIES
         PASS_REGULAR_EXPRESSION "inserted=1.*index=1 x=4 y=0 z=101[.]5 "
         FAIL_REGULAR_EXPRESSION "error")
-    # STRAIGHTEN takes a closed polyline's shorter side between the two, as
-    # the window's Straighten does. On the hexagon (0,0) (10,0) (20,0)
-    # (20,10) (10,10) (0,10), from 3 to 1 forward is 4, 5 and 0 and the
-    # other way only 2: vertex 2 alone goes, leaving five; side=other takes
-    # 4, 5 and 0, leaving (10,0) (20,0) (20,10).
-    add_test(NAME cli.straighten_takes_the_shorter_side_as_the_window_does
+    # STRAIGHTEN walks forward from the first number, as it always has, so an
+    # existing line does what it did. On the hexagon (0,0) (10,0) (20,0)
+    # (20,10) (10,10) (0,10), from 3 to 1 forward is 4, 5 and 0, leaving
+    # (10,0) (20,0) (20,10); side=short takes the window's side, the one with
+    # fewer between - vertex 2 alone - leaving five.
+    add_test(NAME cli.straighten_walks_forward_and_takes_the_short_side_when_asked
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "PLINE 0,0 10,0 20,0 20,10 10,10 0,10 CLOSE"
                 -c "PLINE 0,0 10,0 20,0 20,10 10,10 0,10 CLOSE" -c "STRAIGHTEN 1 3 1"
-                -c "STRAIGHTEN 2 3 1 side=other" -c "VERTEX LIST 2")
-    set_tests_properties(cli.straighten_takes_the_shorter_side_as_the_window_does PROPERTIES
-        PASS_REGULAR_EXPRESSION "id=1 [^\r\n]*vertices=5.*id=2 [^\r\n]*vertices=3.*index=0 x=10 y=0 .*index=1 x=20 y=0 .*index=2 x=20 y=10 "
+                -c "STRAIGHTEN 2 3 1 side=short" -c "VERTEX LIST 1")
+    set_tests_properties(cli.straighten_walks_forward_and_takes_the_short_side_when_asked PROPERTIES
+        PASS_REGULAR_EXPRESSION "id=1 [^\r\n]*vertices=3.*id=2 [^\r\n]*vertices=5.*index=0 x=10 y=0 .*index=1 x=20 y=0 .*index=2 x=20 y=10 "
         FAIL_REGULAR_EXPRESSION "error")
 
     # The survey-code verbs, on a mapfile of the tests' own: its shape is the

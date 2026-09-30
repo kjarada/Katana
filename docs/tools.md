@@ -59,13 +59,19 @@ hands it on as a click goes, to `point3d` with a height and `point`
 without; Insert Vertex overrides it, since its "too close to vertex N" is a
 rule about what a POINTER meant. A z reaches only a step whose
 `InteractiveTool::takesHeights` says so (Point, Polyline 3D, Move Vertex's
-new place, Insert Vertex's): there `x,y,z` is the height and `@dx,dy,dz`
-the tool's `InteractiveTool::lastHeight` plus dz (refused when there is
-none, never read as a height of dz); everywhere else the z of either form
-is dropped, as it always was. The dz rule first applied to every tool, and
-`@0,5,0` at MOVE or LINE was refused ("the point @ is measured from has no
-height"). Rejected: telling the kinds apart by `lastHeight` alone - Move
-Vertex on a vertex with no height must refuse a dz, not drop it.
+new place, Insert Vertex's): there `x,y,z` is the height, and the dz of
+`@dx,dy,dz` is read as the tool's VERB reads it - the height itself, as
+`PLINE3D` has it (the default), or, where `InteractiveTool::dzIsAChange`
+says so, a change of `InteractiveTool::lastHeight` (Move Vertex, as
+`VERTEX MOVE` has it; refused when there is none, never read as a height
+of dz). Everywhere else the z of either form is dropped, as it always was.
+The dz rule first applied to every tool, and `@0,5,0` at MOVE or LINE was
+refused ("the point @ is measured from has no height"); then it made
+Polyline 3D climb dz from its last vertex while `PLINE3D` put the vertex at
+dz, one line two polylines. Rejected: telling the kinds apart by
+`lastHeight` alone - Move Vertex on a vertex with no height must refuse a
+dz, not drop it; and making `PLINE3D` climb too, which would change what an
+existing verb line draws (`docs/drawing.md`, Not done).
 
 **Icons live with their family** (`src/katana_qt/tools/icons_<family>.cpp`,
 by tool id), drawn to icons.cpp's conventions: a 24-unit grid, a 1.7-unit
@@ -249,7 +255,15 @@ whether the view may snap the cursor to a snap for the step the tool is
 at; the view asks it through `SnapRequest::accept`, which passes a refused
 candidate over for the next best. Insert Vertex takes only a snap ON the
 polyline, where its click would be taken. `InteractiveTool::lastHeight`:
-the height a typed dz changes. **What the host holds back**:
+the height a typed dz changes, where `dzIsAChange`.
+`InteractiveTool::takesDelete` and `deleteKey`: whether the tool takes the
+Delete key from the window's Erase while it runs, and what it makes of it -
+the view claims the key (`ShortcutOverride`) and hands it on through
+`ToolHost::deleteKey`. The vertex tools take it: their polyline is selected
+while they work on it, and Erase took the whole string from under them.
+Delete Vertex reads it as its Enter; the others refuse it and say so. Every
+other tool leaves Delete to Erase, as it always was. **What the host holds
+back**:
 `ToolHost::feedback` answers a click the tool took with what the click did,
 not with the refusal the tool's next preview gives at that spot, until the
 cursor leaves it by the pick aperture - the tool is made anew at each

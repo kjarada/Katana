@@ -25,9 +25,12 @@
 //     survey point on a vertex cannot take the pick from its string;
 //   - a vertex is picked within the view's 12 px, a segment or a point on a
 //     polyline within its 8 px: never "the nearest vertex" at any distance.
-//     Those are rules about what a POINTER meant; a place given exactly -
-//     typed, or Enter's marked middle - is refused only where geometry
-//     refuses it (Chosen::exact);
+//     A typed x,y at a pick is taken as a click there is, within the same
+//     reach, and one that misses says so (a typed number names a vertex at
+//     any zoom). What a place given exactly - typed, or Enter's marked
+//     middle - is spared is the rule about what a POINTER meant, Insert's
+//     "too close to vertex N": there only geometry's own refusal, a point
+//     on a vertex, applies (Chosen::exact);
 //   - each one-polyline tool PLANS its edit with the geo:: call the commit
 //     makes, and the preview draws the plan by role (tool_feedback.hpp): what
 //     a click takes, adds and removes. A plan refused for the pick itself (an
@@ -124,11 +127,6 @@ std::string plural(std::size_t count, std::string_view noun)
         return std::to_string(count) + (count == 1 ? " vertex" : " vertices");
     }
     return std::to_string(count) + " " + std::string(noun) + (count == 1 ? "" : "s");
-}
-
-std::string heightLabel(const std::optional<double>& height)
-{
-    return height ? "z " + fixed(*height) : std::string("no height");
 }
 
 // A whole number typed at a pick: vertex (or segment) N of the polyline in
@@ -410,6 +408,10 @@ struct Script {
     // committed, never by a preview, which plans at the remembered values.
     std::function<void(const Collected&)> remember;
     bool restarts = false;
+    // Delete Vertex: the Delete key is its Enter (ScriptTool::deleteKey).
+    bool deleteIsEnter = false;
+    // The tool's title, for what it says of itself ("Insert Vertex").
+    std::string title;
 };
 
 // A second pick of the vertex the pick before took (Straighten's, Grade's):
@@ -745,6 +747,27 @@ class ScriptTool final : public InteractiveTool {
             }
             return idle();
         }
+        if (step.kind == Step::Kind::Value && script_.valueFromClick) {
+            // A click here takes the height of what lies under it (Set
+            // Height), so the preview is that click's plan where one is in
+            // reach; elsewhere a click is refused, and the preview is what
+            // Enter does, said as Enter's (R3). It showed the plan at the
+            // default wherever the cursor was: neither the height a click
+            // took nor the refusal of a click on nothing.
+            if (const auto taken = script_.valueFromClick(collected_, context_, cursor)) {
+                Collected c = collected_;
+                c.values.push_back(*taken);
+                return feedbackOf(script_.plan(withDefaults(std::move(c), step_ + 1), context_));
+            }
+            if (!canPlan(collected_, step_)) {
+                return idle();
+            }
+            ToolFeedback enter = feedbackOf(script_.plan(withDefaults(collected_, step_), context_));
+            if (!enter.caption.empty()) {
+                enter.caption = "Enter: " + enter.caption;
+            }
+            return enter;
+        }
         Collected c = collected_;
         std::size_t from = step_;
         if (step.kind == Step::Kind::Point) {
@@ -776,6 +799,28 @@ class ScriptTool final : public InteractiveTool {
         }
         const Chosen& last = collected_.picks.back();
         return last.shape.vertices[*last.vertex].height;
+    }
+    // "Raise it by dz", as the VERTEX MOVE verb reads @dx,dy,dz.
+    [[nodiscard]] bool dzIsAChange() const override { return true; }
+
+    // The Delete key is the tool's while it runs, never the window's Erase
+    // of the polyline it is editing (InteractiveTool::takesDelete). In
+    // Delete Vertex with vertices chosen before it, Delete is its Enter: it
+    // deletes them. Anywhere else it does nothing, and says so.
+    [[nodiscard]] bool takesDelete() const override { return true; }
+    ToolStep deleteKey() override
+    {
+        if (script_.deleteIsEnter && step_ >= script_.steps.size() &&
+            answeredBy_ == AnsweredBy::Handles) {
+            return enter();
+        }
+        if (script_.deleteIsEnter) {
+            return ToolStep::rejected("Delete deletes the vertices chosen before " +
+                                      script_.title + ", and none is; " + prompt());
+        }
+        return ToolStep::rejected("Delete erases nothing while " + script_.title +
+                                  " runs - it would take the polyline being edited; press Esc "
+                                  "first to erase the selection");
     }
 
     // A point ON a polyline (Insert's) takes a snap only where it lands on
@@ -884,14 +929,19 @@ class ScriptTool final : public InteractiveTool {
         };
         std::vector<FeedbackMark> enter;
         for (const Chosen& pick : collected_.picks) {
-            Point2 at = pick.at;
-            std::string label = "polyline " + std::to_string(pick.polyline);
+            Point2 at;
+            std::string label;
             if (pick.vertex) {
                 at = pick.shape.vertices[*pick.vertex].position;
                 label = std::to_string(*pick.vertex);
             } else if (pick.segment) {
                 at = middleOfPiece(pick.shape, *pick.segment);
                 label = "segment " + std::to_string(*pick.segment);
+            } else {
+                // A whole polyline (Edit Vertices'): no vertex of it is what
+                // Enter takes, and one marked - its vertex 0, "polyline 2 ·
+                // Enter" - read as a chosen vertex. The prompt names it.
+                continue;
             }
             if (!marked(at)) {
                 enter.push_back(vertexMark(FeedbackRole::Enter, at, label + " · Enter"));
@@ -1232,6 +1282,27 @@ class ScriptTool final : public InteractiveTool {
         return step;
     }
 
+    // Why a TYPED point at a pick took nothing. A typed x,y is taken as a
+    // click there is (R1), within the view's reach at this zoom - a vertex
+    // within 12 px, a polyline within 8 - and one that missed was answered
+    // with the prompt alone, though the typist cannot see the reach. Insert
+    // beside a chosen vertex is not a reach but the anchor's segments (its
+    // prompt says so), and says the prompt as before.
+    [[nodiscard]] std::string missed(const Step& step, const Point2& at) const
+    {
+        if (step.kind == Step::Kind::OnLine && collected_.anchor) {
+            return prompt();
+        }
+        const bool vertex = step.kind == Step::Kind::Vertex;
+        const double reach = vertex ? vertexReach(context_) : pickReach(context_);
+        return number(at.x) + "," + number(at.y) + " is not within " + fixed(reach) + " of " +
+               (vertex ? "a vertex" : "a polyline") +
+               " the tool can take: a typed point is taken as a click there is, within the "
+               "view's " +
+               number(vertex ? kSnapAperturePixels : kPickAperturePixels) + " px at this zoom" +
+               (vertex ? "; type the vertex's number, or zoom out. " : "; zoom out. ") + prompt();
+    }
+
     // A click (exact false) or a typed point (true) at `at`, with the height
     // typed for it, if any.
     ToolStep pointAt(const Point2& at, std::optional<double> z, bool exact)
@@ -1245,7 +1316,7 @@ class ScriptTool final : public InteractiveTool {
                 return InteractiveTool::point(at);
             }
             if (!resolve(fresh(), steps.front(), at, exact)) {
-                return ToolStep::rejected(prompt());
+                return ToolStep::rejected(exact ? missed(steps.front(), at) : prompt());
             }
             return anew([&] { return pointAt(at, z, exact); });
         }
@@ -1257,7 +1328,7 @@ class ScriptTool final : public InteractiveTool {
         case Step::Kind::OnLine: {
             auto chosen = resolve(collected_, step, at, exact);
             if (!chosen) {
-                return ToolStep::rejected(prompt());
+                return ToolStep::rejected(exact ? missed(step, at) : prompt());
             }
             return take(std::move(*chosen), step.kind == Step::Kind::OnLine ? z : std::nullopt);
         }
@@ -1645,6 +1716,17 @@ std::string pickedVertex(const Collected& c, std::size_t i = 0)
            std::to_string(c.picks.at(i).polyline);
 }
 
+// " from vertex 1 to 3": Straighten's and Grade's two picks in the order the
+// edit walks them - the side it takes, O's other side once typed
+// (cad::vertexRange, as the plan). Said in the order picked, the prompt read
+// the same before and after O while the caption and the marks changed side.
+std::string walkedBetween(const Collected& c)
+{
+    const auto [from, to] =
+        vertexRange(c.picks.at(0).shape, *c.picks.at(0).vertex, *c.picks.at(1).vertex, c.otherSide);
+    return " from vertex " + std::to_string(from) + " to " + std::to_string(to);
+}
+
 // ---- prompts ---------------------------------------------------------------------------------
 
 using Prompt = std::function<std::string(const Collected&, std::optional<EntityId>)>;
@@ -1971,9 +2053,9 @@ Plan planGrade(const Collected& c, const ToolContext&)
     ToolFeedback& f = plan.feedback;
     f.focus = first.polyline;
     f.marks.push_back(vertexMark(FeedbackRole::Target, shape.vertices[a].position,
-                                 heightLabel(shape.vertices[a].height)));
+                                 heightText(shape.vertices[a].height)));
     f.marks.push_back(vertexMark(FeedbackRole::Target, shape.vertices[b].position,
-                                 heightLabel(shape.vertices[b].height)));
+                                 heightText(shape.vertices[b].height)));
     const auto [from, to] = vertexRange(shape, a, b, c.otherSide);
     auto result = geo::gradeBetween(shape, from, to);
     if (!result) {
@@ -2009,8 +2091,11 @@ Plan planStart(const Collected& c, const ToolContext&)
     plan.command = "START_VERTEX";
     ToolFeedback& f = plan.feedback;
     f.focus = pick.polyline;
-    f.marks.push_back(vertexMark(FeedbackRole::Target, pick.shape.vertices[v].position, "new 0"));
     auto result = geo::changeStartVertex(pick.shape, v);
+    // Named by its number where it is refused: "new 0" beside the struck
+    // ring promised the start the caption turned down.
+    f.marks.push_back(vertexMark(FeedbackRole::Target, pick.shape.vertices[v].position,
+                                 result ? std::string("new 0") : std::to_string(v)));
     if (!result) {
         plan.refusal = result.error().message;
         return plan;
@@ -2031,9 +2116,11 @@ Plan planHeight(const Collected& c, const ToolContext&)
     ToolFeedback& f = plan.feedback;
     f.focus = pick.polyline;
     f.marks.push_back(
-        vertexMark(FeedbackRole::Target, pick.shape.vertices[v].position, heightLabel(current)));
-    f.caption = "vertex " + std::to_string(v) + " · " +
-                (current ? "height " + fixed(*current) : std::string("no height"));
+        vertexMark(FeedbackRole::Target, pick.shape.vertices[v].position, heightText(current)));
+    const auto said = [](const std::optional<double>& z) {
+        return z ? "height " + fixed(*z) : std::string("no height");
+    };
+    f.caption = "vertex " + std::to_string(v) + " · " + said(current);
     const std::string& text = c.values.at(0);
     std::optional<double> height;
     if (!isOption(text, "None")) {
@@ -2042,6 +2129,11 @@ Plan planHeight(const Collected& c, const ToolContext&)
             plan.warning = "'" + text + "' is not a height; type a number or None";
             return plan;
         }
+    }
+    // The height it will have, where that is a change: the height a click
+    // at the value step takes, or Enter's default, was nowhere on screen.
+    if (height != current) {
+        f.caption += " → " + (height ? fixed(*height) : std::string("no height"));
     }
     if (height == current) {
         // Enter at a vertex's own height: nothing to do, and no undo step.
@@ -2143,12 +2235,20 @@ Plan planFillet(const Collected& c, const ToolContext&)
     plan.command = "FILLET_VERTEX";
     ToolFeedback& f = plan.feedback;
     f.focus = pick.polyline;
-    f.marks.push_back(
-        vertexMark(FeedbackRole::Target, shape.vertices[v].position, std::to_string(v)));
     if (auto corner = geo::checkCorner(shape, v); !corner) {
+        // The vertex that is no corner, named: drawn struck through.
+        f.marks.push_back(
+            vertexMark(FeedbackRole::Target, shape.vertices[v].position, std::to_string(v)));
         plan.refusal = corner.error().message;
         return plan;
     }
+    // What the pick acts on is the two segments the arc is tangent to, as
+    // Chamfer marks its two; the corner itself goes (its X, below). A ring on
+    // the corner with the X over it was a circled X - "cancel" - and a near
+    // twin of the refusal's struck ring, which at the default radius is all
+    // the preview showed.
+    f.marks.push_back(pieceMark(FeedbackRole::Target, pieceOf(shape, *segmentBefore(shape, v))));
+    f.marks.push_back(pieceMark(FeedbackRole::Target, pieceOf(shape, *segmentAfter(shape, v))));
     const std::string& text = c.values.at(0);
     const auto radius = parsePositive(text);
     if (!radius) {
@@ -2181,20 +2281,21 @@ Plan planChamfer(const Collected& c, const ToolContext&)
     plan.command = "CHAMFER_VERTEX";
     ToolFeedback& f = plan.feedback;
     f.focus = pick.polyline;
-    const auto incoming = segmentBefore(shape, v);
-    const auto outgoing = segmentAfter(shape, v);
-    // "d1" and "d2", the distances measured along each: a bare "1" and "2"
-    // on the segments read as segment numbers beside the vertex numbers.
-    if (incoming) {
-        f.marks.push_back(pieceMark(FeedbackRole::Target, pieceOf(shape, *incoming), "d1"));
-    }
-    if (outgoing) {
-        f.marks.push_back(pieceMark(FeedbackRole::Target, pieceOf(shape, *outgoing), "d2"));
-    }
     if (auto corner = geo::checkCorner(shape, v); !corner) {
+        // The vertex that is no corner, named and struck, as Fillet's: the
+        // one segment an end has was struck instead, labelled "d1" - a
+        // distance the refusal never asks for.
+        f.marks.push_back(
+            vertexMark(FeedbackRole::Target, shape.vertices[v].position, std::to_string(v)));
         plan.refusal = corner.error().message;
         return plan;
     }
+    // "d1" and "d2", the distances measured along each: a bare "1" and "2"
+    // on the segments read as segment numbers beside the vertex numbers.
+    f.marks.push_back(
+        pieceMark(FeedbackRole::Target, pieceOf(shape, *segmentBefore(shape, v)), "d1"));
+    f.marks.push_back(
+        pieceMark(FeedbackRole::Target, pieceOf(shape, *segmentAfter(shape, v)), "d2"));
     const auto first = parsePositive(c.values.at(0));
     const auto second = parsePositive(c.values.at(1));
     if (!first || !second) {
@@ -2229,6 +2330,7 @@ ToolInfo info(std::string id, std::string name, int order, std::vector<std::stri
     // The prompt names the tool by what it does; the menus gather the family
     // by its name's "Vertices, " (tool_menus.hpp).
     tool.title = name;
+    script.title = name;
     tool.name = "Vertices, " + std::move(name);
     tool.category = "Draw";
     tool.group = "Vertices";
@@ -2334,6 +2436,7 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
                    " chosen vertices, or click another vertex";
         };
         script.restarts = true;
+        script.deleteIsEnter = true;
         report(catalog.add(info(
             "draw.vertex.delete", "Delete Vertex", 20, {"DELETEVERTEX"},
             "Removes the vertex you click, or the vertices chosen before; its two segments "
@@ -2446,8 +2549,7 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
         script.answer = twoVertices;
         script.ready = [](const Collected& c) {
             return "Press Enter to straighten polyline " + std::to_string(c.picks[0].polyline) +
-                   " from vertex " + std::to_string(*c.picks[0].vertex) + " to " +
-                   std::to_string(*c.picks[1].vertex) + ", or click another vertex" +
+                   walkedBetween(c) + ", or click another vertex" +
                    (c.picks[0].shape.closed ? " [Other side]" : "");
         };
         script.restarts = true;
@@ -2564,7 +2666,7 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
         Script script;
         Step vertex = vertexStep(clickThe("vertex", "whose height to set"));
         vertex.label = [](const Chosen& chosen) {
-            return heightLabel(chosen.shape.vertices[*chosen.vertex].height);
+            return heightText(chosen.shape.vertices[*chosen.vertex].height);
         };
         script.steps = {
             vertex,
@@ -2636,7 +2738,7 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
         Step first = vertexStep(clickThe("vertex", "to grade from"));
         first.check = hasHeight;
         first.label = [](const Chosen& chosen) {
-            return heightLabel(chosen.shape.vertices[*chosen.vertex].height);
+            return heightText(chosen.shape.vertices[*chosen.vertex].height);
         };
         Step second = vertexStep(fixedPrompt("Click the vertex to grade to"));
         second.samePolyline = true;
@@ -2647,8 +2749,7 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
         script.answer = twoVertices;
         script.ready = [](const Collected& c) {
             return "Press Enter to grade polyline " + std::to_string(c.picks[0].polyline) +
-                   " from vertex " + std::to_string(*c.picks[0].vertex) + " to " +
-                   std::to_string(*c.picks[1].vertex) + ", or click another vertex" +
+                   walkedBetween(c) + ", or click another vertex" +
                    (c.picks[0].shape.closed ? " [Other side]" : "");
         };
         script.restarts = true;

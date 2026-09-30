@@ -987,13 +987,23 @@ bool ViewportWidget::event(QEvent* event)
     // Delete with a vertex grip hot is the VIEW's: it removes those vertices
     // (keyPressEvent, GripController::deleteHot). The window's Erase holds
     // Delete as a shortcut, and taking it there erased the whole polyline.
-    if (event->type() == QEvent::ShortcutOverride && gripsLive()) {
+    // So is Delete while a tool runs that takes it (a vertex tool,
+    // InteractiveTool::takesDelete): the polyline the tool is editing is
+    // selected - its chosen vertex's grips needed that, and the tool selects
+    // what it has just edited - and Erase took the whole string from under it.
+    if (event->type() == QEvent::ShortcutOverride) {
         const auto* key = static_cast<QKeyEvent*>(event);
         if (key->key() == Qt::Key_Delete && key->modifiers() == Qt::NoModifier) {
-            grips_.refresh(notifications_);
-            if (grips_.hasHotVertex()) {
+            if (tools_.active() && tools_.takesDelete()) {
                 event->accept();
                 return true;
+            }
+            if (gripsLive()) {
+                grips_.refresh(notifications_);
+                if (grips_.hasHotVertex()) {
+                    event->accept();
+                    return true;
+                }
             }
         }
     }
@@ -1055,6 +1065,16 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
             if (event->matches(QKeySequence::Undo)) {
                 // The drawing's Undo is Esc and then Ctrl+Z.
                 stepBack();
+                return;
+            }
+            break;
+        case Qt::Key_Delete:
+            // Claimed from the window's Erase (event()); the tool says what
+            // it means - Delete Vertex's Enter, or nothing, said.
+            if (event->modifiers() == Qt::NoModifier && tools_.takesDelete()) {
+                (void)tools_.deleteKey();
+                updatePrompt();
+                update();
                 return;
             }
             break;

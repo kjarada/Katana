@@ -1,7 +1,10 @@
 #include "drawing/grip_controller.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <optional>
 #include <utility>
+#include <vector>
 
 #include <QPainter>
 #include <QPen>
@@ -29,15 +32,68 @@ GripController::GripController(cad::Document& document) : document_(document) {}
 
 namespace {
 
+// The places of `entity`'s vertex grips, by index; empty for an entity with
+// none (a circle, a text).
+std::vector<std::optional<katana::geometry::Point2>> vertexPlaces(
+    const std::vector<cad::Grip>& grips, katana::entity::EntityId entity)
+{
+    std::vector<std::optional<katana::geometry::Point2>> places;
+    for (const cad::Grip& grip : grips) {
+        if (grip.entity != entity || grip.kind != cad::GripKind::Vertex) {
+            continue;
+        }
+        if (grip.index >= places.size()) {
+            places.resize(grip.index + 1);
+        }
+        places[grip.index] = grip.position;
+    }
+    return places;
+}
+
+// Whether a polyline grip's own vertices are all that moved from `before` to
+// `grips`: every other vertex of its entity is where it was, index for index,
+// and there are as many. A vertex grip's own vertex is itself; a segment
+// middle's are the segment's two ends.
+bool onlyItsOwnVerticesMoved(const cad::Grip& old, const std::vector<cad::Grip>& grips,
+                             const std::vector<cad::Grip>& before)
+{
+    const auto was = vertexPlaces(before, old.entity);
+    const auto now = vertexPlaces(grips, old.entity);
+    if (was.size() != now.size() || now.empty()) {
+        return false;
+    }
+    const std::size_t n = now.size();
+    for (std::size_t i = 0; i < n; ++i) {
+        const bool own = old.kind == cad::GripKind::Vertex
+                             ? i == old.index
+                             : i == old.index || i == (old.index + 1) % n;
+        if (own) {
+            continue;
+        }
+        if (!was[i] || !now[i] ||
+            was[i]->distanceTo(*now[i]) > katana::math::tolerance::kGeometric) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // The grip that is `old` after the drawing changed from `before` to `grips`:
 // the same point of the same entity, by its position - an index names
 // another vertex once a vertex is inserted or deleted before it, and the next
 // Delete would take that one. The same index first, where a twin vertex lies
-// on the same point. Where no grip is at its point, the vertex itself may
-// have moved (VERTEX MOVE, a Vertices panel cell, another view): with as
-// many grips of its kind on the entity as before, nothing was inserted or
-// deleted ahead of it, so its index still names it - matched by position
-// alone, a move of the chosen vertex silently unchose it.
+// on the same point.
+//
+// Where no grip is at its point, its own vertex may have been moved (VERTEX
+// MOVE, a Vertices panel cell, another view), and matched by position alone
+// such a move silently unchose it. A polyline's vertex or segment middle then
+// keeps its index only when every OTHER vertex of the polyline is where it
+// was: that is a move of its own. Two edits between refreshes - a SCRIPT, lines
+// pasted, an agent - can delete the chosen vertex and insert another,
+// leaving as many vertices as before; kept by its index then, the grip named a
+// vertex nobody chose, and Enter or Delete removed it. It goes instead. A
+// grip of any other kind (a centre, a quadrant, a line's end) keeps its index
+// while its entity has as many of that kind: those are never renumbered.
 std::optional<cad::Grip> follow(const cad::Grip& old, const std::vector<cad::Grip>& grips,
                                 const std::vector<cad::Grip>& before)
 {
@@ -58,7 +114,12 @@ std::optional<cad::Grip> follow(const cad::Grip& old, const std::vector<cad::Gri
             return grip;
         }
     }
-    if (std::ranges::count_if(grips, same) == std::ranges::count_if(before, same)) {
+    const bool renumbered =
+        old.kind == cad::GripKind::Vertex || old.kind == cad::GripKind::SegmentMid;
+    const bool kept = renumbered
+                          ? onlyItsOwnVerticesMoved(old, grips, before)
+                          : std::ranges::count_if(grips, same) == std::ranges::count_if(before, same);
+    if (kept) {
         for (const cad::Grip& grip : grips) {
             if (grip.index == old.index && same(grip)) {
                 return grip;
@@ -120,13 +181,16 @@ QString GripController::hoverHint() const
     // gestures nothing else on screen mentions (Shift to choose, Ctrl to add).
     if (const auto polyline = cad::readPolyline(*entity)) {
         if (grip.kind == cad::GripKind::Vertex && grip.index < polyline->vertices.size()) {
+            // Its height written as the vertex tools' labels write it
+            // (cad::heightText): "z -0.000" here beside "z 0.000" there was
+            // one vertex read two ways.
             const auto& height = polyline->vertices[grip.index].height;
             return QString("Vertex %1 of polyline %2%3: drag to move · click to pick up · "
                            "Shift+click to choose · Delete removes the chosen · right-click for "
                            "vertex tools")
                 .arg(grip.index)
                 .arg(grip.entity)
-                .arg(height ? QString(", z %1").arg(*height, 0, 'f', 3) : QString());
+                .arg(height ? ", " + QString::fromStdString(cad::heightText(height)) : QString());
         }
         if (grip.kind == cad::GripKind::SegmentMid) {
             // A straight segment's middle moves the segment bodily; an arc's

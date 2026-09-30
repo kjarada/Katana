@@ -67,7 +67,8 @@ namespace overlay {
 // How many of each the last paintFeedback drew, for the view's
 // lastPreviewCounts and the headless pointer record: what is on screen, so
 // an Added vertex left out beside a Removed one (a fillet a few pixels
-// across) and a focus square thinned out are not counted.
+// across), a Removed X thinned out or kept off a ring, and a focus square
+// thinned out are not counted.
 struct FeedbackCounts {
     std::size_t shapes = 0;
     std::size_t markers = 0;
@@ -102,9 +103,11 @@ struct FeedbackFrame {
 // `focusVertices` (the polyline in play, hollow squares, thinned so that no
 // two are nearer than 10 px - a dense string was buried under a band of
 // them), removed pieces, target pieces, the ghost, the base points,
-// beneathGlyphs, target vertices, removed vertices, what Enter acts on, the
-// refused marks, added vertices, labels, and the caption at the first corner
-// of the cursor where it covers no mark.
+// beneathGlyphs, what Enter acts on, target vertices, removed vertices
+// (thinned as the squares are, and never over a target's ring), the refused
+// marks, added vertices, labels (DemiBold, so a digit's stem is inked), and
+// the caption at the first corner of the cursor where it covers no mark,
+// piece or label.
 FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback& feedback,
                              const std::vector<katana::geometry::Point2>& focusVertices,
                              const FeedbackFrame& frame);

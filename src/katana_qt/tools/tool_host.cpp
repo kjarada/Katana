@@ -160,6 +160,14 @@ ToolHost::Outcome ToolHost::undo()
     return tool_ != nullptr ? apply(tool_->undo()) : idle();
 }
 
+bool ToolHost::takesDelete() const { return tool_ != nullptr && tool_->takesDelete(); }
+
+ToolHost::Outcome ToolHost::deleteKey()
+{
+    heldAt_.reset();
+    return tool_ != nullptr ? apply(tool_->deleteKey()) : idle();
+}
+
 void ToolHost::cancel()
 {
     if (tool_ == nullptr) {
