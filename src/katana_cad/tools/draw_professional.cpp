@@ -215,15 +215,12 @@ class Polyline3dTool final : public InteractiveTool {
         return feedback;
     }
 
+    // The dz of a typed @dx,dy,dz is the new vertex's height, as the PLINE3D
+    // verb reads it (InteractiveTool::dzIsAChange, left at its default): one
+    // line, one polyline, in the window and through katana_cli.
     [[nodiscard]] std::optional<Point2> lastPoint() const override
     {
         return vertices_.empty() ? std::nullopt : std::optional<Point2>(vertices_.back().position);
-    }
-
-    // The last vertex's height, which @dx,dy,dz climbs from.
-    [[nodiscard]] std::optional<double> lastHeight() const override
-    {
-        return vertices_.empty() ? std::nullopt : vertices_.back().height;
     }
 
   private:

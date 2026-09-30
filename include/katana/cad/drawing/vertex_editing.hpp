@@ -98,11 +98,17 @@ editEachPolyline(std::vector<katana::entity::EntityId> ids, std::string name, Po
 // first). An open polyline's lower first. A closed polyline's either way
 // round: forward from `a` unless the other way takes in fewer vertices (a tie
 // walks forward), and the other way round with `otherSide`. The one rule of
-// the window's Straighten and Grade tools and the STRAIGHTEN and VERTEXZ GRADE
-// verbs, so picks 3 then 1 of a hexagon and "STRAIGHTEN id 3 1" take out the
-// same vertex: the verbs walked forward alone, and took out three.
+// the window's Straighten and Grade tools (their O is `otherSide`) and of
+// the STRAIGHTEN and VERTEXZ GRADE verbs' side=short and side=long, so picks
+// 3 then 1 of a hexagon and "STRAIGHTEN id 3 1 side=short" take out the same
+// vertex. The verbs' default stays their forward walk from the first number.
 [[nodiscard]] std::pair<std::size_t, std::size_t>
 vertexRange(const katana::geometry::CurvePolyline2& polyline, std::size_t a, std::size_t b,
             bool otherSide);
+
+// A vertex's height as the vertex tools' labels and the grips' hover hint
+// write it: "z 101.500", or "no height". One writer, so a vertex never reads
+// "z -0.000" in the band and "z 0.000" in a tool's label.
+[[nodiscard]] std::string heightText(const std::optional<double>& height);
 
 } // namespace katana::cad

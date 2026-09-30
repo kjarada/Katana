@@ -170,10 +170,12 @@ TEST(FeedbackPainter, ACrowdedNewVertexGivesWayToTheVertexThatGoes)
     EXPECT_EQ(given.counts.added, 0u);
 }
 
-TEST(FeedbackPainter, EntersPlaceIsAHollowRingNotTheNewVertexDisc)
+TEST(FeedbackPainter, EntersPlaceIsAnOutlinedRingNotTheNewVertexsFilledDisc)
 {
-    // Where Enter would add: the Added disc's circle in the same cyan, but
-    // hollow - its middle is the ground, where the disc's is cyan.
+    // Where Enter would add: the Added disc's circle in the same cyan round
+    // a small dot, and between the two the dark ground, where the disc is
+    // cyan all through (EntersPlaceIsARingRoundADotWithNoLineThroughIt has
+    // the dot).
     ToolFeedback enter;
     enter.marks.push_back(
         FeedbackMark{FeedbackRole::Enter, Geometry{PointGeometry{Point2(5, 0)}}, "Enter"});
@@ -182,8 +184,9 @@ TEST(FeedbackPainter, EntersPlaceIsAHollowRingNotTheNewVertexDisc)
     const Painted ring = paintOver(enter, {});
     const Painted disc = paintOver(added, {});
     const Painted baseline = paintOver(ToolFeedback{}, {});
-    // The ring, 6 px out: inked. A point 2.5 px out on the diagonal, off the
-    // disc's "+": the disc's cyan, the ring's ground.
+    // The ring, 6 px out: inked. A point 2.5 px out on each axis, 3.5 px from
+    // the middle - past the 1.75 px dot, off the disc's "+": the disc's cyan,
+    // the ring's ground.
     const QPointF centre = toScreen(Point2(5, 0));
     EXPECT_GT(inkNear(ring.image, centre, 7.5, overlay::preview()),
               inkNear(baseline.image, centre, 7.5, overlay::preview()));
@@ -477,4 +480,162 @@ TEST(FeedbackPainter, TheBandCutsWhereItIsToldAndSaysWhatItDrew)
     const QString left = drawing::paintBand(painter, QRect(0, 0, 300, 100), prompt, Qt::ElideLeft);
     EXPECT_FALSE(left.startsWith("Insert Vertex:")) << left.toStdString();
     EXPECT_TRUE(left.endsWith("nearby"));
+}
+
+// ---- the review of 2026-09-30, third round -------------------------------------------------
+
+TEST(FeedbackPainter, ARunOfVerticesThatGoIsThinnedAndNeverCrossesOutAKeptVertex)
+{
+    // Straighten on a dense string: "keep" rings at (0,0) and (6,0), pixels
+    // (100,200) and (160,200), and the 29 vertices between, 0.2 apart - 2 px
+    // - going. An X a vertex was one red rope, and the X beside each end lay
+    // across its "keep" ring: a circled X, crossing out a vertex that stays.
+    ToolFeedback feedback;
+    feedback.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{PointGeometry{Point2(0, 0)}}, "keep"});
+    feedback.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{PointGeometry{Point2(6, 0)}}, "keep"});
+    for (int i = 1; i < 30; ++i) {
+        feedback.marks.push_back(
+            FeedbackMark{FeedbackRole::Removed, Geometry{PointGeometry{Point2(0.2 * i, 0)}}, {}});
+    }
+    const Painted painted = paintOver(feedback, {});
+    // No red within either ring's outer edge, 8 px.
+    for (const Point2& kept : {Point2(0, 0), Point2(6, 0)}) {
+        EXPECT_EQ(inkNear(painted.image, toScreen(kept), 8, overlay::removed()), 0)
+            << "at " << kept.x;
+    }
+    // The X's clear of the rings by an X's reach (8 + 7.6 px) lie from pixel
+    // 116 to 144, 29 px; at one per 10 px, three - four at most, where the
+    // floating point puts two a hair under 10 px apart and one is skipped.
+    EXPECT_GE(painted.counts.removed, 2u);
+    EXPECT_LE(painted.counts.removed, 4u);
+    EXPECT_GT(inkNear(painted.image, toScreen(Point2(3, 0)), 16, overlay::removed()), 0)
+        << "some of the run is still marked";
+}
+
+TEST(FeedbackPainter, AChosenVertexIsDrawnOverEntersPlaceBesideIt)
+{
+    // Insert beside a chosen vertex on a short segment: Enter's place, the
+    // segment's middle, 5 px from the chosen vertex. Enter's opaque ring was
+    // drawn after the vertex and covered its ring and all of its filled
+    // square - the vertex the owner asked to see.
+    ToolFeedback chosen;
+    chosen.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{PointGeometry{Point2(0, 0)}}, "5"});
+    ToolFeedback both = chosen;
+    both.marks.push_back(
+        FeedbackMark{FeedbackRole::Enter, Geometry{PointGeometry{Point2(0.5, 0)}}, "Enter"});
+    const Painted alone = paintOver(chosen, {});
+    const Painted beside = paintOver(both, {});
+    const QPointF square = toScreen(Point2(0, 0));
+    ASSERT_GT(inkNear(alone.image, square, 2.5, overlay::target()), 0);
+    EXPECT_EQ(inkNear(beside.image, square, 2.5, overlay::target()),
+              inkNear(alone.image, square, 2.5, overlay::target()));
+    // Enter's place is still there: its ring's far side, 11 px from the
+    // vertex, past the vertex's ring.
+    EXPECT_GT(inkNear(beside.image, toScreen(Point2(0.5, 0)) + QPointF(6, 0), 1.5,
+                      overlay::preview()),
+              0);
+}
+
+namespace {
+
+// WCAG 2.1's relative luminance of an sRGB colour, and the contrast ratio
+// of two (https://www.w3.org/TR/WCAG21/#dfn-relative-luminance).
+double luminance(const QColor& colour)
+{
+    const auto linear = [](int channel) {
+        const double v = channel / 255.0;
+        return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * linear(colour.red()) + 0.7152 * linear(colour.green()) +
+           0.0722 * linear(colour.blue());
+}
+
+double contrast(const QColor& a, const QColor& b)
+{
+    const double la = luminance(a);
+    const double lb = luminance(b);
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
+} // namespace
+
+TEST(FeedbackPainter, ARefusedVertexsNumberReadsAtThreeToOneAgainstItsChip)
+{
+    // A refused pick names its vertex in red beside the struck ring. At the
+    // regular weight the "1"'s one-pixel stem fell across two columns at
+    // about half ink each - wherever the label began - and its most inked
+    // pixel read at 2.9:1 against the chip (#9b4849 on #14191d), under the
+    // 3:1 of WCAG 2.1's 1.4.11 that the overlay's colours are chosen to
+    // (feedback_painter.hpp), where the red itself is 6.4:1. Labels are
+    // DemiBold now: 4.9:1 on this machine's font. The vertex at (5,0), pixel
+    // (150,200): the label's baseline starts at (159,191), its chip one pixel
+    // left of that, the text one right.
+    ToolFeedback feedback;
+    FeedbackMark mark{FeedbackRole::Target, Geometry{PointGeometry{Point2(5, 0)}}, "1"};
+    mark.refused = true;
+    feedback.marks.push_back(mark);
+    feedback.refused = true;
+    const Painted painted = paintOver(feedback, {});
+    // The chip's own ground: its column left of the text.
+    const QColor chip = painted.image.pixelColor(159, 186);
+    // The label's most inked pixel: the most red over green (the red
+    // 0xff6b6b is 148 more red than green, the chip next to none), right
+    // of the struck ring's outer edge at 158.5.
+    QColor inked = chip;
+    for (int y = 176; y <= 196; ++y) {
+        for (int x = 159; x <= 180; ++x) {
+            const QColor pixel = painted.image.pixelColor(x, y);
+            if (pixel.red() - pixel.green() > inked.red() - inked.green()) {
+                inked = pixel;
+            }
+        }
+    }
+    ASSERT_GT(inked.red() - inked.green(), 40) << "the label is there to measure";
+    EXPECT_GE(contrast(inked, chip), 3.0)
+        << "the stem at " << inked.name().toStdString() << " on " << chip.name().toStdString();
+}
+
+TEST(FeedbackPainter, TheCaptionKeepsOffAPieceAlongItsLengthNotOnlyItsMiddle)
+{
+    // A target segment passing below and right of the cursor, its middle far
+    // off: pixel x 130 from the top of the view to the bottom, the middle at
+    // (130,150). Only a piece's middle was kept off, so the caption went
+    // below and right of the cursor at (100,60) - from pixel 116 rightwards,
+    // 76 to 96 down - over the very line the preview marks. A short caption,
+    // so that one corner, below and left, is clear of the line. And the same
+    // line running a million units past the view each way, at 10 px a unit:
+    // it is kept off where it is seen, sampled there alone.
+    for (const double reach : {20.0, 1.0e6}) {
+        ToolFeedback feedback;
+        feedback.marks.push_back(FeedbackMark{
+            FeedbackRole::Target, Geometry{Segment2{Point2(3, reach), Point2(3, -reach)}}, {}});
+        feedback.caption = "vertex 2";
+        ToolFeedback bare = feedback;
+        bare.caption.clear();
+        const Painted with = paintOver(feedback, {});
+        const Painted without = paintOver(bare, {});
+        int lineWith = 0;
+        int lineWithout = 0;
+        for (int y = 70; y <= 110; ++y) {
+            lineWith += inkNear(with.image, QPointF(130, y), 1.5, overlay::target()) > 0 ? 1 : 0;
+            lineWithout +=
+                inkNear(without.image, QPointF(130, y), 1.5, overlay::target()) > 0 ? 1 : 0;
+        }
+        ASSERT_GT(lineWithout, 30) << reach;
+        EXPECT_EQ(lineWith, lineWithout) << reach << ": no part of the line under the caption";
+        // The caption is drawn all the same.
+        int text = 0;
+        for (int y = 0; y < 300; ++y) {
+            for (int x = 0; x < 400; ++x) {
+                text += inkOf(with.image.pixelColor(x, y), katana::qt::theme::text(),
+                              katana::qt::theme::viewport())
+                            ? 1
+                            : 0;
+            }
+        }
+        EXPECT_GT(text, 0) << reach;
+    }
 }

@@ -24,9 +24,11 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "katana/cad/annotation/dimension_build.hpp"
@@ -422,8 +424,9 @@ Vertex    VERTEX LIST id   a summary record, then one per vertex: index x y z bu
           VERTEX SET id N [x= y= z=|none bulge= bearing= distance=]   as the Vertices panel
 Polyline  WEED target tolerance= [keep=on|off]   (keep: survey-point vertices stay)
           DENSIFY target interval= [chord=]  | CLOSE target | OPEN [target]
-          STRAIGHTEN id N N [side=short|other] | VERTEXZ id GRADE N N [side=short|other]
-          (a closed polyline's side with fewer vertices between, as the window's tools)
+          STRAIGHTEN id N N [side=short|long] | VERTEXZ id GRADE N N [side=short|long]
+          (forward from the first N; on a closed polyline side=short takes the side
+          with fewer vertices between, as the window's tools do, and side=long the other)
           STARTVERTEX id N | VERTEXZ id N z|none | VERTEXZ target INTERPOLATE
           (OPEN takes #ids or SELECTION; OPEN directory opens a project)
 Draw      PLINE p p [ARC p...] [LINE p...] [CLOSE]   ARC: tangent arcs; heights as x,y,z
@@ -924,8 +927,8 @@ CommandInterpreter::Reply CommandInterpreter::polylineVerb(const std::string& ve
             return parsed.error();
         }
         if (parsed->positional.size() != 2) {
-            return usageError(grade ? "VERTEXZ id GRADE N N [side=short|other]"
-                                    : "STRAIGHTEN id N N [side=short|other]");
+            return usageError(grade ? "VERTEXZ id GRADE N N [side=short|long]"
+                                    : "STRAIGHTEN id N N [side=short|long]");
         }
         auto from = indexIn(parsed->positional[0]);
         auto to = indexIn(parsed->positional[1]);
@@ -935,28 +938,34 @@ CommandInterpreter::Reply CommandInterpreter::polylineVerb(const std::string& ve
         if (!to) {
             return to.error();
         }
-        // A closed polyline's shorter side between the two, as the window's
-        // Straighten and Grade take it, or with side=other the other way
-        // round, as their O does (cad::vertexRange, the one rule).
-        bool otherSide = false;
+        // Forward from the first number to the second - round through vertex
+        // 0 of a closed polyline when the second is lower - as these verbs
+        // have always walked, so a line written for them still takes out, or
+        // regrades, the vertices it did. The window's Straighten and Grade
+        // take a closed polyline's shorter side and their O the other: here
+        // those are side=short and side=long, asked for (cad::vertexRange,
+        // the one rule). Made the default, the shorter side silently changed
+        // what an existing script's or agent's line did to a closed polyline.
+        std::optional<bool> otherSide;
         if (const std::string* side = parsed->find("side")) {
             const std::string word = lowerOf(*side);
-            if (word != "short" && word != "other") {
-                return makeError(ErrorCode::InvalidArgument, "side is short or other", *side);
+            if (word != "short" && word != "long") {
+                return makeError(ErrorCode::InvalidArgument, "side is short or long", *side);
             }
-            if (word == "other" && !polyline->closed) {
+            if (word == "long" && !polyline->closed) {
                 return makeError(ErrorCode::InvalidArgument,
-                                 "side=other goes the other way round a closed polyline, and "
+                                 "side=long goes the other way round a closed polyline, and "
                                  "polyline " + std::to_string(*id) + " is open");
             }
-            otherSide = word == "other";
+            otherSide = word == "long";
         }
         const std::size_t a = *from;
         const std::size_t b = *to;
         return run(one, editPolyline(*id, grade ? "GRADE" : "STRAIGHTEN",
                                      [a, b, grade, otherSide](const CurvePolyline2& p) {
                                          const auto [walkFrom, walkTo] =
-                                             vertexRange(p, a, b, otherSide);
+                                             otherSide ? vertexRange(p, a, b, *otherSide)
+                                                       : std::pair{a, b};
                                          return grade ? geo::gradeBetween(p, walkFrom, walkTo)
                                                       : geo::straighten(p, walkFrom, walkTo);
                                      }));

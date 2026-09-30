@@ -267,6 +267,90 @@ TEST(PlanViewGrips, DeleteWithAHotVertexIsTheViewsKeyNotTheWindowsErase)
     EXPECT_NE(f.document.model().entities.find(f.polyline), nullptr) << "the polyline stays";
 }
 
+TEST(PlanViewGrips, InsideAVertexToolDeleteNeverErasesThePolylineItIsEditing)
+{
+    // A vertex tool works on a SELECTED polyline - a vertex's grips are
+    // there only while it is, and the tool selects what it has just edited -
+    // and the window's Erase holds Delete, so Delete inside the tool erased
+    // the whole string: "Press Enter to delete vertex 1", Delete pressed
+    // instead, and the polyline was gone. The view claims Delete while a
+    // vertex tool runs: Delete Vertex takes it as its Enter, and the others
+    // do nothing with it and say so.
+    Fixture f;
+    f.select();
+    const auto claimed = [&f] {
+        QKeyEvent offer(QEvent::ShortcutOverride, Qt::Key_Delete, Qt::NoModifier);
+        offer.ignore();
+        QCoreApplication::sendEvent(f.view.get(), &offer);
+        return offer.isAccepted();
+    };
+    f.mouse(QEvent::MouseButtonPress, Point2(10, 0), Qt::LeftButton, Qt::ShiftModifier);
+    f.mouse(QEvent::MouseButtonRelease, Point2(10, 0), Qt::LeftButton, Qt::ShiftModifier);
+    ASSERT_EQ(f.view->gripController().hot().size(), 1u);
+    ASSERT_TRUE(f.view->startTool("draw.vertex.delete").ok());
+    EXPECT_TRUE(claimed()) << "Delete Vertex's, not the window's Erase";
+    f.key(Qt::Key_Delete);
+    EXPECT_EQ(f.geometry().vertices, (std::vector<Point2>{Point2(0, 0), Point2(20, 0)}))
+        << "the chosen vertex, as Enter deletes it";
+    ASSERT_NE(f.document.model().entities.find(f.polyline), nullptr) << "the polyline stays";
+    ASSERT_TRUE(f.view->toolActive()) << "and the tool runs on";
+    EXPECT_TRUE(claimed()) << "with nothing chosen now, still the tool's";
+    const std::size_t undos = f.document.history().undoCount();
+    f.key(Qt::Key_Delete);
+    EXPECT_EQ(f.document.history().undoCount(), undos) << "nothing chosen, nothing deleted";
+    f.key(Qt::Key_Escape);
+
+    // Insert Vertex on the selected polyline: claimed, and refused.
+    ASSERT_TRUE(f.view->startTool("draw.vertex.insert").ok());
+    EXPECT_TRUE(claimed());
+    f.key(Qt::Key_Delete);
+    EXPECT_NE(f.document.model().entities.find(f.polyline), nullptr);
+    EXPECT_EQ(f.document.history().undoCount(), undos);
+    EXPECT_TRUE(f.view->toolActive());
+    f.key(Qt::Key_Escape);
+    ASSERT_FALSE(f.view->toolActive());
+    // No tool and nothing hot: Delete is the window's Erase again.
+    EXPECT_FALSE(claimed());
+}
+
+TEST(PlanViewGrips, AHotVertexWhoseVertexWentInTwoEditsBetweenPaintsGoesToo)
+{
+    // Chosen, then two edits before the view paints again - a SCRIPT, lines
+    // pasted, an agent: the chosen vertex deleted, and another inserted
+    // ahead of it, leaving as many vertices as before. Its index then named
+    // (10,0), a vertex nobody chose, and Delete removed it. Its point is
+    // gone and the vertices before it have moved, so it goes too.
+    Fixture f;
+    f.select();
+    f.mouse(QEvent::MouseButtonPress, Point2(20, 0), Qt::LeftButton, Qt::ShiftModifier);
+    f.mouse(QEvent::MouseButtonRelease, Point2(20, 0), Qt::LeftButton, Qt::ShiftModifier);
+    ASSERT_EQ(f.view->gripController().hot().size(), 1u);
+    ASSERT_TRUE(f.document
+                    .execute(katana::cad::editPolyline(
+                        f.polyline, "VERTEX_DELETE",
+                        [](const katana::geometry::CurvePolyline2& shape) {
+                            return katana::geometry::deleteVertex(shape, 2);
+                        }))
+                    .ok());
+    ASSERT_TRUE(f.document
+                    .execute(katana::cad::editPolyline(
+                        f.polyline, "VERTEX_INSERT",
+                        [](const katana::geometry::CurvePolyline2& shape) {
+                            return katana::geometry::insertVertex(shape, 0, Point2(5, 0));
+                        }))
+                    .ok());
+    paint(*f.view);
+    EXPECT_TRUE(f.view->gripController().hot().empty());
+    // Delete Vertex chosen next, as the review ran it: nothing is offered to
+    // Enter, and Enter deletes nothing. (With no vertex hot, the Delete key
+    // itself is Erase's, of the whole selection, as it always was.)
+    ASSERT_TRUE(f.view->startTool("draw.vertex.delete").ok());
+    f.key(Qt::Key_Return);
+    EXPECT_EQ(f.geometry().vertices,
+              (std::vector<Point2>{Point2(0, 0), Point2(5, 0), Point2(10, 0)}))
+        << "nothing nobody chose is deleted";
+}
+
 TEST(PlanViewGrips, ADoubleClickOnAGripLeavesNothingPickedUp)
 {
     Fixture f;
@@ -352,6 +436,22 @@ TEST(PlanViewGrips, AVertexWithAHeightSaysItsHeight)
     EXPECT_TRUE(f.view->gripController().hoverHint().startsWith(
         "Vertex 2 of polyline " + QString::number(f.polyline) + ", z 101.250: "))
         << f.view->gripController().hoverHint().toStdString();
+    // A height a hair under zero reads as the vertex tools' labels read it
+    // (cad::heightText): "z 0.000". The band wrote it with its own
+    // formatting, "z -0.000", beside a tool's "z 0.000" for the same vertex.
+    ASSERT_TRUE(f.document
+                    .execute(katana::cad::editPolyline(
+                        f.polyline, "VERTEX_Z",
+                        [](const katana::geometry::CurvePolyline2& shape) {
+                            return katana::geometry::setVertexHeight(shape, 1, -0.0004);
+                        }))
+                    .ok());
+    paint(*f.view);
+    f.mouse(QEvent::MouseMove, Point2(10, 0.1), Qt::NoButton);
+    EXPECT_TRUE(f.view->gripController().hoverHint().startsWith(
+        "Vertex 1 of polyline " + QString::number(f.polyline) + ", z 0.000: "))
+        << f.view->gripController().hoverHint().toStdString();
+    EXPECT_EQ(QString::fromStdString(katana::cad::heightText(-0.0004)), "z 0.000");
 }
 
 TEST(PlanViewGrips, CtrlOverASegmentMiddleShowsTheVertexADragWouldAdd)

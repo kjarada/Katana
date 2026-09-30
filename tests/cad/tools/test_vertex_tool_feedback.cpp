@@ -22,6 +22,7 @@
 #include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/snapping.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 #include "tool_driver.hpp"
 
@@ -800,7 +801,10 @@ TEST(VertexToolFeedback, ChangeStartShowsTheNewFirstVertexAndRefusesAnOpenPolyli
     const ToolFeedback shown = driver.preview(10.1, 10);
     EXPECT_EQ(labelsOf(shown, FeedbackRole::Target), std::vector<std::string>{"new 0"});
     EXPECT_EQ(shown.caption, "vertex 2 becomes vertex 0");
-    EXPECT_TRUE(driver.preview(0.1, 20).refused) << "an open polyline has no start to change";
+    const ToolFeedback openEnd = driver.preview(0.1, 20);
+    EXPECT_TRUE(openEnd.refused) << "an open polyline has no start to change";
+    EXPECT_EQ(labelsOf(openEnd, FeedbackRole::Target), std::vector<std::string>{"0"})
+        << "the vertex refused is named, not labelled with the start it is refused";
     EXPECT_EQ(driver.pick(open, 0.1, 20).outcome, ToolStep::Outcome::Rejected);
     ASSERT_EQ(driver.pick(p, 10.1, 10).outcome, ToolStep::Outcome::Done);
     EXPECT_EQ(shapeOf(driver, p).vertices.front().position, Point2(10, 10));
@@ -902,6 +906,47 @@ TEST(VertexToolFeedback, FilletShowsTheArcAtTheLastRadiusAndRefusesAnEndAtThePic
     EXPECT_EQ(driver.tool().expects(), ToolInput::Entity);
 }
 
+TEST(VertexToolFeedback, AFilletsCornerIsMarkedAsTheVertexThatGoesNotAsATakenOne)
+{
+    // The corner (10,0) of (0,0) (10,0) (10,10) goes, replaced by the arc:
+    // its X, with no ring. What the pick acts on is the two segments the arc
+    // is tangent to, (0,0)-(10,0) and (10,0)-(10,10), as Chamfer marks its
+    // two. It was a Target ring AND the X on the corner: a circled X, the
+    // sign for "cancel", and at the default radius - the arc a pixel or two
+    // across - all the preview showed; beside the refusal's struck ring it
+    // said "no" of a corner that was taken.
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+    selectOnly(driver, {p});
+    driver.start("draw.vertex.fillet");
+    const ToolFeedback shown = driver.preview(10, 0.1);
+    ASSERT_FALSE(shown.refused);
+    EXPECT_EQ(pointsOf(shown, FeedbackRole::Removed), std::vector<Point2>{Point2(10, 0)});
+    EXPECT_TRUE(pointsOf(shown, FeedbackRole::Target).empty())
+        << "no ring on the corner that goes";
+    const auto pieces = piecesOf(shown, FeedbackRole::Target);
+    ASSERT_EQ(pieces.size(), 2u);
+    EXPECT_TRUE(isSegment(pieces[0], Point2(0, 0), Point2(10, 0)));
+    EXPECT_TRUE(isSegment(pieces[1], Point2(10, 0), Point2(10, 10)));
+    // An end is refused as the vertex itself, named by its number and drawn
+    // struck (every Target of a refused preview that flags none).
+    const ToolFeedback end = driver.preview(0, 0.1);
+    ASSERT_TRUE(end.refused);
+    EXPECT_EQ(pointsOf(end, FeedbackRole::Target), std::vector<Point2>{Point2(0, 0)});
+    EXPECT_EQ(labelsOf(end, FeedbackRole::Target), std::vector<std::string>{"0"});
+    EXPECT_TRUE(piecesOf(end, FeedbackRole::Target).empty());
+    // Chamfer's end, the same: the vertex struck with its number, where it
+    // struck the one segment an end has, labelled with a distance, "d2",
+    // that the refusal never asks for.
+    driver.start("draw.vertex.chamfer");
+    const ToolFeedback chamferEnd = driver.preview(0, 0.1);
+    ASSERT_TRUE(chamferEnd.refused);
+    EXPECT_EQ(pointsOf(chamferEnd, FeedbackRole::Target), std::vector<Point2>{Point2(0, 0)});
+    EXPECT_EQ(labelsOf(chamferEnd, FeedbackRole::Target), std::vector<std::string>{"0"});
+    EXPECT_TRUE(piecesOf(chamferEnd, FeedbackRole::Target).empty());
+}
+
 TEST(VertexToolFeedback, ChamferMarksItsFirstAndSecondSegments)
 {
     ToolDriver driver;
@@ -928,52 +973,158 @@ TEST(VertexToolFeedback, ChamferMarksItsFirstAndSecondSegments)
               (std::vector<Point2>{Point2(0, 0), Point2(9, 0), Point2(10, 2), Point2(10, 10)}));
 }
 
+namespace {
+
+// A preview's marks as text - role, place, label, refused - with its caption,
+// to tell one preview from another.
+std::string describe(const ToolFeedback& feedback)
+{
+    std::string text = feedback.caption + (feedback.refused ? " refused" : "");
+    for (const auto& mark : feedback.marks) {
+        text += " | " + std::string(katana::cad::toString(mark.role)) + " " + mark.label +
+                (mark.refused ? " (refused)" : "");
+        if (const auto* point = std::get_if<katana::entity::PointGeometry>(&mark.geometry)) {
+            text += " at " + katana::core::formatExactReal(point->position.x) + "," +
+                    katana::core::formatExactReal(point->position.y);
+        } else if (const auto* segment = std::get_if<Segment2>(&mark.geometry)) {
+            text += " segment " + katana::core::formatExactReal(segment->midpoint().x) + "," +
+                    katana::core::formatExactReal(segment->midpoint().y);
+        } else if (const auto* arc = std::get_if<Arc2>(&mark.geometry)) {
+            text += " arc " + katana::core::formatExactReal(arc->midpoint().x) + "," +
+                    katana::core::formatExactReal(arc->midpoint().y);
+        } else {
+            text += " whole";
+        }
+    }
+    return text;
+}
+
+// Whether `ghost` - the result as the preview drew it - is one of the
+// segments of `result`, the polyline the click made: at its ends and middle.
+bool isPieceOf(const CurvePolyline2& result, const Geometry& ghost)
+{
+    const auto same = [](const auto& a, const auto& b) {
+        return closeTo(a.pointAt(0.0), b.pointAt(0.0), 1.0e-9) &&
+               closeTo(a.pointAt(0.5), b.pointAt(0.5), 1.0e-9) &&
+               closeTo(a.pointAt(1.0), b.pointAt(1.0), 1.0e-9);
+    };
+    for (std::size_t i = 0; i < result.segmentCount(); ++i) {
+        const bool match = std::visit(
+            [&](const auto& piece) {
+                if (const auto* line = std::get_if<Segment2>(&ghost)) {
+                    return same(piece, *line);
+                }
+                if (const auto* arc = std::get_if<Arc2>(&ghost)) {
+                    return same(piece, *arc);
+                }
+                return false;
+            },
+            result.segment(i));
+        if (match) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The vertex of `shape` at `at`, if one is.
+const katana::geometry::CurveVertex* vertexAt(const CurvePolyline2& shape, const Point2& at)
+{
+    for (const auto& vertex : shape.vertices) {
+        if (closeTo(vertex.position, at)) {
+            return &vertex;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
 TEST(VertexToolFeedback, APreviewNeverPromisesWhatTheClickDoesNot)
 {
-    // For each tool whose click commits, over a 9 x 9 grid round a small
-    // polyline: a refused preview is a refused click; otherwise the click
-    // leaves every Added point a vertex and every Removed vertex gone. With
-    // grips chosen before the tool (its handles) a click still picks anew,
-    // so the preview is that click's - and where a click takes nothing, it
-    // is Enter's, said as Enter's: the click is refused, the handles kept,
-    // and Enter then does what was shown.
+    // Every pick tool but Insert - whose own finer grid is
+    // TheInsertPreviewIsWhatTheClickCommits - at each step a click answers,
+    // over a 9 x 9 grid round a small polyline, with and without grips chosen
+    // before the tool:
+    //   - a refused preview, one with no mark, or the tool's idle picture (as
+    //     far off, where nothing is in reach) is a refused click;
+    //   - one captioned "Enter: " is a refused click that leaves the tool
+    //     where it was, and Enter then does what was shown;
+    //   - ANY other preview is a click the tool takes: it is done, or goes on
+    //     to its next step - where that step has a default, Enter takes it.
+    // Once done, the edit is the one shown: every Added point a vertex, every
+    // Removed vertex gone, every ghost a piece of the result, "new 0" the
+    // start, a "→ z" label the height given, Set Height's caption the height
+    // set, Edit Vertices' polyline selected. And no vertex is marked both
+    // taken and gone: a ring with an X over it is a circled X, "cancel".
+    // It asserted only where Added, Removed or a ghost was shown, and so
+    // checked nothing of Change Start, Set Height or Edit Vertices.
     struct Case {
         const char* tool;
-        bool closed;
-        double bulge;          // of segment 0
-        const char* firstPick; // a vertex picked first, "" for none
-        int hot = -1;          // a vertex chosen before the tool
-        int hotSecond = -1;    // a second one
-        int hotSegment = -1;   // a segment's middle chosen before the tool
+        bool closed = false;
+        double bulge = 0.0;             // of segment 0
+        std::vector<const char*> first{}; // typed before the grid's step
+        std::vector<int> hot{};           // vertices chosen before the tool
+        int hotSegment = -1;            // a segment's middle chosen before the tool
+        bool heights = false;           // 100, 101, 102 and 103 at the vertices
     };
     const std::vector<Case> cases{
-        {"draw.vertex.delete", false, 0.0, ""},     {"draw.vertex.start", true, 0.0, ""},
-        {"draw.vertex.line", false, 0.5, ""},       {"draw.vertex.straighten", true, 0.0, "0"},
-        {"draw.vertex.fillet", false, 0.0, ""},     {"draw.vertex.delete", true, 0.0, ""},
-        {"draw.vertex.delete", true, 0.0, "", 2},   {"draw.vertex.start", true, 0.0, "", 2},
-        {"draw.vertex.line", false, 0.5, "", -1, -1, 0},
-        {"draw.vertex.straighten", true, 0.0, "", 0, 2},
+        {"draw.vertex.delete"},
+        {"draw.vertex.delete", true},
+        {"draw.vertex.delete", true, 0.0, {}, {2}},
+        {"draw.vertex.delete", false, 0.0, {}, {1, 2}},
+        {"draw.vertex.move"},
+        {"draw.vertex.move", false, 0.0, {"1"}},
+        {"draw.vertex.move", true, 0.0, {}, {2}},
+        {"draw.vertex.edit"},
+        {"draw.vertex.straighten", true},
+        {"draw.vertex.straighten", true, 0.0, {"0"}},
+        {"draw.vertex.straighten", true, 0.0, {}, {0, 2}},
+        {"draw.vertex.start", true},
+        {"draw.vertex.start", true, 0.0, {}, {2}},
+        {"draw.vertex.start"},
+        {"draw.vertex.height", false, 0.0, {}, {}, -1, true},
+        {"draw.vertex.height", false, 0.0, {"1"}, {}, -1, true},
+        {"draw.vertex.grade", true},
+        {"draw.vertex.grade", true, 0.0, {"0"}, {}, -1, true},
+        {"draw.vertex.arc"},
+        {"draw.vertex.arc", false, 0.0, {"0"}},
+        {"draw.vertex.line", false, 0.5},
+        {"draw.vertex.line", false, 0.5, {}, {}, 0},
+        {"draw.vertex.fillet"},
+        {"draw.vertex.fillet", true},
+        {"draw.vertex.chamfer", true},
     };
-    int accepted = 0;
-    int refused = 0;
-    int enterShown = 0;
+    const std::vector<Point2> corners{Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(0, 10)};
+    const std::vector<double> zs{100.0, 101.0, 102.0, 103.0};
+    int refusedEver = 0;
+    int enterEver = 0;
     for (const Case& c : cases) {
+        int taken = 0;
+        int finished = 0;
+        int refused = 0;
+        int enterShown = 0;
         for (int i = 0; i <= 8; ++i) {
             for (int j = 0; j <= 8; ++j) {
                 const double x = -1.0 + 12.0 * i / 8.0;
                 const double y = -1.0 + 12.0 * j / 8.0;
+                const std::string where = std::string(c.tool) + " at " +
+                                          katana::core::formatExactReal(x) + "," +
+                                          katana::core::formatExactReal(y);
                 ToolDriver driver;
-                driver.setPickTolerance(1.0);
-                CurvePolyline2 shape = CurvePolyline2::fromPoints(
-                    {Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(0, 10)}, c.closed);
+                driver.setPickTolerance(1.0); // a vertex within 1.5, a segment within 1
+                CurvePolyline2 shape = CurvePolyline2::fromPoints(corners, c.closed);
                 shape.vertices[0].bulge = c.bulge;
+                if (c.heights) {
+                    for (std::size_t k = 0; k < shape.vertices.size(); ++k) {
+                        shape.vertices[k].height = zs[k];
+                    }
+                }
                 const EntityId p = addCurve(driver, shape);
                 selectOnly(driver, {p});
                 std::vector<Grip> handles;
-                for (const int v : {c.hot, c.hotSecond}) {
-                    if (v >= 0) {
-                        handles.push_back(vertexHandle(driver, p, static_cast<std::size_t>(v)));
-                    }
+                for (const int v : c.hot) {
+                    handles.push_back(vertexHandle(driver, p, static_cast<std::size_t>(v)));
                 }
                 if (c.hotSegment >= 0) {
                     const auto piece = shape.segment(static_cast<std::size_t>(c.hotSegment));
@@ -983,54 +1134,132 @@ TEST(VertexToolFeedback, APreviewNeverPromisesWhatTheClickDoesNot)
                                            static_cast<std::size_t>(c.hotSegment), middle});
                 }
                 driver.start(c.tool, handles);
-                if (std::string(c.firstPick) == "0") {
-                    ASSERT_EQ(driver.type("0").outcome, ToolStep::Outcome::Continue);
+                for (const char* typed : c.first) {
+                    ASSERT_EQ(driver.type(typed).outcome, ToolStep::Outcome::Continue) << where;
                 }
                 const ToolFeedback shown = driver.preview(x, y);
+                const ToolFeedback away = driver.preview(1000, 1000);
                 const std::string prompt = driver.tool().prompt();
                 ToolStep step = driver.click(x, y);
+                const bool promised = shown.caption.rfind("Enter: ", 0) != 0 && !shown.refused &&
+                                      !shown.marks.empty() && describe(shown) != describe(away);
                 if (shown.caption.rfind("Enter: ", 0) == 0) {
-                    // Nothing a click takes is here: refused, and the tool
-                    // still offers what was shown for Enter.
-                    ASSERT_FALSE(handles.empty()) << c.tool << " at " << x << "," << y;
-                    EXPECT_EQ(step.outcome, ToolStep::Outcome::Rejected)
-                        << c.tool << " at " << x << "," << y;
-                    EXPECT_EQ(driver.tool().prompt(), prompt) << "the handles are kept";
+                    // Nothing a click takes is here: refused, the tool where
+                    // it was, and Enter does what was shown - or is refused
+                    // as it showed.
+                    EXPECT_EQ(step.outcome, ToolStep::Outcome::Rejected) << where;
+                    EXPECT_EQ(driver.tool().prompt(), prompt) << where << ": the tool is kept";
                     step = driver.enter();
                     ++enterShown;
-                } else if (step.outcome == ToolStep::Outcome::Continue) {
-                    step = driver.enter(); // Fillet: the radius at its default
-                }
-                if (shown.refused || shown.marks.empty()) {
+                    if (shown.refused) {
+                        EXPECT_EQ(step.outcome, ToolStep::Outcome::Rejected) << where;
+                        continue;
+                    }
+                } else if (!promised) {
                     EXPECT_EQ(step.outcome, ToolStep::Outcome::Rejected)
-                        << c.tool << " at " << x << "," << y;
+                        << where << " shows " << describe(shown);
                     refused += shown.refused ? 1 : 0;
                     continue;
+                } else {
+                    ASSERT_NE(step.outcome, ToolStep::Outcome::Rejected)
+                        << where << " showed " << describe(shown) << " and said " << step.message;
+                    ++taken;
                 }
-                // What the click does is shown - vertices made or taken, or
-                // the ghost of the result (Segment to Line's chord) - unless
-                // only a warning is (Fillet at a radius that does not fit).
-                if (!pointsOf(shown, FeedbackRole::Added).empty() ||
-                    !pointsOf(shown, FeedbackRole::Removed).empty() || !shown.shapes.empty()) {
-                    ASSERT_EQ(step.outcome, ToolStep::Outcome::Done)
-                        << c.tool << " at " << x << "," << y << ": " << step.message;
-                    const auto after = positionsOf(driver, p);
-                    for (const Point2& added : pointsOf(shown, FeedbackRole::Added)) {
-                        EXPECT_TRUE(hasPoint(after, added)) << c.tool << " at " << x << "," << y;
+                // A next step with a default (a radius, two distances, a
+                // height) is Enter's; one that wants a point or a pick ends
+                // the case, the click having been taken.
+                for (int k = 0; k < 3 && step.outcome == ToolStep::Outcome::Continue &&
+                                driver.tool().prompt().ends_with(">");
+                     ++k) {
+                    step = driver.enter();
+                }
+                if (step.outcome != ToolStep::Outcome::Done) {
+                    EXPECT_EQ(step.outcome, ToolStep::Outcome::Continue) << where << ": "
+                                                                         << step.message;
+                    continue;
+                }
+                ++finished;
+                const CurvePolyline2 after = shapeOf(driver, p);
+                const auto positions = after.positions();
+                for (const Point2& added : pointsOf(shown, FeedbackRole::Added)) {
+                    EXPECT_TRUE(hasPoint(positions, added)) << where;
+                }
+                const auto targets = pointsOf(shown, FeedbackRole::Target);
+                for (const Point2& gone : pointsOf(shown, FeedbackRole::Removed)) {
+                    EXPECT_FALSE(hasPoint(positions, gone)) << where;
+                    EXPECT_FALSE(hasPoint(targets, gone))
+                        << where << ": a vertex marked taken and gone, a circled X";
+                }
+                for (const Geometry& ghost : shown.shapes) {
+                    EXPECT_TRUE(isPieceOf(after, ghost)) << where << ": a ghost not in the result";
+                }
+                for (const auto& mark : shown.marks) {
+                    const auto* point = std::get_if<katana::entity::PointGeometry>(&mark.geometry);
+                    if (point == nullptr || mark.role != FeedbackRole::Target) {
+                        continue;
                     }
-                    for (const Point2& gone : pointsOf(shown, FeedbackRole::Removed)) {
-                        EXPECT_FALSE(hasPoint(after, gone)) << c.tool << " at " << x << "," << y;
+                    if (mark.label == "new 0") {
+                        EXPECT_TRUE(closeTo(after.vertices.front().position, point->position))
+                            << where << ": the vertex shown as the new start";
                     }
-                    ++accepted;
+                    if (mark.label.rfind("→ ", 0) == 0) {
+                        const auto* vertex = vertexAt(after, point->position);
+                        ASSERT_NE(vertex, nullptr) << where;
+                        EXPECT_EQ("→ " + katana::cad::heightText(vertex->height).substr(2),
+                                  mark.label)
+                            << where << ": the height a grade label promised";
+                    }
+                }
+                if (std::string_view(c.tool) == "draw.vertex.edit") {
+                    EXPECT_EQ(driver.document().selection().ids(), std::vector<EntityId>{p})
+                        << where;
+                }
+                if (std::string_view(c.tool) == "draw.vertex.height" && !c.first.empty()) {
+                    // The value step's click takes the height nearest within
+                    // the vertex reach, 1.5; Enter (nothing in reach) keeps
+                    // vertex 1's 101 - worked from the corners, not the tool.
+                    std::optional<double> expected = zs[1];
+                    double nearest = 1.5;
+                    for (std::size_t k = 0; k < corners.size(); ++k) {
+                        const double d = corners[k].distanceTo(Point2(x, y));
+                        if (d <= nearest) {
+                            nearest = d;
+                            expected = zs[k];
+                        }
+                    }
+                    EXPECT_EQ(after.vertices[1].height, expected) << where;
+                    const auto arrow = shown.caption.find("→ ");
+                    if (expected != zs[1]) {
+                        ASSERT_NE(arrow, std::string::npos) << where << ": " << shown.caption;
+                        EXPECT_EQ(shown.caption.substr(arrow + std::string("→ ").size()),
+                                  katana::cad::heightText(expected).substr(2))
+                            << where << ": the caption said the height the click set";
+                    } else {
+                        EXPECT_EQ(arrow, std::string::npos) << where << ": " << shown.caption;
+                    }
                 }
             }
         }
+        std::printf("preview grid: %s%s%s: %d taken (%d finished), %d refused, %d Enter's\n",
+                    c.tool, c.first.empty() ? "" : " after a pick",
+                    c.hot.empty() && c.hotSegment < 0 ? "" : " with grips chosen", taken, finished,
+                    refused, enterShown);
+        // Every case reaches a click the tool takes or Enter's, except a tool
+        // shown all refusals on purpose: Change Start on an open polyline,
+        // Grade with no heights.
+        const bool allRefused = (std::string_view(c.tool) == "draw.vertex.start" && !c.closed) ||
+                                (std::string_view(c.tool) == "draw.vertex.grade" && !c.heights);
+        if (allRefused) {
+            EXPECT_EQ(taken + enterShown, 0) << c.tool;
+            EXPECT_GT(refused, 0) << c.tool;
+        } else {
+            EXPECT_GT(taken + enterShown, 0) << c.tool;
+        }
+        refusedEver += refused;
+        enterEver += enterShown;
     }
-    std::printf("preview grid: %d accepted with marks, %d refused, %d where Enter was shown\n",
-                accepted, refused, enterShown);
-    EXPECT_GT(accepted, 0);
-    EXPECT_GT(refused, 0);
-    EXPECT_GT(enterShown, 0);
+    EXPECT_GT(refusedEver, 0);
+    EXPECT_GT(enterEver, 0);
 }
 
 // ---- the review of 2026-09-30: what the preview and the click must agree on ----------------
@@ -1212,10 +1441,15 @@ TEST(VertexToolFeedback, MoveVertexTakesARelativeDzAsAChangeOfItsHeight)
     EXPECT_DOUBLE_EQ(*shapeOf(driver, flat).vertices[1].height, 7.0);
 }
 
-TEST(VertexToolFeedback, AThreeDPolylineClimbsFromItsLastVertexByARelativeDz)
+TEST(VertexToolFeedback, AThreeDPolylineReadsARelativeDzAsThePLINE3DVerbDoes)
 {
-    // The same reading of @dx,dy,dz in the other tool that takes heights:
-    // from 100, @10,0,1.5 is a vertex at 101.5, not at 1.5.
+    // One line, one polyline, in the window and through katana_cli and
+    // katana_mcp: the PLINE3D verb takes the z of @dx,dy,dz as the vertex's
+    // height (docs/drawing.md, "The command line": a z is a vertex's
+    // height), and the tool reads it as its verb does. The tool once
+    // climbed dz from the last vertex - 101.5 from 100 - while the verb put
+    // the same vertex at 1.5. Move Vertex's "raise it by dz" is VERTEX
+    // MOVE's reading, and stays (MoveVertexTakesARelativeDzAsAChangeOfItsHeight).
     ToolDriver driver;
     driver.start("draw.polyline3d");
     ASSERT_EQ(driver.type("0,0,100").outcome, ToolStep::Outcome::Continue);
@@ -1223,10 +1457,21 @@ TEST(VertexToolFeedback, AThreeDPolylineClimbsFromItsLastVertexByARelativeDz)
     ASSERT_EQ(driver.enter().outcome, ToolStep::Outcome::Done);
     const auto made = driver.document().lastCreatedEntities();
     ASSERT_EQ(made.size(), 1u);
-    const CurvePolyline2 polyline = shapeOf(driver, made.front());
-    ASSERT_EQ(polyline.vertices.size(), 2u);
-    EXPECT_EQ(polyline.vertices[1].position, Point2(10, 0));
-    EXPECT_DOUBLE_EQ(*polyline.vertices[1].height, 101.5);
+    const CurvePolyline2 drawn = shapeOf(driver, made.front());
+    ASSERT_EQ(drawn.vertices.size(), 2u);
+    EXPECT_EQ(drawn.vertices[1].position, Point2(10, 0));
+    ASSERT_TRUE(drawn.vertices[1].height.has_value());
+    EXPECT_DOUBLE_EQ(*drawn.vertices[1].height, 1.5);
+
+    katana::cad::CommandInterpreter verbs{driver.document()};
+    ASSERT_TRUE(verbs.run("PLINE3D 0,0,100 @10,0,1.5").ok());
+    const auto typed = driver.document().lastCreatedEntities();
+    ASSERT_EQ(typed.size(), 1u);
+    const CurvePolyline2 fromVerb = shapeOf(driver, typed.front());
+    ASSERT_EQ(fromVerb.vertices.size(), 2u);
+    EXPECT_EQ(fromVerb.vertices[1].position, drawn.vertices[1].position);
+    EXPECT_EQ(fromVerb.vertices[1].height, drawn.vertices[1].height)
+        << "the window's tool and the verb read one line one way";
 }
 
 TEST(VertexToolFeedback, APolylineOnAHiddenOrLockedLayerIsNotTakenThoughItIsSelected)
@@ -1862,4 +2107,121 @@ TEST(VertexToolFeedback, ADzTypedWhereTheStepTakesNoHeightIsDroppedNotRefused)
     ASSERT_TRUE(arc.has_value());
     EXPECT_TRUE(closeTo(arc->center, Point2(5, -5.25), 1.0e-9));
     EXPECT_NEAR(arc->radius, 7.25, 1.0e-9);
+}
+
+// ---- the review of 2026-09-30, third round -------------------------------------------------
+
+TEST(VertexToolFeedback, ATypedPointOutOfReachSaysSoRatherThanRepeatingThePrompt)
+{
+    // A typed x,y at a pick is taken as a click there is (docs/drawing.md,
+    // R1): within the vertex reach, here 1.5 x the aperture of 0.5 = 0.75,
+    // the view's 12 px. (10.9,0) is 0.9 from vertex 1, (10.6,0) is 0.6. The
+    // miss was answered with the prompt alone, though the typist cannot see
+    // the reach; it says so now, and how to name the vertex instead.
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(20, 0)});
+    selectOnly(driver, {p});
+    driver.start("draw.vertex.delete");
+    const std::string prompt = driver.tool().prompt();
+    const ToolStep missed = driver.type("10.9,0");
+    ASSERT_EQ(missed.outcome, ToolStep::Outcome::Rejected);
+    EXPECT_EQ(missed.message.rfind("10.9,0 is not within 0.750 of a vertex", 0), 0u)
+        << missed.message;
+    EXPECT_NE(missed.message.find("12 px"), std::string::npos) << missed.message;
+    EXPECT_NE(missed.message.find("vertex's number"), std::string::npos) << missed.message;
+    EXPECT_TRUE(missed.message.ends_with(prompt)) << missed.message;
+    EXPECT_EQ(positionsOf(driver, p).size(), 3u) << "nothing deleted";
+    // A click there is refused with the prompt, as a click on nothing is.
+    EXPECT_EQ(driver.click(10.9, 0).message, prompt);
+    ASSERT_EQ(driver.type("10.6,0").outcome, ToolStep::Outcome::Done);
+    EXPECT_EQ(positionsOf(driver, p), (std::vector<Point2>{Point2(0, 0), Point2(20, 0)}));
+}
+
+TEST(VertexToolFeedback, StraightenAndGradeSayTheSideEnterTakesAndOtherSideFlipsIt)
+{
+    // The hexagon (0,0) (10,0) (20,0) (20,10) (10,10) (0,10) with vertices 3
+    // and 1 chosen, in that order. From 3 forward to 1 is 4, 5 and 0; the
+    // other way, 1 to 3, only 2: the shorter side is walked from 1 to 3, and
+    // O walks 3 to 1. The prompt named the picks in the order chosen - "from
+    // vertex 3 to 1" - before O and after it, while the caption and the
+    // marks said otherwise.
+    for (const char* tool : {"draw.vertex.straighten", "draw.vertex.grade"}) {
+        ToolDriver driver;
+        driver.setPickTolerance(kAperture);
+        const EntityId h = addPolyline(driver,
+                                       {Point2(0, 0), Point2(10, 0), Point2(20, 0), Point2(20, 10),
+                                        Point2(10, 10), Point2(0, 10)},
+                                       true, {0.0, 1.0, 2.0, 3.0, 4.0, 5.0});
+        selectOnly(driver, {h});
+        driver.start(tool, {vertexHandle(driver, h, 3), vertexHandle(driver, h, 1)});
+        const std::string verb = std::string_view(tool) == "draw.vertex.grade" ? "grade" : "straighten";
+        EXPECT_EQ(driver.tool().prompt(), "Press Enter to " + verb + " polyline " + idText(h) +
+                                              " from vertex 1 to 3, or click another vertex "
+                                              "[Other side]")
+            << tool;
+        ASSERT_EQ(driver.type("O").outcome, ToolStep::Outcome::Continue);
+        EXPECT_EQ(driver.tool().prompt(), "Press Enter to " + verb + " polyline " + idText(h) +
+                                              " from vertex 3 to 1, or click another vertex "
+                                              "[Other side]")
+            << tool;
+        // And Enter walks as the prompt says: Straighten takes out 4, 5 and
+        // 0, leaving (10,0) (20,0) (20,10).
+        if (verb == "straighten") {
+            ASSERT_EQ(driver.enter().outcome, ToolStep::Outcome::Done);
+            EXPECT_EQ(positionsOf(driver, h),
+                      (std::vector<Point2>{Point2(10, 0), Point2(20, 0), Point2(20, 10)}));
+        }
+    }
+}
+
+TEST(VertexToolFeedback, EditVerticesMarksNoVertexForEnterWhereTheClickTakesTheSamePolyline)
+{
+    // Edit Vertices with a polyline selected is answered by the selection;
+    // hovering that polyline previews the click - the whole polyline - and
+    // a mark at its vertex 0, "polyline 2 · Enter", read as a chosen vertex
+    // the tool does not act on. Nothing is marked for Enter now; the prompt
+    // names the polyline.
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+    selectOnly(driver, {p});
+    driver.start("draw.vertex.edit");
+    const ToolFeedback shown = driver.preview(10.1, 5);
+    EXPECT_EQ(piecesOf(shown, FeedbackRole::Target).size(), 1u);
+    EXPECT_TRUE(pointsOf(shown, FeedbackRole::Enter).empty());
+    EXPECT_EQ(shown.caption, "polyline " + idText(p) + " · 3 vertices, open");
+}
+
+TEST(VertexToolFeedback, SetHeightsValueStepPreviewsTheHeightAClickTakesAndEntersElsewhere)
+{
+    // Heights 0, none and 10 at x = 0, 5 and 10, and a point at (30,30) with
+    // a height of 7.5. Vertex 1 picked, the height is asked for with the
+    // default 5, halfway by length. Over the point a click takes 7.5, and the
+    // preview says so; over nothing a click is refused, and the preview is
+    // Enter's, the default. It was "vertex 1 · no height" wherever the cursor
+    // was: neither the height a click took nor the refusal of a click that
+    // was refused (R3).
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(5, 0), Point2(10, 0)}, false,
+                                   {0.0, std::nullopt, 10.0});
+    katana::entity::Entity spot;
+    spot.geometry = katana::entity::PointGeometry{Point2(30, 30)};
+    katana::entity::setHeights(spot.properties, {7.5});
+    driver.add(katana::commands::createEntities({spot}));
+    driver.start("draw.vertex.height");
+    ASSERT_EQ(driver.pick(p, 5, 0.1).outcome, ToolStep::Outcome::Continue);
+    const ToolFeedback over = driver.preview(30.1, 30);
+    EXPECT_FALSE(over.refused);
+    EXPECT_EQ(over.caption, "vertex 1 · no height → 7.500");
+    const ToolFeedback nothing = driver.preview(20, 20);
+    EXPECT_FALSE(nothing.refused);
+    EXPECT_EQ(nothing.caption, "Enter: vertex 1 · no height → 5.000");
+    const ToolStep refused = driver.click(20, 20);
+    EXPECT_EQ(refused.outcome, ToolStep::Outcome::Rejected);
+    EXPECT_EQ(refused.message.rfind("nothing with a height is within reach there", 0), 0u)
+        << refused.message;
+    ASSERT_EQ(driver.click(30.1, 30).outcome, ToolStep::Outcome::Done);
+    EXPECT_DOUBLE_EQ(*shapeOf(driver, p).vertices[1].height, 7.5);
 }

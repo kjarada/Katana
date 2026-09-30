@@ -479,13 +479,16 @@ directly, a font Linux does not have.
 The order, so what matters is on top: the vertices of the polyline in play
 (thinned so no two are nearer than 10 px), removed pieces, target pieces,
 the ghost, the base points, the snap marker (`FeedbackFrame::beneathGlyphs`),
-target vertices, removed vertices, what Enter would act on, the refused
-marks (a ring struck through), added vertices, labels, the caption - at the
-first corner of the cursor where it covers no mark; then the prompt band,
-cut in the middle while nothing is typed. The vertices went after the
-pieces, and a survey string's hundreds buried the target under a band of
-squares; the snap marker went last, and crossed the new vertex's disc where
-it snapped. Nothing is drawn while the pointer is not over the view: before
+what Enter would act on, target vertices, removed vertices (thinned as the
+squares are, and never over a target's ring), the refused marks (a ring
+struck through), added vertices, labels (DemiBold), the caption - at the
+first corner of the cursor where it covers no mark, no label and no piece
+along its length; then the prompt band, cut in the middle while nothing is
+typed. The vertices went after the pieces, and a survey string's hundreds
+buried the target under a band of squares; the snap marker went last, and
+crossed the new vertex's disc where it snapped; Enter's opaque place went
+after the target vertices, and on a short segment hid the chosen vertex a
+few pixels off. Nothing is drawn while the pointer is not over the view: before
 it first is, the cursor is the model's origin, and a tool started from the
 command line drew its band to 0,0; after it has left (`leaveEvent`) the
 cursor is where it left, and a tool chosen from a menu previewed there. A
@@ -537,3 +540,14 @@ snaps off (1.48x a plain move) and 1.53 ms with them on (1.67x), inside the
 ratios measured before; under that load the difference says nothing, and no
 cost was looked for beyond it. The earlier build was not kept to alternate
 against either.
+
+After the third review's fixes (2026-09-30: the caption kept off every
+target and removed piece along its length - sampled every 6 px, and only
+where the piece is in the view, Liang and Barsky's clip, so a segment far
+longer than the view costs its visible length - a run of X's thinned and
+kept off the rings, labels DemiBold), nine repetitions, the machine shared
+with five other worktrees' builds and suites, medians: a plain move 426 us;
+Insert with snaps off 713 us (1.67x a plain move), with them on 798 us
+(1.87x); 692 and 714 hovers previewed an insert. Inside the 2x the spec
+asks, and near the ratios above (1.68x and 1.76x); not alternated against
+the build before, which was not kept.

@@ -121,6 +121,14 @@ class ToolHost {
     // Steps back one input inside the tool (the U inside LINE); never the
     // document's undo.
     Outcome undo();
+    // Whether the running tool takes the Delete key from the window's Erase
+    // (InteractiveTool::takesDelete): the vertex tools, whose polyline Erase
+    // would take from under them. False when none is running.
+    [[nodiscard]] bool takesDelete() const;
+    // Delete pressed while takesDelete(): the tool's answer, applied as any
+    // input's is (Delete Vertex deletes its chosen vertices; the others say
+    // the key does nothing there).
+    Outcome deleteKey();
     // Esc: ends the tool, keeping what the tool's own cancel() says it has
     // already placed - a chain of lines, the parts a Trim has cut, the
     // copies Copy has put down - as AutoCAD keeps the segments of a LINE,

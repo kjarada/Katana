@@ -189,21 +189,29 @@ class InteractiveTool {
     // overrides this answers that too.
     [[nodiscard]] virtual ToolStep point3d(const katana::geometry::Point2& at, double z);
     // A point given EXACTLY - typed as x,y, @dx,dy, @distance<angle or
-    // x,y,z (z its height, after takesHeights and lastHeight have had their
-    // say) - rather than pointed at with the mouse. The default hands it on
-    // as a click goes, to point3d() with a height and point() without, so
-    // only a tool that treats a pointed click differently overrides it:
-    // Insert Vertex refuses a CLICK within the pick aperture of a vertex,
-    // where the vertex meant cannot be told from a new one, but a typed
-    // point says exactly where, whatever the zoom.
+    // x,y,z (z its height, after takesHeights, dzIsAChange and lastHeight
+    // have had their say) - rather than pointed at with the mouse. The
+    // default hands it on as a click goes, to point3d() with a height and
+    // point() without, so only a tool that treats a pointed click
+    // differently overrides it: Insert Vertex refuses a CLICK within the
+    // pick aperture of a vertex, where the vertex meant cannot be told from
+    // a new one, but a typed point says exactly where, whatever the zoom.
     [[nodiscard]] virtual ToolStep exactPoint(const katana::geometry::Point2& at,
                                               std::optional<double> z);
     // Whether the step the tool is at takes a height with its point: the
-    // z of x,y,z, and the dz of @dx,dy,dz as a change of lastHeight(). A tool
+    // z of x,y,z, and the dz of @dx,dy,dz (read as dzIsAChange says). A tool
     // that takes none is handed the point alone, the z of either form
     // dropped - as it always was; refusing @dx,dy,dz there turned "@0,5,0"
     // at MOVE and LINE into an error. The default takes none.
     [[nodiscard]] virtual bool takesHeights() const;
+    // Whether the dz of a typed @dx,dy,dz, at a step that takes heights, is
+    // a CHANGE of lastHeight() - Move Vertex's "raise it by dz", as the
+    // VERTEX MOVE verb reads it - rather than the height itself, as the
+    // PLINE3D verb reads it and so every other tool that takes a height
+    // (the default). A tool reads a line as its verb does, so the window and
+    // katana_cli make one drawing of it: a 3D polyline that climbed dz from
+    // its last vertex in the window was put at a height of dz by the verb.
+    [[nodiscard]] virtual bool dzIsAChange() const;
     [[nodiscard]] virtual ToolStep entity(katana::entity::EntityId id,
                                           const katana::geometry::Point2& at);
     // Typed text that is not a point (routeTypedInput decides): a distance, an
@@ -230,10 +238,20 @@ class InteractiveTool {
     // Perpendicular and Tangent snaps measure from. Nullopt before the first.
     [[nodiscard]] virtual std::optional<katana::geometry::Point2> lastPoint() const;
     // The height of lastPoint(), which the dz of a typed @dx,dy,dz changes
-    // (routeTypedInput) at a step that takes heights; nullopt when it has
-    // none, and then @dx,dy,dz is refused there rather than read as a height
-    // of dz. The default has none.
+    // (routeTypedInput) at a step that takes heights, where dzIsAChange();
+    // nullopt when it has none, and then @dx,dy,dz is refused there rather
+    // than read as a height of dz. The default has none.
     [[nodiscard]] virtual std::optional<double> lastHeight() const;
+    // Whether this tool takes the Delete key from the window's Erase while it
+    // runs. Erase holds Delete as a shortcut and erases the selection, and a
+    // vertex tool works on a SELECTED polyline - a chosen vertex's grips need
+    // it selected, and the tool selects what it has just edited (docs/
+    // drawing.md, R5) - so Delete inside the tool erased the whole string it
+    // was editing. The default leaves Delete to Erase, as it always was.
+    [[nodiscard]] virtual bool takesDelete() const;
+    // Delete pressed while takesDelete(): what the tool makes of it. The
+    // default refuses it, and the refusal says why.
+    [[nodiscard]] virtual ToolStep deleteKey();
     // Whether the view may snap the cursor to `snap` for the step the tool is
     // at; one it may not is passed over for the next best (SnapRequest::
     // accept), and with none the cursor stays where it is. A step that needs

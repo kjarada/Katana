@@ -9,6 +9,7 @@
 #include "katana/cad/survey_import.hpp"
 #include "katana/commands/change_set.hpp"
 #include "katana/entity/entity_geometry.hpp"
+#include "../tools/everyday_support.hpp"
 
 namespace katana::cad {
 
@@ -211,6 +212,13 @@ std::pair<std::size_t, std::size_t> vertexRange(const CurvePolyline2& polyline, 
         walkForward = !walkForward;
     }
     return walkForward ? std::pair{a, b} : std::pair{b, a};
+}
+
+std::string heightText(const std::optional<double>& height)
+{
+    // Three decimals with no "-0.000", as every figure the vertex tools
+    // print (everyday::fixed).
+    return height ? "z " + tools::everyday::fixed(*height) : std::string("no height");
 }
 
 } // namespace katana::cad

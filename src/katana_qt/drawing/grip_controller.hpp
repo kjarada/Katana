@@ -60,7 +60,8 @@ class GripController {
     // (the view's count of document notifications) has moved on. A hot or a
     // grabbed grip follows its point to the index it has now - after an
     // insert before it, vertex 2 is vertex 3 - keeps its index when its own
-    // vertex is moved, and goes when its vertex does.
+    // vertex alone was moved, and goes when its vertex does, or when edits
+    // since have left it no telling which vertex it was.
     void refresh(std::uint64_t generation);
     [[nodiscard]] const std::vector<katana::cad::Grip>& grips() const { return grips_; }
     [[nodiscard]] const std::vector<katana::cad::Grip>& hot() const { return hot_; }

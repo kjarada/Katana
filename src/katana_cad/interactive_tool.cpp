@@ -141,6 +141,8 @@ ToolStep InteractiveTool::exactPoint(const Point2& at, std::optional<double> z)
 
 bool InteractiveTool::takesHeights() const { return false; }
 
+bool InteractiveTool::dzIsAChange() const { return false; }
+
 ToolStep InteractiveTool::entity(katana::entity::EntityId /*id*/, const Point2& /*at*/)
 {
     return ToolStep::rejected(std::string("an entity is not expected here; the tool wants ") +
@@ -163,6 +165,13 @@ ToolFeedback InteractiveTool::preview(const Point2& /*cursor*/) const { return {
 std::optional<Point2> InteractiveTool::lastPoint() const { return std::nullopt; }
 
 std::optional<double> InteractiveTool::lastHeight() const { return std::nullopt; }
+
+bool InteractiveTool::takesDelete() const { return false; }
+
+ToolStep InteractiveTool::deleteKey()
+{
+    return ToolStep::rejected("the Delete key does nothing in this tool");
+}
 
 bool InteractiveTool::takesSnap(const SnapResult& /*snap*/) const { return true; }
 
@@ -217,18 +226,20 @@ namespace {
 
 // A typed point handed to `tool`, as the exact point it is (exactPoint). A
 // step that takes heights (takesHeights) gets the z of x,y,z as the height,
-// and the dz of @dx,dy,dz as a CHANGE of the last point's height, as the
-// VERTEX MOVE verb reads it: handing dz on as the height turned "raise it by
-// 1" into a height of 1 and wiped a surveyed z; with no height there to
-// change, it is refused rather than read as absolute. Every other step drops
-// the z of both forms, as it always did: refusing @dx,dy,dz there refused
-// "@0,5,0" at MOVE and LINE, whose points have no height to change.
+// and the dz of @dx,dy,dz as its verb reads it (dzIsAChange): the height
+// itself for Polyline 3D, as PLINE3D has it; a CHANGE of the last point's
+// height for Move Vertex, as VERTEX MOVE has it - handing dz on as the
+// height there turned "raise it by 1" into a height of 1 and wiped a
+// surveyed z, and with no height there to change it is refused rather than
+// read as absolute. Every other step drops the z of both forms, as it always
+// did: refusing @dx,dy,dz there refused "@0,5,0" at MOVE and LINE, whose
+// points have no height to change.
 ToolStep typedPoint(InteractiveTool& tool, const PrecisePoint& point)
 {
     if (!point.z || !tool.takesHeights()) {
         return tool.exactPoint(point.point, std::nullopt);
     }
-    if (!point.relative) {
+    if (!point.relative || !tool.dzIsAChange()) {
         return tool.exactPoint(point.point, point.z);
     }
     const auto base = tool.lastHeight();
