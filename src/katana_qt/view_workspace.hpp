@@ -263,14 +263,13 @@ class ViewWorkspace final : public QMainWindow {
     // it was cut from surfaces that are gone.
     void drawingReplaced();
 
-    // Frames the ACTIVE view only, as the View menu and the Z command mean it;
-    // one view's zoom is not another's business - unless the user linked
-    // them, and then the views linked with it follow.
-    void zoomExtents();
     // Frames one view, whether active or not: its title bar's Zoom Extents
-    // button, ZOOM EXTENTS and a plan view's middle double-click. The views
-    // linked with it follow; a linked view that draws nothing frames what
-    // the link draws (linkDrawnBounds). NotFound for an id that is not open.
+    // button, ZOOM EXTENTS - the View menu's and the Z command's line for the
+    // active view - and a plan view's middle double-click. One view's zoom
+    // is not another's business unless the user linked them: the views
+    // linked with it follow, and a linked view that draws nothing frames
+    // what the link draws (linkDrawnBounds). NotFound for an id that is not
+    // open.
     [[nodiscard]] katana::core::Status zoomExtents(katana::cad::ViewId id);
     // Frames every view: after New, Open and an import, when all of them are
     // looking at a drawing that has just changed under them. The link is
@@ -414,6 +413,10 @@ class ViewWorkspace final : public QMainWindow {
     // linked view that draws nothing frames on its Zoom Extents. Empty with
     // no link.
     [[nodiscard]] katana::geometry::Box2 linkDrawnBounds() const;
+    // A member of the link other than `id` that has framed something - the
+    // one the user moved last, else the first opened - or kNoView: whose
+    // place a linked view framed on nothing takes (viewMoved).
+    [[nodiscard]] katana::cad::ViewId framedMemberBesides(katana::cad::ViewId id) const;
     // The verbs' host at work (VerbHost): ZOOM on one view, and a link the
     // verbs changed behind the widgets.
     [[nodiscard]] katana::core::Result<std::vector<katana::cad::ViewId>>

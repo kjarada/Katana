@@ -19,11 +19,16 @@ namespace katana::qt {
 QString ZoomToDialog::spokenReply(const QString& reply)
 {
     // The records a ZOOM on a scope answers (cad/view_verbs.hpp): the
-    // scope's, then the view it framed, then each view that followed it.
+    // scope's, then the view it framed - with shown=, how many of them it
+    // shows - then each view that followed it; or, when the view shows none
+    // of them, that view's record with moved=no.
     static const QRegularExpression matchedField(QStringLiteral("\\bmatched=(\\d+)"));
+    static const QRegularExpression shownField(QStringLiteral("\\bshown=(\\d+)"));
     static const QRegularExpression viewField(QStringLiteral("^view=(\\d+)"));
     long long matched = -1;
+    long long shown = -1;
     QString framed;
+    QString unmoved;
     QStringList followed;
     for (const QString& line : reply.split('\n', Qt::SkipEmptyParts)) {
         if (line.startsWith(QStringLiteral("scope="))) {
@@ -38,8 +43,15 @@ QString ZoomToDialog::spokenReply(const QString& reply)
         }
         if (line.contains(QStringLiteral(" followed="))) {
             followed.append(view.captured(1));
+            continue;
+        }
+        if (line.contains(QStringLiteral(" moved=no"))) {
+            unmoved = view.captured(1);
         } else {
             framed = view.captured(1);
+        }
+        if (const auto found = shownField.match(line); found.hasMatch()) {
+            shown = found.captured(1).toLongLong();
         }
     }
     if (matched == 0) {
@@ -47,10 +59,18 @@ QString ZoomToDialog::spokenReply(const QString& reply)
     }
     const QString took = matched > 0 ? QStringLiteral("%1 matched").arg(matched)
                                      : QStringLiteral("ZOOM answered");
-    if (framed.isEmpty()) {
-        return took + QStringLiteral(", none of them drawn in that view: nothing moved.");
+    if (!unmoved.isEmpty() || framed.isEmpty()) {
+        // It said "framed in view 2" of a view that showed none of it.
+        return took + (unmoved.isEmpty()
+                           ? QStringLiteral(", and no view moved.")
+                           : QStringLiteral(", but view %1 shows none of them: nothing moved.")
+                                 .arg(unmoved));
     }
-    QString text = took + QStringLiteral(", framed in view %1").arg(framed);
+    QString text = took + (shown >= 0 && shown < matched
+                               ? QStringLiteral(", %1 of them shown and framed in view %2")
+                                     .arg(shown)
+                                     .arg(framed)
+                               : QStringLiteral(", framed in view %1").arg(framed));
     if (!followed.isEmpty()) {
         const QString last = followed.takeLast();
         text += QStringLiteral("; view%1 %2 followed")

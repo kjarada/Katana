@@ -515,6 +515,22 @@ void RenderViewWidget::zoomBy(double factor)
         gpuView_->setCameraFramed(true); // or its first frame frames the zoom away
     }
 #endif
+    // Out no farther than where the scene is a pixel across, as a plan view's
+    // scale stops at its least: past that a zoom out shows nothing more, and
+    // ZOOM 1e-300 took the eye 4.7e302 units off, where the camera's
+    // arithmetic had no digits left for where it looked and the target the
+    // zoom keeps in the middle moved. A factor above 1 is closer, and the
+    // eye is d / factor away afterwards; the scene's diagonal D is a pixel
+    // across at D (H / 2) / tan(fov / 2), H the view's height in the
+    // camera's pixels. Zoomed out that far already, it goes no farther.
+    if (const katana::math::AABB& box = layers_.bounds; !box.empty() && factor < 1.0) {
+        const double across = (box.max - box.min).length();
+        const double farthest = across * 0.5 * camera().viewportHeight() /
+                                std::tan(0.5 * camera().fieldOfView());
+        if (std::isfinite(farthest) && farthest > 0.0) {
+            factor = std::max(factor, std::min(1.0, camera().distance() / farthest));
+        }
+    }
     // The notches that make `factor` at kZoomPerNotch each, over the middle:
     // the pixel whose centre the view's axis passes through, as
     // Camera::rayThroughPixel samples pixel centres - so the target is still

@@ -129,8 +129,9 @@ class RenderViewWidget final : public QWidget {
     // factor, from a line or the view's bar. A view that has framed nothing
     // yet - a script's VIEWS OPEN 3d then ZOOM IN, with no paint between -
     // frames the scene first, as its first paint would, or that paint would
-    // frame the zoom away. Nothing for a factor that is not finite and above
-    // 0.
+    // frame the zoom away. Out no farther than where the scene is a pixel
+    // across, as a plan view's scale stops at its least. Nothing for a factor
+    // that is not finite and above 0.
     void zoomBy(double factor);
     // Frames the camera on the entities `ids` as this view draws them - the
     // ones it shows and, with its ghosts on, the ones it ghosts

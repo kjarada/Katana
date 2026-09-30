@@ -28,11 +28,13 @@
 #include <QTimer>
 #include <QToolBar>
 
+#include "command_runner.hpp"
 #include "customisation/code_manager.hpp"
 #include "customisation/customisation_context.hpp"
 #include "customisation/customisation_workbench.hpp"
 #include "customisation/symbol_library.hpp"
 #include "katana/archive12d/customisation.hpp"
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "style_manager.hpp"
 #include "view_workspace.hpp"
@@ -54,6 +56,11 @@ const std::filesystem::path kFixture = std::filesystem::path(__FILE__)
 // actions, as MainWindow hands them over.
 struct Bench {
     Document document;
+    // The window's one executor, as MainWindow hands it to the views: the
+    // lines their controls run, recorded, then run through an interpreter
+    // whose view host is the views (withViews).
+    katana::cad::CommandInterpreter interpreter{document};
+    QStringList ran;
     QMainWindow window;
     QMenu* menu = new QMenu("Format", &window);
     QToolBar* bar = new QToolBar("Format", &window);
@@ -73,6 +80,19 @@ struct Bench {
             views = new katana::qt::ViewWorkspace(document, &window);
             window.setCentralWidget(views);
             window.resize(800, 600);
+            interpreter.setViewHost([this] { return &views->verbHost(); });
+            views->setCommandRunner([this](const QString& line) {
+                ran << line;
+                const auto reply = interpreter.run(line.toStdString());
+                katana::qt::VerbOutcome outcome;
+                outcome.ok = reply.ok();
+                if (reply.ok()) {
+                    outcome.reply = QString::fromStdString(*reply);
+                } else {
+                    outcome.error = QString::fromStdString(reply.error().describe());
+                }
+                return outcome;
+            });
         }
         layers->setObjectName("formatLayers");
         load->setObjectName("loadCustomisation");
@@ -281,7 +301,11 @@ TEST(CustomisationWorkbench, TheManagersGoWithTheWorkbenchBeforeTheDocument)
 TEST(CustomisationWorkbench, ShowingWhatUsesAThingSelectsItAndFramesItInTheActivePlanView)
 {
     // A line from (1000, 1000) to (1010, 1000): framed, the active plan
-    // view's centre is the line's middle, (1005, 1000).
+    // view's centre is the line's middle, (1005, 1000). Framed by that
+    // view's Zoom to Selection line through the window's executor, so the
+    // command log says what moved the view and the views linked with it
+    // follow: the direct zoom made before framed the same place outside the
+    // log, and only the line the executor was handed tells the two apart.
     Bench bench(true);
     katana::qt::test::paint(bench.window);
     katana::qt::ViewWorkspace* views = bench.views;
@@ -293,6 +317,8 @@ TEST(CustomisationWorkbench, ShowingWhatUsesAThingSelectsItAndFramesItInTheActiv
 
     EXPECT_EQ(bench.document.selection().ids(), ids);
     ASSERT_NE(views->activePlanView(), nullptr);
+    const katana::cad::ViewId active = views->activePlanView()->state().id;
+    EXPECT_EQ(bench.ran, QStringList{QString("ZOOM SELECTION view=%1").arg(active)});
     const katana::geometry::Point2 centre = views->activePlanView()->viewTransform().center;
     EXPECT_NEAR(centre.x, 1005.0, 1e-6);
     EXPECT_NEAR(centre.y, 1000.0, 1e-6);

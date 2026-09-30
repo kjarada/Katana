@@ -587,10 +587,15 @@ class PlanPainter {
     // strokePolyline lays a line down as dots (dotPath) instead of stroking
     // it: every other pen draws exactly what it drew before. The dots are
     // kept only inside dotReach_, the view in the painter's own units and a
-    // dot beyond; dots_ is their scratch.
+    // dot beyond; dots_ is their scratch. Where the painter only shifts the
+    // drawing (dotDevice_) they are laid in device pixels: dotWidth_ square
+    // and dotPitch_ apart, both in device pixels then; else in its own units.
     bool ghostDots_ = false;
     QRectF dotReach_;
     QPolygonF dots_;
+    bool dotDevice_ = false;
+    double dotWidth_ = cad::kGhostPenPixels;
+    double dotPitch_ = cad::kGhostDotPitchPixels;
     std::vector<Point2> arcPoints_;
     // The faces annotation text is set in, and the lines drawn this paint
     // that labels keep out of (collected by drawEntities when there are
@@ -1741,10 +1746,27 @@ void PlanPainter::strokePolyline(const std::vector<Point2>& vertices, bool close
 
 void PlanPainter::dotPath(const QPolygonF& path, bool closed)
 {
+    // The walk is in device pixels where the dots go on whole ones
+    // (drawSelectionGhosts sets dotDevice_), else in the painter's own units;
+    // `placed` turns a dot of the walk into the point drawn for it, whose
+    // square of dotWidth_ device pixels covers whole pixels only - an odd
+    // width about a pixel's centre, an even one about a pixel's corner.
+    const double ratio = dotDevice_ ? deviceRatio_ : 1.0;
+    const QPointF shift = dotDevice_ ? translation_ : QPointF();
+    const auto walked = [&](const QPointF& p) { return (p + shift) * ratio; };
+    const bool odd = std::fmod(dotWidth_, 2.0) == 1.0;
+    const auto placed = [&](const QPointF& q) {
+        if (!dotDevice_) {
+            return q;
+        }
+        const auto whole = [odd](double v) { return odd ? std::floor(v) + 0.5 : std::round(v); };
+        return QPointF(whole(q.x()), whole(q.y())) / ratio - shift;
+    };
+    const QRectF reach(walked(dotReach_.topLeft()), walked(dotReach_.bottomRight()));
     const qsizetype count = path.size() + (closed && path.size() > 1 ? 1 : 0);
     if (count < 2) {
-        if (!path.isEmpty() && dotReach_.contains(path.front())) {
-            painter_.drawPoint(path.front());
+        if (!path.isEmpty() && reach.contains(walked(path.front()))) {
+            painter_.drawPoint(placed(walked(path.front())));
         }
         return;
     }
@@ -1753,12 +1775,12 @@ void PlanPainter::dotPath(const QPolygonF& path, bool closed)
     // pan moves no dot along the line. Only the part of a segment in reach
     // is walked (Liang-Barsky): zoomed in, a segment can be millions of
     // pixels long.
-    constexpr double kPitch = cad::kGhostDotPitchPixels;
+    const double pitch = dotPitch_;
     dots_.clear();
     double next = 0.0; // along the current segment, to its next dot
     for (qsizetype i = 0; i + 1 < count; ++i) {
-        const QPointF a = path[i];
-        const QPointF b = path[(i + 1) % path.size()];
+        const QPointF a = walked(path[i]);
+        const QPointF b = walked(path[(i + 1) % path.size()]);
         const double dx = b.x() - a.x();
         const double dy = b.y() - a.y();
         const double length = std::hypot(dx, dy);
@@ -1778,15 +1800,15 @@ void PlanPainter::dotPath(const QPolygonF& path, bool closed)
             }
             return from <= to;
         };
-        if (length > 0.0 && within(-dx, a.x() - dotReach_.left()) &&
-            within(dx, dotReach_.right() - a.x()) && within(-dy, a.y() - dotReach_.top()) &&
-            within(dy, dotReach_.bottom() - a.y())) {
-            const double first = std::max(0.0, std::ceil((from * length - next) / kPitch));
-            for (double t = next + first * kPitch; t <= to * length && t < length; t += kPitch) {
-                dots_ << a + QPointF(dx, dy) * (t / length);
+        if (length > 0.0 && within(-dx, a.x() - reach.left()) &&
+            within(dx, reach.right() - a.x()) && within(-dy, a.y() - reach.top()) &&
+            within(dy, reach.bottom() - a.y())) {
+            const double first = std::max(0.0, std::ceil((from * length - next) / pitch));
+            for (double t = next + first * pitch; t <= to * length && t < length; t += pitch) {
+                dots_ << placed(a + QPointF(dx, dy) * (t / length));
             }
         }
-        next = next < length ? next + std::ceil((length - next) / kPitch) * kPitch - length
+        next = next < length ? next + std::ceil((length - next) / pitch) * pitch - length
                              : next - length;
     }
     painter_.drawPoints(dots_);
@@ -1801,8 +1823,21 @@ void PlanPainter::drawSelectionGhosts()
     const auto& model = *source_.model;
     const QColor faint(cad::kSelectionRed, cad::kSelectionGreen, cad::kSelectionBlue,
                        cad::kGhostAlpha);
-    // Square dots, without antialiasing: a dot lands on whole pixels.
-    painter_.setPen(QPen(faint, cad::kGhostPenPixels, Qt::SolidLine, Qt::SquareCap));
+    // Square dots, without antialiasing, each on whole device pixels: the
+    // pen's width and the pitch rounded to whole device pixels, and every dot
+    // put on them (dotPath). At 125 % - the owner's display (render.md) - the
+    // 2 px pen was 2.5 device pixels and landed as 2 or 3: a straight ghost
+    // beaded 3, 2, 3, and a slanted one mixed four shapes of dot. Now 3 px
+    // square every 8 there, and 2 every 6 at 100 % as before. Under a turned
+    // frame no pixel lines up with the drawing, and the dots are laid as
+    // they fall.
+    dotDevice_ = painter_.transform().type() <= QTransform::TxTranslate && deviceRatio_ > 0.0;
+    dotWidth_ = dotDevice_ ? std::max(1.0, std::round(cad::kGhostPenPixels * deviceRatio_))
+                           : cad::kGhostPenPixels;
+    dotPitch_ = dotDevice_ ? std::max(1.0, std::round(cad::kGhostDotPitchPixels * deviceRatio_))
+                           : cad::kGhostDotPitchPixels;
+    painter_.setPen(QPen(faint, dotDevice_ ? dotWidth_ / deviceRatio_ : cad::kGhostPenPixels,
+                         Qt::SolidLine, Qt::SquareCap));
     painter_.setBrush(Qt::NoBrush);
     const bool antialiased = painter_.testRenderHint(QPainter::Antialiasing);
     painter_.setRenderHint(QPainter::Antialiasing, false);

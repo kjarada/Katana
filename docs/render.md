@@ -333,15 +333,27 @@ read and which looked like the view's setting
 the ids rather than the drawing took `BM_SceneSelectionBuild` from 0.039 /
 0.028 ms to 0.006 / 0.005 ms (256 / 512 cells; medians of three, main
 against the view-sync worktree, both Release, 2026-09-30), casing and all.
+The culled walk finds exactly what the walk of the drawing found: the
+one-list build still walks the drawing, drawing each selected entity it
+meets in the selection colour, and the overlay is exactly its
+selection-coloured lines and points, vertex for vertex and in order - with
+unselected entities between the selected, one on a layer the drawing hides
+and a selected id whose entity is gone
+(`SceneLayersBuild.TheOverlayWalkingTheSelectionFindsExactlyWhatAWalkOfTheDrawingFinds`,
+shown failing with the walk made to drop an id).
 
 **Where a set of entities stands in 3D** is where the overlay would draw
 them: `SceneBuilder::overlayBounds` runs the overlay's own emits - the core,
 and the ghosts when the view shows them - over the ids asked about rather
 than the selection's, on the datum the drawing was built on, and returns
 their box without keeping a draw list. It is what a 3D view frames for ZOOM
-on a scope, Zoom to Selection among them (`docs/desktop.md`, "In a 3D or
-elevation view"), so a 3D view has no second rule for where an entity
-stands (`SceneLayersBuild.OverlayBoundsAreWhereTheOverlayWouldDrawTheIds`).
+on a scope, Zoom to Selection among them (`docs/desktop.md`, "Zoom to
+Selection frames what the view shows of it"), so a 3D view has no second
+rule for where an entity stands
+(`SceneLayersBuild.OverlayBoundsAreWhereTheOverlayWouldDrawTheIds`). ZOOM
+hands it only the entities the view shows - the ones it draws, and with its
+ghosts on the selected ones it ghosts - so a ghost is framed only where one
+is drawn.
 
 A GPU renderer must draw the layers in this order, with the same three
 passes' depth writes off.

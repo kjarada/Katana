@@ -1249,7 +1249,8 @@ filter follows it (`ZOOM ALL WHERE TYPE=line` frames what matches). A factor
 may carry AutoCAD's `X` (`ZOOM 2X`, relative to the current view, as a bare
 factor always is here); `2XP`, relative to paper space, is refused, since a
 plan view has none. `'ZOOM` and `'Z`, AutoCAD's transparent form, are `ZOOM`
-at the prompt as well as inside a tool; no other verb takes an apostrophe
+at the prompt as well as inside a tool; only a view verb takes an apostrophe
+(`'VIEWS` is `VIEWS`; `'LINE` is no command)
 (`ViewVerbsTest.ZoomAllAndTheApostropheFormsAreTheExtentsAsInEveryCadProgram`,
 `ViewVerbsTest.AFactorWithAutoCadsXIsRelativeToTheView`). Rejected: taking
 `ALL` alone as the scope word, which frames the entities and not what the
@@ -1289,23 +1290,44 @@ it is not the word here. `SCALE` outside `ViewTransform`'s limits is refused,
 not clamped, because a scale the view cannot show is not the one asked for.
 
 **`ZOOM` takes the shared scope** (above, "Scope and filter"): the scope
-words, read by the one parser and resolved by `matchScope`, then framed by
-`cad::extentOf` - the box of the ids, measured as `drawnExtent` measures one,
-construction lines left out; `MainWindow::showSelection` (Select by ID's
-zoom) and the Format managers' Select Users frame by it too, so the three
-cannot frame the same entities differently. `ZOOM` alone is still
-`EXTENTS`, where no scope word elsewhere means the selection, so the
+words, read by the one parser and resolved by `matchScope`. `ZOOM` alone is
+still `EXTENTS`, where no scope word elsewhere means the selection, so the
 decision is made before the parser is called. The reply begins with the
 scope's record (`scope=selection matched=1`, then the view moved and the
 views that followed); a scope that takes nothing moves no view and says
 `matched=0`, which is an answer, not a refusal
-(`ViewVerbsTest.AScopeThatMatchesNothingMovesNoViewAndSaysSo`). A plan view
-frames the scope's extent; a 3D or elevation view frames the entities
-themselves where its scene draws them, so the request carries them too
-(`ZoomRequest::ids`, ascending; `cad::SceneBuilder::overlayBounds`), and a
-3D view that draws none of them moves nothing and the reply is the scope's
-record alone. A section frames no scope: it shows where entities cross it,
-which is no box of them
+(`ViewVerbsTest.AScopeThatMatchesNothingMovesNoViewAndSaysSo`).
+
+**A view frames what it SHOWS of what the scope took**, in every kind of
+view, by one rule (`shownOf`, `view_verbs.cpp`): the entities it draws - by
+its own hidden layers as well as the drawing's (`isDrawn`) - and, with its
+ghosts on, the selected ones it ghosts (`isGhost`; a plan view ghosts no
+label, which it places among the others). A plan view frames their box by
+`cad::extentOf` - measured as `drawnExtent` measures one, construction lines
+left out; a 3D or elevation view the entities themselves where its scene
+draws them, so the request carries them (`ZoomRequest::ids`, ascending;
+`cad::SceneBuilder::overlayBounds`). The framed view's record ends
+`shown=N`, how many of what matched it shows. A view that shows none of them
+does not move, and its record after the scope's says so:
+
+```
+scope=selection matched=1
+view=2 kind=plan shown=0 moved=no
+```
+
+A plan view framed the extent of everything the scope took: in a view that
+hid the selection's layer with its ghosts off, or with the drawing hiding
+it, the plan view - and its link - went to empty ground while a 3D view
+stayed put for the same line, and the scope's record alone had said nothing
+of a view that did not move
+(`ViewVerbsTest.APlanViewFramesWhatItShowsOfTheSelectionAndSaysHowManyThatIs`,
+`ViewVerbsTest.AViewThatShowsNoneOfWhatTheScopeTookMovesNothingAndSaysSo`,
+`ViewVerbsTest.AThreeDViewAndAPlanViewFrameTheSelectionByOneRule`). Select by
+ID's zoom and the Format managers' Select Users run `ZOOM SELECTION` for the
+active plan view, so they frame by the same rule. Rejected: keeping the plan
+view's frame of everything matched and saying so in its tip - one line would
+then follow two rules by the kind of view it named. A section frames no
+scope: it shows where entities cross it, which is no box of them
 (`ViewVerbsTest.AScopeZoomOnA3DViewCarriesWhatTheScopeTookAndASectionRefusesIt`).
 
 Records, one per line, `key=value`, reals by `core::formatExactReal` and
@@ -1368,7 +1390,8 @@ verb.
 
 `ZOOM` replies the record of the view it moved without `title`, `active`,
 `linked`, `ghosts` and `hidden` - where the view looks, not what it shows -
-then a line for each view that followed it
+and on a scope with `shown=` last (above), then a line for each view that
+followed it
 (`view=2 kind=plan followed=1 centre=... scale=... area=...`), so the reply
 says the whole of what one line did. `ZOOM` alone is still the active view's
 extents; with words it once zoomed to the extents whatever they were

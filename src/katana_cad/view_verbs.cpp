@@ -6,11 +6,13 @@
 #include <limits>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/core/text.hpp"
+#include "katana/entity/entity.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "katana/entity/tables.hpp"
 #include "katana/math/numerics.hpp"
@@ -537,6 +539,34 @@ std::string timesView(const std::string& word)
     return word;
 }
 
+// Of what a scope took, what `view` shows, in the order given: the entities
+// it draws - by its own layers as well as the drawing's (isDrawn) - and, with
+// its ghosts on, the selected ones it ghosts (isGhost). Not a label ghosted
+// in a plan view: the plan painter places labels among the others and
+// ghosts none (PlanPainter::drawSelectionGhosts), where a 3D view marks
+// where one attaches as it marks a ghosted text.
+std::vector<katana::entity::EntityId> shownOf(const Document& document, const ViewState& view,
+                                              const std::vector<katana::entity::EntityId>& ids)
+{
+    const katana::entity::Model& model = document.model();
+    std::vector<katana::entity::EntityId> shown;
+    for (const katana::entity::EntityId id : ids) {
+        const katana::entity::Entity* entity = model.entities.find(id);
+        if (entity == nullptr) {
+            continue;
+        }
+        const bool ghosted =
+            view.selectionGhosts && document.selection().contains(id) &&
+            isGhost(model, *entity, view.layers) &&
+            !(view.kind == ViewKind::Plan &&
+              std::holds_alternative<katana::entity::LabelGeometry>(entity->geometry));
+        if (ghosted || isDrawn(model, *entity, view.layers)) {
+            shown.push_back(id);
+        }
+    }
+    return shown;
+}
+
 // The word the refusal of a kind names the request by.
 std::string requestWord(const ZoomRequest& request)
 {
@@ -627,9 +657,9 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
             return matched.error();
         }
         scope = std::move(matched).value();
+        // What the view shows of it - and so its box - once the view is
+        // known to take a scope (below).
         request.kind = ZoomRequest::Kind::Scope;
-        request.window = extentOf(document.model(), scope->matched);
-        request.ids = scope->matched;
     } else if (!args.empty()) {
         const std::string word = uppered(args[0]);
         at = 1;
@@ -728,13 +758,35 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
         reply = scopeRecord(*scope);
         // Taking nothing is an answer, not a refusal: nothing to frame, and
         // no view moved.
-        if (request.window.empty()) {
+        if (scope->matched.empty()) {
             return reply;
         }
+        // The view frames what it shows of what the scope took, in every
+        // kind of view: a plan view framed the box of all of it, and jumped
+        // to empty ground - and took its link there - for a selection on a
+        // layer it hides with its ghosts off, or one the drawing hides,
+        // where a 3D view frames what it draws and stays put.
+        request.ids = shownOf(document, view, scope->matched);
+        request.window = extentOf(document.model(), request.ids);
+    }
+    // A view that shows none of what the scope took does not move, and says
+    // so after the scope's record: the scope took something, so the scope's
+    // record alone read as though it had been framed.
+    const auto unmoved = [&] {
+        return reply + "\nview=" + std::to_string(view.id) + " kind=" + kindWord(view.kind) +
+               " shown=" + std::to_string(request.ids.size()) + " moved=no";
+    };
+    if (scope && request.ids.empty()) {
+        return unmoved();
     }
     auto moved = host.zoom(request);
     if (!moved) {
         return moved.error();
+    }
+    if (moved->empty()) {
+        // What the view shows of it gave its widget nothing to frame:
+        // construction lines alone, which no extent counts.
+        return unmoved();
     }
     for (const ViewId id : *moved) {
         const ViewState* each = views.find(id);
@@ -749,6 +801,11 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
             reply += " followed=" + std::to_string(request.view);
         }
         reply += placeOf(*each, false);
+        if (scope && id == request.view) {
+            // How many of what the scope took it framed: fewer than matched
+            // where it hides some of them and ghosts none.
+            reply += " shown=" + std::to_string(request.ids.size());
+        }
     }
     return reply;
 }

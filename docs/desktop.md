@@ -535,7 +535,18 @@ bit for bit where it was worked by hand, and reporting nothing itself
 - and the first paint's, where a view linked before it was ever seen, and
 named the one the others come to, moves nobody until its first paint frames
 the drawing, and then leads
-(`ViewLinks.AViewLinkedBeforeItWasEverSeenLeadsFromItsFirstPaint`).
+(`ViewLinks.AViewLinkedBeforeItWasEverSeenLeadsFromItsFirstPaint`). When
+that first paint frames nothing - the view hides every layer with anything
+on it - the view has no place of its own to lead to, and takes the link's
+place instead: that of the member the user moved last that has framed, else
+the first opened (`ViewWorkspace::viewMoved`); with none framed yet it waits,
+and the first to frame brings it along. It said nothing then, kept the
+place every new view starts at, and a script's `VIEWS HIDE 2 design` and
+`VIEWS LINK 1,2 TO 2` left the link showing two places while both views said
+`linked=yes`
+(`ViewLinks.ALinkLedByAViewThatFramesNothingAtItsFirstPaintTakesTheOthersPlace`).
+Rejected: framing what the link draws there, as its Zoom Extents does - it
+would throw away the place the user had put the other views at.
 
 **Who comes to whom when views are linked.** `VIEWS LINK ids TO id` brings
 the others to TO; without TO the joining views come to the link (its lowest
@@ -574,8 +585,9 @@ view's middle double-click, which the widget hands to the workspace
 to the widget's own Zoom Extents, around the rule
 (`ViewLinks.AMiddleDoubleClickInALinkedViewThatDrawsNothingFramesWhatTheLinkDraws`).
 
-**The bar.** A plan view's bar is `[kind] Plan 1 ... [Link][Layers][Zoom
-Extents] [_][float][max][x]`. `ViewLinkButton` is checkable and never a menu
+**The Link.** A plan view's Link is the first of its bar's tools, before
+Layers and the zoom tools (the whole bar is under "The zoom tools on the
+bar" below). `ViewLinkButton` is checkable and never a menu
 (a title bar's menu is a modal loop, which a headless press waits in for
 ever): an open chain in the neutral colour while the view moves alone, a
 closed chain in the accent inside an accent frame while it is linked, and a
@@ -600,6 +612,18 @@ out of sight and showed itself checked for the 3D view
 Unlink All Views (`viewUnlinkAll`) runs `VIEWS UNLINK ALL`; both items are
 run by a test through the window
 (`qt_the_view_menus_link_items_link_the_active_view_and_unlink_all_headless`).
+Link This View and Show the Selection on Hidden Layers are toggles, and
+their check was never seen: the stylesheet draws a menu item that has an
+icon by its `QMenu::icon` rule and draws no check mark for it at all, so
+they - and Grid, Object Snap and every other toggle with an icon - looked
+the same on as off, pixel for pixel, and Link This View on a linked view
+unlinked it with nothing on screen to say it was on. A checked item's icon
+now wears the accent frame a checked toolbar button wears
+(`QMenu::icon:checked` in `theme.cpp`,
+`Theme.ACheckedMenuItemWithAnIconIsFramedAndAnUncheckedOneIsNot`). Rejected:
+a label that changes with the state ("Unlink This View") - a checkable item
+keeps one label and shows its state by its check, as Grid does, and a label
+that turns into its opposite reads as a second item.
 
 **The zoom tools on the bar.** A plan view's bar is `[kind] Plan 1 ...
 [Link][Layers][Zoom In][Zoom Out][Zoom to Selection][Zoom Extents]
@@ -631,20 +655,48 @@ factor at the wheel's 1.15 a notch, over the pixel the view's axis passes
 through (`Camera::rayThroughPixel` samples pixel centres), by
 `RenderViewWidget::zoomAtPixel`, the function the wheel itself calls - so a
 zoom from the bar can never be a different zoom from the wheel's, and it
-goes wherever the wheel goes, towards what is drawn under the cursor once
-that is merged (render.md). Twice as close: the eye half as far from the
+goes wherever the wheel goes. Twice as close: the eye half as far from the
 target, which stays the middle of the view
-(`ViewLinks.AThreeDViewsZoomInIsTwiceAsCloseAboutItsMiddle`). Zoom to
-Selection - and ZOOM on any scope - frames the camera on the entities it
-took where the view's scene draws them, draped and on the datum, the ones
-it shows and, with its ghosts on, the ones it ghosts
+(`ViewLinks.AThreeDViewsZoomInIsTwiceAsCloseAboutItsMiddle`). Out no farther
+than where the scene is a pixel across - its diagonal D at D (H / 2) /
+tan(fov / 2), H the view's height in the camera's pixels - as a plan view's
+scale stops at its least: `ZOOM 1e-300` took the eye 4.7e302 units off,
+where the camera's arithmetic had no digits left for where it looked, and
+the target it keeps in the middle moved from (87.5, 68.69) to (175, 137.38)
+(`ViewLinks.AnEnormousZoomOutOfAThreeDViewStopsWhereTheSceneIsAPixelAcross`).
+
+**Zoom to Selection frames what the view shows of it**, in every kind of
+view, by one rule, the verb's (`shownOf` in `view_verbs.cpp`): of what the
+scope took, the entities the view draws - by its own hidden layers as well
+as the drawing's - and, with its ghosts on, the selected ones it ghosts (a
+plan view ghosts no label). A plan view frames their box; a 3D or elevation
+view the box its scene puts them in, draped and on the datum
 (`SceneBuilder::overlayBounds`, the selection overlay's own emit over the
-ids, so a 3D view has no second rule for where an entity stands); none of
-them drawn there, nothing moves and the reply is the scope's record
-(`ViewLinks.ZoomToSelectionInAThreeDViewFramesWhatItDrawsOfTheSelection`).
+ids, so a 3D view has no second rule for where an entity stands). The same
+for ZOOM on any scope. A plan view framed the box of ALL of the selection:
+in the as-built view with its ghosts off, a selected design feature took the
+view - and the design view linked with it - to empty ground, where nothing
+was drawn or highlighted, while its tip said nothing would move and a 3D
+view pressed the same way stayed put
+(`ViewLinks.APlanViewsZoomToSelectionMovesNothingWhereItShowsNoneOfTheSelection`,
+`qt_a_plan_views_zoom_to_selection_moves_nothing_it_does_not_show_headless`,
+`ViewVerbsTest.AViewThatShowsNoneOfWhatTheScopeTookMovesNothingAndSaysSo`,
+`ViewVerbsTest.AThreeDViewAndAPlanViewFrameTheSelectionByOneRule`,
+`ViewLinks.ZoomToSelectionInAThreeDViewFramesWhatItDrawsOfTheSelection`). The
+framed view's record ends `shown=`, how many of what matched it shows; a view
+that shows none of it does not move, and its record after the scope's says
+`shown=0 moved=no` - the scope's record alone read as though it had framed
+something - and Zoom To says "1 matched, but view 2 shows none of them:
+nothing moved." Rejected: a tip for the plan view that said what it did -
+one button and one verb would then have followed two rules by the kind of
+view, and a frame of empty ground shows the person nothing.
 Select by ID's zoom and a style manager's Select Users run the active plan
 view's Zoom to Selection line (`ViewWorkspace::zoomToSelection`), where they
-framed the view directly, outside the log.
+framed the view directly, outside the log - each shown by a test that the
+old direct zoom fails: the line's reply read from the window's log
+(`qt_select_by_id_selects_and_frames_headless`), and the line the window's
+executor was handed
+(`CustomisationWorkbench.ShowingWhatUsesAThingSelectsItAndFramesItInTheActivePlanView`).
 
 **A view not yet painted.** A view frames what it draws at its first paint,
 and until then holds the place every new view starts at: a plan view the
@@ -735,6 +787,12 @@ is the view's, not the tool's, as AutoCAD resumes LINE after 'ZOOM (and
 host hands it to the workspace (`ToolHost::onTransparent`), which runs it as
 its ZOOM line through the command runner, and the tool stays at its step
 with its prompt (`ViewLinks.ATransparentZoomTypedInsideLineZoomsAndLeavesLineAtItsStep`).
+The line names the view the tool runs in, `view=<id>`, whichever view is
+active; a `view=` typed is kept. Without it the ACTIVE view was zoomed: a
+click on another view's bar or drawing, to look at it, made that one active,
+and a Z typed at Line's prompt zoomed it while the view Line picks its next
+point in stayed where it was
+(`ViewLinks.AZoomTypedAtAToolsPromptZoomsTheViewTheToolRunsInNotTheActiveOne`).
 Which words are ZOOM is the interpreter's reading - its alias table and its
 apostrophe rule, `CommandInterpreter::verbOf` - not a list of the window's,
 so an alias added there reaches a line typed inside a tool too
@@ -771,8 +829,12 @@ Layers button that filters wear the same accent frame side by side, and the
 unlinked chain is the faintest icon on the bar; a look of their own for each
 is polish not yet done. The Link is always on a plan view's bar, so a plan
 dock's least width is 23 px more than another kind's: six views, four of
-them in one row with two plan views, need 1388 px where the window has 1360,
-and the Properties panel goes to its least (five views fit). Letting the
+them in one row with two plan views, need 1388 px where the window has 1360
+(1365 px opened in another order, the section's and the elevation's titles
+cut to "Sect..." and "Elev..."), and the Properties panel goes to its least
+(five views fit). On a narrow plan bar the title's end can stand 2 to 4 px
+from the checked Link's frame: the optional zoom tools keep `kTitleGap` (6
+px) clear of the title, and the tools always shown do not. Letting the
 Link drop off a narrow bar as the zoom tools do was rejected for now: the
 checked Link is what says a view is linked, and a linked view would not show
 it. The Layers popup's layer rows still set the view's layers directly
@@ -904,10 +966,9 @@ Not done:
 - A selected line buried under the ground in 3D is hidden by it, as any line
   is; an x-ray pass over everything is the next step.
 - The 3D ghost's (130, 88, 32) was mixed for the empty ground and reads as a
-  brown terrain line over the elevation ramp (median contrast 2.37:1 with the
-  ground under it, measured by the review); plan and section ghosts are
-  dotted orange. A dotted ghost in 3D needs the scene to dash an overlay
-  line, which it does not yet.
+  brown terrain line over the elevation ramp, whose colours it sits among;
+  plan and section ghosts are dotted orange. A dotted ghost in 3D needs the
+  scene to dash an overlay line, which it does not yet.
 - With many entities selected at an overview scale, the 3 px core over the
   5 px casing merges parallel features a few metres apart into one orange
   mass in 3D and elevation; a thinner casing past a count or below a scale

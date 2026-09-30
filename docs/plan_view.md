@@ -404,8 +404,9 @@ as a GHOST when `PlanPaintOptions::selectionGhosts`
 is on - the plan view sets it from its view's switch, `ViewState::selectionGhosts`;
 every other caller leaves it off and draws what it always drew, and a plot
 never draws one. A ghost is DOTS of the selection's orange at 60 % (alpha
-153), 2 px square, one every 6 px from the line's start
-(`cad/selection_style.hpp`), with no fill, hatch, linestyle or symbol, so it
+153), 2 px square, one every 6 px from the line's start, each on whole device
+pixels (below; `cad/selection_style.hpp`), with no fill, hatch, linestyle or
+symbol, so it
 never reads as the entity drawn; a point is a ring of dots 6 px about it, a
 text, note, leader or dimension the outline of the box it draws, and a label
 is not ghosted. The pass runs after the entity loop and before the labels,
@@ -417,8 +418,33 @@ kept drawing. `PlanPaintStats::ghostsDrawn` counts them apart from
 80 px run, fourteen dots, 28 pixels of ink on row 50 against the same frame
 painted with nothing selected, each the ghost's colour, worked from
 `dotPath` - and none where the document hides the layer or the entity, on
-paper, or with the switch off). Why and how every view shows the selection:
-`docs/desktop.md`, "The selection in every view".
+paper, or with the switch off). Each kind of geometry has its branch and its
+test, each shown failing with its branch taken out: a polyline, an arc or a
+circle goes through `drawGeometry`'s own `strokePolyline`, dotted only
+because the ghost pass asks it to be - without that, a ghosted polyline was a
+solid faint line and no test failed
+(`PlanPainter.AGhostedPolylineIsDottedAlongEachLegWithItsStepCarriedRoundTheCorner`,
+its ten dots worked by hand with the step carried round the corner;
+`PlanPainter.AGhostedCircleIsARowOfSeparateDotsOnItsCurve`); a point is its
+ring (`PlanPainter.AGhostedPointIsADottedRingAroundItNotAMarkOnIt`); a text
+or a dimension the dotted outline of its box, nothing inside
+(`PlanPainter.AGhostedTextIsTheDottedOutlineOfItsBoxNotItsLetters`,
+`PlanPainter.AGhostedDimensionIsTheDottedOutlineOfWhatItDraws`); and a label
+nothing (`PlanPainter.ALabelIsNeverGhosted`). Why and how every view shows
+the selection: `docs/desktop.md`, "The selection in every view".
+
+**A dot is whole device pixels.** Without antialiasing a dot falls on the
+pixels whose centres its square covers, and at 125 % - the owner's display
+(`docs/render.md`) - the 2 px pen was 2.5 device pixels: a straight ghost
+beaded 3, 2, 3 pixels wide, and a slanted one mixed four shapes of dot. Where
+the painter only shifts the drawing, the pen's width and the pitch are
+rounded to whole device pixels - 2 every 6 at 100 %, 3 every 8 at 125 % - and
+each dot is put on whole pixels, an odd width about a pixel's centre and an
+even one about a corner (`PlanPainter::dotPath`,
+`PlanPainter.AtAFractionalScaleEveryGhostDotIsTheSameSquareOfWholePixels`:
+thirteen 3 x 3 dots 8 px apart, worked by hand). Under a turned frame no
+pixel lines up with the drawing, and the dots are laid as they fall. The
+section's 1 px ghost crossings are antialiased and were left as they are.
 
 Not done: a ghosted text or dimension is the outline of its drawn box,
 dotted, which reads as geometry rather than as "a text is here" - the 160 m
