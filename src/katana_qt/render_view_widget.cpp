@@ -557,7 +557,7 @@ void RenderViewWidget::zoomBy(double factor)
     const double scale = sceneScale();
     const QPointF middle((0.5 * camera().viewportWidth() - 0.5) / scale,
                          (0.5 * camera().viewportHeight() - 0.5) / scale);
-    zoomAtPixel(std::log(factor) / std::log(kZoomPerNotch), middle);
+    zoomAtPixel(std::log(factor) / std::log(katana::render::Camera::kZoomPerNotch), middle);
 }
 
 bool RenderViewWidget::zoomToEntities(const std::vector<katana::entity::EntityId>& ids)

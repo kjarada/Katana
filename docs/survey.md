@@ -2392,9 +2392,12 @@ placed within millimetres. Four directions whose first three read are on the
 danger circle are placed wherever read (20 of 20 in the review's trials, 1 to
 3.5 mm from the truth, where 11 were refused;
 `ReductionResection.AFourthDirectionFixesAStationWhoseFirstThreeTargetsAreOnItsDangerCircle`),
-and a distance to one target breaks the danger circle of the directions, as a
+and a distance to one target breaks the danger circle of the directions in the
+tested geometry - a target lies between the station and its reflection in the
+diameter through the distance's target, on the arc away from that target - as a
 surveyor breaks it (12 of 12, where 6 were refused;
 `ReductionResection.ADistanceToOneTargetFixesAStationOnTheDangerCircleOfItsDirections`).
+No more is claimed: the third review found the general statement false.
 Rejected: a relative one-position rule - marks closer than their pointings
 resolve at the range count once - which would need a number of standard
 deviations and would still not see two solutions of marks well apart; and
@@ -2697,6 +2700,13 @@ Not done:
 - A station with two solutions is found only where a start leads to each: the
   starts are the points where two loci meet, and a solution none of them
   descends to within the bound is not looked for.
+- Four decisions have no test that fails without them: the re-queue of a
+  setup that waits for a resection (`reduction.cpp`), the guard that keeps
+  such a setup out of the first pass, the network branch for a resected
+  station (`reduction_adjust.cpp`) and the scale applied to ground distances
+  all survived the third review's mutants through every survey test and the
+  CLI patterns. Their behaviour was checked by hand and by the review's
+  probes, not pinned.
 
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 
