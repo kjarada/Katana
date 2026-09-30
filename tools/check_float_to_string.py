@@ -23,17 +23,24 @@
 # through a template that fails to compile for a floating-point argument, a
 # new instantiation per call so each call is reported, not only a file's
 # first. Only files that mention to_string are checked. A file that cannot be
-# checked is listed as such, with the compiler's first error.
+# checked is listed as such, with the compiler's first error. Before any of
+# them, a canary - one std::to_string(1.0) - is compiled with the first
+# file's own command and must be reported: a "compiler" that exits 0 and
+# prints nothing, or a header that no longer trips, would otherwise check
+# every file and find nothing, a pass with nothing behind it.
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HEADER = os.path.join(HERE, "float_to_string_check.hpp").replace("\\", "/")
 MARK = "KATANA_TO_STRING_OF_FLOATING_POINT"
+# The call is on line 2, which is where the check must say it is.
+CANARY = "#include <string>\nstd::string katanaCanary() { return std::to_string(1.0); }\n"
 
 
 def run_check(entry, extra=""):
@@ -72,6 +79,24 @@ def check(entry):
     return [], None
 
 
+def canary_fires(entry):
+    """None when the canary, compiled with `entry`'s command, is reported at
+    its call; otherwise why the check cannot fire."""
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, "canary.cpp").replace("\\", "/")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(CANARY)
+        command, count = re.subn(r' -c (?:"[^"]*"|\S+)', lambda _: f' -c "{path}"',
+                                 entry["command"])
+        if count != 1:
+            return f"{entry['file']}'s command does not name one source after -c"
+        hits, note = check(dict(entry, command=command, file=path))
+        if any(hit.replace("\\", "/").endswith("canary.cpp:2") for hit in hits):
+            return None
+        return note or (f"a std::to_string(1.0) compiled with {entry['file']}'s command was not "
+                        "reported")
+
+
 def main():
     build = sys.argv[1] if len(sys.argv) > 1 else "build/release"
     jobs = int(sys.argv[2]) if len(sys.argv) > 2 else os.cpu_count() or 4
@@ -103,6 +128,12 @@ def main():
               f"{os.path.join(build, 'compile_commands.json')} lists {len(seen)} of Katana's own "
               f"sources and none mentions to_string; a check that checked nothing is not a pass")
         return 1
+    if work:
+        cannot = canary_fires(work[0])
+        if cannot:
+            print(f"check_float_to_string: the check cannot fire: {cannot}; a check that cannot "
+                  f"find a to_string of a double finds none anywhere, and that is not a pass")
+            return 1
     with ThreadPoolExecutor(jobs) as pool:
         results = list(pool.map(check, work))
     found = sorted({hit.replace("\\", "/") for hits, _ in results for hit in hits})
@@ -113,7 +144,8 @@ def main():
     for note in unchecked:
         print(note)
     print(f"check_float_to_string: {total - len(unchecked)} of {total} files checked, "
-          f"{len(found)} to_string of a floating-point value, {len(unchecked)} not checked")
+          f"{len(found)} to_string of a floating-point value, {len(unchecked)} not checked"
+          f"{'; the canary to_string(1.0) was reported' if work else ''}")
     return 1 if found or unchecked else 0
 
 
