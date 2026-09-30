@@ -165,6 +165,23 @@ PATH in the `add_test` itself. Kept in a variable, the semicolons in it split
 the list, and the process that runs is not the one meant: the first
 `cli.gdal_*` cases failed exactly so, with "no such file or directory".
 
+A semicolon in a `PASS_REGULAR_EXPRESSION` splits it the same way, into a
+list of expressions, and the test passes when ANY of them matches - one
+fragment of what was meant. Write it `\\;` in the quoted string: the property
+then holds `\;`, which ctest's list expansion keeps as one literal `;`. Found
+on 2026-09-30, when the three GSI cases whose expressions pin the parser
+version passed against a reader built to say "parser=1.1": each quotes a
+warning or note with a `;` in it, and a fragment after one matched on its own
+(`cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record` had
+two). They are escaped now, and fail on 1.1. Not fixed: six other cases in
+the same file still carry a bare `;` - `cli.mapfile_list`,
+`cli.code_applies_and_reports`, `cli.list_refuses_words_it_does_not_take`,
+`cli.utility_draw_refuses_a_line_it_cannot_grade`,
+`cli.utility_view_is_refused_headless_naming_area` and
+`cli.utility_draw_of_geometry_with_no_method_is_refused_by_the_vertex` - so
+each passes on part of its expression. Escaping them is for their areas,
+since the whole expression may not match what those verbs print today.
+
 A file written for another program is also handed to an implementation that
 is not Katana's: `cli.ifc_the_scenario_export_is_valid_to_ifcopenshell` runs
 `tools/check_ifc.py` over the IFC export. Such a test is registered only
@@ -498,7 +515,18 @@ fixed on 2026-09-29:
   run without MSYS2's bin on PATH, g++ could not load its DLLs, every one of
   320 files was "not checked" with no reason given, and the tool still exited
   0 - a pass that checked nothing. It now names the reason ("the compiler
-  exited 1 and printed nothing") and fails.
+  exited 1 and printed nothing") and fails. It fails too, saying "nothing to
+  check", when the compile database gives it no file at all - one that is
+  empty, or lists no source that mentions `to_string`, where the tree has
+  some 320 - which passed as "0 of 0 files checked"; and a source the
+  database names but the checkout lacks is "not checked" rather than a
+  Python traceback. Nothing showed that a check could fire, though: a
+  database whose "compiler" was `true` checked every file, found nothing and
+  exited 0. So before the files, a canary - one `std::to_string(1.0)` - is
+  compiled with the first file's own command and must be reported at its
+  line; when it is not, the tool says "the check cannot fire" and exits 1,
+  and when it is, the summary says so ("the canary to_string(1.0) was
+  reported").
 - **`LibraryData.MissingDataBesideALibraryIsNotFound`.** libc++'s
   `weakly_canonical` makes an empty path the working directory, which is
   absolute; libstdc++ leaves it empty. `dataBesideLibraryFile` relied on the
