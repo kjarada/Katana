@@ -999,7 +999,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld}\"" -c "STATUS")
     set_tests_properties(cli.survey_read_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=setup\\.fld format=opcode-field-file parser=1\\.1 read=16 skipped=2 warnings=2[\r\n]+content setups=1 observations=12 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Australia/GDA2020, Zone 56\" epsg=none[\r\n]+warning record=20 [^\r\n]+[\r\n]+warning record=21 text=\"opcode 18 \\(circle feature\\) is not one this reader imports\".*Entities: 0 "
+        "survey file=setup\\.fld format=opcode-field-file parser=1\\.2 read=16 skipped=2 warnings=2[\r\n]+content setups=1 observations=12 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Australia/GDA2020, Zone 56\" epsg=none[\r\n]+warning record=20 [^\r\n]+[\r\n]+warning record=21 text=\"opcode 18 \\(circle feature\\) is not one this reader imports\".*Entities: 0 "
         FAIL_REGULAR_EXPRESSION "error")
     add_test(NAME cli.survey_import_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -1036,7 +1036,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_gnss}\"")
     set_tests_properties(cli.survey_read_gnss_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=gnss\\.fld format=opcode-field-file parser=1\\.1 read=35 skipped=0 warnings=2[\r\n]+content setups=0 observations=5 points=1 unpositioned=4 features=2 control=0[\r\n]+declared crs=\"Local grid A\" epsg=none[\r\n]+warning record=0 text=\"the file is not UTF-8[^\r\n]+[\r\n]+warning record=41 text=\"point 'R001' is given a GNSS position here"
+        "survey file=gnss\\.fld format=opcode-field-file parser=1\\.2 read=35 skipped=0 warnings=2[\r\n]+content setups=0 observations=5 points=1 unpositioned=4 features=2 control=0[\r\n]+declared crs=\"Local grid A\" epsg=none[\r\n]+warning record=0 text=\"the file is not UTF-8[^\r\n]+[\r\n]+warning record=41 text=\"point 'R001' is given a GNSS position here"
         FAIL_REGULAR_EXPRESSION "error")
     add_test(NAME cli.survey_import_gnss_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -1063,7 +1063,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_resection}\"")
     set_tests_properties(cli.survey_read_resection_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=resection\\.fld format=opcode-field-file parser=1\\.1 read=27 skipped=0 warnings=0[\r\n]+content setups=2 observations=24 points=2 unpositioned=4 features=3 control=0[\r\n]+declared crs=\"Local grid B\" epsg=none[\r\n]+not_carried .*not_carried text=\"no coordinates for the 1 setup\\(s\\) made by resection"
+        "survey file=resection\\.fld format=opcode-field-file parser=1\\.2 read=27 skipped=0 warnings=0[\r\n]+content setups=2 observations=24 points=2 unpositioned=4 features=3 control=0[\r\n]+declared crs=\"Local grid B\" epsg=none[\r\n]+not_carried .*not_carried text=\"no coordinates for the 1 setup\\(s\\) made by resection"
         FAIL_REGULAR_EXPRESSION "error|warning record")
     add_test(NAME cli.survey_import_resection_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -1093,7 +1093,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_rtk_setup}\"")
     set_tests_properties(cli.survey_read_rtk_setup_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=rtk_setup\\.fld format=opcode-field-file parser=1\\.1 read=18 skipped=0 warnings=0[\r\n]+content setups=1 observations=11 points=0 unpositioned=4 features=1 control=0[\r\n]+declared crs=\"Local grid C\" epsg=none"
+        "survey file=rtk_setup\\.fld format=opcode-field-file parser=1\\.2 read=18 skipped=0 warnings=0[\r\n]+content setups=1 observations=11 points=0 unpositioned=4 features=1 control=0[\r\n]+declared crs=\"Local grid C\" epsg=none"
         FAIL_REGULAR_EXPRESSION "error|warning record")
     add_test(NAME cli.survey_import_rtk_setup_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -1102,31 +1102,39 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "imported job=job-1 entities=4 layer=survey/points .* at 1000,5000[\r\n]+[^\r\n]+ at 1000,5100[\r\n]+[^\r\n]+ at 1010\\.5,5000[\r\n]+[^\r\n]+ at 1020,4999\\.5[\r\n]"
         FAIL_REGULAR_EXPRESSION "error|backsight has no position")
-    # One setup with two backsights to different points,
-    # tests/surveyio/data/fld/two_backsights.fld: K (1000, 5000) backsights
-    # R3, entered due north, at circle 30, then R4, which nothing places, at
-    # circle 120, 50 m out, and shoots 502 at circle 120, 10 m, level. READ:
-    # all 9 records, and one warning - the second backsight (record 12) is
-    # read as a measurement of its point. IMPORT: the first backsight orients
-    # the setup, 0 - 30 = -30 degrees, so circle 120 is due east: R4 at 1050,
-    # 5000 and 502 at 1010, 5000. The reader had taken R4, the last, for the
-    # backsight and R3's circle for its reading, so the reduction took that
-    # circle for a grid azimuth, less the reading on R4 (30 - 120 = -90), and
-    # drew 502 at 1005, 5008.66 and R4 at 1025, 5043.30.
+    # Two setups with two backsights to different points each,
+    # tests/surveyio/data/fld/two_backsights.fld. A backsight orients its
+    # setup where it reads a horizontal circle to a point with a position, or
+    # states an azimuth; the first that can names the setup's backsight, and
+    # the other is read as a measurement of its point. K (1000, 5000) first
+    # backsights R3, entered due north, at circle 30, then R4, which nothing
+    # places, at circle 120, 50 m out, and shoots 502 at circle 120, 10 m,
+    # level; set up on K again, it first backsights R5, which nothing places,
+    # at circle 0, 40 m out, then R3 at 30, and shoots 503 at circle 210,
+    # 10 m. READ: all 13 records, and two warnings - each backsight to a point
+    # nothing places (records 12 and 15) is read as a measurement of it.
+    # IMPORT: R3 orients both setups, 0 - 30 = -30 degrees: circle 120 is due
+    # east, so R4 is at 1050, 5000 and 502 at 1010, 5000; circle 0 is 330, so
+    # R5 is at 1000 - 40 sin 30 = 980, 5000 + 40 cos 30 = 5034.641; circle 210
+    # is due south, so 503 is at 1000, 4990. The last backsight naming it had
+    # taken R4 for the first setup's with R3's circle, the reduction taking
+    # that circle for a grid azimuth less the reading on R4 (30 - 120 = -90):
+    # 502 at 1005, 5008.66. The first naming it took R5 for the second's,
+    # its circle taken for a grid azimuth: 503 at 995, 4991.34.
     set(_fld_two_backsights "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/two_backsights.fld")
     add_test(NAME cli.survey_read_two_backsights_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_two_backsights}\"")
     set_tests_properties(cli.survey_read_two_backsights_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "read=9 skipped=0 warnings=1[\r\n]+content setups=1 observations=9 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Local grid G\" epsg=none[\r\n]+warning record=12 text=\"a backsight to 'R4', where setup K backsighted 'R3' at record 11: the first backsight orients the setup, and this one is read as a measurement of its point\""
+        "survey file=two_backsights\\.fld format=opcode-field-file parser=1\\.2 read=13 skipped=0 warnings=2[\r\n]+content setups=2 observations=18 points=2 unpositioned=4 features=2 control=0[\r\n]+declared crs=\"Local grid G\" epsg=none[\r\n]+warning record=12 text=\"a backsight to 'R4', where setup K backsights 'R3' \\(record 11\\), the first that can orient it, with a horizontal circle, and coordinates the file gives: this one is read as a measurement of its point\"[\r\n]+warning record=15 text=\"a backsight to 'R5', where setup K \\(2\\) backsights 'R3' \\(record 16\\), the first that can orient it, with a horizontal circle, and coordinates the file gives: this one is read as a measurement of its point\""
         FAIL_REGULAR_EXPRESSION "error")
     add_test(NAME cli.survey_import_two_backsights_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_two_backsights}\"" -c "LIST")
     set_tests_properties(cli.survey_import_two_backsights_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "imported job=job-1 entities=4 layer=survey/points .* at 1000,5000[\r\n]+[^\r\n]+ at 1000,5100[\r\n]+[^\r\n]+ at 1050,5000[\r\n]+[^\r\n]+ at 1010,5000[\r\n]"
+        "imported job=job-1 entities=6 layer=survey/points .* at 1000,5000[\r\n]+[^\r\n]+ at 1000,5100[\r\n]+[^\r\n]+ at 1050,5000[\r\n]+[^\r\n]+ at 1010,5000[\r\n]+[^\r\n]+ at 980,5034\\.641[0-9]*[\r\n]+[^\r\n]+ at 1000,4990[\r\n]"
         FAIL_REGULAR_EXPRESSION "error|backsight has no position")
     # The same verbs on the hand-built GSI-16 job
     # tests/surveyio/data/leica/rounded_seconds_gsi16.gsi, whose angle words
