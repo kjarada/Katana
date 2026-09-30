@@ -7,10 +7,14 @@
 // zoom's are properties of the zoom's definition - a notch magnifies what is
 // under the cursor by 1.15, so its depth divides by 1.15 - measured against
 // the plane the cursor's ray is met with here, never against what the zoom
-// says it picked.
+// says it picked. The limits are the two a view cannot draw past: the near
+// plane's floor, tol::kGeometric / Camera::kNearPivotFloor, and the bound of
+// the double arithmetic, 16 x 2^-53 of the point's distance from the origin
+// (Higham's bound for dot products; scene_zoom.hpp works the count).
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -384,16 +388,21 @@ Camera planeCamera(Projection projection = Projection::Perspective)
     return camera;
 }
 
-// Where the ray through pixel (x, y) meets the plane z = -10, and how far that
-// is in front of the eye: by hand, not by the pick.
-std::optional<Vec3> planeUnder(const Camera& camera, double x, double y)
+// Where the ray through pixel (x, y) meets the plane z = height: by hand, not
+// by the pick.
+std::optional<Vec3> planeUnderAt(const Camera& camera, double x, double y, double height)
 {
     const katana::math::Ray ray = camera.rayThroughPixel(x, y);
     if (ray.direction.z == 0.0) {
         return std::nullopt;
     }
-    const double t = (kPlane - ray.origin.z) / ray.direction.z;
+    const double t = (height - ray.origin.z) / ray.direction.z;
     return t > 0.0 ? std::optional<Vec3>(ray.at(t)) : std::nullopt;
+}
+
+std::optional<Vec3> planeUnder(const Camera& camera, double x, double y)
+{
+    return planeUnderAt(camera, x, y, kPlane);
 }
 
 double depthOf(const Camera& camera, const Vec3& point)
@@ -465,55 +474,57 @@ TEST(SceneZoom, ZoomingInNeverTakesTheEyeThroughWhatIsUnderTheCursor)
     }
 }
 
-TEST(SceneZoom, ZoomingInStopsAtTheMinimumApproachAndANotchOutStillShrinksByTheFactor)
+TEST(SceneZoom, ZoomingInStopsATenthOfAMillimetreShortAndANotchOutStillShrinksByTheFactor)
 {
-    // The box is the ground's: 200 x 200 x 0, a diagonal of 282.84 m, so the
-    // eye comes no nearer than 1e-4 of it, 2.828 cm, where the GPU's float
-    // error is still a sixth of a pixel (scene_zoom.hpp). The zoom stops
-    // there, the point still under the cursor. Part of the box is then
-    // behind the eye, so fitDepthRange puts the near plane at a millionth of
-    // the far one, and the far one is no further than the box's diagonal
-    // plus a thousandth of it: the near plane is 99 times nearer than the
-    // limit at least.
+    // The near plane stays a thousandth of the pivot's distance in front of
+    // the eye (Camera::kNearPivotFloor) and never nearer than
+    // tol::kGeometric, 1e-7: so the pivot, what the zoom went towards, comes
+    // no nearer than 1e-7 / 1e-3 = 1e-4. The double arithmetic's own bound
+    // is far below that here: 16 x 2^-53 x 110 m (the point's distance from
+    // the origin) over a pixel's angle, 2 tan(22.5 deg) / 800, and a tenth of
+    // a pixel is 2e-9 m. The zoom stops there, the point still under the
+    // cursor, the near plane a thousand times nearer than it.
     const SceneLayers layers = planeScene();
-    EXPECT_NEAR(minimumApproach(layers), 1e-4 * std::sqrt(2.0) * 200.0, 1e-15);
     Camera camera = planeCamera();
     const double px = 700.0;
     const double py = 150.0;
     const auto start = planeUnder(camera, px, py);
     ASSERT_TRUE(start.has_value());
+    EXPECT_DOUBLE_EQ(minimumApproach(camera, *start), 1e-4);
+    // From about 150 m, 1.15^n = 1.5e6 at n = 102.
     bool limited = false;
-    for (int notch = 0; notch < 120; ++notch) {
+    for (int notch = 0; notch < 130; ++notch) {
         limited = zoomAtPixel(layers, camera, 1.0, px, py).limited || limited;
     }
     EXPECT_TRUE(limited);
     const auto under = planeUnder(camera, px, py);
     ASSERT_TRUE(under.has_value());
     const double depth = depthOf(camera, *under);
-    EXPECT_NEAR(depth, minimumApproach(layers), 1e-9 * minimumApproach(layers));
+    EXPECT_NEAR(depth, 1e-4, 1e-9 * 1e-4);
     EXPECT_NEAR((*under - *start).length(), 0.0, 1e-6);
     // Held there: another notch in moves nothing. The notch picks the ground
     // again, and its depth is a difference of coordinates some 100 m from the
-    // origin (a unit in the last place of 1.4e-14 m) over the 2.8 cm between
-    // eye and ground: good to a few parts in 1e13, so the factor that holds
+    // origin (a unit in the last place of 1.4e-14 m) over the 0.1 mm between
+    // eye and ground: good to a few parts in 1e10, so the factor that holds
     // the eye at the limit is 1 to that, and the eye moves by less than a
-    // femtometre.
+    // unit in the last place of its coordinates.
     const Vec3 eye = camera.eye();
     const auto held = zoomAtPixel(layers, camera, 1.0, px, py);
     EXPECT_TRUE(held.limited);
-    EXPECT_NEAR(held.factor, 1.0, 1e-11);
+    EXPECT_NEAR(held.factor, 1.0, 1e-8);
     EXPECT_NEAR((camera.eye() - eye).length(), 0.0, 1e-12);
-    // What the view draws through it keeps the ground in front of the near plane.
+    // What the view draws through it keeps the ground well in front of the
+    // near plane: the box reaches behind the eye, so the floor decides, and
+    // the pivot's share of it, 1e-4 x 1e-3, is far below the far plane's.
     Camera drawn = camera;
     ASSERT_TRUE(drawn.fitDepthRange(katana::cad::sceneDepthBox(layers)));
-    ASSERT_DOUBLE_EQ(drawn.nearPlane(), drawn.farPlane() * Camera::kNearFarFloor)
-        << "the box is all in front of the eye, so this proves nothing";
-    EXPECT_LT(99.0 * drawn.nearPlane(), depth);
+    EXPECT_NEAR(drawn.nearPlane(), 1e-7, 1e-15);
+    EXPECT_GT(depth / drawn.nearPlane(), 999.0);
     // And a notch out undoes a notch in.
     (void)zoomAtPixel(layers, camera, -1.0, px, py);
     const auto out = planeUnder(camera, px, py);
     ASSERT_TRUE(out.has_value());
-    EXPECT_NEAR(depthOf(camera, *out) / depth, kPerNotch, 1e-9);
+    EXPECT_NEAR(depthOf(camera, *out) / depth, kPerNotch, 1e-8);
 }
 
 TEST(SceneZoom, AnEnormousNotchCountStopsAtTheMinimumApproachInOneStep)
@@ -526,7 +537,7 @@ TEST(SceneZoom, AnEnormousNotchCountStopsAtTheMinimumApproachInOneStep)
     EXPECT_TRUE(in.limited);
     const auto under = planeUnder(camera, 700.0, 150.0);
     ASSERT_TRUE(under.has_value());
-    EXPECT_NEAR(depthOf(camera, *under), minimumApproach(layers), 1e-9);
+    EXPECT_NEAR(depthOf(camera, *under), 1e-4, 1e-12);
     const Vec3 eye = camera.eye();
     const auto out = zoomAtPixel(layers, camera, -1.0e6, 700.0, 150.0);
     EXPECT_EQ(out.factor, 1.0);
@@ -539,8 +550,8 @@ TEST(SceneZoom, AnOrthographicZoomMagnifiesByTheFactorAndStopsWhereAPerspectiveO
     // Every point of an orthographic pixel's ray stays under it, so there is
     // no depth to pick and nothing ever stalled: a notch divides the height
     // by 1.15. It stops at the height a perspective view shows at the minimum
-    // approach, 2 x 0.028284 x tan(22.5 deg) = 0.023431 m, so P keeps the
-    // limit where it was.
+    // approach, 2 x 1e-4 x tan(22.5 deg) = 8.2843e-5 m, so P keeps the limit
+    // where it was.
     const SceneLayers layers = planeScene();
     Camera camera = planeCamera(Projection::Orthographic);
     double height = camera.orthographicHeight();
@@ -550,32 +561,242 @@ TEST(SceneZoom, AnOrthographicZoomMagnifiesByTheFactorAndStopsWhereAPerspectiveO
         ASSERT_NEAR(height / camera.orthographicHeight(), kPerNotch, 1e-12) << notch;
         height = camera.orthographicHeight();
     }
+    // From 100 m / 1.15^20, 1.15^n = 7.4e4 at n = 80.
     for (int notch = 0; notch < 100; ++notch) {
         (void)zoomAtPixel(layers, camera, 1.0, 700.0, 150.0);
     }
-    const double least = 2.0 * minimumApproach(layers) * std::tan(0.5 * camera.fieldOfView());
-    EXPECT_NEAR(least, 2.0 * 0.028284271247461901 * 0.41421356237309503, 1e-12);
-    EXPECT_NEAR(camera.orthographicHeight(), least, 1e-12);
+    EXPECT_NEAR(camera.orthographicHeight(), 2.0 * 1e-4 * 0.41421356237309503, 1e-15);
 }
 
-TEST(SceneZoom, WithNothingUnderTheCursorANotchZoomsAboutTheTargetsPlaneAsItAlwaysDid)
+TEST(SceneZoom, AnOrthographicViewOfAKilometresWideSceneZoomsOnPastWhereTheScenesSizeStoppedIt)
 {
-    // Nearly level, the top of the view is sky: nothing to anchor on, so the
-    // zoom is Camera::dollyAtPixel's, to the bit.
+    // The elevation view of a 12 km ground framed 8480 m tall: 120 notches in
+    // divide that by 1.15^120 = 1.9e7, to 0.44 mm, and nothing about the
+    // scene's size stops it. A limit of a fraction of the scene's box - 1e-4
+    // of its 17 km diagonal, 1.7 m of view at a 45 degree field - held it at
+    // 1.87 m, and the elevation view had never stalled.
+    SceneLayers layers;
+    addRectangle(layers.terrain, 0.0, 0.0, 12000.0, 12000.0, 90.0);
+    layers.datum = 90.0;
+    layers.bounds = layers.terrain.bounds();
+    Camera camera;
+    camera.setViewportSize(1200, 800);
+    camera.setProjection(Projection::Orthographic);
+    camera.setStandardView(StandardView::Front);
+    camera.setTarget(Vec3(6000.0, 6000.0, 90.0));
+    camera.setDistance(16000.0);
+    camera.setOrthographicHeight(8480.0);
+    for (int notch = 0; notch < 120; ++notch) {
+        ASSERT_FALSE(zoomAtPixel(layers, camera, 1.0, 600.0, 400.0).limited) << notch;
+    }
+    const double expected = 8480.0 / std::pow(kPerNotch, 120.0);
+    EXPECT_NEAR(camera.orthographicHeight(), expected, 1e-9 * expected);
+}
+
+namespace {
+
+// A model in the middle of an empty view, as a docked view opens: ground
+// 40 m square at z = -10, the grid's square 52 m across on the datum round
+// it, seen from the south-west 150 m from (0, 0, -10). The eye is at
+// (-86.6, -86.6, 76.6); the box reaches 180 m deep, to the grid's far
+// corner (26, 26, -10): 2 x 112.6 x 0.5774 + 86.6 x 0.5774. The bottom-left
+// corner of the view meets the datum at (-89.0, -6.3, -10), off the grid and
+// 95.0 m deep; the top of the view meets it at (178, 178), 355 m deep,
+// beyond what the scene reaches.
+SceneLayers islandScene()
+{
+    SceneLayers layers;
+    addRectangle(layers.terrain, -20.0, -20.0, 20.0, 20.0, kPlane);
+    const Vec3 corners[4] = {{-26.0, -26.0, kPlane}, {26.0, -26.0, kPlane}, {26.0, 26.0, kPlane},
+                             {-26.0, 26.0, kPlane}};
+    for (int k = 0; k < 4; ++k) {
+        layers.grid.addSegment(corners[k], corners[(k + 1) % 4], kInk);
+    }
+    layers.datum = kPlane;
+    layers.bounds = layers.terrain.bounds();
+    return layers;
+}
+
+Camera islandCamera()
+{
+    Camera camera;
+    camera.setViewportSize(1200, 800);
+    camera.setStandardView(StandardView::IsoSouthWest);
+    camera.setTarget(Vec3(0.0, 0.0, kPlane));
+    camera.setDistance(150.0);
+    return camera;
+}
+
+} // namespace
+
+TEST(SceneZoom, OffTheModelANotchZoomsTowardsTheDatumAndTheEyeNeverGoesUnderIt)
+{
+    // Nothing is drawn under the bottom-left corner, and the datum there is
+    // outside the grid. The target's plane, 150 m deep, lies beyond the
+    // datum's point, 95.0 m deep, so the old anchor was under the ground and
+    // the eye went through it at -ln(1 - 95.0 / 150) / ln 1.15 = 7.2 notches:
+    // the whole view blank from then on. Anchored on the datum, its point
+    // under the cursor divides its depth by 1.15 a notch and the eye stays
+    // above it.
+    const SceneLayers layers = islandScene();
+    Camera camera = islandCamera();
+    const double px = 5.0;
+    const double py = 795.0;
+    ASSERT_FALSE(pickDrawnPoint(layers, camera, px, py).has_value())
+        << "something is drawn under the cursor, so this proves nothing";
+    const auto start = planeUnder(camera, px, py);
+    ASSERT_TRUE(start.has_value());
+    const double first = depthOf(camera, *start);
+    ASSERT_LT(first, 0.7 * camera.distance()) << "the datum is not nearer than the target's plane";
+    double depth = first;
+    for (int notch = 1; notch <= 60; ++notch) {
+        const auto result = zoomAtPixel(layers, camera, 1.0, px, py);
+        ASSERT_TRUE(result.anchor.has_value()) << notch;
+        EXPECT_EQ(result.anchor->source, ScenePick::Source::Datum) << notch;
+        ASSERT_GT(camera.eye().z, kPlane) << "the eye is under the datum at notch " << notch;
+        const auto under = planeUnder(camera, px, py);
+        ASSERT_TRUE(under.has_value()) << notch;
+        const double now = depthOf(camera, *under);
+        ASSERT_NEAR(depth / now, kPerNotch, 1e-9) << "notch " << notch;
+        depth = now;
+        EXPECT_NEAR((*under - *start).length(), 0.0, 1e-9 * first) << "notch " << notch;
+    }
+}
+
+TEST(SceneZoom, BeyondTheScenesReachANotchZoomsAsDeepAsItReachesSoNothingDrawnStalls)
+{
+    // The top of the view meets the datum 355 m deep, twice as deep as the
+    // scene reaches (180 m). The target's plane, 150 m deep, left the grid's
+    // far corner beyond the anchor, so its magnification tended to
+    // 180 / (180 - 150) = 6 and stopped; anchored on the datum's point, a
+    // notch would cover 13% of 355 m and put the model behind the eye in
+    // four. Anchored as deep as the scene reaches, the far corner divides
+    // its depth by exactly 1.15 a notch, and whatever is drawn, all of it
+    // nearer, divides its own by at least that until it leaves the view.
+    const SceneLayers layers = islandScene();
+    Camera camera = islandCamera();
+    const double px = 600.0;
+    const double py = 5.0;
+    const auto datum = planeUnder(camera, px, py);
+    ASSERT_TRUE(datum.has_value());
+    const Vec3 far(26.0, 26.0, kPlane);
+    const Vec3 ground(20.0, 20.0, kPlane); // the model's far corner
+    ASSERT_GT(depthOf(camera, *datum), 1.5 * depthOf(camera, far))
+        << "the datum is within the scene's reach, so this proves nothing";
+    double reach = depthOf(camera, far);
+    EXPECT_NEAR(reach, 2.0 * 112.6 * 0.5774 + 86.6 * 0.5774, 0.1);
+    double model = depthOf(camera, ground);
+    for (int notch = 1; notch <= 40; ++notch) {
+        const auto result = zoomAtPixel(layers, camera, 1.0, px, py);
+        ASSERT_TRUE(result.anchor.has_value()) << notch;
+        EXPECT_EQ(result.anchor->source, ScenePick::Source::Reach) << notch;
+        ASSERT_GT(camera.eye().z, kPlane) << notch;
+        const double now = depthOf(camera, far);
+        ASSERT_NEAR(reach / now, kPerNotch, 1e-9) << "notch " << notch;
+        reach = now;
+        const double modelNow = depthOf(camera, ground);
+        if (modelNow > 0.0) {
+            EXPECT_GE(model / modelNow, kPerNotch - 1e-9) << "notch " << notch;
+        }
+        model = modelNow;
+    }
+}
+
+TEST(SceneZoom, ALevelRayOutOfTheSceneTakesTheDepthTheSceneReaches)
+{
+    // Nearly level, the top of the view is sky: the ray never comes down to
+    // the datum, so the zoom goes as deep as the scene reaches, its box's
+    // furthest corner along the view.
     const SceneLayers layers = planeScene();
     Camera camera = planeCamera();
     camera.setOrientation(camera.azimuth(), 0.05);
     ASSERT_FALSE(pickDrawnPoint(layers, camera, 600.0, 20.0).has_value())
         << "the pixel is not sky, so this proves nothing";
+    ASSERT_GT(camera.rayThroughPixel(600.0, 20.0).direction.z, 0.0) << "not a rising ray";
+    double reach = 0.0;
+    for (const double x : {-100.0, 100.0}) {
+        for (const double y : {-100.0, 100.0}) {
+            reach = std::max(reach, depthOf(camera, Vec3(x, y, kPlane)));
+        }
+    }
+    const auto anchor = katana::cad::zoomAnchor(layers, camera, 600.0, 20.0);
+    ASSERT_TRUE(anchor.has_value());
+    EXPECT_EQ(anchor->source, ScenePick::Source::Reach);
+    EXPECT_NEAR(anchor->depth, reach, 1e-9 * reach);
+    EXPECT_NEAR(depthOf(camera, anchor->point), reach, 1e-9 * reach);
+}
+
+TEST(SceneZoom, WithTheWholeSceneBehindTheEyeANotchZoomsAboutTheTargetsPlaneAsItAlwaysDid)
+{
+    // Turned round to face away from the scene there is nothing in front to
+    // go towards: the zoom is Camera::dollyAtPixel's, to the bit.
+    const SceneLayers layers = planeScene();
+    Camera camera = planeCamera();
+    camera.setTarget(Vec3(-300.0, -300.0, 50.0));
+    camera.setOrientation(camera.azimuth() + 3.141592653589793, 0.2);
+    ASSERT_FALSE(katana::cad::zoomAnchor(layers, camera, 600.0, 400.0).has_value())
+        << "something is in front of the eye, so this proves nothing";
     Camera expected = camera;
-    expected.dollyAtPixel(1.0 / kPerNotch, 600.0, 20.0);
-    const auto result = zoomAtPixel(layers, camera, 1.0, 600.0, 20.0);
+    expected.dollyAtPixel(1.0 / kPerNotch, 600.0, 400.0);
+    const auto result = zoomAtPixel(layers, camera, 1.0, 600.0, 400.0);
     EXPECT_FALSE(result.anchor.has_value());
     EXPECT_EQ(result.factor, 1.0 / kPerNotch);
     EXPECT_EQ(camera.target().x, expected.target().x);
     EXPECT_EQ(camera.target().y, expected.target().y);
     EXPECT_EQ(camera.target().z, expected.target().z);
     EXPECT_EQ(camera.distance(), expected.distance());
+}
+
+TEST(SceneZoom, OneStrayEntityAtTheOriginNoLongerStopsTheZoomHundredsOfMetresFromASurvey)
+{
+    // A survey at MGA coordinates and one point left at (0, 0), with the
+    // grid SceneBuilder stands round them, reaching 15% of the 6200 km span
+    // past them: the scene's box is 8345 km across. A limit of 1e-4 of that
+    // held the eye 830 m from the ground, and the near plane - a millionth of
+    // the far one, the grid's far corner - was a metre out. What draws the view is good
+    // far closer: the point zoomed towards is 6.2e6 m from the origin, where
+    // 16 x 2^-53 of that over a tenth of an 800 px view's pixel angle,
+    // 2 tan(22.5 deg) / 800, is 0.106 mm.
+    SceneLayers layers;
+    addRectangle(layers.terrain, 300000.0, 6200000.0, 300200.0, 6200200.0, 30.0);
+    layers.entities.addPoint(layers.entities.addVertex(Vec3(0.0, 0.0, 30.0), kInk), 5.0f, 1.5f);
+    layers.datum = 30.0;
+    layers.bounds = layers.terrain.bounds();
+    layers.bounds.expand(layers.entities.bounds());
+    katana::cad::SceneBuilder builder;
+    builder.buildGrid(katana::cad::SceneOptions{}, layers);
+    ASSERT_FALSE(layers.grid.empty());
+    Camera camera;
+    camera.setViewportSize(1200, 800);
+    camera.setStandardView(StandardView::IsoSouthWest);
+    camera.setTarget(Vec3(300100.0, 6200100.0, 30.0));
+    camera.setDistance(400.0);
+    const auto start = planeUnderAt(camera, 600.0, 300.0, 30.0);
+    ASSERT_TRUE(start.has_value());
+    ASSERT_TRUE(start->x > 300000.0 && start->x < 300200.0 && start->y > 6200000.0 &&
+                start->y < 6200200.0)
+        << "the cursor is not on the survey";
+    const double expected = 16.0 * 0x1.0p-53 * start->length() /
+                            (0.1 * 2.0 * 0.41421356237309503 / 800.0);
+    EXPECT_NEAR(expected, 1.06e-4, 0.01e-4);
+    EXPECT_NEAR(minimumApproach(camera, *start), expected, 1e-9 * expected);
+    // From 468 m to 0.106 mm, 1.15^n = 4.4e6 at n = 110.
+    for (int notch = 0; notch < 140; ++notch) {
+        (void)zoomAtPixel(layers, camera, 1.0, 600.0, 300.0);
+    }
+    const auto under = planeUnderAt(camera, 600.0, 300.0, 30.0);
+    ASSERT_TRUE(under.has_value());
+    // A depth of 0.1 mm taken as a difference of coordinates 6.2e6 m from
+    // the origin, whose unit in the last place is 9.3e-10 m: 1e-5 of it.
+    const double depth = depthOf(camera, *under);
+    EXPECT_NEAR(depth, expected, 1e-4 * expected);
+    EXPECT_NEAR((*under - *start).length(), 0.0, 1e-6);
+    // And the view draws it: the near plane stays a thousand times nearer,
+    // where a millionth of the far plane alone would lie beyond the ground.
+    Camera drawn = camera;
+    ASSERT_TRUE(drawn.fitDepthRange(katana::cad::sceneDepthBox(layers)));
+    EXPECT_GT(depth / drawn.nearPlane(), 990.0);
+    EXPECT_GT(drawn.farPlane() * Camera::kNearFarFloor, 1000.0 * depth);
 }
 
 TEST(SceneZoom, NoNotchesNoNumberNoPixelOrNoViewportChangeNothing)
@@ -602,15 +823,35 @@ TEST(SceneZoom, NoNotchesNoNumberNoPixelOrNoViewportChangeNothing)
     EXPECT_EQ(unsized.distance(), before.distance());
 }
 
-TEST(SceneZoom, AnEmptySceneZoomsAboutTheTargetsPlaneDownToAFloorOfTwoTenthsOfAMillimetre)
+TEST(SceneZoom, AnEmptySceneZoomsAboutTheTargetsPlaneDownToATenthOfAMillimetre)
 {
-    // No box: the floor is 1e-4 of a 2 m patch, what Camera::frame makes of
-    // one point.
+    // Nothing to go towards: the target's plane, as before, down to the
+    // near plane's limit, 1e-7 / 1e-3 (the target at the origin makes the
+    // double arithmetic's bound nothing).
     const SceneLayers empty;
-    EXPECT_DOUBLE_EQ(minimumApproach(empty), 2.0e-4);
     Camera camera = planeCamera();
     for (int notch = 0; notch < 200; ++notch) {
-        (void)zoomAtPixel(empty, camera, 1.0, 600.0, 400.0);
+        const auto result = zoomAtPixel(empty, camera, 1.0, 600.0, 400.0);
+        ASSERT_FALSE(result.anchor.has_value());
     }
-    EXPECT_NEAR(camera.distance(), 2.0e-4, 1e-15);
+    EXPECT_NEAR(camera.distance(), 1.0e-4, 1e-15);
+}
+
+TEST(SceneZoom, TheMinimumApproachIsTheLargerOfTheNearPlanesLimitAndTheArithmeticsBound)
+{
+    // tol::kGeometric / Camera::kNearPivotFloor for a point near the origin;
+    // 16 x 2^-53 |p| over a tenth of the pixel's angle for one far from it,
+    // in proportion to its distance and to the view's height in pixels.
+    Camera camera = planeCamera();
+    EXPECT_DOUBLE_EQ(minimumApproach(camera, Vec3(0.0, 0.0, 0.0)), 1e-4);
+    EXPECT_DOUBLE_EQ(minimumApproach(camera, Vec3(3000.0, 4000.0, 0.0)), 1e-4);
+    const double angle = 2.0 * 0.41421356237309503 / 800.0;
+    const Vec3 far(0.0, 6.0e9, 0.0); // an MGA northing in millimetres
+    EXPECT_NEAR(minimumApproach(camera, far), 16.0 * 0x1.0p-53 * 6.0e9 / (0.1 * angle),
+                1e-9 * 0.1);
+    camera.setViewportSize(1200, 1600);
+    EXPECT_NEAR(minimumApproach(camera, far), 2.0 * 16.0 * 0x1.0p-53 * 6.0e9 / (0.1 * angle),
+                1e-9 * 0.2);
+    // A point that is not finite has no bound of its own.
+    EXPECT_DOUBLE_EQ(minimumApproach(camera, Vec3(std::nan(""), 0.0, 0.0)), 1e-4);
 }

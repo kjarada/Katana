@@ -210,6 +210,40 @@ TEST(RenderCamera, AnOrbitAfterFramingKeepsTheBoxInsideTheFittedDepthRange)
     }
 }
 
+TEST(RenderCamera, WithThePivotCloseTheNearPlaneKeepsAThousandthOfItsDistanceInFront)
+{
+    // The eye 1 m from a pivot at the origin, on a ground 2000 km square and
+    // 1 m thick, seen from the south-west: forward is (1, 1, -1) / sqrt 3 and
+    // the eye (-1, -1, 1) / sqrt 3. The far plane is the far bottom corner,
+    // (1e6 + 1/sqrt 3, 1e6 + 1/sqrt 3, -1 - 1/sqrt 3) . forward =
+    // 2e6 / sqrt 3 + 1 + 1/sqrt 3 deep, 1.1547e6 m, plus the fit's pad of a
+    // thousandth of the box's diagonal, sqrt(8e12 + 1) / 1000 = 2828 m. A
+    // millionth of that, 1.157 m, put the near plane beyond the pivot and cut
+    // away what the view looks at. A thousandth of the pivot's distance: 1 mm.
+    Camera camera = defaultCamera(800, 600);
+    camera.setStandardView(StandardView::IsoSouthWest);
+    camera.setDistance(1.0);
+    const katana::math::AABB ground(Vec3(-1.0e6, -1.0e6, -1.0), Vec3(1.0e6, 1.0e6, 0.0));
+    ASSERT_TRUE(camera.fitDepthRange(ground));
+    constexpr double kInvSqrt3 = 0.57735026918962573;
+    const double pad = 1.0e-3 * std::sqrt(8.0e12 + 1.0);
+    EXPECT_NEAR(camera.farPlane(), 2.0e6 * kInvSqrt3 + 1.0 + kInvSqrt3 + pad, 1e-6);
+    ASSERT_GT(camera.farPlane() * Camera::kNearFarFloor, 1.0)
+        << "a millionth of the far plane would not reach the pivot, so this proves nothing";
+    EXPECT_DOUBLE_EQ(camera.nearPlane(), 1.0e-3);
+    const auto pivot = camera.project(camera.target());
+    ASSERT_TRUE(pivot.has_value());
+    EXPECT_GT(pivot->z, 0.0);
+    EXPECT_LT(pivot->z, 1.0);
+
+    // Not zoomed that deep, the planes are the ones they always were: a
+    // millionth of the far one.
+    camera.setDistance(5000.0);
+    ASSERT_TRUE(camera.fitDepthRange(ground));
+    ASSERT_LT(camera.farPlane() * Camera::kNearFarFloor, 5000.0 * Camera::kNearPivotFloor);
+    EXPECT_DOUBLE_EQ(camera.nearPlane(), camera.farPlane() * Camera::kNearFarFloor);
+}
+
 TEST(RenderCamera, FramingALongCorridorFillsTheWidthNotASliverOfIt)
 {
     // A 12 km x 200 m corridor seen from above in a 1600 x 1000 view. The

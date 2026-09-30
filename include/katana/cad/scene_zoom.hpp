@@ -13,12 +13,13 @@
 // ground nearer than the plane the eye went through the ground and the view
 // went blank.
 //
-// So a notch now finds what IS drawn under the cursor (pickDrawnPoint) and
-// moves the pivot to its depth first (Camera::setPivotDepth), which moves
-// nothing on screen. The dolly then magnifies exactly that point by the
-// notch's factor, the eye comes the same fraction nearer to it every notch
-// and never reaches it, and the pan, the orbit and the edges' fade, which all
-// go by the pivot's distance, go by that point's.
+// So a notch now finds what the cursor points at (zoomAnchor: what is drawn
+// there, else the datum's plane or the depth the scene reaches) and moves
+// the pivot to its depth first (Camera::setPivotDepth), which moves nothing
+// on screen. The dolly then magnifies exactly that point by the notch's
+// factor, the eye comes the same fraction nearer to it every notch and never
+// reaches it, and the pan, the orbit and the edges' fade, which all go by the
+// pivot's distance, go by that point's.
 //
 // Headless and free of Qt: RenderViewWidget calls zoomAtPixel for the wheel
 // over either renderer, and so can anything else that zooms a 3D view.
@@ -31,12 +32,16 @@
 
 namespace katana::cad {
 
-// What is drawn under a pixel.
+// What is under a pixel.
 struct ScenePick {
     enum class Source {
         Terrain, // a triangle, line or point of a surface or a mesh
         Drawing, // a triangle, line or point of the drawing
         Datum,   // nothing drawn: the datum's plane, where the grid stands
+        // Nothing drawn, and the datum's plane (if the ray meets it at all)
+        // further than the scene reaches: the ray's point as deep as the
+        // furthest corner of sceneDepthBox (zoomAnchor only).
+        Reach,
     };
     // Where the ray through the pixel meets a triangle or the datum's plane;
     // for a line, its point nearest the ray; for a point, the point.
@@ -80,26 +85,57 @@ struct PickOptions {
                                                       double x, double y,
                                                       const PickOptions& options = {});
 
-// How near a zoom may bring the eye to what it zooms towards: this fraction
-// of the diagonal of sceneDepthBox, and of 2 m at least (a box that small is
-// one point, which Camera::frame shows as a 2 m patch): 3.3 cm on the sample
-// terrain, 20 cm on a 1.2 x 0.8 km site. What sets it is the GPU, which
-// draws in float relative to its scene origin, so its error grows as the
-// view closes on a point away from that origin. Measured with the GPU's own
-// matrix code on an 800 px tall view (docs/render.md, "Zooming towards the
-// cursor"), at this distance it is 0.14-0.16 px, on the sample 80 m from the
-// origin and on the site 460 m; at half of it 0.3-0.4 px, at an eighth of it
-// 1.1-1.7 px. The near plane, which fitDepthRange puts at a millionth of the
-// box's diagonal at most once the eye is inside the box, measured 160 to 450
-// times nearer than the point zoomed into there: it clips nothing of it.
-inline constexpr double kMinimumApproachFraction = 1.0e-4;
-[[nodiscard]] double minimumApproach(const SceneLayers& layers);
+// What a zoom about pixel (x, y) goes towards: what is drawn there
+// (pickDrawnPoint); with nothing drawn there - two thirds of a docked view
+// as it opens, the ground beyond the grid and the background round the
+// model - where the ray meets the datum's plane, however far out, or the
+// ray's point as deep as the scene reaches (the furthest corner of
+// sceneDepthBox along the view direction), whichever is nearer. The datum
+// keeps the eye above the ground a zoom goes towards, where the target's
+// plane put the anchor under it and the eye dived; the reach keeps a pixel
+// near the horizon from anchoring kilometres off in one notch, and leaves
+// nothing drawn beyond the anchor, so nothing drawn stalls: it all grows
+// until it leaves the view. A level or rising ray takes the reach. Nothing
+// when the whole scene is behind the eye, or for what pickDrawnPoint
+// refuses.
+[[nodiscard]] std::optional<ScenePick> zoomAnchor(const SceneLayers& layers,
+                                                  const katana::render::Camera& camera, double x,
+                                                  double y);
+
+// How near a zoom may bring the eye to `point` (a pivot's distance): where
+// what draws the view stops drawing it right, and no nearer than that
+// whatever the scene around it - a limit tied to the scene's box stopped the
+// zoom 930 m from a site at MGA coordinates whose drawing held one stray
+// entity at the origin. The larger of:
+//
+//   * tol::kGeometric / Camera::kNearPivotFloor, 0.1 mm: below it the near
+//     plane, which fitDepthRange keeps a thousandth of the pivot's distance
+//     in front of the eye, would reach its own floor of tol::kGeometric and
+//     stop keeping clear of what the zoom went towards;
+//   * where the double arithmetic that projects a point - the view's
+//     translation, as far from the world's origin as the point, taken from
+//     it - is out by kZoomPrecisionPixels of a pixel. Each rounding is at
+//     most u = 2^-53 of what it holds, and a dot product of n terms is out by
+//     at most n u of the sum of their sizes (Higham, Accuracy and Stability
+//     of Numerical Algorithms, 2nd ed., section 3.1); the view's translation
+//     (3 terms), the projection times the view (4) and the matrix times the
+//     point (4, of the point and the translation, each |point| in size) add
+//     to at most 16 u |point|: 0.11 mm at an MGA northing of 6.2e6 m on an
+//     800 px tall view, and the same length whatever the drawing's unit,
+//     which is what binds a survey drawn in millimetres.
+//
+// The GPU draws in float relative to a scene origin, whose error closes in
+// far sooner; the GPU view keeps that origin next to the pivot instead
+// (gpu::originErrorPixels, docs/gpu.md), so its limit is this one.
+inline constexpr double kZoomPrecisionPixels = 0.1;
+[[nodiscard]] double minimumApproach(const katana::render::Camera& camera,
+                                     const katana::math::Vec3& point);
 
 struct ZoomResult {
     // What the zoom went towards; nothing when it went about the pivot's
     // plane, as it always had: under an orthographic projection, where every
-    // point of a pixel's ray stays under the pixel, or with nothing under the
-    // cursor.
+    // point of a pixel's ray stays under the pixel, or with the whole scene
+    // behind the eye.
     std::optional<ScenePick> anchor;
     // What the distance and the orthographic height were multiplied by:
     // below 1 is nearer, 1 is no move.
@@ -110,14 +146,14 @@ struct ZoomResult {
 
 // Zooms `camera` by `notches` wheel notches, positive in, each
 // Camera::kZoomPerNotch, about pixel (x, y). Under a perspective projection
-// the pivot first moves to the depth of what is drawn under the pixel
-// (pickDrawnPoint, Camera::setPivotDepth), so that point stays under the
-// pixel and its footprint shrinks by exactly the factor. Zooming in stops at
-// minimumApproach: the pivot no nearer than that under a perspective
-// projection, and under an orthographic one no smaller a view than a
-// perspective view shows at that distance, 2 d tan(fov / 2), so P shows the
-// same limit. Zooming out is not limited. Zero, non-finite notches, a pixel
-// that is not finite or a camera with no viewport change nothing.
+// the pivot first moves to the depth of what the pixel points at
+// (zoomAnchor, Camera::setPivotDepth), so that point stays under the pixel
+// and its footprint shrinks by exactly the factor. Zooming in stops at
+// minimumApproach of that point - of the target without one - and under an
+// orthographic projection at the view a perspective view shows there, 2 d
+// tan(fov / 2) tall, so P shows the same limit. Zooming out is not limited.
+// Zero, non-finite notches, a pixel that is not finite or a camera with no
+// viewport change nothing.
 ZoomResult zoomAtPixel(const SceneLayers& layers, katana::render::Camera& camera, double notches,
                        double x, double y);
 

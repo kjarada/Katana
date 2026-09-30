@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 
 #include <QPoint>
@@ -70,10 +71,14 @@ class GpuSceneView final : public QRhiWidget {
     // frame, and only then. Call it when the scene changes, not per frame.
     void setDrawList(const katana::render::DrawList& list);
     // The same for a scene of layers drawn with their own depth rules
-    // (GpuRenderer::setLayers), and for one layer that changed alone
-    // (GpuRenderer::updateLayer) - a selection, faded edges.
-    void setLayers(std::span<const LayerSource> layers);
+    // (GpuRenderer::setLayers, packed against `origin` when one is given),
+    // and for one layer that changed alone (GpuRenderer::updateLayer) - a
+    // selection, faded edges.
+    void setLayers(std::span<const LayerSource> layers,
+                   const std::optional<katana::math::Vec3>& origin = std::nullopt);
     void updateLayer(std::size_t index, const katana::render::DrawList& list);
+    // What the layers are packed against (GpuRenderer::origin).
+    [[nodiscard]] katana::math::Vec3 sceneOrigin() const { return renderer_.origin(); }
 
     void setFrameSettings(const FrameSettings& settings);
     [[nodiscard]] const FrameSettings& frameSettings() const { return settings_; }

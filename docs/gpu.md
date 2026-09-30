@@ -195,12 +195,42 @@ site at the origin, 0 differing pixels on the GPU and on WARP; packed against a
 zero origin instead, as a GPU path without the rule would, 510-523 pixels
 differ (`ASceneAtMgaCoordinatesDrawsLikeTheSameSceneAtTheOrigin`).
 
-The origin bounds the error, it does not end it: zoomed close to a point
-hundreds of metres from the origin, the float offsets of the ground round to a
-fraction of a pixel that grows as the view closes in. So a 3D view's zoom
-stops at a ten-thousandth of the scene's depth box (`cad::minimumApproach`),
-where it measured 0.14-0.16 px on an 800 px tall view and would reach a pixel
-at an eighth of that distance (docs/render.md, "Zooming towards the cursor").
+**The origin follows a deep zoom.** The centre of the scene bounds the error
+only while the view is about as large as the scene. Zoomed in close to a point
+far from it, the float offsets there round to more than a pixel, and one stray
+entity at (0, 0) under a survey at MGA coordinates puts the centre of the
+scene's box 3000 km from the survey, where a float steps in 0.25 m. So the host
+packs every layer again against the camera's pivot once the bound on the error
+there passes a twentieth of a pixel (`gpu::originErrorPixels`,
+`kOriginErrorPixels`; `RenderViewWidget::prepareGpuFrame`, before the layers
+are sent). The bound is 10 u |pivot - origin| over a pixel's footprint at the
+pivot, u = 2^-24: a vertex's offset and the matrix's translation are rounded
+once each, and the shader's four-term dot product rounds both again (Higham's
+bound for a dot product, `scene_origin.hpp` works the count). Measured with
+the shader's float arithmetic, the error stays under the bound for origins
+from 1 m to 3000 km from a point seen from 0.2 m, and with the origin at the
+pivot it is under a thousandth of a pixel
+(`RelativeViewProjection.AtTheOriginsErrorBoundThePivotIsDrawnWithinItAndItsOwnOriginDrawsItExactly`).
+On the device, a line 3100 km from the scene's centre and a millimetre a pixel
+is drawn where it is only when packed against the pivot
+(`GpuLayers.LayersPackedAgainstThePivotDrawASurveyZoomedInCloseWhereItIs`,
+both devices), and the 3D view repacks as it zooms
+(`RenderViewGpu.OnTheDesktopADeepZoomFarFromTheScenesCentrePacksTheLayersAgainstThePivot`:
+without the repack the origin stays 2950 km off and the line lands off the
+cursor, a stub at the top edge).
+
+A repack is a pass over every vertex, 1.8 ms for 66k vertices and 32 ms for
+526k (`BM_GpuPack`, above), so it happens when the bound is crossed and not
+before: the new origin is the pivot itself, and the bound is crossed again
+only once the pivot has drifted 0.05 / (10 x 2^-24) = 84 000 of the view's
+pixels from it. Before, the zoom stopped instead, at a ten-thousandth of the
+scene's box: 3.3 cm on the sample, but 830 m from the survey with the stray
+entity, and on the software view too, which has no such error
+(docs/render.md, "Zooming towards the cursor"). Rejected: packing each vertex
+as two floats, high and low, and subtracting the eye's in the shader (as
+globe viewers do), which ends the error everywhere but doubles every vertex
+and changes every shader, for a case a repack in a few frames of a deep zoom
+covers.
 
 ## Shaders
 
@@ -421,7 +451,14 @@ hands framing over through `onZoomExtents`, and the host zooms towards what
 it built under the cursor, `Camera::kZoomPerNotch` a notch
 (`RenderViewWidget::zoomAtPixel`; docs/render.md, "Zooming towards the
 cursor"). The child holds only packed lists, so without a host it zooms about
-the target's plane - which stalls over ground beyond that plane.
+the target's plane - which stalls over ground beyond that plane. The desktop
+case that holds the hand-over puts the cursor on a point of its line 21.7 m
+beyond the target's plane, where the child's own zoom magnifies by 1.124 a
+notch instead of 1.15, so it fails without the hand-over; with the cursor on
+the target itself, as it first was, both zooms agree and it could not
+(`RenderViewGpu.OnTheDesktopTheWheelOverTheGpuViewZoomsTowardsWhatIsUnderTheCursor`;
+run by hand on the Windows platform on 2026-09-30, passing, and failing at
+the first notch with 1.1245 when `makeGpuView` did not hand the wheel over).
 
 Checked only on Linux (xcb under Xvfb, lavapipe), and to be checked on the
 Windows platform by hand: floating a 3D dock creates a new top-level window,
@@ -503,8 +540,14 @@ against survey coordinates) is compared pixel for pixel.
   `KATANA_GPU_TEST_PLATFORM=xcb` itself. The same holds for the widget
   suite's `RenderViewGpu.OnTheDesktop...` cases with
   `KATANA_WIDGET_TEST_PLATFORM=windows`, the wheel's hand-over to the host
-  among them; that the child hands the wheel over at all needs no device
-  (`TheWheelIsHandedToTheHostThatZoomsTowardsWhatIsUnderTheCursor`).
+  and the repack of a deep zoom among them; that the child hands the wheel
+  over at all needs no device
+  (`TheWheelIsHandedToTheHostThatZoomsTowardsWhatIsUnderTheCursor`). Run
+  either binary with `C:/msys64/ucrt64/bin` first on `PATH`, as ctest does:
+  with `build/release/bin` and its deployed copies of the runtime first, the
+  widget suite hung with nothing printed - even `--gtest_list_tests`, offscreen
+  too - where the same binary lists its cases in a second the other way
+  (2026-09-30; why, not found).
 * A `QRhiWidget` that was never shown can be grabbed ONCE. Qt gives each grab
   of such a widget a new QRhi without calling `initialize()` for it, so every
   grab after the first reads back nothing - all zeros, about 3 s a grab on this

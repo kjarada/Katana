@@ -557,6 +557,25 @@ if(TARGET katana)
             "-DEXPECT=input arg=input source=cloud name=survey_scan id=[0-9]+ points=29512 ground=yes excluded=10488 classes=2"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_from_cloud_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The 3D view's wheel in the real window (docs/render.md, "Zooming towards
+    # the cursor"). SURFACE FROM FILE opens a 3D view of the sample terrain
+    # docked beside the plan, 328 x 497, and ~RenderView2 turns the wheel over
+    # its near ground as a person does, ten notches at a time. The wheel once
+    # anchored every notch on the plane through the orbit target, which there
+    # lies under the ground: the eye went through it between the tenth and the
+    # twentieth notch, and the view was blank (painted=0) at the twentieth and
+    # the thirtieth. Each ?RenderView2 paints the view afresh and says how many
+    # of its pixels are not the background - never none, zooming in or back
+    # out - and where its camera is.
+    add_test(NAME qt_the_3d_views_wheel_keeps_zooming_into_the_ground_under_the_cursor_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\"|?RenderView2|~RenderView2 160,330 10|?RenderView2|~RenderView2 160,330 10|?RenderView2|~RenderView2 160,330 10|?RenderView2|~RenderView2 160,330 -30|?RenderView2|%View2"
+            "-DEXPECT=RenderView2: painted=[1-9][0-9]* target=[^\r\n]* projection=perspective[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: -30 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* "
+            "-DFORBID=painted=0 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/the_3d_views_wheel_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # File > New takes the imported raster with the drawing (audit QT-17):
     # afterwards there is no raster for Surface From Raster to use. Before
     # the fix the orthophoto of the discarded drawing stayed behind the new
@@ -634,6 +653,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_CURRENT_BINARY_DIR}/vector_export_dialog_headless.gpkg")
     set_tests_properties(qt_vector_export_dialog_clean PROPERTIES FIXTURES_SETUP vector_export_dialog_clean)
     set_tests_properties(qt_surface_from_raster_headless qt_surface_from_cloud_headless
+                         qt_the_3d_views_wheel_keeps_zooming_into_the_ground_under_the_cursor_headless
                          qt_new_drops_reference_data_headless
                          qt_dataset_info_headless qt_import_options_headless
                          qt_vector_import_dialog_previews_its_line_headless

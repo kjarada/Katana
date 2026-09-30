@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
+
+#include "katana/math/numerics.hpp"
 
 namespace katana::cad {
 
@@ -183,15 +186,17 @@ void scan(const DrawList& list, ScenePick::Source source, const RayFrame& frame,
         sides.resize(positions.size());
         for (std::size_t i = 0; i < positions.size(); ++i) {
             const Vec3 q = frame.of(positions[i]);
-            sides[i] = linework ? static_cast<std::uint8_t>(raySides(q) | apertureSides(q, aperture))
-                                : raySides(q);
+            sides[i] = linework
+                           ? static_cast<std::uint8_t>(raySides(q) | apertureSides(q, aperture))
+                           : raySides(q);
         }
     }
     for (const auto& triangle : list.triangles) {
         if (cull && (sides[triangle.a] & sides[triangle.b] & sides[triangle.c] & kRaySides) != 0) {
             continue;
         }
-        if (const auto s = alongRay(frame.of(positions[triangle.a]), frame.of(positions[triangle.b]),
+        if (const auto s = alongRay(frame.of(positions[triangle.a]),
+                                    frame.of(positions[triangle.b]),
                                     frame.of(positions[triangle.c]))) {
             nearest.offer(frame.origin + frame.w * *s, source);
         }
@@ -248,15 +253,15 @@ std::optional<ScenePick> pickDrawnPoint(const SceneLayers& layers, const Camera&
     Nearest nearest(camera.eye(), camera.forward());
     std::vector<std::uint8_t> sides;
     scan(layers.terrain, ScenePick::Source::Terrain, frame, aperture, options.cull, sides, nearest);
-    scan(layers.entities, ScenePick::Source::Drawing, frame, aperture, options.cull, sides, nearest);
+    scan(layers.entities, ScenePick::Source::Drawing, frame, aperture, options.cull, sides,
+         nearest);
     if (nearest.pick()) {
         return nearest.pick();
     }
 
     // Nothing drawn under the pixel: the datum's plane, but only inside the
-    // scene's box in plan, where the grid is drawn. Further out a pixel near
-    // the horizon would anchor the zoom kilometres away, on ground where
-    // nothing is.
+    // scene's box in plan, where the grid is drawn. Further out nothing is
+    // drawn; zoomAnchor goes on from there.
     if (frame.w.z == 0.0) {
         return std::nullopt;
     }
@@ -274,11 +279,68 @@ std::optional<ScenePick> pickDrawnPoint(const SceneLayers& layers, const Camera&
     return nearest.pick();
 }
 
-double minimumApproach(const SceneLayers& layers)
+std::optional<ScenePick> zoomAnchor(const SceneLayers& layers, const Camera& camera, double x,
+                                    double y)
 {
+    if (auto drawn = pickDrawnPoint(layers, camera, x, y)) {
+        return drawn;
+    }
+    if (camera.viewportWidth() <= 0 || camera.viewportHeight() <= 0 || !std::isfinite(x) ||
+        !std::isfinite(y)) {
+        return std::nullopt;
+    }
     const AABB box = sceneDepthBox(layers);
-    const double diagonal = box.empty() ? 0.0 : (box.max - box.min).length();
-    return kMinimumApproachFraction * std::max(diagonal, 2.0 * Camera::kMinimumFrameRadius);
+    if (box.empty()) {
+        return std::nullopt;
+    }
+    const Vec3 eye = camera.eye();
+    const Vec3 forward = camera.forward();
+    // How deep the scene reaches: its box's furthest corner along the view.
+    double reach = -std::numeric_limits<double>::infinity();
+    for (int corner = 0; corner < 8; ++corner) {
+        const Vec3 p((corner & 1) != 0 ? box.max.x : box.min.x,
+                     (corner & 2) != 0 ? box.max.y : box.min.y,
+                     (corner & 4) != 0 ? box.max.z : box.min.z);
+        reach = std::max(reach, (p - eye).dot(forward));
+    }
+    const katana::math::Ray ray = camera.rayThroughPixel(x, y);
+    const Vec3 w = ray.direction.normalized();
+    // Depth per unit along the ray: positive for every pixel's ray, which
+    // lies inside the frustum.
+    const double slope = w.dot(forward);
+    if (!(reach > 0.0) || !(slope > 0.0)) {
+        return std::nullopt; // the whole scene is behind the eye
+    }
+    if (w.z != 0.0) {
+        const double s = (layers.datum - ray.origin.z) / w.z;
+        const Vec3 point = ray.origin + w * s;
+        const double depth = (point - eye).dot(forward);
+        if (s >= 0.0 && depth > 0.0 && depth <= reach) {
+            return ScenePick{point, depth, ScenePick::Source::Datum};
+        }
+    }
+    // As deep as the scene reaches, measured from where the ray starts: the
+    // eye, or its own point of an orthographic view's plane.
+    const double start = (ray.origin - eye).dot(forward);
+    const double along = (reach - start) / slope;
+    if (!(along > 0.0)) {
+        return std::nullopt;
+    }
+    return ScenePick{ray.origin + w * along, reach, ScenePick::Source::Reach};
+}
+
+double minimumApproach(const Camera& camera, const Vec3& point)
+{
+    namespace tol = katana::math::tolerance;
+    const double nearPlane = tol::kGeometric / Camera::kNearPivotFloor;
+    const double height = static_cast<double>(std::max(camera.viewportHeight(), 1));
+    // The pixel's angle: a footprint at depth d is d times it.
+    const double angle = 2.0 * std::tan(camera.fieldOfView() * 0.5) / height;
+    constexpr double kUnitRoundoff = 0.5 * std::numeric_limits<double>::epsilon(); // 2^-53
+    constexpr double kRoundings = 16.0;
+    const double size = point.isFinite() ? point.length() : 0.0;
+    const double precision = kRoundings * kUnitRoundoff * size / (angle * kZoomPrecisionPixels);
+    return std::max(nearPlane, precision);
 }
 
 ZoomResult zoomAtPixel(const SceneLayers& layers, Camera& camera, double notches, double x,
@@ -289,18 +351,18 @@ ZoomResult zoomAtPixel(const SceneLayers& layers, Camera& camera, double notches
         camera.viewportWidth() <= 0 || camera.viewportHeight() <= 0) {
         return result;
     }
-    const double nearest = minimumApproach(layers);
     // The least factor the minimum approach allows (above 1: none).
     double least = 0.0;
     if (camera.projection() == Projection::Perspective) {
-        result.anchor = pickDrawnPoint(layers, camera, x, y);
+        result.anchor = zoomAnchor(layers, camera, x, y);
         if (result.anchor) {
             camera.setPivotDepth(result.anchor->depth);
         }
-        least = nearest / camera.distance();
+        const Vec3 towards = result.anchor ? result.anchor->point : camera.target();
+        least = minimumApproach(camera, towards) / camera.distance();
     } else {
-        least = 2.0 * nearest * std::tan(camera.fieldOfView() * 0.5) /
-                camera.orthographicHeight();
+        least = 2.0 * minimumApproach(camera, camera.target()) *
+                std::tan(camera.fieldOfView() * 0.5) / camera.orthographicHeight();
     }
     // Underflows to 0 for an enormous zoom in, which the limit then catches;
     // an enormous zoom out overflows and is refused below.
