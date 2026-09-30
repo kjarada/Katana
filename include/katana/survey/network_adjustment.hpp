@@ -187,7 +187,7 @@ struct LevelAdjustmentResult {
 //   AdjustmentFailure         no usable observations, no free coordinates, fewer
 //                             equations than unknowns, datum defect / rank
 //                             deficiency (the message names the unresolved
-//                             coordinates), coincident stations, divergence
+//                             unknowns), coincident stations, divergence
 [[nodiscard]] katana::core::Result<HorizontalAdjustmentResult>
 adjustHorizontalNetwork(const SurveyNetwork& network, const AdjustmentOptions& options = {});
 

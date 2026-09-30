@@ -1090,7 +1090,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_resection}\"" -c "LIST")
     set_tests_properties(cli.survey_import_resection_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=4[\r\n]+reduction_warning text=\"height difference at S1: K1 is flagged by the Baarda w, critical 3\\.29 \\(value -301\\.57\\).*resection setup=S1 point=S1 from=K1,K2 northing=5100\\.0000[0-9]* easting=1000\\.00032[0-9]* height=20\\.46772[0-9]* [^\r\n]* redundancy=1\\+1 flagged=2 dilution=[0-9.]+ weak=0 checks=1 file_offset=none unapplied_scale_factor=none[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K1\" [^\r\n]* state=flagged[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K2\" [^\r\n]* state=flagged[\r\n]+6 entities[\r\n]+[^\r\n]+ at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1000\\.00032[0-9]*,5100(\\.0000[0-9]*)?[\r\n]+[^\r\n]+ at 1050\\.00032[0-9]*,5099\\.74987[0-9]*[\r\n]+[^\r\n]+ at 1050\\.30814[0-9]*,5095\\.59850[0-9]*[\r\n]+[^\r\n]+ at 1007\\.07106[0-9]*,5007\\.07106[0-9]*"
+        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=4[\r\n]+reduction_warning text=\"height difference at S1: K1 is flagged by the Baarda w, critical 3\\.29 \\(value -301\\.57\\).*resection setup=S1 point=S1 from=K1,K2 northing=5100\\.0000[0-9]* easting=1000\\.00032[0-9]* height=20\\.46772[0-9]* [^\r\n]* redundancy=1\\+1 flagged=2 dilution=[0-9.]+ weak=0 checks=1 file_offset=none radiated_from=none radiation_offset=none unapplied_scale_factor=none[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K1\" [^\r\n]* state=flagged[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K2\" [^\r\n]* state=flagged[\r\n]+6 entities[\r\n]+[^\r\n]+ at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1000\\.00032[0-9]*,5100(\\.0000[0-9]*)?[\r\n]+[^\r\n]+ at 1050\\.00032[0-9]*,5099\\.74987[0-9]*[\r\n]+[^\r\n]+ at 1050\\.30814[0-9]*,5095\\.59850[0-9]*[\r\n]+[^\r\n]+ at 1007\\.07106[0-9]*,5007\\.07106[0-9]*"
         FAIL_REGULAR_EXPRESSION "error|has no position")
     # A free station in the structure of a field controller's resections,
     # tests/surveyio/data/fld/free_station.fld, every name and number
@@ -1114,7 +1114,14 @@ if(KATANA_BUILD_TESTS)
     # and here 0 - so 2.249 mm at 100 m and 2.869 mm at 200 m: 20.00030586.
     # Redundancy 3 in plan (3 readings and 3 distances for N, E and the
     # orientation) and 2 in height; the check (06) to M1 after the 129 is a
-    # check of FS1 (checks=1), not one of its pointings.
+    # check of FS1 (checks=1), not one of its pointings. Its precision is the
+    # a-priori one (the readings fit exactly, so the global test does not fail
+    # above), with no mark's centring or height (instrument height 0): by a
+    # separate script of the textbook model (normal equations of the three
+    # readings, weighted 1 / ((3"/sqrt 2)^2 + (1 mm / D)^2), and three
+    # distances, weighted 1 / (hypot(2 mm, 2 ppm S)^2 + (1 mm)^2)), sN 1.142423
+    # and sE 1.152938 mm; the height's, 1 / sqrt(sum 1 / sigma^2) over 2.248933,
+    # 2.248933 and 2.868937 mm, 1.390860 mm.
     set(_fld_free_station "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/free_station.fld")
     add_test(NAME cli.survey_read_free_station_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -1128,7 +1135,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_free_station}\"" -c "LIST")
     set_tests_properties(cli.survey_import_free_station_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=2[\r\n]+.*resection setup=FS1 point=FS1 from=M1,M2,M3 northing=(6200000|6199999\\.9999)[0-9.]* easting=(300000|299999\\.9999)[0-9.]* height=20\\.0003058[0-9]* [^\r\n]* redundancy=3\\+2 flagged=0 dilution=[0-9.]+ weak=0 checks=1 file_offset=none unapplied_scale_factor=none[\r\n]+6 entities[\r\n]+[^\r\n]+ at 300060,6200080[\r\n]+[^\r\n]+ at 299920,6199940[\r\n]+[^\r\n]+ at 300120,6199840[\r\n]+[^\r\n]+ at 300000,6200000[\r\n]+[^\r\n]+ at 300045\\.3153[0-9]*,6199978\\.869[0-9]*[\r\n]+[^\r\n]+ at 299987\\.3214[0-9]*,6199972\\.8107[0-9]*"
+        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=2[\r\n]+.*resection setup=FS1 point=FS1 from=M1,M2,M3 northing=(6200000|6199999\\.9999)[0-9.]* easting=(300000|299999\\.9999)[0-9.]* height=20\\.0003058[0-9]* sigma_n=0\\.001142422[0-9]* sigma_e=0\\.001152937[0-9]* sigma_h=0\\.001390860[0-9]* redundancy=3\\+2 flagged=0 dilution=[0-9.]+ weak=0 checks=1 file_offset=none radiated_from=none radiation_offset=none unapplied_scale_factor=none[\r\n]+6 entities[\r\n]+[^\r\n]+ at 300060,6200080[\r\n]+[^\r\n]+ at 299920,6199940[\r\n]+[^\r\n]+ at 300120,6199840[\r\n]+[^\r\n]+ at 300000,6200000[\r\n]+[^\r\n]+ at 300045\\.3153[0-9]*,6199978\\.869[0-9]*[\r\n]+[^\r\n]+ at 299987\\.3214[0-9]*,6199972\\.8107[0-9]*"
         FAIL_REGULAR_EXPRESSION "error|has no position|flagged by")
     # A setup on RTK marks, tests/surveyio/data/fld/rtk_setup.fld: A (1000,
     # 5000) and B (1000, 5100), each written " 2" with its receiver's

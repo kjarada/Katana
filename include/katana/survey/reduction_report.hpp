@@ -245,18 +245,23 @@ struct ResectionReport {
     std::vector<std::string> targets{};
     double northing = 0.0;
     double easting = 0.0;
-    // Absent where no target with a height was observed with a zenith angle.
+    // Absent where no target with a height was observed with both a zenith
+    // angle and a distance, which a trigonometric height needs.
     std::optional<double> elevation{};
-    // One sigma, of the point the setup stands on: the least squares' - a
-    // posteriori (scaled by the variance factor) where it has redundancy, a
-    // priori where it has none - with, where the setup records an instrument
-    // height (a mark under the instrument), the a-priori centring over the
-    // mark and the measured instrument height added, which are common to every
-    // pointing and so are not in the least squares' weights.
+    // One sigma, of the point the setup stands on: the least squares' a-priori
+    // precision (the cofactor at the settings' weights), scaled by its
+    // variance factor only where its global test finds the residuals larger
+    // than those weights allow - on the few degrees of freedom of a
+    // resection, a variance factor the test accepts says no more than the
+    // weights - with, where the setup records an instrument height (a mark
+    // under the instrument), the a-priori centring over the mark and the
+    // measured instrument height added, which are common to every pointing and
+    // so are not in the least squares' weights.
     double sigmaNorthing = 0.0;
     double sigmaEasting = 0.0;
     std::optional<double> sigmaElevation{};
-    // Added to a circle reading to give a grid azimuth: the solution's.
+    // Added to a circle reading to give a grid azimuth: the solution's, and
+    // its one sigma, taken as the coordinates' is.
     double orientation = 0.0;
     double sigmaOrientation = 0.0;
     AdjustmentReport horizontal{};
@@ -279,6 +284,13 @@ struct ResectionReport {
     // less them. Also a misclosure row and a warning.
     std::optional<double> fileNorthingDifference{};
     std::optional<double> fileEastingDifference{};
+    // Where another setup had radiated the station before its own block
+    // resected it - a setup that names no backsight, on a mark an earlier
+    // setup shot: that setup, and the resection less the radiation, which is a
+    // check of it. Also a misclosure row and a warning.
+    std::string radiatedFrom{};
+    std::optional<double> radiatedNorthingDifference{};
+    std::optional<double> radiatedEastingDifference{};
     // The drawing projection's point scale factor at the station, where the
     // settings reduce no distance to grid (no grid scale, no combined factor)
     // and that factor would change its longest distance by more than the

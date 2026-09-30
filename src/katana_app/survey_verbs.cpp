@@ -278,10 +278,11 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
         // sigma, metres), its redundancy (plan + heights), how many of its
         // residuals the outlier test flagged, the geometry's dilution and
         // whether that is weak, its checks, how far the file's own
-        // coordinates for the station were, and a scale factor that was not
-        // applied. Then each residual flagged or rejected, one record each,
-        // so an agent sees which without the report and past the warnings'
-        // cap.
+        // coordinates for the station were, which setup had radiated the
+        // station and how far from the resection, and a scale factor that was
+        // not applied. Then each residual flagged or rejected, one record
+        // each, so an agent sees which without the report and past the
+        // warnings' cap.
         const auto optionalNumber = [](const std::optional<double>& value) {
             return value ? recordNumber(*value) : std::string("none");
         };
@@ -298,6 +299,11 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
                     ? std::optional<double>(std::hypot(*resection.fileNorthingDifference,
                                                        *resection.fileEastingDifference))
                     : std::nullopt;
+            const std::optional<double> radiationOffset =
+                resection.radiatedNorthingDifference && resection.radiatedEastingDifference
+                    ? std::optional<double>(std::hypot(*resection.radiatedNorthingDifference,
+                                                       *resection.radiatedEastingDifference))
+                    : std::nullopt;
             reply += "\nresection setup=" + recordText(resection.stationId) +
                      " point=" + recordText(resection.pointId) + " from=" + recordText(from) +
                      " northing=" + recordNumber(resection.northing) +
@@ -313,7 +319,10 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
                      " dilution=" + recordNumber(resection.dilution) +
                      " weak=" + (resection.weakGeometry ? "1" : "0") +
                      " checks=" + std::to_string(resection.checks) +
-                     " file_offset=" + optionalNumber(fileOffset) +
+                     " file_offset=" + optionalNumber(fileOffset) + " radiated_from=" +
+                     (resection.radiatedFrom.empty() ? std::string("none")
+                                                     : recordText(resection.radiatedFrom)) +
+                     " radiation_offset=" + optionalNumber(radiationOffset) +
                      " unapplied_scale_factor=" + optionalNumber(resection.unappliedScaleFactor);
             const auto residuals = [&reply, &resection](const survey::AdjustmentReport& adjustment) {
                 for (const survey::ReportResidual& residual : adjustment.residuals) {

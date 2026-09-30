@@ -449,6 +449,12 @@ std::vector<Table> resectionTables(const ReductionReport& report)
                                        *resection.fileEastingDifference)) +
                 " away");
         }
+        if (resection.radiatedNorthingDifference && resection.radiatedEastingDifference) {
+            add("radiated from " + resection.radiatedFrom + " " +
+                millimetres(std::hypot(*resection.radiatedNorthingDifference,
+                                       *resection.radiatedEastingDifference)) +
+                " away");
+        }
         if (resection.unappliedScaleFactor) {
             add("ground distances on grid coordinates (scale factor " +
                 fixed(*resection.unappliedScaleFactor, 6) + " not applied)");

@@ -75,12 +75,14 @@ Status checkOptions(const AdjustmentOptions& options)
     return {};
 }
 
+// "N(P)", "E(P)" and "H(P)" for a coordinate, and "orientation(P)" for the
+// orientation unknown of the directions read at P, which is not one.
 std::string parameterName(const AdjustedParameter& parameter)
 {
     const char* component = parameter.component == CoordinateComponent::Northing    ? "N"
                             : parameter.component == CoordinateComponent::Easting   ? "E"
                             : parameter.component == CoordinateComponent::Elevation ? "H"
-                                                                                    : "O";
+                                                                                    : "orientation";
     return std::string(component) + "(" + parameter.pointId + ")";
 }
 
@@ -95,7 +97,7 @@ Error rankError(const detail::RankDeficiency& deficiency,
     std::string message = "the network is rank deficient (rank " +
                           std::to_string(deficiency.rank) + " of " +
                           std::to_string(parameters.size()) +
-                          " unknowns); coordinates that cannot be resolved: " + names;
+                          " unknowns); unknowns that cannot be resolved: " + names;
     if (!hint.empty()) {
         message += ". " + hint;
     }
