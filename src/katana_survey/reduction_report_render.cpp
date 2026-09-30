@@ -398,7 +398,8 @@ std::vector<Table> resectionTables(const ReductionReport& report)
     }
     Table summary{"Resections: setups positioned from the points they observe",
                   {"Setup", "Point", "From", "Northing", "Easting", "Height", "sN", "sE", "sH",
-                   "Orientation", "s orientation", "Redundancy", "Unit weight", "Check"},
+                   "Orientation", "s orientation", "Redundancy", "Unit weight", "Dilution",
+                   "Checks", "Check"},
                   {}};
     const auto unitWeight = [](const AdjustmentReport& adjustment) {
         return adjustment.varianceFactor ? fixed(std::sqrt(*adjustment.varianceFactor), 2)
@@ -412,19 +413,45 @@ std::vector<Table> resectionTables(const ReductionReport& report)
         const AdjustmentReport& horizontal = resection.horizontal;
         const std::optional<AdjustmentReport>& height = resection.height;
         std::string check;
-        const auto add = [&check](const char* part) {
+        const auto add = [&check](const std::string& part) {
             check += check.empty() ? "" : "; ";
             check += part;
         };
         if (!horizontal.flaggedOutliers.empty() || (height && !height->flaggedOutliers.empty())) {
             add("FLAGGED");
         }
-        if ((horizontal.globalTest && !horizontal.globalTest->passed) ||
-            (height && height->globalTest && !height->globalTest->passed)) {
-            add("global test FAILED");
+        // Which way the global test failed, as the network's summary says it
+        // with its bounds: a fit too good fails it as surely as one too bad,
+        // and the two mean different things (weights too loose, or an error).
+        const auto globalTest = [&add](const char* what, const AdjustmentReport& adjustment) {
+            if (!adjustment.globalTest || adjustment.globalTest->passed) {
+                return;
+            }
+            const ReportGlobalTest& test = *adjustment.globalTest;
+            const bool below = test.statistic < test.lowerCritical;
+            add(std::string(what) + " global test FAILED, " + fixed(test.statistic, 3) +
+                (below ? " below " + fixed(test.lowerCritical, 3) + " (fits too well)"
+                       : " above " + fixed(test.upperCritical, 3)));
+        };
+        globalTest("plan", horizontal);
+        if (height) {
+            globalTest("height", *height);
         }
         if (horizontal.redundancy == 0) {
             add("no redundancy");
+        }
+        if (resection.weakGeometry) {
+            add("WEAK GEOMETRY");
+        }
+        if (resection.fileNorthingDifference && resection.fileEastingDifference) {
+            add("the file's own coordinates " +
+                millimetres(std::hypot(*resection.fileNorthingDifference,
+                                       *resection.fileEastingDifference)) +
+                " away");
+        }
+        if (resection.unappliedScaleFactor) {
+            add("ground distances on grid coordinates (scale factor " +
+                fixed(*resection.unappliedScaleFactor, 6) + " not applied)");
         }
         summary.rows.push_back(
             {resection.stationId, resection.pointId, from, metres(resection.northing),
@@ -436,7 +463,7 @@ std::vector<Table> resectionTables(const ReductionReport& report)
              std::to_string(horizontal.redundancy) +
                  (height ? " + " + std::to_string(height->redundancy) : std::string{}),
              unitWeight(horizontal) + (height ? " / " + unitWeight(*height) : std::string{}),
-             check});
+             fixed(resection.dilution, 2), std::to_string(resection.checks), check});
     }
     tables.push_back(std::move(summary));
     for (const ResectionReport& resection : report.resections) {

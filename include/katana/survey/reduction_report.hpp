@@ -217,6 +217,20 @@ struct AdjustmentReport {
 
 // ---- Resections ---------------------------------------------------------------------
 
+// A resection whose geometry magnifies the errors of its observations more
+// than this many times is flagged as weak (ResectionReport::dilution): its
+// station is placed, with the precision it has, and the report, SURVEY IMPORT
+// and a warning say so. Three is the reduction's allowable multiplier - a
+// traverse's angular misclosure is allowed three standard deviations - here
+// against the least precise single observation the station was fixed from,
+// so only a geometry that clearly dominates the instrument is flagged: two
+// marks 30 degrees apart with distances give 2.7, three directions 60 degrees
+// apart from outside their triangle 2.5, a station 20 m inside a 100 m danger
+// circle 10.4, three marks within 11 degrees 123 (worked by a separate
+// script, docs/survey.md). A geometry that does not fix the station at all is
+// refused, not flagged.
+inline constexpr double kWeakResectionDilution = 3.0;
+
 // A setup whose station nothing else positioned, positioned by resection (a
 // free station): the least squares of its reduced directions and distances to
 // points already placed, those points held, and of its trigonometric height
@@ -233,8 +247,12 @@ struct ResectionReport {
     double easting = 0.0;
     // Absent where no target with a height was observed with a zenith angle.
     std::optional<double> elevation{};
-    // One sigma; a posteriori (scaled by the variance factor) where the least
-    // squares has redundancy, a priori where it has none.
+    // One sigma, of the point the setup stands on: the least squares' - a
+    // posteriori (scaled by the variance factor) where it has redundancy, a
+    // priori where it has none - with, where the setup records an instrument
+    // height (a mark under the instrument), the a-priori centring over the
+    // mark and the measured instrument height added, which are common to every
+    // pointing and so are not in the least squares' weights.
     double sigmaNorthing = 0.0;
     double sigmaEasting = 0.0;
     std::optional<double> sigmaElevation{};
@@ -243,6 +261,30 @@ struct ResectionReport {
     double sigmaOrientation = 0.0;
     AdjustmentReport horizontal{};
     std::optional<AdjustmentReport> height{};
+    // The geometry's own strength, whatever the residuals say: the station's
+    // standard ellipse at the a-priori weights (sigma0 = 1), and its
+    // semi-major axis over the standard deviation of the least precise single
+    // observation's line of position (for a direction, its sight length times
+    // its standard deviation) - how many times the geometry magnifies the
+    // observations' errors. Weak above kWeakResectionDilution.
+    ReportEllipse aprioriEllipse{};
+    double dilution = 0.0;
+    bool weakGeometry = false;
+    // Pointings after the block the file says the field software resected
+    // from (kResectionEndMetadata) to the points the resection used: checks
+    // of the station, each a row of ReductionReport::misclosures.
+    std::size_t checks = 0;
+    // Where the file gives coordinates of its own for the station (a
+    // controller's, or keyed in), which the resection replaced: the resection
+    // less them. Also a misclosure row and a warning.
+    std::optional<double> fileNorthingDifference{};
+    std::optional<double> fileEastingDifference{};
+    // The drawing projection's point scale factor at the station, where the
+    // settings reduce no distance to grid (no grid scale, no combined factor)
+    // and that factor would change its longest distance by more than the
+    // distance's standard deviation: ground distances were fitted to grid
+    // coordinates.
+    std::optional<double> unappliedScaleFactor{};
     SourceRecord source{};
 
     friend bool operator==(const ResectionReport&, const ResectionReport&) = default;

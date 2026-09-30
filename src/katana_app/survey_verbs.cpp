@@ -1,6 +1,7 @@
 #include "survey_verbs.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <format>
@@ -274,8 +275,16 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
         }
         // Each setup the reduction positioned by resection, as the report's
         // Resections table has it: where, from which points, how well (one
-        // sigma, metres), its redundancy (plan + heights) and how many of its
-        // residuals the outlier test flagged.
+        // sigma, metres), its redundancy (plan + heights), how many of its
+        // residuals the outlier test flagged, the geometry's dilution and
+        // whether that is weak, its checks, how far the file's own
+        // coordinates for the station were, and a scale factor that was not
+        // applied. Then each residual flagged or rejected, one record each,
+        // so an agent sees which without the report and past the warnings'
+        // cap.
+        const auto optionalNumber = [](const std::optional<double>& value) {
+            return value ? recordNumber(*value) : std::string("none");
+        };
         for (const survey::ResectionReport& resection : report->resections) {
             std::string from;
             for (const std::string& target : resection.targets) {
@@ -284,20 +293,47 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
             const std::size_t flagged =
                 resection.horizontal.flaggedOutliers.size() +
                 (resection.height ? resection.height->flaggedOutliers.size() : 0);
+            const std::optional<double> fileOffset =
+                resection.fileNorthingDifference && resection.fileEastingDifference
+                    ? std::optional<double>(std::hypot(*resection.fileNorthingDifference,
+                                                       *resection.fileEastingDifference))
+                    : std::nullopt;
             reply += "\nresection setup=" + recordText(resection.stationId) +
                      " point=" + recordText(resection.pointId) + " from=" + recordText(from) +
                      " northing=" + recordNumber(resection.northing) +
-                     " easting=" + recordNumber(resection.easting) + " height=" +
-                     (resection.elevation ? recordNumber(*resection.elevation)
-                                          : std::string("none")) +
+                     " easting=" + recordNumber(resection.easting) +
+                     " height=" + optionalNumber(resection.elevation) +
                      " sigma_n=" + recordNumber(resection.sigmaNorthing) +
-                     " sigma_e=" + recordNumber(resection.sigmaEasting) + " sigma_h=" +
-                     (resection.sigmaElevation ? recordNumber(*resection.sigmaElevation)
-                                               : std::string("none")) +
+                     " sigma_e=" + recordNumber(resection.sigmaEasting) +
+                     " sigma_h=" + optionalNumber(resection.sigmaElevation) +
                      " redundancy=" + std::to_string(resection.horizontal.redundancy) + "+" +
                      (resection.height ? std::to_string(resection.height->redundancy)
                                        : std::string("0")) +
-                     " flagged=" + std::to_string(flagged);
+                     " flagged=" + std::to_string(flagged) +
+                     " dilution=" + recordNumber(resection.dilution) +
+                     " weak=" + (resection.weakGeometry ? "1" : "0") +
+                     " checks=" + std::to_string(resection.checks) +
+                     " file_offset=" + optionalNumber(fileOffset) +
+                     " unapplied_scale_factor=" + optionalNumber(resection.unappliedScaleFactor);
+            const auto residuals = [&reply, &resection](const survey::AdjustmentReport& adjustment) {
+                for (const survey::ReportResidual& residual : adjustment.residuals) {
+                    if (!residual.flagged && !residual.rejected) {
+                        continue;
+                    }
+                    reply += "\nresection_residual setup=" + recordText(resection.stationId) +
+                             " observation=" + recordText(residual.observation) +
+                             " residual=" + recordNumber(residual.residual) +
+                             " unit=" + (residual.angular ? "rad" : "m") +
+                             " sigma=" + recordNumber(residual.sigma) + " standardised=" +
+                             (residual.standardised ? recordNumber(*residual.standardised)
+                                                    : std::string("none")) +
+                             " state=" + (residual.rejected ? "rejected" : "flagged");
+                }
+            };
+            residuals(resection.horizontal);
+            if (resection.height) {
+                residuals(*resection.height);
+            }
         }
     }
     return reply;

@@ -113,10 +113,19 @@ the reduction's warnings (`docs/survey.md`, "The opcode field file (.fld)"),
 and with a `resection` record for each setup the reduction positioned by
 resection: the setup, its point, the points it was computed `from`, its
 northing, easting and height, their one-sigma precision, its redundancy (plan
-+ heights) and how many of its residuals were `flagged`
-(`cli.survey_import_free_station_field_file`; `docs/survey.md`, "The
-reduction's resection"). No tool of its own: the report the window shows is
-kept with the job, and the record is what an agent acts on.
++ heights), how many of its residuals were `flagged`, its geometry's
+`dilution` and whether that is `weak`, how many `checks` after the file's
+resection block checked it, the `file_offset` from coordinates the file gave
+for the station (or `none`), and an `unapplied_scale_factor` where it fitted
+ground distances to grid coordinates (or `none`). After it, one
+`resection_residual` record per residual the outlier test flagged or
+rejected - the observation, its residual and `unit` (`rad` or `m`), its
+a-priori `sigma`, `standardised` value and `state` - so an agent sees which,
+however many other warnings come first
+(`cli.survey_import_free_station_field_file`,
+`cli.survey_import_resection_field_file`; `docs/survey.md`, "The reduction's
+resection"). No tool of its own: the report the window shows is kept with the
+job, and the records are what an agent acts on.
 `CRS SET` takes a WKT as the agent sends it, quotes and all
 (`McpServer.AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt`); it once lost
 them and refused every WKT whose names hold a blank.
