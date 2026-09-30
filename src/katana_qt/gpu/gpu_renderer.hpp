@@ -38,6 +38,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 #include "gpu_scene.hpp"
@@ -135,9 +136,14 @@ class GpuRenderer {
     // Packs `list` for the GPU as the one layer of the scene, writing depth;
     // it is uploaded by the next render().
     void setDrawList(const katana::render::DrawList& list);
-    // Packs every layer, in drawing order, against the centre of their joint
-    // bounds; uploaded by the next render().
-    void setLayers(std::span<const LayerSource> layers);
+    // Packs every layer, in drawing order, against `origin` - by default the
+    // centre of their joint bounds; a host zoomed deep far from that passes
+    // its pivot (scene_origin.hpp, "The origin follows a deep zoom") -
+    // uploaded by the next render().
+    void setLayers(std::span<const LayerSource> layers,
+                   const std::optional<katana::math::Vec3>& origin = std::nullopt);
+    // What the layers are packed against.
+    [[nodiscard]] const katana::math::Vec3& origin() const;
     // Repacks layer `index` alone, against the origin the last setLayers
     // chose, keeping its depth rule: for a layer that changed without the
     // rest - a selection, edges recoloured by their fade. Its content should

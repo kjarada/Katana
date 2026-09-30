@@ -236,6 +236,8 @@ const GpuSceneData& GpuRenderer::scene() const
 
 std::size_t GpuRenderer::layerCount() const { return resources_->layers.size(); }
 
+const katana::math::Vec3& GpuRenderer::origin() const { return resources_->origin; }
+
 katana::math::AABB GpuRenderer::sceneBounds() const
 {
     katana::math::AABB box;
@@ -359,7 +361,8 @@ void GpuRenderer::setDrawList(const katana::render::DrawList& list)
     setLayers(std::span<const LayerSource>(&only, 1));
 }
 
-void GpuRenderer::setLayers(std::span<const LayerSource> layers)
+void GpuRenderer::setLayers(std::span<const LayerSource> layers,
+                            const std::optional<katana::math::Vec3>& origin)
 {
     Resources& r = *resources_;
     // Each layer bounded once: for the joint box, and then for its packing.
@@ -374,7 +377,7 @@ void GpuRenderer::setLayers(std::span<const LayerSource> layers)
             }
         }
     }
-    r.origin = chooseSceneOrigin(box);
+    r.origin = origin && origin->isFinite() ? *origin : chooseSceneOrigin(box);
     // Kept, not rebuilt, so a layer's buffers are reused by the next upload.
     r.layers.resize(layers.size());
     for (std::size_t i = 0; i < layers.size(); ++i) {

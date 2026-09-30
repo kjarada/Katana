@@ -146,8 +146,9 @@ endif()
 # executor as a dialog does (--run-line), "?WIDGET" prints what the target's WIDGET
 # shows, or whether the window's action of that name is checked (--report),"*NAME" triggers the menu item NAME in its turn
 # (--trigger), "!BUTTON" presses a button, "^FILE" opens File > Export
-# Vector's dialog for FILE (--export-options), and anything else is a FIELD=TEXT
-# fill. '|' between steps, for FILL's reason.
+# Vector's dialog for FILE (--export-options), "~NAME X,Y N" turns the mouse
+# wheel N notches over widget NAME at X,Y (--wheel; RenderView2, a 3D view),
+# and anything else is a FIELD=TEXT fill. '|' between steps, for FILL's reason.
 if(DEFINED DRIVE)
     string(REPLACE "|" ";" _steps "${DRIVE}")
     foreach(_step IN LISTS _steps)
@@ -177,6 +178,8 @@ if(DEFINED DRIVE)
             # File > Export Vector's dialog for that file, in its turn: the
             # menu's file dialog is not opened headless.
             list(APPEND extra --export-options "${_rest}")
+        elseif(_sigil STREQUAL "~")
+            list(APPEND extra --wheel "${_rest}")
         else()
             list(APPEND extra --fill "${_step}")
         endif()

@@ -25,11 +25,11 @@ namespace {
 #endif
 }
 
-// The same numbers as RenderViewWidget's (render_view_widget.cpp): the two
+// The same number as RenderViewWidget's (render_view_widget.cpp): the two
 // widgets must feel identical under the mouse, so a change to one belongs in
-// both. Radians per logical pixel of drag, and the dolly factor per notch.
+// both. Radians per logical pixel of drag. The wheel's factor is the
+// camera's own, Camera::kZoomPerNotch.
 constexpr double kOrbitPerPixel = 0.008;
-constexpr double kZoomPerNotch = 1.15;
 
 } // namespace
 
@@ -91,9 +91,10 @@ void GpuSceneView::setDrawList(const katana::render::DrawList& list)
     update();
 }
 
-void GpuSceneView::setLayers(std::span<const LayerSource> layers)
+void GpuSceneView::setLayers(std::span<const LayerSource> layers,
+                             const std::optional<katana::math::Vec3>& origin)
 {
-    renderer_.setLayers(layers);
+    renderer_.setLayers(layers, origin);
     // As setDrawList: the first scene with something in it after an empty
     // framing is framed at the next frame.
     if (framedEmpty_ && !renderer_.sceneBounds().empty()) {
@@ -338,10 +339,14 @@ void GpuSceneView::wheelEvent(QWheelEvent* event)
     if (notches == 0.0) {
         return;
     }
-    const double factor = std::pow(1.0 / kZoomPerNotch, notches);
     const QPointF position = event->position();
-    camera_.dollyAtPixel(factor, position.x(), position.y());
-    update();
+    if (onWheelZoom) {
+        onWheelZoom(notches, position); // the host asks for the frame
+    } else {
+        camera_.dollyAtPixel(std::pow(1.0 / katana::render::Camera::kZoomPerNotch, notches),
+                             position.x(), position.y());
+        update();
+    }
     event->accept();
 }
 

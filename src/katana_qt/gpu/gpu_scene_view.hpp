@@ -7,7 +7,8 @@
 // message, the status line and the document; this widget only draws and
 // turns the mouse into camera moves - the SAME moves RenderViewWidget makes
 // (left drag orbits, or pans in an elevation view; middle or Shift+left drag
-// pans; the wheel zooms about the cursor; double-click and E frame the scene;
+// pans; the wheel zooms towards what is under the cursor, through the host,
+// which has the scene to find it in; double-click and E frame the scene;
 // 1-5 and 0 pick standard views; P toggles the projection), so a host can put
 // either widget in the same place and the user feels no difference.
 //
@@ -39,9 +40,11 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 
 #include <QPoint>
+#include <QPointF>
 #include <QRhiWidget>
 #include <QString>
 
@@ -68,10 +71,14 @@ class GpuSceneView final : public QRhiWidget {
     // frame, and only then. Call it when the scene changes, not per frame.
     void setDrawList(const katana::render::DrawList& list);
     // The same for a scene of layers drawn with their own depth rules
-    // (GpuRenderer::setLayers), and for one layer that changed alone
-    // (GpuRenderer::updateLayer) - a selection, faded edges.
-    void setLayers(std::span<const LayerSource> layers);
+    // (GpuRenderer::setLayers, packed against `origin` when one is given),
+    // and for one layer that changed alone (GpuRenderer::updateLayer) - a
+    // selection, faded edges.
+    void setLayers(std::span<const LayerSource> layers,
+                   const std::optional<katana::math::Vec3>& origin = std::nullopt);
     void updateLayer(std::size_t index, const katana::render::DrawList& list);
+    // What the layers are packed against (GpuRenderer::origin).
+    [[nodiscard]] katana::math::Vec3 sceneOrigin() const { return renderer_.origin(); }
 
     void setFrameSettings(const FrameSettings& settings);
     [[nodiscard]] const FrameSettings& frameSettings() const { return settings_; }
@@ -116,6 +123,13 @@ class GpuSceneView final : public QRhiWidget {
     std::function<void()> onActivated;
     // Frames the scene; see zoomExtents().
     std::function<void()> onZoomExtents;
+    // The wheel, in notches (positive in, a fine wheel's fractions too) at
+    // the cursor in logical pixels. A host that knows the scene zooms towards
+    // what is drawn under the cursor (RenderViewWidget::zoomAtPixel); this
+    // widget holds only the packed lists, so without a host it zooms about
+    // the target's plane itself (Camera::dollyAtPixel), which stalls over
+    // ground beyond that plane (docs/render.md, "Zooming towards the cursor").
+    std::function<void(double notches, const QPointF& position)> onWheelZoom;
     // "GPU  12345 tri  0.8 ms" after every frame (CPU time to record it).
     std::function<void(const QString&)> onFrameStats;
     // Called at the start of every frame with the camera it will be drawn
