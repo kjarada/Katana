@@ -1090,7 +1090,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_resection}\"" -c "LIST")
     set_tests_properties(cli.survey_import_resection_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=4[\r\n]+reduction_warning text=\"height difference at S1: K1 is flagged by the Baarda w, critical 3\\.29 \\(value -301\\.57\\).*resection setup=S1 point=S1 from=K1,K2 northing=5100\\.0000[0-9]* easting=1000\\.00032[0-9]* height=20\\.46772[0-9]* [^\r\n]* redundancy=1\\+1 flagged=2 dilution=[0-9.]+ weak=0 checks=1 file_offset=none radiated_from=none radiation_offset=none unapplied_scale_factor=none[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K1\" [^\r\n]* state=flagged[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K2\" [^\r\n]* state=flagged[\r\n]+6 entities[\r\n]+[^\r\n]+ at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1000\\.00032[0-9]*,5100(\\.0000[0-9]*)?[\r\n]+[^\r\n]+ at 1050\\.00032[0-9]*,5099\\.74987[0-9]*[\r\n]+[^\r\n]+ at 1050\\.30814[0-9]*,5095\\.59850[0-9]*[\r\n]+[^\r\n]+ at 1007\\.07106[0-9]*,5007\\.07106[0-9]*"
+        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=4[\r\n]+reduction method=[a-z]+ adjustments=[0-9]+ rejected=[0-9]+[\r\n]+reduction_warning text=\"height difference at S1: K1 is flagged by the Baarda w, critical 3\\.29 \\(value -301\\.57\\).*resection setup=S1 point=S1 from=K1,K2 northing=5100\\.0000[0-9]* easting=1000\\.00032[0-9]* height=20\\.46772[0-9]* [^\r\n]* redundancy=1\\+1 flagged=2 dilution=[0-9.]+ weak=0 checks=1 file_offset=none radiated_from=none radiation_offset=none unapplied_scale_factor=none[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K1\" [^\r\n]* state=flagged[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K2\" [^\r\n]* state=flagged[\r\n]+6 entities[\r\n]+[^\r\n]+ at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1000\\.00032[0-9]*,5100(\\.0000[0-9]*)?[\r\n]+[^\r\n]+ at 1050\\.00032[0-9]*,5099\\.74987[0-9]*[\r\n]+[^\r\n]+ at 1050\\.30814[0-9]*,5095\\.59850[0-9]*[\r\n]+[^\r\n]+ at 1007\\.07106[0-9]*,5007\\.07106[0-9]*"
         FAIL_REGULAR_EXPRESSION "error|has no position")
     # A free station in the structure of a field controller's resections,
     # tests/surveyio/data/fld/free_station.fld, every name and number
@@ -1128,7 +1128,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_fld_free_station}\"")
     set_tests_properties(cli.survey_read_free_station_field_file PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=free_station\\.fld format=opcode-field-file parser=1\\.1 read=25 skipped=0 warnings=0[\r\n]+content setups=1 observations=27 points=3 unpositioned=3 features=1 control=0[\r\n]+declared crs=\"Local grid D\" epsg=none"
+        "survey file=free_station\\.fld format=opcode-field-file parser=1\\.2 read=25 skipped=0 warnings=0[\r\n]+content setups=1 observations=27 points=3 unpositioned=3 features=1 control=0[\r\n]+declared crs=\"Local grid D\" epsg=none"
         FAIL_REGULAR_EXPRESSION "error|warning record")
     add_test(NAME cli.survey_import_free_station_field_file
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -1305,7 +1305,7 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.survey_import_gsi_radiates_a_shot_with_no_zenith_angle_by_its_own_horizontal_distance
         PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "parser=1\\.2 read=6 skipped=0 warnings=1[\r\n]+content setups=1 observations=12 .*not_carried text=\"1 block's instrument-computed horizontal distance \\(32\\) or height difference \\(33\\) beside a zenith angle and a distance that were read: not carried[^\r\n]*[\r\n]+not_carried text=\"2 blocks have a slope distance \\(31\\) and no zenith angle that was read \\(none recorded, or one refused at its record\\; the first at record 4\\)[^\r\n]*[\r\n]+imported job=job-1 entities=5 layer=survey/gsi .*at 5062\\.8462[0-9]*,6049\\.1008[0-9]*[\r\n]+[^\r\n]*at 5049\\.1008[0-9]*,5937\\.1537[0-9]*[\r\n]+[^\r\n]*at 4937\\.1534[0-9]*,5950\\.8988[0-9]*"
+        "parser=1\\.2 read=6 skipped=0 warnings=1[\r\n]+content setups=1 observations=12 .*not_carried text=\"1 block's instrument-computed horizontal distance \\(32\\) or height difference \\(33\\) beside a zenith angle and a distance that were read: not carried[^\r\n]*[\r\n]+not_carried text=\"2 blocks have a slope distance \\(31\\) and no zenith angle that was read \\(none recorded, or one refused at its record\\; the first at record 4\\)[^\r\n]*[\r\n]+settings file= set=0 differ=0[\r\n]+imported job=job-1 entities=5 layer=survey/gsi .*at 5062\\.8462[0-9]*,6049\\.1008[0-9]*[\r\n]+[^\r\n]*at 5049\\.1008[0-9]*,5937\\.1537[0-9]*[\r\n]+[^\r\n]*at 4937\\.1534[0-9]*,5950\\.8988[0-9]*"
         FAIL_REGULAR_EXPRESSION "error")
     # CRS SET with a WKT - GDA2020 / MGA zone 56 as OGC WKT1, its names in
     # double quotes and one of them holding blanks - as an agent or a script

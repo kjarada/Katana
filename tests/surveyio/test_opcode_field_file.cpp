@@ -912,6 +912,9 @@ TEST(OpcodeFieldFile, TheWholeResectionJobIsReadWithNothingSkipped)
     EXPECT_EQ(project.coordinateSystem.name, "Local grid B");
     EXPECT_TRUE(topcon_test::anyNotCarriedContains(
         result, "no coordinates for the 1 setup(s) made by resection"));
+    // The reduction resects such a setup (docs/survey.md, "The reduction's
+    // resection"), so the note must not tell a person it cannot.
+    EXPECT_FALSE(topcon_test::anyNotCarriedContains(result, "does not compute a resection"));
 }
 
 TEST(OpcodeFieldFile, AResectionStartsASetupOnItsNamedPointAndItsShotsAreItsOwn)
