@@ -2921,8 +2921,9 @@ Result<ReadResult> FieldFileReader::read(std::string_view bytes)
     if (resections_ > 0) {
         builder_.notCarried("no coordinates for the " + std::to_string(resections_) +
                             " setup(s) made by resection (opcode 128 or 138): the file does not "
-                            "state them and the reduction does not compute a resection, so "
-                            "those setups and what was measured from them are not positioned");
+                            "state them, so SURVEY IMPORT computes each by the reduction's "
+                            "resection from the points it measures; until then those setups "
+                            "and what was measured from them are not positioned");
     }
     ReadResult result = builder_.finish();
     if (result.project.stations.empty() && result.project.points.empty() &&
