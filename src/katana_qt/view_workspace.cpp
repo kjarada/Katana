@@ -69,17 +69,15 @@ constexpr int kZoomSelectionPriority = 2;
 // The ZOOM line a transparent command typed while a tool runs stands for -
 // ZOOM, Z, 'ZOOM or 'Z and whatever follows - or "" for one ZOOM is not
 // (PAN has no verb: tools::isTransparentCommand hands it over all the same).
+// Which words are ZOOM is the interpreter's reading (verbOf: its alias table
+// and its apostrophe rule), never a list of this file's.
 QString transparentZoomLine(const QString& typed)
 {
-    QString text = typed.trimmed();
-    if (text.startsWith('\'')) {
-        text = text.mid(1).trimmed();
-    }
-    const qsizetype blank = text.indexOf(' ');
-    const QString verb = (blank < 0 ? text : text.left(blank)).toUpper();
-    if (verb != "ZOOM" && verb != "Z") {
+    const QString text = typed.trimmed();
+    if (katana::cad::CommandInterpreter::verbOf(text.toStdString()) != "ZOOM") {
         return {};
     }
+    const qsizetype blank = text.indexOf(' ');
     return "ZOOM" + (blank < 0 ? QString() : text.mid(blank));
 }
 
@@ -244,6 +242,7 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
         plan->onActivated = [this, id] { activate(id); };
         // What a linked view follows (cad/view_link.hpp).
         plan->onViewMoved = [this, id](bool byUser) { viewMoved(id, byUser); };
+        plan->onZoomExtents = [this, id] { (void)zoomExtents(id); };
         // The plan view's frame time, as the 3D and section views report theirs.
         plan->onFrameStats = [this](const QString& text) {
             if (onFrameStats) {
@@ -393,36 +392,31 @@ void ViewWorkspace::installChrome(View& view)
     // they follow the wheel. In, Out and Zoom to Selection are optional: a
     // narrow view drops In and Out first, then Selection (priority 1, then
     // 2), and keeps Zoom Extents; each is in the View menu as well.
-    QToolButton* zoomIn = makeTitleBarButton(
-        bar, Icon::ZoomIn, "ViewZoomInButton", "Zoom In",
-        "Twice as close about the centre of this view; linked views follow.");
+    QToolButton* zoomIn = makeTitleBarButton(bar, Icon::ZoomIn, "ViewZoomInButton", "Zoom In", {});
     connect(zoomIn, &QToolButton::clicked, this,
             [this, id] { runViewLine(QString("ZOOM IN view=%1").arg(id)); });
     bar->addTool(zoomIn, kZoomInOutPriority);
     view.zoomInButton = zoomIn;
-    QToolButton* zoomOut = makeTitleBarButton(
-        bar, Icon::ZoomOut, "ViewZoomOutButton", "Zoom Out",
-        "Twice as far about the centre of this view; linked views follow.");
+    QToolButton* zoomOut =
+        makeTitleBarButton(bar, Icon::ZoomOut, "ViewZoomOutButton", "Zoom Out", {});
     connect(zoomOut, &QToolButton::clicked, this,
             [this, id] { runViewLine(QString("ZOOM OUT view=%1").arg(id)); });
     bar->addTool(zoomOut, kZoomInOutPriority);
     view.zoomOutButton = zoomOut;
-    QToolButton* zoomSelection = makeTitleBarButton(
-        bar, Icon::ZoomSelection, "ViewZoomSelectionButton", "Zoom to Selection",
-        "Frame what is selected in this view; linked views follow. Nothing selected: nothing "
-        "moves.");
-    connect(zoomSelection, &QToolButton::clicked, this,
-            [this, id] { runViewLine(QString("ZOOM SELECTION view=%1").arg(id)); });
+    QToolButton* zoomSelection = makeTitleBarButton(bar, Icon::ZoomSelection,
+                                                    "ViewZoomSelectionButton",
+                                                    "Zoom to Selection", {});
+    connect(zoomSelection, &QToolButton::clicked, this, [this, id] { zoomToSelection(id); });
     bar->addTool(zoomSelection, kZoomSelectionPriority);
     view.zoomSelectionButton = zoomSelection;
 
-    QToolButton* extents = makeTitleBarButton(
-        bar, Icon::ZoomExtents, "ViewZoomExtentsButton", "Zoom Extents",
-        "Frame everything this view shows; linked views follow. View > Zoom Extents does the "
-        "same for the active view.");
+    // Their tips say what each does in this kind of view (updateZoomTools).
+    QToolButton* extents =
+        makeTitleBarButton(bar, Icon::ZoomExtents, "ViewZoomExtentsButton", "Zoom Extents", {});
     connect(extents, &QToolButton::clicked, this,
             [this, id] { runViewLine(QString("ZOOM EXTENTS view=%1").arg(id)); });
     bar->addTool(extents);
+    view.zoomExtentsButton = extents;
 
     // Pressing a view's own tools, or its Float or Maximise, is working in
     // that view as a press on its title is (onPressed above) - but a button
@@ -1174,6 +1168,20 @@ Status ViewWorkspace::zoomExtents(ViewId id)
         return makeError(ErrorCode::NotFound, "no such view", std::to_string(id));
     }
     if (view->plan != nullptr) {
+        // A linked view that draws nothing - every layer it shows is empty -
+        // would go to the origin at a pixel a unit, as Zoom Extents on
+        // nothing always has, and take the link there, millions of units off
+        // a survey: it frames what the link draws instead, as zoomExtentsAll
+        // frames a link. Here, where every Zoom Extents of one view comes -
+        // ZOOM EXTENTS, the bar, Ctrl+E and a middle double-click
+        // (ViewportWidget::onZoomExtents) - so none of them can miss it.
+        const ViewState* state = views_.find(id);
+        if (state != nullptr && state->linked && view->plan->drawnBounds().empty()) {
+            if (const katana::geometry::Box2 link = linkDrawnBounds(); !link.empty()) {
+                view->plan->zoomTo(link);
+                return {};
+            }
+        }
         view->plan->zoomExtents();
     } else if (view->render != nullptr) {
         view->render->zoomExtents();
@@ -1183,17 +1191,24 @@ Status ViewWorkspace::zoomExtents(ViewId id)
     return {};
 }
 
-void ViewWorkspace::zoomExtentsAll()
+katana::geometry::Box2 ViewWorkspace::linkDrawnBounds() const
 {
-    // The link, once: on everything its views draw between them, each hiding
-    // layers of its own, so none of them is framed off what it shows.
-    const ViewId framer = linkFramer();
-    katana::geometry::Box2 linkBounds;
+    // Each member through its own hidden layers, so none of them is framed
+    // off what it shows.
+    katana::geometry::Box2 bounds;
     for (const ViewId member : views_.linkedViews()) {
         if (const ViewportWidget* plan = planView(member)) {
-            linkBounds.expand(plan->drawnBounds());
+            bounds.expand(plan->drawnBounds());
         }
     }
+    return bounds;
+}
+
+void ViewWorkspace::zoomExtentsAll()
+{
+    // The link, once: on everything its views draw between them.
+    const ViewId framer = linkFramer();
+    const katana::geometry::Box2 linkBounds = linkDrawnBounds();
     for (const View& view : docks_) {
         const ViewState* state = views_.find(view.id);
         if (state != nullptr && state->linked) {
@@ -1253,6 +1268,11 @@ void ViewWorkspace::setCommandRunner(CommandRunner runner)
 
 void ViewWorkspace::runViewLine(const QString& line) { (void)runner_(line); }
 
+void ViewWorkspace::zoomToSelection(ViewId id)
+{
+    runViewLine(QString("ZOOM SELECTION view=%1").arg(id));
+}
+
 bool ViewWorkspace::runsTransparently(const QString& line) const
 {
     if (activeToolId().empty()) {
@@ -1276,6 +1296,31 @@ void ViewWorkspace::updateZoomTools(const View& view)
     view.titleBar->setToolWanted(view.zoomOutButton, katana::cad::zoomTakes(kind, Request::Out));
     view.titleBar->setToolWanted(view.zoomSelectionButton,
                                  katana::cad::zoomTakes(kind, Request::Scope));
+
+    // And what each does there, which differs by kind: only a view that can
+    // be linked says the linked views follow - a section's and a 3D view's
+    // tips promised a link their kind cannot have.
+    const QString follow = katana::cad::linkable(kind) ? QStringLiteral("; linked views follow")
+                                                       : QString();
+    const QString about = kind == ViewKind::Plan ? QStringLiteral("about the centre of this view")
+                          : kind == ViewKind::Section
+                              ? QStringLiteral("about the middle of the section's plot")
+                              : QStringLiteral("about the middle of this view, as the wheel "
+                                               "zooms there");
+    setTitleBarTip(view.zoomInButton, QStringLiteral("Zoom In"),
+                   QStringLiteral("Twice as close %1%2.").arg(about, follow));
+    setTitleBarTip(view.zoomOutButton, QStringLiteral("Zoom Out"),
+                   QStringLiteral("Twice as far %1%2.").arg(about, follow));
+    setTitleBarTip(view.zoomSelectionButton, QStringLiteral("Zoom to Selection"),
+                   QStringLiteral("Frame what is selected, as this view draws it%1. Nothing "
+                                  "selected, or none of it drawn here: nothing moves.")
+                       .arg(follow));
+    if (view.zoomExtentsButton != nullptr) {
+        setTitleBarTip(view.zoomExtentsButton, QStringLiteral("Zoom Extents"),
+                       QStringLiteral("Frame everything this view shows%1. View > Zoom Extents "
+                                      "does the same for the active view.")
+                           .arg(follow));
+    }
 }
 
 void ViewWorkspace::toggleLink(ViewId id)
@@ -1345,9 +1390,7 @@ void ViewWorkspace::updateLinkButton(const View& view)
                                        others.back();
         tip = "Pans and zooms with " + with + ". Click to unlink.";
     }
-    view.linkButton->setToolTip(QString("<b>%1</b><br>%2").arg(label, tip));
-    view.linkButton->setAccessibleName(label);
-    view.linkButton->setAccessibleDescription(tip);
+    setTitleBarTip(view.linkButton, label, tip);
 }
 
 void ViewWorkspace::updateLinkButtons()
@@ -1400,15 +1443,32 @@ Result<std::vector<ViewId>> ViewWorkspace::zoomView(const katana::cad::ZoomReque
     if (view == nullptr || state == nullptr) {
         return makeError(ErrorCode::NotFound, "no such view", std::to_string(request.view));
     }
+    // What Qt has queued of the layout, done now. A view opened by the line
+    // before, in a script that runs its lines with no event loop between
+    // them, is not at its final width yet: its bar dropped a tool for the
+    // width the split gave it, which queues one more layout and moves the
+    // split a pixel or two. A zoom fits - and its reply says - what the view
+    // shows at the size it is seen at, not at that provisional one.
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
     using Kind = katana::cad::ZoomRequest::Kind;
     switch (request.kind) {
     case Kind::Extents:
-        // Through the view's own Zoom Extents; a plan view's frame() tells
-        // the link (viewMoved).
+        // Through the view's own Zoom Extents, where a linked view that
+        // draws nothing frames what the link draws; a plan view's frame()
+        // tells the link (viewMoved).
         (void)zoomExtents(request.view);
         break;
-    case Kind::Window:
     case Kind::Scope:
+        // What a scope took, in 3D: the box its scene puts them in. None of
+        // them drawn there, nothing to frame, and no view moved.
+        if (view->render != nullptr) {
+            if (!view->render->zoomToEntities(request.ids)) {
+                return std::vector<ViewId>{};
+            }
+            break;
+        }
+        [[fallthrough]];
+    case Kind::Window:
         // A box, or the extent of what a scope took, framed as Zoom Extents
         // frames the drawing (the widget's margin, at its size).
         if (view->plan == nullptr) {
@@ -1420,25 +1480,36 @@ Result<std::vector<ViewId>> ViewWorkspace::zoomView(const katana::cad::ZoomReque
     case Kind::In:
     case Kind::Out:
     case Kind::Factor:
-    case Kind::Centre:
+    case Kind::Centre: {
+        const double factor = request.kind == Kind::Out ? 1.0 / request.factor : request.factor;
+        if (view->render != nullptr && request.kind != Kind::Centre) {
+            // As the wheel turned over the middle of the view, by the notches
+            // that make `factor` (RenderViewWidget::zoomBy).
+            view->render->zoomBy(factor);
+            break;
+        }
         if (view->section != nullptr && request.kind != Kind::Centre) {
             // About the middle of the plot, as a plan view zooms about its
             // centre; a section keeps its pan and zoom in its widget.
-            view->section->zoomAt(view->section->plotCentre(), request.kind == Kind::Out
-                                                                   ? 1.0 / request.factor
-                                                                   : request.factor);
+            view->section->zoomAt(view->section->plotCentre(), factor);
             break;
         }
         if (view->plan == nullptr) {
             return makeError(ErrorCode::InvalidArgument, "only a plan view zooms that way here",
                              std::to_string(request.view));
         }
+        // A view that has framed nothing yet frames what it draws first, as
+        // its first paint would: zoomed from the place a new view holds until
+        // then - the origin at 10 px a unit - and marked framed, it never
+        // framed the drawing, and a link took the others there too.
+        view->plan->frameIfUnframed();
         (void)katana::cad::applyPlanZoom(state->plan, request);
         state->planFramed = true;
         // The user's view now: kept on a resize, as after the wheel.
         view->plan->holdView();
         viewMoved(request.view, true);
         break;
+    }
     }
     std::vector<ViewId> moved{request.view};
     if (state->linked) {

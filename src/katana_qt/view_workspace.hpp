@@ -135,6 +135,12 @@ class ViewWorkspace final : public QMainWindow {
     // is then set from the link as it stands, so a refused line leaves each
     // as it was. View > Link This View runs it for the active plan view.
     void toggleLink(katana::cad::ViewId id);
+    // Frames the selection in view `id` by its Zoom to Selection line, ZOOM
+    // SELECTION view=<id>, through the command runner: logged, and followed
+    // by the views linked with it. The bar's button, Select by ID's zoom and
+    // a manager's Select Users all do it, so none of them frames the
+    // selection a way of its own.
+    void zoomToSelection(katana::cad::ViewId id);
     // Raised whenever the link changes, for the View menu's check mark.
     std::function<void()> onLinksChanged;
     // Raised whenever a view's own settings change - the layers it hides,
@@ -262,8 +268,9 @@ class ViewWorkspace final : public QMainWindow {
     // them, and then the views linked with it follow.
     void zoomExtents();
     // Frames one view, whether active or not: its title bar's Zoom Extents
-    // button. The views linked with it follow. NotFound for an id that is
-    // not open.
+    // button, ZOOM EXTENTS and a plan view's middle double-click. The views
+    // linked with it follow; a linked view that draws nothing frames what
+    // the link draws (linkDrawnBounds). NotFound for an id that is not open.
     [[nodiscard]] katana::core::Status zoomExtents(katana::cad::ViewId id);
     // Frames every view: after New, Open and an import, when all of them are
     // looking at a drawing that has just changed under them. The link is
@@ -271,7 +278,8 @@ class ViewWorkspace final : public QMainWindow {
     // the user moved last (else the lowest id), and the others follow it:
     // framed one by one, each on what it alone draws, they would come apart.
     void zoomExtentsAll();
-    // Frames `bounds` in every plan view; in the link, once, as above.
+    // Frames `bounds` in every plan view; in the link, once, in the member
+    // that frames it for zoomExtentsAll, the others following it.
     void zoomTo(const katana::geometry::Box2& bounds);
     void invalidateReferenceCache();
     // Repaints every view and rebuilds every 3D scene.
@@ -344,6 +352,7 @@ class ViewWorkspace final : public QMainWindow {
         QToolButton* zoomInButton = nullptr;
         QToolButton* zoomOutButton = nullptr;
         QToolButton* zoomSelectionButton = nullptr;
+        QToolButton* zoomExtentsButton = nullptr;
         [[nodiscard]] QWidget* widget() const;
     };
     // The workspace as the verbs' host (verbHost), apart so that its
@@ -385,8 +394,9 @@ class ViewWorkspace final : public QMainWindow {
     void updateLinkButton(const View& view);
     // Every view's, and the View menu's (onLinksChanged).
     void updateLinkButtons();
-    // The zoom tools a view's kind takes (cad/view_verbs.hpp): In and Out on
-    // a plan view and a section, Zoom to Selection on a plan view.
+    // The zoom tools a view's kind takes (cad::zoomTakes): In and Out on
+    // every kind, Zoom to Selection on all but a section; and their tips,
+    // which say what each does in that kind of view.
     void updateZoomTools(const View& view);
     // A bar's line, through the command runner; what it did or why it was
     // refused is in the log the runner writes.
@@ -399,6 +409,11 @@ class ViewWorkspace final : public QMainWindow {
     // The member that frames the link for zoomExtentsAll and zoomTo: the one
     // the user moved last, else the lowest id; kNoView with no link.
     [[nodiscard]] katana::cad::ViewId linkFramer() const;
+    // What the link's members draw between them, each through its own
+    // hidden layers: what zoomExtentsAll frames the link on, and what a
+    // linked view that draws nothing frames on its Zoom Extents. Empty with
+    // no link.
+    [[nodiscard]] katana::geometry::Box2 linkDrawnBounds() const;
     // The verbs' host at work (VerbHost): ZOOM on one view, and a link the
     // verbs changed behind the widgets.
     [[nodiscard]] katana::core::Result<std::vector<katana::cad::ViewId>>

@@ -315,19 +315,21 @@ TEST_F(ViewVerbsTest, ZoomSelectionOfOnePointCentresOnItAndKeepsTheScale)
 TEST(ViewZoom, TheKindsEachZoomTakesAreTheVerbsOneRule)
 {
     // The table the bars, the View menu and the Zoom To dialog read
-    // (cad::zoomTakes), as view_verbs.hpp states it.
+    // (cad::zoomTakes), as view_verbs.hpp states it: EXTENTS, IN, OUT and a
+    // factor every kind, about its middle; a scope every kind but a section,
+    // which shows where entities cross it and has no box of them to frame;
+    // WINDOW and CENTRE a plan view, whose plan position they are.
     using Kind = ZoomRequest::Kind;
     for (const ViewKind kind :
          {ViewKind::Plan, ViewKind::Model3D, ViewKind::Section, ViewKind::Elevation}) {
         const bool plan = kind == ViewKind::Plan;
-        const bool aboutCentre = plan || kind == ViewKind::Section;
         EXPECT_TRUE(zoomTakes(kind, Kind::Extents));
-        EXPECT_EQ(zoomTakes(kind, Kind::In), aboutCentre);
-        EXPECT_EQ(zoomTakes(kind, Kind::Out), aboutCentre);
-        EXPECT_EQ(zoomTakes(kind, Kind::Factor), aboutCentre);
+        EXPECT_TRUE(zoomTakes(kind, Kind::In));
+        EXPECT_TRUE(zoomTakes(kind, Kind::Out));
+        EXPECT_TRUE(zoomTakes(kind, Kind::Factor));
+        EXPECT_EQ(zoomTakes(kind, Kind::Scope), kind != ViewKind::Section);
         EXPECT_EQ(zoomTakes(kind, Kind::Window), plan);
         EXPECT_EQ(zoomTakes(kind, Kind::Centre), plan);
-        EXPECT_EQ(zoomTakes(kind, Kind::Scope), plan);
     }
 }
 
@@ -405,10 +407,20 @@ TEST_F(ViewVerbsTest, ZoomWindowOnA3DViewIsRefusedNamingTheKind)
     EXPECT_EQ(refusal.code, ErrorCode::InvalidArgument);
     EXPECT_TRUE(contains(refusal.message, "ZOOM WINDOW frames a plan view: view 2 is 3D"))
         << refusal.message;
-    EXPECT_TRUE(contains(refused("ZOOM IN view=2").message, "ZOOM IN zooms a plan view"));
-    // EXTENTS frames any view.
+    const auto centre = refused("ZOOM CENTRE 1,2 view=2");
+    EXPECT_TRUE(contains(centre.message, "ZOOM CENTRE centres a plan view: view 2 is 3D"))
+        << centre.message;
+    // EXTENTS frames any view; IN, OUT and a factor zoom any view about its
+    // middle - a 3D view as its wheel zooms there - and reach it as asked.
     (void)ok("ZOOM EXTENTS view=2");
-    EXPECT_EQ(host.zooms.size(), 1U);
+    (void)ok("ZOOM IN view=2");
+    (void)ok("ZOOM 0.5 view=2");
+    ASSERT_EQ(host.zooms.size(), 3U);
+    EXPECT_EQ(host.zooms[1].kind, ZoomRequest::Kind::In);
+    EXPECT_EQ(host.zooms[1].factor, 2.0);
+    EXPECT_EQ(host.zooms[2].kind, ZoomRequest::Kind::Factor);
+    EXPECT_EQ(host.zooms[2].factor, 0.5);
+    EXPECT_EQ(host.zooms[2].view, 2U);
 }
 
 TEST_F(ViewVerbsTest, ZoomOfAViewThatIsNotOpenIsRefusedNamingIt)
@@ -702,11 +714,15 @@ TEST_F(ViewVerbsTest, ZoomOnASectionTakesExtentsInAndOutOnly)
     (void)ok("ZOOM OUT 3 view=2");
     EXPECT_EQ(host.zooms.back().factor, 3.0);
     (void)ok("ZOOM EXTENTS view=2");
-    for (const char* line : {"ZOOM WINDOW 0,0,1,1 view=2", "ZOOM CENTRE 0,0 view=2",
-                             "ZOOM SELECTION view=2"}) {
+    // Each refusal names the kinds that take it (cad::zoomTakes): WINDOW and
+    // CENTRE a plan view's, a scope a plan, 3D or elevation view's.
+    for (const auto& [line, takers] :
+         {std::pair{"ZOOM WINDOW 0,0,1,1 view=2", "a plan view: view 2 is Section"},
+          std::pair{"ZOOM CENTRE 0,0 view=2", "a plan view: view 2 is Section"},
+          std::pair{"ZOOM SELECTION view=2", "a plan, 3D or elevation view: view 2 is Section"}}) {
         const auto refusal = refused(line);
         EXPECT_EQ(refusal.code, ErrorCode::InvalidArgument) << line;
-        EXPECT_TRUE(contains(refusal.message, "a plan view: view 2 is Section")) << refusal.message;
+        EXPECT_TRUE(contains(refusal.message, takers)) << refusal.message;
     }
     EXPECT_EQ(host.zooms.size(), 3U);
 }
@@ -747,4 +763,93 @@ TEST(ViewZoom, ApplyPlanZoomLeavesWindowAndExtentsToTheWidget)
     request.factor = 2;
     EXPECT_TRUE(applyPlanZoom(view, request));
     EXPECT_EQ(view.scale, ViewTransform::kMaximumScale);
+}
+
+TEST_F(ViewVerbsTest, AScopeZoomOnA3DViewCarriesWhatTheScopeTookAndASectionRefusesIt)
+{
+    // A 3D view frames the entities a scope took, where its scene draws
+    // them, so the request carries them - ascending, as matchScope gives
+    // them - beside their plan extent, which a plan view frames.
+    plan();
+    host.set.add(ViewKind::Model3D);
+    host.set.add(ViewKind::Section);
+    (void)ok("LINE 0,0 10,0");
+    (void)ok("LINE 50,50 60,60");
+    (void)ok("LINE 100,0 110,0");
+    const std::vector<katana::entity::EntityId> ids = document.model().entities.ids();
+    ASSERT_EQ(ids.size(), 3U);
+    document.selection().set({ids[2], ids[0]});
+
+    (void)ok("ZOOM SELECTION view=2");
+    ASSERT_EQ(host.zooms.size(), 1U);
+    EXPECT_EQ(host.zooms.back().kind, ZoomRequest::Kind::Scope);
+    EXPECT_EQ(host.zooms.back().ids, (std::vector<katana::entity::EntityId>{ids[0], ids[2]}));
+    // Their plan extent by hand: x from 0 to 110, both on y = 0.
+    EXPECT_EQ(host.zooms.back().window.min, Point2(0, 0));
+    EXPECT_EQ(host.zooms.back().window.max, Point2(110, 0));
+
+    // A section frames no scope, and says which kinds do.
+    const auto refusal = refused("ZOOM SELECTION view=3");
+    EXPECT_EQ(refusal.code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(contains(refusal.message,
+                         "ZOOM on a scope frames a plan, 3D or elevation view: view 3 is Section"))
+        << refusal.message;
+    EXPECT_EQ(host.zooms.size(), 1U) << "nothing refused was asked of the window";
+}
+
+TEST_F(ViewVerbsTest, TheRecordOfAViewThatHasFramedNothingYetSaysSo)
+{
+    // A view frames what it draws at its first paint; until then its place
+    // is the one every new view starts at, which VIEWS OPEN's record gave as
+    // though the view looked there (view_verbs.hpp, framed=no).
+    const std::string opened = ok("VIEWS OPEN plan");
+    EXPECT_TRUE(contains(opened, " framed=no ghosts=on")) << opened;
+    const std::string model = ok("VIEWS OPEN 3d");
+    EXPECT_TRUE(contains(model, " framed=no ghosts=on")) << model;
+
+    // Framed, a record says nothing of it.
+    host.set.find(1)->planFramed = true;
+    host.set.find(2)->cameraFramed = true;
+    const std::string listed = ok("VIEWS");
+    EXPECT_FALSE(contains(listed, "framed=")) << listed;
+    // A section's record has no place to be the placeholder of.
+    EXPECT_FALSE(contains(ok("VIEWS OPEN section"), "framed="));
+}
+
+TEST_F(ViewVerbsTest, HideOrShowOfCommasAloneIsRefusedAndChangesNothing)
+{
+    // "VIEWS HIDE 1 ," names no layer. It replied the view's record as
+    // though it had worked, and changed nothing: a silent failure.
+    addLayers(document, {"design"});
+    plan();
+    (void)ok("VIEWS HIDE 1 design");
+    const std::size_t heard = host.settingChanges.size();
+    for (const char* line :
+         {"VIEWS HIDE 1 ,", "VIEWS SHOW 1 ,,", "VIEWS HIDE 1 , ,", "VIEWS ISOLATE 1 ,"}) {
+        const auto refusal = refused(line);
+        EXPECT_EQ(refusal.code, ErrorCode::ParseFailure) << line;
+        EXPECT_TRUE(contains(refusal.message, "names no layer in ','") ||
+                    contains(refusal.message, "names no layer in ',,'"))
+            << line << ": " << refusal.message;
+    }
+    EXPECT_EQ(host.settingChanges.size(), heard) << "nothing changed, so no view was redrawn";
+    EXPECT_TRUE(host.set.find(1)->layers.hides("design")) << "and design is hidden still";
+}
+
+TEST(CommandVerb, TheVerbOfALineIsTheInterpretersOwnReading)
+{
+    // What the window asks of a line typed inside a tool (verbOf): the
+    // interpreter's alias table and its apostrophe rule, never a list of the
+    // window's own.
+    EXPECT_EQ(CommandInterpreter::verbOf("z"), "ZOOM");
+    EXPECT_EQ(CommandInterpreter::verbOf("  Zoom in 2  "), "ZOOM");
+    EXPECT_EQ(CommandInterpreter::verbOf("'z e"), "ZOOM");
+    EXPECT_EQ(CommandInterpreter::verbOf("'ZOOM"), "ZOOM");
+    EXPECT_EQ(CommandInterpreter::verbOf("views open plan"), "VIEWS");
+    EXPECT_EQ(CommandInterpreter::verbOf("l 0,0 1,1"), "LINE");
+    // An apostrophe makes no other word a verb; run() refuses it.
+    EXPECT_EQ(CommandInterpreter::verbOf("'LINE 0,0"), "'LINE");
+    EXPECT_EQ(CommandInterpreter::verbOf("'"), "'");
+    EXPECT_EQ(CommandInterpreter::verbOf(""), "");
+    EXPECT_EQ(CommandInterpreter::verbOf("   "), "");
 }

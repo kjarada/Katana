@@ -44,22 +44,28 @@
 // EXTENTS frames what the view draws, in any kind of view; ALL and A alone
 // are the same, every CAD program's Zoom All (with a filter after it, ALL is
 // the scope word for the whole drawing). IN and OUT (by 2 unless a factor is
-// given) and a bare factor zoom about the view's centre, in a plan view or a
-// section - a factor may carry AutoCAD's X, "2X", relative to the view as a
-// bare one always is; WINDOW frames a box as Zoom Extents frames the
-// drawing - a box of the drawing, where the scope word AREA would be the
-// entities found in one; CENTRE puts a point in the middle, at SCALE pixels
-// per unit when given. WINDOW and CENTRE act on plan views. 'ZOOM and 'Z,
-// AutoCAD's transparent form, are ZOOM whether or not a tool runs.
+// given) and a bare factor zoom about the middle of any view - a plan view
+// and a section about their centres, a 3D or elevation view as its wheel
+// zooms, turned that many notches over its middle pixel - and a factor may
+// carry AutoCAD's X, "2X", relative to the view as a bare one always is;
+// WINDOW frames a box as Zoom Extents frames the drawing - a box of the
+// drawing, where the scope word AREA would be the entities found in one;
+// CENTRE puts a point in the middle, at SCALE pixels per unit when given.
+// WINDOW and CENTRE act on plan views. 'ZOOM and 'Z, AutoCAD's transparent
+// form, are ZOOM whether or not a tool runs. A view that has not framed
+// anything yet - opened by the line before, in a script that paints nothing
+// between its lines - frames what it draws first, as its first paint would,
+// so a relative zoom never starts from the place a new view holds until then.
 //
 // The scope words are the shared grammar (scope_verbs.hpp), read by the one
 // parser and resolved by matchScope: ZOOM frames what they take, by
 // extentOf. ZOOM alone is still EXTENTS, where no scope word elsewhere is the
 // selection. The reply begins with the scope record; a scope that takes
 // nothing moves no view and says so (matched=0), which is not a refusal. A
-// scope frames a plan view; a 3D view's frame of what a scope takes is not
-// done (docs/cad.md), and 3D and elevation views take EXTENTS alone until
-// their zoom towards the cursor is merged.
+// plan view frames the box of what the scope took; a 3D or elevation view the
+// box its scene puts those entities in - the ones it draws and, with its
+// ghosts on, the ones it ghosts - and when it draws none of them it moves
+// and says nothing more than the scope record. A section frames no scope.
 //
 // HIDE, SHOW and ISOLATE are the view's own layer filter, its Layers button's
 // (cad::LayerOverrides): subtractive, so a view never shows what the document
@@ -79,6 +85,12 @@
 //   view=3 kind=3d title="3D 1" active=no target=x,y,z distance=d azimuth=a elevation=e
 //          projection=perspective ghosts=on
 //   view=4 kind=section title="Section 1" active=no ghosts=on
+//
+// framed=no follows the place of a plan, 3D or elevation view that has not
+// framed anything yet: it frames what it draws at its first paint (a 3D view,
+// at the first scene with something in it), and until then its centre and
+// scale, or its target and distance, are the place every new view starts at,
+// which it will not show. Left out once the view has framed.
 //
 // ZOOM replies the record of the view it moved without title, active,
 // linked, ghosts and hidden - where it looks, not what it shows - then a line
@@ -115,9 +127,9 @@ struct ZoomRequest {
         Factor,  // times `factor` about the view's centre: above 1 is closer
         Window,  // frames `window` as Zoom Extents frames the drawing
         Centre,  // `centre` in the middle, at `scale` pixels per unit if given
-        // Frames `window`, the extent of what a scope took (extentOf): framed
-        // as WINDOW frames a box in a plan view; kept apart because a view of
-        // another kind would frame the entities, not a box.
+        // What a scope took: `window`, their extent (extentOf), framed as
+        // WINDOW frames a box in a plan view; `ids` themselves in a 3D or
+        // elevation view, which frames the box its scene puts them in.
         Scope,
     };
     ViewId view = kNoView;
@@ -125,19 +137,21 @@ struct ZoomRequest {
     // In, Out and Factor: finite and above 0.
     double factor = 2.0;
     katana::geometry::Box2 window{};
+    // Scope: what it took, in ascending order.
+    std::vector<katana::entity::EntityId> ids{};
     katana::geometry::Point2 centre{};
     // Within ViewTransform's limits: SCALE outside them is refused, not
     // clamped, because a scale the view cannot show is not the one asked for.
     std::optional<double> scale{};
 };
 
-// Whether a view of `kind` takes `request`: EXTENTS any view; IN, OUT and a
-// factor a plan view and a section, which zoom about their centres; WINDOW,
-// CENTRE and a scope a plan view, whose plan position they are. A 3D or
-// elevation view zooms by the wheel towards what is under the cursor, which
-// ZOOM IN is to use at its centre once that zoom is merged (docs/cad.md).
-// The one rule: ZOOM refuses by it, and a view's bar, the View menu and the
-// Zoom To dialog offer only what it allows, so widening it widens all four.
+// Whether a view of `kind` takes `request`: EXTENTS, IN, OUT and a factor
+// any view - about the middle of it, a 3D or elevation view by its wheel's
+// own zoom there; a scope a plan, 3D or elevation view, which frame the
+// entities it took (a section shows where they cross it, which has no box to
+// frame); WINDOW and CENTRE a plan view, whose plan position they are. The
+// one rule: ZOOM refuses by it, and a view's bar, the View menu and the Zoom
+// To dialog offer only what it allows, so widening it widens all four.
 [[nodiscard]] bool zoomTakes(ViewKind kind, ZoomRequest::Kind request);
 
 // In, Out, Factor and Centre applied to a plan view's transform: arithmetic
@@ -165,8 +179,10 @@ class ViewVerbHost {
     [[nodiscard]] virtual katana::core::Status activate(ViewId id) = 0;
     // Moves `request.view` as asked, through its widget, and then every view
     // linked with it: the view moved, then each view that followed it, in
-    // the order they were opened. The request has been checked against the
-    // view's kind; a host fails only with what its widget refuses.
+    // the order they were opened - or none, when a 3D view draws nothing of
+    // what a scope took and so has nothing to frame. The request has been
+    // checked against the view's kind; a host fails only with what its
+    // widget refuses.
     [[nodiscard]] virtual katana::core::Result<std::vector<ViewId>>
     zoom(const ZoomRequest& request) = 0;
     // The verbs changed the link: these views joined or left it, and may have

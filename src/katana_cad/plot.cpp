@@ -1,7 +1,6 @@
 #include "katana/cad/plot.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <string>
 
@@ -109,10 +108,7 @@ std::string_view toString(PlotColourMode mode)
 
 std::optional<PlotColourMode> plotColourModeFrom(std::string_view name)
 {
-    std::string lower;
-    for (const char c : name) {
-        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-    }
+    const std::string lower = katana::core::lowered(name);
     if (lower == "colour" || lower == "color") {
         return PlotColourMode::Colour;
     }

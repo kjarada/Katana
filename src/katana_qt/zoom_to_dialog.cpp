@@ -7,12 +7,58 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QVBoxLayout>
 
 #include "customisation/scope_filter_widget.hpp"
+#include "theme.hpp"
 #include "view_workspace.hpp"
 
 namespace katana::qt {
+
+QString ZoomToDialog::spokenReply(const QString& reply)
+{
+    // The records a ZOOM on a scope answers (cad/view_verbs.hpp): the
+    // scope's, then the view it framed, then each view that followed it.
+    static const QRegularExpression matchedField(QStringLiteral("\\bmatched=(\\d+)"));
+    static const QRegularExpression viewField(QStringLiteral("^view=(\\d+)"));
+    long long matched = -1;
+    QString framed;
+    QStringList followed;
+    for (const QString& line : reply.split('\n', Qt::SkipEmptyParts)) {
+        if (line.startsWith(QStringLiteral("scope="))) {
+            if (const auto found = matchedField.match(line); found.hasMatch()) {
+                matched = found.captured(1).toLongLong();
+            }
+            continue;
+        }
+        const auto view = viewField.match(line);
+        if (!view.hasMatch()) {
+            continue;
+        }
+        if (line.contains(QStringLiteral(" followed="))) {
+            followed.append(view.captured(1));
+        } else {
+            framed = view.captured(1);
+        }
+    }
+    if (matched == 0) {
+        return QStringLiteral("Nothing matched, so no view moved.");
+    }
+    const QString took = matched > 0 ? QStringLiteral("%1 matched").arg(matched)
+                                     : QStringLiteral("ZOOM answered");
+    if (framed.isEmpty()) {
+        return took + QStringLiteral(", none of them drawn in that view: nothing moved.");
+    }
+    QString text = took + QStringLiteral(", framed in view %1").arg(framed);
+    if (!followed.isEmpty()) {
+        const QString last = followed.takeLast();
+        text += QStringLiteral("; view%1 %2 followed")
+                    .arg(followed.isEmpty() ? QString() : QStringLiteral("s"))
+                    .arg(followed.isEmpty() ? last : followed.join(", ") + " and " + last);
+    }
+    return text + '.';
+}
 
 ZoomToDialog::ZoomToDialog(ZoomToContext context, QWidget* parent)
     : QDialog(parent), context_(std::move(context))
@@ -120,14 +166,26 @@ bool ZoomToDialog::zoom()
 {
     const auto text = line();
     if (!text) {
-        status_->setText(QString::fromStdString(text.error().describe()));
+        setStatus(QString::fromStdString(text.error().describe()), true);
         return false;
     }
     const VerbOutcome outcome = context_.run
                                     ? context_.run(*text)
                                     : VerbOutcome{false, {}, QStringLiteral("nothing runs it")};
-    status_->setText(outcome.ok ? outcome.reply : outcome.error);
+    // A sentence, and a refusal in the error colour, as Online Data words its
+    // status: the raw records - long reals among them - wrapped over five
+    // lines, and the dialog, grown only to its least height, pressed the
+    // type grid above until its captions lost their descenders. The records
+    // are in the command log the runner writes.
+    setStatus(outcome.ok ? spokenReply(outcome.reply) : outcome.error, !outcome.ok);
     return outcome.ok;
+}
+
+void ZoomToDialog::setStatus(const QString& text, bool isError)
+{
+    status_->setText(text);
+    status_->setStyleSheet(isError ? QStringLiteral("color: %1;").arg(theme::error().name())
+                                   : QString());
 }
 
 } // namespace katana::qt

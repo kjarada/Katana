@@ -1,7 +1,6 @@
 #include "katana/cad/plotting/preflight.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <format>
@@ -25,6 +24,7 @@
 #include "katana/cad/plotting/tables.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/cad/spatial_query.hpp"
+#include "katana/core/text.hpp"
 #include "katana/geometry/alignment.hpp"
 
 namespace katana::cad::plotting {
@@ -126,11 +126,7 @@ std::string trimmedUpper(std::string_view text)
         return {};
     }
     const auto last = text.find_last_not_of(" \t\r\n");
-    std::string out(text.substr(first, last - first + 1));
-    for (char& c : out) {
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    }
-    return out;
+    return katana::core::uppered(text.substr(first, last - first + 1));
 }
 
 bool isBlank(std::string_view text)
@@ -1077,10 +1073,8 @@ void checkViewport(const SheetSet& set, std::size_t index, std::size_t position,
         }
         std::vector<double> widths;
         for (const LegendEntry& entry : legend->entries) {
-            std::string upper = entry.label;
-            std::ranges::transform(upper, upper.begin(),
-                                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-            widths.push_back(estimateTextWidth(upper, 1.8, false) * 0.9);
+            widths.push_back(
+                estimateTextWidth(katana::core::uppered(entry.label), 1.8, false) * 0.9);
         }
         if (const LegendLayout flowed = layoutLegend(viewport.rect, widths); flowed.more > 0) {
             add(Severity::Warning, "legend.overflow", {},
@@ -1341,10 +1335,7 @@ std::string summaryText(const PreflightSummary& summary)
 
 std::string findingLine(const Finding& finding)
 {
-    std::string severity(toString(finding.severity));
-    for (char& c : severity) {
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    }
+    const std::string severity = katana::core::uppered(toString(finding.severity));
     std::string where;
     if (!finding.sheetId.empty() || !finding.viewportId.empty()) {
         where = " [" + finding.sheetId + (finding.viewportId.empty() ? "" : "/" + finding.viewportId) + "]";

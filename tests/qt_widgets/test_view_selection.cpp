@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <string>
 
 #include <QCheckBox>
@@ -287,6 +288,51 @@ TEST(ViewSelection, ASelectedFeatureTheDrawingHidesIsMarkedInNoView)
     EXPECT_EQ(asBuilt.lastGhostCount(), 0u);
 }
 
+TEST(ViewSelection, ASectionHidesAndMarksACrossingByTheLayerItsEntityIsOnNow)
+{
+    // One layer for both questions a section asks of a crossing - does this
+    // view hide it, and how is its selection marked - the layer its entity
+    // is on NOW. The hidden rule read the layer the cut found, the mark the
+    // entity: the design line moved onto the as-built layer the section
+    // hides was drawn as a plain crossing and as a ghost at one station, and
+    // a line moved off it was counted hidden and drawn selected.
+    DesignAndAsBuilt w;
+    katana::geometry::Polyline2 cut;
+    cut.vertices = {Point2(0, 20), Point2(50, 20)};
+    auto cutSection = katana::cad::extractSection(cut, {}, &w.document.model());
+    ASSERT_TRUE(cutSection.ok());
+    ASSERT_TRUE(w.views->showSection(std::move(*cutSection)));
+    processEvents();
+    const ViewId id = w.views->viewSet().views().back()->id;
+    auto* section = w.views->sectionView(id);
+    ASSERT_NE(section, nullptr);
+    w.run("VIEWS HIDE " + std::to_string(id) + " asbuilt");
+    const auto counts = [section] {
+        paint(*section);
+        return std::array<std::size_t, 4>{
+            section->lastDrawnCrossingCount(), section->lastHiddenCrossingCount(),
+            section->lastSelectedCrossingCount(), section->lastGhostCrossingCount()};
+    };
+    using Counts = std::array<std::size_t, 4>; // drawn, hidden, selected, ghosts
+    ASSERT_EQ(counts(), (Counts{1, 1, 1, 0})) << "the design line drawn and selected";
+
+    // The design line, selected, moved onto the layer the section hides: its
+    // crossing hidden, and a ghost - once.
+    w.run("CHLAYER asbuilt");
+    ASSERT_EQ(w.document.model().entities.find(w.design)->layer, "asbuilt");
+    EXPECT_EQ(counts(), (Counts{0, 2, 0, 1}));
+
+    // Back, and the as-built line selected and moved off that layer: drawn,
+    // not hidden, and marked selected.
+    ASSERT_TRUE(w.document.undo().ok());
+    EXPECT_EQ(counts(), (Counts{1, 1, 1, 0}));
+    w.document.selection().set({w.asBuilt});
+    w.document.notifySelectionChanged();
+    w.run("CHLAYER design");
+    ASSERT_EQ(w.document.model().entities.find(w.asBuilt)->layer, "design");
+    EXPECT_EQ(counts(), (Counts{2, 0, 1, 0}));
+}
+
 namespace {
 
 // A mouse event as Qt delivers one to `widget`: `button` pressed, the mouse
@@ -318,7 +364,7 @@ TEST(ViewSelection, AGhostOffersNoGripSoADragWhereItCrossesTheAsBuiltLineEditsNo
     // design line, selected, offers its grips in the design view. The
     // as-built view hides its layer and showed its grips all the same: a
     // drag there from the crossing moved the design line that view does not
-    // show (40 px right took it to (15.93, 10)-(45.93, 30)). It offers none
+    // show (40 px right took it to (15.33, 10)-(45.33, 30)). It offers none
     // of them now - a ghost is never picked - and follows its own layers,
     // which change with no document notification.
     DesignAndAsBuilt w;
@@ -347,7 +393,9 @@ TEST(ViewSelection, AGhostOffersNoGripSoADragWhereItCrossesTheAsBuiltLineEditsNo
 
     const auto after =
         std::get<katana::geometry::Segment2>(w.document.model().entities.find(w.design)->geometry);
-    EXPECT_EQ(after.start, before.start);
+    EXPECT_EQ(after.start, before.start)
+        << "moved to (" << after.start.x << ", " << after.start.y << ")-(" << after.end.x << ", "
+        << after.end.y << ")";
     EXPECT_EQ(after.end, before.end);
     EXPECT_EQ(w.document.history().undoCount(), undoable) << "no edit was made";
 }

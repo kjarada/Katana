@@ -5,17 +5,18 @@
 // through the ZOOM line it builds (docs/desktop.md, "Zoom To"; the verb is
 // cad/view_verbs.hpp). The dialog frames nothing itself: it hands
 // ZOOM <scope words> view=<id> to the window's one executor, so the log shows
-// what ran, and a scope that takes nothing is ZOOM's own answer (matched=0,
-// nothing moved), shown in the status line. Non-modal and kept, so several
-// scopes can be tried in turn; linked views follow each ZOOM as they follow
-// a wheel.
+// what ran and what ZOOM answered, and the status line says it as a sentence
+// - a scope that takes nothing is ZOOM's own answer (matched=0, nothing
+// moved). Non-modal and kept, so several scopes can be tried in turn; linked
+// views follow each ZOOM as they follow a wheel.
 //
 // Object names: zoomToDialog; the scope and filter controls with the prefix
 // zoomTo (zoomToScopeSelection, zoomToScopeDrawing, zoomToFilterLayer ...);
-// zoomToView (the active view, then every open plan view by its title and
-// id: the kinds that frame a scope, cad::zoomTakes);
+// zoomToView (the active view, then every open view that frames a scope -
+// plan, 3D and elevation, cad::zoomTakes - by its title and id);
 // zoomToLine (the line the controls say, updated as they change);
-// zoomToRun; zoomToStatus (what ZOOM answered); zoomToClose.
+// zoomToRun; zoomToStatus (what ZOOM answered, as a sentence; a refusal in
+// the error colour); zoomToClose.
 
 #include <QDialog>
 
@@ -52,8 +53,14 @@ class ZoomToDialog final : public QDialog {
     // controls did not read or ZOOM refused, with the reason in the status.
     bool zoom();
 
+    // ZOOM's reply to a scope as the status says it: "3 matched, framed in
+    // view 2; view 1 followed.", "Nothing matched, so no view moved.", or
+    // that the view draws none of them.
+    [[nodiscard]] static QString spokenReply(const QString& reply);
+
   private:
     void showLine();
+    void setStatus(const QString& text, bool isError);
 
     ZoomToContext context_;
     ScopeFilterWidget* scope_ = nullptr;

@@ -13,9 +13,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
+#include <QLabel>
 #include <QMainWindow>
 #include <QToolButton>
 #include <QMouseEvent>
@@ -26,8 +28,10 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/tables.hpp"
+#include "theme.hpp"
 #include "view_workspace.hpp"
 #include "widget_harness.hpp"
+#include "zoom_to_dialog.hpp"
 
 using katana::cad::CommandInterpreter;
 using katana::cad::Document;
@@ -596,4 +600,410 @@ TEST(ViewLinks, ASectionsZoomInIsTwiceAsCloseAboutTheMiddleOfItsPlot)
     // Twice as close: 100 px from the middle now spans half the stations.
     const QPointF edgeAfter = view->stationElevationAt(middle + QPointF(100, 0));
     EXPECT_NEAR(edgeAfter.x() - after.x(), 0.5 * (edge.x() - before.x()), 1e-9);
+}
+
+namespace {
+
+// A survey line at MGA coordinates, far from the origin every new view starts
+// at: (300000, 6200000) to (300100, 6200050), its middle (300050, 6200025).
+void surveyLine(Document& document, const char* layerName = nullptr)
+{
+    katana::commands::EntityAttributes attributes = document.currentAttributes();
+    if (layerName != nullptr) {
+        katana::entity::Layer layer;
+        layer.name = layerName;
+        ASSERT_TRUE(document.execute(katana::commands::createLayer(layer)).ok());
+        attributes.layer = layerName;
+    }
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(300000, 6200000),
+                                                          Point2(300100, 6200050), attributes))
+                    .ok());
+}
+
+// The scale Zoom Extents frames a w x h box at in `view`: 8 % a side
+// (ViewportWidget's kFrameMargin, ViewTransform::fit), the tighter axis.
+double framedScale(const ViewState& view, double w, double h)
+{
+    return std::min(0.84 * view.plan.widthPixels / w, 0.84 * view.plan.heightPixels / h);
+}
+
+} // namespace
+
+TEST(ViewLinks, AZoomOfAViewNotYetPaintedStartsFromWhatItDraws)
+{
+    // A script runs VIEWS OPEN plan and ZOOM IN back to back, with no paint
+    // between. The view zoomed about the place a new view holds until its
+    // first paint - the origin at 10 px a unit - and, marked framed then,
+    // never framed the drawing: the survey line was nowhere in it. It frames
+    // what it draws first now, as its first paint would, so the zoom is about
+    // the line's middle at twice the scale that frames it.
+    LinkedWorkspace w;
+    surveyLine(w.document);
+    const auto opened = w.interpreter.run("VIEWS OPEN plan");
+    ASSERT_TRUE(opened.ok());
+    EXPECT_NE(opened->find(" framed=no "), std::string::npos) << *opened;
+    const ViewId b = w.views->viewSet().activeId();
+    ASSERT_FALSE(w.state(b).planFramed);
+
+    // Straight on, as a script runs its lines.
+    const auto zoomed = w.interpreter.run("ZOOM IN view=" + std::to_string(b));
+    ASSERT_TRUE(zoomed.ok()) << zoomed.error().describe();
+    const ViewState& view = w.state(b);
+    EXPECT_EQ(view.plan.center, Point2(300050, 6200025));
+    const double fitted = framedScale(view, 100, 50);
+    EXPECT_NEAR(view.plan.scale, 2.0 * fitted, 1e-12 * fitted);
+    EXPECT_TRUE(zoomed->starts_with("view=2 kind=plan centre=300050,6200025 scale=")) << *zoomed;
+
+    // Its first paint leaves it there: the zoom is the user's view now.
+    paint(w.plan(b));
+    EXPECT_EQ(w.state(b).plan.center, Point2(300050, 6200025));
+    EXPECT_NEAR(w.state(b).plan.scale, 2.0 * fitted, 1e-12 * fitted);
+    EXPECT_EQ(w.plan(b).lastDrawnEntityCount(), 1u);
+    EXPECT_EQ(w.run("VIEWS").find("framed="), std::string::npos) << "framed, it says nothing";
+}
+
+TEST(ViewLinks, AZoomStraightAfterAViewOpensIsFramedAtTheWidthTheViewIsSeenAt)
+{
+    // A script's VIEWS OPEN plan then ZOOM IN, with no event loop between.
+    // The new view's bar fits its tools to the width the split gave it, and
+    // a tool it drops queues one more layout, which moves the split by a
+    // pixel or two. The zoom framed the view - and its reply said - at the
+    // width before that layout: in the window, 330 px where the view is seen
+    // at 328. The workspace does the layout Qt has queued before it zooms.
+    // Over the window widths at which the tools come and go, each view about
+    // 250 to 380 px (as ViewChrome's tests sweep them).
+    int differed = 0;
+    for (int windowWidth = 500; windowWidth <= 760; windowWidth += 5) {
+        LinkedWorkspace w;
+        w.window.resize(windowWidth, 600);
+        processEvents();
+        surveyLine(w.document);
+        ASSERT_TRUE(w.interpreter.run("VIEWS OPEN plan").ok());
+        const ViewId b = w.views->viewSet().activeId();
+        const double opened = w.plan(b).width();
+        ASSERT_TRUE(w.interpreter.run("ZOOM IN view=" + std::to_string(b)).ok());
+        const double framed = w.state(b).plan.widthPixels;
+        processEvents();
+        const double seen = w.plan(b).width();
+        EXPECT_EQ(framed, seen) << "window " << windowWidth << " px";
+        differed += opened != seen ? 1 : 0;
+    }
+    // The sweep reaches the case it is about: a width the layout still had
+    // to change when the view had just opened.
+    EXPECT_GT(differed, 0);
+}
+
+TEST(ViewLinks, AViewNotYetPaintedThatLeadsTheLinkTakesItToTheDrawingWhenZoomed)
+{
+    // The same script with a link made in it, the new view leading: the link
+    // went to the origin with it. The view linked with it follows the frame
+    // and then the zoom, bit for bit.
+    LinkedWorkspace w;
+    surveyLine(w.document);
+    const ViewId a = w.views->viewSet().activeId();
+    w.place(a, 300, 200, 10, 20, 4);
+    ASSERT_TRUE(w.interpreter.run("VIEWS OPEN plan").ok());
+    const ViewId b = w.views->viewSet().activeId();
+    const auto linked = w.interpreter.run("VIEWS LINK " + std::to_string(a) + "," +
+                                          std::to_string(b) + " TO " + std::to_string(b));
+    ASSERT_TRUE(linked.ok());
+    EXPECT_EQ(*linked, "leader=2 linked=1,2 moved=none");
+
+    const auto zoomed = w.interpreter.run("ZOOM IN view=" + std::to_string(b));
+    ASSERT_TRUE(zoomed.ok()) << zoomed.error().describe();
+    EXPECT_EQ(w.state(b).plan.center, Point2(300050, 6200025));
+    expectSameView(w.state(a), w.state(b));
+    EXPECT_NE(zoomed->find("\nview=1 kind=plan followed=2 centre=300050,6200025 "),
+              std::string::npos)
+        << *zoomed;
+}
+
+TEST(ViewLinks, AThreeDViewsZoomInIsTwiceAsCloseAboutItsMiddle)
+{
+    // ZOOM IN on a 3D view is its wheel turned over the middle of it: the
+    // notches that make 2 at the wheel's 1.15 a notch, over the pixel the
+    // view's axis passes through - so the eye is half as far from the
+    // target, and the target, the middle of the view, stays where it was.
+    // ZOOM OUT is the way back.
+    LinkedWorkspace w;
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(0, 0), Point2(100, 50))).ok());
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    processEvents();
+    paint(*w.views->renderView(model));
+    ASSERT_TRUE(w.state(model).cameraFramed);
+    const katana::render::Camera before = w.state(model).camera;
+
+    const std::string reply = w.run("ZOOM IN view=" + std::to_string(model));
+    EXPECT_TRUE(reply.starts_with("view=" + std::to_string(model) + " kind=3d target=")) << reply;
+    const katana::render::Camera& after = w.state(model).camera;
+    EXPECT_NEAR(after.distance(), 0.5 * before.distance(), 1e-12 * before.distance());
+    const double near = 1e-9 * before.distance();
+    EXPECT_NEAR(after.target().x, before.target().x, near);
+    EXPECT_NEAR(after.target().y, before.target().y, near);
+    EXPECT_NEAR(after.target().z, before.target().z, near);
+    EXPECT_EQ(after.azimuth(), before.azimuth()) << "a zoom turns nothing";
+
+    (void)w.run("ZOOM OUT view=" + std::to_string(model));
+    EXPECT_NEAR(w.state(model).camera.distance(), before.distance(), 1e-12 * before.distance());
+}
+
+TEST(ViewLinks, AThreeDViewNotYetPaintedFramesTheSceneBeforeItZooms)
+{
+    // As a plan view: VIEWS OPEN 3d and ZOOM IN back to back. The zoom was
+    // made on the camera a new 3D view starts with and the first paint then
+    // framed the scene over it; the view frames first now, so the zoom is
+    // half the distance of the frame, about the line's middle, and its first
+    // paint keeps it.
+    LinkedWorkspace w;
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(1000, 1000), Point2(1100, 1050)))
+            .ok());
+    const auto opened = w.interpreter.run("VIEWS OPEN 3d");
+    ASSERT_TRUE(opened.ok());
+    EXPECT_NE(opened->find(" framed=no "), std::string::npos) << *opened;
+    const ViewId model = w.views->viewSet().activeId();
+    ASSERT_FALSE(w.state(model).cameraFramed);
+
+    ASSERT_TRUE(w.interpreter.run("ZOOM IN view=" + std::to_string(model)).ok());
+    const katana::render::Camera zoomed = w.state(model).camera;
+    // The frame's target is the middle of the line's box, on the datum 0.
+    EXPECT_NEAR(zoomed.target().x, 1050.0, 1e-9);
+    EXPECT_NEAR(zoomed.target().y, 1025.0, 1e-9);
+    EXPECT_NEAR(zoomed.target().z, 0.0, 1e-9);
+
+    paint(*w.views->renderView(model));
+    EXPECT_EQ(w.state(model).camera.distance(), zoomed.distance()) << "the paint kept the zoom";
+
+    // Framed afresh at the same size, the distance is twice the zoomed one.
+    (void)w.run("ZOOM EXTENTS view=" + std::to_string(model));
+    EXPECT_NEAR(zoomed.distance(), 0.5 * w.state(model).camera.distance(),
+                1e-9 * zoomed.distance());
+}
+
+TEST(ViewLinks, ZoomToSelectionInAThreeDViewFramesWhatItDrawsOfTheSelection)
+{
+    // The 3D view's Zoom to Selection, ZOOM SELECTION view=<id>: the selected
+    // line framed where the scene draws it - the camera's target the middle
+    // of its box, (510, 320) on the datum 0. Nothing selected, or none of it
+    // drawn in the view, moves nothing, and the reply is the scope's record.
+    LinkedWorkspace w;
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(0, 0), Point2(10, 0))).ok());
+    katana::commands::EntityAttributes far = w.document.currentAttributes();
+    ASSERT_TRUE(w.document.execute(katana::commands::createLayer(layerNamed("far"))).ok());
+    far.layer = "far";
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(500, 300), Point2(520, 340), far))
+            .ok());
+    const katana::entity::EntityId farLine = w.document.model().entities.ids().back();
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    processEvents();
+    paint(*w.views->renderView(model));
+    const std::string line = "ZOOM SELECTION view=" + std::to_string(model);
+    const katana::render::Camera start = w.state(model).camera;
+
+    EXPECT_EQ(w.run(line), "scope=selection matched=0");
+    EXPECT_EQ(w.state(model).camera.target(), start.target());
+    EXPECT_EQ(w.state(model).camera.distance(), start.distance());
+
+    w.document.selection().set({farLine});
+    w.document.notifySelectionChanged();
+    const std::string framed = w.run(line);
+    EXPECT_TRUE(framed.starts_with("scope=selection matched=1\nview=" + std::to_string(model) +
+                                   " kind=3d target=510,320,0 "))
+        << framed;
+    EXPECT_EQ(w.state(model).camera.target(), katana::geometry::Point3(510, 320, 0));
+    EXPECT_LT(w.state(model).camera.distance(), start.distance()) << "closer: 45 units, not 500";
+
+    // Hidden in that view, and not ghosted there: nothing of it is drawn,
+    // nothing to frame.
+    (void)w.run("VIEWS HIDE " + std::to_string(model) + " far");
+    (void)w.run("VIEWS SET " + std::to_string(model) + " ghosts=off");
+    const katana::render::Camera shown = w.state(model).camera;
+    EXPECT_EQ(w.run(line), "scope=selection matched=1");
+    EXPECT_EQ(w.state(model).camera.target(), shown.target());
+    EXPECT_EQ(w.state(model).camera.distance(), shown.distance());
+}
+
+TEST(ViewLinks, TheBarsZoomInAndOutRunTheirLinesAndZoomTheView)
+{
+    // A view bar's Zoom In and Zoom Out: each runs its line through the
+    // command runner, ZOOM IN view=<id> and ZOOM OUT view=<id>, which halves
+    // and doubles what the view shows - a plan view about its centre, by 2,
+    // a 3D view as its wheel zooms, the eye half as far and back.
+    LinkedWorkspace w;
+    w.window.resize(1200, 600);
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(0, 0), Point2(100, 50))).ok());
+    const ViewId plan = w.views->viewSet().activeId();
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    processEvents();
+    w.state(plan).plan.center = Point2(10, 20);
+    w.state(plan).plan.scale = 4;
+    w.state(plan).planFramed = true;
+    w.plan(plan).holdView();
+    paint(*w.views->renderView(model));
+
+    for (const ViewId id : {plan, model}) {
+        for (const char* name : {"ViewZoomInButton", "ViewZoomOutButton"}) {
+            ASSERT_NE(w.button(id, name), nullptr) << name;
+            ASSERT_TRUE(w.button(id, name)->isVisible()) << name << " on view " << id;
+        }
+    }
+
+    w.button(plan, "ViewZoomInButton")->click();
+    processEvents();
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM IN view=1");
+    EXPECT_EQ(w.state(plan).plan.scale, 8.0);
+    EXPECT_EQ(w.state(plan).plan.center, Point2(10, 20));
+    w.button(plan, "ViewZoomOutButton")->click();
+    processEvents();
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM OUT view=1");
+    EXPECT_EQ(w.state(plan).plan.scale, 4.0);
+
+    const double distance = w.state(model).camera.distance();
+    w.button(model, "ViewZoomInButton")->click();
+    processEvents();
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM IN view=" + std::to_string(model));
+    EXPECT_NEAR(w.state(model).camera.distance(), 0.5 * distance, 1e-12 * distance);
+    w.button(model, "ViewZoomOutButton")->click();
+    processEvents();
+    EXPECT_EQ(w.ran.back().toStdString(), "ZOOM OUT view=" + std::to_string(model));
+    EXPECT_NEAR(w.state(model).camera.distance(), distance, 1e-12 * distance);
+    EXPECT_EQ(w.views->viewSet().activeId(), model) << "pressing a view's tool makes it active";
+}
+
+TEST(ViewLinks, ZoomExtentsInALinkedViewThatDrawsNothingFramesWhatTheLinkDraws)
+{
+    // The design view hides the drawing's one layer. Its Zoom Extents framed
+    // nothing - the origin at a pixel a unit, as Zoom Extents on nothing has
+    // always gone - and took the as-built view there, 6.2 million units off
+    // the line it shows. Linked, it frames what the link draws: the line.
+    LinkedWorkspace w;
+    surveyLine(w.document, "survey");
+    const ViewId a = w.views->viewSet().activeId();
+    const ViewId b = w.views->openView(ViewKind::Plan).id;
+    processEvents();
+    w.place(a, 300, 200, 10, 20, 4);
+    w.place(b, 300, 200, 300050, 6200025, 2);
+    (void)w.run("VIEWS HIDE " + std::to_string(a) + " survey");
+    ASSERT_TRUE(w.plan(a).drawnBounds().empty());
+    (void)w.run("VIEWS LINK " + std::to_string(a) + "," + std::to_string(b));
+
+    const std::string reply = w.run("ZOOM EXTENTS view=" + std::to_string(a));
+    EXPECT_EQ(w.state(a).plan.center, Point2(300050, 6200025));
+    EXPECT_NEAR(w.state(a).plan.scale, framedScale(w.state(a), 100, 50), 1e-12);
+    expectSameView(w.state(b), w.state(a));
+    EXPECT_NE(reply.find("\nview=2 kind=plan followed=1 centre=300050,6200025 "),
+              std::string::npos)
+        << reply;
+
+    // Unlinked, a view that draws nothing still frames nothing, as always.
+    (void)w.run("VIEWS UNLINK ALL");
+    (void)w.run("ZOOM EXTENTS view=" + std::to_string(a));
+    EXPECT_EQ(w.state(a).plan.center, Point2(0, 0));
+    EXPECT_EQ(w.state(a).plan.scale, 1.0);
+    EXPECT_EQ(w.state(b).plan.center, Point2(300050, 6200025)) << "and moves nothing else";
+}
+
+TEST(ViewLinks, AMiddleDoubleClickInALinkedViewThatDrawsNothingFramesWhatTheLinkDraws)
+{
+    // A plan view's middle double-click is its Zoom Extents, and went
+    // straight to the widget's own: in the design view, which draws nothing,
+    // it took the as-built view to the origin at a pixel a unit, around the
+    // rule ZOOM EXTENTS keeps. It is the workspace's Zoom Extents now
+    // (ViewportWidget::onZoomExtents), the one every Zoom Extents of a view
+    // goes through, so it frames what the link draws: the line, its middle
+    // (300050, 6200025), 100 x 50 at the framing margin.
+    LinkedWorkspace w;
+    surveyLine(w.document, "survey");
+    const ViewId a = w.views->viewSet().activeId();
+    const ViewId b = w.views->openView(ViewKind::Plan).id;
+    processEvents();
+    w.place(a, 300, 200, 10, 20, 4);
+    w.place(b, 300, 200, 300050, 6200025, 2);
+    (void)w.run("VIEWS HIDE " + std::to_string(a) + " survey");
+    ASSERT_TRUE(w.plan(a).drawnBounds().empty());
+    (void)w.run("VIEWS LINK " + std::to_string(a) + "," + std::to_string(b));
+
+    ViewportWidget& design = w.plan(a);
+    const QPointF at(150, 100);
+    QMouseEvent click(QEvent::MouseButtonDblClick, at, design.mapToGlobal(at), Qt::MiddleButton,
+                      Qt::MiddleButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(&design, &click);
+    processEvents();
+    EXPECT_EQ(w.state(a).plan.center, Point2(300050, 6200025));
+    EXPECT_NEAR(w.state(a).plan.scale, framedScale(w.state(a), 100, 50), 1e-12);
+    expectSameView(w.state(b), w.state(a));
+}
+
+TEST(ViewLinks, AZoomToolsTipSaysLinkedViewsFollowOnlyWhereTheViewCanBeLinked)
+{
+    // One tip per tool was set for every kind of view, so a section's and a
+    // 3D view's promised "linked views follow", which their kinds cannot.
+    LinkedWorkspace w;
+    const ViewId plan = w.views->viewSet().activeId();
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    const ViewId section = w.views->openView(ViewKind::Section).id;
+    processEvents();
+    const auto tip = [&w](ViewId id, const char* name) {
+        return w.button(id, name)->toolTip().toStdString();
+    };
+    for (const char* name : {"ViewZoomInButton", "ViewZoomOutButton", "ViewZoomSelectionButton",
+                             "ViewZoomExtentsButton"}) {
+        EXPECT_NE(tip(plan, name).find("linked views follow"), std::string::npos) << name;
+        EXPECT_EQ(tip(model, name).find("linked views follow"), std::string::npos) << name;
+        EXPECT_EQ(tip(section, name).find("linked views follow"), std::string::npos) << name;
+    }
+    EXPECT_NE(tip(model, "ViewZoomInButton").find("as the wheel zooms there"), std::string::npos);
+    EXPECT_NE(tip(section, "ViewZoomInButton").find("the section's plot"), std::string::npos);
+
+    // The tips follow the kind: the 3D view made a plan says so.
+    ASSERT_TRUE(w.views->setViewKind(model, ViewKind::Plan).ok());
+    processEvents();
+    EXPECT_NE(tip(model, "ViewZoomInButton").find("linked views follow"), std::string::npos);
+}
+
+TEST(ZoomTo, TheStatusSaysWhatZoomAnsweredAsASentenceAndARefusalInTheErrorColour)
+{
+    // The raw records, long reals among them, wrapped over five lines and
+    // pressed the dialog's type grid until its captions were clipped.
+    using katana::qt::ZoomToDialog;
+    EXPECT_EQ(ZoomToDialog::spokenReply("scope=selection matched=0").toStdString(),
+              "Nothing matched, so no view moved.");
+    EXPECT_EQ(ZoomToDialog::spokenReply(
+                  "scope=drawing where=\"LAYER=design\" matched=3\n"
+                  "view=2 kind=plan centre=33.333333333333336,-3.135162601626014 scale=4 "
+                  "area=1,2,3,4")
+                  .toStdString(),
+              "3 matched, framed in view 2.");
+    EXPECT_EQ(ZoomToDialog::spokenReply("scope=selection matched=1\n"
+                                        "view=2 kind=plan centre=1,2 scale=3 area=0,0,1,1\n"
+                                        "view=1 kind=plan followed=2 centre=1,2 scale=3 "
+                                        "area=0,0,1,1")
+                  .toStdString(),
+              "1 matched, framed in view 2; view 1 followed.");
+    EXPECT_EQ(ZoomToDialog::spokenReply("scope=selection matched=5\n"
+                                        "view=2 kind=plan centre=1,2 scale=3 area=0,0,1,1\n"
+                                        "view=1 kind=plan followed=2 centre=1,2 scale=3\n"
+                                        "view=3 kind=plan followed=2 centre=1,2 scale=3")
+                  .toStdString(),
+              "5 matched, framed in view 2; views 1 and 3 followed.");
+    // A 3D view that draws none of what the scope took.
+    EXPECT_EQ(ZoomToDialog::spokenReply("scope=selection matched=2").toStdString(),
+              "2 matched, none of them drawn in that view: nothing moved.");
+
+    katana::qt::ZoomToContext context;
+    context.run = [](const QString&) {
+        return VerbOutcome{false, {}, QStringLiteral("refused, as asked")};
+    };
+    ZoomToDialog dialog(std::move(context));
+    EXPECT_FALSE(dialog.zoom());
+    const auto* status = dialog.findChild<QLabel*>("zoomToStatus");
+    ASSERT_NE(status, nullptr);
+    EXPECT_EQ(status->text().toStdString(), "refused, as asked");
+    EXPECT_TRUE(status->styleSheet().contains(katana::qt::theme::error().name()))
+        << status->styleSheet().toStdString();
 }

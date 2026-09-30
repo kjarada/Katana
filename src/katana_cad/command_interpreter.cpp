@@ -23,7 +23,6 @@
 #include "katana/entity/dimension_text.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <map>
@@ -230,6 +229,22 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"GLOBALMODIFY", "MODIFY"}, {"Z", "ZOOM"},
     };
     return table;
+}
+
+// The verb a line's first word names, as run() takes it: in capitals, an
+// alias resolved, and the apostrophe of AutoCAD's transparent form taken off
+// a view verb ('ZOOM, 'Z). On any other word the apostrophe stays, so the
+// word is no verb and run() refuses it. One reading for run(), for
+// replacesDocument and for the window's question (verbOf).
+std::string canonicalVerb(std::string_view word)
+{
+    const std::string verb = uppered(word);
+    const bool apostrophe = verb.size() > 1 && verb.front() == '\'';
+    std::string bare = apostrophe ? verb.substr(1) : verb;
+    if (const auto alias = aliases().find(bare); alias != aliases().end()) {
+        bare = alias->second;
+    }
+    return apostrophe && !isViewVerb(bare) ? verb : bare;
 }
 
 std::string describe(const katana::entity::Model& model, const Entity& entity)
@@ -747,12 +762,18 @@ bool CommandInterpreter::replacesDocument(std::string_view line)
     if (!tokens || tokens->empty()) {
         return false;
     }
-    std::string verb = uppered(tokens->front());
-    if (const auto alias = aliases().find(verb); alias != aliases().end()) {
-        verb = alias->second;
-    }
+    const std::string verb = canonicalVerb(tokens->front());
     const Tokens args(tokens->begin() + 1, tokens->end());
     return verb == "NEW" || (verb == "OPEN" && !isDrawingVerb(verb, args));
+}
+
+std::string CommandInterpreter::verbOf(std::string_view line)
+{
+    const auto tokens = tokenize(line);
+    if (!tokens || tokens->empty()) {
+        return {};
+    }
+    return canonicalVerb(tokens->front());
 }
 
 CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
@@ -766,19 +787,12 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     history_.emplace_back(line);
 
-    std::string verb = uppered(tokens->front());
     // 'ZOOM and 'Z, AutoCAD's transparent form, typed with no tool running:
     // the verb itself, as AutoCAD takes it at its prompt (a running tool is
     // handed it first, tools::isTransparentCommand). Only the view verbs
     // have one; any other word after an apostrophe stays unknown.
-    const bool apostrophe = verb.size() > 1 && verb.front() == '\'';
-    if (apostrophe) {
-        verb.erase(0, 1);
-    }
-    if (const auto alias = aliases().find(verb); alias != aliases().end()) {
-        verb = alias->second;
-    }
-    if (apostrophe && !isViewVerb(verb)) {
+    const std::string verb = canonicalVerb(tokens->front());
+    if (verb.size() > 1 && verb.front() == '\'') {
         return makeError(ErrorCode::ParseFailure, "unknown command; type HELP", tokens->front());
     }
     const Tokens args(tokens->begin() + 1, tokens->end());

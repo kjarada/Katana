@@ -1,7 +1,6 @@
 #include "katana/cad/scope_verbs.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <limits>
 #include <string>
 #include <type_traits>
@@ -430,8 +429,7 @@ Result<std::string> formatScopeWords(const ScopeWords& words)
             return makeError(ErrorCode::InvalidArgument,
                              "a double quote or a line break cannot be typed inside a word", part);
         }
-        const bool blank = std::ranges::any_of(
-            part, [](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; });
+        const bool blank = std::ranges::any_of(part, katana::core::isAsciiSpace);
         line += (line.empty() ? "" : " ") + (blank || part.empty() ? "\"" + part + "\"" : part);
     }
     return line;

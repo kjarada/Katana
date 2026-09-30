@@ -323,11 +323,25 @@ document draws and the view (`SceneOptions::layers`) hides (`cad::isGhost`,
 the rule the plan painter and a section ask too), each
 one 1 px line of (130, 88, 32), the selection colour at 45 % mixed over the
 view's ground beforehand, with no casing (`docs/desktop.md`, "The selection
-in every view"). The one-list build (`SceneBuilder::build`) keeps its
-colour-only selection, so the 3D snapshots on sheets are unchanged. Walking
+in every view"). The one-list build (`SceneBuilder::build`), which no view
+draws - the benchmarks and tests do, and a sheet's 3D snapshot is built by
+layer (`buildTerrain`, `buildEntities`) with no selection at all - draws a
+selected entity in the core's colour and width, without the casing: it kept
+a width of its own, `SceneOptions::selectedLineWidth`, 2 px, which no view
+read and which looked like the view's setting
+(`CadScene.TheOneListBuildDrawsASelectedLineAtTheSelectionsOneWidth`). Walking
 the ids rather than the drawing took `BM_SceneSelectionBuild` from 0.039 /
 0.028 ms to 0.006 / 0.005 ms (256 / 512 cells; medians of three, main
 against the view-sync worktree, both Release, 2026-09-30), casing and all.
+
+**Where a set of entities stands in 3D** is where the overlay would draw
+them: `SceneBuilder::overlayBounds` runs the overlay's own emits - the core,
+and the ghosts when the view shows them - over the ids asked about rather
+than the selection's, on the datum the drawing was built on, and returns
+their box without keeping a draw list. It is what a 3D view frames for ZOOM
+on a scope, Zoom to Selection among them (`docs/desktop.md`, "In a 3D or
+elevation view"), so a 3D view has no second rule for where an entity
+stands (`SceneLayersBuild.OverlayBoundsAreWhereTheOverlayWouldDrawTheIds`).
 
 A GPU renderer must draw the layers in this order, with the same three
 passes' depth writes off.

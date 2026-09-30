@@ -496,6 +496,67 @@ void RenderViewWidget::zoomExtents()
     requestFrame();
 }
 
+void RenderViewWidget::zoomBy(double factor)
+{
+    if (!std::isfinite(factor) || !(factor > 0.0) || context_.document == nullptr) {
+        return;
+    }
+    // A view never painted has neither its framebuffer's size nor a frame:
+    // both as its first paint would give them, so the zoom starts from what
+    // it will show.
+    if (gpuView_ == nullptr) {
+        (void)resizeTarget();
+    }
+    if (!framed_) {
+        zoomExtents();
+    }
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ != nullptr) {
+        gpuView_->setCameraFramed(true); // or its first frame frames the zoom away
+    }
+#endif
+    // The notches that make `factor` at kZoomPerNotch each, over the middle:
+    // the pixel whose centre the view's axis passes through, as
+    // Camera::rayThroughPixel samples pixel centres - so the target is still
+    // the middle of the view afterwards - in the logical pixels zoomAtPixel
+    // takes.
+    const double scale = sceneScale();
+    const QPointF middle((0.5 * camera().viewportWidth() - 0.5) / scale,
+                         (0.5 * camera().viewportHeight() - 0.5) / scale);
+    zoomAtPixel(std::log(factor) / std::log(kZoomPerNotch), middle);
+}
+
+bool RenderViewWidget::zoomToEntities(const std::vector<katana::entity::EntityId>& ids)
+{
+    if (context_.document == nullptr || ids.empty()) {
+        return false;
+    }
+    if (gpuView_ == nullptr) {
+        (void)resizeTarget(); // frame() fits the camera's aspect
+    }
+    // The scene as the view draws it now - its datum, its options, its
+    // hidden layers and ghost switch - so the box is where they are drawn.
+    rebuildIfNeeded();
+    const katana::math::AABB box = builder_.overlayBounds(*context_.document, surfaces(),
+                                                          context_.options, layers_, ids);
+    if (box.empty() || !camera().frame(box)) {
+        return false;
+    }
+    framed_ = true;
+    framedEmpty_ = false;
+    // Where the user asked to look: a resize keeps it, as after the wheel,
+    // rather than framing the whole scene again.
+    refitOnResize_ = false;
+    state_.cameraFramed = true;
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ != nullptr) {
+        gpuView_->setCameraFramed(true);
+    }
+#endif
+    requestFrame();
+    return true;
+}
+
 double RenderViewWidget::pixelRatio() const
 {
     const double ratio = devicePixelRatioF();
@@ -758,16 +819,28 @@ void RenderViewWidget::mouseDoubleClickEvent(QMouseEvent* /*event*/) { zoomExten
 
 void RenderViewWidget::wheelEvent(QWheelEvent* event)
 {
+    // One notch is 120 eighths of a degree; a fine wheel sends fractions.
     const double notches = event->angleDelta().y() / 120.0;
     if (notches == 0.0) {
         return;
     }
-    const double factor = std::pow(1.0 / kZoomPerNotch, notches);
-    const QPointF position = event->position() * pixelRatio();
-    refitOnResize_ = false;
-    camera().dollyAtPixel(factor, position.x(), position.y());
-    update();
+    zoomAtPixel(notches, event->position());
     event->accept();
+}
+
+void RenderViewWidget::zoomAtPixel(double notches, const QPointF& position)
+{
+    if (!std::isfinite(notches) || notches == 0.0) {
+        return;
+    }
+    refitOnResize_ = false;
+    // The camera counts in the framebuffer's device pixels here and in the
+    // GPU view's logical ones there - sceneScale, the widths' scale, is the
+    // same ratio.
+    const double scale = sceneScale();
+    camera().dollyAtPixel(std::pow(1.0 / kZoomPerNotch, notches), position.x() * scale,
+                          position.y() * scale);
+    requestFrame();
 }
 
 void RenderViewWidget::keyPressEvent(QKeyEvent* event)

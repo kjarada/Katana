@@ -410,13 +410,16 @@ TEST(ViewChrome, OptionalToolsNeverWidenTheDocksMinimum)
 
 TEST(ViewChrome, AViewTurnedIntoAPlanShowsTheToolsAPlanOpenedAtItsWidthShows)
 {
-    // A 3D view's bar has no In, Out or Selection. Made a plan - the kind
-    // button, View > Active Viewport Shows, the only way a mouse user gets a
-    // second plan - its bar wants the three one after another, and keeps
-    // whatever fit that made: its size does not change, so no resize refits
-    // it. It must show what a plan opened at the same width shows, which is
-    // what the rule gives. Two views side by side, over the window widths at
-    // which the tools come and go (each view about 250 to 380 px).
+    // A 3D view's bar has no Link, so its In, Out and Selection had the
+    // Link's 23 px as well. Made a plan - the kind button, View > Active
+    // Viewport Shows, the only way a mouse user gets a second plan - its bar
+    // wants the Link and refits the three, and keeps whatever fit that made:
+    // its size does not change, so no resize refits it. (When a 3D bar had
+    // none of the three, it wanted them one after another, found In hidden
+    // but counted, and left Selection no room.) It must show what a plan
+    // opened at the same width shows, which is what the rule gives. Two
+    // views side by side, over the window widths at which the tools come and
+    // go (each view about 250 to 380 px).
     std::set<std::vector<std::string>> seen;
     for (int windowWidth = 500; windowWidth <= 760; windowWidth += 5) {
         // The window sized first: a view opened splits the active one into

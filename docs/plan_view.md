@@ -414,11 +414,17 @@ and no test added to the loop every entity passes. It is drawn into the
 kept drawing. `PlanPaintStats::ghostsDrawn` counts them apart from
 `entitiesDrawn`, which the tests use to prove a hidden layer is gone
 (`PlanPainter.ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost` - an
-80 px run, fourteen dots, exactly 28 lit pixels of row 50, each the ghost's
-colour, worked from `dotPath` - and none where the document hides the layer
-or the entity, on paper, or with the switch off). Why
-and how every view shows the selection: `docs/desktop.md`, "The selection
-in every view".
+80 px run, fourteen dots, 28 pixels of ink on row 50 against the same frame
+painted with nothing selected, each the ghost's colour, worked from
+`dotPath` - and none where the document hides the layer or the entity, on
+paper, or with the switch off). Why and how every view shows the selection:
+`docs/desktop.md`, "The selection in every view".
+
+Not done: a ghosted text or dimension is the outline of its drawn box,
+dotted, which reads as geometry rather than as "a text is here" - the 160 m
+dimension of the site plan is a long dotted rectangle under the parcel - and
+a small circle seen from afar gets four dots of its ring and reads as a
+plus. A look that says what was selected is polish for later.
 
 The dots are laid down by the painter (`dotPath`), not by Qt's dotted pen.
 The first version stroked each ghost with `Qt::DotLine`: antialiased, every

@@ -103,6 +103,13 @@ class CommandInterpreter {
     // guard, so an OPEN #12 neither asks to discard the drawing nor is
     // refused for unsaved changes.
     [[nodiscard]] static bool replacesDocument(std::string_view line);
+    // The verb `line` runs, as run() reads it: its first word in capitals,
+    // the apostrophe of 'ZOOM taken off (only a view verb takes one; any
+    // other word keeps it, and run() refuses it), and an alias resolved - Z
+    // is ZOOM. "" for a line with no word or one that does not split. The
+    // window asks it whether a line typed inside a tool is a ZOOM, so which
+    // words are ZOOM is this table's alone.
+    [[nodiscard]] static std::string verbOf(std::string_view line);
     // What the scope word VIEW means (scope_verbs.hpp): the window's active
     // plan view, or the view with the id given, with its own hidden layers
     // and its visible area. Headless there is none, and VIEW is refused in

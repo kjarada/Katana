@@ -43,13 +43,6 @@ QMainWindow* hostOf(const QDockWidget* dock)
     return dock != nullptr ? qobject_cast<QMainWindow*>(dock->parentWidget()) : nullptr;
 }
 
-void setTip(QToolButton* button, const QString& label, const QString& tip)
-{
-    button->setToolTip(QString("<b>%1</b><br>%2").arg(label, tip));
-    button->setAccessibleName(label);
-    button->setAccessibleDescription(tip);
-}
-
 // A floating window put back on a screen that has since gone - a laptop
 // undocked from its second monitor - would come back where nobody can see
 // it. It goes to the middle of the primary screen instead, at its own size
@@ -130,8 +123,15 @@ QToolButton* makeTitleBarButton(QWidget* parent, Icon which, const QString& name
     // minimise or close a panel; never takes focus from a click, which would
     // take it away from the view the user is drawing in.
     button->setFocusPolicy(Qt::TabFocus);
-    setTip(button, label, tip);
+    setTitleBarTip(button, label, tip);
     return button;
+}
+
+void setTitleBarTip(QToolButton* button, const QString& label, const QString& tip)
+{
+    button->setToolTip(QString("<b>%1</b><br>%2").arg(label, tip));
+    button->setAccessibleName(label);
+    button->setAccessibleDescription(tip);
 }
 
 // ---- DockTitleBar -------------------------------------------------------------------------
@@ -374,16 +374,16 @@ void DockTitleBar::refresh()
     float_->setVisible(features.testFlag(QDockWidget::DockWidgetFloatable));
     float_->setIcon(katana::qt::icon(floating ? Icon::Dock : Icon::Float));
     if (floating) {
-        setTip(float_, "Dock",
-               QString("Put this %1 back where it was docked in the window. Double-clicking "
-                       "the title bar does the same.")
-                   .arg(what));
+        setTitleBarTip(float_, "Dock",
+                       QString("Put this %1 back where it was docked in the window. "
+                               "Double-clicking the title bar does the same.")
+                           .arg(what));
     } else {
-        setTip(float_, "Float",
-               QString("Take this %1 out into a window of its own, which can go on another "
-                       "screen. Double-clicking the title bar does the same; drag the title "
-                       "bar back over the window to dock it anywhere.")
-                   .arg(what));
+        setTitleBarTip(float_, "Float",
+                       QString("Take this %1 out into a window of its own, which can go on "
+                               "another screen. Double-clicking the title bar does the same; "
+                               "drag the title bar back over the window to dock it anywhere.")
+                           .arg(what));
     }
     close_->setVisible(features.testFlag(QDockWidget::DockWidgetClosable));
 
@@ -391,14 +391,15 @@ void DockTitleBar::refresh()
         const bool maximised = chrome_ != nullptr && chrome_->isMaximised(&dock_);
         maximise_->setIcon(katana::qt::icon(maximised ? Icon::Restore : Icon::Maximise));
         if (maximised) {
-            setTip(maximise_, "Restore",
-                   floating ? QString("Put this window back to the size and place it had.")
-                            : QString("Bring back the other views, at the sizes they had."));
+            setTitleBarTip(
+                maximise_, "Restore",
+                floating ? QString("Put this window back to the size and place it had.")
+                         : QString("Bring back the other views, at the sizes they had."));
         } else {
-            setTip(maximise_, "Maximise",
-                   floating ? QString("Fill the screen this window is on.")
-                            : QString("Give this view the whole drawing area, hiding the other "
-                                      "docked views until Restore."));
+            setTitleBarTip(maximise_, "Maximise",
+                           floating ? QString("Fill the screen this window is on.")
+                                    : QString("Give this view the whole drawing area, hiding "
+                                              "the other docked views until Restore."));
         }
     }
     updateTitle();

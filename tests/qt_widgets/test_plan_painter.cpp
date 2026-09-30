@@ -1322,10 +1322,11 @@ TEST(PlanPainter, ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost)
     // PlanPainter::dotPath). The 80 px run from column 10 has a dot at t = 0,
     // 6 ... 78 along it, fourteen, and a dot about x covers columns x - 1 and
     // x of rows 49 and 50 (as the long ghost's test below works out), so row
-    // 50 has 28 lit pixels - columns 9 and 10, then every 6 - and nothing
-    // between. Over black a covered pixel is 153/255 of the orange: (153,
-    // 95.4, 16.8), within 2 of that after the 8-bit premultiplied blend's
-    // rounding.
+    // 50 has 28 pixels of ink - columns 9 and 10, then every 6 - and nothing
+    // between. Ink is measured against a baseline, the same frame painted
+    // with nothing selected, never as pixels lit in the ghosted image alone.
+    // Over black a covered pixel is 153/255 of the orange: (153, 95.4,
+    // 16.8), within 2 of that after the 8-bit premultiplied blend's rounding.
     GhostPlan plan;
     PlanPaintStats unselected;
     const QImage bare = plan.paint(unselected, false);
@@ -1339,22 +1340,23 @@ TEST(PlanPainter, ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost)
     EXPECT_EQ(orangeInk(bare), 0u);
     EXPECT_GT(orangeInk(ghosted), orangeInk(bare));
 
-    int lit = 0;
+    const auto inked = [&](int x, int y) { return ghosted.pixel(x, y) != bare.pixel(x, y); };
+    int ink = 0;
     int exact = 0;
     for (int x = 0; x < 100; ++x) {
         const QRgb c = ghosted.pixel(x, 50);
-        lit += qRed(c) > 0 ? 1 : 0;
-        exact += std::abs(qRed(c) - 153) <= 2 && std::abs(qGreen(c) - 95) <= 2 &&
+        ink += inked(x, 50) ? 1 : 0;
+        exact += inked(x, 50) && std::abs(qRed(c) - 153) <= 2 && std::abs(qGreen(c) - 95) <= 2 &&
                          std::abs(qBlue(c) - 17) <= 2
                      ? 1
                      : 0;
     }
-    EXPECT_EQ(lit, 28) << "fourteen dots, 2 px each";
+    EXPECT_EQ(ink, 28) << "fourteen dots, 2 px each";
     EXPECT_EQ(exact, 28) << "each the selection colour at 60 % over black";
     for (int dot = 0; dot < 14; ++dot) {
         const int x = 10 + 6 * dot;
-        EXPECT_GT(qRed(ghosted.pixel(x - 1, 50)), 0) << "dot " << dot;
-        EXPECT_GT(qRed(ghosted.pixel(x, 50)), 0) << "dot " << dot;
+        EXPECT_TRUE(inked(x - 1, 50)) << "dot " << dot;
+        EXPECT_TRUE(inked(x, 50)) << "dot " << dot;
     }
 }
 
@@ -1442,7 +1444,10 @@ TEST(PlanPainter, AGhostLongerThanTheViewIsDottedAcrossItFromItsOwnStart)
     PlanPaintStats stats;
     const QImage image = plan.paint(stats);
     EXPECT_EQ(stats.ghostsDrawn, 1u);
-    const auto lit = [&image](int x) { return qRed(image.pixel(x, 50)) > 0; };
+    // Ink against the baseline, the frame with nothing selected.
+    PlanPaintStats none;
+    const QImage bare = plan.paint(none, false);
+    const auto lit = [&](int x) { return image.pixel(x, 50) != bare.pixel(x, 50); };
     EXPECT_TRUE(lit(1));
     EXPECT_TRUE(lit(2));
     for (int x = 3; x <= 6; ++x) {

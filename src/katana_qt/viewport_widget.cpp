@@ -345,6 +345,15 @@ void ViewportWidget::holdView()
     update();
 }
 
+void ViewportWidget::frameIfUnframed()
+{
+    // The paint's own first steps, at the size the view has now.
+    state_.plan.resize(width(), height());
+    if (!state_.planFramed) {
+        frameOnFirstPaint();
+    }
+}
+
 void ViewportWidget::setReferenceData(katana::interop::ReferenceData* reference)
 {
     // Not named `data`: QWidget already has a member of that name, and -Wshadow
@@ -819,7 +828,11 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent* event)
 void ViewportWidget::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::MiddleButton) {
-        zoomExtents();
+        if (onZoomExtents) {
+            onZoomExtents();
+        } else {
+            zoomExtents();
+        }
         return;
     }
     // Qt delivers a double click as press, release, DOUBLECLICK, release - the

@@ -247,12 +247,17 @@ case folding (`lowered`, `uppered`) and number parsing is `core/text.hpp`
 or `strtod` on file text: Latin-1's toupper makes 0xE0, the lead byte of a
 three-byte UTF-8 sequence, 0xC0); the exact length of a foot or a link is
 `math/unit_ratio.hpp`, which `geodesy/units.hpp` is built from
-(`docs/geodesy.md`). `katana_cad`'s five private `upper()` copies - four of
-them `std::toupper` - are `core::uppered` now. Not done: the same sweep of
-`std::toupper` in `katana_app` (the geo verbs, the session, the MCP server),
-`katana_ifc` and the plot preflight, and of the `std::isspace` and
-`std::isalnum` beside some of them; `katana_dxf`'s reader keeps an ASCII
-`upper()` of its own.
+(`docs/geodesy.md`). `katana_cad` asks none of the C library's character
+functions now: its five private `upper()` copies - four of them
+`std::toupper` - are `core::uppered`, and the survey coding's private
+`lowered()`, the sheet verbs' name folding (`std::isalnum` and
+`std::tolower`), the plot colour mode's `std::tolower`, the plot preflight's
+three `std::toupper` and the `std::isspace` of the scope words' quoting and
+of the customisation record's word count are `core::lowered`, `uppered`,
+`asciiLower` and `isAsciiSpace`. Not done: the same sweep of `std::toupper`
+in `katana_app` (the geo verbs, the session, the MCP server) and
+`katana_ifc`, and of the `std::isspace` and `std::isalnum` beside some of
+them; `katana_dxf`'s reader keeps an ASCII `upper()` of its own.
 
 ## Determinism
 

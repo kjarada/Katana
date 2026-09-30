@@ -14,6 +14,7 @@
 
 #include <functional>
 #include <optional>
+#include <string>
 
 #include <QPoint>
 #include <QRectF>
@@ -76,7 +77,8 @@ class SectionViewWidget final : public QWidget {
     // hide and whose station was in view. For the headless checks, as
     // ViewportWidget::lastDrawnEntityCount is.
     [[nodiscard]] std::size_t lastDrawnCrossingCount() const { return lastDrawnCrossings_; }
-    // Crossings the last paint left out because this view hides their layer.
+    // Crossings the last paint left out because this view hides their layer
+    // - the layer their entity is on now (layerOf).
     [[nodiscard]] std::size_t lastHiddenCrossingCount() const { return lastHiddenCrossings_; }
     // Crossings the last paint drew as selected: a selected entity this
     // view draws (cad::isDrawn).
@@ -135,6 +137,12 @@ class SectionViewWidget final : public QWidget {
     // switch on), or not at all.
     enum class Mark { None, Selected, Ghost };
     [[nodiscard]] Mark markOf(const katana::cad::SectionCrossing& crossing) const;
+    // The layer a crossing is on NOW: its entity's, which markOf reads too,
+    // so whether this view hides a crossing and how it marks its selection
+    // go by one layer - the cut's, read by the one and not the other, drew
+    // an entity moved onto a hidden layer both plain and as a ghost. The
+    // cut's when the entity has gone since, or there is no document.
+    [[nodiscard]] const std::string& layerOf(const katana::cad::SectionCrossing& crossing) const;
     // Inside the axes and their labels, in pixels.
     [[nodiscard]] QRectF plotRect() const;
 
