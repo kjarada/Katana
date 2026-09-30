@@ -160,6 +160,22 @@ struct SetupState {
     bool warnedScale = false;
     std::size_t reportIndex = 0;
     std::vector<std::size_t> pointings{}; // indices into Engine::pointings
+    // Set when resectSetup positioned the station. Such a setup is oriented
+    // by its resection, not its backsight: on the weighted mean of azimuth
+    // less reading over these pointings, each with the standard deviation its
+    // direction had in the resection - the least-squares orientation for the
+    // station where it stands, so it follows the station when an adjustment
+    // moves it. The pointings its resection used are not checks when it
+    // radiates - their residuals are the resection's - but a later pointing
+    // to one of the same points (a controller's check after its block) is.
+    bool resected = false;
+    std::vector<std::pair<std::size_t, double>> resectionDirections{};
+    std::unordered_set<std::size_t> resectionPointings{};
+    std::unordered_set<std::string_view> resectionTargets{};
+    // The record that ends the observations the file's own resection was
+    // computed from (kResectionEndMetadata), when the file says: only the
+    // pointings before it may enter the reduction's resection.
+    std::optional<std::size_t> resectionBlockEnd{};
 };
 
 struct Engine {
@@ -268,10 +284,29 @@ struct Engine {
 void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                       const std::unordered_set<std::string_view>* reradiate = nullptr);
 
+// Whether an adjustment has rejected the direction, the distance or the height
+// of `pointing` - marked its report rows, as a resection's outlier test does
+// before the network runs. What a resection rejected, its setup's orientation
+// leaves out (resectSetup), a mean direction leaves out (meanDirection), and
+// the network takes no more of, nor as its reference direction
+// (adjustAsNetwork). (A pointing the face-pair test excluded is `rejected` as
+// a whole instead.)
+[[nodiscard]] bool directionRejected(const Engine& engine, const ReducedPointing& pointing);
+[[nodiscard]] bool distanceRejected(const Engine& engine, const ReducedPointing& pointing);
+[[nodiscard]] bool heightRejected(const Engine& engine, const ReducedPointing& pointing);
+
 // The mean circle reading of a setup's reduced pointings to `target`, absent
-// when none has a direction.
+// when none has a direction that was not rejected.
 [[nodiscard]] std::optional<double> meanDirection(const Engine& engine, std::size_t setupIndex,
                                                   std::string_view target);
+
+// A pointing's horizontal distance with phase B's factors as they would be from
+// a station at `here` (at the setup, the pointing having no azimuth yet),
+// written nowhere: what a resection solves with before its station exists.
+// Absent without a horizontal distance.
+[[nodiscard]] std::optional<double> gridDistanceFrom(Engine& engine, std::size_t setupIndex,
+                                                     const ReducedPointing& pointing,
+                                                     const Position& here);
 
 // ---- reduction_gnss.cpp ------------------------------------------------------------
 
@@ -315,6 +350,38 @@ bool radiateGnssVectors(Engine& engine,
 // AdjustmentMethod::Network: least squares over every observation that is not
 // a side shot, then the side shots radiated from the adjusted stations.
 [[nodiscard]] katana::core::Status adjustAsNetwork(Engine& engine);
+
+// Whether `pointing` of setup `setupIndex` may enter the setup's resection:
+// every pointing, unless the file marks where the observations its field
+// software resected from end (SetupState::resectionBlockEnd) - then those
+// read before that record. The ones after are checks of the station.
+[[nodiscard]] bool inResectionBlock(const Engine& engine, std::size_t setupIndex,
+                                    const ReducedPointing& pointing);
+
+// Positions the station of setup `setupIndex` by resection from its reduced
+// pointings to points already placed, held as they are: the least squares of
+// its directions (one set, one orientation unknown) and horizontal distances,
+// run from every start its observations give, and then of its trigonometric
+// height differences to the targets with heights, weighted by the reduction's
+// a-priori precision for an instrument that is itself the unknown (its
+// centring and height go to the station's precision, not to each pointing).
+// The station has no position, or one another setup radiated, which it
+// replaces and reports as a check. Places the station
+// (ComputationMethod::Resection), marks the setup resected (SetupState),
+// reports it (ReductionReport::resections) and returns true; or returns false
+// and puts in `why`, as a clause, what refused it: too few placed points, a
+// value that is not finite, a distance that is not positive, directions alone
+// exactly on one line with the station or on the circle through it, a least
+// squares that fails from every start, two positions its observations fit
+// alike, or a station its observations' a-priori precision leaves uncertain
+// by more than its least squares' linear model holds over. A refusal leaves
+// nothing behind: no warning of its least squares, no rejected observation.
+[[nodiscard]] bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why);
+
+// Why a setup whose station has no position was not a resection candidate, as
+// a clause - the placed points it observes against what a resection needs -
+// or empty when it observes none.
+[[nodiscard]] std::string resectionShortfall(const Engine& engine, std::size_t setupIndex);
 
 // Text helpers shared by the two.
 [[nodiscard]] std::string formatSeconds(double radians, int decimals = 1);

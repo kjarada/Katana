@@ -368,8 +368,10 @@ struct ZenithAngleObservation {
 // because a parser does not know the backsight reading of the same face when
 // it meets a shot (the backsight may be observed last, or on both faces), and
 // differencing early would throw away the face pairing the reduction needs.
-// The reduction turns directions into angles or azimuths; the network
-// adjustment does not take them (it lists them as unused).
+// The reduction turns directions into angles or azimuths for its network, and
+// gives a resection's reduced directions to the network adjustment as they
+// are, which takes the directions read at one point as a set with an
+// orientation unknown (network_adjustment.hpp).
 struct HorizontalDirectionObservation {
     std::string at;
     std::string to;
@@ -684,6 +686,16 @@ struct Traverse {
 };
 
 // ---- Field setups, features and the project one import produces -----------------
+
+// SurveyStation::metadata key a reader sets where the file marks the end of the
+// observations its field software computed a resection from (the opcode field
+// file's 129): the value is "record N", N the record number that ends them, in
+// the numbering of the observations' SourceRecord::recordNumber. The
+// reduction's resection then takes only the setup's observations read before
+// record N; those after it - a controller's checks, often taken at the end of
+// the setup - are checks of the resected station, as they were for the field
+// software. Without the key every observation of the setup may enter it.
+inline constexpr const char* kResectionEndMetadata = "resection end";
 
 // One instrument setup as a field file records it: the setup, what the instrument
 // was oriented on, and everything shot from there.

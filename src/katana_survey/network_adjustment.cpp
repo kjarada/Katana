@@ -75,11 +75,14 @@ Status checkOptions(const AdjustmentOptions& options)
     return {};
 }
 
+// "N(P)", "E(P)" and "H(P)" for a coordinate, and "orientation(P)" for the
+// orientation unknown of the directions read at P, which is not one.
 std::string parameterName(const AdjustedParameter& parameter)
 {
-    const char* component = parameter.component == CoordinateComponent::Northing  ? "N"
-                            : parameter.component == CoordinateComponent::Easting ? "E"
-                                                                                  : "H";
+    const char* component = parameter.component == CoordinateComponent::Northing    ? "N"
+                            : parameter.component == CoordinateComponent::Easting   ? "E"
+                            : parameter.component == CoordinateComponent::Elevation ? "H"
+                                                                                    : "orientation";
     return std::string(component) + "(" + parameter.pointId + ")";
 }
 
@@ -94,7 +97,7 @@ Error rankError(const detail::RankDeficiency& deficiency,
     std::string message = "the network is rank deficient (rank " +
                           std::to_string(deficiency.rank) + " of " +
                           std::to_string(parameters.size()) +
-                          " unknowns); coordinates that cannot be resolved: " + names;
+                          " unknowns); unknowns that cannot be resolved: " + names;
     if (!hint.empty()) {
         message += ". " + hint;
     }
@@ -215,6 +218,7 @@ bool isHorizontal(const Observation& observation)
         return distance->kind == DistanceKind::Horizontal;
     }
     return std::holds_alternative<HorizontalAngleObservation>(observation) ||
+           std::holds_alternative<HorizontalDirectionObservation>(observation) ||
            std::holds_alternative<AzimuthObservation>(observation) ||
            std::holds_alternative<GnssBaselineObservation>(observation) ||
            std::holds_alternative<GnssPositionObservation>(observation);
@@ -227,6 +231,8 @@ struct HorizontalModel {
     std::vector<bool> involved; // per network point
     std::vector<Eigen::Index> northingParameter;
     std::vector<Eigen::Index> eastingParameter;
+    // Per network point: the orientation unknown of the directions read there.
+    std::vector<Eigen::Index> orientationParameter;
     std::vector<AdjustedParameter> parameters;
 
     [[nodiscard]] std::size_t pointOf(const std::string& id) const
@@ -243,6 +249,8 @@ HorizontalModel buildHorizontalModel(const SurveyNetwork& network)
     model.involved.assign(pointCount, false);
     model.northingParameter.assign(pointCount, kNotAParameter);
     model.eastingParameter.assign(pointCount, kNotAParameter);
+    model.orientationParameter.assign(pointCount, kNotAParameter);
+    std::vector<bool> readAt(pointCount, false); // a direction set is read there
 
     const auto& observations = network.observations();
     for (std::size_t i = 0; i < observations.size(); ++i) {
@@ -253,6 +261,9 @@ HorizontalModel buildHorizontalModel(const SurveyNetwork& network)
         model.usedObservations.push_back(i);
         for (const std::string& id : referencedPoints(observations[i])) {
             model.involved[model.pointOf(id)] = true;
+        }
+        if (const auto* direction = std::get_if<HorizontalDirectionObservation>(&observations[i])) {
+            readAt[model.pointOf(direction->at)] = true;
         }
     }
 
@@ -271,6 +282,14 @@ HorizontalModel buildHorizontalModel(const SurveyNetwork& network)
         if (!control || control->easting.constraint != ControlConstraint::Fixed) {
             model.eastingParameter[p] = static_cast<Eigen::Index>(model.parameters.size());
             model.parameters.push_back({id, CoordinateComponent::Easting});
+        }
+    }
+    // The orientations after every coordinate, in point order: nothing holds
+    // an orientation, so each set always has its unknown.
+    for (std::size_t p = 0; p < pointCount; ++p) {
+        if (readAt[p]) {
+            model.orientationParameter[p] = static_cast<Eigen::Index>(model.parameters.size());
+            model.parameters.push_back({network.points()[p].id, CoordinateComponent::Orientation});
         }
     }
     return model;
@@ -316,8 +335,11 @@ void addAzimuthTerms(Equation& equation, const HorizontalModel& model, const Lin
     equation.add(model.eastingParameter[from], -dE);
 }
 
+// `orientations` is per network point: the current value of the orientation
+// unknown of the directions read there (unused elsewhere).
 Result<std::vector<Equation>> linearizeHorizontal(const HorizontalModel& model,
-                                                  const std::vector<Coordinate2>& coordinates)
+                                                  const std::vector<Coordinate2>& coordinates,
+                                                  const std::vector<double>& orientations)
 {
     const SurveyNetwork& network = *model.network;
     std::vector<Equation> equations;
@@ -359,6 +381,23 @@ Result<std::vector<Equation>> linearizeHorizontal(const HorizontalModel& model,
             equation.misclosure = normalizeAngleSigned(
                 azimuth->azimuth - std::atan2(line->deltaEasting, line->deltaNorthing));
             addAzimuthTerms(equation, model, *line, from, to, 1.0);
+            equations.push_back(equation);
+        } else if (const auto* direction =
+                       std::get_if<HorizontalDirectionObservation>(&observation)) {
+            const std::size_t at = model.pointOf(direction->at);
+            const std::size_t to = model.pointOf(direction->to);
+            const auto line = lineBetween(model, coordinates, at, to);
+            if (!line) {
+                return line.error();
+            }
+            Equation equation = base;
+            equation.sigma = direction->sigma;
+            // reading = azimuth - o, wrapped as an azimuth is.
+            equation.misclosure = normalizeAngleSigned(
+                direction->direction -
+                (std::atan2(line->deltaEasting, line->deltaNorthing) - orientations[at]));
+            addAzimuthTerms(equation, model, *line, at, to, 1.0);
+            equation.add(model.orientationParameter[at], -1.0);
             equations.push_back(equation);
         } else if (const auto* angle = std::get_if<HorizontalAngleObservation>(&observation)) {
             const std::size_t at = model.pointOf(angle->at);
@@ -510,10 +549,43 @@ Result<HorizontalAdjustmentResult> adjustHorizontal(const SurveyNetwork& network
         coordinates.push_back(point.position());
     }
 
+    // Each set's orientation starts at the mean of azimuth less reading over
+    // its directions, wrapped about the first, from the approximate
+    // coordinates: as near the answer as they are.
+    std::vector<double> orientations(coordinates.size(), 0.0);
+    {
+        std::vector<double> first(coordinates.size(), 0.0);
+        std::vector<double> offsets(coordinates.size(), 0.0);
+        std::vector<std::size_t> count(coordinates.size(), 0);
+        for (const std::size_t index : model.usedObservations) {
+            const auto* direction =
+                std::get_if<HorizontalDirectionObservation>(&network.observations()[index]);
+            if (direction == nullptr) {
+                continue;
+            }
+            const std::size_t at = model.pointOf(direction->at);
+            const std::size_t to = model.pointOf(direction->to);
+            const double value =
+                std::atan2(coordinates[to].easting - coordinates[at].easting,
+                           coordinates[to].northing - coordinates[at].northing) -
+                direction->direction;
+            if (count[at] == 0) {
+                first[at] = value;
+            }
+            offsets[at] += normalizeAngleSigned(value - first[at]);
+            ++count[at];
+        }
+        for (std::size_t p = 0; p < coordinates.size(); ++p) {
+            if (count[p] > 0) {
+                orientations[p] = first[p] + offsets[p] / static_cast<double>(count[p]);
+            }
+        }
+    }
+
     HorizontalAdjustmentResult result;
     bool converged = false;
     while (true) {
-        auto equations = linearizeHorizontal(model, coordinates);
+        auto equations = linearizeHorizontal(model, coordinates, orientations);
         if (!equations) {
             return equations.error();
         }
@@ -555,6 +627,11 @@ Result<HorizontalAdjustmentResult> adjustHorizontal(const SurveyNetwork& network
                 const double correction = core.parameters[model.eastingParameter[p]];
                 coordinates[p].easting += correction;
                 largest = std::max(largest, std::abs(correction));
+            }
+            // Not in `largest`, which is metres: an orientation is linear in
+            // the model, so it has converged once the coordinates have.
+            if (model.orientationParameter[p] != kNotAParameter) {
+                orientations[p] += core.parameters[model.orientationParameter[p]];
             }
         }
         ++result.iterations;
@@ -603,6 +680,18 @@ Result<HorizontalAdjustmentResult> adjustHorizontal(const SurveyNetwork& network
         station.sigmaEasting = std::sqrt(station.covariance.easting);
         station.ellipse = detail::ellipseOf(station.covariance);
         result.stations.push_back(std::move(station));
+    }
+    for (std::size_t p = 0; p < coordinates.size(); ++p) {
+        const Eigen::Index o = model.orientationParameter[p];
+        if (o == kNotAParameter) {
+            continue;
+        }
+        AdjustedOrientation orientation;
+        orientation.pointId = network.points()[p].id;
+        orientation.orientation = normalizeAngle(orientations[p]);
+        orientation.sigma =
+            std::sqrt(result.covariance(static_cast<std::size_t>(o), static_cast<std::size_t>(o)));
+        result.orientations.push_back(std::move(orientation));
     }
     return result;
 }

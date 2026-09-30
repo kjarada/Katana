@@ -109,7 +109,27 @@ imported the same way:
 `SURVEY READ <file>` answers what the reader made of it in records (`survey`,
 `content`, `declared`, each `warning` with its record), and `SURVEY IMPORT
 <file>` imports it as a survey job, one undo step, answering with the job and
-the reduction's warnings (`docs/survey.md`, "The opcode field file (.fld)").
+the reduction's warnings (`docs/survey.md`, "The opcode field file (.fld)"),
+and with a `resection` record for each setup the reduction positioned by
+resection: the setup, its point, the points it was computed `from`, its
+northing, easting and height, their one-sigma precision (a priori, scaled by
+the variance factor only where the resection's global test fails above), its
+redundancy (plan + heights), how many of its residuals were `flagged`, its
+geometry's `dilution` and whether that is `weak`, how many `checks` after the
+file's resection block checked it, the `file_offset` from coordinates the file
+gave for the station (or `none`), the setup it was `radiated_from` before its
+own block resected it and the `radiation_offset` from there (or `none`), and
+an `unapplied_scale_factor` where it fitted ground distances to grid
+coordinates (or `none`). A setup that was not resected - its observations fit
+two positions alike, or do not fix it - is in the warnings, with why. After
+it, one
+`resection_residual` record per residual the outlier test flagged or
+rejected - the observation, its residual and `unit` (`rad` or `m`), its
+a-priori `sigma`, `standardised` value and `state` - so an agent sees which,
+however many other warnings come first
+(`cli.survey_import_free_station_field_file`,
+`cli.survey_import_resection_field_file`; `docs/survey.md`, "The reduction's
+resection").
 The import takes every reduction option of the wizard's Reduction step
 through `SETTINGS <file>` and `SET <key>=<value> ...`, the settings' own text
 form, and answers which settings it ran with (`settings`, and a `setting`

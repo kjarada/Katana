@@ -27,6 +27,7 @@
 #include "katana/cad/survey_job.hpp"
 #include "katana/survey/reduction_report.hpp"
 #include "katana/surveyio/reader.hpp"
+#include "survey/reduction_report_view.hpp"
 #include "survey/survey_dialogs.hpp"
 #include "survey/survey_job_support.hpp"
 #include "survey/survey_jobs_dialog.hpp"
@@ -268,6 +269,34 @@ TEST(SurveyJobsDialog, TheLastAdjustmentIsReadBackFromTheReportsOwnText)
     const auto none = katana::qt::adjustmentFromReportText(survey::renderText({}));
     EXPECT_FALSE(none.varianceFactor.has_value());
     EXPECT_FALSE(none.globalTest.has_value());
+}
+
+TEST(SurveyJobsDialog, AResectionsLeastSquaresIsNotReadBackAsTheJobsAdjustment)
+{
+    // A job reduced by radiation whose reduction resected one setup: the
+    // resection's variance factor and global test are its own, not the job's
+    // last adjustment, so the list reads none back; and the screen's cut of
+    // the report keeps the resection, with its residuals.
+    survey::ReductionReport report;
+    survey::ResectionReport resection;
+    resection.stationId = "S1";
+    resection.pointId = "R";
+    resection.targets = {"A", "B", "C"};
+    resection.horizontal.method = "resection at S1 (horizontal)";
+    resection.horizontal.redundancy = 3;
+    resection.horizontal.varianceFactor = 1.25;
+    resection.horizontal.globalTest = survey::ReportGlobalTest{3.75, 0.216, 9.348, 0.05, true};
+    resection.horizontal.residuals.resize(6);
+    report.resections.push_back(resection);
+    const std::string text = survey::renderText(report);
+    EXPECT_NE(text.find("resection at S1 (horizontal)"), std::string::npos);
+    const auto line = katana::qt::adjustmentFromReportText(text);
+    EXPECT_FALSE(line.varianceFactor.has_value());
+    EXPECT_FALSE(line.globalTest.has_value());
+
+    const survey::ReductionReport shown = katana::qt::displayReport(report, 4);
+    ASSERT_EQ(shown.resections.size(), 1u);
+    EXPECT_EQ(shown.resections[0].horizontal.residuals.size(), 6u);
 }
 
 TEST(SurveyJobsDialog, AStoredReportTooLongToLayOutIsCutAtARowAndSaysSo)

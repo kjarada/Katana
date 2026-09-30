@@ -11,10 +11,25 @@
 //   distance   d_ij                                    partials wrt (N_j, E_j): dN/d, dE/d
 //   azimuth    atan2(dE, dN)                           partials wrt (N_j, E_j): -dE/d^2, dN/d^2
 //   angle      azimuth(at->to) - azimuth(at->from)     difference of two azimuth rows
+//   direction  azimuth(at->to) - o_at                  an azimuth row, and -1 wrt o_at
 //   GNSS baseline (dN, dE), GNSS position (N, E), weighted control: linear
 // Partials with respect to the instrument station have the opposite sign.
 // Angular misclosures are wrapped into (-pi, pi], so azimuths near 0 / 2*pi and
 // angles near a full turn are handled correctly.
+//
+// A horizontal direction is a circle reading, which becomes an azimuth only
+// with the circle's orientation: every direction read at one point is one SET
+// with one orientation unknown o (azimuth = direction + o), started at the mean
+// of azimuth less reading over the set and adjusted with the coordinates. The
+// set is the point's, not a setup's: the network has no notion of a setup, so
+// two setups on one point, whose circles were set apart, must not both be given
+// to it as directions (the reduction's network gives them as angles; its
+// resection, one setup at a time, as directions). Rejected: the angles from a
+// reference pointing that the reduction's network uses. They share that
+// pointing's error, which uncorrelated weights ignore, so a short first sight
+// - its centring error in every angle - spoils all of them; a set weights each
+// direction on its own, as the textbooks' and the field software's
+// free-station adjustments do.
 //
 // Stochastic model: uncorrelated observations, weight 1 / sigma^2, a-priori
 // variance factor 1. Observations that carry no horizontal information (slope
@@ -67,7 +82,10 @@ struct AdjustmentOptions {
     katana::core::Logger* logger = nullptr;
 };
 
-enum class CoordinateComponent { Northing, Easting, Elevation };
+// Orientation is not a coordinate: it is the orientation unknown of the
+// direction set read at the point (see the functional model above), named by
+// that point like its coordinates.
+enum class CoordinateComponent { Northing, Easting, Elevation, Orientation };
 
 // Identifies one unknown: row / column k of the cofactor matrix.
 struct AdjustedParameter {
@@ -125,10 +143,19 @@ struct AdjustedStation {
     ErrorEllipse ellipse; // standard ellipse of `covariance`
 };
 
+// The orientation of the direction set read at one point.
+struct AdjustedOrientation {
+    std::string pointId;
+    double orientation = 0.0; // radians in [0, 2*pi): azimuth = direction + orientation
+    double sigma = 0.0;       // scaled by covarianceScale
+};
+
 struct HorizontalAdjustmentResult {
     // Every point that takes part in the adjustment (including fixed control), in
     // network order.
     std::vector<AdjustedStation> stations;
+    // One per point directions were read at, in network order.
+    std::vector<AdjustedOrientation> orientations;
     std::vector<ResidualRecord> residuals; // observation order, then control
     std::vector<std::size_t> unusedObservations;
     std::vector<AdjustedParameter> parameters; // order of the cofactor matrix
@@ -160,7 +187,7 @@ struct LevelAdjustmentResult {
 //   AdjustmentFailure         no usable observations, no free coordinates, fewer
 //                             equations than unknowns, datum defect / rank
 //                             deficiency (the message names the unresolved
-//                             coordinates), coincident stations, divergence
+//                             unknowns), coincident stations, divergence
 [[nodiscard]] katana::core::Result<HorizontalAdjustmentResult>
 adjustHorizontalNetwork(const SurveyNetwork& network, const AdjustmentOptions& options = {});
 

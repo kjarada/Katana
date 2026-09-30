@@ -215,6 +215,93 @@ struct AdjustmentReport {
     friend bool operator==(const AdjustmentReport&, const AdjustmentReport&) = default;
 };
 
+// ---- Resections ---------------------------------------------------------------------
+
+// A resection whose geometry magnifies the errors of its observations more
+// than this many times is flagged as weak (ResectionReport::dilution): its
+// station is placed, with the precision it has, and the report, SURVEY IMPORT
+// and a warning say so. Three is the reduction's allowable multiplier - a
+// traverse's angular misclosure is allowed three standard deviations - here
+// against the least precise single observation the station was fixed from,
+// so only a geometry that clearly dominates the instrument is flagged: two
+// marks 30 degrees apart with distances give 2.7, three directions 60 degrees
+// apart from outside their triangle 2.5, a station 20 m inside a 100 m danger
+// circle 10.4, three marks within 11 degrees 123 (worked by a separate
+// script, docs/survey.md). A geometry that does not fix the station at all is
+// refused, not flagged.
+inline constexpr double kWeakResectionDilution = 3.0;
+
+// A setup whose station nothing else positioned, positioned by resection (a
+// free station): the least squares of its reduced directions and distances to
+// points already placed, those points held, and of its trigonometric height
+// differences to the ones with heights. Each least squares is reported as an
+// adjustment is - a residual per direction, distance and height difference,
+// with its redundancy number and the outlier test the settings choose - and
+// the coordinates it gave, with their precision.
+struct ResectionReport {
+    std::string stationId; // the setup
+    std::string pointId;   // the point it stands on, which the resection positioned
+    // The placed points it was computed from, in the order the setup observed them.
+    std::vector<std::string> targets{};
+    double northing = 0.0;
+    double easting = 0.0;
+    // Absent where no target with a height was observed with both a zenith
+    // angle and a distance, which a trigonometric height needs.
+    std::optional<double> elevation{};
+    // One sigma, of the point the setup stands on: the least squares' a-priori
+    // precision (the cofactor at the settings' weights), scaled by its
+    // variance factor only where its global test finds the residuals larger
+    // than those weights allow - on the few degrees of freedom of a
+    // resection, a variance factor the test accepts says no more than the
+    // weights - with, where the setup records an instrument height (a mark
+    // under the instrument), the a-priori centring over the mark and the
+    // measured instrument height added, which are common to every pointing and
+    // so are not in the least squares' weights.
+    double sigmaNorthing = 0.0;
+    double sigmaEasting = 0.0;
+    std::optional<double> sigmaElevation{};
+    // Added to a circle reading to give a grid azimuth: the solution's, and
+    // its one sigma, taken as the coordinates' is.
+    double orientation = 0.0;
+    double sigmaOrientation = 0.0;
+    AdjustmentReport horizontal{};
+    std::optional<AdjustmentReport> height{};
+    // The geometry's own strength, whatever the residuals say: the station's
+    // standard ellipse at the a-priori weights (sigma0 = 1), and its
+    // semi-major axis over the standard deviation of the least precise single
+    // observation's line of position (for a direction, its sight length times
+    // its standard deviation) - how many times the geometry magnifies the
+    // observations' errors. Weak above kWeakResectionDilution.
+    ReportEllipse aprioriEllipse{};
+    double dilution = 0.0;
+    bool weakGeometry = false;
+    // Pointings after the block the file says the field software resected
+    // from (kResectionEndMetadata) to the points the resection used: checks
+    // of the station, each a row of ReductionReport::misclosures.
+    std::size_t checks = 0;
+    // Where the file gives coordinates of its own for the station (a
+    // controller's, or keyed in), which the resection replaced: the resection
+    // less them. Also a misclosure row and a warning.
+    std::optional<double> fileNorthingDifference{};
+    std::optional<double> fileEastingDifference{};
+    // Where another setup had radiated the station before its own block
+    // resected it - a setup that names no backsight, on a mark an earlier
+    // setup shot: that setup, and the resection less the radiation, which is a
+    // check of it. Also a misclosure row and a warning.
+    std::string radiatedFrom{};
+    std::optional<double> radiatedNorthingDifference{};
+    std::optional<double> radiatedEastingDifference{};
+    // The drawing projection's point scale factor at the station, where the
+    // settings reduce no distance to grid (no grid scale, no combined factor)
+    // and that factor would change its longest distance by more than the
+    // distance's standard deviation: ground distances were fitted to grid
+    // coordinates.
+    std::optional<double> unappliedScaleFactor{};
+    SourceRecord source{};
+
+    friend bool operator==(const ResectionReport&, const ResectionReport&) = default;
+};
+
 // ---- Coordinates --------------------------------------------------------------------
 
 // How a coordinate came out of the reduction.
@@ -226,6 +313,7 @@ enum class ComputationMethod {
     TraverseLeastSquares,
     NetworkLeastSquares,
     Gnss,                 // a GNSS position converted to grid
+    Resection,            // a setup's station, from its pointings to placed points
 };
 
 [[nodiscard]] const char* toString(ComputationMethod method);
@@ -258,6 +346,7 @@ struct ReductionReport {
     std::vector<ReportObservation> observations{};
     std::vector<FacePairCheck> facePairs{};
     std::vector<MisclosureReport> misclosures{};
+    std::vector<ResectionReport> resections{}; // in the order they were computed
     std::vector<AdjustmentReport> adjustments{};
     std::vector<CoordinateReport> coordinates{};
     std::vector<ReportMessage> warnings{}; // the reduction's own
