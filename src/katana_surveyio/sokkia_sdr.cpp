@@ -46,12 +46,17 @@
 //           time stamp note is "Time Date MM/DD/YYYY Time HH:MM:SS", it
 //           turns the job's atmospheric switch on whenever it writes
 //           weather, its slope distances carry the prism constant and no
-//           atmospheric correction, it writes the field book's records in
-//           their order - and a back-bearing record holds the face 1 circle
-//           reading of the backsight's shot, so it follows that shot - and
-//           it puts the instrument's serial number in the EDM description
-//           field. Its notes give the angle-unit option 4 as "Quadrant
-//           bearings (stored as degrees ...)", a value it never writes.
+//           atmospheric correction, it writes the controller's field book
+//           records in their order, its back-bearing record's circle is
+//           that record's face 1 reading on the backsight, and it puts the
+//           instrument's serial number in the EDM description field. Its
+//           notes give the angle-unit option 4 as "Quadrant bearings
+//           (stored as degrees ...)", a value it never writes.
+//   [JXL]   Trimble, "JobXML Schema" 5.72: the field book those records
+//           come from, where "The BackBearingRecord element provides the
+//           backsight orientation details that will apply to the following
+//           observations" - so [TA] writes a back-bearing record before the
+//           shots it orients, as the file met writes each before its round.
 //   [NIKON] Nikon, "Total Station DTM-322 Instruction Manual", pages
 //           169-172, the SDR2x and SDR33 columns side by side, and the same
 //           tables in Spectra Precision's "Focus 6" user guide, pages
@@ -152,20 +157,46 @@
 //     observations", and from V04-02 on a job with 4-digit point numbers -
 //     the SDR2x layout - writes it after them, before the MC records ("the
 //     SET record precedes the MC records for SDR2x format compatibility");
-//     [LISCAD] reads that order too, the set completed by its 12. So in the
-//     SDR2x layout a 12 read after raw observations of its setup closes the
-//     set they make: those since the setup began, its last 07 or 12, or a
-//     13SC "Set #" note - the last of them as many as the 12's count of
-//     observations, where it states one. A 12 with no raw observation since
-//     then opens its set, as in the SDR33 layout (V04-01's order).
+//     [LISCAD] reads that order too, the set completed by its 12. V04-01
+//     wrote the SDR2x 12 first, as SDR33 does, and the header cannot tell
+//     the two apart: [SDR] 3.2.5 and chapter 5 send every job with 4-digit
+//     point numbers as "SDR20 V03-05". So the set's 07 SC decides, when it
+//     closes the set: raw observations read after the 12 are its set (the
+//     12 opened it, V04-01's order); none - only its MC records, or nothing
+//     - and the set was the raw observations before the 12, those since the
+//     setup began, its last 07 or 12, or a 13SC "Set #" note, the last of
+//     them as many as the 12's count where it states one.
 //   * A setup's first 07 read after some of its observations orients them
-//     too only where one of them is of its backsight: that is [TA]'s order,
-//     the backsight's shot before the back-bearing record made from it.
-//     Otherwise it orients what follows it ([SETX] 8.2) and not them: the
-//     observations before it stay a setup of their own, oriented by a keyed
-//     azimuth or read as azimuths (next), and the 07 begins a new setup on
-//     the same point - with a warning, since a shot taken before any
-//     backsight is unusual enough to be a mistake.
+//     too only where they show themselves on its circle: they read its
+//     backsight, every time, within a minute of the 07's circle reading
+//     (face 2 less half a circle; with no circle stated, a shot of the
+//     backsight is enough). The circle then was not set anew at the 07,
+//     so they were read on the orientation it gives. No writer known puts
+//     shots first ([SETX] 8.2 and [JXL] have a back-bearing record orient
+//     what follows it), so otherwise the observations before it stay a
+//     setup of their own, oriented by a keyed azimuth or read as azimuths
+//     (below), and the 07 begins a new setup on the same point - with a
+//     warning, since a shot taken before any backsight, or before the
+//     circle was set anew, is unusual enough to be a mistake.
+//   * A later 07 that names the setup's backsight and begins a new setup
+//     (its circle moved) takes with it the shots of that backsight read
+//     just before it, since the setup's last 07, 12 or "Set #" note, on its
+//     circle and not on the setup's: the same point read on the new circle
+//     shows it was read after the circle was set anew. Where the setup's 07
+//     gives no circle reading, the setup's first reading of the backsight
+//     is its circle; where the new 07 gives none, a shot of the backsight
+//     off the setup's circle is enough. Any other shot stays with the
+//     orientation it followed ([SETX] 8.2) - a point other than the
+//     backsight read on a new 07's circle shows only that the two records'
+//     azimuths disagree, not that the circle moved. Rounds whose 07s give
+//     no circle reading are one setup with nothing to compare, so their
+//     readings of the backsight are compared face by face, and a spread
+//     past the minute is warned about.
+//   * Those minutes are widened by the horizontal collimation applied to
+//     the readings (below). A 07's circle reading may be [TA]'s, a raw face
+//     1 reading, from which a corrected reading differs by the correction;
+//     or the field book's own, a set's face mean ([SDR] chapter 2's BKB
+//     SC), which the corrected readings match.
 //   * A setup with no 07 is oriented by a keyed azimuth: an 11 with an
 //     azimuth and no distance from the setup's point ([SDR] chapter 2's
 //     "RED KI 0100-0101 Azimuth 23-56'15" H.dist <Null> V.Dist <Null> Code
@@ -194,13 +225,18 @@
 //     (MC) and reduced (RED) views.
 //   * Option 45 is the order of the coordinates in 02 and 08: [SDR] 3.5
 //     defines 1 "N-E-Elev" and 2 "E-N-Elev". 3.6.2 names 21-36 the northing
-//     and 37-52 the easting, which is option 1's order: under 2 the easting
-//     comes first. Sokkia's own E-N-Elev example ([SDR] chapter 2, V04-04.30)
-//     shows the field book storing in the displayed order - its HORZADJ
-//     record's translation printed as "Trans.N" is the easting's, since only
-//     that reading takes its GSTN 1005 to its printed POS 1005 (to 0.1 mm;
-//     the other is 5.5 cm off) - and [TA] writes the easting first under 2.
-//     [TA]'s 3, "Y-X-Z", is east first as well, and read so with a warning:
+//     and 37-52 the easting, which is option 1's order; [SETX] 3.5.6 calls
+//     the setting "the order in which they are displayed". Under 2 the
+//     easting is read first, as [TA] writes it, with one warning a file:
+//     no source shows the order Sokkia's field book sends under 2. Its own
+//     E-N-Elev example ([SDR] chapter 2, V04-04.30) is a printed report
+//     ([SDR] 2.4: "displayed in Printed output form"), so it shows the
+//     display order and not the file's; its HORZADJ record, printed with
+//     fixed labels, only identifies its translation's "Trans.N" as the
+//     easting (that reading takes its GSTN 1005 to 1.1 mm east and 0.8 mm
+//     south of its printed POS 1005; the other, 5.6 cm off in each
+//     ordinate, 7.9 cm in all). [TA]'s 3,
+//     "Y-X-Z", is east first as well, and read so with its own warning:
 //     [SDR] does not define 3, and [SETX] 3.5.6 lists "S-W-Elv" as the
 //     field book's third display order. A file that states coordinates
 //     under any other option is refused. The order read is in the
@@ -217,13 +253,46 @@
 //     AJ, TV or RS (the traverse adjustment, the traverse, the resection)
 //     Calculated; any other Unknown. The LATEST coordinates a file gives a
 //     point are kept, the field book's own rule ([SDR] 2.3: "the latest
-//     coordinates are the best"; [PROLINK] searches from the end of the
+//     coordinates are the best(or an observation in POS view) will
+//     over-ride an observation in OBS view even if the OBS view is stored
+//     later"; [SETX] 6.1 rule 2; [PROLINK] searches from the end of the
 //     field book for a point's POS, STN or POS-view record): the 08 AJ of a
 //     traverse adjustment follows the positions it adjusts, and a later 02
 //     restates the station as the field book held it then. The earlier
 //     ones are kept in the point's metadata, with a warning. (The shared
 //     builder keeps the first for the other raw formats, whose later
 //     positions are checks.)
+//   * Except the POS view of an observation. A field book sending more than
+//     one view writes "more than one record for each observation record",
+//     one after another - for its current view and the POS view "a raw
+//     observation record followed by a position record" ([SETX] 27.2) - and
+//     an MC or RED record has the views an observation has ([SETX] chapter
+//     6: "MC and Red records can also be stored in Pos view"; 8.5.5's
+//     printed examples follow each OBS record, the averaged OBS MC among
+//     them, with its POS TP). So an 08 other than KI, AJ, TV or RS read
+//     straight after a 09 F1, F2, MD or MC, or an 11 with distances, of the
+//     same point is that observation's POS view, whatever the reader does
+//     with the observation (an MC or RED is not imported, a bad set's raw
+//     one is skipped), and the observation stayed in its own view in the
+//     field book: one in OBS, MC or RED view comes after every POS, STN and
+//     POS-view record ([SETX] 6.1 rules 2 and 3), and Store OBS "will NOT
+//     overwrite a previous coordinate if it exists in POS view" ([SETX]
+//     8.5.2) - a check shot onto control. So it places a point that has no
+//     coordinates, or whose coordinates came from such a view (the latest
+//     observation is used where nothing else is, [SETX] 6.1 rule 3), and
+//     never supersedes coordinates from any other record: those stand, and
+//     its own go to the point's metadata, with a warning naming the
+//     observation. An 08 after an 08 of the same point is a record of its
+//     own - 8.5.5's averaged position follows the POS view it averages -
+//     and so is one with any other record between it and the observation.
+//     Two outputs cannot tell an observation stored in OBS view from one
+//     stored in POS view: with the POS view alone ("all the observation (OBS
+//     or MC) and reduced (RED) records are output as POS records", [SETX]
+//     27.2) each is a lone 08, taken as a position; with the OBS and POS
+//     views both on, rather than the current view, each is a 09 and its 08,
+//     taken as a check - so a shot stored in POS view, which the field book
+//     lets overwrite, is kept aside too, the safer mistake: control then
+//     never moves unsaid.
 //   * An 08 or 02 that gives an elevation and no northing or easting cannot
 //     place its point; the height is kept in the point's metadata ("height
 //     without a position", as the GSI reader keeps one), with a warning.
@@ -232,7 +301,10 @@
 //     for the heights, the prism constant, the weather, and curvature and
 //     refraction, RED further for the scale factor and sea level ([SETX]
 //     chapter 5 and 29.1) - so beside a raw observation of the same line in
-//     its setup it would count it twice. Without one - a field book set to
+//     its setup it would count it twice, whether read before that raw
+//     observation or after it: the verdict waits for the setup's next 02 or
+//     the file's end, and "its setup" is everything observed from that 02,
+//     rounds and re-orientations included. Without one - a field book set to
 //     send the MC or RED view ([SDR] 2.1), an MC of a target its setup
 //     never observed raw, a RED from another point, or a [NIKON]
 //     instrument, whose only observation record is 09MC - the writers
@@ -243,10 +315,18 @@
 //     they are skipped with the reason, and the shot is said to be lost, in
 //     its warning and in what the file did not carry.
 //   * A 04's collimation corrections are applied to every raw reading after
-//     it, until the next 04, as [SETX] 29.2.5 applies them: face 1 readings
-//     plus the vertical (Vc) and horizontal (Hc) correction, face 2 minus,
-//     a reading with no vertical angle taken as face 1 ([SETX] 29.2.3). A
-//     face pair's mean is unchanged, so a round observed on both faces is
+//     it as [SETX] 29.2.5 applies them: face 1 readings plus the vertical
+//     (Vc) and horizontal (Hc) correction, face 2 minus, a reading with no
+//     vertical angle taken as face 1 ([SETX] 29.2.3). They apply until the
+//     next 04, an 01 of another instrument type (its EDM type, the code
+//     [SDR] 3.5 lists instruments by), or another job: [SETX] 13.1 applies
+//     them "until either the instrument type is changed or a new
+//     collimation record is added", and "Collimation is not maintained
+//     across all jobs" (the Level 5 manual, chapter 13, the same). An 01 of
+//     another type between two shots of one setup ends it there all the
+//     same: it is applied reading by reading, where the setup's other
+//     settings, which the model holds once a setup, are kept whole. A face
+//     pair's mean is unchanged, so a round observed on both faces is
 //     reduced as before; a shot on one face is corrected. The field book
 //     applies Vc after the instrument and target heights, the reduction
 //     here before them, which differs by at most Vc times the height
@@ -349,6 +429,26 @@ constexpr double kHectopascalsPerInchOfMercury =
 // Rounds of one setup whose circle readings on the backsight differ by more
 // than this were not observed on one orientation (see the top of this file).
 constexpr double kSameCircle = kPi / 10800.0; // one minute of arc
+
+// Whether two circle readings (radians) are within kSameCircle of each
+// other, round the circle's zero, and `slack` more: the horizontal
+// collimation one of them may carry and the other not (see the top of this
+// file).
+bool onSameCircle(double a, double b, double slack = 0.0)
+{
+    double difference = std::fabs(wrapToCircle(a) - wrapToCircle(b));
+    difference = std::min(difference, 2.0 * kPi - difference);
+    return difference <= kSameCircle + slack;
+}
+
+// A horizontal reading as face 1 reads that line: face 2 less half a circle
+// ([SETX] 29.2.3's faces), a reading of no known face taken as face 1.
+double faceOneReading(const survey::HorizontalDirectionObservation& direction)
+{
+    return direction.pointing.face == survey::Face::Right
+               ? wrapToCircle(direction.direction - kPi)
+               : direction.direction;
+}
 
 // The refraction constants of the job record's option: [SDR] 3.5 ("1 0.14,
 // 2 0.20") and, for a header in [NIKON]'s form, [NIKON] page 172 ("0.132 or
@@ -688,7 +788,8 @@ std::optional<survey::SurveyTimestamp> timeStampOf(std::string_view text)
 {
     survey::SurveyTimestamp time;
     text = trimmed(text);
-    // [TA]: "Time Date 07/21/2022 Time 10:39:05".
+    // [TA]: "Time Date MM/DD/YYYY Time HH:MM:SS", as "Time Date 03/14/2026
+    // Time 08:15:00".
     if (const std::size_t date = text.find("Date "); date != std::string_view::npos) {
         std::string_view rest = trimmed(text.substr(date + 5));
         const std::size_t end = rest.find(' ');
@@ -778,6 +879,42 @@ struct Collimation {
     std::size_t record = 0;
 };
 
+// What the observations before a setup's first 07 say of its backsight:
+// whether any is of it, and how many of their horizontal readings on it are
+// on the 07's circle and how many are not.
+struct BacksightReadings {
+    bool observed = false;
+    std::size_t onCircle = 0;
+    std::size_t offCircle = 0;
+};
+
+// A 09 MC or an 11 with distances from the setup's point whose line no raw
+// observation has repeated yet: its verdict waits for the setup's end.
+struct PendingDerivedView {
+    std::size_t record = 0;
+    bool corrected = true; // an MC; otherwise a RED
+    std::string from;
+    std::string to;
+};
+
+// The northing, easting and elevation a 02 or 08 states, metres.
+struct StatedCoordinates {
+    double northing = 0.0;
+    double easting = 0.0;
+    std::optional<double> elevation;
+};
+
+// An observation record read - a 09 F1, F2, MD or MC, or an 11 with
+// distances - whatever the reader then did with it: its record, its target,
+// what a warning calls it and the view the field book keeps it in; record 0
+// for none.
+struct ShotRecord {
+    std::size_t record = 0;
+    std::string to;
+    std::string_view what;
+    std::string_view view;
+};
+
 class SdrReader {
   public:
     SdrReader(std::string_view fileName, survey::SourceRecord source, const ReadOptions& options)
@@ -821,6 +958,13 @@ class SdrReader {
     // True, with the record skipped and the byte named, when one of the
     // point id fields holds a control byte.
     bool refusedIds(std::size_t n, std::initializer_list<std::string_view> fields);
+    // The coordinates a 02 or 08 states for `id`, read in the header's
+    // order; nullopt when they cannot place it (a height alone is kept in
+    // the point's metadata, one ordinate alone said), or refused.
+    std::optional<StatedCoordinates> statedCoordinates(std::string_view id,
+                                                       std::string_view first,
+                                                       std::string_view second,
+                                                       std::string_view elevation, std::size_t n);
     void coordinates(std::string_view id, std::string_view first, std::string_view second,
                      std::string_view elevation, survey::CoordinateSource how, std::size_t n);
     // The settings a setup begun now starts with, and the current setup's
@@ -828,8 +972,19 @@ class SdrReader {
     // and its first shot belongs to it).
     void settingsChanged(std::size_t n, std::string_view what);
     // What a setup's records have not said about its orientation, said
-    // before the next one begins: a keyed azimuth, or none at all.
-    void finishSetup();
+    // before the next one begins: a keyed azimuth, or none at all. `end`:
+    // the setup keeps its observations before it, the rest going to the
+    // setup a 07 begins, so only those are what it observes.
+    void finishSetup(std::size_t end = std::string::npos);
+    // A 09 MC or an 11 with distances: skipped now when it cannot have a raw
+    // twin or already has one, otherwise left for settleDerivedViews().
+    void readDerivedView(PendingDerivedView view);
+    // Skips it with its reason: `repeated`, a raw observation of its line
+    // carries its shot; otherwise its shot is lost, and counted so.
+    void skipDerivedView(const PendingDerivedView& view, bool repeated);
+    // The verdict on each derived view a setup left waiting: its line
+    // observed raw from the setup's point - counted twice - or its shot lost.
+    void settleDerivedViews();
     void resetSetup();
     // A setup on the current one's point, with its instrument height and the
     // settings in force now, taking the current one's observations from
@@ -838,6 +993,27 @@ class SdrReader {
     survey::SurveyStation& splitSetup(std::size_t first, std::size_t n);
     // The raw records of the current setup before observation `first`.
     [[nodiscard]] std::size_t recordsBefore(std::size_t first) const;
+    // The horizontal reading of the current setup's raw record `record` (an
+    // index into recordStarts_), or nullptr when it has none.
+    [[nodiscard]] const survey::HorizontalDirectionObservation*
+    directionOfRecord(const survey::SurveyStation& station, std::size_t record) const;
+    // What the setup's observations before `first` say of backsight `to`,
+    // against the circle reading `reading` a first 07 gives it.
+    [[nodiscard]] BacksightReadings backsightBefore(const survey::SurveyStation& station,
+                                                    std::size_t first, std::string_view to,
+                                                    std::optional<double> reading) const;
+    // Where a 07 that begins a new setup takes its observations from: the
+    // end, or the first of the shots of its backsight `to` just before it
+    // read on its circle `reading` (any, with none) and not on the setup's
+    // (see the top of this file).
+    [[nodiscard]] std::size_t newCircleStart(const survey::SurveyStation& station,
+                                             std::string_view to,
+                                             std::optional<double> reading) const;
+    // For a setup whose 07s give no circle reading: a warning when its
+    // readings of its backsight among its first `kept` observations are
+    // more than a minute apart on one face, since nothing else can show its
+    // circle moved between its rounds.
+    void warnOfBacksightSpread(const survey::SurveyStation& station, std::size_t kept);
     void refuse(std::size_t n, std::string message);
 
     RawProjectBuilder builder_;
@@ -859,7 +1035,7 @@ class SdrReader {
     TemperatureUnit temperatureUnit_ = TemperatureUnit::Unknown;
     CoordinateOrder order_ = CoordinateOrder::Unknown;
     char orderOption_ = ' ';
-    bool orderWarned_ = false; // option 3's doubt, said once
+    bool orderWarned_ = false; // option 2's or 3's doubt, said once
 
     // The job.
     bool jobRead_ = false;
@@ -881,6 +1057,18 @@ class SdrReader {
     std::string badSetName_;
     std::size_t badSetRecord_ = 0;
     Collimation collimation_{};
+    // The EDM type option of the latest 01 that gave one: the instrument
+    // type a collimation holds for ([SETX] 13.1).
+    std::string edmType_;
+    // The 01 that last ended a collimation by another instrument type, and
+    // that collimation's 04: for the warning at a shot of the same setup
+    // after it.
+    std::size_t collimationEndedAt_ = 0;
+    std::size_t endedCollimation_ = 0;
+    // The largest horizontal collimation correction applied to a reading
+    // since the latest 02, radians: how far a corrected reading and a 07's
+    // circle reading on one line may differ with the circle unmoved.
+    double appliedCollimation_ = 0.0;
 
     // The current setup.
     Orientation orientation_{};
@@ -892,23 +1080,40 @@ class SdrReader {
     std::optional<std::size_t> setStart_;
     std::size_t setStartRecord_ = 0;
     bool backsightSinceSet_ = false;
+    // An SDR2x 12 read after raw records: where the set it would close
+    // begins, and how many records that is, for its 07 SC to choose.
+    std::optional<std::size_t> setBefore_;
+    std::size_t setBeforeRecords_ = 0;
     // Where a set the SDR2x layout closes with its 12 could have begun: the
     // setup's start, its last 07 or 12, or a "Set #" note.
     std::size_t setBoundary_ = 0;
-    // The first observation of each of its raw records, in order, and the
-    // targets they observe - what an MC or RED is the reduction of.
+    // The first observation of each of its raw records, in order.
     std::vector<std::size_t> recordStarts_;
-    std::set<std::string, std::less<>> rawTargets_;
     // Each 01, 05 or 06 read after the setup's first observation: it belongs
     // to the next setup unless another shot of this one follows.
     std::vector<std::pair<std::string, std::size_t>> pendingChanges_;
     bool weatherSeen_ = false;
     bool nonAscii_ = false;
 
+    // Since the latest 02: the targets observed raw from its point, whatever
+    // setup a 07 put them in - what an MC or RED is the reduction of - and
+    // the derived views whose line none of them has observed yet.
+    std::set<std::string, std::less<>> occupationTargets_;
+    std::vector<PendingDerivedView> pendingDerived_;
     // Derived views with no raw twin in their setup: the shots are lost,
     // which the file's summary says.
     std::size_t lostCorrected_ = 0;
     std::size_t lostReduced_ = 0;
+
+    // The observation record read last, if the record read last was one,
+    // and the one before the record being read, if that was one: an 08 of
+    // its target straight after it is its POS view.
+    ShotRecord lastShot_;
+    ShotRecord previousShot_;
+    // Points given coordinates by a position record - a 02, or an 08 that is
+    // no observation's POS view - which an observation's POS view never
+    // supersedes ([SETX] 6.1 rule 2).
+    std::set<std::string, std::less<>> positionRecorded_;
 };
 
 void SdrReader::refuse(std::size_t n, std::string message)
@@ -1010,9 +1215,11 @@ bool SdrReader::refusedIds(std::size_t n, std::initializer_list<std::string_view
     return false;
 }
 
-void SdrReader::coordinates(std::string_view id, std::string_view first, std::string_view second,
-                            std::string_view elevation, survey::CoordinateSource how,
-                            std::size_t n)
+std::optional<StatedCoordinates> SdrReader::statedCoordinates(std::string_view id,
+                                                              std::string_view first,
+                                                              std::string_view second,
+                                                              std::string_view elevation,
+                                                              std::size_t n)
 {
     const bool firstStated = !trimmed(first).empty();
     const bool secondStated = !trimmed(second).empty();
@@ -1028,23 +1235,35 @@ void SdrReader::coordinates(std::string_view id, std::string_view first, std::st
                                  " m) and no northing or easting; a height alone cannot place "
                                  "a point, so it is kept in the point's metadata");
         }
-        return;
+        return std::nullopt;
     }
     if (order_ == CoordinateOrder::Unknown) {
         refuse(n, "the record states coordinates, and the header's coordinate order option is '" +
                       shown(std::string(1, orderOption_)) +
                       "'; the format defines 1 (north first) and 2 (east first), and Katana "
                       "will not guess which ordinate is the northing");
-        return;
+        return std::nullopt;
     }
     const bool northFirst = order_ == CoordinateOrder::NorthFirst;
-    if (orderOption_ == '3' && !orderWarned_) {
+    // Neither east-first option is settled by the field book's own files
+    // (see the top of this file): said once, at the first coordinates read.
+    if (!orderWarned_ && (orderOption_ == '2' || orderOption_ == '3')) {
         orderWarned_ = true;
-        builder_.warn(n, "the header's coordinate order option is 3, which the format's publisher "
-                         "does not define: Trimble's published writer uses it for Y-X-Z, the "
-                         "easting first, and the coordinates are read so; Sokkia's field book "
-                         "lists south-west-elevation as a third display order, so a file set to "
-                         "that would be read wrongly - check a known point");
+        builder_.warn(
+            n, orderOption_ == '2'
+                   ? std::string(
+                         "the header's coordinate order option is 2, east-north-elevation, "
+                         "and the coordinates are read easting first, as Trimble's published "
+                         "writer writes them; the format's record layout names the first field "
+                         "the northing, and no source shows which order Sokkia's field book "
+                         "sends under 2 (its one example is a printed report), so a file of its "
+                         "may hold the northing first - check a known point")
+                   : std::string(
+                         "the header's coordinate order option is 3, which the format's "
+                         "publisher does not define: Trimble's published writer uses it for "
+                         "Y-X-Z, the easting first, and the coordinates are read so; Sokkia's "
+                         "field book lists south-west-elevation as a third display order, so a "
+                         "file set to that would be read wrongly - check a known point"));
     }
     const std::optional<double> a = length(first, northFirst ? "northing" : "easting", n);
     const std::optional<double> b = length(second, northFirst ? "easting" : "northing", n);
@@ -1056,9 +1275,22 @@ void SdrReader::coordinates(std::string_view id, std::string_view first, std::st
                                  "' is given only one of its northing and easting; it is "
                                  "imported without coordinates");
         }
-        return;
+        return std::nullopt;
     }
-    builder_.positionPoint(id, northFirst ? *a : *b, northFirst ? *b : *a, z, how, n);
+    return StatedCoordinates{northFirst ? *a : *b, northFirst ? *b : *a, z};
+}
+
+void SdrReader::coordinates(std::string_view id, std::string_view first, std::string_view second,
+                            std::string_view elevation, survey::CoordinateSource how,
+                            std::size_t n)
+{
+    if (const std::optional<StatedCoordinates> stated =
+            statedCoordinates(id, first, second, elevation, n)) {
+        builder_.positionPoint(id, stated->northing, stated->easting, stated->elevation, how, n);
+        // A position record: coordinates the field book uses before any
+        // observation's ([SETX] 6.1 rule 2).
+        positionRecorded_.emplace(id);
+    }
 }
 
 void SdrReader::settingsChanged(std::size_t n, std::string_view what)
@@ -1087,9 +1319,10 @@ void SdrReader::resetSetup()
     setStart_.reset();
     setStartRecord_ = 0;
     backsightSinceSet_ = false;
+    setBefore_.reset();
+    setBeforeRecords_ = 0;
     setBoundary_ = 0;
     recordStarts_.clear();
-    rawTargets_.clear();
     pendingChanges_.clear();
 }
 
@@ -1100,7 +1333,181 @@ std::size_t SdrReader::recordsBefore(std::size_t first) const
         recordStarts_.begin());
 }
 
-void SdrReader::finishSetup()
+const survey::HorizontalDirectionObservation*
+SdrReader::directionOfRecord(const survey::SurveyStation& station, std::size_t record) const
+{
+    const std::size_t begin = recordStarts_[record];
+    const std::size_t end =
+        record + 1 < recordStarts_.size() ? recordStarts_[record + 1] : station.observations.size();
+    for (std::size_t i = begin; i < end; ++i) {
+        if (const auto* direction =
+                std::get_if<survey::HorizontalDirectionObservation>(&station.observations[i])) {
+            return direction;
+        }
+    }
+    return nullptr;
+}
+
+BacksightReadings SdrReader::backsightBefore(const survey::SurveyStation& station,
+                                             std::size_t first, std::string_view to,
+                                             std::optional<double> reading) const
+{
+    BacksightReadings found;
+    for (std::size_t i = 0; i < first; ++i) {
+        std::visit(
+            [&](const auto& o) {
+                if constexpr (requires { o.to; }) {
+                    found.observed = found.observed || o.to == to;
+                }
+            },
+            station.observations[i]);
+        const auto* direction =
+            std::get_if<survey::HorizontalDirectionObservation>(&station.observations[i]);
+        if (reading && direction != nullptr && direction->to == to) {
+            ++(onSameCircle(faceOneReading(*direction), *reading, appliedCollimation_)
+                   ? found.onCircle
+                   : found.offCircle);
+        }
+    }
+    return found;
+}
+
+std::size_t SdrReader::newCircleStart(const survey::SurveyStation& station, std::string_view to,
+                                      std::optional<double> reading) const
+{
+    const std::size_t end = station.observations.size();
+    // Only the setup's own backsight has a reading the old circle gave it:
+    // read elsewhere - on the new record's circle, or off the old one where
+    // the new record gives none - it shows the circle moved. Another point
+    // read on the new circle shows only that the two records' azimuths
+    // disagree, and [SETX] 8.2 has the old record orient it.
+    if (to != orientation_.backsight) {
+        return end;
+    }
+    // The old circle: the setup's 07's reading on the backsight or, with
+    // none, the setup's first reading of it. A first reading that is one of
+    // the shots below is on it, so none of them moves.
+    std::optional<double> old = orientation_.reading;
+    for (std::size_t record = 0; !old && record < recordStarts_.size(); ++record) {
+        if (const survey::HorizontalDirectionObservation* direction =
+                directionOfRecord(station, record);
+            direction != nullptr && direction->to == to) {
+            old = faceOneReading(*direction);
+        }
+    }
+    if (!old) {
+        return end;
+    }
+    std::size_t record = recordStarts_.size();
+    const std::size_t floor = recordsBefore(setBoundary_);
+    while (record > floor) {
+        const survey::HorizontalDirectionObservation* direction =
+            directionOfRecord(station, record - 1);
+        if (direction == nullptr || direction->to != to) {
+            break;
+        }
+        const double faceOne = faceOneReading(*direction);
+        if ((reading && !onSameCircle(faceOne, *reading, appliedCollimation_)) ||
+            onSameCircle(faceOne, *old, appliedCollimation_)) {
+            break;
+        }
+        --record;
+    }
+    return record < recordStarts_.size() ? recordStarts_[record] : end;
+}
+
+void SdrReader::warnOfBacksightSpread(const survey::SurveyStation& station, std::size_t kept)
+{
+    // Face by face: a face 2 reading less half a circle differs from face
+    // 1's by twice the instrument's collimation error where no 04 corrects
+    // it, which is not the circle moving. The slack is for a 04 read
+    // between two of them, correcting one and not the other.
+    const survey::HorizontalDirectionObservation* first[2] = {nullptr, nullptr};
+    for (std::size_t i = 0; i < kept; ++i) {
+        const auto* direction =
+            std::get_if<survey::HorizontalDirectionObservation>(&station.observations[i]);
+        if (direction == nullptr || direction->to != orientation_.backsight) {
+            continue;
+        }
+        const std::size_t face = direction->pointing.face == survey::Face::Right ? 1 : 0;
+        if (first[face] == nullptr) {
+            first[face] = direction;
+        } else if (!onSameCircle(direction->direction, first[face]->direction,
+                                 appliedCollimation_)) {
+            builder_.warn(direction->source.recordNumber,
+                          "setup '" + station.setup.id + "' reads its backsight '" +
+                              orientation_.backsight +
+                              "' here more than a minute of arc from its reading at record " +
+                              std::to_string(first[face]->source.recordNumber) +
+                              " on the same face, and its backsight records give no circle "
+                              "reading to tell whether the circle was moved between them: they "
+                              "are read as one setup, oriented on the mean of those readings");
+            return;
+        }
+    }
+}
+
+void SdrReader::skipDerivedView(const PendingDerivedView& view, bool repeated)
+{
+    if (repeated) {
+        builder_.skip(view.record,
+                      view.corrected
+                          ? "a corrected observation (MC) is the field software's reduction of "
+                            "raw observations this setup holds of '" +
+                                view.to +
+                                "' - oriented, and reduced for the heights, the prism constant "
+                                "and the weather ([SETX] 29.1); it is not imported, since it "
+                                "would count them twice"
+                          : "a reduced observation (azimuth, horizontal and vertical distance) "
+                            "is the field software's reduction of raw observations this setup "
+                            "holds of '" +
+                                view.to +
+                                "', the scale factor and sea level applied ([SETX] 29.1); it is "
+                                "not imported, since it would count them twice");
+        return;
+    }
+    ++(view.corrected ? lostCorrected_ : lostReduced_);
+    builder_.skip(view.record,
+                  view.corrected
+                      ? "a corrected observation (MC) from '" + shown(view.from) + "' to '" +
+                            shown(view.to) +
+                            "', which no raw observation of its setup repeats, is not imported: "
+                            "writers of the format put different numbers in one (Sokkia's field "
+                            "book a mark-to-mark vector already oriented and corrected, "
+                            "Trimble's writer the inverse of computed coordinates, the Nikon and "
+                            "Spectra manuals the instrument's slope distance and angles), so "
+                            "this shot is lost"
+                      : "a reduced observation (azimuth, horizontal and vertical distance) from '" +
+                            view.from + "' to '" + view.to +
+                            "', which no raw observation of its setup repeats, is not imported: "
+                            "it carries the scale factor and the sea-level reduction the "
+                            "reduction would apply again, and writers of the format differ in "
+                            "what else, so this shot is lost");
+}
+
+void SdrReader::readDerivedView(PendingDerivedView view)
+{
+    // Its raw twin is an observation of the same line from the setup's
+    // point, before it or after; from anywhere else nothing can carry it.
+    const survey::SurveyStation* current = builder_.currentStation();
+    if (current == nullptr || view.from != current->setup.pointId) {
+        skipDerivedView(view, false);
+    } else if (occupationTargets_.contains(view.to)) {
+        skipDerivedView(view, true);
+    } else {
+        pendingDerived_.push_back(std::move(view));
+    }
+}
+
+void SdrReader::settleDerivedViews()
+{
+    for (const PendingDerivedView& view : pendingDerived_) {
+        skipDerivedView(view, occupationTargets_.contains(view.to));
+    }
+    pendingDerived_.clear();
+}
+
+void SdrReader::finishSetup(std::size_t end)
 {
     survey::SurveyStation* station = builder_.currentStation();
     if (station == nullptr) {
@@ -1110,8 +1517,10 @@ void SdrReader::finishSetup()
     // azimuth, a scan of the observations each time would cost the product
     // of the two.
     std::set<std::string_view> directed;
-    for (const survey::Observation& o : station->observations) {
-        if (const auto* direction = std::get_if<survey::HorizontalDirectionObservation>(&o)) {
+    const std::size_t kept = std::min(end, station->observations.size());
+    for (std::size_t i = 0; i < kept; ++i) {
+        if (const auto* direction =
+                std::get_if<survey::HorizontalDirectionObservation>(&station->observations[i])) {
             directed.insert(direction->to);
         }
     }
@@ -1128,6 +1537,8 @@ void SdrReader::finishSetup()
                                    : std::string("the backsight record gives no circle reading "
                                                  "on it either, so only the backsight's "
                                                  "coordinates can orient it")));
+        } else if (!orientation_.reading) {
+            warnOfBacksightSpread(*station, kept);
         }
         return;
     }
@@ -1226,21 +1637,17 @@ survey::SurveyStation& SdrReader::splitSetup(std::size_t first, std::size_t n)
     setStart_ = setStart;
     setStartRecord_ = setRecord;
     backsightSinceSet_ = backsightSinceSet;
-    // Its raw records and their targets, as the new setup holds them: one
-    // record's observations share a pointing and stand together.
+    // Its raw records, as the new setup holds them: one record's
+    // observations share a pointing and stand together.
     std::size_t lastPointing = 0;
     for (std::size_t i = 0; i < station.observations.size(); ++i) {
         std::visit(
             [&](const auto& o) {
-                if constexpr (requires {
-                                  o.pointing.index;
-                                  o.to;
-                              }) {
+                if constexpr (requires { o.pointing.index; }) {
                     if (o.pointing.index != lastPointing) {
                         lastPointing = o.pointing.index;
                         recordStarts_.push_back(i);
                     }
-                    rawTargets_.insert(o.to);
                 }
             },
             station.observations[i]);
@@ -1455,6 +1862,13 @@ void SdrReader::readJob(Fields& fields, std::size_t n)
         builder_.warn(n, "a second job ('" + name + "') begins here; its records are read into "
                                                     "the same survey");
         project.metadata["job at record " + std::to_string(n)] = name;
+        if (collimation_.record != 0) {
+            // [SETX] 13.1: "Collimation is not maintained across all jobs."
+            builder_.warn(n, "the collimation of record " + std::to_string(collimation_.record) +
+                                 " is not applied in job '" + name +
+                                 "': the field book keeps a collimation within its job");
+            collimation_ = Collimation{};
+        }
         builder_.countRead();
         return;
     }
@@ -1540,6 +1954,23 @@ void SdrReader::readInstrument(Fields& fields, std::size_t n)
     const std::optional<double> prism = number(fields.real(), "prism constant", n);
 
     instrumentSeen_ = true;
+    if (!edmType.empty()) {
+        // [SETX] 13.1: a collimation applies "until either the instrument
+        // type is changed or a new collimation record is added"; the EDM
+        // type is the code [SDR] 3.5 lists instruments by. The same type
+        // restated (every setup of some files) changes nothing.
+        if (collimation_.record != 0 && !edmType_.empty() && edmType != edmType_) {
+            builder_.warn(n, "the instrument type changes here (EDM type '" + shown(edmType_) +
+                                 "' to '" + shown(edmType) + "'), so the collimation of record " +
+                                 std::to_string(collimation_.record) +
+                                 " is not applied after it: the field book applies one until "
+                                 "the instrument type changes");
+            collimationEndedAt_ = n;
+            endedCollimation_ = collimation_.record;
+            collimation_ = Collimation{};
+        }
+        edmType_ = edmType;
+    }
     if (verticalOption == "1") {
         vertical_ = VerticalReference::Zenith;
     } else if (verticalOption == "2") {
@@ -1658,8 +2089,9 @@ void SdrReader::readCollimation(Fields& fields, std::size_t n)
         builder_.skip(n, "collimation record with no value");
         return;
     }
-    // Applied to every raw reading from here to the next 04 (see the top of
-    // this file); a correction the record leaves null is none.
+    // Applied to every raw reading from here to the next 04, another
+    // instrument type or another job (see the top of this file); a
+    // correction the record leaves null is none.
     collimation_ = Collimation{vertical.value_or(0.0), horizontal.value_or(0.0), n};
     survey::SurveyStation* station = builder_.currentStation();
     std::map<std::string, std::string>& metadata =
@@ -1690,6 +2122,9 @@ void SdrReader::readStation(Fields& fields, std::string_view derivation, std::si
         return;
     }
     finishSetup();
+    settleDerivedViews();
+    occupationTargets_.clear();
+    appliedCollimation_ = 0.0;
     if (!height) {
         builder_.warn(n, "the setup states no instrument height; 0 is used");
     }
@@ -1752,6 +2187,17 @@ void SdrReader::readBacksight(Fields& fields, std::string_view derivation, std::
         azimuth ? std::optional<double>(wrapToCircle(*azimuth)) : std::nullopt;
     const std::optional<double> wrappedReading =
         reading ? std::optional<double>(wrapToCircle(*reading)) : std::nullopt;
+    // An SDR2x 12 read after raw records closed them (V04-02 on) or opened
+    // the set after it (V04-01), and the set's 07 SC tells which (see the
+    // top of this file): raw observations read since the 12 are its set;
+    // none, and the set was the records before it.
+    if (derivation == "SC" && !backsightSinceSet_ && setBefore_ && setStart_ &&
+        *setStart_ == station->observations.size()) {
+        setStart_ = setBefore_;
+        station->metadata["set at record " + std::to_string(setStartRecord_)] +=
+            ", closing the " + std::to_string(setBeforeRecords_) + " before it";
+    }
+    setBefore_.reset();
     // Set Collection's 07 SC read after a set's observations, with no 07
     // since the set began, closes that set: it is what those observations
     // were oriented on. Any other 07 orients what follows ([SETX] 8.2).
@@ -1762,16 +2208,11 @@ void SdrReader::readBacksight(Fields& fields, std::string_view derivation, std::
     // what follows it.
     const std::size_t first = closesSet ? *setStart_ : station->observations.size();
     if (orientation_.set) {
-        const auto sameCircle = [&]() {
-            if (!wrappedReading || !orientation_.reading) {
-                return wrappedReading.has_value() == orientation_.reading.has_value();
-            }
-            double difference = std::fabs(*wrappedReading - *orientation_.reading);
-            difference = std::min(difference, 2.0 * kPi - difference);
-            return difference <= kSameCircle;
-        };
+        const bool sameCircle = wrappedReading && orientation_.reading
+                                    ? onSameCircle(*wrappedReading, *orientation_.reading)
+                                    : wrappedReading.has_value() == orientation_.reading.has_value();
         const bool anotherRound =
-            to == orientation_.backsight && wrappedAzimuth == orientation_.azimuth && sameCircle();
+            to == orientation_.backsight && wrappedAzimuth == orientation_.azimuth && sameCircle;
         if (anotherRound) {
             ++orientation_.rounds;
             station->metadata["backsight rounds"] = std::to_string(orientation_.rounds);
@@ -1783,51 +2224,79 @@ void SdrReader::readBacksight(Fields& fields, std::string_view derivation, std::
             builder_.countRead();
             return;
         }
-        if (first > 0) {
-            // The circle was oriented anew: those observations are read
-            // against another zero, so they are a setup of their own
-            // ([SETX] 8.2). The instrument height is the setup's: no 02 has
-            // moved it. The settings are those in force now, which an 01 or
-            // 05 between the rounds may have changed.
-            finishSetup();
-            station = &splitSetup(first, n);
+        // The circle was oriented anew. Shots of this record's backsight
+        // just before it, on its circle and not the setup's, were read after
+        // that: they go with it (see the top of this file).
+        const std::size_t moved =
+            closesSet ? first : newCircleStart(*station, to, wrappedReading);
+        if (moved > 0) {
+            // Those observations are read against another zero, so they are
+            // a setup of their own ([SETX] 8.2). The instrument height is
+            // the setup's: no 02 has moved it. The settings are those in
+            // force now, which an 01 or 05 between the rounds may have
+            // changed.
+            finishSetup(moved);
+            station = &splitSetup(moved, n);
         } else {
+            const std::string earlier = std::to_string(orientation_.record);
             builder_.warn(n, closesSet ? "this backsight record, closing the set of record " +
                                              std::to_string(setStartRecord_) +
-                                             ", replaces the one at record " +
-                                             std::to_string(orientation_.record) +
+                                             ", replaces the one at record " + earlier +
                                              ", since no observation came between that one "
                                              "and the set"
-                                       : "a second backsight record before any observation on "
-                                         "the first (record " +
-                                             std::to_string(orientation_.record) +
-                                             ") replaces it");
+                             : station->observations.empty()
+                                 ? "a second backsight record before any observation on the "
+                                   "first (record " +
+                                       earlier + ") replaces it"
+                                 : "this backsight record replaces the one at record " + earlier +
+                                       ": every observation since that one reads its backsight '" +
+                                       to + "' " +
+                                       (wrappedReading
+                                            ? "on this record's circle and not on that one's"
+                                            : "off that one's circle") +
+                                       ", so the circle was set anew before them");
             station->metadata.erase("backsight circle readings (radians)");
         }
-    } else if (first > 0 && (closesSet || !rawTargets_.contains(to))) {
-        // The setup's first 07, read after observations it does not orient:
-        // none of them is of its backsight, so this is not [TA]'s order (the
-        // backsight's shot, then the back-bearing record made from it), or
-        // they came before the set it closes. They were read on no
-        // orientation this record gives, so they stay a setup of their own,
-        // oriented as finishSetup() finds, and this record begins another.
-        const std::string previous = station->setup.id;
-        const std::size_t before = recordsBefore(first);
-        const std::size_t setRecord = setStartRecord_;
-        finishSetup();
-        station = &splitSetup(first, n);
-        builder_.warn(n, "setup '" + previous + "' has " + std::to_string(before) +
-                             " observation record(s) before " +
-                             (closesSet ? "the set this backsight record closes (record " +
-                                              std::to_string(setRecord) +
-                                              "), which it orients and not them"
-                                        : "its first backsight record, and none is of its "
-                                          "backsight '" +
-                                              to +
-                                              "': a backsight record orients what follows it "
-                                              "([SETX] 8.2)") +
-                             "; they stay setup '" + previous + "', and setup '" +
-                             station->setup.id + "' begins here");
+    } else if (first > 0) {
+        // The setup's first 07, read after observations. They are read on the
+        // orientation it gives only where they read its backsight on its
+        // circle, which says the circle was not set anew at it (see the top
+        // of this file); and never when they came before the set it closes.
+        const BacksightReadings before = backsightBefore(*station, first, to, wrappedReading);
+        const bool onItsCircle =
+            wrappedReading ? before.onCircle > 0 && before.offCircle == 0 : before.observed;
+        if (closesSet || !onItsCircle) {
+            // They stay a setup of their own, oriented as finishSetup()
+            // finds, and this record begins another.
+            const std::string previous = station->setup.id;
+            const std::size_t records = recordsBefore(first);
+            const std::size_t setRecord = setStartRecord_;
+            std::string why;
+            if (closesSet) {
+                why = "the set this backsight record closes (record " + std::to_string(setRecord) +
+                      "), which it orients and not them";
+            } else if (!before.observed) {
+                why = "its first backsight record, and none is of its backsight '" + to +
+                      "': a backsight record orients what follows it ([SETX] 8.2)";
+            } else if (before.offCircle > 0) {
+                why = "its first backsight record, and they read its backsight '" + to +
+                      "' more than a minute of arc from this record's circle reading on it: the "
+                      "circle was set anew, and a backsight record orients what follows it "
+                      "([SETX] 8.2)";
+            } else {
+                why = "its first backsight record, and none gives a horizontal reading of its "
+                      "backsight '" +
+                      to +
+                      "', so nothing shows them read on this record's circle: a backsight "
+                      "record orients what follows it ([SETX] 8.2)";
+            }
+            finishSetup(first);
+            station = &splitSetup(first, n);
+            builder_.warn(n, "setup '" + previous + "' has " + std::to_string(records) +
+                                 " observation record(s) before " + why + "; they stay setup '" +
+                                 previous + "', and setup '" + station->setup.id +
+                                 "' begins here");
+        }
     }
     orientation_ = Orientation{true, to, wrappedAzimuth, wrappedReading, 1, n};
     keyed_.clear(); // a backsight record orients the setup; a keyed azimuth no longer does
@@ -1868,7 +2337,29 @@ void SdrReader::readPosition(Fields& fields, std::string_view derivation, std::s
         how = survey::CoordinateSource::Calculated;
     }
     builder_.mentionPoint(id, n);
-    coordinates(id, first, second, elevation, how, n);
+    // Neither keyed nor computed, and of the point the observation record
+    // before it observes: that observation's POS view, sent beside it
+    // ([SETX] 27.2).
+    const bool positionView = how != survey::CoordinateSource::Entered &&
+                              how != survey::CoordinateSource::Calculated &&
+                              previousShot_.record != 0 && id == previousShot_.to;
+    if (!positionView) {
+        coordinates(id, first, second, elevation, how, n);
+    } else if (const std::optional<StatedCoordinates> stated =
+                   statedCoordinates(id, first, second, elevation, n)) {
+        // The observation stayed in its own view in the field book, which
+        // places a point that has no other coordinates and never supersedes
+        // those of a position record ([SETX] 6.1, 8.5.2).
+        builder_.positionPoint(
+            id, stated->northing, stated->easting, stated->elevation, how, n,
+            positionRecorded_.contains(id)
+                ? "they are the POS view of the " + std::string(previousShot_.what) +
+                      " at record " + std::to_string(previousShot_.record) +
+                      ", which the field book keeps in " + std::string(previousShot_.view) +
+                      " view: an observation in OBS, MC or RED view does not overwrite a point's "
+                      "coordinates from a position record ([SETX] 6.1, 8.5.2)"
+                : std::string{});
+    }
     if (fatal_) {
         return;
     }
@@ -1886,33 +2377,16 @@ void SdrReader::readObservation(Fields& fields, std::string_view derivation, std
     const std::string_view verticalField = fields.real();
     const std::string_view horizontalField = fields.real();
     const std::string description = cleaned(fields.take(16));
+    // An observation record, whatever becomes of it below: an 08 of its
+    // target straight after it is its POS view (see the top of this file).
     if (derivation == "MC") {
-        // Its raw twin is an observation of the same line in this setup;
-        // without one nothing else carries the shot.
-        const survey::SurveyStation* current = builder_.currentStation();
-        const std::string from = pointIdOf(fromField);
-        const std::string to = pointIdOf(toField);
-        if (current != nullptr && from == current->setup.pointId && rawTargets_.contains(to)) {
-            builder_.skip(n, "a corrected observation (MC) is the field software's reduction of "
-                             "raw observations this setup holds of '" +
-                                 to +
-                                 "' - oriented, and reduced for the heights, the prism "
-                                 "constant and the weather ([SETX] 29.1); it is not imported, "
-                                 "since it would count them twice");
-        } else {
-            ++lostCorrected_;
-            builder_.skip(n, "a corrected observation (MC) from '" + shown(from) + "' to '" +
-                                 shown(to) +
-                                 "', which no raw observation of its setup repeats, is not "
-                                 "imported: writers of the format put different numbers in one "
-                                 "(Sokkia's field book a mark-to-mark vector already oriented "
-                                 "and corrected, Trimble's writer the inverse of computed "
-                                 "coordinates, the Nikon and Spectra manuals the instrument's "
-                                 "slope distance and angles), so this shot is lost");
-        }
+        lastShot_ = ShotRecord{n, pointIdOf(toField), "corrected observation (MC)", "MC"};
+        readDerivedView(PendingDerivedView{n, true, pointIdOf(fromField), pointIdOf(toField)});
         return;
     }
-    if (derivation != "F1" && derivation != "F2" && derivation != "MD") {
+    if (derivation == "F1" || derivation == "F2" || derivation == "MD") {
+        lastShot_ = ShotRecord{n, pointIdOf(toField), "observation", "OBS"};
+    } else {
         builder_.skip(n, "an observation with derivation code '" + shown(derivation) +
                              "', which the format does not define for one");
         return;
@@ -1995,12 +2469,26 @@ void SdrReader::readObservation(Fields& fields, std::string_view derivation, std
 
     for (const auto& [what, record] : pendingChanges_) {
         // One setup holds one set of settings, and the shots before this
-        // record were made under the old ones.
+        // record were made under the old ones. A collimation the record
+        // ended is not one of them: it is applied reading by reading, so it
+        // has ended for the shots after the record (see the top of this
+        // file), and the warning must not say it was kept.
+        const std::string collimation =
+            record == collimationEndedAt_
+                ? "the collimation of record " + std::to_string(endedCollimation_)
+                : std::string{};
         builder_.warn(record, what + " changes in the middle of setup '" + setup->setup.id +
                                   "'; the setup keeps the values it began with, and these apply "
-                                  "from the next setup");
+                                  "from the next setup" +
+                                  (collimation.empty()
+                                       ? std::string{}
+                                       : " - all but " + collimation +
+                                             ", which ends here all the same: it is applied to "
+                                             "each reading, and the field book applies one only "
+                                             "until the instrument type changes"));
         setup->metadata[what + " changed at record " + std::to_string(record)] =
-            "not applied to this setup";
+            collimation.empty() ? std::string("not applied to this setup")
+                                : "not applied to this setup, but " + collimation + " ends at it";
     }
     pendingChanges_.clear();
     if (!instrumentSeen_ && !instrumentWarned_) {
@@ -2032,13 +2520,14 @@ void SdrReader::readObservation(Fields& fields, std::string_view derivation, std
         setup->metadata.try_emplace("collimation of record " +
                                         std::to_string(collimation_.record),
                                     "applied to its readings ([SETX] 29.2.5)");
+        appliedCollimation_ = std::max(appliedCollimation_, std::fabs(collimation_.horizontal));
     }
 
     const survey::ObservationPrecision& precision = builder_.options().precision;
     const double hi = setup->setup.instrumentHeight;
     const survey::Pointing pointing{builder_.nextPointing(), face};
     recordStarts_.push_back(setup->observations.size());
-    rawTargets_.insert(to);
+    occupationTargets_.insert(to);
     if (horizontal) {
         auto& observation = builder_.stationObservation<survey::HorizontalDirectionObservation>(n);
         observation.at = setup->setup.pointId;
@@ -2090,26 +2579,10 @@ void SdrReader::readReduced(Fields& fields, std::size_t n)
         return;
     }
     if (!trimmed(horizontalField).empty() || !trimmed(verticalField).empty()) {
-        // Its raw twin, as for an MC: an observation of the same line in
-        // this setup.
-        const survey::SurveyStation* current = builder_.currentStation();
-        if (current != nullptr && from == current->setup.pointId && rawTargets_.contains(to)) {
-            builder_.skip(n, "a reduced observation (azimuth, horizontal and vertical distance) "
-                             "is the field software's reduction of raw observations this setup "
-                             "holds of '" +
-                                 to +
-                                 "', the scale factor and sea level applied ([SETX] 29.1); it "
-                                 "is not imported, since it would count them twice");
-        } else {
-            ++lostReduced_;
-            builder_.skip(n, "a reduced observation (azimuth, horizontal and vertical distance) "
-                             "from '" +
-                                 from + "' to '" + to +
-                                 "', which no raw observation of its setup repeats, is not "
-                                 "imported: it carries the scale factor and the sea-level "
-                                 "reduction the reduction would apply again, and writers of the "
-                                 "format differ in what else, so this shot is lost");
-        }
+        // A derived view, as an MC is, and an observation record whose POS
+        // view may follow it (see the top of this file).
+        lastShot_ = ShotRecord{n, to, "reduced observation (RED)", "RED"};
+        readDerivedView(PendingDerivedView{n, false, from, to});
         return;
     }
     if (!azimuth) {
@@ -2170,22 +2643,26 @@ void SdrReader::readSet(Fields& fields, std::size_t n)
     }
     if (survey::SurveyStation* station = builder_.currentStation(); station != nullptr) {
         const std::size_t here = station->observations.size();
-        // In the SDR2x layout a 12 after raw records of its setup closes the
-        // set they make (see the top of this file): the last of them as many
-        // as its count, where it states one they hold; otherwise the set
-        // begins here.
+        // The set begins here, as a 12 opens it in SDR33 and SDR2x's V04-01
+        // - unless, in the SDR2x layout, this 12 follows raw records of its
+        // setup and its set's 07 SC finds no raw observation after it: then
+        // it closed the set they make (see the top of this file), the last
+        // of them as many as its count, where it states one they hold.
         const std::size_t since = recordStarts_.size() - recordsBefore(setBoundary_);
-        std::size_t closed = 0;
+        std::size_t closable = 0;
         if (variant_ == Variant::Sdr2x && since > 0) {
-            closed = counted && *counted > 0 && static_cast<std::size_t>(*counted) < since
-                         ? static_cast<std::size_t>(*counted)
-                         : since;
+            closable = counted && *counted > 0 && static_cast<std::size_t>(*counted) < since
+                           ? static_cast<std::size_t>(*counted)
+                           : since;
         }
         station->metadata["set at record " + std::to_string(n)] =
             (setNumber.empty() ? std::string{} : "number " + setNumber + ", ") + count +
-            " observation(s)" + (markedBad ? ", marked bad" : "") +
-            (closed > 0 ? ", closing the " + std::to_string(closed) + " before it" : "");
-        setStart_ = closed > 0 ? recordStarts_[recordStarts_.size() - closed] : here;
+            " observation(s)" + (markedBad ? ", marked bad" : "");
+        setStart_ = here;
+        setBefore_ = closable > 0 ? std::optional<std::size_t>(
+                                        recordStarts_[recordStarts_.size() - closable])
+                                  : std::nullopt;
+        setBeforeRecords_ = closable;
         setStartRecord_ = n;
         backsightSinceSet_ = false;
         setBoundary_ = here;
@@ -2281,6 +2758,9 @@ void SdrReader::readNote(Fields& fields, std::string_view derivation, std::size_
 
 void SdrReader::dispatch(std::string_view line, std::size_t n)
 {
+    // The observation record before this one, if it was one, whatever this
+    // one is: only a record straight after it can be its POS view.
+    previousShot_ = std::exchange(lastShot_, ShotRecord{});
     if (!headerRead_) {
         // [SDR] chapter 3: "The first data record of each transmission is
         // always of type 00."
@@ -2412,6 +2892,7 @@ Result<ReadResult> SdrReader::read(const std::vector<std::string_view>& lines,
                                   "cut short: the record's last field may be incomplete");
     }
     finishSetup();
+    settleDerivedViews();
     survey::SurveyProject& project = builder_.project();
     if (lostCorrected_ > 0) {
         builder_.notCarried(std::to_string(lostCorrected_) +

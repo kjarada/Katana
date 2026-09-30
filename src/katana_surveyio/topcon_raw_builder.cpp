@@ -251,7 +251,8 @@ bool RawProjectBuilder::hasPoint(std::string_view id) const
 
 void RawProjectBuilder::positionPoint(std::string_view id, double northing, double easting,
                                       std::optional<double> elevation,
-                                      survey::CoordinateSource how, std::size_t record)
+                                      survey::CoordinateSource how, std::size_t record,
+                                      std::string_view asideBecause)
 {
     PointEntry& point = entry(id, record);
     if (!point.positioned) {
@@ -278,6 +279,14 @@ void RawProjectBuilder::positionPoint(std::string_view id, double northing, doub
     };
     const std::string restated = text(northing, easting, elevation);
     const std::size_t earlier = point.positionRecord;
+    if (!asideBecause.empty()) {
+        point.metadata["coordinates restated at record " + std::to_string(record)] = restated;
+        warn(record, "point '" + point.id + "' is given different coordinates here (" +
+                         restated + " m) from those of record " + std::to_string(earlier) +
+                         "; those are kept and these are in the point's metadata, since " +
+                         std::string(asideBecause));
+        return;
+    }
     if (restated_ == RestatedCoordinates::LatestKept) {
         point.metadata["coordinates of record " + std::to_string(earlier) + ", superseded"] =
             text(point.northing, point.easting, point.elevation);
