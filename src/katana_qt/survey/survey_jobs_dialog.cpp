@@ -544,7 +544,7 @@ void SurveyJobsDialog::previewAdjustment(std::function<void()> then)
         [this, raw, settings = *settings, context = std::move(*context), jobId, revision,
          previous = std::move(previous), drawingPoints = std::move(drawingPoints),
          then = std::move(then)]() mutable -> SurveyTaskBar::Finish {
-            auto outcome = survey::reduceAndAdjust(*raw, settings, context);
+            auto outcome = cad::reduceForDrawing(*raw, settings, context);
             if (!outcome) {
                 return [this, error = outcome.error()] {
                     newReport_->showNote("The reduction could not run: " + qs(error.describe()));

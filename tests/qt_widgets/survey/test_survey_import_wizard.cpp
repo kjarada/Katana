@@ -559,3 +559,35 @@ TEST(SurveyImportWizard, ItsImportIsTheSurveyImportLinesForTheSameSettings)
     EXPECT_EQ(pointsText(session.document), pointsText(byLine));
     EXPECT_EQ(session.document.model().entities.size(), byLine.model().entities.size());
 }
+
+// The wizard reduces as the line does (cad::reduceForDrawing): with CP1 drawn
+// at two places 100 km apart, holding it would put the job on whichever was
+// drawn first, so its preview refuses, naming both - and nothing is imported.
+TEST(SurveyImportWizard, ItsPreviewRefusesToHoldAPointTheDrawingHasAtTwoPlaces)
+{
+    Session session;
+    {
+        katana::cad::CommandInterpreter interpreter(session.document);
+        for (const char* line : {"FORWARD 500000,4999999,100 0 1 0 CP1",
+                                 "FORWARD 600000,4999999,100 0 1 0 CP1"}) {
+            const auto placed = interpreter.run(line);
+            ASSERT_TRUE(placed.ok()) << placed.error().describe();
+        }
+    }
+    session.openAndRead(fixture("sdr/traverse_without_coordinates.sdr"));
+    QWidget& w = *session.wizard;
+    click(w, "next"); // System
+    click(w, "next"); // Reduction and adjustment
+    choose(w, "controlFrom", "the drawing");
+    choose(w, "controlPick", "CP1");
+    choose(w, "controlHorizontal", "fixed");
+    choose(w, "controlVertical", "fixed");
+    click(w, "addControl");
+    click(w, "previewReduction");
+    const QString message = child<QLabel>(w, "message")->text();
+    EXPECT_TRUE(message.contains("Control point CP1 is on the drawing 2 times, at E 500000.0000 "
+                                 "N 5000000.0000 Z 100.0000 and E 600000.0000 N 5000000.0000 "
+                                 "Z 100.0000, so which one to hold is not known"))
+        << message.toStdString();
+    EXPECT_TRUE(session.document.surveyJobs().empty());
+}

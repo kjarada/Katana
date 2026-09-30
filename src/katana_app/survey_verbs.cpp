@@ -19,8 +19,11 @@
 #include "import_records.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/survey_job.hpp"
+#include "katana/cad/survey_points.hpp"
 #include "katana/core/text.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "katana/survey/reduction_settings.hpp"
+#include "katana/survey/report_summary.hpp"
 #include "katana/surveyio/detect.hpp"
 #include "katana/surveyio/reader.hpp"
 
@@ -333,11 +336,25 @@ Result<SettingsRequest> settingsRequest(const SurveyLine& line)
     SettingsRequest request;
     if (line.settingsFile) {
         const std::filesystem::path path = pathFromText(*line.settingsFile);
-        auto text = readBytes(path, "the settings file");
-        if (!text) {
-            return text.error();
+        auto bytes = readBytes(path, "the settings file");
+        if (!bytes) {
+            return bytes.error();
         }
-        auto settings = survey::parseReductionSettings(*text, &request.fileWarnings);
+        // Decoded as every text file Katana reads is (core/text_encoding.hpp):
+        // the byte order mark an editor saves, or its UTF-16, is the same
+        // settings, where the parser alone would call the text not settings.
+        auto text = katana::core::decodeText(*bytes);
+        if (!text) {
+            return makeError(text.error().code, text.error().message,
+                             "SETTINGS " + pathText(path));
+        }
+        if (text->guessed) {
+            request.fileWarnings.push_back(
+                "the settings file is not UTF-8; it was read as " +
+                std::string(katana::core::toString(text->encoding)) +
+                ", so an accented point id may be wrong");
+        }
+        auto settings = survey::parseReductionSettings(text->text, &request.fileWarnings);
         if (!settings) {
             return makeError(settings.error().code, settings.error().message,
                              "SETTINGS " + pathText(path));
@@ -428,7 +445,66 @@ std::string describeSettings(const survey::ReductionSettings& used,
     return reply;
 }
 
+// " northing=5e+06 easting=5e+05 height=100", each number the shortest text
+// that reads back exactly, as every record writes one; height=none for a
+// point with no height, which is not a height of zero.
+std::string placeFields(double northing, double easting, const std::optional<double>& height)
+{
+    return " northing=" + recordNumber(northing) + " easting=" + recordNumber(easting) +
+           " height=" + (height ? recordNumber(*height) : std::string("none"));
+}
+
+// Where each point the settings hold is held: at the drawing's survey point
+// of its id - the entity too, the first of the id as the reduction takes it
+// (cad::reduceForDrawing refuses an id whose points are not one mark) - or at
+// the file's. Taken from what the import is handed, before it runs; an id
+// neither has is the reduction's to refuse.
+std::string heldRecords(const survey::ReductionSettings& settings,
+                        const survey::SurveyProject& raw,
+                        const std::vector<katana::cad::DrawingSurveyPoint>& drawing)
+{
+    std::string records;
+    for (const survey::ControlSelection& selection : settings.control) {
+        const std::string& id = selection.point.pointId;
+        if (selection.origin == survey::ControlOrigin::Drawing) {
+            const auto point = std::ranges::find(drawing, id, &katana::cad::DrawingSurveyPoint::id);
+            if (point != drawing.end()) {
+                records += "\nheld id=" + recordText(id) +
+                           " from=drawing entity=" + std::to_string(point->entity) +
+                           placeFields(point->northing, point->easting, point->elevation);
+            }
+        } else {
+            const auto point = std::ranges::find(raw.points, id, &survey::SurveyPoint::id);
+            if (point != raw.points.end()) {
+                records += "\nheld id=" + recordText(id) + " from=file" +
+                           placeFields(point->northing, point->easting, point->elevation);
+            }
+        }
+    }
+    return records;
+}
+
 } // namespace
+
+std::string reductionRecords(const survey::ReductionReport& report)
+{
+    std::string records = "\nreduction method=" + recordText(survey::methodText(report.settings)) +
+                          " adjustments=" + std::to_string(report.adjustments.size()) +
+                          " rejected=" + std::to_string(survey::rejectedObservations(report));
+    for (const survey::AdjustmentReport& adjustment : report.adjustments) {
+        const std::optional<survey::ReportGlobalTest>& test = adjustment.globalTest;
+        records += "\nadjustment method=" + recordText(adjustment.method) +
+                   " observations=" + std::to_string(adjustment.observations) +
+                   " unknowns=" + std::to_string(adjustment.unknowns) +
+                   " redundancy=" + std::to_string(adjustment.redundancy) + " variance_factor=" +
+                   (adjustment.varianceFactor ? recordNumber(*adjustment.varianceFactor)
+                                              : std::string("none")) +
+                   " global_test=" + (test ? (test->passed ? "passed" : "failed") : "none") +
+                   " flagged=" + std::to_string(adjustment.flaggedOutliers.size()) +
+                   " rejected=" + std::to_string(adjustment.rejectedOutliers.size());
+    }
+    return records;
+}
 
 bool isSurveyLine(std::string_view line)
 {
@@ -506,9 +582,13 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
     request.job.settings = *settings;
     request.job.layer = importOptions.layer;
     request.job.importedUtc = context->createdUtc;
+    // Before the import draws anything, and before the project is handed on.
+    const std::string held = heldRecords(*settings, read->project,
+                                         katana::cad::drawingSurveyPoints(document));
     request.raw = std::move(read->project);
     request.context = std::move(*context);
     request.importOptions = importOptions;
+    // The command's own reduction, cad::reduceForDrawing, as the wizard's.
     auto command =
         std::make_unique<katana::cad::ImportSurveyJobCommand>(document, std::move(request));
     const katana::cad::ImportSurveyJobCommand* job = command.get();
@@ -521,9 +601,12 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
              " entities=" + std::to_string(document.lastCreatedEntities().size()) +
              " layer=" + recordText(importOptions.layer) + " reduction_warnings=" +
              std::to_string(report != nullptr ? report->warnings.size() : 0);
-    // The reduction's own warnings, as the read's are listed: an agent has no
-    // Survey Jobs dialog to open the report in.
+    reply += held;
+    // What the adjustment made of the data, and then the reduction's own
+    // warnings, as the read's are listed: an agent has no Survey Jobs dialog
+    // to open the report in.
     if (report != nullptr) {
+        reply += reductionRecords(*report);
         for (std::size_t i = 0; i < report->warnings.size() && i < kListedWarnings; ++i) {
             reply += "\nreduction_warning text=" + recordText(report->warnings[i].text);
         }
@@ -544,8 +627,9 @@ const char* surveyHelpText()
            "          step: with the defaults and the control the file declares, or a\n"
            "          SETTINGS file's (the settings text a job keeps), each SET item one\n"
            "          line of that text; SET control=CP1;drawing;fixed;0;fixed;0;fixed;0\n"
-           "          holds the drawing's point CP1 (replies are key=value records,\n"
-           "          docs/survey.md)\n";
+           "          holds the drawing's point CP1 (refused where the drawing has two\n"
+           "          CP1s apart); the reply says where each point was held and what the\n"
+           "          adjustment made of the data (key=value records, docs/survey.md)\n";
 }
 
 } // namespace katana::app

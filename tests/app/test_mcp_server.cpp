@@ -174,6 +174,26 @@ TEST_F(McpServer, TheCommandToolNamesEveryUtilityActionAndTheScopeWords)
     }
 }
 
+// And the survey field-file verbs, with the way to hold a point of the
+// drawing, so an agent finds how to import a file with no coordinates from
+// the tool list alone.
+TEST_F(McpServer, TheCommandToolNamesTheSurveyFieldFileVerbs)
+{
+    initialize();
+    const Json tools = request("tools/list")["result"]["tools"];
+    std::string description;
+    for (const Json& tool : tools) {
+        if (tool["name"] == "katana_run_commands") {
+            description = tool["description"].get<std::string>();
+        }
+    }
+    ASSERT_FALSE(description.empty());
+    for (const char* words : {"SURVEY READ <file>", "SURVEY IMPORT <file>", "SETTINGS <file>",
+                              "SET key=value", "SET control=<id>;drawing;", "FORWARD"}) {
+        EXPECT_NE(description.find(words), std::string::npos) << words;
+    }
+}
+
 TEST_F(McpServer, AnUnknownToolIsInvalidParams)
 {
     EXPECT_EQ(request("tools/call", Json{{"name", "katana_nothing"}})["error"]["code"], -32602);
@@ -356,6 +376,13 @@ TEST_F(McpServer, AnAgentImportsAFileWithNoCoordinatesHoldingAPointOfTheDrawing)
     EXPECT_NE(held.find("\nsettings file= set=1 differ=1\n"
                         "setting key=control value=CP1;drawing;fixed;0;fixed;0;fixed;0\n"
                         "imported job=job-3 entities=3 layer=survey/points"),
+              std::string::npos)
+        << held;
+    // Where CP1 was held: the drawing's point FORWARD made, entity 2 - the
+    // first import's job took number 1 (a job is numbered with the next
+    // entity number) - and nothing adjusted, as the defaults have it.
+    EXPECT_NE(held.find("\nheld id=CP1 from=drawing entity=2 northing=5e+06 easting=5e+05 "
+                        "height=100\nreduction method=radiation adjustments=0 rejected=0\n"),
               std::string::npos)
         << held;
     const std::string list = lines[3]["output"].get<std::string>();
