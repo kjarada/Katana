@@ -463,7 +463,20 @@ every button. Snapping the mark's own square to the device, as was done
 first, made its size hang on where the button sat in the window: at 150%
 Arc's came out 8 px beside the others' 7, and running, two of its rows ran
 into the frame's rounded corner. Taken down, not rounded, since the mark
-starts the pixel after the icon's square ends.
+starts the pixel after the icon's square ends. The mark also ends a whole
+device pixel before the first device column and row the button's 1 px
+border touches. At 125% the border is 1.25 device pixels, and wherever the
+button starts off the device grid - in the window, as on the Draw toolbar,
+never in a grab - it falls across two columns; set back by the inset alone,
+the mark met the first of them along both its sides, and while Circle or Arc
+ran it read as a thickened blue corner of the frame rather than a triangle
+inside it. Where the inset already leaves that pixel, as it does everywhere
+at 100, 150 and 200%, nothing moves; at 125%, and at 175% for some places,
+the mark moves a pixel in, into room the icon's square leaves - it then
+meets the icon's square, as at 100%, without overlapping it. Rejected: an
+inset of three device pixels at 125% wherever the button sits. Where the
+button starts on a whole device pixel, as in a grab, the 6 px mark would
+then cover the icon's last column, or would have to shrink to 5 px.
 
 **The mark goes out when the pointer leaves.** It is lit on the corner by the
 hover events, and the pointer leaves the button over the family's menu to
@@ -501,8 +514,9 @@ button's arrow a 12 px strip and pads the button's right side by a pixel
 more (`QToolButton[popupMode="MenuButtonPopup"]`). The strip is laid in the
 button's border rectangle (`QStyleSheetStyle` gives `::menu-button` that
 origin), and Fusion centres its 8 px arrow in it, so each arrow is 9 px from
-its own icon's ink, 14 from the next button's and 2 px in from the button's
-edge. With the 4 px every button has added to a 10 px strip it was 11 px from
+its own icon's ink, 13 from the next button's and 2 px in from the button's
+edge (each the columns between the two inks, measured on the Edit toolbar at
+100%). With the 4 px every button has added to a 10 px strip it was 11 px from
 its own icon and 12 from the next, and the row read as four things - undo,
 arrow, redo, arrow; with a 10 px strip and no more it was 7 and 12, but the
 arrow ended a pixel from the button's edge, cut off against the rounded
@@ -523,11 +537,29 @@ sets the arrow at the right of the button's padding box in a 13 px box
 (`QStyleSheetStyle`'s default for a `::menu-indicator`), and centres the
 icon in the contents; with only the 2 px every title bar button has, the
 contents ran under the arrow and the icon's frame met it, 2 px over at 100%
-and 3 at 125%. The theme pads a title bar button with a menu on the right by
-that box's 13 px (`QToolButton[chrome="button"][popupMode="InstantPopup"]`),
-so the icon, 4..17 in the 34 px button, is four pixels clear of the arrow,
-22..30. `--check-toolbars` measures the docks' title bars as well as the
-toolbars, and saw it once it looked.
+and 3 at 125%. The theme pads a title bar button whose menu opens on a click
+on the right by that box's 13 px
+(`QToolButton[chrome="button"][popupMode="InstantPopup"]`), so the icon,
+4..17 in the 34 px button, is four pixels clear of the arrow, 22..30.
+`--check-toolbars` measures the docks' title bars as well as the toolbars,
+and saw it once it looked. For a day the rule also matched
+`[popupMode="DelayedPopup"]`, the other mode in which a button with a menu
+draws that arrow; but DelayedPopup is `QToolButton`'s default popup mode,
+which every button without a menu keeps, so every title bar button was padded:
+Minimise, Float, Maximise and a view's Layers and Zoom Extents, fixed at
+22 px, had 5 px of contents, and their 14 px icons were drawn in them -
+Minimise a dot, the others slivers - on every panel and view, at every
+scale. No title bar button has a held-press menu, and one that did would
+draw its arrow over its icon, which `--check-toolbars` fails. Rejected: a
+property of the kind switcher's own for the rule to match - a second marker
+to keep in step with the popup mode, which is what Qt's own recipe matches
+(Qt Style Sheets Examples, "Customizing QToolButton") and which the button
+must have anyway for its menu to open on a click.
+`TitleBarButtons.EveryTitleBarButtonDrawsItsWholeIconWhereCloseDrawsItsOwn`
+measures every button of a panel's and a view's title bars, menu or none,
+against the bar's Close button, which no popup mode rule reaches; the
+checks before it measured only buttons with a menu, and passed with every
+other title bar button broken.
 
 The same padding and border hid a toolbar's OVERFLOW button. A toolbar too
 short for its buttons shows one, 12 px deep (`PM_ToolBarExtensionExtent`),
@@ -561,7 +593,10 @@ Tested in `qt_widgets.ToolFamilyButtons.*` - the mark, its press zone and
 the icon apart at 16, 20 and 28 px icons, on a bar made at that size and on
 one switched to it, and drawn where they say; the mark the same whole
 staircase of device pixels at 100, 125, 150, 175 and 200% wherever the
-button sits; a family against a plain button with the same icon, at rest,
+button sits, and there, running, a whole device pixel clear of its frame
+and off its icon at 16, 20 and 28 px icons (it met the frame at 125% with
+the button 1 to 3 px in, and at 175% 1 px in); a family against a plain
+button with the same icon, at rest,
 under the pointer, running the tool its icon shows (framed, as the plain
 button is) and running another (unframed, as the plain button at rest),
 differing only in the mark's square, the mark in the accent while either
@@ -578,7 +613,8 @@ a document not yet laid out has no lines and passed the check with the
 names' spaces plain - and naming another tool while it runs - and in
 `qt_widgets.SplitButtons.*` (Undo's strip beside its icon and its arrow in
 from the edge, by hand; its hover the button's),
-`qt_widgets.TitleBarButtons.*` (the kind switcher, by hand),
+`qt_widgets.TitleBarButtons.*` (the kind switcher, by hand, and every
+title bar button's whole icon, where its bar's Close draws its own),
 `qt_widgets.ToolBarSigns.*` (the check fails a split button's arrow and a
 kind switcher's drawn over their icons) and `qt_widgets.ToolBarOverflow.*`
 (the arrow whole, in whole device pixels at 100 to 200%, lit while a tool it

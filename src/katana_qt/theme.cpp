@@ -326,7 +326,7 @@ QString styleSheet()
            strip - laid in the border rectangle, ::menu-button's origin in
            QStyleSheetStyle - is 12 px and the padding a pixel more, so
            Fusion's 8 px arrow, centred in the strip, is 9 px from its own
-           icon's ink, 14 from the next button's, and 2 px in from the
+           icon's ink, 13 from the next button's, and 2 px in from the
            button's edge; at 125% its ink ends two device pixels short of the
            button's last. With the 4 px every button has added to a 10 px
            strip each arrow sat 11 px from its own icon and 12 from the next,
@@ -373,16 +373,22 @@ QString styleSheet()
             border: 1px solid %accent%; }
         QToolButton[chrome="button"]::menu-indicator { subcontrol-position: right center;
                                                        subcontrol-origin: padding; }
-        /* A title bar's button with a menu - each view's kind switcher -
-           keeps its arrow off its icon. The arrow is set at the right end of
-           the padding box (above), in a 13 px box (QStyleSheetStyle's
-           defaultSize for a ::menu-indicator), and the icon is centred in
-           the contents: with only the 2 px every title bar button has, the
-           contents ran under the arrow and the icon's frame met it, 2 px
-           over at 100% and 3 at 125%. Padded by the box's 13 px, the
-           contents end where it starts. */
-        QToolButton[chrome="button"][popupMode="InstantPopup"],
-        QToolButton[chrome="button"][popupMode="DelayedPopup"] { padding-right: 13px; }
+        /* A title bar button whose menu opens on a click (InstantPopup) -
+           each view's kind switcher - keeps its arrow off its icon. The
+           arrow is set at the right end of the padding box (above), in a
+           13 px box (QStyleSheetStyle's defaultSize for a ::menu-indicator),
+           and the icon is centred in the contents: with only the 2 px every
+           title bar button has, the contents ran under the arrow and the
+           icon's frame met it, 2 px over at 100% and 3 at 125%. Padded by
+           the box's 13 px, the contents end where it starts; the button must
+           be wide enough for both (the kind switcher is 34 px). Never
+           DelayedPopup: it is QToolButton's default popup mode, so a rule on
+           it padded every title bar button, menu or none - Minimise, Float,
+           Maximise and a view's own tools, fixed at 22 px, were left 5 px of
+           contents, and their 14 px icons were drawn in them. No title bar
+           button holds a menu a press must be held for; one that did would
+           draw its arrow over its icon, and --check-toolbars would say so. */
+        QToolButton[chrome="button"][popupMode="InstantPopup"] { padding-right: 13px; }
         QToolButton[filtered="true"] { border: 1px solid %accent%; }
         QToolBar#MinimisedToolBar { border: none; border-top: 1px solid %border%;
                                     padding: 2px 6px; }

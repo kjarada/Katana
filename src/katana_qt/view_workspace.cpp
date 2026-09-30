@@ -281,9 +281,10 @@ void ViewWorkspace::installChrome(View& view)
     // Room for the menu arrow beside the icon, which says this one opens a
     // menu where its neighbours act at once. The popup mode, set before the
     // button is first shown, is what theme.cpp's rule for a title bar
-    // button with a menu reads: it pads the button's right by the arrow's
-    // box, so the icon is centred in what is left and the arrow sits beside
-    // it rather than on its frame.
+    // button whose menu opens on a click reads (InstantPopup; the default,
+    // DelayedPopup, is every other title bar button's): it pads the button's
+    // right by the arrow's box, so the icon is centred in what is left and
+    // the arrow sits beside it rather than on its frame.
     kind->setFixedWidth(34);
     auto* menu = new QMenu(kind);
     auto* group = new QActionGroup(menu);
