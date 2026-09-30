@@ -4,8 +4,10 @@
 // tool_feedback.hpp) is drawn over a plan view, and the one home of the
 // view's overlay colours. The owner asked on 2026-09-30 for a "visual clue
 // where the vertex is going": a preview now says by ROLE what a click takes
-// (Target), makes (Added) and takes away (Removed), and each role has its own
-// shape as well as its own colour, so it reads without the colour.
+// (Target), makes (Added), takes away (Removed) and what Enter acts on
+// (Enter), and each role has its own shape as well as its own colour, so it
+// reads without the colour - and so does a refusal, whose marks are a ring
+// struck through, not only red (FeedbackMark::refused).
 //
 // The colours are the furniture's - what a view draws over the drawing -
 // not the chrome's, so they are here and not in theme.hpp, whose tokens are
@@ -100,19 +102,22 @@ struct FeedbackFrame {
 // `focusVertices` (the polyline in play, hollow squares, thinned so that no
 // two are nearer than 10 px - a dense string was buried under a band of
 // them), removed pieces, target pieces, the ghost, the base points,
-// beneathGlyphs, target vertices, removed vertices, Enter's place, added
-// vertices, labels, the caption.
+// beneathGlyphs, target vertices, removed vertices, what Enter acts on, the
+// refused marks, added vertices, labels, and the caption at the first corner
+// of the cursor where it covers no mark.
 FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback& feedback,
                              const std::vector<katana::geometry::Point2>& focusVertices,
                              const FeedbackFrame& frame);
 
 // The band along the bottom of a view holding a prompt and what has been
-// typed for it - a tool's or a picked-up grip's, one look for both.
-// Cut short at the left by default, so what is being typed at the end of a
-// prompt stays in sight; a hint is cut at the right, where its start says
-// what it is about.
-void paintBand(QPainter& painter, const QRect& view, const QString& text,
-               Qt::TextElideMode elide = Qt::ElideLeft);
+// typed for it - a tool's or a picked-up grip's, one look for both - and
+// answers the line it drew, cut to fit. Cut short at the left by default, so
+// what is being typed at the end of a prompt stays in sight; a hint is cut
+// at the right, where its start says what it is about; and a tool's prompt
+// with nothing typed yet in the middle, keeping both the tool's name and
+// what Enter does at the end (the view's drawPrompt).
+QString paintBand(QPainter& painter, const QRect& view, const QString& text,
+                  Qt::TextElideMode elide = Qt::ElideLeft);
 // Its height in pixels at the chosen text size.
 [[nodiscard]] int bandHeight();
 

@@ -387,3 +387,103 @@ TEST(PlanViewGrips, CtrlOverASegmentMiddleShowsTheVertexADragWouldAdd)
     QCoreApplication::sendEvent(f.view.get(), &release);
     EXPECT_FALSE(f.view->gripController().ctrl());
 }
+
+TEST(PlanViewGrips, AHotVertexStaysChosenWhenItIsItselfMoved)
+{
+    // Chosen, then moved by another edit (VERTEX MOVE, a Vertices panel
+    // cell, another view): matched again by its position alone, the chosen
+    // vertex was silently unchosen. As many vertices as before means none
+    // was inserted or deleted ahead of it, so its index still names it.
+    Fixture f;
+    f.select();
+    f.mouse(QEvent::MouseButtonPress, Point2(20, 0), Qt::LeftButton, Qt::ShiftModifier);
+    f.mouse(QEvent::MouseButtonRelease, Point2(20, 0), Qt::LeftButton, Qt::ShiftModifier);
+    ASSERT_EQ(f.view->gripController().hot().size(), 1u);
+    ASSERT_TRUE(f.document
+                    .execute(katana::cad::editPolyline(
+                        f.polyline, "VERTEX_MOVE",
+                        [](const katana::geometry::CurvePolyline2& shape) {
+                            return katana::geometry::moveVertex(shape, 2, Point2(22, 3));
+                        }))
+                    .ok());
+    paint(*f.view);
+    ASSERT_EQ(f.view->gripController().hot().size(), 1u) << "still chosen";
+    EXPECT_EQ(f.view->gripController().hot().front().index, 2u);
+    EXPECT_EQ(f.view->gripController().hot().front().position, Point2(22, 3));
+    f.key(Qt::Key_Delete);
+    EXPECT_EQ(f.geometry().vertices, (std::vector<Point2>{Point2(0, 0), Point2(10, 0)}));
+}
+
+TEST(PlanViewGrips, AWordTypedAfterAClickOnAGripGoesToTheCommandLineAndTheGripStaysChosen)
+{
+    // A plain click on a vertex is how it is chosen, and it also picks the
+    // grip up to take a typed point. The tool's name typed next - "click the
+    // vertex, then type INSERTVERTEX" - went into the grip's point and was
+    // refused there. Nothing a grip takes starts with a letter: the grip is
+    // put down, still chosen, and the word goes to the command line.
+    Fixture f;
+    std::vector<QString> typed;
+    f.view->onTextTyped = [&typed](const QString& text) { typed.push_back(text); };
+    f.select();
+    f.mouse(QEvent::MouseButtonPress, Point2(10, 0), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonRelease, Point2(10, 0), Qt::LeftButton);
+    ASSERT_TRUE(f.view->gripController().active()) << "picked up";
+    f.key(Qt::Key_I, "I");
+    f.key(Qt::Key_N, "N");
+    EXPECT_EQ(typed, (std::vector<QString>{"I", "N"}));
+    EXPECT_FALSE(f.view->gripController().active()) << "put down";
+    ASSERT_EQ(f.view->gripController().hot().size(), 1u) << "and still chosen";
+    EXPECT_EQ(f.view->gripController().hot().front().index, 1u);
+    EXPECT_EQ(f.geometry().vertices[1], Point2(10, 0)) << "nothing moved";
+    // A point typed after the click still goes to the grip.
+    f.mouse(QEvent::MouseButtonPress, Point2(0, 0), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonRelease, Point2(0, 0), Qt::LeftButton);
+    for (const QChar c : QString("@3,4")) {
+        f.key(0, QString(c));
+    }
+    f.key(Qt::Key_Return);
+    EXPECT_EQ(f.geometry().vertices[0], Point2(3, 4));
+}
+
+TEST(PlanViewGrips, AnArcsMiddleSaysADragBendsIt)
+{
+    // An arc segment's middle keeps both ends and bends the arc; its hint
+    // said "drag to stretch", a straight segment's gesture.
+    Fixture f;
+    ASSERT_TRUE(f.document
+                    .execute(katana::cad::editPolyline(
+                        f.polyline, "SEGMENT_ARC",
+                        [](const katana::geometry::CurvePolyline2& shape) {
+                            return katana::geometry::segmentToArc(shape, 0, Point2(5, 3));
+                        }))
+                    .ok());
+    f.select();
+    auto& grips = f.view->gripController();
+    const QString id = QString::number(f.polyline);
+    // The arc through (5,3) from (0,0) to (10,0) has its middle there.
+    f.mouse(QEvent::MouseMove, Point2(5, 3.1), Qt::NoButton);
+    EXPECT_EQ(grips.hoverHint(), "Segment 0 of polyline " + id +
+                                     ": drag to bend the arc · Ctrl+drag to add a vertex · "
+                                     "right-click for segment tools");
+    f.mouse(QEvent::MouseMove, Point2(15, 0.1), Qt::NoButton);
+    EXPECT_TRUE(grips.hoverHint().contains("drag to stretch")) << grips.hoverHint().toStdString();
+}
+
+TEST(PlanViewGrips, ACtrlPressOnASegmentMiddleSaysItAddsAVertex)
+{
+    // A Ctrl-press on a middle adds a vertex where it is put down; the band
+    // said what a stretch says, word for word.
+    Fixture f;
+    f.select();
+    auto& grips = f.view->gripController();
+    f.mouse(QEvent::MouseButtonPress, Point2(15, 0), Qt::LeftButton, Qt::ControlModifier);
+    f.mouse(QEvent::MouseButtonRelease, Point2(15, 0), Qt::LeftButton, Qt::ControlModifier);
+    ASSERT_TRUE(grips.active());
+    EXPECT_TRUE(grips.prompt().startsWith("Grip segment middle, adding a vertex: "))
+        << grips.prompt().toStdString();
+    f.key(Qt::Key_Escape);
+    f.mouse(QEvent::MouseButtonPress, Point2(15, 0), Qt::LeftButton);
+    f.mouse(QEvent::MouseButtonRelease, Point2(15, 0), Qt::LeftButton);
+    ASSERT_TRUE(grips.active());
+    EXPECT_FALSE(grips.prompt().contains("adding a vertex")) << grips.prompt().toStdString();
+}

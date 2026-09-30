@@ -87,6 +87,15 @@ struct ToolStep {
 // result, the base points, and marks by role - what a click takes, adds and
 // removes.
 
+// The plan view's two apertures in pixels, here where the tools that measure
+// in them can see them: a click picks what lies within 8 px, and a snap - and
+// a vertex tool's pick of a vertex, the reach an Endpoint snap has - within
+// 12 px. The view converts them at its zoom (ToolContext::pickAperture and
+// vertexAperture); a tool that needs one pixel divides by them. They were
+// the view's own constants, restated as bare 8s and 12s in the tools.
+inline constexpr double kPickAperturePixels = 8.0;
+inline constexpr double kSnapAperturePixels = 12.0;
+
 // The view's own pick: the entity of one of `types` (any, when empty) nearest
 // `at` within `reach` model units that the VIEW lets be picked - through its
 // hidden layers - or nullopt. What a click there gives entity().
@@ -148,8 +157,8 @@ pickUnder(const ToolContext& context, const katana::geometry::Point2& at,
 // pickTolerance.
 [[nodiscard]] double pickReach(const ToolContext& context);
 // How near a pick of a VERTEX must be: the view's snap aperture now (the reach
-// an Endpoint snap has), else 1.5 times pickTolerance - the 12 : 8 ratio of
-// the view's two apertures.
+// an Endpoint snap has), else pickTolerance in the proportion of the view's
+// two apertures (kSnapAperturePixels : kPickAperturePixels).
 [[nodiscard]] double vertexReach(const ToolContext& context);
 
 class InteractiveTool {
@@ -175,8 +184,26 @@ class InteractiveTool {
     // A point with a height, typed as x,y,z. The default drops the height
     // and takes the point, so only a tool that draws in 3D (Polyline 3D,
     // Point) overrides it; such a tool looks up the height of a clicked
-    // point itself (heightAtPoint), since a click arrives as point().
+    // point itself (heightAtPoint), since a click arrives as point(). It is
+    // reached only at a step whose takesHeights() says so, so a tool that
+    // overrides this answers that too.
     [[nodiscard]] virtual ToolStep point3d(const katana::geometry::Point2& at, double z);
+    // A point given EXACTLY - typed as x,y, @dx,dy, @distance<angle or
+    // x,y,z (z its height, after takesHeights and lastHeight have had their
+    // say) - rather than pointed at with the mouse. The default hands it on
+    // as a click goes, to point3d() with a height and point() without, so
+    // only a tool that treats a pointed click differently overrides it:
+    // Insert Vertex refuses a CLICK within the pick aperture of a vertex,
+    // where the vertex meant cannot be told from a new one, but a typed
+    // point says exactly where, whatever the zoom.
+    [[nodiscard]] virtual ToolStep exactPoint(const katana::geometry::Point2& at,
+                                              std::optional<double> z);
+    // Whether the step the tool is at takes a height with its point: the
+    // z of x,y,z, and the dz of @dx,dy,dz as a change of lastHeight(). A tool
+    // that takes none is handed the point alone, the z of either form
+    // dropped - as it always was; refusing @dx,dy,dz there turned "@0,5,0"
+    // at MOVE and LINE into an error. The default takes none.
+    [[nodiscard]] virtual bool takesHeights() const;
     [[nodiscard]] virtual ToolStep entity(katana::entity::EntityId id,
                                           const katana::geometry::Point2& at);
     // Typed text that is not a point (routeTypedInput decides): a distance, an
@@ -203,8 +230,9 @@ class InteractiveTool {
     // Perpendicular and Tangent snaps measure from. Nullopt before the first.
     [[nodiscard]] virtual std::optional<katana::geometry::Point2> lastPoint() const;
     // The height of lastPoint(), which the dz of a typed @dx,dy,dz changes
-    // (routeTypedInput); nullopt when it has none, and then @dx,dy,dz is
-    // refused rather than read as a height of dz. The default has none.
+    // (routeTypedInput) at a step that takes heights; nullopt when it has
+    // none, and then @dx,dy,dz is refused there rather than read as a height
+    // of dz. The default has none.
     [[nodiscard]] virtual std::optional<double> lastHeight() const;
     // Whether the view may snap the cursor to `snap` for the step the tool is
     // at; one it may not is passed over for the next best (SnapRequest::

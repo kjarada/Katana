@@ -24,18 +24,25 @@
 //     the polyline under the cursor - never another kind of entity, so a
 //     survey point on a vertex cannot take the pick from its string;
 //   - a vertex is picked within the view's 12 px, a segment or a point on a
-//     polyline within its 8 px: never "the nearest vertex" at any distance;
+//     polyline within its 8 px: never "the nearest vertex" at any distance.
+//     Those are rules about what a POINTER meant; a place given exactly -
+//     typed, or Enter's marked middle - is refused only where geometry
+//     refuses it (Chosen::exact);
 //   - each one-polyline tool PLANS its edit with the geo:: call the commit
 //     makes, and the preview draws the plan by role (tool_feedback.hpp): what
 //     a click takes, adds and removes. A plan refused for the pick itself (an
 //     end vertex for Fillet) is refused at the pick, before a value is asked;
 //   - an edit is made from the polyline as it was picked, and one changed
-//     since is refused, never silently reverted.
+//     since is refused, never silently reverted. What a tool holds - its
+//     picks, the grips chosen before it, Insert's anchor - is checked again
+//     at every preview and every input (whyNotNow): changed, deleted, hidden
+//     or locked since, it is shown refused and the next input drops it.
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
@@ -45,6 +52,7 @@
 #include <string_view>
 #include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "everyday_support.hpp"
@@ -124,18 +132,16 @@ std::string heightLabel(const std::optional<double>& height)
 }
 
 // A whole number typed at a pick: vertex (or segment) N of the polyline in
-// play. Only digits, so "1.5" and "-1" are refused rather than rounded.
+// play, read as the drawing verbs read an index (drawing_verbs.cpp,
+// indexOf): core::parseInteger takes the whole token, so "1.5" is refused
+// rather than rounded, and a negative one is no index.
 std::optional<std::size_t> wholeNumber(std::string_view text)
 {
-    if (text.empty() || text.size() > 9 ||
-        !std::ranges::all_of(text, [](char c) { return c >= '0' && c <= '9'; })) {
+    const auto value = katana::core::parseInteger(text);
+    if (!value || *value < 0) {
         return std::nullopt;
     }
-    std::size_t value = 0;
-    for (const char c : text) {
-        value = value * 10 + static_cast<std::size_t>(c - '0');
-    }
-    return value;
+    return static_cast<std::size_t>(*value);
 }
 
 std::optional<double> parsePositive(std::string_view text)
@@ -234,6 +240,10 @@ struct Chosen {
     std::optional<std::size_t> segment;
     Point2 at; // the vertex, or where on the segment or the polyline
     bool fromHandle = false; // a grip made hot before the tool, not a click
+    // Given exactly - Enter's marked middle, a typed number or point - not
+    // pointed at: a rule in pixels about what a pointer meant (Insert's "too
+    // close to vertex N") does not apply, only geometry's own.
+    bool exact = false;
 };
 
 struct Collected {
@@ -259,9 +269,17 @@ struct Collected {
 
 // Insert beside a hot handle: the handle's segment, or whichever of a hot
 // vertex's two segments is nearer `at` - at any distance, since the user
-// chose it - with the point put on that segment.
-Chosen besideAnchor(const Chosen& anchor, const Point2& at)
+// chose it - with the point put on that segment. Nullopt where a click takes
+// nothing, within `reach` (0 for a typed point, which is exact): ON the
+// chosen vertex, where the pointer rests after choosing it, and PAST the
+// segment's ends, where the point put on it is an end the cursor is not
+// near. Both were "too close to vertex N; zoom in", at any distance and at
+// any zoom - the first thing the tool showed after a vertex was chosen.
+std::optional<Chosen> besideAnchor(const Chosen& anchor, const Point2& at, double reach)
 {
+    if (anchor.vertex && at.distanceTo(anchor.shape.vertices[*anchor.vertex].position) <= reach) {
+        return std::nullopt;
+    }
     Chosen chosen = anchor;
     chosen.fromHandle = true;
     std::size_t segment = anchor.segment.value_or(0);
@@ -280,15 +298,24 @@ Chosen besideAnchor(const Chosen& anchor, const Point2& at)
     chosen.vertex.reset();
     chosen.segment = segment;
     chosen.at = closestOnPiece(anchor.shape, segment, at);
+    for (const std::size_t end : {segment, anchor.shape.segmentEnd(segment)}) {
+        const Point2& corner = anchor.shape.vertices[end].position;
+        if (chosen.at.distanceTo(corner) <= tol::kGeometric && at.distanceTo(corner) > reach) {
+            return std::nullopt;
+        }
+    }
     return chosen;
 }
 
 // Enter beside a hot handle: the middle of the handle's segment, or of the
-// segment after a hot vertex (before it, at an open polyline's end).
+// segment after a hot vertex (before it, at an open polyline's end). Exact:
+// the place is named, not pointed at, so it is taken on a segment however
+// few pixels long (Chosen::exact).
 Chosen middleBeside(const Chosen& anchor)
 {
     Chosen chosen = anchor;
     chosen.fromHandle = true;
+    chosen.exact = true;
     std::size_t segment = anchor.segment.value_or(0);
     if (anchor.vertex) {
         const auto after = segmentAfter(anchor.shape, *anchor.vertex);
@@ -347,6 +374,10 @@ struct Step {
     bool samePolyline = false;
     // Vertex: [Other side] is offered when the polyline is closed.
     bool otherSide = false;
+    // OnLine, Point: the point's height is taken - the z of x,y,z, the dz of
+    // @dx,dy,dz (InteractiveTool::takesHeights) - by Insert's new vertex and
+    // Move's new place; Segment to Arc's point has no use for one.
+    bool heights = false;
     // A pick refused whatever follows (Grade's vertex with no height).
     std::function<std::optional<std::string>(const Chosen&)> check;
     // The label of the Target the pick shows before the tool can plan.
@@ -382,8 +413,10 @@ struct Script {
 };
 
 // A second pick of the vertex the pick before took (Straighten's, Grade's):
-// the cursor is still on it just after that pick, so it is shown as taken,
-// not refused in red, and a click there says so.
+// refused, and the preview says so (R3) - it showed the first pick as taken,
+// and a click the preview did not refuse was refused. Straight after that
+// pick, with the cursor still on it, the view holds the refusal off
+// (ToolHost::feedback), so the pick is not answered in red.
 std::optional<std::string> alreadyPicked(const Collected& c, const Step& step, const Chosen& chosen)
 {
     if (!step.samePolyline || c.picks.empty() || !chosen.vertex ||
@@ -402,6 +435,35 @@ std::optional<CurvePolyline2> polylineNow(const Document* document, EntityId id)
 {
     const Entity* entity = document != nullptr ? document->model().entities.find(id) : nullptr;
     return entity != nullptr ? readPolyline(*entity) : std::nullopt;
+}
+
+// Why `chosen` - picked by a click earlier in the tool, or chosen before it
+// (a handle, Insert's anchor) - cannot be used as it was chosen: its polyline
+// was edited since (the Vertices panel, an agent, another view), deleted, or
+// its layer hidden or locked (THE visibility rule, pickable). Nullopt while
+// it stands. Only fresh picks were checked: a kept one was drawn and planned
+// from its copy, green, and the click was then refused as stale - or, on a
+// layer hidden since, Enter edited what the view no longer drew.
+std::optional<std::string> whyNotNow(const ToolContext& context, const Chosen& chosen)
+{
+    const Document* document = context.document;
+    const Entity* entity =
+        document != nullptr ? document->model().entities.find(chosen.polyline) : nullptr;
+    const std::string name = "polyline " + std::to_string(chosen.polyline);
+    if (entity == nullptr) {
+        return name + " was deleted since it was picked; pick another";
+    }
+    if (!pickable(context, *entity)) {
+        if (isDrawn(document->model(), *entity, viewOf(context))) {
+            return name + " is on the locked layer " + entity->layer + "; unlock it to edit it";
+        }
+        return name + " is on a layer hidden since it was picked; show it to edit it";
+    }
+    const auto shape = readPolyline(*entity);
+    if (!shape || !(*shape == chosen.shape)) {
+        return staleSentence(chosen.polyline);
+    }
+    return std::nullopt;
 }
 
 std::vector<EntityId> polylinesAmong(const Document* document, const std::vector<EntityId>& ids)
@@ -454,11 +516,15 @@ class ScriptTool final : public InteractiveTool {
         const std::vector<Step>& steps = script_.steps;
         if (!steps.empty() && steps.front().kind == Step::Kind::Selection) {
             // A selection step is answered by the selection the tool started
-            // on, when it holds polylines.
-            if (!own_.empty()) {
-                collected_.selection = own_;
+            // on, when it holds polylines the view lets be edited (R1): a
+            // selected polyline whose layer was then hidden was weeded,
+            // closed or opened where nobody could see it.
+            if (const auto usable = pickableAmong(own_); !usable.empty()) {
+                collected_.selection = usable;
                 step_ = answered_ = 1;
                 answeredBy_ = AnsweredBy::Selection;
+            } else if (const std::string why = lockedNote(); !why.empty()) {
+                collected_.note = why + ". " + steps.front().prompt(collected_, inPlay());
             }
             return;
         }
@@ -536,12 +602,32 @@ class ScriptTool final : public InteractiveTool {
 
     // The view picks any kind of entity at its own aperture; what a pick
     // takes is resolve()'s, so the preview and the click cannot disagree.
-    ToolStep entity(EntityId /*id*/, const Point2& at) override { return pointAt(at, std::nullopt); }
-    ToolStep point(const Point2& at) override { return pointAt(at, std::nullopt); }
-    ToolStep point3d(const Point2& at, double z) override { return pointAt(at, z); }
+    ToolStep entity(EntityId /*id*/, const Point2& at) override
+    {
+        return pointAt(at, std::nullopt, false);
+    }
+    ToolStep point(const Point2& at) override { return pointAt(at, std::nullopt, false); }
+    // Every typed point, with a height or without, comes here - so point3d,
+    // which only the default exactPoint calls, is not overridden.
+    ToolStep exactPoint(const Point2& at, std::optional<double> z) override
+    {
+        return pointAt(at, z, true);
+    }
+
+    // A height is taken with a point where the step uses one (Step::heights):
+    // Insert's new vertex and Move's new place. At a pick, or at Segment to
+    // Arc's point, a height means nothing, and a typed dz there was refused
+    // for want of one to change.
+    [[nodiscard]] bool takesHeights() const override
+    {
+        return step_ < script_.steps.size() && script_.steps[step_].heights;
+    }
 
     ToolStep value(std::string_view text) override
     {
+        if (auto stale = refuseStale()) {
+            return std::move(*stale);
+        }
         const std::string typed(katana::core::trimmed(text));
         const std::vector<Step>& steps = script_.steps;
         const bool atValue = step_ < steps.size() && steps[step_].kind == Step::Kind::Value;
@@ -565,6 +651,9 @@ class ScriptTool final : public InteractiveTool {
 
     ToolStep enter() override
     {
+        if (auto stale = refuseStale()) {
+            return std::move(*stale);
+        }
         const std::vector<Step>& steps = script_.steps;
         if (step_ >= steps.size()) {
             if (answeredBy_ != AnsweredBy::None) {
@@ -580,13 +669,16 @@ class ScriptTool final : public InteractiveTool {
             }
         }
         if (step.kind == Step::Kind::Selection) {
-            const auto polylines =
+            const auto selected =
                 context_.document != nullptr
                     ? polylinesAmong(context_.document, context_.document->selection().ids())
                     : std::vector<EntityId>{};
+            const auto polylines = pickableAmong(selected);
             if (polylines.empty()) {
-                return ToolStep::rejected("no polyline is selected; select polylines, then press "
-                                          "Enter");
+                return ToolStep::rejected(
+                    selected.empty() ? "no polyline is selected; select polylines, then press Enter"
+                                     : "the selected polylines are on hidden or locked layers; "
+                                       "select others, then press Enter");
             }
             collected_.selection = polylines;
             return advance();
@@ -614,14 +706,24 @@ class ScriptTool final : public InteractiveTool {
         if (!script_.plan) {
             return {};
         }
+        if (auto why = staleness()) {
+            // What the tool holds is out of date: no mark where the polyline
+            // was, and the next input is refused with this and drops it.
+            ToolFeedback stale;
+            stale.refused = true;
+            stale.caption = *why;
+            return stale;
+        }
         const std::vector<Step>& steps = script_.steps;
         if (step_ >= steps.size()) {
             // The handles answered every step, and a click picks anew (R3):
             // where one would take something the preview is THAT click's -
             // it drew the handles' plan, and a click deleted a vertex nobody
-            // had marked. Elsewhere a click takes nothing, and the preview is
-            // what Enter does, said as Enter's.
+            // had marked - with what Enter would act on still marked beside
+            // it. Elsewhere a click takes nothing, and the preview is what
+            // Enter does, said as Enter's.
             if (auto click = pickPreview(fresh(), 0, cursor)) {
+                markWhatEnterTakes(*click);
                 return *click;
             }
             ToolFeedback enter = feedbackOf(script_.plan(collected_, context_));
@@ -637,6 +739,9 @@ class ScriptTool final : public InteractiveTool {
         if (isPick(step.kind)) {
             if (auto shown = pickPreview(collected_, step_, cursor)) {
                 return *shown;
+            }
+            if (step.kind == Step::Kind::OnLine && collected_.anchor) {
+                return besideAnchorIdle();
             }
             return idle();
         }
@@ -686,9 +791,9 @@ class ScriptTool final : public InteractiveTool {
             return true;
         }
         const Step& step = steps[step_];
-        auto chosen = resolve(collected_, step, snap.point);
-        // One pixel: pickReach is the view's 8 px (kPickAperturePixels).
-        const double pixel = pickReach(context_) / 8.0;
+        auto chosen = resolve(collected_, step, snap.point, false);
+        // One pixel: pickReach is the view's pick aperture in model units.
+        const double pixel = pickReach(context_) / kPickAperturePixels;
         if (!chosen || chosen->at.distanceTo(snap.point) > pixel) {
             return false;
         }
@@ -724,6 +829,101 @@ class ScriptTool final : public InteractiveTool {
         const Entity* entity =
             context_.document != nullptr ? context_.document->model().entities.find(id) : nullptr;
         return entity != nullptr && pickable(context_, *entity);
+    }
+
+    // The polylines among `ids` a tool may take (pickable), in their order.
+    [[nodiscard]] std::vector<EntityId> pickableAmong(const std::vector<EntityId>& ids) const
+    {
+        std::vector<EntityId> out;
+        std::ranges::copy_if(ids, std::back_inserter(out),
+                             [this](EntityId id) { return pickableId(id); });
+        return out;
+    }
+
+    // Why what the tool holds from before this input - its picks, Insert's
+    // anchor - cannot be used (whyNotNow), or nullopt when all of it stands.
+    [[nodiscard]] std::optional<std::string> staleness() const
+    {
+        for (const Chosen& pick : collected_.picks) {
+            if (auto why = whyNotNow(context_, pick)) {
+                return why;
+            }
+        }
+        if (collected_.anchor) {
+            return whyNotNow(context_, *collected_.anchor);
+        }
+        return std::nullopt;
+    }
+
+    // An input when what the tool holds is stale is refused with the reason,
+    // as the preview said (R3), and the stale picks are dropped, so the next
+    // input picks afresh: the tool starts again from its first step, as a
+    // stale edit refused at the commit always has.
+    std::optional<ToolStep> refuseStale()
+    {
+        auto why = staleness();
+        if (!why) {
+            return std::nullopt;
+        }
+        dropAnswers();
+        return ToolStep::rejected(*why);
+    }
+
+    // Beside a click's preview with the handles answering every step: what
+    // Enter would act on, marked as Enter's with its number - with the
+    // pointer over another vertex the chosen one was a plain square, and the
+    // prompt's "vertex 2" was nowhere on screen. Not where the click's own
+    // marks are: there the click and Enter do the same.
+    void markWhatEnterTakes(ToolFeedback& click) const
+    {
+        const auto marked = [&click](const Point2& at) {
+            return std::ranges::any_of(click.marks, [&at](const FeedbackMark& mark) {
+                const auto* point = std::get_if<PointGeometry>(&mark.geometry);
+                return point != nullptr && point->position.distanceTo(at) <= tol::kGeometric;
+            });
+        };
+        std::vector<FeedbackMark> enter;
+        for (const Chosen& pick : collected_.picks) {
+            Point2 at = pick.at;
+            std::string label = "polyline " + std::to_string(pick.polyline);
+            if (pick.vertex) {
+                at = pick.shape.vertices[*pick.vertex].position;
+                label = std::to_string(*pick.vertex);
+            } else if (pick.segment) {
+                at = middleOfPiece(pick.shape, *pick.segment);
+                label = "segment " + std::to_string(*pick.segment);
+            }
+            if (!marked(at)) {
+                enter.push_back(vertexMark(FeedbackRole::Enter, at, label + " · Enter"));
+            }
+        }
+        click.marks.insert(click.marks.end(), enter.begin(), enter.end());
+    }
+
+    // Insert beside a chosen vertex or segment where a click takes nothing -
+    // past the segment's ends, or on the chosen vertex itself (besideAnchor)
+    // - shows what Enter does: the chosen vertex, the place Enter adds at,
+    // and the caption said as Enter's. It showed "too close to vertex N" in
+    // red, at any distance, the moment the tool started.
+    [[nodiscard]] ToolFeedback besideAnchorIdle() const
+    {
+        const Chosen& anchor = *collected_.anchor;
+        ToolFeedback shown;
+        shown.focus = anchor.polyline;
+        if (anchor.vertex) {
+            shown.marks.push_back(vertexMark(FeedbackRole::Target,
+                                             anchor.shape.vertices[*anchor.vertex].position,
+                                             std::to_string(*anchor.vertex)));
+        }
+        Collected c = collected_;
+        c.picks.push_back(middleBeside(anchor));
+        const Point2 place = c.picks.back().at;
+        const Plan plan = script_.plan(withDefaults(std::move(c), step_ + 1), context_);
+        FeedbackMark enter = vertexMark(FeedbackRole::Enter, place, "Enter");
+        enter.refused = plan.refusal.has_value();
+        shown.marks.push_back(std::move(enter));
+        shown.caption = "Enter: " + (plan.refusal ? *plan.refusal : plan.feedback.caption);
+        return shown;
     }
 
     // Why a selected polyline will not be taken: it is drawn, but on a
@@ -781,12 +981,14 @@ class ScriptTool final : public InteractiveTool {
                                                           const Point2& cursor) const
     {
         const Step& step = script_.steps[at];
-        auto chosen = resolve(c, step, cursor);
+        auto chosen = resolve(c, step, cursor, false);
         if (!chosen) {
             return std::nullopt;
         }
         if (auto already = alreadyPicked(c, step, *chosen)) {
+            // The first pick's marks, drawn as the refusal they now are.
             ToolFeedback taken = idle();
+            taken.refused = true;
             taken.caption = *already;
             return taken;
         }
@@ -950,11 +1152,24 @@ class ScriptTool final : public InteractiveTool {
     // another kind of entity, never a vertex out of reach, and never what the
     // view may not pick - a selected polyline on a hidden or locked layer was
     // previewed and edited through the selection, round the view's own pick.
+    // `exact` for a point typed rather than pointed at (Chosen::exact).
     [[nodiscard]] std::optional<Chosen> resolve(const Collected& c, const Step& step,
-                                                const Point2& at) const
+                                                const Point2& at, bool exact) const
+    {
+        auto chosen = nearestFor(c, step, at, exact);
+        if (chosen) {
+            chosen->exact = exact;
+        }
+        return chosen;
+    }
+
+    // resolve's search, before it marks what was found as given exactly or
+    // pointed at; `exact` also takes the pixel reach off Insert's anchor.
+    [[nodiscard]] std::optional<Chosen> nearestFor(const Collected& c, const Step& step,
+                                                   const Point2& at, bool exact) const
     {
         if (step.kind == Step::Kind::OnLine && c.anchor) {
-            return besideAnchor(*c.anchor, at);
+            return besideAnchor(*c.anchor, at, exact ? 0.0 : pickReach(context_));
         }
         const double reach =
             step.kind == Step::Kind::Vertex ? vertexReach(context_) : pickReach(context_);
@@ -1017,17 +1232,22 @@ class ScriptTool final : public InteractiveTool {
         return step;
     }
 
-    ToolStep pointAt(const Point2& at, std::optional<double> z)
+    // A click (exact false) or a typed point (true) at `at`, with the height
+    // typed for it, if any.
+    ToolStep pointAt(const Point2& at, std::optional<double> z, bool exact)
     {
+        if (auto stale = refuseStale()) {
+            return std::move(*stale);
+        }
         const std::vector<Step>& steps = script_.steps;
         if (step_ >= steps.size()) {
             if (answeredBy_ != AnsweredBy::Handles) {
                 return InteractiveTool::point(at);
             }
-            if (!resolve(fresh(), steps.front(), at)) {
+            if (!resolve(fresh(), steps.front(), at, exact)) {
                 return ToolStep::rejected(prompt());
             }
-            return anew([&] { return pointAt(at, z); });
+            return anew([&] { return pointAt(at, z, exact); });
         }
         const Step& step = steps[step_];
         switch (step.kind) {
@@ -1035,7 +1255,7 @@ class ScriptTool final : public InteractiveTool {
         case Step::Kind::Segment:
         case Step::Kind::Polyline:
         case Step::Kind::OnLine: {
-            auto chosen = resolve(collected_, step, at);
+            auto chosen = resolve(collected_, step, at, exact);
             if (!chosen) {
                 return ToolStep::rejected(prompt());
             }
@@ -1089,6 +1309,7 @@ class ScriptTool final : public InteractiveTool {
         Chosen chosen;
         chosen.polyline = id;
         chosen.shape = *shape;
+        chosen.exact = true; // named, not pointed at
         switch (step.kind) {
         case Step::Kind::Vertex:
             if (index >= shape->vertices.size()) {
@@ -1503,29 +1724,57 @@ Plan planInsert(const Collected& c, const ToolContext& context)
     plan.command = "VERTEX_INSERT";
     ToolFeedback& f = plan.feedback;
     f.focus = on.polyline;
-    f.marks.push_back(pieceMark(FeedbackRole::Target, pieceOf(shape, s)));
-    if (c.anchor && c.anchor->vertex) {
+    // A POINTED click this near a vertex is taken as meant for the vertex:
+    // at the view's pick aperture a new vertex there could not be told from
+    // it. A place given exactly - Enter's marked middle, a typed number or
+    // point - is refused only where geometry refuses it, on a vertex: the
+    // pixel rule turned down the marked middle of every segment 16 px long
+    // or less, where the prompt had just offered it.
+    const double toA = on.at.distanceTo(shape.vertices[a].position);
+    const double toB = on.at.distanceTo(shape.vertices[b].position);
+    const std::optional<std::size_t> tooNear =
+        !on.exact && std::min(toA, toB) <= pickReach(context)
+            ? std::optional<std::size_t>(toA <= toB ? a : b)
+            : std::nullopt;
+    if (c.anchor && c.anchor->vertex && tooNear != c.anchor->vertex) {
         f.marks.push_back(vertexMark(FeedbackRole::Target,
                                      shape.vertices[*c.anchor->vertex].position,
                                      std::to_string(*c.anchor->vertex)));
     }
     if (c.anchor) {
         // Where Enter puts it - the middle of a segment the cursor may not be
-        // on: it inserted on an edge the preview never marked.
-        f.marks.push_back(vertexMark(FeedbackRole::Enter, middleBeside(*c.anchor).at, "Enter"));
+        // on: it inserted on an edge the preview never marked. Not when the
+        // pick IS that place (Enter's own plan). Struck through where Enter
+        // would be refused: a segment with no length has its middle on a
+        // vertex.
+        const Chosen enter = middleBeside(*c.anchor);
+        if (!(enter.segment == on.segment && enter.at.distanceTo(on.at) <= tol::kGeometric)) {
+            FeedbackMark place = vertexMark(FeedbackRole::Enter, enter.at, "Enter");
+            const std::size_t e = *enter.segment;
+            place.refused =
+                enter.at.distanceTo(shape.vertices[e].position) <= tol::kGeometric ||
+                enter.at.distanceTo(shape.vertices[shape.segmentEnd(e)].position) <=
+                    tol::kGeometric;
+            f.marks.push_back(std::move(place));
+        }
     }
-    // A point this near a vertex is taken as meant for the vertex: at the
-    // view's pick aperture a new vertex there could not be told from it.
-    const double reach = pickReach(context);
-    const double toA = on.at.distanceTo(shape.vertices[a].position);
-    const double toB = on.at.distanceTo(shape.vertices[b].position);
-    if (std::min(toA, toB) <= reach) {
-        plan.refusal = "too close to vertex " + std::to_string(toA <= toB ? a : b) +
+    if (tooNear) {
+        // The vertex it is too near, struck through with its number: the
+        // whole segment in red flashed at every vertex the pointer passed,
+        // and said nothing of which vertex was meant.
+        FeedbackMark near =
+            vertexMark(FeedbackRole::Target, shape.vertices[*tooNear].position,
+                       std::to_string(*tooNear));
+        near.refused = true;
+        f.marks.push_back(std::move(near));
+        plan.refusal = "too close to vertex " + std::to_string(*tooNear) +
                        "; zoom in to add a vertex this near it";
         return plan;
     }
+    f.marks.push_back(pieceMark(FeedbackRole::Target, pieceOf(shape, s)));
     auto result = geo::insertVertex(shape, s, on.at, c.height);
     if (!result) {
+        f.marks.back().refused = true;
         plan.refusal = result.error().message;
         return plan;
     }
@@ -2010,22 +2259,25 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
         Script script;
         Step on;
         on.kind = Step::Kind::OnLine;
+        on.heights = true; // x,y,z keeps z as the new vertex's height
         on.prompt = [](const Collected& c, std::optional<EntityId> inPlay) -> std::string {
+            // Enter's offer first, as every tool's "Press Enter to ..." with
+            // something chosen: the command line cuts a long placeholder at
+            // the right, and it cut "or press En...", the half that answers
+            // "what about the already selected vertex".
             if (c.anchor && c.anchor->vertex) {
                 const CurvePolyline2& shape = c.anchor->shape;
                 const std::size_t v = *c.anchor->vertex;
                 const auto after = segmentAfter(shape, v);
                 const std::size_t middle = after ? *after : segmentBefore(shape, v).value_or(0);
-                return "Click beside vertex " + std::to_string(v) + " of polyline " +
-                       std::to_string(c.anchor->polyline) +
-                       " where the new vertex goes, or press Enter for the marked middle of "
-                       "segment " +
-                       std::to_string(middle);
+                return "Press Enter for a vertex at the marked middle of segment " +
+                       std::to_string(middle) + ", or click beside vertex " + std::to_string(v) +
+                       " of polyline " + std::to_string(c.anchor->polyline);
             }
             if (c.anchor && c.anchor->segment) {
-                return "Click on segment " + std::to_string(*c.anchor->segment) + " of polyline " +
-                       std::to_string(c.anchor->polyline) +
-                       " where the new vertex goes, or press Enter for its marked middle";
+                return "Press Enter for a vertex at the marked middle of segment " +
+                       std::to_string(*c.anchor->segment) + " of polyline " +
+                       std::to_string(c.anchor->polyline) + ", or click on it";
             }
             return inPlay ? "Click on polyline " + std::to_string(*inPlay) +
                                 " where the new vertex goes"
@@ -2091,8 +2343,9 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
 
     {
         Script script;
-        script.steps = {vertexStep(clickThe("vertex", "to move")),
-                        pointStep("Specify its new position")};
+        Step to = pointStep("Specify its new position");
+        to.heights = true; // x,y,z sets its height, @dx,dy,dz changes it
+        script.steps = {vertexStep(clickThe("vertex", "to move")), std::move(to)};
         script.plan = planMove;
         script.answer = [](const ToolContext& context, Collected& c) -> std::size_t {
             auto hot = handlesOf(context, GripKind::Vertex);
@@ -2122,17 +2375,28 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
         script.plan = planEdit;
         script.answer = [](const ToolContext& context, Collected& c) -> std::size_t {
             // A grip chosen, else the one polyline selected: it is in the
-            // panel already, so the tool does not ask for it again.
+            // panel already, so the tool does not ask for it again. Only
+            // what the view lets be edited (R1), as every other vertex tool:
+            // one whose layer was hidden or locked after it was selected was
+            // said to be "in the Vertices panel" for editing.
+            const auto usable = [&context](EntityId id) {
+                const Entity* entity = context.document != nullptr
+                                           ? context.document->model().entities.find(id)
+                                           : nullptr;
+                return entity != nullptr && isPolylineEntity(*entity) &&
+                       pickable(context, *entity);
+            };
             EntityId id = kInvalidEntityId;
             for (const Grip& grip : context.handles) {
-                if (polylineNow(context.document, grip.entity)) {
+                if (usable(grip.entity)) {
                     id = grip.entity;
                     break;
                 }
             }
             if (id == kInvalidEntityId) {
-                if (const auto own = polylinesAmong(context.document, context.selection);
-                    own.size() == 1) {
+                std::vector<EntityId> own = polylinesAmong(context.document, context.selection);
+                std::erase_if(own, [&usable](EntityId candidate) { return !usable(candidate); });
+                if (own.size() == 1) {
                     id = own.front();
                 }
             }
@@ -2149,8 +2413,19 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
             return 1;
         };
         script.ready = [](const Collected& c) {
-            return "Polyline " + std::to_string(c.picks.front().polyline) +
-                   " is in the Vertices panel; click another polyline, or press Enter";
+            // The panel shows the first polyline of the selection
+            // (vertex_panel.cpp, refresh); a grip of another selected one is
+            // put there by Enter, which selects it.
+            const EntityId id = c.picks.front().polyline;
+            const auto selected = c.document != nullptr
+                                      ? polylinesAmong(c.document, c.document->selection().ids())
+                                      : std::vector<EntityId>{};
+            if (!selected.empty() && selected.front() == id) {
+                return "Polyline " + std::to_string(id) +
+                       " is in the Vertices panel; click another polyline, or press Enter";
+            }
+            return "Press Enter to show polyline " + std::to_string(id) +
+                   " in the Vertices panel, or click another polyline";
         };
         report(catalog.add(info(
             "draw.vertex.edit", "Edit Vertices", 40, {"EDITVERTICES", "VERTEX"},
@@ -2386,8 +2661,18 @@ void addModifyVertexTools(ToolCatalog& catalog, const Report& report)
 
     {
         Script script;
-        script.steps = {segmentStep(clickThe("segment", "to make an arc")),
-                        pointStep("Specify a point the arc passes through")};
+        Step segment = segmentStep(clickThe("segment", "to make an arc"));
+        // Refused at the pick (R3): a segment with no length has no arc
+        // through any point, and taken, every point after it was refused and
+        // only Esc or U got out.
+        segment.check = [](const Chosen& chosen) -> std::optional<std::string> {
+            if (chosen.shape.segmentLength(*chosen.segment) > tol::kGeometric) {
+                return std::nullopt;
+            }
+            return "segment " + std::to_string(*chosen.segment) +
+                   " has no length; an arc needs its two ends apart";
+        };
+        script.steps = {segment, pointStep("Specify a point the arc passes through")};
         script.plan = planSegmentArc;
         script.answer = oneSegment;
         script.restarts = true;

@@ -51,7 +51,7 @@ Status ToolHost::start(std::string_view id)
     if (onStarted) {
         onStarted(info_->id);
     }
-    report(onPrompt, prompt());
+    reportPrompt();
     return {};
 }
 
@@ -71,8 +71,14 @@ cad::ToolFeedback ToolHost::feedback(const Point2& cursor) const
     }
     cad::ToolFeedback shown = tool_->preview(cursor);
     if (shown.refused && heldAt_ && cursor.distanceTo(*heldAt_) <= holdReach()) {
-        cad::ToolFeedback held;
-        held.focus = shown.focus;
+        // What the tool shows there less its refusal: the marks it flags as
+        // the refusal's reason go (the vertex Insert has just made, too near
+        // for another), the rest stay as drawn - Straighten's first "keep",
+        // which the click has just taken - and the caption is what the
+        // click did.
+        cad::ToolFeedback held = std::move(shown);
+        held.refused = false;
+        std::erase_if(held.marks, [](const cad::FeedbackMark& mark) { return mark.refused; });
         held.caption = heldMessage_;
         return held;
     }
@@ -132,7 +138,7 @@ ToolHost::Outcome ToolHost::typed(std::string_view text)
         // prompt is shown again, as AutoCAD resumes LINE after 'ZOOM.
         const std::string command(katana::core::trimmed(text));
         if (onTransparent && onTransparent(command)) {
-            report(onPrompt, prompt());
+            reportPrompt();
             return Outcome::Continue;
         }
         report(onRejected, command + " cannot run inside " + info_->name +
@@ -208,10 +214,17 @@ ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
     case Outcome::Continue:
         report(onMessage, step.message);
         if (generation_ == from) {
-            report(onPrompt, prompt());
+            reportPrompt();
         }
         break;
     case Outcome::Rejected:
+        // A refusal leaves the prompt as it was, but one that drops what the
+        // tool held - a pick made stale by another edit - asks afresh, and
+        // the command line's placeholder must say so. Before the refusal, so
+        // the status bar ends on the refusal, as it does for every other.
+        if (prompt() != reportedPrompt_) {
+            reportPrompt();
+        }
         report(onRejected, step.message);
         break;
     case Outcome::Done: {
@@ -240,7 +253,7 @@ ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
         }
         if (step.restart) {
             make();
-            report(onPrompt, prompt());
+            reportPrompt();
         } else {
             end();
         }
@@ -262,9 +275,16 @@ void ToolHost::end()
     if (onFinished) {
         onFinished(id);
     }
+    reportedPrompt_.clear();
     if (onPrompt) {
         onPrompt({});
     }
+}
+
+void ToolHost::reportPrompt()
+{
+    reportedPrompt_ = prompt();
+    report(onPrompt, reportedPrompt_);
 }
 
 ToolHost::Outcome ToolHost::idle()

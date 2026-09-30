@@ -136,6 +136,7 @@ class Polyline3dTool final : public InteractiveTool {
     }
 
     ToolStep point3d(const Point2& at, double z) override { return add(at, z); }
+    [[nodiscard]] bool takesHeights() const override { return true; }
 
     ToolStep value(std::string_view text) override
     {

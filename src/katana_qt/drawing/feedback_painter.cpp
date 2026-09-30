@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <numbers>
 #include <optional>
 #include <variant>
+#include <vector>
 
 #include <QFontMetrics>
 #include <QPainter>
@@ -60,6 +63,13 @@ constexpr double kPlusArm = 3.0;
 // - its corner both the target and what goes - read as a Delete.
 constexpr double kRemovedHalf = 4.5;
 constexpr double kRemovedBacking = 5.5;
+// The refusal's stroke runs corner to corner inside its ring, the ring's
+// radius times cos 45° from the middle each way: the struck ring of "not here".
+constexpr double kStruckHalf = kRingRadius * std::numbers::sqrt2 / 2.0;
+// Enter's place: the Added disc's circle round a dot, its middle the dark
+// ground. Hollow, the segment through it read as a circled minus beside the
+// new vertex's circled plus - "add" and "remove" for two places that add.
+constexpr double kEnterDot = 1.75;
 constexpr double kFocusSquare = 6.0;
 // Focus squares nearer each other than this are thinned: the square and its
 // 1.5 px pen are 7.5 px across, so 10 px leaves a gap a squint still sees.
@@ -70,6 +80,9 @@ constexpr double kMarkerHalf = 3.5;
 // (drawn at +12, +18 by the view).
 constexpr double kCaptionOffset = 16.0;
 constexpr double kCaptionBelowTracking = 32.0;
+// Where a vertex mark's label and a piece's label sit from their point.
+constexpr double kVertexLabelOffset = 9.0;
+constexpr double kPieceLabelOffset = 6.0;
 
 bool isVertex(const FeedbackMark& mark)
 {
@@ -81,7 +94,8 @@ QPointF vertexOf(const FeedbackMark& mark, const FeedbackFrame& frame)
     return frame.toScreen(std::get<PointGeometry>(mark.geometry).position);
 }
 
-// Where a piece's label goes: its middle, from the plan's own geometry.
+// Where a piece's label and its refusal's glyph go: its middle, from the
+// plan's own geometry - a whole polyline's, the middle of its middle segment.
 std::optional<QPointF> middleOf(const katana::entity::Geometry& geometry,
                                 const FeedbackFrame& frame)
 {
@@ -91,25 +105,146 @@ std::optional<QPointF> middleOf(const katana::entity::Geometry& geometry,
     if (const auto* arc = std::get_if<katana::geometry::Arc2>(&geometry)) {
         return frame.toScreen(arc->midpoint());
     }
+    if (const auto* polyline = std::get_if<katana::geometry::Polyline2>(&geometry);
+        polyline != nullptr && polyline->segmentCount() > 0) {
+        return frame.toScreen(polyline->segment(polyline->segmentCount() / 2).midpoint());
+    }
+    if (const auto* curve = std::get_if<katana::geometry::CurvePolyline2>(&geometry);
+        curve != nullptr && curve->segmentCount() > 0) {
+        return frame.toScreen(std::visit([](const auto& piece) { return piece.pointAt(0.5); },
+                                         curve->segment(curve->segmentCount() / 2)));
+    }
     return std::nullopt;
+}
+
+// Whether `mark` is drawn as the refusal: flagged by the tool, or - in a
+// refused preview that flags none - a Target, the pick that is turned down
+// (ToolFeedback::refused).
+bool drawnRefused(const FeedbackMark& mark, const katana::cad::ToolFeedback& feedback,
+                  bool anyFlagged)
+{
+    return mark.refused ||
+           (feedback.refused && !anyFlagged && mark.role == FeedbackRole::Target);
+}
+
+// The refusal's glyph: a ring struck through, the sign for "not here", on a
+// dark disc so it reads over any line. Its SHAPE says refused, not only its
+// red: a Target's ring round a filled square, drawn red, was the same khaki
+// ring as the accepted green one to a red-green colour-blind eye (Machado,
+// Oliveira and Fernandes 2009: the two a CIE76 difference of about 5).
+void paintStruck(QPainter& painter, const QPointF& p)
+{
+    QColor backing = overlay::ground();
+    backing.setAlpha(190);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(backing);
+    painter.drawEllipse(p, kRingRadius, kRingRadius);
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(overlay::removed(), 2.0));
+    painter.drawEllipse(p, kRingRadius, kRingRadius);
+    painter.setPen(QPen(overlay::removed(), 2.0, Qt::SolidLine, Qt::FlatCap));
+    painter.drawLine(p + QPointF(-kStruckHalf, -kStruckHalf), p + QPointF(kStruckHalf, kStruckHalf));
+}
+
+// The box a label's chip covers with its baseline's left end at `corner`:
+// the one sum paintLabel draws and the caption keeps off.
+QRectF labelBox(const QPointF& corner, const QString& text)
+{
+    const QFontMetrics metrics(theme::overlayFont(10));
+    return QRectF(corner.x() - 1.0, corner.y() - metrics.ascent(),
+                  metrics.horizontalAdvance(text) + 5.0, metrics.height());
 }
 
 // Text on a small dark chip, so a label reads over whatever it lands on.
 void paintLabel(QPainter& painter, const QPointF& corner, const QString& text, const QColor& colour)
 {
-    const QFont font = theme::overlayFont(10);
-    const QFontMetrics metrics(font);
-    const QRectF box(corner.x(), corner.y() - metrics.ascent(),
-                     metrics.horizontalAdvance(text) + 4.0, metrics.height());
     QColor backing = overlay::ground();
     backing.setAlpha(200);
     painter.setPen(Qt::NoPen);
     painter.setBrush(backing);
-    painter.drawRoundedRect(box.adjusted(-1.0, 0.0, 0.0, 0.0), 2.0, 2.0);
+    painter.drawRoundedRect(labelBox(corner, text), 2.0, 2.0);
     painter.setBrush(Qt::NoBrush);
-    painter.setFont(font);
+    painter.setFont(theme::overlayFont(10));
     painter.setPen(colour);
     painter.drawText(QPointF(corner.x() + 1.0, corner.y()), text);
+}
+
+// Where each mark's label goes, when it has one and a place.
+std::optional<QPointF> labelCorner(const FeedbackMark& mark, const FeedbackFrame& frame)
+{
+    if (isVertex(mark)) {
+        return vertexOf(mark, frame) + QPointF(kVertexLabelOffset, -kVertexLabelOffset);
+    }
+    if (const auto middle = middleOf(mark.geometry, frame)) {
+        return *middle + QPointF(kPieceLabelOffset, -kPieceLabelOffset);
+    }
+    return std::nullopt;
+}
+
+// What the caption keeps off: every vertex glyph and piece middle a mark
+// draws, and every label.
+std::vector<QRectF> markBoxes(const katana::cad::ToolFeedback& feedback, const FeedbackFrame& frame)
+{
+    const double r = kRingRadius + 1.0;
+    std::vector<QRectF> boxes;
+    for (const FeedbackMark& mark : feedback.marks) {
+        const std::optional<QPointF> at =
+            isVertex(mark) ? std::optional<QPointF>(vertexOf(mark, frame))
+                           : middleOf(mark.geometry, frame);
+        if (at) {
+            boxes.emplace_back(at->x() - r, at->y() - r, 2 * r, 2 * r);
+        }
+        if (!mark.label.empty()) {
+            if (const auto corner = labelCorner(mark, frame)) {
+                boxes.push_back(labelBox(*corner, QString::fromStdString(mark.label)));
+            }
+        }
+    }
+    return boxes;
+}
+
+// The caption's chip at the first of the cursor's four corners - below and
+// right, above and right, below and left, above and left - each moved inside
+// the view and off the prompt band, that covers no mark and not the cursor
+// itself; where every one covers something, the one over fewest. It sat
+// below and right whatever was there, and hid the "Enter" place a user who
+// chose a vertex first needs to see.
+QRectF captionChip(const QSizeF& size, const FeedbackFrame& frame,
+                   const std::vector<QRectF>& keepOff)
+{
+    const double below = frame.trackingLabel ? kCaptionBelowTracking : kCaptionOffset;
+    const QPointF c = frame.cursor;
+    const QRectF room = frame.visible.adjusted(0.0, 0.0, 0.0, -frame.bandHeight);
+    // The crosshair's middle, which a chip pushed back into a small view
+    // could land on.
+    const QRectF cursor(c.x() - kCaptionOffset / 2, c.y() - kCaptionOffset / 2, kCaptionOffset,
+                        kCaptionOffset);
+    const double right = c.x() + kCaptionOffset;
+    const double left = c.x() - kCaptionOffset - size.width();
+    const double under = c.y() + below;
+    const double over = c.y() - kCaptionOffset - size.height();
+    QRectF best;
+    std::size_t bestCovered = std::numeric_limits<std::size_t>::max();
+    for (const QPointF& corner : {QPointF(right, under), QPointF(right, over),
+                                  QPointF(left, under), QPointF(left, over)}) {
+        QRectF chip(corner, size);
+        chip.moveLeft(std::clamp(chip.left(), room.left(),
+                                 std::max(room.left(), room.right() - size.width())));
+        chip.moveTop(std::clamp(chip.top(), room.top(),
+                                std::max(room.top(), room.bottom() - size.height())));
+        const auto covered =
+            static_cast<std::size_t>(std::ranges::count_if(
+                keepOff, [&chip](const QRectF& box) { return chip.intersects(box); })) +
+            (chip.intersects(cursor) ? 1U : 0U);
+        if (covered < bestCovered) {
+            best = chip;
+            bestCovered = covered;
+        }
+        if (covered == 0) {
+            break;
+        }
+    }
+    return best;
 }
 
 void paintCaption(QPainter& painter, const katana::cad::ToolFeedback& feedback,
@@ -123,20 +258,7 @@ void paintCaption(QPainter& painter, const katana::cad::ToolFeedback& feedback,
     const double stripe = 2.0;
     const double width = metrics.horizontalAdvance(text) + 2 * padX + stripe;
     const double height = metrics.height() + 2 * padY;
-    const double below = frame.trackingLabel ? kCaptionBelowTracking : kCaptionOffset;
-    double x = frame.cursor.x() + kCaptionOffset;
-    double y = frame.cursor.y() + below;
-    // Flipped to the other side of the cursor where it would leave the view
-    // or run under the prompt band.
-    if (x + width > frame.visible.right()) {
-        x = frame.cursor.x() - kCaptionOffset - width;
-    }
-    if (y + height > frame.visible.bottom() - frame.bandHeight) {
-        y = frame.cursor.y() - kCaptionOffset - height;
-    }
-    x = std::max(x, frame.visible.left());
-    y = std::max(y, frame.visible.top());
-    const QRectF chip(x, y, width, height);
+    const QRectF chip = captionChip(QSizeF(width, height), frame, markBoxes(feedback, frame));
     QColor backing = overlay::ground();
     backing.setAlpha(225);
     painter.setPen(Qt::NoPen);
@@ -205,18 +327,24 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
         painter.setPen(dashes);
         frame.drawShape(mark.geometry);
     }
-    // A pick the tool refuses keeps its target marks, which say what the pick
-    // took, but in the refusal's red: green there promised the click the
-    // caption says is turned down.
-    const QColor targetColour = feedback.refused ? overlay::removed() : overlay::target();
-    // Target pieces: a solid 3 px line along the geometry, arcs as arcs.
-    QColor targetStroke = targetColour;
-    targetStroke.setAlpha(235);
+    // A mark that says why a click is refused keeps its place, which says
+    // what the pick took, but in the refusal's red AND its shape - the ring
+    // struck through (paintStruck): green there promised the click the
+    // caption says is turned down, and red alone is green to many eyes.
+    const bool anyFlagged = std::ranges::any_of(
+        feedback.marks, [](const FeedbackMark& mark) { return mark.refused; });
+    const auto refusedMark = [&](const FeedbackMark& mark) {
+        return drawnRefused(mark, feedback, anyFlagged);
+    };
+    // Target pieces: a solid 3 px line along the geometry, arcs as arcs; a
+    // refused one red, with the struck ring at its middle (below).
     for (const FeedbackMark& mark : feedback.marks) {
         if (mark.role != FeedbackRole::Target || isVertex(mark)) {
             continue;
         }
-        painter.setPen(QPen(targetStroke, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        QColor stroke = refusedMark(mark) ? overlay::removed() : overlay::target();
+        stroke.setAlpha(235);
+        painter.setPen(QPen(stroke, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         frame.drawShape(mark.geometry);
     }
     // The ghost: the result as it will be, dashed, as every tool's always was.
@@ -241,15 +369,15 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
     }
     // Target vertices: a ring round a filled square.
     for (const FeedbackMark& mark : feedback.marks) {
-        if (mark.role != FeedbackRole::Target || !isVertex(mark)) {
+        if (mark.role != FeedbackRole::Target || !isVertex(mark) || refusedMark(mark)) {
             continue;
         }
         const QPointF p = vertexOf(mark, frame);
-        painter.setPen(QPen(targetColour, 2.0));
+        painter.setPen(QPen(overlay::target(), 2.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawEllipse(p, kRingRadius, kRingRadius);
         painter.setPen(QPen(overlay::ground(), 1.0));
-        painter.setBrush(targetColour);
+        painter.setBrush(overlay::target());
         painter.drawRect(QRectF(p.x() - kTargetSquare / 2, p.y() - kTargetSquare / 2,
                                 kTargetSquare, kTargetSquare));
         painter.setBrush(Qt::NoBrush);
@@ -258,7 +386,7 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
     QColor backing = overlay::ground();
     backing.setAlpha(190);
     for (const FeedbackMark& mark : feedback.marks) {
-        if (mark.role != FeedbackRole::Removed || !isVertex(mark)) {
+        if (mark.role != FeedbackRole::Removed || !isVertex(mark) || refusedMark(mark)) {
             continue;
         }
         const QPointF p = vertexOf(mark, frame);
@@ -272,20 +400,43 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
         painter.drawLine(p + QPointF(-kRemovedHalf, kRemovedHalf),
                          p + QPointF(kRemovedHalf, -kRemovedHalf));
     }
-    // Enter's place: the Added disc's circle, hollow - nothing is there
-    // until Enter is pressed - on a dark outline so it reads over the
+    // What Enter acts on: the Added disc's circle round a dot, its middle the
+    // dark ground - nothing is there until Enter is pressed - so the line
+    // through it stops at the ring and no circled minus sits beside the new
+    // vertex's circled plus; on a dark outline so it reads over the
     // target's green, with "Enter" beside it (the labels, below).
     for (const FeedbackMark& mark : feedback.marks) {
         if (mark.role != FeedbackRole::Enter || !isVertex(mark)) {
             continue;
         }
+        ++counts.enter;
+        if (refusedMark(mark)) {
+            continue; // struck, below
+        }
         const QPointF p = vertexOf(mark, frame);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(overlay::ground()); // opaque: no line shows through
+        painter.drawEllipse(p, kAddedRadius, kAddedRadius);
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(overlay::ground(), 4.0));
         painter.drawEllipse(p, kAddedRadius, kAddedRadius);
         painter.setPen(QPen(overlay::preview(), 2.0));
         painter.drawEllipse(p, kAddedRadius, kAddedRadius);
-        ++counts.enter;
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(overlay::preview());
+        painter.drawEllipse(p, kEnterDot, kEnterDot);
+        painter.setBrush(Qt::NoBrush);
+    }
+    // The refused marks: the struck ring on a vertex, and at a piece's middle.
+    for (const FeedbackMark& mark : feedback.marks) {
+        if (!refusedMark(mark)) {
+            continue;
+        }
+        if (isVertex(mark)) {
+            paintStruck(painter, vertexOf(mark, frame));
+        } else if (const auto middle = middleOf(mark.geometry, frame)) {
+            paintStruck(painter, *middle);
+        }
     }
     // Added vertices: a filled disc with a "+", on top of everything else -
     // except over a vertex that goes. A fillet or a chamfer a few pixels
@@ -355,16 +506,11 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
         if (mark.label.empty()) {
             continue;
         }
-        const QColor colour = mark.role == FeedbackRole::Removed ? overlay::removed()
+        const QColor colour = refusedMark(mark) || mark.role == FeedbackRole::Removed
+                                  ? overlay::removed()
                               : mark.role == FeedbackRole::Enter ? overlay::preview()
-                                                                 : targetColour;
-        std::optional<QPointF> at;
-        if (isVertex(mark)) {
-            at = vertexOf(mark, frame) + QPointF(9.0, -9.0);
-        } else if (const auto middle = middleOf(mark.geometry, frame)) {
-            at = *middle + QPointF(6.0, -6.0);
-        }
-        if (at) {
+                                                                 : overlay::target();
+        if (const auto at = labelCorner(mark, frame)) {
             paintLabel(painter, *at, QString::fromStdString(mark.label), colour);
         }
     }
@@ -381,7 +527,8 @@ int bandHeight()
     return metrics.height() + 2 * 4;
 }
 
-void paintBand(QPainter& painter, const QRect& view, const QString& text, Qt::TextElideMode elide)
+QString paintBand(QPainter& painter, const QRect& view, const QString& text,
+                  Qt::TextElideMode elide)
 {
     // The prompt in the view as well as in the window's command line: the
     // eye is on the drawing, and a floating view may be far from the window.
@@ -392,13 +539,14 @@ void paintBand(QPainter& painter, const QRect& view, const QString& text, Qt::Te
     const QRect band(view.left(), view.bottom() + 1 - height, view.width(), height);
     QColor fill = overlay::ground();
     fill.setAlpha(220);
+    const QString line = metrics.elidedText(text, elide, band.width() - 2 * pad - 2);
     painter.save();
     painter.fillRect(band, fill);
     painter.setFont(font);
     painter.setPen(overlay::preview());
-    painter.drawText(band.adjusted(pad + 2, 0, -pad, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                     metrics.elidedText(text, elide, band.width() - 2 * pad - 2));
+    painter.drawText(band.adjusted(pad + 2, 0, -pad, 0), Qt::AlignVCenter | Qt::AlignLeft, line);
     painter.restore();
+    return line;
 }
 
 } // namespace katana::qt::drawing

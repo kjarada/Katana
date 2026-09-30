@@ -479,13 +479,17 @@ directly, a font Linux does not have.
 The order, so what matters is on top: the vertices of the polyline in play
 (thinned so no two are nearer than 10 px), removed pieces, target pieces,
 the ghost, the base points, the snap marker (`FeedbackFrame::beneathGlyphs`),
-target vertices, removed vertices, where Enter would add, added vertices,
-labels, the caption; then the prompt band. The vertices went after the
+target vertices, removed vertices, what Enter would act on, the refused
+marks (a ring struck through), added vertices, labels, the caption - at the
+first corner of the cursor where it covers no mark; then the prompt band,
+cut in the middle while nothing is typed. The vertices went after the
 pieces, and a survey string's hundreds buried the target under a band of
 squares; the snap marker went last, and crossed the new vertex's disc where
-it snapped. Nothing is drawn until the pointer has been over the view:
-before that the cursor is the model's origin, and a tool started from the
-command line drew its band to 0,0. A new vertex that would sit on a vertex
+it snapped. Nothing is drawn while the pointer is not over the view: before
+it first is, the cursor is the model's origin, and a tool started from the
+command line drew its band to 0,0; after it has left (`leaveEvent`) the
+cursor is where it left, and a tool chosen from a menu previewed there. A
+new vertex that would sit on a vertex
 that goes (a fillet a few pixels across) is left out, so the X still reads,
 and is not counted; a vertex label is not doubled by the polyline's own
 "0".
@@ -521,3 +525,15 @@ plain move, well inside a frame. With snaps on, 739 of the hovers preview an
 insert, 660 with them off (`previewedInserts`), so the snapped runs also
 plan more inserts; the "before" runs did not record the count. The build the
 "before" figures came from was not kept to alternate against.
+
+`previewedInserts` is a total over a repetition's iterations, whose number
+depends on the machine's speed, so it compares between runs only as a share
+of them: after the second review's fixes (2026-09-30: what a tool holds
+checked again at every preview, the caption placed clear of the marks), 693
+of 897 hovers with snaps on (77%) and 804 of 1099 with them off (73%). Nine
+repetitions on a machine loaded by three other worktrees' builds - the plain
+move's median 914 us, twice the figure above - gave medians of 1.35 ms with
+snaps off (1.48x a plain move) and 1.53 ms with them on (1.67x), inside the
+ratios measured before; under that load the difference says nothing, and no
+cost was looked for beyond it. The earlier build was not kept to alternate
+against either.

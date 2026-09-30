@@ -53,12 +53,11 @@ double pickReach(const ToolContext& context)
 
 double vertexReach(const ToolContext& context)
 {
-    // 12 px over 8 px: the view's snap aperture over its pick aperture
-    // (viewport_widget.cpp, kSnapAperturePixels and kPickAperturePixels), so
-    // a test's tolerance gives the two reaches in the view's proportion.
-    constexpr double kVertexOverPick = 12.0 / 8.0;
-    return context.vertexAperture ? context.vertexAperture()
-                                  : kVertexOverPick * context.pickTolerance;
+    // With no view (a test), the tolerance stands for the pick aperture and
+    // the vertex reach is in the view's proportion to it.
+    return context.vertexAperture
+               ? context.vertexAperture()
+               : kSnapAperturePixels / kPickAperturePixels * context.pickTolerance;
 }
 
 std::optional<katana::entity::EntityId> pickUnder(const ToolContext& context, const Point2& at,
@@ -135,6 +134,13 @@ ToolStep InteractiveTool::anchoredPoint(const Point2& at,
 
 ToolStep InteractiveTool::point3d(const Point2& at, double /*z*/) { return point(at); }
 
+ToolStep InteractiveTool::exactPoint(const Point2& at, std::optional<double> z)
+{
+    return z ? point3d(at, *z) : point(at);
+}
+
+bool InteractiveTool::takesHeights() const { return false; }
+
 ToolStep InteractiveTool::entity(katana::entity::EntityId /*id*/, const Point2& /*at*/)
 {
     return ToolStep::rejected(std::string("an entity is not expected here; the tool wants ") +
@@ -209,25 +215,28 @@ Result<Point2> parsePointInput(std::string_view text, std::optional<Point2> last
 
 namespace {
 
-// A typed point handed to `tool`. x,y,z is a height for a tool that takes
-// one (point3d's default drops it). @dx,dy,dz CHANGES the last point's
-// height by dz, as the VERTEX MOVE verb reads it: handing dz on as the
-// height turned "raise it by 1" into a height of 1 and wiped a surveyed z.
-// With no height there to change it is refused, never read as absolute.
+// A typed point handed to `tool`, as the exact point it is (exactPoint). A
+// step that takes heights (takesHeights) gets the z of x,y,z as the height,
+// and the dz of @dx,dy,dz as a CHANGE of the last point's height, as the
+// VERTEX MOVE verb reads it: handing dz on as the height turned "raise it by
+// 1" into a height of 1 and wiped a surveyed z; with no height there to
+// change, it is refused rather than read as absolute. Every other step drops
+// the z of both forms, as it always did: refusing @dx,dy,dz there refused
+// "@0,5,0" at MOVE and LINE, whose points have no height to change.
 ToolStep typedPoint(InteractiveTool& tool, const PrecisePoint& point)
 {
-    if (!point.z) {
-        return tool.point(point.point);
+    if (!point.z || !tool.takesHeights()) {
+        return tool.exactPoint(point.point, std::nullopt);
     }
     if (!point.relative) {
-        return tool.point3d(point.point, *point.z);
+        return tool.exactPoint(point.point, point.z);
     }
     const auto base = tool.lastHeight();
     if (!base) {
         return ToolStep::rejected("the point @ is measured from has no height for a dz to "
                                   "change; give the height absolutely, as x,y,z");
     }
-    return tool.point3d(point.point, *base + *point.z);
+    return tool.exactPoint(point.point, *base + *point.z);
 }
 
 } // namespace

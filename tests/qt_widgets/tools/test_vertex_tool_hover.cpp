@@ -12,6 +12,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <string>
+#include <vector>
 
 #include <QImage>
 #include <QKeyEvent>
@@ -21,6 +23,7 @@
 #include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/core/text.hpp"
 #include "theme.hpp"
 #include "widget_harness.hpp"
 
@@ -284,4 +287,59 @@ TEST(VertexToolHover, BesideAChosenVertexEntersPlaceIsDrawn)
     EXPECT_EQ(f.view->lastPreviewCounts().added, 1u);
     EXPECT_GT(inkNear(image, f.pixel(Point2(15, 0)), 7.5, katana::qt::drawing::overlay::preview()),
               0);
+}
+
+TEST(VertexToolHover, ThePointerRecordReadsBackAsOneRecordWithABearingInItsCaption)
+{
+    // Move Vertex's caption ends in a bearing, whose seconds mark is a
+    // double quote. The record quoted the caption by hand, the quote closed
+    // it early, and the line read back as no record at all. It is written
+    // as every reply is (core::replyQuoted), and read back whole.
+    Fixture f;
+    // Shown, as the window is in a headless run: pointerAt paints with the
+    // view's own repaint, which paints nothing for a view not yet exposed.
+    f.view->show();
+    katana::qt::test::processEvents();
+    f.select();
+    ASSERT_TRUE(f.view->startTool("draw.vertex.move").ok());
+    ASSERT_TRUE(f.view->pointerAt(Point2(10, 0), true).ok()); // vertex 1
+    const auto hovered = f.view->pointerAt(Point2(10, 3), false);
+    ASSERT_TRUE(hovered.ok()) << hovered.error().describe();
+    const std::string caption = f.view->lastPreviewCounts().caption;
+    ASSERT_NE(caption.find('"'), std::string::npos) << "a bearing's seconds mark: " << caption;
+    const auto record = katana::core::readReplyRecord(*hovered);
+    ASSERT_TRUE(record.has_value()) << *hovered;
+    EXPECT_EQ(record->words, std::vector<std::string>{"pointer:"});
+    EXPECT_EQ(record->value("caption"), caption);
+    EXPECT_EQ(record->value("prompt"), "Move Vertex: Specify its new position");
+    // Its keys for the roles are the roles' own names.
+    for (const auto role : {katana::cad::FeedbackRole::Target, katana::cad::FeedbackRole::Added,
+                            katana::cad::FeedbackRole::Removed, katana::cad::FeedbackRole::Enter}) {
+        EXPECT_TRUE(record->value(katana::cad::toString(role)).has_value())
+            << katana::cad::toString(role);
+    }
+    EXPECT_EQ(record->value("added"), "1") << "the vertex where it goes";
+}
+
+TEST(VertexToolHover, ALongPromptIsCutInTheMiddleSoTheToolsNameStays)
+{
+    // Cut at the left, a prompt longer than the view lost the tool's name -
+    // at the larger text sizes, or in a narrow view - and the band read
+    // "...Vertex: Click beside". With nothing typed it is cut in the middle;
+    // with something typed, at the left, where the typing is.
+    Fixture f;
+    f.view->resize(260, 300);
+    f.select();
+    f.click(Point2(10, 0)); // the middle vertex's grip, now chosen
+    ASSERT_TRUE(f.view->startTool("draw.vertex.insert").ok());
+    paint(*f.view);
+    const QString band = f.view->promptBandText();
+    EXPECT_TRUE(band.startsWith("Insert Vertex: ")) << band.toStdString();
+    EXPECT_TRUE(band.contains(QChar(0x2026))) << "cut: " << band.toStdString();
+    EXPECT_TRUE(band.endsWith("_")) << band.toStdString();
+    QKeyEvent digit(QEvent::KeyPress, Qt::Key_4, Qt::NoModifier, "4");
+    QCoreApplication::sendEvent(f.view.get(), &digit);
+    paint(*f.view);
+    EXPECT_TRUE(f.view->promptBandText().endsWith("4_")) << f.view->promptBandText().toStdString();
+    EXPECT_FALSE(f.view->promptBandText().startsWith("Insert Vertex: "));
 }

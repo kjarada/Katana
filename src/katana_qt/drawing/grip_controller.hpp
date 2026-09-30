@@ -59,7 +59,8 @@ class GripController {
     // Rebuilds the grips from the document's selection when `generation`
     // (the view's count of document notifications) has moved on. A hot or a
     // grabbed grip follows its point to the index it has now - after an
-    // insert before it, vertex 2 is vertex 3 - and goes when the point does.
+    // insert before it, vertex 2 is vertex 3 - keeps its index when its own
+    // vertex is moved, and goes when its vertex does.
     void refresh(std::uint64_t generation);
     [[nodiscard]] const std::vector<katana::cad::Grip>& grips() const { return grips_; }
     [[nodiscard]] const std::vector<katana::cad::Grip>& hot() const { return hot_; }

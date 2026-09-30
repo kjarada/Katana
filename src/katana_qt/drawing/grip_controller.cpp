@@ -1,6 +1,7 @@
 #include "drawing/grip_controller.hpp"
 
 #include <algorithm>
+#include <utility>
 
 #include <QPainter>
 #include <QPen>
@@ -28,14 +29,23 @@ GripController::GripController(cad::Document& document) : document_(document) {}
 
 namespace {
 
-// The grip that is `old` after the drawing changed: the same point of the
-// same entity, by its position - an index names another vertex once a vertex
-// is inserted or deleted before it, and the next Delete would take that one.
-// The same index first, where a twin vertex lies on the same point.
-std::optional<cad::Grip> follow(const cad::Grip& old, const std::vector<cad::Grip>& grips)
+// The grip that is `old` after the drawing changed from `before` to `grips`:
+// the same point of the same entity, by its position - an index names
+// another vertex once a vertex is inserted or deleted before it, and the next
+// Delete would take that one. The same index first, where a twin vertex lies
+// on the same point. Where no grip is at its point, the vertex itself may
+// have moved (VERTEX MOVE, a Vertices panel cell, another view): with as
+// many grips of its kind on the entity as before, nothing was inserted or
+// deleted ahead of it, so its index still names it - matched by position
+// alone, a move of the chosen vertex silently unchose it.
+std::optional<cad::Grip> follow(const cad::Grip& old, const std::vector<cad::Grip>& grips,
+                                const std::vector<cad::Grip>& before)
 {
+    const auto same = [&](const cad::Grip& grip) {
+        return grip.entity == old.entity && grip.kind == old.kind;
+    };
     const auto at = [&](const cad::Grip& grip) {
-        return grip.entity == old.entity && grip.kind == old.kind &&
+        return same(grip) &&
                grip.position.distanceTo(old.position) <= katana::math::tolerance::kGeometric;
     };
     for (const cad::Grip& grip : grips) {
@@ -46,6 +56,13 @@ std::optional<cad::Grip> follow(const cad::Grip& old, const std::vector<cad::Gri
     for (const cad::Grip& grip : grips) {
         if (at(grip)) {
             return grip;
+        }
+    }
+    if (std::ranges::count_if(grips, same) == std::ranges::count_if(before, same)) {
+        for (const cad::Grip& grip : grips) {
+            if (grip.index == old.index && same(grip)) {
+                return grip;
+            }
         }
     }
     return std::nullopt;
@@ -59,19 +76,20 @@ void GripController::refresh(std::uint64_t generation)
         return;
     }
     generation_ = generation;
-    grips_ = cad::gripsOfSelection(document_, document_.selection().ids());
-    // A hot grip survives a refresh only while its point does (an undo, a
+    const std::vector<cad::Grip> before = std::exchange(
+        grips_, cad::gripsOfSelection(document_, document_.selection().ids()));
+    // A hot grip survives a refresh only while its vertex does (an undo, a
     // selection change or another view's edit may have taken it), and it
-    // follows its point to the index that point has now.
+    // follows its vertex to the index it has now (follow).
     std::vector<cad::Grip> kept;
     for (const cad::Grip& hot : hot_) {
-        if (auto now = follow(hot, grips_)) {
+        if (auto now = follow(hot, grips_, before)) {
             kept.push_back(*now);
         }
     }
     hot_ = std::move(kept);
     if (grabbed_) {
-        if (auto now = follow(*grabbed_, grips_)) {
+        if (auto now = follow(*grabbed_, grips_, before)) {
             grabbed_ = *now;
         } else {
             grabbed_.reset();
@@ -111,10 +129,16 @@ QString GripController::hoverHint() const
                 .arg(height ? QString(", z %1").arg(*height, 0, 'f', 3) : QString());
         }
         if (grip.kind == cad::GripKind::SegmentMid) {
-            return QString("Segment %1 of polyline %2: drag to stretch · Ctrl+drag to add a vertex "
+            // A straight segment's middle moves the segment bodily; an arc's
+            // keeps both ends and bends the arc through the cursor
+            // (docs/drawing.md, "What a drag means per handle").
+            const bool arc =
+                grip.index < polyline->segmentCount() && polyline->isArc(grip.index);
+            return QString("Segment %1 of polyline %2: drag to %3 · Ctrl+drag to add a vertex "
                            "· right-click for segment tools")
                 .arg(grip.index)
-                .arg(grip.entity);
+                .arg(grip.entity)
+                .arg(arc ? QStringLiteral("bend the arc") : QStringLiteral("stretch"));
         }
     }
     QString kind = QString::fromUtf8(cad::toString(grip.kind));
@@ -144,6 +168,13 @@ QString GripController::prompt() const
 {
     if (!grabbed_) {
         return {};
+    }
+    // A Ctrl-press on a segment middle adds a vertex where it is put down;
+    // the band said what a stretch says, word for word.
+    if (insert_ && grabbed_->kind == cad::GripKind::SegmentMid) {
+        return QString("Grip segment middle, adding a vertex: specify where it goes or type x,y, "
+                       "@dx,dy or @distance<angle  %1_")
+            .arg(typed_);
     }
     return QString("Grip %1: specify the point or type x,y, @dx,dy or @distance<angle  %2_")
         .arg(QString::fromUtf8(cad::toString(grabbed_->kind)), typed_);
