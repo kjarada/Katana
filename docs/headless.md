@@ -222,9 +222,17 @@ move - and for `+` a press and a release - and paint again. The view cannot
 tell them from a person's mouse, so they drive the same code: snapping, the
 grips, the tool's pick. Each prints one line, numbers exact
 (`formatExactReal`), what the view then drew of the running tool's preview
-by role (`drawing/feedback_painter.hpp`):
+by role (`drawing/feedback_painter.hpp`) - `enter` counts where Enter,
+not a click, would add:
 
-    pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert expects=point shapes=0 markers=0 target=1 added=1 removed=0 focus=4 refused=no caption="vertex 2 between 1 and 2 · 15.000 from 1" prompt="Insert Vertex: Click on polyline 2 where the new vertex goes"
+    pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert expects=point shapes=0 markers=0 target=1 added=1 removed=0 enter=0 focus=4 refused=no caption="new vertex between 1 and 2 · 15.000 from 1" prompt="Insert Vertex: Click on polyline 2 where the new vertex goes"
+
+The counts are of what is ON SCREEN: an Added vertex the painter leaves out
+beside a Removed one (a fillet a few pixels across) is not counted, nor a
+focus square thinned out of a dense string - `added=2` once stood over a
+picture with no disc in it. A `+` the tool took is recorded as the view
+then shows it: the caption is what the click did, and `refused=no`, until
+the pointer moves off (`ToolHost::feedback`).
 
 `tool=none` and zero counts with no tool running. A point outside the view
 fails the run (exit 1, "is outside the view ... zoom to it first"), as a
@@ -236,7 +244,16 @@ the PNG for the look; the record is what a test asserts
 (`qt_pointer_steps_hover_and_click_the_plan_view_headless`,
 `qt_insert_vertex_shows_where_the_vertex_goes_headless`,
 `qt_insert_vertex_beside_the_vertex_clicked_first_headless`,
-`qt_delete_vertex_takes_the_chosen_vertex_headless`).
+`qt_insert_vertex_is_answered_with_what_it_did_headless`,
+`qt_delete_vertex_takes_the_chosen_vertex_headless`,
+`qt_delete_vertex_previews_the_click_not_the_chosen_vertex_headless`).
+
+A test binary of Qt widgets run by hand needs MSYS2's runtime first on PATH,
+as ctest puts it (`KATANA_RUNTIME_BIN`): with `build/release/bin` first,
+Qt loads the copy of `Qt6Core.dll` there and looks for its platform plugin
+beside the test binary, in `bin/tests/platforms`, which the build does not
+fill - and a GUI program with no platform plugin waits on a message box
+nobody sees. `katana.exe` itself finds `bin/platforms` beside it.
 
 ## check_screenshot.cmake: the test side
 

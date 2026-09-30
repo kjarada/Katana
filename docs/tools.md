@@ -52,9 +52,10 @@ delegates to the drawing system's `parsePrecisePoint`, so a DMS angle or a
 quadrant bearing may follow the `<` of polar input, and the router has an
 overload taking the document's drafting settings and the cursor, which the
 tool host uses: `<angle` and `=distance` lock the next points, `x,y,z`
-reaches a tool's `InteractiveTool::point3d`, and a number a tool refuses at
-a point prompt is direct distance entry (`docs/drawing.md`, "Precision
-input").
+reaches a tool's `InteractiveTool::point3d`, `@dx,dy,dz` reaches it as the
+tool's `InteractiveTool::lastHeight` plus dz (refused when there is none,
+never read as a height of dz), and a number a tool refuses at a point
+prompt is direct distance entry (`docs/drawing.md`, "Precision input").
 
 **Icons live with their family** (`src/katana_qt/tools/icons_<family>.cpp`,
 by tool id), drawn to icons.cpp's conventions: a 24-unit grid, a 1.7-unit
@@ -226,6 +227,24 @@ Vertices tools, `docs/drawing.md`, "What a vertex tool acts on"):
 - `pickAperture`, `vertexAperture`: the view's 8 px and 12 px in model units
   NOW, read at every preview and click; `pickReach` and `vertexReach` fall
   back to `pickTolerance` and 1.5 times it (the 12 : 8 ratio).
+- `view`: the view's own hidden layers (`ToolHost::setView`), for what a tool
+  finds without the view's pick - through the selection, the handles, a
+  point's height: `pickable` asks THE visibility rule with them, as the
+  pick does, and `pickUnder` passes them when it falls back to the model.
+  The vertex tools took a selected polyline on a hidden layer through the
+  selection, round the pick.
+
+**What a tool tells the view (2026-09-30).** `InteractiveTool::takesSnap`:
+whether the view may snap the cursor to a snap for the step the tool is
+at; the view asks it through `SnapRequest::accept`, which passes a refused
+candidate over for the next best. Insert Vertex takes only a snap ON the
+polyline, where its click would be taken. `InteractiveTool::lastHeight`:
+the height a typed dz changes. **What the host holds back**:
+`ToolHost::feedback` answers a click the tool took with what the click did,
+not with the refusal the tool's next preview gives at that spot, until the
+cursor leaves it by the pick aperture - the tool is made anew at each
+restart and never sees the pointer, and the host sees both
+(`AClickTheToolTookIsNotAnsweredInRedUntilThePointerLeavesIt`).
 
 Rejected: a new virtual `preview(cursor, pick)` (46 overrides to change, and
 `-Woverloaded-virtual` fails the build at every one left); refreshing
@@ -358,4 +377,5 @@ Not done: `ViewportWidget` still has the `enum class Tool` of the first eight
 tools and `setTool`, used for Select (`stopToolIn` calls it) and by
 `test_plan_view_tools.cpp`; the window and the workspace name tools by id.
 The picks of an entity step (Trim's edges, the part to cut) are not
-highlighted, and `ToolContext` carries no view's layer overrides.
+highlighted. `ToolContext::view` carries the view's layer overrides, but
+only the vertex tools, Polyline 3D's heights and `pickUnder` read them.

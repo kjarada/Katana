@@ -180,6 +180,7 @@ class ViewportWidget final : public QWidget {
         std::size_t target = 0;
         std::size_t added = 0;
         std::size_t removed = 0;
+        std::size_t enter = 0;
         std::size_t focus = 0;
         bool refused = false;
         std::string caption;
@@ -399,7 +400,10 @@ class ViewportWidget final : public QWidget {
         friend bool operator==(const DrawingKey&, const DrawingKey&) = default;
     };
     [[nodiscard]] DrawingKey drawingKey(double deviceRatio) const;
-    void drawPreview(QPainter& painter) const;
+    // The running tool's preview; answers whether it drew the snap marker
+    // too, beneath its glyphs (FeedbackFrame::beneathGlyphs), or left it to
+    // be drawn after.
+    [[nodiscard]] bool drawPreview(QPainter& painter) const;
     // The running tool's prompt and what has been typed for it, in a band
     // along the bottom of the view.
     void drawPrompt(QPainter& painter) const;

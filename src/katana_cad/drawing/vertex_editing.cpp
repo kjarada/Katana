@@ -1,9 +1,11 @@
 #include "katana/cad/drawing/vertex_editing.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <utility>
 
+#include "katana/cad/selection.hpp"
 #include "katana/cad/survey_import.hpp"
 #include "katana/commands/change_set.hpp"
 #include "katana/entity/entity_geometry.hpp"
@@ -161,7 +163,8 @@ std::vector<bool> verticesOnSurveyPoints(const katana::entity::Model& model,
     return keep;
 }
 
-std::optional<double> heightAtPoint(const Document& document, const Point2& at, double tolerance)
+std::optional<double> heightAtPoint(const Document& document, const Point2& at, double tolerance,
+                                    const LayerOverrides& view)
 {
     std::optional<double> best;
     double bestDistance = std::numeric_limits<double>::infinity();
@@ -177,7 +180,7 @@ std::optional<double> heightAtPoint(const Document& document, const Point2& at, 
         katana::geometry::Box2(at, at).inflated(std::max(tolerance, 1.0e-9)), ids);
     for (const auto id : ids) {
         const Entity* entity = document.model().entities.find(static_cast<EntityId>(id));
-        if (entity == nullptr) {
+        if (entity == nullptr || !isDrawn(document.model(), *entity, view)) {
             continue;
         }
         if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity->geometry)) {
@@ -193,6 +196,21 @@ std::optional<double> heightAtPoint(const Document& document, const Point2& at, 
         }
     }
     return best;
+}
+
+std::pair<std::size_t, std::size_t> vertexRange(const CurvePolyline2& polyline, std::size_t a,
+                                                std::size_t b, bool otherSide)
+{
+    if (!polyline.closed) {
+        return {std::min(a, b), std::max(a, b)};
+    }
+    const std::size_t forward = katana::geometry::verticesBetween(polyline, a, b).size();
+    const std::size_t backward = katana::geometry::verticesBetween(polyline, b, a).size();
+    bool walkForward = forward <= backward;
+    if (otherSide) {
+        walkForward = !walkForward;
+    }
+    return walkForward ? std::pair{a, b} : std::pair{b, a};
 }
 
 } // namespace katana::cad

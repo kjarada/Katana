@@ -22,9 +22,11 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/layer_overrides.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
@@ -81,11 +83,26 @@ editEachPolyline(std::vector<katana::entity::EntityId> ids, std::string name, Po
                                                        double tolerance = 1.0e-4);
 
 // The height the drawing has at `at`: a point's, a polyline's vertex's or a
-// line's end's lying within `tolerance`, the nearest first; nullopt when
-// nothing with a height is there. What a 3D polyline takes from a snapped
-// point.
+// line's end's lying within `tolerance`, the nearest first, of what `view`
+// DRAWS (selection.hpp, isDrawn: a locked layer's heights are still read);
+// nullopt when nothing with a height is there. What a 3D polyline takes from
+// a snapped point and Set Vertex Height from a click. The view has no default,
+// as isDrawn's has none: a hidden point's height once went into a vertex the
+// user could see, from a point they could not.
 [[nodiscard]] std::optional<double> heightAtPoint(const Document& document,
                                                   const katana::geometry::Point2& at,
-                                                  double tolerance = 1.0e-6);
+                                                  double tolerance, const LayerOverrides& view);
+
+// The two vertices of a Straighten or a Grade in the order the arithmetic
+// walks them (geometry::straighten and gradeBetween walk FORWARD from the
+// first). An open polyline's lower first. A closed polyline's either way
+// round: forward from `a` unless the other way takes in fewer vertices (a tie
+// walks forward), and the other way round with `otherSide`. The one rule of
+// the window's Straighten and Grade tools and the STRAIGHTEN and VERTEXZ GRADE
+// verbs, so picks 3 then 1 of a hexagon and "STRAIGHTEN id 3 1" take out the
+// same vertex: the verbs walked forward alone, and took out three.
+[[nodiscard]] std::pair<std::size_t, std::size_t>
+vertexRange(const katana::geometry::CurvePolyline2& polyline, std::size_t a, std::size_t b,
+            bool otherSide);
 
 } // namespace katana::cad

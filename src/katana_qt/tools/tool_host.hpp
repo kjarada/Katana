@@ -58,7 +58,16 @@ class ToolHost {
     // The running tool's prompt, "" when none is running.
     [[nodiscard]] std::string prompt() const;
     // The rubber band for the cursor at `cursor`; empty when none is running.
+    // A click the tool took is never answered in red: until the cursor
+    // leaves the place of that click (by the pick aperture, setCursor), a
+    // refusal there is shown as the polyline in play and what the click did
+    // ("vertex 2 added ..."). The tool, restarted or at its next step, is
+    // right that a second click there would be refused - a vertex is there
+    // now - but red straight after every success read as a failure.
     [[nodiscard]] katana::cad::ToolFeedback feedback(const Point2& cursor) const;
+    // Whether the running tool takes `snap` (InteractiveTool::takesSnap); with
+    // none running, every snap is taken - a grip's drag snaps as it always did.
+    [[nodiscard]] bool takesSnap(const katana::cad::SnapResult& snap) const;
     // What relative input (@dx,dy) and the Perpendicular and Tangent snaps
     // measure from; nullopt before the tool's first point.
     [[nodiscard]] std::optional<Point2> lastPoint() const;
@@ -83,6 +92,9 @@ class ToolHost {
         pickAperture_ = std::move(pick);
         vertexAperture_ = std::move(vertex);
     }
+    // The view's own hidden layers (ToolContext::view), which must outlive the
+    // host: a tool finding what to act on itself passes them as the pick does.
+    void setView(const katana::cad::LayerOverrides* view) { view_ = view; }
 
     // ---- what the user did ---------------------------------------------------
     // Each answers what the tool made of it. With no tool running the answer
@@ -100,8 +112,9 @@ class ToolHost {
     // or an option keyword.
     Outcome typed(std::string_view text);
     // Where the cursor is, for direct distance entry: a number typed at a
-    // point prompt is that far from the last point towards it.
-    void setCursor(const Point2& at) { cursor_ = at; }
+    // point prompt is that far from the last point towards it. Leaving the
+    // place of the last click the tool took ends feedback()'s hold on it.
+    void setCursor(const Point2& at);
     // Enter, Space or a right-click.
     Outcome enter();
     // Steps back one input inside the tool (the U inside LINE); never the
@@ -147,6 +160,12 @@ class ToolHost {
     // layer and style (D9) and the selection as it is.
     void make();
     Outcome apply(katana::cad::ToolStep step);
+    // A click at `at` that the tool answered with `step`: applied, and when
+    // taken, held (heldAt_) so that its place is not answered in red.
+    Outcome click(const Point2& at, katana::cad::ToolStep step);
+    // How far the cursor must go from a held click to end the hold: the
+    // view's pick aperture now, else the tolerance a tool is made with.
+    [[nodiscard]] double holdReach() const;
     // Drops the tool and raises onFinished and onPrompt.
     void end();
     Outcome idle();
@@ -154,6 +173,15 @@ class ToolHost {
 
     katana::cad::Document& document_;
     std::optional<Point2> cursor_;
+    // The last click the tool took and what it said (feedback()); cleared by
+    // any other input, a new tool, and the cursor leaving it.
+    std::optional<Point2> heldAt_;
+    std::string heldMessage_;
+    // What apply() made of its step: taken (Continue, or Done with its
+    // command executed), and the message it reported.
+    bool lastTaken_ = false;
+    std::string lastMessage_;
+    const katana::cad::LayerOverrides* view_ = nullptr;
     const katana::cad::ToolInfo* info_ = nullptr;
     std::unique_ptr<katana::cad::InteractiveTool> tool_;
     // Bumped whenever tool_ is made or dropped, so apply() can tell that a

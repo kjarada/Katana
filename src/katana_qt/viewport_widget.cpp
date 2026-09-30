@@ -61,9 +61,9 @@ using katana::geometry::Vec2;
 
 namespace {
 
-// The drawing's ground is theme::viewport(); a tool's preview, the grips and
-// the prompt band draw in drawing::overlay's colours (feedback_painter.hpp).
-const QColor kSnapMarker(0xf7, 0xd0, 0x3c);
+// The drawing's ground is theme::viewport(); a tool's preview, the grips, the
+// snap marker and the prompt band draw in drawing::overlay's colours
+// (feedback_painter.hpp).
 
 constexpr double kPickAperturePixels = 8.0;
 constexpr double kSnapAperturePixels = 12.0;
@@ -289,7 +289,8 @@ katana::core::Result<std::string> ViewportWidget::pointerAt(const Point2& at, bo
            " expects=" + std::string(expects ? cad::toString(*expects) : "none") +
            " shapes=" + count(counts.shapes) + " markers=" + count(counts.markers) +
            " target=" + count(counts.target) + " added=" + count(counts.added) +
-           " removed=" + count(counts.removed) + " focus=" + count(counts.focus) +
+           " removed=" + count(counts.removed) + " enter=" + count(counts.enter) +
+           " focus=" + count(counts.focus) +
            " refused=" + (counts.refused ? "yes" : "no") + " caption=\"" + counts.caption +
            "\" prompt=\"" + promptLine().toStdString() + "\"";
 }
@@ -329,6 +330,9 @@ void ViewportWidget::wireToolHost()
         return cad::pickEntity(document_.model(), at, reach, filter, &document_.spatialIndex());
     });
     tools_.setApertures([this] { return pickTolerance(); }, [this] { return snapAperture(); });
+    // The same hidden layers for what a tool finds itself (the selection it
+    // started on, a point's height): state_ is this view's for its life.
+    tools_.setView(&state_.layers);
     tools_.onPrompt = [this](const std::string&) { updatePrompt(); };
     tools_.onMessage = [this](const std::string& message) {
         if (onToolMessage) {
@@ -520,6 +524,12 @@ void ViewportWidget::updateCursor(const QPointF& screen)
         request.from = base;
         request.gridSpacing = gridVisible_ ? cad::gridSpacing(state_.plan.scale) : 0.0;
         request.view = &state_.layers;
+        if (!gripping) {
+            // Only a snap the tool's step can use: Insert Vertex's point must
+            // be ON the line, and an arc's centre or another string's end
+            // beside it took the cursor off (InteractiveTool::takesSnap).
+            request.accept = [this](const cad::SnapResult& snap) { return tools_.takesSnap(snap); };
+        }
         // Through the Document's spatial index (PLAN.MD Phase 18). Measured in
         // Release on 100 000 entities: 4404 us per mouse move scanning,
         // 88 us indexed. The answer is identical either way - asserted by
@@ -1312,7 +1322,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     // The view's own furniture over the drawing: what a tool is making, the
     // hint for an empty drawing, the selection box, the snap and the prompt.
     painter.setRenderHint(QPainter::Antialiasing, true);
-    drawPreview(painter);
+    const bool snapDrawn = drawPreview(painter);
     drawGrips(painter);
     if (drawingIsEmpty() && !tools_.active()) {
         drawEmptyHint(painter);
@@ -1326,7 +1336,9 @@ void ViewportWidget::paintEvent(QPaintEvent*)
         painter.drawRect(QRectF(*boxStart_, boxEnd_).normalized());
         painter.setBrush(Qt::NoBrush);
     }
-    drawSnapMarker(painter);
+    if (!snapDrawn) {
+        drawSnapMarker(painter);
+    }
     drawPrompt(painter);
 
     lastFrameMs_ = static_cast<double>(frameTimer.nsecsElapsed()) / 1.0e6;
@@ -1481,14 +1493,14 @@ katana::core::Result<cad::PlotSettings> ViewportWidget::fittedPlot(cad::PlotSett
     return settings;
 }
 
-void ViewportWidget::drawPreview(QPainter& painter) const
+bool ViewportWidget::drawPreview(QPainter& painter) const
 {
     lastPreviewCount_ = 0;
     lastPreviewCounts_ = PreviewCounts{};
     // Nothing until the pointer has been over this view: before that the
     // cursor is the origin, where nobody pointed.
     if (!tools_.active() || !pointerSeen_) {
-        return;
+        return false;
     }
     const cad::ToolFeedback feedback = tools_.feedback(cursorWorld_);
     // A shape in the preview is drawn as the geometry it will become, so a
@@ -1515,6 +1527,9 @@ void ViewportWidget::drawPreview(QPainter& painter) const
     where.trackingLabel =
         !trackingLabel_.isEmpty() && (!activeSnap_ || activeSnap_->mode == cad::SnapMode::Grid);
     where.bandHeight = drawing::bandHeight();
+    // The snap marker goes under the preview's glyphs: where a snap puts the
+    // point, the tool's new vertex is drawn, and it must stay legible there.
+    where.beneathGlyphs = [&] { drawSnapMarker(painter); };
     // The polyline in play shows its vertices, since the grips are hidden
     // while a tool runs.
     std::vector<Point2> focus;
@@ -1527,9 +1542,10 @@ void ViewportWidget::drawPreview(QPainter& painter) const
     }
     const drawing::FeedbackCounts counts = drawing::paintFeedback(painter, feedback, focus, where);
     lastPreviewCount_ = counts.shapes + counts.markers;
-    lastPreviewCounts_ = PreviewCounts{counts.shapes, counts.markers, counts.target, counts.added,
-                                       counts.removed, counts.focus,  feedback.refused,
-                                       feedback.caption};
+    lastPreviewCounts_ = PreviewCounts{counts.shapes,  counts.markers,   counts.target,
+                                       counts.added,   counts.removed,   counts.enter,
+                                       counts.focus,   feedback.refused, feedback.caption};
+    return true;
 }
 
 void ViewportWidget::drawPrompt(QPainter& painter) const
@@ -1580,6 +1596,7 @@ std::optional<cad::Grip> ViewportWidget::gripAt(const QPointF& screen)
 
 void ViewportWidget::drawSnapMarker(QPainter& painter) const
 {
+    const QColor kSnapMarker = drawing::overlay::snap();
     // Object snap tracking: a small cross on each acquired point, and the
     // path the cursor is on, dotted from the point it runs through.
     if (document_.drafting().objectTracking) {

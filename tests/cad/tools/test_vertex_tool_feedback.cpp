@@ -14,9 +14,12 @@
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/drawing/vertex_editing.hpp"
+#include "katana/cad/snapping.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/math/numerics.hpp"
 #include "tool_driver.hpp"
@@ -157,7 +160,7 @@ TEST(VertexToolFeedback, InsertVertexShowsTheSegmentItSplitsAndTheVertexOnIt)
     EXPECT_TRUE(shown.shapes.empty()) << "the two halves lie on the old segment: no ghost";
     EXPECT_EQ(shown.focus, p);
     EXPECT_FALSE(shown.refused);
-    EXPECT_EQ(shown.caption, "vertex 1 between 0 and 1 · 4.000 from 0");
+    EXPECT_EQ(shown.caption, "new vertex between 0 and 1 · 4.000 from 0");
     EXPECT_EQ(driver.executed(), 0) << "a preview changes nothing";
 }
 
@@ -195,7 +198,7 @@ TEST(VertexToolFeedback, OnAnArcTheNewVertexIsOnTheArc)
     ASSERT_EQ(added.size(), 1u);
     EXPECT_TRUE(closeTo(added[0], Point2(5, -5), 1.0e-12)) << added[0].x << "," << added[0].y;
     // A quarter of the circle, 5 pi / 2 along the arc.
-    EXPECT_EQ(shown.caption, "vertex 1 between 0 and 1 · 7.854 from 0");
+    EXPECT_EQ(shown.caption, "new vertex between 0 and 1 · 7.854 from 0");
     // (5,6) is above the chord: the arc's nearest point is an end, sqrt(61)
     // = 7.81 away, far out of reach.
     const ToolFeedback away = driver.preview(5, 6);
@@ -232,7 +235,7 @@ TEST(VertexToolFeedback, AHotVertexChoosesTheSegmentEitherSideNearestTheCursor)
     driver.start("draw.vertex.insert", {vertexHandle(driver, p, 1)});
     EXPECT_EQ(driver.tool().prompt(),
               "Click beside vertex 1 of polyline " + idText(p) +
-                  " where the new vertex goes, or press Enter for the middle of segment 1");
+                  " where the new vertex goes, or press Enter for the marked middle of segment 1");
     // (7,1) is 1 from segment 0 and 3 from segment 1.
     const ToolFeedback west = driver.preview(7, 1);
     const auto westTargets = piecesOf(west, FeedbackRole::Target);
@@ -273,7 +276,7 @@ TEST(VertexToolFeedback, EnterWithAHotVertexAddsTheMiddleOfTheSegmentAfterIt)
     end.start("draw.vertex.insert", {vertexHandle(end, q, 3)});
     EXPECT_EQ(end.tool().prompt(),
               "Click beside vertex 3 of polyline " + idText(q) +
-                  " where the new vertex goes, or press Enter for the middle of segment 2");
+                  " where the new vertex goes, or press Enter for the marked middle of segment 2");
     ASSERT_EQ(end.enter().outcome, ToolStep::Outcome::Done);
     EXPECT_EQ(positionsOf(end, q), (std::vector<Point2>{Point2(0, 0), Point2(10, 0),
                                                         Point2(20, 0), Point2(20, 5),
@@ -476,8 +479,11 @@ TEST(VertexToolFeedback, SeveralHotVerticesGoInOneStep)
     selectOnly(driver, {p});
     driver.start("draw.vertex.delete", {vertexHandle(driver, p, 1), vertexHandle(driver, p, 2)});
     EXPECT_EQ(driver.tool().prompt(), "Press Enter to delete the 2 chosen vertices, or click another vertex");
+    // (8,8) is far from every vertex: a click there takes nothing, so the
+    // preview is what Enter would take, and says it is Enter's.
     const ToolFeedback shown = driver.preview(8, 8);
     EXPECT_EQ(pointsOf(shown, FeedbackRole::Removed).size(), 2u) << "what Enter would take";
+    EXPECT_EQ(shown.caption, "Enter: delete 2 vertices");
     const std::size_t undoCount = driver.document().history().undoCount();
     ASSERT_EQ(driver.enter().outcome, ToolStep::Outcome::Done);
     EXPECT_EQ(positionsOf(driver, p),
@@ -571,7 +577,9 @@ TEST(VertexToolFeedback, OneHotVertexAnswersTheFirstPickOfMove)
     const EntityId q = addPolyline(several, {Point2(0, 0), Point2(5, 0), Point2(10, 0)});
     selectOnly(several, {q});
     several.start("draw.vertex.move", {vertexHandle(several, q, 0), vertexHandle(several, q, 1)});
-    EXPECT_EQ(several.tool().prompt(), "2 vertices are chosen; click the one to move");
+    EXPECT_EQ(several.tool().prompt(), "2 vertices are chosen, and this tool moves one. Click the "
+                                       "vertex of polyline " +
+                                           idText(q) + " to move");
     EXPECT_EQ(several.tool().expects(), ToolInput::Entity);
 }
 
@@ -599,8 +607,11 @@ TEST(VertexToolFeedback, EditVerticesWithASelectedPolylineDoesNotAskForOne)
     EXPECT_EQ(driver.tool().prompt(), "Polyline " + idText(p) +
                                           " is in the Vertices panel; click another polyline, or "
                                           "press Enter");
+    // Over nothing a click takes nothing: the preview is what Enter keeps in
+    // the panel, and says it is Enter's, as every tool answered by what was
+    // chosen before it does.
     const ToolFeedback shown = driver.preview(50, 50);
-    EXPECT_EQ(shown.caption, "polyline " + idText(p) + " · 3 vertices, open");
+    EXPECT_EQ(shown.caption, "Enter: polyline " + idText(p) + " · 3 vertices, open");
     ASSERT_EQ(driver.enter().outcome, ToolStep::Outcome::Done);
     EXPECT_TRUE(driver.finished());
     EXPECT_EQ(driver.executed(), 0);
@@ -880,7 +891,8 @@ TEST(VertexToolFeedback, ChamferMarksItsFirstAndSecondSegments)
     ASSERT_EQ(targets.size(), 2u);
     EXPECT_TRUE(isSegment(targets[0], Point2(0, 0), Point2(10, 0)));
     EXPECT_TRUE(isSegment(targets[1], Point2(10, 0), Point2(10, 10)));
-    EXPECT_EQ(labelsOf(shown, FeedbackRole::Target), (std::vector<std::string>{"1", "2"}));
+    EXPECT_EQ(labelsOf(shown, FeedbackRole::Target), (std::vector<std::string>{"d1", "d2"}))
+        << "the distances along them, not numbers that read as segment numbers";
     ASSERT_EQ(driver.pick(p, 10, 0.1).outcome, ToolStep::Outcome::Continue);
     EXPECT_EQ(driver.tool().prompt().rfind("Specify the first distance, along segment 0", 0), 0u)
         << driver.tool().prompt();
@@ -898,20 +910,31 @@ TEST(VertexToolFeedback, APreviewNeverPromisesWhatTheClickDoesNot)
 {
     // For each tool whose click commits, over a 9 x 9 grid round a small
     // polyline: a refused preview is a refused click; otherwise the click
-    // leaves every Added point a vertex and every Removed vertex gone.
+    // leaves every Added point a vertex and every Removed vertex gone. With
+    // grips chosen before the tool (its handles) a click still picks anew,
+    // so the preview is that click's - and where a click takes nothing, it
+    // is Enter's, said as Enter's: the click is refused, the handles kept,
+    // and Enter then does what was shown.
     struct Case {
         const char* tool;
         bool closed;
         double bulge;          // of segment 0
         const char* firstPick; // a vertex picked first, "" for none
+        int hot = -1;          // a vertex chosen before the tool
+        int hotSecond = -1;    // a second one
+        int hotSegment = -1;   // a segment's middle chosen before the tool
     };
     const std::vector<Case> cases{
         {"draw.vertex.delete", false, 0.0, ""},     {"draw.vertex.start", true, 0.0, ""},
         {"draw.vertex.line", false, 0.5, ""},       {"draw.vertex.straighten", true, 0.0, "0"},
         {"draw.vertex.fillet", false, 0.0, ""},     {"draw.vertex.delete", true, 0.0, ""},
+        {"draw.vertex.delete", true, 0.0, "", 2},   {"draw.vertex.start", true, 0.0, "", 2},
+        {"draw.vertex.line", false, 0.5, "", -1, -1, 0},
+        {"draw.vertex.straighten", true, 0.0, "", 0, 2},
     };
     int accepted = 0;
     int refused = 0;
+    int enterShown = 0;
     for (const Case& c : cases) {
         for (int i = 0; i <= 8; ++i) {
             for (int j = 0; j <= 8; ++j) {
@@ -924,13 +947,36 @@ TEST(VertexToolFeedback, APreviewNeverPromisesWhatTheClickDoesNot)
                 shape.vertices[0].bulge = c.bulge;
                 const EntityId p = addCurve(driver, shape);
                 selectOnly(driver, {p});
-                driver.start(c.tool);
+                std::vector<Grip> handles;
+                for (const int v : {c.hot, c.hotSecond}) {
+                    if (v >= 0) {
+                        handles.push_back(vertexHandle(driver, p, static_cast<std::size_t>(v)));
+                    }
+                }
+                if (c.hotSegment >= 0) {
+                    const auto piece = shape.segment(static_cast<std::size_t>(c.hotSegment));
+                    const Point2 middle =
+                        std::visit([](const auto& segment) { return segment.pointAt(0.5); }, piece);
+                    handles.push_back(Grip{p, GripKind::SegmentMid,
+                                           static_cast<std::size_t>(c.hotSegment), middle});
+                }
+                driver.start(c.tool, handles);
                 if (std::string(c.firstPick) == "0") {
                     ASSERT_EQ(driver.type("0").outcome, ToolStep::Outcome::Continue);
                 }
                 const ToolFeedback shown = driver.preview(x, y);
+                const std::string prompt = driver.tool().prompt();
                 ToolStep step = driver.click(x, y);
-                if (step.outcome == ToolStep::Outcome::Continue) {
+                if (shown.caption.rfind("Enter: ", 0) == 0) {
+                    // Nothing a click takes is here: refused, and the tool
+                    // still offers what was shown for Enter.
+                    ASSERT_FALSE(handles.empty()) << c.tool << " at " << x << "," << y;
+                    EXPECT_EQ(step.outcome, ToolStep::Outcome::Rejected)
+                        << c.tool << " at " << x << "," << y;
+                    EXPECT_EQ(driver.tool().prompt(), prompt) << "the handles are kept";
+                    step = driver.enter();
+                    ++enterShown;
+                } else if (step.outcome == ToolStep::Outcome::Continue) {
                     step = driver.enter(); // Fillet: the radius at its default
                 }
                 if (shown.refused || shown.marks.empty()) {
@@ -958,7 +1004,395 @@ TEST(VertexToolFeedback, APreviewNeverPromisesWhatTheClickDoesNot)
             }
         }
     }
-    std::printf("preview grid: %d accepted with marks, %d refused\n", accepted, refused);
+    std::printf("preview grid: %d accepted with marks, %d refused, %d where Enter was shown\n",
+                accepted, refused, enterShown);
     EXPECT_GT(accepted, 0);
     EXPECT_GT(refused, 0);
+    EXPECT_GT(enterShown, 0);
+}
+
+// ---- the review of 2026-09-30: what the preview and the click must agree on ----------------
+
+TEST(VertexToolFeedback, WithAChosenVertexAClickIsPreviewedWhereItTakesSomethingAndEnterElsewhere)
+{
+    // The square (0,0) (10,0) (10,10) (0,10), closed, with vertex 2 chosen
+    // before Delete Vertex. Over vertex 0 a click deletes vertex 0, so that
+    // is what the preview marks: it marked vertex 2, and the click deleted
+    // a vertex nobody had marked. Over nothing a click takes nothing, and
+    // the preview is Enter's deletion of vertex 2, saying so.
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId p = addPolyline(
+        driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(0, 10)}, true);
+    selectOnly(driver, {p});
+    driver.start("draw.vertex.delete", {vertexHandle(driver, p, 2)});
+    const std::string ready =
+        "Press Enter to delete vertex 2 of polyline " + idText(p) + ", or click another vertex";
+    ASSERT_EQ(driver.tool().prompt(), ready);
+
+    // (0.2, 0.1) is sqrt(0.05) = 0.22 from vertex 0, within the 0.75.
+    const ToolFeedback overVertex0 = driver.preview(0.2, 0.1);
+    EXPECT_EQ(pointsOf(overVertex0, FeedbackRole::Removed), std::vector<Point2>{Point2(0, 0)});
+    EXPECT_EQ(overVertex0.caption, "delete vertex 0 · segments 3 and 0 become one");
+    // (5,5) is sqrt(50) = 7.07 from every vertex.
+    const ToolFeedback overNothing = driver.preview(5, 5);
+    EXPECT_EQ(pointsOf(overNothing, FeedbackRole::Removed), std::vector<Point2>{Point2(10, 10)});
+    EXPECT_EQ(overNothing.caption, "Enter: delete vertex 2 · segments 1 and 2 become one");
+
+    // A click on nothing is refused and keeps the choice: it dropped it.
+    EXPECT_EQ(driver.click(5, 5).outcome, ToolStep::Outcome::Rejected);
+    EXPECT_EQ(driver.tool().prompt(), ready);
+    EXPECT_EQ(driver.executed(), 0);
+    // The click over vertex 0 deletes vertex 0, as the preview showed.
+    ASSERT_EQ(driver.click(0.2, 0.1).outcome, ToolStep::Outcome::Done);
+    EXPECT_EQ(positionsOf(driver, p),
+              (std::vector<Point2>{Point2(10, 0), Point2(10, 10), Point2(0, 10)}));
+}
+
+TEST(VertexToolFeedback, ChangeStartWithAChosenVertexPreviewsTheVertexAClickWouldTake)
+{
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId p = addPolyline(
+        driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(0, 10)}, true);
+    selectOnly(driver, {p});
+    driver.start("draw.vertex.start", {vertexHandle(driver, p, 2)});
+    const ToolFeedback over3 = driver.preview(0.1, 10.1);
+    EXPECT_EQ(pointsOf(over3, FeedbackRole::Target), std::vector<Point2>{Point2(0, 10)});
+    EXPECT_EQ(over3.caption, "vertex 3 becomes vertex 0");
+    EXPECT_EQ(driver.preview(5, 5).caption, "Enter: vertex 2 becomes vertex 0");
+    ASSERT_EQ(driver.click(0.1, 10.1).outcome, ToolStep::Outcome::Done);
+    EXPECT_EQ(shapeOf(driver, p).vertices.front().position, Point2(0, 10));
+}
+
+TEST(VertexToolFeedback, BesideAChosenVertexThePlaceEnterAddsAtIsMarked)
+{
+    // (0,0) (10,0) (10,10) with vertex 1 chosen: Enter adds at the middle
+    // of the segment after it, (10,5), whichever segment the cursor is by -
+    // it added on an edge the preview never marked - so that place is
+    // marked while the click's own place follows the cursor.
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+    selectOnly(driver, {p});
+    driver.start("draw.vertex.insert", {vertexHandle(driver, p, 1)});
+    for (const Point2& cursor : {Point2(7, 1), Point2(11, 4)}) {
+        const ToolFeedback shown = driver.preview(cursor.x, cursor.y);
+        EXPECT_EQ(pointsOf(shown, FeedbackRole::Enter), std::vector<Point2>{Point2(10, 5)});
+        EXPECT_EQ(labelsOf(shown, FeedbackRole::Enter), std::vector<std::string>{"Enter"});
+    }
+    // By segment 0 the click's place is on segment 0, and Enter's stays.
+    EXPECT_TRUE(hasPoint(pointsOf(driver.preview(7, 1), FeedbackRole::Added), Point2(7, 0)));
+    ASSERT_EQ(driver.enter().outcome, ToolStep::Outcome::Done);
+    EXPECT_EQ(positionsOf(driver, p), (std::vector<Point2>{Point2(0, 0), Point2(10, 0),
+                                                           Point2(10, 5), Point2(10, 10)}));
+}
+
+TEST(VertexToolFeedback, TheVertexJustPickedIsShownAsTakenNotRefusedInRed)
+{
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId p = addPolyline(
+        driver, {Point2(0, 0), Point2(1, 1), Point2(2, -1), Point2(3, 1), Point2(4, 0)});
+    driver.start("draw.vertex.straighten");
+    ASSERT_EQ(driver.pick(p, 0, 0.1).outcome, ToolStep::Outcome::Continue);
+    // The cursor is still on vertex 0 just after its pick: that pick, not a
+    // refusal of a second one.
+    const ToolFeedback same = driver.preview(0, 0.1);
+    EXPECT_FALSE(same.refused);
+    EXPECT_EQ(pointsOf(same, FeedbackRole::Target), std::vector<Point2>{Point2(0, 0)});
+    EXPECT_EQ(labelsOf(same, FeedbackRole::Target), std::vector<std::string>{"keep"});
+    EXPECT_EQ(same.caption, "vertex 0 is picked already; click the other one");
+    const ToolStep again = driver.click(0, 0.1);
+    EXPECT_EQ(again.outcome, ToolStep::Outcome::Rejected);
+    EXPECT_EQ(again.message, same.caption) << "the click says what the preview said";
+    // Off the polyline the first pick stays marked.
+    const ToolFeedback away = driver.preview(50, 50);
+    EXPECT_EQ(labelsOf(away, FeedbackRole::Target), std::vector<std::string>{"keep"});
+    EXPECT_EQ(away.focus, p);
+}
+
+TEST(VertexToolFeedback, FilletAndChamferRememberWhatWasTypedForTheNextUse)
+{
+    // 2.5, then 1.5 and 0.75 - none of them the 1 the tools start with, so a
+    // tool that forgot would offer and preview 1.
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId first = addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+    const EntityId second = addPolyline(driver, {Point2(20, 0), Point2(30, 0), Point2(30, 10)});
+    driver.start("draw.vertex.fillet");
+    ASSERT_EQ(driver.pick(first, 10, 0.1).outcome, ToolStep::Outcome::Continue);
+    ASSERT_EQ(driver.type("2.5").outcome, ToolStep::Outcome::Done);
+    // At a right angle the tangent points are the radius back along each
+    // side: (27.5,0) and (30,2.5).
+    const ToolFeedback round = driver.preview(30, 0.1);
+    const auto tangents = pointsOf(round, FeedbackRole::Added);
+    ASSERT_EQ(tangents.size(), 2u);
+    EXPECT_TRUE(hasPoint(tangents, Point2(27.5, 0), 1.0e-12));
+    EXPECT_TRUE(hasPoint(tangents, Point2(30, 2.5), 1.0e-12));
+    EXPECT_EQ(round.caption, "fillet vertex 1 · radius 2.500");
+    ASSERT_EQ(driver.pick(second, 30, 0.1).outcome, ToolStep::Outcome::Continue);
+    EXPECT_TRUE(driver.tool().prompt().ends_with("<2.5>")) << driver.tool().prompt();
+    ASSERT_EQ(driver.type("1").outcome, ToolStep::Outcome::Done); // as it started
+
+    const EntityId third = addPolyline(driver, {Point2(0, 20), Point2(10, 20), Point2(10, 30)});
+    const EntityId fourth = addPolyline(driver, {Point2(20, 20), Point2(30, 20), Point2(30, 30)});
+    driver.start("draw.vertex.chamfer");
+    ASSERT_EQ(driver.pick(third, 10, 20.1).outcome, ToolStep::Outcome::Continue);
+    ASSERT_EQ(driver.type("1.5").outcome, ToolStep::Outcome::Continue);
+    ASSERT_EQ(driver.type("0.75").outcome, ToolStep::Outcome::Done);
+    // The bevel 1.5 back along the incoming side, 0.75 along the outgoing.
+    const auto cut = pointsOf(driver.preview(30, 20.1), FeedbackRole::Added);
+    ASSERT_EQ(cut.size(), 2u);
+    EXPECT_TRUE(hasPoint(cut, Point2(28.5, 20), 1.0e-12));
+    EXPECT_TRUE(hasPoint(cut, Point2(30, 20.75), 1.0e-12));
+    ASSERT_EQ(driver.pick(fourth, 30, 20.1).outcome, ToolStep::Outcome::Continue);
+    EXPECT_TRUE(driver.tool().prompt().ends_with("<1.5>")) << driver.tool().prompt();
+    ASSERT_EQ(driver.type("1").outcome, ToolStep::Outcome::Continue);
+    EXPECT_TRUE(driver.tool().prompt().ends_with("<0.75>")) << driver.tool().prompt();
+    ASSERT_EQ(driver.type("1").outcome, ToolStep::Outcome::Done); // as it started
+}
+
+TEST(VertexToolFeedback, MoveVertexTakesARelativeDzAsAChangeOfItsHeight)
+{
+    // @0,0,1 raises the vertex by 1, as the VERTEX MOVE verb reads it: it
+    // set the height to 1, and a surveyed 101.5 was lost.
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(5, 0), Point2(10, 0)}, false,
+                                   {100.0, 101.5, 100.0});
+    driver.start("draw.vertex.move");
+    ASSERT_EQ(driver.pick(p, 5, 0.1).outcome, ToolStep::Outcome::Continue);
+    ASSERT_EQ(driver.type("@0,0,1").outcome, ToolStep::Outcome::Done);
+    EXPECT_EQ(shapeOf(driver, p).vertices[1].position, Point2(5, 0));
+    EXPECT_DOUBLE_EQ(*shapeOf(driver, p).vertices[1].height, 102.5);
+    ASSERT_EQ(driver.pick(p, 5, 0.1).outcome, ToolStep::Outcome::Continue);
+    ASSERT_EQ(driver.type("@1,0,-0.5").outcome, ToolStep::Outcome::Done);
+    EXPECT_EQ(shapeOf(driver, p).vertices[1].position, Point2(6, 0));
+    EXPECT_DOUBLE_EQ(*shapeOf(driver, p).vertices[1].height, 102.0);
+
+    // A vertex with no height has none for a dz to change: refused, never
+    // read as a height of dz, and the tool still asks where it goes.
+    const EntityId flat = addPolyline(driver, {Point2(0, 5), Point2(5, 5), Point2(10, 5)});
+    ASSERT_EQ(driver.pick(flat, 5, 5.1).outcome, ToolStep::Outcome::Continue);
+    const ToolStep refused = driver.type("@0,0,1");
+    EXPECT_EQ(refused.outcome, ToolStep::Outcome::Rejected);
+    EXPECT_NE(refused.message.find("no height"), std::string::npos) << refused.message;
+    EXPECT_FALSE(shapeOf(driver, flat).vertices[1].height.has_value());
+    EXPECT_EQ(driver.tool().expects(), ToolInput::Point);
+    // x,y,z is still the height itself.
+    ASSERT_EQ(driver.type("5,5,7").outcome, ToolStep::Outcome::Done);
+    EXPECT_DOUBLE_EQ(*shapeOf(driver, flat).vertices[1].height, 7.0);
+}
+
+TEST(VertexToolFeedback, AThreeDPolylineClimbsFromItsLastVertexByARelativeDz)
+{
+    // The same reading of @dx,dy,dz in the other tool that takes heights:
+    // from 100, @10,0,1.5 is a vertex at 101.5, not at 1.5.
+    ToolDriver driver;
+    driver.start("draw.polyline3d");
+    ASSERT_EQ(driver.type("0,0,100").outcome, ToolStep::Outcome::Continue);
+    ASSERT_EQ(driver.type("@10,0,1.5").outcome, ToolStep::Outcome::Continue);
+    ASSERT_EQ(driver.enter().outcome, ToolStep::Outcome::Done);
+    const auto made = driver.document().lastCreatedEntities();
+    ASSERT_EQ(made.size(), 1u);
+    const CurvePolyline2 polyline = shapeOf(driver, made.front());
+    ASSERT_EQ(polyline.vertices.size(), 2u);
+    EXPECT_EQ(polyline.vertices[1].position, Point2(10, 0));
+    EXPECT_DOUBLE_EQ(*polyline.vertices[1].height, 101.5);
+}
+
+TEST(VertexToolFeedback, APolylineOnAHiddenOrLockedLayerIsNotTakenThoughItIsSelected)
+{
+    // Selected, then its layer hidden in the drawing, hidden in this view, or
+    // locked: the selection is not pruned, and the tools took the polyline
+    // through it - marks on ground nobody could see, and an edit; on a locked
+    // layer a preview the command then refused.
+    for (const std::string_view how : {"hidden", "hidden in the view", "locked"}) {
+        ToolDriver driver;
+        driver.setPickTolerance(kAperture);
+        katana::cad::CommandInterpreter layers{driver.document()};
+        ASSERT_TRUE(layers.run("LAYER NEW B").ok());
+        katana::entity::Entity entity;
+        entity.geometry = Polyline2{{Point2(0, 0), Point2(10, 0), Point2(10, 10)}, false};
+        entity.layer = "B";
+        const EntityId p = driver.add(katana::commands::createEntities({entity}));
+        selectOnly(driver, {p});
+        if (how == "hidden") {
+            ASSERT_TRUE(layers.run("LAYER HIDE B").ok());
+        } else if (how == "hidden in the view") {
+            driver.hideInView("B");
+        } else {
+            ASSERT_TRUE(layers.run("LAYER LOCK B").ok());
+        }
+        for (const char* tool : {"draw.vertex.delete", "draw.vertex.insert"}) {
+            driver.start(tool);
+            // Vertex 1, and the middle of segment 0.
+            EXPECT_TRUE(driver.preview(10, 0.1).marks.empty()) << how << ", " << tool;
+            EXPECT_TRUE(driver.preview(5, 0.1).marks.empty()) << how << ", " << tool;
+            EXPECT_EQ(driver.click(10, 0.1).outcome, ToolStep::Outcome::Rejected)
+                << how << ", " << tool;
+            EXPECT_EQ(driver.click(5, 0.1).outcome, ToolStep::Outcome::Rejected)
+                << how << ", " << tool;
+            const std::string prompt = driver.tool().prompt();
+            if (how == "locked") {
+                EXPECT_EQ(prompt.rfind("polyline " + idText(p) +
+                                           " is on the locked layer B; unlock it to edit it. "
+                                           "Click",
+                                       0),
+                          0u)
+                    << tool << ": " << prompt;
+            } else {
+                EXPECT_EQ(prompt.find("olyline " + idText(p)), std::string::npos)
+                    << "no prompt names what cannot be seen: " << tool << ": " << prompt;
+            }
+        }
+        EXPECT_EQ(driver.executed(), 0) << how;
+        EXPECT_EQ(shapeOf(driver, p).vertices.size(), 3u) << how;
+    }
+}
+
+TEST(VertexToolFeedback, SetHeightTakesNoHeightFromAPointTheViewHides)
+{
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    katana::cad::CommandInterpreter layers{driver.document()};
+    ASSERT_TRUE(layers.run("LAYER NEW H").ok());
+    const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(5, 0), Point2(10, 0)});
+    katana::entity::Entity spot;
+    spot.geometry = katana::entity::PointGeometry{Point2(30, 30)};
+    spot.layer = "H";
+    katana::entity::setHeights(spot.properties, {7.5});
+    driver.add(katana::commands::createEntities({spot}));
+    driver.hideInView("H");
+    driver.start("draw.vertex.height");
+    ASSERT_EQ(driver.pick(p, 5, 0.1).outcome, ToolStep::Outcome::Continue);
+    EXPECT_EQ(driver.click(30.1, 30).outcome, ToolStep::Outcome::Rejected);
+    EXPECT_FALSE(shapeOf(driver, p).vertices[1].height.has_value());
+}
+
+TEST(VertexToolFeedback, InsertTakesNoSnapOffTheArcItInsertsInto)
+{
+    // The arc from (0,0) to (10,0) of bulge 1: the half circle about (5,0),
+    // radius 5, below the chord. The cursor (1.5,-3.6) is sqrt(25.21) - 5 =
+    // 0.021 off it, far from its ends and middle, so the only snap there is
+    // its Center, (5,0), which the arc offers while it is hovered - 5 off
+    // the line, where no pick reaches: Insert showed nothing along an arc
+    // but at its very middle.
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    CurvePolyline2 shape = CurvePolyline2::fromPoints({Point2(0, 0), Point2(10, 0)});
+    shape.vertices[0].bulge = 1.0;
+    const EntityId arc = addCurve(driver, shape);
+    selectOnly(driver, {arc});
+    driver.start("draw.vertex.insert");
+    katana::cad::SnapRequest plain;
+    plain.cursor = Point2(1.5, -3.6);
+    plain.aperture = 0.5;
+    const auto centre = katana::cad::snap(driver.document().model(), plain);
+    ASSERT_TRUE(centre.has_value());
+    ASSERT_EQ(centre->mode, katana::cad::SnapMode::Center) << "what took the cursor before";
+    EXPECT_FALSE(driver.snapAt(1.5, -3.6).has_value());
+    const auto added = pointsOf(driver.previewSnapped(1.5, -3.6), FeedbackRole::Added);
+    ASSERT_EQ(added.size(), 1u);
+    // On the arc, by the cursor: its projection from the centre.
+    EXPECT_NEAR(added[0].distanceTo(Point2(5, 0)), 5.0, 1.0e-12);
+    EXPECT_NEAR(added[0].distanceTo(Point2(1.5, -3.6)), std::sqrt(25.21) - 5.0, 1.0e-12);
+    // The arc's Midpoint (5,-5) is on it: taken, and the vertex goes there.
+    const auto middle = driver.snapAt(5, -5.3);
+    ASSERT_TRUE(middle.has_value());
+    EXPECT_EQ(middle->mode, katana::cad::SnapMode::Midpoint);
+    ASSERT_EQ(driver.clickSnapped(5, -5.3).outcome, ToolStep::Outcome::Done);
+    EXPECT_TRUE(hasPoint(positionsOf(driver, arc), Point2(5, -5), 1.0e-12));
+}
+
+TEST(VertexToolFeedback, InsertTakesNoSnapBesideTheLineNorOnAVertexOfIt)
+{
+    // (0,0)-(30,0), a pick reach of 0.3 and the snap aperture of 0.5: the
+    // view's 8 and 12 px in near enough their proportion. A line's end at
+    // (10,0.4) is 0.4 off the polyline: snapped to, the point left the
+    // pick's reach, and Insert showed nothing and refused the click. The
+    // polyline's own vertex (0,0) is too close to insert at. Both are passed
+    // over and the cursor stays; a crossing ON the line is still taken.
+    ToolDriver driver;
+    driver.setPickTolerance(0.3);
+    const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(30, 0)});
+    driver.add(katana::commands::createLine(Point2(10, 0.4), Point2(10, 5)));
+    driver.add(katana::commands::createLine(Point2(20, -5), Point2(20, 7)));
+    selectOnly(driver, {p});
+    driver.start("draw.vertex.insert");
+    EXPECT_FALSE(driver.snapAt(10.3, 0.05).has_value());
+    EXPECT_TRUE(hasPoint(pointsOf(driver.previewSnapped(10.3, 0.05), FeedbackRole::Added),
+                         Point2(10.3, 0)));
+    EXPECT_FALSE(driver.snapAt(0.4, 0.05).has_value());
+    EXPECT_TRUE(hasPoint(pointsOf(driver.previewSnapped(0.4, 0.05), FeedbackRole::Added),
+                         Point2(0.4, 0)));
+    const auto crossing = driver.snapAt(20.2, 0.1);
+    ASSERT_TRUE(crossing.has_value());
+    EXPECT_EQ(crossing->mode, katana::cad::SnapMode::Intersection);
+    ASSERT_EQ(driver.clickSnapped(20.2, 0.1).outcome, ToolStep::Outcome::Done);
+    EXPECT_TRUE(hasPoint(positionsOf(driver, p), Point2(20, 0), 1.0e-12));
+}
+
+TEST(VertexToolFeedback, AChosenVertexTheToolCannotUseIsExplainedNotDropped)
+{
+    // Fillet with an end chosen, Straighten with three, Delete with so many
+    // that too few would be left: each says why before asking as usual.
+    {
+        ToolDriver driver;
+        driver.setPickTolerance(kAperture);
+        const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+        selectOnly(driver, {p});
+        driver.start("draw.vertex.fillet", {vertexHandle(driver, p, 0)});
+        EXPECT_EQ(driver.tool().prompt(),
+                  "vertex 0 is an end of the polyline; a corner is where two segments meet. "
+                  "Click the corner vertex of polyline " +
+                      idText(p) + " to round");
+    }
+    {
+        ToolDriver driver;
+        driver.setPickTolerance(kAperture);
+        const EntityId p = addPolyline(
+            driver, {Point2(0, 0), Point2(1, 1), Point2(2, -1), Point2(3, 1), Point2(4, 0)});
+        selectOnly(driver, {p});
+        driver.start("draw.vertex.straighten", {vertexHandle(driver, p, 0),
+                                                vertexHandle(driver, p, 2),
+                                                vertexHandle(driver, p, 4)});
+        EXPECT_EQ(driver.tool().prompt(),
+                  "3 vertices are chosen, and this tool takes two on one polyline. Click the "
+                  "first vertex of polyline " +
+                      idText(p) + " to keep");
+    }
+    {
+        ToolDriver driver;
+        driver.setPickTolerance(kAperture);
+        const EntityId p = addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+        selectOnly(driver, {p});
+        driver.start("draw.vertex.delete",
+                     {vertexHandle(driver, p, 0), vertexHandle(driver, p, 1)});
+        const std::string prompt = driver.tool().prompt();
+        EXPECT_EQ(prompt.rfind("polyline " + idText(p) + ": deleting 2 vertices would leave 1", 0),
+                  0u)
+            << prompt;
+        EXPECT_TRUE(prompt.ends_with(". Click the vertex of polyline " + idText(p) + " to delete"))
+            << prompt;
+    }
+}
+
+TEST(VertexToolFeedback, TheToolStaysOnThePolylineLastEditedNotTheFirst)
+{
+    // The first insert selects the polyline it edited (R5); an insert on
+    // another then moves the selection to it: kept on the first, the prompt
+    // named the first while the user worked on the second.
+    ToolDriver driver;
+    driver.setPickTolerance(kAperture);
+    const EntityId first = addPolyline(driver, {Point2(0, 0), Point2(10, 0)});
+    const EntityId second = addPolyline(driver, {Point2(0, 5), Point2(10, 5)});
+    driver.start("draw.vertex.insert");
+    ASSERT_EQ(driver.click(4, 5.1).outcome, ToolStep::Outcome::Done);
+    EXPECT_EQ(driver.document().selection().ids(), std::vector<EntityId>{second});
+    ASSERT_EQ(driver.click(6, 0.1).outcome, ToolStep::Outcome::Done);
+    EXPECT_EQ(driver.document().selection().ids(), std::vector<EntityId>{first});
+    EXPECT_EQ(driver.tool().prompt(),
+              "Click on polyline " + idText(first) + " where the new vertex goes");
 }

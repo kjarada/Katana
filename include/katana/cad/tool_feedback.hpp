@@ -29,9 +29,14 @@ enum class FeedbackRole : std::uint8_t {
     Target,  // what a click here takes or acts on: the vertex, the segment, the polyline
     Added,   // where something new lands: a vertex read from the RESULT, not the cursor
     Removed, // what the step takes away: a vertex deleted or straightened out, a piece cut
+    // Where ENTER, not a click here, would put something: Insert Vertex
+    // beside a chosen vertex adds at the middle of a segment the cursor may
+    // not be on, and a place Enter uses must be seen before it is pressed.
+    Enter,
 };
 
-// "target", "added", "removed": how the headless pointer record names them.
+// "target", "added", "removed", "enter": how the headless pointer record
+// names them.
 [[nodiscard]] const char* toString(FeedbackRole role);
 
 struct FeedbackMark {

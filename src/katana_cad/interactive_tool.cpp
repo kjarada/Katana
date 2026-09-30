@@ -40,6 +40,8 @@ const char* toString(FeedbackRole role)
         return "added";
     case FeedbackRole::Removed:
         return "removed";
+    case FeedbackRole::Enter:
+        return "enter";
     }
     return "unknown";
 }
@@ -72,8 +74,20 @@ std::optional<katana::entity::EntityId> pickUnder(const ToolContext& context, co
     }
     SelectionFilter filter;
     filter.types = types;
+    filter.view = context.view;
     return pickEntity(context.document->model(), at, within, filter,
                       &context.document->spatialIndex());
+}
+
+const LayerOverrides& viewOf(const ToolContext& context)
+{
+    return context.view != nullptr ? *context.view : kNoLayerOverrides;
+}
+
+bool pickable(const ToolContext& context, const katana::entity::Entity& entity)
+{
+    return context.document != nullptr &&
+           isSelectable(context.document->model(), entity, viewOf(context));
 }
 
 ToolStep ToolStep::next(std::string message)
@@ -142,6 +156,10 @@ ToolFeedback InteractiveTool::preview(const Point2& /*cursor*/) const { return {
 
 std::optional<Point2> InteractiveTool::lastPoint() const { return std::nullopt; }
 
+std::optional<double> InteractiveTool::lastHeight() const { return std::nullopt; }
+
+bool InteractiveTool::takesSnap(const SnapResult& /*snap*/) const { return true; }
+
 namespace tools {
 
 ToolStep keepWorkOnEscape(InteractiveTool& tool)
@@ -189,6 +207,31 @@ Result<Point2> parsePointInput(std::string_view text, std::optional<Point2> last
     return point->point;
 }
 
+namespace {
+
+// A typed point handed to `tool`. x,y,z is a height for a tool that takes
+// one (point3d's default drops it). @dx,dy,dz CHANGES the last point's
+// height by dz, as the VERTEX MOVE verb reads it: handing dz on as the
+// height turned "raise it by 1" into a height of 1 and wiped a surveyed z.
+// With no height there to change it is refused, never read as absolute.
+ToolStep typedPoint(InteractiveTool& tool, const PrecisePoint& point)
+{
+    if (!point.z) {
+        return tool.point(point.point);
+    }
+    if (!point.relative) {
+        return tool.point3d(point.point, *point.z);
+    }
+    const auto base = tool.lastHeight();
+    if (!base) {
+        return ToolStep::rejected("the point @ is measured from has no height for a dz to "
+                                  "change; give the height absolutely, as x,y,z");
+    }
+    return tool.point3d(point.point, *base + *point.z);
+}
+
+} // namespace
+
 ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text)
 {
     const std::string_view input = katana::core::trimmed(text);
@@ -203,8 +246,7 @@ ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text)
         if (!point) {
             return ToolStep::rejected(point.error().describe());
         }
-        // x,y,z: a height for a tool that takes one (point3d's default drops it).
-        return point->z ? tool.point3d(point->point, *point->z) : tool.point(point->point);
+        return typedPoint(tool, *point);
     }
     return tool.value(input);
 }
@@ -258,7 +300,7 @@ ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text, DraftingS
         if (!point) {
             return ToolStep::rejected(point.error().describe());
         }
-        return point->z ? tool.point3d(point->point, *point->z) : tool.point(point->point);
+        return typedPoint(tool, *point);
     }
     ToolStep step = tool.value(input);
     if (step.outcome == ToolStep::Outcome::Rejected && atPoint && tool.lastPoint()) {

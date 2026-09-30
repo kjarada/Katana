@@ -2159,7 +2159,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>INSERTVERTEX|~110.3,50"
-            "-DEXPECT=pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert [^\r\n]*target=1 added=1 removed=0 focus=4 refused=no caption=\"vertex 2 between 1 and 2 [^0-9\"]+ 15[.]000 from 1\" prompt=\"Insert Vertex: Click on polyline 2 where the new vertex goes\""
+            "-DEXPECT=pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert [^\r\n]*target=1 added=1 removed=0 enter=0 focus=4 refused=no caption=\"new vertex between 1 and 2 [^0-9\"]+ 15[.]000 from 1\" prompt=\"Insert Vertex: Click on polyline 2 where the new vertex goes\""
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/insert_vertex_hover_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_insert_vertex_puts_it_on_the_line_headless
@@ -2175,7 +2175,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85|>INSERTVERTEX|~111,70|>|<VERTEX LIST 2"
-            "-DEXPECT=pointer: action=hover x=111 y=70 tool=draw.vertex.insert [^\r\n]*target=2 added=1 [^\r\n]*caption=\"vertex 2 between 1 and 2 [^0-9\"]+ 35[.]000 from 1\" prompt=\"Insert Vertex: Click beside vertex 2 of polyline 2 where the new vertex goes, or press Enter for the middle of segment 2\".*vertices=5.*index=3 x=75 y=85 "
+            "-DEXPECT=pointer: action=hover x=111 y=70 tool=draw.vertex.insert [^\r\n]*target=2 added=1 removed=0 enter=1 [^\r\n]*caption=\"new vertex between 1 and 2 [^0-9\"]+ 35[.]000 from 1\" prompt=\"Insert Vertex: Click beside vertex 2 of polyline 2 where the new vertex goes, or press Enter for the marked middle of segment 2\".*vertices=5.*index=3 x=75 y=85 "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/insert_vertex_beside_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # A vertex made hot with Shift+click answers Delete Vertex: the prompt
@@ -2187,6 +2187,41 @@ if(TARGET katana)
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85,shift|>DELETEVERTEX|~110,85|>|<VERTEX LIST 2"
             "-DEXPECT=pointer: action=hover x=110 y=85 tool=draw.vertex.delete [^\r\n]*removed=[1-9][^\r\n]*prompt=\"Delete Vertex: Press Enter to delete vertex 2 of polyline 2, or click another vertex\".*vertices=3 "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/delete_vertex_chosen_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The same chosen vertex 2 (110,85), with the pointer over vertex 0
+    # (40,35) instead: a click there picks anew and deletes vertex 0, so the
+    # preview is that deletion, not Enter's - it marked vertex 2 while the
+    # click deleted vertex 0. The click leaves (110,35) (110,85) (40,85).
+    add_test(NAME qt_delete_vertex_previews_the_click_not_the_chosen_vertex_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85,shift|>DELETEVERTEX|~40.2,35.2|+40.2,35.2|<VERTEX LIST 2"
+            "-DEXPECT=pointer: action=hover x=40[.]2 y=35[.]2 tool=draw.vertex.delete [^\r\n]*caption=\"delete vertex 0 [^\"]*\".*vertex 0 deleted.*vertices=3 .*index=0 x=110 y=35 .*index=1 x=110 y=85 .*index=2 x=40 y=85 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/delete_vertex_previews_the_click_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # After the click that adds a vertex the pointer is on it, where the
+    # restarted tool would refuse another: the view answers the click with
+    # what it did, not in red, until the pointer moves.
+    add_test(NAME qt_insert_vertex_is_answered_with_what_it_did_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>INSERTVERTEX|~110.3,50|+110.3,50"
+            "-DEXPECT=pointer: action=click x=110[.]3 y=50 tool=draw.vertex.insert [^\r\n]*refused=no caption=\"vertex 2 added to polyline 2 on segment 1 [(]5 vertices[)]\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/insert_vertex_answered_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # With the snaps on - their default - a line's end 4.5 above the
+    # square's top edge sits in the snap aperture of a pointer on the edge:
+    # it took the cursor off the line, and Insert showed nothing. Now only a
+    # snap ON the line is taken, and the preview is there.
+    add_test(NAME qt_insert_vertex_with_snaps_on_stays_on_the_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=>SNAP ON|>ZOOM E|>LINE 60,89.5 60,100|>SELECT 2|>INSERTVERTEX|~60,85.2|+60,85.2|<VERTEX LIST 2"
+            "-DEXPECT=pointer: action=hover x=60 y=85[.]2 tool=draw.vertex.insert [^\r\n]*target=1 added=1 [^\r\n]*refused=no .*vertices=5 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/insert_vertex_snaps_on_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Straighten on the closed boundary, polyline 1 (0,0) (160,0) (175,90)
     # (80,130) (0,100), from vertex 1 to vertex 3: forward that takes out
@@ -2226,6 +2261,9 @@ if(TARGET katana)
         qt_insert_vertex_puts_it_on_the_line_headless
         qt_insert_vertex_beside_the_vertex_clicked_first_headless
         qt_delete_vertex_takes_the_chosen_vertex_headless
+        qt_delete_vertex_previews_the_click_not_the_chosen_vertex_headless
+        qt_insert_vertex_is_answered_with_what_it_did_headless
+        qt_insert_vertex_with_snaps_on_stays_on_the_line_headless
         qt_straighten_shows_what_goes_headless
         qt_segment_to_arc_shows_the_arc_headless
         qt_fillet_refuses_an_end_vertex_at_the_pick_headless

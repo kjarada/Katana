@@ -7,6 +7,7 @@
 // against geometry worked out by hand.
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -50,18 +51,36 @@ class ToolDriver {
     // What the view would draw with the cursor at (x, y).
     [[nodiscard]] ToolFeedback preview(double x, double y) const { return tool_->preview({x, y}); }
     // A click the plan view would snap: to the nearest end, middle, centre
-    // or intersection (the default modes) within 0.5 of (x, y), handed on
-    // as the view hands it (routeSnappedPoint) - a point of an entity
-    // reaches the tool as that point. Nothing within 0.5 is a plain click.
+    // or intersection (the default modes) within 0.5 of (x, y) that the
+    // tool's step takes (InteractiveTool::takesSnap, as the view asks it),
+    // handed on as the view hands it (routeSnappedPoint) - a point of an
+    // entity reaches the tool as that point. Nothing within 0.5 is a plain
+    // click.
     ToolStep clickSnapped(double x, double y)
+    {
+        const auto found = snapAt(x, y);
+        const katana::geometry::Point2 at = found ? found->point : katana::geometry::Point2(x, y);
+        return apply(routeSnappedPoint(*tool_, document_, at, found));
+    }
+    // What the view would draw with the cursor at (x, y) snapped as
+    // clickSnapped snaps it.
+    [[nodiscard]] ToolFeedback previewSnapped(double x, double y) const
+    {
+        const auto found = snapAt(x, y);
+        return tool_->preview(found ? found->point : katana::geometry::Point2(x, y));
+    }
+    // The snap the view would make at (x, y), the tool asked as the view asks it.
+    [[nodiscard]] std::optional<SnapResult> snapAt(double x, double y) const
     {
         SnapRequest request;
         request.cursor = {x, y};
         request.aperture = 0.5;
-        const auto found = snap(document_.model(), request);
-        const katana::geometry::Point2 at = found ? found->point : katana::geometry::Point2(x, y);
-        return apply(routeSnappedPoint(*tool_, document_, at, found));
+        request.view = &view_;
+        request.accept = [this](const SnapResult& found) { return tool_->takesSnap(found); };
+        return snap(document_.model(), request);
     }
+    // Layers the view hides of its own (ToolContext::view) - before start().
+    void hideInView(std::string_view layer) { view_.hide(layer); }
     ToolStep pick(katana::entity::EntityId id, double x, double y)
     {
         return apply(tool_->entity(id, {x, y}));
@@ -109,6 +128,7 @@ class ToolDriver {
         context.selection = document_.selection().ids();
         context.pickTolerance = pickTolerance_;
         context.handles = std::exchange(handles_, {});
+        context.view = &view_;
         tool_ = info_->make(context);
         finished_ = false;
     }
@@ -138,6 +158,7 @@ class ToolDriver {
     }
 
     Document document_;
+    LayerOverrides view_;
     const ToolInfo* info_ = nullptr;
     std::unique_ptr<InteractiveTool> tool_;
     std::vector<Grip> handles_;

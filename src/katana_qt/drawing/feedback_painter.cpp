@@ -40,6 +40,8 @@ QColor windowBox()
 
 QColor crossingBox() { return QColor(0x7b, 0xd3, 0x89, 40); }
 
+QColor snap() { return QColor(0xf7, 0xd0, 0x3c); }
+
 } // namespace overlay
 
 namespace {
@@ -53,9 +55,15 @@ constexpr double kRingRadius = 7.0;
 constexpr double kTargetSquare = 6.0;
 constexpr double kAddedRadius = 6.0;
 constexpr double kPlusArm = 3.0;
-constexpr double kRemovedHalf = 5.0;
-constexpr double kRemovedBacking = 7.5;
+// The Removed X and its dark disc sit inside a Target ring's 2 px pen
+// (6 to 8 px out): a disc of 7.5 covered the ring's inner half, and a fillet
+// - its corner both the target and what goes - read as a Delete.
+constexpr double kRemovedHalf = 4.5;
+constexpr double kRemovedBacking = 5.5;
 constexpr double kFocusSquare = 6.0;
+// Focus squares nearer each other than this are thinned: the square and its
+// 1.5 px pen are 7.5 px across, so 10 px leaves a gap a squint still sees.
+constexpr double kFocusSpacing = 10.0;
 constexpr double kMarkerHalf = 3.5;
 // The caption's corner is this far right of and below the cursor, clear of
 // the crosshair and the snap marker's name; 16 more below a tracking label
@@ -153,6 +161,36 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
     painter.save();
     painter.setBrush(Qt::NoBrush);
 
+    // The polyline in play first, under everything the tool marks: its
+    // vertices as the grips' cold squares, hollow, vertex 0 numbered (below)
+    // so the numbering the prompts use can be read. Drawn over the marks, a
+    // survey string's hundreds of squares were a band that buried the target
+    // segment and the removed dashes; and a square is left out where it
+    // would crowd the last one drawn, keeping each end, so a dense string
+    // shows where its vertices are without becoming a solid bar.
+    const QRectF reach = frame.visible.adjusted(-kFocusSquare, -kFocusSquare, kFocusSquare,
+                                                kFocusSquare);
+    // One drawRects for all of them: a survey string has hundreds, and a
+    // call each cost more than the rest of the preview.
+    std::vector<QRectF> squares;
+    squares.reserve(focusVertices.size());
+    std::optional<QPointF> lastDrawn;
+    for (std::size_t i = 0; i < focusVertices.size(); ++i) {
+        const QPointF p = frame.toScreen(focusVertices[i]);
+        const bool end = i == 0 || i + 1 == focusVertices.size();
+        if (!reach.contains(p) ||
+            (!end && lastDrawn &&
+             std::hypot(p.x() - lastDrawn->x(), p.y() - lastDrawn->y()) < kFocusSpacing)) {
+            continue;
+        }
+        squares.emplace_back(p.x() - kFocusSquare / 2, p.y() - kFocusSquare / 2, kFocusSquare,
+                             kFocusSquare);
+        lastDrawn = p;
+    }
+    painter.setPen(QPen(overlay::gripCold(), 1.5));
+    painter.drawRects(squares.data(), static_cast<int>(squares.size()));
+    counts.focus = squares.size();
+
     // Removed pieces: a dim stroke under red dashes, so the dashes read over
     // the drawing's own lines and the orange selection dashes alike.
     for (const FeedbackMark& mark : feedback.marks) {
@@ -195,24 +233,12 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
                                 2 * kMarkerHalf));
     }
     counts.markers = feedback.markers.size();
-    // The polyline in play: its vertices as the grips' cold squares, hollow,
-    // with vertex 0 numbered so the numbering the prompts use can be read.
-    const QRectF reach = frame.visible.adjusted(-kFocusSquare, -kFocusSquare, kFocusSquare,
-                                                kFocusSquare);
-    // One drawRects for all of them: a survey string has hundreds, and a
-    // call each cost more than the rest of the preview.
-    std::vector<QRectF> squares;
-    squares.reserve(focusVertices.size());
-    for (const katana::geometry::Point2& vertex : focusVertices) {
-        const QPointF p = frame.toScreen(vertex);
-        if (reach.contains(p)) {
-            squares.emplace_back(p.x() - kFocusSquare / 2, p.y() - kFocusSquare / 2, kFocusSquare,
-                                 kFocusSquare);
-        }
+    // What the view puts beneath the glyphs: its snap marker.
+    if (frame.beneathGlyphs) {
+        painter.save();
+        frame.beneathGlyphs();
+        painter.restore();
     }
-    painter.setPen(QPen(overlay::gripCold(), 1.5));
-    painter.drawRects(squares.data(), static_cast<int>(squares.size()));
-    counts.focus = squares.size();
     // Target vertices: a ring round a filled square.
     for (const FeedbackMark& mark : feedback.marks) {
         if (mark.role != FeedbackRole::Target || !isVertex(mark)) {
@@ -246,6 +272,21 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
         painter.drawLine(p + QPointF(-kRemovedHalf, kRemovedHalf),
                          p + QPointF(kRemovedHalf, -kRemovedHalf));
     }
+    // Enter's place: the Added disc's circle, hollow - nothing is there
+    // until Enter is pressed - on a dark outline so it reads over the
+    // target's green, with "Enter" beside it (the labels, below).
+    for (const FeedbackMark& mark : feedback.marks) {
+        if (mark.role != FeedbackRole::Enter || !isVertex(mark)) {
+            continue;
+        }
+        const QPointF p = vertexOf(mark, frame);
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(overlay::ground(), 4.0));
+        painter.drawEllipse(p, kAddedRadius, kAddedRadius);
+        painter.setPen(QPen(overlay::preview(), 2.0));
+        painter.drawEllipse(p, kAddedRadius, kAddedRadius);
+        ++counts.enter;
+    }
     // Added vertices: a filled disc with a "+", on top of everything else -
     // except over a vertex that goes. A fillet or a chamfer a few pixels
     // across puts its new vertices on the corner's X, and three glyphs on one
@@ -274,18 +315,21 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
         painter.setPen(QPen(overlay::ground(), 1.5, Qt::SolidLine, Qt::FlatCap));
         painter.drawLine(p + QPointF(-kPlusArm, 0), p + QPointF(kPlusArm, 0));
         painter.drawLine(p + QPointF(0, -kPlusArm), p + QPointF(0, kPlusArm));
+        ++counts.added;
     }
-    // Added pieces are the ghost's to show; they are counted with the rest.
+    // Added pieces are the ghost's to show, and neither they nor Enter's
+    // place are counted here: the Added vertices and Enter's were counted
+    // as drawn, above, and the record says what is on screen.
     for (const FeedbackMark& mark : feedback.marks) {
         switch (mark.role) {
         case FeedbackRole::Target:
             ++counts.target;
             break;
-        case FeedbackRole::Added:
-            ++counts.added;
-            break;
         case FeedbackRole::Removed:
             ++counts.removed;
+            break;
+        case FeedbackRole::Added:
+        case FeedbackRole::Enter:
             break;
         }
     }
@@ -311,8 +355,9 @@ FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback&
         if (mark.label.empty()) {
             continue;
         }
-        const QColor colour =
-            mark.role == FeedbackRole::Removed ? overlay::removed() : targetColour;
+        const QColor colour = mark.role == FeedbackRole::Removed ? overlay::removed()
+                              : mark.role == FeedbackRole::Enter ? overlay::preview()
+                                                                 : targetColour;
         std::optional<QPointF> at;
         if (isVertex(mark)) {
             at = vertexOf(mark, frame) + QPointF(9.0, -9.0);
