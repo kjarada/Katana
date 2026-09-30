@@ -687,6 +687,16 @@ struct Traverse {
 
 // ---- Field setups, features and the project one import produces -----------------
 
+// SurveyStation::metadata key a reader sets where the file marks the end of the
+// observations its field software computed a resection from (the opcode field
+// file's 129): the value is "record N", N the record number that ends them, in
+// the numbering of the observations' SourceRecord::recordNumber. The
+// reduction's resection then takes only the setup's observations read before
+// record N; those after it - a controller's checks, often taken at the end of
+// the setup - are checks of the resected station, as they were for the field
+// software. Without the key every observation of the setup may enter it.
+inline constexpr const char* kResectionEndMetadata = "resection end";
+
 // One instrument setup as a field file records it: the setup, what the instrument
 // was oriented on, and everything shot from there.
 //

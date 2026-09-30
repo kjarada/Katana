@@ -28,6 +28,7 @@
 #include <utility>
 #include <variant>
 
+#include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 #include "reduction_engine.hpp"
 #include "reduction_formulas.hpp"
@@ -1209,6 +1210,9 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
             pointing.target != backsight) {
             continue;
         }
+        if (state.resectionPointings.count(p) != 0) {
+            continue; // its resection used it: its residuals are reported there, not as a check
+        }
         if (!pointing.azimuth && !pointing.gridDistance && !pointing.heightDifference) {
             continue;
         }
@@ -1263,11 +1267,13 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
             }
             continue;
         }
-        if (state.resectionTargets.count(a.target) != 0) {
-            continue; // its resection used it: not a check, and its residuals are reported there
-        }
         if (reradiate != nullptr) {
-            engine.place(a.target, computed);
+            // A point its resection was computed from is held by that
+            // resection: a later pointing to it checks the station, and
+            // places nothing.
+            if (state.resectionTargets.count(a.target) == 0) {
+                engine.place(a.target, computed);
+            }
             continue;
         }
         if (existing == nullptr || existing->origin == PositionOrigin::FileOnly) {
@@ -1357,6 +1363,26 @@ Status seedControl(Engine& engine, std::unordered_set<std::string_view>& drawing
         engine.place(point->id, position);
     }
     return {};
+}
+
+// The record a file's resection block ends at, from the setup's
+// kResectionEndMetadata ("record N"): absent where the setup has none, or its
+// value does not end in a record number - and then every pointing of the
+// setup may enter its resection, as for a file that marks no block.
+std::optional<std::size_t> resectionBlockEndOf(const SurveyStation& station)
+{
+    const auto it = station.metadata.find(kResectionEndMetadata);
+    if (it == station.metadata.end()) {
+        return std::nullopt;
+    }
+    const std::string_view value = katana::core::trimmed(it->second);
+    const std::size_t space = value.find_last_of(' ');
+    const std::optional<std::int64_t> record = katana::core::parseInteger(
+        space == std::string_view::npos ? value : value.substr(space + 1));
+    if (!record || *record <= 0) {
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(*record);
 }
 
 void seedEntered(Engine& engine)
@@ -1552,13 +1578,17 @@ void seedGnss(Engine& engine, std::size_t rawIndex, std::size_t rowIndex, GnssSe
 //
 // The resection is a fallback, not a first choice: a station another setup
 // radiates is placed that way as it always was, and its setup's pointings to
-// placed points are checks of it, so no file that reduced before reduces
-// differently unless a setup of it could not be placed at all. It comes before
-// the file's own coordinates because it is computed from what was measured,
-// which is what the reduction is for, where those coordinates are the field
-// software's or a person's, unchecked; and before the circle as set, which is
-// an assumption about the instrument. A resection that is refused (resectSetup
-// says why) leaves the setup to the later steps, which name the refusal.
+// placed points are checks of it. It comes before the file's own coordinates
+// because it is computed from what was measured, which is what the reduction
+// is for, where those coordinates are the field software's or a person's,
+// unchecked - the same order as a radiated point, which replaces the file's
+// coordinates of a point (PositionOrigin::FileOnly). So a setup that stood on
+// the file's own coordinates before (step 1) and observes enough placed
+// points is now resected instead: the file's coordinates are then reported as
+// a check of the resection, with a warning, never dropped unseen
+// (resectSetup). It comes before the circle as set, which is an assumption
+// about the instrument. A resection that is refused (resectSetup says why)
+// leaves the setup to the later steps, which name the refusal.
 void placeSetups(Engine& engine)
 {
     const std::vector<SurveyStation>& stations = engine.raw.stations;
@@ -1610,7 +1640,8 @@ void placeSetups(Engine& engine)
         std::unordered_map<std::string_view, Watch> targets;
         for (const std::size_t p : engine.setups[s].pointings) {
             const ReducedPointing& pointing = engine.pointings[p];
-            if (pointing.rejected || pointing.target == stations[s].setup.pointId) {
+            if (pointing.rejected || pointing.target == stations[s].setup.pointId ||
+                !inResectionBlock(engine, s, pointing)) {
                 continue;
             }
             Watch& watch = targets.try_emplace(pointing.target, Watch{s, false, false}).first->second;
@@ -1663,6 +1694,30 @@ void placeSetups(Engine& engine)
         std::string why;
         if (backsight.empty()) {
             why = " has no backsight";
+            // A setup like a second resection block on a station already
+            // placed observes placed points that could orient it, which the
+            // reduction does not do (docs/survey.md, "The reduction's
+            // resection", Not done): named, so the warning is not read as a
+            // setup that observed nothing known.
+            std::vector<std::string_view> placed;
+            for (const std::size_t p : engine.setups[s].pointings) {
+                const ReducedPointing& pointing = engine.pointings[p];
+                if (!pointing.rejected && pointing.direction &&
+                    engine.find(pointing.target) != nullptr &&
+                    std::find(placed.begin(), placed.end(), pointing.target) == placed.end()) {
+                    placed.push_back(pointing.target);
+                }
+            }
+            if (!placed.empty()) {
+                why += "; it observes " + std::to_string(placed.size()) + " placed point" +
+                       (placed.size() == 1 ? "" : "s") + " (";
+                for (std::size_t i = 0; i < placed.size() && i < 5; ++i) {
+                    why += (i == 0 ? "" : ", ") + std::string(placed[i]);
+                }
+                why += placed.size() > 5 ? ", ...)" : ")";
+                why += ", but a setup on a placed station is not oriented on the points it "
+                       "observes";
+            }
         } else if (backsight == station.setup.pointId) {
             why = " cannot be oriented: its backsight is the point it stands on and no circle "
                   "setting was recorded";
@@ -1980,6 +2035,9 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
     engine.report.input = context.input;
     engine.report.settings = settings;
     engine.setups.resize(raw.stations.size());
+    for (std::size_t s = 0; s < raw.stations.size(); ++s) {
+        engine.setups[s].resectionBlockEnd = resectionBlockEndOf(raw.stations[s]);
+    }
     engine.filePoints.reserve(raw.points.size());
     for (const SurveyPoint& point : raw.points) {
         engine.filePoints.emplace(point.id, &point);

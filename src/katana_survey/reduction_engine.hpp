@@ -165,10 +165,17 @@ struct SetupState {
     // less reading over these pointings, each with the standard deviation its
     // direction had in the resection - the least-squares orientation for the
     // station where it stands, so it follows the station when an adjustment
-    // moves it. Its targets are not checks when it radiates: they were used.
+    // moves it. The pointings its resection used are not checks when it
+    // radiates - their residuals are the resection's - but a later pointing
+    // to one of the same points (a controller's check after its block) is.
     bool resected = false;
     std::vector<std::pair<std::size_t, double>> resectionDirections{};
+    std::unordered_set<std::size_t> resectionPointings{};
     std::unordered_set<std::string_view> resectionTargets{};
+    // The record that ends the observations the file's own resection was
+    // computed from (kResectionEndMetadata), when the file says: only the
+    // pointings before it may enter the reduction's resection.
+    std::optional<std::size_t> resectionBlockEnd{};
 };
 
 struct Engine {
@@ -333,17 +340,30 @@ bool radiateGnssVectors(Engine& engine,
 // a side shot, then the side shots radiated from the adjusted stations.
 [[nodiscard]] katana::core::Status adjustAsNetwork(Engine& engine);
 
+// Whether `pointing` of setup `setupIndex` may enter the setup's resection:
+// every pointing, unless the file marks where the observations its field
+// software resected from end (SetupState::resectionBlockEnd) - then those
+// read before that record. The ones after are checks of the station.
+[[nodiscard]] bool inResectionBlock(const Engine& engine, std::size_t setupIndex,
+                                    const ReducedPointing& pointing);
+
 // Positions the station of setup `setupIndex`, which nothing else has, by
 // resection from its reduced pointings to points already placed, held as they
 // are: the least squares of its directions (one set, one orientation unknown)
-// and horizontal distances, weighted as the network weights them, and then of
-// its trigonometric height differences to the targets with heights. Places
-// the station (ComputationMethod::Resection), marks the setup resected
-// (SetupState), reports it (ReductionReport::resections) and returns true; or
-// returns false and puts in `why`, as a clause, what refused it: too few
-// placed points, a value that is not finite, targets on one position, the
-// station and its targets on one line, the station on the circle through its
-// targets (the danger circle), or a least squares that fails.
+// and horizontal distances, and then of its trigonometric height differences
+// to the targets with heights, weighted by the reduction's a-priori precision
+// for an instrument that is itself the unknown (its centring and height go to
+// the station's precision, not to each pointing). Places the station
+// (ComputationMethod::Resection), marks the setup resected (SetupState),
+// reports it (ReductionReport::resections) and returns true; or returns false
+// and puts in `why`, as a clause, what refused it: too few placed points, a
+// value that is not finite, a distance that is not positive, or a geometry
+// that does not fix the station - on one line with its targets, two targets
+// at nearly one place, near the circle through three of them (the danger
+// circle) - found exactly, or because at the a-priori precision the station
+// is uncertain by more than its least squares' linear model holds over, or
+// because that least squares fails. A refusal leaves nothing behind: no
+// warning of its least squares, no rejected observation.
 [[nodiscard]] bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why);
 
 // Why a setup whose station has no position was not a resection candidate, as
