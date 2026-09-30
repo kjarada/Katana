@@ -66,9 +66,11 @@ TEST(VertexTools, InsertVertexAddsAVertexOnTheNearestSegment)
 {
     ToolDriver driver;
     const EntityId id = addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.insert");
-    driver.pick(id, 4, 0.1);
-    driver.click(4, 0);
+    // One click near the segment: the vertex goes ON it, where the click
+    // projects (a pick of the polyline came first before 2026-09-30).
+    driver.click(4, 0.1);
     EXPECT_EQ(driver.executed(), 1);
     EXPECT_EQ(shapeOf(driver, id).vertices.size(), 4u);
     EXPECT_EQ(shapeOf(driver, id).vertices[1].position, Point2(4, 0));
@@ -80,6 +82,7 @@ TEST(VertexTools, DeleteVertexRemovesTheOneNearestThePick)
 {
     ToolDriver driver;
     const EntityId id = addPolyline(driver, {Point2(0, 0), Point2(5, 3), Point2(10, 0)});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.delete");
     driver.pick(id, 5.2, 2.9);
     EXPECT_EQ(shapeOf(driver, id).vertices.size(), 2u);
@@ -93,6 +96,7 @@ TEST(VertexTools, MoveVertexTakesARelativePointFromTheVertex)
 {
     ToolDriver driver;
     const EntityId id = addPolyline(driver, {Point2(0, 0), Point2(5, 0), Point2(10, 0)});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.move");
     driver.pick(id, 5, 0.2);
     driver.type("@0,3");
@@ -103,6 +107,7 @@ TEST(VertexTools, EditVerticesSelectsThePolylineForThePanel)
 {
     ToolDriver driver;
     const EntityId id = addPolyline(driver, {Point2(0, 0), Point2(5, 0)});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.edit");
     driver.pick(id, 2, 0);
     EXPECT_EQ(driver.executed(), 0) << "no edit, only a selection";
@@ -115,6 +120,7 @@ TEST(VertexTools, StraightenRemovesTheVerticesBetweenTwoPicks)
     ToolDriver driver;
     const EntityId id = addPolyline(
         driver, {Point2(0, 0), Point2(1, 1), Point2(2, -1), Point2(3, 1), Point2(4, 0)});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.straighten");
     driver.pick(id, 0, 0);
     driver.click(4, 0);
@@ -132,12 +138,14 @@ TEST(VertexTools, WeedTakesAToleranceAndCanKeepSurveyPoints)
     driver.add(katana::commands::createEntities({mark}));
 
     selectOnly(driver, {id});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.weed");
     driver.type("0.1");
     driver.enter(); // <Yes>: keep the survey point's vertex
     EXPECT_EQ(shapeOf(driver, id).vertices.size(), 3u);
 
     selectOnly(driver, {id});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.weed");
     driver.enter(); // the remembered 0.1
     driver.type("No");
@@ -149,6 +157,7 @@ TEST(VertexTools, DensifySelectsThenTakesTheIntervalAndChordTolerance)
 {
     ToolDriver driver;
     const EntityId id = addPolyline(driver, {Point2(0, 0), Point2(10, 0)});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.densify");
     EXPECT_EQ(driver.tool().expects(), katana::cad::ToolInput::Selection);
     selectOnly(driver, {id});
@@ -165,6 +174,7 @@ TEST(VertexTools, CloseOrOpenTogglesEachPolyline)
     const EntityId shut =
         addPolyline(driver, {Point2(10, 0), Point2(15, 0), Point2(15, 5)}, true);
     selectOnly(driver, {open, shut});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.close");
     // The selection answered the only question; Enter applies it.
     EXPECT_EQ(driver.executed(), 0);
@@ -179,6 +189,7 @@ TEST(VertexTools, ChangeStartVertexRenumbersAClosedPolyline)
     ToolDriver driver;
     const EntityId id =
         addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(0, 10)}, true);
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.start");
     driver.pick(id, 10, 10);
     EXPECT_EQ(shapeOf(driver, id).vertices.front().position, Point2(10, 10));
@@ -189,6 +200,7 @@ TEST(VertexTools, HeightsAreSetInterpolatedAndGraded)
     ToolDriver driver;
     const EntityId id = addPolyline(driver, {Point2(0, 0), Point2(5, 0), Point2(10, 0)},
                                     false, {100.0, std::nullopt, 110.0});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.height");
     driver.pick(id, 0, 0);
     driver.type("101");
@@ -201,6 +213,7 @@ TEST(VertexTools, HeightsAreSetInterpolatedAndGraded)
     const EntityId other = addPolyline(second, {Point2(0, 0), Point2(5, 0), Point2(10, 0)}, false,
                                        {100.0, std::nullopt, 110.0});
     selectOnly(second, {other});
+    second.setPickTolerance(0.5);
     second.start("draw.vertex.interpolate");
     second.enter();
     EXPECT_NEAR(*shapeOf(second, other).vertices[1].height, 105.0, 1e-12);
@@ -208,6 +221,7 @@ TEST(VertexTools, HeightsAreSetInterpolatedAndGraded)
     ToolDriver third;
     const EntityId graded = addPolyline(third, {Point2(0, 0), Point2(5, 0), Point2(10, 0)}, false,
                                         {100.0, 50.0, 110.0});
+    third.setPickTolerance(0.5);
     third.start("draw.vertex.grade");
     third.pick(graded, 0, 0);
     third.click(10, 0);
@@ -218,6 +232,7 @@ TEST(VertexTools, SegmentsBecomeArcsAndLinesAgain)
 {
     ToolDriver driver;
     const EntityId id = addPolyline(driver, {Point2(0, 0), Point2(2, 0), Point2(2, 5)});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.arc");
     driver.pick(id, 1, 0);
     driver.click(1, -1);
@@ -226,6 +241,7 @@ TEST(VertexTools, SegmentsBecomeArcsAndLinesAgain)
         << "a polyline with an arc is a curve polyline";
     EXPECT_NEAR(shapeOf(driver, id).vertices[0].bulge, 1.0, 1e-12);
 
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.line");
     driver.pick(id, 1, -1);
     EXPECT_TRUE(std::holds_alternative<Polyline2>(
@@ -237,6 +253,7 @@ TEST(VertexTools, FilletAndChamferOneCorner)
 {
     ToolDriver driver;
     const EntityId id = addPolyline(driver, {Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.fillet");
     driver.pick(id, 10, 0);
     driver.type("2");
@@ -245,6 +262,7 @@ TEST(VertexTools, FilletAndChamferOneCorner)
 
     ToolDriver second;
     const EntityId other = addPolyline(second, {Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+    second.setPickTolerance(0.5);
     second.start("draw.vertex.chamfer");
     second.pick(other, 10, 0);
     second.type("2");
@@ -253,6 +271,7 @@ TEST(VertexTools, FilletAndChamferOneCorner)
     // A radius that does not fit is refused and the tool asks again.
     ToolDriver third;
     const EntityId small = addPolyline(third, {Point2(0, 0), Point2(1, 0), Point2(1, 1)});
+    third.setPickTolerance(0.5);
     third.start("draw.vertex.fillet");
     third.pick(small, 1, 0);
     EXPECT_EQ(third.type("50").outcome, ToolStep::Outcome::Rejected);
@@ -265,10 +284,12 @@ TEST(VertexTools, MergeAndSnapToGrid)
     const EntityId id =
         addPolyline(driver, {Point2(0, 0), Point2(0.0005, 0), Point2(5.2, 0.3), Point2(9.9, 0.1)});
     selectOnly(driver, {id});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.merge");
     driver.enter(); // 0.001
     EXPECT_EQ(shapeOf(driver, id).vertices.size(), 3u);
     selectOnly(driver, {id});
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.grid");
     driver.type("1");
     EXPECT_EQ(shapeOf(driver, id).vertices[1].position, Point2(5, 0));
@@ -280,6 +301,7 @@ TEST(VertexTools, EachEditIsOneUndoStep)
     ToolDriver driver;
     const EntityId id = addPolyline(driver, {Point2(0, 0), Point2(5, 0), Point2(10, 0)});
     const std::size_t before = driver.document().history().undoCount();
+    driver.setPickTolerance(0.5);
     driver.start("draw.vertex.delete");
     driver.pick(id, 5, 0);
     EXPECT_EQ(driver.document().history().undoCount(), before + 1);

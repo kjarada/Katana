@@ -1,11 +1,18 @@
 #include "drawing/grip_controller.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <utility>
+#include <vector>
 
 #include <QPainter>
 #include <QPen>
 
+#include "drawing/feedback_painter.hpp"
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/core/text.hpp"
+#include "katana/math/numerics.hpp"
 
 namespace katana::qt::drawing {
 
@@ -13,12 +20,9 @@ namespace cad = katana::cad;
 
 namespace {
 
-// AutoCAD's grip colours, which a drafter's eye already reads: blue cold,
-// green under the cursor, red hot.
-const QColor kCold(0x3f, 0x7f, 0xff);
-const QColor kHover(0x3c, 0xd0, 0x70);
-const QColor kHot(0xf0, 0x40, 0x40);
-const QColor kRubber(0x4c, 0xc9, 0xf0);
+// AutoCAD's grip colours, which a drafter's eye already reads - blue cold,
+// green under the cursor, red hot - are the overlay's (feedback_painter.hpp),
+// as is the rubber band's cyan, a tool preview's.
 constexpr double kGripHalfPixels = 4.0;
 constexpr double kDragPixels = 4.0;
 
@@ -26,32 +30,197 @@ constexpr double kDragPixels = 4.0;
 
 GripController::GripController(cad::Document& document) : document_(document) {}
 
+namespace {
+
+// The places of `entity`'s vertex grips, by index; empty for an entity with
+// none (a circle, a text).
+std::vector<std::optional<katana::geometry::Point2>> vertexPlaces(
+    const std::vector<cad::Grip>& grips, katana::entity::EntityId entity)
+{
+    std::vector<std::optional<katana::geometry::Point2>> places;
+    for (const cad::Grip& grip : grips) {
+        if (grip.entity != entity || grip.kind != cad::GripKind::Vertex) {
+            continue;
+        }
+        if (grip.index >= places.size()) {
+            places.resize(grip.index + 1);
+        }
+        places[grip.index] = grip.position;
+    }
+    return places;
+}
+
+// Whether a polyline grip's own vertices are all that moved from `before` to
+// `grips`: every other vertex of its entity is where it was, index for index,
+// and there are as many. A vertex grip's own vertex is itself; a segment
+// middle's are the segment's two ends.
+bool onlyItsOwnVerticesMoved(const cad::Grip& old, const std::vector<cad::Grip>& grips,
+                             const std::vector<cad::Grip>& before)
+{
+    const auto was = vertexPlaces(before, old.entity);
+    const auto now = vertexPlaces(grips, old.entity);
+    if (was.size() != now.size() || now.empty()) {
+        return false;
+    }
+    const std::size_t n = now.size();
+    for (std::size_t i = 0; i < n; ++i) {
+        const bool own = old.kind == cad::GripKind::Vertex
+                             ? i == old.index
+                             : i == old.index || i == (old.index + 1) % n;
+        if (own) {
+            continue;
+        }
+        if (!was[i] || !now[i] ||
+            was[i]->distanceTo(*now[i]) > katana::math::tolerance::kGeometric) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The grip that is `old` after the drawing changed from `before` to `grips`:
+// the same point of the same entity, by its position - an index names
+// another vertex once a vertex is inserted or deleted before it, and the next
+// Delete would take that one. The same index first, where a twin vertex lies
+// on the same point.
+//
+// Where no grip is at its point, its own vertex may have been moved (VERTEX
+// MOVE, a Vertices panel cell, another view), and matched by position alone
+// such a move silently unchose it. A polyline's vertex or segment middle then
+// keeps its index only when every OTHER vertex of the polyline is where it
+// was: that is a move of its own. Two edits between refreshes - a SCRIPT, lines
+// pasted, an agent - can delete the chosen vertex and insert another,
+// leaving as many vertices as before; kept by its index then, the grip named a
+// vertex nobody chose, and Enter or Delete removed it. It goes instead. A
+// grip of any other kind (a centre, a quadrant, a line's end) keeps its index
+// while its entity has as many of that kind: those are never renumbered.
+std::optional<cad::Grip> follow(const cad::Grip& old, const std::vector<cad::Grip>& grips,
+                                const std::vector<cad::Grip>& before)
+{
+    const auto same = [&](const cad::Grip& grip) {
+        return grip.entity == old.entity && grip.kind == old.kind;
+    };
+    const auto at = [&](const cad::Grip& grip) {
+        return same(grip) &&
+               grip.position.distanceTo(old.position) <= katana::math::tolerance::kGeometric;
+    };
+    for (const cad::Grip& grip : grips) {
+        if (grip.index == old.index && at(grip)) {
+            return grip;
+        }
+    }
+    for (const cad::Grip& grip : grips) {
+        if (at(grip)) {
+            return grip;
+        }
+    }
+    const bool renumbered =
+        old.kind == cad::GripKind::Vertex || old.kind == cad::GripKind::SegmentMid;
+    const bool kept = renumbered
+                          ? onlyItsOwnVerticesMoved(old, grips, before)
+                          : std::ranges::count_if(grips, same) == std::ranges::count_if(before, same);
+    if (kept) {
+        for (const cad::Grip& grip : grips) {
+            if (grip.index == old.index && same(grip)) {
+                return grip;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
 void GripController::refresh(std::uint64_t generation)
 {
     if (generation == generation_) {
         return;
     }
     generation_ = generation;
-    grips_ = cad::gripsOfSelection(document_, document_.selection().ids());
-    // A hot grip survives a refresh only if its handle still exists (an
-    // undo, a selection change or another view's edit may have taken it).
-    std::erase_if(hot_, [&](const cad::Grip& hot) {
-        return std::none_of(grips_.begin(), grips_.end(),
-                            [&](const cad::Grip& grip) { return grip.sameHandle(hot); });
-    });
-    for (cad::Grip& hot : hot_) {
-        for (const cad::Grip& grip : grips_) {
-            if (grip.sameHandle(hot)) {
-                hot.position = grip.position;
-            }
+    const std::vector<cad::Grip> before = std::exchange(
+        grips_, cad::gripsOfSelection(document_, document_.selection().ids()));
+    // A hot grip survives a refresh only while its vertex does (an undo, a
+    // selection change or another view's edit may have taken it), and it
+    // follows its vertex to the index it has now (follow).
+    std::vector<cad::Grip> kept;
+    for (const cad::Grip& hot : hot_) {
+        if (auto now = follow(hot, grips_, before)) {
+            kept.push_back(*now);
         }
     }
-    if (grabbed_ && std::none_of(grips_.begin(), grips_.end(),
-                                 [&](const cad::Grip& grip) { return grip.sameHandle(*grabbed_); })) {
-        grabbed_.reset();
-        state_ = State::Idle;
-        typed_.clear();
+    hot_ = std::move(kept);
+    if (grabbed_) {
+        if (auto now = follow(*grabbed_, grips_, before)) {
+            grabbed_ = *now;
+        } else {
+            grabbed_.reset();
+            state_ = State::Idle;
+            typed_.clear();
+        }
     }
+}
+
+bool GripController::hasHotVertex() const
+{
+    return std::any_of(hot_.begin(), hot_.end(),
+                       [](const cad::Grip& grip) { return grip.kind == cad::GripKind::Vertex; });
+}
+
+QString GripController::hoverHint() const
+{
+    if (!hovered_ || grabbed_) {
+        return {};
+    }
+    const cad::Grip& grip = *hovered_;
+    const katana::entity::Entity* entity = document_.model().entities.find(grip.entity);
+    if (entity == nullptr) {
+        return {};
+    }
+    // A polyline's vertex and segment middle, the grips vertex editing is
+    // about, say what else they offer: the shortcut menu's items, and the
+    // gestures nothing else on screen mentions (Shift to choose, Ctrl to add).
+    if (const auto polyline = cad::readPolyline(*entity)) {
+        if (grip.kind == cad::GripKind::Vertex && grip.index < polyline->vertices.size()) {
+            // Its height written as the vertex tools' labels write it
+            // (cad::heightText): "z -0.000" here beside "z 0.000" there was
+            // one vertex read two ways.
+            const auto& height = polyline->vertices[grip.index].height;
+            return QString("Vertex %1 of polyline %2%3: drag to move · click to pick up · "
+                           "Shift+click to choose · Delete removes the chosen · right-click for "
+                           "vertex tools")
+                .arg(grip.index)
+                .arg(grip.entity)
+                .arg(height ? ", " + QString::fromStdString(cad::heightText(height)) : QString());
+        }
+        if (grip.kind == cad::GripKind::SegmentMid) {
+            // A straight segment's middle moves the segment bodily; an arc's
+            // keeps both ends and bends the arc through the cursor
+            // (docs/drawing.md, "What a drag means per handle").
+            const bool arc =
+                grip.index < polyline->segmentCount() && polyline->isArc(grip.index);
+            return QString("Segment %1 of polyline %2: drag to %3 · Ctrl+drag to add a vertex "
+                           "· right-click for segment tools")
+                .arg(grip.index)
+                .arg(grip.entity)
+                .arg(arc ? QStringLiteral("bend the arc") : QStringLiteral("stretch"));
+        }
+    }
+    QString kind = QString::fromUtf8(cad::toString(grip.kind));
+    if (!kind.isEmpty()) {
+        kind[0] = kind[0].toUpper();
+    }
+    return QString("%1 of %2 %3: drag to move it · click to pick it up · Shift+click to choose")
+        .arg(kind, QString::fromUtf8(std::string(katana::entity::toString(entity->type()))))
+        .arg(grip.entity);
+}
+
+void GripController::setHot(std::vector<cad::Grip> grips)
+{
+    grabbed_.reset();
+    state_ = State::Idle;
+    typed_.clear();
+    insert_ = false;
+    hot_ = std::move(grips);
 }
 
 std::optional<GripController::Point2> GripController::base() const
@@ -63,6 +232,13 @@ QString GripController::prompt() const
 {
     if (!grabbed_) {
         return {};
+    }
+    // A Ctrl-press on a segment middle adds a vertex where it is put down;
+    // the band said what a stretch says, word for word.
+    if (insert_ && grabbed_->kind == cad::GripKind::SegmentMid) {
+        return QString("Grip segment middle, adding a vertex: specify where it goes or type x,y, "
+                       "@dx,dy or @distance<angle  %1_")
+            .arg(typed_);
     }
     return QString("Grip %1: specify the point or type x,y, @dx,dy or @distance<angle  %2_")
         .arg(QString::fromUtf8(cad::toString(grabbed_->kind)), typed_);
@@ -273,14 +449,19 @@ void GripController::paint(QPainter& painter, const std::function<QPointF(const 
                            const std::function<void(const katana::entity::Geometry&)>& drawShape,
                            const QRectF& visible) const
 {
+    FeedbackFrame frame;
+    frame.toScreen = toScreen;
+    frame.drawShape = drawShape;
+    frame.visible = visible;
     if (grabbed_ && active()) {
+        // The drag as a tool's preview is drawn (cad::gripFeedback): the
+        // edited geometry dashed, the grip's old place, and the vertex a
+        // Ctrl-drag adds.
         const cad::GripDrag drag = dragTo(target_);
-        painter.setPen(QPen(kRubber, 1, Qt::DashLine));
+        frame.cursor = toScreen(target_);
+        (void)paintFeedback(painter, cad::gripFeedback(document_, drag), {}, frame);
+        painter.setPen(QPen(overlay::preview(), 1, Qt::DotLine));
         painter.setBrush(Qt::NoBrush);
-        for (const auto& shape : cad::gripPreview(document_, drag)) {
-            drawShape(shape);
-        }
-        painter.setPen(QPen(kRubber, 1, Qt::DotLine));
         painter.drawLine(toScreen(grabbed_->position), toScreen(target_));
     }
     painter.setBrush(Qt::NoBrush);
@@ -289,11 +470,11 @@ void GripController::paint(QPainter& painter, const std::function<QPointF(const 
         if (!visible.contains(p)) {
             continue;
         }
-        QColor colour = kCold;
+        QColor colour = overlay::gripCold();
         if (isHot(grip)) {
-            colour = kHot;
+            colour = overlay::gripHot();
         } else if (hovered_ && hovered_->sameHandle(grip)) {
-            colour = kHover;
+            colour = overlay::gripHover();
         }
         painter.setPen(QPen(colour.darker(150), 1));
         painter.setBrush(colour);
@@ -313,6 +494,16 @@ void GripController::paint(QPainter& painter, const std::function<QPointF(const 
         }
     }
     painter.setBrush(Qt::NoBrush);
+    // Ctrl held over a segment middle: it is drawn as the vertex a drag
+    // there adds, the gesture's only sign on screen.
+    if (ctrl_ && hovered_ && hovered_->kind == cad::GripKind::SegmentMid && !active()) {
+        cad::ToolFeedback added;
+        added.marks.push_back(cad::FeedbackMark{
+            cad::FeedbackRole::Added,
+            katana::entity::Geometry{katana::entity::PointGeometry{hovered_->position}}, {}});
+        frame.cursor = toScreen(hovered_->position);
+        (void)paintFeedback(painter, added, {}, frame);
+    }
 }
 
 } // namespace katana::qt::drawing

@@ -83,6 +83,9 @@ struct DraftingSettings {
 struct PrecisePoint {
     katana::geometry::Point2 point;
     std::optional<double> z; // a height given as the third coordinate
+    // Typed with @: the point is from `last`, and a z is a CHANGE of height
+    // (dz) to the height of whatever `last` is, which only the caller knows.
+    bool relative = false;
 };
 
 // A typed point:

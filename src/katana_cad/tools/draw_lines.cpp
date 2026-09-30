@@ -155,6 +155,7 @@ class PointTool final : public InteractiveTool {
     ToolStep point(const Point2& at) override { return place(at, height_); }
 
     ToolStep point3d(const Point2& at, double z) override { return place(at, z); }
+    [[nodiscard]] bool takesHeights() const override { return true; }
 
     ToolStep value(std::string_view text) override
     {

@@ -949,18 +949,19 @@ void ViewWorkspace::stopTool()
     }
 }
 
-bool ViewWorkspace::pressEnter()
+ViewportWidget* ViewWorkspace::commandTargetView()
 {
-    ViewportWidget* target = nullptr;
     for (ViewportWidget* plan : planViews()) {
         if (plan->toolActive()) {
-            target = plan;
-            break;
+            return plan;
         }
     }
-    if (target == nullptr) {
-        target = activePlanView();
-    }
+    return activePlanView();
+}
+
+bool ViewWorkspace::pressEnter()
+{
+    ViewportWidget* target = commandTargetView();
     if (target == nullptr) {
         return false;
     }
@@ -969,6 +970,17 @@ bool ViewWorkspace::pressEnter()
     QKeyEvent press(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
     QCoreApplication::sendEvent(target, &press);
     return true;
+}
+
+katana::core::Result<std::string> ViewWorkspace::pointerAt(const katana::geometry::Point2& at,
+                                                           bool click,
+                                                           Qt::KeyboardModifiers modifiers)
+{
+    ViewportWidget* target = commandTargetView();
+    if (target == nullptr) {
+        return makeError(ErrorCode::InvalidState, "there is no plan view to point in");
+    }
+    return target->pointerAt(at, click, modifiers);
 }
 
 void ViewWorkspace::setGridVisible(bool visible)

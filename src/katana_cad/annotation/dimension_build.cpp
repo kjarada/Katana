@@ -50,8 +50,10 @@ Result<AnchoredPoint> anchoredPoint(const katana::entity::Model& model, const An
     }
     const auto point = katana::entity::resolveAnchor(*entity, ref);
     if (!point) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "that entity has no such point to dimension to",
+        // Every point OF an entity is read here - a label's, a leader's tip,
+        // VERTEX INSERT's #id.sN - so the sentence names no one use: "to
+        // dimension to" misled an agent inserting at a segment that was not.
+        return makeError(ErrorCode::InvalidArgument, "that entity has no such point",
                          "id=" + std::to_string(ref.entity) + " " + katana::entity::describe(ref));
     }
     return AnchoredPoint{*point, ref};

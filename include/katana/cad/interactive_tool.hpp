@@ -23,12 +23,15 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/drawing/grips.hpp"
 #include "katana/cad/snapping.hpp"
+#include "katana/cad/tool_feedback.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/error.hpp"
@@ -80,13 +83,25 @@ struct ToolStep {
                                        std::string message = {}, bool restart = false);
 };
 
-// The rubber band: what the view draws for the current cursor position, in
-// model coordinates, over the drawing and in a distinct pen.
-struct ToolFeedback {
-    std::vector<katana::entity::Geometry> shapes;
-    // Points worth marking: a base point, a polygon's centre, a picked vertex.
-    std::vector<katana::geometry::Point2> markers;
-};
+// The rubber band (ToolFeedback) is in tool_feedback.hpp: the ghost of the
+// result, the base points, and marks by role - what a click takes, adds and
+// removes.
+
+// The plan view's two apertures in pixels, here where the tools that measure
+// in them can see them: a click picks what lies within 8 px, and a snap - and
+// a vertex tool's pick of a vertex, the reach an Endpoint snap has - within
+// 12 px. The view converts them at its zoom (ToolContext::pickAperture and
+// vertexAperture); a tool that needs one pixel divides by them. They were
+// the view's own constants, restated as bare 8s and 12s in the tools.
+inline constexpr double kPickAperturePixels = 8.0;
+inline constexpr double kSnapAperturePixels = 12.0;
+
+// The view's own pick: the entity of one of `types` (any, when empty) nearest
+// `at` within `reach` model units that the VIEW lets be picked - through its
+// hidden layers - or nullopt. What a click there gives entity().
+using ViewPick = std::function<std::optional<katana::entity::EntityId>(
+    const katana::geometry::Point2& at, double reach,
+    const std::set<katana::entity::EntityType>& types)>;
 
 // What a tool is given when it starts. Everything is by value or const: a tool
 // never changes the document itself, it returns a command that does.
@@ -97,10 +112,54 @@ struct ToolContext {
     // The selection when the tool started, in ascending id order. Transform and
     // edit tools act on it; when it is empty they begin by asking for one.
     std::vector<katana::entity::EntityId> selection;
-    // The view's pick aperture in model units, for a tool that finds geometry
-    // near a point itself (the view does the picking for ToolInput::Entity).
+    // The view's pick aperture in model units when the tool was made (at its
+    // start or restart), for a tool that finds geometry near a point itself.
+    // A tool that picks as the cursor moves reads pickReach() instead, which
+    // follows a zoom inside the tool.
     double pickTolerance = 0.0;
+    // The grips hot in the view when the tool started: a vertex or a segment
+    // the user chose BEFORE choosing the tool (docs/drawing.md, "What a
+    // vertex tool acts on"). Given to the first make() only - a restarted
+    // tool never sees them, since the edit it follows may have renumbered
+    // the vertices they name.
+    std::vector<Grip> handles;
+    // The view's pick and apertures NOW (unset in a test: pickUnder,
+    // pickReach and vertexReach then fall back to the model and to
+    // pickTolerance). One pick for the preview and the click, so what a
+    // preview promises is what the click takes.
+    ViewPick pick;
+    std::function<double()> pickAperture;   // the view's 8 px, in model units
+    std::function<double()> vertexAperture; // the view's 12 px (its snap aperture)
+    // The layers the view hides of its own (LayerOverrides), for a tool that
+    // finds what to act on itself rather than through `pick`: what it takes
+    // must pass THE visibility rule there (pickable), as the view's pick
+    // does. Null in a test: the document's rule alone. The view outlives the
+    // tools it runs, so the pointer does too.
+    const LayerOverrides* view = nullptr;
 };
+
+// The entity of one of `types` nearest `at` within `reach` (pickReach when
+// not given): through the view's pick when the context has one, else through
+// the model and its spatial index, with the context's view's hidden layers.
+[[nodiscard]] std::optional<katana::entity::EntityId>
+pickUnder(const ToolContext& context, const katana::geometry::Point2& at,
+          const std::set<katana::entity::EntityType>& types,
+          std::optional<double> reach = std::nullopt);
+// The view's own hidden layers, or kNoLayerOverrides when the context has no
+// view.
+[[nodiscard]] const LayerOverrides& viewOf(const ToolContext& context);
+// Whether a tool may take `entity`: THE visibility rule (selection.hpp,
+// isSelectable) in the tool's view - drawn there and not locked - the rule
+// every picker asks. A tool that looks through the selection or the spatial
+// index itself asks this, or it would edit what the user cannot see.
+[[nodiscard]] bool pickable(const ToolContext& context, const katana::entity::Entity& entity);
+// How near a pick of a piece must be: the view's pick aperture now, else
+// pickTolerance.
+[[nodiscard]] double pickReach(const ToolContext& context);
+// How near a pick of a VERTEX must be: the view's snap aperture now (the reach
+// an Endpoint snap has), else pickTolerance in the proportion of the view's
+// two apertures (kSnapAperturePixels : kPickAperturePixels).
+[[nodiscard]] double vertexReach(const ToolContext& context);
 
 class InteractiveTool {
   public:
@@ -125,8 +184,34 @@ class InteractiveTool {
     // A point with a height, typed as x,y,z. The default drops the height
     // and takes the point, so only a tool that draws in 3D (Polyline 3D,
     // Point) overrides it; such a tool looks up the height of a clicked
-    // point itself (heightAtPoint), since a click arrives as point().
+    // point itself (heightAtPoint), since a click arrives as point(). It is
+    // reached only at a step whose takesHeights() says so, so a tool that
+    // overrides this answers that too.
     [[nodiscard]] virtual ToolStep point3d(const katana::geometry::Point2& at, double z);
+    // A point given EXACTLY - typed as x,y, @dx,dy, @distance<angle or
+    // x,y,z (z its height, after takesHeights, dzIsAChange and lastHeight
+    // have had their say) - rather than pointed at with the mouse. The
+    // default hands it on as a click goes, to point3d() with a height and
+    // point() without, so only a tool that treats a pointed click
+    // differently overrides it: Insert Vertex refuses a CLICK within the
+    // pick aperture of a vertex, where the vertex meant cannot be told from
+    // a new one, but a typed point says exactly where, whatever the zoom.
+    [[nodiscard]] virtual ToolStep exactPoint(const katana::geometry::Point2& at,
+                                              std::optional<double> z);
+    // Whether the step the tool is at takes a height with its point: the
+    // z of x,y,z, and the dz of @dx,dy,dz (read as dzIsAChange says). A tool
+    // that takes none is handed the point alone, the z of either form
+    // dropped - as it always was; refusing @dx,dy,dz there turned "@0,5,0"
+    // at MOVE and LINE into an error. The default takes none.
+    [[nodiscard]] virtual bool takesHeights() const;
+    // Whether the dz of a typed @dx,dy,dz, at a step that takes heights, is
+    // a CHANGE of lastHeight() - Move Vertex's "raise it by dz", as the
+    // VERTEX MOVE verb reads it - rather than the height itself, as the
+    // PLINE3D verb reads it and so every other tool that takes a height
+    // (the default). A tool reads a line as its verb does, so the window and
+    // katana_cli make one drawing of it: a 3D polyline that climbed dz from
+    // its last vertex in the window was put at a height of dz by the verb.
+    [[nodiscard]] virtual bool dzIsAChange() const;
     [[nodiscard]] virtual ToolStep entity(katana::entity::EntityId id,
                                           const katana::geometry::Point2& at);
     // Typed text that is not a point (routeTypedInput decides): a distance, an
@@ -152,6 +237,28 @@ class InteractiveTool {
     // The last point accepted, which relative input (@dx,dy) and the
     // Perpendicular and Tangent snaps measure from. Nullopt before the first.
     [[nodiscard]] virtual std::optional<katana::geometry::Point2> lastPoint() const;
+    // The height of lastPoint(), which the dz of a typed @dx,dy,dz changes
+    // (routeTypedInput) at a step that takes heights, where dzIsAChange();
+    // nullopt when it has none, and then @dx,dy,dz is refused there rather
+    // than read as a height of dz. The default has none.
+    [[nodiscard]] virtual std::optional<double> lastHeight() const;
+    // Whether this tool takes the Delete key from the window's Erase while it
+    // runs. Erase holds Delete as a shortcut and erases the selection, and a
+    // vertex tool works on a SELECTED polyline - a chosen vertex's grips need
+    // it selected, and the tool selects what it has just edited (docs/
+    // drawing.md, R5) - so Delete inside the tool erased the whole string it
+    // was editing. The default leaves Delete to Erase, as it always was.
+    [[nodiscard]] virtual bool takesDelete() const;
+    // Delete pressed while takesDelete(): what the tool makes of it. The
+    // default refuses it, and the refusal says why.
+    [[nodiscard]] virtual ToolStep deleteKey();
+    // Whether the view may snap the cursor to `snap` for the step the tool is
+    // at; one it may not is passed over for the next best (SnapRequest::
+    // accept), and with none the cursor stays where it is. A step that needs
+    // a point ON a polyline (Insert Vertex) takes only a snap that lands
+    // there: an arc's centre, or another string's end beside the line, took
+    // the cursor off it. The default takes every snap.
+    [[nodiscard]] virtual bool takesSnap(const SnapResult& snap) const;
 };
 
 // Parses a typed point. "x,y" is absolute; "@dx,dy" is relative to `last`;
@@ -196,6 +303,11 @@ struct ToolInfo {
     // tests name a tool by it, so it never changes once shipped.
     std::string id;
     std::string name;     // as the menu shows it: "Line"
+    // What the prompt calls the tool, when not its name: a family's variant
+    // named for what it does ("Insert Vertex", not "Vertices, Insert
+    // Vertex"). Empty for the name. promptTitle() chooses. Initialised here,
+    // so a designated initialiser that leaves it out is not a missing field.
+    std::string title{};
     std::string category; // the menu it goes in: "Draw", "Modify", "Annotate", "Inquiry"
     std::string group;    // the section within that menu: "Lines", "Curves", "Transform", ...
     int order = 0;        // position within the group, ascending
@@ -207,6 +319,10 @@ struct ToolInfo {
     std::string shortcut;
     std::string tip; // one sentence: what it does and how
     std::function<std::unique_ptr<InteractiveTool>(const ToolContext&)> make;
+
+    // What the view's prompt band and the command line's placeholder put
+    // before the prompt: the title, or the name when there is none.
+    [[nodiscard]] const std::string& promptTitle() const { return title.empty() ? name : title; }
 };
 
 class ToolCatalog {

@@ -51,10 +51,27 @@ onto `parsePointInput` is a follow-up. `parsePointInput` itself now
 delegates to the drawing system's `parsePrecisePoint`, so a DMS angle or a
 quadrant bearing may follow the `<` of polar input, and the router has an
 overload taking the document's drafting settings and the cursor, which the
-tool host uses: `<angle` and `=distance` lock the next points, `x,y,z`
-reaches a tool's `InteractiveTool::point3d`, and a number a tool refuses at
-a point prompt is direct distance entry (`docs/drawing.md`, "Precision
-input").
+tool host uses: `<angle` and `=distance` lock the next points, and a number
+a tool refuses at a point prompt is direct distance entry
+(`docs/drawing.md`, "Precision input"). A typed point reaches the tool as
+`InteractiveTool::exactPoint(at, z)` - given, not pointed at - whose default
+hands it on as a click goes, to `point3d` with a height and `point`
+without; Insert Vertex overrides it, since its "too close to vertex N" is a
+rule about what a POINTER meant. A z reaches only a step whose
+`InteractiveTool::takesHeights` says so (Point, Polyline 3D, Move Vertex's
+new place, Insert Vertex's): there `x,y,z` is the height, and the dz of
+`@dx,dy,dz` is read as the tool's VERB reads it - the height itself, as
+`PLINE3D` has it (the default), or, where `InteractiveTool::dzIsAChange`
+says so, a change of `InteractiveTool::lastHeight` (Move Vertex, as
+`VERTEX MOVE` has it; refused when there is none, never read as a height
+of dz). Everywhere else the z of either form is dropped, as it always was.
+The dz rule first applied to every tool, and `@0,5,0` at MOVE or LINE was
+refused ("the point @ is measured from has no height"); then it made
+Polyline 3D climb dz from its last vertex while `PLINE3D` put the vertex at
+dz, one line two polylines. Rejected: telling the kinds apart by
+`lastHeight` alone - Move Vertex on a vertex with no height must refuse a
+dz, not drop it; and making `PLINE3D` climb too, which would change what an
+existing verb line draws (`docs/drawing.md`, Not done).
 
 **Icons live with their family** (`src/katana_qt/tools/icons_<family>.cpp`,
 by tool id), drawn to icons.cpp's conventions: a 24-unit grid, a 1.7-unit
@@ -200,12 +217,95 @@ of any one tool. It starts a tool with the document's current attributes
 snapped point, a picked entity, typed text, Enter, Esc, Undo - and when the
 tool finishes executes its ONE command through the Document. It restarts the
 tool when the tool asks (Circle, Point), and gives the tool the view's pick
-aperture in model units, so Trim's preview and picks match the zoom. It
-reports through hooks and opens nothing, so a test drives it by calling it
+aperture in model units (`ToolContext::pickTolerance`) - read when the tool
+starts or restarts only, so after a zoom inside the tool Trim's and Fillet's
+own picks can differ from the view's until the next restart. It reports
+through hooks and opens nothing, so a test drives it by calling it
 (`tests/qt_widgets/tools/`). A generation count, bumped whenever a tool is
 made, remade or dropped, is how the host knows that a hook replaced the tool
 it was dealing with: a tool started from a hook was once allocated at the
 address of the one it replaced.
+
+**What the host hands a tool besides (2026-09-30).** Three more members of
+`ToolContext`, for a tool that picks as the cursor moves (the Draw >
+Vertices tools, `docs/drawing.md`, "What a vertex tool acts on"):
+
+- `handles`: the grips hot in the view when the tool started - a vertex the
+  user clicked BEFORE choosing the tool. The view sets them in `startTool`
+  (`ToolHost::setHandles`, from `GripController::hot`) and the host gives
+  them to the next tool it makes and to no other (`std::exchange` in
+  `make()`), so a tool restarted after an edit never sees a vertex index the
+  edit has renumbered. The view then drops its grips (`GripController::reset`):
+  a grip picked up before the tool was otherwise put down by the first click
+  after it, a `GRIP_EDIT` nobody asked for.
+- `pick`: the view's own pick NOW, `(at, reach, types)`, through the view's
+  hidden layers; `pickUnder` falls back to the model when a test has none.
+- `pickAperture`, `vertexAperture`: the view's 8 px and 12 px in model units
+  NOW, read at every preview and click; `pickReach` and `vertexReach` fall
+  back to `pickTolerance` and 1.5 times it (the 12 : 8 ratio).
+- `view`: the view's own hidden layers (`ToolHost::setView`), for what a tool
+  finds without the view's pick - through the selection, the handles, a
+  point's height: `pickable` asks THE visibility rule with them, as the
+  pick does, and `pickUnder` passes them when it falls back to the model.
+  The vertex tools took a selected polyline on a hidden layer through the
+  selection, round the pick.
+
+**What a tool tells the view (2026-09-30).** `InteractiveTool::takesSnap`:
+whether the view may snap the cursor to a snap for the step the tool is
+at; the view asks it through `SnapRequest::accept`, which passes a refused
+candidate over for the next best. Insert Vertex takes only a snap ON the
+polyline, where its click would be taken. `InteractiveTool::lastHeight`:
+the height a typed dz changes, where `dzIsAChange`.
+`InteractiveTool::takesDelete` and `deleteKey`: whether the tool takes the
+Delete key from the window's Erase while it runs, and what it makes of it -
+the view claims the key (`ShortcutOverride`) and hands it on through
+`ToolHost::deleteKey`. The vertex tools take it: their polyline is selected
+while they work on it, and Erase took the whole string from under them.
+Delete Vertex reads it as its Enter; the others refuse it and say so. Every
+other tool leaves Delete to Erase, as it always was. **What the host holds
+back**:
+`ToolHost::feedback` answers a click the tool took with what the click did,
+not with the refusal the tool's next preview gives at that spot, until the
+cursor leaves it by the pick aperture - the tool is made anew at each
+restart and never sees the pointer, and the host sees both
+(`AClickTheToolTookIsNotAnsweredInRedUntilThePointerLeavesIt`). The hold
+takes away the marks the tool flags as the refusal's reason and keeps the
+rest, so Straighten's first "keep" stays in sight straight after its pick
+(`StraightensFirstPickIsHeldAsTakenAndItsRefusalShownOnceThePointerComesBack`).
+**What the host says again**: a refusal usually leaves the prompt as it
+was, but one that drops what the tool held (a pick made stale since) asks
+afresh, and the host then says the new prompt before the refusal - only
+then, since the window's status bar shows the refusal and a prompt said
+after it would wipe it
+(`ARefusalThatDropsAStalePickSaysTheNewPromptAndNoOtherRepeatsIt`).
+
+Rejected: a new virtual `preview(cursor, pick)` (46 overrides to change, and
+`-Woverloaded-virtual` fails the build at every one left); refreshing
+`pickTolerance` on every move (it still ignores the view's hidden layers,
+and leaves the preview's pick and the click's able to disagree). Trim,
+Fillet, Offset and Leader still pick with `pickTolerance` and no view
+(`docs/drawing.md`, "Not done").
+
+**Roles in a preview.** `ToolFeedback` (`include/katana/cad/tool_feedback.hpp`)
+kept `shapes` (the ghost, dashed) and `markers` (base points) and gained
+`marks` - geometry by ROLE: Target (what a click takes), Added (what it makes,
+read from the result), Removed (what it takes away), Enter (what Enter, not
+a click here, acts on: Insert's place beside a chosen vertex, the vertices
+chosen before a tool while the pointer is over another) - a `caption` for
+beside the cursor, `refused` when a click there would be refused, and
+`focus`, the polyline whose vertices the view shows while the grips are
+hidden. A mark flagged `FeedbackMark::refused` is the refusal's reason
+(the vertex Insert is too near, the end that is no corner), drawn as a ring
+struck through; a refused preview that flags none has its Target marks
+drawn so. The view draws a role its own way (`drawing/feedback_painter.hpp`),
+so no tool picks a colour; a tool that fills only `shapes` and `markers` is
+drawn as before. The new members have default initialisers, so the tools
+that build one as `{shapes, markers}` - or a mark as `{role, geometry,
+label}` - still compile under `-Wmissing-field-initializers`. The pointer
+record's keys for the roles are their names (`toString(FeedbackRole)`).
+`ToolInfo::title` names a family's variant in the prompt ("Insert Vertex:
+..."), where the menus still gather the family by its name ("Vertices, Insert
+Vertex").
 
 **Esc keeps collected work.** Esc ends the tool, but a tool holding work
 that its Enter only ever COMMITS - a Line or Polyline chain, the cuts of a
@@ -317,4 +417,5 @@ Not done: `ViewportWidget` still has the `enum class Tool` of the first eight
 tools and `setTool`, used for Select (`stopToolIn` calls it) and by
 `test_plan_view_tools.cpp`; the window and the workspace name tools by id.
 The picks of an entity step (Trim's edges, the part to cut) are not
-highlighted, and `ToolContext` carries no view's layer overrides.
+highlighted. `ToolContext::view` carries the view's layer overrides, but
+only the vertex tools, Polyline 3D's heights and `pickUnder` read them.

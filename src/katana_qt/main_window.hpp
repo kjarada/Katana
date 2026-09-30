@@ -250,6 +250,14 @@ class MainWindow final : public QMainWindow {
     // Enter, or the last tool again. False when the line logged an error, so
     // a headless run can stop at a command that was refused.
     bool runCommand(const QString& line);
+    // The headless pointer steps, --hover and --click (docs/headless.md):
+    // `spec` is "x,y" in model units, with ",shift" or ",ctrl" for a key
+    // held. The pointer moves there - and with `click` clicks - in the plan
+    // view Enter goes to, as real mouse events (ViewWorkspace::pointerAt), so
+    // a run without a mouse can show a tool's preview and pick. Answers the
+    // record the step prints; ParseFailure for a spec that is not
+    // x,y[,shift|ctrl].
+    [[nodiscard]] katana::core::Result<std::string> pointerAt(const QString& spec, bool click);
     // The window's one executor for a dialog (command_runner.hpp): `line`
     // echoed in the command log and run by the dispatcher a typed line goes
     // to - but never offered to a running tool, and what is being typed on

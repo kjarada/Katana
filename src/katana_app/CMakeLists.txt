@@ -67,6 +67,49 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "2 entities.*Polyline.*layer=Survey.*area=600")
     set_tests_properties(cli.rejects_bad_input PROPERTIES WILL_FAIL TRUE)
 
+    # VERTEX INSERT with a point OF the polyline (docs/drawing.md, "What a
+    # vertex tool acts on"): "#1@4,0.3" is the place on it nearest (4,0.3),
+    # ON the line, as the window's Insert Vertex puts a click; "#1.s1" with
+    # after=1 is segment 1's middle. By hand on (0,0) (10,0) (10,10): the
+    # first is (4,0), the new vertex 1; segment 1 is (10,0)-(10,10), and its
+    # middle (10,5) the new vertex 2.
+    add_test(NAME cli.vertex_insert_takes_a_point_on_the_polyline
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLINE 0,0 10,0 10,10" -c "VERTEX INSERT 1 #1@4,0.3"
+                -c "VERTEX LIST 1")
+    set_tests_properties(cli.vertex_insert_takes_a_point_on_the_polyline PROPERTIES
+        PASS_REGULAR_EXPRESSION "vertices=4 [^\r\n]* inserted=1.*index=1 x=4 y=0 z=none"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.vertex_insert_takes_a_segments_middle
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLINE 0,0 10,0 10,10"
+                -c "VERTEX INSERT 1 #1.s1 after=1" -c "VERTEX LIST 1")
+    set_tests_properties(cli.vertex_insert_takes_a_segments_middle PROPERTIES
+        PASS_REGULAR_EXPRESSION "vertices=4 [^\r\n]* inserted=2.*index=2 x=10 y=5 z=none"
+        FAIL_REGULAR_EXPRESSION "error")
+    # "#1@4,0.3,101.5": on the line at (4,0), with 101.5 its height - what
+    # x,y,z typed at the window's Insert Vertex does.
+    add_test(NAME cli.vertex_insert_on_the_line_takes_a_height
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLINE 0,0 10,0 10,10"
+                -c "VERTEX INSERT 1 #1@4,0.3,101.5" -c "VERTEX LIST 1")
+    set_tests_properties(cli.vertex_insert_on_the_line_takes_a_height PROPERTIES
+        PASS_REGULAR_EXPRESSION "inserted=1.*index=1 x=4 y=0 z=101[.]5 "
+        FAIL_REGULAR_EXPRESSION "error")
+    # STRAIGHTEN walks forward from the first number, as it always has, so an
+    # existing line does what it did. On the hexagon (0,0) (10,0) (20,0)
+    # (20,10) (10,10) (0,10), from 3 to 1 forward is 4, 5 and 0, leaving
+    # (10,0) (20,0) (20,10); side=short takes the window's side, the one with
+    # fewer between - vertex 2 alone - leaving five.
+    add_test(NAME cli.straighten_walks_forward_and_takes_the_short_side_when_asked
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLINE 0,0 10,0 20,0 20,10 10,10 0,10 CLOSE"
+                -c "PLINE 0,0 10,0 20,0 20,10 10,10 0,10 CLOSE" -c "STRAIGHTEN 1 3 1"
+                -c "STRAIGHTEN 2 3 1 side=short" -c "VERTEX LIST 1")
+    set_tests_properties(cli.straighten_walks_forward_and_takes_the_short_side_when_asked PROPERTIES
+        PASS_REGULAR_EXPRESSION "id=1 [^\r\n]*vertices=3.*id=2 [^\r\n]*vertices=5.*index=0 x=10 y=0 .*index=1 x=20 y=0 .*index=2 x=20 y=10 "
+        FAIL_REGULAR_EXPRESSION "error")
+
     # The survey-code verbs, on a mapfile of the tests' own: its shape is the
     # reference mapfile's, its codes are not. REPLACE puts it in place of the
     # compiled-in map, so what is expected does not depend on whether this

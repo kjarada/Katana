@@ -31,6 +31,7 @@
 
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/entity/model.hpp"
@@ -209,6 +210,80 @@ void BM_PlanPaintCursorMove(benchmark::State& state)
     state.counters["drawingPaints"] = static_cast<double>(view.widget->drawingPaintCount());
 }
 BENCHMARK(BM_PlanPaintCursorMove)->Unit(benchmark::kMillisecond)->UseRealTime();
+
+// The same, with Insert Vertex running and the cursor moving along the
+// drawing's string with the most vertices: each move the tool finds the
+// string under the cursor, plans the insert, and the view draws the split
+// segment, the new vertex, the string's vertices and the caption
+// (docs/drawing.md, "What a vertex tool acts on"). What the preview costs on
+// top of a plain move. With snap:1 the object snap runs on each move as it
+// does for any tool that asks for a point, with the document's default modes;
+// snap:0 leaves the preview alone.
+void BM_PlanPaintCursorMoveInsertVertex(benchmark::State& state)
+{
+    const bool snapping = state.range(0) != 0;
+    if (!fixture().ok) {
+        state.SkipWithError("the survey drawing could not be built");
+        return;
+    }
+    katana::geometry::CurvePolyline2 longest;
+    fixture().document.model().entities.forEach([&](const katana::entity::Entity& entity) {
+        if (auto polyline = katana::cad::readPolyline(entity);
+            polyline && polyline->vertices.size() > longest.vertices.size()) {
+            longest = std::move(*polyline);
+        }
+    });
+    if (longest.vertices.size() < 2) {
+        state.SkipWithError("the survey drawing has no string");
+        return;
+    }
+    // Framed on the string's first 25 vertices and walked along them: at a
+    // frame of the whole string its vertices lie closer together than the
+    // pick aperture, every hover is refused as too near a vertex, and the
+    // insert itself - the plan, the new vertex, the caption - is never made.
+    const std::size_t walked = std::min<std::size_t>(25, longest.vertices.size());
+    Box2 part;
+    for (std::size_t i = 0; i < walked; ++i) {
+        part.expand(longest.vertices[i].position);
+    }
+    const double length = longest.stationOfVertex(walked - 1);
+    View view(1.0, Point2(0.5, 0.5));
+    view.state->plan.fit(part, 0.05);
+    view.frame();
+    if (auto started = view.widget->startTool("draw.vertex.insert"); !started) {
+        state.SkipWithError(started.error().describe().c_str());
+        return;
+    }
+    const bool snapWas = fixture().document.drafting().snapEnabled;
+    fixture().document.drafting().snapEnabled = snapping;
+    int step = 0;
+    std::size_t added = 0;
+    for (auto _ : state) {
+        // 97 stops along the part, a prime, so the cursor does not settle
+        // on the vertices of an evenly spaced string.
+        const Point2 on = longest.pointAtStation(length * static_cast<double>(step++ % 97) / 97.0);
+        const Point2 pixel = view.state->plan.worldToScreen(on);
+        const QPointF at(pixel.x, pixel.y + 2.0); // two pixels off the line, as a hand is
+        QMouseEvent move(QEvent::MouseMove, at, view.widget->mapToGlobal(at), Qt::NoButton,
+                         Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(view.widget.get(), &move);
+        view.frame();
+        added += view.widget->lastPreviewCounts().added;
+    }
+    fixture().document.drafting().snapEnabled = snapWas;
+    setCounters(state, *view.widget);
+    state.counters["drawingPaints"] = static_cast<double>(view.widget->drawingPaintCount());
+    state.counters["stringVertices"] = static_cast<double>(longest.vertices.size());
+    // How many moves showed where a vertex would go: most, but not those
+    // that land within the aperture of one of the string's vertices.
+    state.counters["previewedInserts"] = static_cast<double>(added);
+}
+BENCHMARK(BM_PlanPaintCursorMoveInsertVertex)
+    ->ArgName("snap")
+    ->Arg(1)
+    ->Arg(0)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
 
 // One A1 sheet at 1 : 2500 about the drawing's centre, at 300 dpi.
 void BM_PlanPlotA1(benchmark::State& state)
