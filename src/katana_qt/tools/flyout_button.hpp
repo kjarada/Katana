@@ -1,7 +1,7 @@
 #pragma once
 
-// The toolbar button of a tool family, and the check that holds every
-// toolbar's menu signs off their icons.
+// The toolbar button of a tool family, and the check that holds the menu
+// signs of every toolbar and dock title bar off their icons.
 //
 // A family ("Circle": Centre Radius, 2 Points, 3 Points ...) is one button on
 // its toolbar (tool_menus.hpp). A click runs the family's first tool. The
@@ -9,9 +9,10 @@
 // bottom-right corner, a press held (Qt's DelayedPopup) or a right click. The
 // triangle is the sign that the button holds more than one tool, drawn in the
 // corner the centred icon leaves free, as drawing and graphics programs mark
-// their tool groups. While any of the family's tools runs - the first or one
-// chosen from the menu - the button is framed as running and the triangle
-// takes the accent.
+// their tool groups. The button is framed as running only while the tool its
+// icon shows runs, as every tool button is; while any of the family's tools
+// runs - that one or one chosen from the menu - the triangle takes the
+// accent, and the tooltip names the one that runs.
 //
 // It replaced Qt's split button (QToolButton::MenuButtonPopup), whose arrow
 // the application's stylesheet drew OVER the icon. For a button whose rule has
@@ -22,6 +23,7 @@
 // "Tool families on the toolbars", has the alternatives measured and the
 // reasons for this one.
 
+#include <QList>
 #include <QMenu>
 #include <QPointer>
 #include <QRect>
@@ -30,6 +32,7 @@
 #include <QStringList>
 #include <QToolButton>
 
+class QAction;
 class QToolBar;
 class QWidget;
 
@@ -58,15 +61,21 @@ class FlyoutButton final : public QToolButton {
     // less the icon's square, so a press on the icon always runs the tool.
     [[nodiscard]] QRegion menuZone() const;
     // The tooltip shown: the tool's own, then a line saying how to open the
-    // menu and naming the family's other tools - four at most, past that
-    // three and how many more. Built when shown, since a family's tools are
-    // added to its menu after the button is made.
+    // menu and naming the family's other tools - five at most, past that
+    // four and how many more - and, while another of them runs, a line
+    // naming it. Built when shown, since a family's tools are added to its
+    // menu after the button is made.
     [[nodiscard]] QString toolTipWithMenu() const;
-    // Whether the pointer is over menuZone, where the mark is lit.
+    // Whether the pointer is over menuZone, where the mark is lit. Cleared
+    // whenever the pointer leaves the button, however Qt says so.
     [[nodiscard]] bool pointerOnMark() const { return pointerOnMark_; }
-    // Whether a tool of the family runs - the one a click starts or any
-    // other from its menu. The button shows it as its own running: framed,
-    // as a running tool's button is, with its mark in the accent.
+    // The family's tool that runs, if one does: the one a click starts or
+    // any other from its menu; null while none does.
+    [[nodiscard]] const QAction* runningTool() const;
+    // Whether a tool of the family runs. The mark is lit in the accent while
+    // one does; the button is framed only while it is the one its icon
+    // shows (isChecked), since a frame round Insert Vertex's icon says
+    // Insert Vertex runs.
     [[nodiscard]] bool familyRunning() const;
 
   protected:
@@ -77,9 +86,15 @@ class FlyoutButton final : public QToolButton {
     void contextMenuEvent(QContextMenuEvent* event) override;
 
   private:
-    // The family, kept apart from menu(): drawnParts takes the menu away for
-    // a moment to see what it adds, and a family running must stay framed
-    // while it does, or the frame would pass for the menu's sign.
+    // The status bar's line for where the pointer is: the family's own
+    // ("Vertices: Insert Vertex / Delete Vertex / ...") on the corner that
+    // opens it, the tool's elsewhere on the button, as QWidget shows it on
+    // Enter.
+    void showStatusTip(bool onMark);
+
+    // The family the button stands for, which its running tool is read from.
+    // Kept apart from menu(), what a press opens, which drawnParts takes away
+    // for a moment to see what it adds.
     QPointer<QMenu> family_;
     bool pointerOnMark_ = false;
 };
@@ -93,6 +108,17 @@ class FlyoutButton final : public QToolButton {
 // than their neighbours' and their marks squeezed to 3 px. The families
 // (tool_menus.cpp) and Undo and Redo (main_window.cpp) follow their bars.
 void followToolBarIconSize(QToolButton& button, QToolBar& bar);
+
+// Lights `bar`'s overflow arrow in the accent (theme::kToolRunsBehindOverflow)
+// while a button the arrow hides shows a tool running: a tool's button
+// framed, or a family with one of its tools running. At the window's first
+// size the Draw toolbar hides Ellipse, Divide, Measure and all eighteen
+// Vertices tools behind its arrow, and with one of them running nothing on
+// the toolbars said so. `tools` are the tools: only their buttons light it
+// (Select, checked while no tool runs, does not), and it hears them start
+// and stop; it hears the toolbar hide and show its buttons as their room
+// changes. fillToolMenus calls it for each toolbar it fills.
+void lightOverflowWhileAHiddenToolRuns(QToolBar& bar, const QList<QAction*>& tools);
 
 // Where a tool button draws its icon and the sign of its menu, each measured
 // from its own rendering against itself: the icon's square as where the
@@ -116,13 +142,15 @@ struct DrawnParts {
 };
 [[nodiscard]] DrawnParts drawnParts(QToolButton& button);
 
-// Every icon-only button with a menu on a toolbar under `root` whose menu
-// sign is drawn over its icon's square, in device pixels, or not drawn at
-// all, as "<toolbar> > <button>: <why>". `checked` receives a line for each
-// button measured, clear or not, and `buttons` how many there were. The
-// toolbar's own overflow button is not one of them: it draws its menu arrow
-// as its icon. katana --check-toolbars fails a run with any
-// (docs/headless.md).
+// Every icon-only button with a menu under `root` whose menu sign is drawn
+// over its icon's square, in device pixels, or not drawn at all: on each
+// toolbar ("toolbar button <bar> > <button>: <why>"), then in each dock's
+// title bar ("title bar button <dock> > <button>: <why>" - a view's kind
+// switcher). `checked`
+// receives a line for each button measured, clear or not, and `buttons` how
+// many there were. A toolbar's own overflow button is not one of them: it
+// draws its menu arrow as its icon. katana --check-toolbars fails a run with
+// any (docs/headless.md).
 [[nodiscard]] QStringList menuSignClashes(QWidget& root, QStringList* checked = nullptr,
                                           int* buttons = nullptr);
 

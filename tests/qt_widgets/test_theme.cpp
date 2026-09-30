@@ -89,8 +89,18 @@ TEST(Theme, AMenuSectionShowsItsTitleUnderTheStylesheet)
     EXPECT_LT(lineArea.height(), titleArea.height());
     // The title is letters, rows of ink; the plain separator one rule. On
     // the menu's own ground, the panel colour of the stylesheet's QMenu rule.
-    const int title = inkRows(shot, titleArea, theme::panel());
-    const int line = inkRows(shot, lineArea, theme::panel());
+    // Counted in the grab's own pixels: on a scaled screen the action's
+    // rectangle, in the widget's, is that times the ratio there - at 125%
+    // the rule's 7 rows were counted from where the title's should start.
+    const double ratio = shot.devicePixelRatio();
+    const auto onDevice = [ratio](const QRect& area) {
+        return QRect(QPoint(static_cast<int>(std::floor(area.left() * ratio)),
+                            static_cast<int>(std::floor(area.top() * ratio))),
+                     QPoint(static_cast<int>(std::ceil((area.right() + 1) * ratio)) - 1,
+                            static_cast<int>(std::ceil((area.bottom() + 1) * ratio)) - 1));
+    };
+    const int title = inkRows(shot, onDevice(titleArea), theme::panel());
+    const int line = inkRows(shot, onDevice(lineArea), theme::panel());
     EXPECT_GE(line, 1) << "the plain separator draws its rule";
     EXPECT_LE(line, 2);
     EXPECT_GE(title, line + 4) << "title " << title << " rows, line " << line;

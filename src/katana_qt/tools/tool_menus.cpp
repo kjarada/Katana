@@ -505,6 +505,12 @@ ToolActions fillToolMenus(const cad::ToolCatalog& catalog, const ToolMenuTargets
     for (QMenu* menu : filled) {
         assignMnemonics(*menu);
     }
+    // And each toolbar's overflow arrow lit while a tool it hides runs.
+    for (const auto& [category, bar] : targets.toolBars) {
+        if (bar != nullptr) {
+            lightOverflowWhileAHiddenToolRuns(*bar, result.group_->actions());
+        }
+    }
     return result;
 }
 

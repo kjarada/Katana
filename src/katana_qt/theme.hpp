@@ -93,4 +93,10 @@ void apply(QApplication& application);
 [[nodiscard]] QStyle* makeStyle();
 [[nodiscard]] QString styleSheet();
 
+// The property, true or false, that lights a toolbar's overflow arrow in the
+// accent: set on the arrow's button while a tool runs whose button the arrow
+// hides (tools::lightOverflowWhileAHiddenToolRuns). The style's arrow reads
+// it from the button it is drawn for.
+inline constexpr char kToolRunsBehindOverflow[] = "toolRunsBehind";
+
 } // namespace katana::qt::theme
