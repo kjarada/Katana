@@ -299,8 +299,9 @@ every item (`SH_ComboBox_Popup`), ignoring `maxVisibleItems`: a drawing's two
 hundred styles ran off the screen. The style asks for the scrolling list
 (`qt_widgets.Theme.ALongChoiceListScrollsRatherThanRunningOffTheScreen`).
 Third, a toolbar's overflow arrow: Qt's is a small dark image made for light
-toolbars, and the style draws it in the muted text colour instead ("Tool
-families on the toolbars", below, has why it was not seen at all).
+toolbars, and the style draws it in the muted text colour instead, in whole
+device pixels, and in the accent while a tool runs whose button it hides
+("Tool families on the toolbars", below, has why it was not seen at all).
 
 **`icons.hpp` - the icons are drawn in code.** Each is a vector drawing on a
 24-unit grid painted by a `QIconEngine` at whatever size and device-pixel ratio
@@ -404,26 +405,38 @@ way, the width of the strip it replaced, less the icon's square - so less
 area than the strip, an L of 119 square pixels at 20 px icons against its
 396, the icon keeping its whole square; the held press and the right click,
 anywhere on the button, make up for it. The tooltip says how to open the
-menu and names the family's other tools, four at most: past four it names
-three and says how many more ("Delete Vertex / Move Vertex / Edit Vertices
-and 14 more"), since all seventeen of the Vertices family's others made a
-wall of six lines and the menu lists them anyway. The menu is the Draw
-menu's own submenu, one action per tool, so a tool is the same object in
-both.
+menu and names the family's other tools, five at most: past five it names
+four and says how many more ("Delete Vertex / Move Vertex / Edit Vertices /
+Straighten and 13 more"), since all seventeen of the Vertices family's
+others made a wall of six lines and the menu lists them anyway, while naming
+three of Circle's five and "and 2 more" was hardly shorter than naming them
+all. A name's words are held together by non-breaking spaces, so a long
+tooltip wraps between names and never inside one ("... 2 Points / 3" then
+"Points and 2 more" was Circle's). On the corner that opens the family the
+status bar shows the family's own line ("Vertices: Insert Vertex / Delete
+Vertex / ..."), and elsewhere on the button the tool's, where it showed the
+first tool's alone. The menu is the Draw menu's own submenu, one action per
+tool, so a tool is the same object in both.
 
-**A family shows any of its tools running.** A tool's button is framed in
-the accent while its tool runs (`QToolButton:checked`), and a family's
-button was checked only while its default action was - its first tool. With
-any other running (Delete Vertex, Circle 2 Points) no button on the Draw
-toolbar showed a tool running at all until 2026-09-30. The family's button
-is now framed, its mark in the accent, while ANY of its tools runs
-(`FlyoutButton::familyRunning`, painted with a checked button's state), and
-its menu ticks which. The button hears of it from the family's menu, which
-every tool's action tells when it is checked or unchecked
-(`QEvent::ActionChanged`): the button itself is told only of its default
-action. Rejected: the running tool's icon on the button while it runs - the
-icon would name one tool while a click starts another - and the last tool
-chosen becoming the button's own ("Not done", below).
+**A family is framed for its own tool, and its mark lights for any.** A
+tool's button is framed in the accent while its tool runs
+(`QToolButton:checked`), the toolbar's one sign that a tool runs, and a
+family's button is checked while its default action is - the tool its icon
+shows. With another of its tools running (Delete Vertex, Circle 2 Points) the
+button's mark takes the accent and its tooltip ends "Running now: Delete
+Vertex", in the accent; its menu ticks which. The button hears of it from the
+family's menu, which every tool's action tells when it is checked or
+unchecked (`QEvent::ActionChanged`): the button itself is told only of its
+default action. Until 2026-09-30 no button showed such a tool running at
+all, and then, for a day, the family's button was framed while ANY of its
+tools ran - so with Delete Vertex running the Vertices button framed Insert
+Vertex's icon, a plus on a polyline: the wrong tool, even the opposite one,
+named by the one sign the toolbar has for a tool running. Rejected: that
+frame; the running tool's icon on the button while it runs - the icon would
+name one tool while a click starts another; and the last tool chosen
+becoming the button's own ("Not done", below). The families are behind the
+Draw toolbar's overflow arrow at the window's first size, and a tool running
+behind that arrow lights it (below).
 
 **The families follow their toolbar's icon size.** A button a toolbar makes
 for an action follows the toolbar's icon size (its layout connects
@@ -440,11 +453,28 @@ bars and nothing else.
 **The mark is drawn in the screen's own pixels.** The triangle is filled a
 row at a time, each a pixel wider, without antialiasing: a filled polygon
 lost the pixels on its diagonal, and antialiased at five pixels its edge is
-a smudge. The rows are the device's: the mark's square is taken to the
-device through the painter's transform, snapped to its pixels and painted
-there. Rows of the widget's pixels were whole at 100% and 200%, but at 125%,
-the owner's display, and at 150% each became one device row or two, and the
-staircase came out uneven (rows 1, 2, 3, 3, 5, 6 wide at 125%).
+a smudge. The rows are the device's. Rows of the widget's pixels were whole
+at 100% and 200%, but at 125%, the owner's display, and at 150% each became
+one device row or two, and the staircase came out uneven (rows 1, 2, 3, 3,
+5, 6 wide at 125%). Its legs are 5 px times the screen's ratio and its inset
+from the button's last device pixel 2 px times it, each taken down to whole
+device pixels - 6 px and 2 at 125%, 7 and 3 at 150% - so it is the same on
+every button. Snapping the mark's own square to the device, as was done
+first, made its size hang on where the button sat in the window: at 150%
+Arc's came out 8 px beside the others' 7, and running, two of its rows ran
+into the frame's rounded corner. Taken down, not rounded, since the mark
+starts the pixel after the icon's square ends.
+
+**The mark goes out when the pointer leaves.** It is lit on the corner by the
+hover events, and the pointer leaves the button over the family's menu to
+pick from it. While a popup is open Qt tells the button with a Leave and no
+HoverLeave (`QApplication` sends a HoverLeave only with no popup up, or to
+the popup's own widgets), so the mark stayed lit in the accent - the colour
+of a tool running - after the menu closed, and after the tool it started had
+ended, until the pointer next crossed the button. The button clears it on
+Leave too. The test drives the pointer through the platform
+(`qt_handleMouseEvent`, what QtTest's mouse functions call), since a Leave
+sent by hand would say what the test thought Qt sends.
 
 The alternatives were rendered and measured on 2026-09-30 with a scratch
 prototype compiled against this theme and Qt 6.11.2:
@@ -466,57 +496,110 @@ shows the window's list of toolbars - anywhere else on the toolbar it still
 does.
 
 Undo and Redo stay split buttons: the button undoes one step and the arrow
-drops the history ("Undo and Redo lists", below). The theme pads a split
-button's right side by its strip's 10 px and no more
-(`QToolButton[popupMode="MenuButtonPopup"]`). The strip is laid in the
+drops the history ("Undo and Redo lists", below). The theme gives a split
+button's arrow a 12 px strip and pads the button's right side by a pixel
+more (`QToolButton[popupMode="MenuButtonPopup"]`). The strip is laid in the
 button's border rectangle (`QStyleSheetStyle` gives `::menu-button` that
-origin) and starts a pixel past the icon's contents, so each arrow is 7 px
-from its own icon's ink and 12 from the next button's; with the 4 px every
-button has added to the 10 it was 11 and 12, and the row read as four
-things - undo, arrow, redo, arrow. The strip has no hover shade of its own:
-the stylesheet gives it the whole button's hover, never the pointer's part
-of it (its `SC_ToolButton` is the whole button), so a shade lay on the strip
-with the pointer on the icon too, a band of the pressed colour that read as
-pressed. A 1 px divider on the strip's left edge, shown under the pointer,
-was tried in its place and dropped: the divider takes its pixel from the
-strip, and the arrow was drawn differently at rest and under the pointer.
-Along the top the 10 px each cost nothing.
+origin), and Fusion centres its 8 px arrow in it, so each arrow is 9 px from
+its own icon's ink, 14 from the next button's and 2 px in from the button's
+edge. With the 4 px every button has added to a 10 px strip it was 11 px from
+its own icon and 12 from the next, and the row read as four things - undo,
+arrow, redo, arrow; with a 10 px strip and no more it was 7 and 12, but the
+arrow ended a pixel from the button's edge, cut off against the rounded
+highlight under the pointer (at 125%, its ink 37..47 of 49 device pixels;
+now 39..50 of 53). The strip has no hover shade of its own: the stylesheet
+gives it the whole button's hover, never the pointer's part of it (its
+`SC_ToolButton` is the whole button), so a shade lay on the strip with the
+pointer on the icon too, a band of the pressed colour that read as pressed.
+A 1 px divider on the strip's left edge, shown under the pointer, was tried
+in its place and dropped: the divider takes its pixel from the strip, and
+the arrow was drawn differently at rest and under the pointer. Along the top
+the 13 px each cost nothing.
+
+**A view's kind switcher has its arrow beside its icon.** Every view's title
+bar opens with a button that switches what the view shows (Plan, 3D,
+section, elevation), a menu with an arrow beside the icon. The stylesheet
+sets the arrow at the right of the button's padding box in a 13 px box
+(`QStyleSheetStyle`'s default for a `::menu-indicator`), and centres the
+icon in the contents; with only the 2 px every title bar button has, the
+contents ran under the arrow and the icon's frame met it, 2 px over at 100%
+and 3 at 125%. The theme pads a title bar button with a menu on the right by
+that box's 13 px (`QToolButton[chrome="button"][popupMode="InstantPopup"]`),
+so the icon, 4..17 in the 34 px button, is four pixels clear of the arrow,
+22..30. `--check-toolbars` measures the docks' title bars as well as the
+toolbars, and saw it once it looked.
 
 The same padding and border hid a toolbar's OVERFLOW button. A toolbar too
 short for its buttons shows one, 12 px deep (`PM_ToolBarExtensionExtent`),
-and 4 px of padding and a 1 px border each side left its arrow 2 px: a dot
-nobody could see, so at the window's first size (1360 x 860) the Draw
-toolbar's Ellipse, Divide, Measure and Vertices tools were behind a button
-that did not show. The theme takes the padding and border off that one
-button (`QToolButton#qt_toolbar_ext_button`) and `KatanaStyle` draws its
-arrow in the muted text colour.
+and 4 px of padding inside a 1 px border left its arrow 2 px: a dot nobody
+could see, so at the window's first size (1360 x 860) the Draw toolbar's
+Ellipse, Divide, Measure and Vertices tools were behind a button that did
+not show. The theme takes the padding off that one button
+(`QToolButton#qt_toolbar_ext_button`) and keeps its border, so that while
+the toolbar is expanded the button has the accent outline every checked
+tool button has; taking the border too, as was done first, left it a plain
+grey pill. `KatanaStyle` draws the arrow itself: two chevrons in the muted
+text colour, a pixel wide and without antialiasing, painted for the device
+pixels they are shown in (`OverflowArrowEngine`), 7 x 8 px in the button's
+10 rows at 100%. It was two pixmaps, 12 and 24 px, antialiased: at 125% and
+150% Qt scaled the 24 down, and the chevrons came out in grey halos (21
+colours at 125% against 7 at 100%), and at 100% the two 1.5 px chevrons all
+but ran into one shape. While a tool runs whose button the arrow hides - a
+family with any of its tools running, or a plain tool's button framed - the
+chevrons take the accent (`tools::lightOverflowWhileAHiddenToolRuns`, which
+`fillToolMenus` sets up for each toolbar it fills): at the first size all
+eighteen Vertices tools are behind the Draw toolbar's arrow, and with Delete
+Vertex running nothing on the toolbars said a tool ran. Only a tool's
+button lights it: Select, which heads the Draw toolbar, is checked while no
+tool runs. It is worked out afresh when a tool starts or stops and when the
+toolbar's layout hides or shows a button, the overflow button among them, so
+a window shown short with a tool already running has the arrow lit as it
+appears; expanded, the toolbar shows every button, and the arrow is not
+lit.
 
 Tested in `qt_widgets.ToolFamilyButtons.*` - the mark, its press zone and
 the icon apart at 16, 20 and 28 px icons, on a bar made at that size and on
-one switched to it, and drawn where they say; the mark a whole staircase of
-device pixels at 100, 125, 150 and 200%; a family against a plain button
-with the same icon, at rest, under the pointer, running its first tool and
-running another, differing only in the mark's square; the button painted
-again when any of its tools starts or stops; a click on the icon, the mark,
-a held press, a right click and `QAbstractButton::click`, which `--press`
-uses; the mark lit with the pointer on its corner; the tooltip as it is
-shown, for a family made by hand and for the catalogue's - and in
-`qt_widgets.SplitButtons.*` (Undo's strip beside its icon, by hand; its
-hover the button's), `qt_widgets.ToolBarSigns.*` and
-`qt_widgets.ToolBarOverflow.AToolbarTooShortForItsButtonsShowsItsWholeOverflowArrow`;
-`qt_toolbar_signs_at_125_percent` runs the checks and the staircase at the
-owner's 125%. In the real window, `katana --check-toolbars` measures every
-icon-only toolbar button with a menu from its own rendering - with an opaque
-icon against a clear one for where the icon goes, with its menu against
-without for what the menu adds - and fails a run where the two meet. It
-judges in device pixels: a family's mark starts the pixel after its icon's
-square ends, and at 125% the two boxes taken back to the widget's pixels,
-each rounded outwards, met at pixel 26 - four clashes nobody could see. It
-measures once the steps have run, so a step sets up what it measures:
-`qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless` (the four
-families, Undo and Redo as the window starts),
-`qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_at_125_percent_headless`
-and `qt_the_tool_families_take_large_icons_and_show_any_of_their_tools_running_headless`
+one switched to it, and drawn where they say; the mark the same whole
+staircase of device pixels at 100, 125, 150, 175 and 200% wherever the
+button sits; a family against a plain button with the same icon, at rest,
+under the pointer, running the tool its icon shows (framed, as the plain
+button is) and running another (unframed, as the plain button at rest),
+differing only in the mark's square, the mark in the accent while either
+runs; the button painted again when any of its tools starts or stops; a
+click on the icon, the mark, a held press, a right click and
+`QAbstractButton::click`, which `--press` uses; the mark lit with the
+pointer on its corner and out once the pointer has left for the family's
+menu, the pointer driven through the platform; the status bar's line on the
+corner and off it; the tooltip as it is shown, for a family made by hand and
+for the catalogue's, laid out as the tooltip's label lays it out
+(`QTextOption::WordWrap`) at every width from 60 to 400 px with no name
+split - the test also asserts it reached widths where the names wrap, since
+a document not yet laid out has no lines and passed the check with the
+names' spaces plain - and naming another tool while it runs - and in
+`qt_widgets.SplitButtons.*` (Undo's strip beside its icon and its arrow in
+from the edge, by hand; its hover the button's),
+`qt_widgets.TitleBarButtons.*` (the kind switcher, by hand),
+`qt_widgets.ToolBarSigns.*` (the check fails a split button's arrow and a
+kind switcher's drawn over their icons) and `qt_widgets.ToolBarOverflow.*`
+(the arrow whole, in whole device pixels at 100 to 200%, lit while a tool it
+hides runs, also when the window is shown short with the tool already
+running, never for a checked button that is no tool, and outlined while
+expanded). Every case holds at any screen
+ratio: what is drawn is measured in the grab's device pixels, and
+`qt_toolbar_signs_at_125_percent.<suite>` runs all five suites at the
+owner's 125% (until 2026-09-30 six of these cases held only at 100%). In
+the real window, `katana --check-toolbars` measures every icon-only button
+with a menu on a toolbar or in a dock's title bar from its own rendering -
+with an opaque icon against a clear one for where the icon goes, with its
+menu against without for what the menu adds - and fails a run where the two
+meet. It judges in device pixels: a family's mark starts the pixel after
+its icon's square ends, and at 125% the two boxes taken back to the widget's
+pixels, each rounded outwards, met at pixel 26 - four clashes nobody could
+see. It measures once the steps have run, so a step sets up what it
+measures: `qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless`
+(the four families, Undo, Redo and the view's kind switcher as the window
+starts), `qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_at_125_percent_headless`
+and `qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_with_large_icons_and_a_tool_running_headless`
 (after View > Toolbars > Large Icons, with Delete Vertex running).
 
 Not done: a family button does not remember the tool last chosen from it, as

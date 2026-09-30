@@ -192,8 +192,8 @@ endif()
 if(CHECK_MENUS)
     list(APPEND extra --check-menus)
 endif()
-# -DCHECK_TOOLBARS=ON fails the run when a toolbar button draws the sign of
-# its menu over its icon, or no sign at all (--check-toolbars).
+# -DCHECK_TOOLBARS=ON fails the run when a toolbar or title bar button draws
+# the sign of its menu over its icon, or no sign at all (--check-toolbars).
 if(CHECK_TOOLBARS)
     list(APPEND extra --check-toolbars)
 endif()

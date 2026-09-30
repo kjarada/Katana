@@ -5,6 +5,8 @@
 
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QCoreApplication>
+#include <QDockWidget>
 #include <QHelpEvent>
 #include <QHoverEvent>
 #include <QIcon>
@@ -14,10 +16,12 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QStyle>
+#include <QStatusTipEvent>
 #include <QStyleOptionToolButton>
 #include <QStylePainter>
 #include <QToolBar>
 #include <QToolTip>
+#include <QTransform>
 
 #include "theme.hpp"
 
@@ -32,7 +36,8 @@ constexpr int kMaxLeg = 5;
 constexpr int kMinLeg = 3;
 // From the button's edge to the mark: the theme's 1 px border and a pixel of
 // air. Only the mark's right-angled tip reaches the border's 5 px rounded
-// corner, where the border is the accent too while the tool runs.
+// corner, where the border is the accent too while the tool runs. On a
+// scaled screen both are taken down to whole device pixels (paintEvent).
 constexpr int kInset = 2;
 // The corner a press opens the menu from, 12 px each way: the width of the
 // drop-down strip the mark replaced (a stylesheet's default ::menu-button is
@@ -45,7 +50,17 @@ constexpr int kZone = 12;
 // A family names this many of its other tools in its tooltip, or one fewer
 // and how many more: the Vertices family's seventeen others, all named, were
 // a wall of six lines under the tool's own two, and the menu lists them.
-constexpr qsizetype kNamedInTooltip = 4;
+// Five, so Circle's five are named rather than three "and 2 more", which was
+// hardly shorter.
+constexpr qsizetype kNamedInTooltip = 5;
+
+// A tool's name as the tooltip lists it: its words held together by
+// non-breaking spaces, so that the line wraps between names and never inside
+// one ("3 / Points" was Circle's), and escaped for the tooltip's rich text.
+QString listedName(const QAction& tool)
+{
+    return QString(tool.text()).remove('&').replace(QChar(' '), QChar(QChar::Nbsp)).toHtmlEscaped();
+}
 
 // The box, in device pixels, of the pixels where two grabs of a widget
 // differ; null for none.
@@ -114,15 +129,18 @@ FlyoutButton::FlyoutButton(QMenu& family, QWidget* parent) : QToolButton(parent)
     family.installEventFilter(this);
 }
 
-bool FlyoutButton::familyRunning() const
+const QAction* FlyoutButton::runningTool() const
 {
-    if (isChecked()) {
-        return true;
+    if (family_ == nullptr) {
+        return nullptr;
     }
-    return family_ != nullptr && std::ranges::any_of(family_->actions(), [](const QAction* tool) {
-               return tool->isChecked();
-           });
+    const auto tools = family_->actions();
+    const auto running =
+        std::ranges::find_if(tools, [](const QAction* tool) { return tool->isChecked(); });
+    return running != tools.end() ? *running : nullptr;
 }
+
+bool FlyoutButton::familyRunning() const { return isChecked() || runningTool() != nullptr; }
 
 bool FlyoutButton::eventFilter(QObject* watched, QEvent* event)
 {
@@ -172,7 +190,7 @@ QString FlyoutButton::toolTipWithMenu() const
     QStringList others;
     for (const QAction* item : family->actions()) {
         if (!item->isSeparator() && item != defaultAction()) {
-            others << QString(item->text()).remove('&').toHtmlEscaped();
+            others << listedName(*item);
         }
     }
     if (others.isEmpty()) {
@@ -187,9 +205,16 @@ QString FlyoutButton::toolTipWithMenu() const
     }
     // "for its other tools:" before the names, so that the triangle does not
     // read as the first of them ("the corner triangle for Delete Vertex").
-    return toolTip() + QString("<br><span style='color:%1'>Hold, right-click or press the "
-                               "corner triangle for its other tools: %2</span>")
-                           .arg(theme::textMuted().name(), named);
+    QString tip = toolTip() + QString("<br><span style='color:%1'>Hold, right-click or press the "
+                                      "corner triangle for its other tools: %2</span>")
+                                  .arg(theme::textMuted().name(), named);
+    // Another of them running lights the mark but frames nothing - the icon
+    // is not its - so this is where it is named, in the accent the mark is.
+    if (const QAction* running = runningTool(); running != nullptr && running != defaultAction()) {
+        tip += QString("<br><span style='color:%1'>Running now: %2</span>")
+                   .arg(theme::accent().name(), listedName(*running));
+    }
+    return tip;
 }
 
 bool FlyoutButton::event(QEvent* event)
@@ -202,8 +227,9 @@ bool FlyoutButton::event(QEvent* event)
         return true;
     }
     // The corner is a target of its own, so the mark says so under the
-    // pointer. (A stylesheet's split button cannot: its SC_ToolButton is the
-    // whole button, so the strip is never the hovered part.)
+    // pointer, and the status bar names the family there. (A stylesheet's
+    // split button cannot: its SC_ToolButton is the whole button, so the
+    // strip is never the hovered part.)
     if (event->type() == QEvent::HoverEnter || event->type() == QEvent::HoverMove ||
         event->type() == QEvent::HoverLeave) {
         const bool onMark =
@@ -212,9 +238,30 @@ bool FlyoutButton::event(QEvent* event)
         if (onMark != pointerOnMark_) {
             pointerOnMark_ = onMark;
             update();
+            if (event->type() != QEvent::HoverLeave) {
+                showStatusTip(onMark);
+            }
         }
     }
+    // Leave as well as HoverLeave: while a popup is open Qt sends the button
+    // a Leave when the pointer goes, but no HoverLeave (QApplication's
+    // dispatchEnterLeave sends one only with no popup up, or to the popup's
+    // own widgets). The corner's press opens the family's menu, and the
+    // pointer leaves over it to pick a tool: with only HoverLeave heard, the
+    // mark stayed lit in the accent - the colour of a tool running - after
+    // the menu closed and after the tool it started had ended.
+    if (event->type() == QEvent::Leave && pointerOnMark_) {
+        pointerOnMark_ = false;
+        update();
+    }
     return QToolButton::event(event);
+}
+
+void FlyoutButton::showStatusTip(bool onMark)
+{
+    const QString familyTip = family_ != nullptr ? family_->menuAction()->statusTip() : QString();
+    QStatusTipEvent tip(onMark && !familyTip.isEmpty() ? familyTip : statusTip());
+    QCoreApplication::sendEvent(this, &tip);
 }
 
 void FlyoutButton::paintEvent(QPaintEvent* /*event*/)
@@ -226,28 +273,25 @@ void FlyoutButton::paintEvent(QPaintEvent* /*event*/)
     // its ::menu-indicator arrow in the same corner, Fusion its arrow over
     // the icon. The mark below is the one sign.
     option.features &= ~QStyleOptionToolButton::HasMenu;
-    // Running while any of the family's tools runs, not only the one a click
-    // starts: the button's checked state is its default action's, and with
-    // Delete Vertex running no button on the toolbar was framed at all. The
-    // state a checked button's option has (QToolButton::initStyleOption),
-    // so the frame is the stylesheet's :checked one.
-    const bool running = familyRunning();
-    if (running) {
-        option.state |= QStyle::State_On;
-        option.state &= ~QStyle::State_Raised;
-    }
+    // The frame is the button's own checked state, its default action's, as
+    // on every tool button: it says the tool the icon shows runs. It was
+    // once drawn while ANY of the family's tools ran, and with Delete Vertex
+    // running the Vertices button framed Insert Vertex's icon - the wrong
+    // tool, named by the one sign the toolbar has for "this is running".
     painter.drawComplexControl(QStyle::CC_ToolButton, option);
     if (menu() == nullptr) {
         return;
     }
     // Quiet at rest, brighter under the pointer, the accent with the pointer
-    // on it - a press there opens the family - and while a tool of the
-    // family runs (the checked frame is the accent too), and disabled with
-    // the button.
+    // on it - a press there opens the family - and while any tool of the
+    // family runs, framed or not (the checked frame is the accent too), and
+    // disabled with the button. So with Delete Vertex running the Vertices
+    // button is unframed with its triangle lit: one of the tools behind the
+    // triangle runs, and the tooltip names it.
     QColor ink = theme::textMuted();
     if (!isEnabled()) {
         ink = theme::textDisabled();
-    } else if (running || pointerOnMark_) {
+    } else if (familyRunning() || pointerOnMark_) {
         ink = theme::accent();
     } else if (underMouse() || isDown()) {
         ink = theme::text();
@@ -257,15 +301,31 @@ void FlyoutButton::paintEvent(QPaintEvent* /*event*/)
     // each, so that it is the same pixels on every platform. A polygon fill
     // was not: without antialiasing Qt leaves out the pixels whose centres lie
     // on the diagonal, and a 5 px triangle came out 4 px; antialiased, at
-    // five pixels its edge is a smudge. The rows are the DEVICE's: the
-    // square is taken to the device and snapped to its pixels, and painted
-    // there. Rows of the widget's pixels were whole at a ratio of 1 and 2,
-    // but at 1.25 and 1.5 each became one device row or two and the
-    // staircase came out uneven (rows 1, 2, 3, 3, 5, 6 at 125%).
-    const QRectF onDevice = painter.deviceTransform().mapRect(QRectF(markRect()));
-    const QRect square(QPoint(qRound(onDevice.left()), qRound(onDevice.top())),
-                       QPoint(qRound(onDevice.right()) - 1, qRound(onDevice.bottom()) - 1));
-    const int leg = std::min(square.width(), square.height());
+    // five pixels its edge is a smudge. The rows are the DEVICE's. Rows of
+    // the widget's pixels were whole at a ratio of 1 and 2, but at 1.25 and
+    // 1.5 each became one device row or two and the staircase came out
+    // uneven (rows 1, 2, 3, 3, 5, 6 at 125%). The square is the mark's legs
+    // and inset times the ratio, each taken down to whole device pixels and
+    // set back from the button's last device pixel, so the triangle is the
+    // same on every button: snapping the mark's own square to the device, as
+    // was done first, made its size hang on where the button sat in the
+    // window - at 150% Arc's came out 8 px beside the others' 7, running two
+    // rows into the running frame's rounded corner. Taken down, not rounded,
+    // since the mark's square starts the pixel after the icon's ends.
+    const QTransform& toDevice = painter.deviceTransform();
+    const double ratio = toDevice.m11();
+    // Whole device pixels in `widgetPixels`, taken down; the slack keeps a
+    // ratio a hair under 2 from losing a pixel of ten.
+    const auto whole = [ratio](int widgetPixels) {
+        return static_cast<int>(std::floor(widgetPixels * ratio + 1e-6));
+    };
+    const QRect mark = markRect();
+    const int lastColumn = qRound(width() * ratio + toDevice.dx()) - 1;
+    const int lastRow = qRound(height() * ratio + toDevice.dy()) - 1;
+    const int inset = whole(rect().right() - mark.right());
+    const int leg = std::max(1, whole(mark.width()));
+    const QRect square(QPoint(lastColumn - inset - leg + 1, lastRow - inset - leg + 1),
+                       QSize(leg, leg));
     painter.save();
     // World coordinates that are device pixels: the inverse of what maps the
     // widget's pixels to the device (the screen's ratio, and the offset of
@@ -343,18 +403,93 @@ void followToolBarIconSize(QToolButton& button, QToolBar& bar)
     QObject::connect(&bar, &QToolBar::iconSizeChanged, &button, &QToolButton::setIconSize);
 }
 
+namespace {
+
+// The toolbar's overflow arrow, lit while a button it hides shows a tool
+// running. Worked out afresh whenever a tool starts or stops and whenever
+// the toolbar's layout hides or shows a button (QToolBarLayout calls hide()
+// and show() on the buttons that no longer fit or fit again), from what is
+// hidden and running then - never kept as a count that could drift. When the
+// toolbar is expanded its buttons are shown, their own frames and marks
+// visible, and the arrow is not lit.
+class OverflowLight final : public QObject {
+  public:
+    OverflowLight(QToolBar& bar, const QList<QAction*>& tools)
+        : QObject(&bar), bar_(&bar), tools_(tools)
+    {
+    }
+
+    void refresh() const
+    {
+        auto* overflow =
+            bar_->findChild<QToolButton*>("qt_toolbar_ext_button", Qt::FindDirectChildrenOnly);
+        if (overflow == nullptr) {
+            return;
+        }
+        bool behind = false;
+        for (QToolButton* button : bar_->findChildren<QToolButton*>(Qt::FindDirectChildrenOnly)) {
+            if (button == overflow || !button->isHidden()) {
+                continue;
+            }
+            // A tool's button, not any checked one: Select, which heads the
+            // Draw toolbar, is checked while NO tool runs.
+            const auto* family = dynamic_cast<const FlyoutButton*>(button);
+            const bool tool = tools_.contains(button->defaultAction());
+            if ((tool && button->isChecked()) || (family != nullptr && family->familyRunning())) {
+                behind = true;
+                break;
+            }
+        }
+        if (overflow->property(theme::kToolRunsBehindOverflow).toBool() != behind) {
+            overflow->setProperty(theme::kToolRunsBehindOverflow, behind);
+            overflow->update();
+        }
+    }
+
+  protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        // Hide and Show come only while the toolbar is on the screen, and its
+        // layout also hides buttons before then, as the window is shown. The
+        // overflow button is watched too, so its own Show - which comes after
+        // that layout - works the light out before the arrow is seen.
+        if (event->type() == QEvent::Show || event->type() == QEvent::Hide) {
+            refresh();
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+  private:
+    QToolBar* bar_;
+    QList<QAction*> tools_;
+};
+
+} // namespace
+
+void lightOverflowWhileAHiddenToolRuns(QToolBar& bar, const QList<QAction*>& tools)
+{
+    auto* light = new OverflowLight(bar, tools);
+    for (QToolButton* button : bar.findChildren<QToolButton*>(Qt::FindDirectChildrenOnly)) {
+        button->installEventFilter(light);
+    }
+    for (QAction* tool : tools) {
+        QObject::connect(tool, &QAction::toggled, light, [light] { light->refresh(); });
+    }
+    light->refresh();
+}
+
 QStringList menuSignClashes(QWidget& root, QStringList* checked, int* buttons)
 {
     QStringList clashes;
     int measured = 0;
-    for (QToolBar* bar : root.findChildren<QToolBar*>()) {
-        for (QToolButton* button : bar->findChildren<QToolButton*>(Qt::FindDirectChildrenOnly)) {
+    const auto measure = [&](const QString& holder, QWidget& row) {
+        for (QToolButton* button : row.findChildren<QToolButton*>(Qt::FindDirectChildrenOnly)) {
             if (button->menu() == nullptr || button->objectName() == "qt_toolbar_ext_button" ||
                 button->toolButtonStyle() != Qt::ToolButtonIconOnly || button->icon().isNull()) {
                 continue;
             }
             ++measured;
-            const QString where = bar->objectName() + " > " + button->objectName();
+            const QString where = holder + " > " + button->objectName();
             const DrawnParts parts = drawnParts(*button);
             // Judged, and so said, in device pixels on a scaled screen.
             const bool scaled = parts.ratio != 1.0;
@@ -380,6 +515,17 @@ QStringList menuSignClashes(QWidget& root, QStringList* checked, int* buttons)
             if (checked != nullptr) {
                 *checked << line;
             }
+        }
+    };
+    for (QToolBar* bar : root.findChildren<QToolBar*>()) {
+        measure("toolbar button " + bar->objectName(), *bar);
+    }
+    // A view's title bar opens with its kind switcher, a button with a menu
+    // at the left of every view: its arrow sat on its icon's frame, 2 px at
+    // 100% and 3 at 125%, where no check looked.
+    for (QDockWidget* dock : root.findChildren<QDockWidget*>()) {
+        if (QWidget* titleBar = dock->titleBarWidget()) {
+            measure("title bar button " + dock->objectName(), *titleBar);
         }
     }
     if (buttons != nullptr) {

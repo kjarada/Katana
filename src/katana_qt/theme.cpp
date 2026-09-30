@@ -4,13 +4,15 @@
 #include <QFontDatabase>
 #include <QFontMetrics>
 #include <QIcon>
+#include <QIconEngine>
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
-#include <QPolygonF>
+#include <QPointer>
 #include <QProxyStyle>
 #include <QString>
 #include <QStyleOptionMenuItem>
+#include <QWidget>
 
 #include <algorithm>
 #include <cmath>
@@ -65,6 +67,99 @@ QFont sectionFont(const QFont& base)
     return font;
 }
 
+// A toolbar's overflow arrow: two chevrons, pointing down on a vertical
+// toolbar (its hidden buttons are below its end) or right on a horizontal
+// one, in the muted text colour.
+//
+// Painted in whole pixels of the size it is asked for, which for a scaled
+// screen is the size in the screen's own pixels (QIcon::pixmap asks the
+// engine for the logical size times the ratio), as the icons of icons.hpp
+// are painted. The arrow was first two pixmaps, 12 and 24 px, and at 125%
+// and 150% Qt resampled the 24 down to 15 and 18: the chevrons came out in
+// grey halos. And without antialiasing: a 45-degree line a pixel wide is a
+// clean staircase at any size, where an antialiased one is a smudge at this
+// one - at 12 px the two 1.5 px chevrons all but ran into one shape.
+//
+// The geometry is worked from the rows the arrow has along its way - 10 in
+// the overflow button at 100%, its 12 px less its border: each chevron
+// `half` pixels either side of its apex and `half` + the stroke rows deep,
+// the second right below the first, so the two fill all but a row at each
+// end (at 10 rows: 7 across, 4 deep each, 8 in all, as Qt's own arrow and
+// the first design were). A chevron's arms then never touch the other's: a
+// clear pixel is left between them wherever they run side by side. The
+// stroke is a pixel wide per 10 px of that room, two at 200%.
+//
+// In the accent while a tool runs whose button the arrow hides: the button
+// it is made for (QToolBarExtension hands itself to standardIcon) says so
+// with kToolRunsBehindOverflow, read at each paint.
+class OverflowArrowEngine final : public QIconEngine {
+  public:
+    OverflowArrowEngine(bool down, const QWidget* shownOn)
+        : down_(down), shownOn_(const_cast<QWidget*>(shownOn))
+    {
+    }
+
+    void paint(QPainter* painter, const QRect& rect, QIcon::Mode mode, QIcon::State) override
+    {
+        // In the device's pixels, whatever the painter's transform.
+        const QRect area = painter->deviceTransform().mapRect(QRectF(rect)).toAlignedRect();
+        const bool vertical = down_;
+        const int acrossRoom = vertical ? area.width() : area.height();
+        const int alongRoom = vertical ? area.height() : area.width();
+        const int stroke = std::max(1, alongRoom / 10);
+        const int half = std::min((alongRoom - 2 * stroke) / 2 - 1, (acrossRoom - 1) / 2);
+        if (half < 2) {
+            return; // no room for a chevron that reads as one
+        }
+        const int step = half + stroke;
+        // Across the arrow and along it: its width, and its depth from the
+        // first chevron's top to the second's bottom.
+        const int across = 2 * half + 1;
+        const int along = step + half + stroke;
+        const int centre = (vertical ? area.left() : area.top()) + (acrossRoom - across) / 2 + half;
+        const int start = (vertical ? area.top() : area.left()) + (alongRoom - along) / 2;
+
+        painter->save();
+        painter->setWorldTransform(painter->deviceTransform().inverted() *
+                                   painter->worldTransform());
+        painter->setRenderHint(QPainter::Antialiasing, false);
+        const bool lit =
+            shownOn_ != nullptr && shownOn_->property(kToolRunsBehindOverflow).toBool();
+        const QColor ink = mode == QIcon::Disabled ? textDisabled() : lit ? accent() : textMuted();
+        // Pixel (a, b): a across the arrow, b along it.
+        const auto dot = [&](int a, int b) {
+            painter->fillRect(vertical ? QRect(a, b, 1, 1) : QRect(b, a, 1, 1), ink);
+        };
+        for (const int top : {start, start + step}) {
+            for (int row = 0; row <= half; ++row) {
+                for (int thick = 0; thick < stroke; ++thick) {
+                    dot(centre - half + row, top + row + thick);
+                    dot(centre + half - row, top + row + thick);
+                }
+            }
+        }
+        painter->restore();
+    }
+
+    QPixmap pixmap(const QSize& size, QIcon::Mode mode, QIcon::State state) override
+    {
+        QPixmap pixmap(size);
+        pixmap.fill(Qt::transparent);
+        QPainter painter(&pixmap);
+        paint(&painter, QRect(QPoint(0, 0), size), mode, state);
+        return pixmap;
+    }
+
+    [[nodiscard]] QIconEngine* clone() const override
+    {
+        return new OverflowArrowEngine(down_, shownOn_);
+    }
+
+  private:
+    bool down_;
+    QPointer<QWidget> shownOn_;
+};
+
 // Fusion, with three things it does not do.
 //
 // Menu sections. The Survey, Terrain and GIS menus are grouped under titled
@@ -82,7 +177,7 @@ QFont sectionFont(const QFont& base)
 // A toolbar's overflow arrow. Qt's is a small dark image made for light
 // toolbars (QCommonStyle's toolbar-ext resources), barely there on this one;
 // this style draws it in the muted text colour, pointing the way the hidden
-// buttons are.
+// buttons are, and in the accent while a tool runs whose button it hides.
 class KatanaStyle final : public QProxyStyle {
   public:
     KatanaStyle() : QProxyStyle(QStringLiteral("Fusion")) {}
@@ -119,7 +214,7 @@ class KatanaStyle final : public QProxyStyle {
     {
         if (which == SP_ToolBarHorizontalExtensionButton ||
             which == SP_ToolBarVerticalExtensionButton) {
-            return overflowArrow(which == SP_ToolBarVerticalExtensionButton);
+            return overflowArrow(which == SP_ToolBarVerticalExtensionButton, widget);
         }
         return QProxyStyle::standardIcon(which, option, widget);
     }
@@ -160,32 +255,11 @@ class KatanaStyle final : public QProxyStyle {
     static constexpr int kIndent = 12;
 
     // Two chevrons pointing down (a vertical toolbar's hidden buttons are
-    // below its end) or right, on a 12-unit grid: the arrow's button is
-    // 12 px deep (PM_ToolBarExtensionExtent). Drawn at twice the size too,
-    // for a scaled screen.
-    static QIcon overflowArrow(bool down)
+    // below its end) or right, painted for the pixels they are shown in and
+    // lit for the button they are shown on (OverflowArrowEngine).
+    static QIcon overflowArrow(bool down, const QWidget* shownOn)
     {
-        QIcon icon;
-        for (const int side : {12, 24}) {
-            QPixmap pixmap(side, side);
-            pixmap.fill(Qt::transparent);
-            QPainter painter(&pixmap);
-            painter.setRenderHint(QPainter::Antialiasing);
-            painter.scale(side / 12.0, side / 12.0);
-            painter.setPen(QPen(textMuted(), 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            for (const double at : {2.5, 6.5}) {
-                QPolygonF chevron;
-                if (down) {
-                    chevron << QPointF(3.0, at) << QPointF(6.0, at + 3.0) << QPointF(9.0, at);
-                } else {
-                    chevron << QPointF(at, 3.0) << QPointF(at + 3.0, 6.0) << QPointF(at, 9.0);
-                }
-                painter.drawPolyline(chevron);
-            }
-            painter.end();
-            icon.addPixmap(pixmap);
-        }
-        return icon;
+        return QIcon(new OverflowArrowEngine(down, shownOn));
     }
 
     static const QStyleOptionMenuItem* separatorOf(ContentsType type, const QStyleOption* option)
@@ -249,28 +323,34 @@ QString styleSheet()
            above make Qt reserve no width for the strip
            (PM_MenuButtonIndicator is 0 under such a rule), yet the strip is
            still laid, painted and pressed over the icon's right side. The
-           padding is the strip's 10 px and no more, so the strip - laid in
-           the border rectangle, ::menu-button's origin in QStyleSheetStyle -
-           starts a pixel past the icon's contents: with the 4 px every
-           button has added, each arrow sat 11 px from its own icon and 12
-           from the next button's, and the row read as four things - undo,
-           arrow, redo, arrow - where it now reads as two (7 px, and 12). The
-           strip has no hover shade of its own: the stylesheet gives it the
-           whole button's hover, never the pointer's part (its SC_ToolButton
-           is the whole button), so a shade lay on it with the pointer on the
-           icon too - a darker band that read as pressed. The tool families
-           are not split buttons: they mark their menus in a corner
-           (tools/flyout_button.hpp). */
-        QToolButton[popupMode="MenuButtonPopup"] { padding-right: 10px; }
-        QToolButton::menu-button { border: none; width: 10px; border-top-right-radius: 5px;
+           strip - laid in the border rectangle, ::menu-button's origin in
+           QStyleSheetStyle - is 12 px and the padding a pixel more, so
+           Fusion's 8 px arrow, centred in the strip, is 9 px from its own
+           icon's ink, 14 from the next button's, and 2 px in from the
+           button's edge; at 125% its ink ends two device pixels short of the
+           button's last. With the 4 px every button has added to a 10 px
+           strip each arrow sat 11 px from its own icon and 12 from the next,
+           and the row read as four things - undo, arrow, redo, arrow; with a
+           10 px strip and no more the arrow ended a pixel from the edge, cut
+           off against the rounded hover. The strip has no hover shade of its
+           own: the stylesheet gives it the whole button's hover, never the
+           pointer's part (its SC_ToolButton is the whole button), so a shade
+           lay on it with the pointer on the icon too - a darker band that
+           read as pressed. The tool families are not split buttons: they
+           mark their menus in a corner (tools/flyout_button.hpp). */
+        QToolButton[popupMode="MenuButtonPopup"] { padding-right: 13px; }
+        QToolButton::menu-button { border: none; width: 12px; border-top-right-radius: 5px;
                                    border-bottom-right-radius: 5px; }
         /* The arrow a toolbar shows when the window is too small for all its
            buttons. The button is 12 px deep (PM_ToolBarExtensionExtent), and
-           the 4 px padding and 1 px border every tool button has left its
-           arrow 2 px: a dot nobody saw, with the Draw toolbar's Ellipse and
-           Vertices tools behind it at the window's first size. KatanaStyle
-           draws the arrow in the muted text colour. */
-        QToolButton#qt_toolbar_ext_button { padding: 0px; border: none; }
+           the 4 px padding every tool button has, inside its 1 px border,
+           left its arrow 2 px: a dot nobody saw, with the Draw toolbar's
+           Ellipse and Vertices tools behind it at the window's first size.
+           No padding here, but the border stays, so that while the toolbar
+           is expanded the button has the accent outline every checked tool
+           button has (QToolButton:checked); KatanaStyle draws the arrow in
+           the 10 px left, in the muted text colour. */
+        QToolButton#qt_toolbar_ext_button { padding: 0px; }
 
         /* Every dock wears a DockTitleBar (dock_chrome.hpp), which draws its
            own buttons; the ::title rule is for a dock made without one.
@@ -293,6 +373,16 @@ QString styleSheet()
             border: 1px solid %accent%; }
         QToolButton[chrome="button"]::menu-indicator { subcontrol-position: right center;
                                                        subcontrol-origin: padding; }
+        /* A title bar's button with a menu - each view's kind switcher -
+           keeps its arrow off its icon. The arrow is set at the right end of
+           the padding box (above), in a 13 px box (QStyleSheetStyle's
+           defaultSize for a ::menu-indicator), and the icon is centred in
+           the contents: with only the 2 px every title bar button has, the
+           contents ran under the arrow and the icon's frame met it, 2 px
+           over at 100% and 3 at 125%. Padded by the box's 13 px, the
+           contents end where it starts. */
+        QToolButton[chrome="button"][popupMode="InstantPopup"],
+        QToolButton[chrome="button"][popupMode="DelayedPopup"] { padding-right: 13px; }
         QToolButton[filtered="true"] { border: 1px solid %accent%; }
         QToolBar#MinimisedToolBar { border: none; border-top: 1px solid %border%;
                                     padding: 2px 6px; }

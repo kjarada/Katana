@@ -483,12 +483,13 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 // --check-menus lists every menu item with no icon or no status tip
 // (MainWindow::menuGaps), and fails the run when there is one.
 //
-// --check-toolbars measures every icon-only toolbar button with a menu - the
-// tool families, Undo and Redo - from its own rendering, prints where it
-// draws its icon and its menu's sign, and fails the run when a sign is drawn
-// over the icon or not at all (tools::menuSignClashes). It measures once the
-// --action switches and the steps have run, so --trigger viewToolBarIconsLarge
-// before it is measured at 28 px.
+// --check-toolbars measures every icon-only button with a menu on a toolbar
+// or in a dock's title bar - the tool families, Undo and Redo, each view's
+// kind switcher - from its own rendering, prints where it draws its icon and
+// its menu's sign, and fails the run when a sign is drawn over the icon or
+// not at all (tools::menuSignClashes). It measures once the --action switches
+// and the steps have run, so --trigger viewToolBarIconsLarge before it is
+// measured at 28 px.
 //
 // --survey-dialog may be given again: the next dialog opens and the fills and
 // presses after it go to it, so one run can import a file and export it again.
@@ -780,28 +781,29 @@ int main(int argc, char* argv[])
             }
             std::fprintf(stderr, "menus: %d items, each with an icon and a status tip\n", items);
         }
-        // --check-toolbars measures the toolbars as the actions and steps
-        // leave them, so a step can set up what it measures: the icon size
-        // View > Toolbars chose (--trigger viewToolBarIconsLarge), a tool
-        // running. Every button measured is listed, clear or not, so a test
-        // sees which ones the check reached.
+        // --check-toolbars measures the toolbars and the docks' title bars as
+        // the actions and steps leave them, so a step can set up what it
+        // measures: the icon size View > Toolbars chose (--trigger
+        // viewToolBarIconsLarge), a tool running. Every button measured is
+        // listed, clear or not ("toolbar button ..." or "title bar button
+        // ..."), so a test sees which ones the check reached.
         const auto toolBarSignsClear = [&window] {
             int buttons = 0;
             QStringList measured;
             const QStringList clashes =
                 katana::qt::tools::menuSignClashes(window, &measured, &buttons);
             for (const QString& line : measured) {
-                std::fprintf(stderr, "toolbar button %s\n", qPrintable(line));
+                std::fprintf(stderr, "%s\n", qPrintable(line));
             }
             for (const QString& clash : clashes) {
-                std::fprintf(stderr, "toolbar clash: %s\n", qPrintable(clash));
+                std::fprintf(stderr, "menu sign clash: %s\n", qPrintable(clash));
             }
             if (!clashes.isEmpty()) {
                 return false;
             }
             std::fprintf(stderr,
-                         "toolbars: %d buttons with a menu, each drawing its sign clear of its "
-                         "icon\n",
+                         "toolbars and title bars: %d buttons with a menu, each drawing its sign "
+                         "clear of its icon\n",
                          buttons);
             return true;
         };
