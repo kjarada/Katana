@@ -12,6 +12,7 @@
 
 #include <QImage>
 #include <QPainter>
+#include <QPen>
 
 #include "drawing/feedback_painter.hpp"
 #include "theme.hpp"
@@ -149,7 +150,9 @@ TEST(FeedbackPainter, ACrowdedNewVertexGivesWayToTheVertexThatGoes)
 {
     // A fillet a few pixels across: its new vertex 3 px from the corner's X.
     // Alone the new vertex is drawn; over the X it is left out, so the X
-    // still reads - and it is still counted, being what the tool will do.
+    // still reads - and, left out, it is not counted: the counts are the
+    // headless record of what is on screen, and a record of added=1 over a
+    // picture with no disc told a test something that was not there.
     ToolFeedback alone;
     alone.marks.push_back(
         FeedbackMark{FeedbackRole::Added, Geometry{PointGeometry{Point2(10.3, 0)}}, {}});
@@ -162,7 +165,88 @@ TEST(FeedbackPainter, ACrowdedNewVertexGivesWayToTheVertexThatGoes)
     EXPECT_GT(inkNear(drawn.image, where, 6, overlay::preview()), 0);
     EXPECT_EQ(inkNear(given.image, where, 6, overlay::preview()), 0);
     EXPECT_GT(inkNear(given.image, where, 6, overlay::removed()), 0);
-    EXPECT_EQ(given.counts.added, 1u);
+    EXPECT_EQ(drawn.counts.added, 1u);
+    EXPECT_EQ(given.counts.added, 0u);
+}
+
+TEST(FeedbackPainter, EntersPlaceIsAHollowRingNotTheNewVertexDisc)
+{
+    // Where Enter would add: the Added disc's circle in the same cyan, but
+    // hollow - its middle is the ground, where the disc's is cyan.
+    ToolFeedback enter;
+    enter.marks.push_back(
+        FeedbackMark{FeedbackRole::Enter, Geometry{PointGeometry{Point2(5, 0)}}, "Enter"});
+    ToolFeedback added;
+    added.marks.push_back(FeedbackMark{FeedbackRole::Added, Geometry{PointGeometry{Point2(5, 0)}}, {}});
+    const Painted ring = paintOver(enter, {});
+    const Painted disc = paintOver(added, {});
+    const Painted baseline = paintOver(ToolFeedback{}, {});
+    // The ring, 6 px out: inked. A point 2.5 px out on the diagonal, off the
+    // disc's "+": the disc's cyan, the ring's ground.
+    const QPointF centre = toScreen(Point2(5, 0));
+    EXPECT_GT(inkNear(ring.image, centre, 7.5, overlay::preview()),
+              inkNear(baseline.image, centre, 7.5, overlay::preview()));
+    const QPointF inside = centre + QPointF(2.5, 2.5);
+    EXPECT_GT(inkNear(disc.image, inside, 1, overlay::preview()), 0);
+    EXPECT_EQ(inkNear(ring.image, inside, 1, overlay::preview()), 0);
+    EXPECT_EQ(ring.counts.enter, 1u);
+    EXPECT_EQ(ring.counts.added, 0u) << "Enter's place is not what a click adds";
+}
+
+TEST(FeedbackPainter, ADenseStringsVerticesAreThinnedAndLieUnderTheTarget)
+{
+    // 201 vertices 0.1 apart - 1 px at 10 px a unit - under a target
+    // segment along them. One square a vertex was a solid blue band drawn
+    // over the target; now no two squares are nearer than 10 px, the ends
+    // kept, and they are drawn first, so the target's green lies on top.
+    std::vector<Point2> dense;
+    for (int i = 0; i <= 200; ++i) {
+        dense.emplace_back(0.1 * i, 0.0);
+    }
+    ToolFeedback feedback;
+    feedback.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{Segment2{Point2(0, 0), Point2(20, 0)}}, {}});
+    const Painted painted = paintOver(feedback, dense);
+    // 200 px of string at one square per 10 px: 21 squares, give or take
+    // one where 0.1 x 10 px rounds under 10.
+    EXPECT_GE(painted.counts.focus, 20u);
+    EXPECT_LE(painted.counts.focus, 22u);
+    // Midway between squares and on them alike, the segment is green.
+    for (const double x : {3.05, 7.0, 11.05, 15.0}) {
+        EXPECT_GT(inkNear(painted.image, toScreen(Point2(x, 0)), 1.5, overlay::target()), 0)
+            << "at x = " << x;
+    }
+}
+
+TEST(FeedbackPainter, TheSnapMarkerLiesBeneathTheNewVertex)
+{
+    // The view's snap marker is drawn by beneathGlyphs: before the vertex
+    // glyphs, so a yellow X at the new vertex no longer crosses its disc.
+    ToolFeedback feedback;
+    feedback.marks.push_back(FeedbackMark{FeedbackRole::Added, Geometry{PointGeometry{Point2(5, 0)}}, {}});
+    QImage image(400, 300, QImage::Format_ARGB32_Premultiplied);
+    image.fill(katana::qt::theme::viewport());
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    drawing::FeedbackFrame frame;
+    frame.toScreen = toScreen;
+    frame.drawShape = [](const Geometry&) {};
+    frame.visible = QRectF(0, 0, 400, 300);
+    frame.cursor = QPointF(100, 60);
+    const QPointF centre = toScreen(Point2(5, 0));
+    frame.beneathGlyphs = [&painter, centre] {
+        // The Intersection marker: an X 6 px each way, 2 px wide.
+        painter.setPen(QPen(overlay::snap(), 2));
+        painter.drawLine(centre + QPointF(-6, -6), centre + QPointF(6, 6));
+        painter.drawLine(centre + QPointF(-6, 6), centre + QPointF(6, -6));
+    };
+    (void)drawing::paintFeedback(painter, feedback, {}, frame);
+    painter.end();
+    // On the disc, off its "+": the disc's cyan, and no yellow over it.
+    EXPECT_EQ(inkNear(image, centre + QPointF(2.5, 2.5), 1, overlay::snap()), 0);
+    EXPECT_GT(inkNear(image, centre + QPointF(2.5, 2.5), 1, overlay::preview()), 0);
+    // The marker's tips, beyond the disc, still show.
+    EXPECT_GT(inkNear(image, centre + QPointF(5.5, 5.5), 1, overlay::snap()), 0);
 }
 
 TEST(FeedbackPainter, ARefusedCaptionIsInTheRefusalsColour)

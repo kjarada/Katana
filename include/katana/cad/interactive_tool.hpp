@@ -121,15 +121,29 @@ struct ToolContext {
     ViewPick pick;
     std::function<double()> pickAperture;   // the view's 8 px, in model units
     std::function<double()> vertexAperture; // the view's 12 px (its snap aperture)
+    // The layers the view hides of its own (LayerOverrides), for a tool that
+    // finds what to act on itself rather than through `pick`: what it takes
+    // must pass THE visibility rule there (pickable), as the view's pick
+    // does. Null in a test: the document's rule alone. The view outlives the
+    // tools it runs, so the pointer does too.
+    const LayerOverrides* view = nullptr;
 };
 
 // The entity of one of `types` nearest `at` within `reach` (pickReach when
 // not given): through the view's pick when the context has one, else through
-// the model and its spatial index with no view's hidden layers.
+// the model and its spatial index, with the context's view's hidden layers.
 [[nodiscard]] std::optional<katana::entity::EntityId>
 pickUnder(const ToolContext& context, const katana::geometry::Point2& at,
           const std::set<katana::entity::EntityType>& types,
           std::optional<double> reach = std::nullopt);
+// The view's own hidden layers, or kNoLayerOverrides when the context has no
+// view.
+[[nodiscard]] const LayerOverrides& viewOf(const ToolContext& context);
+// Whether a tool may take `entity`: THE visibility rule (selection.hpp,
+// isSelectable) in the tool's view - drawn there and not locked - the rule
+// every picker asks. A tool that looks through the selection or the spatial
+// index itself asks this, or it would edit what the user cannot see.
+[[nodiscard]] bool pickable(const ToolContext& context, const katana::entity::Entity& entity);
 // How near a pick of a piece must be: the view's pick aperture now, else
 // pickTolerance.
 [[nodiscard]] double pickReach(const ToolContext& context);
@@ -188,6 +202,17 @@ class InteractiveTool {
     // The last point accepted, which relative input (@dx,dy) and the
     // Perpendicular and Tangent snaps measure from. Nullopt before the first.
     [[nodiscard]] virtual std::optional<katana::geometry::Point2> lastPoint() const;
+    // The height of lastPoint(), which the dz of a typed @dx,dy,dz changes
+    // (routeTypedInput); nullopt when it has none, and then @dx,dy,dz is
+    // refused rather than read as a height of dz. The default has none.
+    [[nodiscard]] virtual std::optional<double> lastHeight() const;
+    // Whether the view may snap the cursor to `snap` for the step the tool is
+    // at; one it may not is passed over for the next best (SnapRequest::
+    // accept), and with none the cursor stays where it is. A step that needs
+    // a point ON a polyline (Insert Vertex) takes only a snap that lands
+    // there: an arc's centre, or another string's end beside the line, took
+    // the cursor off it. The default takes every snap.
+    [[nodiscard]] virtual bool takesSnap(const SnapResult& snap) const;
 };
 
 // Parses a typed point. "x,y" is absolute; "@dx,dy" is relative to `last`;

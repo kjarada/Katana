@@ -57,16 +57,22 @@ namespace overlay {
 // crossing (right to left) in green; both see-through.
 [[nodiscard]] QColor windowBox();
 [[nodiscard]] QColor crossingBox();
+// The object snap's marker, its name and the tracking paths: the yellow
+// the plan view has always drawn them in (it was a constant of the view's).
+[[nodiscard]] QColor snap();
 } // namespace overlay
 
 // How many of each the last paintFeedback drew, for the view's
-// lastPreviewCounts and the headless pointer record.
+// lastPreviewCounts and the headless pointer record: what is on screen, so
+// an Added vertex left out beside a Removed one (a fillet a few pixels
+// across) and a focus square thinned out are not counted.
 struct FeedbackCounts {
     std::size_t shapes = 0;
     std::size_t markers = 0;
     std::size_t target = 0;
     std::size_t added = 0;
     std::size_t removed = 0;
+    std::size_t enter = 0;
     std::size_t focus = 0;
 };
 
@@ -83,12 +89,19 @@ struct FeedbackFrame {
     bool trackingLabel = false;
     // The prompt band along the bottom, which the caption keeps off.
     double bandHeight = 0.0;
+    // Drawn after the pieces and before the vertex glyphs: the view's snap
+    // marker. It sits where the new vertex does - a segment's Midpoint, a
+    // crossing - and drawn over the disc, the triangle hid its "+" and the
+    // Intersection's X read as the Removed X.
+    std::function<void()> beneathGlyphs{};
 };
 
-// Draws `feedback` in the order that keeps what matters on top: removed
-// pieces, target pieces, the ghost, the base points, `focusVertices` (the
-// polyline in play, hollow squares), target vertices, removed vertices,
-// added vertices, labels, the caption.
+// Draws `feedback` in the order that keeps what matters on top:
+// `focusVertices` (the polyline in play, hollow squares, thinned so that no
+// two are nearer than 10 px - a dense string was buried under a band of
+// them), removed pieces, target pieces, the ghost, the base points,
+// beneathGlyphs, target vertices, removed vertices, Enter's place, added
+// vertices, labels, the caption.
 FeedbackCounts paintFeedback(QPainter& painter, const katana::cad::ToolFeedback& feedback,
                              const std::vector<katana::geometry::Point2>& focusVertices,
                              const FeedbackFrame& frame);

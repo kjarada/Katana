@@ -12,6 +12,7 @@
 // endpoint always beats merely being somewhere on the line.
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 
 #include "katana/cad/layer_overrides.hpp"
@@ -67,6 +68,12 @@ inline constexpr SnapModes kAllSnapModes = 0x1FFF;
 
 [[nodiscard]] const char* toString(SnapMode mode);
 
+struct SnapResult {
+    katana::geometry::Point2 point;
+    SnapMode mode = SnapMode::None;
+    katana::entity::EntityId entity = katana::entity::kInvalidEntityId; // 0 for Grid
+};
+
 struct SnapRequest {
     katana::geometry::Point2 cursor;
     double aperture = 0.0; // model units; candidates farther than this are ignored
@@ -80,12 +87,11 @@ struct SnapRequest {
     // hidden in that view is not snappable there - a snap to a line nobody can
     // see puts a point somewhere the user cannot explain.
     const LayerOverrides* view = nullptr;
-};
-
-struct SnapResult {
-    katana::geometry::Point2 point;
-    SnapMode mode = SnapMode::None;
-    katana::entity::EntityId entity = katana::entity::kInvalidEntityId; // 0 for Grid
+    // Which candidates the asker can use; one it answers false for is passed
+    // over and the next best taken, in the usual order. The plan view asks
+    // the running tool (InteractiveTool::takesSnap): Insert Vertex takes only
+    // a snap ON the polyline it inserts into. Unset: every candidate.
+    std::function<bool(const SnapResult&)> accept{};
 };
 
 // Considers drawn entities only (visible, on visible layers; locked layers are

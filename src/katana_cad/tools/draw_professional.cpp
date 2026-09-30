@@ -101,7 +101,7 @@ std::optional<double>& currentPolylineHeight()
 class Polyline3dTool final : public InteractiveTool {
   public:
     explicit Polyline3dTool(const ToolContext& context)
-        : document_(context.document), attributes_(context.attributes),
+        : document_(context.document), view_(&viewOf(context)), attributes_(context.attributes),
           current_(currentPolylineHeight())
     {
     }
@@ -128,7 +128,7 @@ class Polyline3dTool final : public InteractiveTool {
     {
         std::optional<double> height = current_;
         if (document_ != nullptr) {
-            if (const auto found = heightAtPoint(*document_, at, 1.0e-6)) {
+            if (const auto found = heightAtPoint(*document_, at, 1.0e-6, *view_)) {
                 height = found;
             }
         }
@@ -219,6 +219,12 @@ class Polyline3dTool final : public InteractiveTool {
         return vertices_.empty() ? std::nullopt : std::optional<Point2>(vertices_.back().position);
     }
 
+    // The last vertex's height, which @dx,dy,dz climbs from.
+    [[nodiscard]] std::optional<double> lastHeight() const override
+    {
+        return vertices_.empty() ? std::nullopt : vertices_.back().height;
+    }
+
   private:
     ToolStep add(const Point2& at, std::optional<double> height)
     {
@@ -248,6 +254,8 @@ class Polyline3dTool final : public InteractiveTool {
     }
 
     const Document* document_ = nullptr;
+    // Whose hidden layers a snapped point's height is not read through.
+    const LayerOverrides* view_ = nullptr;
     cmd::EntityAttributes attributes_;
     std::vector<CurveVertex> vertices_;
     std::optional<double> current_;

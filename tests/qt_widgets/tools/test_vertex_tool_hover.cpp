@@ -149,7 +149,7 @@ TEST(VertexToolHover, HoveringInsertVertexDrawsItsMarksAndNeverRepaintsTheDrawin
     EXPECT_EQ(counts.added, 1u) << "the vertex, where it will go";
     EXPECT_EQ(counts.focus, 3u) << "the polyline's vertices, while the grips are hidden";
     EXPECT_FALSE(counts.refused);
-    EXPECT_EQ(counts.caption, "vertex 2 between 1 and 2 · 5.000 from 1");
+    EXPECT_EQ(counts.caption, "new vertex between 1 and 2 · 5.000 from 1");
     // The marks are the view's furniture: moving over the drawing never
     // paints the drawing again.
     const std::size_t drawn = f.view->drawingPaintCount();
@@ -204,4 +204,84 @@ TEST(VertexToolHover, AVertexClickedBeforeTheToolIsTheOneInsertWorksBeside)
     f.click(Point2(25, 5));
     EXPECT_EQ(f.document.history().undoCount(), before + 1) << "the insert, and no GRIP_EDIT";
     EXPECT_EQ(f.document.history().undoName(), "VERTEX_INSERT");
+}
+
+TEST(VertexToolHover, AnInsertIsAnsweredWithWhatItDidNotARefusalUntilThePointerMoves)
+{
+    // The restarted tool's preview where the vertex now is would refuse a
+    // second click there, and the view drew that in red at once.
+    Fixture f;
+    ASSERT_TRUE(f.view->startTool("draw.vertex.insert").ok());
+    f.hover(Point2(15, 0.3));
+    f.click(Point2(15, 0.3));
+    paint(*f.view);
+    ASSERT_EQ(f.vertices().size(), 4u);
+    EXPECT_FALSE(f.view->lastPreviewCounts().refused);
+    EXPECT_EQ(f.view->lastPreviewCounts().caption,
+              "vertex 2 added to polyline " + std::to_string(f.polyline) +
+                  " on segment 1 (4 vertices)");
+    // Away (2 units, 20 px) and back: now a click there would be refused,
+    // and the preview says so.
+    f.hover(Point2(17, 0.3));
+    paint(*f.view);
+    EXPECT_FALSE(f.view->lastPreviewCounts().refused);
+    f.hover(Point2(15, 0.3));
+    paint(*f.view);
+    EXPECT_TRUE(f.view->lastPreviewCounts().refused);
+}
+
+TEST(VertexToolHover, TheSnapMarkerLiesUnderTheNewVertexNotOverIt)
+{
+    // With the snaps on, the cursor by the middle of segment 0 snaps to its
+    // Midpoint, (5,0), where the new vertex goes: the triangle was drawn over
+    // the disc and hid its "+".
+    Fixture f;
+    f.view->setSnapEnabled(true);
+    ASSERT_TRUE(f.view->startTool("draw.vertex.insert").ok());
+    f.hover(Point2(5.2, 0.3));
+    const QImage image = f.view->grab().toImage();
+    ASSERT_EQ(f.view->lastPreviewCounts().added, 1u);
+    const QPointF disc = f.pixel(Point2(5, 0));
+    const QColor snap = katana::qt::drawing::overlay::snap();
+    // The Midpoint marker is a triangle 6 px each way (viewport_widget.cpp,
+    // drawSnapMarker): its right side runs from (0,-6) to (6,6) about the
+    // point, through (3.6,1.2) - inside the 6 px disc and off its "+".
+    // There: the disc's cyan, and no yellow over it.
+    const QPointF onTheSide = disc + QPointF(3.6, 1.2);
+    EXPECT_EQ(inkNear(image, onTheSide, 0.8, snap), 0);
+    EXPECT_GT(inkNear(image, onTheSide, 0.8, katana::qt::drawing::overlay::preview()), 0);
+    // The marker is there, beyond the disc: the triangle's lower corners.
+    EXPECT_GT(inkNear(image, disc, 10, snap), 0);
+}
+
+TEST(VertexToolHover, APolylineOnALayerThisViewHidesIsNotEditedThroughTheSelection)
+{
+    // Selected, then its layer hidden in this view alone: the view's pick
+    // passes it over, and the tool's own look through the selection must too.
+    Fixture f;
+    f.select();
+    const std::string layer = f.document.model().entities.find(f.polyline)->layer;
+    f.view->state().layers.hide(layer);
+    ASSERT_TRUE(f.view->startTool("draw.vertex.delete").ok());
+    f.hover(Point2(10, 0));
+    paint(*f.view);
+    EXPECT_EQ(f.view->lastPreviewCounts().removed, 0u);
+    f.click(Point2(10, 0));
+    EXPECT_EQ(f.vertices().size(), 3u);
+}
+
+TEST(VertexToolHover, BesideAChosenVertexEntersPlaceIsDrawn)
+{
+    Fixture f;
+    f.select();
+    f.click(Point2(10, 0)); // the middle vertex's grip, now hot
+    ASSERT_TRUE(f.view->startTool("draw.vertex.insert").ok());
+    // By segment 0: the click's place there, and Enter's at (15,0), the
+    // middle of segment 1.
+    f.hover(Point2(6, 0.3));
+    const QImage image = f.view->grab().toImage();
+    EXPECT_EQ(f.view->lastPreviewCounts().enter, 1u);
+    EXPECT_EQ(f.view->lastPreviewCounts().added, 1u);
+    EXPECT_GT(inkNear(image, f.pixel(Point2(15, 0)), 7.5, katana::qt::drawing::overlay::preview()),
+              0);
 }

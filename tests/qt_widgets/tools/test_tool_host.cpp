@@ -248,3 +248,40 @@ TEST(ToolHost, ASnapOnAnEntitysPointReachesTheToolAsThatPoint)
     EXPECT_DOUBLE_EQ(along.tipRef.parameter, 0.4);
     EXPECT_EQ(along.vertices.front(), Point2(4, 0));
 }
+
+TEST(ToolHost, AClickTheToolTookIsNotAnsweredInRedUntilThePointerLeavesIt)
+{
+    // Insert Vertex restarts after each vertex with the cursor on the vertex
+    // it made, where a second click WOULD be refused as too close - and the
+    // view said so in red straight after every success. Until the cursor
+    // leaves the click's place, what the click did is shown instead.
+    Document document;
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createPolyline(
+                        katana::geometry::Polyline2{{Point2(0, 0), Point2(10, 0)}, false}))
+                    .ok());
+    const auto p = document.lastCreatedEntities().front();
+    document.selection().add(p);
+    ToolHost host(document);
+    host.setPickTolerance(0.5);
+    ASSERT_TRUE(host.start("draw.vertex.insert").ok());
+    host.setCursor(Point2(4, 0.1));
+    ASSERT_EQ(host.point(Point2(4, 0.1)), ToolHost::Outcome::Done);
+    const auto held = host.feedback(Point2(4, 0.1));
+    EXPECT_FALSE(held.refused);
+    EXPECT_TRUE(held.marks.empty());
+    EXPECT_EQ(held.caption,
+              "vertex 1 added to polyline " + std::to_string(p) + " on segment 0 (3 vertices)");
+    EXPECT_EQ(held.focus, p);
+    // Away - 4 units, beyond the 0.5 aperture - and back: now the tool's
+    // refusal is what a click there would get, and it is shown.
+    host.setCursor(Point2(8, 0.1));
+    EXPECT_FALSE(host.feedback(Point2(8, 0.1)).refused) << "8 is clear of every vertex";
+    host.setCursor(Point2(4, 0.1));
+    const auto refused = host.feedback(Point2(4, 0.1));
+    EXPECT_TRUE(refused.refused);
+    EXPECT_EQ(refused.caption.rfind("too close to vertex 1", 0), 0u) << refused.caption;
+    // A click the tool refuses is no success to spare: its refusal shows.
+    EXPECT_EQ(host.point(Point2(4, 0.1)), ToolHost::Outcome::Rejected);
+    EXPECT_TRUE(host.feedback(Point2(4, 0.1)).refused);
+}

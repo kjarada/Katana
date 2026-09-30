@@ -201,6 +201,10 @@ class ViewWorkspace final : public QMainWindow {
     // answers). InvalidState when no plan view is open.
     [[nodiscard]] katana::core::Result<std::string>
     pointerAt(const katana::geometry::Point2& at, bool click, Qt::KeyboardModifiers modifiers);
+    // Where Enter and the headless pointer go: the plan view running a tool,
+    // else the active plan view; null when none is open. One choice for both,
+    // so a pointer step and an Enter after it cannot reach different views.
+    [[nodiscard]] ViewportWidget* commandTargetView();
 
     // ---- settings every plan view shares -------------------------------------
     void setGridVisible(bool visible);

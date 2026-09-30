@@ -944,18 +944,19 @@ void ViewWorkspace::stopTool()
     }
 }
 
-bool ViewWorkspace::pressEnter()
+ViewportWidget* ViewWorkspace::commandTargetView()
 {
-    ViewportWidget* target = nullptr;
     for (ViewportWidget* plan : planViews()) {
         if (plan->toolActive()) {
-            target = plan;
-            break;
+            return plan;
         }
     }
-    if (target == nullptr) {
-        target = activePlanView();
-    }
+    return activePlanView();
+}
+
+bool ViewWorkspace::pressEnter()
+{
+    ViewportWidget* target = commandTargetView();
     if (target == nullptr) {
         return false;
     }
@@ -970,18 +971,7 @@ katana::core::Result<std::string> ViewWorkspace::pointerAt(const katana::geometr
                                                            bool click,
                                                            Qt::KeyboardModifiers modifiers)
 {
-    // The view Enter goes to (pressEnter): the one running a tool, else the
-    // active one.
-    ViewportWidget* target = nullptr;
-    for (ViewportWidget* plan : planViews()) {
-        if (plan->toolActive()) {
-            target = plan;
-            break;
-        }
-    }
-    if (target == nullptr) {
-        target = activePlanView();
-    }
+    ViewportWidget* target = commandTargetView();
     if (target == nullptr) {
         return makeError(ErrorCode::InvalidState, "there is no plan view to point in");
     }

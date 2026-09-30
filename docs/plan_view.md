@@ -476,14 +476,18 @@ their drawing colours. The prompt band, the tool's and a picked-up grip's,
 is one `paintBand`, in `theme::overlayFont`; two labels named "Segoe UI"
 directly, a font Linux does not have.
 
-The order, so what matters is on top: removed pieces, target pieces, the
-ghost, the base points, the vertices of the polyline in play, target
-vertices, removed vertices, added vertices, labels, the caption; then the
-snap marker and the prompt band. Nothing is drawn until the pointer has been
-over the view: before that the cursor is the model's origin, and a tool
-started from the command line drew its band to 0,0. A new vertex that
-would sit on a vertex that goes (a fillet a few pixels across) is left out,
-so the X still reads; a vertex label is not doubled by the polyline's own
+The order, so what matters is on top: the vertices of the polyline in play
+(thinned so no two are nearer than 10 px), removed pieces, target pieces,
+the ghost, the base points, the snap marker (`FeedbackFrame::beneathGlyphs`),
+target vertices, removed vertices, where Enter would add, added vertices,
+labels, the caption; then the prompt band. The vertices went after the
+pieces, and a survey string's hundreds buried the target under a band of
+squares; the snap marker went last, and crossed the new vertex's disc where
+it snapped. Nothing is drawn until the pointer has been over the view:
+before that the cursor is the model's origin, and a tool started from the
+command line drew its band to 0,0. A new vertex that would sit on a vertex
+that goes (a fillet a few pixels across) is left out, so the X still reads,
+and is not counted; a vertex label is not doubled by the polyline's own
 "0".
 
 What it costs, measured as above (`tools/compare_benchmarks.py --alternate
@@ -504,3 +508,16 @@ the insert. The string's vertex squares go to QPainter in one `drawRects`.
 A run with the machine's CPU at 100% (the other builds) read 0.9 ms for a
 plain move and 2.7 ms for the insert: under that load the ratio says more
 about the machine than about the preview, so the table is the quieter run.
+
+After the review's fixes (2026-09-30: Insert asks of each snap candidate
+that would win whether it lands ON the line and would be taken, planning
+the insert there - `InteractiveTool::takesSnap`), nine repetitions in one
+run, the plain move its baseline under the same load (a build of another
+worktree was running), microseconds, minimum / median: a plain move
+432.6 / 465.7; Insert with snaps off 706.2 / 784.2 (1.63x / 1.68x a plain
+move, 1.61x / 1.67x before); with snaps on 794.2 / 821.0 (1.84x / 1.76x,
+1.65x / 1.70x before). So the snap's question costs about a tenth of a
+plain move, well inside a frame. With snaps on, 739 of the hovers preview an
+insert, 660 with them off (`previewedInserts`), so the snapped runs also
+plan more inserts; the "before" runs did not record the count. The build the
+"before" figures came from was not kept to alternate against.
