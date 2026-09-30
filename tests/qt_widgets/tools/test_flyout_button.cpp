@@ -3,11 +3,12 @@
 // triangle is drawn beside its icon, never on it; a press on the icon runs
 // the tool while the triangle, a press held and a right click open the
 // family; the button is framed only while the tool its icon shows runs, its
-// triangle lit while any of its tools does; Undo's and Redo's arrows have a
-// strip of their own beside the icon; a view's kind switcher draws its arrow
-// beside its icon; the check the window runs headless (--check-toolbars)
-// sees an arrow drawn over an icon; and a toolbar's overflow arrow is drawn
-// whole, in whole device pixels.
+// triangle lit while any of its tools does, a device pixel clear of the
+// frame; Undo's and Redo's arrows have a strip of their own beside the icon;
+// a view's kind switcher draws its arrow beside its icon, and every other
+// title bar button its whole icon; the check the window runs headless
+// (--check-toolbars) sees an arrow drawn over an icon; and a toolbar's
+// overflow arrow is drawn whole, in whole device pixels.
 //
 // The toolbars are built as the window builds them - fillToolMenus for the
 // families - with the theme's style and stylesheet on the window under test,
@@ -238,8 +239,10 @@ struct DrawBar {
 // On a scaled screen, in the grab's device pixels: the icon a pixmap of s
 // times the ratio; the mark a square of 5 px times the ratio taken down to
 // whole pixels, set 2 px times the ratio (taken down) in from the button's
-// last device pixel. At 125% and 20 px icons: the button's 33 px are 41.25,
-// grabbed as 41, its last pixel 40; the mark 6 px ending at 38, 33..38; the
+// last device pixel and at least a whole device pixel short of the first its
+// 1 px border touches, widget pixel s + 12 times the ratio, taken down. At
+// 125% and 20 px icons: the button's 33 px are 41.25, grabbed as 41, its last
+// pixel 40, and its border from 40.0; the mark 6 px ending at 38, 33..38; the
 // icon's 25 px from 7.5, drawn from 8 - 8..32.
 void expectDrawnAsDesigned(FlyoutButton& button, int size, const std::string& where)
 {
@@ -255,7 +258,8 @@ void expectDrawnAsDesigned(FlyoutButton& button, int size, const std::string& wh
     EXPECT_EQ(parts.iconDevice.size(), QSize(side, side)) << where;
     const int leg = wholeDevicePixels(5, ratio);
     const int last = qRound((size + 13) * ratio) - 1;
-    const int corner = last - wholeDevicePixels(2, ratio);
+    const int corner =
+        std::min(last - wholeDevicePixels(2, ratio), wholeDevicePixels(size + 12, ratio) - 2);
     EXPECT_EQ(parts.signDevice, QRect(corner - leg + 1, corner - leg + 1, leg, leg)) << where;
     EXPECT_FALSE(parts.signDevice.intersects(parts.iconDevice)) << where;
 }
@@ -454,9 +458,12 @@ TEST(ToolFamilyButtons, TheMarkIsTheSameWholeStaircaseOfDevicePixelsWhereverTheB
     // a whole number of device pixels. The triangle is painted a device row
     // at a time: the k-th row from its top is k pixels ending at its right
     // column. Its legs are 5 px times the ratio taken down, 5, 6, 7, 8 and
-    // 10 device pixels at 100, 125, 150, 175 and 200%, and its corner is 2 px
-    // times the ratio, taken down, in from the button's last device pixel -
-    // wherever the button sits. Painted a widget row at a time the rows were
+    // 10 device pixels at 100, 125, 150, 175 and 200%, wherever the button
+    // sits. Its corner is 2 px times the ratio, taken down, in from the
+    // button's last device pixel, and at least a whole device pixel short of
+    // the first the frame's 1 px border touches (the test below): widget
+    // pixel 32 of the 33 px button, plus its offset, times the ratio, taken
+    // down. Painted a widget row at a time the rows were
     // uneven (1, 2, 3, 3, 5, 6 at 125%); with the mark's own square snapped
     // to the device its size hung on the button's place in the window: at
     // 150%, 8 rows where the button began on a whole device pixel and 7
@@ -527,9 +534,91 @@ TEST(ToolFamilyButtons, TheMarkIsTheSameWholeStaircaseOfDevicePixelsWhereverTheB
             EXPECT_EQ(y, rows.front()[3] + k) << where << ", row " << k << " not below the last";
         }
         const int last = qRound((33 + each.offset) * each.ratio) - 1;
-        const int corner = last - wholeDevicePixels(2, each.ratio);
+        const int frame = wholeDevicePixels(32 + each.offset, each.ratio);
+        const int corner = std::min(last - wholeDevicePixels(2, each.ratio), frame - 2);
         EXPECT_EQ(rows.back()[2], corner) << where << ": the corner's column";
         EXPECT_EQ(rows.back()[3], corner) << where << ": the corner's row";
+    }
+}
+
+TEST(ToolFamilyButtons, ARunningFamilysMarkKeepsAWholeDevicePixelOfAirFromItsFrame)
+{
+    // While the tool its icon shows runs, a family is framed in the accent,
+    // and its mark is the accent too. The frame is the stylesheet's 1 px
+    // border: at 125%, the owner's display, 1.25 device pixels, which fall
+    // across two device columns wherever the button starts off the device
+    // grid - as it does in the window, never in a grab. The mark was set 2 px
+    // times the ratio, taken down, in from the button's last device pixel,
+    // and there it met the border's first column and row along both its
+    // sides: a thickened blue corner of the frame, not a triangle inside it.
+    // It ends a whole device pixel before the first device column and row the
+    // border touches. By hand at 125% with the button 2 px in, 2.5 device
+    // pixels: the border, widget pixel 32, is device 42.5..43.75, touching
+    // columns 42 and 43; the mark's 6 px end at 40, leaving 41 clear, and
+    // start at 35, the pixel after the icon's - widget 6..25, device 10..35,
+    // drawn over 10..34. It was 36..41, against column 42. Rendered at each
+    // ratio with the button 0 to 3 widget pixels in, at each toolbar icon
+    // size, the mark kept its size and stayed off the icon.
+    QPixmap solid(64, 64);
+    solid.fill(Qt::white);
+    QPixmap clear(64, 64);
+    clear.fill(Qt::transparent);
+    const auto name = [](const QColor& colour) { return colour.name(QColor::HexArgb).toStdString(); };
+    for (const int size : {16, 20, 28}) {
+        DrawBar built(size);
+        FlyoutButton* circle = built.family("Circle");
+        ASSERT_NE(circle, nullptr);
+        QMenu* family = circle->menu();
+        const QIcon own = circle->icon();
+        circle->defaultAction()->setChecked(true);
+        katana::qt::test::processEvents();
+        ASSERT_TRUE(circle->isChecked());
+        for (const double ratio : {1.0, 1.25, 1.5, 1.75, 2.0}) {
+            for (int offset = 0; offset < 4; ++offset) {
+                const std::string where = std::to_string(size) + " px icons at a ratio of " +
+                                          QString::number(ratio).toStdString() + ", " +
+                                          std::to_string(offset) + " px in";
+                const auto render = [&] {
+                    const QSize room = circle->size() + QSize(offset, offset);
+                    QImage image((QSizeF(room) * ratio).toSize(), QImage::Format_ARGB32);
+                    image.setDevicePixelRatio(ratio);
+                    image.fill(Qt::transparent);
+                    circle->render(&image, QPoint(offset, offset));
+                    return image;
+                };
+                const QImage with = render();
+                circle->setMenu(nullptr);
+                const QImage without = render();
+                circle->setMenu(family);
+                circle->setIcon(QIcon(solid));
+                const QImage withSolid = render();
+                circle->setIcon(QIcon(clear));
+                const QImage withClear = render();
+                circle->setIcon(own);
+                const QRect mark = differenceBox(with, without);
+                const QRect icon = differenceBox(withSolid, withClear);
+                ASSERT_FALSE(mark.isNull()) << where << ": no mark drawn";
+                ASSERT_FALSE(icon.isNull()) << where << ": no icon drawn";
+                EXPECT_EQ(mark.width(), wholeDevicePixels(5, ratio)) << where;
+                EXPECT_EQ(mark.height(), wholeDevicePixels(5, ratio)) << where;
+                EXPECT_GT(mark.left(), icon.right()) << where << ": the mark is on the icon";
+                EXPECT_GT(mark.top(), icon.bottom()) << where << ": the mark is on the icon";
+                // The running button's ground, 3 px in from its left edge
+                // halfway down: inside the border, left of the icon.
+                const QColor ground =
+                    with.pixelColor(devicePixel(QPoint(offset + 3, offset + (size + 13) / 2), ratio));
+                EXPECT_EQ(name(ground), name(theme::raised())) << where;
+                const QColor beside = with.pixelColor(mark.right() + 1, mark.top());
+                const QColor below = with.pixelColor(mark.left(), mark.bottom() + 1);
+                EXPECT_EQ(name(beside), name(ground))
+                    << where << ": device column " << mark.right() + 1 << ", after the mark's "
+                    << mark.left() << ".." << mark.right();
+                EXPECT_EQ(name(below), name(ground))
+                    << where << ": device row " << mark.bottom() + 1 << ", below the mark's "
+                    << mark.top() << ".." << mark.bottom();
+            }
+        }
+        circle->defaultAction()->setChecked(false);
     }
 }
 
@@ -1122,6 +1211,83 @@ TEST(TitleBarButtons, AViewsKindSwitcherDrawsItsArrowBesideItsIconNotOnIt)
     EXPECT_TRUE(std::ranges::any_of(checked, [&](const QString& each) {
         return each.startsWith(line) && each.contains(" clear of its icon ");
     })) << checked.join("\n").toStdString();
+}
+
+TEST(TitleBarButtons, EveryTitleBarButtonDrawsItsWholeIconWhereCloseDrawsItsOwn)
+{
+    // Every button of a panel's and a view's title bar: the window buttons
+    // (Minimise, Float, a view's Maximise, Close), a view's own tools (Layers,
+    // Zoom Extents) and its kind switcher. The theme pads a title bar button
+    // whose menu opens on a click (InstantPopup) by its arrow's 13 px box. A
+    // selector on DelayedPopup beside it padded every other one as well:
+    // DelayedPopup is QToolButton's default popup mode (Qt 6.11,
+    // qtoolbutton.cpp), which a button with no menu keeps. A 22 px button
+    // with a 1 px border, 2 px of padding on the left and 13 on the right has
+    // 22 - 2 - 2 - 13 = 5 px of contents, and its 14 px icon was drawn in
+    // them, at x 3..7 y 9..13: Minimise a dot, Float and Maximise slivers.
+    // By hand at a ratio of 1: 2 px of padding each side leave contents
+    // 3..18 both ways, and the 14 px icon is centred at 4..17; the kind
+    // switcher, 34 px wide and padded 13 px on the right, has contents 3..19
+    // across and its icon at 4..17 too. At any ratio each draws its icon over
+    // the device pixels its bar's Close button draws its own - the same icon
+    // size, at the same place, in a button as tall - and Close is
+    // chrome="close", which no popup mode rule reaches.
+    ThemedViews built;
+    auto* panel = new QDockWidget("Layers", &built.window);
+    panel->setObjectName("LayersDock");
+    panel->setWidget(new QWidget);
+    built.window.addDockWidget(Qt::LeftDockWidgetArea, panel);
+    ASSERT_NE(built.chrome->install(panel, katana::qt::Icon::Layers, katana::qt::DockRole::Panel),
+              nullptr);
+    katana::qt::test::processEvents();
+
+    const auto text = [](const QRect& box) {
+        return "x " + std::to_string(box.left()) + ".." + std::to_string(box.right()) + " y " +
+               std::to_string(box.top()) + ".." + std::to_string(box.bottom());
+    };
+    std::vector<std::string> measured;
+    int withoutMenu = 0;
+    int defaultModeWithoutMenu = 0;
+    for (QDockWidget* dock : built.window.findChildren<QDockWidget*>()) {
+        QWidget* bar = dock->titleBarWidget();
+        ASSERT_NE(bar, nullptr) << dock->objectName().toStdString();
+        auto* close = bar->findChild<QToolButton*>("DockCloseButton", Qt::FindDirectChildrenOnly);
+        ASSERT_NE(close, nullptr) << dock->objectName().toStdString();
+        const auto closeParts = drawnParts(*close);
+        ASSERT_FALSE(closeParts.iconDevice.isNull()) << dock->objectName().toStdString();
+        // Whole: never fewer device pixels than 14 px times the ratio, taken
+        // down.
+        EXPECT_GE(closeParts.iconDevice.width(), wholeDevicePixels(14, closeParts.ratio));
+        EXPECT_GE(closeParts.iconDevice.height(), wholeDevicePixels(14, closeParts.ratio));
+        for (QToolButton* button : bar->findChildren<QToolButton*>(Qt::FindDirectChildrenOnly)) {
+            const std::string where =
+                dock->objectName().toStdString() + " > " + button->objectName().toStdString();
+            measured.push_back(button->objectName().toStdString());
+            if (button->menu() == nullptr) {
+                ++withoutMenu;
+                if (button->popupMode() == QToolButton::DelayedPopup) {
+                    ++defaultModeWithoutMenu;
+                }
+            }
+            const auto parts = drawnParts(*button);
+            EXPECT_EQ(parts.iconDevice, closeParts.iconDevice)
+                << where << ": icon " << text(parts.iconDevice) << ", Close's "
+                << text(closeParts.iconDevice) << " (device pixels at a ratio of " << parts.ratio
+                << ")";
+            if (parts.ratio == 1.0) {
+                EXPECT_EQ(parts.icon, QRect(4, 4, 14, 14)) << where << ": icon " << text(parts.icon);
+            }
+        }
+    }
+    // Every kind of title bar button was measured, and among them the case
+    // that broke: buttons with no menu, each in Qt's default popup mode.
+    for (const std::string name : {"DockMinimiseButton", "DockFloatButton", "DockMaximiseButton",
+                                   "DockCloseButton", "ViewLayersButton", "ViewZoomExtentsButton",
+                                   "ViewKindButton"}) {
+        EXPECT_NE(std::ranges::find(measured, name), measured.end()) << name << " not measured";
+    }
+    EXPECT_GT(withoutMenu, 0);
+    EXPECT_EQ(defaultModeWithoutMenu, withoutMenu);
 }
 
 TEST(ToolBarSigns, TheCheckSeesASplitButtonsArrowDrawnOverItsIcon)

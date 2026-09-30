@@ -34,11 +34,16 @@ namespace {
 // toolbar icon size; three is the smallest triangle that still reads as one.
 constexpr int kMaxLeg = 5;
 constexpr int kMinLeg = 3;
-// From the button's edge to the mark: the theme's 1 px border and a pixel of
-// air. Only the mark's right-angled tip reaches the border's 5 px rounded
-// corner, where the border is the accent too while the tool runs. On a
-// scaled screen both are taken down to whole device pixels (paintEvent).
+// From the button's edge to the mark: the theme's 1 px border (kBorder) and a
+// pixel of air, so that the mark, the accent while a tool of the family runs,
+// never runs into the frame the running tool is drawn in, the accent too.
+// Only the mark's right-angled tip reaches the border's 5 px rounded corner.
+// On a scaled screen the inset is taken down to whole device pixels, and the
+// mark ends at least a whole device pixel before the first device column and
+// row the border touches (paintEvent).
 constexpr int kInset = 2;
+// The theme's border round every tool button (theme.cpp, QToolButton).
+constexpr int kBorder = 1;
 // The corner a press opens the menu from, 12 px each way: the width of the
 // drop-down strip the mark replaced (a stylesheet's default ::menu-button is
 // the base style's PM_MenuButtonIndicator, 12 px in QCommonStyle). Less than
@@ -324,8 +329,25 @@ void FlyoutButton::paintEvent(QPaintEvent* /*event*/)
     const int lastRow = qRound(height() * ratio + toDevice.dy()) - 1;
     const int inset = whole(rect().right() - mark.right());
     const int leg = std::max(1, whole(mark.width()));
-    const QRect square(QPoint(lastColumn - inset - leg + 1, lastRow - inset - leg + 1),
-                       QSize(leg, leg));
+    // The first device column and row the border touches, however little.
+    // The border is kBorder widget pixels at the button's edge, 1.25 device
+    // pixels at 125%, and wherever the button starts off the device grid - in
+    // the window, never in a grab - it falls across two device columns; set
+    // back by the inset alone, the mark met the first of them along both its
+    // sides, and while the tool ran it read as a thickened corner of the
+    // frame. A whole device pixel is kept clear of it. Where the inset leaves
+    // that already - everywhere at 100, 150 and 200% - nothing moves; where it
+    // does not, the mark moves a pixel in, which the icon's square leaves room
+    // for at 125 and 175% at every toolbar icon size (docs/desktop.md, "The
+    // mark is drawn in the screen's own pixels").
+    const auto firstTouched = [ratio](int widgetPixels, double offset) {
+        return static_cast<int>(std::floor(widgetPixels * ratio + offset + 1e-6));
+    };
+    const int right =
+        std::min(lastColumn - inset, firstTouched(width() - kBorder, toDevice.dx()) - 2);
+    const int bottom =
+        std::min(lastRow - inset, firstTouched(height() - kBorder, toDevice.dy()) - 2);
+    const QRect square(QPoint(right - leg + 1, bottom - leg + 1), QSize(leg, leg));
     painter.save();
     // World coordinates that are device pixels: the inverse of what maps the
     // widget's pixels to the device (the screen's ratio, and the offset of
