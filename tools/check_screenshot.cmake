@@ -192,6 +192,11 @@ endif()
 if(CHECK_MENUS)
     list(APPEND extra --check-menus)
 endif()
+# -DCHECK_TOOLBARS=ON fails the run when a toolbar or title bar button draws
+# the sign of its menu over its icon, or no sign at all (--check-toolbars).
+if(CHECK_TOOLBARS)
+    list(APPEND extra --check-toolbars)
+endif()
 # -DCOMPARE=<reference>|<file>[|<file>...]: every file the run writes must
 # hold exactly the reference's text, line ends aside (git may check the
 # reference out with either). The written files are removed first, so one

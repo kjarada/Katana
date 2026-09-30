@@ -12,9 +12,9 @@
 #include <QMenuBar>
 #include <QString>
 #include <QToolBar>
-#include <QToolButton>
 
 #include "katana/core/text.hpp"
+#include "tools/flyout_button.hpp"
 #include "tools/tool_icons.hpp"
 
 namespace katana::qt::tools {
@@ -471,14 +471,14 @@ ToolActions fillToolMenus(const cad::ToolCatalog& catalog, const ToolMenuTargets
                     }
                     if (bar != nullptr) {
                         // One button for the family: a click runs its first
-                        // variant, the arrow offers the others.
-                        auto* button = new QToolButton(bar);
+                        // variant; its corner triangle, a press held or a
+                        // right click offers the others (flyout_button.hpp).
+                        auto* button = new FlyoutButton(*family, bar);
                         button->setObjectName(qs("toolFamilyButton." + category + "." +
                                                  parts->first));
                         button->setDefaultAction(action);
-                        button->setMenu(family);
-                        button->setPopupMode(QToolButton::MenuButtonPopup);
                         bar->addWidget(button);
+                        followToolBarIconSize(*button, *bar);
                     }
                 }
                 // In the submenu the variant alone, "Circle > 2 Points". The
@@ -504,6 +504,12 @@ ToolActions fillToolMenus(const cad::ToolCatalog& catalog, const ToolMenuTargets
     // Last, when every item is in: a letter is chosen against the whole menu.
     for (QMenu* menu : filled) {
         assignMnemonics(*menu);
+    }
+    // And each toolbar's overflow arrow lit while a tool it hides runs.
+    for (const auto& [category, bar] : targets.toolBars) {
+        if (bar != nullptr) {
+            lightOverflowWhileAHiddenToolRuns(*bar, result.group_->actions());
+        }
     }
     return result;
 }
