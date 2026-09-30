@@ -26,6 +26,8 @@ katana_add_test_suite(cad
         ${_cad_utility_tests}
         ${_cad_drawing_tests}
         test_alignment_report.cpp
+        # Zooming a 3D view towards what it draws (cad/scene_zoom.hpp).
+        test_scene_zoom.cpp
 )
 # The sample investigation the utility tests draw and report, the one the
 # cli.utility_* tests and docs/subsurface_utilities.md work by hand.

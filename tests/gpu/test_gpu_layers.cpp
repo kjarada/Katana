@@ -14,6 +14,7 @@
 
 #include "gpu/gpu_renderer.hpp"
 #include "gpu/offscreen_gpu.hpp"
+#include "gpu/scene_origin.hpp"
 #include "gpu_test_support.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/draw_list.hpp"
@@ -21,8 +22,11 @@
 using katana::math::Vec3;
 using katana::qt::gpu::FrameSettings;
 using katana::qt::gpu::GpuDevice;
+using katana::qt::gpu::kOriginErrorPixels;
 using katana::qt::gpu::LayerSource;
 using katana::qt::gpu::OffscreenGpu;
+using katana::qt::gpu::originErrorPixels;
+using katana::qt::gpu::testing::brightness;
 using katana::qt::gpu::testing::Image;
 using katana::qt::gpu::testing::makeGpu;
 using katana::qt::gpu::testing::saveForLooking;
@@ -229,4 +233,53 @@ TEST_P(GpuLayers, ALayerUpdatedAloneIsTheOnlyOneUploaded)
     auto third = gpu->renderFrame(planCamera(), settings);
     ASSERT_TRUE(third.ok());
     EXPECT_FALSE(third->uploaded);
+}
+
+// Zoomed in close to a survey far from its scene's centre, the float offsets
+// packed against that centre round to more than the view is wide; packed
+// against the pivot, as RenderViewWidget packs them once the bound there
+// passes kOriginErrorPixels (scene_origin.hpp, "The origin follows a deep
+// zoom"), the survey is drawn where it is. One stray point at the origin
+// puts the centre of the scene's box 3100 km from a line at MGA
+// coordinates, where a float steps in 0.25 m; the view is 48 mm tall, a
+// millimetre a pixel, and the line runs 10.5 mm north of the pivot: along
+// the centre of row 23.5 - 10.5 = 13.
+TEST_P(GpuLayers, LayersPackedAgainstThePivotDrawASurveyZoomedInCloseWhereItIs)
+{
+    auto gpu = device();
+    if (!gpu) {
+        GTEST_SKIP() << skipReason;
+    }
+    const Vec3 pivot(300000.3, 6200000.3, 30.0);
+    const DrawList line = lineAt(pivot + Vec3(-0.04, 0.0105, 0.0), pivot + Vec3(0.04, 0.0105, 0.0),
+                                 rgba(255, 255, 255), 1.0f);
+    DrawList stray;
+    stray.addPoint(stray.addVertex(Vec3(0.0, 0.0, 30.0), rgba(255, 255, 255)), 3.0f);
+    const std::array<LayerSource, 2> layers{LayerSource{&stray, true}, LayerSource{&line, true}};
+    Camera camera = planCamera();
+    camera.setTarget(pivot);
+    camera.setOrthographicHeight(0.048);
+    FrameSettings settings;
+    settings.background = rgba(0, 0, 0);
+
+    gpu->renderer().setLayers(layers);
+    ASSERT_GT(originErrorPixels(camera, gpu->renderer().origin()), kOriginErrorPixels)
+        << "the scene's centre is near enough to the pivot, so this proves nothing";
+    Image far;
+    ASSERT_TRUE(gpu->renderFrame(camera, settings, &far).ok());
+    saveForLooking(label("far_origin"), far, kWidth, kHeight);
+    ASSERT_LT(brightness(pixelAt(far, 32, 13)), 100)
+        << "drawn in its place from 3100 km off, so this proves nothing";
+
+    gpu->renderer().setLayers(layers, pivot);
+    EXPECT_EQ(gpu->renderer().origin(), pivot);
+    EXPECT_LE(originErrorPixels(camera, pivot), kOriginErrorPixels);
+    Image near;
+    ASSERT_TRUE(gpu->renderFrame(camera, settings, &near).ok());
+    saveForLooking(label("pivot_origin"), near, kWidth, kHeight);
+    for (const int column : {4, 32, 60}) {
+        EXPECT_GT(brightness(pixelAt(near, column, 13)), 600) << column;
+        EXPECT_LT(brightness(pixelAt(near, column, 11)), 100) << column;
+        EXPECT_LT(brightness(pixelAt(near, column, 15)), 100) << column;
+    }
 }

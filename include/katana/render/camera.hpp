@@ -106,7 +106,14 @@ class Camera {
     //   Perspective   near and far bracket the box's corners along the view
     //                 direction; when the eye is inside the box the near plane
     //                 falls back to far * kNearFarFloor, which reversed Z can
-    //                 afford (see Clip above).
+    //                 afford (see Clip above) - or to distance() *
+    //                 kNearPivotFloor when that is nearer. A zoom into a large
+    //                 scene brings the pivot, which is what it zoomed towards,
+    //                 closer than a millionth of the far plane, and a floor
+    //                 tied to the far plane alone cut it away: one stray
+    //                 entity at the origin of a survey at MGA coordinates put
+    //                 the floor 5 m out (docs/render.md, "Zooming towards the
+    //                 cursor"). Never below tol::kGeometric.
     //   Orthographic  the eye is moved back along the view direction until
     //                 the whole box is in front of it (orthographicStandoff),
     //                 because an orthographic view has no reason to cut away
@@ -119,6 +126,13 @@ class Camera {
     // False, with the camera untouched, for an empty or non-finite box.
     bool fitDepthRange(const katana::math::AABB& bounds);
     static constexpr double kNearFarFloor = 1.0e-6;
+    // A thousandth, as for a box wholly behind the eye: what the pivot keeps
+    // between itself and the near plane, so that the ground round what a
+    // zoom went towards - nearer than it towards the bottom of the view - is
+    // not cut either. Flat ground at the bottom edge of a 45 degree view
+    // looking 5 degrees below level at the pivot is a tenth of the pivot's
+    // distance away: sin 5 / sin 50 = 0.11.
+    static constexpr double kNearPivotFloor = 1.0e-3;
 
     // How far behind `distance()` fitDepthRange had to put an orthographic
     // eye to keep the scene in front of it; 0 when it did not need to.
@@ -178,19 +192,46 @@ class Camera {
 
     // ---- interaction ------------------------------------------------------------
 
+    // What one wheel notch zooms by: 2x in five notches. Both 3D widgets and
+    // cad::zoomAtPixel count in it, so the software and GPU views cannot
+    // drift apart.
+    static constexpr double kZoomPerNotch = 1.15;
+
     void orbit(double deltaAzimuth, double deltaElevation);
-    // Slides the target in the view plane by a screen displacement in pixels.
+    // Slides the target in the view plane by a screen displacement in pixels:
+    // a point on the target's plane moves exactly with the drag.
     void panPixels(double dx, double dy);
     // Multiplies the viewing distance (and the orthographic height with it, so
     // an orthographic view zooms rather than sitting still). Values <= 0 ignored.
     void dolly(double factor);
-    // Zoom centred on a pixel: the world point under that pixel stays under it.
+    // Zoom centred on a pixel: the point under that pixel OF THE TARGET'S
+    // PLANE (through the target, facing the eye) stays under it. Under a
+    // perspective projection that point is not the ground under the pixel
+    // but in the air in front of it or under it, and notch after notch the
+    // eye closes on it - the magnification of the ground stalls, or the eye
+    // goes through the ground. So a 3D view moves the pivot to what the
+    // cursor points at first - what is drawn there, else the datum or the
+    // depth the scene reaches (setPivotDepth, cad::zoomAnchor,
+    // cad::zoomAtPixel; docs/render.md, "Zooming towards the cursor").
     void dollyAtPixel(double factor, double x, double y);
+    // Moves the pivot along the view axis to `depth` in front of the eye: the
+    // target to eye() + forward() * depth and the distance to `depth`. The eye
+    // stays where it is, so nothing on screen moves; what moves is everything
+    // the pivot's distance governs - the plane dollyAtPixel anchors on and a
+    // pan drags, the point an orbit turns about, the scale the edges fade by.
+    // Under a perspective projection the orthographic height becomes what
+    // the view shows at that depth, 2 depth tan(fov / 2), so switching to
+    // orthographic keeps the scale there; under an orthographic one the
+    // height is the picture and is kept, and the standoff is folded into the
+    // distance. A depth that is not positive and finite is ignored.
+    void setPivotDepth(double depth);
 
   private:
     Point3 target_{0.0, 0.0, 0.0};
     double distance_ = 100.0;
-    double azimuth_ = -0.785398163397448309616;    // -45 degrees: looking NE
+    // -45 degrees: the eye to the south-east, looking north-west (forward()),
+    // as StandardView::IsoSouthEast.
+    double azimuth_ = -0.785398163397448309616;
     double elevation_ = 0.615479708670387341067;   // ~35.264 degrees: true isometric
     Projection projection_ = Projection::Perspective;
     double fovY_ = 0.785398163397448309616;        // 45 degrees

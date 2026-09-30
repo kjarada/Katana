@@ -20,9 +20,11 @@
 #include <QTextEdit>
 #include <QToolBar>
 #include <QTreeView>
+#include <QWheelEvent>
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <optional>
 #include <thread>
@@ -36,9 +38,12 @@
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/sheet_json.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
+#include "katana/core/text.hpp"
+#include "katana/math/numerics.hpp"
 #include "theme.hpp"
 #include "main_window.hpp"
 #include "plotting/plot_output.hpp"
+#include "render_view_widget.hpp"
 #include "script_runner.hpp"
 #include "tools/flyout_button.hpp"
 #if defined(KATANA_GPU_D3D11)
@@ -92,7 +97,12 @@ QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
 // two - so a test can read everything a menu says without opening it. A NAME
 // that is none of these may be any widget of the window's, so what a dialog
 // did to the window - framing the views - is read with the dialog still the
-// target. False, said, for none of these.
+// target. A 3D or elevation view (RenderView2 is view 2's, as its dock is
+// View2) is what it drew, painted afresh first - painted=, the pixels that
+// are not its background - and where its camera is, by the keys a view's
+// record uses (target=, distance=, azimuth= and elevation= in degrees,
+// projection=), which a screenshot shows only to a person. False, said, for
+// none of these.
 bool reportWidget(const QWidget& target, const QWidget& window, const QString& name)
 {
     const QWidget* widget = target.findChild<QWidget*>(name);
@@ -153,13 +163,86 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
         };
         walk(QModelIndex());
         text = rows.join(" ; ");
+    } else if (const auto* render = dynamic_cast<const katana::qt::RenderViewWidget*>(widget)) {
+        // Painting is logically const here as in the view's own paint: it
+        // brings the frame up to what the view shows now.
+        auto* shown = const_cast<katana::qt::RenderViewWidget*>(render);
+        (void)shown->grab();
+        const katana::render::Camera& camera = shown->camera();
+        const auto real = [](double value) {
+            return QString::fromStdString(katana::core::formatExactReal(value));
+        };
+        const katana::math::Vec3 at = camera.target();
+        text = QString("painted=%1 target=%2,%3,%4 distance=%5 azimuth=%6 elevation=%7 "
+                       "projection=%8")
+                   .arg(shown->paintedPixelCount())
+                   .arg(real(at.x), real(at.y), real(at.z), real(camera.distance()),
+                        real(camera.azimuth() * katana::math::kRadToDeg),
+                        real(camera.elevation() * katana::math::kRadToDeg),
+                        camera.projection() == katana::render::Projection::Perspective
+                            ? QStringLiteral("perspective")
+                            : QStringLiteral("orthographic"));
     } else {
         std::fprintf(stderr,
-                     "--report: there is no label, field, text, list, action or menu %s\n",
+                     "--report: there is no label, field, text, list, view, action or menu %s\n",
                      qPrintable(name));
         return false;
     }
     std::fprintf(stderr, "%s: %s\n", qPrintable(name), qPrintable(text.simplified()));
+    return true;
+}
+
+// --wheel "NAME X,Y N": N notches of the mouse wheel - positive turned away
+// from the person, which zooms in - over the widget NAME at X,Y in its
+// logical pixels. NAME is found as --report finds one: in the target, else
+// anywhere in the window (RenderView2, a 3D view). Each notch is a wheel
+// event of its own, 120 eighths of a degree, sent to the widget under the
+// point - a view's GPU child where it has one - as a person's wheel reaches
+// it, with the event loop run after each, as it runs between two notches of
+// a real wheel. False, said, for a step that is not three words, no such
+// widget, a point outside it or no notches.
+bool turnWheel(const QWidget& target, const QWidget& window, const QString& step)
+{
+    const QStringList words = step.split(' ', Qt::SkipEmptyParts);
+    const QStringList at = words.size() == 3 ? words.at(1).split(',') : QStringList();
+    bool xRead = false;
+    bool yRead = false;
+    bool notchesRead = false;
+    // QString's numbers read the C locale's way, whatever the machine's.
+    const double x = at.size() == 2 ? at.at(0).toDouble(&xRead) : 0.0;
+    const double y = at.size() == 2 ? at.at(1).toDouble(&yRead) : 0.0;
+    const int notches = words.size() == 3 ? words.at(2).toInt(&notchesRead) : 0;
+    if (!xRead || !yRead || !notchesRead || notches == 0) {
+        std::fprintf(stderr, "--wheel: usage: --wheel \"NAME X,Y NOTCHES\", not \"%s\"\n",
+                     qPrintable(step));
+        return false;
+    }
+    QWidget* widget = target.findChild<QWidget*>(words.at(0));
+    if (widget == nullptr) {
+        widget = window.findChild<QWidget*>(words.at(0));
+    }
+    if (widget == nullptr) {
+        std::fprintf(stderr, "--wheel: there is no widget %s\n", qPrintable(words.at(0)));
+        return false;
+    }
+    const QPointF position(x, y);
+    if (!QRectF(widget->rect()).contains(position)) {
+        std::fprintf(stderr, "--wheel: %g,%g is outside %s, %d x %d\n", x, y,
+                     qPrintable(words.at(0)), widget->width(), widget->height());
+        return false;
+    }
+    QWidget* under = widget->childAt(position.toPoint());
+    QWidget* receiver = under != nullptr ? under : widget;
+    const QPointF local = receiver->mapFromGlobal(widget->mapToGlobal(position));
+    const int eighths = notches > 0 ? 120 : -120;
+    for (int notch = 0; notch < std::abs(notches); ++notch) {
+        QWheelEvent wheel(local, receiver->mapToGlobal(local), QPoint(), QPoint(0, eighths),
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(receiver, &wheel);
+        QApplication::processEvents();
+    }
+    std::fprintf(stderr, "--wheel %s: %d notches at %s,%s\n", qPrintable(words.at(0)), notches,
+                 qPrintable(at.at(0)), qPrintable(at.at(1)));
     return true;
 }
 
@@ -356,7 +439,8 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 //   katana [project-directory] [steps...] --export-options FILE [steps...] --screenshot out.png
 //   katana [project-directory] [data-file...] [--select-all] [--action NAME...]
 //                 --dialog NAME [--fill FIELD=TEXT...] [--press BUTTON...]
-//                 [--report WIDGET...] [--dialog NAME ...] [--survey-dock ACTION ...]
+//                 [--report WIDGET...] [--wheel "NAME X,Y N"...]
+//                 [--dialog NAME ...] [--survey-dock ACTION ...]
 //                 [--command TEXT...] [--run-line TEXT...] [--enter] [--trigger NAME...]
 //                 [--script FILE...] --screenshot out.png
 //   katana [project-directory] [data-file...] --script FILE... [--command TEXT...]
@@ -465,6 +549,8 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 // tool's answer, and what it logged is printed back as the dialog gets it -
 // "--run-line TEXT: ok=yes|no", then a "  reply: " or "  error: " line for each
 // line it logged. --report WIDGET prints what the target's WIDGET shows (reportWidget).
+// --wheel "NAME X,Y N" turns the mouse wheel N notches over widget NAME at
+// X,Y, as a person does (turnWheel): a 3D view's zoom, driven headless.
 // --trigger NAME is --action in its turn among these steps, for a menu
 // command that acts on what the steps before it made (formatPurge).
 //
@@ -549,7 +635,7 @@ int main(int argc, char* argv[])
     std::optional<QString> importOptions;
     bool selectEverything = false;
     // --dialog, --survey-dock, --fill, --press, --panel, --command,
-    // --run-line, --enter and --report, in the order given.
+    // --run-line, --enter, --report and --wheel, in the order given.
     std::vector<std::pair<QString, QString>> surveySteps;
     bool checkShortcuts = false;
     bool checkMenus = false;
@@ -631,7 +717,7 @@ int main(int argc, char* argv[])
         } else if (argument == "--survey-dock" || argument == "--fill" || argument == "--press" ||
                    argument == "--panel" || argument == "--command" || argument == "--report" ||
                    argument == "--trigger" || argument == "--run-line" ||
-                   argument == "--script") {
+                   argument == "--script" || argument == "--wheel") {
             surveySteps.emplace_back(argument, value());
         } else if (argument == "--enter") {
             // Enter on an empty command line, a step of its own: an empty
@@ -932,6 +1018,13 @@ int main(int argc, char* argv[])
                     // The window's own widgets and actions before any
                     // dialog: what a command line step changed there.
                     if (!reportWidget(target != nullptr ? *target : window, window, text)) {
+                        return 1;
+                    }
+                    continue;
+                }
+                if (kind == "--wheel") {
+                    // As --report, the window's own views with no dialog open.
+                    if (!turnWheel(target != nullptr ? *target : window, window, text)) {
                         return 1;
                     }
                     continue;

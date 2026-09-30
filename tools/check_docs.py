@@ -22,7 +22,10 @@
 #     does not have it;
 #   * backticked qualified names (`Document::setCurrentStyle`): the last two
 #     names both occur in one file under include/, src/, tests/ or
-#     benchmarks/ - a renamed or deleted member leaves no such file;
+#     benchmarks/ - a renamed or deleted member leaves no such file. The
+#     CMake files there count for these alone, which is where a target's
+#     namespaced name lives (`Qt6::GuiPrivate`); a test name listed in CMake
+#     and gone from the code must still fail the next check;
 #   * test names: `qt_..._headless`, `qt_widgets.Suite.Case` and `cli....`
 #     are registered in a CMakeLists.txt or a TEST(), and a long backticked
 #     CamelCase name (a test case, by this project's naming rule) occurs in
@@ -50,13 +53,11 @@ import sys
 # removed from here in the commit that makes its document pass; the list only
 # shrinks. The last four are being written as this list is made.
 NOT_YET_CHECKED = {
-    'render.md',
     'performance.md',
     'terrain.md',
     'survey_coding.md',
     'plan_view.md',
     'plotting.md',
-    'gpu.md',
     'dxf.md',
 }
 
@@ -69,6 +70,7 @@ ROOT_FILES = ('CMakeLists.txt', 'CMakePresets.json', '.gitignore', '.clang-forma
               '.clang-tidy')
 CODE_ROOTS = ('include', 'src', 'tests', 'benchmarks')
 CODE_SUFFIXES = ('.hpp', '.cpp', '.h', '.inl')
+BUILD_FILE_SUFFIXES = ('CMakeLists.txt', '.cmake')
 
 # The removed root documents, as a citation would name them. Split so that
 # this file does not itself read as one.
@@ -121,13 +123,13 @@ def is_ignored(path, patterns):
                for pattern in patterns)
 
 
-def code_index(root):
-    """word -> set of files, and every file's words, over the code roots."""
+def code_index(root, suffixes=CODE_SUFFIXES):
+    """word -> set of files, over the code roots' files ending in `suffixes`."""
     files_by_word = {}
     for top in CODE_ROOTS:
         for directory, _, names in os.walk(os.path.join(root, top)):
             for name in names:
-                if not name.endswith(CODE_SUFFIXES):
+                if not name.endswith(suffixes):
                     continue
                 path = os.path.join(directory, name)
                 for word in set(WORD.findall(read(path))):
@@ -191,7 +193,8 @@ def fenced_blocks(lines):
     return flags
 
 
-def check_document(root, doc_path, ignored, words, tests, suites, problems, counts):
+def check_document(root, doc_path, ignored, words, build_words, tests, suites, problems,
+                   counts):
     relative_doc = os.path.relpath(doc_path, root).replace(os.sep, '/')
     lines = read(doc_path).split('\n')
     in_code = fenced_blocks(lines)
@@ -236,7 +239,8 @@ def check_document(root, doc_path, ignored, words, tests, suites, problems, coun
                     continue
                 last, owner = parts[-1], parts[-2]
                 counts['names'] += 1
-                if not (words.get(last, set()) & words.get(owner, set())):
+                if not (words.get(last, set()) & words.get(owner, set())) and not (
+                        build_words.get(last, set()) & build_words.get(owner, set())):
                     report(number, 'no file names both %s and %s (%s)' % (owner, last, span))
                 continue
             widgets = QT_WIDGETS.match(span)
@@ -315,6 +319,7 @@ def main():
         return 1
     ignored = ignored_patterns(root)
     words = code_index(root)
+    build_words = code_index(root, BUILD_FILE_SUFFIXES)
     tests, suites = registered_tests(root)
 
     problems = []
@@ -324,7 +329,8 @@ def main():
         if os.path.basename(doc) in NOT_YET_CHECKED and not everything:
             continue
         checked += 1
-        check_document(root, doc, ignored, words, tests, suites, problems, counts)
+        check_document(root, doc, ignored, words, build_words, tests, suites, problems,
+                       counts)
     check_index(root, docs, problems)
     check_switches(root, problems)
 

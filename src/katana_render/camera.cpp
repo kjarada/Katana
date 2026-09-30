@@ -226,8 +226,12 @@ bool Camera::fitDepthRange(const katana::math::AABB& bounds)
     }
     const double far = furthest + pad;
     // With the eye inside the box `nearest` is negative and the floor decides;
-    // reversed Z keeps its precision down there (header, Clip).
-    const double near = std::max(nearest - pad, far * kNearFarFloor);
+    // reversed Z keeps its precision down there (header, Clip). The pivot's
+    // share of the floor decides only once the pivot is nearer than a
+    // thousandth of the far plane, so a view not zoomed that deep keeps the
+    // planes it always had.
+    const double near =
+        std::max(nearest - pad, std::min(far * kNearFarFloor, distance_ * kNearPivotFloor));
     setDepthRange(std::max(near, tol::kGeometric), far);
     return true;
 }
@@ -465,6 +469,30 @@ void Camera::dollyAtPixel(double factor, double x, double y)
     const double tAfter = (target_ - after.origin).dot(f) / denominatorAfter;
     const Point3 moved = after.origin + after.direction * tAfter;
     setTarget(target_ + (anchor - moved));
+}
+
+void Camera::setPivotDepth(double depth)
+{
+    if (!std::isfinite(depth) || !(depth > 0.0)) {
+        return;
+    }
+    // setDistance's floor, applied before the target is placed so that the
+    // eye stays exactly where it was.
+    const double distance = std::max(depth, tol::kGeometric);
+    const Point3 pivot = eye() + forward() * distance;
+    if (!pivot.isFinite()) {
+        return;
+    }
+    target_ = pivot;
+    distance_ = distance;
+    if (projection_ == Projection::Perspective) {
+        setOrthographicHeight(2.0 * distance_ * std::tan(fovY_ * 0.5));
+    } else {
+        // eye() is target - forward * (distance + standoff): with the standoff
+        // folded into the depth it is the same point. fitDepthRange works
+        // the standoff out again at the next frame.
+        standoff_ = 0.0;
+    }
 }
 
 } // namespace katana::render

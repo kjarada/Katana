@@ -1,5 +1,6 @@
 #include "render_view_widget.hpp"
 
+#include "katana/cad/scene_zoom.hpp"
 #include "theme.hpp"
 #include "view_focus.hpp"
 
@@ -18,6 +19,7 @@
 
 #if defined(KATANA_HAS_GPU)
 #include "gpu/gpu_scene_view.hpp"
+#include "gpu/scene_origin.hpp"
 #endif
 
 namespace katana::qt {
@@ -27,9 +29,6 @@ namespace {
 // Radians per pixel of drag. A full turn in roughly 800 pixels, which is about
 // a screen width and matches what every other CAD package feels like.
 constexpr double kOrbitPerPixel = 0.008;
-// One wheel notch is 120 eighths of a degree; 1.15 per notch gives a
-// comfortable 2x in five notches.
-constexpr double kZoomPerNotch = 1.15;
 
 // The ground behind the model, and behind the empty view's message.
 const QColor kBackground(28, 30, 36);
@@ -78,6 +77,9 @@ RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewState& 
                                    QWidget* parent)
     : QWidget(parent), context_(context), state_(state)
 {
+    // As its dock is View<id>: what a headless run's --wheel and --report
+    // name it by (docs/headless.md).
+    setObjectName(QString("RenderView%1").arg(state_.id));
     context_.options.layers = &state_.layers;
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -149,6 +151,10 @@ void RenderViewWidget::makeGpuView()
     };
     // The host frames: it knows what "the scene" is, and frames what it built.
     gpuView_->onZoomExtents = [this] { zoomExtents(); };
+    // And zooms, for the same reason: towards what it built under the cursor.
+    gpuView_->onWheelZoom = [this](double notches, const QPointF& position) {
+        zoomAtPixel(notches, position);
+    };
     gpuView_->onPrepareFrame = [this](katana::render::Camera& frameCamera) {
         prepareGpuFrame(frameCamera);
     };
@@ -251,9 +257,7 @@ void RenderViewWidget::prepareGpuFrame(katana::render::Camera& frameCamera)
 
     // As cad::renderLayers: the depth range fitted to what is drawn, every
     // frame, and the edges faded for how large the triangles are now.
-    katana::math::AABB depthBox = layers_.bounds;
-    depthBox.expand(layers_.grid.bounds());
-    frameCamera.fitDepthRange(depthBox);
+    frameCamera.fitDepthRange(katana::cad::sceneDepthBox(layers_));
     std::vector<float> applied;
     applied.reserve(layers_.edgeRuns.size());
     for (const auto& run : layers_.edgeRuns) {
@@ -263,6 +267,21 @@ void RenderViewWidget::prepareGpuFrame(katana::render::Camera& frameCamera)
     bool edgesChanged = drawEdges != gpuEdgesShown_;
     for (std::size_t i = 0; i < applied.size() && !edgesChanged; ++i) {
         edgesChanged = applied[i] != layers_.edgeRuns[i].applied;
+    }
+    // The GPU draws float offsets from the origin its layers are packed
+    // against, which zoomed in close to a point far from it round to more
+    // than the view can hide: every layer is packed again against the pivot
+    // once the bound there passes kOriginErrorPixels (scene_origin.hpp, "The
+    // origin follows a deep zoom"). Only then - a repack is a pass over every
+    // vertex. The origin checked is the one the layers will have: a stale
+    // scene is packed next against its own centre, unless one was chosen.
+    const katana::math::Vec3 origin =
+        gpuOrigin_        ? *gpuOrigin_
+        : gpuLayersStale_ ? gpu::chooseSceneOrigin(katana::cad::sceneDepthBox(layers_))
+                          : gpuView_->sceneOrigin();
+    if (gpu::originErrorPixels(frameCamera, origin) > gpu::kOriginErrorPixels) {
+        gpuOrigin_ = frameCamera.target();
+        gpuLayersStale_ = true;
     }
     sendLayersToGpu(drawEdges, edgesChanged);
 #else
@@ -286,7 +305,7 @@ void RenderViewWidget::sendLayersToGpu(bool drawEdges, bool edgesChanged)
             {&layers_.entities, true},
             {&layers_.selection, true},
         }};
-        gpuView_->setLayers(layers);
+        gpuView_->setLayers(layers, gpuOrigin_);
     } else {
         // An edit of the drawing over a large surface re-sends the drawing
         // alone, against the origin the terrain set, as the software view
@@ -748,16 +767,56 @@ void RenderViewWidget::mouseDoubleClickEvent(QMouseEvent* /*event*/) { zoomExten
 
 void RenderViewWidget::wheelEvent(QWheelEvent* event)
 {
+    // One notch is 120 eighths of a degree; a fine wheel sends fractions.
     const double notches = event->angleDelta().y() / 120.0;
     if (notches == 0.0) {
         return;
     }
-    const double factor = std::pow(1.0 / kZoomPerNotch, notches);
-    const QPointF position = event->position() * pixelRatio();
-    refitOnResize_ = false;
-    camera().dollyAtPixel(factor, position.x(), position.y());
-    update();
+    zoomAtPixel(notches, event->position());
     event->accept();
+}
+
+void RenderViewWidget::zoomAtPixel(double notches, const QPointF& position)
+{
+    if (!std::isfinite(notches) || notches == 0.0) {
+        return;
+    }
+    refitOnResize_ = false;
+    // In the layers as last built, not rebuilt first: the cursor points at
+    // what the last frame drew. The camera counts in the framebuffer's device
+    // pixels here and in the GPU view's logical ones there - sceneScale, the
+    // widths' scale, is the same ratio.
+    const double scale = sceneScale();
+    const auto zoomed = katana::cad::zoomAtPixel(layers_, camera(), notches,
+                                                 position.x() * scale, position.y() * scale);
+    // A wheel that stops without a word reads as the fault it once was.
+    if (zoomed.limited && onStatus) {
+        onStatus(QStringLiteral("3D view: zoomed in as far as it can be drawn exactly"));
+    }
+    requestFrame();
+}
+
+std::size_t RenderViewWidget::paintedPixelCount() const
+{
+    const QRgb background = kBackground.rgb() & 0xFFFFFFu;
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ != nullptr) {
+        // The GPU child's frame, drawn afresh: the software framebuffer is
+        // not what the view shows while the GPU draws it.
+        const QImage frame = gpuView_->grabFramebuffer().convertToFormat(QImage::Format_ARGB32);
+        std::size_t painted = 0;
+        for (int y = 0; y < frame.height(); ++y) {
+            for (int x = 0; x < frame.width(); ++x) {
+                painted += (frame.pixel(x, y) & 0xFFFFFFu) != background ? 1 : 0;
+            }
+        }
+        return painted;
+    }
+#endif
+    return static_cast<std::size_t>(
+        std::ranges::count_if(framebuffer_.color(), [background](katana::render::Rgba colour) {
+            return (colour & 0xFFFFFFu) != background;
+        }));
 }
 
 void RenderViewWidget::keyPressEvent(QKeyEvent* event)

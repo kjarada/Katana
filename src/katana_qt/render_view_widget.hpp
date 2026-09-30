@@ -22,9 +22,11 @@
 // QImage::Format_ARGB32.
 
 #include <functional>
+#include <optional>
 
 #include <QImage>
 #include <QPoint>
+#include <QPointF>
 #include <QWidget>
 
 #include "katana/cad/scene.hpp"
@@ -102,6 +104,11 @@ class RenderViewWidget final : public QWidget {
     // what would put something there: only for an empty scene of a drawing
     // with nothing in it, and only where the view had room to say it.
     [[nodiscard]] bool emptyMessageShown() const { return emptyMessageShown_; }
+    // Pixels of the last frame that are not the background, by whichever
+    // renderer drew it (the GPU child's drawn afresh): a headless run's word
+    // that the view shows something (--report RenderView<id>), where a
+    // screenshot says it only to a person.
+    [[nodiscard]] std::size_t paintedPixelCount() const;
 
     // Rebuilds the draw list on the next paint. The view calls it itself on
     // every document change (it listens to the document it is given); call it
@@ -109,6 +116,11 @@ class RenderViewWidget final : public QWidget {
     // options, this view's own hidden layers.
     void invalidateScene();
     void zoomExtents();
+    // Zooms by `notches` wheel notches, positive in, about `position` in this
+    // widget's logical pixels, towards what is drawn there
+    // (cad::zoomAtPixel): what the wheel does over either renderer, the GPU
+    // view's wheel arriving through its onWheelZoom.
+    void zoomAtPixel(double notches, const QPointF& position);
     void setStandardView(katana::render::StandardView view);
     void setProjection(katana::render::Projection projection);
     void setVerticalExaggeration(double factor);
@@ -252,6 +264,10 @@ class RenderViewWidget final : public QWidget {
     bool gpuSelectionStale_ = false;
     bool gpuEdgesShown_ = false;
     [[maybe_unused]] bool rebuiltSinceStats_ = false;
+    // The origin the GPU view's layers are packed against once a deep zoom
+    // moved it to the pivot (prepareGpuFrame); until then, none: the
+    // renderer's own choice, the centre of the scene.
+    [[maybe_unused]] std::optional<katana::math::Vec3> gpuOrigin_;
 
     katana::cad::Document* listenedDocument_ = nullptr;
     // Declared LAST so it is destroyed FIRST: the listener it owns captures

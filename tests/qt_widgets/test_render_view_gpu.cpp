@@ -15,11 +15,13 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstddef>
 #include <string>
 
 #include <QApplication>
 #include <QImage>
+#include <QWheelEvent>
 
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -84,6 +86,24 @@ std::string whyNotShown()
         }
     }
     return drawn;
+}
+
+// Whether anything but the view's background is drawn within `radius`
+// pixels of `at`, a point in the frame's own (device) pixels.
+[[maybe_unused]] bool drawnNear(const QImage& frame, QPointF at, int radius)
+{
+    const QImage rgb = frame.convertToFormat(QImage::Format_ARGB32);
+    const int cx = static_cast<int>(std::floor(at.x()));
+    const int cy = static_cast<int>(std::floor(at.y()));
+    for (int y = cy - radius; y <= cy + radius; ++y) {
+        for (int x = cx - radius; x <= cx + radius; ++x) {
+            if (x >= 0 && y >= 0 && x < rgb.width() && y < rgb.height() &&
+                (rgb.pixel(x, y) & 0xFFFFFFu) != (qRgb(28, 30, 36) & 0xFFFFFFu)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // With KATANA_GPU_TEST_IMAGES set to a directory, saves `frame` there as
@@ -180,6 +200,114 @@ TEST(RenderViewGpu, OnTheDesktopAnEditReachesTheGpuView)
     (void)gpuView->grabFramebuffer();
     EXPECT_GT(view.entityBuilds(), builds);
     EXPECT_GT(gpuView->lastStats().lines, before);
+}
+
+// The wheel over the GPU child zooms through the host, towards what the host
+// built under the cursor: the cursor over the line's point (75, 37.5, 0),
+// three quarters along it, which lies 21.7 m beyond the plane of the framed
+// target (50, 25, 0) - (25, 12.5, 0) . (1, 1, -1) / sqrt 3 - so that the
+// child's own zoom, anchored on that plane, magnified it by 1.124 a notch.
+// Through the host each notch divides its depth by 1.15 (docs/render.md,
+// "Zooming towards the cursor"), and the frame draws the line under the
+// cursor. The GPU child's camera counts in its logical pixels, which are the
+// wheel's.
+TEST(RenderViewGpu, OnTheDesktopTheWheelOverTheGpuViewZoomsTowardsWhatIsUnderTheCursor)
+{
+    if (const std::string why = whyNotShown(); !why.empty()) {
+        GTEST_SKIP() << why;
+    }
+    OneLine scene;
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(320, 200);
+    view.show();
+    processEvents();
+    ASSERT_TRUE(view.drawnOnGpu()) << view.rendererReason().toStdString();
+    auto* gpuView = view.gpuView();
+    ASSERT_NE(gpuView, nullptr);
+    (void)gpuView->grabFramebuffer();
+    const katana::math::Vec3 point(75.0, 37.5, 0.0);
+    const auto depthOf = [&state](const katana::math::Vec3& p) {
+        return (p - state.camera.eye()).dot(state.camera.forward());
+    };
+    ASSERT_NEAR(depthOf(point) - state.camera.distance(), 21.650635094610966, 1e-9)
+        << "the point is on the target's plane, where the child's own zoom was right";
+    const auto screen = state.camera.project(point);
+    ASSERT_TRUE(screen.has_value());
+    const QPointF cursor(screen->x - 0.5, screen->y - 0.5);
+    double depth = depthOf(point);
+    for (int notch = 1; notch <= 30; ++notch) {
+        QWheelEvent wheel(cursor, gpuView->mapToGlobal(cursor), QPoint(), QPoint(0, 120),
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(gpuView, &wheel);
+        const double now = depthOf(point);
+        ASSERT_NEAR(depth / now, 1.15, 1e-9) << "notch " << notch;
+        depth = now;
+    }
+    const QImage frame = gpuView->grabFramebuffer();
+    EXPECT_FALSE(gpuView->failed());
+    saveForLooking("render_view_gpu_zoomed", frame);
+    EXPECT_TRUE(drawnNear(frame, cursor * gpuView->devicePixelRatioF(), 3))
+        << "the line is not drawn under the cursor";
+}
+
+// A survey at MGA coordinates with one stray point at the origin: the
+// centre of the scene's box, what the GPU packs its layers against at first,
+// is 3100 km from the survey, where a float steps in 0.25 m. Looked at from
+// 50 m and zoomed 30 notches in towards the line under the cursor, to 0.75 m
+// where a pixel is 3 mm, the line drawn from that origin lands far off the
+// cursor - without the repack, a stub at the top edge. The host packs the
+// layers again against the pivot once the error there passes
+// gpu::kOriginErrorPixels (scene_origin.hpp, "The origin follows a deep
+// zoom"), and the line is drawn under the cursor.
+TEST(RenderViewGpu, OnTheDesktopADeepZoomFarFromTheScenesCentrePacksTheLayersAgainstThePivot)
+{
+    if (const std::string why = whyNotShown(); !why.empty()) {
+        GTEST_SKIP() << why;
+    }
+    Document document;
+    ViewSet views;
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(300000.0, 6200000.0),
+                                                          Point2(300100.0, 6200050.0)))
+                    .ok());
+    ASSERT_TRUE(document.execute(katana::commands::createPoint(Point2(0.0, 0.0))).ok());
+    ViewContext context;
+    context.document = &document;
+    ViewState& state = views.add(ViewKind::Model3D);
+    RenderViewWidget view(context, state);
+    view.resize(320, 200);
+    view.show();
+    processEvents();
+    ASSERT_TRUE(view.drawnOnGpu()) << view.rendererReason().toStdString();
+    auto* gpuView = view.gpuView();
+    ASSERT_NE(gpuView, nullptr);
+    (void)gpuView->grabFramebuffer();
+    const katana::math::Vec3 point(300075.0, 6200037.5, 0.0); // on the line
+    ASSERT_GT((gpuView->sceneOrigin() - point).length(), 1.0e6)
+        << "the GPU packed the scene near the line already, so this proves nothing";
+
+    state.camera.setTarget(point);
+    state.camera.setDistance(50.0);
+    gpuView->update();
+    (void)gpuView->grabFramebuffer();
+    const auto screen = state.camera.project(point);
+    ASSERT_TRUE(screen.has_value());
+    const QPointF cursor(screen->x - 0.5, screen->y - 0.5);
+    for (int notch = 1; notch <= 30; ++notch) {
+        QWheelEvent wheel(cursor, gpuView->mapToGlobal(cursor), QPoint(), QPoint(0, 120),
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(gpuView, &wheel);
+        (void)gpuView->grabFramebuffer();
+    }
+    EXPECT_NEAR(state.camera.distance(), 50.0 / std::pow(1.15, 30.0), 1e-6);
+    const QImage frame = gpuView->grabFramebuffer();
+    ASSERT_FALSE(gpuView->failed());
+    saveForLooking("render_view_gpu_deep_zoom", frame);
+    // The origin followed the zoom to within the view's reach of the pivot.
+    EXPECT_LT((gpuView->sceneOrigin() - state.camera.target()).length(), 50.0);
+    EXPECT_TRUE(drawnNear(frame, cursor * gpuView->devicePixelRatioF(), 3))
+        << "the line is not drawn under the cursor";
 }
 
 // A GPU view that fails hands the view to the software rasteriser, and no
