@@ -28,6 +28,7 @@
 #include <utility>
 #include <variant>
 
+#include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 #include "reduction_engine.hpp"
 #include "reduction_formulas.hpp"
@@ -916,7 +917,188 @@ void rewind(Engine& engine, std::size_t rowIndex)
     }
 }
 
+// The geoid separation a setup at `here` needs for its distances: for a height
+// reduction to the ellipsoid or a grid scale from the projection, and never
+// with the combined factor, which stands in for both.
+std::optional<double> geoidFor(const Engine& engine, const Position& here)
+{
+    const ReductionSettings& settings = engine.settings;
+    if ((settings.heightReduction == HeightReduction::Ellipsoid ||
+         settings.gridScale == GridScale::FromProjection) &&
+        engine.context.geoidSeparation && !settings.useCombinedFactor) {
+        return engine.context.geoidSeparation(here.northing, here.easting);
+    }
+    return std::nullopt;
+}
+
+// Phase B's factors on one pointing's horizontal distance from a station at
+// `here`: the combined factor, or the height reduction and the grid scale -
+// at the line's mid-point, or at the setup while the pointing has no azimuth.
+// With `record`, each factor is written on the pointing's distance rows and
+// the setup's notices are given; without, the grid distance is only returned:
+// what a resection solves with before the station it computes has a position
+// (resectSetup), orientAndRadiate recording the factors once it has one.
+std::optional<double> gridDistanceOf(Engine& engine, std::size_t setupIndex,
+                                     const ReducedPointing& pointing, const Position& here,
+                                     const std::optional<double>& geoid, bool record)
+{
+    if (!pointing.horizontal) {
+        return std::nullopt;
+    }
+    const ReductionSettings& settings = engine.settings;
+    const ReductionContext& context = engine.context;
+    const SurveyStation& station = engine.raw.stations[setupIndex];
+    SetupState& state = engine.setups[setupIndex];
+    const double instrumentHeight = station.setup.instrumentHeight;
+    double distance = *pointing.horizontal;
+    const auto factor = [&](CorrectionKind kind, double value, std::string note) {
+        if (record) {
+            for (std::size_t i = 0; i < pointing.distanceRowCount; ++i) {
+                correct(engine, pointing.distanceRows[i], kind, distance * (value - 1.0), value,
+                        note);
+            }
+        }
+        distance *= value;
+    };
+    const auto notice = [&](bool& given, const std::string& text) {
+        if (record && !given) {
+            given = true;
+            engine.warn("Setup " + station.setup.id + text, station.source);
+        }
+    };
+    if (settings.useCombinedFactor) {
+        factor(CorrectionKind::CombinedFactor, settings.combinedFactor, {});
+    } else {
+        if (settings.heightReduction != HeightReduction::None) {
+            if (!here.height) {
+                notice(state.warnedHeight, ": its point " + station.setup.pointId +
+                                               " has no height, so its distances were not "
+                                               "reduced for height.");
+            } else {
+                double height = *here.height + instrumentHeight + 0.5 * pointing.measuredVertical;
+                bool ok = true;
+                if (settings.heightReduction == HeightReduction::Ellipsoid) {
+                    if (geoid) {
+                        height += *geoid;
+                    } else {
+                        ok = false;
+                        notice(state.warnedGeoid, ": the drawing gives no geoid separation there, "
+                                                  "so its distances were not reduced to the "
+                                                  "ellipsoid.");
+                    }
+                }
+                if (ok) {
+                    factor(CorrectionKind::HeightReduction,
+                           heightReductionFactor(height, settings.earthRadius),
+                           "h " + formatNumber(height, 1) + " m");
+                }
+            }
+        }
+        if (settings.gridScale == GridScale::Fixed) {
+            factor(CorrectionKind::GridScale, settings.fixedGridScaleFactor, "fixed");
+        } else if (settings.gridScale == GridScale::FromProjection) {
+            double northing = here.northing;
+            double easting = here.easting;
+            const char* where = "at setup";
+            if (pointing.azimuth) {
+                northing += 0.5 * distance * std::cos(*pointing.azimuth);
+                easting += 0.5 * distance * std::sin(*pointing.azimuth);
+                where = "at mid-point";
+            }
+            double ellipsoidal = here.height.value_or(0.0) + geoid.value_or(0.0);
+            if (pointing.heightDifference) {
+                ellipsoidal += 0.5 * *pointing.heightDifference;
+            }
+            const std::optional<double> scale =
+                context.gridScaleFactor(northing, easting, ellipsoidal);
+            if (scale && std::isfinite(*scale) && *scale > 0.0) {
+                factor(CorrectionKind::GridScale, *scale, where);
+            } else {
+                notice(state.warnedScale, ": the drawing's projection gives no scale factor "
+                                          "there, so its distances were not reduced to grid.");
+            }
+        }
+    }
+    if (record) {
+        for (std::size_t i = 0; i < pointing.distanceRowCount; ++i) {
+            setReduced(engine, pointing.distanceRows[i], distance);
+        }
+    }
+    return distance;
+}
+
+// The orientation of a resected setup (SetupState::resected) standing at
+// `here`: the weighted mean of azimuth less reading over the directions its
+// resection used, wrapped about the first - at the resection's own station,
+// its least-squares orientation.
+std::optional<double> resectionOrientation(const Engine& engine, const SetupState& state,
+                                           const Position& here)
+{
+    std::optional<double> first;
+    double offsets = 0.0;
+    double weights = 0.0;
+    for (const auto& [p, sigma] : state.resectionDirections) {
+        const ReducedPointing& pointing = engine.pointings[p];
+        const auto target = engine.positions.find(pointing.target);
+        if (target == engine.positions.end() || !pointing.direction) {
+            continue;
+        }
+        const double deltaNorthing = target->second.northing - here.northing;
+        const double deltaEasting = target->second.easting - here.easting;
+        if (std::hypot(deltaNorthing, deltaEasting) <= katana::math::tolerance::kCoordinate) {
+            continue;
+        }
+        const double value =
+            normalizeAngle(std::atan2(deltaEasting, deltaNorthing) - *pointing.direction);
+        if (!first) {
+            first = value;
+        }
+        const double weight = 1.0 / (sigma * sigma);
+        offsets += weight * normalizeAngleSigned(value - *first);
+        weights += weight;
+    }
+    if (!first) {
+        return std::nullopt;
+    }
+    return normalizeAngleSigned(*first + offsets / weights);
+}
+
 } // namespace
+
+std::optional<double> gridDistanceFrom(Engine& engine, std::size_t setupIndex,
+                                       const ReducedPointing& pointing, const Position& here)
+{
+    return gridDistanceOf(engine, setupIndex, pointing, here, geoidFor(engine, here), false);
+}
+
+namespace {
+
+bool anyRowRejected(const Engine& engine, const std::size_t* rows, std::size_t count)
+{
+    for (std::size_t i = 0; i < count; ++i) {
+        if (engine.report.observations[rows[i]].rejected) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+bool directionRejected(const Engine& engine, const ReducedPointing& pointing)
+{
+    return anyRowRejected(engine, pointing.directionRows.data(), pointing.directionRowCount);
+}
+
+bool distanceRejected(const Engine& engine, const ReducedPointing& pointing)
+{
+    return anyRowRejected(engine, pointing.distanceRows.data(), pointing.distanceRowCount);
+}
+
+bool heightRejected(const Engine& engine, const ReducedPointing& pointing)
+{
+    return pointing.heightRow && engine.report.observations[*pointing.heightRow].rejected;
+}
 
 std::optional<double> meanDirection(const Engine& engine, std::size_t setupIndex,
                                     std::string_view target)
@@ -926,7 +1108,8 @@ std::optional<double> meanDirection(const Engine& engine, std::size_t setupIndex
     std::size_t count = 0;
     for (const std::size_t p : engine.setups[setupIndex].pointings) {
         const ReducedPointing& pointing = engine.pointings[p];
-        if (pointing.rejected || pointing.target != target || !pointing.direction) {
+        if (pointing.rejected || pointing.target != target || !pointing.direction ||
+            directionRejected(engine, pointing)) {
             continue;
         }
         if (!first) {
@@ -944,8 +1127,6 @@ std::optional<double> meanDirection(const Engine& engine, std::size_t setupIndex
 void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                       const std::unordered_set<std::string_view>* reradiate)
 {
-    const ReductionSettings& settings = engine.settings;
-    const ReductionContext& context = engine.context;
     const SurveyStation& station = engine.raw.stations[setupIndex];
     SetupState& state = engine.setups[setupIndex];
     ReportSetup& setup = engine.report.setups[state.reportIndex];
@@ -1000,6 +1181,13 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                 normalizeAngleSigned(*backsightAzimuth - normalizeAngle(*station.backsightAzimuth));
         }
     }
+    if (state.resected) {
+        // Oriented by its resection, whatever its backsight: a named one is
+        // a target like the others there.
+        state.orientation = resectionOrientation(engine, state, here);
+        state.orientationAssumed = false;
+        state.orientationStated = false;
+    }
     setup.orientationCorrection = state.orientation;
 
     // ---- per pointing: factors, azimuth, position ----
@@ -1018,13 +1206,7 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
     };
     std::vector<Accumulator> radiated;
     std::unordered_map<std::string_view, std::size_t> radiatedSlot;
-    std::optional<double> geoid;
-    if ((settings.heightReduction == HeightReduction::Ellipsoid ||
-         settings.gridScale == GridScale::FromProjection) &&
-        context.geoidSeparation && !settings.useCombinedFactor) {
-        geoid = context.geoidSeparation(here.northing, here.easting);
-    }
-    const double instrumentHeight = station.setup.instrumentHeight;
+    const std::optional<double> geoid = geoidFor(engine, here);
 
     for (const std::size_t p : state.pointings) {
         ReducedPointing& pointing = engine.pointings[p];
@@ -1052,91 +1234,14 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
             }
         }
 
-        pointing.gridDistance.reset();
-        if (pointing.horizontal) {
-            double distance = *pointing.horizontal;
-            const auto factor = [&](CorrectionKind kind, double value, std::string note) {
-                for (std::size_t i = 0; i < pointing.distanceRowCount; ++i) {
-                    correct(engine, pointing.distanceRows[i], kind, distance * (value - 1.0), value,
-                            note);
-                }
-                distance *= value;
-            };
-            if (settings.useCombinedFactor) {
-                factor(CorrectionKind::CombinedFactor, settings.combinedFactor, {});
-            } else {
-                if (settings.heightReduction != HeightReduction::None) {
-                    if (!here.height) {
-                        if (!state.warnedHeight) {
-                            state.warnedHeight = true;
-                            engine.warn("Setup " + station.setup.id + ": its point " +
-                                            station.setup.pointId +
-                                            " has no height, so its distances were not reduced for "
-                                            "height.",
-                                        station.source);
-                        }
-                    } else {
-                        double height =
-                            *here.height + instrumentHeight + 0.5 * pointing.measuredVertical;
-                        bool ok = true;
-                        if (settings.heightReduction == HeightReduction::Ellipsoid) {
-                            if (geoid) {
-                                height += *geoid;
-                            } else {
-                                ok = false;
-                                if (!state.warnedGeoid) {
-                                    state.warnedGeoid = true;
-                                    engine.warn("Setup " + station.setup.id +
-                                                    ": the drawing gives no geoid separation there, so "
-                                                    "its distances were not reduced to the ellipsoid.",
-                                                station.source);
-                                }
-                            }
-                        }
-                        if (ok) {
-                            factor(CorrectionKind::HeightReduction,
-                                   heightReductionFactor(height, settings.earthRadius),
-                                   "h " + formatNumber(height, 1) + " m");
-                        }
-                    }
-                }
-                if (settings.gridScale == GridScale::Fixed) {
-                    factor(CorrectionKind::GridScale, settings.fixedGridScaleFactor, "fixed");
-                } else if (settings.gridScale == GridScale::FromProjection) {
-                    double northing = here.northing;
-                    double easting = here.easting;
-                    const char* where = "at setup";
-                    if (pointing.azimuth) {
-                        northing += 0.5 * distance * std::cos(*pointing.azimuth);
-                        easting += 0.5 * distance * std::sin(*pointing.azimuth);
-                        where = "at mid-point";
-                    }
-                    double ellipsoidal = here.height.value_or(0.0) + geoid.value_or(0.0);
-                    if (pointing.heightDifference) {
-                        ellipsoidal += 0.5 * *pointing.heightDifference;
-                    }
-                    const std::optional<double> scale =
-                        context.gridScaleFactor(northing, easting, ellipsoidal);
-                    if (scale && std::isfinite(*scale) && *scale > 0.0) {
-                        factor(CorrectionKind::GridScale, *scale, where);
-                    } else if (!state.warnedScale) {
-                        state.warnedScale = true;
-                        engine.warn("Setup " + station.setup.id +
-                                        ": the drawing's projection gives no scale factor there, so "
-                                        "its distances were not reduced to grid.",
-                                    station.source);
-                    }
-                }
-            }
-            pointing.gridDistance = distance;
-            for (std::size_t i = 0; i < pointing.distanceRowCount; ++i) {
-                setReduced(engine, pointing.distanceRows[i], distance);
-            }
-        }
+        pointing.gridDistance = gridDistanceOf(engine, setupIndex, pointing, here, geoid, true);
 
         if (reradiate != nullptr && reradiate->count(pointing.target) == 0 &&
             pointing.target != backsight) {
             continue;
+        }
+        if (state.resectionPointings.count(p) != 0) {
+            continue; // its resection used it: its residuals are reported there, not as a check
         }
         if (!pointing.azimuth && !pointing.gridDistance && !pointing.heightDifference) {
             continue;
@@ -1193,7 +1298,12 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
             continue;
         }
         if (reradiate != nullptr) {
-            engine.place(a.target, computed);
+            // A point its resection was computed from is held by that
+            // resection: a later pointing to it checks the station, and
+            // places nothing.
+            if (state.resectionTargets.count(a.target) == 0) {
+                engine.place(a.target, computed);
+            }
             continue;
         }
         if (existing == nullptr || existing->origin == PositionOrigin::FileOnly) {
@@ -1283,6 +1393,26 @@ Status seedControl(Engine& engine, std::unordered_set<std::string_view>& drawing
         engine.place(point->id, position);
     }
     return {};
+}
+
+// The record a file's resection block ends at, from the setup's
+// kResectionEndMetadata ("record N"): absent where the setup has none, or its
+// value does not end in a record number - and then every pointing of the
+// setup may enter its resection, as for a file that marks no block.
+std::optional<std::size_t> resectionBlockEndOf(const SurveyStation& station)
+{
+    const auto it = station.metadata.find(kResectionEndMetadata);
+    if (it == station.metadata.end()) {
+        return std::nullopt;
+    }
+    const std::string_view value = katana::core::trimmed(it->second);
+    const std::size_t space = value.find_last_of(' ');
+    const std::optional<std::int64_t> record = katana::core::parseInteger(
+        space == std::string_view::npos ? value : value.substr(space + 1));
+    if (!record || *record <= 0) {
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(*record);
 }
 
 void seedEntered(Engine& engine)
@@ -1463,6 +1593,11 @@ void seedGnss(Engine& engine, std::size_t rawIndex, std::size_t rowIndex, GnssSe
 // one point that matters costs nothing. Each setup is tried at most twice.
 //
 // When nothing more can be tried, in this order:
+//   0. a setup whose station nothing positions, and which observes enough
+//      points that are placed - two with a direction and a distance, or three
+//      with a direction - is resected from them (resectSetup), one at a time
+//      in file order: its station is then placed, and it orients and radiates
+//      as any other setup;
 //   1. a setup whose station nothing positions stands on the file's own
 //      coordinates for it, one at a time (its radiation may position others);
 //   2. a setup still waiting for its backsight, where the file records the
@@ -1470,6 +1605,31 @@ void seedGnss(Engine& engine, std::size_t rawIndex, std::size_t rowIndex, GnssSe
 //      one at a time in file order (it may place another setup's backsight),
 //      and the report says so;
 //   3. the rest are given up, and the report says why.
+//
+// The resection is a fallback, not a first choice: a station another setup
+// radiates is placed that way as it always was, and where its setup is
+// oriented on a backsight, or the circle as set, that setup's pointings to
+// placed points are checks of it. A setup that names no backsight has nothing
+// but the points it observes to orient it. On a station another setup
+// radiated - a free station whose mark an earlier setup shot - it is resected
+// from its block when it is tried, as the field software resected it, and the
+// radiation becomes a check of the resection (resectSetup reports it); with
+// too few placed points by then, it waits for step 0 like a station nothing
+// positions. A station control, an entered or a GNSS point gives is not
+// resected - a resection must not move it - nor one another resection placed
+// (docs/survey.md, "The reduction's resection", Not done).
+//
+// The resection comes before the file's own coordinates because it is
+// computed from what was measured, which is what the reduction is for, where
+// those coordinates are the field software's or a person's, unchecked - the
+// same order as a radiated point, which replaces the file's coordinates of a
+// point (PositionOrigin::FileOnly). So a setup that stood on the file's own
+// coordinates before (step 1) and observes enough placed points is now
+// resected instead: the file's coordinates are then reported as a check of the
+// resection, with a warning, never dropped unseen (resectSetup). It comes
+// before the circle as set, which is an assumption about the instrument. A
+// resection that is refused (resectSetup says why) leaves the setup to the
+// later steps, which name the refusal.
 void placeSetups(Engine& engine)
 {
     const std::vector<SurveyStation>& stations = engine.raw.stations;
@@ -1494,9 +1654,75 @@ void placeSetups(Engine& engine)
     // Entries of engine.positionOrder already looked up in waitingFor.
     std::size_t woken = 0;
 
+    // Resection candidates (step 0): setups whose station has no position,
+    // counted as the points they observe are placed, so that a placement
+    // costs only the setups watching that point.
+    struct Watch {
+        std::size_t setup = 0;
+        bool direction = false;
+        bool distance = false;
+    };
+    std::unordered_map<std::string_view, std::vector<Watch>> watching;
+    std::vector<std::size_t> placedWithDirection(count, 0);
+    std::vector<std::size_t> placedWithBoth(count, 0);
+    std::vector<bool> resectionQueued(count, false);
+    MinHeap resectionCandidates;
+    std::vector<std::string> resectionRefused(count); // why, for the later steps' words
+    // Setups that name no backsight, on a station another setup radiated, not
+    // yet resected (see above): tried again at step 0 as their targets are
+    // placed, their stations placed already.
+    std::vector<bool> awaitingResection(count, false);
+    const auto onARadiatedStation = [&](std::size_t s) {
+        const SetupState& state = engine.setups[s];
+        if (state.orientation || state.resected || !stations[s].backsightPointId.empty()) {
+            return false;
+        }
+        const Position* position = engine.find(stations[s].setup.pointId);
+        return position != nullptr && position->origin == PositionOrigin::Computed &&
+               position->method == ComputationMethod::Radiation && position->fromSetup != s;
+    };
+    const auto countPlaced = [&](const Watch& watch) {
+        const std::size_t s = watch.setup;
+        placedWithDirection[s] += watch.direction ? 1 : 0;
+        placedWithBoth[s] += watch.direction && watch.distance ? 1 : 0;
+        if (!resectionQueued[s] && (placedWithBoth[s] >= 2 || placedWithDirection[s] >= 3)) {
+            resectionQueued[s] = true;
+            resectionCandidates.push(s);
+        }
+    };
+    const auto watchTargets = [&](std::size_t s) {
+        std::unordered_map<std::string_view, Watch> targets;
+        for (const std::size_t p : engine.setups[s].pointings) {
+            const ReducedPointing& pointing = engine.pointings[p];
+            if (pointing.rejected || pointing.target == stations[s].setup.pointId ||
+                !inResectionBlock(engine, s, pointing)) {
+                continue;
+            }
+            Watch& watch = targets.try_emplace(pointing.target, Watch{s, false, false}).first->second;
+            watch.direction = watch.direction || pointing.direction.has_value();
+            watch.distance = watch.distance || pointing.horizontal.has_value();
+        }
+        for (const auto& [target, watch] : targets) {
+            if (engine.find(target) != nullptr) {
+                countPlaced(watch);
+            } else {
+                watching[target].push_back(watch);
+            }
+        }
+    };
+
     const auto wake = [&](std::size_t current) {
         while (woken < engine.positionOrder.size()) {
-            const auto it = waitingFor.find(engine.positionOrder[woken++]);
+            const std::string_view placed = engine.positionOrder[woken++];
+            if (const auto seen = watching.find(placed); seen != watching.end()) {
+                for (const Watch& watch : seen->second) {
+                    if (!done[watch.setup]) {
+                        countPlaced(watch);
+                    }
+                }
+                watching.erase(seen);
+            }
+            const auto it = waitingFor.find(placed);
             if (it == waitingFor.end()) {
                 continue;
             }
@@ -1522,6 +1748,30 @@ void placeSetups(Engine& engine)
         std::string why;
         if (backsight.empty()) {
             why = " has no backsight";
+            // A setup like a second resection block on a station already
+            // placed observes placed points that could orient it, which the
+            // reduction does not do (docs/survey.md, "The reduction's
+            // resection", Not done): named, so the warning is not read as a
+            // setup that observed nothing known.
+            std::vector<std::string_view> placed;
+            for (const std::size_t p : engine.setups[s].pointings) {
+                const ReducedPointing& pointing = engine.pointings[p];
+                if (!pointing.rejected && pointing.direction &&
+                    engine.find(pointing.target) != nullptr &&
+                    std::find(placed.begin(), placed.end(), pointing.target) == placed.end()) {
+                    placed.push_back(pointing.target);
+                }
+            }
+            if (!placed.empty()) {
+                why += "; it observes " + std::to_string(placed.size()) + " placed point" +
+                       (placed.size() == 1 ? "" : "s") + " (";
+                for (std::size_t i = 0; i < placed.size() && i < 5; ++i) {
+                    why += (i == 0 ? "" : ", ") + std::string(placed[i]);
+                }
+                why += placed.size() > 5 ? ", ...)" : ")";
+                why += ", but a setup on a placed station is not oriented on the points it "
+                       "observes";
+            }
         } else if (backsight == station.setup.pointId) {
             why = " cannot be oriented: its backsight is the point it stands on and no circle "
                   "setting was recorded";
@@ -1533,8 +1783,16 @@ void placeSetups(Engine& engine)
                   ": it has no direction to it, or stands on the same position, and no circle "
                   "setting was recorded";
         }
+        // One on a radiated station that its block could not resect: why not.
+        std::string unresected;
+        if (awaitingResection[s]) {
+            unresected = resectionRefused[s].empty() ? resectionShortfall(engine, s)
+                                                     : resectionRefused[s];
+        }
         engine.warn("Setup " + station.setup.id + why +
-                        ", so its directions are not oriented and its targets are not radiated.",
+                        ", so its directions are not oriented and its targets are not radiated." +
+                        (unresected.empty() ? std::string{}
+                                            : " It was not resected: " + unresected + "."),
                     station.source);
     };
     const auto finish = [&](std::size_t s) {
@@ -1579,6 +1837,22 @@ void placeSetups(Engine& engine)
             }
             return;
         }
+        if (onARadiatedStation(s)) {
+            // Its block is what orients it: resected now where its targets
+            // are placed, and oriented and radiated on that.
+            if (placedWithBoth[s] >= 2 || placedWithDirection[s] >= 3) {
+                std::string why;
+                if (resectSetup(engine, s, why)) {
+                    awaitingResection[s] = false;
+                    orientAndRadiate(engine, s);
+                    finish(s);
+                    return;
+                }
+                resectionRefused[s] = std::move(why);
+            }
+            awaitingResection[s] = true;
+            return;
+        }
         finish(s);
     };
 
@@ -1589,6 +1863,7 @@ void placeSetups(Engine& engine)
             thisPass.push(s);
         } else {
             waitingFor[stations[s].setup.pointId].push_back(s);
+            watchTargets(s);
         }
     }
     // Everything placed so far was placed before anything waited for it.
@@ -1612,6 +1887,32 @@ void placeSetups(Engine& engine)
             continue;
         }
 
+        // 0. A resection, for the first setup in the file that can have one.
+        // Its station, once placed, wakes it as any placement wakes a setup;
+        // one on a radiated station, placed already, is tried again directly.
+        bool resected = false;
+        while (!resectionCandidates.empty() && !resected) {
+            const std::size_t s = resectionCandidates.top();
+            resectionCandidates.pop();
+            resectionQueued[s] = false;
+            if (done[s] ||
+                (engine.find(stations[s].setup.pointId) != nullptr && !awaitingResection[s])) {
+                continue;
+            }
+            std::string why;
+            resected = resectSetup(engine, s, why);
+            if (!resected) {
+                resectionRefused[s] = std::move(why);
+            } else if (awaitingResection[s]) {
+                awaitingResection[s] = false;
+                queued[s] = true;
+                thisPass.push(s);
+            }
+        }
+        if (resected) {
+            continue;
+        }
+
         // 1. The file's own coordinates for a station nothing positions. A
         // setup already standing on a position keeps it.
         bool fellBack = false;
@@ -1632,8 +1933,11 @@ void placeSetups(Engine& engine)
             position.origin = PositionOrigin::FileOnly;
             engine.place(it->second->id, position);
             engine.warn("Setup " + stations[s].setup.id + " stands on " + pointId +
-                            ", which is not control and was not computed; the file's own "
-                            "coordinates for it were used.",
+                            ", which is not control and was not computed" +
+                            (resectionRefused[s].empty()
+                                 ? std::string{}
+                                 : " (its resection was refused: " + resectionRefused[s] + ")") +
+                            "; the file's own coordinates for it were used.",
                         stations[s].source);
             fellBack = true;
         }
@@ -1667,9 +1971,15 @@ void placeSetups(Engine& engine)
             if (!done[s]) {
                 done[s] = true;
                 --remaining;
+                // Why it was not resected, where it observes any placed point.
+                std::string why = resectionRefused[s];
+                if (why.empty()) {
+                    why = resectionShortfall(engine, s);
+                }
                 engine.warn("Setup " + stations[s].setup.id + " stands on " +
                                 stations[s].setup.pointId +
-                                ", which has no position: nothing was computed from it.",
+                                ", which has no position: nothing was computed from it." +
+                                (why.empty() ? std::string{} : " It was not resected: " + why + "."),
                             stations[s].source);
             }
         }
@@ -1809,6 +2119,9 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
     engine.report.input = context.input;
     engine.report.settings = settings;
     engine.setups.resize(raw.stations.size());
+    for (std::size_t s = 0; s < raw.stations.size(); ++s) {
+        engine.setups[s].resectionBlockEnd = resectionBlockEndOf(raw.stations[s]);
+    }
     engine.filePoints.reserve(raw.points.size());
     for (const SurveyPoint& point : raw.points) {
         engine.filePoints.emplace(point.id, &point);

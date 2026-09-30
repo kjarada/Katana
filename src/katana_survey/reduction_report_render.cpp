@@ -365,6 +365,122 @@ Table misclosureTable(const ReductionReport& report)
     return table;
 }
 
+// One least squares' residuals, as the adjustments and the resections print them.
+Table residualTable(const AdjustmentReport& adjustment)
+{
+    Table residuals{"Residuals: " + adjustment.method,
+                    {"Observation", "Residual", "A-priori sigma", "Redundancy", "Standardised",
+                     "Flag", "Source"},
+                    {}};
+    for (const ReportResidual& residual : adjustment.residuals) {
+        residuals.rows.push_back(
+            {residual.observation,
+             residual.angular ? seconds(residual.residual) : millimetres(residual.residual),
+             residual.angular ? seconds(residual.sigma) : millimetres(residual.sigma),
+             fixed(residual.redundancyNumber, 2),
+             residual.standardised ? signedFixed(*residual.standardised, 2) : "-",
+             residual.rejected ? "REJECTED" : (residual.flagged ? "FLAGGED" : ""),
+             sourceText(residual.source)});
+    }
+    return residuals;
+}
+
+// The setups positioned by resection: one row each - where it put the
+// station, how well, from which points - and then each one's residuals. The
+// summary is a table, not key-value rows: the Survey Jobs dialog reads the
+// network's "Variance factor" rows out of the text, and a resection's are not
+// the network's.
+std::vector<Table> resectionTables(const ReductionReport& report)
+{
+    std::vector<Table> tables;
+    if (report.resections.empty()) {
+        return tables;
+    }
+    Table summary{"Resections: setups positioned from the points they observe",
+                  {"Setup", "Point", "From", "Northing", "Easting", "Height", "sN", "sE", "sH",
+                   "Orientation", "s orientation", "Redundancy", "Unit weight", "Dilution",
+                   "Checks", "Check"},
+                  {}};
+    const auto unitWeight = [](const AdjustmentReport& adjustment) {
+        return adjustment.varianceFactor ? fixed(std::sqrt(*adjustment.varianceFactor), 2)
+                                         : std::string("-");
+    };
+    for (const ResectionReport& resection : report.resections) {
+        std::string from;
+        for (const std::string& target : resection.targets) {
+            from += (from.empty() ? "" : ", ") + target;
+        }
+        const AdjustmentReport& horizontal = resection.horizontal;
+        const std::optional<AdjustmentReport>& height = resection.height;
+        std::string check;
+        const auto add = [&check](const std::string& part) {
+            check += check.empty() ? "" : "; ";
+            check += part;
+        };
+        if (!horizontal.flaggedOutliers.empty() || (height && !height->flaggedOutliers.empty())) {
+            add("FLAGGED");
+        }
+        // Which way the global test failed, as the network's summary says it
+        // with its bounds: a fit too good fails it as surely as one too bad,
+        // and the two mean different things (weights too loose, or an error).
+        const auto globalTest = [&add](const char* what, const AdjustmentReport& adjustment) {
+            if (!adjustment.globalTest || adjustment.globalTest->passed) {
+                return;
+            }
+            const ReportGlobalTest& test = *adjustment.globalTest;
+            const bool below = test.statistic < test.lowerCritical;
+            add(std::string(what) + " global test FAILED, " + fixed(test.statistic, 3) +
+                (below ? " below " + fixed(test.lowerCritical, 3) + " (fits too well)"
+                       : " above " + fixed(test.upperCritical, 3)));
+        };
+        globalTest("plan", horizontal);
+        if (height) {
+            globalTest("height", *height);
+        }
+        if (horizontal.redundancy == 0) {
+            add("no redundancy");
+        }
+        if (resection.weakGeometry) {
+            add("WEAK GEOMETRY");
+        }
+        if (resection.fileNorthingDifference && resection.fileEastingDifference) {
+            add("the file's own coordinates " +
+                millimetres(std::hypot(*resection.fileNorthingDifference,
+                                       *resection.fileEastingDifference)) +
+                " away");
+        }
+        if (resection.radiatedNorthingDifference && resection.radiatedEastingDifference) {
+            add("radiated from " + resection.radiatedFrom + " " +
+                millimetres(std::hypot(*resection.radiatedNorthingDifference,
+                                       *resection.radiatedEastingDifference)) +
+                " away");
+        }
+        if (resection.unappliedScaleFactor) {
+            add("ground distances on grid coordinates (scale factor " +
+                fixed(*resection.unappliedScaleFactor, 6) + " not applied)");
+        }
+        summary.rows.push_back(
+            {resection.stationId, resection.pointId, from, metres(resection.northing),
+             metres(resection.easting), optionalMetres(resection.elevation),
+             fixed(resection.sigmaNorthing * 1000.0, 1), fixed(resection.sigmaEasting * 1000.0, 1),
+             resection.sigmaElevation ? fixed(*resection.sigmaElevation * 1000.0, 1) : "-",
+             dms(resection.orientation),
+             fixed(resection.sigmaOrientation * 648000.0 / kPi, 1) + "\"",
+             std::to_string(horizontal.redundancy) +
+                 (height ? " + " + std::to_string(height->redundancy) : std::string{}),
+             unitWeight(horizontal) + (height ? " / " + unitWeight(*height) : std::string{}),
+             fixed(resection.dilution, 2), std::to_string(resection.checks), check});
+    }
+    tables.push_back(std::move(summary));
+    for (const ResectionReport& resection : report.resections) {
+        tables.push_back(residualTable(resection.horizontal));
+        if (resection.height) {
+            tables.push_back(residualTable(*resection.height));
+        }
+    }
+    return tables;
+}
+
 std::vector<Table> adjustmentTables(const ReductionReport& report)
 {
     std::vector<Table> tables;
@@ -395,22 +511,7 @@ std::vector<Table> adjustmentTables(const ReductionReport& report)
             summary.rows.push_back({"Rejected outlier", rejected});
         }
         tables.push_back(std::move(summary));
-
-        Table residuals{"Residuals: " + adjustment.method,
-                        {"Observation", "Residual", "A-priori sigma", "Redundancy",
-                         "Standardised", "Flag", "Source"},
-                        {}};
-        for (const ReportResidual& residual : adjustment.residuals) {
-            residuals.rows.push_back(
-                {residual.observation,
-                 residual.angular ? seconds(residual.residual) : millimetres(residual.residual),
-                 residual.angular ? seconds(residual.sigma) : millimetres(residual.sigma),
-                 fixed(residual.redundancyNumber, 2),
-                 residual.standardised ? signedFixed(*residual.standardised, 2) : "-",
-                 residual.rejected ? "REJECTED" : (residual.flagged ? "FLAGGED" : ""),
-                 sourceText(residual.source)});
-        }
-        tables.push_back(std::move(residuals));
+        tables.push_back(residualTable(adjustment));
 
         if (!adjustment.ellipses.empty()) {
             Table ellipses{"Error ellipses: " + adjustment.method,
@@ -470,6 +571,9 @@ std::vector<Table> allTables(const ReductionReport& report)
     tables.push_back(facePairTable(report));
     tables.push_back(observationTable(report));
     tables.push_back(misclosureTable(report));
+    for (Table& table : resectionTables(report)) {
+        tables.push_back(std::move(table));
+    }
     for (Table& table : adjustmentTables(report)) {
         tables.push_back(std::move(table));
     }
