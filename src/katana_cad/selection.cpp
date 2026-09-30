@@ -69,6 +69,13 @@ bool isDrawn(const katana::entity::ResolvedLayer& layer, const Entity& entity,
     return entity.visible && layer.shown && !view.hides(entity.layer);
 }
 
+bool isGhost(const Model& model, const Entity& entity, const LayerOverrides& view)
+{
+    // The view's test first: it answers at once for a view that hides
+    // nothing of its own, which is most views, before the layer is resolved.
+    return view.hides(entity.layer) && isDrawn(model, entity, kNoLayerOverrides);
+}
+
 bool isSelectable(const Model& model, const Entity& entity, const LayerOverrides& view)
 {
     // The drawn test once, here, rather than repeated inline: it used to be
@@ -87,6 +94,18 @@ Box2 drawnExtent(const Model& model, const LayerOverrides& view)
             extent.expand(katana::entity::boundingBox(entity.geometry));
         }
     });
+    return extent;
+}
+
+Box2 extentOf(const Model& model, std::span<const EntityId> ids)
+{
+    Box2 extent;
+    for (const EntityId id : ids) {
+        const Entity* entity = model.entities.find(id);
+        if (entity != nullptr && !isConstructionLayer(entity->layer)) {
+            extent.expand(katana::entity::boundingBox(entity->geometry));
+        }
+    }
     return extent;
 }
 

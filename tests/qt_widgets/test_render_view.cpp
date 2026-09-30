@@ -235,6 +235,8 @@ TEST(RenderView, ASelectionClickRebuildsTheOverlayAndNothingUnderIt)
     EXPECT_EQ(view->entityBuilds(), 1);
     EXPECT_EQ(view->selectionBuilds(), 2);
     EXPECT_EQ(view->sceneLayers().selection.lines.size(), 1u);
+    // And its casing, in the list drawn under it (SceneLayers::selectionCasing).
+    EXPECT_EQ(view->sceneLayers().selectionCasing.lines.size(), 1u);
 
     // An edit is a model change: the drawing is rebuilt, the terrain is not.
     ASSERT_TRUE(scene.document

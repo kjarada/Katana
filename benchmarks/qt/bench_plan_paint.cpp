@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -32,7 +33,9 @@
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/drawing/vertex_editing.hpp"
+#include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/plot.hpp"
+#include "katana/cad/selection.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/interop/archive12d.hpp"
@@ -285,6 +288,72 @@ BENCHMARK(BM_PlanPaintCursorMoveInsertVertex)
     ->Unit(benchmark::kMillisecond)
     ->UseRealTime();
 
+// Two plan views of the fixture in one ViewSet, linked (cad/view_link.hpp):
+// a design view and an as-built view that pan and zoom together. The second
+// starts elsewhere and is brought to the first by the link, as VIEWS LINK
+// brings it.
+struct LinkedPair {
+    katana::cad::ViewSet views;
+    katana::cad::ViewState* leader = nullptr;
+    katana::cad::ViewState* follower = nullptr;
+    std::unique_ptr<katana::qt::ViewportWidget> leaderWidget;
+    std::unique_ptr<katana::qt::ViewportWidget> followerWidget;
+    QImage leaderImage{kWidth, kHeight, QImage::Format_ARGB32_Premultiplied};
+    QImage followerImage{kWidth, kHeight, QImage::Format_ARGB32_Premultiplied};
+
+    LinkedPair(double zoom, Point2 centreFraction)
+    {
+        Fixture& f = fixture();
+        const Box2 extent = f.summary.extent;
+        for (katana::cad::ViewState** made : {&leader, &follower}) {
+            katana::cad::ViewState& view = views.add(katana::cad::ViewKind::Plan);
+            view.plan.resize(kWidth, kHeight);
+            view.plan.fit(extent, 0.02);
+            view.planFramed = true;
+            *made = &view;
+        }
+        leader->plan.scale *= zoom;
+        leader->plan.center =
+            Point2(extent.min.x + centreFraction.x * (extent.max.x - extent.min.x),
+                   extent.min.y + centreFraction.y * (extent.max.y - extent.min.y));
+        const katana::cad::ViewId both[] = {leader->id, follower->id};
+        (void)views.link(both, leader->id);
+        leaderWidget = std::make_unique<katana::qt::ViewportWidget>(f.document, *leader);
+        followerWidget = std::make_unique<katana::qt::ViewportWidget>(f.document, *follower);
+        for (katana::qt::ViewportWidget* widget : {leaderWidget.get(), followerWidget.get()}) {
+            widget->resize(kWidth, kHeight);
+            widget->setGridVisible(false);
+        }
+    }
+};
+
+// One step of a middle-drag pan in a view with a second linked to it: the
+// pan, the link's follow (ViewSet::follow, what ViewWorkspace::viewMoved
+// runs) and both views drawn. Against BM_PlanPaintZoomed, the same pan of
+// the same view at the same zoom on its own, it is what linking costs: the
+// second view drawn whole, since its centre moved (docs/plan_view.md,
+// "Linked views"). Measured, not optimised.
+void BM_PlanLinkedPan(benchmark::State& state)
+{
+    if (!fixture().ok) {
+        state.SkipWithError("the survey drawing could not be built");
+        return;
+    }
+    LinkedPair pair(5.0, Point2(0.45, 0.55));
+    double direction = 1.0;
+    for (auto _ : state) {
+        pair.leader->plan.panByPixels(direction, 0.0);
+        direction = -direction;
+        (void)pair.views.follow(pair.leader->id);
+        pair.leaderWidget->render(&pair.leaderImage);
+        pair.followerWidget->render(&pair.followerImage);
+    }
+    setCounters(state, *pair.leaderWidget);
+    state.counters["followerDrawn"] =
+        static_cast<double>(pair.followerWidget->lastDrawnEntityCount());
+}
+BENCHMARK(BM_PlanLinkedPan)->Unit(benchmark::kMillisecond)->UseRealTime();
+
 // One A1 sheet at 1 : 2500 about the drawing's centre, at 300 dpi.
 void BM_PlanPlotA1(benchmark::State& state)
 {
@@ -391,6 +460,68 @@ BENCHMARK_CAPTURE(BM_PlanPainter, zoomed_all, 5.0, kZoomedCentre, true, true, tr
 BENCHMARK_CAPTURE(BM_PlanPainter, deep_none, 25.0, kZoomedCentre, false, false, false)
     ->Unit(benchmark::kMillisecond)->UseRealTime();
 BENCHMARK_CAPTURE(BM_PlanPainter, deep_clip, 25.0, kZoomedCentre, false, true, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+
+namespace {
+
+// The selection's ghosts (PlanPaintOptions::selectionGhosts;
+// docs/plan_view.md, "Ghosts of the selection"): every entity selected and
+// every other layer hidden in the view, painted with the ghosts on and off.
+// Off is the paint as it was before there were ghosts, the pass skipped; the
+// difference is the pass - a walk of the selection's ids, the half on hidden
+// layers drawn dotted.
+void BM_PlanPainterGhosts(benchmark::State& state, double zoom, bool ghosts)
+{
+    Fixture& f = fixture();
+    if (!f.ok) {
+        state.SkipWithError("the survey drawing could not be built");
+        return;
+    }
+    const Box2 extent = f.summary.extent;
+    katana::qt::PlanFrame frame;
+    frame.transform.resize(kWidth, kHeight);
+    frame.transform.fit(extent, 0.02);
+    frame.transform.scale *= zoom;
+    frame.transform.center =
+        Point2(extent.min.x + kZoomedCentre.x * (extent.max.x - extent.min.x),
+               extent.min.y + kZoomedCentre.y * (extent.max.y - extent.min.y));
+    katana::cad::LayerOverrides hidden;
+    const std::vector<std::string> names = f.document.model().layers.names();
+    for (std::size_t i = 1; i < names.size(); i += 2) {
+        (void)hidden.hide(names[i]);
+    }
+    frame.layers = &hidden;
+    katana::cad::SelectionSet everything;
+    everything.set(f.document.model().entities.ids());
+    katana::qt::PlanSource source = katana::qt::planSourceOf(f.document);
+    source.selection = &everything;
+    katana::qt::PlanPaintOptions options;
+    options.selectionGhosts = ghosts;
+    katana::qt::PlanPaintCache cache;
+    QImage image(kWidth, kHeight, QImage::Format_ARGB32_Premultiplied);
+    katana::qt::PlanPaintStats stats;
+    double direction = 1.0;
+    for (auto _ : state) {
+        frame.transform.panByPixels(direction, 0.0);
+        direction = -direction;
+        QPainter painter(&image);
+        painter.fillRect(image.rect(), QColor(0x1e, 0x23, 0x29));
+        stats = katana::qt::paintPlan(painter, source, frame, options, cache);
+    }
+    state.counters["entitiesDrawn"] = static_cast<double>(stats.entitiesDrawn);
+    state.counters["ghosts"] = static_cast<double>(stats.ghostsDrawn);
+    state.counters["selected"] = static_cast<double>(everything.size());
+}
+
+} // namespace
+
+BENCHMARK_CAPTURE(BM_PlanPainterGhosts, extents_off, 1.0, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainterGhosts, extents_on, 1.0, true)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainterGhosts, zoomed_off, 5.0, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainterGhosts, zoomed_on, 5.0, true)
     ->Unit(benchmark::kMillisecond)->UseRealTime();
 
 namespace {

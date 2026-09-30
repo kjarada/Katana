@@ -19,11 +19,13 @@
 #include <QMenu>
 #include <QPainter>
 #include <QStyle>
+#include <QToolButton>
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
 
+#include "dock_chrome.hpp"
 #include "icons.hpp"
 #include "theme.hpp"
 
@@ -166,12 +168,121 @@ TEST(Theme, TextSizesReadBackFromTheirNamesAndNothingElseDoes)
     EXPECT_EQ(theme::textSizeSteps(theme::TextSize::ExtraLarge), 4);
 }
 
+namespace {
+
+// How many pixels along the middle of the top edge of `image` - the straight
+// part of a frame, clear of its rounded corners - are the accent's blue: blue
+// at least twice red and not near black. A ratio, not a distance to the
+// accent, because a dashed pen straddles the pixel row and lands at part
+// coverage, which scales every channel alike; the theme's greys have blue
+// within a few steps of red, and the accent #4c9ffe has 254 against 76.
+int blueOnTopEdge(const QImage& image)
+{
+    int count = 0;
+    for (int x = 5; x < image.width() - 5; ++x) {
+        const QRgb pixel = image.pixel(x, 0);
+        count += qBlue(pixel) > 2 * qRed(pixel) && qBlue(pixel) > 40 ? 1 : 0;
+    }
+    return count;
+}
+
+// A view bar's Link button as DockTitleBar makes it, under the theme,
+// grabbed at its 22 px.
+QImage linkButtonShot(bool checked, bool waiting)
+{
+    const std::unique_ptr<QStyle> style(theme::makeStyle());
+    QWidget host;
+    QToolButton* button = katana::qt::makeTitleBarButton(&host, Icon::ViewLinked,
+                                                         "ViewLinkButton", "Linked", "tip");
+    button->setStyle(style.get());
+    button->setStyleSheet(theme::styleSheet());
+    button->setCheckable(true);
+    button->setChecked(checked);
+    button->setProperty("waiting", waiting);
+    button->style()->unpolish(button);
+    button->style()->polish(button);
+    return button->grab().toImage();
+}
+
+} // namespace
+
+TEST(Theme, ACheckedTitleBarButtonIsFramedInTheAccentAndAnUncheckedOneIsNot)
+{
+    // A view's Link, checked, wears the accent frame a checked toolbar
+    // button wears. The rule for every chrome button has the weight of
+    // QToolButton:checked and came after it, so it took the frame away and
+    // a checked Link looked like an unchecked one.
+    const QImage checked = linkButtonShot(true, false);
+    const QImage unchecked = linkButtonShot(false, false);
+    ASSERT_GE(checked.width(), 22);
+    const int straight = checked.width() - 10;
+    EXPECT_EQ(blueOnTopEdge(checked), straight) << "a solid accent edge";
+    EXPECT_EQ(blueOnTopEdge(unchecked), 0);
+}
+
+TEST(Theme, ALinkWaitingForASecondViewIsFramedDashedNotSolid)
+{
+    // A link of one moves nothing until a second view joins; its frame is
+    // dashed, so the first of the two clicks does not look like the last.
+    // Some of the straight edge is the accent (the dashes) and some is not
+    // (the gaps between them).
+    const QImage waiting = linkButtonShot(true, true);
+    const int straight = waiting.width() - 10;
+    const int dashes = blueOnTopEdge(waiting);
+    EXPECT_GT(dashes, 0) << "the dashes";
+    EXPECT_LT(dashes, straight) << "and the gaps";
+}
+
+TEST(Theme, ACheckedMenuItemWithAnIconIsFramedAndAnUncheckedOneIsNot)
+{
+    // Grid, Object Snap, Link This View: the stylesheet drew a checkable item
+    // that has an icon with no check mark at all, and on looked exactly like
+    // off, pixel for pixel. Two items alike but for the check, one above the
+    // other, the unchecked one the baseline: what differs is the checked
+    // one's frame - the accent's blue, round the icon, which is 16 px across
+    // (Fusion's small icon) - and nothing else.
+    const std::unique_ptr<QStyle> style(theme::makeStyle());
+    QMenu menu;
+    menu.setStyle(style.get());
+    menu.setStyleSheet(theme::styleSheet());
+    QAction* on = menu.addAction(katana::qt::icon(Icon::Grid), "Grid");
+    on->setCheckable(true);
+    on->setChecked(true);
+    QAction* off = menu.addAction(katana::qt::icon(Icon::Grid), "Grid");
+    off->setCheckable(true);
+    menu.adjustSize();
+    const QImage shot = menu.grab().toImage();
+    const QRect onRow = menu.actionGeometry(on);
+    const QRect offRow = menu.actionGeometry(off);
+    ASSERT_EQ(onRow.size(), offRow.size());
+    int differ = 0;
+    int blue = 0;
+    QRect framed;
+    for (int y = 0; y < onRow.height(); ++y) {
+        for (int x = 0; x < onRow.width(); ++x) {
+            const QRgb a = shot.pixel(onRow.left() + x, onRow.top() + y);
+            if (a == shot.pixel(offRow.left() + x, offRow.top() + y)) {
+                continue;
+            }
+            ++differ;
+            blue += qBlue(a) > 2 * qRed(a) && qBlue(a) > 40 ? 1 : 0;
+            framed = framed.united(QRect(x, y, 1, 1));
+        }
+    }
+    EXPECT_GT(differ, 0) << "checked and unchecked look alike";
+    EXPECT_GT(blue, 0) << "the frame is the accent";
+    EXPECT_GE(framed.width(), 16) << "round the icon";
+    EXPECT_GE(framed.height(), 16) << "round the icon";
+    EXPECT_LT(framed.right(), onRow.width() / 2) << "the icon's cell, not the words";
+}
+
 TEST(Icons, TheListHoldsEveryIconOnceAndEachPaintsSomething)
 {
     // Declaration order, one of each: the contact sheet and this test see
     // every icon only if the list does.
     const auto& icons = katana::qt::allIcons();
-    ASSERT_EQ(icons.size(), static_cast<std::size_t>(Icon::LayerColour) + 1);
+    // The last enumerator, which moves whenever an icon is added at the end.
+    ASSERT_EQ(icons.size(), static_cast<std::size_t>(Icon::ZoomSelection) + 1);
     for (std::size_t i = 0; i < icons.size(); ++i) {
         EXPECT_EQ(static_cast<std::size_t>(icons[i]), i);
     }

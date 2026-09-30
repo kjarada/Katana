@@ -228,6 +228,7 @@ double digestOf(const SceneLayers& layers)
     digest.add(layers.terrain);
     digest.add(layers.edges);
     digest.add(layers.entities);
+    digest.add(layers.selectionCasing);
     digest.add(layers.selection);
     digest.add(layers.edgeBase);
     digest.add(layers.edgeInk);

@@ -43,12 +43,22 @@ namespace katana::core {
     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
 }
 
+[[nodiscard]] constexpr char asciiUpper(char c) noexcept
+{
+    return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+}
+
 // `text` without leading and trailing isAsciiSpace bytes. A view into `text`.
 [[nodiscard]] std::string_view trimmed(std::string_view text) noexcept;
 
 // ASCII letters folded to lower case; every other byte, including every byte of
 // a multi-byte UTF-8 sequence, is left exactly as it was.
 [[nodiscard]] std::string lowered(std::string_view text);
+// The same to upper case: a verb's keywords compared however they were typed.
+// Never std::toupper, which reads a byte in the locale's code page - Latin-1
+// upper-cases 0xE0 to 0xC0, and 0xE0 leads every three-byte UTF-8 sequence
+// from U+0800 to U+0FFF.
+[[nodiscard]] std::string uppered(std::string_view text);
 [[nodiscard]] bool equalsIgnoringCase(std::string_view a, std::string_view b) noexcept;
 
 // A decimal integer occupying the WHOLE token, with at most one sign. nullopt for

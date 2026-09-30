@@ -31,6 +31,7 @@
 // active plan view alone (startTool), and starting one stops any other.
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -40,14 +41,20 @@
 #include <QMainWindow>
 #include <QPointer>
 
+#include "command_runner.hpp"
 #include "dock_chrome.hpp"
 #include "katana/cad/view_set.hpp"
+#include "katana/cad/view_verbs.hpp"
 #include "katana/cad/viewport_layout.hpp"
 #include "render_view_widget.hpp"
 #include "section_view_widget.hpp"
 #include "viewport_widget.hpp"
 
 class QToolButton;
+
+namespace katana::cad {
+class CommandInterpreter;
+}
 
 namespace katana::qt {
 
@@ -104,6 +111,42 @@ class ViewWorkspace final : public QMainWindow {
     // How many layers and reference layers a view hides that still exist:
     // what its Layers button reports. 0 for an id that is not open.
     [[nodiscard]] std::size_t hiddenCount(katana::cad::ViewId id) const;
+
+    // ---- linked views and the verbs (cad/view_verbs.hpp, cad/view_link.hpp) ---
+    // What VIEWS and ZOOM act on: this workspace, as the interpreter's
+    // ViewVerbHost (CommandInterpreter::setViewHost). A ZOOM moves the view
+    // through its widget, and the views linked with it follow.
+    [[nodiscard]] katana::cad::ViewVerbHost& verbHost();
+    // The window's one executor. A view bar's controls build their lines
+    // (VIEWS LINK, VIEWS UNLINK, ZOOM IN view=2 ...) and run them through it,
+    // logged as a typed line is; so does a ZOOM typed while a tool runs.
+    // Until one is given, or given empty, they run through an interpreter of
+    // the workspace's own, unlogged.
+    void setCommandRunner(CommandRunner runner);
+    // Whether `line`, typed now, is a ZOOM for the view rather than an answer
+    // for the tool running in a plan view: ZOOM, Z, 'ZOOM or 'Z while a tool
+    // runs (tools::isTransparentCommand). The tool host hands it to the
+    // command runner and the tool stays at its step, so the command line
+    // leaves its echo to the runner, which logs the line once.
+    [[nodiscard]] bool runsTransparently(const QString& line) const;
+    // What a view's Link button does: VIEWS UNLINK <id> when the view is
+    // linked, else VIEWS LINK <id> TO <the view the user moved last>
+    // (ViewSet::linkLeaderFor), through the command runner. Every Link button
+    // is then set from the link as it stands, so a refused line leaves each
+    // as it was. View > Link This View runs it for the active plan view.
+    void toggleLink(katana::cad::ViewId id);
+    // Frames the selection in view `id` by its Zoom to Selection line, ZOOM
+    // SELECTION view=<id>, through the command runner: logged, and followed
+    // by the views linked with it. The bar's button, Select by ID's zoom and
+    // a manager's Select Users all do it, so none of them frames the
+    // selection a way of its own.
+    void zoomToSelection(katana::cad::ViewId id);
+    // Raised whenever the link changes, for the View menu's check mark.
+    std::function<void()> onLinksChanged;
+    // Raised whenever a view's own settings change - the layers it hides,
+    // its ghosts of the selection (VIEWS HIDE, SHOW, ISOLATE, SET) - for the
+    // View menu's Show the Selection on Hidden Layers check mark.
+    std::function<void()> onViewSettingsChanged;
 
     // ---- views ---------------------------------------------------------------
     [[nodiscard]] katana::cad::ViewSet& viewSet() { return views_; }
@@ -231,16 +274,22 @@ class ViewWorkspace final : public QMainWindow {
     // it was cut from surfaces that are gone.
     void drawingReplaced();
 
-    // Frames the ACTIVE view only, as the View menu and the Z command mean it;
-    // one view's zoom is not another's business.
-    void zoomExtents();
     // Frames one view, whether active or not: its title bar's Zoom Extents
-    // button. NotFound for an id that is not open.
+    // button, ZOOM EXTENTS - the View menu's and the Z command's line for the
+    // active view - and a plan view's middle double-click. One view's zoom
+    // is not another's business unless the user linked them: the views
+    // linked with it follow, and a linked view that draws nothing frames
+    // what the link draws (linkDrawnBounds). NotFound for an id that is not
+    // open.
     [[nodiscard]] katana::core::Status zoomExtents(katana::cad::ViewId id);
     // Frames every view: after New, Open and an import, when all of them are
-    // looking at a drawing that has just changed under them.
+    // looking at a drawing that has just changed under them. The link is
+    // framed once, on everything its views draw between them, in the member
+    // the user moved last (else the lowest id), and the others follow it:
+    // framed one by one, each on what it alone draws, they would come apart.
     void zoomExtentsAll();
-    // Frames `bounds` in every plan view.
+    // Frames `bounds` in every plan view; in the link, once, in the member
+    // that frames it for zoomExtentsAll, the others following it.
     void zoomTo(const katana::geometry::Box2& bounds);
     void invalidateReferenceCache();
     // Repaints every view and rebuilds every 3D scene.
@@ -248,10 +297,15 @@ class ViewWorkspace final : public QMainWindow {
     // Repaints every view without rebuilding anything. A floating dock is a
     // window of its own, so update() on this widget no longer reaches it.
     void repaintViews();
-    // Repaints one view after its own hidden layers or references changed:
-    // not a document change, so no listener hears it. Also what keeps the
-    // view's Layers button saying whether the view hides anything.
-    void viewLayersChanged(katana::cad::ViewId id);
+    // Repaints one view after its own hidden layers or references, or its
+    // ghosts of the selection, changed: not a document change, so no
+    // listener hears it. Also what keeps the view's Layers button saying
+    // whether the view hides anything.
+    void viewSettingsChanged(katana::cad::ViewId id);
+    // What the Layers popup's "Show the selection on hidden layers" box does:
+    // VIEWS SET <id> ghosts=on|off, through the command runner, so the change
+    // is logged as a typed line is. The box is then set from the view.
+    void setSelectionGhosts(katana::cad::ViewId id, bool on);
     // Drops per-view hidden layers that name no layer any more (after a delete
     // or a rename), in every view. See LayerOverrides::pruneMissing.
     void pruneViewLayers();
@@ -303,9 +357,17 @@ class ViewWorkspace final : public QMainWindow {
         // The chrome's bar and the view's own tools on it; null without chrome.
         DockTitleBar* titleBar = nullptr;
         QToolButton* kindButton = nullptr;
+        QToolButton* linkButton = nullptr;
         QToolButton* layersButton = nullptr;
+        QToolButton* zoomInButton = nullptr;
+        QToolButton* zoomOutButton = nullptr;
+        QToolButton* zoomSelectionButton = nullptr;
+        QToolButton* zoomExtentsButton = nullptr;
         [[nodiscard]] QWidget* widget() const;
     };
+    // The workspace as the verbs' host (verbHost), apart so that its
+    // open, activate and zoom need not share names with the workspace's own.
+    class VerbHost;
 
     [[nodiscard]] View* find(katana::cad::ViewId id);
     [[nodiscard]] const View* find(katana::cad::ViewId id) const;
@@ -336,6 +398,44 @@ class ViewWorkspace final : public QMainWindow {
     void activateShowingInsteadOf(katana::cad::ViewId hidden);
     // The Layers button's icon and tooltip say whether the view hides anything.
     void updateLayersButton(const View& view);
+    // The Link button shows on a plan view's bar alone; checked, with the
+    // closed chain, while the view is linked, and its tooltip names the
+    // views it moves with. Set from the link, never from a click.
+    void updateLinkButton(const View& view);
+    // Every view's, and the View menu's (onLinksChanged).
+    void updateLinkButtons();
+    // The zoom tools a view's kind takes (cad::zoomTakes): In and Out on
+    // every kind, Zoom to Selection on all but a section; and their tips,
+    // which say what each does in that kind of view.
+    void updateZoomTools(const View& view);
+    // A bar's line, through the command runner; what it did or why it was
+    // refused is in the log the runner writes.
+    void runViewLine(const QString& line);
+    // A plan view's pan or zoom changed (ViewportWidget::onViewMoved): the
+    // move is noted when the user made it, and when the view is linked the
+    // others take its centre and scale (ViewSet::follow) and every member
+    // holds that view on a resize (ViewportWidget::holdView).
+    void viewMoved(katana::cad::ViewId id, bool byUser);
+    // The member that frames the link for zoomExtentsAll and zoomTo: the one
+    // the user moved last, else the lowest id; kNoView with no link.
+    [[nodiscard]] katana::cad::ViewId linkFramer() const;
+    // What the link's members draw between them, each through its own
+    // hidden layers: what zoomExtentsAll frames the link on, and what a
+    // linked view that draws nothing frames on its Zoom Extents. Empty with
+    // no link.
+    [[nodiscard]] katana::geometry::Box2 linkDrawnBounds() const;
+    // A member of the link other than `id` that has framed something - the
+    // one the user moved last, else the first opened - or kNoView: whose
+    // place a linked view framed on nothing takes (viewMoved).
+    [[nodiscard]] katana::cad::ViewId framedMemberBesides(katana::cad::ViewId id) const;
+    // The verbs' host at work (VerbHost): ZOOM on one view, and a link the
+    // verbs changed behind the widgets.
+    [[nodiscard]] katana::core::Result<std::vector<katana::cad::ViewId>>
+    zoomView(const katana::cad::ZoomRequest& request);
+    void linkChanged(const std::vector<katana::cad::ViewId>& ids);
+    // VIEWS ACTIVATE: made active and brought where it can be seen - out of
+    // the tray, or to the front of its tab group.
+    [[nodiscard]] katana::core::Status showAndActivate(katana::cad::ViewId id);
     // Forwards a plan view's tool hooks to this workspace's, and sends the
     // view's Enter-repeat (onRepeatTool) through startTool as view `id`.
     // Its typed text too (onTextTyped), its shortcut menu and its double
@@ -359,6 +459,19 @@ class ViewWorkspace final : public QMainWindow {
     // of them repeats; "" until one has run.
     std::string lastToolId_;
     bool gridVisible_ = true;
+
+    std::unique_ptr<VerbHost> verbHost_;
+    // Until the window hands over its executor, the bars' lines run through
+    // an interpreter of this workspace's own, answered by this workspace: a
+    // workspace built on its own (a test, a harness) has working bars, and
+    // they still go by the verbs, never around them.
+    std::unique_ptr<katana::cad::CommandInterpreter> ownInterpreter_;
+    CommandRunner runner_;
+    // True while viewMoved is moving the link: a view moved by it never
+    // reports that move (holdView raises nothing), and this makes sure of it
+    // should a widget ever report anyway - a follower re-leading the link
+    // would echo the move back and forth.
+    bool following_ = false;
 };
 
 } // namespace katana::qt

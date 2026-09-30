@@ -1398,19 +1398,22 @@ if(TARGET katana)
     # points, and the inverse of the 3-4-5 leg in the log - 5.000 by hand.
     # ZOOM typed between them is taken by the tool host as the view's
     # command (ToolHost::onTransparent), never handed to the tool as a
-    # malformed point, and the tool carries on at the same step. No view
-    # runs it yet, so the host refuses it aloud; the EXPECT holds that
-    # refusal before the inverse, because a ZOOM wrongly sent to the tool
-    # is refused by the tool instead ("'ZOOM' is not an input this tool
-    # takes now") and the inverse still follows, which the result alone
-    # cannot tell apart. When the view sets onTransparent the refusal
-    # becomes the prompt shown again, and this EXPECT with it.
+    # malformed point, and the tool carries on at the same step. The view
+    # runs it (ViewWorkspace::wireTools) as its ZOOM line through the one
+    # executor - naming the view the tool runs in, ZOOM view=1, whichever
+    # view is active - so its record comes before the inverse, and the line
+    # is logged once: the command line leaves the echo to the executor. Before
+    # the view ran it the host refused it aloud ("cannot run inside"); a
+    # ZOOM wrongly sent to the tool would be refused by the tool instead and
+    # the inverse would still follow, which the result alone cannot tell
+    # apart - hence the record, and the refusals forbidden.
     add_test(NAME qt_dist_typed_at_the_command_line_reports_the_inverse_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>DIST|>0,0|>ZOOM|>3,4"
-            "-DEXPECT=! ZOOM cannot run inside Distance; press Esc to end the tool first[.].*Horizontal distance 5[.]000"
+            "-DDRIVE=>DIST|>0,0|>ZOOM|>3,4|?commandLog"
+            "-DEXPECT=view=1 kind=plan[^\r\n]*.*Horizontal distance 5[.]000.*commandLog: .*> ZOOM view=1 view=1 kind=plan"
+            "-DFORBID=cannot run inside|not an input this tool takes|> ZOOM > ZOOM"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dist_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Quick Select is a form asked at the command line, one question at a
@@ -1424,6 +1427,219 @@ if(TARGET katana)
             "-DDRIVE=>LINE 0,0 10,0|>CIRCLE 5,5 2|>SELECT NONE|>QSELECT|>Line|>|>"
             "-DEXPECT=1 entity selected: Lines on any layer, in the drawing"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/quick_select_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Linked plan views (cad/view_link.hpp, docs/desktop.md "Linked views"):
+    # a second plan view opened and linked with the first, the first zoomed
+    # by its line, and the second is where the first is - the ZOOM's reply
+    # says it followed, and VIEWS lists it there. The Link button of the
+    # second view's bar is checked from the link the lines made; the grab is
+    # that view's dock, bar and all.
+    add_test(NAME qt_linked_plan_views_zoom_together_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN plan|>VIEWS LINK 1,2|>ZOOM CENTRE 50,40 SCALE 8 view=1|>VIEWS|%View2|?ViewLinkButton"
+            "-DEXPECT=leader=1 linked=1,2 moved=2.*view=1 kind=plan centre=50,40 scale=8[^\r\n]*[\r\n]+view=2 kind=plan followed=1 centre=50,40 scale=8.*view=2 kind=plan title=\"Plan 2\" active=[a-z]+ linked=yes centre=50,40 scale=8.*ViewLinkButton: Linked, checked"
+            "-DFORBID=unknown command"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/linked_plan_views_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # And out again: UNLINK of one of two leaves the other alone, which is no
+    # link, so both leave, a ZOOM moves one view only and the buttons show
+    # the open chain.
+    add_test(NAME qt_unlinking_one_of_two_views_unlinks_both_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN plan|>VIEWS LINK 1,2|>VIEWS UNLINK 2|>ZOOM IN view=1|%View2|?ViewLinkButton"
+            "-DEXPECT=unlinked=1,2 linked=none.*view=1 kind=plan centre=.*ViewLinkButton: Link this view, unchecked"
+            "-DFORBID=followed="
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/unlinked_plan_views_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The owner's case: a design view hiding the as-built layer beside an
+    # as-built view hiding the design one (VIEWS HIDE), linked, framed on the
+    # works from the design view, the design line selected. Each record says
+    # what its view hides; the PNG shows the design line selected on the left
+    # and the as-built line alone on the right, both at the one scale.
+    add_test(NAME qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS LINK 1,2|>ZOOM WINDOW 0,0,50,40 view=1|>SELECT LAYER design|>VIEWS"
+            "-DEXPECT=view=1 kind=plan title=\"Plan 1\"[^\r\n]*linked=yes[^\r\n]*hidden=asbuilt[\r\n]+view=2 kind=plan title=\"Plan 2\"[^\r\n]*linked=yes[^\r\n]*hidden=design[\r\n]+views=2 linked=2"
+            "-DFORBID=unknown command|no layer '"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/design_and_as_built_views_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The selection in every view (docs/desktop.md): the design line selected
+    # is drawn dashed in the design view and as a dotted ghost in the as-built
+    # view that hides its layer; each record says the view's switch is on.
+    # What each view drew says it too: the design view, its line and the
+    # line's three grips; the as-built view, its own line, the ghost and no
+    # grip on it. The PNG is what to look at: the ghost in the right-hand
+    # view, where the as-built line crosses it.
+    add_test(NAME qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS LINK 1,2|>ZOOM WINDOW 0,0,50,40 view=1|>SELECT LAYER design|>VIEWS|?PlanView1|?PlanView2"
+            "-DEXPECT=view=1 kind=plan[^\r\n]*ghosts=on hidden=asbuilt[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on hidden=design[\r\n]+views=2.*PlanView1: drawn=1 ghosts=0 grips=3[\r\n]+PlanView2: drawn=1 ghosts=1 grips=0"
+            "-DFORBID=unknown command|no layer '"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/selection_ghost_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The as-built view's switch off, by the line its Layers popup runs: no
+    # trace of the design line there - no ghost, and no grip - while the
+    # as-built line is still drawn. The PNG shows the right-hand view with
+    # the as-built line alone.
+    add_test(NAME qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS LINK 1,2|>ZOOM WINDOW 0,0,50,40 view=1|>SELECT LAYER design|>VIEWS SET 2 ghosts=off|?PlanView2"
+            "-DEXPECT=view=2 kind=plan[^\r\n]*ghosts=off hidden=design.*PlanView2: drawn=1 ghosts=0 grips=0"
+            "-DFORBID=unknown command|no layer '|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/selection_ghost_off_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The same switch by the mouse: view 2's Layers popup opened from its
+    # bar, a panel of its own, and its box unticked - which runs the line,
+    # whose reply is view 2's record with its ghosts off.
+    add_test(NAME qt_the_layers_popups_box_turns_a_views_ghosts_off_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 2 design|>SELECT LAYER design|%View2|!ViewLayersButton|%ViewLayersPopup|?ViewLayersShowSelection|!ViewLayersShowSelection|?ViewLayersShowSelection|?PlanView2"
+            "-DEXPECT=ViewLayersShowSelection: Show the selection on hidden layers, checked[\r\n]+view=2 kind=plan[^\r\n]*ghosts=off hidden=design[\r\n]+ViewLayersShowSelection: Show the selection on hidden layers, unchecked[\r\n]+PlanView2: drawn=1 ghosts=0 grips=0"
+            "-DFORBID=unknown command|no layer '|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/layers_popup_ghosts_off_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # And by the View menu, for the active view: the same line through the
+    # same executor (its reply, view 2's record with its ghosts off), the
+    # item's check set from the view, and view 1 untouched.
+    add_test(NAME qt_the_view_menu_turns_the_active_views_ghosts_off_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN plan|?viewSelectionGhosts|*viewSelectionGhosts|?viewSelectionGhosts|>VIEWS"
+            "-DEXPECT=viewSelectionGhosts: Show the Selection on Hidden Layers, checked[\r\n]+view=2 kind=plan[^\r\n]*ghosts=off[\r\n]+viewSelectionGhosts: Show the Selection on Hidden Layers, unchecked[\r\n]+view=1 kind=plan[^\r\n]*ghosts=on[\r\n]+view=2 kind=plan[^\r\n]*ghosts=off[\r\n]+views=2"
+            "-DFORBID=unknown command|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/view_menu_ghosts_off_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The View menu offers the zoom items the active view's kind takes, as
+    # its bar does (cad::zoomTakes): a section frames no scope, so its Zoom
+    # to Selection is disabled, and a click on it refused, where it would be
+    # offered and ZOOM refuse it.
+    add_test(NAME qt_the_view_menus_zoom_to_selection_is_disabled_for_a_section_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN section|*viewZoomSelection"
+            "-DREFUSED=view=2 kind=section[^\r\n]*[\r\n]+.*--trigger viewZoomSelection failed: [^\r\n]*that menu item is disabled"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/view_menu_zoom_selection_section_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The View menu's zoom items and a view bar's zoom buttons, run: each is
+    # its ZOOM line through the one executor - the menu's for the active
+    # view, a button's with its view= - logged as the line it is. In and
+    # Out about the plan view's centre, the line's middle (25, 20) once it
+    # is framed; Zoom to Selection frames the selected line there. On a 3D
+    # view, which takes them all but WINDOW and CENTRE, In and Out as its
+    # wheel zooms there, and Zoom to Selection puts its target at the line's
+    # middle on the datum, (25, 20, 0).
+    add_test(NAME qt_the_view_menus_zoom_items_and_the_bars_buttons_run_their_lines_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LINE 10,10 40,30|>ZOOM|>SELECT ALL|*viewZoomIn|*viewZoomOut|*viewZoomSelection|%View1|!ViewZoomInButton|!ViewZoomOutButton|>VIEWS OPEN 3d|*viewZoomIn|*viewZoomSelection|%View2|!ViewZoomOutButton|?commandLog"
+            "-DEXPECT=commandLog: .*> ZOOM IN view=1 kind=plan centre=25,20 scale=[^ ]+ area=[^ ]+ > ZOOM OUT view=1 kind=plan centre=25,20 [^>]*> ZOOM SELECTION scope=selection matched=1 view=1 kind=plan centre=25,20 [^>]*> ZOOM IN view=1 view=1 kind=plan centre=25,20 [^>]*> ZOOM OUT view=1 view=1 kind=plan centre=25,20 [^>]*> VIEWS OPEN 3d view=2 kind=3d [^>]*> ZOOM IN view=2 kind=3d target=[^>]*> ZOOM SELECTION scope=selection matched=1 view=2 kind=3d target=25,20,0 [^>]*> ZOOM OUT view=2 view=2 kind=3d target="
+            "-DFORBID=unknown command|does not take|--press: .* is hidden"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/view_zoom_items_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # View > Link This View links the ACTIVE view, as it says, by its Link
+    # button's line through the one executor, and is checked from the link:
+    # the second plan view, alone in a link that waits; the first, activated,
+    # joining it; then View > Unlink All Views takes both out.
+    add_test(NAME qt_the_view_menus_link_items_link_the_active_view_and_unlink_all_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN plan|*viewLinkActive|?viewLinkActive|>VIEWS ACTIVATE 1|?viewLinkActive|*viewLinkActive|?viewLinkActive|*viewUnlinkAll|?viewLinkActive|?commandLog"
+            "-DEXPECT=leader=2 linked=2 moved=none[\r\n]+viewLinkActive: Link This View, checked[\r\n]+view=1 kind=plan[^\r\n]*[\r\n]+viewLinkActive: Link This View, unchecked[\r\n]+leader=2 linked=1,2 moved=1[\r\n]+viewLinkActive: Link This View, checked[\r\n]+unlinked=1,2 linked=none[\r\n]+viewLinkActive: Link This View, unchecked[\r\n]+commandLog: .*> VIEWS LINK 2 TO 2 leader=2 linked=2 moved=none .*> VIEWS LINK 1 TO 2 leader=2 linked=1,2 moved=1 > VIEWS UNLINK ALL unlinked=1,2 linked=none"
+            "-DFORBID=unknown command|No plan view"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/view_menu_link_items_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A 3D view cannot be linked, and while one is active Link This View is
+    # disabled - it linked the plan view used last, out of sight, and showed
+    # itself checked for the 3D view.
+    add_test(NAME qt_link_this_view_is_disabled_while_a_3d_view_is_active_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN 3d|*viewLinkActive"
+            "-DREFUSED=view=2 kind=3d[^\r\n]*[\r\n]+.*--trigger viewLinkActive failed: [^\r\n]*that menu item is disabled"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/link_this_view_3d_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A press of a view bar's tool that the bar hid for want of room is
+    # refused, as a disabled button's is: a person cannot see it to click
+    # it. A 3D view's bar hides Link, which its kind has none of.
+    add_test(NAME qt_a_press_of_a_hidden_bar_tool_is_refused_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN 3d|%View2|!ViewLinkButton"
+            "-DREFUSED=view=2 kind=3d[^\r\n]*[\r\n]+.*--press: View2's button ViewLinkButton is hidden"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/hidden_bar_tool_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ZOOM on the shared scope (cad/view_verbs.hpp): the selection framed in
+    # the second view, the first following it. By hand the line's middle is
+    # (25, 20); the reply is the scope's record, then the view moved, then
+    # the one that followed.
+    add_test(NAME qt_zoom_to_selection_moves_the_linked_views_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN plan|>VIEWS LINK 1,2|>LINE 10,10 40,30|>SELECT ALL|>ZOOM SELECTION view=2|>VIEWS"
+            "-DEXPECT=scope=selection matched=1[\r\n]+view=2 kind=plan centre=25,20[^\r\n]*[\r\n]+view=1 kind=plan followed=2 centre=25,20"
+            "-DFORBID=unknown command|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zoom_to_selection_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A view frames what it shows of the selection, in plan as in 3D: the
+    # as-built view hides the design layer with its ghosts off, so its bar's
+    # Zoom to Selection, with the design line selected, moves nothing and
+    # says so. It framed the line it does not show - empty ground there, the
+    # design line's middle (25, 20) - and took the design view along. Both
+    # stay on the as-built line's middle, (70, 20), where ZOOM WINDOW put
+    # them; the PNG is view 2 still showing the as-built line.
+    add_test(NAME qt_a_plan_views_zoom_to_selection_moves_nothing_it_does_not_show_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 60,30 90,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS SET 2 ghosts=off|>VIEWS LINK 1,2|>ZOOM WINDOW 40,0,100,40 view=2|>SELECT LAYER design|%View2|!ViewZoomSelectionButton|>VIEWS"
+            "-DEXPECT=scope=selection matched=1[\r\n]+view=2 kind=plan shown=0 moved=no[\r\n]+.*view=1 kind=plan title=\"Plan 1\"[^\r\n]* linked=yes centre=70,20 [^\r\n]*[\r\n]+view=2 kind=plan title=\"Plan 2\"[^\r\n]* linked=yes centre=70,20 "
+            "-DFORBID=unknown command|no layer '|centre=25,20"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zoom_to_selection_shows_none_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # View > Zoom To: the shared scope and filter controls build the ZOOM
+    # line and hand it to the one executor; the status says what ZOOM
+    # answered. The design line alone is taken: the whole drawing, filtered
+    # to the design layer.
+    add_test(NAME qt_zoom_to_dialog_runs_its_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW other|>LAYER SET other|>CIRCLE 100,100 5|@viewZoomTo|!zoomToScopeDrawing|zoomToFilterLayer=design|?zoomToLine|!zoomToRun|?zoomToStatus"
+            "-DEXPECT=zoomToLine: ZOOM DRAWING WHERE LAYER=design[\r\n]+scope=drawing where=\"LAYER=design\" matched=1[\r\n]+view=1 kind=plan centre=25,20 [^\r\n]*[\r\n]+zoomToStatus: 1 matched, framed in view 1[.]"
+            "-DFORBID=unknown command|does not take"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zoom_to_dialog_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Zoom To's view chooser (zoomToView): the scope framed in the view
+    # chosen - the second plan view, about the line's middle, and then a 3D
+    # view, its target at that middle on the datum - each said in the status
+    # as a sentence.
+    add_test(NAME qt_zoom_to_frames_the_scope_in_the_view_chosen_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW other|>LAYER SET other|>CIRCLE 100,100 5|>VIEWS OPEN plan|>VIEWS OPEN 3d|@viewZoomTo|!zoomToScopeDrawing|zoomToFilterLayer=design|zoomToView=Plan 2 (view 2)|?zoomToLine|!zoomToRun|?zoomToStatus|zoomToView=3D 1 (view 3)|?zoomToLine|!zoomToRun|?zoomToStatus"
+            "-DEXPECT=zoomToLine: ZOOM DRAWING WHERE LAYER=design view=2[\r\n]+scope=drawing where=\"LAYER=design\" matched=1[\r\n]+view=2 kind=plan centre=25,20 [^\r\n]*[\r\n]+zoomToStatus: 1 matched, framed in view 2[.][\r\n]+zoomToLine: ZOOM DRAWING WHERE LAYER=design view=3[\r\n]+scope=drawing where=\"LAYER=design\" matched=1[\r\n]+view=3 kind=3d target=25,20,0 [^\r\n]*[\r\n]+zoomToStatus: 1 matched, framed in view 3[.]"
+            "-DFORBID=unknown command|does not take|has no choice"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zoom_to_view_chosen_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every key sequence the window answers to reaches one thing: Qt
     # disables an ambiguous shortcut for BOTH actions, so a clash is two
@@ -1570,6 +1786,22 @@ if(TARGET katana)
                          qt_the_modify_menu_offers_lengthen_reverse_and_match_properties_headless
                          qt_dist_typed_at_the_command_line_reports_the_inverse_headless
                          qt_quick_select_is_answered_at_the_command_line_headless
+                         qt_linked_plan_views_zoom_together_headless
+                         qt_unlinking_one_of_two_views_unlinks_both_headless
+                         qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless
+                         qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless
+                         qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless
+                         qt_the_layers_popups_box_turns_a_views_ghosts_off_headless
+                         qt_the_view_menu_turns_the_active_views_ghosts_off_headless
+                         qt_the_view_menus_zoom_to_selection_is_disabled_for_a_section_headless
+                         qt_the_view_menus_zoom_items_and_the_bars_buttons_run_their_lines_headless
+                         qt_the_view_menus_link_items_link_the_active_view_and_unlink_all_headless
+                         qt_link_this_view_is_disabled_while_a_3d_view_is_active_headless
+                         qt_a_press_of_a_hidden_bar_tool_is_refused_headless
+                         qt_zoom_to_selection_moves_the_linked_views_headless
+                         qt_a_plan_views_zoom_to_selection_moves_nothing_it_does_not_show_headless
+                         qt_zoom_to_dialog_runs_its_line_headless
+                         qt_zoom_to_frames_the_scope_in_the_view_chosen_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
                          qt_every_menu_item_has_an_icon_and_a_status_tip_headless
                          qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless
@@ -2061,6 +2293,22 @@ if(TARGET katana)
             "-DEXPECT=1 erased[\r\n]+0 entities[\r\n]+circle created[\r\n]+! InvalidState: nothing is selected[^\r\n]*[\r\n]+script=\"[^\"]*/bare_tool_words\\.kcs\" lines=6 ran=6 failed=1[\r\n]+.*1 entities[\r\n]+2  Circle"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_bare_tool_words_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A script that opens a plan view, links it and zooms it, with no paint
+    # between its lines: the zoom starts from what the view draws - a survey
+    # line at MGA coordinates, its middle (300050, 6200025) - where it
+    # started from the place a new view holds until its first paint, the
+    # origin at 10 px a unit, and took the view linked with it there too.
+    # VIEWS OPEN's record says the view has not framed yet (framed=no).
+    add_test(NAME qt_a_script_that_opens_a_view_and_zooms_it_zooms_about_what_it_draws_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSCRIPT=${_scripts}/open_and_zoom.kcs"
+            "-DDRIVE=?PlanView2|>VIEWS"
+            "-DEXPECT=view=2 kind=plan title=\"Plan 2\" active=yes linked=no centre=0,0 scale=10 area=[^ ]+ framed=no ghosts=on[\r\n]+leader=2 linked=1,2 moved=none[\r\n]+view=2 kind=plan centre=300050,6200025 scale=[^\r\n]*[\r\n]+view=1 kind=plan followed=2 centre=300050,6200025 [^\r\n]*[\r\n]+script=\"[^\"]*/open_and_zoom\\.kcs\" lines=4 ran=4 failed=0.*PlanView2: drawn=1 ghosts=0 grips=0.*view=2 kind=plan title=\"Plan 2\" active=yes linked=yes centre=300050,6200025 "
+            "-DFORBID=centre=0,0 scale=20|unknown command|stopped at"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_open_and_zoom_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Without --screenshot, --script is a batch run as katana_cli's is: never
     # shown, over when its steps are, 0 when every line ran and 1 at the first
     # refused.
@@ -2081,6 +2329,7 @@ if(TARGET katana)
         qt_several_lines_on_the_command_line_run_as_a_script_headless
         qt_lines_pasted_at_a_text_prompt_are_the_texts_lines_headless
         qt_a_scripts_bare_tool_word_runs_as_katana_cli_runs_it_headless
+        qt_a_script_that_opens_a_view_and_zooms_it_zooms_about_what_it_draws_headless
         qt_script_batch_run_exits_when_the_script_is_done_headless
         qt_script_batch_run_fails_at_a_refused_line_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
@@ -2226,15 +2475,18 @@ endif()
 # Edit > Select by ID and the Edit and View actions' object names
 # (docs/desktop.md, "The plan view's shortcut menu"). Three points; Select All
 # by its action; the dialog, non-modal, selects #2 and 3 through the executor
-# and says what SELECT answered; Grid is reached by its name and turned off;
-# Erase by its name erases the two, and Undo by its name brings them back.
+# and says what SELECT answered, and frames them by the plan view's Zoom to
+# Selection line through the same executor - the two points' box is
+# (20,20)-(40,40), so the view is centred on (30,30); Grid is reached by its
+# name and turned off; Erase by its name erases the two, and Undo by its name
+# brings them back.
 if(TARGET katana)
     add_test(NAME qt_select_by_id_selects_and_frames_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>POINT 1,1|>POINT 20,20|>POINT 40,40|*editSelectAll|@editSelectById|selectByIdIds=#2, 3|!selectByIdSelect|?selectByIdStatus|*viewGrid|?viewGrid|*editErase|>LIST|*editUndo|>LIST"
-            "-DEXPECT=3 selected.*--dialog editSelectById opened selectByIdDialog \"Select by ID\"[\r\n]+2 selected[\r\n]+selectByIdStatus: 2 selected.*viewGrid: Grid, unchecked[\r\n]+2 erased[\r\n]+1 entities[\r\n]+1 +Point +layer=0 +at 1,1.*3 entities"
+            "-DEXPECT=3 selected.*--dialog editSelectById opened selectByIdDialog \"Select by ID\"[\r\n]+2 selected[\r\n]+scope=selection matched=2[\r\n]+view=1 kind=plan centre=30,30 [^\r\n]*[\r\n]+selectByIdStatus: 2 selected.*viewGrid: Grid, unchecked[\r\n]+2 erased[\r\n]+1 entities[\r\n]+1 +Point +layer=0 +at 1,1.*3 entities"
             "-DFORBID=\\(modal\\)|no such menu item|not an entity id"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/select_by_id_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")

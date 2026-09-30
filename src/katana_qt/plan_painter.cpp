@@ -31,6 +31,7 @@
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/hatching.hpp"
+#include "katana/cad/selection_style.hpp"
 #include "katana/cad/spatial_query.hpp"
 #include "katana/cad/style_drawing.hpp"
 #include "katana/core/task_pool.hpp"
@@ -63,7 +64,8 @@ namespace {
 const QColor kGridMinor(0x2a, 0x31, 0x39);
 const QColor kGridMajor(0x38, 0x42, 0x4d);
 const QColor kAxis(0x5a, 0x68, 0x75);
-const QColor kSelection(0xff, 0x9f, 0x1c);
+// The one selection colour every view draws (cad/selection_style.hpp).
+const QColor kSelection(cad::kSelectionRed, cad::kSelectionGreen, cad::kSelectionBlue);
 const QColor kAlignment(0xff, 0xb7, 0x4d); // amber: an overlay, not drawing content
 
 // The size a paper text's one font is made at, in pixels. A text is set by
@@ -503,6 +505,16 @@ class PlanPainter {
                       const katana::geometry::SplatCloud& splat);
     void drawMeshFootprints();
     void drawEntities();
+    // The selection on layers this frame hides and the document shows, as
+    // ghosts (PlanPaintOptions::selectionGhosts): over the selection's ids
+    // alone, so it costs nothing without a selection.
+    void drawSelectionGhosts();
+    // `path`, in the painter's units, as dots of the painter's pen - square,
+    // kGhostPenPixels a side - one every kGhostDotPitchPixels from its start
+    // (cad/selection_style.hpp): even at every angle, where Qt's dotted pen
+    // drew crosses and Ts along a diagonal without antialiasing and cost
+    // several times as much with it.
+    void dotPath(const QPolygonF& path, bool closed);
     void drawAlignments();
     void drawGeometry(const katana::entity::Geometry& geometry);
     // The polyline through `vertices` (model units), in the painter's pen,
@@ -571,6 +583,19 @@ class PlanPainter {
     double deviceRatio_ = 1.0;
     // Scratch for clipping and for arcs, reused across entities.
     katana::geometry::PolylineRuns runs_;
+    // While the ghosts of the selection are drawn (drawSelectionGhosts),
+    // strokePolyline lays a line down as dots (dotPath) instead of stroking
+    // it: every other pen draws exactly what it drew before. The dots are
+    // kept only inside dotReach_, the view in the painter's own units and a
+    // dot beyond; dots_ is their scratch. Where the painter only shifts the
+    // drawing (dotDevice_) they are laid in device pixels: dotWidth_ square
+    // and dotPitch_ apart, both in device pixels then; else in its own units.
+    bool ghostDots_ = false;
+    QRectF dotReach_;
+    QPolygonF dots_;
+    bool dotDevice_ = false;
+    double dotWidth_ = cad::kGhostPenPixels;
+    double dotPitch_ = cad::kGhostDotPitchPixels;
     std::vector<Point2> arcPoints_;
     // The faces annotation text is set in, and the lines drawn this paint
     // that labels keep out of (collected by drawEntities when there are
@@ -669,6 +694,7 @@ PlanPaintStats PlanPainter::paint()
     }
     if (source_.model != nullptr) {
         drawEntities();
+        drawSelectionGhosts();
         if (options_.labels) {
             drawLabels();
         }
@@ -1656,6 +1682,15 @@ bool PlanPainter::stampSprite(const StylePaintTarget& target, const std::string&
 
 void PlanPainter::strokePolyline(const std::vector<Point2>& vertices, bool closed)
 {
+    if (ghostDots_) {
+        QPolygonF path;
+        path.reserve(static_cast<int>(vertices.size()));
+        for (const auto& vertex : vertices) {
+            path << toScreen(vertex);
+        }
+        dotPath(path, closed);
+        return;
+    }
     const QPen& pen = painter_.pen();
     // Only a solid pen is clipped: a dash pattern starts at the start of the
     // line, so a line cut at the view's edge would start its dashes there
@@ -1707,6 +1742,192 @@ void PlanPainter::strokePolyline(const std::vector<Point2>& vertices, bool close
         }
         painter_.drawPolyline(polygon);
     }
+}
+
+void PlanPainter::dotPath(const QPolygonF& path, bool closed)
+{
+    // The walk is in device pixels where the dots go on whole ones
+    // (drawSelectionGhosts sets dotDevice_), else in the painter's own units;
+    // `placed` turns a dot of the walk into the point drawn for it, whose
+    // square of dotWidth_ device pixels covers whole pixels only - an odd
+    // width about a pixel's centre, an even one about a pixel's corner.
+    const double ratio = dotDevice_ ? deviceRatio_ : 1.0;
+    const QPointF shift = dotDevice_ ? translation_ : QPointF();
+    const auto walked = [&](const QPointF& p) { return (p + shift) * ratio; };
+    const bool odd = std::fmod(dotWidth_, 2.0) == 1.0;
+    const auto placed = [&](const QPointF& q) {
+        if (!dotDevice_) {
+            return q;
+        }
+        const auto whole = [odd](double v) { return odd ? std::floor(v) + 0.5 : std::round(v); };
+        return QPointF(whole(q.x()), whole(q.y())) / ratio - shift;
+    };
+    const QRectF reach(walked(dotReach_.topLeft()), walked(dotReach_.bottomRight()));
+    const qsizetype count = path.size() + (closed && path.size() > 1 ? 1 : 0);
+    if (count < 2) {
+        if (!path.isEmpty() && reach.contains(walked(path.front()))) {
+            painter_.drawPoint(placed(walked(path.front())));
+        }
+        return;
+    }
+    // A dot every pitch from the path's start, the phase carried from one
+    // segment to the next and through the segments that miss the view, so a
+    // pan moves no dot along the line. Only the part of a segment in reach
+    // is walked (Liang-Barsky): zoomed in, a segment can be millions of
+    // pixels long.
+    const double pitch = dotPitch_;
+    dots_.clear();
+    double next = 0.0; // along the current segment, to its next dot
+    for (qsizetype i = 0; i + 1 < count; ++i) {
+        const QPointF a = walked(path[i]);
+        const QPointF b = walked(path[(i + 1) % path.size()]);
+        const double dx = b.x() - a.x();
+        const double dy = b.y() - a.y();
+        const double length = std::hypot(dx, dy);
+        double from = 0.0;
+        double to = 1.0;
+        // p u <= q for each edge of the reach; false when the segment
+        // misses it.
+        const auto within = [&from, &to](double p, double q) {
+            if (p == 0.0) {
+                return q >= 0.0;
+            }
+            const double u = q / p;
+            if (p < 0.0) {
+                from = std::max(from, u);
+            } else {
+                to = std::min(to, u);
+            }
+            return from <= to;
+        };
+        if (length > 0.0 && within(-dx, a.x() - reach.left()) &&
+            within(dx, reach.right() - a.x()) && within(-dy, a.y() - reach.top()) &&
+            within(dy, reach.bottom() - a.y())) {
+            const double first = std::max(0.0, std::ceil((from * length - next) / pitch));
+            for (double t = next + first * pitch; t <= to * length && t < length; t += pitch) {
+                dots_ << placed(a + QPointF(dx, dy) * (t / length));
+            }
+        }
+        next = next < length ? next + std::ceil((length - next) / pitch) * pitch - length
+                             : next - length;
+    }
+    painter_.drawPoints(dots_);
+}
+
+void PlanPainter::drawSelectionGhosts()
+{
+    if (!options_.selectionGhosts || paper() || source_.selection == nullptr ||
+        source_.selection->empty() || frame_.layers == nullptr || frame_.layers->empty()) {
+        return;
+    }
+    const auto& model = *source_.model;
+    const QColor faint(cad::kSelectionRed, cad::kSelectionGreen, cad::kSelectionBlue,
+                       cad::kGhostAlpha);
+    // Square dots, without antialiasing, each on whole device pixels: the
+    // pen's width and the pitch rounded to whole device pixels, and every dot
+    // put on them (dotPath). At 125 % - the owner's display (render.md) - the
+    // 2 px pen was 2.5 device pixels and landed as 2 or 3: a straight ghost
+    // beaded 3, 2, 3, and a slanted one mixed four shapes of dot. Now 3 px
+    // square every 8 there, and 2 every 6 at 100 % as before. Under a turned
+    // frame no pixel lines up with the drawing, and the dots are laid as
+    // they fall.
+    dotDevice_ = painter_.transform().type() <= QTransform::TxTranslate && deviceRatio_ > 0.0;
+    dotWidth_ = dotDevice_ ? std::max(1.0, std::round(cad::kGhostPenPixels * deviceRatio_))
+                           : cad::kGhostPenPixels;
+    dotPitch_ = dotDevice_ ? std::max(1.0, std::round(cad::kGhostDotPitchPixels * deviceRatio_))
+                           : cad::kGhostDotPitchPixels;
+    painter_.setPen(QPen(faint, dotDevice_ ? dotWidth_ / deviceRatio_ : cad::kGhostPenPixels,
+                         Qt::SolidLine, Qt::SquareCap));
+    painter_.setBrush(Qt::NoBrush);
+    const bool antialiased = painter_.testRenderHint(QPainter::Antialiasing);
+    painter_.setRenderHint(QPainter::Antialiasing, false);
+    // The outline alone: no hatch, fill, linestyle or symbol, so a ghost
+    // never reads as the entity drawn.
+    hatch_ = nullptr;
+    ghostDots_ = true;
+    {
+        const QPointF a = toScreen(visible_.min);
+        const QPointF b = toScreen(visible_.max);
+        const double beyond = cad::kGhostPenPixels;
+        dotReach_ = QRectF(a, b).normalized().adjusted(-beyond, -beyond, beyond, beyond);
+    }
+    // What can reach the view: past it by what a paper-sized note or
+    // dimension draws beyond its geometry at this scale, as the entity
+    // loop's index query reaches (annotationReach), and by a point's ring.
+    // The cheap test, on each entity's own box, before any layout, which
+    // measures a note's words: never for a note nowhere near the view.
+    const Box2 reach = visible_.inflated(std::max(
+        katana::entity::annotationModelSize(kAnnotationReachMillimetres, options_.annotationScale),
+        (cad::kGhostRingPixels + cad::kGhostPenPixels) / std::max(view_.scale, 1e-12)));
+    for (const katana::entity::EntityId id : source_.selection->ids()) {
+        const Entity* entity = model.entities.find(id);
+        // A label is placed with the others and has no outline of its own.
+        if (entity == nullptr ||
+            std::holds_alternative<katana::entity::LabelGeometry>(entity->geometry)) {
+            continue;
+        }
+        // Drawn here already (and highlighted), or hidden by the document -
+        // which hides it in every view, ghost or not.
+        if (!cad::isGhost(model, *entity, *frame_.layers)) {
+            continue;
+        }
+        const auto& geometry = entity->geometry;
+        const Box2 own = katana::entity::boundingBox(geometry);
+        if (own.empty() || !own.intersects(reach)) {
+            continue;
+        }
+        // A text, a note, a leader or a dimension as the outline of the box
+        // it draws: its words at ghost strength would be unreadable anyway.
+        std::optional<Box2> outline;
+        if (const auto* text = std::get_if<katana::entity::TextGeometry>(&geometry)) {
+            outline = isPlainText(*text)
+                          ? katana::entity::boundingBox(geometry)
+                          : cad::annotation::layoutTextEntity(model, *text,
+                                                              options_.annotationScale,
+                                                              annotationFonts_.measure())
+                                .extent;
+        } else if (const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&geometry)) {
+            outline = cad::annotation::buildLeader(model, *leader, options_.annotationScale,
+                                                   annotationFonts_.measure())
+                          .extent;
+        } else if (const auto* dimension =
+                       std::get_if<katana::entity::DimensionGeometry>(&geometry)) {
+            outline = cad::buildDimension(*dimension, cad::resolveDimensionStyle(model, *entity),
+                                          options_.annotationScale)
+                          .extent;
+            if (outline->empty()) {
+                outline = katana::entity::boundingBox(geometry);
+            }
+        }
+        const Box2 box = outline ? *outline : own;
+        const bool isPoint = std::holds_alternative<katana::entity::PointGeometry>(geometry);
+        if (box.empty() || !box.intersects(isPoint ? reach : visible_)) {
+            continue;
+        }
+        if (outline) {
+            const QPointF a = toScreen(box.min);
+            const QPointF b = toScreen(box.max);
+            dotPath(QPolygonF({a, QPointF(b.x(), a.y()), b, QPointF(a.x(), b.y())}), true);
+        } else if (const auto* point = std::get_if<katana::entity::PointGeometry>(&geometry)) {
+            // A ring of kGhostRingPixels, as a polygon fine enough that its
+            // chords are no longer than the dots are apart.
+            const QPointF centre = toScreen(point->position);
+            QPolygonF ring;
+            constexpr int kSides = 24;
+            for (int k = 0; k < kSides; ++k) {
+                const double angle = katana::math::kTwoPi * k / kSides;
+                ring << centre + QPointF(std::cos(angle), std::sin(angle)) * cad::kGhostRingPixels;
+            }
+            dotPath(ring, true);
+        } else if (const auto* segment = std::get_if<Segment2>(&geometry)) {
+            dotPath(QPolygonF({toScreen(segment->start), toScreen(segment->end)}), false);
+        } else {
+            drawGeometry(geometry);
+        }
+        ++stats_.ghostsDrawn;
+    }
+    ghostDots_ = false;
+    painter_.setRenderHint(QPainter::Antialiasing, antialiased);
 }
 
 void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)

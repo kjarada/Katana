@@ -396,15 +396,18 @@ currentRendererEnvironment(false, failedBefore))`. The child takes the host's
 camera by reference, so switching renderers keeps the view.
 
 * **The same layers, with the same depth rules.** The host builds
-  `cad::SceneLayers` as it always did, and hands the GPU all five
-  (`GpuRenderer::setLayers`): the grid and the edges tested but not written,
-  the terrain, the drawing and the selection written - `cad::renderLayers`'
-  rules, for the same defects (`GpuLayers.*` tests: the grid through a flat
-  pad, a draped line dashed by TIN edges). One draw list, as the first design
-  here had it, could not carry them.
+  `cad::SceneLayers` as it always did, and hands the GPU all six
+  (`GpuRenderer::setLayers`): the grid, the edges and the selection's casing
+  tested but not written, the terrain, the drawing and the selection written
+  - `cad::renderLayers`' rules, for the same defects (`GpuLayers.*` tests:
+  the grid through a flat pad, a draped line dashed by TIN edges, a selected
+  line drawn dark by its own casing - pulled nearer than the core by its
+  width, below). One draw list, as the first design here had it, could not
+  carry them.
 * **Only what changed is sent.** A rebuilt terrain sends every layer; a
-  rebuilt drawing sends the grid, the drawing and the selection against the
-  origin the terrain set; a click sends the selection alone - as the software
+  rebuilt drawing sends the grid, the drawing and the selection (its casing
+  and its core) against the origin the terrain set; a click sends the
+  selection alone - as the software
   view rebuilds only its overlay (docs/render.md, "The scene in layers").
 * **Each frame, what `renderLayers` does first** (`GpuSceneView::onPrepareFrame`):
   the scene rebuilt if it is dirty, the depth range fitted to the layers and

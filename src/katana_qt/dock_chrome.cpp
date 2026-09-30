@@ -43,13 +43,6 @@ QMainWindow* hostOf(const QDockWidget* dock)
     return dock != nullptr ? qobject_cast<QMainWindow*>(dock->parentWidget()) : nullptr;
 }
 
-void setTip(QToolButton* button, const QString& label, const QString& tip)
-{
-    button->setToolTip(QString("<b>%1</b><br>%2").arg(label, tip));
-    button->setAccessibleName(label);
-    button->setAccessibleDescription(tip);
-}
-
 // A floating window put back on a screen that has since gone - a laptop
 // undocked from its second monitor - would come back where nobody can see
 // it. It goes to the middle of the primary screen instead, at its own size
@@ -86,6 +79,7 @@ class ElidedTitle final : public QWidget {
         text_ = text;
         update();
     }
+    [[nodiscard]] const QString& text() const { return text_; }
     void setColor(const QColor& color)
     {
         color_ = color;
@@ -129,8 +123,15 @@ QToolButton* makeTitleBarButton(QWidget* parent, Icon which, const QString& name
     // minimise or close a panel; never takes focus from a click, which would
     // take it away from the view the user is drawing in.
     button->setFocusPolicy(Qt::TabFocus);
-    setTip(button, label, tip);
+    setTitleBarTip(button, label, tip);
     return button;
+}
+
+void setTitleBarTip(QToolButton* button, const QString& label, const QString& tip)
+{
+    button->setToolTip(QString("<b>%1</b><br>%2").arg(label, tip));
+    button->setAccessibleName(label);
+    button->setAccessibleDescription(tip);
 }
 
 // ---- DockTitleBar -------------------------------------------------------------------------
@@ -235,14 +236,123 @@ void DockTitleBar::setLeadingWidget(QWidget* widget)
     leading_ = widget;
 }
 
-void DockTitleBar::addTool(QWidget* widget)
+void DockTitleBar::addTool(QWidget* widget, int priority)
 {
     if (widget == nullptr) {
         return;
     }
     widget->setParent(this);
     tools_->addWidget(widget);
+    toolList_.push_back({widget, priority, true});
     widget->show();
+    fitOptionalTools();
+}
+
+void DockTitleBar::setToolWanted(QWidget* widget, bool wanted)
+{
+    for (Tool& tool : toolList_) {
+        if (tool.widget != widget) {
+            continue;
+        }
+        tool.wanted = wanted;
+        if (tool.priority == kAlways) {
+            widget->setVisible(wanted);
+        }
+        fitOptionalTools();
+        return;
+    }
+}
+
+int DockTitleBar::optionalWidth() const
+{
+    // Each shown tool is its width and the row's spacing before or after it:
+    // the row always keeps a tool that is always shown, so there is one.
+    int width = 0;
+    for (const Tool& tool : toolList_) {
+        if (tool.priority != kAlways && !tool.widget->isHidden()) {
+            width += tool.widget->sizeHint().width() + tools_->spacing();
+        }
+    }
+    return width;
+}
+
+QSize DockTitleBar::minimumSizeHint() const
+{
+    // The layout counts every tool shown, so an optional tool shown would
+    // raise the least width and could never be crowded out again: the view
+    // would stop narrowing at it. Qt asks a child's hint rather than taking
+    // its layout's minimum as a floor (QLayout does that for a window only),
+    // so leaving the optional tools out here is enough.
+    QSize hint = QWidget::minimumSizeHint();
+    hint.rwidth() -= optionalWidth();
+    return hint;
+}
+
+void DockTitleBar::remeasure()
+{
+    // Hiding a widget invalidates its parent's layout, which is layout_, and
+    // not the tools' row nested in it: the row goes on counting a tool just
+    // hidden until the bar's next activation, and minimumSizeHint reads it.
+    tools_->invalidate();
+    layout_->invalidate();
+}
+
+void DockTitleBar::fitOptionalTools()
+{
+    // Asked afresh: a tool shown or hidden since the layout last measured it
+    // would otherwise be counted as it was - an always-shown tool that
+    // setToolWanted has just hidden, whose room is now the optional tools'
+    // (ViewChrome test
+    // AnAlwaysShownToolNoLongerWantedGivesItsRoomToTheOptionalOnesAtOnce).
+    remeasure();
+    if (std::ranges::none_of(toolList_,
+                             [](const Tool& tool) { return tool.priority != kAlways; })) {
+        return;
+    }
+    // What is left once the bar has its least width and the title, rather
+    // than the least it will be squeezed to, the room to be read whole: its
+    // text and kTitleGap, up to kTitleRoom.
+    const int least = title_->minimumWidth();
+    const int titleRoom = std::clamp(title_->sizeHint().width() + kTitleGap, least,
+                                     std::max(least, kTitleRoom));
+    int room = width() - minimumSizeHint().width() - (titleRoom - least);
+    std::vector<int> priorities;
+    for (const Tool& tool : toolList_) {
+        if (tool.priority != kAlways && !std::ranges::contains(priorities, tool.priority)) {
+            priorities.push_back(tool.priority);
+        }
+    }
+    std::ranges::sort(priorities, std::greater<>());
+    bool fits = true;
+    for (const int priority : priorities) {
+        int needed = 0;
+        for (const Tool& tool : toolList_) {
+            if (tool.priority == priority && tool.wanted) {
+                needed += tool.widget->sizeHint().width() + tools_->spacing();
+            }
+        }
+        // Highest first, and never a lower one past a higher one that did not
+        // fit: the tools a person reaches for most go last.
+        fits = fits && needed <= room;
+        if (fits) {
+            room -= needed;
+        }
+        for (const Tool& tool : toolList_) {
+            if (tool.priority == priority) {
+                tool.widget->setVisible(fits && tool.wanted);
+            }
+        }
+    }
+    // And again for the tools this hid, which the next fit and the dock both
+    // count before the bar's next activation. A 3D view turned plan wants
+    // In, Out and Selection one after another: In, hidden for want of room,
+    // was still counted, which left no room for Selection - and nothing
+    // refitted the bar, whose size had not changed. A view split at once
+    // after its bar was narrowed kept a least width counting the tools just
+    // hidden: 308 px of a 554 px row, where half was 277 (ViewChrome tests
+    // AViewTurnedIntoAPlanShowsTheToolsAPlanOpenedAtItsWidthShows and
+    // OpeningAViewSplitsItIntoEqualHalvesWhateverToolsItsBarShows).
+    remeasure();
 }
 
 void DockTitleBar::setActive(bool active)
@@ -264,16 +374,16 @@ void DockTitleBar::refresh()
     float_->setVisible(features.testFlag(QDockWidget::DockWidgetFloatable));
     float_->setIcon(katana::qt::icon(floating ? Icon::Dock : Icon::Float));
     if (floating) {
-        setTip(float_, "Dock",
-               QString("Put this %1 back where it was docked in the window. Double-clicking "
-                       "the title bar does the same.")
-                   .arg(what));
+        setTitleBarTip(float_, "Dock",
+                       QString("Put this %1 back where it was docked in the window. "
+                               "Double-clicking the title bar does the same.")
+                           .arg(what));
     } else {
-        setTip(float_, "Float",
-               QString("Take this %1 out into a window of its own, which can go on another "
-                       "screen. Double-clicking the title bar does the same; drag the title "
-                       "bar back over the window to dock it anywhere.")
-                   .arg(what));
+        setTitleBarTip(float_, "Float",
+                       QString("Take this %1 out into a window of its own, which can go on "
+                               "another screen. Double-clicking the title bar does the same; "
+                               "drag the title bar back over the window to dock it anywhere.")
+                           .arg(what));
     }
     close_->setVisible(features.testFlag(QDockWidget::DockWidgetClosable));
 
@@ -281,14 +391,15 @@ void DockTitleBar::refresh()
         const bool maximised = chrome_ != nullptr && chrome_->isMaximised(&dock_);
         maximise_->setIcon(katana::qt::icon(maximised ? Icon::Restore : Icon::Maximise));
         if (maximised) {
-            setTip(maximise_, "Restore",
-                   floating ? QString("Put this window back to the size and place it had.")
-                            : QString("Bring back the other views, at the sizes they had."));
+            setTitleBarTip(
+                maximise_, "Restore",
+                floating ? QString("Put this window back to the size and place it had.")
+                         : QString("Bring back the other views, at the sizes they had."));
         } else {
-            setTip(maximise_, "Maximise",
-                   floating ? QString("Fill the screen this window is on.")
-                            : QString("Give this view the whole drawing area, hiding the other "
-                                      "docked views until Restore."));
+            setTitleBarTip(maximise_, "Maximise",
+                           floating ? QString("Fill the screen this window is on.")
+                                    : QString("Give this view the whole drawing area, hiding "
+                                              "the other docked views until Restore."));
         }
     }
     updateTitle();
@@ -297,12 +408,17 @@ void DockTitleBar::refresh()
 
 void DockTitleBar::updateTitle()
 {
+    const bool renamed = title_->text() != dock_.windowTitle();
     title_->setText(dock_.windowTitle());
     // Panels are always readable; views are muted unless active, so the one
     // the menus act on stands out without the others fading away.
     const bool bright = role_ == DockRole::Panel || active_;
     title_->setColor(bright ? theme::text() : theme::textMuted());
     title_->setToolTip(dock_.windowTitle());
+    // The room the optional tools leave the title is the title's own width.
+    if (renamed) {
+        fitOptionalTools();
+    }
 }
 
 void DockTitleBar::paintEvent(QPaintEvent*)
@@ -319,6 +435,7 @@ void DockTitleBar::paintEvent(QPaintEvent*)
 void DockTitleBar::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
+    fitOptionalTools();
     title_->update();
 }
 

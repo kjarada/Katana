@@ -26,6 +26,8 @@ add_library(katana_cad STATIC
     viewport_layout.cpp
     layer_overrides.cpp
     view_set.cpp
+    view_link.cpp
+    view_verbs.cpp
     scope_verbs.cpp
     property_outline.cpp
 )

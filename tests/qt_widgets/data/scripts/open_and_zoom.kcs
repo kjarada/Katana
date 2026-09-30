@@ -1,0 +1,8 @@
+# A plan view opened, linked and zoomed by the lines after it, with no paint
+# between them (docs/desktop.md, "Linked views"): the zoom starts from what
+# the view draws - this survey line, far from the origin every new view
+# starts at - and the view linked with it follows.
+LINE 300000,6200000 300100,6200050
+VIEWS OPEN plan
+VIEWS LINK 1,2 TO 2
+ZOOM IN view=2

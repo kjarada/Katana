@@ -131,9 +131,9 @@ and current-layer change), the model revision, the library generation, a
 fingerprint of the selection's ids (a caller that changes the selection and
 only repaints still sees it), fingerprints of the reference layers' and
 meshes' visibility and style (the panels change those without a
-notification), the view's hidden layers and references, the grid and the
-line option. A mouse move, a snap marker or a rubber band then costs the
-furniture, not the drawing.
+notification), the view's hidden layers and references, the grid, the
+line option and the view's ghost switch (below). A mouse move, a snap marker
+or a rubber band then costs the furniture, not the drawing.
 
 ## Screen and paper
 
@@ -145,6 +145,7 @@ place, the painter:
 | Line width | a hairline: 1.5 px, or 1 px with Thin screen lines | the line weight in millimetres |
 | White pens | white | black (decision D7, `cad::paperColour`) |
 | Selection, locked-layer fading | shown | not printed (audit QT-26) |
+| Ghosts of the selection | drawn when the view asks (below) | never |
 | Plain point cross | 4 px either side | 1 mm either side |
 | Alignment overlay | 2 px line, 1 px ticks 6 px long, 11 px labels | 0.5 mm line, 0.25 mm ticks 1.5 mm long, 2.5 mm labels |
 | Hatch lines | cosmetic hairline | 0.13 mm |
@@ -293,6 +294,8 @@ index is an opened project's. At 1600 x 1000:
   zoomed in five times, panned a pixel each iteration so nothing is reused,
   through the widget; `...ThickLines` the same at the 1.5 px look.
 * `BM_PlanPaintCursorMove` - the mouse moving over an unchanged drawing.
+* `BM_PlanLinkedPan` - a pan step of the zoomed view with a second view
+  linked to it, both drawn (below, "Linked views").
 * `BM_PlanPlotA1` - one A1 sheet at 1 : 2500, 300 dpi.
 * `BM_PlanPainter/<zoom>_<measures>` - the painter alone with the thin pen,
   clipping and sprites switched on one at a time, with counters of what each
@@ -393,6 +396,92 @@ that every plan view reads at its next paint. Plots keep their
 paper-millimetre weights either way. The headless `--trigger
 ThinScreenLinesAction` turns it off for a screenshot.
 
+### Ghosts of the selection
+
+A selected entity the document draws and the frame's layers hide
+(`PlanFrame::layers`; `cad::isGhost`, the one rule every view asks) is drawn
+as a GHOST when `PlanPaintOptions::selectionGhosts`
+is on - the plan view sets it from its view's switch, `ViewState::selectionGhosts`;
+every other caller leaves it off and draws what it always drew, and a plot
+never draws one. A ghost is DOTS of the selection's orange at 60 % (alpha
+153), 2 px square, one every 6 px from the line's start, each on whole device
+pixels (below; `cad/selection_style.hpp`), with no fill, hatch, linestyle or
+symbol, so it
+never reads as the entity drawn; a point is a ring of dots 6 px about it, a
+text, note, leader or dimension the outline of the box it draws, and a label
+is not ghosted. The pass runs after the entity loop and before the labels,
+over the selection's ids alone: O(selection), nothing with no selection,
+and no test added to the loop every entity passes. It is drawn into the
+kept drawing. `PlanPaintStats::ghostsDrawn` counts them apart from
+`entitiesDrawn`, which the tests use to prove a hidden layer is gone
+(`PlanPainter.ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost` - an
+80 px run, fourteen dots, 28 pixels of ink on row 50 against the same frame
+painted with nothing selected, each the ghost's colour, worked from
+`dotPath` - and none where the document hides the layer or the entity, on
+paper, or with the switch off). Each kind of geometry has its branch and its
+test, each shown failing with its branch taken out: a polyline, an arc or a
+circle goes through `drawGeometry`'s own `strokePolyline`, dotted only
+because the ghost pass asks it to be - without that, a ghosted polyline was a
+solid faint line and no test failed
+(`PlanPainter.AGhostedPolylineIsDottedAlongEachLegWithItsStepCarriedRoundTheCorner`,
+its ten dots worked by hand with the step carried round the corner;
+`PlanPainter.AGhostedCircleIsARowOfSeparateDotsOnItsCurve`); a point is its
+ring (`PlanPainter.AGhostedPointIsADottedRingAroundItNotAMarkOnIt`); a text
+or a dimension the dotted outline of its box, nothing inside
+(`PlanPainter.AGhostedTextIsTheDottedOutlineOfItsBoxNotItsLetters`,
+`PlanPainter.AGhostedDimensionIsTheDottedOutlineOfWhatItDraws`); and a label
+nothing (`PlanPainter.ALabelIsNeverGhosted`). Why and how every view shows
+the selection: `docs/desktop.md`, "The selection in every view".
+
+**A dot is whole device pixels.** Without antialiasing a dot falls on the
+pixels whose centres its square covers, and at 125 % - the owner's display
+(`docs/render.md`) - the 2 px pen was 2.5 device pixels: a straight ghost
+beaded 3, 2, 3 pixels wide, and a slanted one mixed four shapes of dot. Where
+the painter only shifts the drawing, the pen's width and the pitch are
+rounded to whole device pixels - 2 every 6 at 100 %, 3 every 8 at 125 % - and
+each dot is put on whole pixels, an odd width about a pixel's centre and an
+even one about a corner (`PlanPainter::dotPath`,
+`PlanPainter.AtAFractionalScaleEveryGhostDotIsTheSameSquareOfWholePixels`:
+thirteen 3 x 3 dots 8 px apart, worked by hand). Under a turned frame no
+pixel lines up with the drawing, and the dots are laid as they fall. The
+section's 1 px ghost crossings are antialiased and were left as they are.
+
+Not done: a ghosted text or dimension is the outline of its drawn box,
+dotted, which reads as geometry rather than as "a text is here" - the 160 m
+dimension of the site plan is a long dotted rectangle under the parcel - and
+a small circle seen from afar gets four dots of its ring and reads as a
+plus. A look that says what was selected is polish for later.
+
+The dots are laid down by the painter (`dotPath`), not by Qt's dotted pen.
+The first version stroked each ghost with `Qt::DotLine`: antialiased, every
+dot of a long line seen in part was made and thrown away (a dash pattern
+cannot be clipped without moving its dashes), and every selected note in the
+drawing was laid out before the cull; without antialiasing Qt drew crosses
+and Ts for dots along a diagonal. `dotPath` puts a square dot every pitch,
+carrying the phase from segment to segment and through the segments that
+miss the view - so a pan moves no dot along the line - and keeps only the
+dots in the view; a note is laid out only when its own box is near the view.
+`BM_PlanPainterGhosts` paints the generated drawing (27 600 entities) at
+1600 x 1000 with EVERY entity selected and every other layer hidden - the
+worst case, a Select All seen from a view hiding half the layers - with the
+ghosts off (the paint as before) and on, each pair in one run. Measured on
+2026-09-30 in the view-sync worktree's Release build, medians of three (the
+first version) and five (dots) repetitions of at least 1 and 2 s, other
+workflows' builds running on the machine, which moves the ghosts-off paint
+by a third between runs:
+
+| ghosts off / on | the first version | dots |
+|---|---|---|
+| at extents (10 800 ghosts) | 189 / 752 ms | 95.1 / 158 ms |
+| zoomed in five times (827 ghosts) | 17.2 / 191 ms | 10.2 / 31.4 ms |
+
+A segment is walked only where it crosses the view (Liang-Barsky on the
+screen): zoomed in, one segment of a long string can be millions of pixels
+long (`PlanPainter.AGhostLongerThanTheViewIsDottedAcrossItFromItsOwnStart`,
+which also pins the phase to the line's own start). What is left zoomed in
+is mostly the walk of the 27 600 selected ids; a selection of the usual size
+costs nothing that can be measured.
+
 ### The frame statistic
 
 The plan view reports each paint in the status bar, as the 3D view does:
@@ -400,6 +489,27 @@ The plan view reports each paint in the status bar, as the 3D view does:
 `Plan  27886 drawn  192.9 ms (kept, 0.4 ms)` when a frame only laid the kept
 drawing down. `lastFrameMilliseconds`, `lastDrawingMilliseconds` and
 `drawingPaintCount` give the same to a test.
+
+### Linked views
+
+Two plan views linked (`docs/desktop.md`, "Linked views") share every pan
+and zoom, so each step of a pan in one draws the other whole as well: its
+centre moved, and its kept drawing is keyed on the centre. `BM_PlanLinkedPan`
+measures one step of a middle-drag pan with a second view linked - the pan,
+the link's `ViewSet::follow` and both views drawn, each 1600 x 1000 on the
+generated drawing zoomed in five times - against `BM_PlanPaintZoomed`, the
+same step of the same view alone. Measured on 2026-09-30 in the view-sync
+worktree's Release build, three repetitions of at least 2 s, medians, with
+another workflow's builds running on the machine:
+
+| | one view | two views linked |
+|---|---|---|
+| a pan step (1 914 entities drawn in each) | 10.3 ms | 23.3 ms |
+
+The second view costs a second whole paint, about what the first costs; the
+follow itself is copying two numbers into each member. Nothing is optimised:
+a pan at 43 steps a second in two views is still smooth, and the kept drawing
+(and not the link) is where a drawing too slow to pan would be worked on.
 
 ## Tests
 

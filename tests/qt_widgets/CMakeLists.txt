@@ -36,6 +36,12 @@ add_executable(katana_qt_widget_tests
     test_sheet_editor.cpp
     test_plan_cloud.cpp
     test_view_chrome.cpp
+    # Linked plan views, their Link button and the VIEWS and ZOOM lines the
+    # workspace answers (test_view_links).
+    test_view_links.cpp
+    # The selection in every view: ghosts where a view hides the layer, and
+    # each view's switch for them (test_view_selection).
+    test_view_selection.cpp
     # The background job runner (test_jobs).
     test_jobs.cpp
     # GIS > Online Data's dialog (test_gis_online).

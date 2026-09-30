@@ -17,6 +17,7 @@ using katana::core::parseFiniteDouble;
 using katana::core::parseInteger;
 using katana::core::splitLines;
 using katana::core::trimmed;
+using katana::core::uppered;
 
 TEST(CoreText, TrimRemovesExactlyTheCLocaleBlanksFromBothEnds)
 {
@@ -43,6 +44,9 @@ TEST(CoreText, TrimNeverCutsAUtf8SequenceWhateverTheLocale)
         }
         EXPECT_EQ(trimmed("voil\xC3\xA0"), "voil\xC3\xA0") << name;
         EXPECT_EQ(lowered("VOIL\xC3\x80"), "voil\xC3\x80") << name;
+        // U+0905, E0 A4 85: Latin-1's toupper makes the lead byte 0xC0, and
+        // the name is no longer UTF-8.
+        EXPECT_EQ(uppered("\xE0\xA4\x85 voil\xC3\xA0"), "\xE0\xA4\x85 VOIL\xC3\xA0") << name;
     }
     std::setlocale(LC_CTYPE, saved.c_str());
 }
@@ -50,6 +54,10 @@ TEST(CoreText, TrimNeverCutsAUtf8SequenceWhateverTheLocale)
 TEST(CoreText, CaseFoldingTouchesOnlyAsciiLetters)
 {
     EXPECT_EQ(lowered("Survey CODE 12-b"), "survey code 12-b");
+    EXPECT_EQ(uppered("Survey code 12-b"), "SURVEY CODE 12-B");
+    EXPECT_EQ(uppered(""), "");
+    // The bytes either side of 'a' to 'z' are not letters.
+    EXPECT_EQ(uppered("`{@["), "`{@[");
     EXPECT_TRUE(equalsIgnoringCase("GSI16", "gsi16"));
     EXPECT_FALSE(equalsIgnoringCase("GSI16", "GSI8"));
     EXPECT_FALSE(equalsIgnoringCase("ab", "abc"));

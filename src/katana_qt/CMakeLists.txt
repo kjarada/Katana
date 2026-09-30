@@ -59,6 +59,8 @@ add_library(katana_qt_ui OBJECT
     plan_context_menu.hpp
     select_by_id_dialog.cpp
     select_by_id_dialog.hpp
+    zoom_to_dialog.cpp
+    zoom_to_dialog.hpp
     render_view_widget.cpp
     render_view_widget.hpp
     section_view_widget.cpp

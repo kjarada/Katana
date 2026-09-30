@@ -102,6 +102,13 @@ class ViewportWidget final : public QWidget {
     // headless checks, which cannot look at pixels, to prove that a layer
     // hidden in one view is gone from that view and from no other.
     [[nodiscard]] std::size_t lastDrawnEntityCount() const { return lastDrawnEntities_; }
+    // Of the selection, how many the last paint drew as ghosts: selected, on
+    // a layer the document shows and this view hides
+    // (PlanPaintStats::ghostsDrawn; ViewState::selectionGhosts).
+    [[nodiscard]] std::size_t lastGhostCount() const { return lastGhosts_; }
+    // The grips this view offers on the selection as its last paint built
+    // them: none on an entity on a layer this view hides, however selected.
+    [[nodiscard]] std::size_t gripCount() const { return grips_.grips().size(); }
 
     // ---- what a frame costs -------------------------------------------------
     // The drawing is painted into an image kept between paints, and a paint
@@ -212,6 +219,31 @@ class ViewportWidget final : public QWidget {
     void zoomTo(const katana::geometry::Box2& bounds);
     // The box zoomExtents frames. Empty when this view has nothing to show.
     [[nodiscard]] katana::geometry::Box2 drawnBounds() const;
+
+    // Raised when this view's pan or zoom has just changed: a wheel notch, a
+    // middle-drag pan and a frame (Zoom Extents, zoomTo) with `byUser` true,
+    // the first paint's frame with false - on nothing too, when the view
+    // draws nothing and keeps the place it started at. What linked views
+    // follow (ViewWorkspace::viewMoved). Never raised by holdView or by a
+    // change made to the state from outside, so a view following another
+    // never reports the move it was given.
+    std::function<void(bool byUser)> onViewMoved;
+    // The Zoom Extents a middle double-click asks for, done by the host when
+    // it sets this: it knows the link, and a linked view that draws nothing
+    // frames what the link draws rather than the origin
+    // (ViewWorkspace::zoomExtents), as GpuSceneView::onZoomExtents hands a 3D
+    // view's to its host. Unset, zoomExtents().
+    std::function<void()> onZoomExtents;
+    // Keeps the view where its state now says, as a linked view must: forgets
+    // the box it was framed on, so a resize keeps the centre and scale rather
+    // than refitting that box, and repaints. Raises nothing.
+    void holdView();
+    // Frames the view as its first paint would, unless it has been framed:
+    // for a ZOOM asked of a view not yet painted - a script's VIEWS OPEN plan
+    // then ZOOM IN, which run with no paint between - so the zoom starts
+    // from what the view draws and not from the place a new view holds
+    // until then (ViewWorkspace::zoomView).
+    void frameIfUnframed();
 
     // Reference data (imported imagery and point clouds) belongs to the window;
     // the viewport only paints it, and never mutates it (Rule 3). Null until the
@@ -405,6 +437,7 @@ class ViewportWidget final : public QWidget {
         std::set<std::uint64_t> hiddenReferences;
         bool grid = false;
         bool thinLines = false;
+        bool ghosts = false; // ViewState::selectionGhosts
         friend bool operator==(const DrawingKey&, const DrawingKey&) = default;
     };
     [[nodiscard]] DrawingKey drawingKey(double deviceRatio) const;
@@ -424,6 +457,7 @@ class ViewportWidget final : public QWidget {
     katana::cad::Document& document_;
     katana::cad::ViewState& state_;
     mutable std::size_t lastDrawnEntities_ = 0;
+    mutable std::size_t lastGhosts_ = 0;
     // Declared after document_ and destroyed before anything else here: the
     // listener it owns captures this widget.
     katana::cad::Document::ListenerHandle documentListener_;

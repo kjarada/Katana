@@ -1216,6 +1216,217 @@ to" and "Only those that match" as one widget every dialog shares, whose
 `verbWords()` are these words (`docs/desktop.md`, "Global Modify"), and the
 window answering `VIEW` through `scopeViewOf`.
 
+## The window's views: VIEWS and ZOOM
+
+The owner asked on 2026-09-30 for views that pan and zoom together - "zoom in
+a design view and the as-built view zooms in too" - with the controls on each
+view's own bar. The views are the window's (`cad::ViewSet`, held by the
+workspace), so two verbs reach them (`include/katana/cad/view_verbs.hpp`):
+
+```
+VIEWS [LIST]                          a record per open view, then views=N linked=M
+VIEWS OPEN plan|3d|section|elevation  opens one, active; its record
+VIEWS ACTIVATE <id>                   its record
+VIEWS LINK <id>[,<id>...] [TO <id>]   leader=1 linked=1,2 moved=2
+VIEWS UNLINK <id>[,<id>...] | ALL     unlinked=1,2 linked=none
+VIEWS HIDE <id> <layer>[,<layer>...]  the layers that view hides of its own; its record
+VIEWS SHOW <id> <layer>[,<layer>...] | ALL
+VIEWS ISOLATE <id> <layer>
+VIEWS SET <id> ghosts=on|off          whether it shows the selection where it hides the layer
+ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
+ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
+     | CENTRE x,y [SCALE s]  [view=<id>]
+ZOOM SELECTION | DRAWING | VIEW [<id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
+     [WHERE key=value ...]  [view=<id>]
+```
+
+**The zoom lines a script already holds run.** The old window zoomed the
+extents for any `ZOOM` line, so a script written for it held `ZOOM A`, `Z A`
+and `ZOOM ALL` - every CAD program's Zoom All - and a refusal of them stopped
+a script that ran to the end there. `ALL` and `A` alone are `EXTENTS`; `ALL`
+is also the shared scope word for the whole drawing, and is that when a
+filter follows it (`ZOOM ALL WHERE TYPE=line` frames what matches). A factor
+may carry AutoCAD's `X` (`ZOOM 2X`, relative to the current view, as a bare
+factor always is here); `2XP`, relative to paper space, is refused, since a
+plan view has none. `'ZOOM` and `'Z`, AutoCAD's transparent form, are `ZOOM`
+at the prompt as well as inside a tool; only a view verb takes an apostrophe
+(`'VIEWS` is `VIEWS`; `'LINE` is no command)
+(`ViewVerbsTest.ZoomAllAndTheApostropheFormsAreTheExtentsAsInEveryCadProgram`,
+`ViewVerbsTest.AFactorWithAutoCadsXIsRelativeToTheView`). Rejected: taking
+`ALL` alone as the scope word, which frames the entities and not what the
+view draws - its alignments left out - so `ZOOM ALL` and `ZOOM` framed two
+different boxes. The refusals and the degenerate lines - no view open, a
+`CENTRE` with no point, an `UNLINK` naming nothing, an `OPEN` or `ACTIVATE`
+with the wrong number of words, the selection one point - have their tests
+(`ViewVerbsTest.DegenerateZoomAndViewsLinesAreRefusedNamingWhatIsMissing`,
+`ViewVerbsTest.ZoomSelectionOfOnePointCentresOnItAndKeepsTheScale`).
+
+An id is the `ViewId` a record's `view=` gives, as for the scope word `VIEW`,
+never the number in the title. `view=` may stand anywhere on a `ZOOM` line and
+is taken off before anything else is read - after `WHERE` it would otherwise
+be read as a condition and refused. `EXTENTS` frames what the view draws, in
+any kind of view; `IN` and `OUT` (by 2 unless a factor is given) and a bare
+factor zoom any view about its middle - a plan view about its centre, a
+section about the middle of its plot (`SectionViewWidget::zoomAt`), a 3D or
+elevation view as its wheel zooms, turned that many notches over its middle
+pixel (`docs/desktop.md`, "In a 3D or elevation view"); `WINDOW` frames a
+box as Zoom Extents frames the drawing - the margin is the widget's - and
+`CENTRE` puts a point in the middle, at `SCALE` pixels per unit when given,
+both in a plan view. A request a view's kind does not take is refused naming
+the kinds that take it (`ZOOM WINDOW frames a plan view: view 3 is 3D`,
+`ZOOM on a scope frames a plan, 3D or elevation view: view 4 is Section`).
+Which kind takes which zoom is ONE rule, `cad::zoomTakes`: the verb refuses
+by it, the refusal names its kinds from it, and a view's bar, the View
+menu's zoom items and the Zoom To dialog's list of views offer only what it
+allows. It was written twice - the verb's and the bar's - and widening the
+verb's alone for 3D would have left the bar without In and Out; widened
+once, for 3D and elevation, the four followed together
+(`ViewZoom.TheKindsEachZoomTakesAreTheVerbsOneRule`). A view that has not
+framed anything yet frames what it draws before a zoom, as its first paint
+would: a script's `VIEWS OPEN plan` then `ZOOM IN`, with no paint between,
+zoomed about the origin (`docs/desktop.md`, "A view not yet painted"). `WINDOW` is a box of the
+drawing; the scope word `AREA` means the entities found in one, which is why
+it is not the word here. `SCALE` outside `ViewTransform`'s limits is refused,
+not clamped, because a scale the view cannot show is not the one asked for.
+
+**`ZOOM` takes the shared scope** (above, "Scope and filter"): the scope
+words, read by the one parser and resolved by `matchScope`. `ZOOM` alone is
+still `EXTENTS`, where no scope word elsewhere means the selection, so the
+decision is made before the parser is called. The reply begins with the
+scope's record (`scope=selection matched=1`, then the view moved and the
+views that followed); a scope that takes nothing moves no view and says
+`matched=0`, which is an answer, not a refusal
+(`ViewVerbsTest.AScopeThatMatchesNothingMovesNoViewAndSaysSo`).
+
+**A view frames what it SHOWS of what the scope took**, in every kind of
+view, by one rule (`shownOf`, `view_verbs.cpp`): the entities it draws - by
+its own hidden layers as well as the drawing's (`isDrawn`) - and, with its
+ghosts on, the selected ones it ghosts (`isGhost`; a plan view ghosts no
+label, which it places among the others). A plan view frames their box by
+`cad::extentOf` - measured as `drawnExtent` measures one, construction lines
+left out; a 3D or elevation view the entities themselves where its scene
+draws them, so the request carries them (`ZoomRequest::ids`, ascending;
+`cad::SceneBuilder::overlayBounds`). The framed view's record ends
+`shown=N`, how many of what matched it shows. A view that shows none of them
+does not move, and its record after the scope's says so:
+
+```
+scope=selection matched=1
+view=2 kind=plan shown=0 moved=no
+```
+
+A plan view framed the extent of everything the scope took: in a view that
+hid the selection's layer with its ghosts off, or with the drawing hiding
+it, the plan view - and its link - went to empty ground while a 3D view
+stayed put for the same line, and the scope's record alone had said nothing
+of a view that did not move
+(`ViewVerbsTest.APlanViewFramesWhatItShowsOfTheSelectionAndSaysHowManyThatIs`,
+`ViewVerbsTest.AViewThatShowsNoneOfWhatTheScopeTookMovesNothingAndSaysSo`,
+`ViewVerbsTest.AThreeDViewAndAPlanViewFrameTheSelectionByOneRule`). Select by
+ID's zoom and the Format managers' Select Users run `ZOOM SELECTION` for the
+active plan view, so they frame by the same rule. Rejected: keeping the plan
+view's frame of everything matched and saying so in its tip - one line would
+then follow two rules by the kind of view it named. A section frames no
+scope: it shows where entities cross it, which is no box of them
+(`ViewVerbsTest.AScopeZoomOnA3DViewCarriesWhatTheScopeTookAndASectionRefusesIt`).
+
+Records, one per line, `key=value`, reals by `core::formatExactReal` and
+angles in degrees:
+
+```
+view=1 kind=plan title="Plan 1" active=yes linked=yes centre=50,40 scale=8 area=31.25,27.5,68.75,52.5 ghosts=on
+view=3 kind=3d title="3D 1" active=no target=x,y,z distance=d azimuth=a elevation=e projection=perspective ghosts=on
+view=4 kind=section title="Section 1" active=no ghosts=on
+```
+
+Every record carries `ghosts=on|off`, the view's switch for the selection's
+ghosts (below), and ends with `hidden=a,b` when its view hides layers of its
+own - left out when it hides none - so `VIEWS` says which view is the design
+view and which the as-built one. `framed=no` follows the place of a plan, 3D
+or elevation view that has framed nothing yet (`ViewState::planFramed`,
+`cameraFramed`): it frames what it draws at its first paint, and until then
+its centre and scale, or target and distance, are the place every new view
+starts at, which `VIEWS OPEN`'s record gave as though the view looked there
+(`ViewVerbsTest.TheRecordOfAViewThatHasFramedNothingYetSaysSo`). Left out
+once it has framed, as `hidden=` is when there is nothing to say.
+
+**`HIDE`, `SHOW` and `ISOLATE` are a view's own layer filter**, what its
+Layers button sets (`cad::LayerOverrides`; `docs/desktop.md`, "The
+workspace"): subtractive, so a view never shows what the document hides; view
+state, so not saved, not undoable and no document change - the window redraws
+that one view (`ViewVerbHost::settingsChanged`). Without them an agent could not
+set up a design view beside an as-built view, and no test could either: the
+popup edited the state directly. A layer is a layer of the drawing or a node
+of the tree above one (`design` when only `design/road` is a layer), as the
+popup lists them; one the drawing lacks is refused naming it
+(`no layer 'roads' in the drawing (LAYER LIST lists them)`), and a list with
+one such is refused whole, and so is a list of commas alone (`VIEWS HIDE 1
+,`), which named no layer and replied the unchanged record as though it had
+worked (`ViewVerbsTest.HideOrShowOfCommasAloneIsRefusedAndChangesNothing`).
+`ISOLATE` keeps one layer, its parents and what lies beneath it; `SHOW ALL`
+shows everything the document shows
+(`ViewVerbsTest.ViewsHideShowIsolateChangeOnlyThatView`). `SHOW` of a layer
+beneath one the view hides is refused, naming what holds it (`view 1 hides
+'design', which holds 'design/road': show 'design' (VIEWS SHOW 1 design)`),
+before any layer of the line is shown: `LayerOverrides::show` removes only
+an exact entry, so the layer stayed hidden and the reply was the unchanged
+record, a silent failure
+(`ViewVerbsTest.ShowingALayerBeneathOneTheViewHidesIsRefusedNamingWhatHoldsIt`).
+The popup's own rows still edit the state directly rather than run these
+lines; that and the reference layers, which cad cannot name, are
+`docs/desktop.md`'s "Not done".
+
+**`SET <id> ghosts=on|off` is a view's switch for the selection's ghosts**
+(`ViewState::selectionGhosts`, on when a view opens): a selected entity the
+document draws and that view hides (`cad::isGhost`) is drawn there faint,
+never picked, snapped to, given grips or plotted (`docs/desktop.md`, "The
+selection in every view"). The Layers popup's box and View > Show the
+Selection on Hidden Layers run this line. Every word is read before any
+is applied, so `ghosts=off ghosts=maybe` changes nothing; a key other than
+`ghosts`, or a value other than on and off, is refused naming it
+(`ViewVerbsTest.ViewsSetRefusesWhatItDoesNotTakeAndChangesNothing`). `SET`
+and not a word of its own, so the next switch a view gains is a key, not a
+verb.
+
+`ZOOM` replies the record of the view it moved without `title`, `active`,
+`linked`, `ghosts` and `hidden` - where the view looks, not what it shows -
+and on a scope with `shown=` last (above), then a line for each view that
+followed it
+(`view=2 kind=plan followed=1 centre=... scale=... area=...`), so the reply
+says the whole of what one line did. `ZOOM` alone is still the active view's
+extents; with words it once zoomed to the extents whatever they were
+(`ZOOM FOO BAR` said nothing), and now refuses a word it does not know,
+naming it with the usage. An `UNLINK` lists every view that left: an unlink
+that leaves one member dissolves the link (a link of one follows nothing),
+and that member left too.
+
+**The window's side is a `cad::ViewVerbHost`**, handed over by
+`CommandInterpreter::setViewHost` as `setScopeContext` hands over `VIEW`: the
+open views, and opening, activating and zooming one through its widget,
+which frames at its own size. The plan zoom's arithmetic that needs no
+widget - `IN`, `OUT`, a factor and `CENTRE` - is `cad::applyPlanZoom`, here
+and tested, and the window's host applies it and then tells the link. A
+test's host does the same with a `ViewSet` of its own, so the grammar, the
+records and the refusals are tested without Qt
+(`tests/cad/test_view_verbs.cpp`). With no host - `katana_cli`, `katana_mcp`
+- both verbs are refused by name, "VIEWS is the desktop window's", never as
+unknown commands (`ViewVerbsTest.ViewsAndZoomAreRefusedByNameWithoutAWindow`,
+and a `cli.` test for each in `src/katana_app/CMakeLists.txt`).
+
+**The link is `ViewSet`'s** (`link`, `unlink`, `follow`; `ViewState::linked`
+and `lastMoved`), and the rule for one pair of views is
+`include/katana/cad/view_link.hpp`: plan to plan, the follower takes the
+centre and the scale in pixels per unit, EXACTLY, and keeps its own size,
+hidden layers and reference layers - a wider view shows more of the same
+place. Every other pair of kinds returns false, and only plan views may join
+for now (`only plan views link: view 3 is 3D`). Plain data like the rest of
+a view's state: not saved, not undoable, never a document notification - a
+notification repaints every plan view's whole kept drawing. The leader rule,
+the resize rule and the rejected alternatives are `docs/desktop.md`'s
+"Linked views"; the tests are `tests/cad/test_view_set.cpp`
+(`ViewSet.LinkedPlanViewsTakeTheCentreAndScaleOfTheViewThatMovedAndKeepTheirOwnSize`
+and the tests after it).
+
 ## What the managers stand on
 
 

@@ -112,6 +112,7 @@
 #include "katana/archive12d/domain.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
+#include "katana/cad/view_link.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/dxf/reader.hpp"
 #include "katana/entity/anchor.hpp"
@@ -337,6 +338,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     interpreter_.setScopeContext([this](std::optional<std::uint32_t> id) {
         return cad::scopeViewOf(views_->viewSet(), id);
     });
+    // VIEWS and ZOOM (cad/view_verbs.hpp) act on this window's views; the
+    // controls on a view's bar build those lines and run them through the
+    // one executor, so a click is logged as the line it is.
+    interpreter_.setViewHost([this] { return &views_->verbHost(); });
+    views_->setCommandRunner(commandRunner());
+    views_->onLinksChanged = [this] { refreshViewMenu(); };
+    views_->onViewSettingsChanged = [this] { refreshViewMenu(); };
 
     views_->onPrompt = [this](const QString& prompt) {
         statusBar()->showMessage(prompt);
@@ -824,10 +832,35 @@ void MainWindow::buildActions()
     });
 
     // ---- View ------------------------------------------------------------------------
+    // The zoom items run their ZOOM lines for the active view through the one
+    // executor, as each view's bar runs them for itself (cad/view_verbs.hpp):
+    // logged, and followed by the views linked with it.
     QAction* extentsAction = makeAction(Icon::ZoomExtents, "Zoom &Extents",
-                                        "Fit the whole drawing in the view",
+                                        "Fit the whole drawing in the view (ZOOM EXTENTS)",
                                         QKeySequence(Qt::CTRL | Qt::Key_E), "viewZoomExtents");
-    connect(extentsAction, &QAction::triggered, this, [this] { views_->zoomExtents(); });
+    connect(extentsAction, &QAction::triggered, this,
+            [this] { (void)runVerbLine("ZOOM EXTENTS"); });
+    QAction* zoomInAction = makeAction(Icon::ZoomIn, "Zoom &In",
+                                       "Twice as close about the centre of the active view (ZOOM IN)",
+                                       {}, "viewZoomIn");
+    connect(zoomInAction, &QAction::triggered, this, [this] { (void)runVerbLine("ZOOM IN"); });
+    QAction* zoomOutAction = makeAction(Icon::ZoomOut, "Zoom &Out",
+                                        "Twice as far about the centre of the active view (ZOOM OUT)",
+                                        {}, "viewZoomOut");
+    connect(zoomOutAction, &QAction::triggered, this, [this] { (void)runVerbLine("ZOOM OUT"); });
+    QAction* zoomSelectionAction =
+        makeAction(Icon::ZoomSelection, "Zoom to Sele&ction",
+                   "Frame what is selected in the active view (ZOOM SELECTION)", {},
+                   "viewZoomSelection");
+    connect(zoomSelectionAction, &QAction::triggered, this,
+            [this] { (void)runVerbLine("ZOOM SELECTION"); });
+    QAction* zoomToAction = makeAction(
+        Icon::ZoomTo, "&Zoom To...",
+        "Frame what a scope takes - layers, a filter, the selection - in a view (ZOOM <scope>)", {},
+        "viewZoomTo");
+    // What the headless --dialog step opens it by (main.cpp, openDialog).
+    zoomToAction->setData(QStringLiteral("zoomToDialog"));
+    connect(zoomToAction, &QAction::triggered, this, [this] { showZoomTo(); });
     gridAction_ = makeAction(Icon::Grid, "&Grid", "Show or hide the grid", QKeySequence(Qt::Key_F7),
                              "viewGrid");
     gridAction_->setCheckable(true);
@@ -842,6 +875,7 @@ void MainWindow::buildActions()
 
     viewMenu_->addSection("Display");
     viewMenu_->addAction(extentsAction);
+    viewMenu_->addActions({zoomInAction, zoomOutAction, zoomSelectionAction, zoomToAction});
     viewMenu_->addActions({gridAction_, snapAction_});
     // Plan-view lines as a cosmetic pixel instead of the 1.5 px hairline:
     // measured 5-8x cheaper to stroke (docs/plan_view.md), so on by default,
@@ -2467,19 +2501,30 @@ void MainWindow::showSelectById()
     selectById_->activateWindow();
 }
 
+void MainWindow::showZoomTo()
+{
+    if (!zoomTo_) {
+        ZoomToContext context;
+        context.document = &document_;
+        context.views = views_;
+        context.run = commandRunner();
+        zoomTo_ = std::make_unique<ZoomToDialog>(std::move(context), this);
+    }
+    zoomTo_->refresh();
+    zoomTo_->show();
+    zoomTo_->raise();
+    zoomTo_->activateWindow();
+}
+
 void MainWindow::showSelection(bool zoom)
 {
     // Framed in the view the person is working in, as the style manager's
-    // Select Users frames what a style covers; the other views keep theirs.
+    // Select Users frames what a style covers; the other views keep theirs,
+    // but for the views linked with it. By the view's Zoom to Selection
+    // line, through the one executor, so the log says what moved the view.
     ViewportWidget* plan = views_->activePlanView();
     if (zoom && plan != nullptr) {
-        katana::geometry::Box2 bounds;
-        for (const katana::entity::EntityId id : document_.selection().ids()) {
-            if (const katana::entity::Entity* entity = document_.model().entities.find(id)) {
-                bounds.expand(katana::entity::boundingBox(entity->geometry));
-            }
-        }
-        plan->zoomTo(bounds);
+        views_->zoomToSelection(plan->state().id);
     }
     propertyDock_->show();
     propertyDock_->raise();
@@ -2939,8 +2984,12 @@ void MainWindow::typeLinesIntoTool(const QString& text)
 
 void MainWindow::runTypedLine(const QString& line)
 {
-    // What is typed is echoed - but an ONLINE KEY's value never is.
-    commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+    // What is typed is echoed - but an ONLINE KEY's value never is, and a
+    // ZOOM typed while a tool runs is echoed by the executor that runs it
+    // (ViewWorkspace::runsTransparently): echoed here as well, it showed twice.
+    if (!views_->runsTransparently(line)) {
+        commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+    }
     // A tool waiting for typed text - a Text's string, a count - takes the
     // whole line before any verb below, as a transparent ZOOM gives way to it
     // (tools::isTransparentCommand): "Utility pit" is a label on a services
@@ -3056,11 +3105,8 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
     const QString verb = words.front().toUpper();
     const QString argument = words.size() > 1 ? words[1].toUpper() : QString();
 
-    // Commands that concern the view rather than the document.
-    if (verb == "ZOOM" || verb == "Z") {
-        views_->zoomExtents();
-        return;
-    }
+    // ZOOM (Z) is the interpreter's now (cad/view_verbs.hpp), answered by the
+    // workspace: it was taken here, and whatever followed it was ignored.
     // ON, OFF, or nothing to toggle - and anything else refused: every other
     // word once meant OFF, so SNAP ENDPOINT OFF turned object snap off
     // altogether and said nothing.
@@ -4862,6 +4908,56 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
         kindActions_.push_back(action);
     }
 
+    // Linked views (cad/view_link.hpp): the Link button of the active plan
+    // view's bar, and every view out of the link at once - the same lines,
+    // through the same executor. K, not L: Viewport Layout has L.
+    linkAction_ = viewMenu->addAction(katana::qt::icon(Icon::ViewLinked), "Lin&k This View");
+    linkAction_->setObjectName("viewLinkActive");
+    linkAction_->setCheckable(true);
+    linkAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    linkAction_->setStatusTip("Pan and zoom the active plan view together with the other linked "
+                              "views, or take it out of the link (VIEWS LINK, VIEWS UNLINK)");
+    connect(linkAction_, &QAction::triggered, this, [this] {
+        // The ACTIVE view, as the item says, and only a kind that links
+        // (refreshViewMenu disables it otherwise): it took the plan view used
+        // last while a 3D view was active, and linked a view out of sight.
+        const cad::ViewState* active = views_->viewSet().active();
+        if (active != nullptr && cad::linkable(active->kind)) {
+            views_->toggleLink(active->id);
+        } else {
+            logMessage("Only a plan view links, and the active view is not one. Click a plan "
+                       "view, or VIEWS OPEN plan to open one.",
+                       true);
+        }
+        refreshViewMenu();
+    });
+    QAction* unlinkAll = viewMenu->addAction(katana::qt::icon(Icon::ViewUnlinked),
+                                             "U&nlink All Views");
+    unlinkAll->setObjectName("viewUnlinkAll");
+    unlinkAll->setStatusTip(
+        "Take every view out of the link, so each pans and zooms on its own (VIEWS UNLINK ALL)");
+    connect(unlinkAll, &QAction::triggered, this,
+            [this] { (void)runVerbLine("VIEWS UNLINK ALL"); });
+
+    // The active view's ghosts of the selection (docs/desktop.md, "The
+    // selection in every view"): the box in its Layers popup, by the same
+    // line through the same executor. D: every other letter of it is taken.
+    ghostsAction_ = viewMenu->addAction(katana::qt::icon(Icon::LayerVisible),
+                                        "Show the Selection on Hi&dden Layers");
+    ghostsAction_->setObjectName("viewSelectionGhosts");
+    ghostsAction_->setCheckable(true);
+    ghostsAction_->setStatusTip("Draw what is selected faintly in the active view where it hides "
+                                "the layer, or not at all (VIEWS SET <id> ghosts=on|off)");
+    connect(ghostsAction_, &QAction::triggered, this, [this](bool on) {
+        const cad::ViewId active = views_->viewSet().activeId();
+        if (active == cad::kNoView) {
+            logMessage("No view is open. VIEWS OPEN plan opens one.", true);
+        } else {
+            views_->setSelectionGhosts(active, on);
+        }
+        refreshViewMenu();
+    });
+
     viewMenu->addSection("3D Views");
     QMenu* standard = viewMenu->addMenu("Standard &3D Views");
     standard->setIcon(katana::qt::icon(Icon::ViewIsoSouthWest));
@@ -4933,6 +5029,28 @@ void MainWindow::refreshViewMenu()
 {
     for (QAction* action : kindActions_) {
         action->setChecked(action->data().toInt() == static_cast<int>(views_->activeViewKind()));
+    }
+    const cad::ViewState* active = views_->viewSet().find(views_->viewSet().activeId());
+    if (linkAction_ != nullptr) {
+        // The active view's link, as the zoom items below follow its kind.
+        const bool linkable = active != nullptr && cad::linkable(active->kind);
+        linkAction_->setEnabled(linkable);
+        linkAction_->setChecked(linkable && active->linked);
+    }
+    if (ghostsAction_ != nullptr) {
+        ghostsAction_->setEnabled(active != nullptr);
+        ghostsAction_->setChecked(active != nullptr && active->selectionGhosts);
+    }
+    // The zoom items the active view's kind takes, as its bar offers them
+    // (cad::zoomTakes, ZOOM's own rule): an item offered that ZOOM would
+    // refuse - a section's Zoom to Selection - is disabled, not refused.
+    using Request = cad::ZoomRequest::Kind;
+    for (const auto& [name, request] :
+         {std::pair{"viewZoomIn", Request::In}, std::pair{"viewZoomOut", Request::Out},
+          std::pair{"viewZoomSelection", Request::Scope}}) {
+        if (QAction* action = findChild<QAction*>(name)) {
+            action->setEnabled(active != nullptr && cad::zoomTakes(active->kind, request));
+        }
     }
 }
 
