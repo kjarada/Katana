@@ -279,8 +279,28 @@ pivot (30 notches in and out over the sample terrain: the eye back to 2e-12 m,
 the target 70.6 m from where it was). E frames the scene again. Zoomed out so
 far that the model shrinks to the cursor, the pick finds the model under it and
 the way back in goes towards that: 40 notches out and 40 in returned the eye to
-within 0.3-0.8 m of a 292 m framing, over the terrain and off it alike, where
-the target's plane had left it 40 m off beside the model.
+within 0.3-0.8 m of a 292 m framing, over the terrain and off it alike. The
+target's-plane zoom this replaces returned it to within 1e-11 m at the same
+cursor places (the second review, 2026-09-30, measured both; the 40 m first
+written here was the unreleased first fix's), so an out-and-in pair is no
+longer exact: the price of zooming towards what is drawn.
+
+**Not done** (the second review's findings, 2026-09-30, left open when the
+work was stopped to save the owner's tokens):
+
+* Zooming at a 3D string above the ground loses it: the pick is within 3 px of
+  the line, but the dolly anchors at the picked depth on the cursor's ray, so
+  the line's pixel offset grows 1.15 times a notch, leaves the aperture after
+  14 to 21 notches, and the next notch anchors on the terrain behind it; the
+  camera then flies past the string.
+* Off the model the view still empties within 10 to 30 notches with no cue,
+  and every later notch changes nothing on screen, which is what the owner
+  meant by the zoom stopping. The dive and the numeric stall are fixed; what
+  the eye sees when the cursor is over background is not.
+* The zoom-limit message stays on the status line after zooming back out.
+* After a zoom over the upper half of the view, Front, Left and Right put the
+  eye under the terrain: the pivot lies beyond the ground on the view axis
+  and the standard views keep the target and the distance.
 
 **Rejected:**
 
@@ -581,7 +601,7 @@ in every view"). The one-list build (`SceneBuilder::build`), which no view
 draws - the benchmarks and tests do, and a sheet's 3D snapshot is built by
 layer (`buildTerrain`, `buildEntities`) with no selection at all - draws a
 selected entity in the core's colour and width, without the casing: it kept
-a width of its own, `SceneOptions::selectedLineWidth`, 2 px, which no view
+a width of its own (the option `selectedLineWidth`, since removed), 2 px, which no view
 read and which looked like the view's setting
 (`CadScene.TheOneListBuildDrawsASelectedLineAtTheSelectionsOneWidth`). Walking
 the ids rather than the drawing took `BM_SceneSelectionBuild` from 0.039 /
