@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QElapsedTimer>
 #include <QFile>
@@ -27,10 +28,16 @@
 #include <string>
 #include <vector>
 
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/survey_job.hpp"
+#include "katana/cad/survey_points.hpp"
+#include "katana/core/text.hpp"
+#include "katana/survey/reduction_settings.hpp"
 #include "katana/surveyio/reader.hpp"
 #include "survey/survey_import_wizard.hpp"
 #include "survey/survey_task.hpp"
+#include "survey_verbs.hpp"
 
 namespace survey = katana::survey;
 namespace surveyio = katana::surveyio;
@@ -448,4 +455,139 @@ TEST(SurveyImportWizard, ALargeFileIsReadOffTheGuiThreadWhichKeepsAnsweringAndCa
         // itself takes seconds, so this is the thread doing its job.
         EXPECT_LT(longest, 250) << "the GUI thread waited " << longest << " ms";
     }
+}
+
+namespace {
+
+// A job with what the clock decides taken out: when it was imported and when
+// its report was made, which the report states.
+katana::cad::SurveyJob timeless(katana::cad::SurveyJob job)
+{
+    for (const std::string& when : {job.reportCreatedUtc, job.importedUtc}) {
+        if (when.empty()) {
+            continue;
+        }
+        for (std::string* text : {&job.reportText, &job.reportHtml}) {
+            for (std::size_t at = text->find(when); at != std::string::npos;
+                 at = text->find(when, at)) {
+                text->replace(at, when.size(), "<when>");
+            }
+        }
+    }
+    job.reportCreatedUtc.clear();
+    job.importedUtc.clear();
+    return job;
+}
+
+// The drawing's survey points, a line each, every number exactly.
+std::string pointsText(const Document& document)
+{
+    std::string text;
+    for (const katana::cad::DrawingSurveyPoint& point : katana::cad::drawingSurveyPoints(document)) {
+        text += std::to_string(point.entity) + " " + point.id + " " + point.layer + " " +
+                katana::core::formatExactReal(point.easting) + " " +
+                katana::core::formatExactReal(point.northing) + " " +
+                (point.elevation ? katana::core::formatExactReal(*point.elevation) : "-") + "\n";
+    }
+    return text;
+}
+
+} // namespace
+
+// The wizard's Import and the SURVEY IMPORT line, given the same settings,
+// make the same import: the same job - settings, points, report but for its
+// time - and the same points on the drawing, bit for bit. The wizard runs its
+// command itself rather than handing the line to the window's executor
+// (docs/survey.md, "Not done"), so this is what holds the two together: the
+// file with no coordinates, CP1 held where the drawing has it - picked from
+// the drawing's points in the wizard, control=... on the line - and two
+// settings changed from the defaults, the faces and the curvature and
+// refraction.
+TEST(SurveyImportWizard, ItsImportIsTheSurveyImportLinesForTheSameSettings)
+{
+    const std::string file = fixture("sdr/traverse_without_coordinates.sdr");
+    const auto placeCp1 = [](Document& document) {
+        katana::cad::CommandInterpreter interpreter(document);
+        const auto placed = interpreter.run("FORWARD 500000,4999999,100 0 1 0 CP1");
+        ASSERT_TRUE(placed.ok()) << placed.error().describe();
+    };
+
+    Session session;
+    placeCp1(session.document);
+    session.openAndRead(file);
+    QWidget& w = *session.wizard;
+    click(w, "next"); // System
+    click(w, "next"); // Reduction and adjustment
+    choose(w, "faces", "face left only");
+    child<QCheckBox>(w, "curvatureRefraction")->setChecked(false);
+    choose(w, "controlFrom", "the drawing");
+    choose(w, "controlPick", "CP1");
+    choose(w, "controlHorizontal", "fixed");
+    choose(w, "controlVertical", "fixed");
+    click(w, "addControl");
+    click(w, "next"); // Options
+    click(w, "next"); // Report
+    ASSERT_TRUE(session.step().contains("Report")) << session.step().toStdString();
+    click(w, "import");
+    ASSERT_EQ(session.document.surveyJobs().size(), 1U);
+
+    Document byLine;
+    placeCp1(byLine);
+    const auto reply = katana::app::runSurveyLine(
+        byLine, "SURVEY IMPORT \"" + file +
+                    "\" SET faces=face-left-only curvature_refraction=false "
+                    "control=CP1;drawing;fixed;0;fixed;0;fixed;0");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    ASSERT_EQ(byLine.surveyJobs().size(), 1U);
+
+    const katana::cad::SurveyJob wizard = timeless(session.document.surveyJobs().front());
+    const katana::cad::SurveyJob line = timeless(byLine.surveyJobs().front());
+    EXPECT_EQ(survey::serialiseReductionSettings(wizard.settings),
+              survey::serialiseReductionSettings(line.settings));
+    // The settings are the ones asked for, not merely equal to each other.
+    survey::ReductionSettings asked;
+    asked.faces = survey::FaceHandling::FaceLeftOnly;
+    asked.curvatureAndRefraction = false;
+    survey::ControlSelection cp1;
+    cp1.point = survey::ControlPoint::fixed3d("CP1");
+    cp1.origin = survey::ControlOrigin::Drawing;
+    asked.control = {cp1};
+    EXPECT_TRUE(wizard.settings == asked) << survey::serialiseReductionSettings(wizard.settings);
+    EXPECT_EQ(wizard.placedPoints.size(), 3U); // CP2, T1, T2; CP1 is the drawing's
+    EXPECT_EQ(wizard.reportText, line.reportText);
+    EXPECT_TRUE(wizard == line);
+    EXPECT_EQ(pointsText(session.document), pointsText(byLine));
+    EXPECT_EQ(session.document.model().entities.size(), byLine.model().entities.size());
+}
+
+// The wizard reduces as the line does (cad::reduceForDrawing): with CP1 drawn
+// at two places 100 km apart, holding it would put the job on whichever was
+// drawn first, so its preview refuses, naming both - and nothing is imported.
+TEST(SurveyImportWizard, ItsPreviewRefusesToHoldAPointTheDrawingHasAtTwoPlaces)
+{
+    Session session;
+    {
+        katana::cad::CommandInterpreter interpreter(session.document);
+        for (const char* line : {"FORWARD 500000,4999999,100 0 1 0 CP1",
+                                 "FORWARD 600000,4999999,100 0 1 0 CP1"}) {
+            const auto placed = interpreter.run(line);
+            ASSERT_TRUE(placed.ok()) << placed.error().describe();
+        }
+    }
+    session.openAndRead(fixture("sdr/traverse_without_coordinates.sdr"));
+    QWidget& w = *session.wizard;
+    click(w, "next"); // System
+    click(w, "next"); // Reduction and adjustment
+    choose(w, "controlFrom", "the drawing");
+    choose(w, "controlPick", "CP1");
+    choose(w, "controlHorizontal", "fixed");
+    choose(w, "controlVertical", "fixed");
+    click(w, "addControl");
+    click(w, "previewReduction");
+    const QString message = child<QLabel>(w, "message")->text();
+    EXPECT_TRUE(message.contains("Control point CP1 is on the drawing 2 times, at E 500000.0000 "
+                                 "N 5000000.0000 Z 100.0000 and E 600000.0000 N 5000000.0000 "
+                                 "Z 100.0000, so which one to hold is not known"))
+        << message.toStdString();
+    EXPECT_TRUE(session.document.surveyJobs().empty());
 }

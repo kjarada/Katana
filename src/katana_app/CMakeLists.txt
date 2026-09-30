@@ -1299,3 +1299,149 @@ if(KATANA_BUILD_TESTS)
         "imported job=job-1 entities=4 layer=survey/sdr .*layer=survey/sdr  at 500000,5000000[\r\n]+[^\r\n]+at 500000,5000100[\r\n]+[^\r\n]+at 500149\\.795756,5000000[\r\n]+[^\r\n]+at 500149\\.795756,5000079\\.98883[\r\n].*Entities: 0 "
         FAIL_REGULAR_EXPRESSION "error")
 endif()
+
+# SURVEY IMPORT's reduction settings (survey_verbs.hpp, docs/survey.md "The
+# reduction settings of SURVEY IMPORT"): SET's items and a SETTINGS file,
+# both the settings' text form. The file is
+# tests/surveyio/data/sdr/traverse_without_coordinates.sdr - traverse.sdr
+# with its two 08 coordinate records taken out - so without control it
+# places nothing; FORWARD puts CP1 on the drawing at 500000 E 5000000 N
+# 100 Z (1 m due north of 500000,4999999), and control=CP1;drawing;fixed;...
+# holds it there. Worked by hand (the working is repeated, with the heights,
+# in tests/app/test_survey_verbs.cpp): setup CP1 is oriented on the 07's
+# azimuth 0 less its reading 0 on CP2, the backsight, which nothing else
+# places. CP2, four pointings of 100.006 m at zenith 89.36977 (face right
+# 270.63023), is H = 100.006 sin 89.36977 = 99.9999502 m due north less the
+# curvature and refraction term (1 - k/2) V H / R = 0.935 x 1.1000027 x
+# 99.99995 / 6371000 = 0.0161 mm, k = 0.13 and R = 6 371 000 m the
+# reduction's own: 5000099.9999340 N. T1 and T2 are where
+# cli.survey_import_sokkia_sdr has them, worked there: 500149.7957556 E
+# 5000000 N and 500149.7957556 E 5000079.9888319 N - T2's setup is oriented
+# on CP1 at 270 by the coordinates, as it was by the file's. CP1 itself is
+# the drawing's point and is not drawn again: 3 points. A job is numbered
+# with the next entity number (cad's newJobId), so the job numbers below
+# count what the lines before made. With
+# curvature_refraction=false the terms go: CP2 5000099.9999502 N, T1
+# 500000 + 150.0015 sin 87 = 500149.7959282 E, T2 5000079.9888155 N. LIST
+# writes 12 significant digits. Each refusal is followed by STATUS, which
+# must not run: katana_cli stops at the first failing line.
+if(KATANA_BUILD_TESTS)
+    set(_sdr_bare "${PROJECT_SOURCE_DIR}/tests/surveyio/data/sdr/traverse_without_coordinates.sdr")
+    set(_settings "${PROJECT_SOURCE_DIR}/tests/app/data/survey_settings")
+    set(_place_cp1 "FORWARD 500000,4999999,100 0 1 0 CP1")
+    # ';' separates a CMake list's items, so a control line's are written
+    # $<SEMICOLON> in a command (a '\;' reaches the program as it is); in a
+    # regex, where a ';' would make two regexes either of which passes the
+    # test, '.' stands for it.
+    set(_s "$<SEMICOLON>")
+    set(_hold_cp1 "control=CP1${_s}drawing${_s}fixed${_s}0${_s}fixed${_s}0${_s}fixed${_s}0")
+    set(_held_cp1 "setting key=control value=CP1.drawing.fixed.0.fixed.0.fixed.0[\r\n]")
+    set(_held_points "layer=0  at 500000,5000000[\r\n]+[^\r\n]+layer=survey/points  at 500000,5000099\\.99993[\r\n]+[^\r\n]+at 500149\\.795756,5000000[\r\n]+[^\r\n]+at 500149\\.795756,5000079\\.98883[\r\n]")
+    # The file alone first: it places nothing. The three reduction warnings
+    # of the held import are the humidity, the atmospheric correction and
+    # the orientation on the file's azimuth; CP1 is not among points "named
+    # with no coordinates", since the drawing gives it a position.
+    add_test(NAME cli.survey_import_holds_a_point_of_the_drawing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_sdr_bare}\""
+                -c "${_place_cp1}" -c "SURVEY IMPORT \"${_sdr_bare}\" SET ${_hold_cp1}"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_holds_a_point_of_the_drawing PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=0 .*settings file= set=1 differ=1[\r\n]+${_held_cp1}imported job=job-3 entities=3 layer=survey/points reduction_warnings=3[\r\n].*${_held_points}"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_takes_its_settings_from_a_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_place_cp1}"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SETTINGS \"${_settings}/hold_cp1.txt\""
+                -c "LIST")
+    set_tests_properties(cli.survey_import_takes_its_settings_from_a_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "settings file=hold_cp1\\.txt set=0 differ=1[\r\n]+${_held_cp1}settings_warning text=\"line 8: setting 'later\\.setting' is not known to this version and was ignored\"[\r\n]+imported job=job-2 entities=3 .*${_held_points}"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_set_changes_a_key_the_settings_file_leaves
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_place_cp1}"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SETTINGS \"${_settings}/hold_cp1.txt\" SET curvature_refraction=false"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_set_changes_a_key_the_settings_file_leaves PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "settings file=hold_cp1\\.txt set=1 differ=2[\r\n]+setting key=curvature_refraction value=false[\r\n]+${_held_cp1}.*at 500000,5000099\\.99995[\r\n]+[^\r\n]+at 500149\\.795928,5000000[\r\n]+[^\r\n]+at 500149\\.795928,5000079\\.98882[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # Every refusal the options document, each in the words of the parser,
+    # the validation or the reduction that makes it. Named arguments, not a
+    # table: a list would split the control lines at their ';'.
+    function(katana_survey_refusal name options said)
+        add_test(NAME cli.survey_import_refuses_${name}
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    $<TARGET_FILE:katana_cli> -c "${_place_cp1}"
+                    -c "SURVEY IMPORT \"${_sdr_bare}\" ${options}" -c "STATUS")
+        set_tests_properties(cli.survey_import_refuses_${name} PROPERTIES
+            PASS_REGULAR_EXPRESSION "error: ${said}"
+            FAIL_REGULAR_EXPRESSION "Entities:|imported job")
+    endfunction()
+    katana_survey_refusal(an_unknown_setting "SET bogus=1"
+        "InvalidArgument: 'bogus' is not a reduction setting; the settings are atmospheric, .*, iterations\\.max, control \\[SET bogus=1\\]")
+    katana_survey_refusal(a_setting_that_is_not_a_number "SET refraction.k=abc"
+        "ParseFailure: line 2 of the reduction settings: 'abc' is not a number \\(refraction\\.k\\) \\[SET refraction\\.k=abc\\]")
+    katana_survey_refusal(a_setting_outside_its_range "SET refraction.k=2"
+        "InvalidArgument: the coefficient of refraction must lie between -1 and 1 \\[SET refraction\\.k=2\\]")
+    katana_survey_refusal(settings_from_a_newer_katana "SETTINGS \"${_settings}/newer_version.txt\""
+        "Unsupported: these reduction settings were written by a newer Katana \\(settings version 2\\); this one reads up to version 1 \\[SETTINGS [^\r\n]*newer_version\\.txt\\]")
+    katana_survey_refusal(a_settings_file_that_is_not_there "SETTINGS \"${_settings}/no such settings.txt\""
+        "FileImportFailure: the settings file cannot be read \\[[^\r\n]*no such settings\\.txt: ")
+    katana_survey_refusal(a_control_point_the_drawing_does_not_have
+        "SET control=CP9${_s}drawing${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0"
+        "NotFound: Control point CP9 is not on the drawing, so it cannot be held\\.")
+    katana_survey_refusal(a_control_point_the_file_gives_no_coordinates
+        "SET control=CP1${_s}file${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0"
+        "NotFound: Control point CP1 is not a point with coordinates in the file, so it cannot be held\\.")
+    katana_survey_refusal(a_set_with_no_items "SET"
+        "InvalidArgument: SET needs at least one <key>=<value>; usage: ")
+    katana_survey_refusal(a_setting_given_twice "SET atmospheric=none atmospheric=auto"
+        "InvalidArgument: 'atmospheric' is given twice \\[SET atmospheric=auto\\]")
+    katana_survey_refusal(a_control_point_held_twice
+        "SET ${_hold_cp1} control=CP1${_s}drawing${_s}free${_s}0${_s}free${_s}0${_s}fixed${_s}0"
+        "InvalidArgument: control point 'CP1' is listed twice")
+    # CP1 drawn twice, 100 km apart: the reduction would hold whichever was
+    # drawn first, so the import refuses to hold it and names both places,
+    # to a tenth of a millimetre (cad::reduceForDrawing).
+    add_test(NAME cli.survey_import_refuses_a_point_the_drawing_has_at_two_places
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_place_cp1}"
+                -c "FORWARD 600000,4999999,100 0 1 0 CP1"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SET ${_hold_cp1}" -c "STATUS")
+    set_tests_properties(cli.survey_import_refuses_a_point_the_drawing_has_at_two_places
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "error: InvalidArgument: Control point CP1 is on the drawing 2 times, at E 500000\\.0000 N 5000000\\.0000 Z 100\\.0000 and E 600000\\.0000 N 5000000\\.0000 Z 100\\.0000, so which one to hold is not known. rename or delete all but one\\."
+        FAIL_REGULAR_EXPRESSION "Entities:|imported job")
+    # After the import, where CP1 was held - the drawing's entity 1, the
+    # point FORWARD made - and what the adjustment made of the data: nothing
+    # adjusted and nothing rejected, as the defaults have it. A number is the
+    # shortest text that reads back exactly, so 5 000 000 is 5e+06.
+    add_test(NAME cli.survey_import_says_where_it_held_and_what_it_adjusted
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_place_cp1}"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SET ${_hold_cp1}")
+    set_tests_properties(cli.survey_import_says_where_it_held_and_what_it_adjusted PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-2 entities=3 layer=survey/points reduction_warnings=3[\r\n]+held id=CP1 from=drawing entity=1 northing=5e\\+06 easting=5e\\+05 height=100[\r\n]+reduction method=radiation adjustments=0 rejected=0[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A network, the import wizard's own fixture: two setups, on A and on B,
+    # each with a direction and a distance to the other and to P and Q. The
+    # network takes a setup's directions as angles from its backsight: 4
+    # angles and 6 distances, 10 observations; A and B held in plan, the
+    # unknowns are P and Q, 4; a redundancy of 6 (worked in
+    # tests/app/test_survey_verbs.cpp, which holds the variance factor and
+    # the global test to the reduction's own report).
+    add_test(NAME cli.survey_import_says_what_a_network_adjustment_made_of_the_data
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "SURVEY IMPORT \"${PROJECT_SOURCE_DIR}/tests/qt_widgets/survey/data/network_gsi8.gsi\" SET adjustment.method=network control=A${_s}file${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0 control=B${_s}file${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0")
+    set_tests_properties(cli.survey_import_says_what_a_network_adjustment_made_of_the_data
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "reduction method=\"network, horizontal\" adjustments=1 rejected=[0-9]+[\r\n]+adjustment method=\"network least squares \\(horizontal\\)\" observations=10 unknowns=4 redundancy=6 variance_factor=[0-9][0-9.e+-]* global_test=(passed|failed) flagged=[0-9]+ rejected=[0-9]+[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()

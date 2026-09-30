@@ -1728,7 +1728,7 @@ void SurveyImportWizard::runPreview(std::function<void()> then)
         [this, raw, settings = *settings, context = std::move(*context), generation, revision,
          system = std::move(system), drawingPoints = std::move(drawingPoints),
          then = std::move(then)]() mutable -> SurveyTaskBar::Finish {
-            auto outcome = survey::reduceAndAdjust(*raw, settings, context);
+            auto outcome = cad::reduceForDrawing(*raw, settings, context);
             if (!outcome) {
                 return [this, error = outcome.error()] {
                     previewReport_->showNote("The reduction could not run: " +

@@ -1,0 +1,4 @@
+katana-reduction-settings=2
+# Written by a Katana whose settings text is a version later than this one
+# reads: refused whole, never half read.
+control=CP1;drawing;fixed;0;fixed;0;fixed;0

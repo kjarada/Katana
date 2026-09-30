@@ -15,8 +15,9 @@
 // needs a reader is INJECTED: the import is handed the project already read,
 // and the re-adjustment is handed a SurveyJobReader, which the application
 // binds to surveyio::readSurvey over surveyio::siblingsInMemory(job's files).
-// The reduction is injected as well - defaulting to survey::reduceAndAdjust -
-// so the commands can be tested with a fake that returns a known outcome.
+// The reduction is injected as well - defaulting to reduceForDrawing, which is
+// survey::reduceAndAdjust with the drawing's control checked - so the
+// commands can be tested with a fake that returns a known outcome.
 
 #include <functional>
 #include <memory>
@@ -61,6 +62,24 @@ using SurveyJobReader =
 [[nodiscard]] katana::core::Result<katana::survey::ReductionContext>
 reductionContextFor(const Document& document);
 
+// survey::reduceAndAdjust as a job on a drawing runs it: the commands' default
+// reduction below, and what the import wizard's and the Survey Jobs dialog's
+// previews run. First the control the settings hold FROM the drawing is
+// checked against the drawing's points (context.drawingPoints), where the
+// reduction only takes the first point of an id:
+//   - an id the drawing has more than once is refused (InvalidArgument),
+//     naming where each one is, since which is first is only the order they
+//     were drawn in;
+//   - an id the file never names changes nothing, and a warning says so;
+//   - an id the file gives other coordinates is held where the drawing has
+//     it, and a warning gives both.
+// Those warnings open the report's list, before the reduction's own. An id
+// the drawing does not have is the reduction's to refuse, in its own words.
+[[nodiscard]] katana::core::Result<katana::survey::ReductionOutcome>
+reduceForDrawing(const katana::survey::SurveyProject& raw,
+                 const katana::survey::ReductionSettings& settings,
+                 const katana::survey::ReductionContext& context);
+
 // ---- Import ------------------------------------------------------------------------
 
 struct SurveyJobImport {
@@ -96,7 +115,7 @@ struct SurveyJobImport {
 class ImportSurveyJobCommand final : public katana::commands::Command {
   public:
     ImportSurveyJobCommand(Document& document, SurveyJobImport request,
-                           ReductionFunction reduce = &katana::survey::reduceAndAdjust);
+                           ReductionFunction reduce = &reduceForDrawing);
     ~ImportSurveyJobCommand() override;
 
     [[nodiscard]] std::string_view name() const override { return "IMPORT_SURVEY_JOB"; }
@@ -185,7 +204,7 @@ class ReadjustSurveyJobCommand final : public katana::commands::Command {
   public:
     ReadjustSurveyJobCommand(Document& document, SurveyJobReadjustment request,
                              SurveyJobReader read,
-                             ReductionFunction reduce = &katana::survey::reduceAndAdjust);
+                             ReductionFunction reduce = &reduceForDrawing);
     ~ReadjustSurveyJobCommand() override;
 
     [[nodiscard]] std::string_view name() const override { return "READJUST_SURVEY_JOB"; }
