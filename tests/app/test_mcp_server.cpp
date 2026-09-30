@@ -298,7 +298,8 @@ TEST_F(McpServer, AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt)
 // gives SURVEY READ and SURVEY IMPORT every format surveyio reads. The file
 // is the hand-built one of the surveyio tests; its 4 points are worked by
 // hand in src/katana_app/CMakeLists.txt, beside cli.survey_import_sokkia_sdr,
-// and its 7 warnings are its 7 deleted records.
+// and its 8 warnings are its 7 deleted records and its coordinate order
+// (option 2, read east first), said once.
 TEST_F(McpServer, AnAgentReadsAndImportsASokkiaSdrFile)
 {
     initialize();
@@ -311,7 +312,10 @@ TEST_F(McpServer, AnAgentReadsAndImportsASokkiaSdrFile)
     ASSERT_EQ(lines.size(), 2U);
     const std::string read = lines[0]["output"].get<std::string>();
     EXPECT_NE(read.find("survey file=traverse.sdr format=sokkia-sdr parser=1.0 read=40 "
-                        "skipped=7 warnings=7"),
+                        "skipped=7 warnings=8"),
+              std::string::npos)
+        << read;
+    EXPECT_NE(read.find("warning record=8 text=\"the header's coordinate order option is 2"),
               std::string::npos)
         << read;
     EXPECT_NE(read.find("warning record=35 text=\"a deleted record (marked 'DD'), 02NM "

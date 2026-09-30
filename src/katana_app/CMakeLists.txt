@@ -1194,9 +1194,10 @@ endif()
 # tests/surveyio/data/sdr/traverse.sdr. READ: 40 records read and 7 skipped
 # (lines 33 to 39, deleted with "DD" and "DDDD"), 2 setups, 36 observations
 # (12 face 1 and face 2 records of 3), CP1 and CP2 keyed in, T1 and T2
-# observed, the CTRL and TRAV codes; 7 warnings, one for each deleted
-# record (the header's coordinate order, option 2, is the format's own
-# E-N-Elev and needs none). IMPORT reduces it with the defaults and draws 4
+# observed, the CTRL and TRAV codes; 8 warnings: one at the first record
+# that states coordinates (8), since the header's coordinate order, option
+# 2, is read east first where no Sokkia file shows the order, and one for
+# each deleted record. IMPORT reduces it with the defaults and draws 4
 # points on LAYER, one undo step. Worked by hand: from CP1 (500000 E,
 # 5000000 N) oriented on CP2 due north at circle 0, T1 is at circle 90,
 # zenith 87 on both faces, the mean of its four slope distances 150.0015 m;
@@ -1219,7 +1220,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_sdr}\"" -c "STATUS")
     set_tests_properties(cli.survey_read_sokkia_sdr PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=traverse\\.sdr format=sokkia-sdr parser=1\\.0 read=40 skipped=7 warnings=7[\r\n]+content setups=2 observations=36 points=2 unpositioned=2 features=2 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=33 text=\"a deleted record \\(marked 'DD'\\), 01NM \\(instrument\\), is not imported\".*warning record=39 text=\"a deleted record \\(marked 'DDDD'\\), 13TS \\(note\\), is not imported\".*Entities: 0 "
+        "survey file=traverse\\.sdr format=sokkia-sdr parser=1\\.0 read=40 skipped=7 warnings=8[\r\n]+content setups=2 observations=36 points=2 unpositioned=2 features=2 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=8 text=\"the header's coordinate order option is 2, east-north-elevation, and the coordinates are read easting first[^\r\n]*check a known point\"[\r\n]+warning record=33 text=\"a deleted record \\(marked 'DD'\\), 01NM \\(instrument\\), is not imported\".*warning record=39 text=\"a deleted record \\(marked 'DDDD'\\), 13TS \\(note\\), is not imported\".*Entities: 0 "
         FAIL_REGULAR_EXPRESSION "error")
     add_test(NAME cli.survey_import_sokkia_sdr
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
