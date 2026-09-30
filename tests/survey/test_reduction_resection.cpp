@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -83,6 +84,23 @@ void observe(std::vector<Shot>& shots, std::size_t& index, const Mark& mark, boo
               distance ? std::optional<double>(std::atan2(horizontal, fall)) : std::nullopt,
               distance ? std::optional<double>(std::hypot(horizontal, fall)) : std::nullopt,
               kTargetHeight);
+}
+
+// What a station at (n, e) observes of `mark` on both faces: the reading for
+// a circle turned by `turn`, plus `readingError`, and - when `distance` - a
+// level sight (zenith 90, the target at the instrument's height, so the mark
+// and the station share a height) `horizontal` long, the true length unless
+// given.
+void level(std::vector<Shot>& shots, std::size_t& index, double n, double e, const Mark& mark,
+           double turn, bool distance, double readingError = 0.0,
+           std::optional<double> horizontal = std::nullopt)
+{
+    const double reading =
+        katana::math::normalizeAngle(azimuthFrom(n, e, mark) - turn + readingError);
+    const double length = horizontal.value_or(std::hypot(mark.northing - n, mark.easting - e));
+    bothFaces(shots, mark.id, index, reading,
+              distance ? std::optional<double>(deg(90)) : std::nullopt,
+              distance ? std::optional<double>(length) : std::nullopt, kInstrumentHeight);
 }
 
 // The marks entered with coordinates; R and Q named only.
@@ -222,10 +240,14 @@ TEST(ReductionResection, ResidualsAndPrecisionMatchAnIndependentLeastSquares)
     //   -2.5835 mm, reading B +0.7731", distance B +0.6589 mm, reading C
     //   -1.1253", distance C -1.2971 mm; v'Pv 1.847118723 on 3 degrees of
     //   freedom, variance factor 0.615706241;
-    //   a posteriori sN 0.7752 mm, sE 0.5766 mm, sw 2.1546".
-    // R stands over a mark (instrument height 1.55), so its precision adds
-    // the instrument's 1 mm centring: sN hypot(0.7752, 1) = 1.2653 mm, sE
-    // hypot(0.5766, 1) = 1.1543 mm.
+    //   a priori sN 0.987965 mm, sE 0.734805 mm, sw 2.745902".
+    // The global test passes (1.847 is inside chi-square(3) 0.216 to 9.348),
+    // so the variance factor - 0.62 on 3 degrees of freedom, itself uncertain
+    // by 82 % - is not applied: the precision is the a-priori one. R stands
+    // over a mark (instrument height 1.55), so its precision adds the
+    // instrument's 1 mm centring: sN hypot(0.987965, 1) = 1.405729 mm, sE
+    // hypot(0.734805, 1) = 1.240942 mm. (The round before scaled by the
+    // variance factor: 1.2653 and 1.1543 mm.)
     std::vector<Shot> shots;
     std::size_t index = 1;
     observe(shots, index, kA, true, 50.004);
@@ -255,15 +277,17 @@ TEST(ReductionResection, ResidualsAndPrecisionMatchAnIndependentLeastSquares)
         const double tolerance = residual.angular ? arcSeconds(0.0001) : 1e-7;
         EXPECT_NEAR(residual.residual, expected[i], tolerance) << labels[i];
     }
-    EXPECT_NEAR(resection.sigmaNorthing, 0.0012653, 1e-7);
-    EXPECT_NEAR(resection.sigmaEasting, 0.0011543, 1e-7);
-    EXPECT_NEAR(resection.sigmaOrientation, arcSeconds(2.1546), arcSeconds(0.0001));
+    ASSERT_TRUE(horizontal.globalTest.has_value());
+    EXPECT_TRUE(horizontal.globalTest->passed);
+    EXPECT_NEAR(resection.sigmaNorthing, 0.001405729, 1e-9);
+    EXPECT_NEAR(resection.sigmaEasting, 0.001240942, 1e-9);
+    EXPECT_NEAR(resection.sigmaOrientation, arcSeconds(2.745902), arcSeconds(0.000001));
 
     // The station carries that precision onto the drawing.
     const ComputedPoint* r = findPoint(*outcome, "R");
     ASSERT_NE(r, nullptr);
-    EXPECT_NEAR(*r->sigmaNorthing, 0.0012653, 1e-7);
-    EXPECT_NEAR(*r->sigmaEasting, 0.0011543, 1e-7);
+    EXPECT_NEAR(*r->sigmaNorthing, 0.001405729, 1e-9);
+    EXPECT_NEAR(*r->sigmaEasting, 0.001240942, 1e-9);
 }
 
 TEST(ReductionResection, TheHeightIsTheWeightedMeanOfTrigonometricHeightsWithCurvature)
@@ -277,12 +301,18 @@ TEST(ReductionResection, TheHeightIsTheWeightedMeanOfTrigonometricHeightsWithCur
     //   R's height from A and from B = 50 + 2.344829305 = 52.344829305,
     //   from C 52.350829305. The three have the same zenith and distance, so
     //   the same weight: the plain mean, 52.346829305; residuals
-    //   (computed - observed) -2, -2 and +4 mm; the a posteriori standard
-    //   error of a mean of three, sqrt(sum v^2 / (n (n - 1))) =
-    //   sqrt(24e-6 / 6) = 2 mm. The instrument height, measured once to the
-    //   settings' 2 mm, is in every height difference alike, so it is in none
-    //   of their weights and is added to the mark's height after: sigma
-    //   hypot(2, 2) = 2.828427 mm.
+    //   (computed - observed) -2, -2 and +4 mm. Each height difference's
+    //   a-priori sigma: S = hypot(50, 2.195) = 50.048158, cos z = -2.195 / S,
+    //   sigma_S = hypot(2 mm, 2 ppm S) = 2.002503 mm, sigma_z = 3" / sqrt 2,
+    //   and the target height's 2 mm: sqrt((cos z sigma_S)^2 + (50 sigma_z)^2
+    //   + (2 mm)^2) = 2.066915 mm. v'Pv = 24e-6 / (2.066915 mm)^2 = 5.618,
+    //   inside chi-square(2)'s 0.051 to 7.378, so the global test passes and
+    //   the precision is the a-priori one: a mean of three, 2.066915 / sqrt 3 =
+    //   1.193334 mm. The instrument height, measured once to the settings' 2
+    //   mm, is in every height difference alike, so it is in none of their
+    //   weights and is added to the mark's height after: sigma hypot(1.193334,
+    //   2) = 2.328958 mm. (The round before scaled by the variance factor: the
+    //   a posteriori 2 mm, and hypot(2, 2) = 2.828427 mm.)
     std::vector<Shot> shots;
     std::size_t index = 1;
     observe(shots, index, kA, true);
@@ -297,7 +327,7 @@ TEST(ReductionResection, TheHeightIsTheWeightedMeanOfTrigonometricHeightsWithCur
     ASSERT_TRUE(resection.elevation.has_value());
     EXPECT_NEAR(*resection.elevation, 52.346829305, 1e-9);
     ASSERT_TRUE(resection.sigmaElevation.has_value());
-    EXPECT_NEAR(*resection.sigmaElevation, 0.002828427, 1e-9);
+    EXPECT_NEAR(*resection.sigmaElevation, 0.002328958, 1e-9);
     ASSERT_TRUE(resection.height.has_value());
     ASSERT_EQ(resection.height->residuals.size(), 3U);
     EXPECT_NEAR(resection.height->residuals[0].residual, -0.002, 1e-9);
@@ -729,12 +759,13 @@ TEST(ReductionResection, ATraverseAdjustmentDoesNotReplaceAResectionWithAnotherS
 // on the danger circle, on one line with its targets, or with two targets a
 // few millimetres apart, is not exactly any of them, and a least squares
 // puts it wherever the errors do - tens of metres off. Each of these is
-// refused with its geometry named, and leaves nothing behind: where its least
+// refused with its geometry named - the shape it comes nearest, with its
+// numbers at the solution - and leaves nothing behind: where its least
 // squares solves, by the station's own a-priori precision (resectSetup: its
 // ellipse at 95 % reaches past where the least squares' linear model holds);
-// where the least squares fails - rank deficient at the start the closed
-// form gives - by that. Each test has a case of the first kind (a
-// resectSetup without the precision test places those stations).
+// where the least squares is rank deficient from every start, by that. Each
+// test has a case of the first kind (a resectSetup without the precision test
+// places those stations).
 
 namespace {
 
@@ -777,9 +808,14 @@ TEST(ReductionResection, AStationOnTheDangerCircleReadWithUnequalErrorsIsRefused
         EXPECT_EQ(findPoint(*outcome, "R"), nullptr) << errors[0];
         EXPECT_EQ(findPoint(*outcome, "Q"), nullptr) << errors[0];
         EXPECT_TRUE(outcome->report.resections.empty());
+        // Where its least squares put it, on the circle - how near, the
+        // errors decide - and the precision that refuses it.
+        EXPECT_EQ(warningsWith(outcome->report, "It was not resected: it stands "), 1U)
+            << allWarnings(outcome->report);
         EXPECT_EQ(warningsWith(outcome->report,
-                               "It was not resected: it stands near the circle through A, B and "
-                               "C (the danger circle)"),
+                               " from the circle through A, B and C (the danger circle, radius "
+                               "100.000 m), and at the precision of its observations it is "
+                               "uncertain by "),
                   1U)
             << allWarnings(outcome->report);
         expectNothingLeftBehind(*outcome);
@@ -789,9 +825,11 @@ TEST(ReductionResection, AStationOnTheDangerCircleReadWithUnequalErrorsIsRefused
 TEST(ReductionResection, AStationOnOneLineWithItsTargetsReadWithErrorsIsRefused)
 {
     // A 100 m and B 200 m due north of R, C 100 m due south, read +1", -1",
-    // +0.5" off (its least squares fails) and -2", +0.5", +1" off (it solves,
-    // 304 m along the meridian, and the precision refuses it); before, such
-    // a station was placed 25 to 88 m along the line.
+    // +0.5" off (its least squares is rank deficient from every start) and
+    // -2", +0.5", +1" off (it solves, 304 m along the meridian, and the
+    // precision refuses it); before the precision criterion, such a station
+    // was placed 25 to 88 m along the line. Either way the refusal says how
+    // near one line its sight lines are.
     const Mark a{"A", 1140.0, 1030.0};
     const Mark b{"B", 1240.0, 1030.0};
     const Mark c{"C", 940.0, 1030.0};
@@ -806,7 +844,13 @@ TEST(ReductionResection, AStationOnOneLineWithItsTargetsReadWithErrorsIsRefused)
         ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
         EXPECT_EQ(findPoint(*outcome, "R"), nullptr) << errors[0];
         EXPECT_EQ(warningsWith(outcome->report,
-                               "It was not resected: it stands nearly on one line with A, B and C"),
+                               "It was not resected: its sight lines to A, B and C are within "),
+                  1U)
+            << allWarnings(outcome->report);
+        EXPECT_EQ(warningsWith(outcome->report, errors[0] == 1.0
+                                                    ? "its least squares cannot fix it (the "
+                                                      "network is rank deficient"
+                                                    : "at the precision of its observations"),
                   1U)
             << allWarnings(outcome->report);
         expectNothingLeftBehind(*outcome);
@@ -823,7 +867,9 @@ TEST(ReductionResection, TwoMarksAFewMillimetresApartDoNotFixAStationWithTheirDi
     // time, 20" off the first: the repeated reading is redundancy the turn
     // cannot absorb, so its least squares flags both readings of M before
     // the precision refuses the station - and the refusal takes the flags
-    // back.
+    // back. The refusal gives the pair's separation and their measured
+    // distance, the longer of hypot(122, 100) = 157.747 and hypot(122,
+    // 100.005) = 157.750 m.
     const Mark m{"M", 1162.0, 1130.0};
     const Mark m2{"M2", 1162.0, 1130.005};
     const double toM = std::hypot(122.0, 100.0);
@@ -840,8 +886,8 @@ TEST(ReductionResection, TwoMarksAFewMillimetresApartDoNotFixAStationWithTheirDi
         ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
         EXPECT_EQ(findPoint(*outcome, "R"), nullptr) << again;
         EXPECT_EQ(warningsWith(outcome->report,
-                               "It was not resected: M and M2 are nearly at one place (5.0 mm "
-                               "apart, "),
+                               "It was not resected: M and M2 are 5.0 mm apart, 157.750 m from "
+                               "it, and at the precision of its observations"),
                   1U)
             << allWarnings(outcome->report);
         EXPECT_EQ(warningsWith(outcome->report, "at the precision of its observations"), 1U)
@@ -863,9 +909,10 @@ TEST(ReductionResection, TwoOfThreeTargetsAFewMillimetresApartDoNotFixAStationBy
     const auto outcome = reduceAndAdjust(marksAnd({kA, a2, kC}, shots), bareSettings(), {});
     ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
     EXPECT_EQ(findPoint(*outcome, "R"), nullptr);
-    EXPECT_EQ(warningsWith(outcome->report,
-                           "It was not resected: A and A2 are nearly at one place (5.0 mm apart"),
+    EXPECT_EQ(warningsWith(outcome->report, "It was not resected: A and A2 are 5.0 mm apart, "),
               1U)
+        << allWarnings(outcome->report);
+    EXPECT_EQ(warningsWith(outcome->report, "at the precision of its observations"), 1U)
         << allWarnings(outcome->report);
     expectNothingLeftBehind(*outcome);
 }
@@ -1132,8 +1179,10 @@ TEST(ReductionResection, TheHeightIsAWeightedMeanOverSightsOfDifferentLengths)
     // separate script puts at 2.066915 mm for A and B and 2.869024 mm for D.
     // The weighted mean: 52.345537986 (the plain mean would be 52.345975828);
     // residuals (computed - observed) -0.708681, -0.708681 and +2.730889 mm;
-    // a posteriori sigma sqrt(v'Pv / 2 / sum p) = 0.983700 mm, and with the
-    // instrument height's 2 mm, hypot = 2.228826 mm.
+    // v'Pv 1.141 on 2 degrees of freedom, so the global test passes and the
+    // precision is the a-priori 1 / sqrt(sum p) = 1.302290 mm, and with the
+    // instrument height's 2 mm, hypot = 2.386621 mm (the a posteriori
+    // 0.983700 mm the round before gave 2.228826).
     const Mark d{"D", 1240.0, 1030.0};
     std::vector<Shot> shots;
     std::size_t index = 1;
@@ -1154,7 +1203,7 @@ TEST(ReductionResection, TheHeightIsAWeightedMeanOverSightsOfDifferentLengths)
     EXPECT_NEAR(resection.height->residuals[1].residual, -0.000708681, 1e-9);
     EXPECT_NEAR(resection.height->residuals[2].residual, 0.002730889, 1e-9);
     ASSERT_TRUE(resection.sigmaElevation.has_value());
-    EXPECT_NEAR(*resection.sigmaElevation, 0.002228826, 1e-9);
+    EXPECT_NEAR(*resection.sigmaElevation, 0.002386621, 1e-9);
 }
 
 TEST(ReductionResection, AResectedSetupFollowsItsStationWhenANetworkMovesIt)
@@ -1393,6 +1442,704 @@ TEST(ReductionResection, ASecondBlockOnAStationAlreadyResectedSaysWhatItCouldBeO
                            "setup on a placed station is not oriented on the points it observes, "
                            "so its directions are not oriented and its targets are not "
                            "radiated."),
+              1U)
+        << allWarnings(outcome->report);
+}
+
+// ---- Where the least squares starts, and a station with two answers ----------------
+//
+// Gauss-Newton finds the solution nearest its start. The resection starts it
+// from every point where two of the station's loci meet, best first, and
+// refuses a station whose observations fit two positions alike (resectSetup).
+
+TEST(ReductionResection, TwoPositionsItsObservationsFitAlikeAreRefusedNotEitherPlaced)
+{
+    // A (N 1000, E 1000) and A2 5 mm east of it, each read with a direction
+    // and a distance, and C 60 m east of A by direction alone: one distance
+    // and one angle, two circles that meet twice. R really stands 100 m from
+    // A at bearing 130 deg (N 935.721239, E 1076.604444), its circle turned
+    // 20 deg, the sights level; A read 2" low and 2 mm short. By the separate
+    // script of the model of ResidualsAndPrecisionMatchAnIndependentLeastSquares,
+    // its least squares has two solutions: near R, N 935.723203, E 1076.604787
+    // (v'Pv 0.625), and N 906.663885, E 1035.888245 (v'Pv 0.057), 50.023 m
+    // away - where the round before, started from the rigid fit on the close
+    // pair, placed the station, 32 mm uncertain at 95 %. Their squares differ
+    // by 0.568, under chi-square(2) at 95 % (5.99), and each lies far outside
+    // the other's ellipse (Mahalanobis^2 1.3e8): the observations do not tell
+    // them apart, and neither is placed. The pair's measured distances are
+    // 99.998 (A, 2 mm short) and 99.996 m.
+    const Mark a{"A", 1000.0, 1000.0};
+    const Mark a2{"A2", 1000.0, 1000.005};
+    const Mark c{"C", 1000.0, 1060.0};
+    const double rN = 1000.0 + 100.0 * std::cos(deg(130));
+    const double rE = 1000.0 + 100.0 * std::sin(deg(130));
+    std::vector<Shot> shots;
+    std::size_t index = 1;
+    level(shots, index, rN, rE, a, deg(20), true, arcSeconds(-2.0),
+          std::hypot(a.northing - rN, a.easting - rE) - 0.002);
+    level(shots, index, rN, rE, a2, deg(20), true);
+    level(shots, index, rN, rE, c, deg(20), false);
+    shootQ(shots, index);
+    const auto outcome = reduceAndAdjust(marksAnd({a, a2, c}, shots), bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    EXPECT_EQ(findPoint(*outcome, "R"), nullptr);
+    EXPECT_EQ(findPoint(*outcome, "Q"), nullptr);
+    EXPECT_TRUE(outcome->report.resections.empty());
+    EXPECT_EQ(warningsWith(outcome->report,
+                           "It was not resected: A and A2 are 5.0 mm apart, 99.998 m from it, and "
+                           "its observations fit two positions 50.023 m apart (N 906.664 "
+                           "E 1035.888 and N 935.723 E 1076.605: weighted squares of residuals "
+                           "0.057 and 0.625, where the station's 95 % confidence region takes in "
+                           "all within 5.99 of the least), so they do not fix it."),
+              1U)
+        << allWarnings(outcome->report);
+    expectNothingLeftBehind(*outcome);
+}
+
+TEST(ReductionResection, AFourthDirectionFixesAStationWhoseFirstThreeTargetsAreOnItsDangerCircle)
+{
+    // A, B and C on the circle of radius 100 about N 1000, E 1000, and R on
+    // it at N 1000, E 900 (AStationOnTheDangerCircleIsRefused); D 100 m west
+    // of R, N 1000, E 800, off that circle. Four directions fix R. The round
+    // before started from the first three read, on the danger circle, and
+    // refused R about half the time, by the errors - and never when D was
+    // read first. Exact readings put R where they were made from, whichever
+    // is read first. A read 2" low, B 0.5" and C 1" high, D exact put it,
+    // read either way round, where the separate script puts it:
+    // N 999.999959041, E 900.001454430, 1.5 mm off (v'Pv 0.113, one degree of
+    // freedom).
+    const Mark a{"A", 1100.0, 1000.0};
+    const Mark b{"B", 1000.0, 1100.0};
+    const Mark c{"C", 900.0, 1000.0};
+    const Mark d{"D", 1000.0, 800.0};
+    const double rN = 1000.0;
+    const double rE = 900.0;
+    for (const bool errors : {false, true}) {
+        for (const bool dFirst : {false, true}) {
+            std::vector<Shot> shots;
+            std::size_t index = 1;
+            if (dFirst) {
+                level(shots, index, rN, rE, d, deg(20), false);
+            }
+            level(shots, index, rN, rE, a, deg(20), false, errors ? arcSeconds(-2.0) : 0.0);
+            level(shots, index, rN, rE, b, deg(20), false, errors ? arcSeconds(0.5) : 0.0);
+            level(shots, index, rN, rE, c, deg(20), false, errors ? arcSeconds(1.0) : 0.0);
+            if (!dFirst) {
+                level(shots, index, rN, rE, d, deg(20), false);
+            }
+            const auto outcome =
+                reduceAndAdjust(marksAnd({a, b, c, d}, shots), bareSettings(), {});
+            ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+            const ComputedPoint* r = findPoint(*outcome, "R");
+            ASSERT_NE(r, nullptr) << errors << dFirst << "\n" << allWarnings(outcome->report);
+            EXPECT_NEAR(r->northing, errors ? 999.999959041 : rN, 1e-8) << errors << dFirst;
+            EXPECT_NEAR(r->easting, errors ? 900.001454430 : rE, 1e-8) << errors << dFirst;
+            ASSERT_EQ(outcome->report.resections.size(), 1U);
+            EXPECT_EQ(outcome->report.resections[0].horizontal.redundancy, 1U);
+        }
+    }
+}
+
+TEST(ReductionResection, ADistanceToOneTargetFixesAStationOnTheDangerCircleOfItsDirections)
+{
+    // R on the danger circle of A, B and C again, now with its distance to A,
+    // hypot(100, 100) = 141.421356 m, level: the distance's circle about A
+    // meets the danger circle at R and at B, a target - so at R alone. Exact
+    // readings put R where they were made; A read 1" high and 1 mm long, B 1"
+    // low and C 0.5" high put it where the separate script puts it:
+    // N 999.998828191, E 899.999757600. The round before refused both: the
+    // closed form of its three directions found the danger circle, and it
+    // looked no further.
+    const Mark a{"A", 1100.0, 1000.0};
+    const Mark b{"B", 1000.0, 1100.0};
+    const Mark c{"C", 900.0, 1000.0};
+    const double rN = 1000.0;
+    const double rE = 900.0;
+    for (const bool errors : {false, true}) {
+        std::vector<Shot> shots;
+        std::size_t index = 1;
+        level(shots, index, rN, rE, a, deg(20), true, errors ? arcSeconds(1.0) : 0.0,
+              std::hypot(100.0, 100.0) + (errors ? 0.001 : 0.0));
+        level(shots, index, rN, rE, b, deg(20), false, errors ? arcSeconds(-1.0) : 0.0);
+        level(shots, index, rN, rE, c, deg(20), false, errors ? arcSeconds(0.5) : 0.0);
+        const auto outcome = reduceAndAdjust(marksAnd({a, b, c}, shots), bareSettings(), {});
+        ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+        const ComputedPoint* r = findPoint(*outcome, "R");
+        ASSERT_NE(r, nullptr) << errors << "\n" << allWarnings(outcome->report);
+        EXPECT_NEAR(r->northing, errors ? 999.998828191 : rN, 1e-8) << errors;
+        EXPECT_NEAR(r->easting, errors ? 899.999757600 : rE, 1e-8) << errors;
+    }
+}
+
+// ---- A network after a resection ----------------------------------------------------
+
+TEST(ReductionResection, ANetworkTakesNoReadingItsResectionRejected)
+{
+    // The station of AGrossReadingIsRejectedAndTheStationOrientationAndShots-
+    // ComeFromTheRest, with three gross readings: B's direction 60" high, read
+    // first; D's distance 30 mm long; and C's mark 50 mm higher than its
+    // sight says, so its height difference is 50 mm out. Adjusted as a network
+    // of plan and heights, A, B, C and D held, automatic rejection on. The
+    // resection rejects all three. The network takes none of them - not B's
+    // direction as an angle, nor as the setup's reference, which every angle
+    // is measured from, whether the setup names B as its backsight or names
+    // none (the round before made B the reference, put its 60" into every
+    // angle, rejected the right ones and left R 6.8 mm off, while the report
+    // called B rejected); not D's distance; not C's height difference - so the
+    // network rejects nothing of its own. Everything else is exact: R stays
+    // where it was made from, at A's, B's and D's height, 50 + 2.345 =
+    // 52.345, and Q, radiated at reading 0, 100 m level, at N 1040 +
+    // 100 cos 20 = 1133.969262079, E 1030 + 100 sin 20 = 1064.202014333, at
+    // R's height.
+    const Mark d{"D", 1240.0, 1030.0};
+    std::vector<Shot> shots;
+    std::size_t index = 1;
+    observe(shots, index, kB, true, 50.0, arcSeconds(60.0));
+    observe(shots, index, kA, true);
+    observe(shots, index, kC, true);
+    observe(shots, index, d, true, 200.030);
+    bothFaces(shots, "Q", index, 0.0, deg(90), 100.0, kInstrumentHeight);
+    ReductionSettings settings = bareSettings();
+    settings.autoRejectOutliers = true;
+    settings.method = AdjustmentMethod::Network;
+    settings.networkDimension = NetworkDimension::HorizontalAndLevels;
+    for (const char* id : {"A", "B", "C", "D"}) {
+        settings.control.push_back(ControlSelection{ControlPoint::fixed3d(id), ControlOrigin::File});
+    }
+    for (const char* backsight : {"", "B"}) {
+        SurveyProject project = marksAnd({kA, kB, kC, d}, shots);
+        project.points[2].elevation = 50.050; // C
+        project.stations[0].backsightPointId = backsight;
+        const auto outcome = reduceAndAdjust(project, settings, {});
+        ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+        const ReductionReport& report = outcome->report;
+        ASSERT_EQ(report.resections.size(), 1U) << allWarnings(report);
+        const ResectionReport& resection = report.resections[0];
+        std::vector<std::string> rejected = resection.horizontal.rejectedOutliers;
+        std::sort(rejected.begin(), rejected.end());
+        EXPECT_EQ(rejected,
+                  (std::vector<std::string>{"direction at S1: B", "distance at S1: D"}))
+            << backsight;
+        ASSERT_TRUE(resection.height.has_value());
+        EXPECT_EQ(resection.height->rejectedOutliers,
+                  (std::vector<std::string>{"height difference at S1: C"}))
+            << backsight;
+        const ReportObservation* row = findRow(report, "horizontal direction", "B");
+        ASSERT_NE(row, nullptr);
+        EXPECT_TRUE(row->rejected);
+        EXPECT_NE(row->rejectionReason.find("Baarda w"), std::string::npos)
+            << row->rejectionReason;
+
+        ASSERT_EQ(report.adjustments.size(), 2U) << backsight;
+        bool angleFromA = false;
+        for (const AdjustmentReport& network : report.adjustments) {
+            EXPECT_TRUE(network.rejectedOutliers.empty()) << backsight << " " << network.method;
+            for (const ReportResidual& residual : network.residuals) {
+                const std::string& label = residual.observation;
+                EXPECT_EQ(label.find("B ->"), std::string::npos) << backsight << " " << label;
+                EXPECT_EQ(label.find("-> B"), std::string::npos) << backsight << " " << label;
+                EXPECT_NE(label, "distance at S1: D") << backsight;
+                EXPECT_NE(label, "height difference at S1: C") << backsight;
+                angleFromA = angleFromA || label == "angle at S1: A -> C";
+            }
+        }
+        EXPECT_TRUE(angleFromA) << backsight;
+
+        const ComputedPoint* r = findPoint(*outcome, "R");
+        ASSERT_NE(r, nullptr);
+        EXPECT_EQ(r->method, ComputationMethod::NetworkLeastSquares);
+        EXPECT_NEAR(r->northing, kStationNorthing, 1e-8) << backsight;
+        EXPECT_NEAR(r->easting, kStationEasting, 1e-8) << backsight;
+        ASSERT_TRUE(r->elevation.has_value());
+        EXPECT_NEAR(*r->elevation, kStationHeight, 1e-9) << backsight;
+        const ComputedPoint* q = findPoint(*outcome, "Q");
+        ASSERT_NE(q, nullptr);
+        EXPECT_NEAR(q->northing, 1133.969262079, 1e-8) << backsight;
+        EXPECT_NEAR(q->easting, 1064.202014333, 1e-8) << backsight;
+    }
+}
+
+// ---- When a resection is tried ------------------------------------------------------
+
+TEST(ReductionResection, AFreeStationOnAMarkAnEarlierFreeStationShotIsResectedFromItsOwnBlock)
+{
+    // Two free stations, neither naming a backsight, their circles at north.
+    // R1 (N 1050, E 1050) is resected from A (N 1000, E 1000) and B
+    // (N 1000, E 1100) and reads R2's mark 100 m due north 20" high, so it
+    // radiates R2 to N 1050 + 100 cos 20" = 1149.999999530, E 1050 +
+    // 100 sin 20" = 1050.009696274. R2's own setup reads C (N 1200, E 1000)
+    // and D (N 1200, E 1100) with distances and shoots Q2 due east 10 m.
+    // Nothing orients that setup but its block, so it is resected from it -
+    // R2 at N 1150, E 1050, where its readings were made - and the radiation
+    // from R1 becomes a check of it: resection less radiation +0.000000470 N,
+    // -0.009696274 E, 9.7 mm, in height 0 (level sights). Q2 at N 1150,
+    // E 1060. The round before left R2 on the radiation and its setup
+    // unoriented, and dropped Q2.
+    const Mark a{"A", 1000.0, 1000.0};
+    const Mark b{"B", 1000.0, 1100.0};
+    const Mark c{"C", 1200.0, 1000.0};
+    const Mark d{"D", 1200.0, 1100.0};
+    const Mark r2{"R2", 1150.0, 1050.0};
+    SurveyProject project;
+    for (const Mark& mark : {a, b, c, d}) {
+        project.points.push_back(point(mark.id, mark.northing, mark.easting, 50.0));
+    }
+    for (const char* id : {"R1", "R2", "Q2"}) {
+        project.unpositionedPoints.push_back(unpositioned(id));
+    }
+    std::vector<Shot> atR1;
+    std::size_t index = 1;
+    level(atR1, index, 1050.0, 1050.0, a, 0.0, true);
+    level(atR1, index, 1050.0, 1050.0, b, 0.0, true);
+    level(atR1, index, 1050.0, 1050.0, r2, 0.0, true, arcSeconds(20.0));
+    project.stations.push_back(setup("S1", "R1", kInstrumentHeight, {}, atR1));
+    std::vector<Shot> atR2;
+    index = 1;
+    level(atR2, index, 1150.0, 1050.0, c, 0.0, true);
+    level(atR2, index, 1150.0, 1050.0, d, 0.0, true);
+    bothFaces(atR2, "Q2", index, deg(90), deg(90), 10.0, kInstrumentHeight);
+    project.stations.push_back(setup("S2", "R2", kInstrumentHeight, {}, atR2));
+
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ReductionReport& report = outcome->report;
+    ASSERT_EQ(report.resections.size(), 2U) << allWarnings(report);
+    EXPECT_EQ(report.resections[1].stationId, "S2");
+    const ComputedPoint* resected = findPoint(*outcome, "R2");
+    ASSERT_NE(resected, nullptr);
+    EXPECT_EQ(resected->method, ComputationMethod::Resection);
+    EXPECT_NEAR(resected->northing, 1150.0, 1e-8);
+    EXPECT_NEAR(resected->easting, 1050.0, 1e-8);
+
+    const ResectionReport& second = report.resections[1];
+    EXPECT_EQ(second.radiatedFrom, "S1");
+    ASSERT_TRUE(second.radiatedNorthingDifference.has_value());
+    EXPECT_NEAR(*second.radiatedNorthingDifference, 0.000000470, 1e-9);
+    EXPECT_NEAR(*second.radiatedEastingDifference, -0.009696274, 1e-9);
+    const MisclosureReport* check = nullptr;
+    for (const MisclosureReport& misclosure : report.misclosures) {
+        if (misclosure.name == "R2 by resection at setup S2, against its radiation from setup S1") {
+            check = &misclosure;
+        }
+    }
+    ASSERT_NE(check, nullptr);
+    EXPECT_NEAR(*check->linear, 0.009696274, 1e-9);
+    ASSERT_TRUE(check->height.has_value());
+    EXPECT_NEAR(*check->height, 0.0, 1e-9);
+    EXPECT_EQ(warningsWith(report, "Setup S2 stands on R2, which setup S1 radiated: its own "
+                                   "resection from C and D places it 9.7 mm from there, and the "
+                                   "radiation is a check of it"),
+              1U)
+        << allWarnings(report);
+    EXPECT_EQ(warningsWith(report, "has no backsight"), 0U) << allWarnings(report);
+
+    const ComputedPoint* q2 = findPoint(*outcome, "Q2");
+    ASSERT_NE(q2, nullptr);
+    EXPECT_NEAR(q2->northing, 1150.0, 1e-8);
+    EXPECT_NEAR(q2->easting, 1060.0, 1e-8);
+}
+
+TEST(ReductionResection, AFreeStationOnARadiatedMarkWithTooFewPlacedPointsSaysWhy)
+{
+    // The test above with D left out of R2's block: C alone, one placed point,
+    // does not resect R2, so its setup - naming no backsight - is not
+    // oriented, and the warning says what a resection would have needed.
+    const Mark a{"A", 1000.0, 1000.0};
+    const Mark b{"B", 1000.0, 1100.0};
+    const Mark c{"C", 1200.0, 1000.0};
+    const Mark r2{"R2", 1150.0, 1050.0};
+    SurveyProject project;
+    for (const Mark& mark : {a, b, c}) {
+        project.points.push_back(point(mark.id, mark.northing, mark.easting, 50.0));
+    }
+    for (const char* id : {"R1", "R2", "Q2"}) {
+        project.unpositionedPoints.push_back(unpositioned(id));
+    }
+    std::vector<Shot> atR1;
+    std::size_t index = 1;
+    level(atR1, index, 1050.0, 1050.0, a, 0.0, true);
+    level(atR1, index, 1050.0, 1050.0, b, 0.0, true);
+    level(atR1, index, 1050.0, 1050.0, r2, 0.0, true);
+    project.stations.push_back(setup("S1", "R1", kInstrumentHeight, {}, atR1));
+    std::vector<Shot> atR2;
+    index = 1;
+    level(atR2, index, 1150.0, 1050.0, c, 0.0, true);
+    bothFaces(atR2, "Q2", index, deg(90), deg(90), 10.0, kInstrumentHeight);
+    project.stations.push_back(setup("S2", "R2", kInstrumentHeight, {}, atR2));
+
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    ASSERT_EQ(outcome->report.resections.size(), 1U);
+    const ComputedPoint* radiated = findPoint(*outcome, "R2");
+    ASSERT_NE(radiated, nullptr);
+    EXPECT_EQ(radiated->method, ComputationMethod::Radiation);
+    EXPECT_EQ(findPoint(*outcome, "Q2"), nullptr);
+    EXPECT_EQ(warningsWith(outcome->report,
+                           "Setup S2 has no backsight; it observes 1 placed point (C), but a "
+                           "setup on a placed station is not oriented on the points it observes, "
+                           "so its directions are not oriented and its targets are not radiated. "
+                           "It was not resected: it observes 1 placed point with a direction (C), "
+                           "1 of them with a distance as well, where a resection needs two placed "
+                           "points observed with a direction and a distance, or three observed "
+                           "with a direction."),
+              1U)
+        << allWarnings(outcome->report);
+}
+
+TEST(ReductionResection, AResectionComesBeforeTheCircleAsSet)
+{
+    // S1 on K (N 1000, E 1000) backsights R, which nothing places; its circle
+    // was set to 44 deg on R, which is really at azimuth 45 - a degree slipped
+    // - and it reads R there, 70.711 m level. S2 on R (N 1050, E 1050), naming
+    // no backsight, reads A (N 1100, E 1000) and B (N 1000, E 1100) with
+    // distances, its circle at north, and shoots Q due east 10 m. The
+    // resection comes first: R where its readings were made, and S1 oriented
+    // on it, 45 - 44 = +1 deg - the slip found - where the circle taken as a
+    // grid azimuth would radiate R 1.23 m off. Q at N 1050, E 1060.
+    const Mark k{"K", 1000.0, 1000.0};
+    const Mark a{"A", 1100.0, 1000.0};
+    const Mark b{"B", 1000.0, 1100.0};
+    const Mark r{"R", 1050.0, 1050.0};
+    SurveyProject project;
+    for (const Mark& mark : {k, a, b}) {
+        project.points.push_back(point(mark.id, mark.northing, mark.easting, 50.0));
+    }
+    project.unpositionedPoints.push_back(unpositioned("R"));
+    project.unpositionedPoints.push_back(unpositioned("Q"));
+    std::vector<Shot> atK;
+    std::size_t index = 1;
+    level(atK, index, k.northing, k.easting, r, deg(1), true);
+    SurveyStation first = setup("S1", "K", kInstrumentHeight, "R", atK);
+    first.backsightAzimuth = deg(44);
+    project.stations.push_back(first);
+    std::vector<Shot> atR;
+    index = 1;
+    level(atR, index, r.northing, r.easting, a, 0.0, true);
+    level(atR, index, r.northing, r.easting, b, 0.0, true);
+    bothFaces(atR, "Q", index, deg(90), deg(90), 10.0, kInstrumentHeight);
+    project.stations.push_back(setup("S2", "R", kInstrumentHeight, {}, atR));
+
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* resected = findPoint(*outcome, "R");
+    ASSERT_NE(resected, nullptr);
+    EXPECT_EQ(resected->method, ComputationMethod::Resection);
+    EXPECT_NEAR(resected->northing, 1050.0, 1e-8);
+    EXPECT_NEAR(resected->easting, 1050.0, 1e-8);
+    ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
+    EXPECT_NEAR(*outcome->report.setups[0].orientationCorrection, deg(1), 1e-10);
+    EXPECT_EQ(warningsWith(outcome->report, "circle"), 0U) << allWarnings(outcome->report);
+    const ComputedPoint* q = findPoint(*outcome, "Q");
+    ASSERT_NE(q, nullptr);
+    EXPECT_NEAR(q->northing, 1050.0, 1e-8);
+    EXPECT_NEAR(q->easting, 1060.0, 1e-8);
+}
+
+TEST(ReductionResection, AResectionTakesThePointsAnEarlierResectionPlaced)
+{
+    // Two free stations resected one at a time, in file order. R1 (N 1050,
+    // E 1050) reads A (N 1000, E 1000) and B (N 1000, E 1100) with distances,
+    // its circle at north, and radiates E at reading 0, 50 m: N 1100, E 1050.
+    // R2 (N 1150, E 1050) reads C (N 1200, E 1000) and D (N 1200, E 1100),
+    // entered, and E, which only R1 places. R2 is resected once R1 has
+    // radiated: from all three - three directions and three distances,
+    // redundancy 3 - not from the two entered ones it could have had at the
+    // start (redundancy 1).
+    const Mark a{"A", 1000.0, 1000.0};
+    const Mark b{"B", 1000.0, 1100.0};
+    const Mark c{"C", 1200.0, 1000.0};
+    const Mark d{"D", 1200.0, 1100.0};
+    const Mark e{"E", 1100.0, 1050.0};
+    SurveyProject project;
+    for (const Mark& mark : {a, b, c, d}) {
+        project.points.push_back(point(mark.id, mark.northing, mark.easting, 50.0));
+    }
+    for (const char* id : {"R1", "R2", "E"}) {
+        project.unpositionedPoints.push_back(unpositioned(id));
+    }
+    std::vector<Shot> atR1;
+    std::size_t index = 1;
+    level(atR1, index, 1050.0, 1050.0, a, 0.0, true);
+    level(atR1, index, 1050.0, 1050.0, b, 0.0, true);
+    level(atR1, index, 1050.0, 1050.0, e, 0.0, true);
+    project.stations.push_back(setup("S1", "R1", kInstrumentHeight, {}, atR1));
+    std::vector<Shot> atR2;
+    index = 1;
+    level(atR2, index, 1150.0, 1050.0, c, 0.0, true);
+    level(atR2, index, 1150.0, 1050.0, d, 0.0, true);
+    level(atR2, index, 1150.0, 1050.0, e, 0.0, true);
+    project.stations.push_back(setup("S2", "R2", kInstrumentHeight, {}, atR2));
+
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    ASSERT_EQ(outcome->report.resections.size(), 2U) << allWarnings(outcome->report);
+    const ResectionReport& second = outcome->report.resections[1];
+    EXPECT_EQ(second.stationId, "S2");
+    EXPECT_EQ(second.targets, (std::vector<std::string>{"C", "D", "E"}));
+    EXPECT_EQ(second.horizontal.redundancy, 3U);
+    EXPECT_NEAR(second.northing, 1150.0, 1e-8);
+    EXPECT_NEAR(second.easting, 1050.0, 1e-8);
+}
+
+TEST(ReductionResection, ARefusedResectionIsTriedAgainWhenAnotherOfItsTargetsIsPlaced)
+{
+    // S1 on R reads A, B and C on its danger circle, exactly, and D (N 1000,
+    // E 800), which nothing places yet: refused, the three placed ones alone
+    // on the circle. Then S2 stands on M (N 1000, E 700), known only by the
+    // file's own coordinates, backsights L (N 1100, E 700) due north at
+    // reading 0, and radiates D due east, 100 m. With D placed, S1 is tried
+    // again, and resected from all four where its readings were made.
+    const Mark a{"A", 1100.0, 1000.0};
+    const Mark b{"B", 1000.0, 1100.0};
+    const Mark c{"C", 900.0, 1000.0};
+    const Mark d{"D", 1000.0, 800.0};
+    const Mark l{"L", 1100.0, 700.0};
+    SurveyProject project;
+    for (const Mark& mark : {a, b, c, l}) {
+        project.points.push_back(point(mark.id, mark.northing, mark.easting, 50.0));
+    }
+    project.points.push_back(point("M", 1000.0, 700.0, 50.0, CoordinateSource::Calculated));
+    project.unpositionedPoints.push_back(unpositioned("R"));
+    project.unpositionedPoints.push_back(unpositioned("D"));
+    std::vector<Shot> atR;
+    std::size_t index = 1;
+    for (const Mark& mark : {a, b, c, d}) {
+        level(atR, index, 1000.0, 900.0, mark, deg(20), false);
+    }
+    project.stations.push_back(setup("S1", "R", kInstrumentHeight, {}, atR));
+    std::vector<Shot> atM;
+    index = 1;
+    level(atM, index, 1000.0, 700.0, l, 0.0, true);
+    level(atM, index, 1000.0, 700.0, d, 0.0, true);
+    project.stations.push_back(setup("S2", "M", kInstrumentHeight, "L", atM));
+
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* r = findPoint(*outcome, "R");
+    ASSERT_NE(r, nullptr) << allWarnings(outcome->report);
+    EXPECT_EQ(r->method, ComputationMethod::Resection);
+    EXPECT_NEAR(r->northing, 1000.0, 1e-8);
+    EXPECT_NEAR(r->easting, 900.0, 1e-8);
+    ASSERT_EQ(outcome->report.resections.size(), 1U);
+    EXPECT_EQ(outcome->report.resections[0].targets,
+              (std::vector<std::string>{"A", "B", "C", "D"}));
+}
+
+TEST(ReductionResection, AStationAnotherSetupRadiatedKeepsItWhileItsSetupWaitsForItsBacksight)
+{
+    // S1 on K (N 990, E 1030) backsights A and radiates R, read 30" high,
+    // 50 m due north: N 990 + 50 cos 30" = 1039.999999471, E 1030 +
+    // 50 sin 30" = 1030.007272205. S2 on R names a backsight, X, that nothing
+    // places, and reads A and B with distances - enough for a resection. But
+    // S2 names a backsight, so it is oriented on that or not at all: R keeps
+    // the position S1 gave it, and S2 is given up for want of X.
+    const Mark k{"K", 990.0, 1030.0};
+    SurveyProject project;
+    for (const Mark& mark : {k, kA, kB}) {
+        project.points.push_back(point(mark.id, mark.northing, mark.easting, 50.0));
+    }
+    project.unpositionedPoints.push_back(unpositioned("R"));
+    project.unpositionedPoints.push_back(unpositioned("X"));
+    std::vector<Shot> atK;
+    std::size_t index = 1;
+    level(atK, index, k.northing, k.easting, kA, 0.0, true);
+    level(atK, index, k.northing, k.easting, Mark{"R", kStationNorthing, kStationEasting}, 0.0,
+          true, arcSeconds(30.0));
+    project.stations.push_back(setup("S1", "K", kInstrumentHeight, "A", atK));
+    std::vector<Shot> atR;
+    index = 1;
+    level(atR, index, kStationNorthing, kStationEasting, kA, deg(20), true);
+    level(atR, index, kStationNorthing, kStationEasting, kB, deg(20), true);
+    project.stations.push_back(setup("S2", "R", kInstrumentHeight, "X", atR));
+
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    EXPECT_TRUE(outcome->report.resections.empty());
+    const ComputedPoint* r = findPoint(*outcome, "R");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(r->method, ComputationMethod::Radiation);
+    EXPECT_NEAR(r->northing, 1039.999999471, 1e-8);
+    EXPECT_NEAR(r->easting, 1030.007272205, 1e-8);
+    EXPECT_EQ(warningsWith(outcome->report, "Setup S2 cannot be oriented: its backsight X has no "
+                                            "position"),
+              1U)
+        << allWarnings(outcome->report);
+}
+
+TEST(ReductionResection, AResectedSetupIsOrientedByItsResectionNotByTheBacksightItNames)
+{
+    // The shared R, its setup naming A as its backsight; A read 10" high on
+    // both faces, B and C exact, all with distances; Q read at 0, 100 m level.
+    // By the separate script: R at N 1039.998877235, E 1030.000621099, its
+    // orientation 19.999216428 deg - the least squares', the weighted mean of
+    // azimuth less reading over its three directions at R - so Q at
+    // N 1133.968607048, E 1064.201350313. Oriented on the backsight alone it
+    // would be 19.998563574 deg, and Q 1.1 mm away (N 1133.968996740,
+    // E 1064.200279578).
+    std::vector<Shot> shots;
+    std::size_t index = 1;
+    observe(shots, index, kA, true, 50.0, arcSeconds(10.0));
+    observe(shots, index, kB, true);
+    observe(shots, index, kC, true);
+    bothFaces(shots, "Q", index, 0.0, deg(90), 100.0, kInstrumentHeight);
+    SurveyProject project = marksAnd({kA, kB, kC}, shots);
+    project.stations[0].backsightPointId = "A";
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* r = findPoint(*outcome, "R");
+    ASSERT_NE(r, nullptr);
+    EXPECT_NEAR(r->northing, 1039.998877235, 1e-8);
+    EXPECT_NEAR(r->easting, 1030.000621099, 1e-8);
+    ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
+    EXPECT_NEAR(*outcome->report.setups[0].orientationCorrection, deg(19.999216428), 1e-10);
+    const ComputedPoint* q = findPoint(*outcome, "Q");
+    ASSERT_NE(q, nullptr);
+    EXPECT_NEAR(q->northing, 1133.968607048, 1e-8);
+    EXPECT_NEAR(q->easting, 1064.201350313, 1e-8);
+}
+
+TEST(ReductionResection, ACheckAfterTheBlockMovesNothingWhenATraverseRadiatesAgain)
+{
+    // The traverse job of ATraverseAdjustmentDoesNotReplaceAResection...: S1
+    // on A (N 1000, E 1000) oriented on R due north, S2 to S4 round B, C and
+    // D - and S1 also radiates P 50 m due west, N 1000, E 950. A free station
+    // F (N 1050, E 950) reads A (azimuth 135), P (180, 50 m) and R (45) in
+    // its block, the file marking its end at record 4, and then P again, 20"
+    // high and 10 mm long: a check after the block. After the traverse the
+    // side shots are radiated again. P is S1's, from A, which the traverse
+    // holds: N 1000, E 950 still. The check is F's and places nothing -
+    // radiated from F it would put P at N 1050 + 50.010 cos(180 deg + 20") =
+    // 999.990000235, E 950 + 50.010 sin(180 deg + 20") = 949.995150894,
+    // 11.1 mm off. (Each shot its own pointing, its direction and distance
+    // one observation of it.)
+    SurveyProject project;
+    project.points.push_back(point("A", 1000.0, 1000.0, 20.0));
+    project.points.push_back(point("R", 1100.0, 1000.0, 20.0));
+    for (const char* id : {"B", "C", "D", "F", "P"}) {
+        project.unpositionedPoints.push_back(unpositioned(id));
+    }
+    std::size_t pointing = 1;
+    const auto horizontal = [&pointing](std::string target, double direction,
+                                        std::optional<double> distance = std::nullopt) {
+        Shot shot{std::move(target), pointing++, Face::Unknown, direction, {}, distance};
+        shot.kind = DistanceKind::Horizontal;
+        return shot;
+    };
+    project.stations.push_back(setup("S1", "A", 1.5, "R",
+                                     {horizontal("R", 0.0), horizontal("B", deg(90), 100.010),
+                                      horizontal("D", deg(180)),
+                                      horizontal("P", deg(270), 50.0)}));
+    project.stations.push_back(
+        setup("S2", "B", 1.5, "A", {horizontal("A", 0.0), horizontal("C", deg(270), 100.0)}));
+    project.stations.push_back(
+        setup("S3", "C", 1.5, "B", {horizontal("B", 0.0), horizontal("D", deg(270), 100.0)}));
+    project.stations.push_back(
+        setup("S4", "D", 1.5, "C", {horizontal("C", 0.0), horizontal("A", deg(270), 100.0)}));
+    const double diagonal = 50.0 * std::sqrt(2.0);
+    SurveyStation free = setup(
+        "S5", "F", 1.5, {},
+        {horizontal("A", deg(135), diagonal), horizontal("P", deg(180), 50.0),
+         horizontal("R", deg(45), diagonal),
+         horizontal("P", deg(180) + arcSeconds(20.0), 50.010)});
+    free.metadata[kResectionEndMetadata] = "record 4";
+    project.stations.push_back(free);
+    ReductionSettings settings = bareSettings();
+    settings.method = AdjustmentMethod::Traverse;
+    const auto outcome = reduceAndAdjust(project, settings, {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    ASSERT_EQ(outcome->report.resections.size(), 1U);
+    EXPECT_EQ(outcome->report.resections[0].checks, 1U);
+    const ComputedPoint* f = findPoint(*outcome, "F");
+    ASSERT_NE(f, nullptr);
+    EXPECT_NEAR(f->northing, 1050.0, 1e-8);
+    EXPECT_NEAR(f->easting, 950.0, 1e-8);
+    const ComputedPoint* p = findPoint(*outcome, "P");
+    ASSERT_NE(p, nullptr);
+    EXPECT_NEAR(p->northing, 1000.0, 1e-8);
+    EXPECT_NEAR(p->easting, 950.0, 1e-8);
+    // And the traverse was adjusted: B moved west by its Bowditch share.
+    const ComputedPoint* b = findPoint(*outcome, "B");
+    ASSERT_NE(b, nullptr);
+    EXPECT_NEAR(b->easting, 1100.00749981, 1e-8);
+}
+
+// ---- Precision ---------------------------------------------------------------------
+
+TEST(ReductionResection, AFreeStationWithNoMarkUnderItHasNoMarksCentringInItsPrecision)
+{
+    // The shared R with no instrument height - the instrument itself is the
+    // point, over no mark - A read 2" high, B 1" low, C exact, all with
+    // distances. By the separate script: v'Pv 0.093 on 3 degrees of freedom,
+    // the global test not failing above, so the precision is the a-priori
+    // one - sN 0.987957 mm, sE 0.734819 mm - with no mark's centring added
+    // (which would make sN hypot(0.987957, 1) = 1.405724 mm).
+    std::vector<Shot> shots;
+    std::size_t index = 1;
+    observe(shots, index, kA, true, 50.0, arcSeconds(2.0));
+    observe(shots, index, kB, true, 50.0, arcSeconds(-1.0));
+    observe(shots, index, kC, true);
+    SurveyProject project = marksAnd({kA, kB, kC}, shots);
+    project.stations[0].setup.instrumentHeight = 0.0;
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    ASSERT_EQ(outcome->report.resections.size(), 1U);
+    EXPECT_NEAR(outcome->report.resections[0].sigmaNorthing, 0.000987957, 1e-9);
+    EXPECT_NEAR(outcome->report.resections[0].sigmaEasting, 0.000734819, 1e-9);
+}
+
+TEST(ReductionResection, ThePrecisionIsScaledByTheVarianceFactorOnlyWhereTheGlobalTestFailsAbove)
+{
+    // The shared R, A read 20" high and B 20" low, C exact, all with
+    // distances. By the separate script: R at N 1039.995508816, E 1030, the
+    // orientation 20 deg; v'Pv 16.513 on 3 degrees of freedom, above
+    // chi-square(3, 0.975) = 9.348, so the residuals are larger than the
+    // a-priori weights allow, and the a-priori precision is scaled by the
+    // variance factor, 5.504294: sN 2.317720 mm, sE 1.724021 mm, the
+    // orientation 6.442423"; with the mark's 1 mm centring (instrument height
+    // 1.55), sN 2.524247 and sE 1.993050 mm. The report says the test failed.
+    std::vector<Shot> shots;
+    std::size_t index = 1;
+    observe(shots, index, kA, true, 50.0, arcSeconds(20.0));
+    observe(shots, index, kB, true, 50.0, arcSeconds(-20.0));
+    observe(shots, index, kC, true);
+    const auto outcome = reduceAndAdjust(marksAnd({kA, kB, kC}, shots), bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    ASSERT_EQ(outcome->report.resections.size(), 1U);
+    const ResectionReport& resection = outcome->report.resections[0];
+    EXPECT_NEAR(resection.northing, 1039.995508816, 1e-8);
+    EXPECT_NEAR(resection.easting, 1030.0, 1e-8);
+    ASSERT_TRUE(resection.horizontal.globalTest.has_value());
+    EXPECT_FALSE(resection.horizontal.globalTest->passed);
+    ASSERT_TRUE(resection.horizontal.varianceFactor.has_value());
+    EXPECT_NEAR(*resection.horizontal.varianceFactor, 5.504294, 1e-6);
+    EXPECT_NEAR(resection.sigmaNorthing, 0.002524247, 1e-9);
+    EXPECT_NEAR(resection.sigmaEasting, 0.001993050, 1e-9);
+    EXPECT_NEAR(resection.sigmaOrientation, arcSeconds(6.442423), arcSeconds(0.000001));
+    EXPECT_NE(renderText(outcome->report).find("plan global test FAILED, 16.513 above 9.348"),
+              std::string::npos);
+}
+
+TEST(ReductionResection, AResectionReadWithZenithsButNoDistancesSaysWhyItHasNoHeight)
+{
+    // A, B and C each read on both faces with a direction and a zenith angle
+    // but no distance: the marks have heights and zenith angles, but a
+    // trigonometric height needs the distance too, and the warning says so.
+    std::vector<Shot> shots;
+    std::size_t index = 1;
+    for (const Mark& mark : {kA, kB, kC}) {
+        bothFaces(shots, mark.id, index,
+                  katana::math::normalizeAngle(
+                      azimuthFrom(kStationNorthing, kStationEasting, mark) - deg(20)),
+                  std::atan2(50.0, -2.195), std::nullopt, kTargetHeight);
+    }
+    const auto outcome = reduceAndAdjust(marksAnd({kA, kB, kC}, shots), bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    ASSERT_NE(findPoint(*outcome, "R"), nullptr);
+    EXPECT_EQ(warningsWith(outcome->report,
+                           "Setup S1: resected with no height: no point it was resected from has "
+                           "a height and was observed with both a zenith angle and a distance, "
+                           "which a trigonometric height needs, so nothing radiated from it has "
+                           "one."),
               1U)
         << allWarnings(outcome->report);
 }

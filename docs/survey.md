@@ -1328,15 +1328,15 @@ Not done:
 
 ## The reduction's resection
 
-Added 2026-09-30, and reworked the same day after review. A setup on a point
-that nothing else positions - a free station, which a field controller calls a
-resection (the opcode field file's 128 and 138) - used to be given up ("stands
-on ..., which has no position: nothing was computed from it"), and everything
-measured from it with it: the owner's resection job has twelve such setups,
-and they held 4 056 of its 4 834 points. The reduction now computes such a
-station from the setup's reduced pointings to points already placed. It looks
-at nothing but the reduced pointings, so it serves every format with such a
-setup, not the field file alone: `resectSetup` in
+Added 2026-09-30, and reworked the same day after two reviews. A setup on a
+point that nothing else positions - a free station, which a field controller
+calls a resection (the opcode field file's 128 and 138) - used to be given up
+("stands on ..., which has no position: nothing was computed from it"), and
+everything measured from it with it: the owner's resection job has twelve such
+setups, and they held 4 056 of its 4 834 points. The reduction now computes
+such a station from the setup's reduced pointings to points already placed. It
+looks at nothing but the reduced pointings, so it serves every format with
+such a setup, not the field file alone: `resectSetup` in
 `src/katana_survey/reduction_adjust.cpp`, tried from `placeSetups` in
 `src/katana_survey/reduction.cpp`.
 
@@ -1344,13 +1344,37 @@ setup, not the field file alone: `resectSetup` in
 just been placed, the reduction falls back, one setup at a time, on: 0. the
 resection of the first setup in the file that has what one needs; 1. the
 file's own coordinates for a station nothing positions; 2. the circle as set
-on a backsight nothing positions; 3. giving up, saying why. A fallback and not
-a first choice: a station that another setup radiates keeps that position, as
-it always did, and its setup's pointings to placed points are checks of it
-(`ReductionResection.AStationAnotherSetupRadiatesIsNotResected`). Before the
-file's own coordinates, because a resection is computed from what was
-measured, which is what the reduction is for, where the file's coordinates of
-a station are a controller's or a person's and unchecked - the order a
+on a backsight nothing positions; 3. giving up, saying why. One at a time, so
+that a resection's radiation can place the points a later one needs: a second
+free station that observes a point only the first radiates is resected from it
+too (`ReductionResection.AResectionTakesThePointsAnEarlierResectionPlaced`),
+and a setup refused for want of a point is tried again once that point is
+placed (`ReductionResection.ARefusedResectionIsTriedAgainWhenAnotherOfItsTargetsIsPlaced`).
+A fallback and not a first choice: a station that another setup radiates keeps
+that position, as it always did, and where its own setup is oriented on a
+backsight, or the circle as set, that setup's pointings to placed points are
+checks of it (`ReductionResection.AStationAnotherSetupRadiatesIsNotResected`,
+and `ReductionResection.AStationAnotherSetupRadiatedKeepsItWhileItsSetupWaitsForItsBacksight`
+for one whose backsight nothing places). A setup that names no backsight is
+another matter: nothing orients it but the points it observes. The earlier
+versions said its pointings were checks too, and they were not - the setup was
+left unoriented and everything measured from it dropped, which is what the
+field file's free stations are whenever an earlier setup has shot the next
+one's mark. So such a setup, on a station another setup radiated, is resected
+from its own block when it is tried, as the field software resected it; the
+radiation becomes a check of the resection - a misclosure row "R2 by resection
+at setup S2, against its radiation from setup S1", a warning with the
+distance, and `radiated_from` and `radiation_offset` in `SURVEY IMPORT`'s
+record - and the setup is oriented on its resection and radiates the rest
+(`ReductionResection.AFreeStationOnAMarkAnEarlierFreeStationShotIsResectedFromItsOwnBlock`).
+With too few placed points by then, it waits for step 0 like a station nothing
+positions, and is given up with the reason if it never has enough
+(`ReductionResection.AFreeStationOnARadiatedMarkWithTooFewPlacedPointsSaysWhy`).
+A station control, an entered or a GNSS point gives is not resected - a
+resection must not move it - nor one another resection placed (Not done).
+Before the file's own coordinates, because a resection is computed from what
+was measured, which is what the reduction is for, where the file's coordinates
+of a station are a controller's or a person's and unchecked - the order a
 radiated point already takes over the file's coordinates of a point
 (`PositionOrigin::FileOnly`). So a job whose setups stood on the file's own
 coordinates before (an RW5 `OC`, a GSI station, a GTS `STN` all arrive with no
@@ -1365,8 +1389,12 @@ where its readings put it, went from the file's `OC` for G, with the warning
 that it was used, to G resected from P and Q, 50.0 mm from that `OC` - the
 warning and the misclosure row say so - and the shot from G moved with it (a
 scratch check, main's CLI against this one). Before the circle as set, which
-is an assumption about the instrument. A setup is tried once its targets are
-placed, whichever setup places them
+is an assumption about the instrument: a setup whose circle was set a degree
+wrong on a backsight that a resection then places is oriented on that
+backsight's coordinates, the slip found, where the circle taken as a grid
+azimuth would radiate everything from it wrongly
+(`ReductionResection.AResectionComesBeforeTheCircleAsSet`). A setup is tried
+once its targets are placed, whichever setup places them
 (`ReductionResection.AResectionWaitsForTargetsALaterSetupPlaces`): the
 candidates are counted as points are placed, each placement touching only the
 setups that observe that point, so the step adds nothing per placement and
@@ -1387,10 +1415,14 @@ file marks the end of the observations its field software resected from (the
 field file's 129: its reader sets `kResectionEndMetadata`, "record N", on the
 setup, `include/katana/survey/data_model.hpp`), only the pointings before it
 enter the resection; a controller's checks after the block - one right after
-it, others after hundreds of shots - are checks of the resected station, each a misclosure row, as they were for the field software and as any
-setup's pointings to placed points are
+it, others after hundreds of shots - are checks of the resected station, each
+a misclosure row, as they were for the field software and as any setup's
+pointings to placed points are
 (`ReductionResection.ACheckAfterTheFilesResectionBlockChecksTheStationAndDoesNotMoveIt`,
-`ReductionResection.ABlockEndThatNamesNoRecordLeavesEveryPointingToTheResection`).
+`ReductionResection.ABlockEndThatNamesNoRecordLeavesEveryPointingToTheResection`);
+and when a traverse or a network adjustment radiates the side shots again, a
+check places nothing, its target held by the resection
+(`ReductionResection.ACheckAfterTheBlockMovesNothingWhenATraverseRadiatesAgain`).
 The first version took them into the resection, where they stopped checking;
 the owner's stations moved by up to 7.0 mm (heights 3.1 mm) between the two
 versions, which also differ in their weights (the review measured 6.9 mm for
@@ -1420,84 +1452,136 @@ and the measured height are added to the station's precision after the least
 squares; an instrument height of zero is a free station with no mark, the
 instrument itself the point
 (`ReductionResection.ResidualsAndPrecisionMatchAnIndependentLeastSquares`,
+`ReductionResection.AFreeStationWithNoMarkUnderItHasNoMarksCentringInItsPrecision`,
 `ReductionResection.TheHeightIsTheWeightedMeanOfTrigonometricHeightsWithCurvature`,
 `ReductionResection.TheHeightIsAWeightedMeanOverSightsOfDifferentLengths`).
-Both least squares go through the network's outlier loop, so the settings'
-test - Baarda's w at `outlierSignificance` (critical value 3.29 at the default
-0.001) or Pope's tau - flags a resection's residual as it flags a network's,
-with a warning, and automatic rejection rejects as there: a rejected direction
-takes no part in the orientation either
+The last run of each least squares goes through the network's outlier loop, so
+the settings' test - Baarda's w at `outlierSignificance` (critical value 3.29
+at the default 0.001) or Pope's tau - flags a resection's residual as it flags
+a network's, with a warning, and automatic rejection rejects as there: a
+rejected direction takes no part in the orientation either
 (`ReductionResection.AGrossReadingIsRejectedAndTheStationOrientationAndShotsComeFromTheRest`).
-Gauss-Newton starts from a closed form: the rigid (Helmert, no scale) fit of
-the station's own frame onto the targets with distances, or else the
-two-circle construction from three directions. The orientation is the
-solution's: `orientAndRadiate` orients a resected setup on the weighted mean
-of azimuth less reading over the directions the resection used - the
-least-squares orientation for where the station stands
+The orientation is the solution's: `orientAndRadiate` orients a resected setup
+on the weighted mean of azimuth less reading over the directions the resection
+used - the least-squares orientation for where the station stands
 (`ReductionResection.TheOrientationIsTheWeightedMeanOfItsDirectionsAtTheStation`),
-which follows the station when a network adjustment moves it
+whatever backsight the setup names
+(`ReductionResection.AResectedSetupIsOrientedByItsResectionNotByTheBacksightItNames`),
+and which follows the station when a network adjustment moves it
 (`ReductionResection.AResectedSetupFollowsItsStationWhenANetworkMovesIt`) -
 and radiates the rest; the pointings it used are not also checks of it.
 
-The direction sets are new in the network adjustment
-(`SurveyHorizontalNetwork.ThreeDirectionsFixAFreePointAndTheOrientationOfItsSet`,
-`SurveyHorizontalNetwork.ADirectionSetWithDistancesIsAdjustedToAnIndependentSolution`):
-every direction read at one point is one set. Rejected: the angles from a
-reference pointing that the reduction's network builds. They share that
-pointing's error, which uncorrelated weights ignore, so a short first sight -
-its centring error in every angle - spoils all of them; three of the resection
-job's twelve blocks read a mark 3 to 5 m away. Rejected too: a resection
-formula (Tienstra's, Collins') for the answer. It takes three directions
-exactly, and so uses neither a fourth nor a distance, nor weights, nor says
-how well the station is fixed.
+**Where it starts, and a station with two answers.** Gauss-Newton finds the
+solution nearest its start, and a resection can have two. The second review
+found one: two marks a few millimetres apart, each with a distance, and a
+third mark by direction alone give one distance and one angle - two circles,
+which meet twice - and the start the earlier versions took, the rigid fit of
+the station's frame onto the close pair, turned by a 5 mm baseline, reached
+whichever solution it fell nearer: 50 m from where the readings were made in
+up to a quarter of the review's trials, with a precision that said 32 mm at
+95 % and nothing flagged. The same start also failed the other way: the closed form of the
+first three directions read, where those three were on the station's danger
+circle and a fourth mark fixed it, gave a start the least squares could not
+solve from, and the station was refused - about half the time, by the errors,
+and never with the fourth mark read first. So the least squares now starts
+from every point the observations give: where each two of the station's loci
+meet - the circle of a distance about its target, the arc from which two
+targets are seen under the angle between their readings (the line through
+them where that angle is 0 or 180 degrees) - and the rigid fit. Each start is
+judged by the weighted squares of the residuals it leaves, the orientation
+there the weighted mean of azimuth less reading (which makes them least). The
+least squares runs from the best, and then from each other start beyond the
+linear reach of the solutions found (below) whose squares are within the
+bound of the least found; a run that fails moves on to the next. The arcs are
+of each target read with a direction and the next one round the circle, and
+the one it makes the widest angle with: every pair of three targets, and of
+more a number that grows with the targets, not with their square, every target
+on two of them.
+
+The bound is chi-square with two degrees of freedom at the settings'
+confidence level - the square of the scale the station's ellipse is drawn at,
+5.99 at 95 % - where the likelihood puts the edge of the station's confidence
+region: the positions whose weighted squares exceed the least by less than
+that are the ones the observations do not exclude. The ellipse stands in for
+that region about the solution. Where a second solution lies within the bound
+but outside the best one's ellipse, the region has a second part the ellipse
+does not show, the observations do not tell the two apart, and the resection
+is refused, the two positions and their squares named
+(`ReductionResection.TwoPositionsItsObservationsFitAlikeAreRefusedNotEitherPlaced`:
+50.023 m apart, their squares 0.057 and 0.625, as a separate script of the
+model finds them). Where automatic rejection took an observation out, the
+search is made again without it. In the review's Monte Carlo of that geometry
+(40 trials a separation, 1.5" a face and 1.5 mm a distance), the round before
+put the station 50 m off in 10, 5, 3 and 2 of 40 with the pair 3, 5, 10 and
+20 mm apart; now none is placed wrong - 40, 37, 19 and 0 are refused, the rest
+placed within millimetres. Four directions whose first three read are on the
+danger circle are placed wherever read (20 of 20 in the review's trials, 1 to
+3.5 mm from the truth, where 11 were refused;
+`ReductionResection.AFourthDirectionFixesAStationWhoseFirstThreeTargetsAreOnItsDangerCircle`),
+and a distance to one target breaks the danger circle of the directions, as a
+surveyor breaks it (12 of 12, where 6 were refused;
+`ReductionResection.ADistanceToOneTargetFixesAStationOnTheDangerCircleOfItsDirections`).
+Rejected: a relative one-position rule - marks closer than their pointings
+resolve at the range count once - which would need a number of standard
+deviations and would still not see two solutions of marks well apart; and
+refusing on a second minimum wherever it lies, which would refuse stations
+whose observations exclude it.
 
 **What refuses it,** each named in the warning that the setup was not
 resected, and in the file's-own-coordinates warning where that follows, and
 never a position: too few placed points (saying what it observes and what a
 resection needs); a value that is not finite; a horizontal distance that is
-not positive (`ReductionResection.ADistanceThatIsNotPositiveIsRefused`); a
-least squares that fails - rank deficient, not converging - with its reason
-(`ReductionResection.ALeastSquaresThatFailsIsRefusedWithItsReason`); and a
-geometry that does not fix the station. That last is where the first version
-failed. It refused the station on one line with its targets, and on the
-danger circle, only when the readings were exact: in the review's probes,
-read to an arc second, a station on the danger circle was placed anywhere on
-it, 50 to 150 m off, a station on one line with its marks 25 to 88 m along it,
-and one with two of its marks 5 mm apart 18 to 156 m off, with nothing
-flagged. Now:
+not positive (`ReductionResection.ADistanceThatIsNotPositiveIsRefused`);
+directions alone, every three of them exactly on one line with the station or
+on the circle through it (`ReductionResection.AStationOnOneLineWithItsTargetsIsRefused`,
+`ReductionResection.AStationOnTheDangerCircleIsRefused`) - with a distance,
+the closed form does not decide, the starts do; a least squares that fails
+from every start - rank deficient, not converging - with its reason
+(`ReductionResection.ALeastSquaresThatFailsIsRefusedWithItsReason`); two
+positions its observations fit alike (above); and a geometry that does not fix
+the station. The first version refused the station on one line with its
+targets, and on the danger circle, only when the readings were exact: in the
+first review's probes, read to an arc second, a station on the danger circle
+was placed anywhere on it, 50 to 150 m off, a station on one line with its
+marks 25 to 88 m along it, and one with two of its marks 5 mm apart 18 to 156
+m off, with nothing flagged. Now the solution is judged by its own a-priori
+precision - the station's standard ellipse from the cofactor at the settings'
+weights, whatever the residuals say - against the least squares' own
+validity. The least squares takes each observation as linear about the
+solution; over an offset a from it, a distance of length D changes by up to
+a^2 / 2D more than that, and a direction by up to a^2 / 2D^2 radians (the
+second-order terms of hypot and atan2). Where the station's ellipse at the
+settings' confidence level (x 2.4477 at 95 %) reaches past the offset at which
+that exceeds an observation's own standard deviation - sqrt(2 D sigma) for a
+distance, D sqrt(2 sigma) for a direction - the model the least squares
+solved does not hold over the region the station may be in: its observations
+do not fix it. The criterion is the least squares' own and needs no tolerance
+from outside. It refuses all 57 of the first review's degenerate probes (20
+on the danger circle, 20 on one line, 10 with two of three marks 5 mm apart, 7
+mixed) and 9 more with two marks 5, 50 and 500 mm apart at 158 m (placed 0.2
+to 30 m off before), and places its four sound ones exactly
+(`ReductionResection.AStationOnTheDangerCircleReadWithUnequalErrorsIsRefusedNotPlaced`,
+`ReductionResection.AStationOnOneLineWithItsTargetsReadWithErrorsIsRefused`,
+`ReductionResection.TwoMarksAFewMillimetresApartDoNotFixAStationWithTheirDistances`,
+`ReductionResection.TwoOfThreeTargetsAFewMillimetresApartDoNotFixAStationByDirections`).
 
-- Exactly degenerate geometry is still found in the closed form, and named
-  (`ReductionResection.AStationOnOneLineWithItsTargetsIsRefused`,
-  `ReductionResection.AStationOnTheDangerCircleIsRefused`).
-- Otherwise the solution is judged by its own a-priori precision - the
-  station's standard ellipse from the cofactor at the settings' weights,
-  whatever the residuals say - against the least squares' own validity. The
-  least squares takes each observation as linear about the solution; over an
-  offset a from it, a distance of length D changes by up to a^2 / 2D more than
-  that, and a direction by up to a^2 / 2D^2 radians (the second-order terms of
-  hypot and atan2). Where the station's ellipse at the settings' confidence
-  level (x 2.4477 at 95 %) reaches past the offset at which that exceeds an
-  observation's own standard deviation - sqrt(2 D sigma) for a distance, D
-  sqrt(2 sigma) for a direction - the model the least squares solved does not
-  hold over the region the station may be in: its observations do not fix it.
-  The criterion is the least squares' own and needs no tolerance from outside.
-  It refuses all 57 of the review's degenerate probes (20 on the danger
-  circle, 20 on one line, 10 with two of three marks 5 mm apart, 7 mixed) and
-  9 more with two marks 5, 50 and 500 mm apart at 158 m (placed 0.2 to 30 m
-  off before), and places the review's four sound ones exactly; where the
-  least squares fails first, the refusal names the geometry just the same
-  (`ReductionResection.AStationOnTheDangerCircleReadWithUnequalErrorsIsRefusedNotPlaced`,
-  `ReductionResection.AStationOnOneLineWithItsTargetsReadWithErrorsIsRefused`,
-  `ReductionResection.TwoMarksAFewMillimetresApartDoNotFixAStationWithTheirDistances`,
-  `ReductionResection.TwoOfThreeTargetsAFewMillimetresApartDoNotFixAStationByDirections`).
-- The warning names the geometry nearest one that fixes nothing - two targets
-  at nearly one place, the station nearly on one line with its targets, or
-  near the circle through three of them - by a measure that is zero for each
-  exactly (their separation over their distance; the largest sine of an angle
-  between two sight lines; the station's distance from the circle over its
-  radius), below a tenth, which only chooses the words.
-- A refusal leaves nothing of its least squares behind: the flagged-residual
-  warnings it gave and any observation it rejected are taken back.
+A geometric refusal - the two positions, the precision, a least squares rank
+deficient from every start - names the shape of a geometry that fixes nothing
+which the station's comes nearest, with its numbers at the solution (or, for
+the rank deficiency, at the best start): "M and M2 are 5.0 mm apart, 157.750 m
+from it", "its sight lines to A, B and C are within 3.0" of one line", "it
+stands 0.6 mm from the circle through A, B and C (the danger circle, radius
+100.000 m)". The measure that picks it is each shape's own, zero for that
+shape exactly (the separation over the distance; the largest sine of an angle
+between two sight lines; the distance from the circle over its radius), and
+the least is named. The round before named a shape only below a tenth of
+that measure, a number with no source that could name the danger circle for
+four marks that fixed the station; a fact with its numbers needs no such
+number, and whether the geometry fixes the station is the precision's to say.
+A least squares that does not converge names no shape: that is not the
+geometry's. A refusal leaves nothing of its least squares behind: the
+flagged-residual warnings it gave and any observation it rejected are taken
+back.
 
 A geometry the criterion passes can still be weak. The resection reports its
 dilution: the a-priori semi-major axis over the standard deviation of the
@@ -1515,61 +1599,119 @@ the station with distances 0.37 to 0.44, two with distances 90 degrees apart
 apart from outside their triangle 2.5, 30 degrees apart 9.1; a station 20 m
 inside a 100 m danger circle 10.4, 5 m inside it 48; three marks within 11
 degrees 123; the owner's twelve 0.41 to 0.94. The weak ones are placed where
-their precision says: the review's station 5 m inside the danger circle, read
-1 to 2" off, 99 mm from the truth against 264 mm at 95 %, and its three marks
-within 11 degrees 86 mm against 434 mm. Rejected: refusing them too. Their
-positions are right to the precision they state, and throwing a measurement
-away is the person's decision (`ReductionSettings::autoRejectOutliers` is off
-by default for that reason); the flag and the warning put it in front of them.
+their precision says: the first review's station 5 m inside the danger circle,
+read 1 to 2" off, 99 mm from the truth against 264 mm at 95 %, and its three
+marks within 11 degrees 86 mm against 434 mm. A weak station that had a second
+solution within the bound is now refused with it, not placed. Rejected:
+refusing the weak ones too. Their positions are right to the precision they
+state, and throwing a measurement away is the person's decision
+(`ReductionSettings::autoRejectOutliers` is off by default for that reason);
+the flag and the warning put it in front of them.
+
+**A network after it.** In a network adjustment the resected station is
+adjusted with everything else, its setup's directions as angles from a
+reference direction. What the resection's outlier test rejected, the network
+takes no more than it did - not a direction as an angle, not a distance, not
+a height difference - and a rejected direction is never the reference, which
+every angle of the setup is measured from, whether the setup names it as its
+backsight or not: a rejected reading takes part in no mean direction
+(`directionRejected`, `meanDirection`). The second review found the network
+taking a direction the resection had rejected as that reference, putting its
+60" into every angle, rejecting the right ones and leaving the station 6.8 mm
+off, while the report called the reading rejected
+(`ReductionResection.ANetworkTakesNoReadingItsResectionRejected`).
 
 **What it reports.** `ReductionReport::resections`: per resected setup the
 station, the points it was computed from, its coordinates and one-sigma
-precision (a posteriori where there is redundancy, a priori where there is
-none, the mark's centring and height added where there is a mark), its
-orientation and that orientation's precision, the a-priori ellipse and
-dilution, the checks after its block, the file's own coordinates' difference,
-and each least squares as an adjustment is reported - a residual per
-direction, distance and height difference with its redundancy number and
-standardised value. The report prints a Resections table - with Dilution and
-Checks columns, and a Check column that says which way a global test failed
-("plan global test FAILED, 0.000 below 0.216 (fits too well)", or "above"
-with the upper bound) as the network's summary gives its bounds - and each
-resection's residuals ("Residuals: resection at S1 (horizontal)"), a row
-FLAGGED as a network's is; the station's coordinate row says "resection". A
-resection with no redundancy is warned about ("nothing checks the position it
-gives"), and one with no height too. Where the settings reduce no distance to
-the grid and the drawing's projection gives a point scale factor that would
-change the longest distance by more than its standard deviation, the
-resection has fitted ground distances to grid coordinates, and a warning
-says so, naming the setups, with the factor in the record
-(`ReductionResection.GroundDistancesFittedToAProjectedGridAreSaid`).
+precision, its orientation and that orientation's precision, the a-priori
+ellipse and dilution, the checks after its block, the file's own coordinates'
+difference, the radiation it replaced and from which setup, and each least
+squares as an adjustment is reported - a residual per direction, distance and
+height difference with its redundancy number and standardised value. The
+precision is the least squares' a-priori one, scaled by its variance factor
+only where its global test finds the residuals larger than the a-priori
+weights allow, above the test's upper bound
+(`ReductionResection.ThePrecisionIsScaledByTheVarianceFactorOnlyWhereTheGlobalTestFailsAbove`);
+the mark's centring and height are added where there is a mark. The earlier
+versions always scaled it, a posteriori; but on the one to three degrees of
+freedom a resection has, the variance factor is itself uncertain - a
+chi-square on r has a relative standard deviation of sqrt(2 / r), 141 % on
+one, 82 % on three - so one the test accepts says no more than the weights,
+and scaling by it shrank or swelled the precision by chance: to 3 nm for the
+free-station fixture, whose exact readings fit exactly, and to a sixth of the
+a-priori value for one of the owner's heights, whose test failed for fitting
+too well. The residual tables keep the variance factor, and the Resections
+table its square root, so the a posteriori value can still be read. The report
+prints a Resections table - with Dilution and Checks columns, and a Check
+column that says which way a global test failed ("plan global test FAILED,
+0.000 below 0.216 (fits too well)", or "above" with the upper bound) as the
+network's summary gives its bounds, and "radiated from S1 9.7 mm away" where
+a radiation was replaced - and each resection's residuals ("Residuals:
+resection at S1 (horizontal)"), a row FLAGGED as a network's is; the station's
+coordinate row says "resection". A resection with no redundancy is warned
+about ("nothing checks the position it gives"), and one with no height too -
+naming why, where the marks were read with zenith angles but no distance,
+which a trigonometric height needs
+(`ReductionResection.AResectionReadWithZenithsButNoDistancesSaysWhyItHasNoHeight`).
+Where the settings reduce no distance to the grid and the drawing's projection
+gives a point scale factor that would change the longest distance by more
+than its standard deviation, the resection has fitted ground distances to grid
+coordinates, and a warning says so, naming the setups, with the factor in the
+record (`ReductionResection.GroundDistancesFittedToAProjectedGridAreSaid`).
 `SURVEY IMPORT` answers one `resection` record each - `dilution`, `weak`,
-`checks`, `file_offset` and `unapplied_scale_factor` among its fields - and a
-`resection_residual` record for each residual flagged or rejected, so an
-agent sees which, past the cap on listed warnings (`docs/mcp.md`).
+`checks`, `file_offset`, `radiated_from`, `radiation_offset` and
+`unapplied_scale_factor` among its fields - and a `resection_residual` record
+for each residual flagged or rejected, so an agent sees which, past the cap on
+listed warnings (`docs/mcp.md`). The network adjustment's rank-deficiency
+message calls what it cannot resolve unknowns, naming a set's orientation
+"orientation(P)", not a coordinate
+(`SurveyHorizontalNetwork.APointOnTheCircleThroughItsThreeTargetsIsRankDeficient`).
 
 **Checked.** `tests/survey/test_reduction_resection.cpp`: two placed points
 with distances and three directions alone, each recovering the station they
 were made from; a perturbed resection whose position, orientation, residuals,
 variance factor and precision match a separate script of the textbook model
-(normal equations, not Katana's code) to 1e-8 m and 0.0001"; the orientation's
-and the height's weights over sights of different lengths, each against a
-weighted mean worked apart that an unweighted one misses by 0.13 mm and 0.44
-mm; the distances' three factors; automatic rejection; a network that moves
-the station; the file's block and its check; the file's own coordinates; the
-unapplied grid scale; every refusal, exact and read with errors; the weak
-flag; the order; the fallbacks. Each proven by removing its part: without the
-precision criterion the four noisy-geometry tests fail; without the take-back,
-the close-marks one; without the distances' factors, the four factor tests;
-with the orientation or the heights unweighted, the test of each; with the
-instrument's centring and height left in each pointing's weight, four; without
-the mark's centring and height added to the station, three; with a rejected
-reading left in the orientation, the rejection test; without the block, the
-two block tests; without the file-coordinates check, its test; without the
-grid-scale notice, its test; without the weak flag, its test; with the
-resection's own pointings radiated as checks, two; with only the coordinate
-tolerance making one position, its test. Two fixtures:
-`tests/surveyio/data/fld/resection.fld`, whose free station
+(normal equations, not Katana's code) to 1e-8 m and 0.000001"; the
+orientation's and the height's weights over sights of different lengths, each
+against a weighted mean worked apart that an unweighted one misses by 0.13 mm
+and 0.44 mm; the distances' three factors; automatic rejection; a network that
+moves the station, and one that takes none of what the resection rejected;
+the file's block and its check; the file's own coordinates; the unapplied grid
+scale; two solutions; the starts; every refusal, exact and read with errors;
+the weak flag; the order and the fallbacks; the precision rule. Each proven by
+removing its part, the tests rebuilt and run (a scratch script). The round
+before: the precision criterion removed, the four noisy-geometry tests fail;
+the take-back, the close-marks one; the distances' factors, the four factor
+tests; the orientation or the heights unweighted, the test of each; the
+instrument's centring and height in each pointing's weight, four; the mark's
+centring and height not added, three; a rejected reading left in the
+orientation, the rejection test; the block ignored, the two block tests; the
+file-coordinates check, its test; the grid-scale notice, its test; the weak
+flag, its test; the resection's own pointings radiated as checks, two; only
+the coordinate tolerance making one position, its test. This round, 25 parts,
+24 caught: without the check for a second solution, with the search stopped at
+its first solution, or with its starts unsorted, the two-positions test fails;
+with the round before's starts (the rigid fit, else the first three
+directions' closed form), four - the fourth direction, the distance on the
+danger circle, the retried refusal and the two positions; with the exact
+refusal applied where a distance could break it, the danger-circle distance
+test; with the network taking a rejected direction, distance or height
+difference, or a mean direction taking a rejected reading, the network test;
+without the resection of a setup on a radiated station, its two tests, and
+without its check reported, one; the review's seven surviving mutants - the
+circle as set tried first, every candidate resected at once, no second try
+after a refusal, a placed station resected over, a resected setup oriented on
+its backsight, a check re-placing its target, every station taken to be over a
+mark - one or two tests each; the precision always scaled, four, and never
+scaled, one; every station over a mark and the precision always scaled, the
+CLI's pinned free-station precision too; no shape for a rank deficiency, one;
+the round before's words for no height and for the rank deficiency, their
+tests. The one part no test reaches: a start whose least squares fails is
+passed over for the next (`continue`, not `break`), and in 400 random
+resections through the command line - near-degenerate shapes among them - 201
+probe files and the owner's three field files the best start never failed
+where a later one then solved.
+Two fixtures: `tests/surveyio/data/fld/resection.fld`, whose free station
 `cli.survey_import_resection_field_file` expects where a hand calculation of
 its block puts it, the check after the 129 a misclosure (S1 1000.00033 E,
 5100.00000 N from K1 and K2, redundancy 1 in plan; the 06 after its 129 a
@@ -1580,23 +1722,33 @@ a controller's resections - 128, target heights, three marks on both faces,
 129, the residual comments, a check, then shots - with invented names and
 numbers (`cli.survey_read_free_station_field_file`,
 `cli.survey_import_free_station_field_file`, its height pinned to the weighted
-mean of the block's three, 20.00030586).
+mean of the block's three, 20.00030586, and its precision to the a-priori
+sigma_n 1.142 mm and sigma_e 1.153 mm of a separate script, no mark under it).
 
 The owner's resection job, `CRS SET EPSG:7856` and `SURVEY IMPORT` (a local
-check; the file is the owner's): before the resection, 778 points and 42
-reduction warnings, twelve of them "stands on ..., which has no position"; now
-all 4 834 points and 71 warnings - the 27 face-pair warnings as before, the
+check; the file is the owner's): before the resection, 778 points and
+42 reduction warnings, twelve of them "stands on ..., which has no position";
+now all 4 834 points and 71 warnings - the 27 face-pair warnings as before, the
 prism and atmospheric notices, one notice that the twelve resections fitted
 ground distances to grid coordinates, and 41 residuals the resections flag: 27
 distances, every one computed shorter than measured, and 14 directions. Each
 resection is of its block, redundancy 3 in plan and 2 in height; the 14 checks
 after the blocks are misclosure rows; the dilutions are 0.41 to 0.94, none
-weak. The import's defaults apply no grid scale factor, and the marks are MGA
-grid coordinates where the zone's point scale factor is 0.99980 (200 ppm, 32
-mm on the job's longest resection sight of 162 m). The controller wrote its
-own residuals after each block, one line per face per mark: another program's
-numbers, so an independent check. Its scale factor is in them: fitting its
-station, orientation and scale to where its residual lines put the marks gives
+weak. The search from every start finds one solution for each of the twelve,
+where the rigid fit reached the round before: every drawn position, the
+stations' among them, is as the round before gave it, to the last digit
+`LIST` prints, and no setup names no backsight on a radiated station. The
+import's defaults apply no grid scale factor, and the marks are MGA grid
+coordinates where the zone's point scale factor is 0.99980 (200 ppm, 32 mm on
+the job's longest resection sight of 162 m): the distance residuals carry it,
+every plan global test fails above, and the plan precision is scaled by its
+variance factor - 3.1 to 13.4 mm, one sigma, and it says the weights were too
+optimistic for ground distances on grid marks; none of the height tests fails
+above, and the heights' precision is the a-priori 1.2 to 1.3 mm, where the
+a-posteriori one was 0.19 to 2.24 mm. The controller wrote its own residuals
+after each block, one line per face per mark: another program's numbers, so
+an independent check. Its scale factor is in them: fitting its station,
+orientation and scale to where its residual lines put the marks gives
 0.999792 to 0.999800 for the twelve, the projection's factor there. With that
 factor applied (a fixed 0.9998, through a scratch harness, since `SURVEY
 IMPORT` sets none; Survey > Survey Jobs does), Katana's residuals agree with
@@ -1612,17 +1764,22 @@ the checks in, 6.1 mm RMS and 11.3 mm at most, as the review measured it),
 which the grid-scale notice now says, and the distance residuals 14.6 mm RMS
 from its (at most 31 mm). What is left differs because the controller adjusts
 each face as an observation where the reduction means the pair first, and
-weights them its own way. The reduction of the job took 13.6 to 13.7 ms before
-the resection and 17.9 to 18.3 ms now (Release, the reduction alone, best of
-five in each of three runs) - the twelve least squares, and the 4 056 points
-they let it radiate and report; the whole command, drawing and listing 6.2
-times the points, 0.27 s before and 0.39 s now (best of five).
+weights them its own way. The reduction of the job took 13.1 to 14.7 ms before
+the resection and 17.3 to 19.2 ms now (Release, the reduction alone, best of
+five in each of five runs), against 17.9 to 18.3 ms the round before: the
+search from every start costs nothing measurable, its least squares running
+from the best start and then only from starts the bound lets through. The
+whole command, drawing and listing 6.2 times the points, was 0.27 s before and
+0.39 s the round before; on this round's loaded machine (five tracks building)
+main, the round before and this round all took 0.37 to 0.45 s, and nothing
+between them can be told apart.
 
 The owner's other files import as they did before (`SURVEY IMPORT`, every
 `LIST` position compared): the second field file (862 points, 8 warnings), the
 RTK job (3 482, none), the SDR traverse (no point, 47 warnings: none of its
 setups observes a placed point) and the GSI traverse (57, 24) give output
-identical to main's - none of their setups resects.
+identical to main's, byte for byte: none of their setups resects, and none
+that names no backsight stands on a station another setup radiated.
 
 Not done:
 
@@ -1630,16 +1787,26 @@ Not done:
   A resected station is not computed again when an adjustment moves its
   targets - the network adjustment adjusts it with the rest, a traverse
   adjustment leaves it.
-- A setup whose station is already placed and that has no backsight - a second
-  resection block on a station an earlier one placed - is not oriented on the
-  placed points it observes: its targets are not radiated, and its warning
-  names the points it could be oriented on
+- A setup whose station is already placed and that has no backsight is not
+  oriented on the placed points it observes where that station is control, an
+  entered or a GNSS point, or was placed by another resection - a second
+  resection block on one station: its targets are not radiated, and its
+  warning names the points it could be oriented on
   (`ReductionResection.ASecondBlockOnAStationAlreadyResectedSaysWhatItCouldBeOrientedOn`).
-  Orienting every such setup on them would change every format's setups that
-  name no backsight, which is the reduction's decision to make, not this
+  On a known station that would be an orientation alone, and on a resected
+  one a second resection of one station, whose two results would need
+  combining; orienting every such setup would change every format's setups
+  that name no backsight, which is the reduction's decision to make, not this
   one's.
+- A setup that used a free station's radiated position before that station's
+  own block resected it - a backsight on it, a resection from it, earlier in
+  the same pass - keeps what it used; the network adjustment makes them
+  consistent.
 - A setup whose station fell back on the file's own coordinates before its
   targets were placed is not resected once they are.
+- A resection read with zenith angles but no distances has no height: a
+  trigonometric height from the zenith angles over the resected horizontal
+  distances is not formed.
 - The reduction's network still turns a setup's directions into angles from a
   reference pointing: the network adjustment knows no setups, so two setups on
   one point would be one set there.
@@ -1653,6 +1820,9 @@ Not done:
   resection's alone.
 - A weak geometry is flagged, not refused, whatever its dilution short of the
   criterion that refuses it.
+- A station with two solutions is found only where a start leads to each: the
+  starts are the points where two loci meet, and a solution none of them
+  descends to within the bound is not looked for.
 
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 

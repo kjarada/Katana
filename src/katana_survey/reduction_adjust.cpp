@@ -951,7 +951,11 @@ Status adjustAsNetwork(Engine& engine)
         const std::string& at = station.setup.pointId;
         const bool horizontalHere = horizontal && state.positioned && present.count(at) != 0;
 
-        // The reference direction: the backsight, else the first network target.
+        // The reference direction: the backsight, else the first network
+        // target. What an adjustment before this one rejected - a resection's
+        // outlier test - the network takes no more than it did (the report
+        // says rejected), and never as the reference, whose error would be in
+        // every angle measured from it.
         std::string_view reference;
         if (!station.backsightPointId.empty() && present.count(station.backsightPointId) &&
             meanDirection(engine, s, station.backsightPointId)) {
@@ -959,7 +963,8 @@ Status adjustAsNetwork(Engine& engine)
         } else {
             for (const std::size_t p : state.pointings) {
                 const ReducedPointing& pointing = engine.pointings[p];
-                if (!pointing.rejected && pointing.direction && present.count(pointing.target)) {
+                if (!pointing.rejected && pointing.direction && present.count(pointing.target) &&
+                    !directionRejected(engine, pointing)) {
                     reference = pointing.target;
                     break;
                 }
@@ -973,7 +978,8 @@ Status adjustAsNetwork(Engine& engine)
             double sigma = 0.0;
             for (const std::size_t p : state.pointings) {
                 const ReducedPointing& pointing = engine.pointings[p];
-                if (!pointing.rejected && pointing.target == reference && pointing.direction) {
+                if (!pointing.rejected && pointing.target == reference && pointing.direction &&
+                    !directionRejected(engine, pointing)) {
                     sigma = pointing.sigmaDirection;
                     ++count;
                 }
@@ -1005,7 +1011,7 @@ Status adjustAsNetwork(Engine& engine)
             const bool horizontalTarget = horizontalHere && present.count(pointing.target) != 0;
             const SourceRecord source = pointing.source ? *pointing.source : station.source;
             if (horizontalTarget && pointing.direction && referenceDirection &&
-                pointing.target != reference) {
+                pointing.target != reference && !directionRejected(engine, pointing)) {
                 const double sigma =
                     withCentring(apriori, std::hypot(pointing.sigmaDirection, referenceSigma),
                                  pointing.gridDistance.value_or(0.0));
@@ -1018,7 +1024,7 @@ Status adjustAsNetwork(Engine& engine)
                     label(s, "angle", reference, pointing.target), source, &pointing,
                     PointingPart::Direction});
             }
-            if (horizontalTarget && pointing.gridDistance) {
+            if (horizontalTarget && pointing.gridDistance && !distanceRejected(engine, pointing)) {
                 DistanceObservation distance;
                 distance.from = at;
                 distance.to = pointing.target;
@@ -1031,7 +1037,8 @@ Status adjustAsNetwork(Engine& engine)
                     PointingPart::Distance});
             }
             if (levels && pointing.heightDifference && pointing.slope && pointing.zenith &&
-                levelPresent.count(at) != 0 && levelPresent.count(pointing.target) != 0) {
+                levelPresent.count(at) != 0 && levelPresent.count(pointing.target) != 0 &&
+                !heightRejected(engine, pointing)) {
                 levelInputs.observations.push_back(NetworkObservation{
                     LevelDifferenceObservation{at, std::string(pointing.target),
                                                *pointing.heightDifference,
@@ -1239,10 +1246,11 @@ Status adjustAsNetwork(Engine& engine)
 
 // ---- Resection -------------------------------------------------------------------------
 //
-// A free station: a setup on a point nothing else positions, computed from its
-// reduced pointings to points already placed, which are held as they are. When
-// it is tried, and why then, is placeSetups' (reduction.cpp); what it needs,
-// how it is solved and what refuses it, here.
+// A free station: a setup on a point nothing else positions - or a setup that
+// names no backsight on a point only another setup's radiation positions -
+// computed from its reduced pointings to points already placed, which are held
+// as they are. When it is tried, and why then, is placeSetups' (reduction.cpp);
+// what it needs, how it is solved and what refuses it, here.
 //
 // Needed: two placed points each observed with a direction and a horizontal
 // distance, or three observed with a direction - the fewest that fix a
@@ -1258,31 +1266,64 @@ Status adjustAsNetwork(Engine& engine)
 // set whose orientation is the third unknown, and each horizontal distance,
 // with phase B's factors taken at the approximate station; weighted by the
 // reduction's one policy for an instrument that is itself the unknown
-// (StationModel::Resected); through adjustWithOutliers, so the settings'
-// outlier test flags a residual here as in a network. Then the level
+// (StationModel::Resected); its last run through adjustWithOutliers, so the
+// settings' outlier test flags a residual here as in a network. Then the level
 // adjustment of its trigonometric height differences to the targets with
-// heights. Gauss-Newton starts from a closed form: the rigid fit of the
-// station's own frame onto the targets with distances, or else the two-circle
-// solution of three directions.
+// heights.
 //
-// Refused where the geometry does not fix the station. Exactly degenerate
-// geometry - the station on one line with three targets, or on the circle
-// through them - the closed form finds. Readings carry their errors, though,
-// and then it seldom is exact: a station on the danger circle read to an arc
-// second lands anywhere on the circle. So the solution is also judged by its
-// own a-priori precision - the cofactor at the settings' weights, whatever the
-// residuals. The least squares takes each observation as linear about the
-// solution; over an offset a from it, a distance of length D changes by up to
-// a^2 / 2D more than that, and a direction by up to a^2 / 2D^2 radians (the
-// second-order terms of hypot and atan2). Where the station's ellipse at the
-// settings' confidence level reaches past the offset at which that exceeds an
-// observation's own standard deviation - sqrt(2 D sigma) for a distance,
-// D sqrt(2 sigma) for a direction - the model the least squares solved does
-// not hold over the region the station may be in: its observations do not fix
-// it, and it is refused. That criterion is the least squares' own and needs
-// no tolerance from outside. A geometry it passes that still magnifies the
-// observations' errors more than kWeakResectionDilution times is placed, and
-// flagged weak.
+// Where it starts, and whether the station has one answer. Gauss-Newton finds
+// the solution nearest its start, and a resection can have two: two marks with
+// distances and a third mark by direction alone give one distance and one
+// angle, two circles that meet twice. Started from one construction, it can
+// place such a station tens of metres from where the readings were made, with
+// a precision that says millimetres, and nothing flagged - both solutions fit.
+// So it starts from every point the observations give: where
+// two of the station's loci meet - the circle of a distance about its target,
+// the arc from which two targets are seen under the angle between their
+// readings (the line through them where that angle is 0 or 180 degrees) - and
+// the rigid fit of the station's own frame onto the targets with distances.
+// Each start is judged by the weighted squares of the residuals it leaves, the
+// orientation there the weighted mean of azimuth less reading (which minimises
+// them over the orientation). The least squares runs from the best, then from
+// each other start beyond the linear reach (below) of the solutions found
+// whose squares are within the bound below of the least found; a run that
+// fails moves on to the next start. The bound is chi-square with two degrees
+// of freedom at the settings' confidence level - the square of the scale the
+// station's ellipse is drawn at, 5.99 at 95 % - which is where the likelihood
+// puts the edge of the station's confidence region: the positions whose
+// weighted squares exceed the least by less than that are the ones its
+// observations do not exclude. The ellipse stands in for that region about the
+// solution. Where a second solution lies within the bound but outside the best
+// one's ellipse, the region has a second part the ellipse does not show: the
+// observations do not tell the two apart, and the resection is refused. And a
+// start from the best point, not from the first three marks, keeps three marks
+// on the danger circle, read first, from refusing a station a fourth one fixes.
+//
+// Refused, too, where the solution's own geometry does not fix it. Exactly
+// degenerate geometry of directions alone - the station on one line with every
+// three targets, or on the circle through them - the closed form finds.
+// Readings carry their errors, though, and then it seldom is exact: a station
+// on the danger circle read to an arc second lands anywhere on the circle. So
+// the solution is also judged by its own a-priori precision - the cofactor at
+// the settings' weights, whatever the residuals. The least squares takes each
+// observation as linear about the solution; over an offset a from it, a
+// distance of length D changes by up to a^2 / 2D more than that, and a
+// direction by up to a^2 / 2D^2 radians (the second-order terms of hypot and
+// atan2). Where the station's ellipse at the settings' confidence level
+// reaches past the offset at which that exceeds an observation's own standard
+// deviation - sqrt(2 D sigma) for a distance, D sqrt(2 sigma) for a direction -
+// the model the least squares solved does not hold over the region the station
+// may be in: its observations do not fix it, and it is refused. That criterion
+// is the least squares' own and needs no tolerance from outside. A geometry it
+// passes that still magnifies the observations' errors more than
+// kWeakResectionDilution times is placed, and flagged weak.
+//
+// A geometric refusal names the shape of a geometry that fixes nothing which
+// the station's comes nearest - two marks at one place, the station on one
+// line with its marks, or on the circle through three of them - with its
+// numbers at the solution: how far apart, within what angle of one line, how
+// far from that circle. It says what the geometry is; whether that fixes the
+// station is the precision's to say, so no tolerance decides what is near.
 //
 // Rejected: a resection formula (Tienstra's, Collins') for the answer. It
 // takes three directions exactly, so it neither uses a fourth nor a distance,
@@ -1290,7 +1331,10 @@ Status adjustAsNetwork(Engine& engine)
 // all of that and is the adjustment every other coordinate here comes from.
 // Rejected too: a tolerance on each degenerate shape - how near the danger
 // circle, how narrow the angles, how close two marks - which would need a
-// number from outside for each, where the precision judges them all alike.
+// number from outside for each, where the precision judges them all alike; and
+// a relative one-position rule (marks closer than their pointings resolve at
+// the range count once), which would need a number of standard deviations,
+// and would still not see two solutions of marks that are well apart.
 
 namespace {
 
@@ -1306,6 +1350,14 @@ Plane planeOf(const Position& position)
 std::string lengthWords(double metres)
 {
     return metres < 1.0 ? formatMillimetres(metres) : formatNumber(metres, 3) + " m";
+}
+
+// "2.1\"" below a degree, "12.3 deg" from there.
+std::string angleWords(double radians)
+{
+    return radians < katana::math::kDegToRad
+               ? formatSeconds(radians)
+               : formatNumber(radians * katana::math::kRadToDeg, 1) + " deg";
 }
 
 // A setup's pointings to one placed point, meaned.
@@ -1546,8 +1598,9 @@ struct ThreeDirections {
 // three angles are exactly 0 or 180 degrees (the station on one line with the
 // targets) and where the two circles are exactly one (the station on the
 // circle through all three: the danger circle, where any point of it sees them
-// alike). Near those, the start is still given: the least squares' precision
-// judges it (resectSetup).
+// alike). Used only to find directions alone exactly that degenerate: the
+// least squares' starts come from the loci (resectSetup), and near those
+// shapes its precision judges the solution.
 ThreeDirections threeDirections(const ResectionTarget& a, const ResectionTarget& b,
                                 const ResectionTarget& c)
 {
@@ -1602,65 +1655,183 @@ std::optional<std::pair<Plane, double>> circleThrough(Plane a, Plane b, Plane c)
     return std::pair{a + centre, std::abs(centre)};
 }
 
-// A measure of how near a geometry that does not fix a station is, below
-// which a refusal names it. Each measure is a sine or a length over a sight
-// length, so a tenth is a sight line within 6 degrees of the others' line,
-// two marks a tenth of their distance apart, or the station a tenth of the
-// danger circle's radius from it: near by any standard, and far above what
-// degenerate geometry read to arc seconds gives (docs/survey.md). It only
-// chooses the words: whether a station is fixed is its precision's to say.
-constexpr double kNearDegenerate = 0.1;
+// Where the station is by one or two of its observations: a circle - of a
+// distance about its target, or of the arc from which two targets are seen
+// under the angle between their readings (inscribedCentre) - or, where that
+// angle is 0 or 180 degrees, the line through the two targets.
+struct Locus {
+    Plane point{}; // a circle's centre, or a point of the line
+    double radius = 0.0;
+    Plane along{}; // the line's unit direction; zero for a circle
+};
 
-struct Degeneracy {
+// The cross product of two vectors of the plane (its one component): zero for
+// parallel ones.
+double cross(Plane a, Plane b)
+{
+    return a.real() * b.imag() - a.imag() * b.real();
+}
+
+// Where two loci meet, added to `points`: none, one or two points. Two that
+// miss each other - read with errors, where the true ones touch or nearly do -
+// give one point instead, on the line of their centres (the foot of the
+// radical line for two circles, of the centre for a circle and a line), which
+// for two that nearly touch is where they would: a start near the station,
+// which the least squares then solves.
+void meet(const Locus& a, const Locus& b, std::vector<Plane>& points)
+{
+    const bool lineA = a.along != Plane{};
+    const bool lineB = b.along != Plane{};
+    if (lineA && lineB) {
+        const double turn = cross(a.along, b.along);
+        if (turn != 0.0) {
+            points.push_back(a.point + a.along * (cross(b.point - a.point, b.along) / turn));
+        }
+        return;
+    }
+    if (lineA || lineB) {
+        const Locus& line = lineA ? a : b;
+        const Locus& circle = lineA ? b : a;
+        const Plane foot =
+            line.point + line.along * (std::conj(line.along) * (circle.point - line.point)).real();
+        const double offset = std::abs(circle.point - foot);
+        if (offset <= circle.radius) {
+            const Plane half =
+                line.along * std::sqrt(circle.radius * circle.radius - offset * offset);
+            points.push_back(foot + half);
+            points.push_back(foot - half);
+        } else {
+            points.push_back(foot);
+        }
+        return;
+    }
+    const Plane between = b.point - a.point;
+    const double apart = std::abs(between);
+    if (apart == 0.0) {
+        return; // one centre: the circles meet everywhere or nowhere
+    }
+    const Plane unit = between / apart;
+    const double along = (a.radius * a.radius - b.radius * b.radius + apart * apart) / (2.0 * apart);
+    const double across = a.radius * a.radius - along * along;
+    const Plane foot = a.point + unit * along;
+    if (across >= 0.0) {
+        const Plane half = Plane(0.0, 1.0) * unit * std::sqrt(across);
+        points.push_back(foot + half);
+        points.push_back(foot - half);
+    } else {
+        points.push_back(foot);
+    }
+}
+
+// One horizontal observation of the resection as a start is judged by it, in
+// the order its least squares takes them (resectSetup), so that one mask of
+// the observations its outlier test rejected serves both.
+struct Reading {
+    Plane target{};
+    bool direction = false;
+    double value = 0.0;            // the circle reading, or the grid distance
+    double sigma = 0.0;            // a distance's; a direction's before its target's centring
+    std::optional<double> sight{}; // a direction's measured sight, over which that centring acts
+};
+
+// The weighted squares of the residuals a station at `station` leaves, at the
+// orientation there that makes them least - the weighted mean of azimuth less
+// reading - with the weights its least squares gives them. The readings
+// `excluded` marks take no part.
+double squaresAt(Plane station, const std::vector<Reading>& readings,
+                 const std::vector<bool>& excluded, const ObservationPrecision& apriori)
+{
+    std::vector<double> sigmas(readings.size(), 0.0);
+    std::optional<double> first;
+    double offsets = 0.0;
+    double weights = 0.0;
+    for (std::size_t i = 0; i < readings.size(); ++i) {
+        const Reading& reading = readings[i];
+        if (excluded[i] || !reading.direction) {
+            continue;
+        }
+        const Plane line = reading.target - station;
+        sigmas[i] = withCentring(apriori, reading.sigma, reading.sight.value_or(std::abs(line)),
+                                 StationModel::Resected);
+        const double value = normalizeAngle(std::atan2(line.real(), line.imag()) - reading.value);
+        if (!first) {
+            first = value;
+        }
+        const double weight = 1.0 / (sigmas[i] * sigmas[i]);
+        offsets += weight * normalizeAngleSigned(value - *first);
+        weights += weight;
+    }
+    const double orientation = first ? *first + offsets / weights : 0.0;
+    double squares = 0.0;
+    for (std::size_t i = 0; i < readings.size(); ++i) {
+        const Reading& reading = readings[i];
+        if (excluded[i]) {
+            continue;
+        }
+        const Plane line = reading.target - station;
+        const double standardised =
+            reading.direction
+                ? normalizeAngleSigned(std::atan2(line.real(), line.imag()) - reading.value -
+                                       orientation) /
+                      sigmas[i]
+                : (std::abs(line) - reading.value) / reading.sigma;
+        squares += standardised * standardised;
+    }
+    return squares;
+}
+
+// The squared Mahalanobis distance of `offset` from a station whose
+// coordinates have the cofactor `q`: above chi-square(2) at a confidence
+// level, the offset lies outside the station's ellipse at that level.
+double mahalanobis2(Plane offset, const Covariance2& q)
+{
+    const double determinant = q.northing * q.easting - q.northingEasting * q.northingEasting;
+    if (!(determinant > 0.0)) {
+        return std::numeric_limits<double>::infinity();
+    }
+    const double north = offset.imag();
+    const double east = offset.real();
+    return (q.easting * north * north - 2.0 * q.northingEasting * north * east +
+            q.northing * east * east) /
+           determinant;
+}
+
+// A shape of the geometries that fix no station, and how near one comes to it.
+struct Shape {
     double measure = std::numeric_limits<double>::infinity();
     std::string clause;
 };
 
-// The geometry that does not fix a station which this one comes nearest, as a
-// clause: two targets at nearly one place (their separation over their
-// distance from the station), the station on one line with its targets (the
-// largest sine of an angle between two sight lines, which one line through
-// the station makes zero), or the station near the circle through three of
-// them (its distance from that circle over the radius). Each is zero where the
-// geometry is exactly that one; the least is named. `station` is where the
-// station is thought to be, absent when not even that is known.
-Degeneracy nearestDegeneracy(const std::vector<const ResectionTarget*>& targets,
-                             std::optional<Plane> station)
+// Of the shapes that fix no station, the one a station at `station` comes
+// nearest, as a clause with its numbers: two targets at one place (their
+// separation over their distance from it), the station on one line with three
+// or more targets (the largest sine of an angle between two sight lines, which
+// one line through the station makes zero), or on the circle through three of
+// them (its distance from that circle over the radius). Each measure is zero
+// for its shape exactly; the least is named. What it names is a fact of the
+// geometry; the refusal it goes with says why that does not fix the station.
+Shape nearestShape(const std::vector<const ResectionTarget*>& targets, Plane station)
 {
-    Degeneracy nearest;
+    Shape nearest;
     const auto consider = [&nearest](double measure, std::string clause) {
         if (std::isfinite(measure) && measure < nearest.measure) {
-            nearest = Degeneracy{measure, std::move(clause)};
+            nearest = Shape{measure, std::move(clause)};
         }
     };
     const std::size_t count = targets.size();
-    double figure = 0.0; // the widest separation of two targets
     for (std::size_t i = 0; i < count; ++i) {
         for (std::size_t j = i + 1; j < count; ++j) {
-            figure = std::max(figure, std::abs(planeOf(*targets[i]->position) -
-                                               planeOf(*targets[j]->position)));
-        }
-    }
-    // How far each target is: as measured, else from where the station is
-    // thought to be, else the figure's own size.
-    std::vector<double> reach(count, figure);
-    for (std::size_t i = 0; i < count; ++i) {
-        if (targets[i]->distance) {
-            reach[i] = *targets[i]->distance;
-        } else if (station) {
-            reach[i] = std::abs(planeOf(*targets[i]->position) - *station);
-        }
-    }
-    for (std::size_t i = 0; i < count; ++i) {
-        for (std::size_t j = i + 1; j < count; ++j) {
-            const double apart =
-                std::abs(planeOf(*targets[i]->position) - planeOf(*targets[j]->position));
-            const double from = std::max(reach[i], reach[j]);
-            if (from > 0.0) {
-                consider(apart / from, std::string(targets[i]->id) + " and " +
-                                           std::string(targets[j]->id) +
-                                           " are nearly at one place (" + lengthWords(apart) +
-                                           " apart, " + lengthWords(from) + " from it)");
+            const Plane a = planeOf(*targets[i]->position);
+            const Plane b = planeOf(*targets[j]->position);
+            const double apart = std::abs(a - b);
+            // How far they are: as measured, else from the station.
+            const double reach = std::max(targets[i]->distance.value_or(std::abs(a - station)),
+                                          targets[j]->distance.value_or(std::abs(b - station)));
+            if (reach > 0.0) {
+                consider(apart / reach, std::string(targets[i]->id) + " and " +
+                                            std::string(targets[j]->id) + " are " +
+                                            lengthWords(apart) + " apart, " + lengthWords(reach) +
+                                            " from it");
             }
         }
     }
@@ -1674,23 +1845,22 @@ Degeneracy nearestDegeneracy(const std::vector<const ResectionTarget*>& targets,
                               std::abs(std::sin(*targets[j]->direction - *targets[i]->direction)));
         }
     }
-    consider(widest, "it stands nearly on one line with " + namesOf(targets));
-    if (station) {
-        for (std::size_t i = 0; i < count; ++i) {
-            for (std::size_t j = i + 1; j < count; ++j) {
-                for (std::size_t k = j + 1; k < count; ++k) {
-                    const auto circle = circleThrough(planeOf(*targets[i]->position),
-                                                      planeOf(*targets[j]->position),
-                                                      planeOf(*targets[k]->position));
-                    if (!circle) {
-                        continue;
-                    }
-                    consider(std::abs(std::abs(*station - circle->first) - circle->second) /
-                                 circle->second,
-                             "it stands near the circle through " +
-                                 namesOf({targets[i], targets[j], targets[k]}) +
-                                 " (the danger circle)");
+    consider(widest, "its sight lines to " + namesOf(targets) + " are within " +
+                         angleWords(std::asin(std::min(widest, 1.0))) + " of one line");
+    for (std::size_t i = 0; i < count; ++i) {
+        for (std::size_t j = i + 1; j < count; ++j) {
+            for (std::size_t k = j + 1; k < count; ++k) {
+                const auto circle = circleThrough(planeOf(*targets[i]->position),
+                                                  planeOf(*targets[j]->position),
+                                                  planeOf(*targets[k]->position));
+                if (!circle) {
+                    continue;
                 }
+                const double offset = std::abs(std::abs(station - circle->first) - circle->second);
+                consider(offset / circle->second,
+                         "it stands " + lengthWords(offset) + " from the circle through " +
+                             namesOf({targets[i], targets[j], targets[k]}) +
+                             " (the danger circle, radius " + lengthWords(circle->second) + ")");
             }
         }
     }
@@ -1707,7 +1877,8 @@ struct Sight {
 // How well the least squares fixed the station, from the geometry and the
 // observations' a-priori precision alone (see the section's head).
 struct StationStrength {
-    ErrorEllipse apriori{};    // the station's standard ellipse at the a-priori weights
+    Covariance2 cofactor{};    // of the station's northing and easting, at the a-priori weights
+    ErrorEllipse apriori{};    // its standard ellipse
     double confidence = 0.0;   // its semi-major axis at the settings' confidence level
     double linearWithin = 0.0; // the offset within which the linear model holds
     double worstLine = 0.0;    // the least precise single observation's line of position
@@ -1740,13 +1911,14 @@ std::optional<StationStrength> stationStrength(const HorizontalAdjustmentResult&
     if (!north || !east || sights.empty()) {
         return std::nullopt;
     }
-    const Result<ErrorEllipse> ellipse = errorEllipse(Covariance2{
-        result.cofactor(*north, *north), result.cofactor(*east, *east),
-        result.cofactor(*north, *east)});
+    const Covariance2 cofactor{result.cofactor(*north, *north), result.cofactor(*east, *east),
+                               result.cofactor(*north, *east)};
+    const Result<ErrorEllipse> ellipse = errorEllipse(cofactor);
     if (!ellipse) {
         return std::nullopt;
     }
     StationStrength strength;
+    strength.cofactor = cofactor;
     strength.apriori = *ellipse;
     strength.confidence = ellipse->semiMajor * confidenceScale;
     strength.linearWithin = std::numeric_limits<double>::infinity();
@@ -1765,10 +1937,69 @@ std::optional<StationStrength> stationStrength(const HorizontalAdjustmentResult&
     return strength;
 }
 
+// A solution of the resection's least squares: where it put the station, the
+// weighted squares of its residuals, and how well it fixes the station.
+struct Solution {
+    Plane position{};
+    double squares = 0.0;
+    StationStrength strength{};
+};
+
+// The one of `found` with the least squares.
+std::size_t leastOf(const std::vector<Solution>& found)
+{
+    return static_cast<std::size_t>(
+        std::min_element(found.begin(), found.end(),
+                         [](const Solution& x, const Solution& y) { return x.squares < y.squares; }) -
+        found.begin());
+}
+
+// Another solution of `found` its observations do not tell from `best`: its
+// squares within `bound` of best's and it outside best's ellipse at the
+// confidence level whose chi-square(2) is `bound`. The nearest in squares, or
+// none.
+const Solution* rivalOf(const std::vector<Solution>& found, const Solution& best, double bound)
+{
+    const Solution* rival = nullptr;
+    for (const Solution& other : found) {
+        if (&other == &best || other.squares > best.squares + bound ||
+            mahalanobis2(other.position - best.position, best.strength.cofactor) <= bound) {
+            continue;
+        }
+        if (rival == nullptr || other.squares < rival->squares) {
+            rival = &other;
+        }
+    }
+    return rival;
+}
+
 // "12 deg": the azimuth of an ellipse's semi-major axis, in whole degrees.
 std::string axisWords(const ErrorEllipse& ellipse)
 {
     return formatNumber(ellipse.orientation * 180.0 / katana::math::kPi, 0) + " deg";
+}
+
+// "N 4935.721 E 5076.604": a position, to the millimetre.
+std::string positionWords(Plane position)
+{
+    return "N " + formatNumber(position.imag(), 3) + " E " + formatNumber(position.real(), 3);
+}
+
+// The precision a least squares gives, as a factor on its a-priori cofactor:
+// the variance factor where its global test finds the residuals larger than
+// the a-priori weights allow (above the test's upper bound), else 1. On the
+// few degrees of freedom of a resection the variance factor is itself
+// uncertain - a chi-square on r has a relative standard deviation of
+// sqrt(2 / r), 141 % on one, 82 % on three - so one the test accepts says no
+// more than the weights did, and scaling by it would shrink or swell the
+// precision by chance (to nanometres where exact readings fit exactly); one
+// above the bound says the weights were too optimistic.
+double precisionScaleOf(const AdjustmentStatistics& statistics)
+{
+    return statistics.globalTest && statistics.varianceFactor &&
+                   statistics.globalTest->statistic > statistics.globalTest->upperCritical
+               ? *statistics.varianceFactor
+               : 1.0;
 }
 
 } // namespace
@@ -1802,6 +2033,14 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
     const SurveyStation& station = engine.raw.stations[setupIndex];
     SetupState& state = engine.setups[setupIndex];
     const std::string& at = station.setup.pointId;
+    // Where another setup's radiation put the station, when placeSetups
+    // resects a setup that names no backsight on it: replaced, and kept as a
+    // check of the resection.
+    const Position* before = engine.find(at);
+    const std::optional<Position> radiated =
+        before != nullptr && before->method == ComputationMethod::Radiation
+            ? std::optional<Position>(*before)
+            : std::nullopt;
 
     const ResectionData data = resectionData(engine, setupIndex);
     if (!data.notFinite.empty()) {
@@ -1809,50 +2048,61 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
               ", or where that point is, is not a finite number";
         return false;
     }
-    const DistinctTargets distinct = distinctTargets(data.targets, onePositionOf(apriori));
+    const double onePosition = onePositionOf(apriori);
+    const DistinctTargets distinct = distinctTargets(data.targets, onePosition);
     if (distinct.withBoth.size() < 2 && distinct.withDirection.size() < 3) {
         why = tooFew(distinct);
         return false;
     }
 
-    // ---- where Gauss-Newton starts ----
-    std::optional<Plane> start;
-    if (distinct.withBoth.size() >= 2) {
-        start = fitStation(distinct.withBoth);
-    }
-    if (!start && distinct.withDirection.size() >= 3) {
+    // Directions alone, every three of them exactly on one line with the
+    // station or on the circle through it: nothing fixes it, whatever the
+    // start, and the closed form says which.
+    const bool anyDistance =
+        std::any_of(data.targets.begin(), data.targets.end(),
+                    [](const ResectionTarget& target) { return target.distance.has_value(); });
+    if (!anyDistance) {
         const std::vector<const ResectionTarget*>& t = distinct.withDirection;
         std::string first;
-        for (std::size_t i = 0; i < t.size() && !start; ++i) {
-            for (std::size_t j = i + 1; j < t.size() && !start; ++j) {
-                for (std::size_t k = j + 1; k < t.size() && !start; ++k) {
+        bool fixes = false;
+        for (std::size_t i = 0; i < t.size() && !fixes; ++i) {
+            for (std::size_t j = i + 1; j < t.size() && !fixes; ++j) {
+                for (std::size_t k = j + 1; k < t.size() && !fixes; ++k) {
                     const ThreeDirections three = threeDirections(*t[i], *t[j], *t[k]);
-                    start = three.station;
-                    if (!start && first.empty()) {
+                    fixes = three.station.has_value();
+                    if (!fixes && first.empty()) {
                         first = three.why;
                     }
                 }
             }
         }
-        if (!start) {
+        if (!fixes) {
             why = first;
             return false;
         }
     }
-    if (!start) {
-        why = "its directions and distances to " + namesOf(distinct.withBoth) +
-              " put them at one place, where their coordinates put them apart";
-        return false;
+
+    // ---- its observations ----
+    // The distances' factors are taken at a station not yet known: the rigid
+    // fit where there is one, else amid the targets, and the height the
+    // targets with heights give it. Only the grid scale and the geoid depend
+    // on where, a few parts per million over the few hundred metres a start
+    // can be off; the least squares takes them again at each start it runs
+    // from.
+    const std::optional<Plane> fit =
+        distinct.withBoth.size() >= 2 ? fitStation(distinct.withBoth) : std::nullopt;
+    Plane reference{};
+    if (fit && std::isfinite(fit->real()) && std::isfinite(fit->imag())) {
+        reference = *fit;
+    } else {
+        for (const ResectionTarget* target : distinct.withDirection) {
+            reference += planeOf(*target->position);
+        }
+        reference /= static_cast<double>(distinct.withDirection.size());
     }
-    if (!std::isfinite(start->real()) || !std::isfinite(start->imag())) {
-        why = "its approximate position is not a finite number";
-        return false;
-    }
-    // A height to take the distances' factors at: the mean of what the
-    // targets with heights give it.
     Position approximate;
-    approximate.northing = start->imag();
-    approximate.easting = start->real();
+    approximate.northing = reference.imag();
+    approximate.easting = reference.real();
     {
         double sum = 0.0;
         std::size_t count = 0;
@@ -1868,73 +2118,326 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
             approximate.height = sum / static_cast<double>(count);
         }
     }
-
-    // ---- the least squares of its directions and distances ----
-    const auto label = [&station](const char* what, std::string_view to) {
-        return std::string(what) + " at " + station.setup.id + ": " + std::string(to);
-    };
-    NetworkInputs horizontal;
-    {
-        SurveyPoint free;
-        free.id = at;
-        free.northing = approximate.northing;
-        free.easting = approximate.easting;
-        horizontal.points.push_back(std::move(free));
-    }
-    for (const ResectionTarget& target : data.targets) {
-        SurveyPoint held;
-        held.id = target.id;
-        held.northing = target.position->northing;
-        held.easting = target.position->easting;
-        horizontal.points.push_back(std::move(held));
-        horizontal.control.push_back(ControlPoint::fixedHorizontal(std::string(target.id)));
-    }
-    std::vector<std::pair<std::size_t, double>> directions; // pointing, its sigma
-    std::vector<Sight> sights;                              // one per horizontal observation
+    std::vector<Reading> readings;
     for (const std::size_t p : data.pointings) {
         const ReducedPointing& pointing = engine.pointings[p];
-        const Position& target = engine.positions.at(pointing.target);
-        const SourceRecord source = pointing.source ? *pointing.source : station.source;
+        const Plane target = planeOf(engine.positions.at(pointing.target));
         const std::optional<double> gridDistance =
             gridDistanceFrom(engine, setupIndex, pointing, approximate);
         if (gridDistance && !(std::isfinite(*gridDistance) && *gridDistance > 0.0)) {
             why = "its distance to " + std::string(pointing.target) + " is not a positive number";
             return false;
         }
-        const Pointing group{pointing.leftIndex, Face::Unknown};
         if (pointing.direction) {
-            HorizontalDirectionObservation direction;
-            direction.at = at;
-            direction.to = pointing.target;
-            direction.direction = *pointing.direction;
-            // Across the measured line where there is one, else the line the
-            // start gives: centring is millimetres, the start is closer.
-            direction.sigma = withCentring(apriori, pointing.sigmaDirection,
-                                           gridDistance.value_or(std::abs(planeOf(target) - *start)),
-                                           StationModel::Resected);
-            direction.source = source;
-            direction.pointing = group;
-            directions.emplace_back(p, direction.sigma);
-            sights.push_back(Sight{planeOf(target), direction.sigma, true});
-            horizontal.observations.push_back(NetworkObservation{
-                direction, label("direction", pointing.target), source, &pointing,
-                PointingPart::Direction});
+            readings.push_back(
+                Reading{target, true, *pointing.direction, pointing.sigmaDirection, gridDistance});
         }
         if (gridDistance) {
-            DistanceObservation distance;
-            distance.from = at;
-            distance.to = pointing.target;
-            distance.distance = *gridDistance;
-            distance.sigma = distanceSigmaOf(apriori, pointing, StationModel::Resected);
-            distance.kind = DistanceKind::Horizontal;
-            distance.source = source;
-            distance.pointing = group;
-            sights.push_back(Sight{planeOf(target), distance.sigma, false});
-            horizontal.observations.push_back(NetworkObservation{
-                distance, label("distance", pointing.target), source, &pointing,
-                PointingPart::Distance});
+            readings.push_back(Reading{target, false, *gridDistance,
+                                       distanceSigmaOf(apriori, pointing, StationModel::Resected),
+                                       std::nullopt});
         }
     }
+
+    // The network of its least squares, started at `start`: the station free,
+    // its targets held, a direction and a distance per pointing as `readings`
+    // has them, with the distances' factors at the start.
+    const auto label = [&station](const char* what, std::string_view to) {
+        return std::string(what) + " at " + station.setup.id + ": " + std::string(to);
+    };
+    struct Inputs {
+        NetworkInputs network;
+        std::vector<Sight> sights;                              // one per observation
+        std::vector<std::pair<std::size_t, double>> directions; // pointing, its sigma
+    };
+    const auto inputsAt = [&](Plane start) {
+        Position here = approximate;
+        here.northing = start.imag();
+        here.easting = start.real();
+        Inputs inputs;
+        {
+            SurveyPoint free;
+            free.id = at;
+            free.northing = here.northing;
+            free.easting = here.easting;
+            inputs.network.points.push_back(std::move(free));
+        }
+        for (const ResectionTarget& target : data.targets) {
+            SurveyPoint held;
+            held.id = target.id;
+            held.northing = target.position->northing;
+            held.easting = target.position->easting;
+            inputs.network.points.push_back(std::move(held));
+            inputs.network.control.push_back(ControlPoint::fixedHorizontal(std::string(target.id)));
+        }
+        for (const std::size_t p : data.pointings) {
+            const ReducedPointing& pointing = engine.pointings[p];
+            const Position& target = engine.positions.at(pointing.target);
+            const SourceRecord source = pointing.source ? *pointing.source : station.source;
+            const std::optional<double> gridDistance =
+                gridDistanceFrom(engine, setupIndex, pointing, here);
+            const Pointing group{pointing.leftIndex, Face::Unknown};
+            if (pointing.direction) {
+                HorizontalDirectionObservation direction;
+                direction.at = at;
+                direction.to = pointing.target;
+                direction.direction = *pointing.direction;
+                // Across the measured line where there is one, else the line
+                // the start gives: centring is millimetres, the start closer.
+                direction.sigma =
+                    withCentring(apriori, pointing.sigmaDirection,
+                                 gridDistance.value_or(std::abs(planeOf(target) - start)),
+                                 StationModel::Resected);
+                direction.source = source;
+                direction.pointing = group;
+                inputs.directions.emplace_back(p, direction.sigma);
+                inputs.sights.push_back(Sight{planeOf(target), direction.sigma, true});
+                inputs.network.observations.push_back(NetworkObservation{
+                    direction, label("direction", pointing.target), source, &pointing,
+                    PointingPart::Direction});
+            }
+            if (gridDistance) {
+                DistanceObservation distance;
+                distance.from = at;
+                distance.to = pointing.target;
+                distance.distance = *gridDistance;
+                distance.sigma = distanceSigmaOf(apriori, pointing, StationModel::Resected);
+                distance.kind = DistanceKind::Horizontal;
+                distance.source = source;
+                distance.pointing = group;
+                inputs.sights.push_back(Sight{planeOf(target), distance.sigma, false});
+                inputs.network.observations.push_back(NetworkObservation{
+                    distance, label("distance", pointing.target), source, &pointing,
+                    PointingPart::Distance});
+            }
+        }
+        return inputs;
+    };
+
+    // ---- where its least squares starts ----
+    // Every point where two of its loci meet (the section's head), and the
+    // rigid fit.
+    std::vector<Locus> loci;
+    {
+        // A circle per distinct place with a distance, its radius the mean.
+        std::vector<Plane> centres;
+        for (const ResectionTarget& target : data.targets) {
+            const Plane centre = planeOf(*target.position);
+            double sum = 0.0;
+            std::size_t count = 0;
+            for (const Reading& reading : readings) {
+                if (!reading.direction && reading.target == centre) {
+                    sum += reading.value;
+                    ++count;
+                }
+            }
+            const bool repeated = std::any_of(centres.begin(), centres.end(), [&](Plane other) {
+                return std::abs(other - centre) <= onePosition;
+            });
+            if (count > 0 && !repeated) {
+                centres.push_back(centre);
+                loci.push_back(Locus{centre, sum / static_cast<double>(count), {}});
+            }
+        }
+        // An arc per pair of targets read with a direction: each with the
+        // next round the circle and with the one it makes the widest angle
+        // with - every pair of three targets, and of more a number of arcs
+        // that grows with the targets, not with their square, while every
+        // target is on two of them.
+        const std::vector<const ResectionTarget*>& seen = distinct.withDirection;
+        const std::size_t count = seen.size();
+        std::vector<std::size_t> byReading(count);
+        for (std::size_t k = 0; k < count; ++k) {
+            byReading[k] = k;
+        }
+        std::stable_sort(byReading.begin(), byReading.end(), [&seen](std::size_t x, std::size_t y) {
+            return *seen[x]->direction < *seen[y]->direction;
+        });
+        std::vector<std::pair<std::size_t, std::size_t>> pairs;
+        const auto pair = [&pairs](std::size_t i, std::size_t j) {
+            const std::pair<std::size_t, std::size_t> both{std::min(i, j), std::max(i, j)};
+            if (i != j && std::find(pairs.begin(), pairs.end(), both) == pairs.end()) {
+                pairs.push_back(both);
+            }
+        };
+        for (std::size_t k = 0; k < count; ++k) {
+            pair(byReading[k], byReading[(k + 1) % count]);
+        }
+        for (std::size_t i = 0; i < count; ++i) {
+            std::size_t widest = i;
+            double sine = -1.0;
+            for (std::size_t j = 0; j < count; ++j) {
+                const double s = std::abs(std::sin(*seen[j]->direction - *seen[i]->direction));
+                if (j != i && s > sine) {
+                    sine = s;
+                    widest = j;
+                }
+            }
+            pair(i, widest);
+        }
+        for (const auto& [i, j] : pairs) {
+            const Plane from = planeOf(*seen[i]->position);
+            const Plane to = planeOf(*seen[j]->position);
+            const double angle = *seen[j]->direction - *seen[i]->direction;
+            if (std::abs(std::sin(angle)) <= katana::math::tolerance::kAngular) {
+                loci.push_back(Locus{from, 0.0, (to - from) / std::abs(to - from)});
+            } else {
+                const Plane centre = inscribedCentre(from, to, angle);
+                loci.push_back(Locus{centre, std::abs(from - centre), {}});
+            }
+        }
+    }
+    std::vector<Plane> starts;
+    if (fit) {
+        starts.push_back(*fit);
+    }
+    for (std::size_t a = 0; a < loci.size(); ++a) {
+        for (std::size_t b = a + 1; b < loci.size(); ++b) {
+            meet(loci[a], loci[b], starts);
+        }
+    }
+    // Not a start: a point that is not finite, or one on a target, where
+    // every arc through that target meets another.
+    std::erase_if(starts, [&](Plane start) {
+        return !std::isfinite(start.real()) || !std::isfinite(start.imag()) ||
+               std::any_of(data.targets.begin(), data.targets.end(),
+                           [&](const ResectionTarget& target) {
+                               return std::abs(planeOf(*target.position) - start) <= onePosition;
+                           });
+    });
+
+    // ---- its solutions ----
+    const double confidenceScale = ellipseConfidenceScale(settings.confidenceLevel)
+                                       .valueOr(std::numeric_limits<double>::infinity());
+    // chi-square(2) at the confidence level: the edge of the station's
+    // confidence region, in weighted squares above the least.
+    const double bound = confidenceScale * confidenceScale;
+    const std::string confidenceWords = formatNumber(settings.confidenceLevel * 100.0, 0) + " %";
+    AdjustmentOptions options;
+    options.maxIterations = settings.maxIterations;
+    options.significanceLevel = 1.0 - settings.confidenceLevel;
+    // Why the first least squares that failed did, and where it started.
+    std::string failure;
+    Plane failedAt{};
+    const auto fail = [&failure, &failedAt](Plane start, const std::string& message) {
+        if (failure.empty()) {
+            failure = message;
+            failedAt = start;
+        }
+    };
+    const auto solveFrom = [&](Plane start,
+                               const std::vector<bool>& excluded) -> std::optional<Solution> {
+        const Inputs inputs = inputsAt(start);
+        std::vector<std::size_t> included;
+        const Result<SurveyNetwork> network = buildNetwork(inputs.network, excluded, included);
+        if (!network) {
+            fail(start, network.error().message);
+            return std::nullopt;
+        }
+        const Result<HorizontalAdjustmentResult> result = adjustHorizontalNetwork(*network, options);
+        if (!result) {
+            fail(start, result.error().message);
+            return std::nullopt;
+        }
+        std::optional<Plane> position;
+        for (const AdjustedStation& adjusted : result->stations) {
+            if (adjusted.pointId == at) {
+                position = Plane{adjusted.position.easting, adjusted.position.northing};
+            }
+        }
+        std::vector<Sight> kept;
+        for (std::size_t i = 0; i < inputs.sights.size(); ++i) {
+            if (!excluded[i]) {
+                kept.push_back(inputs.sights[i]);
+            }
+        }
+        const std::optional<StationStrength> strength =
+            position ? stationStrength(*result, at, *position, kept, confidenceScale)
+                     : std::nullopt;
+        if (!strength) {
+            fail(start, "it gives the station no precision");
+            return std::nullopt;
+        }
+        return Solution{*position, result->statistics.weightedSquaredResiduals, *strength};
+    };
+    // The solutions from the starts, beside `found`, over the observations
+    // `excluded` leaves (see the section's head).
+    const auto search = [&](const std::vector<bool>& excluded, std::vector<Solution> found) {
+        struct Start {
+            Plane point{};
+            double squares = 0.0;
+        };
+        std::vector<Start> order;
+        for (const Plane start : starts) {
+            const double squares = squaresAt(start, readings, excluded, apriori);
+            if (std::isfinite(squares)) {
+                order.push_back(Start{start, squares});
+            }
+        }
+        std::stable_sort(order.begin(), order.end(),
+                         [](const Start& x, const Start& y) { return x.squares < y.squares; });
+        for (const Start& start : order) {
+            double least = std::numeric_limits<double>::infinity();
+            bool reached = false;
+            for (const Solution& solution : found) {
+                least = std::min(least, solution.squares);
+                reached = reached || std::abs(start.point - solution.position) <=
+                                         solution.strength.linearWithin;
+            }
+            if (start.squares > least + bound) {
+                break; // it, and every start after it, fits worse than the region allows
+            }
+            if (reached) {
+                continue; // within a solution's linear reach: that solution
+            }
+            std::optional<Solution> solution = solveFrom(start.point, excluded);
+            if (!solution) {
+                continue;
+            }
+            const bool known = std::any_of(found.begin(), found.end(), [&](const Solution& other) {
+                return mahalanobis2(solution->position - other.position, other.strength.cofactor) <=
+                       bound;
+            });
+            if (!known) {
+                found.push_back(std::move(*solution));
+            }
+        }
+        return found;
+    };
+    const auto shapeAt = [&distinct](Plane position) {
+        const std::string clause = nearestShape(distinct.withDirection, position).clause;
+        return clause.empty() ? clause : clause + ", and ";
+    };
+    const auto twoPositions = [&](const Solution& one, const Solution& other) {
+        return shapeAt(one.position) + "its observations fit two positions " +
+               lengthWords(std::abs(other.position - one.position)) + " apart (" +
+               positionWords(one.position) + " and " + positionWords(other.position) +
+               ": weighted squares of residuals " + formatNumber(one.squares, 3) + " and " +
+               formatNumber(other.squares, 3) + ", where the station's " + confidenceWords +
+               " confidence region takes in all within " + formatNumber(bound, 2) +
+               " of the least), so they do not fix it";
+    };
+
+    const std::vector<Solution> solutions =
+        search(std::vector<bool>(readings.size(), false), {});
+    if (solutions.empty()) {
+        // A rank deficiency (network_adjustment.cpp's rankError) is the
+        // geometry's: its observations do not determine the station where the
+        // best start put it, and the shape says how. A failure to converge is
+        // not, and names none.
+        const bool geometric = failure.starts_with("the network is rank deficient");
+        why = (geometric ? shapeAt(failedAt) : std::string{}) + "its least squares cannot fix it (" +
+              (failure.empty() ? std::string("no start was found") : failure) + ")";
+        return false;
+    }
+    const Solution& best = solutions[leastOf(solutions)];
+    if (const Solution* rival = rivalOf(solutions, best, bound); rival != nullptr) {
+        why = twoPositions(best, *rival);
+        return false;
+    }
+
+    // ---- the least squares it is reported by, from the best solution ----
+    const Inputs horizontal = inputsAt(best.position);
 
     // What its least squares leaves behind - warnings, observations marked
     // rejected - so that a refusal takes it back: a setup that was not
@@ -1960,26 +2463,24 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
         engine.report.warnings.erase(
             engine.report.warnings.begin() + static_cast<std::ptrdiff_t>(warningsBefore),
             engine.report.warnings.end());
-        for (const RowState& before : rowsBefore) {
-            ReportObservation& observation = engine.report.observations[before.row];
-            observation.rejected = before.rejected;
-            observation.rejectionReason = before.reason;
+        for (const RowState& previous : rowsBefore) {
+            ReportObservation& observation = engine.report.observations[previous.row];
+            observation.rejected = previous.rejected;
+            observation.rejectionReason = previous.reason;
         }
     };
 
     const std::string name = "resection at " + station.setup.id;
     AdjustmentReport horizontalReport;
     const Result<HorizontalAdjustmentResult> solved = adjustWithOutliers<HorizontalAdjustmentResult>(
-        engine, horizontal, name + " (horizontal)",
-        [](const SurveyNetwork& network, const AdjustmentOptions& options) {
-            return adjustHorizontalNetwork(network, options);
+        engine, horizontal.network, name + " (horizontal)",
+        [](const SurveyNetwork& network, const AdjustmentOptions& adjustment) {
+            return adjustHorizontalNetwork(network, adjustment);
         },
         horizontalReport, "the resection");
     if (!solved) {
         takeBack();
-        const Degeneracy nearest = nearestDegeneracy(distinct.withDirection, start);
-        why = (nearest.measure < kNearDegenerate ? nearest.clause + ", and " : std::string{}) +
-              "its least squares cannot fix it (" + solved.error().message + ")";
+        why = "its least squares cannot fix it (" + solved.error().message + ")";
         return false;
     }
     const AdjustedStation* fixed = nullptr;
@@ -2000,35 +2501,42 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
         return false;
     }
 
-    // ---- does its geometry fix it? ----
+    // ---- does it fix the station? ----
     const Plane solution{fixed->position.easting, fixed->position.northing};
+    std::vector<bool> excluded(horizontal.network.observations.size(), false);
     std::vector<Sight> kept;
-    for (std::size_t i = 0; i < horizontal.observations.size(); ++i) {
-        const NetworkObservation& observation = horizontal.observations[i];
-        bool rejected = false;
+    for (std::size_t i = 0; i < horizontal.network.observations.size(); ++i) {
+        const NetworkObservation& observation = horizontal.network.observations[i];
         for (const std::size_t row : partRows(*observation.pointing, observation.part)) {
-            rejected = rejected || engine.report.observations[row].rejected;
+            excluded[i] = excluded[i] || engine.report.observations[row].rejected;
         }
-        if (!rejected) {
-            kept.push_back(sights[i]);
+        if (!excluded[i]) {
+            kept.push_back(horizontal.sights[i]);
         }
     }
-    const double confidenceScale = ellipseConfidenceScale(settings.confidenceLevel)
-                                       .valueOr(std::numeric_limits<double>::infinity());
-    const std::string confidenceWords = formatNumber(settings.confidenceLevel * 100.0, 0) + " %";
     const std::optional<StationStrength> strength =
         stationStrength(*solved, at, solution, kept, confidenceScale);
+    if (strength && std::find(excluded.begin(), excluded.end(), true) != excluded.end()) {
+        // What the outlier test rejected changes what the rest fix: searched
+        // again without it, the solution reached the first found.
+        const std::vector<Solution> again = search(
+            excluded, {Solution{solution, solved->statistics.weightedSquaredResiduals, *strength}});
+        const Solution& least = again[leastOf(again)];
+        const Solution* rival = &least != &again.front() ? &least : rivalOf(again, least, bound);
+        if (rival != nullptr) {
+            takeBack();
+            why = twoPositions(again.front(), *rival);
+            return false;
+        }
+    }
     if (!strength || !strength->fixes()) {
         takeBack();
-        const Degeneracy nearest = nearestDegeneracy(distinct.withDirection, solution);
-        why = nearest.measure < kNearDegenerate ? nearest.clause
-                                                : std::string("its geometry does not fix it");
-        why += strength ? ": at the precision of its observations it is uncertain by " +
-                              lengthWords(strength->confidence) + " (" + confidenceWords +
-                              ") along azimuth " + axisWords(strength->apriori) +
-                              ", past the " + lengthWords(strength->linearWithin) +
-                              " within which its least squares' linear model holds"
-                        : ": its least squares gives it no precision";
+        why = strength ? shapeAt(solution) + "at the precision of its observations it is uncertain by " +
+                             lengthWords(strength->confidence) + " (" + confidenceWords +
+                             ") along azimuth " + axisWords(strength->apriori) + ", past the " +
+                             lengthWords(strength->linearWithin) +
+                             " within which its least squares' linear model holds"
+                       : "its least squares gives it no precision";
         return false;
     }
 
@@ -2071,21 +2579,27 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
     }
     if (levels.observations.empty()) {
         engine.warnSetup(station, "resected with no height: no point it was resected from has a "
-                                  "height and was observed with a zenith angle, so nothing "
+                                  "height and was observed with both a zenith angle and a "
+                                  "distance, which a trigonometric height needs, so nothing "
                                   "radiated from it has one.");
     } else {
         AdjustmentReport report;
         const Result<LevelAdjustmentResult> levelled = adjustWithOutliers<LevelAdjustmentResult>(
             engine, levels, name + " (heights)",
-            [](const SurveyNetwork& network, const AdjustmentOptions& options) {
-                return adjustLevelNetwork(network, options);
+            [](const SurveyNetwork& network, const AdjustmentOptions& adjustment) {
+                return adjustLevelNetwork(network, adjustment);
             },
             report, "the resection");
         if (levelled) {
+            const double scale = precisionScaleOf(levelled->statistics);
+            for (std::size_t k = 0; k < levelled->parameters.size(); ++k) {
+                if (levelled->parameters[k].pointId == at) {
+                    sigmaElevation = std::sqrt(levelled->cofactor(k, k) * scale);
+                }
+            }
             for (const AdjustedElevation& adjusted : levelled->elevations) {
                 if (adjusted.pointId == at) {
                     elevation = adjusted.elevation;
-                    sigmaElevation = adjusted.sigma;
                 }
             }
             report.iterations = 1;
@@ -2103,14 +2617,26 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
     }
 
     // ---- the station ----
-    // The least squares placed the instrument. Where it stands over a mark -
-    // the setup records an instrument height - the mark is off the instrument
-    // by the centring and below it by the measured height, errors common to
-    // every pointing and so in no pointing's weight (StationModel): they are
-    // the station's, added here. An instrument height of zero is a free
-    // station with no mark under it, the instrument itself the point.
+    // Its precision is the least squares' a-priori one, scaled only where the
+    // global test finds its residuals too large (precisionScaleOf). The least
+    // squares placed the instrument. Where it stands over a mark - the setup
+    // records an instrument height - the mark is off the instrument by the
+    // centring and below it by the measured height, errors common to every
+    // pointing and so in no pointing's weight (StationModel): they are the
+    // station's, added here. An instrument height of zero is a free station
+    // with no mark under it, the instrument itself the point.
+    const double planScale = precisionScaleOf(solved->statistics);
+    Covariance2 covariance{strength->cofactor.northing * planScale,
+                           strength->cofactor.easting * planScale,
+                           strength->cofactor.northingEasting * planScale};
+    double sigmaOrientation = 0.0;
+    for (std::size_t k = 0; k < solved->parameters.size(); ++k) {
+        if (solved->parameters[k].pointId == at &&
+            solved->parameters[k].component == CoordinateComponent::Orientation) {
+            sigmaOrientation = std::sqrt(solved->cofactor(k, k) * planScale);
+        }
+    }
     const bool overAMark = station.setup.instrumentHeight != 0.0;
-    Covariance2 covariance = fixed->covariance;
     if (overAMark) {
         const double centring = apriori.instrumentCentring * apriori.instrumentCentring;
         covariance.northing += centring;
@@ -2132,15 +2658,12 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
 
     state.resected = true;
     state.resectionDirections.clear();
-    for (const auto& [p, sigma] : directions) {
-        const ReducedPointing& pointing = engine.pointings[p];
+    for (const auto& [p, sigma] : horizontal.directions) {
         // One the outlier test rejected is not in the solution, so not in its
         // orientation either.
-        if (pointing.directionRowCount > 0 &&
-            engine.report.observations[pointing.directionRows[0]].rejected) {
-            continue;
+        if (!directionRejected(engine, engine.pointings[p])) {
+            state.resectionDirections.emplace_back(p, sigma);
         }
-        state.resectionDirections.emplace_back(p, sigma);
     }
     state.resectionPointings.clear();
     state.resectionPointings.insert(data.pointings.begin(), data.pointings.end());
@@ -2162,7 +2685,7 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
     report.sigmaEasting = *position.sigmaEasting;
     report.sigmaElevation = sigmaElevation;
     report.orientation = normalizeAngleSigned(orientation->orientation);
-    report.sigmaOrientation = orientation->sigma;
+    report.sigmaOrientation = sigmaOrientation;
     report.aprioriEllipse = ReportEllipse{at, strength->apriori, confidenceScale};
     report.dilution = strength->dilution();
     report.weakGeometry = report.dilution > kWeakResectionDilution;
@@ -2173,7 +2696,35 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
     report.horizontal = std::move(horizontalReport);
     report.height = std::move(heightReport);
     report.source = station.source;
-    const std::string from = namesOf(distinct.withDirection);
+    const std::string resectedFrom = namesOf(distinct.withDirection);
+
+    // The position another setup radiated the station to, which the
+    // resection replaced: a check of the one against the other, and a warning.
+    if (radiated) {
+        const std::size_t by = radiated->fromSetup;
+        const std::string radiator = by < engine.raw.stations.size()
+                                         ? engine.raw.stations[by].setup.id
+                                         : std::string("another setup");
+        MisclosureReport check;
+        check.name = at + " by resection at setup " + station.setup.id +
+                     ", against its radiation from setup " + radiator;
+        check.northing = position.northing - radiated->northing;
+        check.easting = position.easting - radiated->easting;
+        check.linear = std::hypot(*check.northing, *check.easting);
+        if (position.height && radiated->height) {
+            check.height = *position.height - *radiated->height;
+        }
+        report.radiatedFrom = radiator;
+        report.radiatedNorthingDifference = check.northing;
+        report.radiatedEastingDifference = check.easting;
+        engine.warn("Setup " + station.setup.id + " stands on " + at + ", which setup " + radiator +
+                        " radiated: its own resection from " + resectedFrom + " places it " +
+                        lengthWords(*check.linear) +
+                        " from there, and the radiation is a check of it (the misclosure \"" +
+                        check.name + "\").",
+                    station.source);
+        engine.report.misclosures.push_back(std::move(check));
+    }
 
     // The file's own coordinates for the station, which the resection
     // replaced (placeSetups says why it comes first): not dropped unseen, but
@@ -2191,7 +2742,7 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
         report.fileNorthingDifference = check.northing;
         report.fileEastingDifference = check.easting;
         engine.warn("Setup " + station.setup.id + " stands on " + at + ": its resection from " +
-                        from + " places it " + lengthWords(*check.linear) +
+                        resectedFrom + " places it " + lengthWords(*check.linear) +
                         " from the file's own coordinates for it, which were not used (the "
                         "misclosure \"" + check.name + "\").",
                     station.source);
@@ -2231,7 +2782,7 @@ bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why)
     }
 
     if (report.weakGeometry) {
-        engine.warn("Setup " + station.setup.id + ": its resection from " + from +
+        engine.warn("Setup " + station.setup.id + ": its resection from " + resectedFrom +
                         " has a weak geometry - at the precision of its observations its station "
                         "is uncertain by " + lengthWords(strength->confidence) + " (" +
                         confidenceWords + ") along azimuth " + axisWords(strength->apriori) +

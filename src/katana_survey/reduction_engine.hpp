@@ -284,8 +284,19 @@ struct Engine {
 void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                       const std::unordered_set<std::string_view>* reradiate = nullptr);
 
+// Whether an adjustment has rejected the direction, the distance or the height
+// of `pointing` - marked its report rows, as a resection's outlier test does
+// before the network runs. What a resection rejected, its setup's orientation
+// leaves out (resectSetup), a mean direction leaves out (meanDirection), and
+// the network takes no more of, nor as its reference direction
+// (adjustAsNetwork). (A pointing the face-pair test excluded is `rejected` as
+// a whole instead.)
+[[nodiscard]] bool directionRejected(const Engine& engine, const ReducedPointing& pointing);
+[[nodiscard]] bool distanceRejected(const Engine& engine, const ReducedPointing& pointing);
+[[nodiscard]] bool heightRejected(const Engine& engine, const ReducedPointing& pointing);
+
 // The mean circle reading of a setup's reduced pointings to `target`, absent
-// when none has a direction.
+// when none has a direction that was not rejected.
 [[nodiscard]] std::optional<double> meanDirection(const Engine& engine, std::size_t setupIndex,
                                                   std::string_view target);
 
@@ -347,23 +358,24 @@ bool radiateGnssVectors(Engine& engine,
 [[nodiscard]] bool inResectionBlock(const Engine& engine, std::size_t setupIndex,
                                     const ReducedPointing& pointing);
 
-// Positions the station of setup `setupIndex`, which nothing else has, by
-// resection from its reduced pointings to points already placed, held as they
-// are: the least squares of its directions (one set, one orientation unknown)
-// and horizontal distances, and then of its trigonometric height differences
-// to the targets with heights, weighted by the reduction's a-priori precision
-// for an instrument that is itself the unknown (its centring and height go to
-// the station's precision, not to each pointing). Places the station
+// Positions the station of setup `setupIndex` by resection from its reduced
+// pointings to points already placed, held as they are: the least squares of
+// its directions (one set, one orientation unknown) and horizontal distances,
+// run from every start its observations give, and then of its trigonometric
+// height differences to the targets with heights, weighted by the reduction's
+// a-priori precision for an instrument that is itself the unknown (its
+// centring and height go to the station's precision, not to each pointing).
+// The station has no position, or one another setup radiated, which it
+// replaces and reports as a check. Places the station
 // (ComputationMethod::Resection), marks the setup resected (SetupState),
 // reports it (ReductionReport::resections) and returns true; or returns false
 // and puts in `why`, as a clause, what refused it: too few placed points, a
-// value that is not finite, a distance that is not positive, or a geometry
-// that does not fix the station - on one line with its targets, two targets
-// at nearly one place, near the circle through three of them (the danger
-// circle) - found exactly, or because at the a-priori precision the station
-// is uncertain by more than its least squares' linear model holds over, or
-// because that least squares fails. A refusal leaves nothing behind: no
-// warning of its least squares, no rejected observation.
+// value that is not finite, a distance that is not positive, directions alone
+// exactly on one line with the station or on the circle through it, a least
+// squares that fails from every start, two positions its observations fit
+// alike, or a station its observations' a-priori precision leaves uncertain
+// by more than its least squares' linear model holds over. A refusal leaves
+// nothing behind: no warning of its least squares, no rejected observation.
 [[nodiscard]] bool resectSetup(Engine& engine, std::size_t setupIndex, std::string& why);
 
 // Why a setup whose station has no position was not a resection candidate, as

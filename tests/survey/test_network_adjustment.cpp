@@ -337,4 +337,14 @@ TEST(SurveyHorizontalNetwork, APointOnTheCircleThroughItsThreeTargetsIsRankDefic
     EXPECT_EQ(result.error().code, ErrorCode::AdjustmentFailure);
     EXPECT_NE(result.error().message.find("rank deficient"), std::string::npos)
         << result.error().message;
+    // What it cannot resolve are unknowns, not all of them coordinates: the
+    // orientation of the set is one, and is named as such.
+    EXPECT_NE(result.error().message.find("unknowns that cannot be resolved: "),
+              std::string::npos)
+        << result.error().message;
+    EXPECT_EQ(result.error().message.find("coordinates that cannot be resolved"),
+              std::string::npos)
+        << result.error().message;
+    EXPECT_NE(result.error().message.find("orientation(P)"), std::string::npos)
+        << result.error().message;
 }

@@ -1071,6 +1071,35 @@ std::optional<double> gridDistanceFrom(Engine& engine, std::size_t setupIndex,
     return gridDistanceOf(engine, setupIndex, pointing, here, geoidFor(engine, here), false);
 }
 
+namespace {
+
+bool anyRowRejected(const Engine& engine, const std::size_t* rows, std::size_t count)
+{
+    for (std::size_t i = 0; i < count; ++i) {
+        if (engine.report.observations[rows[i]].rejected) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+bool directionRejected(const Engine& engine, const ReducedPointing& pointing)
+{
+    return anyRowRejected(engine, pointing.directionRows.data(), pointing.directionRowCount);
+}
+
+bool distanceRejected(const Engine& engine, const ReducedPointing& pointing)
+{
+    return anyRowRejected(engine, pointing.distanceRows.data(), pointing.distanceRowCount);
+}
+
+bool heightRejected(const Engine& engine, const ReducedPointing& pointing)
+{
+    return pointing.heightRow && engine.report.observations[*pointing.heightRow].rejected;
+}
+
 std::optional<double> meanDirection(const Engine& engine, std::size_t setupIndex,
                                     std::string_view target)
 {
@@ -1079,7 +1108,8 @@ std::optional<double> meanDirection(const Engine& engine, std::size_t setupIndex
     std::size_t count = 0;
     for (const std::size_t p : engine.setups[setupIndex].pointings) {
         const ReducedPointing& pointing = engine.pointings[p];
-        if (pointing.rejected || pointing.target != target || !pointing.direction) {
+        if (pointing.rejected || pointing.target != target || !pointing.direction ||
+            directionRejected(engine, pointing)) {
             continue;
         }
         if (!first) {
@@ -1577,18 +1607,29 @@ void seedGnss(Engine& engine, std::size_t rawIndex, std::size_t rowIndex, GnssSe
 //   3. the rest are given up, and the report says why.
 //
 // The resection is a fallback, not a first choice: a station another setup
-// radiates is placed that way as it always was, and its setup's pointings to
-// placed points are checks of it. It comes before the file's own coordinates
-// because it is computed from what was measured, which is what the reduction
-// is for, where those coordinates are the field software's or a person's,
-// unchecked - the same order as a radiated point, which replaces the file's
-// coordinates of a point (PositionOrigin::FileOnly). So a setup that stood on
-// the file's own coordinates before (step 1) and observes enough placed
-// points is now resected instead: the file's coordinates are then reported as
-// a check of the resection, with a warning, never dropped unseen
-// (resectSetup). It comes before the circle as set, which is an assumption
-// about the instrument. A resection that is refused (resectSetup says why)
-// leaves the setup to the later steps, which name the refusal.
+// radiates is placed that way as it always was, and where its setup is
+// oriented on a backsight, or the circle as set, that setup's pointings to
+// placed points are checks of it. A setup that names no backsight has nothing
+// but the points it observes to orient it. On a station another setup
+// radiated - a free station whose mark an earlier setup shot - it is resected
+// from its block when it is tried, as the field software resected it, and the
+// radiation becomes a check of the resection (resectSetup reports it); with
+// too few placed points by then, it waits for step 0 like a station nothing
+// positions. A station control, an entered or a GNSS point gives is not
+// resected - a resection must not move it - nor one another resection placed
+// (docs/survey.md, "The reduction's resection", Not done).
+//
+// The resection comes before the file's own coordinates because it is
+// computed from what was measured, which is what the reduction is for, where
+// those coordinates are the field software's or a person's, unchecked - the
+// same order as a radiated point, which replaces the file's coordinates of a
+// point (PositionOrigin::FileOnly). So a setup that stood on the file's own
+// coordinates before (step 1) and observes enough placed points is now
+// resected instead: the file's coordinates are then reported as a check of the
+// resection, with a warning, never dropped unseen (resectSetup). It comes
+// before the circle as set, which is an assumption about the instrument. A
+// resection that is refused (resectSetup says why) leaves the setup to the
+// later steps, which name the refusal.
 void placeSetups(Engine& engine)
 {
     const std::vector<SurveyStation>& stations = engine.raw.stations;
@@ -1627,6 +1668,19 @@ void placeSetups(Engine& engine)
     std::vector<bool> resectionQueued(count, false);
     MinHeap resectionCandidates;
     std::vector<std::string> resectionRefused(count); // why, for the later steps' words
+    // Setups that name no backsight, on a station another setup radiated, not
+    // yet resected (see above): tried again at step 0 as their targets are
+    // placed, their stations placed already.
+    std::vector<bool> awaitingResection(count, false);
+    const auto onARadiatedStation = [&](std::size_t s) {
+        const SetupState& state = engine.setups[s];
+        if (state.orientation || state.resected || !stations[s].backsightPointId.empty()) {
+            return false;
+        }
+        const Position* position = engine.find(stations[s].setup.pointId);
+        return position != nullptr && position->origin == PositionOrigin::Computed &&
+               position->method == ComputationMethod::Radiation && position->fromSetup != s;
+    };
     const auto countPlaced = [&](const Watch& watch) {
         const std::size_t s = watch.setup;
         placedWithDirection[s] += watch.direction ? 1 : 0;
@@ -1729,8 +1783,16 @@ void placeSetups(Engine& engine)
                   ": it has no direction to it, or stands on the same position, and no circle "
                   "setting was recorded";
         }
+        // One on a radiated station that its block could not resect: why not.
+        std::string unresected;
+        if (awaitingResection[s]) {
+            unresected = resectionRefused[s].empty() ? resectionShortfall(engine, s)
+                                                     : resectionRefused[s];
+        }
         engine.warn("Setup " + station.setup.id + why +
-                        ", so its directions are not oriented and its targets are not radiated.",
+                        ", so its directions are not oriented and its targets are not radiated." +
+                        (unresected.empty() ? std::string{}
+                                            : " It was not resected: " + unresected + "."),
                     station.source);
     };
     const auto finish = [&](std::size_t s) {
@@ -1775,6 +1837,22 @@ void placeSetups(Engine& engine)
             }
             return;
         }
+        if (onARadiatedStation(s)) {
+            // Its block is what orients it: resected now where its targets
+            // are placed, and oriented and radiated on that.
+            if (placedWithBoth[s] >= 2 || placedWithDirection[s] >= 3) {
+                std::string why;
+                if (resectSetup(engine, s, why)) {
+                    awaitingResection[s] = false;
+                    orientAndRadiate(engine, s);
+                    finish(s);
+                    return;
+                }
+                resectionRefused[s] = std::move(why);
+            }
+            awaitingResection[s] = true;
+            return;
+        }
         finish(s);
     };
 
@@ -1810,19 +1888,25 @@ void placeSetups(Engine& engine)
         }
 
         // 0. A resection, for the first setup in the file that can have one.
-        // Its station, once placed, wakes it as any placement wakes a setup.
+        // Its station, once placed, wakes it as any placement wakes a setup;
+        // one on a radiated station, placed already, is tried again directly.
         bool resected = false;
         while (!resectionCandidates.empty() && !resected) {
             const std::size_t s = resectionCandidates.top();
             resectionCandidates.pop();
             resectionQueued[s] = false;
-            if (done[s] || engine.find(stations[s].setup.pointId) != nullptr) {
+            if (done[s] ||
+                (engine.find(stations[s].setup.pointId) != nullptr && !awaitingResection[s])) {
                 continue;
             }
             std::string why;
             resected = resectSetup(engine, s, why);
             if (!resected) {
                 resectionRefused[s] = std::move(why);
+            } else if (awaitingResection[s]) {
+                awaitingResection[s] = false;
+                queued[s] = true;
+                thisPass.push(s);
             }
         }
         if (resected) {
