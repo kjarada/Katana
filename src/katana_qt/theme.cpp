@@ -304,6 +304,12 @@ QString styleSheet()
         /* No QMenu::separator rule: KatanaStyle draws separators and section
            titles, and a rule here would paint over the titles. */
         QMenu::icon { padding-left: 6px; }
+        /* A checked item's icon framed as a checked toolbar button is. The
+           stylesheet draws an item with an icon by its QMenu::icon rule and
+           no check mark at all, so Grid, Object Snap, Link This View and
+           every other toggle looked the same on as off - pixel for pixel. */
+        QMenu::icon:checked { background: %raised%; border: 1px solid %accent%;
+                              border-radius: 3px; }
 
         QToolBar { background: %window%; border: none; border-bottom: 1px solid %border%;
                    padding: 3px 6px; spacing: 2px; }
@@ -371,6 +377,16 @@ QString styleSheet()
         QToolButton[chrome="close"]:hover { background: %error%; }
         QToolButton[chrome="button"]:focus, QToolButton[chrome="close"]:focus {
             border: 1px solid %accent%; }
+        /* A checked title-bar button (a view's Link) framed as a checked
+           toolbar button is. The rule for every chrome button above has the
+           same weight as QToolButton:checked and comes later, so without
+           this one it took the frame away and a checked button looked like
+           any other. */
+        QToolButton[chrome="button"]:checked { background: %raised%; border: 1px solid %accent%; }
+        /* A Link waiting for a second view - a link of one, which moves
+           nothing yet - in a dashed frame: it looked exactly like a working
+           link, so the first of the two clicks looked like the last. */
+        QToolButton[chrome="button"][waiting="true"]:checked { border: 1px dashed %accent%; }
         QToolButton[chrome="button"]::menu-indicator { subcontrol-position: right center;
                                                        subcontrol-origin: padding; }
         /* A title bar button whose menu opens on a click (InstantPopup) -

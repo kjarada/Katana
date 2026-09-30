@@ -17,7 +17,6 @@
 #include "customisation/symbol_library.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/purge.hpp"
-#include "katana/entity/entity_geometry.hpp"
 #include "style_manager.hpp"
 #include "view_workspace.hpp"
 #include "viewport_widget.hpp"
@@ -179,19 +178,11 @@ void CustomisationWorkbench::selectAndShow(const std::vector<katana::entity::Ent
     document.notifySelectionChanged();
     // Framed where the person is looking - the ACTIVE plan view - so what a
     // style or a symbol is used by is seen, not only counted. The other
-    // views keep their own zoom.
+    // views keep their own zoom, but for the views linked with it. By that
+    // view's Zoom to Selection line, so the log says what moved it.
     ViewportWidget* plan = services_.views != nullptr ? services_.views->activePlanView() : nullptr;
-    if (plan == nullptr) {
-        return;
-    }
-    katana::geometry::Box2 bounds;
-    for (const katana::entity::EntityId id : ids) {
-        if (const katana::entity::Entity* entity = document.model().entities.find(id)) {
-            bounds.expand(katana::entity::boundingBox(entity->geometry));
-        }
-    }
-    if (!bounds.empty()) {
-        plan->zoomTo(bounds);
+    if (plan != nullptr) {
+        services_.views->zoomToSelection(plan->state().id);
     }
 }
 

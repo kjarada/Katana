@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -12,6 +13,7 @@
 #include <limits>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <QFile>
 #include <QImage>
@@ -20,7 +22,9 @@
 #include <QWheelEvent>
 #include <QPainter>
 
+#include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/plot.hpp"
+#include "katana/cad/selection.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/model.hpp"
@@ -1256,4 +1260,525 @@ TEST(PlanPainter, TwoThreadsPaintingTheSameDrawingAtOnceEachPaintWhatTheGuiThrea
     }
     EXPECT_TRUE(first == expected);
     EXPECT_TRUE(second == expected);
+}
+
+// ---- the selection's ghosts (cad/selection_style.hpp) --------------------------------
+
+namespace {
+
+// A white line from (10, 50) to (90, 50) on "design", selected, through a
+// frame 100 x 100 px at 1 px a unit about (50, 50): along row 50 from column
+// 10 to 90, the frame's y running down. The view hides "design" of its own.
+struct GhostPlan {
+    Model model;
+    katana::cad::SelectionSet selection;
+    katana::cad::LayerOverrides view;
+    PlanFrame frame = frameOf(100.0, 100.0, 1.0, Point2(50.0, 50.0));
+    PlanPaintOptions options;
+
+    GhostPlan()
+    {
+        katana::entity::Layer layer;
+        layer.name = "design";
+        layer.color = katana::entity::Color{255, 255, 255, 255};
+        EXPECT_TRUE(model.layers.add(layer));
+        auto id = model.entities.add(entityOf(Segment2{Point2(10, 50), Point2(90, 50)}, "design"));
+        EXPECT_TRUE(id.ok());
+        selection.add(*id);
+        EXPECT_TRUE(view.hide("design"));
+        frame.layers = &view;
+        options.selectionGhosts = true;
+    }
+
+    QImage paint(PlanPaintStats& stats, bool selected = true) const
+    {
+        PlanSource source;
+        source.model = &model;
+        const katana::cad::SelectionSet none;
+        source.selection = selected ? &selection : &none;
+        return paintedSource(source, frame, options, kBlack, &stats);
+    }
+};
+
+// Pixels of the line's rows, 48 to 52, in the selection's orange: red well
+// above green, green well above blue - never the layer's white, the black
+// ground or grey.
+std::size_t orangeInk(const QImage& image)
+{
+    std::size_t ink = 0;
+    for (int y = 48; y <= 52; ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QRgb c = image.pixel(x, y);
+            ink += qRed(c) > qGreen(c) + 30 && qGreen(c) > qBlue(c) + 30 ? 1 : 0;
+        }
+    }
+    return ink;
+}
+
+} // namespace
+
+TEST(PlanPainter, ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost)
+{
+    // The ghost: #FF9F1C at alpha 153, in 2 px square dots every 6 px from
+    // the line's start, not antialiased (selection_style.hpp;
+    // PlanPainter::dotPath). The 80 px run from column 10 has a dot at t = 0,
+    // 6 ... 78 along it, fourteen, and a dot about x covers columns x - 1 and
+    // x of rows 49 and 50 (as the long ghost's test below works out), so row
+    // 50 has 28 pixels of ink - columns 9 and 10, then every 6 - and nothing
+    // between. Ink is measured against a baseline, the same frame painted
+    // with nothing selected, never as pixels lit in the ghosted image alone.
+    // Over black a covered pixel is 153/255 of the orange: (153, 95.4,
+    // 16.8), within 2 of that after the 8-bit premultiplied blend's rounding.
+    GhostPlan plan;
+    PlanPaintStats unselected;
+    const QImage bare = plan.paint(unselected, false);
+    PlanPaintStats selected;
+    const QImage ghosted = plan.paint(selected);
+
+    EXPECT_EQ(selected.ghostsDrawn, 1u);
+    EXPECT_EQ(unselected.ghostsDrawn, 0u);
+    EXPECT_EQ(selected.entitiesDrawn, unselected.entitiesDrawn) << "a ghost is not an entity drawn";
+    EXPECT_EQ(selected.entitiesDrawn, 0u) << "the layer is hidden in this view";
+    EXPECT_EQ(orangeInk(bare), 0u);
+    EXPECT_GT(orangeInk(ghosted), orangeInk(bare));
+
+    const auto inked = [&](int x, int y) { return ghosted.pixel(x, y) != bare.pixel(x, y); };
+    int ink = 0;
+    int exact = 0;
+    for (int x = 0; x < 100; ++x) {
+        const QRgb c = ghosted.pixel(x, 50);
+        ink += inked(x, 50) ? 1 : 0;
+        exact += inked(x, 50) && std::abs(qRed(c) - 153) <= 2 && std::abs(qGreen(c) - 95) <= 2 &&
+                         std::abs(qBlue(c) - 17) <= 2
+                     ? 1
+                     : 0;
+    }
+    EXPECT_EQ(ink, 28) << "fourteen dots, 2 px each";
+    EXPECT_EQ(exact, 28) << "each the selection colour at 60 % over black";
+    for (int dot = 0; dot < 14; ++dot) {
+        const int x = 10 + 6 * dot;
+        EXPECT_TRUE(inked(x - 1, 50)) << "dot " << dot;
+        EXPECT_TRUE(inked(x, 50)) << "dot " << dot;
+    }
+}
+
+TEST(PlanPainter, NoGhostWhereTheDocumentHidesTheLayer)
+{
+    // A layer the drawing switches off stays off in every view: a ghost says
+    // "selected, but hidden in this view", never "selected, though off".
+    GhostPlan plan;
+    katana::entity::Layer design = *plan.model.layers.find("design");
+    design.visible = false;
+    ASSERT_TRUE(plan.model.layers.update(design));
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u);
+    EXPECT_EQ(orangeInk(image), 0u);
+}
+
+TEST(PlanPainter, NoGhostOfAnEntityMadeInvisible)
+{
+    // The same rule for the entity's own switch (cad::isGhost): invisible,
+    // it is hidden in every view, selected or not.
+    GhostPlan plan;
+    const katana::entity::EntityId id = plan.selection.ids().front();
+    katana::entity::Entity hidden = *plan.model.entities.find(id);
+    hidden.visible = false;
+    ASSERT_TRUE(plan.model.entities.replace(hidden).ok());
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u);
+    EXPECT_EQ(orangeInk(image), 0u);
+}
+
+TEST(PlanPainter, NoGhostOnPaper)
+{
+    GhostPlan plan;
+    PlotSettings settings;
+    plan.options = paperOptions(settings, 4.0);
+    plan.options.selectionGhosts = true;
+    PlanPaintStats stats;
+    (void)plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u) << "a plot draws what the drawing shows, never a ghost";
+}
+
+TEST(PlanPainter, NoGhostWithGhostsOff)
+{
+    // PlanPaintOptions::selectionGhosts defaults to false, so every caller
+    // but the plan view - which sets it from ViewState::selectionGhosts - is
+    // unchanged.
+    GhostPlan plan;
+    plan.options = PlanPaintOptions{};
+    ASSERT_FALSE(plan.options.selectionGhosts);
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u);
+    EXPECT_EQ(orangeInk(image), 0u);
+}
+
+TEST(PlanPainter, ASelectedEntityTheViewShowsIsDrawnSelectedAndNotAsAGhost)
+{
+    // The view hiding nothing: the line is drawn, in the selection's 2 px
+    // orange dashes, once.
+    GhostPlan plan;
+    plan.frame.layers = nullptr;
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u);
+    EXPECT_EQ(stats.entitiesDrawn, 1u);
+    EXPECT_GT(orangeInk(image), 0u);
+}
+
+TEST(PlanPainter, AGhostLongerThanTheViewIsDottedAcrossItFromItsOwnStart)
+{
+    // A line from (-1e6, 50) to (1e6, 50), both ends far outside the frame,
+    // which shows x from 0 to 100 at 1 px a unit: the dots are laid only
+    // where it crosses the view, and in step with the line's own start. A
+    // dot every 6 px from x = -1e6 puts one at every x = 6k - 1e6, and
+    // -1e6 = 2 - 6 x 166 667, so at x = 2, 8, 14 ... 98: 17 dots. A dot
+    // 2 px square about x covers the columns x - 1 and x, so columns 1 and
+    // 2 are lit and 3 to 6 are not.
+    GhostPlan plan;
+    auto id = plan.model.entities.add(
+        entityOf(Segment2{Point2(-1.0e6, 50), Point2(1.0e6, 50)}, "design"));
+    ASSERT_TRUE(id.ok());
+    plan.selection.set({*id});
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 1u);
+    // Ink against the baseline, the frame with nothing selected.
+    PlanPaintStats none;
+    const QImage bare = plan.paint(none, false);
+    const auto lit = [&](int x) { return image.pixel(x, 50) != bare.pixel(x, 50); };
+    EXPECT_TRUE(lit(1));
+    EXPECT_TRUE(lit(2));
+    for (int x = 3; x <= 6; ++x) {
+        EXPECT_FALSE(lit(x)) << "column " << x;
+    }
+    EXPECT_TRUE(lit(7));
+    EXPECT_TRUE(lit(8));
+    int columns = 0;
+    for (int x = 0; x < 100; ++x) {
+        columns += lit(x) ? 1 : 0;
+    }
+    EXPECT_EQ(columns, 17 * 2);
+}
+
+// ---- a ghost of each kind of geometry -------------------------------------------------------
+//
+// drawSelectionGhosts has a branch for each kind: a line is dotted as it is;
+// a polyline, an arc or a circle goes through drawGeometry's own
+// strokePolyline, dotted only because the ghost pass asks it to be; a point
+// is a ring; a text or a dimension the outline of the box it draws; a label
+// nothing. Each is painted alone, selected, on the layer GhostPlan's view
+// hides, and its ink read against the same frame with nothing selected.
+
+namespace {
+
+// The pixels the ghost inked: those that differ from the frame painted with
+// nothing selected.
+std::vector<QPoint> ghostInk(const GhostPlan& plan, PlanPaintStats& stats)
+{
+    PlanPaintStats none;
+    const QImage bare = plan.paint(none, false);
+    const QImage ghosted = plan.paint(stats);
+    std::vector<QPoint> ink;
+    for (int y = 0; y < ghosted.height(); ++y) {
+        for (int x = 0; x < ghosted.width(); ++x) {
+            if (ghosted.pixel(x, y) != bare.pixel(x, y)) {
+                ink.emplace_back(x, y);
+            }
+        }
+    }
+    return ink;
+}
+
+// How many separate marks the ink makes: pixels grouped with their eight
+// neighbours. A dotted trace is many; a solid one is one.
+int marksIn(const std::vector<QPoint>& ink)
+{
+    std::vector<bool> seen(ink.size(), false);
+    int marks = 0;
+    for (std::size_t first = 0; first < ink.size(); ++first) {
+        if (seen[first]) {
+            continue;
+        }
+        ++marks;
+        std::vector<std::size_t> open{first};
+        seen[first] = true;
+        while (!open.empty()) {
+            const QPoint at = ink[open.back()];
+            open.pop_back();
+            for (std::size_t other = 0; other < ink.size(); ++other) {
+                if (!seen[other] && std::abs(ink[other].x() - at.x()) <= 1 &&
+                    std::abs(ink[other].y() - at.y()) <= 1) {
+                    seen[other] = true;
+                    open.push_back(other);
+                }
+            }
+        }
+    }
+    return marks;
+}
+
+// Selects `geometry`, alone, on GhostPlan's hidden layer.
+void selectOnly(GhostPlan& plan, katana::entity::Geometry geometry)
+{
+    auto id = plan.model.entities.add(entityOf(std::move(geometry), "design"));
+    ASSERT_TRUE(id.ok());
+    plan.selection.set({*id});
+}
+
+// The ink is the dotted outline of a box: every pixel within a pixel of an
+// edge of the box round the ink, none inside it, and separate dots along
+// each of its four sides. Returns that box, the ink's own bounds.
+QRect expectDottedBox(const std::vector<QPoint>& ink)
+{
+    EXPECT_FALSE(ink.empty());
+    if (ink.empty()) {
+        return {};
+    }
+    int left = ink.front().x();
+    int right = left;
+    int top = ink.front().y();
+    int bottom = top;
+    for (const QPoint& p : ink) {
+        left = std::min(left, p.x());
+        right = std::max(right, p.x());
+        top = std::min(top, p.y());
+        bottom = std::max(bottom, p.y());
+    }
+    std::array<std::vector<QPoint>, 4> sides; // top, bottom, left, right
+    for (const QPoint& p : ink) {
+        const bool onTop = p.y() <= top + 1;
+        const bool onBottom = p.y() >= bottom - 1;
+        const bool onLeft = p.x() <= left + 1;
+        const bool onRight = p.x() >= right - 1;
+        EXPECT_TRUE(onTop || onBottom || onLeft || onRight)
+            << "ink inside the box at " << p.x() << "," << p.y();
+        if (onTop) {
+            sides[0].push_back(p);
+        }
+        if (onBottom) {
+            sides[1].push_back(p);
+        }
+        if (onLeft) {
+            sides[2].push_back(p);
+        }
+        if (onRight) {
+            sides[3].push_back(p);
+        }
+    }
+    for (const auto& side : sides) {
+        EXPECT_GE(marksIn(side), 2) << "dots along each side, not one mark";
+    }
+    return QRect(QPoint(left, top), QPoint(right, bottom));
+}
+
+} // namespace
+
+TEST(PlanPainter, AGhostedPolylineIsDottedAlongEachLegWithItsStepCarriedRoundTheCorner)
+{
+    // (10,50) -> (40,50) -> (40,20) in the model is screen (10,50) -> (40,50)
+    // -> (40,80) in the 100 x 100 frame at 1 px a unit about (50, 50). A dot
+    // every 6 px from the start: at 0, 6 ... 24 along the 30 px first leg,
+    // x = 10, 16, 22, 28 and 34 on row 50; 30 is a whole number of steps, so
+    // the next falls on the corner, (40, 50); then y = 56, 62, 68 and 74 down
+    // the second leg, whose end, 30 along it, is not dotted (a dot is laid
+    // short of a leg's end). A 2 px dot about (x, y) covers columns x - 1 and
+    // x of rows y - 1 and y: ten dots, forty pixels, and nothing between them
+    // - where the solid stroke drawGeometry lays without the dots covers row
+    // 50 from column 9 to 40.
+    GhostPlan plan;
+    selectOnly(plan, Polyline2{{Point2(10, 50), Point2(40, 50), Point2(40, 20)}, false});
+    PlanPaintStats stats;
+    const std::vector<QPoint> ink = ghostInk(plan, stats);
+    EXPECT_EQ(stats.ghostsDrawn, 1u);
+    EXPECT_EQ(stats.entitiesDrawn, 0u);
+
+    std::vector<QPoint> expected;
+    const auto dot = [&expected](int x, int y) {
+        for (const QPoint p :
+             {QPoint(x - 1, y - 1), QPoint(x, y - 1), QPoint(x - 1, y), QPoint(x, y)}) {
+            expected.push_back(p);
+        }
+    };
+    for (const int x : {10, 16, 22, 28, 34, 40}) {
+        dot(x, 50);
+    }
+    for (const int y : {56, 62, 68, 74}) {
+        dot(40, y);
+    }
+    const auto byPlace = [](const QPoint& a, const QPoint& b) {
+        return a.y() != b.y() ? a.y() < b.y() : a.x() < b.x();
+    };
+    std::ranges::sort(expected, byPlace);
+    std::vector<QPoint> got = ink;
+    std::ranges::sort(got, byPlace);
+    EXPECT_EQ(got, expected) << "ten 2 px dots and nothing between them";
+}
+
+TEST(PlanPainter, AGhostedCircleIsARowOfSeparateDotsOnItsCurve)
+{
+    // A circle of radius 30 about (50, 50): screen radius 30 about (50, 50),
+    // chorded to a quarter of a pixel and dotted every 6 px of its 188.5 px
+    // round, 32 dots (the last 2.5 px short of the first, so the two may
+    // touch). A dot is put on the whole pixel nearest where it falls, at most
+    // half a pixel off each way, and its 2 px square covers the two pixel
+    // centres half a pixel either side of that: a pixel of ink is at most a
+    // pixel off a point on a chord each way, 1.42 px in all, and a chord is
+    // within 0.25 px of the circle - so 28.33 to 31.42 px from the centre.
+    // Without the dots, the ghost pen strokes the circle solid: one mark,
+    // not thirty.
+    GhostPlan plan;
+    selectOnly(plan, katana::geometry::Circle2{Point2(50, 50), 30.0});
+    PlanPaintStats stats;
+    const std::vector<QPoint> ink = ghostInk(plan, stats);
+    EXPECT_EQ(stats.ghostsDrawn, 1u);
+    for (const QPoint& p : ink) {
+        const double r = std::hypot(p.x() + 0.5 - 50.0, p.y() + 0.5 - 50.0);
+        EXPECT_GE(r, 28.33) << p.x() << "," << p.y();
+        EXPECT_LE(r, 31.42) << p.x() << "," << p.y();
+    }
+    const int marks = marksIn(ink);
+    EXPECT_GE(marks, 31) << "a dot every 6 px";
+    EXPECT_LE(marks, 32);
+}
+
+TEST(PlanPainter, AGhostedPointIsADottedRingAroundItNotAMarkOnIt)
+{
+    // A ring of 6 px radius about the point (selection_style.hpp), outside
+    // the cross the point is drawn with: a 24-gon whose round is 37.6 px,
+    // dotted every 6 px - seven dots, the last 1.6 px short of the first, so
+    // six marks or seven. A pixel of ink is at most 1.42 px from a point on
+    // the ring's chords (as the circle's above), which are 5.95 to 6 px out:
+    // 4.53 to 7.42 px from the centre, and nothing on the point itself.
+    GhostPlan plan;
+    selectOnly(plan, katana::entity::PointGeometry{Point2(50, 50)});
+    PlanPaintStats stats;
+    const std::vector<QPoint> ink = ghostInk(plan, stats);
+    EXPECT_EQ(stats.ghostsDrawn, 1u);
+    ASSERT_FALSE(ink.empty());
+    for (const QPoint& p : ink) {
+        const double r = std::hypot(p.x() + 0.5 - 50.0, p.y() + 0.5 - 50.0);
+        EXPECT_GE(r, 4.53) << p.x() << "," << p.y();
+        EXPECT_LE(r, 7.42) << p.x() << "," << p.y();
+    }
+    const int marks = marksIn(ink);
+    EXPECT_GE(marks, 6);
+    EXPECT_LE(marks, 7);
+}
+
+TEST(PlanPainter, AGhostedTextIsTheDottedOutlineOfItsBoxNotItsLetters)
+{
+    // "LOT 7", 10 units tall from its baseline's left end at (20, 40). One
+    // line of baseline-left text is its height tall above the baseline
+    // (textBlockExtent), so its box is x from 20, y from 40 to 50: screen
+    // column 20 on, rows 50 to 60, and wider than it is tall. A dot about an
+    // edge covers the pixel before it as well, so the ink runs from column 19
+    // and over rows 49 to 60. Its words at a ghost's strength would be
+    // unreadable, and letters would put ink inside the box.
+    GhostPlan plan;
+    selectOnly(plan, katana::entity::TextGeometry{Point2(20, 40), "LOT 7", 10.0, 0.0});
+    PlanPaintStats stats;
+    const std::vector<QPoint> ink = ghostInk(plan, stats);
+    EXPECT_EQ(stats.ghostsDrawn, 1u);
+    const QRect box = expectDottedBox(ink);
+    EXPECT_EQ(box.left(), 19);
+    EXPECT_EQ(box.top(), 49);
+    EXPECT_EQ(box.bottom(), 60);
+    EXPECT_GT(box.width(), box.height());
+}
+
+TEST(PlanPainter, AGhostedDimensionIsTheDottedOutlineOfWhatItDraws)
+{
+    // From (20, 30) to (80, 30), 10 above: screen (20, 70) to (80, 70), its
+    // dimension line 10 px higher. The outline of the box the dimension
+    // draws - extension lines, arrows and text - holds both points; drawn
+    // as itself, its dimension line would cross the box's inside.
+    GhostPlan plan;
+    katana::entity::DimensionGeometry dimension;
+    dimension.start = Point2(20, 30);
+    dimension.end = Point2(80, 30);
+    dimension.offset = 10.0;
+    selectOnly(plan, dimension);
+    PlanPaintStats stats;
+    const std::vector<QPoint> ink = ghostInk(plan, stats);
+    EXPECT_EQ(stats.ghostsDrawn, 1u);
+    const QRect box = expectDottedBox(ink);
+    EXPECT_LE(box.left(), 21);
+    EXPECT_GE(box.right(), 79);
+    EXPECT_GE(box.bottom(), 69);
+    EXPECT_LE(box.top(), 60) << "the dimension line and its text stand above the points";
+}
+
+TEST(PlanPainter, ALabelIsNeverGhosted)
+{
+    // A label is placed with the others, and has no outline of its own to
+    // dot: selected on a layer the view hides, it leaves no trace there.
+    GhostPlan plan;
+    // Labelling the fixture's line, a label's one target.
+    const katana::entity::EntityId line = plan.selection.ids().front();
+    selectOnly(plan, katana::entity::LabelGeometry{
+                         .target = line, .style = "any", .anchor = Point2(50, 50)});
+    ASSERT_EQ(plan.selection.size(), 1u);
+    ASSERT_NE(plan.selection.ids().front(), line) << "the label alone is selected";
+    PlanPaintStats stats;
+    const std::vector<QPoint> ink = ghostInk(plan, stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u);
+    EXPECT_TRUE(ink.empty()) << ink.size() << " pixels";
+}
+
+TEST(PlanPainter, AtAFractionalScaleEveryGhostDotIsTheSameSquareOfWholePixels)
+{
+    // At 125 % - the owner's display (docs/render.md) - the 2 px pen was 2.5
+    // device pixels, drawn without antialiasing as 2 or 3: a straight ghost
+    // beaded 3, 2, 3 pixels, and a slanted one mixed four shapes of dot. The
+    // pen and the pitch are whole device pixels now, rounded - 2 x 1.25 =
+    // 2.5 to 3, 6 x 1.25 = 7.5 to 8 - and each dot is put on whole pixels.
+    // GhostPlan's line, (10,50)-(90,50), is device (12.5, 62.5) to (112.5,
+    // 62.5): 100 device pixels, a dot at 0, 8 ... 96 along it, thirteen, each
+    // 3 px square about a pixel's centre - columns 11 to 13 of rows 61 to 63
+    // for the first, and 8 columns on for each after. Ink against the frame
+    // painted with nothing selected, at the same scale.
+    GhostPlan plan;
+    const auto paintAt = [&plan](bool selected) {
+        QImage image(125, 125, QImage::Format_ARGB32_Premultiplied);
+        image.setDevicePixelRatio(1.25);
+        image.fill(kBlack);
+        PlanSource source;
+        source.model = &plan.model;
+        const katana::cad::SelectionSet none;
+        source.selection = selected ? &plan.selection : &none;
+        PlanPaintCache cache;
+        QPainter painter(&image);
+        (void)paintPlan(painter, source, plan.frame, plan.options, cache);
+        painter.end();
+        return image;
+    };
+    const QImage bare = paintAt(false);
+    const QImage ghosted = paintAt(true);
+    std::vector<QPoint> ink;
+    for (int y = 0; y < ghosted.height(); ++y) {
+        for (int x = 0; x < ghosted.width(); ++x) {
+            if (ghosted.pixel(x, y) != bare.pixel(x, y)) {
+                ink.emplace_back(x, y);
+            }
+        }
+    }
+    std::vector<QPoint> expected;
+    for (int dot = 0; dot < 13; ++dot) {
+        for (int y = 61; y <= 63; ++y) {
+            for (int x = 11 + 8 * dot; x <= 13 + 8 * dot; ++x) {
+                expected.emplace_back(x, y);
+            }
+        }
+    }
+    const auto byPlace = [](const QPoint& a, const QPoint& b) {
+        return a.y() != b.y() ? a.y() < b.y() : a.x() < b.x();
+    };
+    std::ranges::sort(expected, byPlace);
+    std::ranges::sort(ink, byPlace);
+    EXPECT_EQ(ink.size(), expected.size());
+    EXPECT_EQ(ink, expected) << "thirteen 3 x 3 dots, 8 px apart";
 }

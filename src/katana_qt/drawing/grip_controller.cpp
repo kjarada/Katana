@@ -133,12 +133,14 @@ std::optional<cad::Grip> follow(const cad::Grip& old, const std::vector<cad::Gri
 
 void GripController::refresh(std::uint64_t generation)
 {
-    if (generation == generation_) {
+    const cad::LayerOverrides& view = view_ != nullptr ? *view_ : cad::kNoLayerOverrides;
+    if (generation == generation_ && view == builtFor_) {
         return;
     }
     generation_ = generation;
+    builtFor_ = view;
     const std::vector<cad::Grip> before = std::exchange(
-        grips_, cad::gripsOfSelection(document_, document_.selection().ids()));
+        grips_, cad::gripsOfSelection(document_, document_.selection().ids(), view));
     // A hot grip survives a refresh only while its vertex does (an undo, a
     // selection change or another view's edit may have taken it), and it
     // follows its vertex to the index it has now (follow).

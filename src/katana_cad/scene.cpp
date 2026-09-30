@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <span>
 #include <type_traits>
 #include <variant>
 
@@ -911,7 +912,8 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
 void SceneBuilder::emitEntities(const Document& document,
                                 const std::vector<SceneSurface>& surfaces,
                                 const SceneOptions& options, Selected which, double datumHint,
-                                bool datumKnown, DrawList& out, double* lowestHeight)
+                                bool datumKnown, DrawList& out, double* lowestHeight,
+                                std::optional<std::span<const katana::entity::EntityId>> walk)
 {
     const SelectionSet& selection = document.selection();
     const Heights heights(surfaces, options);
@@ -921,8 +923,11 @@ void SceneBuilder::emitEntities(const Document& document,
     std::vector<katana::geometry::Point3> path;
     std::vector<std::optional<double>> own;
 
-    const float baseBias =
-        which == Selected::Only ? options.selectionDepthBias : options.entityDepthBias;
+    // The overlay - its core and its ghosts - is drawn over the drawing and
+    // walks the selection's ids alone: O(selection), not O(drawing).
+    const bool overlay = which == Selected::Only || which == Selected::Ghosts;
+    const float baseBias = overlay ? options.selectionDepthBias : options.entityDepthBias;
+    const float pointSize = which == Selected::Only ? kSelectedPointSize : options.pointSize;
 
     // EVERY drawn path goes through this one emitter, including a plain
     // Segment2. The tempting shortcut - a Segment2 adding its DrawLine
@@ -936,7 +941,7 @@ void SceneBuilder::emitEntities(const Document& document,
         heights.path(points, own, closed, path, &lowest);
         if (points.size() == 1) {
             const VertexIndex v = out.addVertex(path.front(), color);
-            out.addPoint(v, options.pointSize * scale, baseBias);
+            out.addPoint(v, pointSize * scale, baseBias);
             return;
         }
 
@@ -996,21 +1001,25 @@ void SceneBuilder::emitEntities(const Document& document,
         }
     };
 
-    document.model().entities.forEach([&](const Entity& entity) {
-        // The plan view's rule, so a layer switched off disappears here too.
-        if (!isDrawn(document.model(), entity, viewOf(options))) {
+    const auto emitOne = [&](const Entity& entity) {
+        // The plan view's rules, so a layer switched off disappears here too:
+        // drawn where this view draws it, a ghost where only this view hides
+        // it (selection.hpp).
+        if (which == Selected::Ghosts ? !isGhost(document.model(), entity, viewOf(options))
+                                      : !isDrawn(document.model(), entity, viewOf(options))) {
             return;
         }
-        const bool selected = selection.contains(entity.id);
-        if (which == Selected::Only && !selected) {
-            return;
-        }
+        // The overlay walks the selection, so everything it meets is selected.
+        const bool selected = overlay || selection.contains(entity.id);
         const bool styled = selected && which != Selected::AsDrawn;
         const auto display = katana::entity::resolveDisplay(document.model(), entity);
-        const Rgba color =
-            styled ? options.selectionColor : colorOf(document.model(), entity, display, options);
-        const float width =
-            (styled ? options.selectedLineWidth : options.entityLineWidth) * scale;
+        const Rgba color = which == Selected::Ghosts ? kGhostColor3d
+                           : styled ? options.selectionColor
+                                    : colorOf(document.model(), entity, display, options);
+        const float width = (which == Selected::Ghosts ? kGhostWidth3d
+                             : styled                  ? kSelectionCoreWidth
+                                                       : options.entityLineWidth) *
+                            scale;
         // A selected entity is drawn in the selection style, dashes and all.
         const katana::entity::Linetype* linetype =
             styled ? nullptr : document.model().linetypes.find(display.linetype);
@@ -1163,7 +1172,23 @@ void SceneBuilder::emitEntities(const Document& document,
                 }
             },
             entity.geometry);
-    });
+    };
+    if (overlay) {
+        // Ascending, as forEach visits: the overlay is the same list, in the
+        // same order, as a walk of the drawing that kept the selected.
+        // SelectionSet::ids() is a copy, held here for the loop: a span of
+        // the temporary would dangle.
+        const std::vector<katana::entity::EntityId> selected =
+            walk ? std::vector<katana::entity::EntityId>{} : selection.ids();
+        for (const katana::entity::EntityId id :
+             walk ? *walk : std::span<const katana::entity::EntityId>(selected)) {
+            if (const Entity* entity = document.model().entities.find(id)) {
+                emitOne(*entity);
+            }
+        }
+    } else {
+        document.model().entities.forEach(emitOne);
+    }
 
     // What had no height and nothing under it goes on the datum, which only
     // now is known when the terrain did not decide it.
@@ -1363,11 +1388,55 @@ void SceneBuilder::buildSelection(const Document& document,
                                   const SceneOptions& options, SceneLayers& layers)
 {
     layers.selection.clear();
+    layers.selectionCasing.clear();
     if (!options.drawEntities || document.selection().empty()) {
         return;
     }
-    emitEntities(document, surfaces, options, Selected::Only, layers.datum, true,
-                 layers.selection, nullptr);
+    DrawList& overlay = layers.selection;
+    emitEntities(document, surfaces, options, Selected::Only, layers.datum, true, overlay,
+                 nullptr);
+    // The casing: every line and point of the core again, wider, darker and
+    // a little behind it (selection_style.hpp), in the list drawn before the
+    // core's and writing no depth (SceneLayers::selectionCasing).
+    const float scale = std::max(options.pixelScale, 0.1f);
+    DrawList& casing = layers.selectionCasing;
+    for (const katana::render::DrawLine& core : overlay.lines) {
+        const VertexIndex a = casing.addVertex(overlay.positions[core.a], kSelectionCasingColor);
+        const VertexIndex b = casing.addVertex(overlay.positions[core.b], kSelectionCasingColor);
+        casing.addLine(a, b, kSelectionCasingWidth * scale, kSelectionCasingBias);
+    }
+    for (const katana::render::DrawPoint& core : overlay.points) {
+        casing.addPoint(casing.addVertex(overlay.positions[core.a], kSelectionCasingColor),
+                        kSelectedPointCasing * scale, kSelectionCasingBias);
+    }
+    // The selection on layers this view alone hides, faint and without a
+    // casing, when the view asks for it.
+    if (options.selectionGhosts && options.layers != nullptr && !options.layers->empty()) {
+        emitEntities(document, surfaces, options, Selected::Ghosts, layers.datum, true, overlay,
+                     nullptr);
+    }
+}
+
+katana::math::AABB SceneBuilder::overlayBounds(const Document& document,
+                                               const std::vector<SceneSurface>& surfaces,
+                                               const SceneOptions& options,
+                                               const SceneLayers& layers,
+                                               std::span<const katana::entity::EntityId> ids)
+{
+    if (!options.drawEntities || ids.empty()) {
+        return {};
+    }
+    // Through the overlay's own emits, on the datum the drawing was put at,
+    // so the box is where the view draws them - draped, lifted, exaggerated
+    // - and never a second rule for where an entity stands in 3D.
+    DrawList scratch;
+    emitEntities(document, surfaces, options, Selected::Only, layers.datum, true, scratch,
+                 nullptr, ids);
+    if (options.selectionGhosts && options.layers != nullptr && !options.layers->empty()) {
+        emitEntities(document, surfaces, options, Selected::Ghosts, layers.datum, true, scratch,
+                     nullptr, ids);
+    }
+    return scratch.bounds(used_);
 }
 
 void SceneBuilder::buildGrid(const SceneOptions& options, SceneLayers& layers)
@@ -1476,8 +1545,8 @@ renderLayers(SceneLayers& layers, katana::render::Camera& camera,
     const bool drawEdges = SceneBuilder::fadeEdges(layers, camera);
 
     // In this order into one depth buffer, so equal depths resolve the same
-    // way every frame (the first drawn wins, Rule 7). Why the grid and the
-    // edges write no depth: scene.hpp, renderLayers.
+    // way every frame (the first drawn wins, Rule 7). Why the grid, the edges
+    // and the selection's casing write no depth: scene.hpp, renderLayers.
     struct Pass {
         const DrawList* list;
         bool depthWrite;
@@ -1486,6 +1555,7 @@ renderLayers(SceneLayers& layers, katana::render::Camera& camera,
                            {&layers.terrain, true},
                            {drawEdges ? &layers.edges : nullptr, false},
                            {&layers.entities, true},
+                           {&layers.selectionCasing, false},
                            {&layers.selection, true}};
     katana::render::RenderStats total;
     for (const Pass& pass : passes) {
@@ -1515,6 +1585,9 @@ AABB sceneDepthBox(const SceneLayers& layers)
 {
     AABB box = layers.bounds;
     box.expand(layers.grid.bounds());
+    // A ghost of the selection lies where the view draws nothing, so outside
+    // `bounds` (SceneLayers::bounds).
+    box.expand(layers.selection.bounds());
     return box;
 }
 

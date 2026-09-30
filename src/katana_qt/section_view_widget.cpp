@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include <QMouseEvent>
 #include <QPainter>
 #include <QResizeEvent>
 #include <QWheelEvent>
 
+#include "katana/cad/selection_style.hpp"
 #include "theme.hpp"
 #include "view_focus.hpp"
 
@@ -23,6 +25,12 @@ constexpr int kRightMargin = 12;
 
 constexpr double kZoomPerNotch = 1.15;
 
+// A selected entity's crossing: the selection colour, solid and 2 px against
+// the others' 1 px dashes, with a dot of 3.5 px radius at its level - a
+// little wider than the 1.8 px surface lines it sits on.
+constexpr double kSelectedCrossingPixels = 2.0;
+constexpr double kSelectedCrossingDot = 3.5;
+
 const QColor kBackground(24, 26, 32);
 const QColor kGrid(48, 52, 62);
 const QColor kGridMajor(74, 80, 94);
@@ -30,9 +38,13 @@ const QColor kAxis(150, 158, 175);
 const QColor kText(196, 202, 214);
 
 // A distinct colour per surface, in the order they were cut. Existing ground
-// first, then design: the two a section almost always carries.
-const QColor kSurfaceColors[] = {QColor(120, 200, 120), QColor(235, 170, 80),
-                                 QColor(130, 175, 245), QColor(220, 120, 200),
+// first, then design: the two a section almost always carries. None near the
+// selection's orange (cad/selection_style.hpp), which marks a selected
+// crossing and its dot: the second was (235, 170, 80), CIE76 22.9 from it, so
+// the usual design surface's vertex dots hid the selected crossing's. The
+// nearest now is the yellow, 50.9.
+const QColor kSurfaceColors[] = {QColor(120, 200, 120), QColor(130, 175, 245),
+                                 QColor(220, 120, 200), QColor(100, 205, 205),
                                  QColor(230, 230, 130)};
 
 // The plot area - inside the axes and their labels - of a widget this size.
@@ -58,6 +70,22 @@ SectionViewWidget::SectionViewWidget(katana::cad::ViewState& state, QWidget* par
             onActivated();
         }
     });
+}
+
+void SectionViewWidget::setDocument(katana::cad::Document* document)
+{
+    if (document == document_) {
+        return;
+    }
+    documentListener_.reset();
+    document_ = document;
+    if (document_ != nullptr) {
+        // A selection change, and a layer shown or hidden in the drawing,
+        // change which crossings are marked; the section itself is cut again
+        // only when asked (Terrain > Cut Section), so this only repaints.
+        documentListener_ = document_->addListener([this] { update(); });
+    }
+    update();
 }
 
 void SectionViewWidget::setSection(katana::cad::Section section)
@@ -302,8 +330,7 @@ void SectionViewWidget::drawCrossings(QPainter& painter) const
     if (!section.has_value() || section->crossings.empty()) {
         return;
     }
-    const QRectF plot(kLeftMargin, kTopMargin, width() - kLeftMargin - kRightMargin,
-                      height() - kTopMargin - kBottomMargin);
+    const QRectF plot = plotRect();
     painter.setClipRect(plot);
     painter.setPen(QPen(QColor(210, 90, 90), 1.0, Qt::DashLine));
 
@@ -312,7 +339,8 @@ void SectionViewWidget::drawCrossings(QPainter& painter) const
         // a layer hidden in this view takes its crossings out of it too. At
         // paint time rather than by cutting the section again: the section
         // is shared, and which layers a view hides changes far more often.
-        if (state_.layers.hides(crossing.layer)) {
+        // The layer the entity is on now, as markOf reads it (layerOf).
+        if (state_.layers.hides(layerOf(crossing))) {
             ++lastHiddenCrossings_;
             continue;
         }
@@ -320,10 +348,100 @@ void SectionViewWidget::drawCrossings(QPainter& painter) const
         if (x < plot.left() || x > plot.right()) {
             continue;
         }
-        painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
         ++lastDrawnCrossings_;
+        // A selected one is drawn by drawSelectedCrossings, over the surfaces.
+        if (markOf(crossing) != Mark::Selected) {
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+        }
     }
     painter.setClipping(false);
+}
+
+void SectionViewWidget::drawSelectedCrossings(QPainter& painter) const
+{
+    lastSelectedCrossings_ = 0;
+    lastGhostCrossings_ = 0;
+    const std::optional<katana::cad::Section>& section = state_.section;
+    if (document_ == nullptr || document_->selection().empty() || !section.has_value()) {
+        return;
+    }
+    const QRectF plot = plotRect();
+    painter.setClipRect(plot);
+    const QColor selection(katana::cad::kSelectionRed, katana::cad::kSelectionGreen,
+                           katana::cad::kSelectionBlue);
+    QColor faint = selection;
+    faint.setAlpha(katana::cad::kGhostAlpha);
+    const QPen ghostPen(faint, katana::cad::kGhostCrossingPixels, Qt::DotLine, Qt::FlatCap);
+    // Solid where every other crossing is dashed, and twice as wide, with a
+    // dot where it has a level: the one the user picked, at a glance.
+    const QPen selectedPen(selection, kSelectedCrossingPixels);
+    painter.setBrush(selection);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    for (const auto& crossing : section->crossings) {
+        const Mark mark = markOf(crossing);
+        if (mark == Mark::None) {
+            continue;
+        }
+        const double x = toScreen(crossing.station, 0.0).x();
+        if (x < plot.left() || x > plot.right()) {
+            continue;
+        }
+        if (mark == Mark::Ghost) {
+            painter.setPen(ghostPen);
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+            ++lastGhostCrossings_;
+            continue;
+        }
+        painter.setPen(selectedPen);
+        painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+        if (crossing.elevation.has_value()) {
+            painter.drawEllipse(toScreen(crossing.station, *crossing.elevation),
+                                kSelectedCrossingDot, kSelectedCrossingDot);
+        }
+        ++lastSelectedCrossings_;
+    }
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setBrush(Qt::NoBrush);
+    painter.setClipping(false);
+}
+
+SectionViewWidget::Mark SectionViewWidget::markOf(const katana::cad::SectionCrossing& crossing) const
+{
+    if (document_ == nullptr || !document_->selection().contains(crossing.entity)) {
+        return Mark::None;
+    }
+    // The entity as it is now, not as the cut found it: the plan and 3D
+    // views' rules (cad/selection.hpp), so an entity the document hides -
+    // its layer switched off, or it made invisible since the cut - is marked
+    // in no view, and one on a layer only this view hides is a ghost.
+    const katana::entity::Model& model = document_->model();
+    const katana::entity::Entity* entity = model.entities.find(crossing.entity);
+    if (entity == nullptr) {
+        return Mark::None;
+    }
+    if (katana::cad::isDrawn(model, *entity, state_.layers)) {
+        return Mark::Selected;
+    }
+    return state_.selectionGhosts && katana::cad::isGhost(model, *entity, state_.layers)
+               ? Mark::Ghost
+               : Mark::None;
+}
+
+const std::string& SectionViewWidget::layerOf(const katana::cad::SectionCrossing& crossing) const
+{
+    if (document_ != nullptr) {
+        if (const katana::entity::Entity* entity =
+                document_->model().entities.find(crossing.entity)) {
+            return entity->layer;
+        }
+    }
+    return crossing.layer;
+}
+
+QRectF SectionViewWidget::plotRect() const
+{
+    return QRectF(kLeftMargin, kTopMargin, width() - kLeftMargin - kRightMargin,
+                  height() - kTopMargin - kBottomMargin);
 }
 
 void SectionViewWidget::drawLegend(QPainter& painter) const
@@ -365,6 +483,8 @@ void SectionViewWidget::paintEvent(QPaintEvent* /*event*/)
     if (!section.has_value()) {
         lastDrawnCrossings_ = 0;
         lastHiddenCrossings_ = 0;
+        lastSelectedCrossings_ = 0;
+        lastGhostCrossings_ = 0;
         painter.setPen(theme::textMuted());
         painter.drawText(rect().adjusted(12, 12, -12, -12), Qt::AlignCenter | Qt::TextWordWrap,
                          QStringLiteral("No section yet.\nSelect a line or polyline, then "
@@ -375,6 +495,7 @@ void SectionViewWidget::paintEvent(QPaintEvent* /*event*/)
     drawGrid(painter);
     drawCrossings(painter);
     drawSurfaces(painter);
+    drawSelectedCrossings(painter);
     drawLegend(painter);
 
     if (onFrameStats) {
@@ -383,6 +504,9 @@ void SectionViewWidget::paintEvent(QPaintEvent* /*event*/)
                            .arg(section->crossings.size());
         if (lastHiddenCrossings_ > 0) {
             text += QString(", %1 hidden in this view").arg(lastHiddenCrossings_);
+        }
+        if (lastSelectedCrossings_ + lastGhostCrossings_ > 0) {
+            text += QString(", %1 selected").arg(lastSelectedCrossings_ + lastGhostCrossings_);
         }
         onFrameStats(text);
     }
@@ -471,12 +595,21 @@ void SectionViewWidget::wheelEvent(QWheelEvent* event)
     if (notches == 0.0) {
         return;
     }
-    // Zoom about the cursor: the station and elevation under it must not move.
-    const QPointF position = event->position();
+    // About the cursor.
+    zoomAt(event->position(), std::pow(kZoomPerNotch, notches));
+    event->accept();
+}
+
+void SectionViewWidget::zoomAt(const QPointF& position, double factor)
+{
+    if (!std::isfinite(factor) || factor <= 0.0) {
+        return;
+    }
+    // The station and elevation under `position` must not move.
     const double station = stationAt(position.x());
     const double elevation = elevationAt(position.y());
 
-    scale_ = std::clamp(scale_ * std::pow(kZoomPerNotch, notches), 1e-9, 1e9);
+    scale_ = std::clamp(scale_ * factor, 1e-9, 1e9);
 
     originStation_ = station - (position.x() - kLeftMargin) / scale_;
     originElevation_ = elevation - (static_cast<double>(height() - kBottomMargin) - position.y()) /
@@ -484,7 +617,6 @@ void SectionViewWidget::wheelEvent(QWheelEvent* event)
     framed_ = true;
     userMoved_ = true; // the user's view now, kept on a resize
     update();
-    event->accept();
 }
 
 } // namespace katana::qt

@@ -40,11 +40,12 @@ const QColor kBackground(28, 30, 36);
 bool gpuFailedThisSession = false;
 
 // The layers in cad::renderLayers' order, with its depth rules (scene.hpp:
-// the grid and the edges test depth and write none).
+// the grid, the edges and the selection's casing test depth and write none).
 constexpr std::size_t kGridLayer = 0;
 constexpr std::size_t kEdgesLayer = 2;
 constexpr std::size_t kEntitiesLayer = 3;
-constexpr std::size_t kSelectionLayer = 4;
+constexpr std::size_t kSelectionCasingLayer = 4;
+constexpr std::size_t kSelectionLayer = 5;
 #endif
 
 } // namespace
@@ -298,11 +299,12 @@ void RenderViewWidget::sendLayersToGpu(bool drawEdges, bool edgesChanged)
     static const katana::render::DrawList kNothing;
     const katana::render::DrawList& edges = drawEdges ? layers_.edges : kNothing;
     if (gpuLayersStale_) {
-        const std::array<gpu::LayerSource, 5> layers{{
+        const std::array<gpu::LayerSource, 6> layers{{
             {&layers_.grid, false},
             {&layers_.terrain, true},
             {&edges, false},
             {&layers_.entities, true},
+            {&layers_.selectionCasing, false},
             {&layers_.selection, true},
         }};
         gpuView_->setLayers(layers, gpuOrigin_);
@@ -315,6 +317,7 @@ void RenderViewWidget::sendLayersToGpu(bool drawEdges, bool edgesChanged)
             gpuView_->updateLayer(kEntitiesLayer, layers_.entities);
         }
         if (gpuDrawingStale_ || gpuSelectionStale_) {
+            gpuView_->updateLayer(kSelectionCasingLayer, layers_.selectionCasing);
             gpuView_->updateLayer(kSelectionLayer, layers_.selection);
         }
         if (edgesChanged) {
@@ -422,6 +425,12 @@ void RenderViewWidget::rebuildIfNeeded()
         context_.options.pixelScale = ratio;
         terrainDirty_ = entitiesDirty_ = selectionDirty_ = true;
     }
+    // The view's own ghost switch (ViewState::selectionGhosts), which only
+    // the selection overlay reads.
+    if (state_.selectionGhosts != context_.options.selectionGhosts) {
+        context_.options.selectionGhosts = state_.selectionGhosts;
+        selectionDirty_ = true;
+    }
     if (!terrainDirty_ && !entitiesDirty_ && !selectionDirty_) {
         return;
     }
@@ -503,6 +512,83 @@ void RenderViewWidget::zoomExtents()
     // one of the empty ground is replaced by the first real frame anyway.
     state_.cameraFramed = !framedEmpty_;
     requestFrame();
+}
+
+void RenderViewWidget::zoomBy(double factor)
+{
+    if (!std::isfinite(factor) || !(factor > 0.0) || context_.document == nullptr) {
+        return;
+    }
+    // A view never painted has neither its framebuffer's size nor a frame:
+    // both as its first paint would give them, so the zoom starts from what
+    // it will show.
+    if (gpuView_ == nullptr) {
+        (void)resizeTarget();
+    }
+    if (!framed_) {
+        zoomExtents();
+    }
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ != nullptr) {
+        gpuView_->setCameraFramed(true); // or its first frame frames the zoom away
+    }
+#endif
+    // Out no farther than where the scene is a pixel across, as a plan view's
+    // scale stops at its least: past that a zoom out shows nothing more, and
+    // ZOOM 1e-300 took the eye 4.7e302 units off, where the camera's
+    // arithmetic had no digits left for where it looked and the target the
+    // zoom keeps in the middle moved. A factor above 1 is closer, and the
+    // eye is d / factor away afterwards; the scene's diagonal D is a pixel
+    // across at D (H / 2) / tan(fov / 2), H the view's height in the
+    // camera's pixels. Zoomed out that far already, it goes no farther.
+    if (const katana::math::AABB& box = layers_.bounds; !box.empty() && factor < 1.0) {
+        const double across = (box.max - box.min).length();
+        const double farthest = across * 0.5 * camera().viewportHeight() /
+                                std::tan(0.5 * camera().fieldOfView());
+        if (std::isfinite(farthest) && farthest > 0.0) {
+            factor = std::max(factor, std::min(1.0, camera().distance() / farthest));
+        }
+    }
+    // The notches that make `factor` at kZoomPerNotch each, over the middle:
+    // the pixel whose centre the view's axis passes through, as
+    // Camera::rayThroughPixel samples pixel centres - so the target is still
+    // the middle of the view afterwards - in the logical pixels zoomAtPixel
+    // takes.
+    const double scale = sceneScale();
+    const QPointF middle((0.5 * camera().viewportWidth() - 0.5) / scale,
+                         (0.5 * camera().viewportHeight() - 0.5) / scale);
+    zoomAtPixel(std::log(factor) / std::log(kZoomPerNotch), middle);
+}
+
+bool RenderViewWidget::zoomToEntities(const std::vector<katana::entity::EntityId>& ids)
+{
+    if (context_.document == nullptr || ids.empty()) {
+        return false;
+    }
+    if (gpuView_ == nullptr) {
+        (void)resizeTarget(); // frame() fits the camera's aspect
+    }
+    // The scene as the view draws it now - its datum, its options, its
+    // hidden layers and ghost switch - so the box is where they are drawn.
+    rebuildIfNeeded();
+    const katana::math::AABB box = builder_.overlayBounds(*context_.document, surfaces(),
+                                                          context_.options, layers_, ids);
+    if (box.empty() || !camera().frame(box)) {
+        return false;
+    }
+    framed_ = true;
+    framedEmpty_ = false;
+    // Where the user asked to look: a resize keeps it, as after the wheel,
+    // rather than framing the whole scene again.
+    refitOnResize_ = false;
+    state_.cameraFramed = true;
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ != nullptr) {
+        gpuView_->setCameraFramed(true);
+    }
+#endif
+    requestFrame();
+    return true;
 }
 
 double RenderViewWidget::pixelRatio() const

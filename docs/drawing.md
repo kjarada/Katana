@@ -202,8 +202,14 @@ grips name it. A grip put down where it was picked up makes no undo step.
 
 `gripsOfSelection` gives no grips past 20 000 (a selection of a whole
 survey would otherwise paint a million squares), and none on a locked or
-hidden layer. Dimensions, labels and leaders offer none here: their handles
-are the annotation system's.
+hidden layer - hidden by the drawing, or by the view the grips are for, which
+it is given with no default, as `isSelectable` is: a selected entity on a
+layer a view hides is a ghost there at most, and a drag on its grip moved a
+design line from the as-built view that hid it (`docs/desktop.md`, "The
+selection in every view"). The plan view's grip controller follows its
+view's hidden layers, which change with no document notification.
+Dimensions, labels and leaders offer none here: their handles are the
+annotation system's.
 
 Tested with real mouse and key events in
 `tests/qt_widgets/drawing/test_plan_view_grips.cpp`: a drag is one undo step,

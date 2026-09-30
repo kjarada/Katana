@@ -163,6 +163,9 @@ std::optional<Tool> legacyTool(std::string_view id)
 ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, QWidget* parent)
     : QWidget(parent), document_(document), state_(state), tools_(document), grips_(document)
 {
+    // What a headless run reports it by (docs/headless.md), as its dock is
+    // View<id>.
+    setObjectName(QString("PlanView%1").arg(state.id));
     setMinimumSize(kMinimumWidth, kMinimumHeight);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -177,6 +180,8 @@ ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, Q
         update();
     });
     wireToolHost();
+    // No grip on what this view hides: a ghost is never picked here.
+    grips_.setView(&state_.layers);
     grips_.onError = [this](const QString& error) {
         if (onError) {
             onError(error);
@@ -408,6 +413,9 @@ void ViewportWidget::frame(const Box2& bounds)
     state_.planFramed = true;
     framedBox_ = bounds;
     update();
+    if (onViewMoved) {
+        onViewMoved(true);
+    }
 }
 
 void ViewportWidget::frameOnFirstPaint()
@@ -420,6 +428,28 @@ void ViewportWidget::frameOnFirstPaint()
     if (!bounds.empty()) {
         state_.plan.fit(bounds, kFrameMargin);
         framedBox_ = bounds;
+    }
+    // Not the user's move: a view linked while it had never been seen leads
+    // the link from here (cad::ViewSet::follow) - or, framed on nothing,
+    // takes the link's place (ViewWorkspace::viewMoved): it said nothing
+    // then, and the link it led showed two places, both views linked=yes.
+    if (onViewMoved) {
+        onViewMoved(false);
+    }
+}
+
+void ViewportWidget::holdView()
+{
+    framedBox_.reset();
+    update();
+}
+
+void ViewportWidget::frameIfUnframed()
+{
+    // The paint's own first steps, at the size the view has now.
+    state_.plan.resize(width(), height());
+    if (!state_.planFramed) {
+        frameOnFirstPaint();
     }
 }
 
@@ -854,6 +884,9 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event)
         const QPointF delta = event->position() - lastMouse_;
         state_.plan.panByPixels(delta.x(), delta.y());
         framedBox_.reset(); // the user's view now, kept on a resize
+        if (onViewMoved) {
+            onViewMoved(true);
+        }
     } else if (boxStart_) {
         boxEnd_ = event->position();
     }
@@ -907,7 +940,11 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent* event)
 void ViewportWidget::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::MiddleButton) {
-        zoomExtents();
+        if (onZoomExtents) {
+            onZoomExtents();
+        } else {
+            zoomExtents();
+        }
         return;
     }
     // Qt delivers a double click as press, release, DOUBLECLICK, release - the
@@ -943,6 +980,9 @@ void ViewportWidget::wheelEvent(QWheelEvent* event)
         framedBox_.reset(); // the user's view now, kept on a resize
         updateCursor(event->position());
         update();
+        if (onViewMoved) {
+            onViewMoved(true);
+        }
     }
     event->accept();
 }
@@ -1234,6 +1274,7 @@ PlanPaintOptions ViewportWidget::screenOptions() const
     // docs/annotation.md); a change of it is a command, so the kept drawing
     // is repainted by the model revision it moves.
     options.annotationScale = document_.annotationScale();
+    options.selectionGhosts = state_.selectionGhosts;
     return options;
 }
 
@@ -1330,6 +1371,7 @@ ViewportWidget::DrawingKey ViewportWidget::drawingKey(double deviceRatio) const
     key.hiddenReferences = state_.hiddenReferences;
     key.grid = gridVisible_;
     key.thinLines = thinScreenLines();
+    key.ghosts = state_.selectionGhosts;
     return key;
 }
 
@@ -1365,6 +1407,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
             paintPlan(layer, paintSource(), paintFrame(), screenOptions(), paintCache_);
         layer.end();
         lastDrawnEntities_ = stats.entitiesDrawn;
+        lastGhosts_ = stats.ghostsDrawn;
         drawingKey_ = std::move(key);
         ++drawingPaints_;
         lastDrawingMs_ = static_cast<double>(drawingTimer.nsecsElapsed()) / 1.0e6;

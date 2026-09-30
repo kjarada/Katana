@@ -86,7 +86,7 @@ class RenderViewWidget final : public QWidget {
     {
         return layers_.grid.lines.size() + layers_.terrain.lines.size() +
                layers_.edges.lines.size() + layers_.entities.lines.size() +
-               layers_.selection.lines.size();
+               layers_.selectionCasing.lines.size() + layers_.selection.lines.size();
     }
     // The scene as last built, by layer.
     [[nodiscard]] const katana::cad::SceneLayers& sceneLayers() const { return layers_; }
@@ -119,7 +119,8 @@ class RenderViewWidget final : public QWidget {
     // Zooms by `notches` wheel notches, positive in, about `position` in this
     // widget's logical pixels, towards what is drawn there
     // (cad::zoomAtPixel): what the wheel does over either renderer, the GPU
-    // view's wheel arriving through its onWheelZoom.
+    // view's wheel arriving through its onWheelZoom, and what zoomBy calls, so
+    // a zoom from a view's bar is the wheel's own.
     void zoomAtPixel(double notches, const QPointF& position);
     void setStandardView(katana::render::StandardView view);
     void setProjection(katana::render::Projection projection);
@@ -128,6 +129,23 @@ class RenderViewWidget final : public QWidget {
     {
         return context_.options.verticalExaggeration;
     }
+
+    // ---- ZOOM (cad/view_verbs.hpp) -------------------------------------------
+    // `factor` times closer, below 1 farther, as the wheel turned that many
+    // notches over the middle of the view (zoomAtPixel): ZOOM IN, OUT and a
+    // factor, from a line or the view's bar. A view that has framed nothing
+    // yet - a script's VIEWS OPEN 3d then ZOOM IN, with no paint between -
+    // frames the scene first, as its first paint would, or that paint would
+    // frame the zoom away. Out no farther than where the scene is a pixel
+    // across, as a plan view's scale stops at its least. Nothing for a factor
+    // that is not finite and above 0.
+    void zoomBy(double factor);
+    // Frames the camera on the entities `ids` as this view draws them - the
+    // ones it shows and, with its ghosts on, the ones it ghosts
+    // (cad::SceneBuilder::overlayBounds): ZOOM on a scope, Zoom to Selection.
+    // Kept on a resize, as the user's own view is. False, and the camera
+    // untouched, when the view draws none of them.
+    bool zoomToEntities(const std::vector<katana::entity::EntityId>& ids);
 
     // Milliseconds the last paint took - any scene build it did, the render
     // and the blit - and what it contained. Shown in the status bar: a number

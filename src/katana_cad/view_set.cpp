@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "katana/cad/view_link.hpp"
+
 namespace katana::cad {
 
 using katana::core::ErrorCode;
@@ -60,6 +62,9 @@ std::unique_ptr<ViewState> ViewSet::take(ViewId id)
     if (found == views_.end()) {
         return nullptr;
     }
+    // Out of the link first, while the view is still one of the set: the
+    // members left behind are counted without it.
+    (void)leaveLink(**found);
     std::unique_ptr<ViewState> taken = std::move(*found);
     views_.erase(found);
     std::erase(recent_, id);
@@ -78,6 +83,9 @@ Status ViewSet::setKind(ViewId id, ViewKind kind)
     if (view->kind == kind) {
         return {};
     }
+    // What it shows now is not what the link keeps in step, and following
+    // would move it by numbers that mean something else for its new kind.
+    (void)leaveLink(*view);
     view->kind = kind;
     view->number = lowestFreeNumber(kind, id);
     // Section does not look through the camera, so it leaves it; and arriving
@@ -177,6 +185,189 @@ void ViewSet::touch(ViewId id)
 {
     std::erase(recent_, id);
     recent_.push_back(id);
+}
+
+// ---- linked views -------------------------------------------------------------------------
+
+namespace {
+
+bool holds(const std::vector<ViewId>& ids, ViewId id) { return std::ranges::contains(ids, id); }
+
+} // namespace
+
+std::vector<ViewId> ViewSet::linkedViews() const
+{
+    std::vector<ViewId> members;
+    for (const auto& view : views_) {
+        if (view->linked) {
+            members.push_back(view->id);
+        }
+    }
+    return members;
+}
+
+Result<ViewSet::LinkChange> ViewSet::link(std::span<const ViewId> ids, std::optional<ViewId> to)
+{
+    // Everything is checked before anything changes, so a refused line
+    // leaves the link as it was.
+    std::vector<ViewId> joining;
+    for (const ViewId id : ids) {
+        const ViewState* view = find(id);
+        if (view == nullptr) {
+            return makeError(ErrorCode::NotFound,
+                             "no view " + std::to_string(id) + " is open (VIEWS lists them)",
+                             std::to_string(id));
+        }
+        if (!linkable(view->kind)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "only plan views link: view " + std::to_string(id) + " is " +
+                                 toString(view->kind),
+                             std::to_string(id));
+        }
+        if (!holds(joining, id)) {
+            joining.push_back(id);
+        }
+    }
+    if (joining.empty()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "name the views to link: VIEWS LINK <id>[,<id>...] [TO <id>]");
+    }
+    const std::vector<ViewId> members = linkedViews();
+    ViewId leader = joining.front();
+    if (to) {
+        if (find(*to) == nullptr) {
+            return makeError(ErrorCode::NotFound,
+                             "no view " + std::to_string(*to) + " is open (VIEWS lists them)",
+                             std::to_string(*to));
+        }
+        if (!holds(joining, *to) && !holds(members, *to)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "TO names the view the others come to, one being linked or already "
+                             "linked: view " +
+                                 std::to_string(*to) + " is neither",
+                             std::to_string(*to));
+        }
+        leader = *to;
+    } else if (!members.empty()) {
+        // The link as it stands leads: joining it must not move the views
+        // already in it.
+        leader = std::ranges::min(members);
+    }
+    for (const ViewId id : joining) {
+        find(id)->linked = true;
+    }
+    LinkChange change;
+    change.leader = leader;
+    change.moved = follow(leader);
+    change.linked = linkedViews();
+    return change;
+}
+
+std::vector<ViewId> ViewSet::leaveLink(ViewState& view)
+{
+    if (!view.linked) {
+        return {};
+    }
+    view.linked = false;
+    std::vector<ViewId> left{view.id};
+    // A link of one follows nothing and leads nothing; left standing it would
+    // make the next view linked follow a view nobody chose. Only a link this
+    // left with one member goes: a link of one made on purpose - the first
+    // click of two - waits for the second.
+    const std::vector<ViewId> members = linkedViews();
+    if (members.size() == 1) {
+        find(members.front())->linked = false;
+        left.push_back(members.front());
+    }
+    return left;
+}
+
+Result<std::vector<ViewId>> ViewSet::unlink(std::span<const ViewId> ids)
+{
+    for (const ViewId id : ids) {
+        if (find(id) == nullptr) {
+            return makeError(ErrorCode::NotFound,
+                             "no view " + std::to_string(id) + " is open (VIEWS lists them)",
+                             std::to_string(id));
+        }
+    }
+    std::vector<ViewId> left;
+    for (const ViewId id : ids) {
+        for (const ViewId gone : leaveLink(*find(id))) {
+            if (!holds(left, gone)) {
+                left.push_back(gone);
+            }
+        }
+    }
+    // In creation order, as every list of views here is.
+    std::vector<ViewId> ordered;
+    for (const auto& view : views_) {
+        if (holds(left, view->id)) {
+            ordered.push_back(view->id);
+        }
+    }
+    return ordered;
+}
+
+std::vector<ViewId> ViewSet::unlinkAll()
+{
+    std::vector<ViewId> left = linkedViews();
+    for (const ViewId id : left) {
+        find(id)->linked = false;
+    }
+    return left;
+}
+
+void ViewSet::noteMoved(ViewId id)
+{
+    if (ViewState* view = find(id)) {
+        view->lastMoved = ++moves_;
+    }
+}
+
+ViewId ViewSet::linkLeaderFor(ViewId joining) const
+{
+    const std::vector<ViewId> members = linkedViews();
+    ViewId latest = kNoView;
+    std::uint64_t latestMove = 0;
+    const auto consider = [&](ViewId id) {
+        const ViewState* view = find(id);
+        if (view != nullptr && view->lastMoved > latestMove) {
+            latest = id;
+            latestMove = view->lastMoved;
+        }
+    };
+    consider(joining);
+    for (const ViewId id : members) {
+        consider(id);
+    }
+    if (latest != kNoView) {
+        return latest;
+    }
+    return members.empty() ? joining : std::ranges::min(members);
+}
+
+std::vector<ViewId> ViewSet::follow(ViewId source)
+{
+    const ViewState* from = find(source);
+    // An unframed view's centre and scale are the defaults a widget starts
+    // with, not a place anybody chose: nothing follows them.
+    if (from == nullptr || !from->linked || !from->planFramed) {
+        return {};
+    }
+    std::vector<ViewId> moved;
+    for (const auto& view : views_) {
+        if (view->id == source || !view->linked) {
+            continue;
+        }
+        if (followView(*from, *view)) {
+            // Framed: the view's widget must not frame it again at its first
+            // paint, which would move it off the link.
+            view->planFramed = true;
+            moved.push_back(view->id);
+        }
+    }
+    return moved;
 }
 
 } // namespace katana::cad

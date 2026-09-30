@@ -26,6 +26,15 @@ std::string lowered(std::string_view text)
     return out;
 }
 
+std::string uppered(std::string_view text)
+{
+    std::string out(text);
+    for (char& c : out) {
+        c = asciiUpper(c);
+    }
+    return out;
+}
+
 bool equalsIgnoringCase(std::string_view a, std::string_view b) noexcept
 {
     if (a.size() != b.size()) {
