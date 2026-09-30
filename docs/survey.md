@@ -182,7 +182,7 @@ extension.
 | Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
 | Leica GSI (`leica-gsi`): GSI-8 and GSI-16, mixed or not; any extension when every line is a GSI block | yes | no | 1.1 | total station words only (a digital level's are counted, not read); declares no coordinate system; a sexagesimal angle whose word writes 60 seconds in their place is read as the next minute, and a circle reading past a full circle is refused (see "Leica GSI" below) |
 | Opcode field file (`opcode-field-file`): `.fld`, tab-separated records opening with a numeric opcode, total-station and GNSS (RTK) jobs | yes | no | 1.1 | opcodes 02, 03, 04, 05, 06, 07, 09, 16, 20, 29, 41, 42, 43, 44, 71, 72, 73, 99, 100, 124, 125, 128, 129, 138, 139 and -2 read; every other opcode skipped with a warning naming it; an RTK position written as 02 with its receiver's "GNSS Solution" is a GNSS position, any other 02 an entered coordinate; a backsight's stated azimuth kept apart from its circle reading; every measurement of a point keeps its attributes; offsets move the shot they follow; resected setups are not positioned; the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
-| Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning, a shot with no raw twin said to be lost; units from the header - an undefined angle or distance unit refused, an undefined pressure or temperature unit warned about and not read, a `13DU` followed; coordinates in the header's order (1 N-E-Elev; 2 E-N-Elev and Trimble's 3 east first, each with a warning), a point's latest kept, a shot's POS view never over a position record; collimation (04) applied per face until another instrument type or job; declares no coordinate system |
+| Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning, a shot with no raw twin said to be lost; units from the header - an undefined angle or distance unit refused, an undefined pressure or temperature unit warned about and not read, a `13DU` followed; coordinates in the header's order (1 N-E-Elev; 2 E-N-Elev and Trimble's 3 east first, each with a warning), a point's latest kept, an observation's POS view (after its 09 or 11) never over a position record; collimation (04) applied per face until another instrument type or job; declares no coordinate system |
 
 The matrix lists the formats that have a section in this file.
 `src/katana_surveyio/` also registers readers for TDS RW5, Topcon GTS-7
@@ -929,9 +929,9 @@ Not done:
 - `SURVEY IMPORT` reduces with no grid scale factor and no height reduction
   unless a person sets them in Survey > Survey Jobs, so a total-station job
   imported into a projected drawing is radiated with ground distances.
-- surveyio has seven file-local digit tests (`isDigit` in leica_dbx.cpp,
+- surveyio has eight file-local digit tests (`isDigit` in leica_dbx.cpp,
   leica_gsi.cpp, rinex.cpp, rinex_common.cpp, rinex_compact.cpp,
-  topcon_raw_builder.cpp and opcode_field_file.cpp), and
+  topcon_raw_builder.cpp, opcode_field_file.cpp and sokkia_sdr.cpp), and
   `include/katana/core/text.hpp`, which would be their one home, has none.
 - The verb has no reduction options - a person changes them in Survey > Survey
   Jobs, which re-adjusts the imported job.
@@ -1094,7 +1094,14 @@ Decisions that are the reader's own, each stated in the source:
   records comes before the round it orients, and 245 hold that round's
   face-mean reading on the backsight (to 0.05"; the other is 0.3" off it),
   where 195 come straight after the backsight shot that ended the round
-  before. The rule stands on the readings, not on a writer's order.
+  before. The rule stands on the readings, not on a writer's order. The
+  minute is widened by the horizontal collimation applied to the readings:
+  a `07`'s circle may be Trimble's writer's raw face 1 reading, from which a
+  corrected reading differs by the correction, or, in Sokkia's own, the
+  set's face mean (chapter 2's BKB SC), which the corrected readings match -
+  so a 72" collimation had split a setup read on one circle (a reviewer's
+  case), where 45 degrees still shows. Rejected: comparing the uncorrected
+  readings, which only moves the false split to the face-mean circle.
   Rejected: orienting
   the whole setup, the reader's first rule, which turned such shots by the
   `07`'s circle without a word and let a later `07` override a keyed
@@ -1114,11 +1121,20 @@ Decisions that are the reader's own, each stated in the source:
   orientation and moved its other shots by half the move, 39 m at 100 m in
   a reviewer's case of a 45-degree move. A face 2 reading is compared less
   half a circle, so a round ending on face 2 of the backsight stays with
-  its own circle even when the next is moved half a circle. Any other shot
-  stays with the orientation it followed (SETX 8.2). Rejected: the same for
-  a `07` naming another backsight, its reading predicted from the two
-  records' azimuths - a point other than the backsight read on the new
-  circle shows only that the azimuths disagree, not that the circle moved.
+  its own circle even when the next is moved half a circle. Where the
+  setup's `07` gives no circle reading, its first reading of the backsight
+  stands for its circle; where the new `07` gives none, a shot of the
+  backsight off the setup's circle is enough (the fourth review found the
+  move did nothing when either `07` lacked a circle, leaving C 39 m off in
+  a reviewer's case). Rounds whose `07`s give no circle are one setup with
+  nothing to compare, so their readings of the backsight are compared face
+  by face (face 2 against face 1 would take an instrument's collimation for
+  a move), and a spread past the minute is warned about at the reading.
+  Any other shot stays with the orientation it followed (SETX 8.2).
+  Rejected: the same for a `07` naming another backsight, its reading
+  predicted from the two records' azimuths - a point other than the
+  backsight read on the new circle shows only that the azimuths disagree,
+  not that the circle moved.
 - **A setup with no `07` is oriented by a keyed azimuth, or reads azimuths.**
   An `11` with an azimuth and no distance from the setup's point is a keyed
   orientation, and a setup with no back-bearing record is oriented by the
@@ -1152,7 +1168,13 @@ Decisions that are the reader's own, each stated in the source:
   chapter 13, says both). The instrument type is the `01`'s EDM type, the
   code Sokkia's 3.5 lists instruments by; the same type restated, as some
   files do before every setup, keeps the correction. Each end is warned
-  about where it happens. A face pair's mean is unchanged, so a round on both
+  about where it happens. An `01` of another type between two shots of one
+  setup ends it there all the same - it is applied reading by reading -
+  while the setup keeps its other settings, which the model holds once a
+  setup; the warning about the change in the middle of the setup names the
+  collimation as the exception (it had said the setup kept everything,
+  beside the warning that the collimation ended). A face pair's mean is
+  unchanged, so a round on both
   faces reduces as before and its faces now agree; a shot on one face moves
   (17.45 mm at 100 m for a 36" correction). The field book corrects the
   zenith after the instrument and target heights, the reader before them,
@@ -1186,9 +1208,9 @@ Decisions that are the reader's own, each stated in the source:
   refractivity at the reduction's 658 nm gives 4.3 to 12.6 ppm across its 41
   setups, worked independently of Katana's code. Reduced with its first
   station held at an assumed position (N 6 250 000, E 300 000), the far end
-  of the traverse, 18236, moves 16.4 mm between the default and Recompute
-  (161512 16.1 mm; measured with this round's build) - so a person whose
-  distances are raw must choose Recompute.
+  of the traverse moves 16.4 mm between the default and Recompute (another
+  station 16.1 mm; measured with the second review's build) - so a person
+  whose distances are raw must choose Recompute.
 - **The prism constant is in the distances**, the instrument record's value
   in millimetres: the field book applies it on acceptance, and Trimble's
   writer adds the target's constant to each distance and writes 0 there.
@@ -1205,10 +1227,11 @@ Decisions that are the reader's own, each stated in the source:
   example SDR files are displayed in Printed output form" - so it shows the
   display order, not the file's; its HORZADJ record, printed with fixed
   labels ("Trans.N", "Trans.E"), only identifies which printed value is the
-  easting (the translation printed as "Trans.N" takes its GSTN 1005 to 0.1 mm
-  east and 0.8 mm south of its printed POS 1005; the other reading is 5.5 cm
-  off), which a printer that orders values by the option without relabelling
-  explains as well as a file stored east first. Both of chapter 4's
+  easting (the translation printed as "Trans.N" takes its GSTN 1005 to 1.1 mm
+  east and 0.8 mm south of its printed POS 1005; the other reading is 5.6 cm
+  off in each ordinate, 7.9 cm in all - the third review's text had 0.1 mm
+  and 5.5 cm), which a printer that orders values by the option without
+  relabelling explains as well as a file stored east first. Both of chapter 4's
   transmitted samples are option 1. Trimble's 3, "Y-X-Z", is east first too
   and read so, with its own warning: Sokkia does not define 3, and SETX 3.5.6
   lists south-west-elevation as the field book's third display order. The
@@ -1229,9 +1252,9 @@ Decisions that are the reader's own, each stated in the source:
   which is warned about record by record. A header in the Nikon form also
   takes the refraction constant option 1 as Nikon's 0.132, not Sokkia's
   0.14.
-- **A point's latest coordinates are its own - but never a shot's POS view
-  over a position record.** Coordinates keyed in (KI) are Entered, an `08
-  TP` FieldObserved, `08 AJ`, `TV` and `RS` Calculated, any other Unknown; a
+- **A point's latest coordinates are its own - but never an observation's
+  POS view over a position record.** Coordinates keyed in (KI) are Entered,
+  an `08 TP` FieldObserved, `08 AJ`, `TV` and `RS` Calculated, any other Unknown; a
   point given coordinates more than once keeps the latest, the field book's
   own rule. Sokkia's 2.3 in full: "The rule is essentially that the latest
   coordinates are the best(or an observation in POS view) will over-ride an
@@ -1245,24 +1268,42 @@ Decisions that are the reader's own, each stated in the source:
   same coordinates again say nothing. The shared builder gained the choice
   (`RawProjectBuilder::RestatedCoordinates`); the RW5, GTS-7 and field-file
   readers keep the first, their formats' later positions being checks.
-  The exception is the second clause. A field book sending its current view
-  and the POS view writes "a raw observation record followed by a position
-  record" (SETX 27.2), so an `08` other than KI, AJ, TV or RS read straight
-  after a `09` F1, F2 or MD of the same point is that shot's POS view, and
-  the shot stayed in OBS view, which "will NOT overwrite a previous
-  coordinate if it exists in POS view" (SETX 8.5.5) - a check shot onto
-  control. It places a point with no coordinates, or one whose coordinates
-  came only from such views (the latest OBS view counts where nothing else
-  does, SETX 6.1 rule 3); it never supersedes the coordinates of any other
-  record, which stand, its own going to the point's metadata with a warning
-  naming the shot (`positionPoint`'s `asideBecause`). Rejected: the latest
-  whatever the record, the second review's rule, which let a check shot's
-  POS view move keyed control (13 mm in a reviewer's case, the misclose
-  gone), demote it from Entered so a later `02` restating it moved the
-  shots from it too, and replace a backsight's keyed coordinates; and
-  keeping the first, the reader's first rule, which imported chapter 2's
-  traverse with its stations unadjusted beside side shots computed from the
-  adjusted ones.
+  The exception is the second clause. A field book sending more than one
+  view writes "more than one record for each observation record", one after
+  another - for its current view and the POS view, "a raw observation record
+  followed by a position record" (SETX 27.2) - and an MC or RED record has
+  the views a raw one has (SETX chapter 6: "MC and Red records can also be
+  stored in Pos view"; SETX 8.5.5's printed examples follow each OBS record,
+  the averaged OBS MC among them, with its POS TP). So an `08` other than
+  KI, AJ, TV or RS read straight after a `09` F1, F2, MD or MC, or an `11`
+  with distances, of the same point is that observation's POS view,
+  whatever the reader then does with the observation (an MC or RED is not
+  imported, a bad set's raw one is skipped), and the observation stayed in
+  its own view: one in OBS, MC or RED view comes after every POS, STN and
+  POS-view record (SETX 6.1 rules 2 and 3), and Store OBS "will NOT
+  overwrite a previous coordinate if it exists in POS view" (SETX 8.5.2) - a
+  check shot onto control. It places a point with no coordinates, or one
+  whose coordinates came only from such views (the latest observation counts
+  where nothing else does, SETX 6.1 rule 3); it never supersedes the
+  coordinates of any other record, which stand, its own going to the point's
+  metadata with a warning naming the observation and its view
+  (`positionPoint`'s `asideBecause`). Straight after is what pairs them: an
+  `08` after an `08` of the same point is a record of its own - SETX 8.5.5
+  prints the new averaged position straight after the POS view it averages -
+  and so is one with a note or any other record between it and the shot. An
+  MC or RED whose observation is lost (below) may still place its point by
+  its POS view: the observation is lost to the reduction, the field book's
+  position from it is not. Rejected: the latest whatever the record, the
+  second review's rule, which let a check shot's POS view move keyed control
+  (13 mm in a reviewer's case, the misclose gone), demote it from Entered so
+  a later `02` restating it moved the shots from it too, and replace a
+  backsight's keyed coordinates; a POS view only straight after a raw `09`,
+  the third review's rule, which let the POS view of an MC or RED - a set's
+  averaged MC, or a shot stored in MC or RED view - move keyed control by
+  the same 13 mm, beside warnings that set the raw shots' POS views aside;
+  and keeping the first, the reader's first rule, which imported chapter
+  2's traverse with its stations unadjusted beside side shots computed from
+  the adjusted ones.
 - **A height with no position is kept.** An `08` or `02` that gives an
   elevation and no northing or easting cannot place its point; the height
   goes to the point's metadata (`height without a position`, as the GSI
@@ -1282,11 +1323,13 @@ Decisions that are the reader's own, each stated in the source:
   coordinates, Nikon's "slope distance, vertical angle, horizontal angle"
   with target heights in `03` records beside them. So they are skipped, each
   with the reason, and a shot with no raw twin is said to be lost, in its
-  warning and in what the file did not carry. The twin may come before the
-  derived view or after it: the verdict on one whose line has no raw
-  observation yet waits for its setup's next `02` or the file's end, and
+  warning and in what the file did not carry - its observation, that is: a
+  POS view sent beside it still places its point (above). The twin may come
+  before the derived view or after it: the verdict on one whose line has no
+  raw observation yet waits for its setup's next `02` or the file's end, and
   "its setup" is all that `02`'s observations, from its point, whatever
-  setup a re-orienting `07` put them in. Rejected: importing them on one
+  setup a re-orienting `07` put them in - and no earlier `02`'s, whose
+  records' views were sent beside them. Rejected: importing them on one
   writer's meaning, which would put another writer's points in the wrong
   place without a word; deciding by whether the setup held any raw
   observation, the rule after the first review, which called an MC of an
@@ -1347,7 +1390,13 @@ lines). None of the changed rules has anything to act on there: each of its
 246 back-bearing records comes before its round, its six rounds a setup on
 one circle; it has no `04`, `12`, MC or RED with distances, no `08` after a
 shot, and its one `08` states no coordinates for the option-2 warning to be
-given at.
+given at. After the fourth review's changes (the same day) it reads and
+imports as main's reader did, `SURVEY IMPORT`'s 47 reduction warnings included, and the
+full dump is again byte for byte the same: every one of its back-bearing
+records gives a circle reading (so none is inferred, and no round goes
+unchecked), it has no collimation to widen a circle test, its 42 instrument
+records name one EDM type, and its one `08` follows no observation of its
+point.
 
 Tests: `tests/surveyio/test_sokkia_sdr.cpp`, on the hand-built
 `tests/surveyio/data/sdr/traverse.sdr` (its second setup's circle zeroed on
@@ -1358,13 +1407,20 @@ before them, and its `BKB TP 0003-0002` (azimuth 269-59'50", circle
 270-00'00") orienting a shot less the circle, and less a reading 5" off it;
 the SDR2x set layout with the circle moved between sets, and with the `12`
 first as V04-01 wrote it; each order of shots and first backsight record,
-the backsight read before a first `07` on its circle, on another, and on
-face 2, and a round's backsight shot before a `07` on a moved circle; the
-collimation on each face, and its end at another instrument type and
-another job; a shot's POS view beside control, beside nothing, twice, and a
-lone `08 TP`; derived views read before their raw twins, across a
-re-orientation and past the next `02`. Each test of the third review was
-seen to fail with its fix taken out.
+the backsight read before a first `07` on its circle, on another, on face
+2, with no horizontal reading, and 72" off it under a 72" collimation, and
+a round's backsight shot before a `07` on a moved circle, with a circle in
+both `07`s or in only one; rounds whose `07`s give no circle, their
+readings of the backsight spread or not; the collimation on each face, and
+its end at another instrument type (between setups and in the middle of
+one) and another job; a shot's POS view beside control, beside nothing,
+twice, and a lone `08 TP`; the POS views of a set's raw shots and its
+averaged MC, of an MC alone, of a RED, and of a raw shot sent with its MC;
+an `08` that is no view - a note between it and the shot, or SETX 8.5.5's
+averaged position after a view; derived views read before their raw twins,
+across a re-orientation and past the next `02`, and one after a second `02`
+whose line only the first observed. Each test of the third and fourth
+reviews was seen to fail with its fix taken out.
 `Reduction.AStatedAzimuthIsTakenLessTheSetupsReadingOnTheBacksightNotLessTheCircle`
 and `Reduction.WithNoReadingOnTheBacksightTheStatedAzimuthIsTakenLessTheCircleSetOnIt`
 pin the orientation with a reading and a circle that are not zero (the
@@ -1426,21 +1482,24 @@ Not done:
   option-3 file (the read options carry no format-specific setting), so a
   Sokkia file under 2 that holds the northing first is read transposed,
   with the warning.
-- Two of the field book's outputs hold a shot stored in OBS view and one
-  stored in POS view alike. Sent with the POS view alone ("all the
-  observation (OBS or MC) ... records are output as POS records", SETX
-  27.2), each is an `08 TP` with no `09` before it, taken as a position
-  record: a check shot onto control there replaces the control's
-  coordinates (warned, the earlier ones in the point's metadata), which the
-  field book itself would not. Sent with the OBS and POS views both on,
-  rather than the current view, each is a `09` and its `08`, taken as a
-  check: a shot stored in POS view, which the field book lets overwrite,
-  leaves the point's earlier coordinates standing (warned, its own in the
-  metadata) - the safer of the two mistakes, since control never moves
-  without a word.
+- Two of the field book's outputs hold an observation stored in its own
+  view and one stored in POS view alike. Sent with the POS view alone ("all
+  the observation (OBS or MC) and reduced (RED) records are output as POS
+  records", SETX 27.2), each is an `08 TP` with no observation record before
+  it, taken as a position record: a check shot onto control there replaces
+  the control's coordinates (warned, the earlier ones in the point's
+  metadata), which the field book itself would not. Sent with an
+  observation view and the POS view both on, rather than the current view,
+  each is its `09` (or `11`) and its `08`, taken as a check: a shot stored
+  in POS view, which the field book lets overwrite, leaves the point's
+  earlier coordinates standing (warned, its own in the metadata) - the
+  safer of the two mistakes, since control never moves without a word.
 - A first `07` that gives no circle reading orients the shots before it
   where any is of its backsight, as the rule was: with no circle there is
-  nothing to compare their readings with.
+  nothing to compare their readings with. Rounds whose `07`s give no circle
+  are one setup whatever their circles; a spread in their readings of the
+  backsight is warned about, not split, since which round moved is not
+  said.
 - The latest coordinates are taken record by record. An `08` restating a
   point's northing and easting with no elevation leaves it none, where one
   with the same northing and easting keeps the earlier elevation (the
