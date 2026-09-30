@@ -473,8 +473,9 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 // both as real mouse events (MainWindow::pointerAt), since a headless run
 // has no mouse and a tool's preview and picks need one. Each prints what the
 // view then showed: "pointer: action= x= y= tool= expects= shapes= markers=
-// target= added= removed= focus= refused= caption= prompt=". A point outside
-// the view fails the run.
+// target= added= removed= enter= focus= refused= caption= prompt=", a reply
+// record whose caption and prompt are quoted as every reply's text is
+// (core::replyQuoted). A point outside the view fails the run.
 //
 // --script FILE runs a katana_cli script (.kcs) in the window, a step among the
 // others: the window's SCRIPT verb through its one executor, each line echoed

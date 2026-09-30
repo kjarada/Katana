@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <variant>
 
@@ -291,4 +292,189 @@ TEST(FeedbackPainter, ARefusedPicksTargetIsDrawnInTheRefusalsRedNotTheTargetsGre
     }
     // Still the target in the counts: the record says what the pick took.
     EXPECT_EQ(red.counts.target, 2u);
+}
+
+// ---- the review of 2026-09-30, second round ------------------------------------------------
+
+namespace {
+
+// A colour as a red-green colour-blind eye sees it: deuteranopia at severity
+// 1.0 in Machado, Oliveira and Fernandes (2009), "A Physiologically-based
+// Model for Simulation of Color Vision Deficiency", IEEE TVCG 15(6), whose
+// matrix applies to linear RGB (IEC 61966-2-1's sRGB decoding).
+std::array<double, 3> deuteranope(const QColor& colour)
+{
+    const auto linear = [](int channel) {
+        const double v = channel / 255.0;
+        return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
+    };
+    const double r = linear(colour.red());
+    const double g = linear(colour.green());
+    const double b = linear(colour.blue());
+    return {0.367322 * r + 0.860646 * g - 0.227968 * b,
+            0.280085 * r + 0.672501 * g + 0.047413 * b,
+            -0.011820 * r + 0.042940 * g + 0.968881 * b};
+}
+
+// The pixels within `radius` of `centre` that such an eye sees differently in
+// `a` and `b`: some channel more than 0.08 apart in linear light. The
+// target's green (0x3cd070) and the refusal's red (0xff6b6b) come out at
+// (0.523, 0.445, 0.184) and (0.460, 0.386, 0.137) - 0.063 apart at most,
+// worked from the matrix - so two marks that differ only in those two hues
+// count none (the control below).
+int seenApart(const QImage& a, const QImage& b, QPointF centre, double radius)
+{
+    int count = 0;
+    for (int y = int(centre.y() - radius); y <= int(centre.y() + radius); ++y) {
+        for (int x = int(centre.x() - radius); x <= int(centre.x() + radius); ++x) {
+            if (std::hypot(x - centre.x(), y - centre.y()) > radius) {
+                continue;
+            }
+            const auto p = deuteranope(a.pixelColor(x, y));
+            const auto q = deuteranope(b.pixelColor(x, y));
+            if (std::abs(p[0] - q[0]) > 0.08 || std::abs(p[1] - q[1]) > 0.08 ||
+                std::abs(p[2] - q[2]) > 0.08) {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
+} // namespace
+
+TEST(FeedbackPainter, ARefusedMarkDiffersInShapeNotOnlyInHueToARedGreenColourBlindEye)
+{
+    // Fillet on an end vertex, Segment to Line on a straight segment: the
+    // refused pick was the accepted one's ring and line in red, the same
+    // khaki to a deuteranope as the green. Now the refusal's own shape - the
+    // ring struck through, on a vertex and at a piece's middle - tells them
+    // apart without the colour.
+    ToolFeedback taken;
+    taken.marks.push_back(FeedbackMark{FeedbackRole::Target, Geometry{PointGeometry{Point2(5, 0)}}, {}});
+    taken.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{Segment2{Point2(10, 5), Point2(20, 5)}}, {}});
+    ToolFeedback refused = taken;
+    refused.refused = true;
+    const Painted accepted = paintOver(taken, {});
+    const Painted turnedDown = paintOver(refused, {});
+    EXPECT_GT(seenApart(accepted.image, turnedDown.image, toScreen(Point2(5, 0)), 9), 10);
+    EXPECT_GT(seenApart(accepted.image, turnedDown.image, toScreen(Point2(15, 5)), 9), 10);
+
+    // The control: one ring and line drawn in each colour, the same shape,
+    // are not told apart by this measure.
+    const auto drawn = [](const QColor& colour) {
+        QImage image(400, 300, QImage::Format_ARGB32_Premultiplied);
+        image.fill(katana::qt::theme::viewport());
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setPen(QPen(colour, 2.0));
+        painter.drawEllipse(toScreen(Point2(5, 0)), 7.0, 7.0);
+        painter.setPen(QPen(colour, 3.0));
+        painter.drawLine(toScreen(Point2(10, 5)), toScreen(Point2(20, 5)));
+        return image;
+    };
+    const QImage green = drawn(overlay::target());
+    const QImage red = drawn(overlay::removed());
+    EXPECT_EQ(seenApart(green, red, toScreen(Point2(5, 0)), 9), 0);
+    EXPECT_EQ(seenApart(green, red, toScreen(Point2(15, 5)), 9), 0);
+}
+
+TEST(FeedbackPainter, OnlyTheMarkFlaggedAsTheReasonIsDrawnRefused)
+{
+    // Insert beside a chosen vertex, too near another: the vertex it is too
+    // near is the refusal's, struck in red; the chosen vertex stays the
+    // target green it was - the whole preview in red said the choice itself
+    // was refused.
+    ToolFeedback feedback;
+    feedback.refused = true;
+    feedback.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{PointGeometry{Point2(5, 0)}}, "2"});
+    feedback.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{PointGeometry{Point2(15, 0)}}, "0", true});
+    const Painted painted = paintOver(feedback, {});
+    const Painted baseline = paintOver(ToolFeedback{}, {});
+    const QPointF chosen = toScreen(Point2(5, 0));
+    const QPointF near = toScreen(Point2(15, 0));
+    EXPECT_GT(inkNear(painted.image, chosen, 8, overlay::target()),
+              inkNear(baseline.image, chosen, 8, overlay::target()));
+    EXPECT_EQ(inkNear(painted.image, chosen, 8, overlay::removed()), 0);
+    EXPECT_GT(inkNear(painted.image, near, 8, overlay::removed()),
+              inkNear(baseline.image, near, 8, overlay::removed()));
+    EXPECT_EQ(inkNear(painted.image, near, 8, overlay::target()), 0);
+}
+
+TEST(FeedbackPainter, EntersPlaceIsARingRoundADotWithNoLineThroughIt)
+{
+    // Insert beside a chosen vertex draws Enter's place on the segment it
+    // splits. Hollow, the ring had the green line across its middle - a
+    // circled minus beside the new vertex's circled plus, "remove" and "add"
+    // for two places that both add. Its middle is now the dark ground with a
+    // dot, and the line stops at the ring.
+    ToolFeedback feedback;
+    feedback.marks.push_back(
+        FeedbackMark{FeedbackRole::Target, Geometry{Segment2{Point2(0, 0), Point2(10, 0)}}, {}});
+    feedback.marks.push_back(
+        FeedbackMark{FeedbackRole::Enter, Geometry{PointGeometry{Point2(5, 0)}}, {}});
+    const Painted painted = paintOver(feedback, {});
+    const QPointF centre = toScreen(Point2(5, 0));
+    // On the line, inside the ring's 6 px: no green.
+    EXPECT_EQ(inkNear(painted.image, centre + QPointF(3.5, 0), 1, overlay::target()), 0);
+    EXPECT_EQ(inkNear(painted.image, centre - QPointF(3.5, 0), 1, overlay::target()), 0);
+    // The dot at its middle, in the preview cyan.
+    EXPECT_GT(inkNear(painted.image, centre, 1, overlay::preview()), 0);
+    // Beyond the ring the line goes on.
+    EXPECT_GT(inkNear(painted.image, centre + QPointF(12, 0), 1, overlay::target()), 0);
+}
+
+TEST(FeedbackPainter, TheCaptionKeepsOffTheMarks)
+{
+    // The caption's chip went 16 px right of and below the cursor whatever
+    // was there; beside a chosen vertex it hid Enter's place. With a mark
+    // where it would go - the cursor at (100,60), Enter's place at pixel
+    // (150,86), model (5,11.4) - it goes to another corner of the cursor,
+    // and every bit of the mark's ink is still there.
+    ToolFeedback feedback;
+    feedback.marks.push_back(
+        FeedbackMark{FeedbackRole::Enter, Geometry{PointGeometry{Point2(5, 11.4)}}, {}});
+    feedback.caption = "vertex 2 · 5.000";
+    ToolFeedback bare = feedback;
+    bare.caption.clear();
+    const Painted with = paintOver(feedback, {});
+    const Painted without = paintOver(bare, {});
+    const QPointF mark = toScreen(Point2(5, 11.4));
+    ASSERT_GT(inkNear(without.image, mark, 7.5, overlay::preview()), 0);
+    EXPECT_EQ(inkNear(with.image, mark, 7.5, overlay::preview()),
+              inkNear(without.image, mark, 7.5, overlay::preview()));
+    // The caption is drawn all the same: its text's ink, above the cursor.
+    int text = 0;
+    for (int y = 0; y < 60; ++y) {
+        for (int x = 100; x < 400; ++x) {
+            text += inkOf(with.image.pixelColor(x, y), katana::qt::theme::text(),
+                          katana::qt::theme::viewport())
+                        ? 1
+                        : 0;
+        }
+    }
+    EXPECT_GT(text, 0);
+}
+
+TEST(FeedbackPainter, TheBandCutsWhereItIsToldAndSaysWhatItDrew)
+{
+    // A prompt too long for the view: cut in the middle it keeps the tool's
+    // name and its end; at the left, as for what is being typed, it keeps
+    // the end alone.
+    QImage image(300, 100, QImage::Format_ARGB32_Premultiplied);
+    image.fill(katana::qt::theme::viewport());
+    QPainter painter(&image);
+    const QString prompt =
+        "Insert Vertex: Press Enter for a vertex at the marked middle of segment 2, or click "
+        "beside vertex 2 of polyline 2 where the new vertex goes, or anywhere else nearby";
+    const QString middle = drawing::paintBand(painter, QRect(0, 0, 300, 100), prompt, Qt::ElideMiddle);
+    EXPECT_TRUE(middle.startsWith("Insert Vertex:")) << middle.toStdString();
+    EXPECT_TRUE(middle.endsWith("nearby")) << middle.toStdString();
+    EXPECT_LT(middle.size(), prompt.size());
+    const QString left = drawing::paintBand(painter, QRect(0, 0, 300, 100), prompt, Qt::ElideLeft);
+    EXPECT_FALSE(left.startsWith("Insert Vertex:")) << left.toStdString();
+    EXPECT_TRUE(left.endsWith("nearby"));
 }

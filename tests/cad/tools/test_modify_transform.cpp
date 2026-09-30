@@ -290,6 +290,22 @@ TEST(MoveTool, TakesTheSecondPointRelativeOrPolarFromTheBasePoint)
     expectNear(moved.end, {7.0, 6.0});
 }
 
+TEST(MoveTool, ARelativePointWithADzMovesInPlanAsItAlwaysDid)
+{
+    // Move's points have no height to change: the dz of @dx,dy,dz is dropped,
+    // as the z of x,y,z is. The dz rule of 2026-09-30 (a change of the last
+    // point's height, refused where there is none) is for the tools that
+    // take heights, and applied to every tool it refused "@0,5,0" here.
+    for (const char* typed : {"@0,5,0", "@0,5,1"}) {
+        OneLine fixture({1.0, 2.0}, {3.0, 2.0}, "modify.move");
+        ToolDriver& driver = fixture.driver;
+        ASSERT_EQ(driver.type("0,0").outcome, Outcome::Continue);
+        const ToolStep step = driver.type(typed);
+        ASSERT_EQ(step.outcome, Outcome::Done) << typed << ": " << step.message;
+        EXPECT_EQ(lineOf(driver, fixture.id), (Segment2{{1.0, 7.0}, {3.0, 7.0}})) << typed;
+    }
+}
+
 TEST(MoveTool, EnterAtTheSecondPointUsesTheBasePointAsTheDisplacement)
 {
     OneLine fixture({1.0, 2.0}, {3.0, 2.0}, "modify.move");

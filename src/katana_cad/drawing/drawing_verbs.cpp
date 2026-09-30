@@ -619,6 +619,15 @@ CommandInterpreter::Reply CommandInterpreter::vertexVerb(const Tokens& args)
                 return makeError(ErrorCode::InvalidArgument,
                                  "there is no segment after vertex " + std::to_string(*index));
             }
+            // A point of this polyline names its segment itself: an after=
+            // naming another put a point of segment 0 after vertex 1, and the
+            // polyline folded back on itself.
+            if (anchoredSegment && *anchoredSegment != *index) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "the point " + given + " is on segment " +
+                                     std::to_string(*anchoredSegment) + ", not after vertex " +
+                                     std::to_string(*index) + "; give one or the other");
+            }
             segment = *index;
         } else if (anchoredSegment) {
             segment = *anchoredSegment;

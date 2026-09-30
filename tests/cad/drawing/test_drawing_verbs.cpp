@@ -197,6 +197,28 @@ TEST(DrawingVerbs, VertexInsertAtAPointOfThePolylineTakesThatSegmentAndAHeight)
     EXPECT_EQ(s.polyline(id).vertices[1].position, Point2(3, 2));
 }
 
+TEST(DrawingVerbs, VertexInsertRefusesAnAfterThatIsNotTheSegmentOfItsPoint)
+{
+    // "#id@4,0.3" is on segment 0 of (0,0) (10,0) (10,10). after=1 put that
+    // point after vertex 1 - (0,0) (10,0) (4,0) (10,10) - and the polyline
+    // doubled back, 27.66 long for 20. The point names its segment; an
+    // after= that agrees (the grip menu's "#id.sN after=N") is taken.
+    Session s;
+    const EntityId id = corner(s);
+    const std::string c = std::to_string(id);
+    const auto folded = s.interpreter.run("VERTEX INSERT " + c + " #" + c + "@4,0.3 after=1");
+    ASSERT_FALSE(folded.ok());
+    EXPECT_EQ(folded.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(folded.error().describe().find("is on segment 0, not after vertex 1"),
+              std::string::npos)
+        << folded.error().describe();
+    EXPECT_EQ(s.polyline(id).positions(),
+              (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(10, 10)}));
+    EXPECT_EQ(value(s.ok("VERTEX INSERT " + c + " #" + c + ".s1 after=1"), "inserted"), "2");
+    EXPECT_EQ(s.polyline(id).positions(),
+              (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(10, 5), Point2(10, 10)}));
+}
+
 TEST(DrawingVerbs, StraightenAndGradeTakeAClosedPolylinesShorterSideAsTheWindowDoes)
 {
     // The hexagon (0,0) (10,0) (20,0) (20,10) (10,10) (0,10): from vertex 3

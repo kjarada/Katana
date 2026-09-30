@@ -227,6 +227,15 @@ not a click, would add:
 
     pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert expects=point shapes=0 markers=0 target=1 added=1 removed=0 enter=0 focus=4 refused=no caption="new vertex between 1 and 2 · 15.000 from 1" prompt="Insert Vertex: Click on polyline 2 where the new vertex goes"
 
+It is a reply record like every verb's (`docs/cad.md`): the roles' keys are
+their names (`cad::toString(FeedbackRole)`), and the caption and the prompt
+are written by `core::replyQuoted`, so `core::readReplyRecord` reads the
+line back whole. Quoted by hand, Move Vertex's caption - which ends in a
+bearing, `0°00'00"` - closed its value early and the line was no record at
+all; it is written `0°00'00\"` now
+(`qt_pointer_record_quotes_a_bearing_as_a_reply_does_headless`,
+`VertexToolHover.ThePointerRecordReadsBackAsOneRecordWithABearingInItsCaption`).
+
 The counts are of what is ON SCREEN: an Added vertex the painter leaves out
 beside a Removed one (a fillet a few pixels across) is not counted, nor a
 focus square thinned out of a dense string - `added=2` once stood over a
@@ -244,9 +253,15 @@ the PNG for the look; the record is what a test asserts
 (`qt_pointer_steps_hover_and_click_the_plan_view_headless`,
 `qt_insert_vertex_shows_where_the_vertex_goes_headless`,
 `qt_insert_vertex_beside_the_vertex_clicked_first_headless`,
+`qt_insert_vertex_beyond_a_chosen_corner_shows_enter_not_a_refusal_headless`,
+`qt_insert_vertex_refuses_a_choice_edited_since_headless`,
 `qt_insert_vertex_is_answered_with_what_it_did_headless`,
 `qt_delete_vertex_takes_the_chosen_vertex_headless`,
 `qt_delete_vertex_previews_the_click_not_the_chosen_vertex_headless`).
+A headless run's pointer never leaves the view - there is no step for
+that - so a tool started after a `~` step previews where the pointer is;
+in the window, the pointer leaving the view for a menu takes the preview
+away (`PlanViewTools.NoPreviewIsDrawnWhileThePointerIsOutsideTheView`).
 
 A test binary of Qt widgets run by hand needs MSYS2's runtime first on PATH,
 as ctest puts it (`KATANA_RUNTIME_BIN`): with `build/release/bin` first,

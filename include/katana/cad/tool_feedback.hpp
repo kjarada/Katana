@@ -29,14 +29,18 @@ enum class FeedbackRole : std::uint8_t {
     Target,  // what a click here takes or acts on: the vertex, the segment, the polyline
     Added,   // where something new lands: a vertex read from the RESULT, not the cursor
     Removed, // what the step takes away: a vertex deleted or straightened out, a piece cut
-    // Where ENTER, not a click here, would put something: Insert Vertex
-    // beside a chosen vertex adds at the middle of a segment the cursor may
-    // not be on, and a place Enter uses must be seen before it is pressed.
+    // What ENTER, not a click here, acts on: Insert Vertex's place at the
+    // middle of a segment the cursor may not be on, and the vertices chosen
+    // before a tool that Enter deletes, straightens or makes the start while
+    // the pointer is over another. A place or a vertex Enter uses must be
+    // seen before it is pressed; with the pointer on another vertex the
+    // chosen one was drawn as a plain square, and "vertex 2" in the prompt
+    // could not be found on screen.
     Enter,
 };
 
 // "target", "added", "removed", "enter": how the headless pointer record
-// names them.
+// names them - its keys are these strings (viewport_widget.cpp, pointerAt).
 [[nodiscard]] const char* toString(FeedbackRole role);
 
 struct FeedbackMark {
@@ -47,6 +51,15 @@ struct FeedbackMark {
     katana::entity::Geometry geometry;
     // Beside a vertex glyph: its number, "keep", "z 101.500". Empty for none.
     std::string label;
+    // This mark is WHY a click here is refused - the vertex a new one would
+    // be too near, the end that is no corner - or a place Enter would be
+    // refused at. The view draws it with the refusal's own shape, a ring
+    // struck through, as well as its colour: red and green alone are one
+    // khaki to a red-green colour-blind eye. When a refused preview flags
+    // no mark, every Target in it is drawn so (ToolFeedback::refused).
+    // Initialised here, so the marks built as {role, geometry, label} name
+    // every member they must.
+    bool refused = false;
 };
 
 // The rubber band: what the view draws for the current cursor position, in
@@ -62,11 +75,14 @@ struct ToolFeedback {
     std::vector<katana::geometry::Point2> markers;
     // What the preview says about the drawing already there, by role.
     std::vector<FeedbackMark> marks{};
-    // One line beside the cursor: what a click (or Enter) here does - "vertex
-    // 2 between 1 and 2 · 15.000 from 1" - or, with `refused`, why it cannot.
+    // One line beside the cursor: what a click (or Enter) here does - "new
+    // vertex between 1 and 2 · 15.000 from 1" - or, with `refused`, why it
+    // cannot.
     std::string caption{};
     // A click here would be refused, for the reason `caption` gives; the
-    // view says so in the refusal's colour.
+    // view says so in the refusal's colour and draws the marks that say why
+    // in the refusal's shape - those flagged FeedbackMark::refused, or, when
+    // none is flagged, every Target, the pick that is turned down.
     bool refused = false;
     // The polyline in play, whose vertices the view shows while the tool
     // runs (the grips are hidden then).

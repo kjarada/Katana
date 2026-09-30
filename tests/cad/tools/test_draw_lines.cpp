@@ -374,6 +374,30 @@ TEST(DrawLineTool, TakesRelativeAndPolarPointsFromTheLastPoint)
     EXPECT_TRUE(near(lines[1].end, {4, 3}));
 }
 
+TEST(DrawLineTool, ARelativePointWithADzIsTakenInPlan)
+{
+    // A line has no heights: the dz of @dx,dy,dz is dropped, as the z of
+    // x,y,z always was, through both routes typed text takes - the plain one
+    // and the command line's with the drafting aids. Refused as "no height
+    // for a dz to change", "@10,0,0" drew no line at all.
+    ToolDriver driver;
+    driver.start("draw.line");
+    ASSERT_EQ(driver.type("0,0").outcome, Outcome::Continue);
+    const ToolStep flat = driver.type("@10,0,0");
+    ASSERT_EQ(flat.outcome, Outcome::Continue) << flat.message;
+    katana::cad::DraftingSettings drafting;
+    const ToolStep raised =
+        katana::cad::routeTypedInput(driver.tool(), "@0,5,1", drafting, std::nullopt);
+    ASSERT_EQ(raised.outcome, Outcome::Continue) << raised.message;
+    ASSERT_TRUE(driver.tool().lastPoint().has_value());
+    EXPECT_EQ(*driver.tool().lastPoint(), Point2(10, 5));
+    (void)driver.enter();
+    const auto lines = shapesOf<Segment2>(driver.document());
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[0], (Segment2{{0, 0}, {10, 0}}));
+    EXPECT_EQ(lines[1], (Segment2{{10, 0}, {10, 5}}));
+}
+
 TEST(DrawLineTool, RefusesAPointOnTopOfTheLastOneAndCarriesOn)
 {
     ToolDriver driver;

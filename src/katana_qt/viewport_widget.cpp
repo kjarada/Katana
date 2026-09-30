@@ -65,8 +65,10 @@ namespace {
 // snap marker and the prompt band draw in drawing::overlay's colours
 // (feedback_painter.hpp).
 
-constexpr double kPickAperturePixels = 8.0;
-constexpr double kSnapAperturePixels = 12.0;
+// The view's apertures have one home, beside the tools that measure in them
+// (interactive_tool.hpp).
+using cad::kPickAperturePixels;
+using cad::kSnapAperturePixels;
 constexpr double kWheelZoomStep = 1.2;
 // Drags shorter than this are clicks, not selection boxes.
 constexpr double kDragThresholdPixels = 4.0;
@@ -281,18 +283,29 @@ katana::core::Result<std::string> ViewportWidget::pointerAt(const Point2& at, bo
     repaint();
     const PreviewCounts& counts = lastPreviewCounts_;
     const auto expects = tools_.expects();
-    const auto count = [](std::size_t n) { return std::to_string(n); };
+    // One record, written as every verb's reply is: the roles' keys are
+    // their names (cad::toString), and the caption and the prompt go through
+    // replyQuoted - Move Vertex's caption ends in a bearing's seconds mark,
+    // and quoted by hand it closed the value early and the line read back as
+    // no record at all (core::readReplyRecord).
+    const auto role = [](cad::FeedbackRole kind, std::size_t n) {
+        return " " + std::string(cad::toString(kind)) + "=" + std::to_string(n);
+    };
     return "pointer: action=" + std::string(click ? "click" : "hover") +
            " x=" + katana::core::formatExactReal(at.x) +
            " y=" + katana::core::formatExactReal(at.y) +
            " tool=" + (tools_.active() ? tools_.activeId() : std::string("none")) +
            " expects=" + std::string(expects ? cad::toString(*expects) : "none") +
-           " shapes=" + count(counts.shapes) + " markers=" + count(counts.markers) +
-           " target=" + count(counts.target) + " added=" + count(counts.added) +
-           " removed=" + count(counts.removed) + " enter=" + count(counts.enter) +
-           " focus=" + count(counts.focus) +
-           " refused=" + (counts.refused ? "yes" : "no") + " caption=\"" + counts.caption +
-           "\" prompt=\"" + promptLine().toStdString() + "\"";
+           " shapes=" + std::to_string(counts.shapes) +
+           " markers=" + std::to_string(counts.markers) +
+           role(cad::FeedbackRole::Target, counts.target) +
+           role(cad::FeedbackRole::Added, counts.added) +
+           role(cad::FeedbackRole::Removed, counts.removed) +
+           role(cad::FeedbackRole::Enter, counts.enter) +
+           " focus=" + std::to_string(counts.focus) +
+           " refused=" + (counts.refused ? "yes" : "no") +
+           " caption=" + katana::core::replyQuoted(counts.caption) +
+           " prompt=" + katana::core::replyQuoted(promptLine().toStdString());
 }
 
 bool ViewportWidget::typeIntoTool(const QString& text)
@@ -996,6 +1009,16 @@ void ViewportWidget::keyReleaseEvent(QKeyEvent* event)
     QWidget::keyReleaseEvent(event);
 }
 
+void ViewportWidget::leaveEvent(QEvent* event)
+{
+    // Off to a menu, a toolbar or another view: there is no cursor here to
+    // preview for until the pointer comes back, and where it left is not
+    // where a tool chosen meanwhile is being aimed.
+    pointerSeen_ = false;
+    update();
+    QWidget::leaveEvent(event);
+}
+
 void ViewportWidget::keyPressEvent(QKeyEvent* event)
 {
     if (event->key() == Qt::Key_Control) {
@@ -1067,7 +1090,16 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
             cancel();
             return;
         default:
-            if (isTypedText(*event) && grips_.type(event->text())) {
+            if (isTypedText(*event) && grips_.typed().isEmpty() && event->text().front().isLetter()) {
+                // A word, not a point: nothing a grip takes starts with a
+                // letter (x,y, @dx,dy, <bearing, a distance). A click on a
+                // vertex is how it is chosen, and the tool's name typed next
+                // went into the grip's point and was refused there; now the
+                // grip is put down, still chosen, and the word goes to the
+                // command line below.
+                grips_.escape();
+                update();
+            } else if (isTypedText(*event) && grips_.type(event->text())) {
                 update();
                 event->accept();
                 return;
@@ -1550,11 +1582,17 @@ bool ViewportWidget::drawPreview(QPainter& painter) const
 
 void ViewportWidget::drawPrompt(QPainter& painter) const
 {
+    promptBand_.clear();
     if (!tools_.active()) {
         return;
     }
-    // What has been typed follows the prompt with a caret, as it will be sent.
-    drawing::paintBand(painter, rect(), QString("%1  %2_").arg(promptLine(), typed_));
+    // What has been typed follows the prompt with a caret, as it will be
+    // sent, and a line too long for the view is cut at the left so it stays
+    // in sight. With nothing typed it is cut in the middle, keeping both the
+    // tool's name - a cut at the left lost it at the larger text sizes - and
+    // the options and default a prompt ends with ("[Other side]", "<2.5>").
+    promptBand_ = drawing::paintBand(painter, rect(), QString("%1  %2_").arg(promptLine(), typed_),
+                                     typed_.isEmpty() ? Qt::ElideMiddle : Qt::ElideLeft);
 }
 
 void ViewportWidget::drawGrips(QPainter& painter) const

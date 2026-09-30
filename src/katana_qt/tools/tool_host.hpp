@@ -60,7 +60,8 @@ class ToolHost {
     // The rubber band for the cursor at `cursor`; empty when none is running.
     // A click the tool took is never answered in red: until the cursor
     // leaves the place of that click (by the pick aperture, setCursor), a
-    // refusal there is shown as the polyline in play and what the click did
+    // refusal there is shown without it - the marks the tool flags as its
+    // reason gone, the others kept - and captioned with what the click did
     // ("vertex 2 added ..."). The tool, restarted or at its next step, is
     // right that a second click there would be refused - a vertex is there
     // now - but red straight after every success read as a failure.
@@ -168,6 +169,9 @@ class ToolHost {
     [[nodiscard]] double holdReach() const;
     // Drops the tool and raises onFinished and onPrompt.
     void end();
+    // Raises onPrompt with the running tool's prompt, and keeps it: a
+    // refusal says the prompt again only when it changed (apply).
+    void reportPrompt();
     Outcome idle();
     void report(const std::function<void(const std::string&)>& hook, const std::string& text);
 
@@ -181,6 +185,8 @@ class ToolHost {
     // command executed), and the message it reported.
     bool lastTaken_ = false;
     std::string lastMessage_;
+    // The prompt onPrompt last carried.
+    std::string reportedPrompt_;
     const katana::cad::LayerOverrides* view_ = nullptr;
     const katana::cad::ToolInfo* info_ = nullptr;
     std::unique_ptr<katana::cad::InteractiveTool> tool_;

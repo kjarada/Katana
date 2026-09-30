@@ -21,11 +21,13 @@ using katana::geometry::Polyline2;
 
 TEST(ToolFeedback, FeedbackRolesHaveStableNames)
 {
-    // The headless pointer record prints these (docs/headless.md); a test
-    // matching "target=1 added=1" must not break on a rename.
+    // The headless pointer record's keys are these (viewport_widget.cpp,
+    // pointerAt; docs/headless.md): a test matching "target=1 added=1"
+    // must not break on a rename.
     EXPECT_EQ(std::string(katana::cad::toString(FeedbackRole::Target)), "target");
     EXPECT_EQ(std::string(katana::cad::toString(FeedbackRole::Added)), "added");
     EXPECT_EQ(std::string(katana::cad::toString(FeedbackRole::Removed)), "removed");
+    EXPECT_EQ(std::string(katana::cad::toString(FeedbackRole::Enter)), "enter");
 }
 
 TEST(ToolFeedback, PickUnderTakesOnlyTheTypesAsked)

@@ -51,11 +51,21 @@ onto `parsePointInput` is a follow-up. `parsePointInput` itself now
 delegates to the drawing system's `parsePrecisePoint`, so a DMS angle or a
 quadrant bearing may follow the `<` of polar input, and the router has an
 overload taking the document's drafting settings and the cursor, which the
-tool host uses: `<angle` and `=distance` lock the next points, `x,y,z`
-reaches a tool's `InteractiveTool::point3d`, `@dx,dy,dz` reaches it as the
-tool's `InteractiveTool::lastHeight` plus dz (refused when there is none,
-never read as a height of dz), and a number a tool refuses at a point
-prompt is direct distance entry (`docs/drawing.md`, "Precision input").
+tool host uses: `<angle` and `=distance` lock the next points, and a number
+a tool refuses at a point prompt is direct distance entry
+(`docs/drawing.md`, "Precision input"). A typed point reaches the tool as
+`InteractiveTool::exactPoint(at, z)` - given, not pointed at - whose default
+hands it on as a click goes, to `point3d` with a height and `point`
+without; Insert Vertex overrides it, since its "too close to vertex N" is a
+rule about what a POINTER meant. A z reaches only a step whose
+`InteractiveTool::takesHeights` says so (Point, Polyline 3D, Move Vertex's
+new place, Insert Vertex's): there `x,y,z` is the height and `@dx,dy,dz`
+the tool's `InteractiveTool::lastHeight` plus dz (refused when there is
+none, never read as a height of dz); everywhere else the z of either form
+is dropped, as it always was. The dz rule first applied to every tool, and
+`@0,5,0` at MOVE or LINE was refused ("the point @ is measured from has no
+height"). Rejected: telling the kinds apart by `lastHeight` alone - Move
+Vertex on a vertex with no height must refuse a dz, not drop it.
 
 **Icons live with their family** (`src/katana_qt/tools/icons_<family>.cpp`,
 by tool id), drawn to icons.cpp's conventions: a 24-unit grid, a 1.7-unit
@@ -244,7 +254,16 @@ the height a typed dz changes. **What the host holds back**:
 not with the refusal the tool's next preview gives at that spot, until the
 cursor leaves it by the pick aperture - the tool is made anew at each
 restart and never sees the pointer, and the host sees both
-(`AClickTheToolTookIsNotAnsweredInRedUntilThePointerLeavesIt`).
+(`AClickTheToolTookIsNotAnsweredInRedUntilThePointerLeavesIt`). The hold
+takes away the marks the tool flags as the refusal's reason and keeps the
+rest, so Straighten's first "keep" stays in sight straight after its pick
+(`StraightensFirstPickIsHeldAsTakenAndItsRefusalShownOnceThePointerComesBack`).
+**What the host says again**: a refusal usually leaves the prompt as it
+was, but one that drops what the tool held (a pick made stale since) asks
+afresh, and the host then says the new prompt before the refusal - only
+then, since the window's status bar shows the refusal and a prompt said
+after it would wipe it
+(`ARefusalThatDropsAStalePickSaysTheNewPromptAndNoOtherRepeatsIt`).
 
 Rejected: a new virtual `preview(cursor, pick)` (46 overrides to change, and
 `-Woverloaded-virtual` fails the build at every one left); refreshing
@@ -256,13 +275,20 @@ Fillet, Offset and Leader still pick with `pickTolerance` and no view
 **Roles in a preview.** `ToolFeedback` (`include/katana/cad/tool_feedback.hpp`)
 kept `shapes` (the ghost, dashed) and `markers` (base points) and gained
 `marks` - geometry by ROLE: Target (what a click takes), Added (what it makes,
-read from the result), Removed (what it takes away) - a `caption` for beside
-the cursor, `refused` when a click there would be refused, and `focus`, the
-polyline whose vertices the view shows while the grips are hidden. The view
-draws a role its own way (`drawing/feedback_painter.hpp`), so no tool picks a
-colour; a tool that fills only `shapes` and `markers` is drawn as before. The
-new members have default initialisers, so the tools that build one as
-`{shapes, markers}` still compile under `-Wmissing-field-initializers`.
+read from the result), Removed (what it takes away), Enter (what Enter, not
+a click here, acts on: Insert's place beside a chosen vertex, the vertices
+chosen before a tool while the pointer is over another) - a `caption` for
+beside the cursor, `refused` when a click there would be refused, and
+`focus`, the polyline whose vertices the view shows while the grips are
+hidden. A mark flagged `FeedbackMark::refused` is the refusal's reason
+(the vertex Insert is too near, the end that is no corner), drawn as a ring
+struck through; a refused preview that flags none has its Target marks
+drawn so. The view draws a role its own way (`drawing/feedback_painter.hpp`),
+so no tool picks a colour; a tool that fills only `shapes` and `markers` is
+drawn as before. The new members have default initialisers, so the tools
+that build one as `{shapes, markers}` - or a mark as `{role, geometry,
+label}` - still compile under `-Wmissing-field-initializers`. The pointer
+record's keys for the roles are their names (`toString(FeedbackRole)`).
 `ToolInfo::title` names a family's variant in the prompt ("Insert Vertex:
 ..."), where the menus still gather the family by its name ("Vertices, Insert
 Vertex").
