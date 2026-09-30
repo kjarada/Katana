@@ -139,10 +139,17 @@ class Collector {
         }
         const bool better = !best_ || distance < bestDistance_ ||
                             (distance == bestDistance_ && rankOf(mode) < rankOf(best_->mode));
-        if (better) {
-            best_ = SnapResult{point, mode, entity};
-            bestDistance_ = distance;
+        if (!better) {
+            return;
         }
+        // Asked only of a candidate that would win, so a costly accept (a
+        // tool planning its edit there) runs a handful of times a move.
+        const SnapResult candidate{point, mode, entity};
+        if (request_.accept && !request_.accept(candidate)) {
+            return;
+        }
+        best_ = candidate;
+        bestDistance_ = distance;
     }
 
     const SnapRequest& request_;
@@ -531,9 +538,10 @@ std::optional<SnapResult> snap(const katana::entity::Model& model, const SnapReq
         for (const auto& [id, curve] : curves) {
             const Point2 point = katana::geometry::closestPoint(curve, request.cursor);
             const double distance = point.distanceTo(request.cursor);
-            if (distance <= nearestDistance) {
+            const SnapResult candidate{point, SnapMode::Nearest, id};
+            if (distance <= nearestDistance && (!request.accept || request.accept(candidate))) {
                 nearestDistance = distance;
-                nearest = SnapResult{point, SnapMode::Nearest, id};
+                nearest = candidate;
             }
         }
         if (nearest) {
@@ -547,9 +555,12 @@ std::optional<SnapResult> snap(const katana::entity::Model& model, const SnapReq
     if (hasMode(request.modes, SnapMode::Grid) && request.gridSpacing > 0.0) {
         const double spacing = request.gridSpacing;
         const Vec2 d = request.cursor - request.gridOrigin;
-        return SnapResult{request.gridOrigin + Vec2(std::round(d.x / spacing) * spacing,
-                                                    std::round(d.y / spacing) * spacing),
-                          SnapMode::Grid, katana::entity::kInvalidEntityId};
+        const SnapResult node{request.gridOrigin + Vec2(std::round(d.x / spacing) * spacing,
+                                                        std::round(d.y / spacing) * spacing),
+                              SnapMode::Grid, katana::entity::kInvalidEntityId};
+        if (!request.accept || request.accept(node)) {
+            return node;
+        }
     }
     return std::nullopt;
 }

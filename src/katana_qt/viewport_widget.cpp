@@ -1,5 +1,6 @@
 #include "viewport_widget.hpp"
 
+#include "drawing/feedback_painter.hpp"
 #include "theme.hpp"
 #include "view_focus.hpp"
 
@@ -23,6 +24,7 @@
 #include <QLineF>
 #include <QMarginsF>
 #include <QContextMenuEvent>
+#include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QCursor>
 #include <QFont>
@@ -34,7 +36,9 @@
 #include <QPolygonF>
 #include <QWheelEvent>
 
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/core/text.hpp"
 #include "katana/archive12d/domain.hpp"
 #include "katana/geometry/chording.hpp"
 #include "katana/cad/style_drawing.hpp"
@@ -57,12 +61,14 @@ using katana::geometry::Vec2;
 
 namespace {
 
-const QColor kBackground(0x1e, 0x23, 0x29);
-const QColor kPreview(0x4c, 0xc9, 0xf0);
-const QColor kSnapMarker(0xf7, 0xd0, 0x3c);
+// The drawing's ground is theme::viewport(); a tool's preview, the grips, the
+// snap marker and the prompt band draw in drawing::overlay's colours
+// (feedback_painter.hpp).
 
-constexpr double kPickAperturePixels = 8.0;
-constexpr double kSnapAperturePixels = 12.0;
+// The view's apertures have one home, beside the tools that measure in them
+// (interactive_tool.hpp).
+using cad::kPickAperturePixels;
+using cad::kSnapAperturePixels;
 constexpr double kWheelZoomStep = 1.2;
 // Drags shorter than this are clicks, not selection boxes.
 constexpr double kDragThresholdPixels = 4.0;
@@ -227,7 +233,79 @@ katana::core::Status ViewportWidget::startTool(std::string_view id)
     boxStart_.reset();
     typed_.clear();
     tools_.setPickTolerance(pickTolerance());
-    return tools_.start(id);
+    // The vertices chosen before the tool - the hot grips - are its handles
+    // (ToolContext::handles), given to it once. Only while no tool runs are
+    // the grips the user's: a tool running now has hidden them.
+    if (gripsLive()) {
+        grips_.refresh(notifications_);
+        tools_.setHandles(grips_.hot());
+    }
+    auto started = tools_.start(id);
+    if (started) {
+        // The grips go with the tool: a grip picked up before it was put
+        // down by the first click after it ended - a GRIP_EDIT nobody asked
+        // for, moving a vertex the tool may have renumbered.
+        grips_.reset();
+    } else {
+        tools_.setHandles({});
+    }
+    return started;
+}
+
+katana::core::Result<std::string> ViewportWidget::pointerAt(const Point2& at, bool click,
+                                                            Qt::KeyboardModifiers modifiers)
+{
+    // Painted first, so the transform is the one on screen (paintEvent sizes
+    // it and frames a view that has never been framed).
+    repaint();
+    const QPointF pixel = toScreen(at);
+    if (!QRectF(rect()).contains(pixel)) {
+        return katana::core::makeError(
+            katana::core::ErrorCode::InvalidArgument,
+            "the point " + katana::core::formatExactReal(at.x) + "," +
+                katana::core::formatExactReal(at.y) + " is outside the view (" +
+                std::to_string(width()) + " x " + std::to_string(height()) +
+                " px); zoom to it first");
+    }
+    // Real events, as a mouse sends them: the view cannot tell this pointer
+    // from a person's, so a headless run drives what a person does.
+    const QPointF global = mapToGlobal(pixel);
+    QMouseEvent move(QEvent::MouseMove, pixel, global, Qt::NoButton, Qt::NoButton, modifiers);
+    QCoreApplication::sendEvent(this, &move);
+    if (click) {
+        QMouseEvent press(QEvent::MouseButtonPress, pixel, global, Qt::LeftButton, Qt::LeftButton,
+                          modifiers);
+        QCoreApplication::sendEvent(this, &press);
+        QMouseEvent release(QEvent::MouseButtonRelease, pixel, global, Qt::LeftButton,
+                            Qt::NoButton, modifiers);
+        QCoreApplication::sendEvent(this, &release);
+    }
+    repaint();
+    const PreviewCounts& counts = lastPreviewCounts_;
+    const auto expects = tools_.expects();
+    // One record, written as every verb's reply is: the roles' keys are
+    // their names (cad::toString), and the caption and the prompt go through
+    // replyQuoted - Move Vertex's caption ends in a bearing's seconds mark,
+    // and quoted by hand it closed the value early and the line read back as
+    // no record at all (core::readReplyRecord).
+    const auto role = [](cad::FeedbackRole kind, std::size_t n) {
+        return " " + std::string(cad::toString(kind)) + "=" + std::to_string(n);
+    };
+    return "pointer: action=" + std::string(click ? "click" : "hover") +
+           " x=" + katana::core::formatExactReal(at.x) +
+           " y=" + katana::core::formatExactReal(at.y) +
+           " tool=" + (tools_.active() ? tools_.activeId() : std::string("none")) +
+           " expects=" + std::string(expects ? cad::toString(*expects) : "none") +
+           " shapes=" + std::to_string(counts.shapes) +
+           " markers=" + std::to_string(counts.markers) +
+           role(cad::FeedbackRole::Target, counts.target) +
+           role(cad::FeedbackRole::Added, counts.added) +
+           role(cad::FeedbackRole::Removed, counts.removed) +
+           role(cad::FeedbackRole::Enter, counts.enter) +
+           " focus=" + std::to_string(counts.focus) +
+           " refused=" + (counts.refused ? "yes" : "no") +
+           " caption=" + katana::core::replyQuoted(counts.caption) +
+           " prompt=" + katana::core::replyQuoted(promptLine().toStdString());
 }
 
 bool ViewportWidget::typeIntoTool(const QString& text)
@@ -247,8 +325,27 @@ double ViewportWidget::pickTolerance() const
     return state_.plan.pixelsToWorld(kPickAperturePixels);
 }
 
+double ViewportWidget::snapAperture() const
+{
+    return state_.plan.pixelsToWorld(kSnapAperturePixels);
+}
+
 void ViewportWidget::wireToolHost()
 {
+    // The view's own pick and apertures, read when the tool asks - at every
+    // preview and click - so a zoom inside the tool is followed, and a
+    // layer hidden in this view is never picked through (ToolContext::pick).
+    tools_.setPick([this](const Point2& at, double reach,
+                          const std::set<katana::entity::EntityType>& types) {
+        cad::SelectionFilter filter;
+        filter.types = types;
+        filter.view = &state_.layers;
+        return cad::pickEntity(document_.model(), at, reach, filter, &document_.spatialIndex());
+    });
+    tools_.setApertures([this] { return pickTolerance(); }, [this] { return snapAperture(); });
+    // The same hidden layers for what a tool finds itself (the selection it
+    // started on, a point's height): state_ is this view's for its life.
+    tools_.setView(&state_.layers);
     tools_.onPrompt = [this](const std::string&) { updatePrompt(); };
     tools_.onMessage = [this](const std::string& message) {
         if (onToolMessage) {
@@ -393,17 +490,21 @@ void ViewportWidget::resetInteraction()
     update();
 }
 
+QString ViewportWidget::promptLine() const
+{
+    if (!tools_.active()) {
+        return QStringLiteral("Select: click an entity, drag right for a window, drag left for "
+                              "crossing");
+    }
+    return QString("%1: %2").arg(QString::fromStdString(tools_.info()->promptTitle()),
+                                 QString::fromStdString(tools_.prompt()));
+}
+
 void ViewportWidget::updatePrompt()
 {
-    if (!onPrompt) {
-        return;
+    if (onPrompt) {
+        onPrompt(promptLine());
     }
-    if (tools_.active()) {
-        onPrompt(QString("%1: %2").arg(QString::fromStdString(tools_.info()->name),
-                                      QString::fromStdString(tools_.prompt())));
-        return;
-    }
-    onPrompt("Select: click an entity, drag right for a window, drag left for crossing");
 }
 
 void ViewportWidget::run(cmd::CommandPtr command)
@@ -420,6 +521,7 @@ void ViewportWidget::updateCursor(const QPointF& screen)
 {
     const Point2 raw = toWorld(screen);
     cursorWorld_ = raw;
+    pointerSeen_ = true;
     activeSnap_.reset();
 
     // Snapping serves a tool that wants a point, and a grip being dragged:
@@ -435,6 +537,12 @@ void ViewportWidget::updateCursor(const QPointF& screen)
         request.from = base;
         request.gridSpacing = gridVisible_ ? cad::gridSpacing(state_.plan.scale) : 0.0;
         request.view = &state_.layers;
+        if (!gripping) {
+            // Only a snap the tool's step can use: Insert Vertex's point must
+            // be ON the line, and an arc's centre or another string's end
+            // beside it took the cursor off (InteractiveTool::takesSnap).
+            request.accept = [this](const cad::SnapResult& snap) { return tools_.takesSnap(snap); };
+        }
         // Through the Document's spatial index (PLAN.MD Phase 18). Measured in
         // Release on 100 000 entities: 4404 us per mouse move scanning,
         // 88 us indexed. The answer is identical either way - asserted by
@@ -751,6 +859,8 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event)
     }
     lastMouse_ = event->position();
     updateCursor(event->position());
+    // Ctrl as the mouse reports it, where the key went to another widget.
+    grips_.setCtrl((event->modifiers() & Qt::ControlModifier) != 0);
     if (gripsLive()) {
         grips_.refresh(notifications_);
         const QPointF moved = event->position() - gripPress_;
@@ -810,6 +920,13 @@ void ViewportWidget::mouseDoubleClickEvent(QMouseEvent* event)
         mousePressEvent(event);
         return;
     }
+    // The first click of the two picked a grip up; the double click asks for
+    // the entity's editor, not a grip following the cursor until the next
+    // click puts it down somewhere.
+    if (event->button() == Qt::LeftButton && gripsLive() && grips_.base()) {
+        grips_.escape();
+        update();
+    }
     if (event->button() == Qt::LeftButton && onEntityDoubleClicked) {
         if (const auto id = entityAt(event->position())) {
             onEntityDoubleClicked(*id);
@@ -867,11 +984,58 @@ bool ViewportWidget::event(QEvent* event)
         event->accept();
         return true;
     }
+    // Delete with a vertex grip hot is the VIEW's: it removes those vertices
+    // (keyPressEvent, GripController::deleteHot). The window's Erase holds
+    // Delete as a shortcut, and taking it there erased the whole polyline.
+    // So is Delete while a tool runs that takes it (a vertex tool,
+    // InteractiveTool::takesDelete): the polyline the tool is editing is
+    // selected - its chosen vertex's grips needed that, and the tool selects
+    // what it has just edited - and Erase took the whole string from under it.
+    if (event->type() == QEvent::ShortcutOverride) {
+        const auto* key = static_cast<QKeyEvent*>(event);
+        if (key->key() == Qt::Key_Delete && key->modifiers() == Qt::NoModifier) {
+            if (tools_.active() && tools_.takesDelete()) {
+                event->accept();
+                return true;
+            }
+            if (gripsLive()) {
+                grips_.refresh(notifications_);
+                if (grips_.hasHotVertex()) {
+                    event->accept();
+                    return true;
+                }
+            }
+        }
+    }
     return QWidget::event(event);
+}
+
+void ViewportWidget::keyReleaseEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Control) {
+        grips_.setCtrl(false);
+        update();
+    }
+    QWidget::keyReleaseEvent(event);
+}
+
+void ViewportWidget::leaveEvent(QEvent* event)
+{
+    // Off to a menu, a toolbar or another view: there is no cursor here to
+    // preview for until the pointer comes back, and where it left is not
+    // where a tool chosen meanwhile is being aimed.
+    pointerSeen_ = false;
+    update();
+    QWidget::leaveEvent(event);
 }
 
 void ViewportWidget::keyPressEvent(QKeyEvent* event)
 {
+    if (event->key() == Qt::Key_Control) {
+        // A segment middle under the cursor shows the vertex a Ctrl-drag adds.
+        grips_.setCtrl(true);
+        update();
+    }
     if (tools_.active()) {
         // While a tool runs, what is typed is ITS input - a coordinate, a
         // distance, an option letter - kept here and shown after the prompt
@@ -901,6 +1065,16 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
             if (event->matches(QKeySequence::Undo)) {
                 // The drawing's Undo is Esc and then Ctrl+Z.
                 stepBack();
+                return;
+            }
+            break;
+        case Qt::Key_Delete:
+            // Claimed from the window's Erase (event()); the tool says what
+            // it means - Delete Vertex's Enter, or nothing, said.
+            if (event->modifiers() == Qt::NoModifier && tools_.takesDelete()) {
+                (void)tools_.deleteKey();
+                updatePrompt();
+                update();
                 return;
             }
             break;
@@ -936,7 +1110,16 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
             cancel();
             return;
         default:
-            if (isTypedText(*event) && grips_.type(event->text())) {
+            if (isTypedText(*event) && grips_.typed().isEmpty() && event->text().front().isLetter()) {
+                // A word, not a point: nothing a grip takes starts with a
+                // letter (x,y, @dx,dy, <bearing, a distance). A click on a
+                // vertex is how it is chosen, and the tool's name typed next
+                // went into the grip's point and was refused there; now the
+                // grip is put down, still chosen, and the word goes to the
+                // command line below.
+                grips_.escape();
+                update();
+            } else if (isTypedText(*event) && grips_.type(event->text())) {
                 update();
                 event->accept();
                 return;
@@ -1177,7 +1360,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
         }
         drawing_.setDevicePixelRatio(deviceRatio);
         QPainter layer(&drawing_);
-        layer.fillRect(rect(), kBackground);
+        layer.fillRect(rect(), theme::viewport());
         const PlanPaintStats stats =
             paintPlan(layer, paintSource(), paintFrame(), screenOptions(), paintCache_);
         layer.end();
@@ -1191,7 +1374,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     // The view's own furniture over the drawing: what a tool is making, the
     // hint for an empty drawing, the selection box, the snap and the prompt.
     painter.setRenderHint(QPainter::Antialiasing, true);
-    drawPreview(painter);
+    const bool snapDrawn = drawPreview(painter);
     drawGrips(painter);
     if (drawingIsEmpty() && !tools_.active()) {
         drawEmptyHint(painter);
@@ -1199,13 +1382,15 @@ void ViewportWidget::paintEvent(QPaintEvent*)
 
     if (boxStart_) {
         const bool window = boxEnd_.x() >= boxStart_->x();
-        QColor fill = window ? QColor(0x4c, 0xc9, 0xf0, 40) : QColor(0x7b, 0xd3, 0x89, 40);
+        const QColor fill = window ? drawing::overlay::windowBox() : drawing::overlay::crossingBox();
         painter.setPen(QPen(fill.lighter(160), 1, window ? Qt::SolidLine : Qt::DashLine));
         painter.setBrush(fill);
         painter.drawRect(QRectF(*boxStart_, boxEnd_).normalized());
         painter.setBrush(Qt::NoBrush);
     }
-    drawSnapMarker(painter);
+    if (!snapDrawn) {
+        drawSnapMarker(painter);
+    }
     drawPrompt(painter);
 
     lastFrameMs_ = static_cast<double>(frameTimer.nsecsElapsed()) / 1.0e6;
@@ -1269,7 +1454,7 @@ void ViewportWidget::drawEmptyHint(QPainter& painter) const
     painter.setRenderHint(QPainter::TextAntialiasing, true);
     // A backing of the drawing's own ground, so the grid's axes, which cross
     // right where the hint sits, do not strike through the words.
-    QColor backing = kBackground;
+    QColor backing = theme::viewport();
     backing.setAlpha(225);
     painter.setPen(Qt::NoPen);
     painter.setBrush(backing);
@@ -1360,11 +1545,14 @@ katana::core::Result<cad::PlotSettings> ViewportWidget::fittedPlot(cad::PlotSett
     return settings;
 }
 
-void ViewportWidget::drawPreview(QPainter& painter) const
+bool ViewportWidget::drawPreview(QPainter& painter) const
 {
     lastPreviewCount_ = 0;
-    if (!tools_.active()) {
-        return;
+    lastPreviewCounts_ = PreviewCounts{};
+    // Nothing until the pointer has been over this view: before that the
+    // cursor is the origin, where nobody pointed.
+    if (!tools_.active() || !pointerSeen_) {
+        return false;
     }
     const cad::ToolFeedback feedback = tools_.feedback(cursorWorld_);
     // A shape in the preview is drawn as the geometry it will become, so a
@@ -1374,49 +1562,57 @@ void ViewportWidget::drawPreview(QPainter& painter) const
     katana::entity::Entity drawn;
     drawn.layer = document_.currentAttributes().layer;
     drawn.style = document_.currentAttributes().style;
-    painter.setPen(QPen(kPreview, 1, Qt::DashLine));
-    painter.setBrush(Qt::NoBrush);
     const PlanFrame frame = paintFrame();
     const PlanPaintOptions options = screenOptions();
-    katana::entity::DimensionStyle dimensionStyle{};
-    for (const katana::entity::Geometry& shape : feedback.shapes) {
+    drawing::FeedbackFrame where;
+    where.toScreen = [this](const Point2& p) { return toScreen(p); };
+    where.drawShape = [&](const katana::entity::Geometry& shape) {
+        katana::entity::DimensionStyle dimensionStyle{};
         if (std::holds_alternative<katana::entity::DimensionGeometry>(shape)) {
             drawn.geometry = shape;
             dimensionStyle = cad::resolveDimensionStyle(document_.model(), drawn);
         }
         paintPlanGeometry(painter, frame, options, paintCache_, shape, dimensionStyle);
+    };
+    where.visible = QRectF(rect());
+    where.cursor = toScreen(cursorWorld_);
+    where.trackingLabel =
+        !trackingLabel_.isEmpty() && (!activeSnap_ || activeSnap_->mode == cad::SnapMode::Grid);
+    where.bandHeight = drawing::bandHeight();
+    // The snap marker goes under the preview's glyphs: where a snap puts the
+    // point, the tool's new vertex is drawn, and it must stay legible there.
+    where.beneathGlyphs = [&] { drawSnapMarker(painter); };
+    // The polyline in play shows its vertices, since the grips are hidden
+    // while a tool runs.
+    std::vector<Point2> focus;
+    if (feedback.focus) {
+        if (const Entity* entity = document_.model().entities.find(*feedback.focus)) {
+            if (const auto polyline = cad::readPolyline(*entity)) {
+                focus = polyline->positions();
+            }
+        }
     }
-    // Markers: a small open square, the grip AutoCAD draws at a base point.
-    painter.setPen(QPen(kPreview, 1.5));
-    const double r = 3.5;
-    for (const Point2& marker : feedback.markers) {
-        const QPointF p = toScreen(marker);
-        painter.drawRect(QRectF(p.x() - r, p.y() - r, 2 * r, 2 * r));
-    }
-    lastPreviewCount_ = feedback.shapes.size() + feedback.markers.size();
+    const drawing::FeedbackCounts counts = drawing::paintFeedback(painter, feedback, focus, where);
+    lastPreviewCount_ = counts.shapes + counts.markers;
+    lastPreviewCounts_ = PreviewCounts{counts.shapes,  counts.markers,   counts.target,
+                                       counts.added,   counts.removed,   counts.enter,
+                                       counts.focus,   feedback.refused, feedback.caption};
+    return true;
 }
 
 void ViewportWidget::drawPrompt(QPainter& painter) const
 {
+    promptBand_.clear();
     if (!tools_.active()) {
         return;
     }
-    // The prompt in the view as well as in the window's command line: the
-    // eye is on the drawing, and a floating view may be far from the window.
-    // What has been typed follows it with a caret, as it will be sent.
-    const QString text = QString("%1: %2  %3_").arg(QString::fromStdString(tools_.info()->name),
-                                                    QString::fromStdString(tools_.prompt()),
-                                                    typed_);
-    const QFont font = theme::overlayFont(12);
-    painter.setFont(font);
-    const QFontMetrics metrics(font);
-    const int pad = 4;
-    const int height = metrics.height() + 2 * pad;
-    const QRect band(0, this->height() - height, width(), height);
-    painter.fillRect(band, QColor(0x12, 0x16, 0x1a, 220));
-    painter.setPen(kPreview);
-    painter.drawText(band.adjusted(pad + 2, 0, -pad, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                     metrics.elidedText(text, Qt::ElideLeft, band.width() - 2 * pad - 2));
+    // What has been typed follows the prompt with a caret, as it will be
+    // sent, and a line too long for the view is cut at the left so it stays
+    // in sight. With nothing typed it is cut in the middle, keeping both the
+    // tool's name - a cut at the left lost it at the larger text sizes - and
+    // the options and default a prompt ends with ("[Other side]", "<2.5>").
+    promptBand_ = drawing::paintBand(painter, rect(), QString("%1  %2_").arg(promptLine(), typed_),
+                                     typed_.isEmpty() ? Qt::ElideMiddle : Qt::ElideLeft);
 }
 
 void ViewportWidget::drawGrips(QPainter& painter) const
@@ -1439,22 +1635,26 @@ void ViewportWidget::drawGrips(QPainter& painter) const
         QRectF(rect()).adjusted(-8, -8, 8, 8));
     if (grips.base()) {
         // The grip's prompt and what has been typed for it, where a tool's goes.
-        QFont font("Segoe UI");
-        font.setPixelSize(12);
-        painter.setFont(font);
-        const QFontMetrics metrics(font);
-        const int pad = 4;
-        const int height = metrics.height() + 2 * pad;
-        const QRect band(0, this->height() - height, width(), height);
-        painter.fillRect(band, QColor(0x12, 0x16, 0x1a, 220));
-        painter.setPen(kPreview);
-        painter.drawText(band.adjusted(pad + 2, 0, -pad, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                         metrics.elidedText(grips.prompt(), Qt::ElideLeft, band.width() - 2 * pad - 2));
+        drawing::paintBand(painter, rect(), grips.prompt());
+    } else if (const QString hint = grips.hoverHint(); !hint.isEmpty()) {
+        // A grip under the cursor says what it is and what it offers.
+        drawing::paintBand(painter, rect(), hint, Qt::ElideRight);
     }
+}
+
+std::optional<cad::Grip> ViewportWidget::gripAt(const QPointF& screen)
+{
+    if (!gripsLive()) {
+        return std::nullopt;
+    }
+    grips_.refresh(notifications_);
+    // The reach a press on a grip has (mousePressEvent).
+    return cad::gripAt(grips_.grips(), toWorld(screen), pickTolerance());
 }
 
 void ViewportWidget::drawSnapMarker(QPainter& painter) const
 {
+    const QColor kSnapMarker = drawing::overlay::snap();
     // Object snap tracking: a small cross on each acquired point, and the
     // path the cursor is on, dotted from the point it runs through.
     if (document_.drafting().objectTracking) {
@@ -1473,7 +1673,7 @@ void ViewportWidget::drawSnapMarker(QPainter& painter) const
         // A drafting aid's tooltip: what constrained the point.
         const QPointF p = toScreen(cursorWorld_);
         painter.setPen(kSnapMarker);
-        painter.setFont(QFont("Segoe UI", 8));
+        painter.setFont(theme::overlayFont(11));
         painter.drawText(p + QPointF(12, 18), trackingLabel_);
     }
     if (!activeSnap_ || activeSnap_->mode == cad::SnapMode::Grid) {

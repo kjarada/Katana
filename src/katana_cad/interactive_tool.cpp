@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <tuple>
 
+#include "katana/cad/selection.hpp"
 #include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 #include "tools/families.hpp"
@@ -28,6 +29,64 @@ const char* toString(ToolInput input)
         return "value";
     }
     return "unknown";
+}
+
+const char* toString(FeedbackRole role)
+{
+    switch (role) {
+    case FeedbackRole::Target:
+        return "target";
+    case FeedbackRole::Added:
+        return "added";
+    case FeedbackRole::Removed:
+        return "removed";
+    case FeedbackRole::Enter:
+        return "enter";
+    }
+    return "unknown";
+}
+
+double pickReach(const ToolContext& context)
+{
+    return context.pickAperture ? context.pickAperture() : context.pickTolerance;
+}
+
+double vertexReach(const ToolContext& context)
+{
+    // With no view (a test), the tolerance stands for the pick aperture and
+    // the vertex reach is in the view's proportion to it.
+    return context.vertexAperture
+               ? context.vertexAperture()
+               : kSnapAperturePixels / kPickAperturePixels * context.pickTolerance;
+}
+
+std::optional<katana::entity::EntityId> pickUnder(const ToolContext& context, const Point2& at,
+                                                  const std::set<katana::entity::EntityType>& types,
+                                                  std::optional<double> reach)
+{
+    const double within = reach.value_or(pickReach(context));
+    if (context.pick) {
+        return context.pick(at, within, types);
+    }
+    if (context.document == nullptr) {
+        return std::nullopt;
+    }
+    SelectionFilter filter;
+    filter.types = types;
+    filter.view = context.view;
+    return pickEntity(context.document->model(), at, within, filter,
+                      &context.document->spatialIndex());
+}
+
+const LayerOverrides& viewOf(const ToolContext& context)
+{
+    return context.view != nullptr ? *context.view : kNoLayerOverrides;
+}
+
+bool pickable(const ToolContext& context, const katana::entity::Entity& entity)
+{
+    return context.document != nullptr &&
+           isSelectable(context.document->model(), entity, viewOf(context));
 }
 
 ToolStep ToolStep::next(std::string message)
@@ -75,6 +134,15 @@ ToolStep InteractiveTool::anchoredPoint(const Point2& at,
 
 ToolStep InteractiveTool::point3d(const Point2& at, double /*z*/) { return point(at); }
 
+ToolStep InteractiveTool::exactPoint(const Point2& at, std::optional<double> z)
+{
+    return z ? point3d(at, *z) : point(at);
+}
+
+bool InteractiveTool::takesHeights() const { return false; }
+
+bool InteractiveTool::dzIsAChange() const { return false; }
+
 ToolStep InteractiveTool::entity(katana::entity::EntityId /*id*/, const Point2& /*at*/)
 {
     return ToolStep::rejected(std::string("an entity is not expected here; the tool wants ") +
@@ -95,6 +163,17 @@ ToolStep InteractiveTool::cancel() { return ToolStep::done(nullptr); }
 ToolFeedback InteractiveTool::preview(const Point2& /*cursor*/) const { return {}; }
 
 std::optional<Point2> InteractiveTool::lastPoint() const { return std::nullopt; }
+
+std::optional<double> InteractiveTool::lastHeight() const { return std::nullopt; }
+
+bool InteractiveTool::takesDelete() const { return false; }
+
+ToolStep InteractiveTool::deleteKey()
+{
+    return ToolStep::rejected("the Delete key does nothing in this tool");
+}
+
+bool InteractiveTool::takesSnap(const SnapResult& /*snap*/) const { return true; }
 
 namespace tools {
 
@@ -143,6 +222,36 @@ Result<Point2> parsePointInput(std::string_view text, std::optional<Point2> last
     return point->point;
 }
 
+namespace {
+
+// A typed point handed to `tool`, as the exact point it is (exactPoint). A
+// step that takes heights (takesHeights) gets the z of x,y,z as the height,
+// and the dz of @dx,dy,dz as its verb reads it (dzIsAChange): the height
+// itself for Polyline 3D, as PLINE3D has it; a CHANGE of the last point's
+// height for Move Vertex, as VERTEX MOVE has it - handing dz on as the
+// height there turned "raise it by 1" into a height of 1 and wiped a
+// surveyed z, and with no height there to change it is refused rather than
+// read as absolute. Every other step drops the z of both forms, as it always
+// did: refusing @dx,dy,dz there refused "@0,5,0" at MOVE and LINE, whose
+// points have no height to change.
+ToolStep typedPoint(InteractiveTool& tool, const PrecisePoint& point)
+{
+    if (!point.z || !tool.takesHeights()) {
+        return tool.exactPoint(point.point, std::nullopt);
+    }
+    if (!point.relative || !tool.dzIsAChange()) {
+        return tool.exactPoint(point.point, point.z);
+    }
+    const auto base = tool.lastHeight();
+    if (!base) {
+        return ToolStep::rejected("the point @ is measured from has no height for a dz to "
+                                  "change; give the height absolutely, as x,y,z");
+    }
+    return tool.exactPoint(point.point, *base + *point.z);
+}
+
+} // namespace
+
 ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text)
 {
     const std::string_view input = katana::core::trimmed(text);
@@ -157,8 +266,7 @@ ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text)
         if (!point) {
             return ToolStep::rejected(point.error().describe());
         }
-        // x,y,z: a height for a tool that takes one (point3d's default drops it).
-        return point->z ? tool.point3d(point->point, *point->z) : tool.point(point->point);
+        return typedPoint(tool, *point);
     }
     return tool.value(input);
 }
@@ -212,7 +320,7 @@ ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text, DraftingS
         if (!point) {
             return ToolStep::rejected(point.error().describe());
         }
-        return point->z ? tool.point3d(point->point, *point->z) : tool.point(point->point);
+        return typedPoint(tool, *point);
     }
     ToolStep step = tool.value(input);
     if (step.outcome == ToolStep::Outcome::Rejected && atPoint && tool.lastPoint()) {

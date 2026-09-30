@@ -265,6 +265,40 @@ TEST(PolylineVertices, FilletRoundsACornerWithATangentArc)
         << "no corner";
 }
 
+TEST(PolylineVertices, CheckCornerRefusesWhatNoFilletOrChamferCouldCut)
+{
+    // What the Fillet and Chamfer Vertex tools refuse a pick with: a corner
+    // is two straight segments of some length meeting at an angle.
+    const auto corner = line3d({Point2(0, 0), Point2(10, 0), Point2(10, 10)});
+    EXPECT_TRUE(checkCorner(corner, 1).ok());
+    const auto end = checkCorner(corner, 0);
+    ASSERT_FALSE(end.ok());
+    EXPECT_EQ(end.error().message,
+              "vertex 0 is an end of the polyline; a corner is where two segments meet");
+    EXPECT_FALSE(checkCorner(corner, 2).ok()) << "the other end";
+    EXPECT_FALSE(checkCorner(corner, 3).ok()) << "no vertex 3";
+    // A closed polyline's first vertex is a corner like any other.
+    const auto square = CurvePolyline2::fromPoints(
+        {Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(0, 10)}, true);
+    EXPECT_TRUE(checkCorner(square, 0).ok());
+    // Beside an arc: segment 0 bulges.
+    auto bent = corner;
+    bent.vertices[0].bulge = 0.5;
+    const auto arc = checkCorner(bent, 1);
+    ASSERT_FALSE(arc.ok());
+    EXPECT_NE(arc.error().message.find("beside an arc"), std::string::npos) << arc.error().message;
+    // In line: (0,0) (1,0) (2,0) turns through no angle.
+    const auto straight = checkCorner(line3d({Point2(0, 0), Point2(1, 0), Point2(2, 0)}), 1);
+    ASSERT_FALSE(straight.ok());
+    EXPECT_NE(straight.error().message.find("in line"), std::string::npos)
+        << straight.error().message;
+    // A segment of no length: vertex 1 on vertex 0.
+    const auto none = checkCorner(line3d({Point2(0, 0), Point2(0, 0), Point2(0, 10)}), 1);
+    ASSERT_FALSE(none.ok());
+    EXPECT_NE(none.error().message.find("has no length"), std::string::npos)
+        << none.error().message;
+}
+
 TEST(PolylineVertices, ChamferCutsACorner)
 {
     const auto p = line3d({Point2(0, 0), Point2(10, 0), Point2(10, 10)});

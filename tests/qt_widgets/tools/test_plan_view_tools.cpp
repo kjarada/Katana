@@ -249,6 +249,44 @@ TEST(PlanViewTools, TheRubberBandIsDrawnWhileHoveringAfterTheFirstPoint)
     EXPECT_EQ(band->end, Point2(10, 0));
 }
 
+TEST(PlanViewTools, NoPreviewIsDrawnBeforeThePointerHasMoved)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.type("5,5");
+    plan.enter();
+    paint(plan.view);
+    // The pointer has never been over the view: the cursor is the model's
+    // origin, where nobody pointed, and a band to it would lead nowhere.
+    EXPECT_EQ(plan.view.lastPreviewCount(), 0u);
+    plan.move(300, 150); // (10, 0)
+    paint(plan.view);
+    // The band from (5, 5) to the cursor and the marker on (5, 5): 1 + 1.
+    EXPECT_EQ(plan.view.lastPreviewCount(), 2u);
+}
+
+TEST(PlanViewTools, NoPreviewIsDrawnWhileThePointerIsOutsideTheView)
+{
+    // Off to a menu or a toolbar, the pointer leaves the view where it last
+    // was: a tool chosen there previewed at that spot - Move Vertex dragged
+    // a vertex to the view's edge, Insert Vertex refused at a vertex nobody
+    // pointed at. Nothing is drawn until the pointer is back.
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.type("5,5");
+    plan.enter();
+    plan.move(300, 150); // (10, 0)
+    paint(plan.view);
+    ASSERT_EQ(plan.view.lastPreviewCount(), 2u) << "the band and the marker on (5, 5)";
+    QEvent leave(QEvent::Leave);
+    QCoreApplication::sendEvent(&plan.view, &leave);
+    paint(plan.view);
+    EXPECT_EQ(plan.view.lastPreviewCount(), 0u);
+    plan.move(250, 50); // (5, 10)
+    paint(plan.view);
+    EXPECT_EQ(plan.view.lastPreviewCount(), 2u) << "back over the view, from where it is now";
+}
+
 TEST(PlanViewTools, ARightClickIsEnterWhileAToolRuns)
 {
     PlanFixture plan;

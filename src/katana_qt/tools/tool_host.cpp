@@ -45,12 +45,13 @@ Status ToolHost::start(std::string_view id)
         return makeError(ErrorCode::NotFound, "there is no tool '" + std::string(id) + "'");
     }
     cancel();
+    heldAt_.reset();
     info_ = info;
     make();
     if (onStarted) {
         onStarted(info_->id);
     }
-    report(onPrompt, prompt());
+    reportPrompt();
     return {};
 }
 
@@ -65,7 +66,28 @@ std::string ToolHost::prompt() const { return tool_ != nullptr ? tool_->prompt()
 
 cad::ToolFeedback ToolHost::feedback(const Point2& cursor) const
 {
-    return tool_ != nullptr ? tool_->preview(cursor) : cad::ToolFeedback{};
+    if (tool_ == nullptr) {
+        return {};
+    }
+    cad::ToolFeedback shown = tool_->preview(cursor);
+    if (shown.refused && heldAt_ && cursor.distanceTo(*heldAt_) <= holdReach()) {
+        // What the tool shows there less its refusal: the marks it flags as
+        // the refusal's reason go (the vertex Insert has just made, too near
+        // for another), the rest stay as drawn - Straighten's first "keep",
+        // which the click has just taken - and the caption is what the
+        // click did.
+        cad::ToolFeedback held = std::move(shown);
+        held.refused = false;
+        std::erase_if(held.marks, [](const cad::FeedbackMark& mark) { return mark.refused; });
+        held.caption = heldMessage_;
+        return held;
+    }
+    return shown;
+}
+
+bool ToolHost::takesSnap(const cad::SnapResult& snap) const
+{
+    return tool_ == nullptr || tool_->takesSnap(snap);
 }
 
 std::optional<ToolHost::Point2> ToolHost::lastPoint() const
@@ -73,18 +95,41 @@ std::optional<ToolHost::Point2> ToolHost::lastPoint() const
     return tool_ != nullptr ? tool_->lastPoint() : std::nullopt;
 }
 
+void ToolHost::setCursor(const Point2& at)
+{
+    cursor_ = at;
+    if (heldAt_ && at.distanceTo(*heldAt_) > holdReach()) {
+        heldAt_.reset();
+    }
+}
+
+double ToolHost::holdReach() const { return pickAperture_ ? pickAperture_() : pickTolerance_; }
+
 ToolHost::Outcome ToolHost::point(const Point2& at, const std::optional<cad::SnapResult>& snap)
 {
-    return tool_ != nullptr ? apply(cad::routeSnappedPoint(*tool_, document_, at, snap)) : idle();
+    return tool_ != nullptr ? click(at, cad::routeSnappedPoint(*tool_, document_, at, snap))
+                            : idle();
 }
 
 ToolHost::Outcome ToolHost::entity(katana::entity::EntityId id, const Point2& at)
 {
-    return tool_ != nullptr ? apply(tool_->entity(id, at)) : idle();
+    return tool_ != nullptr ? click(at, tool_->entity(id, at)) : idle();
+}
+
+ToolHost::Outcome ToolHost::click(const Point2& at, cad::ToolStep step)
+{
+    heldAt_.reset();
+    const Outcome outcome = apply(std::move(step));
+    if (lastTaken_ && tool_ != nullptr) {
+        heldAt_ = at;
+        heldMessage_ = lastMessage_;
+    }
+    return outcome;
 }
 
 ToolHost::Outcome ToolHost::typed(std::string_view text)
 {
+    heldAt_.reset();
     if (tool_ == nullptr) {
         return idle();
     }
@@ -93,7 +138,7 @@ ToolHost::Outcome ToolHost::typed(std::string_view text)
         // prompt is shown again, as AutoCAD resumes LINE after 'ZOOM.
         const std::string command(katana::core::trimmed(text));
         if (onTransparent && onTransparent(command)) {
-            report(onPrompt, prompt());
+            reportPrompt();
             return Outcome::Continue;
         }
         report(onRejected, command + " cannot run inside " + info_->name +
@@ -103,9 +148,25 @@ ToolHost::Outcome ToolHost::typed(std::string_view text)
     return apply(cad::routeTypedInput(*tool_, text, document_.drafting(), cursor_));
 }
 
-ToolHost::Outcome ToolHost::enter() { return tool_ != nullptr ? apply(tool_->enter()) : idle(); }
+ToolHost::Outcome ToolHost::enter()
+{
+    heldAt_.reset();
+    return tool_ != nullptr ? apply(tool_->enter()) : idle();
+}
 
-ToolHost::Outcome ToolHost::undo() { return tool_ != nullptr ? apply(tool_->undo()) : idle(); }
+ToolHost::Outcome ToolHost::undo()
+{
+    heldAt_.reset();
+    return tool_ != nullptr ? apply(tool_->undo()) : idle();
+}
+
+bool ToolHost::takesDelete() const { return tool_ != nullptr && tool_->takesDelete(); }
+
+ToolHost::Outcome ToolHost::deleteKey()
+{
+    heldAt_.reset();
+    return tool_ != nullptr ? apply(tool_->deleteKey()) : idle();
+}
 
 void ToolHost::cancel()
 {
@@ -137,6 +198,12 @@ void ToolHost::make()
     context.attributes = document_.currentAttributes();
     context.selection = document_.selection().ids();
     context.pickTolerance = pickTolerance_;
+    // Once: taken by this tool, so a restart after its edit has none.
+    context.handles = std::exchange(handles_, {});
+    context.pick = pick_;
+    context.pickAperture = pickAperture_;
+    context.vertexAperture = vertexAperture_;
+    context.view = view_;
     tool_ = info_->make(context);
     ++generation_;
 }
@@ -144,6 +211,8 @@ void ToolHost::make()
 ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
 {
     const Outcome outcome = step.outcome;
+    lastTaken_ = outcome == Outcome::Continue;
+    lastMessage_ = step.message;
     // The tool this step came from. A hook raised below may stop it or start
     // another; what follows a hook applies only while it is still this one.
     // Counted, not compared by address: a tool started in a hook can be
@@ -153,10 +222,17 @@ ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
     case Outcome::Continue:
         report(onMessage, step.message);
         if (generation_ == from) {
-            report(onPrompt, prompt());
+            reportPrompt();
         }
         break;
     case Outcome::Rejected:
+        // A refusal leaves the prompt as it was, but one that drops what the
+        // tool held - a pick made stale by another edit - asks afresh, and
+        // the command line's placeholder must say so. Before the refusal, so
+        // the status bar ends on the refusal, as it does for every other.
+        if (prompt() != reportedPrompt_) {
+            reportPrompt();
+        }
         report(onRejected, step.message);
         break;
     case Outcome::Done: {
@@ -168,6 +244,7 @@ ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
                 report(onRejected, status.error().describe());
             }
         }
+        lastTaken_ = executed;
         if (executed) {
             report(onMessage, step.message);
             if (step.selection) {
@@ -184,7 +261,7 @@ ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
         }
         if (step.restart) {
             make();
-            report(onPrompt, prompt());
+            reportPrompt();
         } else {
             end();
         }
@@ -201,13 +278,21 @@ void ToolHost::end()
     // this one gone rather than cancelling it a second time.
     tool_.reset();
     info_ = nullptr;
+    heldAt_.reset();
     ++generation_;
     if (onFinished) {
         onFinished(id);
     }
+    reportedPrompt_.clear();
     if (onPrompt) {
         onPrompt({});
     }
+}
+
+void ToolHost::reportPrompt()
+{
+    reportedPrompt_ = prompt();
+    report(onPrompt, reportedPrompt_);
 }
 
 ToolHost::Outcome ToolHost::idle()

@@ -187,6 +187,8 @@ every action, field, button and tab gets one. In a test they are one
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
 | `--export-options FILE` | `^FILE` | opens File > Export Vector's dialog for FILE, in its turn, and makes it the target - what the menu opens once its file dialog has answered, which a headless run never opens. A step rather than a switch, so the `--command` lines before it have made the drawing whose layers and scope it offers (`qt_vector_export_dialog_writes_what_its_filter_takes_headless`) |
 | `--wheel "NAME X,Y N"` | `~NAME X,Y N` | turns the mouse wheel N notches - positive away from the person, which zooms in; negative, out - over widget NAME at X,Y in its logical pixels, NAME found as `--report` finds one. Each notch is a wheel event of its own, sent to the widget under that point (a 3D view's GPU child, where it has one) with the event loop run after it, as a person's wheel reaches the view; so a 3D view's zoom is driven in the real window, `~RenderView2 160,330 10|?RenderView2` (`qt_the_3d_views_wheel_keeps_zooming_into_the_ground_under_the_cursor_headless`). A step that is not three words, no such widget, a point outside it or no notches ends the run |
+| `--hover X,Y` | `~X,Y` (a `~` then a widget name is the wheel's) | moves the pointer to model point X,Y in the plan view Enter goes to (the one running a tool, else the active one), as a real mouse move: a tool's preview follows it. Prints the pointer record (below) |
+| `--click X,Y[,shift\|,ctrl]` | `+X,Y[,shift\|,ctrl]` | the same, then a left press and release there with the key held: a tool's pick or point, or with no tool a grip picked up (plain) or made hot (`,shift`) as a person's click does. Prints the record as the view shows it after the click |
 
 What the target is at the end is what `--screenshot` grabs; steps that were
 all commands leave the window. A dialog that deletes itself when a step
@@ -210,6 +212,65 @@ reply (`MainWindow::runIfcCommand`), so a test reads which line a press ran.
 
 A headless run echoes its command log to stderr, which is where a test reads
 what a command REPORTED.
+
+**The pointer.** A headless run has no mouse, and a tool's preview and its
+picks follow one: before the pointer steps a run could start Insert Vertex
+but never show where a vertex would go, and a pick step (a vertex, a
+segment) refused every typed coordinate it was not written to take. `~` and
+`+` (`MainWindow::pointerAt`, `ViewWorkspace::pointerAt`,
+`ViewportWidget::pointerAt`) paint the view so its transform is the one on
+screen, map the model point to a pixel through it, send a real `QMouseEvent`
+move - and for `+` a press and a release - and paint again. The view cannot
+tell them from a person's mouse, so they drive the same code: snapping, the
+grips, the tool's pick. Each prints one line, numbers exact
+(`formatExactReal`), what the view then drew of the running tool's preview
+by role (`drawing/feedback_painter.hpp`) - `enter` counts where Enter,
+not a click, would add:
+
+    pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert expects=point shapes=0 markers=0 target=1 added=1 removed=0 enter=0 focus=4 refused=no caption="new vertex between 1 and 2 · 15.000 from 1" prompt="Insert Vertex: Click on polyline 2 where the new vertex goes"
+
+It is a reply record like every verb's (`docs/cad.md`): the roles' keys are
+their names (`cad::toString(FeedbackRole)`), and the caption and the prompt
+are written by `core::replyQuoted`, so `core::readReplyRecord` reads the
+line back whole. Quoted by hand, Move Vertex's caption - which ends in a
+bearing, `0°00'00"` - closed its value early and the line was no record at
+all; it is written `0°00'00\"` now
+(`qt_pointer_record_quotes_a_bearing_as_a_reply_does_headless`,
+`VertexToolHover.ThePointerRecordReadsBackAsOneRecordWithABearingInItsCaption`).
+
+The counts are of what is ON SCREEN: an Added vertex the painter leaves out
+beside a Removed one (a fillet a few pixels across) is not counted, nor a
+focus square thinned out of a dense string - `added=2` once stood over a
+picture with no disc in it. A `+` the tool took is recorded as the view
+then shows it: the caption is what the click did, and `refused=no`, until
+the pointer moves off (`ToolHost::feedback`).
+
+`tool=none` and zero counts with no tool running. A point outside the view
+fails the run (exit 1, "is outside the view ... zoom to it first"), as a
+spec that is not `x,y[,shift|ctrl]` does. The pointer's model point comes
+back from its pixel within a few units in the last place, so what a click
+made from it - a vertex put on a line - is matched to ten decimals, not
+exactly (`qt_insert_vertex_puts_it_on_the_line_headless`). A person reads
+the PNG for the look; the record is what a test asserts
+(`qt_pointer_steps_hover_and_click_the_plan_view_headless`,
+`qt_insert_vertex_shows_where_the_vertex_goes_headless`,
+`qt_insert_vertex_beside_the_vertex_clicked_first_headless`,
+`qt_insert_vertex_beyond_a_chosen_corner_shows_enter_not_a_refusal_headless`,
+`qt_insert_vertex_refuses_a_choice_edited_since_headless`,
+`qt_insert_vertex_is_answered_with_what_it_did_headless`,
+`qt_delete_vertex_takes_the_chosen_vertex_headless`,
+`qt_delete_vertex_previews_the_click_not_the_chosen_vertex_headless`).
+A headless run's pointer never leaves the view - there is no step for
+that - so a tool started after a `~` step previews where the pointer is;
+in the window, the pointer leaving the view for a menu takes the preview
+away (`PlanViewTools.NoPreviewIsDrawnWhileThePointerIsOutsideTheView`).
+
+A test binary of Qt widgets run by hand needs MSYS2's runtime first on PATH,
+as ctest puts it (`KATANA_RUNTIME_BIN`): with `build/release/bin` first,
+Qt loads the copy of `Qt6Core.dll` there and looks for its platform plugin
+beside the test binary, in `bin/tests/platforms`, which the build does not
+fill - and a GUI program with no platform plugin waits on a message box
+nobody sees. `katana.exe` itself finds `bin/platforms` beside it.
 
 ## check_screenshot.cmake: the test side
 
@@ -317,6 +378,13 @@ A modal box in a headless run is a hang until the test's timeout. So
 
 ## Not done
 
+- No step presses a key into a view (`&KEY` was proposed for a view's own
+  keys: Delete on a hot vertex, Ctrl held over a grip). Enter reaches a view
+  through `>` alone; the rest is tested in `tests/qt_widgets` with real key
+  events, where Qt's shortcut map is not in the way, so Delete through the
+  window's shortcut map is not driven end to end.
+- No step drags: `+` is a press and a release at one point. A grip drag is
+  a click to pick the grip up and a second click to put it down.
 - A `--fill` of a list selects the row, as a click on its text does, but never
   ticks a checkable row: the shared scope widget's "The checked layers" list
   (`vectorExportLayers`, `globalModifyLayers`) cannot be ticked by a step. A

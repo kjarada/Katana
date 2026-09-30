@@ -146,9 +146,12 @@ endif()
 # executor as a dialog does (--run-line), "?WIDGET" prints what the target's WIDGET
 # shows, or whether the window's action of that name is checked (--report),"*NAME" triggers the menu item NAME in its turn
 # (--trigger), "!BUTTON" presses a button, "^FILE" opens File > Export
-# Vector's dialog for FILE (--export-options), "~NAME X,Y N" turns the mouse
-# wheel N notches over widget NAME at X,Y (--wheel; RenderView2, a 3D view),
-# and anything else is a FIELD=TEXT fill. '|' between steps, for FILL's reason.
+# Vector's dialog for FILE (--export-options), "~X,Y" moves the pointer to
+# model point X,Y in the plan view (--hover) and "+X,Y" clicks there, with
+# ",shift" or ",ctrl" held (--click), "~NAME X,Y N" turns the mouse wheel N
+# notches over widget NAME at X,Y (--wheel; RenderView2, a 3D view: "~" then a
+# letter is the wheel, "~" then a number the pointer), and anything else is a
+# FIELD=TEXT fill. '|' between steps, for FILL's reason.
 if(DEFINED DRIVE)
     string(REPLACE "|" ";" _steps "${DRIVE}")
     foreach(_step IN LISTS _steps)
@@ -179,7 +182,16 @@ if(DEFINED DRIVE)
             # menu's file dialog is not opened headless.
             list(APPEND extra --export-options "${_rest}")
         elseif(_sigil STREQUAL "~")
-            list(APPEND extra --wheel "${_rest}")
+            if(_rest MATCHES "^[A-Za-z]")
+                # A widget name first: the mouse wheel over that widget (--wheel).
+                list(APPEND extra --wheel "${_rest}")
+            else()
+                # A model point first: the pointer, which a headless run has no mouse
+                # for - a tool's preview follows it, and a click picks with it.
+                list(APPEND extra --hover "${_rest}")
+            endif()
+        elseif(_sigil STREQUAL "+")
+            list(APPEND extra --click "${_rest}")
         else()
             list(APPEND extra --fill "${_step}")
         endif()

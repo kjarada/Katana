@@ -216,6 +216,7 @@ Result<PrecisePoint> parsePrecisePoint(std::string_view text, std::optional<Poin
                          std::string(text));
     }
     PrecisePoint out;
+    out.relative = relative;
     if (const auto polar = body.find('<'); polar != std::string_view::npos) {
         if (!relative) {
             return makeError(ErrorCode::ParseFailure, "polar points are relative: @distance<angle",

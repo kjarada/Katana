@@ -5,11 +5,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <string>
 #include <variant>
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/snapping.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "tools/tool_host.hpp"
@@ -247,4 +249,118 @@ TEST(ToolHost, ASnapOnAnEntitysPointReachesTheToolAsThatPoint)
     EXPECT_EQ(along.tipRef.point, katana::entity::AnchorPoint::Along);
     EXPECT_DOUBLE_EQ(along.tipRef.parameter, 0.4);
     EXPECT_EQ(along.vertices.front(), Point2(4, 0));
+}
+
+TEST(ToolHost, AClickTheToolTookIsNotAnsweredInRedUntilThePointerLeavesIt)
+{
+    // Insert Vertex restarts after each vertex with the cursor on the vertex
+    // it made, where a second click WOULD be refused as too close - and the
+    // view said so in red straight after every success. Until the cursor
+    // leaves the click's place, what the click did is shown instead.
+    Document document;
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createPolyline(
+                        katana::geometry::Polyline2{{Point2(0, 0), Point2(10, 0)}, false}))
+                    .ok());
+    const auto p = document.lastCreatedEntities().front();
+    document.selection().add(p);
+    ToolHost host(document);
+    host.setPickTolerance(0.5);
+    ASSERT_TRUE(host.start("draw.vertex.insert").ok());
+    host.setCursor(Point2(4, 0.1));
+    ASSERT_EQ(host.point(Point2(4, 0.1)), ToolHost::Outcome::Done);
+    const auto held = host.feedback(Point2(4, 0.1));
+    EXPECT_FALSE(held.refused);
+    EXPECT_TRUE(held.marks.empty());
+    EXPECT_EQ(held.caption,
+              "vertex 1 added to polyline " + std::to_string(p) + " on segment 0 (3 vertices)");
+    EXPECT_EQ(held.focus, p);
+    // Away - 4 units, beyond the 0.5 aperture - and back: now the tool's
+    // refusal is what a click there would get, and it is shown.
+    host.setCursor(Point2(8, 0.1));
+    EXPECT_FALSE(host.feedback(Point2(8, 0.1)).refused) << "8 is clear of every vertex";
+    host.setCursor(Point2(4, 0.1));
+    const auto refused = host.feedback(Point2(4, 0.1));
+    EXPECT_TRUE(refused.refused);
+    EXPECT_EQ(refused.caption.rfind("too close to vertex 1", 0), 0u) << refused.caption;
+    // A click the tool refuses is no success to spare: its refusal shows.
+    EXPECT_EQ(host.point(Point2(4, 0.1)), ToolHost::Outcome::Rejected);
+    EXPECT_TRUE(host.feedback(Point2(4, 0.1)).refused);
+}
+
+TEST(ToolHost, StraightensFirstPickIsHeldAsTakenAndItsRefusalShownOnceThePointerComesBack)
+{
+    // A second click on Straighten's first vertex is refused, so the tool's
+    // preview there is the refusal (R3). Straight after the pick, the hold
+    // shows the pick as taken - its "keep" ring, not red - and once the
+    // pointer has left and come back, the refusal. The hold used to keep
+    // nothing but the polyline, so the ring the click had just made went.
+    Document document;
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createPolyline(katana::geometry::Polyline2{
+                        {Point2(0, 0), Point2(1, 1), Point2(2, -1), Point2(3, 1), Point2(4, 0)},
+                        false}))
+                    .ok());
+    const auto p = document.lastCreatedEntities().front();
+    document.selection().add(p);
+    ToolHost host(document);
+    host.setPickTolerance(0.5);
+    ASSERT_TRUE(host.start("draw.vertex.straighten").ok());
+    host.setCursor(Point2(0, 0.1));
+    ASSERT_EQ(host.point(Point2(0, 0.1)), ToolHost::Outcome::Continue);
+    const auto keep = [](const katana::cad::ToolFeedback& feedback) {
+        return std::ranges::count_if(feedback.marks, [](const katana::cad::FeedbackMark& mark) {
+            const auto* point = std::get_if<katana::entity::PointGeometry>(&mark.geometry);
+            return mark.role == katana::cad::FeedbackRole::Target && point != nullptr &&
+                   point->position == Point2(0, 0) && mark.label == "keep";
+        });
+    };
+    const auto held = host.feedback(Point2(0, 0.1));
+    EXPECT_FALSE(held.refused);
+    EXPECT_EQ(keep(held), 1);
+    host.setCursor(Point2(2, 3));
+    host.setCursor(Point2(0, 0.1));
+    const auto back = host.feedback(Point2(0, 0.1));
+    EXPECT_TRUE(back.refused);
+    EXPECT_EQ(back.caption, "vertex 0 is picked already; click the other one");
+    EXPECT_EQ(keep(back), 1) << "the pick's mark, drawn as the refusal";
+}
+
+TEST(ToolHost, ARefusalThatDropsAStalePickSaysTheNewPromptAndNoOtherRepeatsIt)
+{
+    // Insert beside vertex 1, then another edit moves vertex 2: the next
+    // click is refused as stale and drops the choice, so the tool asks
+    // afresh - and the window's command line, which hears a prompt only
+    // through onPrompt, went on offering Enter for the vertex dropped. A
+    // refusal that leaves the prompt as it was says nothing more: the
+    // status bar keeps the refusal it shows.
+    Document document;
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createPolyline(katana::geometry::Polyline2{
+                        {Point2(0, 0), Point2(10, 0), Point2(10, 10)}, false}))
+                    .ok());
+    const auto p = document.lastCreatedEntities().front();
+    document.selection().add(p);
+    ToolHost host(document);
+    host.setPickTolerance(0.5);
+    std::vector<std::string> prompts;
+    host.onPrompt = [&prompts](const std::string& prompt) { prompts.push_back(prompt); };
+    host.setHandles({katana::cad::Grip{p, katana::cad::GripKind::Vertex, 1, Point2(10, 0)}});
+    ASSERT_TRUE(host.start("draw.vertex.insert").ok());
+    ASSERT_FALSE(prompts.empty());
+    EXPECT_EQ(prompts.back().rfind("Press Enter for a vertex at the marked middle of segment 1", 0),
+              0u)
+        << prompts.back();
+    ASSERT_TRUE(document
+                    .execute(katana::cad::editPolyline(
+                        p, "VERTEX_MOVE",
+                        [](const katana::geometry::CurvePolyline2& shape) {
+                            return katana::geometry::moveVertex(shape, 2, Point2(20, 10));
+                        }))
+                    .ok());
+    EXPECT_EQ(host.point(Point2(10.2, 5)), ToolHost::Outcome::Rejected);
+    EXPECT_EQ(prompts.back(), "Click on polyline " + std::to_string(p) + " where the new vertex goes");
+    const std::size_t said = prompts.size();
+    EXPECT_EQ(host.point(Point2(50, 50)), ToolHost::Outcome::Rejected) << "nothing there";
+    EXPECT_EQ(prompts.size(), said);
 }

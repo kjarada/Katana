@@ -153,6 +153,135 @@ TEST(DrawingVerbs, VertexInsertSplitsTheNearestSegmentOrTheOneNamed)
         << "an unknown option is refused, not ignored";
 }
 
+TEST(DrawingVerbs, VertexInsertAtAPointOfThePolylineTakesThatSegmentAndAHeight)
+{
+    Session s;
+    // A polyline that doubles back, (0,0) (10,0) (0,0): the middle of
+    // segment 1, (5,0), lies on segment 0 too, which the nearest segment
+    // would take. "#id.s1" names segment 1 itself: the vertex after it.
+    const EntityId back = idOf(s.ok("PLINE 0,0 10,0 0,0"));
+    const std::string b = std::to_string(back);
+    EXPECT_EQ(value(s.ok("VERTEX INSERT " + b + " #" + b + ".s1"), "inserted"), "2");
+    EXPECT_EQ(s.polyline(back).positions(),
+              (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(5, 0), Point2(0, 0)}));
+
+    // "#id@x,y,z": on the line nearest x,y, with z its height.
+    const EntityId id = corner(s);
+    const std::string c = std::to_string(id);
+    EXPECT_EQ(value(s.ok("VERTEX INSERT " + c + " #" + c + "@4,0.3,101.5"), "inserted"), "1");
+    const auto on = s.polyline(id).vertices[1];
+    EXPECT_NEAR(on.position.x, 4.0, 1.0e-12);
+    EXPECT_NEAR(on.position.y, 0.0, 1.0e-12);
+    ASSERT_TRUE(on.height.has_value());
+    EXPECT_DOUBLE_EQ(*on.height, 101.5);
+
+    // A segment it has not got: refused, and in words about the polyline's
+    // point, not a dimension's.
+    const auto noSegment = s.interpreter.run("VERTEX INSERT " + c + " #" + c + ".s9");
+    ASSERT_FALSE(noSegment.ok());
+    EXPECT_EQ(noSegment.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(noSegment.error().describe().find("dimension"), std::string::npos)
+        << noSegment.error().describe();
+    // An entity there is not.
+    EXPECT_EQ(s.fails("VERTEX INSERT " + c + " #999@1,1"), ErrorCode::NotFound);
+    // A point on a vertex already: refused, the polyline as it was.
+    const std::size_t count = s.polyline(id).vertices.size();
+    (void)s.fails("VERTEX INSERT " + c + " #" + c + "@10,0");
+    EXPECT_EQ(s.polyline(id).vertices.size(), count);
+    // A point of ANOTHER entity is that entity's: the end (3,2) of this
+    // line is nearest (3,5), and goes into the corner's nearest segment, 0.
+    const EntityId other = idOf(s.ok("PLINE 3,-2 3,2"));
+    EXPECT_EQ(value(s.ok("VERTEX INSERT " + c + " #" + std::to_string(other) + "@3,5"),
+                    "inserted"),
+              "1");
+    EXPECT_EQ(s.polyline(id).vertices[1].position, Point2(3, 2));
+}
+
+TEST(DrawingVerbs, VertexInsertRefusesAnAfterThatIsNotTheSegmentOfItsPoint)
+{
+    // "#id@4,0.3" is on segment 0 of (0,0) (10,0) (10,10). after=1 put that
+    // point after vertex 1 - (0,0) (10,0) (4,0) (10,10) - and the polyline
+    // doubled back, 27.66 long for 20. The point names its segment; an
+    // after= that agrees (the grip menu's "#id.sN after=N") is taken.
+    Session s;
+    const EntityId id = corner(s);
+    const std::string c = std::to_string(id);
+    const auto folded = s.interpreter.run("VERTEX INSERT " + c + " #" + c + "@4,0.3 after=1");
+    ASSERT_FALSE(folded.ok());
+    EXPECT_EQ(folded.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(folded.error().describe().find("is on segment 0, not after vertex 1"),
+              std::string::npos)
+        << folded.error().describe();
+    EXPECT_EQ(s.polyline(id).positions(),
+              (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(10, 10)}));
+    EXPECT_EQ(value(s.ok("VERTEX INSERT " + c + " #" + c + ".s1 after=1"), "inserted"), "2");
+    EXPECT_EQ(s.polyline(id).positions(),
+              (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(10, 5), Point2(10, 10)}));
+}
+
+TEST(DrawingVerbs, StraightenAndGradeWalkForwardUnlessTheShortOrLongSideIsAskedFor)
+{
+    // The hexagon (0,0) (10,0) (20,0) (20,10) (10,10) (0,10): from vertex 3
+    // to vertex 1, forward is 4, 5 and 0 and the other way only 2. The verbs
+    // walk forward from the first number, as they always have, so a line
+    // written for them takes out the three it did; the window's rule - the
+    // shorter side, and O for the other - is side=short and side=long.
+    // Made the verbs' default, it silently changed which vertices an
+    // existing script or agent line took out.
+    Session s;
+    const EntityId h = idOf(s.ok("PLINE 0,0 10,0 20,0 20,10 10,10 0,10 CLOSE"));
+    const std::string id = std::to_string(h);
+    const std::vector<Point2> forward{Point2(10, 0), Point2(20, 0), Point2(20, 10)};
+    const std::vector<Point2> shortSide{Point2(0, 0), Point2(10, 0), Point2(20, 10),
+                                        Point2(10, 10), Point2(0, 10)};
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 3 1"), "vertices"), "3");
+    EXPECT_EQ(s.polyline(h).positions(), forward);
+    ASSERT_TRUE(s.document.undo());
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 3 1 side=short"), "vertices"), "5");
+    EXPECT_EQ(s.polyline(h).positions(), shortSide);
+    ASSERT_TRUE(s.document.undo());
+    // The long side from 1 to 3 is the forward walk from 3 to 1.
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 1 3 side=long"), "vertices"), "3");
+    EXPECT_EQ(s.polyline(h).positions(), forward);
+    ASSERT_TRUE(s.document.undo());
+    // And forward from 1 to 3 is the short side here.
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + id + " 1 3"), "vertices"), "5");
+    EXPECT_EQ(s.polyline(h).positions(), shortSide);
+    EXPECT_EQ(s.fails("STRAIGHTEN " + id + " 0 1 side=sideways"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(s.fails("STRAIGHTEN " + id + " 0 3 side=other"), ErrorCode::InvalidArgument)
+        << "short or long, not the window's letter";
+    // An open polyline has one way between two vertices: side=short walks
+    // it, side=long has nothing to walk.
+    const EntityId open = idOf(s.ok("PLINE 0,0 10,0 20,0"));
+    EXPECT_EQ(s.fails("STRAIGHTEN " + std::to_string(open) + " 0 2 side=long"),
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(value(s.ok("STRAIGHTEN " + std::to_string(open) + " 2 0 side=short"), "vertices"),
+              "2");
+
+    // Grade on the same hexagon with heights: 0 at vertex 1, 10 at vertex 3.
+    // Forward from 3 to 1 through 4, 5 and 0 is 40 long in four steps of
+    // 10: 7.5, 5 and 2.5. The short way, 1 to 3, puts vertex 2 halfway by
+    // length, at 5.
+    const EntityId z = idOf(s.ok("PLINE3D 0,0,0 10,0,0 20,0,0 20,10,10 10,10,0 0,10,0 CLOSE"));
+    const std::string zid = std::to_string(z);
+    s.ok("VERTEXZ " + zid + " GRADE 3 1");
+    auto graded = s.polyline(z);
+    EXPECT_DOUBLE_EQ(*graded.vertices[4].height, 7.5);
+    EXPECT_DOUBLE_EQ(*graded.vertices[5].height, 5.0);
+    EXPECT_DOUBLE_EQ(*graded.vertices[0].height, 2.5);
+    EXPECT_DOUBLE_EQ(*graded.vertices[2].height, 0.0) << "the short way is left alone";
+    ASSERT_TRUE(s.document.undo());
+    s.ok("VERTEXZ " + zid + " GRADE 3 1 side=short");
+    graded = s.polyline(z);
+    EXPECT_DOUBLE_EQ(*graded.vertices[2].height, 5.0);
+    EXPECT_DOUBLE_EQ(*graded.vertices[4].height, 0.0) << "the long way is left alone";
+    ASSERT_TRUE(s.document.undo());
+    s.ok("VERTEXZ " + zid + " GRADE 1 3 side=long");
+    graded = s.polyline(z);
+    EXPECT_DOUBLE_EQ(*graded.vertices[4].height, 7.5);
+    EXPECT_DOUBLE_EQ(*graded.vertices[0].height, 2.5);
+}
+
 TEST(DrawingVerbs, VertexDeleteRemovesSeveralAtOnceAsOneUndoStep)
 {
     Session s;

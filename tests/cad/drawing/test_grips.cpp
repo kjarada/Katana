@@ -163,6 +163,42 @@ TEST(GripDrags, ASegmentMiddleStretchesOrInsertsAVertex)
     EXPECT_EQ(i.vertices[1], Point2(2, -1));
 }
 
+TEST(GripDrags, GripFeedbackOfACtrlInsertShowsTheNewVertex)
+{
+    // Segment 0's middle of (0,0) (10,0) (20,0), Ctrl-dragged to (5,-3): the
+    // grip was at (5,0), and the vertex it makes is (5,-3), the new vertex 1.
+    Document document;
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createPolyline(
+                        Polyline2{{Point2(0, 0), Point2(10, 0), Point2(20, 0)}, false}))
+                    .ok());
+    const Entity& entity =
+        *document.model().entities.find(document.lastCreatedEntities().front());
+    GripDrag drag;
+    drag.grabbed = gripOf(entity, GripKind::SegmentMid, 0);
+    drag.target = Point2(5, -3);
+    drag.insertVertex = true;
+    const ToolFeedback feedback = gripFeedback(document, drag);
+    ASSERT_EQ(feedback.shapes.size(), 1u);
+    const auto* ghost = std::get_if<Polyline2>(&feedback.shapes[0]);
+    ASSERT_NE(ghost, nullptr);
+    EXPECT_EQ(ghost->vertices,
+              (std::vector<Point2>{Point2(0, 0), Point2(5, -3), Point2(10, 0), Point2(20, 0)}));
+    ASSERT_EQ(feedback.marks.size(), 2u);
+    EXPECT_EQ(feedback.marks[0].role, FeedbackRole::Target);
+    EXPECT_EQ(std::get<katana::entity::PointGeometry>(feedback.marks[0].geometry).position,
+              Point2(5, 0));
+    EXPECT_EQ(feedback.marks[1].role, FeedbackRole::Added);
+    EXPECT_EQ(std::get<katana::entity::PointGeometry>(feedback.marks[1].geometry).position,
+              Point2(5, -3));
+
+    // A plain drag of the same grip stretches the segment: no vertex added.
+    drag.insertVertex = false;
+    const ToolFeedback stretch = gripFeedback(document, drag);
+    ASSERT_EQ(stretch.marks.size(), 1u);
+    EXPECT_EQ(stretch.marks[0].role, FeedbackRole::Target);
+}
+
 TEST(GripDrags, AnArcSegmentsMiddleReshapesTheArcThroughTheTarget)
 {
     CurvePolyline2 p = CurvePolyline2::fromPoints({Point2(0, 0), Point2(2, 0)});

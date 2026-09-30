@@ -23,6 +23,17 @@
 //   planContextColour.Choose         COLOR #RRGGBB, the colour asked for
 //   planContextInfo                  INFO #<id>, for one entity
 //   planContextRepeat                the last tool again, with nothing selected
+//
+// Opened on a polyline's grip, the grip's own items come first, under a
+// section naming it (docs/drawing.md, "Grips"):
+//   planContextVertex.Delete         VERTEX DELETE <id> <v>
+//   planContextVertex.InsertAfter    VERTEX INSERT <id> #<id>.s<v> after=<v>
+//   planContextVertex.Start          STARTVERTEX <id> <v>, a closed polyline's
+//   planContextVertex.Move|Height|Fillet|Chamfer|Straighten
+//                                    the tool, the vertex its handle
+//   planContextSegment.AddMiddle     VERTEX INSERT <id> #<id>.s<s> after=<s>
+//   planContextSegment.Insert|Arc    the tool, the segment its handle
+//   planContextSegment.Line          VERTEX SET <id> <s> bulge=0, an arc's
 
 #include <functional>
 #include <optional>
@@ -33,6 +44,7 @@
 
 #include "command_runner.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/drawing/grips.hpp"
 #include "katana/core/error.hpp"
 
 namespace katana::qt {
@@ -50,6 +62,13 @@ struct PlanContextMenuContext {
     // dialog in the window, a fixed answer in a test. nullopt when the person
     // cancelled, and nothing is run.
     std::function<std::optional<QColor>(const QColor& initial)> chooseColour;
+    // The grip the menu was opened on (ViewportWidget::gripAt), when it was:
+    // a polyline's vertex or segment middle gets its own items first.
+    std::optional<katana::cad::Grip> grip;
+    // Starts catalogue tool `toolId` with `grip` its handle - hot, as a click
+    // on the grip before the tool makes it (ToolContext::handles). Unset,
+    // the tools are left out.
+    std::function<void(const std::string& toolId, const katana::cad::Grip& grip)> startToolOn;
 };
 
 class PlanContextMenu final : public QMenu {
@@ -68,6 +87,10 @@ class PlanContextMenu final : public QMenu {
     // The layers under `parent` ("" for the roots), `shared` ticked: the
     // layer every selected entity is on, "" when they are on several.
     void addLayerItems(QMenu& menu, const std::string& parent, const std::string& shared);
+    // The items of the polyline grip the menu was opened on, when it was.
+    void addGripItems();
+    // An item that starts `toolId` on the grip; left out without startToolOn.
+    QAction* addTool(const QString& text, const QString& objectName, const std::string& toolId);
 
     PlanContextMenuContext context_;
 };

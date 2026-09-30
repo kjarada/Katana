@@ -458,3 +458,96 @@ handling; a grip drag snaps from the grip's old position and, with no
 object snap, is constrained by the document's drafting settings (ortho,
 polar, locks), whose label is drawn beside the cursor. The gesture and the
 rules are `docs/drawing.md` ("Grips", "Precision input").
+
+## A tool's preview, by role
+
+A running tool's preview (`cad::ToolFeedback`, `include/katana/cad/tool_feedback.hpp`)
+is drawn by ONE function, `drawing::paintFeedback`
+(`src/katana_qt/drawing/feedback_painter.hpp`), over the kept drawing image
+like every other piece of furniture: a hover repaints the marks and never
+the drawing (`drawingPaintCount`, asserted in
+`tests/qt_widgets/tools/test_vertex_tool_hover.cpp`). The overlay's colours
+have their one home there too, `drawing::overlay` - the preview cyan, the
+target green, the removed red, the grips' blue, green and red, the band's
+ground, a selection box's two fills - where they were literals in the view
+and the grip controller (the cyan was written out three times). They are not
+in `theme.hpp`: its tokens are the chrome's, and it says the views keep
+their drawing colours. The prompt band, the tool's and a picked-up grip's,
+is one `paintBand`, in `theme::overlayFont`; two labels named "Segoe UI"
+directly, a font Linux does not have.
+
+The order, so what matters is on top: the vertices of the polyline in play
+(thinned so no two are nearer than 10 px), removed pieces, target pieces,
+the ghost, the base points, the snap marker (`FeedbackFrame::beneathGlyphs`),
+what Enter would act on, target vertices, removed vertices (thinned as the
+squares are, and never over a target's ring), the refused marks (a ring
+struck through), added vertices, labels (DemiBold), the caption - at the
+first corner of the cursor where it covers no mark, no label and no piece
+along its length; then the prompt band, cut in the middle while nothing is
+typed. The vertices went after the pieces, and a survey string's hundreds
+buried the target under a band of squares; the snap marker went last, and
+crossed the new vertex's disc where it snapped; Enter's opaque place went
+after the target vertices, and on a short segment hid the chosen vertex a
+few pixels off. Nothing is drawn while the pointer is not over the view: before
+it first is, the cursor is the model's origin, and a tool started from the
+command line drew its band to 0,0; after it has left (`leaveEvent`) the
+cursor is where it left, and a tool chosen from a menu previewed there. A
+new vertex that would sit on a vertex
+that goes (a fillet a few pixels across) is left out, so the X still reads,
+and is not counted; a vertex label is not doubled by the polyline's own
+"0".
+
+What it costs, measured as above (`tools/compare_benchmarks.py --alternate
+3`, nine samples a cell, `main` at f971317 against this change, the machine
+shared with three other worktrees' builds; microseconds, minimum / median):
+
+| Benchmark | before | after |
+|---|---|---|
+| `BM_PlanPaintCursorMove` (no tool) | 375.87 / 417.76 | 388.02 / 415.91 (+3.2% / -0.4%: noise) |
+| `BM_PlanPaintCursorMoveInsertVertex/snap:0` | - | 623.35 / 693.84 (1.61x / 1.67x a plain move) |
+| `BM_PlanPaintCursorMoveInsertVertex/snap:1` | - | 640.44 / 706.74 (1.65x / 1.70x) |
+
+The Insert Vertex runs hover along the survey drawing's 400-vertex string,
+framed on its first 25 vertices so that most hovers make an insert
+(`previewedInserts`); framed on the whole string its vertices lie closer
+than the pick aperture and every hover is refused, which measured nothing of
+the insert. The string's vertex squares go to QPainter in one `drawRects`.
+A run with the machine's CPU at 100% (the other builds) read 0.9 ms for a
+plain move and 2.7 ms for the insert: under that load the ratio says more
+about the machine than about the preview, so the table is the quieter run.
+
+After the review's fixes (2026-09-30: Insert asks of each snap candidate
+that would win whether it lands ON the line and would be taken, planning
+the insert there - `InteractiveTool::takesSnap`), nine repetitions in one
+run, the plain move its baseline under the same load (a build of another
+worktree was running), microseconds, minimum / median: a plain move
+432.6 / 465.7; Insert with snaps off 706.2 / 784.2 (1.63x / 1.68x a plain
+move, 1.61x / 1.67x before); with snaps on 794.2 / 821.0 (1.84x / 1.76x,
+1.65x / 1.70x before). So the snap's question costs about a tenth of a
+plain move, well inside a frame. With snaps on, 739 of the hovers preview an
+insert, 660 with them off (`previewedInserts`), so the snapped runs also
+plan more inserts; the "before" runs did not record the count. The build the
+"before" figures came from was not kept to alternate against.
+
+`previewedInserts` is a total over a repetition's iterations, whose number
+depends on the machine's speed, so it compares between runs only as a share
+of them: after the second review's fixes (2026-09-30: what a tool holds
+checked again at every preview, the caption placed clear of the marks), 693
+of 897 hovers with snaps on (77%) and 804 of 1099 with them off (73%). Nine
+repetitions on a machine loaded by three other worktrees' builds - the plain
+move's median 914 us, twice the figure above - gave medians of 1.35 ms with
+snaps off (1.48x a plain move) and 1.53 ms with them on (1.67x), inside the
+ratios measured before; under that load the difference says nothing, and no
+cost was looked for beyond it. The earlier build was not kept to alternate
+against either.
+
+After the third review's fixes (2026-09-30: the caption kept off every
+target and removed piece along its length - sampled every 6 px, and only
+where the piece is in the view, Liang and Barsky's clip, so a segment far
+longer than the view costs its visible length - a run of X's thinned and
+kept off the rings, labels DemiBold), nine repetitions, the machine shared
+with five other worktrees' builds and suites, medians: a plain move 426 us;
+Insert with snaps off 713 us (1.67x a plain move), with them on 798 us
+(1.87x); 692 and 714 hovers previewed an insert. Inside the 2x the spec
+asks, and near the ratios above (1.68x and 1.76x); not alternated against
+the build before, which was not kept.

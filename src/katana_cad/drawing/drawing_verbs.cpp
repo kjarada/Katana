@@ -24,11 +24,14 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "katana/cad/annotation/dimension_build.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/drawing/draw_shapes.hpp"
 #include "katana/cad/drawing/drafting.hpp"
@@ -416,12 +419,16 @@ std::string CommandInterpreter::drawingHelpText()
           quadrant bearing N45d30'E); a z is the vertex's height.  Each edit is one undo step.
 Vertex    VERTEX LIST id   a summary record, then one per vertex: index x y z bulge
           bearing (whole-circle degrees) distance (the segment's chord)
-          VERTEX INSERT id p [after=N] | DELETE id N [N...] | MOVE id N p (@ is from the vertex)
+          VERTEX INSERT id p|#id@x,y[,z]|#id.sN [after=N]   #id@x,y: on the line nearest x,y
+          VERTEX DELETE id N [N...] | MOVE id N p (@ is from the vertex, dz changes its height)
           VERTEX SET id N [x= y= z=|none bulge= bearing= distance=]   as the Vertices panel
 Polyline  WEED target tolerance= [keep=on|off]   (keep: survey-point vertices stay)
-          DENSIFY target interval= [chord=]  | STRAIGHTEN id N N | CLOSE target | OPEN [target]
+          DENSIFY target interval= [chord=]  | CLOSE target | OPEN [target]
+          STRAIGHTEN id N N [side=short|long] | VERTEXZ id GRADE N N [side=short|long]
+          (forward from the first N; on a closed polyline side=short takes the side
+          with fewer vertices between, as the window's tools do, and side=long the other)
           STARTVERTEX id N | VERTEXZ id N z|none | VERTEXZ target INTERPOLATE
-          VERTEXZ id GRADE N N   (OPEN takes #ids or SELECTION; OPEN directory opens a project)
+          (OPEN takes #ids or SELECTION; OPEN directory opens a project)
 Draw      PLINE p p [ARC p...] [LINE p...] [CLOSE]   ARC: tangent arcs; heights as x,y,z
           PLINE3D p p [p...] [CLOSE] [z=]   z= is the height of points given without one
           SPLINE p p [p...] [control=on|off] [degree=3] | DLINE p p [p...] width= [CLOSE]
@@ -558,11 +565,50 @@ CommandInterpreter::Reply CommandInterpreter::vertexVerb(const Tokens& args)
             return parsed.error();
         }
         if (parsed->positional.size() != 1) {
-            return usageError("VERTEX INSERT id x,y[,z] [after=N]");
+            return usageError("VERTEX INSERT id x,y[,z] | #id@x,y[,z] | #id.sN [after=N]");
         }
-        auto at = parseDrawingPoint(parsed->positional[0]);
-        if (!at) {
-            return at.error();
+        // A point, or a point OF an entity (parseAnchoredPoint): "#12@x,y" is
+        // the place on #12 nearest x,y - ON the line, as the window's Insert
+        // Vertex puts a click - and "#12.s3" segment 3's middle. On this
+        // polyline the anchor names its segment itself, where nearestSegment
+        // could take a neighbour at a vertex.
+        const std::string& given = parsed->positional[0];
+        Point2 where;
+        std::optional<double> z;
+        std::optional<std::size_t> anchoredSegment;
+        if (!given.empty() && given.front() == '#') {
+            // "#12@x,y,z": on the line, with z its height, as x,y,z typed at
+            // the window's Insert Vertex is. The anchor reads x,y alone.
+            std::string anchorText = given;
+            if (const std::size_t at = given.find('@'); at != std::string::npos) {
+                const std::string_view near = std::string_view(given).substr(at + 1);
+                if (std::ranges::count(near, ',') == 2) {
+                    const std::size_t comma = near.rfind(',');
+                    auto height = numberOf(near.substr(comma + 1), "the height");
+                    if (!height) {
+                        return height.error();
+                    }
+                    z = *height;
+                    anchorText = given.substr(0, at + 1 + comma);
+                }
+            }
+            auto anchored = parseAnchoredPoint(anchorText);
+            if (!anchored) {
+                return anchored.error();
+            }
+            where = anchored->point;
+            if (anchored->ref.entity == *id &&
+                (anchored->ref.point == katana::entity::AnchorPoint::Along ||
+                 anchored->ref.point == katana::entity::AnchorPoint::SegmentMid)) {
+                anchoredSegment = anchored->ref.index;
+            }
+        } else {
+            auto at = parseDrawingPoint(given);
+            if (!at) {
+                return at.error();
+            }
+            where = at->point;
+            z = at->z;
         }
         std::size_t segment = 0;
         if (const std::string* after = parsed->find("after")) {
@@ -576,12 +622,21 @@ CommandInterpreter::Reply CommandInterpreter::vertexVerb(const Tokens& args)
                 return makeError(ErrorCode::InvalidArgument,
                                  "there is no segment after vertex " + std::to_string(*index));
             }
+            // A point of this polyline names its segment itself: an after=
+            // naming another put a point of segment 0 after vertex 1, and the
+            // polyline folded back on itself.
+            if (anchoredSegment && *anchoredSegment != *index) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "the point " + given + " is on segment " +
+                                     std::to_string(*anchoredSegment) + ", not after vertex " +
+                                     std::to_string(*index) + "; give one or the other");
+            }
             segment = *index;
-        } else if (const auto nearest = geo::nearestSegment(*polyline, at->point)) {
+        } else if (anchoredSegment) {
+            segment = *anchoredSegment;
+        } else if (const auto nearest = geo::nearestSegment(*polyline, where)) {
             segment = *nearest;
         }
-        const Point2 where = at->point;
-        const std::optional<double> z = at->z;
         auto status = document_.execute(editPolyline(
             *id, "VERTEX_INSERT", [segment, where, z](const CurvePolyline2& p) {
                 return geo::insertVertex(p, segment, where, z);
@@ -851,8 +906,8 @@ CommandInterpreter::Reply CommandInterpreter::polylineVerb(const std::string& ve
     if (!polyline) {
         return polyline.error();
     }
-    const auto indexAt = [&](std::size_t position) -> Result<std::size_t> {
-        auto index = indexOf(args[position], verb.c_str());
+    const auto indexIn = [&](const std::string& text) -> Result<std::size_t> {
+        auto index = indexOf(text, verb.c_str());
         if (!index) {
             return index.error();
         }
@@ -861,29 +916,58 @@ CommandInterpreter::Reply CommandInterpreter::polylineVerb(const std::string& ve
         }
         return *index;
     };
+    const auto indexAt = [&](std::size_t position) { return indexIn(args[position]); };
     const std::vector<EntityId> one{*id};
 
     if (verb == "STRAIGHTEN" ||
-        (verb == "VERTEXZ" && args.size() == 4 && upperOf(args[1]) == "GRADE")) {
+        (verb == "VERTEXZ" && args.size() >= 4 && upperOf(args[1]) == "GRADE")) {
         const bool grade = verb == "VERTEXZ";
-        const std::size_t first = grade ? 2 : 1;
-        if (args.size() != first + 2) {
-            return usageError(grade ? "VERTEXZ id GRADE N N" : "STRAIGHTEN id N N");
+        auto parsed = splitArguments(args, grade ? 2 : 1, {"side"});
+        if (!parsed) {
+            return parsed.error();
         }
-        auto from = indexAt(first);
-        auto to = indexAt(first + 1);
+        if (parsed->positional.size() != 2) {
+            return usageError(grade ? "VERTEXZ id GRADE N N [side=short|long]"
+                                    : "STRAIGHTEN id N N [side=short|long]");
+        }
+        auto from = indexIn(parsed->positional[0]);
+        auto to = indexIn(parsed->positional[1]);
         if (!from) {
             return from.error();
         }
         if (!to) {
             return to.error();
         }
+        // Forward from the first number to the second - round through vertex
+        // 0 of a closed polyline when the second is lower - as these verbs
+        // have always walked, so a line written for them still takes out, or
+        // regrades, the vertices it did. The window's Straighten and Grade
+        // take a closed polyline's shorter side and their O the other: here
+        // those are side=short and side=long, asked for (cad::vertexRange,
+        // the one rule). Made the default, the shorter side silently changed
+        // what an existing script's or agent's line did to a closed polyline.
+        std::optional<bool> otherSide;
+        if (const std::string* side = parsed->find("side")) {
+            const std::string word = lowerOf(*side);
+            if (word != "short" && word != "long") {
+                return makeError(ErrorCode::InvalidArgument, "side is short or long", *side);
+            }
+            if (word == "long" && !polyline->closed) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "side=long goes the other way round a closed polyline, and "
+                                 "polyline " + std::to_string(*id) + " is open");
+            }
+            otherSide = word == "long";
+        }
         const std::size_t a = *from;
         const std::size_t b = *to;
         return run(one, editPolyline(*id, grade ? "GRADE" : "STRAIGHTEN",
-                                     [a, b, grade](const CurvePolyline2& p) {
-                                         return grade ? geo::gradeBetween(p, a, b)
-                                                      : geo::straighten(p, a, b);
+                                     [a, b, grade, otherSide](const CurvePolyline2& p) {
+                                         const auto [walkFrom, walkTo] =
+                                             otherSide ? vertexRange(p, a, b, *otherSide)
+                                                       : std::pair{a, b};
+                                         return grade ? geo::gradeBetween(p, walkFrom, walkTo)
+                                                      : geo::straighten(p, walkFrom, walkTo);
                                      }));
     }
     if (verb == "STARTVERTEX") {

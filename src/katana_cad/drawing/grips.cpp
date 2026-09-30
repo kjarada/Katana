@@ -508,4 +508,31 @@ std::vector<katana::entity::Geometry> gripPreview(const Document& document, cons
     return out;
 }
 
+ToolFeedback gripFeedback(const Document& document, const GripDrag& drag)
+{
+    ToolFeedback feedback;
+    feedback.shapes = gripPreview(document, drag);
+    feedback.marks.push_back(FeedbackMark{
+        FeedbackRole::Target, katana::entity::Geometry{katana::entity::PointGeometry{drag.grabbed.position}},
+        {}});
+    if (drag.insertVertex && drag.grabbed.kind == GripKind::SegmentMid) {
+        // The vertex a Ctrl-drag adds is the one after the segment's start
+        // in the edited polyline (dragPolyline's insertVertex).
+        const Entity* entity = document.model().entities.find(drag.grabbed.entity);
+        if (entity != nullptr) {
+            if (auto edited = applyGripDrag(*entity, drag)) {
+                if (const auto polyline = readPolyline(*edited);
+                    polyline && drag.grabbed.index + 1 < polyline->vertices.size()) {
+                    feedback.marks.push_back(FeedbackMark{
+                        FeedbackRole::Added,
+                        katana::entity::Geometry{katana::entity::PointGeometry{
+                            polyline->vertices[drag.grabbed.index + 1].position}},
+                        {}});
+                }
+            }
+        }
+    }
+    return feedback;
+}
+
 } // namespace katana::cad

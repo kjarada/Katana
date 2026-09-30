@@ -101,7 +101,7 @@ std::optional<double>& currentPolylineHeight()
 class Polyline3dTool final : public InteractiveTool {
   public:
     explicit Polyline3dTool(const ToolContext& context)
-        : document_(context.document), attributes_(context.attributes),
+        : document_(context.document), view_(&viewOf(context)), attributes_(context.attributes),
           current_(currentPolylineHeight())
     {
     }
@@ -128,7 +128,7 @@ class Polyline3dTool final : public InteractiveTool {
     {
         std::optional<double> height = current_;
         if (document_ != nullptr) {
-            if (const auto found = heightAtPoint(*document_, at, 1.0e-6)) {
+            if (const auto found = heightAtPoint(*document_, at, 1.0e-6, *view_)) {
                 height = found;
             }
         }
@@ -136,6 +136,7 @@ class Polyline3dTool final : public InteractiveTool {
     }
 
     ToolStep point3d(const Point2& at, double z) override { return add(at, z); }
+    [[nodiscard]] bool takesHeights() const override { return true; }
 
     ToolStep value(std::string_view text) override
     {
@@ -214,6 +215,9 @@ class Polyline3dTool final : public InteractiveTool {
         return feedback;
     }
 
+    // The dz of a typed @dx,dy,dz is the new vertex's height, as the PLINE3D
+    // verb reads it (InteractiveTool::dzIsAChange, left at its default): one
+    // line, one polyline, in the window and through katana_cli.
     [[nodiscard]] std::optional<Point2> lastPoint() const override
     {
         return vertices_.empty() ? std::nullopt : std::optional<Point2>(vertices_.back().position);
@@ -248,6 +252,8 @@ class Polyline3dTool final : public InteractiveTool {
     }
 
     const Document* document_ = nullptr;
+    // Whose hidden layers a snapped point's height is not read through.
+    const LayerOverrides* view_ = nullptr;
     cmd::EntityAttributes attributes_;
     std::vector<CurveVertex> vertices_;
     std::optional<double> current_;

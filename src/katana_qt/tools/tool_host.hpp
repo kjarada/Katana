@@ -20,6 +20,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/interactive_tool.hpp"
@@ -56,7 +58,17 @@ class ToolHost {
     // The running tool's prompt, "" when none is running.
     [[nodiscard]] std::string prompt() const;
     // The rubber band for the cursor at `cursor`; empty when none is running.
+    // A click the tool took is never answered in red: until the cursor
+    // leaves the place of that click (by the pick aperture, setCursor), a
+    // refusal there is shown without it - the marks the tool flags as its
+    // reason gone, the others kept - and captioned with what the click did
+    // ("vertex 2 added ..."). The tool, restarted or at its next step, is
+    // right that a second click there would be refused - a vertex is there
+    // now - but red straight after every success read as a failure.
     [[nodiscard]] katana::cad::ToolFeedback feedback(const Point2& cursor) const;
+    // Whether the running tool takes `snap` (InteractiveTool::takesSnap); with
+    // none running, every snap is taken - a grip's drag snaps as it always did.
+    [[nodiscard]] bool takesSnap(const katana::cad::SnapResult& snap) const;
     // What relative input (@dx,dy) and the Perpendicular and Tangent snaps
     // measure from; nullopt before the tool's first point.
     [[nodiscard]] std::optional<Point2> lastPoint() const;
@@ -67,6 +79,23 @@ class ToolHost {
     // The view's pick aperture in model units, given to a tool when it starts
     // or restarts (ToolContext::pickTolerance). The view sets it from its zoom.
     void setPickTolerance(double tolerance) { pickTolerance_ = tolerance; }
+    // The grips hot in the view when the next tool starts
+    // (ToolContext::handles). Taken by the next tool made and by no other:
+    // a restart after an edit gets none, since the edit may have renumbered
+    // the vertices they name.
+    void setHandles(std::vector<katana::cad::Grip> handles) { handles_ = std::move(handles); }
+    // The view's own pick and its apertures, read NOW whenever a tool asks
+    // (ToolContext::pick, pickAperture, vertexAperture): copied into every
+    // tool's context, so a zoom inside a tool is followed.
+    void setPick(katana::cad::ViewPick pick) { pick_ = std::move(pick); }
+    void setApertures(std::function<double()> pick, std::function<double()> vertex)
+    {
+        pickAperture_ = std::move(pick);
+        vertexAperture_ = std::move(vertex);
+    }
+    // The view's own hidden layers (ToolContext::view), which must outlive the
+    // host: a tool finding what to act on itself passes them as the pick does.
+    void setView(const katana::cad::LayerOverrides* view) { view_ = view; }
 
     // ---- what the user did ---------------------------------------------------
     // Each answers what the tool made of it. With no tool running the answer
@@ -84,13 +113,22 @@ class ToolHost {
     // or an option keyword.
     Outcome typed(std::string_view text);
     // Where the cursor is, for direct distance entry: a number typed at a
-    // point prompt is that far from the last point towards it.
-    void setCursor(const Point2& at) { cursor_ = at; }
+    // point prompt is that far from the last point towards it. Leaving the
+    // place of the last click the tool took ends feedback()'s hold on it.
+    void setCursor(const Point2& at);
     // Enter, Space or a right-click.
     Outcome enter();
     // Steps back one input inside the tool (the U inside LINE); never the
     // document's undo.
     Outcome undo();
+    // Whether the running tool takes the Delete key from the window's Erase
+    // (InteractiveTool::takesDelete): the vertex tools, whose polyline Erase
+    // would take from under them. False when none is running.
+    [[nodiscard]] bool takesDelete() const;
+    // Delete pressed while takesDelete(): the tool's answer, applied as any
+    // input's is (Delete Vertex deletes its chosen vertices; the others say
+    // the key does nothing there).
+    Outcome deleteKey();
     // Esc: ends the tool, keeping what the tool's own cancel() says it has
     // already placed - a chain of lines, the parts a Trim has cut, the
     // copies Copy has put down - as AutoCAD keeps the segments of a LINE,
@@ -131,19 +169,43 @@ class ToolHost {
     // layer and style (D9) and the selection as it is.
     void make();
     Outcome apply(katana::cad::ToolStep step);
+    // A click at `at` that the tool answered with `step`: applied, and when
+    // taken, held (heldAt_) so that its place is not answered in red.
+    Outcome click(const Point2& at, katana::cad::ToolStep step);
+    // How far the cursor must go from a held click to end the hold: the
+    // view's pick aperture now, else the tolerance a tool is made with.
+    [[nodiscard]] double holdReach() const;
     // Drops the tool and raises onFinished and onPrompt.
     void end();
+    // Raises onPrompt with the running tool's prompt, and keeps it: a
+    // refusal says the prompt again only when it changed (apply).
+    void reportPrompt();
     Outcome idle();
     void report(const std::function<void(const std::string&)>& hook, const std::string& text);
 
     katana::cad::Document& document_;
     std::optional<Point2> cursor_;
+    // The last click the tool took and what it said (feedback()); cleared by
+    // any other input, a new tool, and the cursor leaving it.
+    std::optional<Point2> heldAt_;
+    std::string heldMessage_;
+    // What apply() made of its step: taken (Continue, or Done with its
+    // command executed), and the message it reported.
+    bool lastTaken_ = false;
+    std::string lastMessage_;
+    // The prompt onPrompt last carried.
+    std::string reportedPrompt_;
+    const katana::cad::LayerOverrides* view_ = nullptr;
     const katana::cad::ToolInfo* info_ = nullptr;
     std::unique_ptr<katana::cad::InteractiveTool> tool_;
     // Bumped whenever tool_ is made or dropped, so apply() can tell that a
     // hook replaced the tool it was dealing with (see apply).
     std::uint64_t generation_ = 0;
     double pickTolerance_ = 0.0;
+    std::vector<katana::cad::Grip> handles_;
+    katana::cad::ViewPick pick_;
+    std::function<double()> pickAperture_;
+    std::function<double()> vertexAperture_;
 };
 
 // True for text typed while a tool runs that is a command for the view, not
