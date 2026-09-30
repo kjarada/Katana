@@ -1258,10 +1258,15 @@ TEST(OpcodeFieldFile, ARecordGivingANameOfItsOwnFindsThePointItsIdNamesIn44Point
     EXPECT_EQ(first.backsightPointId, "1002");
     EXPECT_EQ(valueOf(metadataOf(project, "1002"), "record 6/point name"), "RO");
     EXPECT_EQ(valueOf(metadataOf(project, "1002"), "record 6/point ID"), "(absent)");
-    // The check is on CP3, and what it calls it is kept there.
+    // The check is on CP3, and what it calls it is kept there. M5 being a
+    // point too, the check says which it took.
     const auto cp3 = metadataOf(project, "CP3");
     EXPECT_EQ(valueOf(cp3, "record 9/check measurement"), "from setup 1001");
     EXPECT_EQ(valueOf(cp3, "record 9/point name"), "M5");
+    EXPECT_TRUE(warned(result, 9,
+                       "the check names point 'M5' with point ID 1003, and the format's search "
+                       "for its point (44.5) finds point 'CP3' first: the check checks 'CP3', not "
+                       "the point of that name"));
     EXPECT_EQ(observationsTo<survey::DistanceObservation>(first, "CP3").size(), 1u);
     EXPECT_EQ(observationsTo<survey::DistanceObservation>(first, "M5").size(), 1u);
     const survey::SurveyStation& second = project.stations[1];
@@ -1311,6 +1316,84 @@ TEST(OpcodeFieldFile, ABacksightNamedByAnotherPointsIdMakesNoPointOfThatName)
     ASSERT_TRUE(positions.contains("101"));
     EXPECT_NEAR(positions.at("101").easting, 1010.0, kPositionTolerance);
     EXPECT_NEAR(positions.at("101").northing, 5000.0, kPositionTolerance);
+}
+
+TEST(OpcodeFieldFile, WithinEachOf44Point5sListsANameIsSearchedForBeforeAnId)
+{
+    // Each record below gives a name and an ID that find two different
+    // points in one list; 44.5 takes the name's. Coordinates P1 (ID X1), due
+    // north of A, and P2 (ID Y1), due east; shots Q1 (ID S1) and Q2 (ID S2).
+    //   record 5: name X1 is P1's ID (step 5), ID Y1 P2's (step 6): P1. The
+    //     setup, oriented on P1 at circle 0, puts 101 at circle 90, 10 m, at
+    //     (1010, 5000); oriented on P2 it would be at (1000, 4990).
+    //   record 7: name P1 is P1's (step 4), ID Y1 P2's (step 6): P1.
+    //   record 10: name Q1 is Q1's (step 7), ID S2 Q2's (step 9): Q1.
+    //   record 11: name S1 is Q1's ID (step 8), ID S2 Q2's (step 9): Q1.
+    const ReadResult result = readLines({
+        "02\t\t\t\tX1\tP1\t\t1000.0\t5100.0\t21.0",
+        "02\t\t\t\tY1\tP2\t\t1100.0\t5000.0\t21.0",
+        "02\t\t\t\tA\t\t\t1000.0\t5000.0\t20.0",
+        "03\t\t\t\tA\t\t\t1.5",
+        "04\t\t\t\tY1\tX1\t\t0.0\t90.0\t100.0",
+        "07\t\tEB\t01\t101\t\t\t90.0\t90.0\t10.0",
+        "06\t\t\t\tY1\tP1\t\t0.0\t90.0\t100.0",
+        "07\t\tEB\t01\tS1\tQ1\t\t180.0\t90.0\t10.0",
+        "07\t\tEB\t01\tS2\tQ2\t\t270.0\t90.0\t10.0",
+        "06\t\t\t\tS2\tQ1\t\t180.0\t90.0\t10.0",
+        "06\t\t\t\tS2\tS1\t\t180.0\t90.0\t10.0",
+    });
+    EXPECT_EQ(result.recordsSkipped, 0u);
+    ASSERT_EQ(result.project.stations.size(), 1u);
+    EXPECT_EQ(result.project.stations[0].backsightPointId, "P1");
+    const auto p1 = metadataOf(result.project, "P1");
+    EXPECT_EQ(valueOf(p1, "record 5/point name"), "X1");
+    EXPECT_EQ(valueOf(p1, "record 5/point ID"), "Y1");
+    EXPECT_EQ(valueOf(p1, "record 7/check measurement"), "from setup A");
+    const auto q1 = metadataOf(result.project, "Q1");
+    EXPECT_EQ(valueOf(q1, "record 10/check measurement"), "from setup A");
+    EXPECT_EQ(valueOf(q1, "record 11/check measurement"), "from setup A");
+    for (const char* other : {"P2", "Q2"}) {
+        for (const auto& [key, value] : metadataOf(result.project, other)) {
+            EXPECT_EQ(key.find("check measurement"), std::string::npos) << other << ": " << key;
+        }
+    }
+    const auto positions = reducedPositions(result.project);
+    ASSERT_TRUE(positions.contains("101"));
+    EXPECT_NEAR(positions.at("101").easting, 1010.0, kPositionTolerance);
+    EXPECT_NEAR(positions.at("101").northing, 5000.0, kPositionTolerance);
+}
+
+TEST(OpcodeFieldFile, ARecordWhoseNameIsAnotherPointThanTheOne44Point5FindsIsWarnedOf)
+{
+    // T1 is a point only a check (06) made, so it is in neither of 44.5's
+    // lists, the coordinates and the shots. The second setup names T1 with
+    // point ID 5, which shot 5 was given: 44.5 finds shot 5 by its ID (step
+    // 9), and the setup stands on it, with a warning that its name is another
+    // point's. Shot 5 is at (1010, 5000); from it A is on bearing 270, read
+    // at circle 0, so 301 at circle 90, 10 m, is on bearing 0: (1010, 5010).
+    const ReadResult result = readLines({
+        "02\t\t\t\tA\t\t\t1000.0\t5000.0\t20.0",
+        "02\t\t\t\tB\t\t\t1000.0\t5100.0\t20.0",
+        "03\t\t\t\tA\t\t\t1.5",
+        "04\t\t\t\tB\t\t\t0.0\t90.0\t100.0",
+        "07\t\tEB\t01\t5\t\t\t90.0\t90.0\t10.0",
+        "06\t\t\t\t\tT1\t\t180.0\t90.0\t20.0",
+        "03\t\t\t\t5\tT1\t\t1.5",
+        "04\t\t\t\tA\t\t\t0.0\t90.0\t10.0",
+        "07\t\tEB\t02\t301\t\t\t90.0\t90.0\t10.0",
+    });
+    EXPECT_EQ(result.recordsSkipped, 0u);
+    ASSERT_EQ(result.project.stations.size(), 2u);
+    EXPECT_EQ(result.project.stations[1].setup.pointId, "5");
+    EXPECT_EQ(valueOf(result.project.stations[1].metadata, "point name"), "T1");
+    EXPECT_TRUE(warned(result, 7,
+                       "the setup names point 'T1' with point ID 5, and the format's search for "
+                       "its point (44.5) finds point '5' first: the setup stands on '5', not the "
+                       "point of that name"));
+    const auto positions = reducedPositions(result.project);
+    ASSERT_TRUE(positions.contains("301"));
+    EXPECT_NEAR(positions.at("301").easting, 1010.0, kPositionTolerance);
+    EXPECT_NEAR(positions.at("301").northing, 5010.0, kPositionTolerance);
 }
 
 TEST(OpcodeFieldFile, AHeaderKeyGivenAgainKeepsBothValuesWithAWarning)
@@ -1449,14 +1532,15 @@ TEST(OpcodeFieldFile, ALaterBacksightChangesNeitherTheCircleNorTheStatedAzimuth)
                 kPositionTolerance);
 }
 
-TEST(OpcodeFieldFile, ABacksightToAnotherPointIsAMeasurementOfItAndTheFirstBacksightOrientsTheSetup)
+TEST(OpcodeFieldFile, ABacksightToAnotherPointThanTheOneThatOrientsTheSetupIsAMeasurementOfIt)
 {
-    // Two backsights to different points in one setup. The first names the
-    // backsight, and the circle and the azimuth are that point's; the second
-    // is read as a measurement of its own point. Before, the setup took its
-    // backsight point from the last 04 and its circle and azimuth from the
-    // first, so it was oriented on one point's circle less the reading on
-    // another's, and every direction turned by the difference.
+    // Two backsights to different points in one setup, each of these three
+    // with the first able to orient it. The first names the backsight, and
+    // the circle and the azimuth are that point's; the second is read as a
+    // measurement of its own point. Before, the setup took its backsight
+    // point from the last 04 and its circle and azimuth from the first, so
+    // it was oriented on one point's circle less the reading on another's,
+    // and every direction turned by the difference.
     //
     // K at (1000, 5000). R1, which nothing places, reads 0 and is given
     // azimuth 45: orientation 45 - 0 = 45 degrees. R2, placed by nothing
@@ -1481,9 +1565,10 @@ TEST(OpcodeFieldFile, ABacksightToAnotherPointIsAMeasurementOfItAndTheFirstBacks
     EXPECT_NEAR(*k.statedBacksightAzimuth, degrees(45.0), kAngleTolerance);
     EXPECT_EQ(valueOf(k.metadata, "backsight azimuth record 4"), "135.0 degrees");
     EXPECT_TRUE(warned(stated, 4,
-                       "a backsight to 'R2', where setup K backsighted 'R1' at record 3: the first "
-                       "backsight orients the setup, and this one is read as a measurement of its "
-                       "point; its azimuth, 135.0 degrees, is kept in the setup's metadata"));
+                       "a backsight to 'R2', where setup K backsights 'R1' (record 3), the first "
+                       "that can orient it, with a horizontal circle and a stated azimuth: this "
+                       "one is read as a measurement of its point; its azimuth, 135.0 degrees, is "
+                       "kept in the setup's metadata"));
     const auto positions = reducedPositions(stated.project);
     ASSERT_TRUE(positions.contains("501") && positions.contains("R2"));
     EXPECT_NEAR(positions.at("501").easting, 1000.0 + 10.0 * std::sin(degrees(135.0)),
@@ -1511,7 +1596,10 @@ TEST(OpcodeFieldFile, ABacksightToAnotherPointIsAMeasurementOfItAndTheFirstBacks
     });
     ASSERT_EQ(known.project.stations.size(), 1u);
     EXPECT_EQ(known.project.stations[0].backsightPointId, "R3");
-    EXPECT_TRUE(warned(known, 5, "a backsight to 'R4', where setup K backsighted 'R3' at record 4"));
+    EXPECT_TRUE(warned(known, 5,
+                       "a backsight to 'R4', where setup K backsights 'R3' (record 4), the first "
+                       "that can orient it, with a horizontal circle, and coordinates the file "
+                       "gives: this one is read as a measurement of its point"));
     const survey::ReductionOutcome outcome = reduced(known.project);
     std::map<std::string, survey::ComputedPoint> placed;
     for (const survey::ComputedPoint& point : outcome.points) {
@@ -1526,10 +1614,11 @@ TEST(OpcodeFieldFile, ABacksightToAnotherPointIsAMeasurementOfItAndTheFirstBacks
 
     // Where the two disagree - R5, the first, given azimuth 45 at circle 30
     // (orientation 15); R6, due east of K, reading 120 (orientation 90 - 120
-    // = -30) - the first orients the setup and the second, which has
-    // coordinates, is a check on it: radiated at bearing 120 + 15 = 135, 50 m
-    // out, it misses R6's (1050, 5000) by 50 cos 135 = -35.355 m north and
-    // 1000 + 50 sin 135 - 1050 = -14.645 m east. Nothing is turned silently.
+    // = -30) - the first can orient the setup, so it does, and the second,
+    // which has coordinates, is a check on it: radiated at bearing 120 + 15 =
+    // 135, 50 m out, it misses R6's (1050, 5000) by 50 cos 135 = -35.355 m
+    // north and 1000 + 50 sin 135 - 1050 = -14.645 m east. Nothing is turned
+    // silently.
     const ReadResult disagree = readLines({
         "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
         "02\t\t\t\tR6\t\t\t1050.0\t5000.0\t20.0",
@@ -1537,7 +1626,7 @@ TEST(OpcodeFieldFile, ABacksightToAnotherPointIsAMeasurementOfItAndTheFirstBacks
         "04\t\t\t\tR5\t\t\t30.0\t90.0\t100.0\t45.0",
         "04\t\t\t\tR6\t\t\t120.0\t90.0\t50.0",
     });
-    EXPECT_TRUE(warned(disagree, 5, "a backsight to 'R6', where setup K backsighted 'R5'"));
+    EXPECT_TRUE(warned(disagree, 5, "a backsight to 'R6', where setup K backsights 'R5' (record 4)"));
     const survey::ReductionOutcome checked = reduced(disagree.project);
     ASSERT_EQ(checked.report.misclosures.size(), 1u);
     const survey::MisclosureReport& check = checked.report.misclosures[0];
@@ -1546,6 +1635,196 @@ TEST(OpcodeFieldFile, ABacksightToAnotherPointIsAMeasurementOfItAndTheFirstBacks
     EXPECT_NEAR(*check.northing, 50.0 * std::cos(degrees(135.0)), kPositionTolerance);
     EXPECT_NEAR(*check.easting, 1000.0 + 50.0 * std::sin(degrees(135.0)) - 1050.0,
                 kPositionTolerance);
+}
+
+TEST(OpcodeFieldFile, ABacksightThatCannotOrientItsSetupGivesWayToALaterOneThatCan)
+{
+    // A 04 orients its setup where it gives a horizontal circle to a point
+    // with a position (coordinates the file gives, or a measurement from an
+    // earlier setup) or states an azimuth. In each case below the first 04
+    // cannot and the second can; the second names the backsight, and the
+    // first is read as a measurement. With the first naming it, the setup
+    // was oriented on the first's circle taken as a grid azimuth, or not at
+    // all, although the second could orient it.
+    //
+    // K at (1000, 5000), R3 entered due north of it. R4, which nothing
+    // places, reads 120, 50 m out; R3 reads 30: the orientation is 0 - 30 =
+    // -30 degrees, so R4 is on bearing 90, at (1050, 5000), and 502 at
+    // circle 120, 10 m, at (1010, 5000). R4 has no coordinates to check, and
+    // R3 is the backsight: nothing misses. With R4 naming the backsight the
+    // circle 120 was taken for its grid azimuth, and 502 drawn on bearing
+    // 120 and R3 reported 51.8 m out.
+    const ReadResult control = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "02\t\t\t\tR3\t\t\t1000.0\t5100.0\t20.0",
+        "03\t\t\t\tK\t\t\t1.5",
+        "04\t\t\t\tR4\t\t\t120.0\t90.0\t50.0",
+        "04\t\t\t\tR3\t\t\t30.0\t90.0\t100.0",
+        "07\t\tEB\t01\t502\t\t\t120.0\t90.0\t10.0",
+    });
+    EXPECT_EQ(control.recordsSkipped, 0u);
+    ASSERT_EQ(control.project.stations.size(), 1u);
+    const survey::SurveyStation& k = control.project.stations[0];
+    EXPECT_EQ(k.backsightPointId, "R3");
+    ASSERT_TRUE(k.backsightAzimuth.has_value());
+    EXPECT_NEAR(*k.backsightAzimuth, degrees(30.0), kAngleTolerance);
+    EXPECT_TRUE(warned(control, 4,
+                       "a backsight to 'R4', where setup K backsights 'R3' (record 5), the first "
+                       "that can orient it, with a horizontal circle, and coordinates the file "
+                       "gives: this one is read as a measurement of its point"));
+    const survey::ReductionOutcome outcome = reduced(control.project);
+    EXPECT_TRUE(outcome.report.misclosures.empty());
+    EXPECT_EQ(reductionWarningsWith(outcome.report, "taken as a grid azimuth"), 0u);
+    std::map<std::string, survey::ComputedPoint> placed;
+    for (const survey::ComputedPoint& point : outcome.points) {
+        placed[point.id] = point;
+    }
+    ASSERT_TRUE(placed.contains("502") && placed.contains("R4"));
+    EXPECT_NEAR(placed.at("R4").easting, 1050.0, kPositionTolerance);
+    EXPECT_NEAR(placed.at("R4").northing, 5000.0, kPositionTolerance);
+    EXPECT_NEAR(placed.at("502").easting, 1010.0, kPositionTolerance);
+    EXPECT_NEAR(placed.at("502").northing, 5000.0, kPositionTolerance);
+
+    // The same with R3's coordinates after the setup, and after the next one
+    // begins: the reduction places every 02 before any setup, so they still
+    // orient it. Settled as each 04 is read, or as the setup ends, neither
+    // backsight could have, and R4's circle would.
+    const ReadResult later = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "03\t\t\t\tK\t\t\t1.5",
+        "04\t\t\t\tR4\t\t\t120.0\t90.0\t50.0",
+        "04\t\t\t\tR3\t\t\t30.0\t90.0\t100.0",
+        "07\t\tEB\t01\t502\t\t\t120.0\t90.0\t10.0",
+        "03\t\t\t\tK\t\t\t1.5",
+        "02\t\t\t\tR3\t\t\t1000.0\t5100.0\t20.0",
+    });
+    ASSERT_EQ(later.project.stations.size(), 2u);
+    EXPECT_EQ(later.project.stations[0].backsightPointId, "R3");
+    const auto afterward = reducedPositions(later.project);
+    ASSERT_TRUE(afterward.contains("502"));
+    EXPECT_NEAR(afterward.at("502").easting, 1010.0, kPositionTolerance);
+    EXPECT_NEAR(afterward.at("502").northing, 5000.0, kPositionTolerance);
+
+    // R7, which nothing places, reads 0 with no azimuth; R8, placed by
+    // nothing either, reads 30 and is given azimuth 45: orientation 45 - 30 =
+    // 15 degrees. 503 at circle 120 is on bearing 135, (1000 + 10 sin 135,
+    // 5000 + 10 cos 135); R7 on bearing 15, 50 m out. With R7 naming the
+    // backsight R8's azimuth was only kept in the metadata and the circle 0
+    // taken for R7's grid azimuth: 503 on bearing 120.
+    const ReadResult stated = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "03\t\t\t\tK\t\t\t1.5",
+        "04\t\t\t\tR7\t\t\t0.0\t90.0\t50.0",
+        "04\t\t\t\tR8\t\t\t30.0\t90.0\t100.0\t45.0",
+        "07\t\tEB\t01\t503\t\t\t120.0\t90.0\t10.0",
+    });
+    ASSERT_EQ(stated.project.stations.size(), 1u);
+    const survey::SurveyStation& byAzimuth = stated.project.stations[0];
+    EXPECT_EQ(byAzimuth.backsightPointId, "R8");
+    ASSERT_TRUE(byAzimuth.backsightAzimuth && byAzimuth.statedBacksightAzimuth);
+    EXPECT_NEAR(*byAzimuth.backsightAzimuth, degrees(30.0), kAngleTolerance);
+    EXPECT_NEAR(*byAzimuth.statedBacksightAzimuth, degrees(45.0), kAngleTolerance);
+    EXPECT_EQ(valueOf(byAzimuth.metadata, "backsight azimuth record 4"), "(absent)");
+    EXPECT_TRUE(warned(stated, 3,
+                       "a backsight to 'R7', where setup K backsights 'R8' (record 4), the first "
+                       "that can orient it, with a horizontal circle and a stated azimuth"));
+    const auto byStated = reducedPositions(stated.project);
+    ASSERT_TRUE(byStated.contains("503") && byStated.contains("R7"));
+    EXPECT_NEAR(byStated.at("503").easting, 1000.0 + 10.0 * std::sin(degrees(135.0)),
+                kPositionTolerance);
+    EXPECT_NEAR(byStated.at("503").northing, 5000.0 + 10.0 * std::cos(degrees(135.0)),
+                kPositionTolerance);
+    EXPECT_NEAR(byStated.at("R7").easting, 1000.0 + 50.0 * std::sin(degrees(15.0)),
+                kPositionTolerance);
+    EXPECT_NEAR(byStated.at("R7").northing, 5000.0 + 50.0 * std::cos(degrees(15.0)),
+                kPositionTolerance);
+
+    // R3 entered due north, with no horizontal circle read on it; R6 entered
+    // due east, reading 120: orientation 90 - 120 = -30, so 504 at circle
+    // 120 is at (1010, 5000). With R3 naming the backsight the setup had no
+    // direction to orient on, and 504 was not drawn.
+    const ReadResult noCircle = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "02\t\t\t\tR3\t\t\t1000.0\t5100.0\t20.0",
+        "02\t\t\t\tR6\t\t\t1050.0\t5000.0\t20.0",
+        "03\t\t\t\tK\t\t\t1.5",
+        "04\t\t\t\tR3\t\t\t\t90.0\t100.0",
+        "04\t\t\t\tR6\t\t\t120.0\t90.0\t50.0",
+        "07\t\tEB\t01\t504\t\t\t120.0\t90.0\t10.0",
+    });
+    EXPECT_EQ(noCircle.recordsSkipped, 0u);
+    ASSERT_EQ(noCircle.project.stations.size(), 1u);
+    EXPECT_EQ(noCircle.project.stations[0].backsightPointId, "R6");
+    const auto byR6 = reducedPositions(noCircle.project);
+    ASSERT_TRUE(byR6.contains("504"));
+    EXPECT_NEAR(byR6.at("504").easting, 1010.0, kPositionTolerance);
+    EXPECT_NEAR(byR6.at("504").northing, 5000.0, kPositionTolerance);
+
+    // A traverse: K, oriented on R3 at circle 0, shoots T1 at circle 90 and
+    // T2 at circle 180, 10 m each: (1010, 5000) and (1000, 4990). The setup
+    // on T1 first reads X, which nothing places, at 50, then T2, which K
+    // measured, at 135: T2 is on bearing 225 from T1, so the orientation is
+    // 225 - 135 = 90 degrees. 505 at circle 0, 10 m, is on bearing 90 from T1,
+    // at (1020, 5000); X at circle 50, 20 m, on bearing 140. With X naming the
+    // backsight its circle was taken for its grid azimuth: 505 on bearing 0.
+    const ReadResult traverse = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "02\t\t\t\tR3\t\t\t1000.0\t5100.0\t20.0",
+        "03\t\t\t\tK\t\t\t1.5",
+        "04\t\t\t\tR3\t\t\t0.0\t90.0\t100.0",
+        "07\t\tEB\t01\tT1\t\t\t90.0\t90.0\t10.0",
+        "07\t\tEB\t01\tT2\t\t\t180.0\t90.0\t10.0",
+        "03\t\t\t\tT1\t\t\t1.5",
+        "04\t\t\t\tX\t\t\t50.0\t90.0\t20.0",
+        "04\t\t\t\tT2\t\t\t135.0\t90.0\t14.142135623731",
+        "07\t\tEB\t02\t505\t\t\t0.0\t90.0\t10.0",
+    });
+    EXPECT_EQ(traverse.recordsSkipped, 0u);
+    ASSERT_EQ(traverse.project.stations.size(), 2u);
+    EXPECT_EQ(traverse.project.stations[1].setup.pointId, "T1");
+    EXPECT_EQ(traverse.project.stations[1].backsightPointId, "T2");
+    EXPECT_TRUE(warned(traverse, 8,
+                       "a backsight to 'X', where setup T1 backsights 'T2' (record 9), the first "
+                       "that can orient it, with a horizontal circle, and measured from setup K"));
+    const auto byTraverse = reducedPositions(traverse.project);
+    ASSERT_TRUE(byTraverse.contains("505") && byTraverse.contains("X"));
+    EXPECT_NEAR(byTraverse.at("505").easting, 1020.0, kPositionTolerance);
+    EXPECT_NEAR(byTraverse.at("505").northing, 5000.0, kPositionTolerance);
+    EXPECT_NEAR(byTraverse.at("X").easting, 1010.0 + 20.0 * std::sin(degrees(140.0)),
+                kPositionTolerance);
+    EXPECT_NEAR(byTraverse.at("X").northing, 5000.0 + 20.0 * std::cos(degrees(140.0)),
+                kPositionTolerance);
+}
+
+TEST(OpcodeFieldFile, WhereNoBacksightCanOrientItsSetupTheFirstWithACircleNamesIt)
+{
+    // R3 is entered but read with no horizontal circle; R9, which nothing
+    // places, reads 40 with no azimuth. Neither can orient the setup, so the
+    // first with a circle names the backsight and the reduction takes that
+    // circle as set to the grid, saying so: orientation 40 - 40 = 0, and 507
+    // at circle 130, 10 m, is on bearing 130. The first 04 naming it left
+    // the setup with no direction to orient on, and nothing was drawn.
+    const ReadResult result = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "02\t\t\t\tR3\t\t\t1000.0\t5100.0\t20.0",
+        "03\t\t\t\tK\t\t\t1.5",
+        "04\t\t\t\tR3\t\t\t\t90.0\t100.0",
+        "04\t\t\t\tR9\t\t\t40.0\t90.0\t50.0",
+        "07\t\tEB\t01\t507\t\t\t130.0\t90.0\t10.0",
+    });
+    ASSERT_EQ(result.project.stations.size(), 1u);
+    EXPECT_EQ(result.project.stations[0].backsightPointId, "R9");
+    EXPECT_TRUE(warned(result, 4,
+                       "a backsight to 'R3', where setup K backsights 'R9' (record 5), the first "
+                       "with a horizontal circle, as none with one is to a point with a position "
+                       "or states an azimuth: this one is read as a measurement of its point"));
+    const survey::ReductionOutcome outcome = reduced(result.project);
+    EXPECT_EQ(reductionWarningsWith(outcome.report, "taken as a grid azimuth"), 1u);
+    const auto shot = std::find_if(outcome.points.begin(), outcome.points.end(),
+                                   [](const survey::ComputedPoint& p) { return p.id == "507"; });
+    ASSERT_NE(shot, outcome.points.end());
+    EXPECT_NEAR(shot->easting, 1000.0 + 10.0 * std::sin(degrees(130.0)), kPositionTolerance);
+    EXPECT_NEAR(shot->northing, 5000.0 + 10.0 * std::cos(degrees(130.0)), kPositionTolerance);
 }
 
 // ---- Layouts -----------------------------------------------------------------------------
@@ -2397,23 +2676,37 @@ TEST(OpcodeFieldFile, ABareCloseAfterMultipleCodingClosesTheSecondString)
 
 TEST(OpcodeFieldFile, AMultipleCodingNotReadLeavesTheCurrentStringUnknownSoABareCloseIsSkipped)
 {
-    // A 16 makes its own string the current one. One that is not read - a
-    // trailing tab makes this one six values, and the next has no feature
-    // code - leaves which string is current unknown: the bare 20 after it is
-    // skipped, naming it, where it closed EB 01, the string of the shot
-    // before. A measurement read after it makes its own string current.
+    // A 16 makes its own string the current one. One that is not read - this
+    // one has a sixth value, and the next no feature code - leaves which
+    // string is current unknown: the bare 20 after it is skipped, naming it,
+    // where it closed EB 01, the string of the shot before. A measurement
+    // read after it makes its own string current, and so does a 16 read
+    // after it: the last 20 closes TB 4, 301's second string, not HB 3.
     const ReadResult result = readLines({
         "03\t\t\t\tS\t\t\t1.5",
         "07\t\tEB\t01\t101\t\t\t10.0\t90.0\t5.0",
         "07\t\tEB\t01\t102\t\t\t20.0\t90.0\t5.0",
-        "16\t\tNS\t01\t\t\t\t",
+        "16\t\tNS\t01\t\t\t\tx",
         "20",
         "07\t\tFE\t2\t201\t\t\t30.0\t90.0\t5.0",
         "16\t\t\t\t\t\t",
         "20",
         "07\t\tFE\t2\t202\t\t\t40.0\t90.0\t5.0",
         "20",
+        "07\t\tHB\t3\t301\t\t\t50.0\t90.0\t5.0",
+        "16\t\t\t\t\t\t",
+        "16\t\tTB\t4\t\t\t",
+        "20",
     });
+    EXPECT_TRUE(warned(result, 14, "the string TB 4 is closed with 1 point(s)"));
+    const auto tb = featuresOf(result.project, "TB");
+    ASSERT_EQ(tb.size(), 1u);
+    EXPECT_TRUE(tb[0]->closed);
+    EXPECT_EQ(tb[0]->pointIds, (std::vector<std::string>{"301"}));
+    const auto hb = featuresOf(result.project, "HB");
+    ASSERT_EQ(hb.size(), 1u);
+    EXPECT_FALSE(hb[0]->closed);
+    EXPECT_TRUE(warned(result, 12, "multiple coding (opcode 16) with no feature code"));
     EXPECT_TRUE(warned(result, 4,
                        "multiple coding (opcode 16) with 6 value(s) where the format gives a point "
                        "description of 5"));
@@ -2430,7 +2723,43 @@ TEST(OpcodeFieldFile, AMultipleCodingNotReadLeavesTheCurrentStringUnknownSoABare
     EXPECT_TRUE(fe[0]->closed);
     EXPECT_EQ(fe[0]->pointIds, (std::vector<std::string>{"201", "202"}));
     EXPECT_TRUE(warned(result, 10, "the string FE 2 is closed with 2 point(s)"));
-    EXPECT_EQ(result.recordsSkipped, 4u);
+    // Records 4, 5, 7, 8 and 12.
+    EXPECT_EQ(result.recordsSkipped, 5u);
+}
+
+TEST(OpcodeFieldFile, AMultipleCodingACloseAndAnOffsetWithATrailingTabAreRead)
+{
+    // One blank value past a record's count is a trailing tab, as a fixed
+    // record's is: each of these was skipped for its count. K (1000, 5000)
+    // oriented on B, due north at circle 0. The 16 strings 102 into NS 01 as
+    // well; the 42 moves 102, the current measurement, 0.5 m further out, to
+    // 10.5 m on bearing 100; the 20 closes NS 01; the 43 moves 101, 10 m due
+    // east, 0.3 m to the left looking from K: north, to (1010, 5000.3).
+    const ReadResult result = readLines({
+        "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
+        "02\t\t\t\tB\t\t\t1000.0\t5100.0\t20.0",
+        "03\t\t\t\tK\t\t\t1.5",
+        "04\t\t\t\tB\t\t\t0.0\t90.0\t100.0",
+        "07\t\tEB\t01\t101\t\t\t90.0\t90.0\t10.0",
+        "07\t\tEB\t01\t102\t\t\t100.0\t90.0\t10.0",
+        "16\t\tNS\t01\t\t\t\t",
+        "42\t\t0.5\t",
+        "20\t\tNS\t01\t\t\t\t",
+        "43\t\t\t\t101\t\t\t-0.3\t",
+    });
+    EXPECT_EQ(result.recordsSkipped, 0u);
+    const auto ns = featuresOf(result.project, "NS");
+    ASSERT_EQ(ns.size(), 1u);
+    EXPECT_TRUE(ns[0]->closed);
+    EXPECT_EQ(ns[0]->pointIds, (std::vector<std::string>{"102"}));
+    const auto positions = reducedPositions(result.project);
+    ASSERT_TRUE(positions.contains("101") && positions.contains("102"));
+    EXPECT_NEAR(positions.at("102").easting, 1000.0 + 10.5 * std::sin(degrees(100.0)),
+                kPositionTolerance);
+    EXPECT_NEAR(positions.at("102").northing, 5000.0 + 10.5 * std::cos(degrees(100.0)),
+                kPositionTolerance);
+    EXPECT_NEAR(positions.at("101").easting, 1010.0, kPositionTolerance);
+    EXPECT_NEAR(positions.at("101").northing, 5000.3, kPositionTolerance);
 }
 
 TEST(OpcodeFieldFile, ACloseOrAnOffsetFindsANamedShotByItsPointId)
@@ -2439,10 +2768,13 @@ TEST(OpcodeFieldFile, ACloseOrAnOffsetFindsANamedShotByItsPointId)
     // closes "the string containing that point ID". The shots are named P1,
     // P2 and P3, with IDs 11, 12 and 13; the offset names P2 and the close P1
     // by the ID alone. Before, the ID was looked for among the names, and
-    // both were skipped, saying no record had made the point.
+    // both were skipped, saying no record had made the point. Two more shots
+    // are NAMED 11 and 12, in EQ 1: the ID is looked for before the name, so
+    // neither is moved nor has its string closed.
     //
     // K (1000, 5000) oriented on B, due north at circle 0: P2 at circle 80,
-    // level, 10 m, moved 0.5 m further out is 10.5 m out on bearing 80.
+    // level, 10 m, moved 0.5 m further out is 10.5 m out on bearing 80; the
+    // shot named 12, at circle 50, stays 10 m out.
     const ReadResult result = readLines({
         "02\t\t\t\tK\t\t\t1000.0\t5000.0\t20.0",
         "02\t\t\t\tB\t\t\t1000.0\t5100.0\t20.0",
@@ -2451,6 +2783,8 @@ TEST(OpcodeFieldFile, ACloseOrAnOffsetFindsANamedShotByItsPointId)
         "07\t\tEP\t1\t11\tP1\t\t90.0\t90.0\t10.0",
         "07\t\tEP\t1\t12\tP2\t\t80.0\t90.0\t10.0",
         "07\t\tEP\t1\t13\tP3\t\t70.0\t90.0\t10.0",
+        "07\t\tEQ\t1\t98\t11\t\t60.0\t90.0\t10.0",
+        "07\t\tEQ\t1\t99\t12\t\t50.0\t90.0\t10.0",
         "42\t\t\t\t12\t\t\t0.5",
         "20\t\t\t\t11\t\t",
     });
@@ -2460,14 +2794,78 @@ TEST(OpcodeFieldFile, ACloseOrAnOffsetFindsANamedShotByItsPointId)
     ASSERT_EQ(ep.size(), 1u);
     EXPECT_TRUE(ep[0]->closed);
     EXPECT_EQ(ep[0]->pointIds, (std::vector<std::string>{"P1", "P2", "P3"}));
-    EXPECT_EQ(valueOf(metadataOf(result.project, "P2"), "offset record 8"),
+    const auto eq = featuresOf(result.project, "EQ");
+    ASSERT_EQ(eq.size(), 1u);
+    EXPECT_FALSE(eq[0]->closed);
+    EXPECT_EQ(valueOf(metadataOf(result.project, "P2"), "offset record 10"),
               "radial 0.5 m from setup K, applied to the shot of record 6");
+    EXPECT_EQ(valueOf(metadataOf(result.project, "12"), "offset record 10"), "(absent)");
     const auto positions = reducedPositions(result.project);
-    ASSERT_TRUE(positions.contains("P2"));
+    ASSERT_TRUE(positions.contains("P2") && positions.contains("12"));
     EXPECT_NEAR(positions.at("P2").easting, 1000.0 + 10.5 * std::sin(degrees(80.0)),
                 kPositionTolerance);
     EXPECT_NEAR(positions.at("P2").northing, 5000.0 + 10.5 * std::cos(degrees(80.0)),
                 kPositionTolerance);
+    EXPECT_NEAR(positions.at("12").easting, 1000.0 + 10.0 * std::sin(degrees(50.0)),
+                kPositionTolerance);
+    EXPECT_NEAR(positions.at("12").northing, 5000.0 + 10.0 * std::cos(degrees(50.0)),
+                kPositionTolerance);
+}
+
+TEST(OpcodeFieldFile, AnOffsetOrACloseByAPointIdAShotAndACoordinateShareActsOnTheShot)
+{
+    // Coordinate CP5 has point ID 5, and so has shot 5, which has no name.
+    // [FLD] calls a point ID "normally unique", the ID a measurement is
+    // given; an offset moves a shot, and a 20 closes "the string containing
+    // that point ID". Both take the shot, saying so. Before, the coordinate
+    // was taken, which no offset moves and no string holds: the offset was
+    // kept unapplied and the 20 skipped. Coordinate CP9, in string KB 1, and
+    // shot 9, in none, have point ID 9: only the coordinate's string is open,
+    // so the 20 naming 9 closes it.
+    //
+    // A (1000, 5000) oriented on B, due north at circle 0: shot 5 at circle
+    // 0, level, 50 m, moved 0.5 m further out is at (1000, 5050.5).
+    const ReadResult result = readLines({
+        "02\t\t\t\t5\tCP5\t\t1000.0\t5050.0\t20.0",
+        "02\t\t\t\tA\t\t\t1000.0\t5000.0\t20.0",
+        "02\t\t\t\tB\t\t\t1000.0\t5100.0\t20.0",
+        "03\t\t\t\tA\t\t\t1.5",
+        "04\t\t\t\tB\t\t\t0.0\t90.0\t100.0",
+        "07\t\tEB\t01\t5\t\t\t0.0\t90.0\t50.0",
+        "07\t\tEB\t01\t6\t\t\t90.0\t90.0\t10.0",
+        "42\t\t\t\t5\t\t\t0.5",
+        "20\t\t\t\t5\t\t",
+        "02\t\tKB\t1\t8\tCP8\t\t1020.0\t5000.0\t20.0",
+        "02\t\tKB\t1\t9\tCP9\t\t1030.0\t5000.0\t20.0",
+        "07\t\t\t\t9\t\t\t180.0\t90.0\t10.0",
+        "20\t\t\t\t9\t\t",
+    });
+    EXPECT_EQ(result.recordsSkipped, 0u);
+    EXPECT_TRUE(warned(result, 8,
+                       "radial offset (opcode 42) names point ID 5, which a shot gave point '5' "
+                       "and a coordinate point 'CP5': it is taken for point '5', the shot's"));
+    EXPECT_TRUE(warned(result, 9,
+                       "close string (opcode 20) names point ID 5, which a shot gave point '5' "
+                       "and a coordinate point 'CP5': it is taken for point '5', the shot's"));
+    EXPECT_TRUE(warned(result, 9, "the string of point '5' is closed with 2 point(s)"));
+    EXPECT_TRUE(warned(result, 13,
+                       "close string (opcode 20) names point ID 9, which a shot gave point '9' "
+                       "and a coordinate point 'CP9': it is taken for point 'CP9', the one on "
+                       "an open string"));
+    const auto kb = featuresOf(result.project, "KB");
+    ASSERT_EQ(kb.size(), 1u);
+    EXPECT_TRUE(kb[0]->closed);
+    EXPECT_EQ(kb[0]->pointIds, (std::vector<std::string>{"CP8", "CP9"}));
+    const auto eb = featuresOf(result.project, "EB");
+    ASSERT_EQ(eb.size(), 1u);
+    EXPECT_TRUE(eb[0]->closed);
+    EXPECT_EQ(valueOf(metadataOf(result.project, "5"), "offset record 8"),
+              "radial 0.5 m from setup A, applied to the shot of record 6");
+    EXPECT_EQ(valueOf(metadataOf(result.project, "CP5"), "offset record 8"), "(absent)");
+    const auto positions = reducedPositions(result.project);
+    ASSERT_TRUE(positions.contains("5"));
+    EXPECT_NEAR(positions.at("5").easting, 1000.0, kPositionTolerance);
+    EXPECT_NEAR(positions.at("5").northing, 5050.5, kPositionTolerance);
 }
 
 TEST(OpcodeFieldFile, TheFileEndRecordStopsTheReadAndCountsWhatFollows)
