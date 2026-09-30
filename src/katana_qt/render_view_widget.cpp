@@ -19,6 +19,7 @@
 
 #if defined(KATANA_HAS_GPU)
 #include "gpu/gpu_scene_view.hpp"
+#include "gpu/scene_origin.hpp"
 #endif
 
 namespace katana::qt {
@@ -76,6 +77,9 @@ RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewState& 
                                    QWidget* parent)
     : QWidget(parent), context_(context), state_(state)
 {
+    // As its dock is View<id>: what a headless run's --wheel and --report
+    // name it by (docs/headless.md).
+    setObjectName(QString("RenderView%1").arg(state_.id));
     context_.options.layers = &state_.layers;
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -264,6 +268,21 @@ void RenderViewWidget::prepareGpuFrame(katana::render::Camera& frameCamera)
     for (std::size_t i = 0; i < applied.size() && !edgesChanged; ++i) {
         edgesChanged = applied[i] != layers_.edgeRuns[i].applied;
     }
+    // The GPU draws float offsets from the origin its layers are packed
+    // against, which zoomed in close to a point far from it round to more
+    // than the view can hide: every layer is packed again against the pivot
+    // once the bound there passes kOriginErrorPixels (scene_origin.hpp, "The
+    // origin follows a deep zoom"). Only then - a repack is a pass over every
+    // vertex. The origin checked is the one the layers will have: a stale
+    // scene is packed next against its own centre, unless one was chosen.
+    const katana::math::Vec3 origin =
+        gpuOrigin_        ? *gpuOrigin_
+        : gpuLayersStale_ ? gpu::chooseSceneOrigin(katana::cad::sceneDepthBox(layers_))
+                          : gpuView_->sceneOrigin();
+    if (gpu::originErrorPixels(frameCamera, origin) > gpu::kOriginErrorPixels) {
+        gpuOrigin_ = frameCamera.target();
+        gpuLayersStale_ = true;
+    }
     sendLayersToGpu(drawEdges, edgesChanged);
 #else
     (void)frameCamera;
@@ -286,7 +305,7 @@ void RenderViewWidget::sendLayersToGpu(bool drawEdges, bool edgesChanged)
             {&layers_.entities, true},
             {&layers_.selection, true},
         }};
-        gpuView_->setLayers(layers);
+        gpuView_->setLayers(layers, gpuOrigin_);
     } else {
         // An edit of the drawing over a large surface re-sends the drawing
         // alone, against the origin the terrain set, as the software view
@@ -768,9 +787,36 @@ void RenderViewWidget::zoomAtPixel(double notches, const QPointF& position)
     // pixels here and in the GPU view's logical ones there - sceneScale, the
     // widths' scale, is the same ratio.
     const double scale = sceneScale();
-    katana::cad::zoomAtPixel(layers_, camera(), notches, position.x() * scale,
-                             position.y() * scale);
+    const auto zoomed = katana::cad::zoomAtPixel(layers_, camera(), notches,
+                                                 position.x() * scale, position.y() * scale);
+    // A wheel that stops without a word reads as the fault it once was.
+    if (zoomed.limited && onStatus) {
+        onStatus(QStringLiteral("3D view: zoomed in as far as it can be drawn exactly"));
+    }
     requestFrame();
+}
+
+std::size_t RenderViewWidget::paintedPixelCount() const
+{
+    const QRgb background = kBackground.rgb() & 0xFFFFFFu;
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ != nullptr) {
+        // The GPU child's frame, drawn afresh: the software framebuffer is
+        // not what the view shows while the GPU draws it.
+        const QImage frame = gpuView_->grabFramebuffer().convertToFormat(QImage::Format_ARGB32);
+        std::size_t painted = 0;
+        for (int y = 0; y < frame.height(); ++y) {
+            for (int x = 0; x < frame.width(); ++x) {
+                painted += (frame.pixel(x, y) & 0xFFFFFFu) != background ? 1 : 0;
+            }
+        }
+        return painted;
+    }
+#endif
+    return static_cast<std::size_t>(
+        std::ranges::count_if(framebuffer_.color(), [background](katana::render::Rgba colour) {
+            return (colour & 0xFFFFFFu) != background;
+        }));
 }
 
 void RenderViewWidget::keyPressEvent(QKeyEvent* event)

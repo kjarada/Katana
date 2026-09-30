@@ -226,8 +226,12 @@ bool Camera::fitDepthRange(const katana::math::AABB& bounds)
     }
     const double far = furthest + pad;
     // With the eye inside the box `nearest` is negative and the floor decides;
-    // reversed Z keeps its precision down there (header, Clip).
-    const double near = std::max(nearest - pad, far * kNearFarFloor);
+    // reversed Z keeps its precision down there (header, Clip). The pivot's
+    // share of the floor decides only once the pivot is nearer than a
+    // thousandth of the far plane, so a view not zoomed that deep keeps the
+    // planes it always had.
+    const double near =
+        std::max(nearest - pad, std::min(far * kNearFarFloor, distance_ * kNearPivotFloor));
     setDepthRange(std::max(near, tol::kGeometric), far);
     return true;
 }

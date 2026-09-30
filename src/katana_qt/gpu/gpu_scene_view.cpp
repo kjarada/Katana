@@ -91,9 +91,10 @@ void GpuSceneView::setDrawList(const katana::render::DrawList& list)
     update();
 }
 
-void GpuSceneView::setLayers(std::span<const LayerSource> layers)
+void GpuSceneView::setLayers(std::span<const LayerSource> layers,
+                             const std::optional<katana::math::Vec3>& origin)
 {
-    renderer_.setLayers(layers);
+    renderer_.setLayers(layers, origin);
     // As setDrawList: the first scene with something in it after an empty
     // framing is framed at the next frame.
     if (framedEmpty_ && !renderer_.sceneBounds().empty()) {

@@ -25,6 +25,7 @@
 #include <QWheelEvent>
 
 #include "katana/cad/scene.hpp"
+#include "katana/cad/scene_zoom.hpp"
 #include "katana/cad/section.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -709,4 +710,258 @@ TEST(RenderView, ANotchOutAfterZoomingInShrinksTheGroundUnderTheCursorByTheSameF
     const auto back = groundUnder(state.camera, cursor, ratio);
     ASSERT_TRUE(back.has_value());
     EXPECT_NEAR(depthOf(state.camera, *back), startDepth, 1e-9 * startDepth);
+}
+
+// ---- off the model: the background round it in a docked view ----------------------------
+//
+// The window's 3D dock is tall and narrow, about 330 x 520, and a scene framed
+// to its width leaves two thirds of it background: the datum beyond the grid,
+// where nothing is drawn. There the wheel still anchored on the target's
+// plane, so below the model the eye dived under the ground and above it the
+// eye converged on a point in the air, and either way the whole view was
+// blank from about the twentieth notch on (docs/render.md, "Zooming towards
+// the cursor").
+
+namespace {
+
+// Nothing of the view's own layers - terrain, drawing, the grid's plane - is
+// under the cursor.
+bool nothingDrawnUnder(const RenderViewWidget& view, const katana::render::Camera& camera,
+                       QPointF cursor, double ratio)
+{
+    return !katana::cad::pickDrawnPoint(view.sceneLayers(), camera, cursor.x() * ratio,
+                                        cursor.y() * ratio)
+                .has_value();
+}
+
+// How deep the scene's box reaches along the view: its furthest corner.
+double reachOf(const RenderViewWidget& view, const katana::render::Camera& camera)
+{
+    const katana::math::AABB box = katana::cad::sceneDepthBox(view.sceneLayers());
+    double reach = -1.0e300;
+    for (int corner = 0; corner < 8; ++corner) {
+        const katana::math::Vec3 p((corner & 1) != 0 ? box.max.x : box.min.x,
+                                   (corner & 2) != 0 ? box.max.y : box.min.y,
+                                   (corner & 4) != 0 ? box.max.z : box.min.z);
+        reach = std::max(reach, depthOf(camera, p));
+    }
+    return reach;
+}
+
+void leftDrag(QWidget& view, QPointF from, QPointF to)
+{
+    QMouseEvent press(QEvent::MouseButtonPress, from, view.mapToGlobal(from), Qt::LeftButton,
+                      Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(&view, &press);
+    QMouseEvent move(QEvent::MouseMove, to, view.mapToGlobal(to), Qt::NoButton, Qt::LeftButton,
+                     Qt::NoModifier);
+    QApplication::sendEvent(&view, &move);
+    QMouseEvent release(QEvent::MouseButtonRelease, to, view.mapToGlobal(to), Qt::LeftButton,
+                        Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(&view, &release);
+}
+
+} // namespace
+
+TEST(RenderView, InADockSizedViewTheWheelBelowTheModelZoomsTowardsTheDatumAndBackOutAgain)
+{
+    // Below the model the ground is the datum, the plane the grid stands on,
+    // nearer than the target's plane: the old anchor lay under it, and the
+    // eye went under the ground and stayed there. The eye must stay above
+    // it, the datum's point under the cursor must divide its depth by 1.15 a
+    // notch, and as many notches out must bring the view back as it was.
+    // Not that the view never goes blank: the model lies in the plane the
+    // zoom closes on, which the eye comes to see edge on - from h above it
+    // ground L away is atan(h / L) below the horizon, and the top of this
+    // view is 35.26 - 22.5 = 12.76 degrees below it - so the model leaves
+    // the top of the view as the eye nears the empty ground it went towards.
+    FlatGround scene;
+    ASSERT_TRUE(scene.built.has_value());
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(330, 520);
+    paint(view);
+    const std::size_t painted = paintedPixels(view);
+    ASSERT_GT(painted, 1000u);
+    const double ratio = view.devicePixelRatioF();
+    const QPointF cursor(165.0, 510.0);
+    ASSERT_TRUE(nothingDrawnUnder(view, state.camera, cursor, ratio))
+        << "the cursor is over the model, so this proves nothing";
+    const katana::math::Vec3 eye = state.camera.eye();
+    const auto start = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(start.has_value());
+    double depth = depthOf(state.camera, *start);
+    ASSERT_LT(depth, 0.9 * state.camera.distance())
+        << "the datum is not nearer than the target's plane, so the old anchor did not dive";
+    saveForLooking(view, "dock_below_00");
+    for (int notch = 1; notch <= 40; ++notch) {
+        turnWheel(view, cursor, kNotch);
+        ASSERT_GT(state.camera.eye().z, kGroundHeight)
+            << "the eye is under the datum at notch " << notch;
+        const auto under = groundUnder(state.camera, cursor, ratio);
+        ASSERT_TRUE(under.has_value()) << notch;
+        const double now = depthOf(state.camera, *under);
+        ASSERT_NEAR(depth / now, kPerNotch, 1e-9) << "notch " << notch;
+        depth = now;
+        if (notch % 10 == 0) {
+            paint(view);
+            saveForLooking(view, "dock_below_" + twoDigits(notch));
+        }
+    }
+    for (int notch = 1; notch <= 40; ++notch) {
+        turnWheel(view, cursor, -kNotch);
+    }
+    EXPECT_NEAR((state.camera.eye() - eye).length(), 0.0, 1e-9 * state.camera.distance());
+    paint(view);
+    saveForLooking(view, "dock_below_back");
+    EXPECT_NEAR(static_cast<double>(paintedPixels(view)), static_cast<double>(painted),
+                0.01 * static_cast<double>(painted));
+}
+
+TEST(RenderView, InADockSizedViewTheWheelAboveTheModelKeepsMagnifyingTheSceneAsFarAsItReaches)
+{
+    // Above the model the ray meets the datum beyond everything the scene
+    // reaches, so the zoom goes as deep as the scene reaches: the furthest
+    // corner of its box divides its depth by 1.15 a notch, and everything
+    // drawn, all of it nearer, grows at least as fast. Anchored on the
+    // target's plane, that corner lay beyond the anchor and stalled.
+    FlatGround scene;
+    ASSERT_TRUE(scene.built.has_value());
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(330, 520);
+    paint(view);
+    const double ratio = view.devicePixelRatioF();
+    const QPointF cursor(165.0, 15.0);
+    ASSERT_TRUE(nothingDrawnUnder(view, state.camera, cursor, ratio))
+        << "the cursor is over the model, so this proves nothing";
+    double reach = reachOf(view, state.camera);
+    const auto datum = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(!datum || depthOf(state.camera, *datum) > reach)
+        << "the datum is within the scene's reach, so this is the case below the model";
+    ASSERT_GT(reach, 1.1 * state.camera.distance())
+        << "the scene reaches no further than the target's plane, so nothing stalled";
+    saveForLooking(view, "dock_above_00");
+    for (int notch = 1; notch <= 40; ++notch) {
+        turnWheel(view, cursor, kNotch);
+        const double now = reachOf(view, state.camera);
+        ASSERT_NEAR(reach / now, kPerNotch, 1e-9) << "notch " << notch;
+        reach = now;
+        ASSERT_GT(state.camera.eye().z, kGroundHeight) << notch;
+        if (notch % 10 == 0) {
+            paint(view);
+            saveForLooking(view, "dock_above_" + twoDigits(notch));
+        }
+    }
+}
+
+// ---- the pan and the orbit after a zoom ----------------------------------------------------
+
+TEST(RenderView, AfterAZoomTheOrbitTurnsAboutThePointOfTheViewAxisAsDeepAsWhatTheZoomWentTowards)
+{
+    // The zoom moves the pivot to the depth of what the cursor points at
+    // (Camera::setPivotDepth): on the view axis, as deep as the ground under
+    // the cursor. An orbit then turns about that point and keeps it.
+    FlatGround scene;
+    ASSERT_TRUE(scene.built.has_value());
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(400, 300);
+    paint(view);
+    const double ratio = view.devicePixelRatioF();
+    const QPointF cursor(200.0, 90.0);
+    for (int notch = 0; notch < 10; ++notch) {
+        turnWheel(view, cursor, kNotch);
+    }
+    const auto under = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(under.has_value());
+    const double depth = depthOf(state.camera, *under);
+    EXPECT_NEAR(state.camera.distance(), depth, 1e-9 * depth);
+    const katana::math::Vec3 pivot = state.camera.eye() + state.camera.forward() * depth;
+    EXPECT_NEAR((state.camera.target() - pivot).length(), 0.0, 1e-9 * depth);
+
+    leftDrag(view, QPointF(200.0, 150.0), QPointF(300.0, 170.0));
+    EXPECT_NEAR((state.camera.target() - pivot).length(), 0.0, 1e-9 * depth);
+    EXPECT_NEAR(state.camera.distance(), depth, 1e-9 * depth);
+}
+
+TEST(RenderView, AfterAZoomAPanStartedElsewhereMovesTheGroundThereInProportionToThePivotsDepth)
+{
+    // A pan slides the camera across the view by the drag, counted at the
+    // pivot's depth: the ground at the depth the zoom went to follows the
+    // drag one to one, and ground at depth d moves pivot / d of it - as a
+    // perspective pan always did, the pivot being where the zoom left it.
+    FlatGround scene;
+    ASSERT_TRUE(scene.built.has_value());
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(400, 300);
+    paint(view);
+    const double ratio = view.devicePixelRatioF();
+    for (int notch = 0; notch < 10; ++notch) {
+        turnWheel(view, QPointF(200.0, 90.0), kNotch);
+    }
+    const QPointF from(200.0, 250.0);
+    const auto ground = groundUnder(state.camera, from, ratio);
+    ASSERT_TRUE(ground.has_value());
+    const double d = depthOf(state.camera, *ground);
+    const double pivot = state.camera.distance();
+    ASSERT_LT(d, 0.8 * pivot) << "the ground there is as deep as the pivot, so this proves little";
+    const auto before = state.camera.project(*ground);
+    ASSERT_TRUE(before.has_value());
+    middleDrag(view, from, from + QPointF(100.0, 0.0));
+    const auto after = state.camera.project(*ground);
+    ASSERT_TRUE(after.has_value());
+    const double expected = 100.0 * ratio * pivot / d;
+    EXPECT_NEAR(after->x - before->x, expected, 1e-6 * expected);
+    EXPECT_NEAR(after->y - before->y, 0.0, 1e-6 * expected);
+}
+
+// ---- where the zoom stops ------------------------------------------------------------------
+
+TEST(RenderView, AZoomHeldAtItsLimitSaysSoOnTheStatusLineAndNothingBefore)
+{
+    // The zoom stops where the view could no longer be drawn exactly
+    // (cad::minimumApproach): here the near plane's limit, 1e-7 / 1e-3 =
+    // 0.1 mm, the double arithmetic's bound on ground a few hundred metres
+    // from the origin being nanometres. From a depth D the eye reaches it at
+    // n = ln(D / 1e-4) / ln 1.15 notches, so ground between 1e-4 x 1.15^100 =
+    // 117 m and 1e-4 x 1.15^130 = 8.1 km deep is not reached in 100 notches
+    // and is in 130. A wheel that stopped without a word read as the fault
+    // the zoom once had, so the view says why it stopped - and only then.
+    FlatGround scene;
+    ASSERT_TRUE(scene.built.has_value());
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(400, 300);
+    std::vector<QString> said;
+    view.onStatus = [&said](const QString& text) { said.push_back(text); };
+    paint(view);
+    const double ratio = view.devicePixelRatioF();
+    const QPointF cursor(200.0, 90.0);
+    const auto ground = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(ground.has_value());
+    const double depth = depthOf(state.camera, *ground);
+    ASSERT_GT(depth, 1e-4 * std::pow(kPerNotch, 100.0)) << "the limit comes within 100 notches";
+    ASSERT_LT(depth, 1e-4 * std::pow(kPerNotch, 130.0)) << "the limit is not reached in 130";
+    const auto limitSaid = [&said] {
+        return std::ranges::count_if(said, [](const QString& text) {
+            return text == QStringLiteral("3D view: zoomed in as far as it can be drawn exactly");
+        });
+    };
+    for (int notch = 0; notch < 100; ++notch) {
+        turnWheel(view, cursor, kNotch);
+    }
+    EXPECT_EQ(limitSaid(), 0) << "the view said it was held before it was";
+    for (int notch = 100; notch < 130; ++notch) {
+        turnWheel(view, cursor, kNotch);
+    }
+    EXPECT_GT(limitSaid(), 0) << "the zoom stopped without a word";
+    const auto under = groundUnder(state.camera, cursor, ratio);
+    ASSERT_TRUE(under.has_value());
+    EXPECT_NEAR(depthOf(state.camera, *under), 1e-4, 1e-6 * 1e-4);
+    // A notch out moves away from the limit and says nothing more.
+    const auto before = limitSaid();
+    turnWheel(view, cursor, -kNotch);
+    EXPECT_EQ(limitSaid(), before);
 }

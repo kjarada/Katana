@@ -321,7 +321,8 @@ renderLayers(SceneLayers& layers, katana::render::Camera& camera,
 
 // The box a frame's depth range is fitted to: every layer's (`bounds`) and
 // the grid's, which reaches past them. The one box renderLayers, the GPU
-// view's frame and the zoom's minimum approach (scene_zoom.hpp) all go by.
+// view's frame and origin, and how deep the zoom reaches off the model
+// (scene_zoom.hpp, zoomAnchor) all go by.
 [[nodiscard]] katana::math::AABB sceneDepthBox(const SceneLayers& layers);
 
 // The elevation ramp's colour at t in [0, 1] (clamped): what the legend of a

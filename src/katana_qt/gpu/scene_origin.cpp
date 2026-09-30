@@ -15,6 +15,17 @@ Vec3 chooseSceneOrigin(const katana::math::AABB& bounds)
     return bounds.center();
 }
 
+double originErrorPixels(const Camera& camera, const Vec3& origin)
+{
+    const double footprint = camera.worldPerPixel();
+    if (!(footprint > 0.0)) {
+        return 0.0;
+    }
+    constexpr double kFloatRoundoff = 0x1.0p-24;
+    constexpr double kRoundings = 10.0;
+    return kRoundings * kFloatRoundoff * (camera.target() - origin).length() / footprint;
+}
+
 Mat4 relativeViewMatrix(const Camera& camera, const Vec3& origin)
 {
     const Vec3 f = camera.forward();
