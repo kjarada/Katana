@@ -1827,13 +1827,13 @@ void PlanPainter::drawSelectionGhosts()
     for (const katana::entity::EntityId id : source_.selection->ids()) {
         const Entity* entity = model.entities.find(id);
         // A label is placed with the others and has no outline of its own.
-        if (entity == nullptr || !entity->visible ||
+        if (entity == nullptr ||
             std::holds_alternative<katana::entity::LabelGeometry>(entity->geometry)) {
             continue;
         }
         // Drawn here already (and highlighted), or hidden by the document -
         // which hides it in every view, ghost or not.
-        if (!frame_.layers->hides(entity->layer) || !model.layers.resolve(entity->layer).shown) {
+        if (!cad::isGhost(model, *entity, *frame_.layers)) {
             continue;
         }
         const auto& geometry = entity->geometry;

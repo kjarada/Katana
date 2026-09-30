@@ -82,6 +82,13 @@ class GripController {
     bool backspace();
     // Drops everything: a new drawing, a tool starting.
     void reset();
+    // The layers the view hides of its own (ViewState::layers), which
+    // outlive this: a selected entity on one of them offers no grip here
+    // (cad::gripsOfSelection) - it is a ghost in this view at most. Null,
+    // the default, is the document's rule alone. They change with no
+    // document notification, so refresh() compares them with what it last
+    // built from.
+    void setView(const katana::cad::LayerOverrides* view) { view_ = view; }
 
     // The grips, the drag's preview and its rubber band, onto `painter`
     // through `toScreen`; only grips inside `visible` (screen pixels).
@@ -100,6 +107,9 @@ class GripController {
     [[nodiscard]] bool isHot(const katana::cad::Grip& grip) const;
 
     katana::cad::Document& document_;
+    const katana::cad::LayerOverrides* view_ = nullptr;
+    // What view_ held when the grips were last built.
+    katana::cad::LayerOverrides builtFor_;
     std::uint64_t generation_ = ~std::uint64_t{0};
     std::vector<katana::cad::Grip> grips_;
     std::vector<katana::cad::Grip> hot_;

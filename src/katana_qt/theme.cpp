@@ -221,6 +221,10 @@ QString styleSheet()
            this one it took the frame away and a checked button looked like
            any other. */
         QToolButton[chrome="button"]:checked { background: %raised%; border: 1px solid %accent%; }
+        /* A Link waiting for a second view - a link of one, which moves
+           nothing yet - in a dashed frame: it looked exactly like a working
+           link, so the first of the two clicks looked like the last. */
+        QToolButton[chrome="button"][waiting="true"]:checked { border: 1px dashed %accent%; }
         QToolButton[chrome="button"]::menu-indicator { subcontrol-position: right center;
                                                        subcontrol-origin: padding; }
         QToolButton[filtered="true"] { border: 1px solid %accent%; }

@@ -148,8 +148,8 @@ ViewLayersPopup::ViewLayersPopup(ViewWorkspace& workspace, ViewId view, QWidget*
     ghosts_->setToolTip(
         "<b>Show the selection on hidden layers</b><br>A selected feature on a layer this "
         "view hides is drawn here faint and dotted, so a selection made in another view "
-        "shows where it is. It is never picked, snapped to or plotted here. VIEWS SET "
-        "&lt;id&gt; ghosts=on|off on the command line.");
+        "shows where it is. It is never picked, snapped to, given grips or plotted here. "
+        "VIEWS SET &lt;id&gt; ghosts=on|off on the command line.");
 
     referenceHeading_ = new QLabel("Reference data", this);
     referenceHeading_->setFont(bold);

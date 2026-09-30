@@ -398,8 +398,9 @@ ThinScreenLinesAction` turns it off for a screenshot.
 
 ### Ghosts of the selection
 
-A selected entity on a layer the document shows and the frame's layers hide
-(`PlanFrame::layers`) is drawn as a GHOST when `PlanPaintOptions::selectionGhosts`
+A selected entity the document draws and the frame's layers hide
+(`PlanFrame::layers`; `cad::isGhost`, the one rule every view asks) is drawn
+as a GHOST when `PlanPaintOptions::selectionGhosts`
 is on - the plan view sets it from its view's switch, `ViewState::selectionGhosts`;
 every other caller leaves it off and draws what it always drew, and a plot
 never draws one. A ghost is DOTS of the selection's orange at 60 % (alpha
@@ -412,8 +413,10 @@ over the selection's ids alone: O(selection), nothing with no selection,
 and no test added to the loop every entity passes. It is drawn into the
 kept drawing. `PlanPaintStats::ghostsDrawn` counts them apart from
 `entitiesDrawn`, which the tests use to prove a hidden layer is gone
-(`PlanPainter.ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost`, and none
-where the document hides the layer, on paper, or with the switch off). Why
+(`PlanPainter.ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost` - an
+80 px run, fourteen dots, exactly 28 lit pixels of row 50, each the ghost's
+colour, worked from `dotPath` - and none where the document hides the layer
+or the entity, on paper, or with the switch off). Why
 and how every view shows the selection: `docs/desktop.md`, "The selection
 in every view".
 

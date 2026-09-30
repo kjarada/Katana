@@ -1317,11 +1317,15 @@ std::size_t orangeInk(const QImage& image)
 
 TEST(PlanPainter, ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost)
 {
-    // The ghost pen: #FF9F1C at alpha 153, 2 px, dotted (selection_style.hpp).
-    // Over black a fully covered pixel is 153/255 of it: (153, 95.4, 16.8).
-    // A 2 px pen about row 50 covers rows 49 and 50 whole. Qt's dot is one
-    // pen width on and two off (QPen::dashPattern for Qt::DotLine is 1, 2),
-    // so a third of the 80 px run is lit: 26.7 px a row.
+    // The ghost: #FF9F1C at alpha 153, in 2 px square dots every 6 px from
+    // the line's start, not antialiased (selection_style.hpp;
+    // PlanPainter::dotPath). The 80 px run from column 10 has a dot at t = 0,
+    // 6 ... 78 along it, fourteen, and a dot about x covers columns x - 1 and
+    // x of rows 49 and 50 (as the long ghost's test below works out), so row
+    // 50 has 28 lit pixels - columns 9 and 10, then every 6 - and nothing
+    // between. Over black a covered pixel is 153/255 of the orange: (153,
+    // 95.4, 16.8), within 2 of that after the 8-bit premultiplied blend's
+    // rounding.
     GhostPlan plan;
     PlanPaintStats unselected;
     const QImage bare = plan.paint(unselected, false);
@@ -1335,20 +1339,23 @@ TEST(PlanPainter, ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost)
     EXPECT_EQ(orangeInk(bare), 0u);
     EXPECT_GT(orangeInk(ghosted), orangeInk(bare));
 
-    // Along row 50, the ink in units of a whole ghost pixel's red, 153: the
-    // length lit, whatever the antialiasing does at each dot's ends.
-    double lit = 0.0;
+    int lit = 0;
     int exact = 0;
     for (int x = 0; x < 100; ++x) {
         const QRgb c = ghosted.pixel(x, 50);
-        lit += qRed(c) / 153.0;
+        lit += qRed(c) > 0 ? 1 : 0;
         exact += std::abs(qRed(c) - 153) <= 2 && std::abs(qGreen(c) - 95) <= 2 &&
                          std::abs(qBlue(c) - 17) <= 2
                      ? 1
                      : 0;
     }
-    EXPECT_NEAR(lit, 80.0 / 3.0, 6.0) << "dotted: a third of the 80 px run";
-    EXPECT_GE(exact, 8) << "the selection colour at 60 % over black";
+    EXPECT_EQ(lit, 28) << "fourteen dots, 2 px each";
+    EXPECT_EQ(exact, 28) << "each the selection colour at 60 % over black";
+    for (int dot = 0; dot < 14; ++dot) {
+        const int x = 10 + 6 * dot;
+        EXPECT_GT(qRed(ghosted.pixel(x - 1, 50)), 0) << "dot " << dot;
+        EXPECT_GT(qRed(ghosted.pixel(x, 50)), 0) << "dot " << dot;
+    }
 }
 
 TEST(PlanPainter, NoGhostWhereTheDocumentHidesTheLayer)
@@ -1359,6 +1366,21 @@ TEST(PlanPainter, NoGhostWhereTheDocumentHidesTheLayer)
     katana::entity::Layer design = *plan.model.layers.find("design");
     design.visible = false;
     ASSERT_TRUE(plan.model.layers.update(design));
+    PlanPaintStats stats;
+    const QImage image = plan.paint(stats);
+    EXPECT_EQ(stats.ghostsDrawn, 0u);
+    EXPECT_EQ(orangeInk(image), 0u);
+}
+
+TEST(PlanPainter, NoGhostOfAnEntityMadeInvisible)
+{
+    // The same rule for the entity's own switch (cad::isGhost): invisible,
+    // it is hidden in every view, selected or not.
+    GhostPlan plan;
+    const katana::entity::EntityId id = plan.selection.ids().front();
+    katana::entity::Entity hidden = *plan.model.entities.find(id);
+    hidden.visible = false;
+    ASSERT_TRUE(plan.model.entities.replace(hidden).ok());
     PlanPaintStats stats;
     const QImage image = plan.paint(stats);
     EXPECT_EQ(stats.ghostsDrawn, 0u);

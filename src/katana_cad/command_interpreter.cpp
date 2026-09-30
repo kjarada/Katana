@@ -48,12 +48,7 @@ namespace ann = katana::cad::annotation;
 
 namespace {
 
-std::string upper(std::string text)
-{
-    std::transform(text.begin(), text.end(), text.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
-    return text;
-}
+using katana::core::uppered;
 
 // Splits on whitespace; double quotes group words and are removed. The
 // blanks are core::isAsciiSpace's, never the locale's: in a Latin-1 locale
@@ -399,7 +394,7 @@ std::string describe(const katana::entity::Model& model, const Entity& entity)
 katana::core::Result<katana::entity::PropertyValue> typedPropertyValue(const std::string& type,
                                                                       const std::string& text)
 {
-    const std::string wanted = upper(type);
+    const std::string wanted = uppered(type);
     if (wanted == "TEXT" || wanted == "STRING") {
         return katana::entity::PropertyValue(text);
     }
@@ -420,7 +415,7 @@ katana::core::Result<katana::entity::PropertyValue> typedPropertyValue(const std
         return katana::entity::PropertyValue(*number);
     }
     if (wanted == "BOOLEAN" || wanted == "BOOL") {
-        const std::string folded = upper(text);
+        const std::string folded = uppered(text);
         if (folded == "TRUE" || folded == "1") {
             return katana::entity::PropertyValue(true);
         }
@@ -435,7 +430,7 @@ katana::core::Result<katana::entity::PropertyValue> typedPropertyValue(const std
 
 katana::entity::PropertyValue parsePropertyValue(const std::string& text)
 {
-    const std::string folded = upper(text);
+    const std::string folded = uppered(text);
     if (folded == "TRUE") {
         return true;
     }
@@ -555,9 +550,10 @@ Views     the desktop window's views (katana_cli and katana_mcp have none, and r
           the layers that view hides of its own, as its Layers button sets them
           VIEWS SET id ghosts=on|off   whether that view shows the selection faintly where it
           hides the layer (on when a view opens)
-Zoom      ZOOM (Z)   the active view's extents | ZOOM EXTENTS | IN [f] | OUT [f] | f |
-          WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE pixels-per-unit]   [view=id]; IN and OUT
-          are by 2 about the view's centre; linked views follow every ZOOM
+Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTENTS (E, ALL,
+          A) | IN [f] | OUT [f] | f | fX | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE
+          pixels-per-unit]   [view=id]; IN and OUT are by 2 about the view's centre;
+          linked views follow every ZOOM
           ZOOM SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
           [WHERE k=v ...]   frames what the scope takes (matched=0: nothing moves)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM Z ?  LE MT TS LS
@@ -703,7 +699,7 @@ katana::core::Result<std::string> purgeTables(Document& document,
     if (args.size() > 1) {
         return usage(kPurgeUsage);
     }
-    const std::string what = args.empty() ? "ALL" : upper(args[0]);
+    const std::string what = args.empty() ? "ALL" : uppered(args[0]);
     PurgeOptions options;
     if (what == "STYLES") {
         options.linetypes = options.hatches = false;
@@ -751,7 +747,7 @@ bool CommandInterpreter::replacesDocument(std::string_view line)
     if (!tokens || tokens->empty()) {
         return false;
     }
-    std::string verb = upper(tokens->front());
+    std::string verb = uppered(tokens->front());
     if (const auto alias = aliases().find(verb); alias != aliases().end()) {
         verb = alias->second;
     }
@@ -770,9 +766,20 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     history_.emplace_back(line);
 
-    std::string verb = upper(tokens->front());
+    std::string verb = uppered(tokens->front());
+    // 'ZOOM and 'Z, AutoCAD's transparent form, typed with no tool running:
+    // the verb itself, as AutoCAD takes it at its prompt (a running tool is
+    // handed it first, tools::isTransparentCommand). Only the view verbs
+    // have one; any other word after an apostrophe stays unknown.
+    const bool apostrophe = verb.size() > 1 && verb.front() == '\'';
+    if (apostrophe) {
+        verb.erase(0, 1);
+    }
     if (const auto alias = aliases().find(verb); alias != aliases().end()) {
         verb = alias->second;
+    }
+    if (apostrophe && !isViewVerb(verb)) {
+        return makeError(ErrorCode::ParseFailure, "unknown command; type HELP", tokens->front());
     }
     const Tokens args(tokens->begin() + 1, tokens->end());
 
@@ -881,7 +888,7 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
 CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
 {
     const auto& model = document_.model();
-    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const std::string action = args.empty() ? "LIST" : uppered(args[0]);
 
     if (action == "LIST") {
         std::ostringstream out;
@@ -1002,7 +1009,7 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
     // field and its value were taken. Shared by SET and by NEW with a field,
     // so a new style and an edited one read a field the same way.
     const auto setField = [&](katana::entity::Style& changed) -> std::optional<Reply> {
-        const std::string field = upper(args[2]);
+        const std::string field = uppered(args[2]);
         const std::string& value = args[3];
         // A field whose value is one word takes one: STYLE NEW a colour #F00
         // weight 0.5 made the style, said so, and dropped the weight. The
@@ -1034,7 +1041,7 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
             }
             changed.lineWeight = *weight;
         } else if (field == "COLOUR" || field == "COLOR") {
-            if (upper(value) == "BYLAYER") {
+            if (uppered(value) == "BYLAYER") {
                 changed.color.reset();
             } else {
                 const auto colour = katana::entity::Color::fromHex(value);
@@ -1099,7 +1106,7 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
             static constexpr std::string_view kFields[] = {
                 "LINETYPE", "WEIGHT", "COLOUR", "COLOR", "HATCH", "SYMBOL", "SYMBOLSIZE",
                 "DESCRIPTION"};
-            const std::string field = upper(args[2]);
+            const std::string field = uppered(args[2]);
             if (std::find(std::begin(kFields), std::end(kFields), field) == std::end(kFields)) {
                 if (const auto wrong = wants(2)) {
                     return *wrong;
@@ -1378,7 +1385,7 @@ CommandInterpreter::Reply CommandInterpreter::transform(const std::string& verb,
                             count + " scaled");
     }
     if (verb == "MIRROR") {
-        if (args.size() < 2 || args.size() > 3 || (args.size() == 3 && upper(args[2]) != "KEEP")) {
+        if (args.size() < 2 || args.size() > 3 || (args.size() == 3 && uppered(args[2]) != "KEEP")) {
             return usage("MIRROR p p [KEEP]");
         }
         const auto a = parsePoint(args[0]);
@@ -1519,7 +1526,7 @@ CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
         return usage("SELECT ALL | NONE | id... | LAYER name | TYPE name");
     }
     const auto& model = document_.model();
-    const std::string mode = upper(args[0]);
+    const std::string mode = uppered(args[0]);
     std::vector<EntityId> ids;
 
     const auto collect = [&](const SelectionFilter& filter) {
@@ -1582,7 +1589,7 @@ CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
 CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
 {
     const auto& model = document_.model();
-    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const std::string action = args.empty() ? "LIST" : uppered(args[0]);
 
     if (action == "LIST") {
         std::ostringstream out;
@@ -1677,7 +1684,7 @@ CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
 CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
 {
     const auto& model = document_.model();
-    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const std::string action = args.empty() ? "LIST" : uppered(args[0]);
 
     if (action == "LIST") {
         std::ostringstream out;
@@ -1778,7 +1785,7 @@ CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
         // offset where a family of that position remains, since none can be
         // typed and an imported pattern's would otherwise be lost to an edit
         // of its spacing.
-        const bool toSolid = args.size() == 3 && upper(args[2]) == "SOLID";
+        const bool toSolid = args.size() == 3 && uppered(args[2]) == "SOLID";
         if (!toSolid && (args.size() < 4 || (args.size() - 2) % 2 != 0)) {
             return usage("HATCH SET name angle spacing [angle spacing ...] | HATCH SET name SOLID"
                          "\n  angle in DEGREES, spacing in MODEL units");
@@ -1826,7 +1833,7 @@ CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
 CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
 {
     const auto& model = document_.model();
-    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const std::string action = args.empty() ? "LIST" : uppered(args[0]);
     const char* const kUsage =
         "ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spiralIn [spiralOut]]]"
         "\n      | SET name index radius [spiralIn [spiralOut]] | START name station"
@@ -2122,7 +2129,7 @@ CommandInterpreter::Reply CommandInterpreter::coordinateSystem(const Tokens& arg
         }
         return text;
     };
-    const std::string action = args.empty() ? std::string("SHOW") : upper(args[0]);
+    const std::string action = args.empty() ? std::string("SHOW") : uppered(args[0]);
     if (action == "SHOW" || action == "INFO") {
         return describeLine(document_.metadata().coordinateSystem);
     }
@@ -2212,7 +2219,7 @@ CommandInterpreter::Reply CommandInterpreter::parcel(const Tokens& args)
     if (!report) {
         return report.error();
     }
-    const std::string action = args.size() > 1 ? upper(args[1]) : "REPORT";
+    const std::string action = args.size() > 1 ? uppered(args[1]) : "REPORT";
 
     if (action == "LEGAL") {
         const std::string name = args.size() > 2 ? args[2] : "Parcel " + args[0];
@@ -2364,7 +2371,7 @@ CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
         "LINETYPE LIST | NEW name dash gap [dash gap ...] | RENAME old new | DELETE name |"
         " MERGE from into";
     const auto& model = document_.model();
-    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const std::string action = args.empty() ? "LIST" : uppered(args[0]);
 
     if (action == "LIST") {
         std::ostringstream out;
@@ -2448,7 +2455,7 @@ CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
 CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)
 {
     const auto& model = document_.model();
-    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const std::string action = args.empty() ? "LIST" : uppered(args[0]);
 
     if (action == "LIST") {
         std::ostringstream out;
@@ -2576,7 +2583,7 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
     // PROP TREE reads, and takes a scope as every reading verb does
     // (property_outline.hpp), so it is answered before the selection is
     // required: PROP TREE DRAWING needs none.
-    if (verb == "PROP" && !args.empty() && upper(args[0]) == "TREE") {
+    if (verb == "PROP" && !args.empty() && uppered(args[0]) == "TREE") {
         return propertyTreeReply(document_, Tokens(args.begin() + 1, args.end()), scopeViews_);
     }
     if (auto selected = requireSelection(); !selected) {
@@ -2597,7 +2604,7 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
             return usage("COLOR #RRGGBB | BYLAYER");
         }
         std::optional<katana::entity::Color> color;
-        if (upper(args[0]) != "BYLAYER") {
+        if (uppered(args[0]) != "BYLAYER") {
             const auto parsed = katana::entity::Color::fromHex(args[0]);
             if (!parsed) {
                 return parsed.error();
@@ -2612,7 +2619,7 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
     static constexpr const char* kPropUsage =
         "PROP LIST | SET key value [text|integer|real|boolean] | DELETE key | RENAME old new | "
         "TREE [scope] [UNDER path] [FROM n] [LIMIT n]";
-    const std::string action = args.empty() ? std::string("LIST") : upper(args[0]);
+    const std::string action = args.empty() ? std::string("LIST") : uppered(args[0]);
 
     if (action == "LIST") {
         std::ostringstream out;
@@ -2679,7 +2686,7 @@ constexpr const char* kModifyUsage =
 
 Result<bool> parseYesNo(const std::string& text)
 {
-    const std::string folded = upper(text);
+    const std::string folded = uppered(text);
     if (folded == "YES" || folded == "ON" || folded == "TRUE" || folded == "1") {
         return true;
     }
@@ -2695,7 +2702,7 @@ Status parseSetWord(const std::string& word, GlobalModify& change)
     if (equals == std::string::npos) {
         return makeError(ErrorCode::ParseFailure, "a SET field is key=value", word);
     }
-    const std::string key = upper(word.substr(0, equals));
+    const std::string key = uppered(word.substr(0, equals));
     const std::string value = word.substr(equals + 1);
     const auto number = [&]() { return parseNumber(value); };
 
@@ -2711,7 +2718,7 @@ Status parseSetWord(const std::string& word, GlobalModify& change)
         }
         entities.colour = *colour;
     } else if (key == "STYLE") {
-        entities.style = upper(value) == "BYLAYER" ? std::string() : value;
+        entities.style = uppered(value) == "BYLAYER" ? std::string() : value;
     } else if (key == "VISIBLE") {
         auto on = parseYesNo(value);
         if (!on) {
@@ -2818,7 +2825,7 @@ CommandInterpreter::Reply CommandInterpreter::modify(const Tokens& args)
     std::optional<std::size_t> firstWhere; // where in `scope` the filter began
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string& word = args[i];
-        const std::string folded = upper(word);
+        const std::string folded = uppered(word);
         if (folded == "PREVIEW") {
             preview = true;
             continue;
@@ -2956,7 +2963,7 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
         if (args.empty()) {
             return formatStatus(documentStatus(document_));
         }
-        if (args.size() == 1 && upper(args[0]) == "JSON") {
+        if (args.size() == 1 && uppered(args[0]) == "JSON") {
             return statusJson(documentStatus(document_));
         }
         return usage("STATUS [JSON]");

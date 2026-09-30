@@ -497,7 +497,10 @@ as-built layers beside an as-built view hiding the design ones
 (`qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless`).
 Not done: the popup's rows still edit the view's state directly rather than
 run those lines, and a view's hidden reference layers have no line, since
-cad cannot name a reference layer.
+cad cannot name a reference layer. The rows wait on the verb, not only on
+the wiring: `VIEWS HIDE` reads a comma as the break between two layers, and
+a layer's name may hold one, so a line cannot yet name every layer the popup
+can - the verb needs a quoted name that is one layer whatever it holds first.
 
 ### Linked views: a design view and an as-built view that move together
 
@@ -525,7 +528,14 @@ whenever it is resized until the user moves it, which in a linked view would
 change its scale behind the link's back, so every member forgets its frame
 when the link moves it or it moves the link. Resizing a dock never breaks the
 link (`ViewLinks.ALinkedViewKeepsTheLinksViewWhenResized`, shown failing with
-`holdView` emptied).
+`holdView` emptied). Each move has its test through the widget, shown failing
+with its hook taken out: the wheel's, a middle-drag pan's - the other view
+bit for bit where it was worked by hand, and reporting nothing itself
+(`ViewLinks.APanInALinkedViewMovesTheOtherBitForBitAndTheOtherNeverReportsIt`)
+- and the first paint's, where a view linked before it was ever seen, and
+named the one the others come to, moves nobody until its first paint frames
+the drawing, and then leads
+(`ViewLinks.AViewLinkedBeforeItWasEverSeenLeadsFromItsFirstPaint`).
 
 **Who comes to whom when views are linked.** `VIEWS LINK ids TO id` brings
 the others to TO; without TO the joining views come to the link (its lowest
@@ -538,9 +548,11 @@ made (`ViewSet.AJoiningViewComesToTheViewTheUserMovedLast`). Rejected:
 "the joining view always follows", which loses that zoom whenever the view
 zoomed is clicked second; and one click linking to an implicit "previous"
 view, which surprises with three views open. The first click makes a link of
-one, which waits for the second ("Linked, waiting"); an unlink, a close or a
-change of kind that leaves one member dissolves the link, and none of them
-moves a view.
+one, which waits for the second ("Linked, waiting"), in a DASHED accent
+frame: in the solid frame of a working link it looked finished, and the
+second click was not made (`Theme.ALinkWaitingForASecondViewIsFramedDashedNotSolid`);
+an unlink, a close or a change of kind that leaves one member dissolves the
+link, and none of them moves a view.
 
 **Zoom Extents on every view** (`zoomExtentsAll`, after New, Open and an
 import) and `ViewWorkspace::zoomTo` frame the link ONCE, in the member moved
@@ -579,34 +591,67 @@ view=<id>`, `ZOOM SELECTION view=<id>`, `ZOOM EXTENTS view=<id>` - so a
 click is logged, the views linked with it follow, and Zoom to Selection with
 nothing selected says `matched=0` and moves nothing. A button the view's
 kind would refuse is not offered: the bar shows what ZOOM takes there, and
-follows the view's kind. The View menu has the same four for the active
-view (`viewZoomIn`, `viewZoomOut`, `viewZoomSelection`, and Zoom Extents,
-which now runs `ZOOM EXTENTS` too) and Zoom To (below).
+follows the view's kind, by ZOOM's own rule (`cad::zoomTakes`). The View
+menu has the same four for the active view (`viewZoomIn`, `viewZoomOut`,
+`viewZoomSelection`, and Zoom Extents, which now runs `ZOOM EXTENTS` too),
+enabled by the same rule for the active view's kind - a 3D view's Zoom In
+was offered and only refused
+(`qt_the_view_menus_zoom_in_is_disabled_for_a_3d_view_headless`) - and Zoom
+To (below).
 
 In, Out and Zoom to Selection are OPTIONAL tools (`DockTitleBar::addTool`
 with a priority): a bar shows them, highest priority first, only while they
-fit and leave the title `DockTitleBar::kTitleRoom` (56 px, "Plan 1" and a
-little over); tools of one priority come and go together. Zoom to Selection
-(2) outlasts In and Out (1), which the wheel does as well. They are never in
-the bar's least width (`DockTitleBar::minimumSizeHint` leaves them out: Qt
-asks a child's hint rather than taking its layout's minimum), so a view can
-always be narrowed past them - each tool always shown costs 23 px of the
-least width, and three more would have stopped a Quad view's bars from
-narrowing to their docks. No overflow menu: every optional tool is in the
-View menu too, and a menu opened from a title bar is a modal loop a headless
-press would wait in (`ViewChrome.TheTitleBarShowsOptionalToolsOnlyWhereTheyFitAndNoTwoOverlap`,
+fit and leave the title the room to be read whole - its text's width and
+`DockTitleBar::kTitleGap` (6 px, the gap before the window buttons), never
+more than `kTitleRoom` (56 px); tools of one priority come and go together.
+Zoom to Selection (2) outlasts In and Out (1), which the wheel does as well.
+A flat 56 px left "Plan 1" a 69 px gap at the owner's two-up width, where In
+and Out needed 46, so both bars lost them; room by the title's own width
+fits all six there. They are never in the bar's least width
+(`DockTitleBar::minimumSizeHint` leaves them out: Qt asks a child's hint
+rather than taking its layout's minimum), so a view can always be narrowed
+past them - each tool always shown costs 23 px of the least width, and three
+more would have stopped a Quad view's bars from narrowing to their docks. No
+overflow menu: every optional tool is in the View menu too, and a menu opened
+from a title bar is a modal loop a headless press would wait in
+(`ViewChrome.TheTitleBarShowsOptionalToolsOnlyWhereTheyFitAndNoTwoOverlap`,
 `ViewChrome.OptionalToolsNeverWidenTheDocksMinimum`).
+
+**A bar is measured afresh after every change of its tools.** Hiding a widget
+invalidates its parent's layout - the bar's own row - and not the tools' row
+nested in it, which went on counting a tool just hidden until the bar's next
+activation. Two things read that stale count. The fit itself: a 3D view
+turned plan wanted In, Out and Selection one after another, found In hidden
+but counted, left no room for Selection, and nothing refitted a bar whose
+size had not changed - a mouse user's only route to two plan views showed
+three tools where a plan opened at that width showed four
+(`ViewChrome.AViewTurnedIntoAPlanShowsTheToolsAPlanOpenedAtItsWidthShows`).
+And the dock, which asks the bar's least width as it lays views out: a view
+split just after its bar dropped tools kept a least width that counted them,
+308 px of a 554 px row where half was 277, and the Quad layout took 34 and
+33 px from the side panels for it
+(`ViewChrome.OpeningAViewSplitsItIntoEqualHalvesWhateverToolsItsBarShows`,
+`ViewChrome.QuadPutsTheViewsInQuartersWhateverToolsTheirBarsShow`). So
+`DockTitleBar::fitOptionalTools` marks both rows to be measured again before
+it measures and again after it shows and hides
+(`DockTitleBar::remeasure`). Measured after, in the 1360 px window, the
+Quad layout's side panels are 11 and 10 px narrower than before the link
+existed - the Link button's 23 px of the plan dock's least width, which
+QDockWidget takes as the dock's own hint where it exceeds the content's -
+where they were 34 and 33 px narrower.
 
 **Zoom To** (View > Zoom To, `zoomToDialog`) frames what a scope takes - the
 shared "Apply to" and "Only those that match" (`ScopeFilterWidget`, prefix
 `zoomTo`) - in a chosen view (`zoomToView`: the active view, then every open
-view by its title and id). It builds `ZOOM <scope words> [view=<id>]`
+plan view by its title and id - the kinds that frame a scope, by
+`cad::zoomTakes`; a 3D view or a section was offered and ZOOM refused it). It builds `ZOOM <scope words> [view=<id>]`
 (`zoomToLine` shows it as the controls change), runs it through the command
 runner (`zoomToRun`) and shows ZOOM's answer (`zoomToStatus`). Non-modal and
 kept, as Select by ID is (`qt_zoom_to_dialog_runs_its_line_headless`).
 
 **ZOOM typed while a tool runs** - Z, ZOOM, 'ZOOM, 'Z and whatever follows -
-is the view's, not the tool's, as AutoCAD resumes LINE after 'ZOOM: the tool
+is the view's, not the tool's, as AutoCAD resumes LINE after 'ZOOM (and
+'ZOOM with no tool running is ZOOM, as at AutoCAD's prompt): the tool
 host hands it to the workspace (`ToolHost::onTransparent`), which runs it as
 its ZOOM line through the command runner, and the tool stays at its step
 with its prompt (`ViewLinks.ATransparentZoomTypedInsideLineZoomsAndLeavesLineAtItsStep`).
@@ -636,16 +681,18 @@ model changes cheaply when groups are asked for.
 
 **Not done.** Only plan views link: a 3D or elevation view needs its camera
 in logical pixels first (the software view counts device pixels, the GPU
-view logical ones), a section its pan and zoom in `ViewState`. Grips are
-still shown on a selected entity that a view hides (`gripsOfSelection` takes
-no view layers). The link is not kept between sessions, as the workspace is
-not. A 3D or elevation view's bar has no Zoom In, Out or Selection yet, and
-ZOOM IN on one is refused naming its kind: its zoom is to go towards what is
-drawn at the centre, through the 3D wheel's own zoom towards the cursor
-(built on another branch; once merged, the workspace's `zoomView` hands IN
-and OUT to it at the centre pixel, and the verb's rule of which kinds take
-which zoom lets them through), and framing what a scope takes in 3D needs
-the scene to draw a set of ids.
+view logical ones), a section its pan and zoom in `ViewState`. The link is
+not kept between sessions, as the workspace is not. A 3D or elevation view's
+bar has no Zoom In, Out or Selection yet, and ZOOM IN on one is refused
+naming its kind: its zoom is to go towards what is drawn at the centre,
+through the 3D wheel's own zoom towards the cursor (built on another branch;
+once merged, the workspace's `zoomView` hands IN and OUT to it at the centre
+pixel, and widening `cad::zoomTakes` lets them through - the bar, the View
+menu and Zoom To follow that one rule), and framing what a scope takes in 3D
+needs the scene to draw a set of ids. A checked Link and a Layers button
+that filters wear the same accent frame side by side, and the unlinked chain
+is the faintest icon on the bar; a look of their own for each is polish not
+yet done.
 
 ### The selection in every view
 
@@ -662,8 +709,8 @@ view:
   section draws the selected entity's crossing solid, 2 px, in the orange,
   with a dot at its level, where the other crossings are 1 px red dashes.
 - **Selected, on a layer the drawing shows and the view hides: a ghost** -
-  drawn faint, and never picked, snapped to or plotted there
-  (`ViewLayerRule.AGhostIsNeitherPickedNorSnappedTo`). A feature selected in
+  drawn faint, and never picked, snapped to, given grips or plotted there
+  (`ViewLayerRule.AGhostIsNeitherPickedNorSnappedToNorGivenGrips`). A feature selected in
   the design view shows where it is in the as-built view that hides the
   design layers. In plan it is DOTS of the orange at 60 % (alpha 153), 2 px
   square and 6 px apart, where a selection is dashed, with no fill, hatch,
@@ -676,7 +723,39 @@ view:
   with no casing. In a section it is the crossing, 1 px, dotted, at 60 %.
 - **A layer the drawing hides stays hidden everywhere.** A ghost says
   "selected, but hidden in this view", never "selected, though switched
-  off".
+  off" - nor an entity made invisible.
+
+**One rule, beside the drawn rule.** `cad::isGhost(model, entity, view)`
+(`selection.hpp`) is true where `view` alone hides an entity the document
+draws; the plan painter, the 3D scene and a section ask it and nothing else.
+It was written three ways - the scene's by `isDrawn`, the painter's inline,
+the section's a third way that read the layer the cut found and never the
+entity - and the copies had drifted: a selected entity made invisible, or
+its layer switched off in the drawing, went on being marked in a section,
+as selected or as a ghost, where plan and 3D drew nothing
+(`ViewSelection.ASelectedFeatureTheDrawingHidesIsMarkedInNoView`). A
+section now reads the crossing's entity as it is now; a crossing whose
+entity the drawing hides keeps the plain dashed line every crossing had
+before a section knew of the selection. Its surfaces' palette has no orange
+any more: the second colour, the usual design surface's, was CIE76 22.9 from
+the selection's - nearer than the BOUNDARY yellow that had the 3D selection
+recoloured - and a selected crossing's dot sat among that surface's orange
+vertex dots; the nearest is now the yellow, 50.9.
+
+**No grip on a ghost.** A view offers grips only on what it draws:
+`cad::gripsOfSelection` takes the view's `LayerOverrides`, with no default,
+as `isSelectable` does, and the plan view's grip controller follows the
+view's layers, which change with no document notification (it compares them
+with those it last built from). Before, every grip of a selected entity was
+drawn in a view that hid its layer, and could be dragged: in the owner's
+case - a design line and an as-built line that cross - a drag from the
+crossing in the as-built view moved the design line that view does not show
+(`ViewSelection.AGhostOffersNoGripSoADragWhereItCrossesTheAsBuiltLineEditsNothing`,
+`GripCommands.AViewOffersNoGripOnWhatItHidesAndTheOthersKeepTheirs`). A
+headless run reads what a plan view drew, ghosts and grips among it
+(`?PlanView2`, `docs/headless.md`), so the check that a view with its ghosts
+off shows no trace of the selection looks at the drawing, not only at the
+view's record (`qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless`).
 
 One colour and every size are in `include/katana/cad/selection_style.hpp`,
 each with its reason. The 3D selection was (255, 190, 60), beside the
@@ -689,7 +768,12 @@ items, not entities.
 (`ViewLayersShowSelection`) in the view's Layers popup, beside the layer
 filter it belongs with, and `VIEWS SET <id> ghosts=on|off`, which the box
 runs through the command runner, so a click is logged as its line
-(`ViewSelection.TheLayersPopupsBoxRunsViewsSetThroughTheRunner`). VIEWS
+(`ViewSelection.TheLayersPopupsBoxRunsViewsSetThroughTheRunner`,
+`qt_the_layers_popups_box_turns_a_views_ghosts_off_headless`). View > Show
+the Selection on Hidden Layers (`viewSelectionGhosts`; D, every other letter
+of it being taken in the View menu) is the active view's switch by the same
+line, checked from the view as the active view or its settings change
+(`qt_the_view_menu_turns_the_active_views_ghosts_off_headless`). VIEWS
 reports it in every record, `ghosts=on|off` (`docs/cad.md`, "The window's
 views"). Not a bar button: every tool always on the bar costs 23 px of every
 view's least width.
@@ -720,11 +804,29 @@ apart from every layer colour); the ghost switch on the view's bar (the width
 above); the casing by draw order in one list (the GPU's pull decides, not
 the order).
 
-Not done: grips are still drawn, and can be dragged, on a ghost - as on any
-selected entity on a layer its view hides, because `gripsOfSelection` takes
-no view layers; it is to take the view's `LayerOverrides` with no default,
-as `isDrawn` does. A selected line buried under the ground in 3D is hidden
-by it, as any line is; an x-ray pass over everything is the next step.
+Not done:
+
+- A selected line buried under the ground in 3D is hidden by it, as any line
+  is; an x-ray pass over everything is the next step.
+- The 3D ghost's (130, 88, 32) was mixed for the empty ground and reads as a
+  brown terrain line over the elevation ramp (median contrast 2.37:1 with the
+  ground under it, measured by the review); plan and section ghosts are
+  dotted orange. A dotted ghost in 3D needs the scene to dash an overlay
+  line, which it does not yet.
+- With many entities selected at an overview scale, the 3 px core over the
+  5 px casing merges parallel features a few metres apart into one orange
+  mass in 3D and elevation; a thinner casing past a count or below a scale
+  is not done.
+- A section's legend is drawn over a selected crossing with no backing.
+- A section draws a crossing whose entity the drawing hides (switched off
+  after the cut) as a plain dashed line; only the selection's marks follow
+  the drawing's rule, since the crossings are the cut's.
+- `VIEWS SET <3d id> ghosts=...` rebuilds the 3D view's terrain as well as
+  its overlay (`ViewWorkspace::viewSettingsChanged` calls
+  `RenderViewWidget::invalidateScene`, one scene build, 60 to 115 ms on the
+  229k-triangle benchmark surface), though only the overlay reads the switch.
+  Narrowing it belongs with the render view's rework on the 3D zoom branch,
+  where the change would otherwise conflict.
 
 ### The dock chrome: one title bar for panels and views
 

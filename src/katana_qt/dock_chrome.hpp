@@ -99,12 +99,18 @@ class DockTitleBar final : public QWidget {
 
     // A tool shown whatever the bar's width.
     static constexpr int kAlways = std::numeric_limits<int>::max();
-    // What an optional tool leaves the title at the least: enough for "Plan 1"
-    // and a little over, so a narrow view keeps its name before its extras.
+    // What an optional tool leaves the title: room to read it whole - its
+    // text's width and kTitleGap after it - and never more than kTitleRoom,
+    // so a narrow view keeps its name before its extras and a long name does
+    // not crowd them all out. A flat 56 px left a 69 px gap beside "Plan 1"
+    // at the owner's two-up width, where Zoom In and Out needed 46.
     static constexpr int kTitleRoom = 56;
+    // Between the title's text and the first tool: the 6 px the bar leaves
+    // between its tools and the window buttons, so the three read as apart.
+    static constexpr int kTitleGap = 6;
     // Adds `widget` to the slot between the title and the window buttons, in
     // the order added. With a `priority` below kAlways the tool is OPTIONAL:
-    // shown only while it fits with kTitleRoom left for the title, the
+    // shown only while it fits with the title's room left for it, the
     // highest priority first - tools of one priority come and go together -
     // and never counted in the bar's least width, so it never stops a view
     // being narrowed. Every optional tool is also in a menu: nothing is lost
@@ -115,8 +121,6 @@ class DockTitleBar final : public QWidget {
     // a view's zoom tools where its kind has none. An optional tool that is
     // wanted is still shown only where it fits.
     void setToolWanted(QWidget* widget, bool wanted);
-    // Hidden for want of room, and wanted. False for any other tool.
-    [[nodiscard]] bool toolCrowdedOut(const QWidget* widget) const;
 
     // The least width the always-shown tools, the window buttons and the
     // title's least need: an optional tool is never in it.
@@ -170,6 +174,10 @@ class DockTitleBar final : public QWidget {
     // Shows the optional tools that fit, highest priority first, and hides
     // the rest: at every resize and whenever a tool is added or wanted.
     void fitOptionalTools();
+    // Marks both rows of the bar to be measured again (the bar's, and the
+    // tools' nested in it), so that the next minimumSizeHint counts only the
+    // tools shown now.
+    void remeasure();
     // The width the shown optional tools take in the tools' row, their
     // spacing with them.
     [[nodiscard]] int optionalWidth() const;

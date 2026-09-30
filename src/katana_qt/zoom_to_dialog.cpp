@@ -79,6 +79,11 @@ void ZoomToDialog::refresh()
     view_->addItem(QStringLiteral("Active view"), 0U);
     if (context_.views != nullptr) {
         for (const katana::cad::ViewState* state : context_.views->viewSet().views()) {
+            // Only the views that frame a scope (cad::zoomTakes): ZOOM would
+            // refuse the rest by their kind.
+            if (!katana::cad::zoomTakes(state->kind, katana::cad::ZoomRequest::Kind::Scope)) {
+                continue;
+            }
             view_->addItem(QStringLiteral("%1 (view %2)")
                                .arg(QString::fromStdString(katana::cad::ViewSet::title(*state)))
                                .arg(state->id),

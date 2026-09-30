@@ -76,12 +76,18 @@ struct Grip {
 // middles, and so on), each with its position.
 [[nodiscard]] std::vector<Grip> gripsOf(const katana::entity::Entity& entity);
 
-// The grips of every entity in `ids` that the drawing can edit (drawn, on an
-// unlocked layer), capped at `limit` in all: a selection of every entity of
-// a large survey would otherwise draw a million squares - past the cap the
-// view shows none, as CAD programs do past their grip limit.
+// The grips of every entity in `ids` that `view` lets be edited (drawn there,
+// on an unlocked layer: isSelectable), capped at `limit` in all: a selection
+// of every entity of a large survey would otherwise draw a million squares -
+// past the cap the view shows none, as CAD programs do past their grip limit.
+// A selected entity on a layer `view` hides offers no grip there: that view
+// shows it as a ghost at most (docs/desktop.md, "The selection in every
+// view"), which is never picked - a grip on it dragged a design line from the
+// as-built view that hid it. `view` has no default, as isSelectable's has
+// none: kNoLayerOverrides (selection.hpp) for the document's rule alone.
 [[nodiscard]] std::vector<Grip> gripsOfSelection(const Document& document,
                                                  const std::vector<katana::entity::EntityId>& ids,
+                                                 const LayerOverrides& view,
                                                  std::size_t limit = 20000);
 
 // The grip within `aperture` of `at`, nearest first; nullopt when none.

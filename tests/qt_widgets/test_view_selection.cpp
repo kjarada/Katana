@@ -15,6 +15,7 @@
 
 #include <QCheckBox>
 #include <QMainWindow>
+#include <QMouseEvent>
 
 #include "command_runner.hpp"
 #include "dock_chrome.hpp"
@@ -233,6 +234,122 @@ TEST(ViewSelection, ASectionMarksTheCrossingOfTheFeatureSelectedInPlan)
     w.document.notifySelectionChanged();
     paint(*view);
     EXPECT_EQ(view->lastGhostCrossingCount(), 0u);
+}
+
+TEST(ViewSelection, ASelectedFeatureTheDrawingHidesIsMarkedInNoView)
+{
+    // One rule for every view (cad::isGhost beside cad::isDrawn): an entity
+    // the drawing hides - made invisible, or its layer switched off - stays
+    // hidden in every view, selected or not. The section asked a rule of its
+    // own, which read the layer the cut found and not the entity, and went on
+    // marking such a crossing as selected, or as a ghost.
+    DesignAndAsBuilt w;
+    katana::geometry::Polyline2 cut;
+    cut.vertices = {Point2(0, 20), Point2(50, 20)};
+    auto cutSection = katana::cad::extractSection(cut, {}, &w.document.model());
+    ASSERT_TRUE(cutSection.ok());
+    ASSERT_TRUE(w.views->showSection(std::move(*cutSection)));
+    processEvents();
+    const ViewId id = w.views->viewSet().views().back()->id;
+    auto* section = w.views->sectionView(id);
+    ASSERT_NE(section, nullptr);
+    auto& asBuilt = *w.views->planView(2);
+    paint(*section);
+    paint(asBuilt);
+    ASSERT_EQ(section->lastSelectedCrossingCount(), 1u);
+    ASSERT_EQ(asBuilt.lastGhostCount(), 1u);
+
+    // The design line made invisible, and selected still.
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::setEntityVisible({w.design}, false)).ok());
+    ASSERT_TRUE(w.document.selection().contains(w.design));
+    paint(*section);
+    paint(asBuilt);
+    EXPECT_EQ(section->lastSelectedCrossingCount(), 0u);
+    EXPECT_EQ(section->lastGhostCrossingCount(), 0u);
+    EXPECT_EQ(asBuilt.lastGhostCount(), 0u);
+    // Nor a ghost in a section that hides its layer.
+    w.run("VIEWS HIDE " + std::to_string(id) + " design");
+    paint(*section);
+    EXPECT_EQ(section->lastGhostCrossingCount(), 0u);
+    w.run("VIEWS SHOW " + std::to_string(id) + " ALL");
+
+    // Visible again; then its layer switched off in the drawing.
+    ASSERT_TRUE(w.document.undo().ok());
+    paint(*section);
+    ASSERT_EQ(section->lastSelectedCrossingCount(), 1u);
+    w.run("LAYER HIDE design");
+    ASSERT_TRUE(w.document.selection().contains(w.design));
+    paint(*section);
+    paint(asBuilt);
+    EXPECT_EQ(section->lastSelectedCrossingCount(), 0u);
+    EXPECT_EQ(section->lastGhostCrossingCount(), 0u);
+    EXPECT_EQ(asBuilt.lastGhostCount(), 0u);
+}
+
+namespace {
+
+// A mouse event as Qt delivers one to `widget`: `button` pressed, the mouse
+// moved with it held, or `button` released.
+void mouse(QWidget& widget, QEvent::Type type, QPointF at, Qt::MouseButton button)
+{
+    const Qt::MouseButtons held =
+        type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::MouseButtons(button);
+    QMouseEvent event(type, at, widget.mapToGlobal(at),
+                      type == QEvent::MouseMove ? Qt::NoButton : button, held, Qt::NoModifier);
+    QCoreApplication::sendEvent(&widget, &event);
+}
+
+// Presses on `from`, moves in four steps to `to` and lets go.
+void drag(QWidget& widget, QPointF from, QPointF to)
+{
+    mouse(widget, QEvent::MouseButtonPress, from, Qt::LeftButton);
+    for (int step = 1; step <= 4; ++step) {
+        mouse(widget, QEvent::MouseMove, from + (to - from) * (step / 4.0), Qt::LeftButton);
+    }
+    mouse(widget, QEvent::MouseButtonRelease, to, Qt::LeftButton);
+}
+
+} // namespace
+
+TEST(ViewSelection, AGhostOffersNoGripSoADragWhereItCrossesTheAsBuiltLineEditsNothing)
+{
+    // Where the two lines cross, (25, 20), both have their middles; the
+    // design line, selected, offers its grips in the design view. The
+    // as-built view hides its layer and showed its grips all the same: a
+    // drag there from the crossing moved the design line that view does not
+    // show (40 px right took it to (15.93, 10)-(45.93, 30)). It offers none
+    // of them now - a ghost is never picked - and follows its own layers,
+    // which change with no document notification.
+    DesignAndAsBuilt w;
+    w.run("ZOOM WINDOW 0,0,50,40 view=2");
+    auto& design = *w.views->planView(1);
+    auto& asBuilt = *w.views->planView(2);
+    paint(design);
+    paint(asBuilt);
+    EXPECT_EQ(design.gripCount(), 3u) << "the design line's two ends and middle";
+    EXPECT_EQ(asBuilt.gripCount(), 0u);
+    EXPECT_EQ(asBuilt.lastGhostCount(), 1u) << "drawn as a ghost there, all the same";
+
+    w.run("VIEWS SHOW 2 design");
+    paint(asBuilt);
+    EXPECT_EQ(asBuilt.gripCount(), 3u) << "shown there again, it is edited there again";
+    w.run("VIEWS HIDE 2 design");
+    paint(asBuilt);
+    EXPECT_EQ(asBuilt.gripCount(), 0u);
+
+    const std::size_t undoable = w.document.history().undoCount();
+    const auto before =
+        std::get<katana::geometry::Segment2>(w.document.model().entities.find(w.design)->geometry);
+    const Point2 crossing = w.state(2).plan.worldToScreen(Point2(25, 20));
+    drag(asBuilt, QPointF(crossing.x, crossing.y), QPointF(crossing.x + 40, crossing.y));
+    processEvents();
+
+    const auto after =
+        std::get<katana::geometry::Segment2>(w.document.model().entities.find(w.design)->geometry);
+    EXPECT_EQ(after.start, before.start);
+    EXPECT_EQ(after.end, before.end);
+    EXPECT_EQ(w.document.history().undoCount(), undoable) << "no edit was made";
 }
 
 TEST(ViewSelection, AGhostSwitchChangedWithoutANotificationIsStillDrawn)

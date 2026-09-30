@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/drawing/grips.hpp"
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/scene.hpp"
 #include "katana/cad/section.hpp"
@@ -659,15 +660,27 @@ TEST(ViewLayerRule, SnappingHonoursTheViewTheCursorIsIn)
     }
 }
 
-TEST(ViewLayerRule, AGhostIsNeitherPickedNorSnappedTo)
+TEST(ViewLayerRule, AGhostIsNeitherPickedNorSnappedToNorGivenGrips)
 {
     // Selected, the tin line is drawn in the plan view as a ghost
     // (cad/selection_style.hpp) - drawn, but still on a layer that view
-    // hides: a click or a snap there must not reach what the view hides, or
-    // Delete would erase something the user cannot see.
+    // hides: a click, a snap or a grip there must not reach what the view
+    // hides, or Delete would erase, and a drag move, something the user
+    // cannot see.
     TwoViews views;
     views.document.selection().add(views.tin);
     const auto& model = views.document.model();
+    // A ghost there by the one rule, and drawn in the 3D view, which hides
+    // nothing: it is the plan view's rule that keeps it out of reach.
+    ASSERT_TRUE(katana::cad::isGhost(model, views.entity(views.tin), views.plan));
+    ASSERT_FALSE(katana::cad::isGhost(model, views.entity(views.tin), views.model3d));
+    EXPECT_TRUE(
+        katana::cad::gripsOfSelection(views.document, views.document.selection().ids(), views.plan)
+            .empty());
+    EXPECT_EQ(katana::cad::gripsOfSelection(views.document, views.document.selection().ids(),
+                                            views.model3d)
+                  .size(),
+              3U) << "a line's two ends and middle, where the view shows it";
     SelectionFilter inPlan;
     inPlan.view = &views.plan;
     SnapRequest request;

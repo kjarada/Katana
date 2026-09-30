@@ -722,6 +722,8 @@ class MainWindow final : public QMainWindow {
     std::vector<QAction*> kindActions_;
     // View > Link This View: checked while the active plan view is linked.
     QAction* linkAction_ = nullptr;
+    // View > Show the Selection on Hidden Layers: the active view's switch.
+    QAction* ghostsAction_ = nullptr;
     // Every toolbar makeToolBar made, with the action of the name shown
     // before its buttons (null for one that has a label of its own).
     std::vector<std::pair<QToolBar*, QAction*>> toolBars_;

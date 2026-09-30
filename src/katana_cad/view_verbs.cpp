@@ -35,16 +35,7 @@ constexpr const char* kZoomUsage =
     "SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY] "
     "[WHERE k=v ...]] [view=id]";
 
-std::string upper(std::string_view text)
-{
-    std::string out(text);
-    for (char& c : out) {
-        if (c >= 'a' && c <= 'z') {
-            c = static_cast<char>(c - 'a' + 'A');
-        }
-    }
-    return out;
-}
+using katana::core::uppered;
 
 // The word a record and VIEWS OPEN use for a kind: the title's word, lower
 // case, so "3D 1" is kind=3d.
@@ -104,7 +95,7 @@ Result<ViewId> parseViewId(std::string_view word)
 Result<std::vector<ViewId>> parseIds(const std::vector<std::string>& args, std::size_t& at)
 {
     std::vector<ViewId> ids;
-    while (at < args.size() && upper(args[at]) != "TO") {
+    while (at < args.size() && uppered(args[at]) != "TO") {
         std::string_view word = args[at];
         std::size_t start = 0;
         while (start <= word.size()) {
@@ -217,7 +208,7 @@ Result<std::string> viewsVerb(const Document& document, ViewVerbHost& host,
                               const std::vector<std::string>& args)
 {
     ViewSet& views = host.views();
-    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const std::string action = args.empty() ? "LIST" : uppered(args[0]);
     const auto refuseWord = [](const std::string& word) {
         return makeError(ErrorCode::ParseFailure,
                          "VIEWS does not take '" + word + "': " + kViewsUsage, word);
@@ -305,7 +296,7 @@ Result<std::string> viewsVerb(const Document& document, ViewVerbHost& host,
     }
     if (action == "UNLINK") {
         std::vector<ViewId> left;
-        if (args.size() == 2 && upper(args[1]) == "ALL") {
+        if (args.size() == 2 && uppered(args[1]) == "ALL") {
             left = views.unlinkAll();
         } else {
             std::size_t at = 1;
@@ -347,7 +338,7 @@ Result<std::string> viewsVerb(const Document& document, ViewVerbHost& host,
         if (view == nullptr) {
             return notOpen(*id);
         }
-        if (action == "SHOW" && args.size() == 3 && upper(args[2]) == "ALL") {
+        if (action == "SHOW" && args.size() == 3 && uppered(args[2]) == "ALL") {
             view->layers.clear();
         } else {
             auto layers = parseLayers(document, args, 2);
@@ -367,6 +358,29 @@ Result<std::string> viewsVerb(const Document& document, ViewVerbHost& host,
                     return status.error();
                 }
             } else {
+                // A layer beneath one this view hides stays hidden whatever
+                // is shown of it (LayerOverrides::show), so SHOW of it would
+                // change nothing and say nothing: refused, naming what holds
+                // it, before any layer of the line is shown.
+                const auto holder = [&](const std::string& layer) -> std::optional<std::string> {
+                    for (const std::string& ancestor : katana::entity::layerAncestors(layer)) {
+                        if (view->layers.hidesDirectly(ancestor) &&
+                            !std::ranges::contains(*layers, ancestor)) {
+                            return ancestor;
+                        }
+                    }
+                    return std::nullopt;
+                };
+                for (const std::string& layer : *layers) {
+                    if (const auto held = action == "SHOW" ? holder(layer) : std::nullopt) {
+                        return makeError(ErrorCode::CommandRejected,
+                                         "view " + std::to_string(*id) + " hides '" + *held +
+                                             "', which holds '" + layer + "': show '" + *held +
+                                             "' (VIEWS SHOW " + std::to_string(*id) + " " +
+                                             *held + ")",
+                                         layer);
+                    }
+                }
                 for (const std::string& layer : *layers) {
                     if (action == "HIDE") {
                         (void)view->layers.hide(layer);
@@ -400,11 +414,11 @@ Result<std::string> viewsVerb(const Document& document, ViewVerbHost& host,
         for (std::size_t at = 2; at < args.size(); ++at) {
             const std::string& word = args[at];
             const std::size_t equals = word.find('=');
-            if (equals == std::string::npos || upper(word.substr(0, equals)) != "GHOSTS") {
+            if (equals == std::string::npos || uppered(word.substr(0, equals)) != "GHOSTS") {
                 return makeError(ErrorCode::ParseFailure,
                                  "VIEWS SET does not take '" + word + "': " + kSetUsage, word);
             }
-            const std::string value = upper(word.substr(equals + 1));
+            const std::string value = uppered(word.substr(equals + 1));
             if (value != "ON" && value != "OFF") {
                 return makeError(ErrorCode::ParseFailure,
                                  "ghosts= is on or off, not '" + word.substr(equals + 1) + "'",
@@ -495,6 +509,18 @@ Result<double> parseFactor(const std::string& word)
     return *factor;
 }
 
+// A factor as AutoCAD writes one relative to the view, "2X" or "0.5x", is a
+// bare factor here, which is always relative to the view: the number, else
+// the word as it is. ("2XP", relative to paper space, stays a word ZOOM
+// refuses: a plan view has no paper space.)
+std::string timesView(const std::string& word)
+{
+    if (word.size() > 1 && (word.back() == 'X' || word.back() == 'x')) {
+        return word.substr(0, word.size() - 1);
+    }
+    return word;
+}
+
 // The word the refusal of a kind names the request by.
 std::string requestWord(const ZoomRequest& request)
 {
@@ -515,28 +541,6 @@ std::string requestWord(const ZoomRequest& request)
         return "on a scope";
     }
     return "";
-}
-
-// Whether a view of `kind` takes `request`. EXTENTS any view; IN, OUT and a
-// factor a plan view and a section, which zoom about their centres; WINDOW,
-// CENTRE and a scope a plan view, whose plan position they are. A 3D or
-// elevation view zooms by the wheel towards what is under the cursor, which
-// ZOOM IN is to use at its centre once that zoom is merged (docs/cad.md).
-bool takes(ViewKind kind, ZoomRequest::Kind request)
-{
-    switch (request) {
-    case ZoomRequest::Kind::Extents:
-        return true;
-    case ZoomRequest::Kind::In:
-    case ZoomRequest::Kind::Out:
-    case ZoomRequest::Kind::Factor:
-        return kind == ViewKind::Plan || kind == ViewKind::Section;
-    case ZoomRequest::Kind::Window:
-    case ZoomRequest::Kind::Centre:
-    case ZoomRequest::Kind::Scope:
-        return kind == ViewKind::Plan;
-    }
-    return false;
 }
 
 Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
@@ -583,7 +587,15 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
     std::size_t at = 0;
     // What a scope took, when the line gave one.
     std::optional<ScopeMatch> scope;
-    if (!args.empty() && isScopeWord(args[0])) {
+    // ZOOM A and ZOOM ALL alone are Zoom All, the extents - every CAD
+    // program's, and the zoom line a script most often holds; on the old
+    // window it zoomed the extents whatever followed ZOOM, so a refusal here
+    // stopped a script that ran to the end there. ALL is the shared scope
+    // word for the drawing too, and is that with a filter after it (ZOOM ALL
+    // WHERE ...), which frames the entities it matches.
+    const bool zoomAll =
+        args.size() == 1 && (uppered(args[0]) == "A" || uppered(args[0]) == "ALL");
+    if (!args.empty() && isScopeWord(args[0]) && !zoomAll) {
         // The one parser and the one matcher every verb on drawing data uses.
         // Only with a scope word: ZOOM alone is EXTENTS, where no scope word
         // elsewhere means the selection.
@@ -602,9 +614,9 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
         request.kind = ZoomRequest::Kind::Scope;
         request.window = extentOf(document.model(), scope->matched);
     } else if (!args.empty()) {
-        const std::string word = upper(args[0]);
+        const std::string word = uppered(args[0]);
         at = 1;
-        if (word == "EXTENTS" || word == "E") {
+        if (word == "EXTENTS" || word == "E" || zoomAll) {
             request.kind = ZoomRequest::Kind::Extents;
         } else if (word == "IN" || word == "OUT") {
             request.kind = word == "IN" ? ZoomRequest::Kind::In : ZoomRequest::Kind::Out;
@@ -633,7 +645,7 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
             }
             request.centre = *centre;
             ++at;
-            if (at < args.size() && upper(args[at]) == "SCALE") {
+            if (at < args.size() && uppered(args[at]) == "SCALE") {
                 const auto scale =
                     at + 1 < args.size() ? katana::core::parseFiniteDouble(args[at + 1])
                                          : std::nullopt;
@@ -650,9 +662,10 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
                 request.scale = *scale;
                 at += 2;
             }
-        } else if (katana::core::parseFiniteDouble(args[0])) {
+        } else if (const std::string number = timesView(args[0]);
+                   katana::core::parseFiniteDouble(number)) {
             request.kind = ZoomRequest::Kind::Factor;
-            auto factor = parseFactor(args[0]);
+            auto factor = parseFactor(number);
             if (!factor) {
                 return factor.error();
             }
@@ -666,7 +679,7 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
     }
 
     const ViewState& view = *views.find(request.view);
-    if (!takes(view.kind, request.kind)) {
+    if (!zoomTakes(view.kind, request.kind)) {
         const char* does = request.kind == ZoomRequest::Kind::Window ||
                                    request.kind == ZoomRequest::Kind::Scope
                                ? "frames"
@@ -715,6 +728,23 @@ Result<std::string> zoomVerb(const Document& document, ViewVerbHost& host,
 }
 
 } // namespace
+
+bool zoomTakes(ViewKind kind, ZoomRequest::Kind request)
+{
+    switch (request) {
+    case ZoomRequest::Kind::Extents:
+        return true;
+    case ZoomRequest::Kind::In:
+    case ZoomRequest::Kind::Out:
+    case ZoomRequest::Kind::Factor:
+        return kind == ViewKind::Plan || kind == ViewKind::Section;
+    case ZoomRequest::Kind::Window:
+    case ZoomRequest::Kind::Centre:
+    case ZoomRequest::Kind::Scope:
+        return kind == ViewKind::Plan;
+    }
+    return false;
+}
 
 bool applyPlanZoom(ViewTransform& view, const ZoomRequest& request)
 {

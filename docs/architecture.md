@@ -241,11 +241,18 @@ Two further consequences run through the code:
   and again shifted by (500000, 5000000).
 
 Text and units have one home each, low in the stack, so that every layer can
-reach them: decoding bytes to UTF-8 is `core/text_encoding.hpp`; trimming and
-number parsing is `core/text.hpp` (locale-independent - never `std::isspace`,
-`std::tolower` or `strtod` on file text); the exact length of a foot or a link
-is `math/unit_ratio.hpp`, which `geodesy/units.hpp` is built from
-(`docs/geodesy.md`).
+reach them: decoding bytes to UTF-8 is `core/text_encoding.hpp`; trimming,
+case folding (`lowered`, `uppered`) and number parsing is `core/text.hpp`
+(locale-independent - never `std::isspace`, `std::tolower`, `std::toupper`
+or `strtod` on file text: Latin-1's toupper makes 0xE0, the lead byte of a
+three-byte UTF-8 sequence, 0xC0); the exact length of a foot or a link is
+`math/unit_ratio.hpp`, which `geodesy/units.hpp` is built from
+(`docs/geodesy.md`). `katana_cad`'s five private `upper()` copies - four of
+them `std::toupper` - are `core::uppered` now. Not done: the same sweep of
+`std::toupper` in `katana_app` (the geo verbs, the session, the MCP server),
+`katana_ifc` and the plot preflight, and of the `std::isspace` and
+`std::isalnum` beside some of them; `katana_dxf`'s reader keeps an ASCII
+`upper()` of its own.
 
 ## Determinism
 

@@ -131,12 +131,12 @@ std::vector<Grip> gripsOf(const Entity& entity)
 }
 
 std::vector<Grip> gripsOfSelection(const Document& document, const std::vector<EntityId>& ids,
-                                   std::size_t limit)
+                                   const LayerOverrides& view, std::size_t limit)
 {
     std::vector<Grip> out;
     for (const EntityId id : ids) {
         const Entity* entity = document.model().entities.find(id);
-        if (entity == nullptr || !isSelectable(document.model(), *entity, kNoLayerOverrides)) {
+        if (entity == nullptr || !isSelectable(document.model(), *entity, view)) {
             continue;
         }
         auto grips = gripsOf(*entity);

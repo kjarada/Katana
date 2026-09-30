@@ -1233,11 +1233,32 @@ VIEWS HIDE <id> <layer>[,<layer>...]  the layers that view hides of its own; its
 VIEWS SHOW <id> <layer>[,<layer>...] | ALL
 VIEWS ISOLATE <id> <layer>
 VIEWS SET <id> ghosts=on|off          whether it shows the selection where it hides the layer
-ZOOM | Z                              the active view's extents, as always
-ZOOM EXTENTS | IN [f] | OUT [f] | <f> | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s]  [view=<id>]
+ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
+ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
+     | CENTRE x,y [SCALE s]  [view=<id>]
 ZOOM SELECTION | DRAWING | VIEW [<id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY]
      [WHERE key=value ...]  [view=<id>]
 ```
+
+**The zoom lines a script already holds run.** The old window zoomed the
+extents for any `ZOOM` line, so a script written for it held `ZOOM A`, `Z A`
+and `ZOOM ALL` - every CAD program's Zoom All - and a refusal of them stopped
+a script that ran to the end there. `ALL` and `A` alone are `EXTENTS`; `ALL`
+is also the shared scope word for the whole drawing, and is that when a
+filter follows it (`ZOOM ALL WHERE TYPE=line` frames what matches). A factor
+may carry AutoCAD's `X` (`ZOOM 2X`, relative to the current view, as a bare
+factor always is here); `2XP`, relative to paper space, is refused, since a
+plan view has none. `'ZOOM` and `'Z`, AutoCAD's transparent form, are `ZOOM`
+at the prompt as well as inside a tool; no other verb takes an apostrophe
+(`ViewVerbsTest.ZoomAllAndTheApostropheFormsAreTheExtentsAsInEveryCadProgram`,
+`ViewVerbsTest.AFactorWithAutoCadsXIsRelativeToTheView`). Rejected: taking
+`ALL` alone as the scope word, which frames the entities and not what the
+view draws - its alignments left out - so `ZOOM ALL` and `ZOOM` framed two
+different boxes. The refusals and the degenerate lines - no view open, a
+`CENTRE` with no point, an `UNLINK` naming nothing, an `OPEN` or `ACTIVATE`
+with the wrong number of words, the selection one point - have their tests
+(`ViewVerbsTest.DegenerateZoomAndViewsLinesAreRefusedNamingWhatIsMissing`,
+`ViewVerbsTest.ZoomSelectionOfOnePointCentresOnItAndKeepsTheScale`).
 
 An id is the `ViewId` a record's `view=` gives, as for the scope word `VIEW`,
 never the number in the title. `view=` may stand anywhere on a `ZOOM` line and
@@ -1251,7 +1272,12 @@ widget's - and `CENTRE` puts a point in the middle, at `SCALE` pixels per
 unit when given. A request a view's kind does not take is refused naming the
 kind (`ZOOM WINDOW frames a plan view: view 3 is 3D`); 3D and elevation views
 take `EXTENTS` alone until the 3D zoom towards the cursor is merged
-(`docs/desktop.md`, "Linked views", Not done). `WINDOW` is a box of the
+(`docs/desktop.md`, "Linked views", Not done). Which kind takes which zoom is
+ONE rule, `cad::zoomTakes`: the verb refuses by it, and a view's bar, the
+View menu's zoom items and the Zoom To dialog's list of views offer only what
+it allows. It was written twice - the verb's and the bar's - and widening the
+verb's alone for 3D would have left the bar without In and Out
+(`ViewZoom.TheKindsEachZoomTakesAreTheVerbsOneRule`). `WINDOW` is a box of the
 drawing; the scope word `AREA` means the entities found in one, which is why
 it is not the word here. `SCALE` outside `ViewTransform`'s limits is refused,
 not clamped, because a scale the view cannot show is not the one asked for.
@@ -1297,23 +1323,32 @@ popup lists them; one the drawing lacks is refused naming it
 (`no layer 'roads' in the drawing (LAYER LIST lists them)`), and a list with
 one such is refused whole. `ISOLATE` keeps one layer, its parents and what
 lies beneath it; `SHOW ALL` shows everything the document shows
-(`ViewVerbsTest.ViewsHideShowIsolateChangeOnlyThatView`). The popup's own
-rows still edit the state directly rather than run these lines; that and the
-reference layers, which cad cannot name, are `docs/desktop.md`'s "Not done".
+(`ViewVerbsTest.ViewsHideShowIsolateChangeOnlyThatView`). `SHOW` of a layer
+beneath one the view hides is refused, naming what holds it (`view 1 hides
+'design', which holds 'design/road': show 'design' (VIEWS SHOW 1 design)`),
+before any layer of the line is shown: `LayerOverrides::show` removes only
+an exact entry, so the layer stayed hidden and the reply was the unchanged
+record, a silent failure
+(`ViewVerbsTest.ShowingALayerBeneathOneTheViewHidesIsRefusedNamingWhatHoldsIt`).
+The popup's own rows still edit the state directly rather than run these
+lines; that and the reference layers, which cad cannot name, are
+`docs/desktop.md`'s "Not done".
 
 **`SET <id> ghosts=on|off` is a view's switch for the selection's ghosts**
-(`ViewState::selectionGhosts`, on when a view opens): a selected entity on a
-layer the document shows and that view hides is drawn there faint, never
-picked, snapped to or plotted (`docs/desktop.md`, "The selection in every
-view"). The Layers popup's box runs this line. Every word is read before any
+(`ViewState::selectionGhosts`, on when a view opens): a selected entity the
+document draws and that view hides (`cad::isGhost`) is drawn there faint,
+never picked, snapped to, given grips or plotted (`docs/desktop.md`, "The
+selection in every view"). The Layers popup's box and View > Show the
+Selection on Hidden Layers run this line. Every word is read before any
 is applied, so `ghosts=off ghosts=maybe` changes nothing; a key other than
 `ghosts`, or a value other than on and off, is refused naming it
 (`ViewVerbsTest.ViewsSetRefusesWhatItDoesNotTakeAndChangesNothing`). `SET`
 and not a word of its own, so the next switch a view gains is a key, not a
 verb.
 
-`ZOOM` replies the record of the view it moved without `title`, `active` and
-`linked`, then a line for each view that followed it
+`ZOOM` replies the record of the view it moved without `title`, `active`,
+`linked`, `ghosts` and `hidden` - where the view looks, not what it shows -
+then a line for each view that followed it
 (`view=2 kind=plan followed=1 centre=... scale=... area=...`), so the reply
 says the whole of what one line did. `ZOOM` alone is still the active view's
 extents; with words it once zoomed to the extents whatever they were

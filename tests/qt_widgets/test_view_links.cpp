@@ -18,6 +18,7 @@
 
 #include <QMainWindow>
 #include <QToolButton>
+#include <QMouseEvent>
 #include <QWheelEvent>
 
 #include "command_runner.hpp"
@@ -115,6 +116,37 @@ struct LinkedWorkspace {
         QCoreApplication::sendEvent(&view, &event);
         processEvents();
     }
+
+    // A middle-button drag in view `id` from `from` by `by` pixels, in four
+    // moves, as a person pans.
+    void pan(ViewId id, QPointF from, QPointF by)
+    {
+        ViewportWidget& view = plan(id);
+        const auto send = [&view](QEvent::Type type, QPointF at, Qt::MouseButtons held) {
+            QMouseEvent event(type, at, view.mapToGlobal(at),
+                              type == QEvent::MouseMove ? Qt::NoButton : Qt::MiddleButton, held,
+                              Qt::NoModifier);
+            QCoreApplication::sendEvent(&view, &event);
+        };
+        send(QEvent::MouseButtonPress, from, Qt::MiddleButton);
+        for (int step = 1; step <= 4; ++step) {
+            send(QEvent::MouseMove, from + by * (step / 4.0), Qt::MiddleButton);
+        }
+        send(QEvent::MouseButtonRelease, from + by, Qt::NoButton);
+        processEvents();
+    }
+
+    // Counts the moves view `id` reports to the workspace, passing each on.
+    void countMoves(ViewId id, int& reports)
+    {
+        ViewportWidget& view = plan(id);
+        view.onViewMoved = [previous = view.onViewMoved, &reports](bool byUser) {
+            ++reports;
+            if (previous) {
+                previous(byUser);
+            }
+        };
+    }
 };
 
 katana::entity::Layer layerNamed(const char* name)
@@ -166,6 +198,60 @@ TEST(ViewLinks, AWheelNotchInALinkedPlanViewGivesTheOtherTheSameCentreAndScale)
     // And it was drawn again, once, for it.
     paint(w.plan(b));
     EXPECT_EQ(w.plan(b).drawingPaintCount(), before + 1);
+}
+
+TEST(ViewLinks, APanInALinkedViewMovesTheOtherBitForBitAndTheOtherNeverReportsIt)
+{
+    LinkedWorkspace w;
+    const ViewId a = w.views->viewSet().activeId();
+    const ViewId b = w.views->openView(ViewKind::Plan).id;
+    processEvents();
+    w.place(a, 300, 200, 10, 20, 4);
+    w.place(b, 380, 260, -50, -50, 1);
+    (void)w.run("VIEWS LINK " + std::to_string(a) + "," + std::to_string(b));
+    int reportsA = 0;
+    int reportsB = 0;
+    w.countMoves(a, reportsA);
+    w.countMoves(b, reportsB);
+
+    // A dragged (+60, -30) px from its middle: the point that was under the
+    // press, (10, 20), is under the release, so by hand the centre is
+    // (10 - 60/4, 20 - 30/4) = (-5, 12.5) at the same 4 px a unit.
+    w.pan(a, QPointF(150, 100), QPointF(60, -30));
+
+    EXPECT_EQ(w.state(a).plan.center, Point2(-5, 12.5));
+    EXPECT_EQ(w.state(a).plan.scale, 4.0);
+    expectSameView(w.state(b), w.state(a));
+    EXPECT_GT(reportsA, 0) << "each move of the drag is the user's";
+    EXPECT_EQ(reportsB, 0) << "moved by the link, B reports nothing: no echo";
+}
+
+TEST(ViewLinks, AViewLinkedBeforeItWasEverSeenLeadsFromItsFirstPaint)
+{
+    // Linked while never painted and named the one the others come to, a
+    // plan view moves nobody - it has nothing framed to give them - until
+    // its first paint frames the drawing; that frame is then the link's.
+    LinkedWorkspace w;
+    ASSERT_TRUE(
+        w.document.execute(katana::commands::createLine(Point2(1000, 1000), Point2(1100, 1050)))
+            .ok());
+    const ViewId a = w.views->viewSet().activeId();
+    w.place(a, 300, 200, 10, 20, 4);
+    const ViewId b = w.views->openView(ViewKind::Plan).id;
+    ASSERT_FALSE(w.state(b).planFramed);
+    // Straight to the interpreter: the event loop would paint B at once.
+    const auto linked = w.interpreter.run("VIEWS LINK " + std::to_string(a) + "," +
+                                          std::to_string(b) + " TO " + std::to_string(b));
+    ASSERT_TRUE(linked.ok());
+    EXPECT_EQ(*linked, "leader=2 linked=1,2 moved=none");
+    ASSERT_EQ(w.state(a).plan.center, Point2(10, 20)) << "nothing framed to follow yet";
+
+    paint(w.plan(b));
+
+    // B framed the line about its middle, and A shows exactly that.
+    ASSERT_TRUE(w.state(b).planFramed);
+    EXPECT_EQ(w.state(b).plan.center, Point2(1050, 1025));
+    expectSameView(w.state(a), w.state(b));
 }
 
 TEST(ViewLinks, AWheelInAnUnlinkedViewMovesNoOtherView)
