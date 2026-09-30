@@ -54,6 +54,22 @@
 // not wrapped. A full circle itself is the circle's zero, reached by rounding
 // up at the top of the circle.
 //
+// A SIGN comes with every measured value (page 6: "+: Positive value, -:
+// Negative value"), and what a negative one means differs by circle. Word 22
+// is read as a zenith angle, and no zenith angle is negative, so a negative
+// word 22 is refused at its record; wrapped onto the circle, -005 00 00 would
+// be a face-right zenith of 5 degrees, the shot drawn near the vertical and
+// half a turn round from where it was measured. What wrote it is not known: a
+// damaged word, or an instrument whose vertical angle setting reached the
+// file. GSI ONLINE lists such a setting for the TPS100 series (page 9, SET 44,
+// "V angle READING": 0 Zenith, 1 Horizontal, 2 Slope in percent), under which
+// a sight below the horizon reads negative, but does not say that word 22
+// follows it. No setting gives word 21 another meaning - 171 only turns the
+// circle clockwise or counterclockwise, 178 and 179 switch the Hz compensator
+// and collimation - so a negative one is the direction it names, counted the
+// other way from the circle's zero: -090 00 00 is read as 270 00 00. -0 is
+// zero in either word.
+//
 // Everything here streams over one string_view: no regex, std::from_chars for
 // every number, and nothing allocated per record beyond the values it produces.
 
@@ -92,8 +108,12 @@ using katana::core::Result;
 // 1.1 reads 60-second angle words as the next minute, an all-zero code or
 // remark word as empty, a backsight the file positions later, and code
 // information in a point's own block; it refuses a circle reading past a full
-// circle.
-constexpr const char* kParserVersion = "1.1";
+// circle, which 1.0 wrapped onto it. 1.2 refuses a negative vertical reading
+// and a sexagesimal word with no digit, which 1.1 read as angles, and carries
+// a block's own horizontal distance and height difference (32, 33) where no
+// zenith angle beside its slope distance was read, or no distance beside its
+// zenith angle, where 1.1 dropped them as values the reduction computes.
+constexpr const char* kParserVersion = "1.2";
 
 constexpr double kPi = std::numbers::pi;
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
@@ -287,7 +307,7 @@ struct SixtySeconds {
     std::size_t zeros = 0;    // the digits written after the seconds, all 0
 };
 
-// "word 22, 084 01 60.0, read as 084 02 00.0"
+// "word 22, 086 27 60.0, read as 086 28 00.0"
 std::string sixtyText(const SixtySeconds& sixty)
 {
     const auto angle = [&sixty](std::int64_t degrees, int minutes, int seconds) {
@@ -704,7 +724,11 @@ class GsiReader {
 
     void warnWord(const Block& block, const Word& word, std::string_view problem)
     {
-        warn(block.record, "word " + std::to_string(word.index) + " " + shown(word.data) + " " +
+        // A '-' is shown, being part of the value written; the '+' nearly
+        // every word carries is not.
+        const std::string written =
+            word.sign == '-' ? "-" + std::string(word.data) : std::string(word.data);
+        warn(block.record, "word " + std::to_string(word.index) + " " + shown(written) + " " +
                                std::string(problem) + "; that value was not read");
     }
 
@@ -812,7 +836,9 @@ class GsiReader {
 
     // A circle reading (word 21 or 22) in radians, as read: not wrapped, not
     // turned into a zenith. `sixty` is set when it was a 60-second word read as
-    // the next minute (SIXTY SECONDS, at the top), and empty otherwise.
+    // the next minute (SIXTY SECONDS, at the top), and empty otherwise. A
+    // negative word 22 is refused here; a negative word 21 is returned as it
+    // is, and shotBlock wraps it onto the circle (SIGN, at the top).
     std::optional<double> angleOf(const Block& block, const Word& word,
                                   std::optional<SixtySeconds>& sixty)
     {
@@ -868,8 +894,33 @@ class GsiReader {
                      "reading is");
             return std::nullopt;
         }
+        if (refusedAsNegativeZenith(block, word, inUnit)) {
+            return std::nullopt;
+        }
         noteAngularUnit(declared, block.record);
         return inUnit * toRadians;
+    }
+
+    // A vertical reading below zero is no zenith angle (SIGN, at the top):
+    // refused at its record, and counted for the note on the vertical angle
+    // setting in finish(). `value` is the reading in any unit; -0 is not below
+    // zero, and is read. Counted wherever the word is, a code block's too, as
+    // every refused word is warned about wherever it is: the note counts the
+    // refusals, as a sign of what wrote the file's vertical readings. The
+    // 60-second note is another matter - it says its words were READ as the
+    // next minute, so it counts only the words whose values were kept
+    // (keptSixty).
+    bool refusedAsNegativeZenith(const Block& block, const Word& word, double value)
+    {
+        if (word.index != 22 || value >= 0.0) {
+            return false;
+        }
+        warnWord(block, word,
+                 "is negative, which no zenith angle is (a damaged word, or an instrument whose "
+                 "vertical angle setting - GSI ONLINE's SET 44: horizontal, or slope in percent - "
+                 "reached the file)");
+        negativeZeniths_.add(block.record);
+        return true;
     }
 
     // DDDMMSSs: degrees, minutes, seconds and tenths - DDD.MMSSs with the point
@@ -879,6 +930,13 @@ class GsiReader {
     std::optional<double> sexagesimal(const Block& block, const Word& word,
                                       std::optional<SixtySeconds>& sixty)
     {
+        // A word with no digit - "." - writes no angle. The missing digits
+        // supplied below would make it 000 00 00.0, a reading like any other;
+        // numberOf refuses the same word in the other units.
+        if (word.data.find_first_of("0123456789") == std::string_view::npos) {
+            warnWord(block, word, "is not a sexagesimal angle: it has no digit");
+            return std::nullopt;
+        }
         std::string_view whole = word.data;
         std::string_view fraction;
         const std::size_t point = whole.find('.');
@@ -991,13 +1049,21 @@ class GsiReader {
             warnWord(block, word, "is past a full circle (360 degrees), which no circle reading is");
             return std::nullopt;
         }
-        sixty = carried;
-        noteAngularUnit(survey::AngularUnit::DegreesMinutesSeconds, block.record);
         double degreesValue = static_cast<double>(degrees) + minutes / 60.0 +
                               (seconds + finer) / 3600.0;
         if (word.sign == '-') {
             degreesValue = -degreesValue;
         }
+        // Where this sits among the steps above changes nothing: the sign is
+        // the same before a carry and after it (-000 00 60.0 is below zero
+        // either way), and a refused word's `sixty` is never counted, since
+        // the 60-second words are counted where their values are kept
+        // (keptSixty).
+        if (refusedAsNegativeZenith(block, word, degreesValue)) {
+            return std::nullopt;
+        }
+        sixty = carried;
+        noteAngularUnit(survey::AngularUnit::DegreesMinutesSeconds, block.record);
         return degreesValue * (kPi / 180.0);
     }
 
@@ -1931,34 +1997,65 @@ class GsiReader {
             }
             return true;
         };
+        // The instrument's own horizontal distance and height difference (32,
+        // 33) are what it computed from the slope distance and its vertical
+        // reading. Beside a zenith angle and a distance that were both read
+        // they are DERIVED: the reduction computes its own from those, and
+        // carrying both would count one measurement twice. Without either -
+        // no zenith angle read beside the slope distance (none recorded, or
+        // one refused at its record), or no distance beside the zenith angle
+        // - the reduction can compute neither, and they are the shot's only
+        // horizontal distance and height, so they are carried as the file
+        // gives them. A pointing keeps one distance, the one it is radiated
+        // by, and a slope distance with no zenith angle cannot be reduced to
+        // horizontal: where the block has its own horizontal distance, that
+        // is the shot's, and the slope distance is not carried (finish()
+        // says how many).
         const bool slope = usable(block.slope, "slope distance");
-        if (slope) {
+        bool derived = false;
+        if (slope && zenith) {
             distanceOf(*block.slope, survey::DistanceKind::Slope);
-            if (block.horizontal || block.heightDifference) {
-                derivedValues_.add(block.record);
+            derived = block.horizontal || block.heightDifference;
+        } else {
+            // Beside a slope distance, a horizontal distance of zero -
+            // Leica's "none measured" - is passed over for the slope
+            // distance, not counted as a shot without one.
+            const bool horizontal = (slope && block.horizontal && *block.horizontal == 0.0)
+                                        ? false
+                                        : usable(block.horizontal, "horizontal distance");
+            if (horizontal) {
+                distanceOf(*block.horizontal, survey::DistanceKind::Horizontal);
+                if (slope) {
+                    slopeWithoutZenith_.add(block.record);
+                }
+            } else if (slope) {
+                distanceOf(*block.slope, survey::DistanceKind::Slope);
             }
-        } else if (usable(block.horizontal, "horizontal distance")) {
-            distanceOf(*block.horizontal, survey::DistanceKind::Horizontal);
+            if (block.heightDifference) {
+                if (zenith && horizontal) {
+                    derived = true;
+                } else {
+                    auto& level = std::get<survey::LevelDifferenceObservation>(
+                        observations.emplace_back(
+                            std::in_place_type<survey::LevelDifferenceObservation>));
+                    level.from = from;
+                    level.to = to;
+                    level.heightDifference = *block.heightDifference;
+                    level.length = (block.horizontal && *block.horizontal > 0.0)
+                                       ? *block.horizontal
+                                       : 0.0;
+                    // Both heights measured with a tape, and the angle the
+                    // instrument reduced with over the length of the line.
+                    level.sigma = std::hypot(precision_.heightMeasurement,
+                                             precision_.heightMeasurement,
+                                             level.length * precision_.zenith);
+                    level.source = source;
+                    level.source.recordNumber = block.record;
+                }
+            }
         }
-        if (block.heightDifference && !slope) {
-            if (zenith) {
-                derivedValues_.add(block.record);
-            } else {
-                auto& level = std::get<survey::LevelDifferenceObservation>(observations.emplace_back(
-                    std::in_place_type<survey::LevelDifferenceObservation>));
-                level.from = from;
-                level.to = to;
-                level.heightDifference = *block.heightDifference;
-                level.length = (block.horizontal && *block.horizontal > 0.0) ? *block.horizontal
-                                                                             : 0.0;
-                // Both heights measured with a tape, and the angle the
-                // instrument reduced with over the length of the line.
-                level.sigma = std::hypot(precision_.heightMeasurement,
-                                         precision_.heightMeasurement,
-                                         level.length * precision_.zenith);
-                level.source = source;
-                level.source.recordNumber = block.record;
-            }
+        if (derived) {
+            derivedValues_.add(block.record);
         }
     }
 
@@ -2042,6 +2139,7 @@ class GsiReader {
     // Sexagesimal words of 60.0 seconds read as the next minute, and their records.
     Tally roundedSeconds_;
     RecordList roundedSecondRecords_;
+    Tally negativeZeniths_;     // vertical readings (word 22) below zero, refused
     Tally zeroCodeWords_;       // code information and remark words of nothing but zeros
     Tally remarksInCodeBlocks_; // remark words (71-79) in a code block, not read
     Tally otherPrism_; // distances measured with another prism constant than their setup's
@@ -2056,6 +2154,7 @@ class GsiReader {
     Tally coordinateRecords_;
     Tally zeroDistances_;
     Tally derivedValues_;
+    Tally slopeWithoutZenith_; // slope distances passed over for the block's own 32
     Tally timeWords_;
     Tally heightOnly_;
     Tally partialPosition_;
@@ -2346,9 +2445,33 @@ ReadResult GsiReader::finish()
                           plural(setups, "setup", "setups") +
                           ": whether their distances include one is not stated");
     }
-    if (zenithAngles_ != 0) {
-        lacking.emplace_back("GSI does not record the vertical angle setting: word 22 was read "
-                             "as a zenith angle, the instruments' usual setting");
+    if (zenithAngles_ != 0 || negativeZeniths_.count != 0) {
+        const bool zenithsRead = zenithAngles_ != 0;
+        std::string setting = "GSI does not record the vertical angle setting: ";
+        if (zenithsRead) {
+            setting += "word 22 was read as a zenith angle, the instruments' usual setting";
+        }
+        if (negativeZeniths_.count != 0) {
+            // Each was warned about at its record. What they may say of the
+            // file's OTHER vertical readings, which were read, is said here
+            // once: a positive elevation read as a zenith is no less wrong,
+            // and nothing in its word shows it. Where every one was refused,
+            // no word 22 was read, and there are no others to doubt.
+            setting += std::string(zenithsRead ? "; " : "") +
+                       plural(negativeZeniths_.count, "reading was", "readings were") +
+                       " refused as negative, which no zenith angle is (the first at record " +
+                       std::to_string(negativeZeniths_.firstRecord) + ")" +
+                       (zenithsRead ? "" : ", and no word 22 was read as a zenith angle") +
+                       ": such a reading is a damaged word, or an instrument's vertical angle "
+                       "setting reaching the file (GSI ONLINE's SET 44 reads V from the zenith, "
+                       "the horizon or in percent, and it does not say whether word 22 follows "
+                       "it)" +
+                       (zenithsRead ? "; if it was the setting, the file's other word 22 "
+                                      "readings are not zenith angles either, and the shots "
+                                      "read with them are wrong"
+                                    : "");
+        }
+        lacking.push_back(std::move(setting));
     }
     if (directions_ != 0) {
         // GSI ONLINE's SET/CONF 171, "Direction of horizontal circle reading
@@ -2373,9 +2496,18 @@ ReadResult GsiReader::finish()
     }
     if (derivedValues_.count != 0) {
         lacking.push_back(plural(derivedValues_.count, "block's", "blocks'") +
-                          " instrument-computed horizontal distance or height difference beside "
-                          "the measured slope distance and zenith angle: not carried, the "
-                          "reduction computes its own from the measurements");
+                          " instrument-computed horizontal distance (32) or height difference "
+                          "(33) beside a zenith angle and a distance that were read: not carried, "
+                          "the reduction computes its own from those");
+    }
+    if (slopeWithoutZenith_.count != 0) {
+        lacking.push_back(plural(slopeWithoutZenith_.count, "block has", "blocks have") +
+                          " a slope distance (31) and no zenith angle that was read (none "
+                          "recorded, or one refused at its record; the first at record " +
+                          std::to_string(slopeWithoutZenith_.firstRecord) +
+                          "), so the slope distance cannot be reduced to horizontal: it was not "
+                          "carried, and the horizontal distance (32) the instrument computed for "
+                          "the same shot was carried in its place");
     }
     return std::move(result_);
 }

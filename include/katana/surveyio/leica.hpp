@@ -26,10 +26,15 @@
 //     left, over it face right. A face-right zenith angle is stored in the
 //     model's [0, pi] range, i.e. as a full turn less the reading (the
 //     face-left equivalent); the horizontal direction is always the raw
-//     circle reading. A block with a horizontal
-//     distance (32) and no slope distance gives a horizontal distance; one
-//     with a height difference (33) and neither a zenith angle nor a slope
-//     distance gives a LevelDifferenceObservation from the station;
+//     circle reading. The instrument's own horizontal distance (32) and
+//     height difference (33) are DERIVED where the block keeps what the
+//     reduction computes them from - a zenith angle and a distance - and are
+//     not carried then. Otherwise they are the shot's: a block with a
+//     horizontal distance and no slope distance, or with no zenith angle read
+//     beside its slope distance (none recorded, or one refused), gives the
+//     horizontal distance as its one distance, the slope distance then not
+//     carried; a height difference gives a LevelDifferenceObservation from
+//     the station;
 //   * every point the file names: with coordinates (81-83, or 84-86 when the
 //     block measures nothing) as a SurveyPoint, without as an UnpositionedPoint;
 //   * a point's code from word 71, else from its code block (41); remarks
@@ -67,6 +72,13 @@
 //     Any other 60, seconds past 60.0 and minutes past 59 are refused, word
 //     by word, and so is a circle reading past a full circle (400 gon, 360
 //     degrees, 6400 mil) in any unit.
+//   * a NEGATIVE vertical reading (22) refused at its record: no zenith
+//     angle is negative. It is a damaged word, or an instrument's vertical
+//     angle setting reaching the file (GSI ONLINE lists SET 44, V from the
+//     horizon or in percent, and does not say whether word 22 follows it),
+//     so the import also says, once, that the file's other vertical readings
+//     may not be zenith angles either. A negative horizontal reading (21) is
+//     the direction it names, read on the circle: -90 degrees is 270.
 //   * each distance's prism constant as its shot recorded it, which may
 //     differ from its setup's; the import says how many do.
 // GSI states no coordinate system: the person supplies it, and the import says

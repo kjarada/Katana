@@ -1146,25 +1146,28 @@ if(KATANA_BUILD_TESTS)
     # minute. IMPORT, worked by hand: STN1 (5000 E, 6000 N) is oriented on
     # CP01, keyed in due north, at circle 0. P1 at circle 044 59 60.0 = 45 deg
     # and zenith 089 59 60.0 = 90 deg, 100 m, is 100 m out at 45 deg: 5070.711
-    # E 6070.711 N. P2 at 135 deg and zenith 084 01 60.0 = 84 deg 02 min, 200
-    # m, is 200 sin(84 deg 02') = 198.9165 m out, less the curvature and
+    # E 6070.711 N. P2 at 135 deg and zenith 086 27 60.0 = 86 deg 28 min, 200
+    # m, is 200 sin(86 deg 28') = 199.6198 m out, less the curvature and
     # refraction term (1 - k/2) V H / R (reduceSlope; k 0.13, R 6 371 000 m)
-    # of 0.6 mm: 198.9159 m at 135 deg, 5140.655 E 5859.345 N. Read as 084 01
-    # 00 it would be 6.1 mm nearer (4.3 mm in each coordinate, 5140.6505 E),
-    # and P1 read as 044 59 00 lands 2.9 cm away; refused, as they were,
-    # neither is radiated and 2 points are drawn, not 4. The READ warning
-    # lists the records of the three 60-second words and shows the first as
-    # written and as read.
+    # of 0.4 mm: 199.6195 m at 135 deg, 5141.1523 E 5858.8477 N (worked with
+    # a 75-digit pi). Read as 086 27 00 it would be 3.6 mm nearer (2.5 mm in
+    # each coordinate, 5141.1497 E), and P1 read as 044 59 00 lands 2.9 cm
+    # away; refused, as they were, neither is radiated and 2 points are drawn,
+    # not 4. The READ warning lists the records of the three 60-second words
+    # and shows the first as written and as read. A ';' in these expressions
+    # is written "\\;": bare, CMake splits the expression there into a list of
+    # alternatives, and the test passes on either fragment - these three did,
+    # with the parser version wrong.
     set(_gsi "${PROJECT_SOURCE_DIR}/tests/surveyio/data/leica/rounded_seconds_gsi16.gsi")
     add_test(NAME cli.survey_read_gsi_reads_sixty_seconds_as_the_next_minute
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_gsi}\"")
     set_tests_properties(cli.survey_read_gsi_reads_sixty_seconds_as_the_next_minute PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "survey file=rounded_seconds_gsi16\\.gsi format=leica-gsi parser=1\\.1 read=6 skipped=0 warnings=2[\r\n]+content setups=1 observations=11 points=2 unpositioned=3 features=0 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=6 text=\"word 21 '0000000009000610' is not a sexagesimal angle: the seconds run to 59[^\r\n]*[\r\n]+warning record=4 text=\"3 angle words write 60 seconds, where a sexagesimal angle's seconds run to 59 \\(at records 4, 5; the first, word 21, 044 59 60\\.0, read as 045 00 00\\.0\\)[^\r\n]*read as the next minute, within the writer's rounding of what was measured\""
+        "survey file=rounded_seconds_gsi16\\.gsi format=leica-gsi parser=1\\.2 read=6 skipped=0 warnings=2[\r\n]+content setups=1 observations=11 points=2 unpositioned=3 features=0 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=6 text=\"word 21 '0000000009000610' is not a sexagesimal angle: the seconds run to 59[^\r\n]*[\r\n]+warning record=4 text=\"3 angle words write 60 seconds, where a sexagesimal angle's seconds run to 59 \\(at records 4, 5\\; the first, word 21, 044 59 60\\.0, read as 045 00 00\\.0\\)[^\r\n]*read as the next minute, within the writer's rounding of what was measured\""
         FAIL_REGULAR_EXPRESSION "error")
     set(_gsi_p1 "at 5070\\.71[01][0-9]*,6070\\.71[01][0-9]*")
-    set(_gsi_p2 "at 5140\\.65[45][0-9]*,5859\\.34[45][0-9]*")
+    set(_gsi_p2 "at 5141\\.1522[0-9]*,5858\\.8477[0-9]*")
     add_test(NAME cli.survey_import_gsi_radiates_the_shots_whose_angles_wrote_sixty_seconds
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_gsi}\" LAYER survey/gsi"
@@ -1173,6 +1176,71 @@ if(KATANA_BUILD_TESTS)
         PROPERTIES
         PASS_REGULAR_EXPRESSION
         "imported job=job-1 entities=4 layer=survey/gsi .*(${_gsi_p1}.*${_gsi_p2}|${_gsi_p2}.*${_gsi_p1})"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A negative vertical reading, on the hand-built GSI-8 job
+    # tests/surveyio/data/leica/negative_vertical_gsi8.gsi: no zenith angle is
+    # negative - it is a damaged word, or an instrument's vertical angle
+    # setting (GSI ONLINE's SET 44) reaching the file (docs/survey.md, "Leica
+    # GSI"). READ: 5 records; 8 observations - every shot's circle reading,
+    # zenith angle and distance but P1's V of -005 00 00.0, refused at record
+    # 4 - and that one warning, with a note on what it suggests of the file's
+    # other vertical readings. IMPORT, worked by hand: STN1 (5000 E, 6000 N)
+    # is oriented on CP01, keyed in due north, at circle 0. P2 at circle -045
+    # 00 00.0, the direction 315 deg, and zenith 90 deg, 100 m, is 100 m out
+    # at 315 deg (reduceSlope's curvature and refraction term is a product
+    # with SD cos z, zero at 90 deg): 5000 - 100 sin 45 deg = 4929.2893
+    # E, 6000 + 100 cos 45 deg = 6070.7107 N. P1, with no zenith angle, is not
+    # radiated: 3 points are drawn. Wrapped onto the circle, as the reader once
+    # did, its V was 355 00 00.0, a face-right zenith of 5 deg, and P1 was
+    # drawn 100 sin 5 deg = 8.7156 m out at 225 deg: 4993.8372 E 5993.8372 N,
+    # which the FAIL expression refuses.
+    set(_gsi_negative_v
+        "${PROJECT_SOURCE_DIR}/tests/surveyio/data/leica/negative_vertical_gsi8.gsi")
+    add_test(NAME cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY READ \"${_gsi_negative_v}\"")
+    set_tests_properties(cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=negative_vertical_gsi8\\.gsi format=leica-gsi parser=1\\.2 read=5 skipped=0 warnings=1[\r\n]+content setups=1 observations=8 points=2 unpositioned=2 features=0 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=4 text=\"word 22 '-00500000' is negative, which no zenith angle is \\(a damaged word, or an instrument whose vertical angle setting - GSI ONLINE's SET 44[^\r\n]*\\; that value was not read\".*not_carried text=\"GSI does not record the vertical angle setting: word 22 was read as a zenith angle, the instruments' usual setting\\; 1 reading was refused as negative, which no zenith angle is \\(the first at record 4\\)"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_gsi_draws_no_point_from_a_negative_vertical_reading
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_gsi_negative_v}\" LAYER survey/gsi"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_gsi_draws_no_point_from_a_negative_vertical_reading
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=3 layer=survey/gsi .*at 4929\\.2893[0-9]*,6070\\.7106[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error|at 4993\\.8")
+    # A shot's own horizontal distance and height difference (32, 33), on the
+    # hand-built GSI-8 job tests/surveyio/data/leica/derived_distances_gsi8.gsi
+    # (docs/survey.md, "Leica GSI"). Each shot's slope distance is 80.000 m,
+    # and its 32 and 33 are what an instrument computes for that at a zenith
+    # of 094 30 00.0: 80 sin 94.5 deg = 79.753 m, 80 cos 94.5 deg = -6.277 m.
+    # Q1's V, -004 30 00.0, is refused as negative and Q2 has none, so neither
+    # slope distance can be reduced to horizontal; Q3's V is read. Worked by
+    # hand (a 75-digit pi): STN1 (5000 E, 6000 N) is oriented on CP01, keyed
+    # in due north, at circle 0. Q1 at 52 deg and Q2 at 142 deg are radiated
+    # by their own 79.753 m, a recorded horizontal distance and used as it
+    # is: 5062.8462 E 6049.1008 N and 5049.1008 E 5937.1538 N. Q3 at 232 deg
+    # is radiated by its slope distance and zenith angle: 80 sin 94.5 deg =
+    # 79.75339 m, plus the curvature and refraction term (1 - k/2) V H / R of
+    # +0.07 mm (V = 80 cos 94.5 deg is negative), 79.75346 m - 4937.1534 E
+    # 5950.8989 N, 0.4 mm from where its own 32 would put it (4937.1538 E).
+    # The import says that Q3's 32 and 33 were not carried, and that Q1's and
+    # Q2's slope distances were not. Parser 1.1 dropped Q1's and Q2's 32 and
+    # 33 as derived too, said so of 3 blocks "beside the measured slope
+    # distance and zenith angle", and drew 3 points, not 5.
+    set(_gsi_derived "${PROJECT_SOURCE_DIR}/tests/surveyio/data/leica/derived_distances_gsi8.gsi")
+    add_test(NAME cli.survey_import_gsi_radiates_a_shot_with_no_zenith_angle_by_its_own_horizontal_distance
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_gsi_derived}\" LAYER survey/gsi"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_gsi_radiates_a_shot_with_no_zenith_angle_by_its_own_horizontal_distance
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "parser=1\\.2 read=6 skipped=0 warnings=1[\r\n]+content setups=1 observations=12 .*not_carried text=\"1 block's instrument-computed horizontal distance \\(32\\) or height difference \\(33\\) beside a zenith angle and a distance that were read: not carried[^\r\n]*[\r\n]+not_carried text=\"2 blocks have a slope distance \\(31\\) and no zenith angle that was read \\(none recorded, or one refused at its record\\; the first at record 4\\)[^\r\n]*[\r\n]+imported job=job-1 entities=5 layer=survey/gsi .*at 5062\\.8462[0-9]*,6049\\.1008[0-9]*[\r\n]+[^\r\n]*at 5049\\.1008[0-9]*,5937\\.1537[0-9]*[\r\n]+[^\r\n]*at 4937\\.1534[0-9]*,5950\\.8988[0-9]*"
         FAIL_REGULAR_EXPRESSION "error")
     # CRS SET with a WKT - GDA2020 / MGA zone 56 as OGC WKT1, its names in
     # double quotes and one of them holding blanks - as an agent or a script
