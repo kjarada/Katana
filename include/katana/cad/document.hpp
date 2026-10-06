@@ -291,6 +291,13 @@ class Document {
     // The name the host's built-in customisation declares (empty: none), for
     // the record's renames. startCustomisation sets it.
     void setBuiltInCustomisationName(std::string name);
+    // What a start found: what went wrong, a sentence each, and whether the
+    // kept customisation was made from another built-in than the host has
+    // (CustomisationState::startProblems, keptFromAnotherBuiltIn).
+    // startCustomisation sets it, so that a report asked for later still has
+    // what was said once at the start. It is no edit of the session: origin
+    // and `kept` stand, and the value it already has is nothing at all.
+    void setCustomisationStart(std::vector<std::string> problems, bool keptFromAnotherBuiltIn);
     // For a load installed through the raw setters - a front end that read
     // the files itself: adds its sources to the session's
     // (cad::recordCustomisationLoad) and takes them off what the open project

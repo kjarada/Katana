@@ -28,15 +28,29 @@ namespace katana::core {
 // UTF-8 is read as UTF-8, through char8_t, which every implementation reads
 // so. Bytes that are NOT UTF-8 are taken as the narrow name they are - the
 // file the C runtime would open if handed them, which on Windows is the name
-// read in the ANSI code page: katana_cli's arguments, an environment
-// variable's value and a script saved from an ANSI editor arrive that way
-// ("café" in the ANSI code page is not UTF-8). It never throws.
-// std::filesystem::path constructed from such bytes does, here, and nothing
-// up a verb's call chain catches it.
+// read in the ANSI code page: katana_cli's arguments and a script saved from
+// an ANSI editor arrive that way ("café" in the ANSI code page is not
+// UTF-8). It never throws. std::filesystem::path constructed from such bytes
+// does, here, and nothing up a verb's call chain catches it.
 [[nodiscard]] std::filesystem::path pathFromUtf8(std::string_view text);
 
 // The path as UTF-8 text, for a message or a reply.
 [[nodiscard]] std::string pathToUtf8(const std::filesystem::path& path);
+
+// The value of the environment variable `name` as text; empty when it is not
+// set, and when it is set to nothing - one case to every reader here, as it
+// is to Windows' own `set NAME=`, which removes the variable. `name` is
+// ASCII: a variable of Katana's own.
+//
+// On Windows the value is read WIDE and handed back as UTF-8. std::getenv
+// gives the ANSI code page's bytes there, and by the time it has them a
+// character the code page has no byte for is already a '?': a kept
+// customisation under a folder named in Japanese, on a machine set up for
+// English, was a file under "??" - not there, so not read, with nothing said
+// - and a KEEP then failed to write it. Elsewhere the bytes are the
+// variable's own. Either way pathFromUtf8 makes the path of them, so a file
+// a variable names is asked for through here and never through getenv.
+[[nodiscard]] std::string environmentVariable(const char* name);
 
 // Every byte of the file, undecoded - what a reader that decodes for itself
 // (core::decodeText) and a digest both want. NotFound when the file cannot be

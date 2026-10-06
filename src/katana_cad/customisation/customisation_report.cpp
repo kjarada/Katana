@@ -292,6 +292,12 @@ std::string customisationJson(const Document& document)
           {"unresolved", summary.coverage.unresolved},
           {"notLinestyles", summary.coverage.notLinestyles}}},
         {"missing", state.missingAtOpen},
+        // What the start found, always written - empty when it had nothing
+        // to say - so that a reader can tell "nothing went wrong" from a
+        // build that does not say.
+        {"start",
+         {{"problems", state.startProblems},
+          {"keptFromAnotherBuiltIn", state.keptFromAnotherBuiltIn}}},
     };
     // A name that is not UTF-8 is shown with U+FFFD rather than thrown at a
     // client that only asked what is loaded (as STATUS JSON does).

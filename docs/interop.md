@@ -952,8 +952,9 @@ warning text="..."
   typed as a session line - `katana_cli -c HELP`, or `HELP` among
   `katana_run_commands` - is `Session::helpText`, the text `katana_help`
   and `--help` give. It used to reach the interpreter, whose HELP knows
-  neither the executor's verbs nor CUSTOMISE and IFC, which are the
-  session's (`cli.help_typed_as_a_line_is_the_whole_session_help`,
+  neither the executor's verbs nor IFC, which is the session's (and did not
+  know CUSTOMISE, the session's too until it became the interpreter's own
+  on 2026-10-06) (`cli.help_typed_as_a_line_is_the_whole_session_help`,
   `McpServer.HelpSentAsACommandIsTheWholeSessionHelp`). With a word,
   `HELP SHEETS` and `HELP UTILITY` stay the interpreter's.
 
@@ -973,7 +974,9 @@ Not done:
 - The window's Command Reference (`windowHelpText`,
   `src/katana_qt/command_reference_dialog.cpp`) keeps its own copies of the
   IFC and CUSTOMISE help blocks rather than reading `ifcHelpText` and the
-  session's, so an edit to one is not seen in the other.
+  interpreter's, so an edit to one is not seen in the other. (The session
+  has no CUSTOMISE block of its own any more: the interpreter's help has the
+  family's.)
 
 The import and export dialogs build `IMPORT` and `EXPORT` lines ("Import
 options", "Export options"); neither writes through `interop` itself any

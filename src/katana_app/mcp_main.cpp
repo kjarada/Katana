@@ -98,8 +98,10 @@ int main(int argc, char* argv[])
         std::cerr << "error: katana_mcp could not take its standard output for the protocol\n";
         return 1;
     }
-    // std::cout now reaches stderr, as everything but the protocol must.
-    katana::app::Session session(argc > 0 ? argv[0] : nullptr);
+    // std::cout now reaches stderr, as everything but the protocol must - the
+    // line that says which customisation the session started with among it.
+    // Never nullptr, which is a session of no program (session.hpp).
+    katana::app::Session session(argc > 0 ? argv[0] : "katana_mcp");
     if (!project.empty()) {
         if (project.find('"') != std::string::npos) {
             std::cerr << "error: a project path may not contain a double quote\n";
