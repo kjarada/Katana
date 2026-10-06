@@ -1746,4 +1746,61 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "reduction method=\"network, horizontal\" adjustments=1 rejected=[0-9]+[\r\n]+adjustment method=\"network least squares \\(horizontal\\)\" observations=10 unknowns=4 redundancy=6 variance_factor=[0-9][0-9.e+-]* global_test=(passed|failed) flagged=[0-9]+ rejected=[0-9]+[\r\n]"
         FAIL_REGULAR_EXPRESSION "error")
+    # CODES and LINEWORK (survey_verbs.hpp; docs/survey.md, "SURVEY IMPORT
+    # codes and strings what it draws") on a program with NO survey codes. The
+    # RTK job above draws its 5 points and nothing is asked of the job: the two
+    # records say why, each after the other - no survey codes, unless the line
+    # itself said off, which is said first. What a customisation then does with
+    # the same file is worked by hand in tests/app/test_survey_verbs.cpp
+    # (SurveyVerbs), in process.
+    #
+    # THE SEAM, AND WHAT IT DOES NOT YET DO. KATANA_BUILTIN_CUSTOMISATION=none
+    # tells a session that starts through cad::builtInCustomisation() to start
+    # with no customisation. When these two tests and the LINEWORK one below
+    # were written katana_cli did not start that way: its session seeded from
+    # the older built-in table and never read the variable (session.cpp,
+    # loadDefaultCustomisation), so the word did nothing and the three held
+    # only because that table is empty in a clean checkout. On a build that
+    # compiles survey codes in by that older road the first expects
+    # no-survey-codes and gets a coded import, the LINEWORK test fails wherever
+    # KB has a rule, and the unchanged cli.survey_import_* tests above run
+    # coded. They belong on main ONLY TOGETHER WITH the session's port to
+    # cad::startCustomisation, which is what makes the seam true here.
+    add_test(NAME cli.survey_import_says_why_it_coded_nothing_and_takes_codes_off
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_gnss}\""
+                -c "NEW" -c "SURVEY IMPORT \"${_fld_gnss}\" CODES off" -c "STATUS")
+    set_tests_properties(cli.survey_import_says_why_it_coded_nothing_and_takes_codes_off PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=5 layer=survey/points [^\r\n]+[\r\n]+.*coded none reason=no-survey-codes[\r\n]+linework none reason=no-survey-codes[\r\n]+.*imported job=[^\r\n]+[\r\n]+.*coded none reason=off[\r\n]+linework none reason=no-survey-codes[\r\n]+.*Entities: 5 "
+        FAIL_REGULAR_EXPRESSION "error")
+    katana_survey_refusal(codes_that_are_neither_on_nor_off "CODES maybe"
+        "InvalidArgument: CODES takes on or off, and 'maybe' is neither. usage: ")
+    # LINEWORK (cad/linework_verbs.hpp; docs/survey_coding.md, "LINEWORK on the
+    # command line") through katana_cli, again with no survey codes: two
+    # points coded "KB ST" and "KB END", numbered 1 and 2, ten metres apart.
+    # Nothing selected, so the scope is the drawing: 2 entities, both points.
+    # No rule knows KB, and a control code alone makes a line when the run is
+    # asked for by name: one line of two points on their layer, noted as
+    # unstyled. PREVIEW says so and draws nothing; the run draws entity 3, a
+    # polyline 10 long. A SECOND run takes the 2 points and that line, finds
+    # the line the drawing already holds and draws nothing: the 2 points it
+    # runs through are left out as already drawn, 1 line, and the drawing is
+    # still 3 entities (it was 4, the same line twice, until the run was told
+    # to look). It is no undo step, so the one UNDO that follows takes the
+    # first run's line back, to the 2 points.
+    add_test(NAME cli.linework_strings_points_by_their_control_codes_as_one_undo_step
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                $<TARGET_FILE:katana_cli> -c "POINT 0,0" -c "POINT 10,0"
+                -c "SELECT 1" -c "PROP SET code \"KB ST\" text" -c "PROP SET point 1 text"
+                -c "SELECT 2" -c "PROP SET code \"KB END\" text" -c "PROP SET point 2 text"
+                -c "SELECT NONE" -c "LINEWORK PREVIEW" -c "LINEWORK" -c "LINEWORK" -c "LIST"
+                -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.linework_strings_points_by_their_control_codes_as_one_undo_step
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1 preview=yes[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0 entity=3[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+linework scope=drawing matched=3 considered=2 lines=0 unplaced=0 notes=1[\r\n]+left_out=2 reason=already-drawn lines=1[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+3 entities[\r\n]+.*Polyline +layer=0 +vertices=2[^\r\n]*length=10[^0-9.].*Entities: 2 "
+        FAIL_REGULAR_EXPRESSION "error")
 endif()
