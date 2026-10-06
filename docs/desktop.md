@@ -3070,6 +3070,220 @@ non-modal dialog the window keeps (`MainWindow::showAlignmentManager`,
 decisions are in `docs/cad.md`, "The Alignment Manager". The Terrain menu
 opens with it, in an Alignments section, and the toolbar with its button.
 
+## Settings
+
+What the session's customisation IS, and the few things that are done to it
+whole, in one non-modal dialog (`SettingsDialog`, `settingsDialog`,
+`src/katana_qt/customisation/settings_dialog.hpp`). The lines it runs are the
+`CUSTOMISE` family's (`docs/customisation.md`, "The verbs"), and what "kept"
+means is in "Settings and the kept customisation" there; this is the dialog.
+
+**It has no menu item yet.** The dialog is built and tested on its own
+(`tests/qt_widgets/customisation/test_settings_dialog.cpp`): the window's
+item, the context the window fills and the headless tests are the work that
+follows it ("Not done", below). Whoever opens it hands over a
+`SettingsContext` - the Document, the one executor, the log, whether the
+session is headless, whether the Survey Code Manager holds unapplied edits,
+three callbacks that open the editors, and what the session's host offers:
+whether there is a built-in customisation and the kept file's path as text.
+Every member has an empty default, and a button whose callback is empty is
+disabled.
+
+A page list (`settingsPages`) beside a stack (`settingsStack`). One page
+today, Customisation (`settingsCustomisation`); a second is one more
+`addPage`.
+
+| Part | Object names | What it shows or runs |
+|---|---|---|
+| What is active | `settingsActiveName`, `settingsActiveOrigin`, `settingsActiveDefinitions`, `settingsActiveSymbols`, `settingsActiveRules`, `settingsActiveKept`, `settingsActiveProblems` | the name; the origin in plain words (None, Built in, Kept by you, Loaded this session, Edited this session); how many definitions, how many of them symbols, and the rules over how many codes; "Kept" or "Not kept" with the kept file's path, or that the session has none; what went wrong at start-up, hidden when nothing did |
+| The notice | `settingsShowNotice`, `settingsNotice` | the author's notice, read-only and hidden until asked for: the customisation's own, then each source's under `From <name>:`. The toggle is hidden while there is none |
+| Import | `settingsImportPath`, `settingsImportBrowse`, `settingsImportReplace`, `settingsImport` | `CUSTOMISE "<file>"`, or with Replace instead of merging ticked `CUSTOMISE REPLACE "<file>"` |
+| Export | `settingsExportPath`, `settingsExportBrowse`, `settingsExport` | `CUSTOMISE EXPORT "<file>"` |
+| Built-in and kept | `settingsReset`, `settingsKeep`, `settingsRevert` | `CUSTOMISE RESET`, `CUSTOMISE KEEP`, `CUSTOMISE REVERT` |
+| When survey data comes in | `settingsAutoCodes`, `settingsAutoLinework` | `CUSTOMISE SET auto.codes=on` or `off`, `CUSTOMISE SET auto.linework=on` or `off`, when the box is toggled |
+| Linework control codes | `settingsLinework`, `settingsEditLinework` | the seven spellings, read-only, each under the word its editor labels it with (`Start: ST, End: END, Close: CL, Begin curve: BC, ...`; `(off)` for a control switched off), and a button that opens that editor, the Survey Code Manager at its Linework tab |
+| Editors | `settingsOpenCodes`, `settingsOpenSymbols` | open the Survey Code Manager and the Symbol Library |
+| Status | `settingsStatus`, `settingsClose` | each line run, as the command log echoes it (`> CUSTOMISE RESET`), then what it answered: the reply, or `Refused:` and the verb's own words, in the error colour |
+
+**Every button that changes anything builds a line** and hands it to the one
+executor ("One executor: the command runner"), so it is echoed in the command
+log and a refusal is the verb's. There is no Apply: a control runs its line
+when it is pressed, a box when it is toggled - `toggled`, not `clicked`, so
+that a box the headless driver fills (`settingsAutoCodes=off`) runs its line
+as a click does.
+
+**The page shows what the Document says**, never what a button hoped for. It
+is read again from the Document's change notification, through a
+`DocumentWatcher`, when one of three counters has moved:
+`Document::customisationGeneration`, `Document::libraryGeneration` and
+`Document::surveyMapGeneration`. The first alone is not enough - an editor's
+second commit in a session already marked edited moves only the library's or
+the map's, and the counts would stand still
+(`TheLabelsFollowTheDocument`). A box whose line was refused, or that nothing
+ran, goes back to what the Document has, since no notification comes to say
+that nothing changed; reading the boxes from the Document runs no line
+(`RefreshingFromADocumentChangeRunsNothing`).
+
+**What is edited in Settings is kept.** A session that was kept before
+Import, Reset to Built-in or a toggled box, and is not kept after it, is kept
+again: the dialog runs `CUSTOMISE KEEP` behind its own line, and the status
+shows both lines and both answers. Only when the host has a kept file, only
+when the first line was carried out, and never behind Export, Keep or Revert
+to Kept. Whether to keep is asked of the Document after the line, not
+inferred from the line: one that was refused, or a reset that left the
+session the kept one, is followed by nothing. A load typed on the command
+line or run by a script is not followed either, and the page then says "Not
+kept" beside an enabled Keep
+(`WithTheVerbItselfAnEditOfAKeptSessionIsWrittenToTheKeptFile` runs it with
+the verbs themselves and reads the kept file back).
+
+**A reset that is kept sets the kept file aside.** Reset to Built-in on a kept
+session is followed by `CUSTOMISE KEEP` like any other edit made here, and
+`KEEP` writes no copy of the built-in: it renames the kept file to
+`<kept file>.bak` (`docs/customisation.md`, "The host: RESET, KEEP and
+REVERT"). Nothing is then kept, so Revert to Kept is refused in the verb's
+words - "no customisation is kept" - and is NOT the way back. An earlier
+revision of this section said it was. The way back is the file that was set
+aside:
+
+- **in Settings, Import it with Replace instead of merging ticked.** Its
+  definitions take the place of the whole library and its rules of all the
+  codes, each kind it holds, and its control codes and switches are set as it
+  says them; the session being the kept one, the import is kept, in a kept
+  file written anew
+  (`AfterAResetOfAKeptSessionRevertHasNoneToReadAndTheFileSetAsideIsTheWayBack`).
+  A kind the file does not hold stays the built-in's, and so does a colour
+  name it does not give;
+- **or, outside the program, give the file its own name back** and press
+  Revert to Kept, which reads it exactly as it was
+  (`TheFileSetAsideGivenItsOwnNameBackIsReadByRevertAsItWas`).
+
+Only until the next `KEEP` that finds a kept file, because ONE earlier file
+is kept. The first edit made in Settings after the reset writes a new kept
+file and leaves the `.bak`; the second sets that new file aside in the
+`.bak`'s place, and the customisation the reset put away is then in neither
+file (`TheFileAResetSetAsideLastsOnlyUntilTheSecondEditKeptAfterIt`).
+
+No question is asked before the press, so the button says it first. On a kept
+session whose host has a kept file, Reset to Built-in's tip names the `.bak`,
+says that Revert to Kept will have none to read, and gives the way back
+(`ResetSaysBeforeItIsPressedThatAKeptSessionsFileIsSetAside`). Keep's tip
+says the same of a session that is the built-in and not kept - what a reset
+typed on the command line leaves - where a press writes nothing and sets the
+kept file aside
+(`KeepOfASessionThatIsTheBuiltInWritesNothingAndSetsTheKeptFileAside`). A
+reset that is NOT kept - typed, or made here on a session that was not the
+kept one - leaves the kept file where it is, and Revert to Kept then does go
+back (`ARevertOfASessionThatWasResetAndNotKeptReadsTheKeptFileAgain`).
+
+**Refused in the dialog**, with the reason in the status and the log, and
+nothing run:
+
+- **Import, Reset to Built-in and Revert to Kept while the Survey Code
+  Manager holds unapplied edits**, in the words the window refuses to close
+  over them with (`CustomisationWorkbench::confirmClose`). The manager keeps
+  its buffer when the drawing's rules change under it, and its Apply then
+  installs that buffer whole: the load would be undone without a word. Revert
+  to Kept is held to it with the other two because it loads rules the same
+  way.
+- **A file no line can carry** - a double quote or a line break in its path:
+  the tokenizer's quoted words have no escape, and the rule is the one every
+  dialog writes a word by (`src/katana_qt/command_word.hpp`) - and no file at
+  all.
+- **Browse in a headless session**, which opens no file dialog and names the
+  line to type and the field to fill. Browse is the only thing here that
+  opens one; it offers the filter the two managers offer
+  (`customisationFileFilter`), opens where the path in the field points, and
+  only fills the field. Export's gives a name that does not end `.json`, in
+  any letter case, the ending `.customisation.json`, so that the file is one
+  Import's own filter shows
+  (`ExportsBrowseFillsTheFieldAndEndsANameWithNoJsonEndingAsACustomisationFile`).
+
+Reset to Built-in is disabled, with a tip saying why, when the host has no
+built-in; Keep and Revert to Kept when it has no kept file; Keep also while
+the session is already kept. No button is a default, Enter in a field presses
+nothing, and no path through the dialog opens a modal box.
+
+**A path is written in quotes, with `/`, and a bare name with its directory**
+(`keep` becomes `"./keep"`). The family reads a line's whole first word as a
+keyword once the tokenizer has taken the quotes off, so a file called `keep`
+would run `KEEP`, and `EXPORT` refuses a file called as one of its own words;
+a file so called is given with its directory (`docs/customisation.md`, "The
+verbs"). Every name with no directory in it is, so the dialog keeps no list
+of the family's words to go stale
+(`TheLinesItBuildsAreReadByTheVerbItself`).
+
+**A path pasted in its quotes is the path inside them.** A file manager
+copies a path with double quotes round it (`"C:\data\site codes.json"`), and
+they are no part of the file's name: ONE pair round the WHOLE path is taken
+off, with the blanks beside it, before the path is read - by Import, by
+Export and by Browse alike. Left on, the path was refused for holding a
+double quote. A quote anywhere else is still refused, and quotes round
+nothing name no file (`APathPastedInItsQuotesIsReadAsThePathItIs`).
+
+Decisions, and what was rejected:
+
+- *Rejected: an Apply button.* The code manager already has one, and a
+  second commit step here would be a second buffer that a load could silently
+  be undone from. Each control is one line, run at once.
+- *Rejected: writing every change to the kept file as it is made.* A line
+  typed to try a customisation would then rewrite the user's own for good
+  (`docs/customisation.md`, "`KEEP` is said, not implied"). Settings keeps
+  only what Settings changed, and only a session that was the kept one.
+- *Rejected: editing the linework control codes here too.* They have one
+  editor, the Survey Code Manager's Linework tab; a second set of seven
+  fields would be a second place for them to differ.
+- *Rejected: naming the linework controls as a file does* (`arcStart=BC`).
+  Those are the words `CUSTOMISE SET` and the format read, written for a
+  script. The page says Start, End, Close, Begin curve, End curve, Join to
+  point and Rectangle - the labels of the one editor its button opens - so
+  that a control has one name in the window.
+- *Rejected: a label for the status.* A load answers with several records
+  and a refusal may list every reason; a label grows with its text and would
+  push the page about. It is a read-only box of four lines, and the headless
+  driver's `?settingsStatus` prints a box's text as it is, where it reads a
+  label's as markup and would drop the `<file>` of a refusal that names a
+  line.
+- *Rejected: asking before Reset or before Export writes over a file.* A
+  question is a modal box, which a headless run cannot answer.
+  `CUSTOMISE EXPORT` says `replaced=yes` in its answer, and what a reset of a
+  kept session costs is said on the button before it is pressed ("A reset
+  that is kept sets the kept file aside", above).
+
+Not done:
+
+- **Whether a reset made in Settings should be kept at all is the owner's to
+  decide.** As built, and as the brief has it, the reset is followed by
+  `KEEP`: the kept file is set aside, one `.bak` deep, and the second edit
+  after it is the end of what was there. Not followed, the kept file would
+  stand, the page would say "Not kept", and Revert to Kept would be the way
+  back - and a reset would last the session unless Keep were pressed. Keeping
+  more than one earlier file would be `CUSTOMISE KEEP`'s to do
+  (`src/katana_cad/customisation/customisation_verbs.cpp`).
+- **The seven linework labels are in two lists**: the Linework tab's own
+  (`src/katana_qt/customisation/code_manager_tabs.cpp`) and this dialog's
+  (`kLineworkLabels`). One list that both read is the fix; the tab's file
+  was another task's while the dialog was built.
+  `TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem` reads the tab's
+  labels and fails when either list changes alone.
+- **No menu item, no window context, no headless test.** The window does not
+  make this dialog yet, so `--dialog` cannot reach it.
+- **The lines need the interpreter's family, with a host.** The window still
+  takes a `CUSTOMISE` line itself and reads every word after it as a file
+  (`docs/customisation.md`, "Where this stands"): wired to that, only Import
+  would do what it says. The dialog is tested against the family itself, the
+  interpreter over the same Document.
+- **The start-up problems row is never shown.** What went wrong when the
+  session started (`CustomisationStart::problems`) is not on the Document in
+  this tree; the dialog has the row (`settingsActiveProblems`) and ONE marked
+  place that reads none, in `src/katana_qt/customisation/settings_dialog.cpp`.
+- **Revert to Kept is enabled whenever the host has a kept file**, whether or
+  not the file is there: `CUSTOMISE REVERT` refuses in its own words when
+  nothing is kept. Disabling it would mean the dialog reading the disk, which
+  nothing notifies it of.
+- **Export writes the whole session.** The parts (`CODES`, `ONLY`) are the
+  two managers' export buttons.
+
 ## The rules a dialog or panel follows
 
 Collected here because each was paid for once, and a new manager is where
