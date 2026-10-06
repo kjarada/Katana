@@ -1546,3 +1546,104 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   one - `CommandInterpreter::setColourLookup`, through which a front end did,
   is gone - so the parameter is reached by its two tests alone, and goes
   when someone next changes that function's signature.
+
+## Settings and the kept customisation
+
+A session's customisation lasts the session. What makes it the one the next
+start gives is the KEPT FILE: a Katana customisation file, written by
+`CUSTOMISE KEEP` and read at start-up in the place of the built-in
+(`cad::startCustomisation`; "The host: RESET, KEEP and REVERT", above). The
+Document says whether the session is that one
+(`CustomisationState::kept`): true for what start-up installed and for what
+was last kept, false from the first change after either - an editor's
+commit, a `SET`, a load.
+
+Where the file is belongs to the front end, which hands its path to the
+interpreter in the host (`cad::CustomisationHost`). A front end that keeps
+none - every test's, and a headless run that names none - has `KEEP` and
+`REVERT` refused by name, and the refusal names the environment variable a
+front end reads the path from (`cad::kKeptCustomisationVariable`). Which
+per-user place an interactive window uses is the window's to say and is not
+in this tree; the Settings dialog is told the path as text
+(`SettingsContext::keptFile`) and shows it.
+
+**Settings** (`src/katana_qt/customisation/settings_dialog.hpp`;
+`docs/desktop.md`, "Settings") is where a person sees all of this and does
+the whole-customisation things, each a line of the family:
+
+| In Settings | The line |
+|---|---|
+| Import, a file | `CUSTOMISE "<file>"` |
+| Import, Replace instead of merging ticked | `CUSTOMISE REPLACE "<file>"` |
+| Export, a file | `CUSTOMISE EXPORT "<file>"` |
+| Reset to Built-in | `CUSTOMISE RESET` |
+| Keep | `CUSTOMISE KEEP` |
+| Revert to Kept | `CUSTOMISE REVERT` |
+| Apply survey codes, toggled | `CUSTOMISE SET auto.codes=on` or `=off` |
+| Join coded points into lines, toggled | `CUSTOMISE SET auto.linework=on` or `=off` |
+
+The file is always in quotes and written with `/`, and a name with no
+directory in it is given one (`"./keep"`), so that the family's rule - a
+keyword is the whole first word, quotes or none - can never read a file as
+`KEEP` or `RESET`. A path pasted into a field in quotes of its own, as a file
+manager copies one, is the path inside them.
+
+**What is edited in Settings is kept; what is typed is not.** `KEEP` is said,
+not implied ("The verbs: decisions, and what was rejected"), and Settings is
+where it is said for the person: a session that was kept before Import,
+Reset to Built-in or a toggled box, and is not after it, is followed by
+`CUSTOMISE KEEP`, run by the dialog as a line of its own. What that does in
+each case is the verb's:
+
+- **an edit of a kept session** - a switch, a file merged in - is written to
+  the kept file, the file that was there staying beside it as `.bak`. The
+  first such edit of a session that started from the built-in creates the
+  file;
+- **Reset to Built-in where a file is kept** leaves a session that is the
+  built-in and not the kept one, so it is kept - and a session that IS the
+  built-in is kept by setting the kept file aside as `.bak`, never by writing
+  a copy of the built-in that would hide every later edition of it. Nothing
+  is then kept, so `REVERT` is refused ("no customisation is kept") and is
+  not the way back. The way back is that `.bak`:
+  `CUSTOMISE REPLACE "<kept file>.bak"` - Import with Replace in Settings,
+  which keeps it again - or the file given its own name back, and `REVERT`.
+  ONE earlier file is kept, so only until the next `KEEP` that finds a kept
+  file: the second edit made in Settings after the reset. The button says so
+  before it is pressed (`docs/desktop.md`, "Settings", follows the file
+  through each press, with the tests);
+- **Reset to Built-in where nothing is kept** leaves the session the kept
+  one already, and nothing follows;
+- **a `KEEP` that is refused** - the kept file changed on disk since this
+  session read it, it does not read, a newer Katana wrote it - is shown as
+  the refusal it is, under the line that was carried out. The session is
+  then edited and not kept, the page says so, and Keep is there to try again
+  once `REVERT` or `EXPORT` has dealt with the file.
+
+A line typed on the command line, run by a script or sent by an agent
+changes the session and is followed by nothing: Settings then shows "Not
+kept" beside Keep, and the person decides. *Rejected: keeping after every
+change, whoever made it* - one line would last a session in `katana_cli` and
+for ever in the window, and an agent trying a customisation would be
+rewriting its user's. *Rejected: keeping only on the Keep button, with a
+question at quit* - "edit it in Settings" would then mean "edit it, and
+remember to keep it", and a question is a modal box a headless run cannot
+answer.
+
+Export, Keep and Revert to Kept are never followed: an export changes
+nothing, and `REVERT` leaves the session as the kept file has it.
+
+Not done:
+
+- **Whether a reset made in Settings should be kept at all** is the owner's
+  to decide: kept, it sets the kept file aside, one `.bak` deep; not kept,
+  the file would stand and `REVERT` would go back to it (`docs/desktop.md`,
+  "Settings", "Not done").
+- **The two managers and the definition editor do not keep their commits
+  yet.** They call a hook round each commit
+  (`CustomisationContext::beginCommit`) that nothing answers in this tree, so
+  an Apply in the Survey Code Manager leaves a kept session not kept, and
+  Settings says so.
+- **Nothing is locked while the Survey Code Manager holds unapplied edits
+  except the three buttons in Settings** (Import, Reset to Built-in, Revert
+  to Kept): the same lines typed are still run, and the manager's log says
+  the rules changed under it.
