@@ -273,7 +273,7 @@ struct FileDialogPeek {
 // The Format menu and toolbar as MainWindow builds them: the workbench's
 // actions made with their tips as the window's action factory makes them
 // (status tip, and a tooltip naming the action), the window's own Layers
-// and Load / Replace actions beside them. The fixture customisation is
+// action beside them. The fixture customisation is
 // loaded, and the drawing has a style on a library linestyle, a style on
 // the plain line ("1", as an archive import names it) and a point in each.
 struct Bench {
@@ -282,8 +282,6 @@ struct Bench {
     QMenu* menu = new QMenu("Format", &window);
     QToolBar* bar = new QToolBar("Format", &window);
     QAction* layers = new QAction("&Layers...", &window);
-    QAction* load = new QAction("Loa&d Customisation...", &window);
-    QAction* replace = new QAction("&Replace Loaded Customisation...", &window);
     std::unique_ptr<CustomisationWorkbench> bench;
 
     Bench()
@@ -300,8 +298,6 @@ struct Bench {
         }
 
         layers->setObjectName("formatLayers");
-        load->setObjectName("loadCustomisation");
-        replace->setObjectName("replaceCustomisation");
         CustomisationServices services;
         services.document = &document;
         services.makeAction = [this](katana::qt::Icon icon, const QString& text,
@@ -316,8 +312,6 @@ struct Bench {
         services.log = [](const QString&, bool) {};
         services.headless = [] { return true; };
         services.layers = layers;
-        services.loadCustomisation = load;
-        services.replaceCustomisation = replace;
         bench = std::make_unique<CustomisationWorkbench>(window, std::move(services), *menu, *bar);
     }
 
@@ -348,14 +342,22 @@ TEST(GeneralTexts, NoFormatMenuItemOrToolbarButtonNamesAnotherProgramInItsTextOr
     for (const QAction* action : bench.bar->actions()) {
         addAction(seen, "toolbar", *action);
     }
-    // The workbench's five, each with its tips, and the window's two.
+    // The workbench's five, each with its tips. (The window's Load and
+    // Replace Loaded Customisation stood beside them until the files they
+    // loaded stopped being read; no menu item loads a file here now.)
     for (const char* name : {"formatStyles", "formatSymbols", "formatSurveyCodes", "formatPurge",
-                             "formatGlobalModify", "loadCustomisation", "replaceCustomisation"}) {
+                             "formatGlobalModify"}) {
         EXPECT_NE(bench.window.findChild<QAction*>(name), nullptr) << name;
     }
+    for (const char* name : {"loadCustomisation", "replaceCustomisation"}) {
+        EXPECT_EQ(bench.window.findChild<QAction*>(name), nullptr) << name;
+    }
     expectNoneNamesAnotherProgram(seen);
+    // Nor a file of a format the window no longer reads: the Survey Code
+    // Manager's tip said "the loaded survey code files" while it loaded them.
+    expectNoneNamesAnOlderFormat(seen);
     EXPECT_TRUE(anyContains(seen, "the loaded library linestyles"));
-    EXPECT_TRUE(anyContains(seen, "the loaded survey code files"));
+    EXPECT_TRUE(anyContains(seen, "The survey codes of the session's customisation"));
 }
 
 TEST(GeneralTexts, NoTextTheStyleManagerShowsNamesAnotherProgram)

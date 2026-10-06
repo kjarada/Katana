@@ -9,6 +9,7 @@ add_library(katana_app STATIC
     import_records.cpp import_records.hpp
     survey_verbs.cpp survey_verbs.hpp
     mcp_server.cpp mcp_server.hpp
+    mcp_customisation.cpp mcp_tools.hpp
 )
 katana_target_defaults(katana_app)
 target_include_directories(katana_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -110,29 +111,29 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "id=1 [^\r\n]*vertices=3.*id=2 [^\r\n]*vertices=5.*index=0 x=10 y=0 .*index=1 x=20 y=0 .*index=2 x=20 y=10 "
         FAIL_REGULAR_EXPRESSION "error")
 
-    # The survey-code verbs, on a mapfile of the tests' own: its shape is the
-    # reference mapfile's, its codes are not. REPLACE puts it in place of the
-    # compiled-in map, so what is expected does not depend on whether this
-    # checkout has the reference customisation. By index: 0 KT* feature,
-    # 1 KX* feature with no layer, 2 KT* a built-in symbol, "cross". (The
-    # file is a survey code file, so its elements are that file's: <map_data>
-    # is what the replies call a feature rule and <model> its layer.)
-    set(_mapfile "${CMAKE_CURRENT_BINARY_DIR}/cli-codes.mapfile")
-    file(WRITE "${_mapfile}" [=[<?xml version="1.0"?>
-<xml12d xmlns="http://www.12d.com/schema/xml12d-10.0">
-  <map_file>
-    <version>11.0</version>
-    <map_data>
-      <item><key>KT*</key><model>KATANA TEST</model><colour>red</colour><linestyle>0</linestyle><comment>[KT*] Katana test</comment></item>
-      <item><key>KX*</key><colour>red</colour></item>
-    </map_data>
-    <vertex_symbol_data>
-      <item><key>KT*</key><symbol_data><style>cross</style><size>2</size></symbol_data></item>
-    </vertex_symbol_data>
-  </map_file>
-</xml12d>
+    # The survey-code verbs, on a customisation of the tests' own: its codes are
+    # nobody else's. REPLACE puts its rules in the place of whatever rules the
+    # session started with. By index: 0 KT* feature, 1 KX* feature with no
+    # layer, 2 KT* a built-in symbol, "cross". It is a Katana customisation
+    # file, written out by hand from the format's chapter of
+    # docs/customisation.md; until 2026-10-06 it was a survey code file of
+    # another program holding the same three rules, which no longer loads
+    # (that text is kept below, as the file a session refuses).
+    set(_codes "${CMAKE_CURRENT_BINARY_DIR}/cli-codes.customisation.json")
+    file(WRITE "${_codes}" [=[{
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "cli-codes",
+  "codes": [
+    {"key": "KT*", "sets": "feature", "layer": "KATANA TEST", "colour": "red", "linestyle": "0", "comment": "[KT*] Katana test"},
+    {"key": "KX*", "sets": "feature", "colour": "red"},
+    {"key": "KT*", "sets": "symbol", "symbol": {"name": "cross", "size": 2}}
+  ]
+}
 ]=])
-    set(_replace "CUSTOMISE REPLACE \"${_mapfile}\"")
+    set(_replace "CUSTOMISE REPLACE \"${_codes}\"")
+    # "[\r\n]+" where a line ends: the console writes CRLF on Windows.
+    set(_eol "[\r\n]+")
     add_test(NAME cli.code_explain
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CODE EXPLAIN KT01"
@@ -149,7 +150,7 @@ if(KATANA_BUILD_TESTS)
     # KX* rule #2: KT* feature, KT* symbol, KX* feature.
     add_test(NAME cli.code_check_after_a_merge
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
-                $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CUSTOMISE \"${_mapfile}\""
+                $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CUSTOMISE \"${_codes}\""
                 -c "CODE CHECK")
     add_test(NAME cli.code_applies_and_reports
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -164,71 +165,77 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "POINT 1,1" -c "LAYER NEW a"
                 -c "LAYER SET a" -c "POINT 2,2" -c "SELECT ALL" -c "PROP SET code KT01"
                 -c "CODE LAYERS a PREVIEW" -c "LIST")
-    # A QUOTED path whose first word is "replace" is a file, not the REPLACE
-    # keyword: taken for the keyword, the file was dropped ("REPLACE needs a
-    # file") or, given twice, replaced the loaded map instead of merging. Run
+    # A path whose first word is "replace" is a file, not the REPLACE keyword:
+    # a keyword is the WHOLE first word (cad/customisation_verbs.hpp), and a
+    # quoted path with a blank in it is one word. Taken for the keyword by the
+    # parser this session once had, the file was dropped ("REPLACE needs a
+    # file") or, given twice, replaced the loaded rules instead of merging. Run
     # beside the file, so that the path's first word really is "replace". By
-    # hand: cli-codes.mapfile has 3 rules over 2 keys (KT*, KX*) and this
-    # file 1 rule over RM*, so a merge holds 4 rules over 3 keys, and loading
-    # the same file twice in one load adds its rule once.
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/replace me.mapfile" [=[<?xml version="1.0"?>
-<xml12d xmlns="http://www.12d.com/schema/xml12d-10.0">
-  <map_file>
-    <version>11.0</version>
-    <map_data>
-      <item><key>RM*</key><model>REPLACE ME</model></item>
-    </map_data>
-  </map_file>
-</xml12d>
+    # hand: cli-codes has 3 rules over 2 keys (KT*, KX*) and this file 1 rule
+    # over RM*, so a merge holds 4 rules over 3 keys, and naming the same file
+    # twice in one load adds its rule once.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/replace me.customisation.json" [=[{
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "replace me",
+  "codes": [
+    {"key": "RM*", "sets": "feature", "layer": "REPLACE ME"}
+  ]
+}
 ]=])
     add_test(NAME cli.a_quoted_path_starting_with_replace_is_loaded_as_a_file
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
-                $<TARGET_FILE:katana_cli> -c "customise replace \"${_mapfile}\""
-                -c "CUSTOMISE \"replace me.mapfile\"" -c "CUSTOMISE")
+                $<TARGET_FILE:katana_cli> -c "customise replace \"${_codes}\""
+                -c "CUSTOMISE \"replace me.customisation.json\"" -c "CUSTOMISE")
     add_test(NAME cli.the_same_quoted_replace_path_twice_merges_rather_than_replaces
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}"
-                -c "CUSTOMISE \"replace me.mapfile\" \"replace me.mapfile\"" -c "CUSTOMISE")
+                -c "CUSTOMISE \"replace me.customisation.json\" \"replace me.customisation.json\""
+                -c "CUSTOMISE")
     set_tests_properties(cli.a_quoted_path_starting_with_replace_is_loaded_as_a_file
         cli.the_same_quoted_replace_path_twice_merges_rather_than_replaces
         PROPERTIES PASS_REGULAR_EXPRESSION "4 survey code rules over 3 distinct codes")
-    # A library-only load keeps the map (audit QT-21): the symbol fixture is
-    # merged in after the tests' mapfile, and the mapfile's 3 rules over 2
-    # codes are still there. By hand, from cli-codes.mapfile above.
-    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
+    # A load of definitions alone keeps the rules (audit QT-21): the symbol
+    # fixture is merged in after the tests' codes, and their 3 rules over 2
+    # codes are still there. By hand: the fixture holds four symbols and no
+    # rule, and none of the four is in a session that has only cli-codes'.
+    # The fixtures are the committed ones every customisation test reads.
+    set(_data "${PROJECT_SOURCE_DIR}/tests/data/customisation")
+    set(_symbols "${_data}/test_symbols.customisation.json")
     add_test(NAME cli.a_library_alone_merged_in_keeps_the_survey_codes
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}"
-                -c "CUSTOMISE \"${_fixture}/test_symbols.4d\"" -c "CUSTOMISE")
+                -c "CUSTOMISE \"${_symbols}\"" -c "CUSTOMISE")
     set_tests_properties(cli.a_library_alone_merged_in_keeps_the_survey_codes PROPERTIES
-        PASS_REGULAR_EXPRESSION "test_symbols\\.4d: style library, [0-9]+ added.*3 survey code rules over 2 distinct codes")
+        PASS_REGULAR_EXPRESSION "loaded file=[^\r\n]*test_symbols\\.customisation\\.json\"? name=test_symbols definitions_added=4 definitions_replaced=0 codes_added=0 codes_replaced=0 .*3 survey code rules over 2 distinct codes")
 
-    # A saved project records the customisation files it was drawn with, and
-    # a later session that opens it without one of them is told which (a
-    # warning; the project still opens). Saved with the symbol fixture merged
-    # in, then opened in a second process that never loads it. With the
-    # fixture loaded first, nothing is missing.
+    # A saved project records the customisations it was drawn with - by the
+    # NAME each declares, never a file's - and a later session that opens it
+    # without one of them is told which (a warning; the project still opens).
+    # Saved with the symbol fixture, whose name is test_symbols, merged in,
+    # then opened in a second process that never loads it. With the fixture
+    # loaded first, nothing is missing.
     set(_recorded "${CMAKE_CURRENT_BINARY_DIR}/cli-recorded.katana")
     add_test(NAME cli.recorded_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_recorded}")
     add_test(NAME cli.a_saved_project_records_its_customisation
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
-                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_fixture}/test_symbols.4d\""
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_symbols}\""
                 -c "LINE 0,0 10,0" -c "SAVE \"${_recorded}\"")
-    add_test(NAME cli.opening_a_project_names_the_customisation_files_not_loaded
+    add_test(NAME cli.opening_a_project_names_the_customisations_not_loaded
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "OPEN \"${_recorded}\"")
     add_test(NAME cli.opening_a_project_with_its_customisation_loaded_warns_of_nothing
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
-                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_fixture}/test_symbols.4d\""
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_symbols}\""
                 -c "OPEN \"${_recorded}\"")
     set_tests_properties(cli.recorded_cleanup PROPERTIES FIXTURES_SETUP cli_recorded_clean)
     set_tests_properties(cli.a_saved_project_records_its_customisation PROPERTIES
         FIXTURES_REQUIRED cli_recorded_clean FIXTURES_SETUP cli_recorded)
-    set_tests_properties(cli.opening_a_project_names_the_customisation_files_not_loaded PROPERTIES
+    set_tests_properties(cli.opening_a_project_names_the_customisations_not_loaded PROPERTIES
         FIXTURES_REQUIRED cli_recorded
-        PASS_REGULAR_EXPRESSION "opened .*warning: this project was drawn with customisation files that are not loaded: \"test_symbols\\.4d\"[\r\n]")
+        PASS_REGULAR_EXPRESSION "opened .*warning: this project was drawn with customisations that are not loaded: \"test_symbols\"[\r\n]")
     set_tests_properties(cli.opening_a_project_with_its_customisation_loaded_warns_of_nothing PROPERTIES
         FIXTURES_REQUIRED cli_recorded
         PASS_REGULAR_EXPRESSION "opened "
@@ -237,14 +244,14 @@ if(KATANA_BUILD_TESTS)
     # Three sessions on one project of their own. The first saves it with the
     # symbol fixture loaded; the second opens it without the fixture (warned)
     # and saves it unedited; the third, again without it, must still be told:
-    # a session that never had the file cannot judge it, so its save keeps
-    # the name. The second session rewrote the record from what it had
+    # a session that never had the customisation cannot judge it, so its save
+    # keeps the name. The second session rewrote the record from what it had
     # loaded, and the third opened in silence.
     set(_resaved "${CMAKE_CURRENT_BINARY_DIR}/cli-resaved.katana")
     add_test(NAME cli.resaved_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_resaved}")
     add_test(NAME cli.a_project_is_saved_with_a_symbol_file_loaded
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
-                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_fixture}/test_symbols.4d\""
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_symbols}\""
                 -c "LINE 0,0 10,0" -c "SAVE \"${_resaved}\"")
     add_test(NAME cli.an_unedited_save_where_a_file_is_missing_succeeds
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
@@ -260,15 +267,13 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "saved[\r\n]")
     set_tests_properties(cli.a_file_missing_when_the_project_was_saved_is_still_named_on_opening
         PROPERTIES FIXTURES_REQUIRED cli_resaved_second
-        PASS_REGULAR_EXPRESSION "not loaded: \"test_symbols\\.4d\"[\r\n]")
+        PASS_REGULAR_EXPRESSION "not loaded: \"test_symbols\"[\r\n]")
 
-    # "[\r\n]+" where a line ends: the console writes CRLF on Windows.
     # A rule's section and fields are in the Katana customisation format's
     # words (feature, symbol, layer), which the replies give since the survey
     # code file's own (map_data, vertex_symbol_data, model) left them: the four
     # expressions below were changed word for word from the table "The words
     # a rule is shown by" in docs/customisation.md, not from what a run printed.
-    set(_eol "[\r\n]+")
     set_tests_properties(cli.code_explain PROPERTIES PASS_REGULAR_EXPRESSION
         "Code \"KT01\": prefix match, matched${_eol}  layer: KATANA TEST  <- rule #0 KT\\* \\(feature\\).*  symbol: cross, size 2  <- rule #2 KT\\* \\(symbol\\)${_eol}  linestyle \"0\": a plain line${_eol}  symbol \"cross\": drawn by Katana itself${_eol}  colour \"red\": #FF0000${_eol}Code \"kt01\": no rule matches it${_eol}  near miss: key \"KT\\*\" differs only in letter case")
     # A ';' is written "\\;": bare, it splits the expression into a list and the
@@ -277,10 +282,13 @@ if(KATANA_BUILD_TESTS)
     # two sections, then layer, linestyle, symbol, colour and comment.
     set_tests_properties(cli.code_list PROPERTIES PASS_REGULAR_EXPRESSION
         "KT\\*  \\[prefix\\; 2 rules: feature, symbol\\]  layer KATANA TEST\\; linestyle 0\\; symbol cross\\; colour red\\; \"\\[KT\\*\\] Katana test\"${_eol}1 of 2 codes match \"katana\"")
-    # The file's kind is said in the help's words: a survey code file, not a
-    # style library.
+    # The merge's record for the file: nothing added, and 3 replaced - its
+    # keys counted once for each section it gives them rules in (KT* feature,
+    # KX* feature, KT* symbol). The first load of the line ADDED those three,
+    # so this can only be the second's. A path with a blank in it is written
+    # in quotes, hence the optional one.
     set_tests_properties(cli.code_check_after_a_merge PROPERTIES PASS_REGULAR_EXPRESSION
-        "cli-codes\\.mapfile: survey code file, 0 added, 3 replaced \\(codes, once for each section\\): \"KT\\*\", \"KX\\*\", \"KT\\*\".*3 rules checked: 0 errors, 1 warning${_eol}  by kind: 1 no layer${_eol}  rule #2 KX\\* \\(feature\\): warning, no layer")
+        "loaded file=[^\r\n]*cli-codes\\.customisation\\.json\"? name=cli-codes definitions_added=0 definitions_replaced=0 codes_added=0 codes_replaced=3 colours_added=0 colours_replaced=0 linework=no automation=no.*3 rules checked: 0 errors, 1 warning${_eol}  by kind: 1 no layer${_eol}  rule #2 KX\\* \\(feature\\): warning, no layer")
     # Each reply begins with what its scope took: no scope word is the whole
     # drawing, which holds the one point the test draws.
     set_tests_properties(cli.code_applies_and_reports PROPERTIES PASS_REGULAR_EXPRESSION
@@ -293,16 +301,164 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "scope=layers layers=a sublayers=yes matched=1${_eol}1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*  KT01: 1 entity, prefix, matched\\; layer a -> KATANA TEST\\; style cross \\(created\\)\\; 1 changed${_eol}Preview: nothing was changed\\.${_eol}.*2  Point  layer=a  at 2,2")
 
-    # CUSTOMISE alone names the files loaded, in load order - "is my code
-    # file loaded?" is what a count could not answer - after the counts. The
-    # built-in libraries may come first where this checkout has them, so the
-    # line after the heading is not pinned.
-    add_test(NAME cli.customise_alone_names_the_files_loaded
+    # CUSTOMISE alone says what the session holds as records, after the two
+    # count lines: its name and where it came from, then each source by the
+    # name it declares and what it brought - "is my code file loaded?" is what
+    # a count could not answer - then the switches and the linework codes by
+    # the keys CUSTOMISE SET takes. By hand: a session that started with
+    # nothing takes the first load's name; cli-codes brought 3 rules over 2
+    # keys and no definition; the switches are on and the seven spellings the
+    # defaults until a customisation says otherwise.
+    add_test(NAME cli.customise_alone_names_the_sources_loaded
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CUSTOMISE")
-    set_tests_properties(cli.customise_alone_names_the_files_loaded PROPERTIES
+    set_tests_properties(cli.customise_alone_names_the_sources_loaded PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "3 survey code rules over 2 distinct codes${_eol}Loaded files, in load order:${_eol}.*  \"cli-codes\\.mapfile\", a survey code file")
+        "3 survey code rules over 2 distinct codes${_eol}customisation name=cli-codes origin=loaded kept=no definitions=0 codes=2 rules=3 colours=0${_eol}source name=cli-codes definitions=no rules=yes${_eol}automation auto\\.codes=on auto\\.linework=on${_eol}linework linework\\.start=ST linework\\.end=END linework\\.close=CL linework\\.arcstart=BC linework\\.arcend=EC linework\\.join=JPN linework\\.rectangle=RECT")
+
+    # A survey code file of another program is not a Katana customisation
+    # file: refused in the reader's words, naming the file, with nothing
+    # loaded and the batch stopped there (so the point is never drawn). The
+    # text is the one this file's tests loaded their codes from until
+    # 2026-10-06; its element names are that format's own.
+    set(_legacy "${CMAKE_CURRENT_BINARY_DIR}/cli-legacy.mapfile")
+    file(WRITE "${_legacy}" [=[<?xml version="1.0"?>
+<xml12d xmlns="http://www.12d.com/schema/xml12d-10.0">
+  <map_file>
+    <version>11.0</version>
+    <map_data>
+      <item><key>KT*</key><model>KATANA TEST</model><colour>red</colour><linestyle>0</linestyle><comment>[KT*] Katana test</comment></item>
+      <item><key>KX*</key><colour>red</colour></item>
+    </map_data>
+    <vertex_symbol_data>
+      <item><key>KT*</key><symbol_data><style>cross</style><size>2</size></symbol_data></item>
+    </vertex_symbol_data>
+  </map_file>
+</xml12d>
+]=])
+    add_test(NAME cli.a_survey_code_file_is_refused_as_not_a_katana_customisation_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_legacy}\"" -c "POINT 1,1")
+    set_tests_properties(cli.a_survey_code_file_is_refused_as_not_a_katana_customisation_file
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: ParseFailure: not a Katana customisation file \\[[^\r\n]*cli-legacy\\.mapfile"
+        FAIL_REGULAR_EXPRESSION "point created|loaded file=")
+
+    # CUSTOMISE EXPORT writes the session as ONE Katana customisation file,
+    # and a second process that loads it holds the same thing. By hand, from
+    # the three committed fixtures: 3 linestyles + 4 symbols = 7 definitions;
+    # 11 rules over 8 distinct keys, in 11 (section, key) groups; one name the
+    # rules ask for that nothing defines, as the survey fixture's own comment
+    # says. The session takes the first loaded customisation's name. The
+    # export lists its three sources, which the second session's load brings
+    # in the file's place, and says the linework codes and the switches (a
+    # whole export does; a part does not).
+    set(_exported "${CMAKE_CURRENT_BINARY_DIR}/cli-exported.customisation.json")
+    add_test(NAME cli.exported_cleanup COMMAND ${CMAKE_COMMAND} -E rm -f "${_exported}")
+    add_test(NAME cli.customise_export_writes_the_session_as_one_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "CUSTOMISE \"${_data}/test_linestyles.customisation.json\" \"${_symbols}\" \"${_data}/test_survey.customisation.json\""
+                -c "CUSTOMISE EXPORT \"${_exported}\"")
+    add_test(NAME cli.an_exported_customisation_replaces_a_second_sessions_with_the_same_counts
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE REPLACE \"${_exported}\"" -c "CUSTOMISE")
+    set_tests_properties(cli.exported_cleanup PROPERTIES FIXTURES_SETUP cli_exported_clean)
+    set_tests_properties(cli.customise_export_writes_the_session_as_one_file PROPERTIES
+        FIXTURES_REQUIRED cli_exported_clean FIXTURES_SETUP cli_exported
+        PASS_REGULAR_EXPRESSION "undefined names=1${_eol}undefined name=\"TEST Missing Symbol\"${_eol}customisation name=test_linestyles origin=loaded kept=no definitions=7 codes=8 rules=11 colours=0${_eol}exported file=[^\r\n]*cli-exported\\.customisation\\.json\"? name=test_linestyles definitions=7 codes=8 rules=11 replaced=no"
+        FAIL_REGULAR_EXPRESSION "error")
+    set_tests_properties(
+        cli.an_exported_customisation_replaces_a_second_sessions_with_the_same_counts PROPERTIES
+        FIXTURES_REQUIRED cli_exported
+        PASS_REGULAR_EXPRESSION "loaded file=[^\r\n]*cli-exported\\.customisation\\.json\"? name=test_linestyles definitions_added=7 definitions_replaced=0 codes_added=11 codes_replaced=0 colours_added=0 colours_replaced=0 linework=yes automation=yes${_eol}.*customisation name=test_linestyles origin=loaded kept=no definitions=7 codes=8 rules=11 colours=0${_eol}source name=test_linestyles definitions=yes rules=no${_eol}source name=test_symbols definitions=yes rules=no${_eol}source name=test_survey definitions=no rules=yes"
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # What a session starts with, and the two variables that say so
+    # (cad/customisation_host.hpp). These tests set them on their own command
+    # lines: every other test here starts with whatever the suite gives it.
+    #
+    # KATANA_BUILTIN_CUSTOMISATION names a file that IS the built-in for the
+    # run: the session starts with it and says so, and CUSTOMISE RESET goes
+    # back to it. By hand: the survey fixture is 11 rules over 8 keys and no
+    # definition; a REPLACE of rules alone takes all 8 keys away and leaves
+    # the session its name; with no kept file the reset session is what the
+    # next start gives, so it is kept. KATANA_CUSTOMISATION is unset for the
+    # run, so that one in the caller's environment cannot start it instead.
+    add_test(NAME cli.customise_reset_gives_the_built_in_customisation_the_seam_names
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_data}/test_survey.customisation.json"
+                $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CUSTOMISE RESET" -c "CUSTOMISE")
+    set_tests_properties(cli.customise_reset_gives_the_built_in_customisation_the_seam_names
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "Customisation: test_survey, 0 linestyles and symbols and 11 survey code rules, built in${_eol}.*removed definitions=0 codes=8${_eol}.*customisation name=test_survey origin=loaded kept=no definitions=0 codes=2 rules=3 colours=0${_eol}reset name=test_survey definitions=0 codes=8 rules=11 kept=yes${_eol}.*customisation name=test_survey origin=builtIn kept=yes definitions=0 codes=8 rules=11 colours=0"
+        FAIL_REGULAR_EXPRESSION "error")
+    # ... and `none` says there is no built-in at all, whatever this build
+    # compiled in: the session starts with nothing, says nothing of a
+    # customisation at start-up, and has none to reset to.
+    add_test(NAME cli.a_session_told_there_is_no_built_in_customisation_starts_empty
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}" "KATANA_BUILTIN_CUSTOMISATION=none"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE" -c "CUSTOMISE RESET")
+    set_tests_properties(cli.a_session_told_there_is_no_built_in_customisation_starts_empty
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "No customisation is loaded\\.${_eol}  CUSTOMISE <file> \\[<file>\\.\\.\\.\\]  loads Katana customisation files${_eol}customisation name=\"\" origin=none kept=no definitions=0 codes=0 rules=0 colours=0${_eol}.*error: InvalidState: CUSTOMISE RESET needs a built-in customisation, and this program has none"
+        FAIL_REGULAR_EXPRESSION "Customisation: ")
+    # KATANA_CUSTOMISATION names the kept file, the only one a command line
+    # reads or writes: CUSTOMISE KEEP in one process writes the session there,
+    # and the next process starts with it in the built-in's place. By hand:
+    # the built-in is the symbol fixture, 4 definitions and no rule; with the
+    # survey fixture's 11 rules over 8 keys merged in, the session is no
+    # longer the built-in, so KEEP writes it; no file was there, so nothing
+    # was set aside. The second process says "kept", holds the same counts
+    # and both sources, and - kept from this very built-in - is told nothing
+    # of another edition.
+    set(_kept "${CMAKE_CURRENT_BINARY_DIR}/cli-kept.customisation.json")
+    add_test(NAME cli.kept_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${_kept}" "${_kept}.bak" "${_kept}.tmp")
+    add_test(NAME cli.customise_keep_writes_the_session_to_the_file_the_variable_names
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_symbols}" "KATANA_CUSTOMISATION=${_kept}"
+                $<TARGET_FILE:katana_cli>
+                -c "CUSTOMISE \"${_data}/test_survey.customisation.json\"" -c "CUSTOMISE KEEP")
+    add_test(NAME cli.the_next_session_starts_with_the_kept_customisation
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_symbols}" "KATANA_CUSTOMISATION=${_kept}"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE")
+    set_tests_properties(cli.kept_cleanup PROPERTIES FIXTURES_SETUP cli_kept_clean)
+    set_tests_properties(cli.customise_keep_writes_the_session_to_the_file_the_variable_names
+        PROPERTIES FIXTURES_REQUIRED cli_kept_clean FIXTURES_SETUP cli_kept
+        PASS_REGULAR_EXPRESSION "Customisation: test_symbols, 4 linestyles and symbols and 0 survey code rules, built in${_eol}.*kept file=[^\r\n]*cli-kept\\.customisation\\.json\"? written=yes name=test_symbols definitions=4 codes=8 rules=11 backup=none"
+        FAIL_REGULAR_EXPRESSION "error")
+    set_tests_properties(cli.the_next_session_starts_with_the_kept_customisation PROPERTIES
+        FIXTURES_REQUIRED cli_kept
+        PASS_REGULAR_EXPRESSION "Customisation: test_symbols, 4 linestyles and symbols and 11 survey code rules, kept${_eol}.*customisation name=test_symbols origin=kept kept=yes definitions=4 codes=8 rules=11 colours=0${_eol}source name=test_symbols definitions=yes rules=no${_eol}source name=test_survey definitions=no rules=yes"
+        FAIL_REGULAR_EXPRESSION "error|warning")
+    # A kept file that does not read is SAID, on stderr and before anything
+    # else, and the built-in starts in its place rather than nothing: here
+    # the kept file is the survey code file of another program from above.
+    add_test(NAME cli.a_kept_file_that_does_not_read_is_said_and_the_built_in_starts_in_its_place
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_symbols}" "KATANA_CUSTOMISATION=${_legacy}"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE")
+    set_tests_properties(
+        cli.a_kept_file_that_does_not_read_is_said_and_the_built_in_starts_in_its_place PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: the kept customisation is not read, so the built-in customisation is used: ParseFailure: not a Katana customisation file.*Customisation: test_symbols, 4 linestyles and symbols and 0 survey code rules, built in${_eol}.*customisation name=test_symbols origin=builtIn kept=yes definitions=4 codes=0 rules=0 colours=0")
+    # ... and it can be read again for as long as the session runs: CUSTOMISE
+    # JSON has what the start found, as `start`. Standard error reaches
+    # whoever started katana_cli; an agent on the other side of katana_mcp is
+    # never shown it, and read only `origin: builtIn` there. By hand: the
+    # object's keys are in alphabetical order, two blanks a level, a list's
+    # entries a line each; the built-in started and nothing kept did, so the
+    # flag is false; the one problem is the sentence the test above pins.
+    add_test(NAME cli.customise_json_says_what_went_wrong_when_the_session_started
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_symbols}" "KATANA_CUSTOMISATION=${_legacy}"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE JSON")
+    set_tests_properties(cli.customise_json_says_what_went_wrong_when_the_session_started
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"start\": {${_eol}    \"keptFromAnotherBuiltIn\": false,${_eol}    \"problems\": \\[${_eol}      \"the kept customisation is not read, so the built-in customisation is used: ParseFailure: not a Katana customisation file")
     # INFO with an entity's id describes the entity, as the interpreter's
     # INFO does, in a build with the GIS module too: there every INFO was
     # once read as INFO <file>. A 10 x 5 rectangle: perimeter 30, area 50.
@@ -411,15 +567,17 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "pi index=1 x=100 y=0 radius=50 spiral_in=0 spiral_out=0.*station=50[.]000 x=50[.]000 y=0[.]000 direction=0[.]000 azimuth=90[^ ]+ radius=50[.]000 turn=left key=TC.*station=128[.]540 x=100[.]000 y=50[.]000 direction=90[.]000 [^ ]+ radius=straight key=CT.*key=end"
         FAIL_REGULAR_EXPRESSION "error")
 
-    # The help names the customisation's files by what they are, in the words
-    # the window uses, and no product: what STYLE's linetype takes and what
-    # CUSTOMISE loads.
-    add_test(NAME cli.the_help_names_the_customisation_files_by_what_they_are
+    # The help says what STYLE's linetype takes and what CUSTOMISE loads - a
+    # Katana customisation file - and names no product and no other program's
+    # file: a survey code file (.mapfile) and a style library (.4d) no longer
+    # load, so no help text may send a person to one. The Customise block is
+    # the interpreter's; the session had one of its own, which named both.
+    add_test(NAME cli.the_help_says_customise_loads_katana_customisation_files
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> --help)
-    set_tests_properties(cli.the_help_names_the_customisation_files_by_what_they_are PROPERTIES
-        PASS_REGULAR_EXPRESSION "a loaded library linestyle or ByLayer.*CUSTOMISE \\[REPLACE\\] <file> \\[<file>\\.\\.\\.\\]  load style${_eol} +libraries \\(\\.4d\\) and survey code files \\(\\.mapfile\\)"
-        FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)")
+    set_tests_properties(cli.the_help_says_customise_loads_katana_customisation_files PROPERTIES
+        PASS_REGULAR_EXPRESSION "a loaded library linestyle or ByLayer.*Customise CUSTOMISE \\[REPLACE\\] <file> \\[<file>\\.\\.\\.\\] +load Katana customisation files, merged"
+        FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)|[.]4d|[.]mapfile|MAPFILE")
 
     # LIST takes no words: LIST LAYER x once listed the whole drawing, as
     # though it had filtered it. Refused with its usage; LIST alone lists.
@@ -430,9 +588,10 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "1 entities.*error: InvalidArgument: usage: LIST [(]every entity; INFO id describes one[)]")
 
     # HELP typed as a line is the session's whole help, as --help and
-    # katana_help are: CUSTOMISE, IFC and the window-only verbs are
-    # the session's, not the interpreter's, and were missing from it. ? is
-    # HELP's alias.
+    # katana_help are: IFC and the window-only verbs are the session's, not
+    # the interpreter's, and were missing from it (CUSTOMISE was the
+    # session's too until 2026-10-06, and is the interpreter's block now). ?
+    # is HELP's alias.
     add_test(NAME cli.help_typed_as_a_line_is_the_whole_session_help
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "HELP" -c "?")
@@ -1586,5 +1745,139 @@ if(KATANA_BUILD_TESTS)
         PROPERTIES
         PASS_REGULAR_EXPRESSION
         "reduction method=\"network, horizontal\" adjustments=1 rejected=[0-9]+[\r\n]+adjustment method=\"network least squares \\(horizontal\\)\" observations=10 unknowns=4 redundancy=6 variance_factor=[0-9][0-9.e+-]* global_test=(passed|failed) flagged=[0-9]+ rejected=[0-9]+[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # CODES and LINEWORK (survey_verbs.hpp; docs/survey.md, "SURVEY IMPORT
+    # codes and strings what it draws") on a program with NO survey codes. The
+    # RTK job above draws its 5 points and nothing is asked of the job: the two
+    # records say why, each after the other - no survey codes, unless the line
+    # itself said off, which is said first. What a customisation then does with
+    # the same file is the three tests at the end of this file, through the
+    # program, and tests/app/test_survey_verbs.cpp (SurveyVerbs), in process.
+    #
+    # KATANA_BUILTIN_CUSTOMISATION=none is the seam (cad/customisation_host.hpp):
+    # the session starts through cad::startCustomisation and reads it, so these
+    # start with no customisation whatever the build compiled in. They were
+    # written before the session did - it then seeded from an older table and
+    # never read the variable - and held only where that table was empty.
+    add_test(NAME cli.survey_import_says_why_it_coded_nothing_and_takes_codes_off
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                $<TARGET_FILE:katana_cli> -c "SURVEY IMPORT \"${_fld_gnss}\""
+                -c "NEW" -c "SURVEY IMPORT \"${_fld_gnss}\" CODES off" -c "STATUS")
+    set_tests_properties(cli.survey_import_says_why_it_coded_nothing_and_takes_codes_off PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=5 layer=survey/points [^\r\n]+[\r\n]+.*coded none reason=no-survey-codes[\r\n]+linework none reason=no-survey-codes[\r\n]+.*imported job=[^\r\n]+[\r\n]+.*coded none reason=off[\r\n]+linework none reason=no-survey-codes[\r\n]+.*Entities: 5 "
+        FAIL_REGULAR_EXPRESSION "error")
+    katana_survey_refusal(codes_that_are_neither_on_nor_off "CODES maybe"
+        "InvalidArgument: CODES takes on or off, and 'maybe' is neither. usage: ")
+    # LINEWORK (cad/linework_verbs.hpp; docs/survey_coding.md, "LINEWORK on the
+    # command line") through katana_cli, again with no survey codes: two
+    # points coded "KB ST" and "KB END", numbered 1 and 2, ten metres apart.
+    # Nothing selected, so the scope is the drawing: 2 entities, both points.
+    # No rule knows KB, and a control code alone makes a line when the run is
+    # asked for by name: one line of two points on their layer, noted as
+    # unstyled. PREVIEW says so and draws nothing; the run draws entity 3, a
+    # polyline 10 long. A SECOND run takes the 2 points and that line, finds
+    # the line the drawing already holds and draws nothing: the 2 points it
+    # runs through are left out as already drawn, 1 line, and the drawing is
+    # still 3 entities (it was 4, the same line twice, until the run was told
+    # to look). It is no undo step, so the one UNDO that follows takes the
+    # first run's line back, to the 2 points.
+    add_test(NAME cli.linework_strings_points_by_their_control_codes_as_one_undo_step
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                $<TARGET_FILE:katana_cli> -c "POINT 0,0" -c "POINT 10,0"
+                -c "SELECT 1" -c "PROP SET code \"KB ST\" text" -c "PROP SET point 1 text"
+                -c "SELECT 2" -c "PROP SET code \"KB END\" text" -c "PROP SET point 2 text"
+                -c "SELECT NONE" -c "LINEWORK PREVIEW" -c "LINEWORK" -c "LINEWORK" -c "LIST"
+                -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.linework_strings_points_by_their_control_codes_as_one_undo_step
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1 preview=yes[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0 entity=3[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+linework scope=drawing matched=3 considered=2 lines=0 unplaced=0 notes=1[\r\n]+left_out=2 reason=already-drawn lines=1[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+3 entities[\r\n]+.*Polyline +layer=0 +vertices=2[^\r\n]*length=10[^0-9.].*Entities: 2 "
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # SURVEY IMPORT and LINEWORK on a program that HAS survey codes: the
+    # hand-written fixture tests/data/field_codes/test_field_codes, named as
+    # the built-in of the run through the seam, and the RTK job gnss.fld above.
+    # Every value below is worked out from those two files, by hand. (The
+    # fixture is not beside the three of tests/data/customisation: the window's
+    # headless checks load every file of that folder and pin what three hold.)
+    #
+    # The customisation: one linestyle, "FIELD Kerb", no symbol, and three
+    # rules - KB* a LINE on FIELD KERB in that linestyle, EB* a line, CTRL a
+    # point code - so the session says 1 and 3 as it starts.
+    #
+    # The file, in the order its points are drawn (cli.survey_import_gnss_
+    # field_file): CM1 keyed in with no code at 500000,6200000; then the four
+    # shots coded KB with string number 1 - R001 at 500010,6200020, R002 at
+    # 500020,6200020, R003 at 500020,6200030, and, after the bare 20 that
+    # CLOSES the string, R004 at 500040,6200040, which begins KB 1 again and
+    # is alone in it.
+    #
+    # So an import that says nothing of codes or linework - both switches are
+    # on until a customisation says otherwise - draws the 5 points; codes the
+    # 4 that carry KB (all four matched, by KB*, onto the ONE layer FIELD KERB
+    # in the ONE style named after the linestyle); and strings the file's
+    # lines: the closed KB 1 through R001, R002 and R003, which makes no layer
+    # and no style of its own. Two things are in no line - CM1, which has no
+    # code, and the second KB 1, of one point, which is a fault and so the
+    # last of the reduction's warnings. The line is a right-angled triangle
+    # with legs of 10: 10 + 10 + sqrt(200) = 34.1421..., area 50. LIST shows
+    # the points on their layers and the line; ONE undo takes points, line,
+    # layers, style and job back, to an empty drawing. KATANA_CUSTOMISATION is
+    # unset for the run, so that a kept file of the caller's cannot start it.
+    # (Between the start-up line and `imported` stand the file's own records,
+    # as SURVEY READ gives them, and `settings`: docs/survey.md, "The reply".)
+    set(_field_codes
+        "${PROJECT_SOURCE_DIR}/tests/data/field_codes/test_field_codes.customisation.json")
+    set(_field_start "Customisation: test_field_codes, 1 linestyles and symbols and 3 survey code rules, built in")
+    set(_gnss_onto "SURVEY IMPORT \"${_fld_gnss}\" LAYER fieldwork")
+    add_test(NAME cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                $<TARGET_FILE:katana_cli> -c "${_gnss_onto}" -c "LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(
+        cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "${_field_start}${_eol}.*imported job=job-1 entities=5 layer=fieldwork [^\r\n]+${_eol}.*reduction_warning text=\"1 string\\(s\\) of the file are in no line \\(fewer than two of its points have a position: 1\\)\\.\"${_eol}coded points=4 matched=4 unmatched_codes=0 layers=1 styles=1${_eol}linework lines=1 unplaced=2 layers=0 styles=0${_eol}(.*[\r\n])?6 entities${_eol}[^\r\n]*Point +layer=fieldwork +at 500000,6200000${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500010,6200020${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500020,6200020${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500020,6200030${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500040,6200040${_eol}[^\r\n]*Polyline +layer=FIELD KERB +vertices=3 +closed +length=34[.]1421[0-9]* +area=50${_eol}.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+    # ... and with both words off it is the import of before, though the
+    # codes are there: the 5 points on the layer the line named, no layer or
+    # line of a rule, and no warning about a string - nothing was strung.
+    add_test(NAME cli.survey_import_with_codes_and_linework_off_draws_its_points_alone
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                $<TARGET_FILE:katana_cli> -c "${_gnss_onto} CODES off LINEWORK off" -c "LIST"
+                -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.survey_import_with_codes_and_linework_off_draws_its_points_alone
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "${_field_start}${_eol}.*imported job=job-1 entities=5 layer=fieldwork [^\r\n]+${_eol}.*coded none reason=off${_eol}linework none reason=off${_eol}(.*[\r\n])?5 entities${_eol}[^\r\n]*Point +layer=fieldwork +at 500000,6200000${_eol}[^\r\n]*Point +layer=fieldwork +at 500010,6200020${_eol}[^\r\n]*Point +layer=fieldwork +at 500020,6200020${_eol}[^\r\n]*Point +layer=fieldwork +at 500020,6200030${_eol}[^\r\n]*Point +layer=fieldwork +at 500040,6200040${_eol}.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error|FIELD KERB|Polyline|in no line")
+    # LINEWORK typed after an import that was told LINEWORK off. The points
+    # are coded (the first two records), and the verb then strings them BY
+    # THEIR CODES, not as the file strung them: the four shots of KB 1 in
+    # point order are one OPEN line of 4 vertices, R001 to R004 - 10 + 10 +
+    # sqrt(20*20 + 10*10) = 42.3606... long - on FIELD KERB, and CM1 has no
+    # code. The job took the first entity id for its number, so the points are
+    # entities 2 to 6 and the line is 7. Asked again, the verb finds the line
+    # the drawing holds and draws nothing: the 4 points it runs through are
+    # left out, 1 line. That second run is no undo step, so ONE undo takes the
+    # line back and leaves the import's 5 points. The scope is said, DRAWING,
+    # so that the test does not rest on what an import leaves selected.
+    add_test(NAME cli.linework_typed_after_an_import_strings_its_points_by_their_codes_once
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                $<TARGET_FILE:katana_cli> -c "${_gnss_onto} LINEWORK off" -c "LINEWORK DRAWING"
+                -c "LINEWORK DRAWING" -c "LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.linework_typed_after_an_import_strings_its_points_by_their_codes_once
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "coded points=4 matched=4 unmatched_codes=0 layers=1 styles=1${_eol}linework none reason=off${_eol}(.*[\r\n])?linework scope=drawing matched=5 considered=5 lines=1 unplaced=1 notes=0${_eol}string name=KB1 key=KB\\* number=1 points=4 vertices=4 closed=no layer=\"FIELD KERB\" entity=7${_eol}unplaced reason=\"no code\" points=1${_eol}linework scope=drawing matched=6 considered=5 lines=0 unplaced=1 notes=0${_eol}left_out=4 reason=already-drawn lines=1${_eol}unplaced reason=\"no code\" points=1${_eol}6 entities${_eol}.*Polyline +layer=FIELD KERB +vertices=4 +open +length=42[.]3606[0-9]*${_eol}.*Entities: 5 "
         FAIL_REGULAR_EXPRESSION "error")
 endif()

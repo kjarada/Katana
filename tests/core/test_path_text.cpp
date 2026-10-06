@@ -1,8 +1,9 @@
-// A path as the text a person typed, and a file as the bytes it holds
-// (core/path_text.hpp).
+// A path as the text a person typed, a file as the bytes it holds, and an
+// environment variable as the text it was set to (core/path_text.hpp).
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -17,6 +18,7 @@
 #include "katana/core/path_text.hpp"
 
 namespace fs = std::filesystem;
+using katana::core::environmentVariable;
 using katana::core::ErrorCode;
 using katana::core::pathFromUtf8;
 using katana::core::pathToUtf8;
@@ -26,6 +28,71 @@ namespace {
 
 // "Zürich" in UTF-8: the u-umlaut is the two bytes C3 BC.
 const std::string kZurich = "Z\xC3\xBCrich";
+
+// Two kanji, a hyphen and two Hebrew letters - U+65E5 U+672C, U+002D, U+05E2
+// U+05D1 - in UTF-8, each worked out from its code point: E6 97 A5, E6 9C AC,
+// 2D, D7 A2, D7 91. Two scripts because no ANSI code page holds both: on any
+// Windows machine whose code page is not UTF-8 itself, the C runtime's narrow
+// environment has a '?' for at least two of the four.
+const std::string kTwoScripts = "\xE6\x97\xA5\xE6\x9C\xAC-\xD7\xA2\xD7\x91";
+
+// An environment variable of these tests' own, removed when the test ends.
+class TestVariable {
+  public:
+    TestVariable() { remove(); }
+    ~TestVariable() { remove(); }
+    TestVariable(const TestVariable&) = delete;
+    TestVariable& operator=(const TestVariable&) = delete;
+
+    [[nodiscard]] const char* name() const { return kName; }
+
+    // Narrow bytes, as most programs set a variable.
+    void set(const char* value) const
+    {
+#if defined(_WIN32)
+        // An empty value removes the variable.
+        ASSERT_EQ(_putenv_s(kName, value), 0);
+#else
+        ASSERT_EQ(setenv(kName, value, 1), 0);
+#endif
+    }
+
+    // kTwoScripts, exactly: as UTF-16 on Windows, where a narrow value would
+    // be the code page's, and as its UTF-8 bytes elsewhere.
+    void setTwoScripts() const
+    {
+#if defined(_WIN32)
+        ASSERT_EQ(_wputenv_s(kWideName, L"\u65E5\u672C-\u05E2\u05D1"), 0);
+#else
+        ASSERT_EQ(setenv(kName, kTwoScripts.c_str(), 1), 0);
+#endif
+    }
+
+    // A path, exactly: its own wide text on Windows.
+    void set(const fs::path& value) const
+    {
+#if defined(_WIN32)
+        ASSERT_EQ(_wputenv_s(kWideName, value.c_str()), 0);
+#else
+        ASSERT_EQ(setenv(kName, value.c_str(), 1), 0);
+#endif
+    }
+
+  private:
+    static void remove()
+    {
+#if defined(_WIN32)
+        (void)_putenv_s(kName, "");
+#else
+        (void)unsetenv(kName);
+#endif
+    }
+
+    static constexpr const char* kName = "KATANA_TEST_PATH_TEXT_VARIABLE";
+#if defined(_WIN32)
+    static constexpr const wchar_t* kWideName = L"KATANA_TEST_PATH_TEXT_VARIABLE";
+#endif
+};
 
 // The process id, so that two processes running these cases at once never
 // share a folder: under ctest --parallel a test program is run a case at a
@@ -121,6 +188,49 @@ TEST(PathText, BytesThatAreNotUtf8AreTakenAsTheNarrowNameTheyAreRatherThanThrown
     }
     ASSERT_TRUE(read.ok()) << read.error().describe();
     EXPECT_EQ(*read, "narrow");
+}
+
+TEST(PathText, AnEnvironmentVariableIsReadAsTheTextItHoldsWhateverTheCodePage)
+{
+    const TestVariable variable;
+    // Not set: nothing, as for a variable that is set to nothing.
+    EXPECT_EQ(environmentVariable(variable.name()), "");
+    EXPECT_EQ(environmentVariable(nullptr), "");
+    EXPECT_EQ(environmentVariable(""), "");
+
+    variable.set("plain value");
+    EXPECT_EQ(environmentVariable(variable.name()), "plain value");
+
+    // Text no one code page holds: read as the characters it is, in UTF-8.
+    // Read through the C runtime's narrow getenv on Windows it came back as
+    // "??-??", the code page's best, and the file it named was not found.
+    variable.setTwoScripts();
+    const std::string read = environmentVariable(variable.name());
+    EXPECT_EQ(read, kTwoScripts);
+    EXPECT_EQ(read.size(), 11u) << "three bytes a kanji, one the hyphen, two a Hebrew letter";
+
+    variable.set("");
+    EXPECT_EQ(environmentVariable(variable.name()), "");
+}
+
+TEST(PathText, AFileAnEnvironmentVariableNamesOutsideTheCodePageIsTheFileRead)
+{
+    // What a variable that names a file is for: the name read back is the
+    // file's, so the path made of it opens the file.
+    const Scratch scratch("variable-names-a-file");
+    const fs::path folder = scratch.root / pathFromUtf8(kTwoScripts);
+    fs::create_directories(folder);
+    const fs::path file = folder / "kept.txt";
+    std::ofstream(file, std::ios::binary) << "kept";
+
+    const TestVariable variable;
+    variable.set(file);
+    const std::string named = environmentVariable(variable.name());
+    EXPECT_EQ(named, pathToUtf8(file));
+    EXPECT_NE(named.find(kTwoScripts), std::string::npos) << named;
+    const auto read = readFileBytes(pathFromUtf8(named));
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_EQ(*read, "kept");
 }
 
 TEST(PathText, AFileIsReadAsEveryByteItHolds)

@@ -158,8 +158,15 @@ the check leaves in the build tree.
 reopen in a SECOND process and query, so a round trip through the project
 file is tested as a user would make it; `WILL_FAIL` cases show bad input
 fails the process; fixtures (`FIXTURES_SETUP`, `FIXTURES_REQUIRED`) order the
-steps and clean up. The survey-code cases write their own small code file
-rather than depend on the git-ignored customisation.
+steps and clean up. The survey-code cases write their own small Katana
+customisation file rather than depend on the git-ignored one. The cases that
+pin what a session STARTS with say so on their own command line, through
+`cmake -E env`: `KATANA_BUILTIN_CUSTOMISATION` naming a committed fixture of
+`tests/data/customisation` as the built-in of the run (or `none`), and
+`KATANA_CUSTOMISATION` naming the kept file (`docs/customisation.md`, "What
+katana_cli and katana_mcp start with"). A case that names a built-in and no
+kept file unsets `KATANA_CUSTOMISATION` (`--unset=`), so that one set in the
+caller's shell cannot start the session instead.
 
 A test command that goes through `cmake -E env "PATH=...;..."` writes the
 PATH in the `add_test` itself. Kept in a variable, the semicolons in it split
@@ -431,8 +438,10 @@ failures. What was wrong with each, and why it was fixed where it was:
 
 What still skips in that run, and why, all for reasons outside the program:
 
-- the tests that read the gitignored reference customisation, and the headless
-  quit check that is disabled without it;
+- the tests that read the gitignored reference customisation (the headless
+  quit check was disabled without it too, until it was given a committed
+  fixture as its built-in: `docs/headless.md`, "The customisation a run
+  starts with");
 - the two `OnlineLive.*` cases (`KATANA_ONLINE_TESTS=1`);
 - the `gpu.*/Hardware` device cases, since the container has no GPU;
 - `GdalAdapter.GdalIsPointedAtTheCertificatesBesideLibcurl`, where the

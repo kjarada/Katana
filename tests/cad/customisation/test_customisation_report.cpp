@@ -1,15 +1,16 @@
-// What a bare CUSTOMISE says (customisation_report.hpp). Two texts of one
-// summary while the front ends move to the interpreter's verb: the older
-// prose, which the window's and katana_cli's own CUSTOMISE and File > Drawing
-// Summary still print (the first tests), and the verb's records (the last).
-// Counted by hand from what each test loads.
+// What a bare CUSTOMISE says (customisation_report.hpp): the numbers of the
+// summary, and the verb's reply made from one - the count lines, the records,
+// the coverage. Counted by hand from what each test loads.
+//
+// The four tests of an older prose text stood first here ("Loaded files, in
+// load order: ...", cad::customisationReport). They went with that text on
+// 2026-10-07, when the last front end that printed it took the verb's reply.
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/customisation_report.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/entity/style_library.hpp"
@@ -62,81 +63,6 @@ const std::vector<CustomisationSource> kLoaded{{"lines.4d", true, false, {}},
                                                {"site codes.mapfile", false, true, {}}};
 
 } // namespace
-
-TEST(CustomisationReport, NothingLoadedSaysSoAndHowToLoad)
-{
-    const Document document;
-    EXPECT_EQ(katana::cad::customisationReport(document, {}, {}),
-              "No customisation is loaded.\n"
-              "  CUSTOMISE <file> [<file>...]  loads style libraries (.4d) and survey code "
-              "files (.mapfile)\n");
-}
-
-TEST(CustomisationReport, TheProjectsMissingFilesAreNamedEvenWithNothingLoaded)
-{
-    const Document document;
-    EXPECT_EQ(katana::cad::customisationReport(document, {}, {"lines.4d", "site codes.mapfile"}),
-              "No customisation is loaded.\n"
-              "  CUSTOMISE <file> [<file>...]  loads style libraries (.4d) and survey code "
-              "files (.mapfile)\n"
-              "This project was drawn with customisation files that are not loaded: "
-              "\"lines.4d\", \"site codes.mapfile\"\n");
-}
-
-TEST(CustomisationReport, CountsNamesTheFilesInLoadOrderAndSaysWhatTheDrawingUses)
-{
-    Document document;
-    load(document);
-    EXPECT_EQ(katana::cad::customisationReport(document, kLoaded, {"old symbols.4d"}),
-              "2 linestyle and symbol definitions in 2 groups: 1 offered as symbols, 1 as "
-              "linestyles (one definition can be both)\n"
-              "2 survey code rules over 1 distinct code\n"
-              "Loaded files, in load order:\n"
-              "  \"lines.4d\", a style library\n"
-              "  \"pits.4d\", a style library\n"
-              "  \"site codes.mapfile\", a survey code file\n"
-              "This project was drawn with customisation files that are not loaded: "
-              "\"old symbols.4d\"\n"
-              "This drawing has no styles yet; import a drawing or survey that carries styles, "
-              "or make one in Format > Styles and Linetypes or with STYLE NEW, to see the "
-              "customisation take effect.\n");
-
-    // A style that names the fence is drawn with it: 1 of 1.
-    katana::cad::CommandInterpreter interpreter(document);
-    ASSERT_TRUE(interpreter.run("STYLE NEW Fence").ok());
-    ASSERT_TRUE(interpreter.run("STYLE SET Fence linetype \"TEST Fence\"").ok());
-    const std::string report = katana::cad::customisationReport(document, kLoaded, {});
-    EXPECT_NE(report.find("\"site codes.mapfile\", a survey code file\n"
-                          "1 of this drawing's 1 styles are drawn with a loaded definition "
-                          "(1 name one; the rest are plain lines)\n"),
-              std::string::npos)
-        << report;
-}
-
-TEST(CustomisationReport, ASourceIsSaidToBeWhatItBroughtBothKindsAndNeitherIncluded)
-{
-    // A source is named by what it brought. Definitions alone and rules alone
-    // keep the words they have always had; one Katana customisation brings
-    // both, and one that brought neither - a table of colours - is a source
-    // all the same. It once fell through to "a survey code file", the word
-    // for whatever had not brought definitions.
-    const std::vector<CustomisationSource> loaded{{"lines.4d", true, false, {}},
-                                                  {"site codes.mapfile", false, true, {}},
-                                                  {"NSW", true, true, {}},
-                                                  {"Site colours", false, false, {}}};
-    Document document;
-    load(document);
-    const std::string report = katana::cad::customisationReport(document, loaded, {});
-    EXPECT_NE(report.find(
-                  "Loaded files, in load order:\n"
-                  "  \"lines.4d\", a style library\n"
-                  "  \"site codes.mapfile\", a survey code file\n"
-                  "  \"NSW\", a customisation\n"
-                  "  \"Site colours\", a customisation with no definitions or survey code rules\n"
-                  "This drawing has no styles yet"),
-              std::string::npos)
-        << report;
-}
 
 TEST(CustomisationReport, TheSummaryIsTheNumbersTheTextIsMadeFrom)
 {

@@ -1,6 +1,7 @@
 #include "katana/cad/definition_users.hpp"
 
 #include <algorithm>
+#include <iterator>
 
 #include "katana/entity/model.hpp"
 #include "katana/entity/tables.hpp"
@@ -67,6 +68,33 @@ std::vector<std::string> DefinitionUsers::describe() const
     }
     for (const std::string& layer : layers) {
         lines.push_back(userLine("layer", layer, "names it as its linetype"));
+    }
+    return lines;
+}
+
+std::vector<std::string> DefinitionUsers::styles() const
+{
+    std::vector<std::string> named;
+    // Both lists are ascending, as the header promises, so this is the union
+    // in the same order.
+    std::set_union(linetypeStyles.begin(), linetypeStyles.end(), symbolStyles.begin(),
+                   symbolStyles.end(), std::back_inserter(named));
+    return named;
+}
+
+std::vector<std::string> DefinitionUsers::cited(std::string_view name) const
+{
+    const std::string of = "\"" + std::string(name) + "\": ";
+    std::vector<std::string> lines;
+    for (const DefinitionRule& rule : rules) {
+        lines.push_back(of + "rule #" + std::to_string(rule.index) + " " + rule.key + " (" +
+                        std::string(katana::entity::toString(rule.section)) + ") names it");
+    }
+    for (const std::string& style : styles()) {
+        lines.push_back(of + "the drawing's style \"" + style + "\" names it");
+    }
+    for (const std::string& layer : layers) {
+        lines.push_back(of + "the drawing's layer \"" + layer + "\" names it");
     }
     return lines;
 }

@@ -4,8 +4,10 @@
 #include <utility>
 
 #include <QAction>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QStringList>
 #include <QToolBar>
 #include <QWidget>
@@ -14,6 +16,7 @@
 #include "customisation/customisation_context.hpp"
 #include "customisation/definition_editor.hpp"
 #include "customisation/definition_thumbnails.hpp"
+#include "customisation/document_watcher.hpp"
 #include "customisation/global_modify_dialog.hpp"
 #include "customisation/symbol_library.hpp"
 #include "katana/cad/document.hpp"
@@ -83,7 +86,7 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
              "formatSymbols", kSymbolLibraryName);
     codesAction_ =
         make(Icon::FormatSurveyCodes, "&Survey Code Manager...",
-             "The survey code library (the loaded survey code files): test a code, edit its "
+             "The survey codes of the session's customisation: test a code, edit its "
              "rules, see the drawing's codes and their issues, apply the codes, run linework",
              "formatSurveyCodes", kCodeManagerName);
     globalModifyAction_ =
@@ -112,19 +115,22 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
         menu.addAction(services_.layers);
     }
     menu.addActions({stylesAction_, symbolsAction_, codesAction_});
-    if (services_.loadCustomisation != nullptr || services_.replaceCustomisation != nullptr) {
-        menu.addSection(QStringLiteral("Customisation Files"));
-        for (QAction* shared : {services_.loadCustomisation, services_.replaceCustomisation}) {
-            if (shared != nullptr) {
-                menu.addAction(shared);
-            }
-        }
-    }
     menu.addSection(QStringLiteral("Across the Drawing"));
     menu.addAction(globalModifyAction_);
     menu.addAction(purgeAction_);
 
     toolBar.addActions({stylesAction_, symbolsAction_, codesAction_, globalModifyAction_});
+
+    if (services_.document != nullptr) {
+        // What the session has now - the defaults, in a window whose
+        // customisation is installed after it is built - and then every
+        // change: the start-up install, a load, CUSTOMISE SET, RESET, REVERT.
+        // The watcher delivers on any notification, whichever part it names.
+        followedLinework_ = services_.document->customisationState().linework;
+        lineworkCodes_ = followedLinework_;
+        watcher_ = std::make_unique<DocumentWatcher>(
+            *services_.document, [this](const DocumentChanges&) { followLineworkCodes(); });
+    }
 }
 
 CustomisationWorkbench::~CustomisationWorkbench()
@@ -138,6 +144,40 @@ CustomisationWorkbench::~CustomisationWorkbench()
     delete codes_.data();
     delete symbols_.data();
     delete styles_.data();
+}
+
+void CustomisationWorkbench::followLineworkCodes()
+{
+    if (services_.document == nullptr || (watcher_ != nullptr && !watcher_->documentAlive())) {
+        return;
+    }
+    const katana::cad::LineworkCodes& now = services_.document->customisationState().linework;
+    if (now == followedLinework_) {
+        return;
+    }
+    followedLinework_ = now;
+    lineworkCodes_ = now;
+    if (codes_.isNull()) {
+        return;
+    }
+    // The tab that is already built: its fields by the object names the
+    // headless driver fills them by - "linework" and the control's own word,
+    // lineworkStart to lineworkRectangle - and then its own button, as a
+    // person taking the codes into use would. Setting the copy above is not
+    // enough for a tab that exists: it would go on showing the old codes,
+    // and Execute would build a plan it had made with them. (The tab is to
+    // read the Document itself, and its button to run CUSTOMISE SET; this
+    // goes with the copy then.)
+    for (const katana::entity::LineworkCodeMember& code : katana::entity::lineworkCodeMembers()) {
+        QString name = QString::fromUtf8(code.name.data(), static_cast<qsizetype>(code.name.size()));
+        name[0] = name[0].toUpper();
+        if (auto* field = codes_->findChild<QLineEdit*>("linework" + name)) {
+            field->setText(QString::fromStdString(now.*code.spelling));
+        }
+    }
+    if (auto* use = codes_->findChild<QPushButton*>(QStringLiteral("lineworkCodesUse"))) {
+        use->click();
+    }
 }
 
 StyleManagerDialog* CustomisationWorkbench::styleManager() const { return styles_.data(); }
@@ -178,12 +218,29 @@ CustomisationContext CustomisationWorkbench::context()
     context.editDefinition = [this](DefinitionEdit what, const std::string& name) {
         editDefinition(what, name);
     };
-    // beginCommit is left empty: nothing here knows yet whether the session's
-    // customisation is the kept one, which is what it is for. Every editor
-    // that commits already calls it, before and after - the definition
+    // An editor's own commit keeps a kept session kept: the definition
     // editor's Save and Delete, the Survey Code Manager's Apply and the Symbol
-    // Library's Import Definitions - so answering it here is the whole of
-    // keeping a kept session kept across their changes.
+    // Library's Import Definitions each call this before they commit and run
+    // what it hands back after. It is asked BEFORE, because the commit is what
+    // makes the session "not kept" (the Document marks an edited customisation
+    // so), and answers with the line a person would type - CUSTOMISE KEEP
+    // through the window's executor, echoed and logged as one.
+    //
+    // Nothing is handed back, so nothing runs, when the session was not the
+    // kept one - a customisation typed, scripted or loaded with --customise
+    // lasts the session, and an editor's change on top of it does too - or
+    // when this session has no kept file: KEEP would only be refused, in the
+    // log, after every Save.
+    context.beginCommit = [this]() -> std::function<void()> {
+        const katana::cad::Document* document = services_.document;
+        if (document == nullptr || !document->customisationState().kept || !services_.run ||
+            !services_.hasKeptFile || !services_.hasKeptFile()) {
+            return {};
+        }
+        // The runner by value: the editor calls this after its commit, and
+        // holds nothing else of the workbench.
+        return [run = services_.run] { (void)run(QStringLiteral("CUSTOMISE KEEP")); };
+    };
     return context;
 }
 
@@ -242,6 +299,9 @@ SymbolLibraryDialog& CustomisationWorkbench::showSymbolLibrary()
 SurveyCodeManagerDialog& CustomisationWorkbench::showCodeManager()
 {
     if (codes_.isNull()) {
+        // Before it reads them: a line typed in this very turn may have
+        // changed the codes, and the watcher has not delivered yet.
+        followLineworkCodes();
         codes_ = new SurveyCodeManagerDialog(context(), &window_);
         codes_->setModal(false);
         // Opened on the first rule, explained and in the form, as the other

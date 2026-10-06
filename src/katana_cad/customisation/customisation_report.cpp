@@ -41,7 +41,7 @@ bool nothingLoaded(const CustomisationSummary& summary)
     return summary.definitions == 0 && summary.rules == 0;
 }
 
-// The two lines both texts begin with when something is loaded.
+// The two lines the reply begins with when something is loaded.
 void writeCounts(std::ostream& out, const CustomisationSummary& summary)
 {
     out << counted(summary.definitions, "linestyle and symbol definition",
@@ -74,61 +74,6 @@ CustomisationSummary customisationSummary(const Document& document,
     summary.notLoaded = missingAtOpen;
     summary.coverage = customisationCoverage(document);
     return summary;
-}
-
-std::string formatCustomisationSummary(const CustomisationSummary& summary)
-{
-    std::ostringstream out;
-    const bool nothing = nothingLoaded(summary);
-    if (nothing) {
-        out << "No customisation is loaded.\n"
-            << "  CUSTOMISE <file> [<file>...]  loads style libraries (.4d) and survey code "
-               "files (.mapfile)\n";
-    } else {
-        writeCounts(out, summary);
-    }
-    // Which files, because "is my symbol file loaded?" is the question a
-    // count cannot answer.
-    if (!summary.loaded.empty()) {
-        out << "Loaded files, in load order:\n";
-        for (const CustomisationSource& file : summary.loaded) {
-            // By what it brought: definitions alone are a style library's,
-            // rules alone a survey code file's, and both one customisation's.
-            // One that brought NEITHER is still a source - a table of
-            // colours, a set of control codes - and is said to be that, not
-            // passed off as the survey code file it would otherwise fall
-            // through to.
-            const char* kind = "a customisation with no definitions or survey code rules";
-            if (file.definitions && file.rules) {
-                kind = "a customisation";
-            } else if (file.definitions) {
-                kind = "a style library";
-            } else if (file.rules) {
-                kind = "a survey code file";
-            }
-            out << "  \"" << file.name << "\", " << kind << "\n";
-        }
-    }
-    // What the OPEN warned of, kept in view: said once at the open, it
-    // scrolled away while what those files defined still drew as plain lines.
-    if (!summary.notLoaded.empty()) {
-        out << "This project was drawn with customisation files that are not loaded:";
-        for (std::size_t i = 0; i < summary.notLoaded.size(); ++i) {
-            out << (i == 0 ? " \"" : ", \"") << summary.notLoaded[i] << "\"";
-        }
-        out << "\n";
-    }
-    if (!nothing) {
-        out << formatCoverage(summary.coverage);
-    }
-    return out.str();
-}
-
-std::string customisationReport(const Document& document,
-                                const std::vector<CustomisationSource>& loaded,
-                                const std::vector<std::string>& missingAtOpen)
-{
-    return formatCustomisationSummary(customisationSummary(document, loaded, missingAtOpen));
 }
 
 // ---- the verb's reply -------------------------------------------------------------------
@@ -292,6 +237,12 @@ std::string customisationJson(const Document& document)
           {"unresolved", summary.coverage.unresolved},
           {"notLinestyles", summary.coverage.notLinestyles}}},
         {"missing", state.missingAtOpen},
+        // What the start found, always written - empty when it had nothing
+        // to say - so that a reader can tell "nothing went wrong" from a
+        // build that does not say.
+        {"start",
+         {{"problems", state.startProblems},
+          {"keptFromAnotherBuiltIn", state.keptFromAnotherBuiltIn}}},
     };
     // A name that is not UTF-8 is shown with U+FFFD rather than thrown at a
     // client that only asked what is loaded (as STATUS JSON does).
