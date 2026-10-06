@@ -1168,7 +1168,8 @@ struct StyleManagerDialog::Impl {
         text += QStringLiteral("Group: %1<br>")
                     .arg(row.group.empty() ? QStringLiteral("(none)")
                                            : fromName(row.group).toHtmlEscaped());
-        text += QStringLiteral("File: %1<br>")
+        // A library definition's source is the name of its customisation.
+        text += QStringLiteral("Customisation: %1<br>")
                     .arg(row.sourceFile.empty() ? QStringLiteral("(made in this session)")
                                                 : fromName(row.sourceFile).toHtmlEscaped());
         text += QStringLiteral("Kind: %1<br>").arg(kindExplained(row.kind).toHtmlEscaped());

@@ -775,9 +775,11 @@ survives being read and written.
 
 ### Not done
 
-- **Nothing reads or writes a file yet.** This is the value, the format and
-  its tests; the commands, the built-in customisation and Settings come with
-  the work that follows, and are recorded in this document then.
+- **The commands and Settings are not here yet.** A file is read when a
+  session starts (`docs/survey_coding.md`, "What a session starts with") and
+  read and written by the Symbol Library and the Survey Code Manager
+  (`docs/desktop.md`); the `CUSTOMISE` commands and Settings come with the
+  work that follows, and are recorded in this document then.
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
 - **Some of a rule's members are still shown by another word.** `CODE

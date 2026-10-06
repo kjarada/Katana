@@ -1,8 +1,8 @@
 #include "symbol_library.hpp"
 
 #include <algorithm>
-#include <fstream>
 #include <map>
+#include <span>
 #include <utility>
 
 #include <QComboBox>
@@ -22,16 +22,18 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "code_manager_support.hpp"
 #include "definition_thumbnails.hpp"
 #include "document_watcher.hpp"
 #include "filter_bar.hpp"
 #include "format.hpp"
 #include "icons.hpp"
-#include "katana/archive12d/customisation.hpp"
-#include "katana/archive12d/style_library.hpp"
+#include "katana/cad/customisation_host.hpp"
+#include "katana/cad/customisation_merge.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/symbol_assign.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/customisation.hpp"
 #include "katana/entity/tables.hpp"
 #include "name_picker.hpp"
 #include "style_painter.hpp"
@@ -161,7 +163,7 @@ QString modeText(const katana::cad::CatalogueEntry& entry)
         reasons << QStringLiteral("a style names it as one");
     }
     if (entry.kind.listedAsSymbol) {
-        reasons << QStringLiteral("its file is a symbol file");
+        reasons << QStringLiteral("its customisation lists it as a symbol");
     }
     return QStringLiteral("along a line; a symbol because %1")
         .arg(reasons.join(QStringLiteral(", ")));
@@ -267,16 +269,16 @@ void SymbolLibraryDialog::buildUi()
     auto* outer = new QVBoxLayout(this);
 
     auto* toolbar = new QHBoxLayout;
-    load_ = new QPushButton(icon(Icon::Import), QStringLiteral("Load .4d..."), this);
-    load_->setObjectName(QStringLiteral("loadLibrary"));
+    load_ = new QPushButton(icon(Icon::Import), QStringLiteral("Import Definitions..."), this);
+    load_->setObjectName(QStringLiteral("importDefinitions"));
     load_->setToolTip(QStringLiteral(
-        "Merge a style or symbol library (.4d) into this session's: its definitions are "
-        "added, or replace those of the same name; nothing else is removed"));
-    export_ =
-        new QPushButton(icon(Icon::Export), QStringLiteral("Export Selected to .4d..."), this);
+        "Merge the linestyle and symbol definitions of a Katana customisation file, and its "
+        "colours, into this session's: they are added, or replace those of the same name; "
+        "nothing else is removed"));
+    export_ = new QPushButton(icon(Icon::Export), QStringLiteral("Export Selected..."), this);
     export_->setObjectName(QStringLiteral("exportSelected"));
     export_->setToolTip(
-        QStringLiteral("Write the selected library symbols to a symbol library (.4d)"));
+        QStringLiteral("Write the selected library symbols to a Katana customisation file"));
     toolbar->addWidget(load_);
     toolbar->addWidget(export_);
     toolbar->addStretch(1);
@@ -506,7 +508,7 @@ void SymbolLibraryDialog::buildUi()
     QObject::connect(replaceWith_, &QComboBox::currentTextChanged, this,
                      [this] { updateActions(); });
     QObject::connect(selectUsing_, &QPushButton::clicked, this, [this] { selectPointsUsing(); });
-    QObject::connect(load_, &QPushButton::clicked, this, [this] { loadClicked(); });
+    QObject::connect(load_, &QPushButton::clicked, this, [this] { importClicked(); });
     QObject::connect(export_, &QPushButton::clicked, this, [this] { exportClicked(); });
 }
 
@@ -1077,54 +1079,109 @@ bool SymbolLibraryDialog::replaceInStyles(const std::string& replacement)
     return true;
 }
 
-bool SymbolLibraryDialog::loadLibraryFile(const std::filesystem::path& path)
+bool SymbolLibraryDialog::importDefinitionsFile(const std::filesystem::path& path)
 {
     if (!alive()) {
         return false;
     }
     const QString file = pathText(path);
-    auto loaded = katana::archive12d::readCustomisation({path});
-    if (!loaded) {
-        log(QStringLiteral("Could not load %1: %2").arg(file, describe(loaded.error())), true);
+    auto read = katana::cad::readCustomisationFile(path);
+    if (!read) {
+        log(QStringLiteral("Could not import %1: %2").arg(file, describe(read.error())), true);
         return false;
     }
-    for (const std::string& warning : loaded.value().warnings) {
-        log(text(warning), false);
+    // What a symbol library takes from a customisation: its definitions and
+    // its colours. Its survey code rules are the Survey Code Manager's to
+    // import, into a buffer a person reviews; its control codes and switches
+    // are settings of whoever wrote the file. So the load handed to the merge
+    // is the file without those.
+    katana::entity::Customisation taken = std::move(read.value().customisation);
+    QStringList left;
+    if (!taken.map.empty()) {
+        left << QStringLiteral("survey code rules (%1)").arg(grouped(taken.map.size()));
+    }
+    if (taken.linework) {
+        left << QStringLiteral("the linework codes");
+    }
+    if (taken.automation) {
+        left << QStringLiteral("the automation switches");
+    }
+    taken.map = {};
+    taken.linework.reset();
+    taken.automation.reset();
+    // And without the sources that brought the file only rules. A source it
+    // lists becomes one of the session's, by name, and is taken off what the
+    // open project is missing: one left in with its rules flag cleared would
+    // pass for loaded, with none of its rules here (sourcesOfPart).
+    taken.sources = sourcesOfPart(std::move(taken.sources), CustomisationPart::Definitions,
+                                  !taken.colours.empty());
+    const QString leftAlone =
+        left.isEmpty()
+            ? QString()
+            : QStringLiteral("Not imported from %1, as the symbol library takes definitions and "
+                             "colours: %2. Import Codes in the Survey Code Manager takes survey "
+                             "code rules; the line CUSTOMISE <file> loads a whole customisation.")
+                  .arg(file, left.join(QStringLiteral(", ")));
+    if (taken.library.empty() && taken.colours.empty()) {
+        log(QStringLiteral("%1 holds no definitions or colours to import").arg(file), false);
+        if (!leftAlone.isEmpty()) {
+            log(leftAlone, false);
+        }
+        return false;
     }
     // Decision D1: a load MERGES. Replacing the session's library from a
     // symbol browser would throw away every definition the drawing uses
     // that this file does not happen to hold.
-    katana::archive12d::CustomisationMerge merged = katana::archive12d::mergeCustomisation(
-        document_->styleLibrary(), document_->surveyMap(), loaded.value(),
-        katana::archive12d::LoadMode::Merge);
-    for (const std::string& problem : merged.problems) {
-        log(text(problem), true);
-    }
-    const bool changed = merged.libraryLoaded || merged.mapLoaded;
-    for (const katana::archive12d::FileMerge& each : merged.files) {
-        const bool map = each.kind == katana::archive12d::CustomisationFile::MapFile;
-        QString line = QStringLiteral("Merged %1 into the %2: %3 added")
-                           .arg(each.name.empty() ? file : text(each.name),
-                                map ? QStringLiteral("survey map") : QStringLiteral("library"),
-                                grouped(each.added.size()));
-        if (!each.added.empty()) {
-            line += QStringLiteral(" (%1)").arg(listOf(each.added));
+    katana::cad::CustomisationMerge merged = katana::cad::mergeCustomisation(
+        document_->customisation(), std::span<const katana::entity::Customisation>(&taken, 1),
+        katana::cad::LoadMode::Merge);
+    if (!merged.ok()) {
+        for (const std::string& problem : merged.problems) {
+            log(QStringLiteral("Could not import %1: %2").arg(file, text(problem)), true);
         }
-        line += QStringLiteral(", %1 replaced").arg(grouped(each.replaced.size()));
-        if (!each.replaced.empty()) {
-            line += QStringLiteral(" (%1)").arg(listOf(each.replaced));
-        }
-        log(line, false);
-    }
-    if (!changed) {
-        log(QStringLiteral("%1 held nothing to load").arg(file), false);
         return false;
     }
-    if (merged.libraryLoaded) {
-        document_->setStyleLibrary(std::move(merged.library));
+    // The install judges the session's own parts, which the merge did not:
+    // heeded, and nothing is said to have been merged unless it was.
+    if (const auto installed = document_->installCustomisation(
+            std::move(merged.merged), katana::cad::CustomisationOrigin::Loaded);
+        !installed) {
+        log(QStringLiteral("Could not import %1: %2").arg(file, describe(installed.error())),
+            true);
+        return false;
     }
-    if (merged.mapLoaded) {
-        document_->setSurveyMap(std::move(merged.map));
+    // KEEP STEP, wired by the lead: when the session was kept before this
+    // commit (customisationState().kept, read BEFORE installCustomisation,
+    // which clears it) the line `CUSTOMISE KEEP` runs here through
+    // context_.run. Nothing is kept yet.
+    const auto mergedLine = [](const std::string& name, const QString& into,
+                               const std::vector<std::string>& added,
+                               const std::vector<std::string>& replaced) {
+        QString line = QStringLiteral("Merged %1 into the %2: %3 added")
+                           .arg(text(name), into, grouped(added.size()));
+        if (!added.empty()) {
+            line += QStringLiteral(" (%1)").arg(listOf(added));
+        }
+        line += QStringLiteral(", %1 replaced").arg(grouped(replaced.size()));
+        if (!replaced.empty()) {
+            line += QStringLiteral(" (%1)").arg(listOf(replaced));
+        }
+        return line;
+    };
+    for (const katana::cad::CustomisationLoad& load : merged.loads) {
+        if (load.definitions) {
+            log(mergedLine(load.name, QStringLiteral("library"), load.addedDefinitions,
+                           load.replacedDefinitions),
+                false);
+        }
+        if (!load.addedColours.empty() || !load.replacedColours.empty()) {
+            log(mergedLine(load.name, QStringLiteral("colours"), load.addedColours,
+                           load.replacedColours),
+                false);
+        }
+    }
+    if (!leftAlone.isEmpty()) {
+        log(leftAlone, false);
     }
     return true;
 }
@@ -1147,19 +1204,27 @@ bool SymbolLibraryDialog::exportSelectedTo(const std::filesystem::path& path)
         log(QStringLiteral("Export: select one or more library symbols in the grid first"), true);
         return false;
     }
-    katana::archive12d::StyleLibraryWriteOptions options;
-    options.names = names;
-    options.comments = {"Symbols exported from Katana's symbol library"};
-    const auto written = katana::archive12d::writeStyleLibrary(document_->styleLibrary(), options);
+    // The session's customisation cut down to the selected definitions by
+    // the rule both managers export by (exportedPart): the session's name and
+    // its author's notice, the sources that brought it definitions, and the
+    // colours the selected pens name - without which a pen of "sui water
+    // potable" would draw in the entity's colour wherever the file went. Not
+    // the session's rules, control codes or switches: a file of two symbols
+    // for a colleague must not reset theirs.
+    katana::entity::Customisation session = document_->customisation();
+    session.name = exportedCustomisationName(document_, path);
+    const katana::entity::Customisation selected =
+        exportedPart(std::move(session), CustomisationPart::Definitions, names);
+    katana::entity::CustomisationWriteOptions options;
+    options.codes = false;
+    options.only = names;
+    const auto written = katana::entity::customisationToJson(selected, options);
     if (!written) {
         log(QStringLiteral("Export to %1: %2").arg(pathText(path), describe(written.error())),
             true);
         return false;
     }
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    out << written.value();
-    out.close();
-    if (!out) {
+    if (const auto status = writeFileBytes(path, written.value()); !status) {
         log(QStringLiteral("Export: could not write %1").arg(pathText(path)), true);
         return false;
     }
@@ -1169,24 +1234,24 @@ bool SymbolLibraryDialog::exportSelectedTo(const std::filesystem::path& path)
     return true;
 }
 
-void SymbolLibraryDialog::loadClicked()
+void SymbolLibraryDialog::importClicked()
 {
     std::filesystem::path path;
-    if (chooseLoadFile) {
-        path = chooseLoadFile();
+    if (chooseImportFile) {
+        path = chooseImportFile();
     } else if (headless_) {
-        log(QStringLiteral("Load .4d: a headless session opens no file dialog; "
-                           "call loadLibraryFile with a path"),
+        log(QStringLiteral("Import Definitions: a headless session opens no file dialog; "
+                           "call importDefinitionsFile with a path"),
             true);
         return;
     } else {
         const QString chosen = QFileDialog::getOpenFileName(
-            this, QStringLiteral("Load a Style or Symbol Library"), {},
-            QStringLiteral("Style and symbol libraries (*.4d);;All files (*)"));
+            this, QStringLiteral("Import Definitions from a Katana Customisation"), {},
+            customisationFileFilter() + QStringLiteral(";;All files (*)"));
         path = std::filesystem::path(chosen.toStdU16String());
     }
     if (!path.empty()) {
-        loadLibraryFile(path);
+        importDefinitionsFile(path);
     }
 }
 
@@ -1196,15 +1261,15 @@ void SymbolLibraryDialog::exportClicked()
     if (chooseExportFile) {
         path = chooseExportFile();
     } else if (headless_) {
-        log(QStringLiteral("Export to .4d: a headless session opens no file dialog; "
+        log(QStringLiteral("Export Selected: a headless session opens no file dialog; "
                            "call exportSelectedTo with a path"),
             true);
         return;
     } else {
         const QString chosen = QFileDialog::getSaveFileName(
-            this, QStringLiteral("Export Symbols to a Symbol Library"),
-            QStringLiteral("symbols_export.4d"),
-            QStringLiteral("Style and symbol libraries (*.4d);;All files (*)"));
+            this, QStringLiteral("Export Symbols to a Katana Customisation"),
+            QStringLiteral("symbols.customisation.json"),
+            customisationFileFilter() + QStringLiteral(";;All files (*)"));
         path = std::filesystem::path(chosen.toStdU16String());
     }
     if (!path.empty()) {

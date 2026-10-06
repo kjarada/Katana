@@ -1278,6 +1278,7 @@ const PlanPainter::Resolved& PlanPainter::resolve(const Entity& entity)
         r.target.entityPen = r.entityPen;
         r.target.entityPen.setCapStyle(Qt::FlatCap);
         r.target.paper = paper() ? options_.plot : nullptr;
+        r.target.colours = source_.colours;
         // resolveHatchPattern from the display already resolved, rather than
         // a second full resolveDisplay of its own.
         r.hatch = cad::resolveHatchPattern(model, r.display);
@@ -2326,6 +2327,7 @@ PlanSource planSourceOf(const katana::cad::Document& document)
     source.model = &document.model();
     source.library = &document.styleLibrary();
     source.libraryGeneration = document.libraryGeneration();
+    source.colours = &document.customisationState().colours;
     source.index = &document.spatialIndex();
     source.selection = &document.selection();
     return source;
