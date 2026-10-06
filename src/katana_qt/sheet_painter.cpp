@@ -1371,6 +1371,7 @@ void SheetPainter::paintLegend(const Viewport& viewport, TextSetter& text, const
     LegendSampleContext samples;
     samples.model = model;
     samples.library = source_.plan.library;
+    samples.colours = source_.plan.colours;
     samples.plot = &options_.plot;
     samples.pixelsPerMillimetre = paper.ppmm();
     samples.scale = legend->scale > 0.0 ? legend->scale : viewport.scale;

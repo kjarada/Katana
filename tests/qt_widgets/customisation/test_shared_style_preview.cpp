@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -293,5 +294,76 @@ TEST(StylePreview, APreviewWhoseDocumentHasGonePaintsOnlyItsGround)
     document.reset();
     const QImage image = preview.grab().toImage();
     EXPECT_EQ(image.pixelColor(100, 50), QColor(Qt::white));
+    EXPECT_EQ(preview.scaleBarMetres(), 0.0);
+}
+
+TEST(StylePreview, AnUnsavedDefinitionIsPaintedAsOneInTheLibraryIsWithoutBeingPutThere)
+{
+    // The drawing has NO library. The dashed kerb and the ring are handed to
+    // the pane as the definition editor hands over what is typed, and are
+    // painted exactly where the tests above worked out by hand that a library
+    // definition is: the kerb's first four periods as 8 dashes over about 38
+    // columns from x = 12 on the row y = 115, the ring fitted at 102 pixels a
+    // metre round a crosshair at (100, 63).
+    Document document;
+    const std::uint64_t generation = document.libraryGeneration();
+    {
+        StylePreview preview(document);
+        preview.resize(400, 160);
+        preview.setScaleDenominator(500);
+        preview.setDefinition(dashedKerb(), StylePreview::DefinitionAs::Linestyle);
+        const QImage image = preview.grab().toImage();
+        const katana::geometry::Point2 start = preview.view().worldToScreen({0.0, 0.0});
+        EXPECT_NEAR(start.x, 12.0, 1e-9);
+        EXPECT_NEAR(start.y, 115.0, 1e-9);
+        const InkCount count = countInk(image, 12, 72, 115);
+        EXPECT_EQ(count.runs, 8);
+        EXPECT_NEAR(count.columns, 38, 2);
+        EXPECT_TRUE(preview.notice().isEmpty()) << preview.notice().toStdString();
+    }
+    {
+        StylePreview preview(document);
+        preview.resize(200, 150);
+        preview.setDefinition(ring(), StylePreview::DefinitionAs::Symbol);
+        const QImage image = preview.grab().toImage();
+        ASSERT_TRUE(preview.insertionPoint().has_value());
+        EXPECT_NEAR(preview.insertionPoint()->x(), 100.0, 1e-9);
+        EXPECT_NEAR(preview.insertionPoint()->y(), 63.0, 1e-9);
+        EXPECT_NEAR(preview.view().scale, 102.0, 1e-9);
+        EXPECT_EQ(image.pixelColor(100, 63), StylePreview::insertionMarkColour());
+        EXPECT_TRUE(preview.notice().isEmpty()) << preview.notice().toStdString();
+    }
+    // Nothing reached the Document: its library is as empty and as old as it was.
+    EXPECT_TRUE(document.styleLibrary().empty());
+    EXPECT_EQ(document.libraryGeneration(), generation);
+}
+
+TEST(StylePreview, AnUnsavedDefinitionEditedUnderOneNameIsPaintedAsItNowIs)
+{
+    // The same name at every keystroke: a cache of flattened definitions keyed
+    // on names would paint the first for ever. The ring's radius 0.5 fits at
+    // 102 px a metre (worked above); at radius 1 it is 102 / (2 x 1) = 51.
+    PreviewFixture fixture;
+    StylePreview preview(fixture.document);
+    preview.resize(200, 150);
+    katana::entity::LineStyle edited = ring();
+    preview.setDefinition(edited, StylePreview::DefinitionAs::Symbol);
+    (void)preview.grab();
+    EXPECT_NEAR(preview.view().scale, 102.0, 1e-9);
+    edited.strokes.back().radius = 1.0;
+    preview.setDefinition(edited, StylePreview::DefinitionAs::Symbol);
+    (void)preview.grab();
+    EXPECT_NEAR(preview.view().scale, 51.0, 1e-9);
+
+    // Asked for by NAME again, it is the library's definition - radius 0.5 -
+    // that is painted, not the edit that was never saved.
+    preview.setSymbol("TEST Ring");
+    (void)preview.grab();
+    EXPECT_NEAR(preview.view().scale, 102.0, 1e-9);
+
+    // A definition no library would take - no name - shows nothing at all.
+    preview.setDefinition(katana::entity::LineStyle{}, StylePreview::DefinitionAs::Symbol);
+    (void)preview.grab();
+    EXPECT_FALSE(preview.insertionPoint().has_value());
     EXPECT_EQ(preview.scaleBarMetres(), 0.0);
 }

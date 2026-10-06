@@ -107,6 +107,14 @@ struct BuiltInCustomisation {
 // The name of the environment variable the seam is.
 inline constexpr const char* kBuiltInCustomisationVariable = "KATANA_BUILTIN_CUSTOMISATION";
 
+// The name of the environment variable that names the kept file: the only way
+// a headless run, katana_cli or katana_mcp has one (a run that must be the
+// same every time reads no per-user place), and what overrides the desktop's
+// own. cad never reads it - a front end does, when it builds its host - but
+// the name is here, beside the seam's, because CUSTOMISE KEEP says it to a
+// session that was given no kept file.
+inline constexpr const char* kKeptCustomisationVariable = "KATANA_CUSTOMISATION";
+
 // What a front end hands over.
 struct CustomisationHost {
     BuiltInCustomisation builtIn{};
@@ -114,6 +122,20 @@ struct CustomisationHost {
     // front end keeps none. The file need not exist.
     std::filesystem::path keptFile{};
 };
+
+// Installs `builtIn` as the session's customisation, origin BuiltIn, based on
+// ITSELF - basedOn its own name and `builtIn.digest`, whatever its file says
+// it was made from, and no basedOn at all when the host gave no digest. ONE
+// place for that rule: a start with no kept file (startCustomisation) and
+// CUSTOMISE RESET both install through it, and CUSTOMISE KEEP asks it what
+// "the session is the built-in" means. `kept`: whether the next start would
+// give this session (Document::installCustomisation).
+//
+// InvalidState when `builtIn` holds none; otherwise whatever
+// Document::installCustomisation refuses, the Document left as it was.
+[[nodiscard]] katana::core::Status installBuiltInCustomisation(Document& document,
+                                                               const BuiltInCustomisation& builtIn,
+                                                               bool kept);
 
 // What startCustomisation did, for the front end to say in its own words.
 struct CustomisationStart {
@@ -149,7 +171,10 @@ struct CustomisationStart {
 // start.)
 //
 // It also tells the Document the built-in's name, which answers the names a
-// project recorded for the built-in's earlier files.
+// project recorded for the built-in's earlier files, and what this start
+// found - the report's `problems` and `keptFromAnotherBuiltIn`
+// (Document::setCustomisationStart) - so that a report of the session asked
+// for later (customisationJson) still says what a front end said once.
 [[nodiscard]] CustomisationStart startCustomisation(Document& document,
                                                     const CustomisationHost& host);
 

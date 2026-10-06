@@ -158,8 +158,15 @@ the check leaves in the build tree.
 reopen in a SECOND process and query, so a round trip through the project
 file is tested as a user would make it; `WILL_FAIL` cases show bad input
 fails the process; fixtures (`FIXTURES_SETUP`, `FIXTURES_REQUIRED`) order the
-steps and clean up. The survey-code cases write their own small code file
-rather than depend on the git-ignored customisation.
+steps and clean up. The survey-code cases write their own small Katana
+customisation file rather than depend on the git-ignored one. The cases that
+pin what a session STARTS with say so on their own command line, through
+`cmake -E env`: `KATANA_BUILTIN_CUSTOMISATION` naming a committed fixture of
+`tests/data/customisation` as the built-in of the run (or `none`), and
+`KATANA_CUSTOMISATION` naming the kept file (`docs/customisation.md`, "What
+katana_cli and katana_mcp start with"). A case that names a built-in and no
+kept file unsets `KATANA_CUSTOMISATION` (`--unset=`), so that one set in the
+caller's shell cannot start the session instead.
 
 A test command that goes through `cmake -E env "PATH=...;..."` writes the
 PATH in the `add_test` itself. Kept in a variable, the semicolons in it split
@@ -174,9 +181,13 @@ on 2026-09-30, when the three GSI cases whose expressions pin the parser
 version passed against a reader built to say "parser=1.1": each quotes a
 warning or note with a `;` in it, and a fragment after one matched on its own
 (`cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record` had
-two). They are escaped now, and fail on 1.1. Not fixed: six other cases in
-the same file still carry a bare `;` - `cli.mapfile_list`,
-`cli.code_applies_and_reports`, `cli.list_refuses_words_it_does_not_take`,
+two). They are escaped now, and fail on 1.1. Two of the survey-code cases
+were escaped on 2026-10-06, when their verbs were reworded (`cli.code_list`,
+named after the verb `MAPFILE LIST` until then, and
+`cli.code_applies_and_reports`): each whole expression matched what its verb
+prints. Not fixed: four other cases in
+the same file still carry a bare `;` -
+`cli.list_refuses_words_it_does_not_take`,
 `cli.utility_draw_refuses_a_line_it_cannot_grade`,
 `cli.utility_view_is_refused_headless_naming_area` and
 `cli.utility_draw_of_geometry_with_no_method_is_refused_by_the_vertex` - so
@@ -200,8 +211,9 @@ writes it there. The same holds for a person: open a copy of a sample.
 
 Fixtures live beside their suite (`tests/archive12d/data/`,
 `tests/surveyio/`), except the three small customisations of
-`tests/data/customisation/`, which more than one suite is to load
-(`docs/customisation.md`, "The fixtures, and what the converter is held to");
+`tests/data/customisation/`, which more than one suite loads
+(`docs/customisation.md`, "The fixtures, and what the converter is held to"),
+and the one of `tests/data/field_codes/`, which the survey import's tests load;
 `samples/` holds a small project (`samples/site_plan`), the
 script that draws it and a few GIS files. The owner's large real archives are
 kept outside the repository and used for measuring and looking, never
@@ -430,8 +442,10 @@ failures. What was wrong with each, and why it was fixed where it was:
 
 What still skips in that run, and why, all for reasons outside the program:
 
-- the tests that read the gitignored reference customisation, and the headless
-  quit check that is disabled without it;
+- the tests that read the gitignored reference customisation (the headless
+  quit check was disabled without it too, until it was given a committed
+  fixture as its built-in: `docs/headless.md`, "The customisation a run
+  starts with");
 - the two `OnlineLive.*` cases (`KATANA_ONLINE_TESTS=1`);
 - the `gpu.*/Hardware` device cases, since the container has no GPU;
 - `GdalAdapter.GdalIsPointedAtTheCertificatesBesideLibcurl`, where the

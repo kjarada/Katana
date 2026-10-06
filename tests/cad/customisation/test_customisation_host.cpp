@@ -29,6 +29,7 @@
 #endif
 
 #include "katana/cad/customisation_host.hpp"
+#include "katana/cad/customisation_report.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/path_text.hpp"
 
@@ -40,6 +41,7 @@ using katana::cad::CustomisationSource;
 using katana::cad::CustomisationStart;
 using katana::cad::CustomisationState;
 using katana::cad::Document;
+using katana::cad::DocumentChange;
 using katana::core::ErrorCode;
 using katana::entity::Customisation;
 
@@ -545,6 +547,33 @@ TEST(CustomisationStart, WithNoHostNothingIsInstalledAndThatIsNoProblem)
     EXPECT_EQ(document.customisationGeneration(), 0u);
 }
 
+TEST(CustomisationStart, InstallingABuiltInThatIsNotThereIsRefusedAndTheDocumentIsLeftAsItWas)
+{
+    // The one function a start and CUSTOMISE RESET both install the built-in
+    // through. Handed a host's built-in that holds none, it refuses - the
+    // verb asks first and never reaches this, a front end calling it may.
+    Document document;
+    const auto none =
+        katana::cad::installBuiltInCustomisation(document, BuiltInCustomisation{}, true);
+    ASSERT_FALSE(none.ok());
+    EXPECT_EQ(none.error().code, ErrorCode::InvalidState);
+    EXPECT_EQ(none.error().message, "there is no built-in customisation to install");
+    EXPECT_TRUE(document.customisationState() == CustomisationState{});
+    EXPECT_EQ(document.customisationGeneration(), 0u);
+
+    // With one, `kept` is the caller's to say: a RESET while a kept file is
+    // there installs the built-in as a session the next start would NOT give.
+    const auto installed =
+        katana::cad::installBuiltInCustomisation(document, builtInFrom(kSmall), false);
+    ASSERT_TRUE(installed.ok()) << installed.error().describe();
+    const CustomisationState& state = document.customisationState();
+    EXPECT_EQ(state.origin, CustomisationOrigin::BuiltIn);
+    EXPECT_FALSE(state.kept);
+    ASSERT_TRUE(state.basedOn.has_value());
+    EXPECT_EQ(state.basedOn->name, "Small Built In");
+    EXPECT_EQ(state.basedOn->digest, fnv1a(kSmall));
+}
+
 TEST(CustomisationStart, TheBuiltInIsInstalledWhenNothingIsKept)
 {
     const Scratch scratch("built-in");
@@ -793,6 +822,104 @@ TEST(CustomisationStart, ABuiltInTheDocumentRefusesIsReportedAndNothingIsInstall
         << report.problems[0];
     EXPECT_EQ(document.customisationState().origin, CustomisationOrigin::None);
     EXPECT_FALSE(document.customisationState().kept);
+}
+
+TEST(CustomisationStart, WhatAStartFoundStaysOnTheDocumentAndIsInItsJsonReport)
+{
+    // A front end says what a start found once, where its errors go. Whoever
+    // asks what the session holds later - a client of katana_mcp, which never
+    // sees that stream - was told `origin: builtIn` and not that the
+    // customisation it kept had been refused. So it is kept on the Document,
+    // and the report gives it.
+    const Scratch scratch("start-on-the-document");
+    CustomisationHost host;
+    host.builtIn = builtInFrom(kSmall);
+    host.keptFile = scratch.write("customisation.json", "{ this is not a customisation");
+
+    Document document;
+    const CustomisationStart report = katana::cad::startCustomisation(document, host);
+    const std::string sentence = "the kept customisation is not read, so the built-in "
+                                 "customisation is used: ParseFailure: not a Katana "
+                                 "customisation file";
+    ASSERT_EQ(report.problems.size(), 1u);
+    EXPECT_EQ(report.problems[0].rfind(sentence, 0), 0u) << report.problems[0];
+    EXPECT_EQ(document.customisationState().startProblems, report.problems);
+    EXPECT_FALSE(document.customisationState().keptFromAnotherBuiltIn);
+    // Keys in alphabetical order, two blanks a level: `start` is the last
+    // member, and the sentence begins its one line.
+    const std::string json = katana::cad::customisationJson(document);
+    EXPECT_NE(json.find("\"start\": {\n    \"keptFromAnotherBuiltIn\": false,\n    \"problems\": "
+                        "[\n      \"" + sentence),
+              std::string::npos)
+        << json;
+
+    // It is of the START: an edit of the session and a load into it change
+    // neither.
+    document.setAutomation({false, false});
+    auto loaded = katana::entity::customisationFromJson(keptText(""));
+    ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
+    ASSERT_TRUE(
+        document.installCustomisation(std::move(*loaded), CustomisationOrigin::Loaded).ok());
+    EXPECT_EQ(document.customisationState().name, "Mine");
+    EXPECT_EQ(document.customisationState().startProblems, report.problems);
+
+    // A kept customisation made from another edition of the built-in is no
+    // problem, and is said too.
+    host.keptFile = scratch.write("earlier.json", keptText("0123456789abcdef"));
+    Document earlier;
+    ASSERT_TRUE(katana::cad::startCustomisation(earlier, host).keptFromAnotherBuiltIn);
+    EXPECT_TRUE(earlier.customisationState().keptFromAnotherBuiltIn);
+    EXPECT_TRUE(earlier.customisationState().startProblems.empty());
+    EXPECT_NE(katana::cad::customisationJson(earlier).find(
+                  "\"start\": {\n    \"keptFromAnotherBuiltIn\": true,\n    \"problems\": []\n  }"),
+              std::string::npos);
+
+    // A start that found nothing leaves nothing - over what an earlier start
+    // left, too: the first Document, started again with no kept file.
+    const std::string nothing =
+        "\"start\": {\n    \"keptFromAnotherBuiltIn\": false,\n    \"problems\": []\n  }";
+    CustomisationHost clean;
+    clean.builtIn = host.builtIn;
+    EXPECT_TRUE(katana::cad::startCustomisation(document, clean).problems.empty());
+    EXPECT_TRUE(document.customisationState().startProblems.empty());
+    EXPECT_NE(katana::cad::customisationJson(document).find(nothing), std::string::npos);
+    // And a Document that was never started says the same.
+    const Document never;
+    EXPECT_NE(katana::cad::customisationJson(never).find(nothing), std::string::npos);
+}
+
+TEST(CustomisationStart, RecordingWhatAStartFoundIsNoEditOfTheSessionAndIsReportedOnce)
+{
+    Document document;
+    auto small = katana::entity::customisationFromJson(kSmall);
+    ASSERT_TRUE(small.ok()) << small.error().describe();
+    ASSERT_TRUE(
+        document.installCustomisation(std::move(*small), CustomisationOrigin::BuiltIn, true).ok());
+    std::vector<std::uint32_t> calls;
+    const Document::ListenerHandle handle = document.addListener(
+        [&calls](const DocumentChange& change) { calls.push_back(change.parts); });
+    const std::uint64_t before = document.customisationGeneration();
+    const std::vector<std::string> problems{"the kept customisation is not read"};
+
+    document.setCustomisationStart(problems, true);
+    // One notification, of the customisation's state alone, as for every
+    // other part of it.
+    ASSERT_EQ(calls.size(), 1u);
+    EXPECT_EQ(calls[0], std::uint32_t{DocumentChange::Customisation});
+    EXPECT_EQ(document.customisationGeneration(), before + 1);
+    const CustomisationState& state = document.customisationState();
+    EXPECT_EQ(state.startProblems, problems);
+    EXPECT_TRUE(state.keptFromAnotherBuiltIn);
+    // What a start found is no edit: the session is still the built-in, still
+    // what the next start would give, and the drawing is untouched.
+    EXPECT_EQ(state.origin, CustomisationOrigin::BuiltIn);
+    EXPECT_TRUE(state.kept);
+    EXPECT_FALSE(document.isModified());
+
+    // The value it already has is nothing at all.
+    document.setCustomisationStart(problems, true);
+    EXPECT_EQ(calls.size(), 1u);
+    EXPECT_EQ(document.customisationGeneration(), before + 1);
 }
 
 TEST(CustomisationStart, ASessionWrittenToTheKeptFileIsTheSessionTheNextStartGives)

@@ -49,7 +49,32 @@ void summarise(CustomisationStart& report, const Document& document, Customisati
 
 } // namespace
 
-CustomisationStart startCustomisation(Document& document, const CustomisationHost& host)
+katana::core::Status installBuiltInCustomisation(Document& document,
+                                                 const BuiltInCustomisation& builtIn, bool kept)
+{
+    if (builtIn.customisation == nullptr) {
+        return makeError(katana::core::ErrorCode::InvalidState,
+                         "there is no built-in customisation to install");
+    }
+    // The one copy of it an install makes: the Document owns what it is
+    // drawn with, and an editor changes that in place.
+    katana::entity::Customisation copy = *builtIn.customisation;
+    // Based on ITSELF, whatever its file says it was made from: a built-in
+    // that was itself exported from a session names an earlier one, and a
+    // copy kept from it would carry that digest - not this built-in's - and
+    // be reported as made from another, at every start, though nothing had
+    // changed. With no digest there is nothing to be based on by.
+    copy.basedOn.reset();
+    if (!builtIn.digest.empty()) {
+        copy.basedOn = katana::entity::CustomisationBase{copy.name, builtIn.digest};
+    }
+    return document.installCustomisation(std::move(copy), CustomisationOrigin::BuiltIn, kept);
+}
+
+namespace {
+
+// The choice startCustomisation makes, and its report.
+CustomisationStart chooseAndInstall(Document& document, const CustomisationHost& host)
 {
     CustomisationStart report;
     const bool hasBuiltIn = host.builtIn.customisation != nullptr;
@@ -98,21 +123,7 @@ CustomisationStart startCustomisation(Document& document, const CustomisationHos
     }
 
     if (hasBuiltIn) {
-        // The one copy of it a start makes: the Document owns what it is
-        // drawn with, and an editor changes that in place.
-        katana::entity::Customisation builtIn = *host.builtIn.customisation;
-        // Based on ITSELF, whatever its file says it was made from: a
-        // built-in that was itself exported from a session names an earlier
-        // one, and a copy kept from it would carry that digest - not this
-        // built-in's - and be reported as made from another, at every start,
-        // though nothing had changed. With no digest there is nothing to be
-        // based on by.
-        builtIn.basedOn.reset();
-        if (!host.builtIn.digest.empty()) {
-            builtIn.basedOn = katana::entity::CustomisationBase{builtIn.name, host.builtIn.digest};
-        }
-        const auto installed = document.installCustomisation(std::move(builtIn),
-                                                             CustomisationOrigin::BuiltIn, true);
+        const auto installed = installBuiltInCustomisation(document, host.builtIn, true);
         if (!installed) {
             report.problems.push_back("the built-in customisation is not installed: " +
                                       installed.error().describe());
@@ -120,6 +131,20 @@ CustomisationStart startCustomisation(Document& document, const CustomisationHos
         }
         summarise(report, document, CustomisationOrigin::BuiltIn);
     }
+    return report;
+}
+
+} // namespace
+
+CustomisationStart startCustomisation(Document& document, const CustomisationHost& host)
+{
+    CustomisationStart report = chooseAndInstall(document, host);
+    // Left on the Document as well as handed back. The front end says it
+    // once, where its errors go; whoever asks what the session holds later -
+    // CUSTOMISE JSON, a client of katana_mcp, which is never shown that
+    // stream - is then still told that the customisation it kept is not the
+    // one it got.
+    document.setCustomisationStart(report.problems, report.keptFromAnotherBuiltIn);
     return report;
 }
 

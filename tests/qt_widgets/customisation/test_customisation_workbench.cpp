@@ -4,6 +4,11 @@
 // builds them from, and Purge Unused. Driven through its QActions, as a click
 // on the menu drives it.
 //
+// The customisation the managers open on is the three hand-written fixtures of
+// tests/data/customisation, loaded by the CUSTOMISE line as a person loads
+// them: 3 + 4 definitions and 11 survey code rules, counted by hand from the
+// files (test_linestyles, test_symbols, test_survey).
+//
 // The drawing Purge reads, set up by hand in PurgeDrawing below:
 //   linetype  fence   named only by style Spare
 //   styles    Kerb    worn by the one point
@@ -16,15 +21,23 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
+#include <QLabel>
+#include <QLineEdit>
 #include <QMainWindow>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolBar>
 
@@ -32,10 +45,13 @@
 #include "customisation/code_manager.hpp"
 #include "customisation/customisation_context.hpp"
 #include "customisation/customisation_workbench.hpp"
+#include "customisation/definition_editor.hpp"
 #include "customisation/symbol_library.hpp"
-#include "katana/archive12d/customisation.hpp"
 #include "katana/cad/command_interpreter.hpp"
+#include "katana/cad/customisation_host.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/customisation.hpp"
+#include "katana/entity/survey_map.hpp"
 #include "style_manager.hpp"
 #include "view_workspace.hpp"
 #include "widget_harness.hpp"
@@ -50,10 +66,10 @@ const std::filesystem::path kFixture = std::filesystem::path(__FILE__)
                                            .parent_path()
                                            .parent_path()
                                            .parent_path() /
-                                       "archive12d" / "data" / "customisation";
+                                       "data" / "customisation";
 
-// A window with a Format menu and toolbar, and the window's three shared
-// actions, as MainWindow hands them over.
+// A window with a Format menu and toolbar, and the window's own Layers
+// action, as MainWindow hands them over.
 struct Bench {
     Document document;
     // The window's one executor, as MainWindow hands it to the views: the
@@ -65,8 +81,6 @@ struct Bench {
     QMenu* menu = new QMenu("Format", &window);
     QToolBar* bar = new QToolBar("Format", &window);
     QAction* layers = new QAction("Layers...", &window);
-    QAction* load = new QAction("Load Customisation...", &window);
-    QAction* replace = new QAction("Replace Loaded Customisation...", &window);
     std::vector<QString> log;
     bool headless = true;
     // The window's views, when a test asks for them: what "show me what
@@ -95,8 +109,6 @@ struct Bench {
             });
         }
         layers->setObjectName("formatLayers");
-        load->setObjectName("loadCustomisation");
-        replace->setObjectName("replaceCustomisation");
         CustomisationServices services;
         services.document = &document;
         services.views = views;
@@ -109,8 +121,6 @@ struct Bench {
         services.log = [this](const QString& text, bool) { log.push_back(text); };
         services.headless = [this] { return headless; };
         services.layers = layers;
-        services.loadCustomisation = load;
-        services.replaceCustomisation = replace;
         bench = std::make_unique<CustomisationWorkbench>(window, std::move(services), *menu, *bar);
     }
 
@@ -121,14 +131,19 @@ struct Bench {
         return *found;
     }
 
+    // The three fixtures in one CUSTOMISE line, each path quoted (a checkout
+    // may sit in a folder with a blank in its name).
     void loadFixture()
     {
-        auto loaded = katana::archive12d::readCustomisation(
-            {kFixture / "test_linestyles.4d", kFixture / "test_survey.mapfile",
-             kFixture / "test_symbols.4d"});
+        std::string line = "CUSTOMISE";
+        for (const char* name : {"test_linestyles", "test_survey", "test_symbols"}) {
+            const std::string file = std::string(name) + ".customisation.json";
+            line += " \"" + (kFixture / file).generic_string() + "\"";
+        }
+        const auto loaded = interpreter.run(line);
         ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
-        document.setStyleLibrary(loaded->library);
-        document.setSurveyMap(loaded->map);
+        ASSERT_EQ(document.styleLibrary().size(), 7u);
+        ASSERT_EQ(document.surveyMap().size(), 11u);
     }
 };
 
@@ -166,6 +181,15 @@ void purgeDrawing(Document& document)
     ASSERT_TRUE(document.setCurrentStyle("Current").ok());
 }
 
+// A widget of the code manager by the object name the headless driver finds
+// it by; the test stops where one is missing.
+template <typename T> T* named(QWidget* dialog, const char* name)
+{
+    T* found = dialog != nullptr ? dialog->findChild<T*>(QString::fromLatin1(name)) : nullptr;
+    EXPECT_NE(found, nullptr) << "no " << name;
+    return found;
+}
+
 // Answers the next question box with `button`, from inside its exec(), as a
 // person clicking it would. Stops with this object, so a box the test did not
 // expect is never answered by a later test's timer.
@@ -191,15 +215,16 @@ struct BoxAnswer {
 
 } // namespace
 
-TEST(CustomisationWorkbench, TheFormatMenuOffersLayersTheManagersTheLoadsAndPurgeInThatOrder)
+TEST(CustomisationWorkbench, TheFormatMenuOffersLayersTheManagersGlobalModifyAndPurgeInThatOrder)
 {
     Bench bench;
     // Each group under a titled section, the first too (theme.cpp draws the
-    // titles).
+    // titles). Two sections: the third, Customisation Files, went with the
+    // Load and Replace items it held - a customisation file is loaded by the
+    // CUSTOMISE line, which is no menu item of Format's.
     EXPECT_EQ(names(bench.menu->actions()),
               (std::vector<std::string>{"---", "formatLayers", "formatStyles", "formatSymbols",
-                                        "formatSurveyCodes", "---", "loadCustomisation",
-                                        "replaceCustomisation", "---", "formatGlobalModify",
+                                        "formatSurveyCodes", "---", "formatGlobalModify",
                                         "formatPurge"}));
     QStringList titles;
     for (const QAction* action : bench.menu->actions()) {
@@ -207,8 +232,7 @@ TEST(CustomisationWorkbench, TheFormatMenuOffersLayersTheManagersTheLoadsAndPurg
             titles << action->text();
         }
     }
-    EXPECT_EQ(titles, (QStringList{"Tables and Libraries", "Customisation Files",
-                                   "Across the Drawing"}));
+    EXPECT_EQ(titles, (QStringList{"Tables and Libraries", "Across the Drawing"}));
     EXPECT_EQ(names(bench.bar->actions()),
               (std::vector<std::string>{"formatStyles", "formatSymbols", "formatSurveyCodes",
                                         "formatGlobalModify"}));
@@ -258,6 +282,99 @@ TEST(CustomisationWorkbench, TheCodeManagersUnappliedEditsSurviveClosingAndReope
     EXPECT_TRUE(codes->dirty());
     EXPECT_EQ(codes->buffer().size(), 12u);
     EXPECT_EQ(bench.document.surveyMap().size(), 11u) << "nothing applied";
+}
+
+TEST(CustomisationWorkbench,
+     TheLineworkTabStringsWithTheCustomisationsControlCodesAndFollowsAChange)
+{
+    // By hand. The fixture's rule WM* draws a line, so four points coded WM1
+    // are one string, joined in the order made: (0,0), (10,0), (20,0),
+    // (30,0). The third is coded "WM1 GO". While the start code is the
+    // default ST, GO is a token nothing knows: ONE line through the four,
+    // and one note. Once the customisation's start code is GO, the third
+    // point begins a second line: TWO lines of two points, and no note.
+    Bench bench;
+    bench.loadFixture();
+    for (const char* line : {"POINT 0,0", "POINT 10,0", "POINT 20,0", "POINT 30,0", "SELECT ALL",
+                             "PROP SET code WM1", "SELECT 3", "PROP SET code \"WM1 GO\"",
+                             "SELECT NONE"}) {
+        const auto ran = bench.interpreter.run(line);
+        ASSERT_TRUE(ran.ok()) << line << ": " << ran.error().describe();
+    }
+    bench.action("formatSurveyCodes").trigger();
+    katana::qt::SurveyCodeManagerDialog* codes = bench.bench->codeManager();
+    auto* start = named<QLineEdit>(codes, "lineworkStart");
+    auto* order = named<QComboBox>(codes, "lineworkOrder");
+    auto* preview = named<QPushButton>(codes, "lineworkPreview");
+    auto* execute = named<QPushButton>(codes, "lineworkExecute");
+    auto* summary = named<QLabel>(codes, "lineworkSummary");
+    ASSERT_FALSE(start == nullptr || order == nullptr || preview == nullptr ||
+                 execute == nullptr || summary == nullptr);
+    // In the order observed: the points were typed, and carry no number.
+    order->setCurrentIndex(1);
+
+    EXPECT_EQ(start->text(), "ST");
+    preview->click();
+    EXPECT_EQ(summary->text(), "Preview only: 1 lines from 4 points; 0 points not placed; 1 "
+                               "notes. Execute builds them as one undoable step.");
+
+    const auto set = bench.interpreter.run("CUSTOMISE SET linework.start=GO");
+    ASSERT_TRUE(set.ok()) << set.error().describe();
+    katana::qt::test::processEvents();
+
+    EXPECT_EQ(start->text(), "GO") << "the tab shows the customisation's code";
+    EXPECT_EQ(codes->lineworkCodes().start, "GO");
+    EXPECT_EQ(bench.bench->lineworkCodes().start, "GO");
+    ASSERT_FALSE(bench.log.empty());
+    EXPECT_EQ(bench.log.back(), "Linework control codes set for this session.");
+    // Execute with no Preview pressed since: what is built is planned with
+    // the codes the tab now shows, not the plan made with ST.
+    execute->click();
+    EXPECT_EQ(bench.document.model().entities.size(), 6u) << "the 4 points and 2 lines";
+    EXPECT_EQ(bench.document.lastCreatedEntities().size(), 2u);
+    EXPECT_EQ(summary->text(),
+              "Preview only: 2 lines from 4 points; 0 points not placed; 0 notes. Execute builds "
+              "them as one undoable step. Executed as one undoable step.");
+}
+
+TEST(CustomisationWorkbench, ACodeManagerOpenedLaterIsBuiltOnTheCustomisationsLineworkCodes)
+{
+    Bench bench;
+    const auto set = bench.interpreter.run("CUSTOMISE SET linework.start=BEGIN linework.end=STOP");
+    ASSERT_TRUE(set.ok()) << set.error().describe();
+    // Opened in the same turn: no event loop has run since the line.
+    bench.action("formatSurveyCodes").trigger();
+    katana::qt::SurveyCodeManagerDialog* codes = bench.bench->codeManager();
+    auto* start = named<QLineEdit>(codes, "lineworkStart");
+    auto* end = named<QLineEdit>(codes, "lineworkEnd");
+    auto* use = named<QPushButton>(codes, "lineworkCodesUse");
+    ASSERT_FALSE(start == nullptr || end == nullptr || use == nullptr);
+    EXPECT_EQ(start->text(), "BEGIN");
+    EXPECT_EQ(end->text(), "STOP");
+    EXPECT_EQ(codes->lineworkCodes().start, "BEGIN");
+    EXPECT_EQ(codes->lineworkCodes().close, "CL") << "a code the line did not name is as it was";
+
+    // The tab's own Use These Codes sets the window's copy alone: the
+    // customisation still says BEGIN. (That button running CUSTOMISE SET is
+    // the code manager's own change to make.)
+    start->setText("MINE");
+    use->click();
+    ASSERT_EQ(codes->lineworkCodes().start, "MINE");
+    EXPECT_EQ(bench.document.customisationState().linework.start, "BEGIN");
+    // A change of the customisation that is not of its control codes leaves
+    // what the tab was given ...
+    const auto other = bench.interpreter.run("CUSTOMISE SET auto.codes=off");
+    ASSERT_TRUE(other.ok()) << other.error().describe();
+    katana::qt::test::processEvents();
+    EXPECT_EQ(codes->lineworkCodes().start, "MINE");
+    EXPECT_EQ(start->text(), "MINE");
+    // ... and a change of them takes over.
+    const auto changed = bench.interpreter.run("CUSTOMISE SET linework.start=GO");
+    ASSERT_TRUE(changed.ok()) << changed.error().describe();
+    katana::qt::test::processEvents();
+    EXPECT_EQ(codes->lineworkCodes().start, "GO");
+    EXPECT_EQ(start->text(), "GO");
+    EXPECT_EQ(end->text(), "STOP");
 }
 
 TEST(CustomisationWorkbench, TheManagersAskNothingInAHeadlessSessionAndMayInAnInteractiveOne)
@@ -458,4 +575,203 @@ TEST(CustomisationWorkbench, AnInteractiveCloseAsksOverTheCodeManagerAndCancelKe
     }
     EXPECT_FALSE(codes->dirty());
     EXPECT_EQ(bench.document.surveyMap().size(), 12u);
+}
+
+// ---- an editor's own commit keeps a kept session kept ------------------------------------
+//
+// CustomisationContext::beginCommit, answered by the workbench: asked before a
+// manager or the definition editor commits, it hands back the CUSTOMISE KEEP
+// line - to run after the commit - only when the session WAS the kept one and
+// this session has a kept file (CustomisationServices::hasKeptFile).
+//
+// The session of these tests starts as a program's does (cad::startCustomisation
+// through a host), with the fixture test_symbols as its built-in: 4 symbols, no
+// rule, counted by hand from its text. With no kept file on disk the built-in is
+// what starts, and it is "kept" - it is what the next start would give.
+
+namespace {
+
+// The workbench with an executor of its own - each line recorded, then run by
+// an interpreter that holds the host - and a kept file in a folder of the
+// test's, which does not exist until a KEEP writes it.
+struct KeptBench {
+    Document document;
+    katana::cad::CommandInterpreter interpreter{document};
+    QTemporaryDir folder;
+    std::filesystem::path keptFile;
+    katana::cad::CustomisationHost host;
+    QStringList ran;
+    std::vector<QString> log;
+    QMainWindow window;
+    QMenu* menu = new QMenu("Format", &window);
+    QToolBar* bar = new QToolBar("Format", &window);
+    std::unique_ptr<CustomisationWorkbench> bench;
+
+    // `withKeptFile`: whether the host names a kept file, which is what the
+    // window tells the workbench.
+    explicit KeptBench(bool withKeptFile)
+    {
+        EXPECT_TRUE(folder.isValid());
+        keptFile = std::filesystem::path(folder.path().toStdU16String()) / "customisation.json";
+        const auto builtIn =
+            katana::cad::readCustomisationFile(kFixture / "test_symbols.customisation.json");
+        EXPECT_TRUE(builtIn.ok()) << (builtIn.ok() ? "" : builtIn.error().describe());
+        if (builtIn.ok()) {
+            host.builtIn.customisation =
+                std::make_shared<const katana::entity::Customisation>(builtIn->customisation);
+            host.builtIn.digest = builtIn->digest;
+        }
+        if (withKeptFile) {
+            host.keptFile = keptFile;
+        }
+        interpreter.setCustomisationHost(host);
+        const katana::cad::CustomisationStart start =
+            katana::cad::startCustomisation(document, host);
+        EXPECT_EQ(start.installed, katana::cad::CustomisationOrigin::BuiltIn);
+        EXPECT_TRUE(document.customisationState().kept);
+
+        CustomisationServices services;
+        services.document = &document;
+        services.makeAction = [this](katana::qt::Icon icon, const QString& text, const QString&,
+                                     const QKeySequence&, const QString& name) {
+            auto* action = new QAction(katana::qt::icon(icon), text, &window);
+            action->setObjectName(name);
+            return action;
+        };
+        services.log = [this](const QString& text, bool) { log.push_back(text); };
+        services.headless = [] { return true; };
+        services.run = [this](const QString& line) {
+            ran << line;
+            const auto reply = interpreter.run(line.toStdString());
+            katana::qt::VerbOutcome outcome;
+            outcome.ok = reply.ok();
+            if (reply.ok()) {
+                outcome.reply = QString::fromStdString(*reply);
+            } else {
+                outcome.error = QString::fromStdString(reply.error().describe());
+                log.push_back(outcome.error);
+            }
+            return outcome;
+        };
+        services.hasKeptFile = [withKeptFile] { return withKeptFile; };
+        bench = std::make_unique<CustomisationWorkbench>(window, std::move(services), *menu, *bar);
+    }
+
+    [[nodiscard]] int keepLines() const
+    {
+        return static_cast<int>(ran.count(QStringLiteral("CUSTOMISE KEEP")));
+    }
+
+    // The three commits an editor makes, in turn: the Survey Code Manager's
+    // Apply of one new rule, the Symbol Library's Import Definitions of the
+    // fixture's three linestyles, and the definition editor's Save of a new
+    // symbol of two strokes. After each, `afterEach` is told which it was.
+    void commitThroughEachEditor(const std::function<void(const char* which)>& afterEach)
+    {
+        katana::qt::SurveyCodeManagerDialog& codes = bench->showCodeManager();
+        katana::entity::SurveyRule rule;
+        rule.key = "KQ*";
+        rule.model = "KEPT";
+        ASSERT_TRUE(codes.addRule(rule).ok());
+        const auto applied = codes.apply();
+        ASSERT_TRUE(applied.ok()) << applied.error().describe();
+        ASSERT_EQ(document.surveyMap().size(), 1u);
+        afterEach("the Survey Code Manager's Apply");
+
+        ASSERT_TRUE(bench->showSymbolLibrary().importDefinitionsFile(
+            kFixture / "test_linestyles.customisation.json"));
+        ASSERT_EQ(document.styleLibrary().size(), 7u) << "4 symbols and 3 linestyles";
+        afterEach("the Symbol Library's Import Definitions");
+
+        katana::qt::DefinitionEditorDialog& editor = bench->showDefinitionEditor();
+        ASSERT_TRUE(editor.newDefinition(true));
+        named<QLineEdit>(&editor, "definitionName")->setText(QStringLiteral("TEST Post"));
+        named<QPlainTextEdit>(&editor, "definitionStrokes")
+            ->setPlainText(QStringLiteral("[\"move\", 0, 0],\n[\"draw\", 0, 2]"));
+        ASSERT_TRUE(editor.save());
+        ASSERT_EQ(document.styleLibrary().size(), 8u);
+        afterEach("the definition editor's Save");
+    }
+};
+
+} // namespace
+
+TEST(CustomisationWorkbench, AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAndItStaysKept)
+{
+    KeptBench bench(true);
+    ASSERT_FALSE(std::filesystem::exists(bench.keptFile));
+    int commits = 0;
+    bench.commitThroughEachEditor([&](const char* which) {
+        ++commits;
+        // ONE line more after each commit, and it is the last line run.
+        EXPECT_EQ(bench.keepLines(), commits) << which;
+        ASSERT_FALSE(bench.ran.isEmpty()) << which;
+        EXPECT_EQ(bench.ran.last(), QStringLiteral("CUSTOMISE KEEP")) << which;
+        // The line did what a typed one does: the session is the kept one
+        // again, which is why the NEXT editor's commit keeps it too.
+        EXPECT_TRUE(bench.document.customisationState().kept) << which;
+        EXPECT_TRUE(std::filesystem::exists(bench.keptFile)) << which;
+    });
+    ASSERT_EQ(commits, 3);
+    // Only the three: the manager's Apply, the import and the Save are not
+    // lines themselves.
+    EXPECT_EQ(bench.ran, (QStringList{QStringLiteral("CUSTOMISE KEEP"),
+                                      QStringLiteral("CUSTOMISE KEEP"),
+                                      QStringLiteral("CUSTOMISE KEEP")}));
+
+    // The definition editor's Delete is a line of its own, and is kept too.
+    katana::qt::DefinitionEditorDialog* editor = bench.bench->definitionEditor();
+    ASSERT_NE(editor, nullptr);
+    ASSERT_TRUE(editor->remove(false)) << "nothing names TEST Post";
+    ASSERT_EQ(bench.ran.size(), 5);
+    EXPECT_EQ(bench.ran[3], QStringLiteral("CUSTOMISE REMOVE \"TEST Post\""));
+    EXPECT_EQ(bench.ran[4], QStringLiteral("CUSTOMISE KEEP"));
+
+    // What the next start reads is what the editors left: by hand, the
+    // built-in's 4 symbols and the 3 imported linestyles (the new symbol was
+    // deleted again), and the one rule.
+    Document next;
+    const katana::cad::CustomisationStart start = katana::cad::startCustomisation(next, bench.host);
+    EXPECT_EQ(start.installed, katana::cad::CustomisationOrigin::Kept);
+    EXPECT_EQ(start.definitions, 7u);
+    EXPECT_EQ(start.symbols, 4u);
+    EXPECT_EQ(start.rules, 1u);
+    EXPECT_TRUE(start.problems.empty());
+}
+
+TEST(CustomisationWorkbench, ASessionThatWasNotTheKeptOneIsNotKeptByAnEditorsCommit)
+{
+    // A customisation typed in lasts the session: the load makes the session
+    // "not kept", and an editor's change on top of it is not written either.
+    KeptBench bench(true);
+    const auto loaded = bench.interpreter.run(
+        "CUSTOMISE \"" + (kFixture / "test_symbols.customisation.json").generic_string() + "\"");
+    ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
+    ASSERT_FALSE(bench.document.customisationState().kept);
+
+    int commits = 0;
+    bench.commitThroughEachEditor([&](const char* which) {
+        ++commits;
+        EXPECT_TRUE(bench.ran.isEmpty()) << which << " ran " << bench.ran.join(" | ").toStdString();
+        EXPECT_FALSE(bench.document.customisationState().kept) << which;
+    });
+    EXPECT_EQ(commits, 3);
+    EXPECT_FALSE(std::filesystem::exists(bench.keptFile));
+}
+
+TEST(CustomisationWorkbench, WithNoKeptFileAnEditorsCommitRunsNoLineAndLogsNoRefusal)
+{
+    // The session IS the kept one - the built-in, as started - but nothing
+    // names a file to keep it in. KEEP would be refused after every commit,
+    // so it is not asked.
+    KeptBench bench(false);
+    int commits = 0;
+    bench.commitThroughEachEditor([&](const char* which) {
+        ++commits;
+        EXPECT_TRUE(bench.ran.isEmpty()) << which << " ran " << bench.ran.join(" | ").toStdString();
+    });
+    EXPECT_EQ(commits, 3);
+    for (const QString& line : bench.log) {
+        EXPECT_FALSE(line.contains(QStringLiteral("KEEP"))) << line.toStdString();
+    }
 }

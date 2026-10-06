@@ -3,7 +3,9 @@
 // Every tool is a thin shape over Session::run: a tool builds command lines,
 // runs them, and hands back what the session printed. So there is one
 // implementation of every verb, the one katana_cli and its tests exercise, and
-// a tool can never do something the command line cannot.
+// a tool can never do something the command line cannot. (Two tools run no
+// line: katana_status and katana_customisation read the Document through cad,
+// for what no reply holds as structure, and change nothing.)
 
 #include "mcp_server.hpp"
 #include "mcp_tools.hpp"
@@ -25,6 +27,7 @@
 #include <nlohmann/json.hpp>
 
 #include "katana/cad/command_interpreter.hpp"
+#include "katana/cad/customisation_report.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/import_placement.hpp"
@@ -585,9 +588,16 @@ const std::vector<Tool>& tools()
             "MOVE, COPY, ROTATE, OFFSET, TRIM, FILLET...), layers and styles, alignments and "
             "design profiles (ALIGN), parcels (PARCEL), survey calculations (INVERSE, FORWARD, "
             "AREA), survey field files (SURVEY READ <file>; SURVEY IMPORT <file> [SETTINGS "
-            "<file>] [SET key=value ...], where SET control=<id>;drawing;fixed;0;fixed;0;fixed;0 "
-            "holds a point of the drawing, as FORWARD puts one there), survey codes (CODE, "
-            "MAPFILE, CUSTOMISE), AS 5488 subsurface utilities "
+            "<file>] [SET key=value ...] [CODES on|off] [LINEWORK on|off], where SET "
+            "control=<id>;drawing;fixed;0;fixed;0;fixed;0 "
+            "holds a point of the drawing, as FORWARD puts one there, and an import codes "
+            "and strings the points it draws by the loaded survey codes unless told off), "
+            "survey codes (CODE, CODE LIST, CODE CHECK; LINEWORK [<scope>] [WHERE key=value "
+            "...] [ORDER number|entity] [PREVIEW] joins coded points into lines, HELP "
+            "LINEWORK) and the customisation they come from (CUSTOMISE <file> "
+            "loads a Katana customisation file, CUSTOMISE EXPORT <file> writes the session as "
+            "one, CUSTOMISE alone reports what is loaded; HELP CUSTOMISE), AS 5488 subsurface "
+            "utilities "
             "(UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW, REGRADE, SCHEDULE - on a schedule "
             "file, or on what is drawn by the scope words DRAWING | SELECTION | "
             "AREA x0,y0,x1,y1 | LAYERS a,b [ONLY], then [WHERE key=value ...]; UTILITY DRAW "
@@ -1027,6 +1037,10 @@ const std::vector<Tool>& tools()
                                std::string(redo ? "REDO " : "UNDO ") + std::to_string(steps));
             }});
 
+        // The customisation as structured data, from its own file
+        // (mcp_customisation.cpp).
+        list.push_back(customisationTool());
+
 #if defined(KATANA_WITH_INTEROP)
         // The geoprocessing tools, from their own file (geo/mcp_geo_tools.cpp).
         for (Tool& tool : geoTools()) {
@@ -1052,6 +1066,14 @@ constexpr std::array kResources{
              "text/plain"},
     Resource{"katana://status", "Drawing status",
              "The live drawing's state, as katana_status reports it.", "application/json"},
+    // CUSTOMISE JSON (docs/customisation.md, "The replies"), as
+    // katana_customisation's summary gives it.
+    Resource{"katana://customisation", "Customisation",
+             "The session's customisation: its name and where it came from, its sources and "
+             "their notices, counts, linework codes, automation, colours, what is wrong with "
+             "its rules, what this drawing uses of it, and what went wrong when the session "
+             "started.",
+             "application/json"},
 #if defined(KATANA_WITH_INTEROP)
     // FORMATS JSON (docs/interop.md, "Formats"), as katana_formats lists it.
     Resource{"katana://formats", "GDAL formats",
@@ -1371,6 +1393,12 @@ std::optional<std::string> Server::handle(std::string_view message)
                 mimeType = "text/plain";
             } else if (uri == "katana://status") {
                 text = statusOf(session_).dump(2);
+                mimeType = "application/json";
+            } else if (uri == "katana://customisation") {
+                // cad's own report, read from the Document as the status is:
+                // a line would answer the same and leave a CUSTOMISE JSON in
+                // the history of a session nobody had typed into.
+                text = katana::cad::customisationJson(session_.document());
                 mimeType = "application/json";
 #if defined(KATANA_WITH_INTEROP)
             } else if (uri == "katana://formats") {

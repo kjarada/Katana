@@ -1,8 +1,9 @@
 #pragma once
 
 // The survey code manager: the feature-code library a surveyor codes against
-// - a survey code file editor, Civil 3D's description keys, TBC's feature
-// definition manager, Carlson's field-to-finish - in one non-modal dialog.
+// - an editor of a customisation's survey codes, Civil 3D's description keys,
+// TBC's feature definition manager, Carlson's field-to-finish - in one
+// non-modal dialog.
 //
 // Five tabs, each over one cad foundation, so the dialog decides nothing the
 // CLI would say differently:
@@ -41,8 +42,8 @@
 #include <QDialog>
 
 #include "customisation/customisation_context.hpp"
-#include "katana/archive12d/customisation.hpp"
 #include "katana/cad/code_table.hpp"
+#include "katana/cad/customisation_merge.hpp"
 #include "katana/cad/linework.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/commands/command_stack.hpp"
@@ -83,8 +84,10 @@ class SurveyCodeManagerDialog : public QDialog {
     // The buffer differs from the drawing's map: the one it was taken from,
     // last applied, or last seen changed elsewhere.
     [[nodiscard]] bool dirty() const;
-    // The buffer onto the Document (setSurveyMap). InvalidState when the
-    // Document is gone.
+    // The buffer onto the Document (setSurveyMap), with the commit hook
+    // called round it (CustomisationContext::beginCommit): before it, and
+    // what it hands back after. InvalidState when the Document is gone - no
+    // commit, so the hook is not called.
     [[nodiscard]] katana::core::Status apply();
     // The Document's map back into the buffer, discarding the edits.
     void revert();
@@ -116,16 +119,26 @@ class SurveyCodeManagerDialog : public QDialog {
     // What the Import / Export buttons do once a file is chosen; the buttons
     // ask for a file only in an interactive session.
     //
-    // Reads a mapfile (or any customisation file: archive12d decides by what
-    // is in it) and merges its rules into the BUFFER - Merge by default, as
-    // loading does everywhere (D1) - for review before Apply. Library
-    // definitions in the file are not loaded here: this edits the map only.
-    [[nodiscard]] katana::core::Status importMapfile(
-        const std::filesystem::path& path,
-        katana::archive12d::LoadMode mode = katana::archive12d::LoadMode::Merge);
-    // The buffer as a survey code file (.mapfile), UTF-16LE with a byte
-    // order mark, as the format's own writers write one.
-    [[nodiscard]] katana::core::Status exportMapfile(const std::filesystem::path& path) const;
+    // Reads a Katana customisation file (docs/customisation.md) and merges
+    // ITS RULES into the BUFFER through cad::mergeCustomisation - Merge by
+    // default, as loading does everywhere (D1) - for review before Apply.
+    // The definitions, colours and settings the file also holds are left
+    // alone and counted in the log: this edits the survey codes only.
+    // NotFound for a file with no rules; what the format's reader refuses
+    // keeps its own error (a file in another format is "not a Katana
+    // customisation file"). The buffer is as it was after any failure.
+    [[nodiscard]] katana::core::Status
+    importCodes(const std::filesystem::path& path,
+                katana::cad::LoadMode mode = katana::cad::LoadMode::Merge);
+    // The buffer as a Katana customisation file of survey codes alone: its
+    // rules in their order, under the session's name
+    // (exportedCustomisationName) and with what of the session belongs with
+    // them (cad::customisationPart, the one rule CUSTOMISE EXPORT ... CODES
+    // writes a part by too) - its description and its author's notice, the
+    // sources that brought it rules, each with its notice, the notice of
+    // every source left out, and the colours the rules name. Not its
+    // definitions, and not its linework codes or automation switches.
+    [[nodiscard]] katana::core::Status exportCodes(const std::filesystem::path& path) const;
     // The buffer's code list (cad::codeListCsv), UTF-8.
     [[nodiscard]] katana::core::Status exportCodeList(const std::filesystem::path& path) const;
 
