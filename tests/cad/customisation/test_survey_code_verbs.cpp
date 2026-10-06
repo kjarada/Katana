@@ -524,6 +524,58 @@ TEST(SurveyCodeScope, PreviewReportsAndChangesNothing)
               "Preview: nothing was changed.");
 }
 
+TEST(SurveyCodeScope, ACensusTakesPreviewAndIsTheSameCensus)
+{
+    // CODE and CODE CENSUS are one grammar, PREVIEW included. A census
+    // changes nothing, so the word asks nothing more of it: wherever it
+    // stands the reply is the census of the same scope, never a usage error
+    // and never a property called PREVIEW.
+    Scoped session;
+    const std::string drawing = "scope=drawing matched=3\n"
+                                "3 entities carry a code in \"code\", 3 distinct codes\n"
+                                "  KT01: 1, prefix, matched, layer KATANA TEST\n"
+                                "  KT02: 1, prefix, matched, layer KATANA TEST\n"
+                                "  KX01: 1, prefix, matched";
+    for (const char* line : {"CODE CENSUS DRAWING PREVIEW", "CODE CENSUS PREVIEW",
+                             "code census preview drawing", "CODE CENSUS PREVIEW PROPERTY code"}) {
+        EXPECT_EQ(session.ok(line), drawing) << line;
+    }
+    EXPECT_EQ(session.ok("CODE CENSUS LAYERS a PREVIEW"),
+              std::string("scope=layers layers=a sublayers=yes matched=2\n") + kCensusOfLayerA);
+    // A property that IS called as the word is named with PROPERTY, as for
+    // CODE.
+    EXPECT_EQ(session.ok("CODE CENSUS PROPERTY preview"),
+              "scope=drawing matched=3\n0 entities carry a code in \"preview\", 0 distinct codes");
+}
+
+TEST(SurveyCodeScope, ViewIsTheWindowsViewWhereAFrontEndAnswersForOne)
+{
+    // A view showing the window 0,0 - 1.5,1.5 and hiding nothing of its own,
+    // as the window hands one to the interpreter: of the three coded
+    // entities it shows the first point, (1,1), alone.
+    Scoped session;
+    session.interpreter.setScopeContext(
+        [](std::optional<std::uint32_t>) -> katana::core::Result<katana::cad::ScopeView> {
+            katana::cad::ScopeView view;
+            view.id = 3;
+            view.area = katana::geometry::Box2(katana::geometry::Point2(0, 0),
+                                               katana::geometry::Point2(1.5, 1.5));
+            return view;
+        });
+    EXPECT_EQ(session.ok("CODE CENSUS VIEW"),
+              "scope=view view=3 area=0,0,1.5,1.5 matched=1\n"
+              "1 entity carries a code in \"code\", 1 distinct code\n"
+              "  KT01: 1, prefix, matched, layer KATANA TEST");
+    // CODE on it codes that point and leaves the two the view does not show.
+    const std::string reply = session.ok("CODE VIEW");
+    EXPECT_TRUE(reply.starts_with("scope=view view=3 area=0,0,1.5,1.5 matched=1\n"
+                                  "1 entity carries a code in \"code\": 1 matched"))
+        << reply;
+    EXPECT_EQ(session.layerOf(session.onZero), "KATANA TEST");
+    EXPECT_EQ(session.layerOf(session.pointOnA), "a");
+    EXPECT_EQ(session.layerOf(session.lineOnA), "a");
+}
+
 TEST(SurveyCodeScope, AScopeThatTakesNothingIsReportedAndCodesNothing)
 {
     // Nothing is selected. An empty list of ids means EVERY entity to
@@ -592,6 +644,29 @@ TEST(SurveyCodeScope, AWordThatCannotBeginAScopeIsStillTheProperty)
               "0 entities carry a code in \"Layer\", 0 distinct codes");
 }
 
+TEST(SurveyCodeScope, APropertyOfSeveralWordsWhoseFirstIsAScopeWordIsNamedWithProperty)
+{
+    // With a word after it LAYER begins the scope form, and nothing can tell
+    // "Layer a", a property of two words, from the layer a: the line is the
+    // layer. "Area m2" is then a window that is not four numbers. Each is
+    // still a property when it is named as one, quoted to be one word.
+    Scoped session;
+    EXPECT_EQ(session.ok("CODE CENSUS Layer a"),
+              std::string("scope=layers layers=a sublayers=yes matched=2\n") + kCensusOfLayerA);
+    const katana::core::Error area = session.refused("CODE CENSUS Area m2");
+    EXPECT_EQ(area.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(area.context, "m2");
+    EXPECT_EQ(session.ok("CODE CENSUS PROPERTY \"Layer a\""),
+              "scope=drawing matched=3\n0 entities carry a code in \"Layer a\", 0 distinct codes");
+    EXPECT_EQ(session.ok("CODE CENSUS PROPERTY \"Area m2\""),
+              "scope=drawing matched=3\n0 entities carry a code in \"Area m2\", 0 distinct codes");
+    // A property of several words whose first is none of those words is the
+    // rest of the line, quotes or none.
+    EXPECT_EQ(session.ok("CODE CENSUS Area_m2 of lot"),
+              "scope=drawing matched=3\n"
+              "0 entities carry a code in \"Area_m2 of lot\", 0 distinct codes");
+}
+
 TEST(SurveyCodeScope, WhatTheGrammarRefuses)
 {
     Scoped session;
@@ -606,9 +681,13 @@ TEST(SurveyCodeScope, WhatTheGrammarRefuses)
                   "usage: CODE [<scope>] [WHERE key=value ...] [PROPERTY <name>] [PREVIEW]")
             << line;
     }
-    // A census changes nothing, so it has no PREVIEW to give.
-    EXPECT_EQ(session.refused("CODE CENSUS DRAWING PREVIEW").message,
-              "usage: CODE CENSUS [<scope>] [WHERE key=value ...] [PROPERTY <name>]");
+    // The census has the same grammar and its own usage line.
+    for (const char* line : {"CODE CENSUS DRAWING everything", "CODE CENSUS PROPERTY a PROPERTY b",
+                             "CODE CENSUS DRAWING PROPERTY"}) {
+        EXPECT_EQ(session.refused(line).message,
+                  "usage: CODE CENSUS [<scope>] [WHERE key=value ...] [PROPERTY <name>] [PREVIEW]")
+            << line;
+    }
     // The shared parser's own refusals come through as they are.
     EXPECT_EQ(session.refused("CODE DRAWING SELECTION").message,
               "give one scope: SELECTION, DRAWING, VIEW, AREA or LAYERS");

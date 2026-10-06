@@ -281,10 +281,75 @@ Result<std::string> load(Document& document, const Words& files, LoadMode mode)
 
 // ---- export -------------------------------------------------------------------------------
 
+// One of EXPORT's own words, in any case.
+bool isExportWord(const std::string& word)
+{
+    for (const char* own : {"CODES", "LINESTYLES", "SYMBOLS", "NAME", "ONLY"}) {
+        if (is(word, own)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// What a PART of the session says of where it came from. A file's `sources`
+// are taken at their word where the file is loaded: each becomes a source of
+// that session, by name, and both a project's record of what it was drawn
+// with and the warning that one of those is not loaded go by name. So a part
+// lists a source only for what the part itself HOLDS of it:
+//
+//   definitions   one of the definitions written came from it (`writtenFrom`,
+//                 the LineStyle::source of each)
+//   rules         the rules are written (`rulesWritten`) and it brought some
+//   neither       it brought neither kind - a table of colours - and there
+//                 are colours, which go with every part
+//
+// Written with the session's list as it stood, one symbol exported for a
+// colleague said it was the whole customisation, rules and all, and loaded it
+// answered for a customisation that was not there. A source the part holds
+// nothing of is left out, and its notice is written with the part's own:
+// nothing says whose the colours are, and an author's notice is never dropped
+// by an export.
+void narrowSourcesToPart(Customisation& part,
+                         const std::set<std::string, std::less<>>& writtenFrom, bool rulesWritten)
+{
+    std::vector<katana::entity::CustomisationSourceNote> held;
+    for (katana::entity::CustomisationSourceNote& source : part.sources) {
+        const bool broughtNeither = !source.definitions && !source.rules;
+        source.definitions = writtenFrom.contains(source.name);
+        source.rules = source.rules && rulesWritten;
+        if (source.definitions || source.rules || (broughtNeither && !part.colours.empty())) {
+            held.push_back(std::move(source));
+            continue;
+        }
+        for (std::string& line : source.notice) {
+            if (std::find(part.notice.begin(), part.notice.end(), line) == part.notice.end()) {
+                part.notice.push_back(std::move(line));
+            }
+        }
+    }
+    part.sources = std::move(held);
+}
+
 Result<std::string> exportTo(const Document& document, const Words& args)
 {
     if (args.empty()) {
         return usage(kExportUsage);
+    }
+    // The first word is the file. One of EXPORT's own words there is a line
+    // whose file was left out - CUSTOMISE EXPORT CODES wrote the whole session
+    // into a file called CODES - and a file that IS so called is given with
+    // its directory, as the family's keyword rule has it.
+    if (isExportWord(args.front())) {
+        // The usage first and the word last: a front end prints the context
+        // in brackets after the message, where it would read as one more
+        // option of the usage.
+        return makeError(ErrorCode::InvalidArgument,
+                         std::string("usage: ") + kExportUsage +
+                             ": the file comes first, and this is one of EXPORT's own words; a "
+                             "file so called is given with its directory (./" +
+                             args.front() + ")",
+                         args.front());
     }
     const fs::path file = katana::core::pathFromUtf8(args.front());
     katana::entity::CustomisationWriteOptions options;
@@ -328,14 +393,23 @@ Result<std::string> exportTo(const Document& document, const Words& args)
     if (only && options.only.empty()) {
         return usage(kExportUsage);
     }
-    const bool kinds = linestyles || symbols || codes;
-    if (kinds) {
+    // Which kinds are written. A kind word chooses among them; ONLY chooses
+    // among the DEFINITIONS, so with it the codes are written only when CODES
+    // says so, and both kinds of definition stay open to the names unless
+    // LINESTYLES or SYMBOLS narrows them. (CODES once switched every kind it
+    // did not name off, ONLY or not, so CODES ONLY <definition> - the codes
+    // and one symbol - was refused for the very symbol it asked for.)
+    const bool part = linestyles || symbols || codes || only;
+    if (part) {
+        options.codes = codes;
+    }
+    if (linestyles || symbols) {
         options.linestyles = linestyles;
         options.symbols = symbols;
-        options.codes = codes;
-    } else if (only) {
-        // Named definitions and nothing else: what Export Selected means.
-        options.codes = false;
+    } else if (codes && !only) {
+        // The codes alone.
+        options.linestyles = false;
+        options.symbols = false;
     }
 
     if (document.customisationState().origin == CustomisationOrigin::None) {
@@ -354,27 +428,46 @@ Result<std::string> exportTo(const Document& document, const Words& args)
         }
         return makeError(ErrorCode::InvalidArgument, "NAME: " + named.error().message, session.name);
     }
-    if (kinds || only) {
+    // After ONLY every word is a definition. One of EXPORT's own words there,
+    // naming no definition, is that word put in the wrong place, and "no
+    // definition of this name" alone would not say so.
+    for (const std::string& word : options.only) {
+        if (isExportWord(word) && !session.library.contains(word)) {
+            return makeError(ErrorCode::NotFound,
+                             "after ONLY every word is a definition's name, and the library has "
+                             "no definition of this name; a word of EXPORT's own goes before ONLY",
+                             word);
+        }
+    }
+
+    // The definitions the writer will choose, by the rule it chooses by
+    // (entity::CustomisationWriteOptions): counted for the reply, and each
+    // one's source noted for what a part says of its sources.
+    const std::set<std::string, std::less<>> chosen(options.only.begin(), options.only.end());
+    std::size_t definitions = 0;
+    std::set<std::string, std::less<>> writtenFrom;
+    session.library.forEach([&](const katana::entity::LineStyle& definition) {
+        const bool kind = definition.symbol ? options.symbols : options.linestyles;
+        if (kind && (chosen.empty() || chosen.contains(definition.name))) {
+            ++definitions;
+            writtenFrom.insert(definition.source);
+        }
+    });
+    if (part) {
         // A part of the session is a fragment for someone else's, or for
         // this one later. Merged in, it must not reset their control codes
         // and switches, and it is not a copy of the built-in to be told from
-        // another edition. The colours and every notice go with it.
+        // another edition. The colours and every notice go with it; of the
+        // sources, those it holds something of.
         session.linework.reset();
         session.automation.reset();
         session.basedOn.reset();
+        narrowSourcesToPart(session, writtenFrom, options.codes && !session.map.empty());
     }
     const auto text = katana::entity::customisationToJson(session, options);
     if (!text) {
         return text.error();
     }
-
-    // What was written, counted as the writer chose it.
-    const std::set<std::string, std::less<>> chosen(options.only.begin(), options.only.end());
-    std::size_t definitions = 0;
-    session.library.forEach([&](const katana::entity::LineStyle& definition) {
-        const bool kind = definition.symbol ? options.symbols : options.linestyles;
-        definitions += kind && (chosen.empty() || chosen.contains(definition.name)) ? 1 : 0;
-    });
     const bool replaced = isThere(file);
     if (auto written = writeWhole(file, *text, nullptr); !written) {
         return written.error();
@@ -454,6 +547,15 @@ Result<std::string> keep(Document& document, CustomisationVerbContext& context)
     if (document.customisationState().origin == CustomisationOrigin::None) {
         return makeError(ErrorCode::InvalidState,
                          "CUSTOMISE KEEP: no customisation is loaded, so there is nothing to keep");
+    }
+    if (document.customisationState().name.empty()) {
+        // Rules or definitions made in an editor with no customisation ever
+        // installed. A file needs a name, and the writer's own refusal - a
+        // name cannot be empty - would not say how the session gets one.
+        return makeError(ErrorCode::InvalidState,
+                         "CUSTOMISE KEEP: the session's customisation has no name to be kept "
+                         "under; CUSTOMISE EXPORT <file> NAME <name> writes it under one, and "
+                         "CUSTOMISE REPLACE <file> then gives the session that name");
     }
     const std::string shown = katana::core::pathToUtf8(*file);
 
@@ -558,16 +660,22 @@ Result<std::string> revert(Document& document, CustomisationVerbContext& context
 // ---- removing -----------------------------------------------------------------------------
 
 // What names a definition: the survey code rules that give it as their
-// linestyle or their symbol, by index, and the drawing's styles that give it
-// as their linetype or their symbol, by name.
+// linestyle or their symbol, by index; the drawing's styles that give it as
+// their linetype or their symbol, by name; and the drawing's layers that give
+// it as their linetype, by name - an entity with no style of its own is drawn
+// with its layer's.
 //
 // TO BE REPLACED BY THE SHARED FUNCTION WHEN IT LANDS: a public cad function
 // answering exactly this is being written in another tree as this is. It is
 // one function, called from one place (removeDefinitions), so that the swap
-// is one edit.
+// is one edit. What replaces it must count the layers too: without them
+// REMOVE took a definition a layer was drawn with, unforced and unsaid.
 struct DefinitionUse {
     std::vector<std::size_t> rules{};
     std::vector<std::string> styles{};
+    std::vector<std::string> layers{};
+
+    [[nodiscard]] bool any() const { return !rules.empty() || !styles.empty() || !layers.empty(); }
 };
 
 DefinitionUse usesOfDefinition(const Document& document, std::string_view name)
@@ -584,6 +692,11 @@ DefinitionUse usesOfDefinition(const Document& document, std::string_view name)
             use.styles.push_back(style.name);
         }
     });
+    for (const katana::entity::Layer& layer : document.model().layers.all()) {
+        if (layer.linetype == name) {
+            use.layers.push_back(layer.name);
+        }
+    }
     return use;
 }
 
@@ -614,7 +727,7 @@ Result<std::string> removeDefinitions(Document& document, Words names, bool forc
     for (const std::string& name : names) {
         uses.push_back(usesOfDefinition(document, name));
         const DefinitionUse& use = uses.back();
-        used += use.rules.empty() && use.styles.empty() ? 0 : 1;
+        used += use.any() ? 1 : 0;
         for (const std::size_t index : use.rules) {
             const katana::entity::SurveyRule& rule = rules[index];
             listing += "\n  \"" + name + "\": rule #" + number(index) + " " + rule.key + " (" +
@@ -622,6 +735,9 @@ Result<std::string> removeDefinitions(Document& document, Words names, bool forc
         }
         for (const std::string& style : use.styles) {
             listing += "\n  \"" + name + "\": the drawing's style \"" + style + "\" names it";
+        }
+        for (const std::string& layer : use.layers) {
+            listing += "\n  \"" + name + "\": the drawing's layer \"" + layer + "\" names it";
         }
     }
     if (used != 0 && !force) {
@@ -641,7 +757,8 @@ Result<std::string> removeDefinitions(Document& document, Words names, bool forc
     for (std::size_t i = 0; i < names.size(); ++i) {
         reply += "removed definition=" + recordValue(names[i]) +
                  " rules=" + number(uses[i].rules.size()) +
-                 " styles=" + number(uses[i].styles.size()) + "\n";
+                 " styles=" + number(uses[i].styles.size()) +
+                 " layers=" + number(uses[i].layers.size()) + "\n";
     }
     return trimmedReply(std::move(reply));
 }
@@ -709,6 +826,7 @@ Result<std::string> setValues(Document& document, const Words& args)
     katana::entity::CustomisationAutomation automation = document.customisationState().automation;
     katana::entity::LineworkCodes linework = document.customisationState().linework;
     std::string reply = "set";
+    std::set<std::string> given;
     for (const std::string& word : args) {
         const std::size_t equals = word.find('=');
         if (equals == std::string::npos || equals == 0) {
@@ -718,6 +836,13 @@ Result<std::string> setValues(Document& document, const Words& args)
         }
         const std::string key = katana::core::lowered(word.substr(0, equals));
         const std::string value = word.substr(equals + 1);
+        // A key given twice is two answers to one question. The later one
+        // won, and the reply said both back as though both had been set.
+        if (!given.insert(key).second) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a SET key is given once in a line, and " + key + " is given twice",
+                             word);
+        }
         if (key == "auto.codes" || key == "auto.linework") {
             const bool on = is(value, "on");
             if (!on && !is(value, "off")) {
@@ -845,12 +970,16 @@ Load      CUSTOMISE <file> [<file>...]   merge the files into what is loaded: a 
           customisation record
 Export    CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>]
           [ONLY <definition>...]   write the session; with a kind word, those kinds alone;
-          ONLY, those definitions (and no codes unless CODES is said); NAME, under that name.
+          ONLY, those definitions, of either kind unless LINESTYLES or SYMBOLS says which
+          (and no codes unless CODES is said); NAME, under that name.
           A part is written without the linework codes and the automation, so that merging it
-          resets nobody's. A file that is there is written over, and the reply says so:
+          resets nobody's, and lists as its sources only those it holds something of: where
+          it is loaded a source is taken at its word. The colours and every notice go with it.
+          A file that is there is written over, and the reply says so:
           exported file= name= definitions= codes= rules= replaced=yes|no
-          After ONLY every word is a definition; a definition called NAME is listed by giving
-          NAME <name> before ONLY
+          The file is the first word; a file called as one of EXPORT's own words is given
+          with its directory (./CODES). After ONLY every word is a definition; a definition
+          called NAME is listed by giving NAME <name> before ONLY
 Start     CUSTOMISE RESET   the program's built-in customisation in the place of the session's:
           reset name= definitions= codes= rules= kept=yes|no
           CUSTOMISE KEEP   write the session to the kept file, which the next start reads in
@@ -865,13 +994,15 @@ Start     CUSTOMISE RESET   the program's built-in customisation in the place of
           These three need what the program was started with; a session given no built-in or
           no kept file refuses each by name
 Remove    CUSTOMISE REMOVE <definition>... [FORCE]   refused, listing the rules and the
-          drawing's styles that name one, unless FORCE: removed definition= rules= styles=
+          drawing's styles and layers that name one, unless FORCE: removed definition=
+          rules= styles= layers=
           CUSTOMISE REMOVE CODE <key>...   every rule of each key: removed code= rules=
           (To CHANGE a rule or a definition, merge a file that holds it: CUSTOMISE <file>)
 Settings  CUSTOMISE SET <key>=<value>...   auto.codes=on|off and auto.linework=on|off (code a
           survey import's points, then string them); linework.start, .end, .close, .arcstart,
           .arcend, .join and .rectangle=<word>, a control's spelling in a field code (empty:
-          that control is off). One refused item sets none: set <key>=<value> ...
+          that control is off). A key is given once in a line, and one refused item sets
+          none: set <key>=<value> ...
 Editing a customisation changes the session only: KEEP makes it what the next start gives.)";
 }
 

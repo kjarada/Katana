@@ -97,6 +97,43 @@ const std::string kSite = R"({
   ]
 })";
 
+// Three more, for what a PART of a session says of where it came from:
+//
+//   kOwn "Own"      one linestyle, OWN Line: a colleague's own session.
+//   kMarks "Marks"  a symbol, MARK Cross, the rule MK* that draws it, and a
+//                   notice of its own.
+//   kTints "Tints"  neither definitions nor rules: a table of one colour, and
+//                   a notice of its own.
+//
+// Marks and Tints MERGED into the built-in: the session is still "Small Built
+// In" with its own notice, and its sources are Small Built In (definitions,
+// rules, no notice of its own - that is the session's), Marks (definitions,
+// rules, its notice) and Tints (neither, its notice); 3 definitions, 3 rules,
+// 2 colours.
+const std::string kOwn = R"({
+  "format": "katana-customisation", "version": 1, "name": "Own",
+  "linestyles": [
+    {"name": "OWN Line", "strokes": [["move", 0, 0], ["draw", 1, 0]]}
+  ]
+})";
+
+const std::string kMarks = R"({
+  "format": "katana-customisation", "version": 1, "name": "Marks",
+  "notice": ["Marks: drawn by hand."],
+  "symbols": [
+    {"name": "MARK Cross", "atVertices": true, "strokes": [["move", -1, 0], ["draw", 1, 0]]}
+  ],
+  "codes": [
+    {"key": "MK*", "sets": "symbol", "symbol": {"name": "MARK Cross"}}
+  ]
+})";
+
+const std::string kTints = R"({
+  "format": "katana-customisation", "version": 1, "name": "Tints",
+  "notice": ["Tints: free to use."],
+  "colours": {"tint teal": "#008080"}
+})";
+
 // A style library as another program writes one: not a Katana customisation.
 const std::string kLegacyLibrary = "worldstyle \"X\" { move 0 0 draw 1 0 }\n";
 
@@ -288,6 +325,23 @@ struct Hosted : Bare {
     fs::path backup() const { return fs::path(keptFile).concat(".bak"); }
 };
 
+// A definition put into the session's library as an editor puts one: from no
+// customisation, and named by nothing until a test names it. `symbol`: listed
+// as a symbol and drawn at vertices, else a linestyle.
+void addDefinition(Document& document, const std::string& name, bool symbol = false)
+{
+    katana::entity::StyleLibrary library = document.styleLibrary();
+    katana::entity::LineStyle definition;
+    definition.name = name;
+    definition.symbol = symbol;
+    definition.atVertices = symbol;
+    ASSERT_TRUE(katana::entity::addOrReplace(library, definition).ok());
+    document.setStyleLibrary(library);
+}
+
+// {name, brought definitions, brought rules, its notice}.
+using Sources = std::vector<katana::entity::CustomisationSourceNote>;
+
 const char* const kDefaultLinework =
     "linework linework.start=ST linework.end=END linework.close=CL linework.arcstart=BC "
     "linework.arcend=EC linework.join=JPN linework.rectangle=RECT";
@@ -332,6 +386,32 @@ TEST(CustomisationVerbs, WithNothingLoadedItSaysSoAndHowToLoad)
                           "rules=0 colours=0\n"
                           "automation auto.codes=on auto.linework=on\n") +
                   kDefaultLinework);
+}
+
+TEST(CustomisationVerbs, ACustomisationThatBringsNeitherKindIsNotSaidToBeNoCustomisation)
+{
+    // A file of settings alone: a name, the seven control codes, the two
+    // switches. Loaded, a customisation IS loaded - the record below the
+    // first line names it and says where it came from - so the first line may
+    // not say that none is. What is true of it is that nothing in it draws.
+    const std::string settings = R"({
+  "format": "katana-customisation", "version": 1, "name": "Set",
+  "linework": {"start": "S", "end": "E", "close": "C", "arcStart": "PC", "arcEnd": "PT",
+               "join": "J", "rectangle": "R"},
+  "automation": {"codesOnSurveyImport": false, "lineworkOnSurveyImport": false}
+})";
+    const Scratch scratch("settings-only");
+    Bare session;
+    session.ok("CUSTOMISE " + typed(scratch.write("settings.json", settings)));
+    EXPECT_EQ(session.ok("CUSTOMISE"),
+              "No linestyle or symbol definitions and no survey code rules are loaded.\n"
+              "  CUSTOMISE <file> [<file>...]  loads Katana customisation files\n"
+              "customisation name=Set origin=loaded kept=no definitions=0 codes=0 rules=0 "
+              "colours=0\n"
+              "source name=Set definitions=no rules=no\n"
+              "automation auto.codes=off auto.linework=off\n"
+              "linework linework.start=S linework.end=E linework.close=C linework.arcstart=PC "
+              "linework.arcend=PT linework.join=J linework.rectangle=R");
 }
 
 TEST(CustomisationVerbs, JsonIsTheSameAsOneObject)
@@ -422,6 +502,79 @@ TEST(CustomisationVerbs, JsonCountsWhatIsWrongWithTheRulesWithoutTheWordAScriptF
     EXPECT_TRUE(contains(json, "\"warnings\": 1")) << json;
     EXPECT_TRUE(contains(json, "\"origin\": \"loaded\"")) << json;
     EXPECT_TRUE(contains(json, "\"basedOn\": null")) << json;
+}
+
+TEST(CustomisationVerbs, JsonCountsWhatTheDrawingUsesAndCarriesEachSourcesNoticeAndWhatIsMissing)
+{
+    // The built-in with Marks merged in - a source with a notice of its own -
+    // and a drawing of four styles:
+    //
+    //   Fence   linetype TEST Fence, which the library defines
+    //   Ghost   linetype TEST Spare, a definition removed again from under it
+    //   Mark    symbol cross, a shape Katana draws itself
+    //   Plain   names nothing
+    //
+    // So 4 styles; 2 name a definition (Fence and Ghost) and 1 of those is
+    // defined; 1 is drawn by Katana itself; TEST Spare is the one name the
+    // styles give that nothing defines.
+    Hosted session("json-coverage");
+    session.start();
+    session.ok("CUSTOMISE " + typed(session.scratch.write("marks.json", kMarks)));
+    addDefinition(session.document, "TEST Spare");
+    session.ok("STYLE NEW Fence");
+    session.ok("STYLE SET Fence linetype \"TEST Fence\"");
+    session.ok("STYLE NEW Ghost");
+    session.ok("STYLE SET Ghost linetype \"TEST Spare\"");
+    session.ok("STYLE NEW Mark");
+    session.ok("STYLE SET Mark symbol cross");
+    session.ok("STYLE NEW Plain");
+    session.ok("CUSTOMISE REMOVE \"TEST Spare\" FORCE");
+
+    const std::string json = session.ok("CUSTOMISE JSON");
+    EXPECT_TRUE(contains(json, R"(  "coverage": {
+    "builtIn": 1,
+    "named": 2,
+    "notLinestyles": [],
+    "resolved": 1,
+    "styles": 4,
+    "unresolved": [
+      "TEST Spare"
+    ]
+  },)"))
+        << json;
+    // Each source with its own notice: the built-in's is the session's, said
+    // at the top, so its entry has none.
+    EXPECT_TRUE(contains(json, R"(  "sources": [
+    {
+      "definitions": true,
+      "name": "Small Built In",
+      "notice": [],
+      "rules": true
+    },
+    {
+      "definitions": true,
+      "name": "Marks",
+      "notice": [
+        "Marks: drawn by hand."
+      ],
+      "rules": true
+    }
+  ])"))
+        << json;
+    EXPECT_TRUE(contains(json, "  \"missing\": [],\n")) << json;
+
+    // The project is recorded with the two customisations it is drawn with,
+    // in load order. Opened where neither is loaded, both are missing.
+    const fs::path project = session.scratch.root / "drawn.katana";
+    ASSERT_TRUE(session.document.saveAs(project).ok());
+    Bare other;
+    ASSERT_TRUE(other.document.open(project).ok());
+    EXPECT_TRUE(contains(other.ok("CUSTOMISE JSON"), R"(  "missing": [
+    "Small Built In",
+    "Marks"
+  ],)"));
+    EXPECT_TRUE(contains(other.ok("CUSTOMISE"), "missing name=\"Small Built In\"\n"
+                                                "missing name=Marks"));
 }
 
 // ---- loading -------------------------------------------------------------------------------
@@ -515,6 +668,38 @@ TEST(CustomisationVerbs, AFileNamedTwiceIsReadOnceAndSaid)
     EXPECT_EQ(recordsOf(reply, "loaded"), 1u) << reply;
     // Read twice, each of Site's three rules would be in the map twice: 7.
     EXPECT_EQ(session.document.surveyMap().size(), 4u);
+}
+
+TEST(CustomisationVerbs, AReplyCountsEveryNameAndListsTheFirstTwenty)
+{
+    // 25 symbols, D01 to D25, and then a library of one other in their
+    // place: all 25 are gone. The count says 25; the names stop at 20, in
+    // name order, so D01 to D20 are listed and D21 to D25 are not.
+    std::string many = R"({"format": "katana-customisation", "version": 1, "name": "Many",)"
+                       R"( "symbols": [)";
+    for (int i = 1; i <= 25; ++i) {
+        many += std::string(i > 1 ? ", " : "") + R"({"name": "D)" + (i < 10 ? "0" : "") +
+                std::to_string(i) + R"(", "strokes": [["circle", 1]]})";
+    }
+    many += "]}";
+    const std::string one = R"({"format": "katana-customisation", "version": 1, "name": "One",)"
+                            R"( "symbols": [{"name": "Z", "strokes": [["circle", 1]]}]})";
+    const Scratch scratch("twenty");
+    Bare session;
+    session.ok("CUSTOMISE " + typed(scratch.write("many.json", many)));
+    ASSERT_EQ(session.document.styleLibrary().size(), 25u);
+
+    const std::string reply =
+        session.ok("CUSTOMISE REPLACE " + typed(scratch.write("one.json", one)));
+    const ReplyRecord count = record(reply, "removed");
+    EXPECT_EQ(field(count, "definitions"), "25");
+    EXPECT_EQ(field(count, "codes"), "0");
+    // The record of the count, then one a name.
+    EXPECT_EQ(recordsOf(reply, "removed"), 21u) << reply;
+    EXPECT_EQ(field(record(reply, "removed", 1), "definition"), "D01");
+    EXPECT_EQ(field(record(reply, "removed", 20), "definition"), "D20");
+    EXPECT_FALSE(contains(reply, "D21")) << reply;
+    EXPECT_EQ(session.document.styleLibrary().size(), 1u);
 }
 
 TEST(CustomisationVerbs, ALoadIsAllOrNothingAndEveryFileThatDoesNotReadIsNamed)
@@ -621,6 +806,24 @@ TEST(CustomisationVerbs, AKeywordIsTheWholeFirstWordAndAFileSoNamedIsGivenWithIt
     // A word that is no keyword is a file, and is refused as one that is
     // not there: LOAD is not a word of this verb.
     EXPECT_EQ(session.refused("CUSTOMISE LOAD ./json").code, ErrorCode::NotFound);
+
+    // EXPORT's first word is the file, and one of EXPORT's own words there
+    // is a line whose file was left out: CUSTOMISE EXPORT CODES once wrote
+    // the whole session into a file called CODES. With its directory, a file
+    // so called is the file. (The session holds Site: 3 rules.)
+    for (const char* word : {"CODES", "linestyles", "Symbols", "NAME", "only"}) {
+        const katana::core::Error error =
+            session.refused(std::string("CUSTOMISE EXPORT ") + word);
+        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << word;
+        EXPECT_TRUE(error.message.starts_with("usage: CUSTOMISE EXPORT <file> ")) << error.message;
+        EXPECT_TRUE(error.message.ends_with(std::string("is given with its directory (./") + word +
+                                            ")"))
+            << error.message;
+        EXPECT_EQ(error.context, word);
+        EXPECT_FALSE(fs::exists(scratch.root / word)) << word;
+    }
+    EXPECT_EQ(field(record(session.ok("CUSTOMISE EXPORT ./CODES"), "exported"), "rules"), "3");
+    EXPECT_EQ(parsed(contentsOf(scratch.root / "CODES")).map.size(), 3u);
 }
 
 TEST(CustomisationVerbs, TheWordsThatTakeNothingRefuseAWordAfterThem)
@@ -700,6 +903,8 @@ TEST(CustomisationVerbs, AnExportOfAPartHoldsThatPartAndNoSettings)
     EXPECT_FALSE(codes.basedOn.has_value());
     EXPECT_EQ(codes.name, "Small Built In");
     EXPECT_EQ(codes.notice, std::vector<std::string>{"Written for these tests."});
+    // Of its one source it holds the rules and no definition, and says so.
+    EXPECT_EQ(codes.sources, (Sources{{"Small Built In", false, true, {}}}));
 
     // One kind of definition, then the other.
     const auto [symbolsReply, symbols] = exportedTo("symbols.json", "symbols");
@@ -708,10 +913,12 @@ TEST(CustomisationVerbs, AnExportOfAPartHoldsThatPartAndNoSettings)
     EXPECT_TRUE(symbols.library.contains("TEST Peg"));
     EXPECT_EQ(symbols.library.size(), 1u);
     EXPECT_EQ(symbols.map.size(), 0u);
+    EXPECT_EQ(symbols.sources, (Sources{{"Small Built In", true, false, {}}}));
     const auto [linesReply, lines] = exportedTo("lines.json", "LINESTYLES CODES");
     EXPECT_EQ(field(linesReply, "definitions"), "1");
     EXPECT_EQ(field(linesReply, "rules"), "2");
     EXPECT_TRUE(lines.library.contains("TEST Fence"));
+    EXPECT_EQ(lines.sources, (Sources{{"Small Built In", true, true, {}}}));
 
     // Named definitions alone - and no codes unless CODES is said - under a
     // name of the export's own.
@@ -728,6 +935,26 @@ TEST(CustomisationVerbs, AnExportOfAPartHoldsThatPartAndNoSettings)
     EXPECT_EQ(field(bothReply, "rules"), "2");
     EXPECT_EQ(both.name, "Both");
 
+    // ONLY chooses among the DEFINITIONS and a kind word among the kinds, so
+    // the names are open to both kinds of definition until LINESTYLES or
+    // SYMBOLS narrows them. CODES said beside ONLY adds the codes and narrows
+    // nothing: it once switched both kinds of definition off, and the symbol
+    // asked for by name was refused as "not being written".
+    const auto [codesAndPegReply, codesAndPeg] =
+        exportedTo("codes-and-peg.json", "CODES ONLY \"TEST Peg\"");
+    EXPECT_EQ(field(codesAndPegReply, "definitions"), "1");
+    EXPECT_EQ(field(codesAndPegReply, "codes"), "2");
+    EXPECT_EQ(field(codesAndPegReply, "rules"), "2");
+    EXPECT_TRUE(codesAndPeg.library.contains("TEST Peg"));
+    EXPECT_EQ(codesAndPeg.library.size(), 1u);
+    EXPECT_EQ(codesAndPeg.map.size(), 2u);
+    // A linestyle and a symbol by name, with no kind word at all.
+    const auto [twoReply, two] = exportedTo("two.json", "ONLY \"TEST Fence\" \"TEST Peg\"");
+    EXPECT_EQ(field(twoReply, "definitions"), "2");
+    EXPECT_EQ(field(twoReply, "rules"), "0");
+    EXPECT_EQ(two.library.size(), 2u);
+    EXPECT_EQ(two.map.size(), 0u);
+
     // The whole session does hold the settings: it is what a KEEP writes.
     const auto [wholeReply, whole] = exportedTo("whole.json", "");
     EXPECT_EQ(field(wholeReply, "definitions"), "2");
@@ -735,6 +962,163 @@ TEST(CustomisationVerbs, AnExportOfAPartHoldsThatPartAndNoSettings)
     EXPECT_EQ(whole.linework->start, "S");
     EXPECT_TRUE(whole.automation.has_value());
     EXPECT_TRUE(whole.basedOn.has_value());
+    EXPECT_EQ(whole.sources, (Sources{{"Small Built In", true, true, {}}}));
+}
+
+TEST(CustomisationVerbs, APartLoadedElsewhereAnswersOnlyForWhatItHolds)
+{
+    // One symbol of the built-in, exported for a colleague. The session is
+    // "Small Built In" - definitions and rules - and the part holds one of
+    // its definitions and none of its rules, so that is what the part says:
+    // the source, with definitions and without rules.
+    Hosted author("part-author");
+    author.start();
+    const fs::path project = author.scratch.root / "site.katana";
+    ASSERT_TRUE(author.document.saveAs(project).ok());
+    const fs::path pegs = author.scratch.root / "pegs.json";
+    author.ok("CUSTOMISE EXPORT " + typed(pegs) + " ONLY \"TEST Peg\" NAME Pegs");
+
+    const Customisation part = parsed(contentsOf(pegs));
+    EXPECT_EQ(part.name, "Pegs");
+    EXPECT_EQ(part.sources, (Sources{{"Small Built In", true, false, {}}}));
+    EXPECT_EQ(part.notice, std::vector<std::string>{"Written for these tests."});
+    ASSERT_EQ(part.library.size(), 1u);
+    // The definition itself still says which customisation it came from.
+    EXPECT_EQ(part.library.find("TEST Peg")->source, "Small Built In");
+    EXPECT_TRUE(part.map.empty());
+
+    // The colleague has a customisation of their own, opens the author's
+    // project - which was drawn with one they do not have - and loads the
+    // part. Their session holds one definition of "Small Built In" and none
+    // of its rules, and says exactly that. (The part once listed the
+    // author's sources as they stood: "definitions=yes rules=yes", of a
+    // customisation the colleague had one symbol of.)
+    Bare colleague;
+    colleague.ok("CUSTOMISE " + typed(author.scratch.write("own.json", kOwn)));
+    ASSERT_TRUE(colleague.document.open(project).ok());
+    ASSERT_EQ(colleague.state().missingAtOpen, std::vector<std::string>{"Small Built In"});
+    const std::string loaded = colleague.ok("CUSTOMISE " + typed(pegs));
+    EXPECT_EQ(field(record(loaded, "loaded"), "name"), "Pegs");
+    EXPECT_EQ(colleague.state().sources,
+              (Sources{{"Own", true, false, {}},
+                       {"Small Built In", true, false, {"Written for these tests."}}}));
+    EXPECT_TRUE(contains(colleague.ok("CUSTOMISE"),
+                         "source name=Own definitions=yes rules=no\n"
+                         "source name=\"Small Built In\" definitions=yes rules=no\n"));
+    EXPECT_EQ(colleague.document.surveyMap().size(), 0u);
+
+    // What a save records the drawing as drawn with: both, while the
+    // colleague's library holds a definition of each.
+    ASSERT_TRUE(colleague.document.save().ok());
+    EXPECT_EQ(colleague.document.metadata().customisation,
+              (std::vector<std::string>{"Own", "Small Built In"}));
+    // The one symbol removed again, nothing of "Small Built In" is left in
+    // the session, and the next save no longer says the drawing is drawn
+    // with it. A source that brought definitions alone is recorded only
+    // while it still defines something; one said to have brought RULES is
+    // taken at its word for ever, which is what the part's untrue "rules"
+    // made of it.
+    colleague.ok("CUSTOMISE REMOVE \"TEST Peg\"");
+    ASSERT_TRUE(colleague.document.save().ok());
+    EXPECT_EQ(colleague.document.metadata().customisation, std::vector<std::string>{"Own"});
+}
+
+TEST(CustomisationVerbs, APartNamesTheSourcesOfWhatItHoldsAndCarriesEveryNotice)
+{
+    // The built-in with Marks and Tints merged in (the head of this file):
+    // sources Small Built In (definitions, rules), Marks (definitions, rules,
+    // its notice) and Tints (neither kind, its notice); the session's own
+    // notice is the built-in's.
+    Hosted session("part-sources");
+    session.start();
+    session.ok("CUSTOMISE " + typed(session.scratch.write("marks.json", kMarks)) + " " +
+               typed(session.scratch.write("tints.json", kTints)));
+    const std::vector<std::string> marksNotice{"Marks: drawn by hand."};
+    const std::vector<std::string> tintsNotice{"Tints: free to use."};
+    ASSERT_EQ(session.state().sources, (Sources{{"Small Built In", true, true, {}},
+                                                 {"Marks", true, true, marksNotice},
+                                                 {"Tints", false, false, tintsNotice}}));
+    const auto part = [&session](const std::string& name, const std::string& words) {
+        const fs::path file = session.scratch.root / name;
+        session.ok("CUSTOMISE EXPORT " + typed(file) + " " + words);
+        return parsed(contentsOf(file));
+    };
+
+    // One symbol, which came from Marks. Nothing of the built-in's is
+    // written, so it is no source of the part; Tints is, for the colours,
+    // which go with every part and are all a table of colours brings.
+    const Customisation cross = part("cross.json", "ONLY \"MARK Cross\" NAME Crosses");
+    EXPECT_EQ(cross.sources,
+              (Sources{{"Marks", true, false, marksNotice}, {"Tints", false, false, tintsNotice}}));
+    EXPECT_EQ(cross.notice, std::vector<std::string>{"Written for these tests."});
+    EXPECT_EQ(cross.colours.size(), 2u);
+
+    // The codes alone: every source that brought rules, said to have brought
+    // rules and no more.
+    const Customisation codes = part("codes.json", "CODES");
+    EXPECT_EQ(codes.sources, (Sources{{"Small Built In", false, true, {}},
+                                      {"Marks", false, true, marksNotice},
+                                      {"Tints", false, false, tintsNotice}}));
+    EXPECT_EQ(codes.map.size(), 3u);
+
+    // The linestyles alone: TEST Fence, the built-in's. Marks brought a
+    // symbol and a rule and neither is written, so it is not a source of
+    // this part - and its notice is not dropped for that: it is written with
+    // the part's own, after it.
+    const Customisation lines = part("lines.json", "LINESTYLES");
+    EXPECT_EQ(lines.sources, (Sources{{"Small Built In", true, false, {}},
+                                      {"Tints", false, false, tintsNotice}}));
+    EXPECT_EQ(lines.notice,
+              (std::vector<std::string>{"Written for these tests.", "Marks: drawn by hand."}));
+
+    // With no colour left to write, a table of colours is no source of a
+    // part either; its notice is kept the same way.
+    session.document.setColourTable({});
+    const Customisation bare = part("bare.json", "ONLY \"MARK Cross\"");
+    EXPECT_EQ(bare.sources, (Sources{{"Marks", true, false, marksNotice}}));
+    EXPECT_EQ(bare.notice,
+              (std::vector<std::string>{"Written for these tests.", "Tints: free to use."}));
+    EXPECT_TRUE(bare.colours.empty());
+
+    // Loaded into an empty session, the first part brings the two sources it
+    // lists and nothing of the built-in's but the notice it carries.
+    Bare other;
+    other.ok("CUSTOMISE " + typed(session.scratch.root / "cross.json"));
+    EXPECT_EQ(other.state().name, "Crosses");
+    EXPECT_EQ(other.state().notice, std::vector<std::string>{"Written for these tests."});
+    EXPECT_EQ(other.state().sources,
+              (Sources{{"Marks", true, false, marksNotice}, {"Tints", false, false, tintsNotice}}));
+}
+
+TEST(CustomisationVerbs, TheCodesWrittenAndReadBackInTheirPlaceLeaveTheSourcesWithWhatEachBrought)
+{
+    // The round trip that edits the codes: EXPORT f CODES, change the file,
+    // REPLACE f. The same three-source session as above. The part lists the
+    // two sources that brought rules, as bringing rules, and the table of
+    // colours; read back in the place of the rules, each source is again
+    // what it was - definitions it kept, rules it brought again - and in the
+    // same order. (A part that listed no sources would come back as ONE
+    // source of the session's name, and Marks would have lost its rules.)
+    // The one thing more: a file's own notice goes with the source of its
+    // name, so the built-in's entry now says the session's notice too.
+    Hosted session("part-round-trip");
+    session.start();
+    session.ok("CUSTOMISE " + typed(session.scratch.write("marks.json", kMarks)) + " " +
+               typed(session.scratch.write("tints.json", kTints)));
+    const std::vector<std::string> marksNotice{"Marks: drawn by hand."};
+    const std::vector<std::string> tintsNotice{"Tints: free to use."};
+    const std::string file = typed(session.scratch.root / "codes.json");
+    session.ok("CUSTOMISE EXPORT " + file + " CODES");
+    const std::string reply = session.ok("CUSTOMISE REPLACE " + file);
+    // The same 3 rules took the place of the 3: nothing is gone.
+    EXPECT_EQ(recordsOf(reply, "removed"), 0u) << reply;
+    EXPECT_EQ(session.document.surveyMap().size(), 3u);
+    EXPECT_EQ(session.document.styleLibrary().size(), 3u);
+    EXPECT_EQ(session.state().sources,
+              (Sources{{"Small Built In", true, true, {"Written for these tests."}},
+                       {"Marks", true, true, marksNotice},
+                       {"Tints", false, false, tintsNotice}}));
+    EXPECT_EQ(session.state().name, "Small Built In");
 }
 
 TEST(CustomisationVerbs, WhatAnExportRefusesWritesNoFile)
@@ -756,6 +1140,15 @@ TEST(CustomisationVerbs, WhatAnExportRefusesWritesNoFile)
               ErrorCode::NotFound);
     EXPECT_EQ(session.refused("CUSTOMISE EXPORT " + file + " LINESTYLES ONLY \"TEST Peg\"").code,
               ErrorCode::InvalidArgument);
+    // After ONLY every word is a definition, so a kind word put there is
+    // asked for as one. It is none, and the refusal says where it belongs.
+    const katana::core::Error after =
+        session.refused("CUSTOMISE EXPORT " + file + " ONLY \"TEST Peg\" CODES");
+    EXPECT_EQ(after.code, ErrorCode::NotFound);
+    EXPECT_EQ(after.context, "CODES");
+    EXPECT_EQ(after.message,
+              "after ONLY every word is a definition's name, and the library has no definition "
+              "of this name; a word of EXPORT's own goes before ONLY");
     // A name a project could not record.
     const katana::core::Error name = session.refused("CUSTOMISE EXPORT " + file + " NAME a/b");
     EXPECT_EQ(name.code, ErrorCode::InvalidArgument);
@@ -988,6 +1381,105 @@ TEST(CustomisationVerbs, KeepIsRefusedOverAFileThatAppearedDoesNotReadOrIsNewer)
         // And REVERT says why it cannot read it.
         EXPECT_EQ(session.refused("CUSTOMISE REVERT").code, ErrorCode::Unsupported);
     }
+    // Something is there that cannot be read at all - here a folder of the
+    // kept file's own name. It is not written over unseen either.
+    {
+        Hosted session("keep-cannot-read");
+        fs::create_directories(session.keptFile);
+        session.start();
+        session.ok("CUSTOMISE SET auto.codes=off");
+        const katana::core::Error error = session.refused("CUSTOMISE KEEP");
+        EXPECT_EQ(error.code, ErrorCode::InvalidState);
+        EXPECT_EQ(error.message,
+                  "CUSTOMISE KEEP: the kept customisation file cannot be read, so it is not "
+                  "written over: the file cannot be opened: it is a directory");
+        EXPECT_TRUE(fs::is_directory(session.keptFile));
+        EXPECT_FALSE(session.state().kept);
+    }
+}
+
+TEST(CustomisationVerbs, AWriteThatFailsIsRefusedAndLeavesWhatWasThere)
+{
+    // EXPORT to a name a folder has: the text is written beside it and cannot
+    // be put in its place. The folder stands, and nothing is left beside it.
+    {
+        Hosted session("write-export");
+        session.start();
+        const fs::path folder = session.scratch.root / "a-folder";
+        fs::create_directories(folder);
+        const katana::core::Error error = session.refused("CUSTOMISE EXPORT " + typed(folder));
+        EXPECT_EQ(error.code, ErrorCode::FileExportFailure);
+        EXPECT_EQ(error.message, "the file cannot be written");
+        EXPECT_TRUE(contains(error.context, "a-folder")) << error.context;
+        EXPECT_TRUE(fs::is_directory(folder));
+        EXPECT_FALSE(fs::exists(fs::path(folder).concat(".tmp")));
+    }
+    // KEEP where the kept file's folder cannot be made: a file stands where
+    // the folder would be. The session stays not kept.
+    {
+        Hosted session("write-keep");
+        const std::string was = "a file, where the kept file's folder would be";
+        const fs::path blocker = session.scratch.write("blocker", was);
+        session.keptFile = blocker / "customisation.json";
+        session.host.keptFile = session.keptFile;
+        session.start();
+        session.ok("CUSTOMISE SET auto.codes=off");
+        const katana::core::Error error = session.refused("CUSTOMISE KEEP");
+        EXPECT_EQ(error.code, ErrorCode::FileExportFailure);
+        EXPECT_EQ(error.message, "the file cannot be written");
+        EXPECT_EQ(contentsOf(blocker), was);
+        EXPECT_FALSE(session.state().kept);
+    }
+    // KEEP where the file that is there cannot be kept beside it: a folder
+    // has the .bak's name. Nothing is written - the kept file is as it was.
+    {
+        Hosted session("write-backup");
+        session.start();
+        session.ok("CUSTOMISE SET auto.codes=off");
+        session.ok("CUSTOMISE KEEP");
+        const std::string first = contentsOf(session.keptFile);
+        fs::create_directories(session.backup());
+        session.ok("CUSTOMISE SET linework.start=S");
+        const katana::core::Error error = session.refused("CUSTOMISE KEEP");
+        EXPECT_EQ(error.code, ErrorCode::FileExportFailure);
+        EXPECT_EQ(error.message,
+                  "the file that is there could not be kept beside it, so nothing was written");
+        EXPECT_EQ(contentsOf(session.keptFile), first);
+        EXPECT_FALSE(fs::exists(fs::path(session.keptFile).concat(".tmp")));
+        EXPECT_FALSE(session.state().kept);
+    }
+}
+
+TEST(CustomisationVerbs, KeepRefusesASessionWithNoNameUntilAnExportAndAReplaceNameIt)
+{
+    // Rules made with no customisation ever installed - an editor's, on an
+    // empty session: there is a customisation, and it has no name.
+    Hosted session("keep-unnamed", false, true);
+    session.start();
+    session.document.setSurveyMap(parsed(kSite).map);
+    ASSERT_EQ(session.state().name, "");
+
+    const katana::core::Error error = session.refused("CUSTOMISE KEEP");
+    EXPECT_EQ(error.code, ErrorCode::InvalidState);
+    EXPECT_EQ(error.message,
+              "CUSTOMISE KEEP: the session's customisation has no name to be kept under; "
+              "CUSTOMISE EXPORT <file> NAME <name> writes it under one, and CUSTOMISE REPLACE "
+              "<file> then gives the session that name");
+    EXPECT_FALSE(fs::exists(session.keptFile));
+
+    // Done as it says: the session is "Mine", and is kept. Site's 3 rules
+    // over 3 keys, and no definition - only its rules were set.
+    const std::string file = typed(session.scratch.root / "mine.json");
+    session.ok("CUSTOMISE EXPORT " + file + " NAME Mine");
+    session.ok("CUSTOMISE REPLACE " + file);
+    EXPECT_EQ(session.state().name, "Mine");
+    const ReplyRecord kept = record(session.ok("CUSTOMISE KEEP"), "kept");
+    EXPECT_EQ(field(kept, "written"), "yes");
+    EXPECT_EQ(field(kept, "name"), "Mine");
+    EXPECT_EQ(field(kept, "definitions"), "0");
+    EXPECT_EQ(field(kept, "codes"), "3");
+    EXPECT_EQ(field(kept, "rules"), "3");
+    EXPECT_EQ(parsed(contentsOf(session.keptFile)).name, "Mine");
 }
 
 TEST(CustomisationVerbs, WithNoHostResetKeepAndRevertAreRefusedByNameAndTheRestWorks)
@@ -1096,15 +1588,50 @@ TEST(CustomisationVerbs, RemovingADefinitionInUseIsRefusedSayingWhoUsesItUnlessF
 
     // One nothing names goes without FORCE; a name given twice is one name.
     EXPECT_EQ(session.ok("CUSTOMISE REMOVE \"TEST Spare\" \"TEST Spare\""),
-              "removed definition=\"TEST Spare\" rules=0 styles=0");
+              "removed definition=\"TEST Spare\" rules=0 styles=0 layers=0");
     // Forced, the reply still says who names what is gone.
     EXPECT_EQ(session.ok("CUSTOMISE REMOVE \"TEST Fence\" \"TEST Peg\" force"),
-              "removed definition=\"TEST Fence\" rules=1 styles=1\n"
-              "removed definition=\"TEST Peg\" rules=1 styles=0");
+              "removed definition=\"TEST Fence\" rules=1 styles=1 layers=0\n"
+              "removed definition=\"TEST Peg\" rules=1 styles=0 layers=0");
     EXPECT_TRUE(session.document.styleLibrary().empty());
     EXPECT_EQ(session.document.surveyMap().size(), 2u) << "the rules are not removed with them";
     EXPECT_EQ(session.state().origin, CustomisationOrigin::Edited);
     EXPECT_FALSE(session.state().kept);
+}
+
+TEST(CustomisationVerbs, ALayersLinetypeAndAStylesSymbolAreUsesOfADefinitionToo)
+{
+    // Two definitions no rule names: a linestyle a LAYER is drawn with, and a
+    // symbol a STYLE draws its points with. An entity with no style of its
+    // own is drawn with its layer's linetype, so the layer holds the
+    // definition in place exactly as a style does - and was once not asked:
+    // the definition went without FORCE and without a word.
+    Hosted session("remove-layer");
+    session.start();
+    addDefinition(session.document, "TEST Hedge");
+    addDefinition(session.document, "TEST Stake", true);
+    session.ok("LAYER NEW trees");
+    session.ok("LAYER LTYPE trees \"TEST Hedge\"");
+    session.ok("STYLE NEW Mark");
+    session.ok("STYLE SET Mark symbol \"TEST Stake\"");
+
+    const katana::core::Error hedge = session.refused("CUSTOMISE REMOVE \"TEST Hedge\"");
+    EXPECT_EQ(hedge.code, ErrorCode::InvalidState);
+    EXPECT_EQ(hedge.message,
+              "CUSTOMISE REMOVE: 1 of the 1 definition named is in use, so nothing was removed; "
+              "FORCE removes what is used too, and what names it then draws plain\n"
+              "  \"TEST Hedge\": the drawing's layer \"trees\" names it");
+    const katana::core::Error stake = session.refused("CUSTOMISE REMOVE \"TEST Stake\"");
+    EXPECT_EQ(stake.message,
+              "CUSTOMISE REMOVE: 1 of the 1 definition named is in use, so nothing was removed; "
+              "FORCE removes what is used too, and what names it then draws plain\n"
+              "  \"TEST Stake\": the drawing's style \"Mark\" names it");
+    EXPECT_EQ(session.document.styleLibrary().size(), 4u);
+
+    EXPECT_EQ(session.ok("CUSTOMISE REMOVE \"TEST Hedge\" \"TEST Stake\" FORCE"),
+              "removed definition=\"TEST Hedge\" rules=0 styles=0 layers=1\n"
+              "removed definition=\"TEST Stake\" rules=0 styles=1 layers=0");
+    EXPECT_EQ(session.document.styleLibrary().size(), 2u);
 }
 
 TEST(CustomisationVerbs, RemovingWhatIsNotThereRemovesNothing)
@@ -1219,7 +1746,21 @@ TEST(CustomisationVerbs, OneRefusedItemSetsNoneOfThem)
                     .message.starts_with("not a SET key; "));
     EXPECT_TRUE(session.refused("CUSTOMISE SET auto.codes=off linework.start")
                     .message.starts_with("a SET item is key=value; "));
+    // A value with no key before its '='.
+    EXPECT_TRUE(session.refused("CUSTOMISE SET auto.codes=off =S")
+                    .message.starts_with("a SET item is key=value; "));
     EXPECT_TRUE(session.refused("CUSTOMISE SET").message.starts_with("usage: CUSTOMISE SET "));
+    // A key given twice is two answers to one question, whatever the case
+    // of its letters: neither is taken. (The later once won, and the reply
+    // said both back.)
+    const katana::core::Error twice =
+        session.refused("CUSTOMISE SET linework.start=S linework.start=XX");
+    EXPECT_EQ(twice.code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(twice.message,
+              "a SET key is given once in a line, and linework.start is given twice");
+    EXPECT_EQ(twice.context, "linework.start=XX");
+    EXPECT_EQ(session.refused("CUSTOMISE SET auto.codes=off AUTO.CODES=on").message,
+              "a SET key is given once in a line, and auto.codes is given twice");
 
     EXPECT_TRUE(session.state().automation.codesOnSurveyImport);
     EXPECT_TRUE(session.state().automation.lineworkOnSurveyImport);
@@ -1255,7 +1796,14 @@ TEST(CustomisationVerbs, TheHelpNamesEveryWordAndHelpCustomiseSaysEveryReply)
                               "reset name=", "kept file=", "written=no "
                                                           "reason=the-session-is-the-built-in",
                               "reverted file=", "removed definition=", "removed code=",
-                              "set <key>=<value>", "./json", "CUSTOMIZE"}) {
+                              "set <key>=<value>", "./json", "CUSTOMIZE",
+                              // What the family says of its own edges: a layer
+                              // is a use, the file comes first, a key once, and
+                              // what a part lists.
+                              "rules= styles= layers=", "(./CODES)",
+                              "A key is given once in a line",
+                              "lists as its sources only those it holds something of",
+                              "of either kind unless LINESTYLES or SYMBOLS says which"}) {
         EXPECT_TRUE(contains(family, reply)) << reply;
     }
     // Neither names another program's file kinds, nor its name.

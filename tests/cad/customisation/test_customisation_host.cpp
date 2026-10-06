@@ -545,6 +545,33 @@ TEST(CustomisationStart, WithNoHostNothingIsInstalledAndThatIsNoProblem)
     EXPECT_EQ(document.customisationGeneration(), 0u);
 }
 
+TEST(CustomisationStart, InstallingABuiltInThatIsNotThereIsRefusedAndTheDocumentIsLeftAsItWas)
+{
+    // The one function a start and CUSTOMISE RESET both install the built-in
+    // through. Handed a host's built-in that holds none, it refuses - the
+    // verb asks first and never reaches this, a front end calling it may.
+    Document document;
+    const auto none =
+        katana::cad::installBuiltInCustomisation(document, BuiltInCustomisation{}, true);
+    ASSERT_FALSE(none.ok());
+    EXPECT_EQ(none.error().code, ErrorCode::InvalidState);
+    EXPECT_EQ(none.error().message, "there is no built-in customisation to install");
+    EXPECT_TRUE(document.customisationState() == CustomisationState{});
+    EXPECT_EQ(document.customisationGeneration(), 0u);
+
+    // With one, `kept` is the caller's to say: a RESET while a kept file is
+    // there installs the built-in as a session the next start would NOT give.
+    const auto installed =
+        katana::cad::installBuiltInCustomisation(document, builtInFrom(kSmall), false);
+    ASSERT_TRUE(installed.ok()) << installed.error().describe();
+    const CustomisationState& state = document.customisationState();
+    EXPECT_EQ(state.origin, CustomisationOrigin::BuiltIn);
+    EXPECT_FALSE(state.kept);
+    ASSERT_TRUE(state.basedOn.has_value());
+    EXPECT_EQ(state.basedOn->name, "Small Built In");
+    EXPECT_EQ(state.basedOn->digest, fnv1a(kSmall));
+}
+
 TEST(CustomisationStart, TheBuiltInIsInstalledWhenNothingIsKept)
 {
     const Scratch scratch("built-in");

@@ -24,7 +24,7 @@ namespace {
 constexpr const char* kApplyUsage =
     "CODE [<scope>] [WHERE key=value ...] [PROPERTY <name>] [PREVIEW]";
 constexpr const char* kCensusUsage =
-    "CODE CENSUS [<scope>] [WHERE key=value ...] [PROPERTY <name>]";
+    "CODE CENSUS [<scope>] [WHERE key=value ...] [PROPERTY <name>] [PREVIEW]";
 
 katana::core::Error usage(std::string_view text)
 {
@@ -109,9 +109,10 @@ bool beginsScopeForm(const Words& words, std::size_t at)
 // [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW], the last two in either
 // order and on either side of the scope. The scope and its filter are the
 // shared parser's; with no scope word it is the DRAWING, a bare WHERE
-// included, which is this verb's own default.
-Result<CodeRequest> parseRequest(const Words& words, std::size_t at, bool takesPreview,
-                                 const char* usageText)
+// included, which is this verb's own default. ONE grammar for CODE and for
+// CODE CENSUS: PREVIEW is read for both, and a census, which changes nothing,
+// has nothing to do for it.
+Result<CodeRequest> parseRequest(const Words& words, std::size_t at, const char* usageText)
 {
     CodeRequest request;
     request.scope.source = ScopeSource::Drawing;
@@ -134,7 +135,7 @@ Result<CodeRequest> parseRequest(const Words& words, std::size_t at, bool takesP
             at += 2;
             continue;
         }
-        if (takesPreview && is(word, "PREVIEW")) {
+        if (is(word, "PREVIEW")) {
             request.preview = true;
             ++at;
             continue;
@@ -162,7 +163,7 @@ Result<CodeRequest> parseRequest(const Words& words, std::size_t at, bool takesP
 Result<std::string> apply(Document& document, const Words& args, const ColourLookup& colourOf,
                           const ScopeViewProvider& views)
 {
-    const auto request = parseRequest(args, 0, true, kApplyUsage);
+    const auto request = parseRequest(args, 0, kApplyUsage);
     if (!request) {
         return request.error();
     }
@@ -204,11 +205,14 @@ Result<std::string> apply(Document& document, const Words& args, const ColourLoo
     return text + "Applied as one command. UNDO puts it all back.";
 }
 
-// CODE CENSUS [<scope>] ...: the codes what the scope took carries.
+// CODE CENSUS [<scope>] ...: the codes what the scope took carries. PREVIEW
+// is taken and asks nothing more of it: the two forms are one grammar, and a
+// line built for CODE with CENSUS put in must not turn into a usage error for
+// the one word that promises to change nothing.
 Result<std::string> census(const Document& document, const Words& args,
                            const ScopeViewProvider& views)
 {
-    const auto request = parseRequest(args, 1, false, kCensusUsage);
+    const auto request = parseRequest(args, 1, kCensusUsage);
     if (!request) {
         return request.error();
     }

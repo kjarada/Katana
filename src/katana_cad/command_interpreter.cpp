@@ -520,12 +520,14 @@ Codes     CODE [scope] [WHERE k=v ...] [PROPERTY name] [PREVIEW]   apply the loa
           found when not named), one undo step; PREVIEW reports and changes nothing.
           With no scope word it is the whole DRAWING, under a bare WHERE too: CODE has
           always been the whole drawing, where MODIFY with none is the selection
-          CODE CENSUS [scope] [WHERE k=v ...] [PROPERTY name]   the codes those entities
-          carry  |  CODE EXPLAIN code   why a code gets what it gets
+          CODE CENSUS [scope] [WHERE k=v ...] [PROPERTY name] [PREVIEW]   the codes those
+          entities carry (it changes nothing, so PREVIEW asks nothing more of it)
+          CODE EXPLAIN code   why a code gets what it gets
           CODE LIST [filter]   the loaded survey codes, one per line  |  CODE CHECK   the
           same checked: it fails when a rule has an error
           CODE name and CODE CENSUS name still read name as the property; one called
-          as a scope word or a subcommand is PROPERTY name
+          as a scope word or a subcommand, or of several words the first of which is
+          one (Area m2), is PROPERTY "name"
 Customise CUSTOMISE [REPLACE] <file> [<file>...]   load Katana customisation files, merged
           into what is loaded (REPLACE: in the place of each kind they bring); all or
           nothing. CUSTOMISE alone reports what is loaded, CUSTOMISE JSON as JSON

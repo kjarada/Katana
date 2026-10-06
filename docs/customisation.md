@@ -905,28 +905,71 @@ named twice is read once, and the reply says so. What Merge and Replace each
 do to definitions, rules, colours, the settings and the sources is the
 merge's to say (`include/katana/cad/customisation_merge.hpp`).
 
-**An export** writes the whole session, or a part: with a kind word, those
-kinds alone; with `ONLY`, those definitions - and no codes, unless `CODES` is
-said too, which is what a window's "export the selected symbols" means. A
-PART is written without the linework codes, the automation and `basedOn`: it
-is a fragment for someone else's session, or for this one later, and merged
-in it must not reset their control codes. The colours and every notice go
-with it. After `ONLY` every word is a definition; one called `NAME` is listed
-by giving `NAME <name>` before `ONLY`. A file that is there is written over,
-and the reply says it was (`replaced=yes`). A session with no name - rules
-made in an editor with no customisation ever installed - is refused until
-`NAME` gives one.
+**An export** writes the whole session, or a part. A kind word chooses among
+the three kinds (`CODES`, `LINESTYLES`, `SYMBOLS`): those said, alone. `ONLY`
+chooses among the DEFINITIONS: those named, of either kind unless
+`LINESTYLES` or `SYMBOLS` says which, and no codes unless `CODES` is said
+too - `ONLY "TEST Peg"` is what a window's "export the selected symbols"
+means, and `CODES ONLY "TEST Peg"` is the codes with that one symbol.
+
+| Words | Linestyles written | Symbols written | Codes written |
+|---|---|---|---|
+| none | all | all | all |
+| `CODES` | none | none | all |
+| `LINESTYLES` | all | none | none |
+| `SYMBOLS CODES` | none | all | all |
+| `ONLY a b` | those among a, b | those among a, b | none |
+| `CODES ONLY a b` | those among a, b | those among a, b | all |
+| `SYMBOLS ONLY a b` | none: a linestyle named is refused | those among a, b | none |
+
+The file is the first word. One of `EXPORT`'s own words there (`CUSTOMISE
+EXPORT CODES`) is a line whose file was left out and is refused; a file so
+called is given with its directory (`./CODES`), as the family's keyword rule
+has it. After `ONLY` every word is a definition: one called `NAME` is listed
+by giving `NAME <name>` before `ONLY`, and a kind word put after it is
+refused as the definition it is not, saying that it goes before. A file that
+is there is written over, and the reply says it was (`replaced=yes`). A
+session with no name - rules made in an editor with no customisation ever
+installed - is refused until `NAME` gives one.
+
+**A part** - anything a kind word or `ONLY` chose - is a fragment for
+someone else's session, or for this one later:
+
+- It is written without the linework codes, the automation and `basedOn`.
+  Merged in, it must not reset anyone's control codes, and it is not a copy
+  of the built-in to be told from another edition.
+- It keeps the session's name unless `NAME` gives another: it is a part of
+  that customisation.
+- The colours go with it, whole.
+- **It lists a source only for what it holds of it**: with `definitions`
+  when one of the definitions written came from that source
+  (`LineStyle::source`), with `rules` when the rules are written and that
+  source brought some, with neither when the source brought neither kind (a
+  table of colours) and there are colours to write. A source the part holds
+  nothing of is left out.
+- **Every notice goes with it.** The notice of a source that is left out is
+  written with the part's own, after it: nothing says whose the colours
+  are, and an author's notice is never dropped by an export.
+
+Where a file is loaded its sources are taken at their word: each becomes a
+source of that session by name, and a project's record of what it was drawn
+with is by name too (`cad::customisationRecord`: a source said to have
+brought rules is recorded for good). A part written with the session's list
+as it stood said of one exported symbol that it was the whole customisation,
+rules included.
 
 **`REMOVE`** takes definitions out of the library and refuses, changing
 nothing, when one of them is still named - by a survey code rule as its
-linestyle or its symbol, or by a style of the drawing as its linetype or its
-symbol - listing every rule and style that names it. `FORCE` removes it all
-the same, and what names it then draws plain. `REMOVE CODE` removes every
-rule of each key, in every section; a key is matched as it is written.
+linestyle or its symbol, by a style of the drawing as its linetype or its
+symbol, or by a layer of the drawing as its linetype - listing every rule,
+style and layer that names it. `FORCE` removes it all the same, and what
+names it then draws plain. `REMOVE CODE` removes every rule of each key, in
+every section; a key is matched as it is written.
 
 **`SET`** changes the two switches and the seven control codes. Every item is
 read before any is set, and the codes are judged by `entity::validate`, so
-one refused item sets none of them.
+one refused item sets none of them. A key is given once in a line: given
+twice it is refused, where the later value once won and the reply said both.
 
 ### The replies
 
@@ -936,8 +979,9 @@ reads a line back). A file's path is written with `/` on every platform - a
 backslash in a record is an escape. No reply to a line that succeeded holds
 the word `error`: a script, and dozens of the command line's own tests, take
 that word for a failure. (So the JSON report's count of rules that cannot be
-applied is `cannotApply`. `CODE CHECK`'s older reply does say "0 errors", and
-is left as it is.)
+applied is `cannotApply`. `CODE CHECK`'s reply does say "0 errors": it is the
+reply that verb had as `MAPFILE CHECK`, kept word for word, and it counts as
+`UTILITY CHECK` counts - see "The verbs: not done".)
 
 ```
 CUSTOMISE                 the two count lines, then
@@ -959,10 +1003,18 @@ CUSTOMISE RESET           reset name=<n> definitions=<n> codes=<n> rules=<n> kep
 CUSTOMISE KEEP            kept file=<f> written=yes name=<n> definitions=<n> codes=<n> rules=<n> backup=<f>.bak|none
                           kept file=<f> written=no reason=the-session-is-the-built-in backup=<f>.bak|none
 CUSTOMISE REVERT          reverted file=<f> name=<n> definitions=<n> codes=<n> rules=<n>
-CUSTOMISE REMOVE a b      removed definition=<name> rules=<n> styles=<n>          one a name: the rules and styles that still name it
+CUSTOMISE REMOVE a b      removed definition=<name> rules=<n> styles=<n> layers=<n>   one a name: the rules, styles and layers that still name it
 CUSTOMISE REMOVE CODE k   removed code=<key> rules=<n>                            one a key
 CUSTOMISE SET k=v ...     set <k>=<v> ...
 ```
+
+The report's first lines are the two counts when the session holds a
+definition or a rule. With neither it says so in one of two ways: `No
+customisation is loaded.` when nothing has been installed (`origin=none`),
+and `No linestyle or symbol definitions and no survey code rules are loaded.`
+of a customisation that is there and brought neither kind - a table of
+colours, a file of settings. The first once stood above the record naming
+the customisation it said was not loaded.
 
 `codes=` is distinct keys and `rules=` rules, as the count line has them
 ("1,624 survey code rules over 632 distinct codes"); `codes_added` and
@@ -1018,9 +1070,17 @@ It refuses to write over a kept file that
   would otherwise lose it without a word. `REVERT` reads the file as it is
   now, after which it is the one this session saw; `EXPORT` first keeps what
   this session has;
+- **cannot be read at all** - a folder of that name, a file that will not
+  open: what is there is never written over unseen;
 - **does not read** as a customisation: its owner may mean to mend it;
 - **was written by a newer Katana**, which holds what this one cannot write
   back.
+
+A session with no name is refused too, saying how it gets one (`EXPORT ...
+NAME`, then `REPLACE`). A write that fails - the folder cannot be made, the
+file that is there cannot be copied beside it as `.bak`, the new text cannot
+be put in its place - is a `FileExportFailure` that leaves the kept file as
+it was and nothing beside it; `EXPORT` writes the same way.
 
 When the session IS the built-in, nothing is written and the kept file is set
 aside as `.bak` (`written=no reason=the-session-is-the-built-in`). "Is the
@@ -1033,12 +1093,17 @@ from what `RESET` leaves.
 ### CODE
 
 ```
-CODE [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW]    apply the loaded codes, one undo step
-CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>]       the codes those entities carry
-CODE EXPLAIN <code>                                       why a code gets what it gets
-CODE LIST [<filter>]                                      the loaded codes, one a line
-CODE CHECK                                                their lint; refused when a rule has an error
+CODE [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW]           apply the loaded codes, one undo step
+CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW]    the codes those entities carry
+CODE EXPLAIN <code>                                              why a code gets what it gets
+CODE LIST [<filter>]                                             the loaded codes, one a line
+CODE CHECK                                                       their lint; refused when a rule has an error
 ```
+
+`CODE` and `CODE CENSUS` are one grammar. `PREVIEW` on `CODE` reports what
+coding would do and changes nothing (`Preview: nothing was changed.`). A
+census changes nothing to begin with, so the word asks nothing more of it:
+it is taken, wherever it stands, and the reply is the census.
 
 The scope and filter are the one grammar every verb on drawing data takes
 (`docs/cad.md`, "Scope and filter"), read by the one parser, and the reply
@@ -1060,6 +1125,13 @@ and `AREA` need their list or their window, so `CODE Layer` - an attribute
 many drawings from GIS data carry - is still that property, and `CODE LAYERS
 a` is the layer `a`. A property called as a scope word that stands alone
 (`ALL`, `VIEW`, `SEL`) or as a subcommand is given as `PROPERTY <name>`.
+
+So is a property of several words whose first is one of those words. With a
+word after it even `LAYER`, `LAYERS` and `AREA` begin the scope form, and
+nothing can tell `CODE Layer a`, the layer, from a property called "Layer
+a": the line is the layer, and `CODE Area m2` is refused as a window that is
+not four numbers. That property is `CODE PROPERTY "Area m2"`. A property of
+several words whose first is none of them is still the rest of the line.
 
 `CODE LIST` and `CODE CHECK` were a verb of their own, `MAPFILE`, named after
 the survey code file of another program. That file no longer loads; the verb
@@ -1098,6 +1170,31 @@ and the control codes are settings, not data.
 installing what read and reporting the rest.* Half a customisation draws a
 survey with half its symbols, and nothing on screen says which half.
 
+**A part lists only the sources it holds something of.** *Rejected: the
+session's list as it stands*, which is what was first written. One symbol
+exported under another name then listed its customisation with `definitions`
+and `rules`; a colleague who loaded it was shown that customisation as a
+source with rules it did not have, and every project they saved afterwards
+recorded it for good, the symbol removed or not. *Rejected: no `sources` at
+all, every notice folded into the part's own.* It is true of where the part
+is loaded, but it flattens what the session knows: the codes of a session
+merged from two customisations would come back as one source, so `EXPORT f
+CODES`, an edit and `REPLACE f` - the round trip an agent makes - would leave
+the session with other sources than it had. Narrowed, the same sources come
+back, each with what it brought.
+*Rejected: dropping the notice of a source that is left out.* The colours go
+with every part and nothing says whose they are.
+
+**`PREVIEW` is a word of a census too, and does nothing there.** *Rejected:
+refusing it*, which is what was first written ("a census changes nothing, so
+it has no preview to give"). True, and the wrong answer: a line built for
+`CODE` with `CENSUS` put in became a usage error for the one word that
+promises to change nothing, and `CODE CENSUS preview`, which had been a
+property, became one too. *Rejected: reading a lone `preview` after `CENSUS`
+as the property it was.* `PREVIEW` first would then mean one thing after
+`CODE` and another after `CODE CENSUS`; a property so called is `PROPERTY
+preview` in both.
+
 **`CODE` with no scope word is the drawing.** *Rejected: the selection, as
 the other verbs have it.* The same line would then code something else the
 day something happened to be selected, with no word of it in a script. The
@@ -1131,17 +1228,39 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 
 - **The front ends do not use the family for `CUSTOMISE` yet** ("Where this
   stands"). Until they do, `katana_cli --help` lists a Customise block twice,
-  the interpreter's and the session's own.
+  the interpreter's and the session's own, and the two disagree; and `CODE`
+  with nothing loaded says `CUSTOMISE <file> loads a Katana customisation
+  file`, which is true of this family and not yet of what those two programs
+  run for that line.
+- **A quoted verb slips past the front ends' own `CUSTOMISE`.** Each tests
+  the line's first word as typed, and the interpreter removes quotes, so
+  `"CUSTOMISE" JSON` reaches this family today, with no host, beside the
+  older code that an unquoted line still gets. It closes when the two
+  interceptions go.
 - **An unnamed session has no verb that names it.** `EXPORT ... NAME <name>`
   writes it under one, and loading that file with `REPLACE` gives the session
-  the name; `KEEP` refuses it until then.
+  the name; `KEEP` refuses it until then, and says so.
+- **A part still answers for its source by NAME.** A session that loads one
+  symbol exported from a customisation lists that customisation as a source
+  with `definitions`, and the open project's `missing` record for the name
+  goes, as it would at the next open by the definition's own `from`. A
+  project's record is names, and a name cannot say "a part of".
 - **`FORCE` is read as the last word and `CODE` as the first** of a `REMOVE`.
   A definition called `FORCE` is removed by `REMOVE FORCE FORCE`, and one
   called `CODE` by listing it after another name.
-- **Who uses a definition** is asked by a function private to the verb, which
-  counts the rules and the drawing's styles that name it. A LAYER whose
-  linetype names it is not counted. A shared function for the question is
-  being written; this one is replaced by it.
+- **Who uses a definition** is asked by a function private to the verb
+  (`usesOfDefinition`, `src/katana_cad/customisation/customisation_verbs.cpp`),
+  which counts the rules, the drawing's styles and the drawing's layers that
+  name it. A shared function for the question is being written; this one is
+  replaced by it, and what replaces it must count the layers too. An entity
+  is not asked: it reaches a definition only through its style or its layer.
+- **`CODE CHECK` says "0 errors" when it succeeds.** It is the reply the verb
+  had under its old name, kept word for word, and `UTILITY CHECK` counts the
+  same way ("0 errors, 0 warnings"); so a test of the command line that runs
+  either cannot fail on the word `error`, as the others do. Rewording it is
+  one line of `cad::formatLint` and every pin of that count.
+- **A property of several words that begins with a scope word** is read as
+  that scope ("CODE", above): it is named `PROPERTY "Area m2"`.
 - **The refusal "nothing was loaded, for N reasons"** lists what the merge
   refuses of a load. A file that reads has already passed everything the
   merge looks for, so no file reaches it today and no test does.
