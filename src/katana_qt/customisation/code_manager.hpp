@@ -108,7 +108,7 @@ class SurveyCodeManagerDialog : public QDialog {
     // What the form holds, as a rule - InvalidArgument for a field that does
     // not parse (a size that is not a number, an attribute line).
     [[nodiscard]] katana::core::Result<katana::entity::SurveyRule> formRule() const;
-    // A new map_data rule in the form for a code the drawing carries, keyed
+    // A new feature rule in the form for a code the drawing carries, keyed
     // by cad::suggestedKey, on the Code Table tab. Nothing is added until Add.
     void newRuleFromCode(const std::string& code);
 

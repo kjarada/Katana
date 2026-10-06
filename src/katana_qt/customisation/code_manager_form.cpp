@@ -190,7 +190,7 @@ QWidget* SurveyCodeManagerDialog::buildRuleForm()
     rulePages_ = new QStackedWidget(form);
     rulePages_->setObjectName(QStringLiteral("rulePages"));
 
-    // map_data: where the code goes and how its line is drawn.
+    // feature: where the code goes and how its line is drawn.
     auto* mapPage = new QWidget(rulePages_);
     auto* mapForm = new QFormLayout(mapPage);
     ruleModel_ = lineField(mapPage, "ruleModel");
@@ -205,7 +205,7 @@ QWidget* SurveyCodeManagerDialog::buildRuleForm()
     ruleLinestyle_->setObjectName(QStringLiteral("ruleLinestyle"));
     ruleWeight_ = lineField(mapPage, "ruleWeight");
     ruleGroup_ = lineField(mapPage, "ruleGroup");
-    mapForm->addRow(tr("Layer (model)"), ruleModel_);
+    mapForm->addRow(tr("Layer"), ruleModel_);
     mapForm->addRow(QString(), ruleModelStatus_);
     mapForm->addRow(tr("Colour"), ruleColour_);
     mapForm->addRow(tr("Line / point"), ruleBreakline_);
@@ -214,7 +214,7 @@ QWidget* SurveyCodeManagerDialog::buildRuleForm()
     mapForm->addRow(tr("Group"), ruleGroup_);
     rulePages_->addWidget(mapPage);
 
-    // vertex_symbol_data: the symbol at each point.
+    // symbol: the symbol at each point.
     auto* symbolPage = new QWidget(rulePages_);
     auto* symbolForm = new QFormLayout(symbolPage);
     ruleSymbol_ = new NamePicker(context_, katana::cad::NameRole::Symbol, false, symbolPage);
@@ -237,7 +237,7 @@ QWidget* SurveyCodeManagerDialog::buildRuleForm()
     symbolForm->addRow(tr("Hide the line"), ruleHide_);
     rulePages_->addWidget(symbolPage);
 
-    // vertex_textstyle_data: the fields a person sets; the rest are kept.
+    // text: the fields a person sets; the rest are kept.
     auto* textPage = new QWidget(rulePages_);
     auto* textForm = new QFormLayout(textPage);
     ruleTextStyle_ = lineField(textPage, "ruleTextStyle");
@@ -290,11 +290,11 @@ QWidget* SurveyCodeManagerDialog::buildRuleForm()
     attributeLayout->addWidget(ruleAttributes_);
     rulePages_->addWidget(attributePage);
 
-    // tinable_data.
+    // surface.
     auto* tinablePage = new QWidget(rulePages_);
     auto* tinableForm = new QFormLayout(tinablePage);
     ruleTinable_ = choiceField(tinablePage, "ruleTinable", {tr("(not set)"), tr("yes"), tr("no")});
-    tinableForm->addRow(tr("Goes into a TIN"), ruleTinable_);
+    tinableForm->addRow(tr("Goes into a surface"), ruleTinable_);
     rulePages_->addWidget(tinablePage);
 
     layout->addWidget(rulePages_);

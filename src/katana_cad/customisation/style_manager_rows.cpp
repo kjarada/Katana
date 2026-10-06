@@ -331,7 +331,7 @@ std::vector<StyleDiagnostic> styleDiagnostics(const Document& document)
             // Defined, but as a symbol: say so, or a person looks for a
             // library to load when the fix is to pick a linestyle.
             if (missing.status == NameStatus::NotALinestyle) {
-                diagnostic.drawnAs += ": a `mode vertex` symbol, not a linestyle";
+                diagnostic.drawnAs += ": an `at vertices` symbol, not a linestyle";
             }
         } else {
             diagnostic.kind = StyleDiagnosticKind::MissingSymbol;

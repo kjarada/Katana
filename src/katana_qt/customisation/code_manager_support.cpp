@@ -50,7 +50,7 @@ QString definitionLabel(const std::string& name, DefinitionState state)
     case DefinitionState::BuiltIn:
         return QObject::tr("%1 (built in)").arg(shown);
     case DefinitionState::WrongKind:
-        return QObject::tr("%1 (a vertex symbol)").arg(shown);
+        return QObject::tr("%1 (an `at vertices` symbol)").arg(shown);
     case DefinitionState::Undefined:
         return QObject::tr("%1 (not defined)").arg(shown);
     }

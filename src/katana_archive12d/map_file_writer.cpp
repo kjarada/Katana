@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "customisation_words.hpp"
 #include "katana/core/text.hpp"
 
 namespace katana::archive12d {
@@ -159,7 +160,7 @@ class Writer {
             passes.empty() ? 0 : *std::max_element(passes.begin(), passes.end()) + 1;
         for (std::size_t pass = 0; pass < passCount; ++pass) {
             for (const SurveySection section : kSectionOrder) {
-                const std::string name = katana::entity::toString(section);
+                const std::string_view name = detail::sectionElement(section);
                 bool opened = false;
                 for (std::size_t i = 0; i < rules.size(); ++i) {
                     if (passes[i] != pass || rules[i].section != section) {
@@ -297,7 +298,7 @@ class Writer {
     [[nodiscard]] Status refuse(std::string_view what) const
     {
         return makeError(ErrorCode::InvalidArgument,
-                         "a <" + std::string(katana::entity::toString(section_)) +
+                         "a <" + std::string(detail::sectionElement(section_)) +
                              "> rule cannot hold " + std::string(what) +
                              ", so writing it would lose it",
                          "rule \"" + key_ + "\"");
@@ -406,7 +407,7 @@ class Writer {
         if (rule.key.empty()) {
             // The reader skips a keyless item: it names no code.
             return makeError(ErrorCode::InvalidArgument, "a rule has no key",
-                             katana::entity::toString(rule.section));
+                             std::string(detail::sectionElement(rule.section)));
         }
         if (auto status = checkFieldsBelong(rule); !status) {
             return status;
