@@ -452,6 +452,33 @@ void SymbolLibraryDialog::buildUi()
     outer->addWidget(splitter, 1);
 
     auto* bottom = new QHBoxLayout;
+    // The definition editor's four doors (definition_editor.hpp): the editor
+    // is the maker's, and a button only asks for it.
+    const auto door = [&](QPushButton*& made, const QString& label, const char* objectName,
+                          const QString& tip, DefinitionEdit what) {
+        made = new QPushButton(label, this);
+        made->setObjectName(QString::fromLatin1(objectName));
+        made->setToolTip(tip);
+        bottom->addWidget(made);
+        QObject::connect(made, &QPushButton::clicked, this, [this, what] {
+            if (context_.editDefinition) {
+                context_.editDefinition(what, current_);
+            }
+        });
+    };
+    door(newDefinition_, QStringLiteral("New Symbol..."), "symbolNew",
+         QStringLiteral("Make a symbol definition in the definition editor"),
+         DefinitionEdit::NewSymbol);
+    door(editDefinition_, QStringLiteral("Edit Definition..."), "symbolEdit",
+         QStringLiteral("Change this symbol's definition: its strokes, units and size"),
+         DefinitionEdit::Edit);
+    door(duplicateDefinition_, QStringLiteral("Duplicate Definition..."), "symbolDuplicate",
+         QStringLiteral("A copy of this symbol's definition under a new name"),
+         DefinitionEdit::Duplicate);
+    door(deleteDefinition_, QStringLiteral("Delete Definition"), "symbolDelete",
+         QStringLiteral("Take this symbol's definition out of the library. Refused, in the "
+                        "definition editor, while a survey code, a style or a layer names it"),
+         DefinitionEdit::Delete);
     bottom->addStretch(1);
     auto* close = new QPushButton(QStringLiteral("Close"), this);
     close->setObjectName(QStringLiteral("closeButton"));
@@ -931,6 +958,15 @@ void SymbolLibraryDialog::updateActions()
         }
     }
     export_->setEnabled(exportable);
+    // New needs only an editor to ask; the other three a definition the
+    // library holds - not a built-in shape, nor a name nothing defines.
+    const bool editor = live && static_cast<bool>(context_.editDefinition);
+    const bool defined =
+        editor && entry != nullptr && document_->styleLibrary().contains(current_);
+    newDefinition_->setEnabled(editor);
+    for (QPushButton* each : {editDefinition_, duplicateDefinition_, deleteDefinition_}) {
+        each->setEnabled(defined);
+    }
 }
 
 // ---- actions -----------------------------------------------------------------------------------

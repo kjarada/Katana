@@ -582,6 +582,76 @@ written only when the source differs from it, and a text with no `from` reads
 as it. Reading runs `entity::validate`, since no library is there to. The
 entry is named `definition "<name>"`.
 
+### Editing a definition
+
+In the window one definition is made, changed, copied or deleted in the
+definition editor (`docs/desktop.md`, "The definition editor";
+`src/katana_qt/customisation/definition_editor.hpp`), reached from the Symbol
+Library and from the Linetypes tab of Styles and Linetypes. What it shows of
+a definition is this format and nothing beside it:
+
+- **the members as fields**: `name`, `group`, the list it sits in (Kind),
+  `units` by its three words, `atVertices`, `length`, `factor`, `origin`,
+  `anchors`, `stretchMode` and `cycleMode`; and `from`, shown and not edited.
+  A number is the text the writer would write for it (rule 9 of "Layout"),
+  and an empty one is the member left out;
+- **the `strokes` as the lines a file holds**, one stroke a line, read by
+  `definitionFromJson` as they are typed. The table of strokes under "The
+  members" is therefore the editor's reference as much as the file's, and a
+  line can be carried from one to the other unchanged.
+
+Two departures from a file, both in the strokes box and neither in what is
+saved: the comma that ends a line may be left off (the lines are joined with
+commas before the reader sees them), and a blank line is passed over. A line
+that would END the list and give the definition a member - valid JSON, since
+a definition is one object - is refused: members are set in the fields.
+
+What the format decides, the editor does not decide again:
+
+- **What a definition may be** is the reader's answer. The message under the
+  form is its refusal, or `entity::validate`'s, in the words under "The
+  reader is strict", with the line of the box in front: `Line 3: definition
+  "TEST Valve" strokes[2]: "drow" is not a kind of stroke ...`. The line is
+  found by reading each line alone, since the reader names a stroke by its
+  place and not by a line; and the line and column the reader ends some
+  refusals with are left off, being of the joined text and not of the box
+  (`cad::readStrokeText`, `include/katana/cad/definition_edit.hpp`).
+- **A name is fixed once the definition exists.** A name is a definition's
+  identity - "once across BOTH lists" - and what a rule's `linestyle`, a
+  rule's `symbol` and the drawing's styles and layers hold of it. Nothing
+  follows a changed name, so the editor does not offer one; Duplicate copies
+  a definition under a new name. The format takes any name; the editor does
+  not MAKE one that no command line could name the definition by - a double
+  quote in it, or the words `CODE` and `FORCE` alone - since such a
+  definition could not be removed again (`cad::removeDefinitionLine`).
+- **Which list holds it is a field**, Kind, and is what sets
+  `LineStyle::symbol` - as the list does in a file.
+- **Where it came from is kept.** `from` is not edited: a definition changed
+  in a session still came from the customisation it came from, and a copy of
+  it did too. One made in the editor has none ("Made in this session"), which
+  a file writes as `"from": ""` under a named customisation.
+
+**Removing a definition asks who names it.** `cad::definitionUsers`
+(`include/katana/cad/definition_users.hpp`) lists the rules that name it as
+their `linestyle` or as their `symbol` - each by its index, its key and its
+`sets` word, `rule #1 AC* (symbol)`, since a rule has no identity but its
+place - and the styles and layers of the drawing that name it. Any rule is
+asked, whatever its `sets`: a member may sit on a rule of any kind. A name
+counts as it is drawn: itself, and the earlier name of a definition that was
+renamed, where the library has no definition of that earlier name. The
+answer also says what ELSE answers to the name - the drawing's own linetype
+of it, or the built-in shape of it - because that is what the users are
+drawn with once the definition is gone; only where neither does is a line
+then plain and a point a stand-in mark. The editor's Delete hands the line
+`CUSTOMISE REMOVE "<name>"` to the window's executor and shows what it
+answered; when it was refused and something names the definition it shows
+this list and offers the same line with `FORCE`.
+
+A commit is the whole library installed again with the one definition added
+or replaced. There is no undo of it, and no command that makes one
+definition: on a command line a definition is written in a file and the file
+loaded.
+
 ### Colour names
 
 `include/katana/entity/colour_names.hpp`. A rule, a symbol and a pen NAME

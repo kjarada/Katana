@@ -31,9 +31,17 @@
 // the first time it is asked for and kept - hidden, not deleted - between
 // uses, so the code manager's unapplied edits survive closing it; asking again
 // shows and raises the same one.
+//
+// It owns the definition editor (definition_editor.hpp) the same way. That one
+// has no menu item: the Symbol Library's New, Edit, Duplicate and Delete and
+// the Linetypes tab's Edit Definition and New Library Linestyle ask for it
+// through the context (CustomisationContext::editDefinition), so there is one
+// editor whichever manager asked, and a headless run reaches it as
+// `%definitionEditorDialog` once a step has opened it.
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <QKeySequence>
@@ -56,6 +64,7 @@ class Document;
 
 namespace katana::qt {
 
+class DefinitionEditorDialog;
 class DefinitionThumbnails;
 class GlobalModifyDialog;
 class StyleManagerDialog;
@@ -63,6 +72,7 @@ class SurveyCodeManagerDialog;
 class SymbolLibraryDialog;
 class ViewWorkspace;
 struct CustomisationContext;
+enum class DefinitionEdit;
 
 struct CustomisationServices {
     katana::cad::Document* document = nullptr;
@@ -121,11 +131,18 @@ class CustomisationWorkbench {
     // view, layers or the drawing, changed as one undo step. Its View scope
     // offers the workspace's open views (services.views); none without one.
     GlobalModifyDialog& showGlobalModify();
+    // The one definition editor, shown and raised - made the first time.
+    DefinitionEditorDialog& showDefinitionEditor();
+    // A manager's request of it (CustomisationContext::editDefinition): the
+    // editor is shown, then asked. False when it refused, which it has said
+    // in its own message area and in the log.
+    bool editDefinition(DefinitionEdit what, const std::string& name);
     // The managers made so far; null for one never opened.
     [[nodiscard]] StyleManagerDialog* styleManager() const;
     [[nodiscard]] SymbolLibraryDialog* symbolLibrary() const;
     [[nodiscard]] SurveyCodeManagerDialog* codeManager() const;
     [[nodiscard]] GlobalModifyDialog* globalModify() const;
+    [[nodiscard]] DefinitionEditorDialog* definitionEditor() const;
 
     // Format > Purge Unused: every style, linetype and hatch pattern nothing
     // uses (cad::purgeCommand), keeping the current style, deleted as ONE
@@ -144,6 +161,12 @@ class CustomisationWorkbench {
     // the rules it is about; false on Cancel (or a failed Apply), the
     // manager left open with its edits. Headless: nobody can answer, so -
     // as the window's unsaved-drawing check - refused and said, false.
+    //
+    // The definition editor's unsaved form is asked about first, the same
+    // way: interactive, the editor is shown and `confirm` (else a question
+    // box) asks whether to discard it; headless, refused and said. A yes
+    // discards nothing here - the later questions may still keep the window
+    // open - and is not asked again until the form changes.
     [[nodiscard]] bool confirmClose();
 
     // What every manager is built from, for a caller building one of its
@@ -171,6 +194,7 @@ class CustomisationWorkbench {
     QPointer<SymbolLibraryDialog> symbols_;
     QPointer<SurveyCodeManagerDialog> codes_;
     QPointer<GlobalModifyDialog> globalModify_;
+    QPointer<DefinitionEditorDialog> definitions_;
 };
 
 } // namespace katana::qt
