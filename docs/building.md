@@ -254,6 +254,8 @@ Every `KATANA_*` cache variable, with its default:
 | `KATANA_MODULE_FILTER` | empty | configure only the listed modules and their suites, e.g. `"katana_core;katana_math;katana_geometry"`; the configure fails, naming the module, when a listed module needs one that is not listed |
 | `KATANA_DEPLOY_RUNTIME` | `ON` | copy the runtime DLLs and the GDAL and PROJ data beside the programs ("The build tree runs on its own too") |
 | `KATANA_CUSTOMISATION_DIR` | `resources/customisation` | the folder whose customisation is compiled in ("The customisation folder") |
+| `KATANA_BUILTIN_CUSTOMISATION` | `resources/customisation/nsw.customisation.json`, git-ignored | the Katana customisation file compiled into `katana_cad` as the built-in; a build where the file is absent has none, which is every clone (`docs/survey_coding.md`, "The built-in, and the seam") |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | `OFF` | fail the configure when that file is absent, for a release that must not ship without a built-in |
 | `KATANA_REFERENCE_CUSTOMISATION_DIR` | the reference folder under `docs/`, git-ignored | where the reference customisation is kept in the legacy formats; only the converter's reference test reads it, and skips when the folder is absent or holds no such file ("The reference folder and the converter") |
 | `KATANA_CCACHE` | `ON` | compile through ccache when it is installed and no `CMAKE_CXX_COMPILER_LAUNCHER` is given ("Build and test speed") |
 
@@ -415,13 +417,48 @@ cmake --preset release -DKATANA_REFERENCE_CUSTOMISATION_DIR=D:/Survey/Reference
 
 `katana_customisation_convert` turns those files into ONE file in the Katana
 customisation format: `resources/customisation/nsw.customisation.json`,
-git-ignored as well, which is the file the built-in customisation is to be
-compiled in from. `docs/customisation.md`, "Converting a customisation
-from the legacy formats", has its command line, what it does to names and
-colours, and the figures of the reference conversion. It is built in `all`
-beside `katana_12da_probe`, into `<build>/bin`, and like the probe it has no
-install rule: `cmake --install`, the bundle and the packages hold `katana`,
-`katana_cli` and `katana_mcp` only.
+git-ignored as well, which is the file the built-in customisation is
+compiled in from (`KATANA_BUILTIN_CUSTOMISATION`, above; `docs/survey_coding.md`,
+"The built-in, and the seam"). `docs/customisation.md`, "Converting a
+customisation from the legacy formats", has its command line, what it does to
+names and colours, and the figures of the reference conversion. It is built
+in `all` beside `katana_12da_probe`, into `<build>/bin`, and like the probe
+it has no install rule: `cmake --install`, the bundle and the packages hold
+`katana`, `katana_cli` and `katana_mcp` only.
+
+The reference customisation is converted with the four files in this order -
+the words are arguments so that no committed file spells them, and the file
+is found again at the next build:
+
+```sh
+build/release/bin/katana_customisation_convert --name NSW \
+    --description "Linestyles, symbols and survey codes of the NSW customisation." \
+    --notice-from "<linestyle library>" --notice-from "<symbol library>" \
+    --colours "<folder>/support/colours.4d" \
+    --strip-leading-word <publisher's word> --strip-leading-word <vendor's word> \
+    --remove-word <publisher's word> \
+    -o resources/customisation/nsw.customisation.json \
+    "<symbol library>" "<survey code file>" "<names file>" "<linestyle library>"
+```
+
+The name and the description are given word for word, unlike the rest: both
+are written into the file, so its bytes - and the digest of them, by which a
+customisation a user kept is told from another edition of the built-in - are
+this command's and no other's. They are Katana's own words and no part of the
+reference files, so a committed file may spell them.
+
+**The symbol library first and the linestyle library last, by decision**
+(2026-10-06). The order of the files is the load order, a customisation holds
+one definition a name, and the later library's is the one kept; three names
+are defined by both libraries, and the survey code rules give two of them as
+their linestyle and none as a symbol. *Rejected: the order these files were
+always loaded in*, the symbol library last, which kept the symbol's strokes
+under four rules that draw a line. *Not done: two definitions a name*, which
+a library that is one table by name cannot hold; the symbol library's three
+are not in the built-in. `docs/customisation.md`, "The reference
+customisation", has the whole of it, and the figures each order gives.
+`tools/reference_census.py` counts the four files in the order IT is given
+them, so give it the same one.
 
 The converted file sits in the folder `KATANA_CUSTOMISATION_DIR` names, and
 that machinery must not take it for a legacy file. The embedding does not: it

@@ -9,10 +9,13 @@
 #
 # --against <census.json> compares with a census that script wrote, figure by
 # figure, and exits 1 if any differs. Figures that describe the legacy FILES
-# rather than what they hold (blocks read and replaced, strokes read, rules a
-# file, items without a key, what carried a stripped word, how a file was
-# decoded, its notice, what its colour table says) have no counterpart in a
-# customisation; they are listed and not compared.
+# rather than what they hold (the order they were given in, blocks read and
+# replaced, strokes read, rules a file, items without a key, what carried a
+# stripped word, how a file was decoded, its notice, what its colour table
+# says) have no counterpart in a customisation; they are listed and not
+# compared. The order still decides what is compared: that script counts the
+# definitions the order it was given keeps, so a customisation agrees only
+# with the census of the order it was converted in.
 #
 # --strip WORD (repeatable) names the leading words the conversion was to
 # take off: the census then counts the names, group paths and rule references
@@ -41,8 +44,8 @@ SECTION_OF = {
 }
 
 # Figures of the reference census that are about the legacy files themselves.
-NOT_IN_A_CUSTOMISATION = ('blocksRead', 'blocksPerFile', 'blocksReplaced', 'opsRead',
-                          'rulesPerFile', 'keylessItems', 'carried', 'replaced',
+NOT_IN_A_CUSTOMISATION = ('loadOrder', 'blocksRead', 'blocksPerFile', 'blocksReplaced',
+                          'opsRead', 'rulesPerFile', 'keylessItems', 'carried', 'replaced',
                           'inferredEncoding', 'noticeLines', 'colours')
 
 
@@ -64,6 +67,8 @@ def census_of(document, strip):
     by_name = {d['name']: d for d in definitions}
     if len(by_name) != len(definitions):
         raise SystemExit('a definition name is given twice')
+    linestyle_names = {d['name'] for d in linestyles}
+    symbol_names = {d['name'] for d in symbols}
     rules = document.get('codes', [])
 
     ops = collections.Counter()
@@ -130,6 +135,18 @@ def census_of(document, strip):
         'referencedSymbols': len(referenced_symbols),
         'referenced': len(referenced),
         'unresolved': [n for n in referenced if n not in by_name],
+        # Rules that name a definition of the other list: as their linestyle
+        # one listed in "symbols", as their symbol one listed in "linestyles".
+        'rulesNamingTheOtherKind': {
+            'linestyleFromSymbolsFile': {
+                'rules': sum(1 for r in rules if r.get('linestyle') in symbol_names),
+                'names': len({r['linestyle'] for r in rules
+                              if r.get('linestyle') in symbol_names})},
+            'symbolFromLinestylesFile': {
+                'rules': sum(1 for r in rules if said(r, 'symbol') in linestyle_names),
+                'names': len({said(r, 'symbol') for r in rules
+                              if said(r, 'symbol') in linestyle_names})},
+        },
         'colourNames': dict(sorted(colours.items())),
         'namesBeginningWithAStrippedWord': still,
         'WM01': {w: first_match('WM01', w) for w in ('model', 'linestyle', 'breakline', 'colour')},

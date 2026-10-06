@@ -21,8 +21,13 @@ __pycache__/
 samples/*/backups/
 
 # Third-party reference material under its author's own licence, kept on disk
-# and never in the repository: what resources/customisation/ below was made
-# from. The build and the tests read that folder, not this one.
+# and never in the repository: the reference customisation in the legacy
+# formats (two style libraries and two survey code files, with their colour
+# table), which resources/customisation/ below is made from. The build reads
+# nothing here. One suite does, through KATANA_REFERENCE_CUSTOMISATION_DIR:
+# the converter's test of what it makes of these files
+# (tests/archive12d/customisation/test_convert.cpp), which skips where the
+# folder is absent or holds no such file.
 docs/12d Refrence Files/
 
 # The TfNSW Utility Schema and Specification workbook (DMS-FT-493), under
@@ -31,15 +36,25 @@ docs/12d Refrence Files/
 # registered when it is not; tools/utility_schema_domains.py reads any copy.
 docs/TfNSW Reference Files/
 
-# The customisation compiled into the build - linestyles.4d, symbols.4d,
-# survey_codes.mapfile and survey_codes_names.mapfile, read by
-# tools/embed_customisation.py through KATANA_CUSTOMISATION_DIR. Third-party
-# material under its own licence, so it is kept on disk and never in the
-# repository; a checkout without it builds an empty table, and the tests that
-# read it skip.
+# The customisation compiled into the build: nsw.customisation.json, the one
+# file in the Katana customisation format that katana_customisation_convert
+# makes of the reference files above (docs/customisation.md, "The reference
+# customisation"), compiled in with #embed through
+# KATANA_BUILTIN_CUSTOMISATION. It is made from third-party material under its
+# own licence, so it is kept on disk and never in the repository; a checkout
+# without it builds a program with no built-in customisation.
+#
+# The older embedding still looks in this folder as well
+# (tools/embed_customisation.py, through KATANA_CUSTOMISATION_DIR), for the
+# four legacy files it was written for: linestyles.4d, symbols.4d,
+# survey_codes.mapfile and survey_codes_names.mapfile. They are no longer kept
+# here, so it builds an empty table and the tests that read it skip. They are
+# not to be copied back in beside the converted file: the tests that hand
+# every file of this folder to the legacy loader would then fail on it
+# (docs/building.md, "The reference folder and the converter").
 resources/customisation/
 
-# Git worktrees created for parallel agents (CLAUDE.md section 5.3). Each is a
+# Git worktrees created for parallel agents (CLAUDE.md section 8). Each is a
 # checkout of its own; tracking one would embed a repository in this one.
 .claude/worktrees/
 

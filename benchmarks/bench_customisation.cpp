@@ -2,13 +2,18 @@
 // format (entity/customisation.hpp; docs/customisation.md has the numbers).
 //
 // The customisation is GENERATED, in code, to the size and the mix of the
-// reference one - 792 definitions (474 of them symbols) holding 35,684
-// strokes, 17,014 moves, 17,220 draws, 104 arcs, 312 circles, 178 dots, 342
+// reference one - 792 definitions (471 of them symbols) holding 35,692
+// strokes, 17,020 moves, 17,222 draws, 104 arcs, 312 circles, 178 dots, 342
 // pens and 514 texts, with coordinates of three decimals as such files have,
 // and 1,624 rules over 632 keys in the reference mix of kinds. The reference
 // customisation itself is third-party material and is in no clone, and a
 // measurement has to be repeatable by anyone; the figures are those of
-// tools/reference_census.py.
+// tools/reference_census.py, given the files in the order the built-in is
+// converted in: the symbol library first and the linestyle library last, so
+// that the three names both define keep the linestyle the survey code rules
+// draw with (docs/customisation.md, "The reference customisation"). Given
+// the other way round they were 474 symbols, 157 at vertices and 35,684
+// strokes - 17,014 moves and 17,220 draws.
 //
 // Reading is what a start-up pays, once: the customisation compiled into the
 // program is parsed on first use. So besides the whole file it is read in its
@@ -39,10 +44,11 @@ using namespace katana::entity;
 
 namespace {
 
-// The reference customisation's size (tools/reference_census.py).
+// The reference customisation's size (tools/reference_census.py, in the load
+// order the head of this file gives).
 constexpr std::size_t kDefinitions = 792;
-constexpr std::size_t kSymbols = 474;
-constexpr std::size_t kAtVertices = 157;
+constexpr std::size_t kSymbols = 471;
+constexpr std::size_t kAtVertices = 155;
 constexpr std::size_t kGroups = 71;
 constexpr std::size_t kRules = 1624;
 constexpr std::size_t kKeys = 632;
@@ -52,7 +58,7 @@ struct KindCount {
     std::size_t count;
 };
 constexpr KindCount kStrokeMix[] = {
-    {StrokeOp::Move, 17014}, {StrokeOp::Draw, 17220}, {StrokeOp::Arc, 104}, {StrokeOp::Circle, 312},
+    {StrokeOp::Move, 17020}, {StrokeOp::Draw, 17222}, {StrokeOp::Arc, 104}, {StrokeOp::Circle, 312},
     {StrokeOp::Dot, 178},    {StrokeOp::Pen, 342},    {StrokeOp::Text, 514},
 };
 
@@ -127,11 +133,11 @@ LineStyle generatedDefinition(std::size_t i, const std::vector<StrokeOp>& kinds)
     style.symbol = i < kSymbols;
     style.atVertices = i < kAtVertices;
     if (!style.symbol) {
-        // The linestyles in the reference mix of units: 237 paper, 45 between
-        // two points, the rest in world units.
+        // The linestyles in the reference mix of units (the census's `units`):
+        // 237 paper, 47 between two points, the rest in world units.
         const std::size_t line = i - kSymbols;
         style.units = line < 237 ? StyleUnits::Paper
-                                 : line < 282 ? StyleUnits::TwoPoint : StyleUnits::World;
+                                 : line < 284 ? StyleUnits::TwoPoint : StyleUnits::World;
         style.length = 12.5;
         if (style.units == StyleUnits::TwoPoint) {
             style.anchor2 = {4.0, 0.0};
