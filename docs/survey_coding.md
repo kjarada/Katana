@@ -54,15 +54,16 @@ is that a definition is offered as a SYMBOL when any of these holds:
 - it is `mode vertex`;
 - a `vertex_symbol_data` rule of the loaded mapfile names it;
 - some `Style::symbol` names it;
-- the file it was read from has "symbol" in its name, in any case - the way
-  symbol libraries are named (the built-in one is `symbols.4d`), which is why
-  every definition now carries
-  `LineStyle::source`, the NAME of its file (never a path). The style library
-  reader also puts that answer on the definition itself, as
-  `LineStyle::symbol`: the flag a Katana customisation file sets by the list a
-  definition sits in (`docs/customisation.md`), where one name covers both
-  kinds and so cannot say which. The catalogue and the lint still ask the
-  name; they move to the flag with the work that brings that format into use.
+- its customisation lists it as a symbol (`LineStyle::symbol`): in a Katana
+  customisation file it sits in the `symbols` list (`docs/customisation.md`).
+  Until 2026-10-06 this fourth signal was the NAME of the file it was read
+  from, having "symbol" in it, in any case - the way symbol libraries are
+  named (the built-in one is `symbols.4d`), which is why every definition
+  carries `LineStyle::source`, the NAME of its file (never a path). One
+  customisation holds both kinds under one name, so a name can no longer say
+  which. The style library reader, which does read one kind a file, sets the
+  flag by that file-name rule; the catalogue and the lint read the flag
+  (`cad::classifyDefinition`, `SymbolNotSymbolCapable`).
 
 It is offered as a LINESTYLE when it is not `mode vertex`, so a definition
 can be both, and `DefinitionKind` keeps each reason so a browser can say why

@@ -943,10 +943,12 @@ family's whole reference (`cad::customisationVerbHelp`).
 front end today. A `CUSTOMISE` line does not yet: `katana_cli` and the window
 each take it before the interpreter sees it, with the code they had, which
 still reads the older files (`src/katana_app/session.cpp`,
-`src/katana_qt/main_window.cpp`). Each is moved to this family by the work
-that ports it; until then what `docs/survey_coding.md` says of `CUSTOMISE
-<file>` is what those two programs do, and neither hands the interpreter a
-host.
+`src/katana_qt/main_window.cpp`) - all but `CUSTOMISE REMOVE` in the window,
+which it hands on and this family answers, since the definition editor's
+Delete runs that line (`docs/desktop.md`, "The definition editor"). Each is
+moved to this family by the work that ports it; until then what
+`docs/survey_coding.md` says of `CUSTOMISE <file>` is what those two programs
+do, and neither hands the interpreter a host.
 
 ### CUSTOMISE
 
@@ -1350,12 +1352,12 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 
 ### The verbs: not done
 
-- **The front ends do not use the family for `CUSTOMISE` yet** ("Where this
-  stands"). Until they do, `katana_cli --help` lists a Customise block twice,
-  the interpreter's and the session's own, and the two disagree; and `CODE`
-  with nothing loaded says `CUSTOMISE <file> loads a Katana customisation
-  file`, which is true of this family and not yet of what those two programs
-  run for that line.
+- **The front ends do not use the family for `CUSTOMISE` yet**, but for the
+  window's `REMOVE` ("Where this stands"). Until they do, `katana_cli --help`
+  lists a Customise block twice, the interpreter's and the session's own, and
+  the two disagree; and `CODE` with nothing loaded says
+  `CUSTOMISE <file> loads a Katana customisation file`, which is true of this
+  family and not yet of what those two programs run for that line.
 - **A quoted verb slips past the front ends' own `CUSTOMISE`.** Each tests
   the line's first word as typed, and the interpreter removes quotes, so
   `"CUSTOMISE" JSON` reaches this family today, with no host, beside the

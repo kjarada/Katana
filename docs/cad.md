@@ -297,7 +297,9 @@ with what `RESET`, `KEEP` and `REVERT` need handed over by the front end
 (`CommandInterpreter::setCustomisationHost`). `docs/customisation.md`, "The
 verbs", has the grammar, the replies and the decisions. The two front ends
 still take a `CUSTOMISE` line themselves, before the interpreter sees it,
-until each is ported to it.
+until each is ported to it - all but `CUSTOMISE REMOVE` in the window, which
+it hands on and the interpreter answers, since the definition editor's
+Delete runs that line (`docs/desktop.md`, "The definition editor").
 
 ### STATUS
 
