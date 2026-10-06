@@ -216,6 +216,46 @@ TEST(CustomisationRefusals, BytesThatAreNotUtf8AreRefusedRatherThanGuessedAt)
     EXPECT_NE(error.context.find("UTF-8"), std::string::npos) << error.describe();
 }
 
+// A byte order mark is a promise about the bytes behind it. When they break
+// it the file is still "bytes that are neither UTF-8 nor UTF-16", and gets the
+// one message every such file gets, with what is wrong beside it - not the
+// decoder's own message under some other headline.
+TEST(CustomisationRefusals, BytesThatBreakTheirOwnByteOrderMarkAreNotAKatanaCustomisationFile)
+{
+    const std::string sound = R"({"format": "katana-customisation", "version": 1, "name": "T"})";
+
+    // EF BB BF says UTF-8; E9 alone ("Café" in Windows-1252) is not.
+    const Error marked = refusalOf(
+        "\xEF\xBB\xBF{\"format\": \"katana-customisation\", \"version\": 1, \"name\": \"Caf\xE9\"}");
+    EXPECT_EQ(marked.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(marked.message, kNotACustomisation);
+    EXPECT_NE(marked.context.find("UTF-8"), std::string::npos) << marked.describe();
+
+    // FF FE says UTF-16, which is two bytes a unit: one byte more is a file
+    // cut short.
+    auto utf16 = katana::core::encodeUtf16LittleEndian(sound);
+    ASSERT_TRUE(utf16.ok());
+    ASSERT_EQ(utf16->size() % 2, 0u);
+    const Error odd = refusalOf(*utf16 + "}");
+    EXPECT_EQ(odd.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(odd.message, kNotACustomisation);
+    EXPECT_NE(odd.context.find("UTF-16"), std::string::npos) << odd.describe();
+
+    // A high surrogate (D83D, little-endian 3D D8) with no low one after it,
+    // as the file's last unit.
+    const Error half = refusalOf(*utf16 + std::string("\x3D\xD8", 2));
+    EXPECT_EQ(half.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(half.message, kNotACustomisation);
+    EXPECT_NE(half.context.find("UTF-16"), std::string::npos) << half.describe();
+
+    // The same goes for one definition's text.
+    const auto definition = katana::entity::definitionFromJson("\xEF\xBB\xBF{\"name\": \"Caf\xE9\"}",
+                                                               false);
+    ASSERT_FALSE(definition.ok());
+    EXPECT_EQ(definition.error().code, ErrorCode::ParseFailure);
+    EXPECT_EQ(definition.error().message, "not a definition in the Katana customisation format");
+}
+
 // ---- the version ----------------------------------------------------------------------------
 
 TEST(CustomisationRefusals, ANewerVersionIsUnsupportedWhateverElseTheFileHolds)
@@ -279,6 +319,28 @@ TEST(CustomisationRefusals, ANameThatAProjectCouldNotRecordIsRefused)
     }
 }
 
+TEST(CustomisationRefusals, ANameThatCouldNotBeToldFromAnotherOrSeenIsRefused)
+{
+    // A name is an identity: a project records it and is matched against it.
+    // A blank at either end makes two names that look like one; a tab, an
+    // escape (U+001B), a NUL and a delete (U+007F) are characters nobody can
+    // see in a list. Each is written here as JSON escapes it.
+    for (const char* name :
+         {"NSW ", " NSW", " ", "a\\tb", "a\\u001b[31mb", "a\\u0000b", "a\\u007f"}) {
+        const std::string text =
+            std::string(R"({"format": "katana-customisation", "version": 1, "name": ")") + name +
+            "\"}";
+        const Error error = refusalOf(text);
+        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << text;
+        expectNames(error, "top level", "name");
+    }
+    // A blank INSIDE a name is part of it.
+    EXPECT_EQ(readCustomisation(
+                  R"({"format": "katana-customisation", "version": 1, "name": "Site set 2026"})")
+                  .name,
+              "Site set 2026");
+}
+
 TEST(CustomisationRefusals, TheNamesOfSourcesBasesAndDefinitionSourcesAreHeldToTheSameRule)
 {
     expectRefused(
@@ -289,6 +351,10 @@ TEST(CustomisationRefusals, TheNamesOfSourcesBasesAndDefinitionSourcesAreHeldToT
             {R"("linestyles": [{"name": "A", "from": "x/y"}])", R"(linestyles[0] "A")", "from"},
             {R"("symbols": [{"name": "A"}, {"name": "B", "from": "two\nlines"}])",
              R"(symbols[1] "B")", "from"},
+            // a blank at an end, and a character that cannot be seen
+            {R"("sources": [{"name": "Site "}])", R"(sources[0] "Site ")", "name"},
+            {R"("basedOn": {"name": " NSW", "digest": "0123456789abcdef"})", "basedOn", "name"},
+            {R"("linestyles": [{"name": "A", "from": "a\tb"}])", R"(linestyles[0] "A")", "from"},
         },
         ErrorCode::InvalidArgument);
 }
@@ -395,9 +461,12 @@ TEST(CustomisationRefusals, AMemberGivenTwiceIsRefusedAtEveryLevelNamingTheEntry
              R"(sources[1] "B")", "rules"},
             {R"("symbols": [{"name": "TEST Valve", "group": "a", "group": "b"}])",
              R"(symbols[0] "TEST Valve")", "group"},
+            // Inside a stroke the stroke is as far as a place goes ("How an
+            // entry is named"): the same `strokes[1]` an unknown member of
+            // that object is refused under, above.
             {R"("linestyles": [{"name": "L", "strokes": [["move", 0, 0],
                                                         ["text", {"text": "a", "text": "b"}]]}])",
-             R"(linestyles[0] "L" strokes[1][1])", "text"},
+             R"(linestyles[0] "L" strokes[1])", "text"},
             {R"("codes": [{"key": "A", "sets": "feature"},
                           {"key": "WM*", "sets": "feature", "colour": "red", "colour": "blue"}])",
              R"(codes[1] "WM*")", "colour"},
@@ -489,6 +558,15 @@ TEST(CustomisationRefusals, AValueOfTheWrongKindIsRefusedNamingItsMember)
              "anchors"},
             {R"("linestyles": [{"name": "G", "anchors": [[0, 0], [1]]}])", R"(linestyles[0] "G")",
              "anchors"},
+            // ... and one value too many is as wrong as one too few: a third
+            // coordinate or a third anchor would otherwise be dropped unsaid
+            {R"("linestyles": [{"name": "G", "origin": [1, 2, 3]}])", R"(linestyles[0] "G")",
+             "origin"},
+            {R"("linestyles": [{"name": "G", "anchors": [[0, 0], [1, 1], [2, 2]]}])",
+             R"(linestyles[0] "G")", "anchors"},
+            {R"("linestyles": [{"name": "G", "anchors": [[0, 0, 0], [1, 1]]}])",
+             R"(linestyles[0] "G")", "anchors"},
+            {R"("linestyles": [{"name": "G", "anchors": []}])", R"(linestyles[0] "G")", "anchors"},
             {R"("linestyles": [{"name": "G", "strokes": {"move": [0, 0]}}])",
              R"(linestyles[0] "G")", "strokes"},
             {R"("notice": "one line")", "top level", "notice"},
@@ -664,6 +742,11 @@ TEST(CustomisationRefusals, AStrokeWithAValueOfTheWrongKindIsRefused)
              R"(symbols[0] "TEST Valve" strokes[9])", "extra"},
             {testValveWith(R"(["text", {"extra": [0, 0, "0"]}])"),
              R"(symbols[0] "TEST Valve" strokes[9])", "extra"},
+            // a fourth number is not three
+            {testValveWith(R"(["text", {"extra": [0, 0, 0, 0]}])"),
+             R"(symbols[0] "TEST Valve" strokes[9])", "extra"},
+            {testValveWith(R"(["text", {"extra": 0}])"), R"(symbols[0] "TEST Valve" strokes[9])",
+             "extra"},
         },
         ErrorCode::ParseFailure);
     const Error text = refusalOf(customisationWith(testValveWith(R"(["text", "W"])")));
@@ -698,19 +781,33 @@ TEST(CustomisationRefusals, TwoDefinitionsOfOneNameAreRefused)
 
 TEST(CustomisationRefusals, TwoColourNamesThatFoldToOneAreRefused)
 {
-    // Lower case, '_' and '-' as a blank: three spellings of one name.
-    for (const char* colours : {R"({"SUI Gas": "#FFFF00", "sui_gas": "#FF0000"})",
-                                R"({"sui gas": "#FFFF00", "sui-gas": "#FF0000"})",
-                                R"({"off gray": "#808080", "Off Grey": "#808081"})"}) {
-        const Error error = refusalOf(customisationWith(std::string("\"colours\": ") + colours));
-        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << colours;
-        EXPECT_EQ(error.message.rfind("colours \"", 0), 0u) << error.describe();
+    // Lower case, '_' and '-' as a blank, "gray" as "grey": spellings of one
+    // name. The members of a JSON object have no order, so "the second of the
+    // two" cannot be the file's second: the names are gone through in the
+    // order of their bytes, the later of the two in THAT order is the entry
+    // refused, and both spellings are beside it, the earlier first. By hand:
+    // 'S' (53) sorts before 's' (73), ' ' (20) before '-' (2D), and 'O' (4F)
+    // before 'o' (6F).
+    struct Alike {
+        const char* colours;
+        const char* earlier;
+        const char* refused;
+    };
+    for (const Alike& alike :
+         {Alike{R"({"SUI Gas": "#FFFF00", "sui_gas": "#FF0000"})", "SUI Gas", "sui_gas"},
+          // the same two the other way round in the file: the same answer
+          Alike{R"({"sui_gas": "#FF0000", "SUI Gas": "#FFFF00"})", "SUI Gas", "sui_gas"},
+          Alike{R"({"sui gas": "#FFFF00", "sui-gas": "#FF0000"})", "sui gas", "sui-gas"},
+          Alike{R"({"off gray": "#808080", "Off Grey": "#808081"})", "Off Grey", "off gray"}}) {
+        const Error error =
+            refusalOf(customisationWith(std::string("\"colours\": ") + alike.colours));
+        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << alike.colours;
+        EXPECT_EQ(error.message.rfind(std::string("colours \"") + alike.refused + "\": ", 0), 0u)
+            << error.describe();
+        EXPECT_EQ(error.context,
+                  std::string("\"") + alike.earlier + "\" and \"" + alike.refused + "\"")
+            << error.describe();
     }
-    // Whichever of the two is met second is the one refused; both are named.
-    const Error both =
-        refusalOf(customisationWith(R"("colours": {"SUI Gas": "#FFFF00", "sui_gas": "#FF0000"})"));
-    EXPECT_NE(both.describe().find("SUI Gas"), std::string::npos) << both.describe();
-    EXPECT_NE(both.describe().find("sui_gas"), std::string::npos) << both.describe();
 }
 
 TEST(CustomisationRefusals, AColourNameThatIsAStandardNameIsRefused)
@@ -815,13 +912,505 @@ TEST(CustomisationRefusals, WhatValidateRefusesOfADefinitionIsRefusedNamingIt)
 TEST(CustomisationRefusals, LineworkCodesThatCouldNotBeToldApartAreRefused)
 {
     // "st" and "ST" are one token to the reader of a field code; a spelling
-    // with a blank in it could never be one token at all.
-    for (const char* linework :
-         {R"({"start": "ST", "end": "st"})", R"({"close": "C L"})", R"({"join": "END"})"}) {
-        const Error error = refusalOf(customisationWith(std::string("\"linework\": ") + linework));
-        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << linework;
+    // with a blank in it could never be one token at all. Which controls are
+    // at fault is beside the refusal, in the words entity::validate says it
+    // (test_linework_codes.cpp): the two that clash, the earlier first, with
+    // the earlier's spelling - "join" given the default spelling of "end"
+    // clashes with "end" - or the one control and its spelling.
+    struct Clash {
+        const char* linework;
+        const char* context;
+    };
+    for (const Clash& clash : {Clash{R"({"start": "ST", "end": "st"})", "start and end are \"ST\""},
+                               Clash{R"({"close": "C L"})", "close=\"C L\""},
+                               Clash{R"({"join": "END"})", "end and join are \"END\""}}) {
+        const Error error =
+            refusalOf(customisationWith(std::string("\"linework\": ") + clash.linework));
+        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << clash.linework;
         EXPECT_EQ(error.message.rfind("linework: ", 0), 0u) << error.describe();
+        EXPECT_EQ(error.context, clash.context) << error.describe();
     }
+}
+
+TEST(CustomisationRefusals, ANegativeSizeIsRefusedAsNegativeAndNotAsNotFinite)
+{
+    // 0 is "the definition's own size" for a symbol and "not said" for a
+    // text; below it there is no size to draw at. But -1 is a finite number,
+    // and the refusal must say what is wrong with it, not something else.
+    for (const char* rule :
+         {R"({"key": "A", "sets": "symbol", "symbol": {"name": "P", "size": -1}})",
+          R"({"key": "A", "sets": "text", "text": {"style": "ISO", "size": -0.5}})"}) {
+        const Error error = refusalOf(customisationWith(std::string("\"codes\": [") + rule + "]"));
+        EXPECT_EQ(error.code, ErrorCode::InvalidArgument) << rule;
+        EXPECT_EQ(error.message.rfind(R"(codes[0] "A": )", 0), 0u) << error.describe();
+        EXPECT_NE(error.message.find("size cannot be negative"), std::string::npos)
+            << error.describe();
+        EXPECT_EQ(error.message.find("finite"), std::string::npos) << error.describe();
+    }
+
+    // The model's own check says the two apart as well: a size that is not a
+    // number at all is "not finite", one below zero is "negative".
+    SurveyRule symbol;
+    symbol.key = "A";
+    symbol.symbol = katana::entity::SurveySymbol{};
+    symbol.symbol->size = std::numeric_limits<double>::quiet_NaN();
+    auto status = katana::entity::validate(symbol);
+    ASSERT_FALSE(status.ok());
+    EXPECT_NE(status.error().message.find("finite"), std::string::npos) << status.error().describe();
+    symbol.symbol->size = -1.0;
+    status = katana::entity::validate(symbol);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().message, "a symbol's size cannot be negative");
+    SurveyRule text;
+    text.key = "A";
+    text.textStyle = katana::entity::SurveyTextStyle{};
+    text.textStyle->size = -std::numeric_limits<double>::infinity();
+    status = katana::entity::validate(text);
+    ASSERT_FALSE(status.ok());
+    EXPECT_NE(status.error().message.find("finite"), std::string::npos) << status.error().describe();
+    text.textStyle->size = -0.5;
+    status = katana::entity::validate(text);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().message, "a text style's size cannot be negative");
+
+    // Every other number of the two may be below zero, and negative zero is
+    // not below it.
+    const Customisation read = readCustomisation(customisationWith(
+        R"("codes": [{"key": "A", "sets": "symbol",
+                      "symbol": {"size": -0.0, "rotation": -45, "offset": -0.2, "raise": -0.1},
+                      "text": {"size": -0.0, "offset": -0.5, "raise": -0.25, "angle": -30,
+                               "slant": -10}}])"));
+    ASSERT_EQ(read.map.size(), 1u);
+    EXPECT_EQ(read.map.rules()[0].symbol->rotation, -45.0);
+    EXPECT_EQ(read.map.rules()[0].symbol->raise, -0.1);
+    EXPECT_EQ(read.map.rules()[0].textStyle->angle, -30.0);
+    EXPECT_EQ(read.map.rules()[0].textStyle->slant, -10.0);
+}
+
+// ---- numbers a double cannot hold -----------------------------------------------------------
+
+namespace {
+
+constexpr const char* kTooLarge = "has a number too large to hold";
+constexpr const char* kTooSmall =
+    "has a number too small to hold: it is not zero, and would be read as 0";
+
+} // namespace
+
+// 1e400 is JSON, and past the largest double (about 1.8e308). The JSON library
+// stops at such a number; what the reader then says is what it would say of
+// any value of the wrong kind - the entry and the member - with the number and
+// where it stands beside it.
+TEST(CustomisationRefusals, ANumberTooLargeToHoldIsRefusedNamingTheEntryTheMemberAndThePlace)
+{
+    // The place is worked out by hand. Line 2 is
+    //    ` "linestyles": [{"name": "A", "length": 1e400}]}`
+    // one blank, then "linestyles" in its quotes (12 characters, columns 2 to
+    // 13), `: [{` (14 to 17), "name" (18 to 23), `: ` (24, 25), "A" (26 to
+    // 28), `, ` (29, 30), "length" (31 to 38), `: ` (39, 40), and 1e400 in
+    // columns 41 to 45. The column given is that of the number's LAST
+    // character, which is where a JSON reader stands once it has read it.
+    const Error error =
+        refusalOf("{\"format\": \"katana-customisation\", \"version\": 1, \"name\": \"T\",\n"
+                  " \"linestyles\": [{\"name\": \"A\", \"length\": 1e400}]}");
+    EXPECT_EQ(error.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(error.message, std::string(R"(linestyles[0] "A": "length" )") + kTooLarge);
+    EXPECT_EQ(error.context, "1e400 at line 2, column 45");
+
+    struct Large {
+        std::string members;
+        std::string message;
+        std::string number;
+    };
+    const std::vector<Large> cases = {
+        // below the least as well as above the greatest
+        {R"("linestyles": [{"name": "A", "factor": -1e400}])",
+         std::string(R"(linestyles[0] "A": "factor" )") + kTooLarge, "-1e400"},
+        // just past the largest double, 1.7976931348623157e308
+        {R"("linestyles": [{"name": "A", "length": 2e308}])",
+         std::string(R"(linestyles[0] "A": "length" )") + kTooLarge, "2e308"},
+        // in a list under a member: the member is still what is named
+        {R"("linestyles": [{"name": "A", "origin": [0, 1e400]}])",
+         std::string(R"(linestyles[0] "A": "origin" )") + kTooLarge, "1e400"},
+        {R"("linestyles": [{"name": "A", "anchors": [[0, 0], [1e999, 0]]}])",
+         std::string(R"(linestyles[0] "A": "anchors" )") + kTooLarge, "1e999"},
+        // in a stroke, and in the object and the list a text stroke holds
+        {testValveWith(R"(["move", 1e400, 0])"),
+         std::string(R"(symbols[0] "TEST Valve" strokes[9]: this stroke )") + kTooLarge, "1e400"},
+        {testValveWith(R"(["text", {"height": 1E+400}])"),
+         std::string(R"(symbols[0] "TEST Valve" strokes[9]: "height" )") + kTooLarge, "1E+400"},
+        {testValveWith(R"(["text", {"extra": [0, 1e400, 0]}])"),
+         std::string(R"(symbols[0] "TEST Valve" strokes[9]: "extra" )") + kTooLarge, "1e400"},
+        // in a part of a rule
+        {R"("codes": [{"key": "A", "sets": "symbol", "symbol": {"name": "P", "size": 1e400}}])",
+         std::string(R"(codes[0] "A" symbol: "size" )") + kTooLarge, "1e400"},
+        {R"("codes": [{"key": "A", "sets": "text", "text": {"slant": 1e400}}])",
+         std::string(R"(codes[0] "A" text: "slant" )") + kTooLarge, "1e400"},
+        // where no number belongs at all, it is still the number that stopped the reading
+        {R"("description": 1e400)", std::string(R"(top level: "description" )") + kTooLarge,
+         "1e400"},
+        // an entry whose name comes after the number has no name to show yet
+        {R"("linestyles": [{"length": 1e400, "name": "A"}])",
+         std::string(R"(linestyles[0]: "length" )") + kTooLarge, "1e400"},
+        // bare among the strokes, it is in the list that "strokes" is
+        {testValveWith("1e400"),
+         std::string(R"(symbols[0] "TEST Valve": "strokes" )") + kTooLarge, "1e400"},
+        // in an entry of a list inside a rule, and in the file's own objects
+        {R"("codes": [{"key": "A", "sets": "attributes", "attributes": [{"type": "text", "name": "N"}, {"type": "text", "name": "M", "value": 1e400}]}])",
+         std::string(R"(codes[0] "A" attributes[1]: "value" )") + kTooLarge, "1e400"},
+        {R"("linework": {"start": "S", "end": 1e400})",
+         std::string(R"(linework: "end" )") + kTooLarge, "1e400"},
+        {R"("colours": {"sui gas": 1e400})", std::string(R"(colours: "sui gas" )") + kTooLarge,
+         "1e400"},
+        {R"("sources": [{"name": "A"}, {"name": "B", "rules": 1e400}])",
+         std::string(R"(sources[1] "B": "rules" )") + kTooLarge, "1e400"},
+    };
+    for (const Large& large : cases) {
+        const Error refused = refusalOf(customisationWith(large.members));
+        EXPECT_EQ(refused.code, ErrorCode::ParseFailure) << large.members;
+        EXPECT_EQ(refused.message, large.message) << large.members;
+        EXPECT_EQ(refused.context.rfind(large.number + " at line 1, column ", 0), 0u)
+            << refused.describe();
+    }
+
+    // The largest double itself, and its negative, are read.
+    const Customisation ends = readCustomisation(customisationWith(
+        R"("linestyles": [{"name": "A", "length": 1.7976931348623157e308,
+                           "origin": [-1.7976931348623157e308, 0]}])"));
+    ASSERT_NE(ends.library.find("A"), nullptr);
+    EXPECT_EQ(ends.library.find("A")->length, std::numeric_limits<double>::max());
+    EXPECT_EQ(ends.library.find("A")->origin.x, -std::numeric_limits<double>::max());
+}
+
+// The reading stops AT such a number, so what a file is told depends on what
+// it had said by then. The writer puts "format" and "version" first, and so
+// does anyone who starts from a file it wrote.
+TEST(CustomisationRefusals, ANumberTooLargeBeforeTheFileSaysWhatItIsIsNotAKatanaCustomisationFile)
+{
+    for (const char* text :
+         {// the same file with its members the other way round
+          R"({"linestyles": [{"name": "A", "length": 1e400}], "format": "katana-customisation", "version": 1, "name": "T"})",
+          // JSON of some other kind
+          R"({"type": "FeatureCollection", "bbox": [0, 0, 1e400, 1]})",
+          R"({"format": "katana-sheets", "version": 1, "scale": 1e400})",
+          // not an object at all
+          "1e400", "[1e400]", "[[0, -1e400]]"}) {
+        const Error error = refusalOf(text);
+        EXPECT_EQ(error.code, ErrorCode::ParseFailure) << text;
+        EXPECT_EQ(error.message, kNotACustomisation) << text;
+        EXPECT_NE(error.context.find("1e400 at line 1, column "), std::string::npos)
+            << error.describe();
+    }
+
+    // A file that has said it is NEWER is told that, as for anything else a
+    // newer file may hold.
+    const Error newer = refusalOf(
+        R"({"format": "katana-customisation", "version": 2, "name": "T", "limit": 1e400})");
+    EXPECT_EQ(newer.code, ErrorCode::Unsupported);
+    EXPECT_NE(newer.message.find("newer version of Katana"), std::string::npos) << newer.describe();
+}
+
+// One definition's text has no "format" to say first: it is a definition as
+// soon as it is an object, and the number is refused by its member, or by its
+// stroke, under the definition's own name.
+TEST(CustomisationRefusals, ANumberTooLargeInADefinitionsTextIsRefusedTheSameWay)
+{
+    using katana::entity::definitionFromJson;
+    const auto member = definitionFromJson(R"({"name": "A", "length": 1e400})", false);
+    ASSERT_FALSE(member.ok());
+    EXPECT_EQ(member.error().code, ErrorCode::ParseFailure);
+    EXPECT_EQ(member.error().message, std::string(R"(definition "A": "length" )") + kTooLarge);
+    // {"name": "A", "length": 1e400} - by hand, the number's last character
+    // is in column 29: `{"name": "A", ` is 14 characters, `"length": ` 10
+    // more, and the number the next 5.
+    EXPECT_EQ(member.error().context, "1e400 at line 1, column 29");
+
+    const auto stroke = definitionFromJson(
+        R"({"name": "A", "strokes": [["move", 0, 0], ["circle", -1e400]]})", true);
+    ASSERT_FALSE(stroke.ok());
+    EXPECT_EQ(stroke.error().code, ErrorCode::ParseFailure);
+    EXPECT_EQ(stroke.error().message,
+              std::string(R"(definition "A" strokes[1]: this stroke )") + kTooLarge);
+    EXPECT_EQ(stroke.error().context.rfind("-1e400 at line 1, column ", 0), 0u)
+        << stroke.error().describe();
+
+    const auto text = definitionFromJson(
+        R"({"name": "A", "strokes": [["text", {"extra": [0, 0, 1e400]}]]})", true);
+    ASSERT_FALSE(text.ok());
+    EXPECT_EQ(text.error().message,
+              std::string(R"(definition "A" strokes[0]: "extra" )") + kTooLarge);
+
+    // Before the name is read there is none to show; and a text that is not
+    // an object is not a definition at all.
+    const auto unnamed = definitionFromJson(R"({"factor": 1e400, "name": "A"})", false);
+    ASSERT_FALSE(unnamed.ok());
+    EXPECT_EQ(unnamed.error().message, std::string(R"(definition: "factor" )") + kTooLarge);
+    for (const char* notOne : {"1e400", "[1e400]"}) {
+        const auto refused = definitionFromJson(notOne, false);
+        ASSERT_FALSE(refused.ok()) << notOne;
+        EXPECT_EQ(refused.error().code, ErrorCode::ParseFailure) << notOne;
+        EXPECT_EQ(refused.error().message, "not a definition in the Katana customisation format")
+            << notOne;
+        EXPECT_NE(refused.error().context.find("1e400 at line 1, column "), std::string::npos)
+            << refused.error().describe();
+    }
+}
+
+// 1e-400 is below the smallest double (about 4.9e-324). The JSON library
+// reads it as 0 and says nothing - and 0 is "not said" for a length, "the
+// definition's own" for a size, and refused for a factor in words that blame
+// a zero nobody wrote.
+TEST(CustomisationRefusals, ANumberTooSmallToHoldIsRefusedRatherThanReadAsZero)
+{
+    struct Small {
+        std::string members;
+        std::string message;
+        std::string context; // the number, or the stroke, as the file wrote it
+    };
+    const std::string zeros(400, '0'); // 0.000...0001, written without an exponent
+    const std::vector<Small> cases = {
+        {R"("linestyles": [{"name": "A", "length": 1e-400}])",
+         std::string(R"(linestyles[0] "A": "length" )") + kTooSmall, "1e-400"},
+        {R"("linestyles": [{"name": "A", "factor": 1E-400}])",
+         std::string(R"(linestyles[0] "A": "factor" )") + kTooSmall, "1E-400"},
+        {R"("linestyles": [{"name": "A", "origin": [-1e-400, 0]}])",
+         std::string(R"(linestyles[0] "A": "origin" )") + kTooSmall, "[-1e-400,0]"},
+        {R"("linestyles": [{"name": "A", "anchors": [[0, 0], [0, 2.5e-999]]}])",
+         std::string(R"(linestyles[0] "A": "anchors" )") + kTooSmall, "[0,2.5e-999]"},
+        {testValveWith(R"(["move", 1e-400, 0])"),
+         std::string(R"(symbols[0] "TEST Valve" strokes[9]: this stroke )") + kTooSmall,
+         R"(["move",1e-400,0])"},
+        {testValveWith(R"(["arc", 1, 0, -1e-400])"),
+         std::string(R"(symbols[0] "TEST Valve" strokes[9]: this stroke )") + kTooSmall,
+         R"(["arc",1,0,-1e-400])"},
+        {testValveWith(R"(["text", {"angle": 1e-400}])"),
+         std::string(R"(symbols[0] "TEST Valve" strokes[9]: "angle" )") + kTooSmall, "1e-400"},
+        {testValveWith(R"(["text", {"extra": [0, 0, 1e-999]}])"),
+         std::string(R"(symbols[0] "TEST Valve" strokes[9]: "extra" )") + kTooSmall,
+         "[0,0,1e-999]"},
+        {R"("codes": [{"key": "A", "sets": "symbol", "symbol": {"rotation": 0.)" + zeros + "1}}]",
+         std::string(R"(codes[0] "A" symbol: "rotation" )") + kTooSmall, "0." + zeros + "1"},
+        {R"("codes": [{"key": "A", "sets": "text", "text": {"size": 1e-400}}])",
+         std::string(R"(codes[0] "A" text: "size" )") + kTooSmall, "1e-400"},
+    };
+    for (const Small& small : cases) {
+        const Error error = refusalOf(customisationWith(small.members));
+        EXPECT_EQ(error.code, ErrorCode::ParseFailure) << small.members;
+        EXPECT_EQ(error.message, small.message) << small.members;
+        // What is shown of a value is cut at 60 characters.
+        const std::string shown = small.context.size() > 60 ? small.context.substr(0, 60) + "..."
+                                                            : small.context;
+        EXPECT_EQ(error.context, shown) << small.members;
+    }
+
+    // Where no number belongs, or only a whole one, it is refused as any
+    // other value there is - and shown as the file wrote it, not as 0.
+    const Error named = refusalOf(customisationWith(R"("description": 1e-400)"));
+    EXPECT_EQ(named.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(named.message, R"(top level: "description" must be text, in double quotes)");
+    EXPECT_EQ(named.context, "1e-400");
+    const Error whole =
+        refusalOf(customisationWith(R"("linestyles": [{"name": "A", "cycleMode": 1e-400}])"));
+    EXPECT_EQ(whole.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(whole.message, R"(linestyles[0] "A": "cycleMode" must be a whole number)");
+    EXPECT_EQ(whole.context, "1e-400");
+    // ... and where a list of strokes, or one stroke of it, belongs.
+    const Error strokes =
+        refusalOf(customisationWith(R"("linestyles": [{"name": "A", "strokes": 1e-400}])"));
+    EXPECT_EQ(strokes.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(strokes.message, R"(linestyles[0] "A": "strokes" must be a list, written [...])");
+    EXPECT_EQ(strokes.context, "1e-400");
+    const Error stroke = refusalOf(customisationWith(testValveWith("1e-400")));
+    EXPECT_EQ(stroke.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(stroke.message.rfind(R"(symbols[0] "TEST Valve" strokes[9]: a stroke is a list)", 0),
+              0u)
+        << stroke.describe();
+    EXPECT_EQ(stroke.context, "1e-400");
+    const Error pen = refusalOf(customisationWith(testValveWith(R"(["pen", 1e-400])")));
+    EXPECT_EQ(pen.code, ErrorCode::ParseFailure);
+    expectNames(pen, R"(symbols[0] "TEST Valve" strokes[9])", "pen");
+    EXPECT_EQ(pen.context, R"(["pen",1e-400])");
+
+    // One definition's text is read by the same code.
+    const auto definition =
+        katana::entity::definitionFromJson(R"({"name": "A", "factor": 1e-400})", false);
+    ASSERT_FALSE(definition.ok());
+    EXPECT_EQ(definition.error().code, ErrorCode::ParseFailure);
+    EXPECT_EQ(definition.error().message, std::string(R"(definition "A": "factor" )") + kTooSmall);
+}
+
+TEST(CustomisationRefusals, ZeroWrittenAtLengthIsZeroAndTheSmallestNumbersADoubleHoldsAreRead)
+{
+    // Every digit of each of these is 0, whatever its exponent says: they
+    // ARE zero, and the sign of the last two is kept.
+    const Customisation zeros = readCustomisation(customisationWith(
+        R"("linestyles": [{"name": "A", "length": 0e-400, "origin": [0.000, 0E5],
+                           "anchors": [[-0.0e-400, 0.0e999], [-0e-999, 0]]}])"));
+    const LineStyle* a = zeros.library.find("A");
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->length, 0.0);
+    EXPECT_EQ(a->origin.x, 0.0);
+    EXPECT_EQ(a->origin.y, 0.0);
+    EXPECT_EQ(a->anchor1.x, 0.0);
+    EXPECT_TRUE(std::signbit(a->anchor1.x));
+    EXPECT_EQ(a->anchor1.y, 0.0);
+    EXPECT_FALSE(std::signbit(a->anchor1.y));
+    EXPECT_TRUE(std::signbit(a->anchor2.x));
+
+    // 5e-324 is the smallest number a double holds (2^-1074) and 1e-320 one
+    // of the few thousand just above it, held to fewer digits: neither is
+    // zero, and each is read as the nearest double there is.
+    const Customisation tiny = readCustomisation(customisationWith(
+        R"("linestyles": [{"name": "A", "length": 5e-324,
+                           "strokes": [["move", 1e-320, -5e-324]]}])"));
+    const LineStyle* b = tiny.library.find("A");
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(b->length, std::numeric_limits<double>::denorm_min());
+    ASSERT_EQ(b->strokes.size(), 1u);
+    EXPECT_GT(b->strokes[0].point.x, 0.0);
+    EXPECT_LT(b->strokes[0].point.x, 1.1e-320);
+    EXPECT_EQ(b->strokes[0].point.y, -std::numeric_limits<double>::denorm_min());
+}
+
+// ---- values nested deep ---------------------------------------------------------------------
+
+namespace {
+
+// A value may nest as deep as its text is long: 100,000 "[" are a file of
+// 200 KB. Far past where anything that goes down a level of the program's
+// stack for a level of the value runs out of stack.
+constexpr std::size_t kDeep = 100000;
+
+// `kDeep` lists one inside the other, the innermost empty: [[[...]]].
+std::string deepLists()
+{
+    return std::string(kDeep, '[') + std::string(kDeep, ']');
+}
+
+// `kDeep` objects one inside the other: {"a":{"a":...{"a":0}...}}.
+std::string deepObjects()
+{
+    std::string text;
+    text.reserve(kDeep * 6 + 1);
+    for (std::size_t i = 0; i < kDeep; ++i) {
+        text += "{\"a\":";
+    }
+    text += '0';
+    text.append(kDeep, '}');
+    return text;
+}
+
+} // namespace
+
+TEST(CustomisationRefusals, AValueNestedAHundredThousandDeepIsRefusedLikeAnyOtherOfTheWrongKind)
+{
+    const std::string lists = deepLists();
+    const std::string objects = deepObjects();
+
+    // Where the file has not said it is a customisation: its "format" is the
+    // deep value, or the text itself is.
+    for (const std::string& text : {"{\"format\": " + lists + "}", "{\"format\": " + objects + "}",
+                                    lists, objects}) {
+        const Error error = refusalOf(text);
+        EXPECT_EQ(error.code, ErrorCode::ParseFailure);
+        EXPECT_EQ(error.message, kNotACustomisation);
+    }
+
+    // Anywhere else it is a value of the wrong kind, refused by the entry and
+    // the member exactly as a shallow one is.
+    const std::vector<Refused> cases = {
+        {"\"description\": " + objects, "top level", "description"},
+        {"\"sources\": " + objects, "top level", "sources"},
+        {"\"linestyles\": [{\"name\": \"A\", \"group\": " + lists + "}]", R"(linestyles[0] "A")",
+         "group"},
+        {"\"linestyles\": [{\"name\": \"A\", \"origin\": " + lists + "}]", R"(linestyles[0] "A")",
+         "origin"},
+        {"\"linestyles\": [{\"name\": \"A\", \"strokes\": " + objects + "}]", R"(linestyles[0] "A")",
+         "strokes"},
+        {"\"symbols\": [{\"name\": \"A\", \"strokes\": [[\"move\", " + lists + ", 0]]}]",
+         R"(symbols[0] "A" strokes[0])", "move"},
+        {"\"symbols\": [{\"name\": \"A\", \"strokes\": [[\"pen\", " + objects + "]]}]",
+         R"(symbols[0] "A" strokes[0])", "pen"},
+        {"\"symbols\": [{\"name\": \"A\", \"strokes\": [[\"text\", {\"height\": " + lists + "}]]}]",
+         R"(symbols[0] "A" strokes[0])", "height"},
+        {"\"symbols\": [{\"name\": \"A\", \"strokes\": [[\"text\", {\"extra\": [0, 0, " + lists +
+             "]}]]}]",
+         R"(symbols[0] "A" strokes[0])", "extra"},
+        {"\"codes\": [{\"key\": \"A\", \"sets\": \"feature\", \"layer\": " + lists + "}]",
+         R"(codes[0] "A")", "layer"},
+        {"\"codes\": [{\"key\": \"A\", \"sets\": " + objects + "}]", R"(codes[0] "A")", "sets"},
+        {"\"codes\": [{\"key\": \"A\", \"sets\": \"attributes\", \"attributes\": [{\"type\": "
+         "\"text\", \"name\": " +
+             lists + "}]}]",
+         R"(codes[0] "A" attributes[0])", "name"},
+        {"\"zzz\": " + lists, "top level", "zzz"},
+        // the first of two is thrown away as the second is put in
+        {"\"description\": " + lists + ", \"description\": " + objects, "top level", "description"},
+    };
+    for (const Refused& refused : cases) {
+        const Error error = refusalOf(customisationWith(refused.members));
+        EXPECT_EQ(error.code, ErrorCode::ParseFailure) << refused.entry << " " << refused.member;
+        expectNames(error, refused.entry, refused.member);
+        // What a refusal shows of a value is cut short however much there is.
+        EXPECT_LE(error.context.size(), 240u) << refused.entry << " " << refused.member;
+    }
+
+    // The file's own name, and what is shown of a value: its first 60
+    // characters.
+    const Error named = refusalOf(R"({"format": "katana-customisation", "version": 1, "name": )" +
+                                  lists + "}");
+    EXPECT_EQ(named.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(named.message, R"(top level: "name" must be text, in double quotes)");
+    EXPECT_EQ(named.context, std::string(60, '[') + "...");
+    const Error described = refusalOf(customisationWith("\"description\": " + objects));
+    // {"a": is five characters, so twelve of them are the first sixty.
+    std::string twelve;
+    for (int i = 0; i < 12; ++i) {
+        twelve += "{\"a\":";
+    }
+    EXPECT_EQ(described.context, twelve + "...");
+
+    // And where an object or a stroke should be.
+    for (const auto& [members, entry] : std::vector<std::pair<std::string, std::string>>{
+             {"\"linestyles\": [" + lists + "]", "linestyles[0]"},
+             {"\"codes\": [{\"key\": \"A\", \"sets\": \"symbol\", \"symbol\": " + lists + "}]",
+              R"(codes[0] "A" symbol)"},
+             {"\"basedOn\": " + lists, "basedOn"}}) {
+        const Error error = refusalOf(customisationWith(members));
+        EXPECT_EQ(error.code, ErrorCode::ParseFailure) << entry;
+        EXPECT_EQ(error.message, entry + ": must be an object, written {...}");
+    }
+    for (const std::string& stroke : {lists, objects}) {
+        const Error error = refusalOf(
+            customisationWith("\"symbols\": [{\"name\": \"A\", \"strokes\": [[\"move\", 0, 0], " +
+                              stroke + "]}]"));
+        EXPECT_EQ(error.code, ErrorCode::ParseFailure);
+        EXPECT_EQ(error.message.rfind(R"(symbols[0] "A" strokes[1]: )", 0), 0u) << error.message;
+    }
+    const Error colour = refusalOf(customisationWith("\"colours\": {\"sui gas\": " + lists + "}"));
+    EXPECT_EQ(colour.code, ErrorCode::ParseFailure);
+    EXPECT_EQ(colour.message.rfind(R"(colours "sui gas": )", 0), 0u) << colour.message;
+}
+
+TEST(CustomisationRefusals, ADefinitionsTextNestedAHundredThousandDeepIsRefusedTheSameWay)
+{
+    const std::string lists = deepLists();
+    const auto notOne = katana::entity::definitionFromJson(lists, false);
+    ASSERT_FALSE(notOne.ok());
+    EXPECT_EQ(notOne.error().code, ErrorCode::ParseFailure);
+    EXPECT_EQ(notOne.error().message, "not a definition in the Katana customisation format");
+
+    const auto member =
+        katana::entity::definitionFromJson("{\"name\": \"A\", \"group\": " + lists + "}", false);
+    ASSERT_FALSE(member.ok());
+    EXPECT_EQ(member.error().code, ErrorCode::ParseFailure);
+    expectNames(member.error(), R"(definition "A")", "group");
+
+    const auto stroke = katana::entity::definitionFromJson(
+        "{\"name\": \"A\", \"strokes\": [[\"circle\", " + deepObjects() + "]]}", false);
+    ASSERT_FALSE(stroke.ok());
+    EXPECT_EQ(stroke.error().code, ErrorCode::ParseFailure);
+    expectNames(stroke.error(), R"(definition "A" strokes[0])", "circle");
 }
 
 // ---- what the writer refuses ----------------------------------------------------------------

@@ -30,11 +30,13 @@
 
 namespace katana::entity {
 
-// The form a colour name is compared in: ASCII letters in lower case, no
-// blanks at either end, `_` and `-` read as a blank, and "gray" as "grey"
-// where it is the whole name or its last word ("Dark_Gray" is "dark grey").
-// Blanks inside a name are kept as they are: "dark  red", with two, is not
-// "dark red".
+// The form a colour name is compared in: ASCII letters in lower case, `_` and
+// `-` read as a blank, THEN no blanks at either end - so a separator at an end
+// goes as a blank there does, and "red_" is "red" - and "gray" as "grey" where
+// it is the whole name or its last word ("Dark_Gray" is "dark grey"). Blanks
+// inside a name are kept as they are: "dark  red", with two, is not "dark
+// red". Folding a folded name changes nothing, which is what lets it be the
+// key a table is kept by.
 [[nodiscard]] std::string foldColourName(std::string_view name);
 
 // The colour of one of the 27 standard names, compared by foldColourName.

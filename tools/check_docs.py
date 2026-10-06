@@ -33,9 +33,11 @@
 #   * no citation of the removed root documents (the plan, the contributor
 #     instructions, the readme);
 # and, over all of docs/*.md, that docs/index.md lists every document and
-# names none that does not exist (EXPECTED ones excepted); and that
+# names none that does not exist (EXPECTED ones excepted); that
 # docs/headless.md names every switch src/katana_qt/main.cpp parses and every
-# variable tools/check_screenshot.cmake reads.
+# variable tools/check_screenshot.cmake reads; and that the worked example
+# docs/customisation.md prints is, character for character, the text the
+# format's own test reads and writes back.
 #
 # Deliberately NOT checked: bare file names (`numerics.hpp` - ambiguous by
 # design, and the path beside them usually says which), prose, and whether
@@ -308,6 +310,35 @@ def check_switches(root, problems):
                                 '(tools/check_screenshot.cmake)' % variable)
 
 
+def check_worked_example(root, problems):
+    """The example docs/customisation.md prints under "A worked example" is
+    the text tests/entity/customisation/test_customisation_format.cpp reads
+    and writes back byte for byte. A person may copy that example to start a
+    file of their own, so it must be what the writer writes; the test proves
+    that of its own copy, held in a raw string, and this holds the document
+    to that copy - a claim in a document that IS checked, where the rest of
+    this script only checks that what is cited exists."""
+    document = os.path.join(root, 'docs', 'customisation.md')
+    test = os.path.join(root, 'tests', 'entity', 'customisation',
+                        'test_customisation_format.cpp')
+    if not os.path.exists(document):
+        return
+    lines = read(document).split('\n')
+    try:
+        heading = lines.index('### A worked example')
+        begin = lines.index('```json', heading) + 1
+        end = lines.index('```', begin)
+    except ValueError:
+        problems.append('docs/customisation.md: no ```json block under '
+                        '"### A worked example"')
+        return
+    literal = 'R"json(' + '\n'.join(lines[begin:end]) + '\n)json"'
+    if not os.path.exists(test) or literal not in read(test):
+        problems.append('docs/customisation.md:%d: the worked example is not the text '
+                        'tests/entity/customisation/test_customisation_format.cpp holds '
+                        '(TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted)' % (begin + 1))
+
+
 def main():
     arguments = sys.argv[1:]
     everything = '--all' in arguments
@@ -333,6 +364,7 @@ def main():
                        counts)
     check_index(root, docs, problems)
     check_switches(root, problems)
+    check_worked_example(root, problems)
 
     for problem in problems:
         print(problem)

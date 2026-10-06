@@ -75,6 +75,7 @@
 
 #include "katana/archive12d/archive.hpp"
 #include "katana/core/error.hpp"
+#include "katana/entity/colour_names.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/tables.hpp"
@@ -299,19 +300,21 @@ fromDomain(const katana::entity::Model& model, const std::vector<ExportSurface>&
 // empty: a name that says nothing is a circle.
 [[nodiscard]] std::string_view symbolForLinestyle(std::string_view name);
 
-// The RGB of one of 12d Model's standard colour names, matched without regard
-// to case. nullopt for any other name: colours are defined per project in
-// 12d, and the archive carries only the name, so an unknown one ("pen 025",
-// "vis concrete") is left ByLayer rather than guessed at.
-[[nodiscard]] std::optional<katana::entity::Color> standardColour(std::string_view name);
-// The 27 standard names standardColour knows, lower case, in the table's
-// order (the plain names first, then the dark and the light shades). For a
-// colour-name field to list, so that it can offer nothing standardColour
-// would not draw and needs no copy of the table of its own.
-[[nodiscard]] std::vector<std::string> standardColourNames();
-// The standard name nearest to `colour` - what export writes for an entity
-// whose colour did not come from 12d in the first place.
-[[nodiscard]] std::string nearestStandardColour(const katana::entity::Color& colour);
+// The standard colour names, under the names this module's import and export
+// and the front ends have always called them by. They are the entity layer's
+// (entity/colour_names.hpp, which says what each returns): a customisation's
+// own colours are resolved beside them there, by cad, which may not see this
+// module. An archive carries only the NAME of a colour, so a name that is not
+// one of the 27 ("pen 025", "vis concrete") is left ByLayer rather than
+// guessed at.
+//
+// The functions THEMSELVES, and not three here that forward to them:
+// nearestStandardColour takes an entity::Color, so a plain call inside this
+// namespace finds entity's function through its argument as well, and beside
+// a second function of the same signature that call would not compile.
+using katana::entity::nearestStandardColour;
+using katana::entity::standardColour;
+using katana::entity::standardColourNames;
 
 // The heights import writes are read back with katana::entity::heightsOf
 // (entity.hpp), the one reader of them; this module had its own until

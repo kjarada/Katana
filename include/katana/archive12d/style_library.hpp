@@ -58,13 +58,14 @@ struct StyleLibraryRead {
 //
 // `sourceName` is the name of the file the text came from, and is stamped on
 // every definition read as LineStyle::source - it is how a browser says where
-// a definition came from, and part of how a symbol is told from a linestyle
-// (most symbols the reference mapfiles use are not `mode vertex`; they are
-// symbols because they live in the symbol file). Only the NAME is kept: if a
-// path is passed, everything up to its last separator is dropped, so a
-// library never carries where on someone's disk it was loaded from. Empty for
-// text that came from no file, and the definitions then say so by carrying
-// none.
+// a definition came from. It also decides LineStyle::symbol, which the text
+// itself cannot say: a definition is listed as a symbol when that name holds
+// "symbol", whatever its case (most symbols the reference mapfiles use are
+// not `mode vertex`; they are symbols because they live in the symbol file).
+// Only the NAME is kept: if a path is passed, everything up to its last
+// separator is dropped, so a library never carries where on someone's disk it
+// was loaded from. Empty for text that came from no file, and the definitions
+// then say so by carrying none - and none of them is listed as a symbol.
 [[nodiscard]] katana::core::Result<StyleLibraryRead> readStyleLibrary(std::string_view text,
                                                                       std::string_view sourceName = {});
 
@@ -99,9 +100,13 @@ struct StyleLibraryWriteOptions {
 // writes it. Every field of a definition is written - all three kinds, `mode
 // vertex`, group, length, factor, origins, anchors, stretch and cycle mode,
 // pens and every stroke, a text with the three numbers kept but not
-// understood - so that readStyleLibrary(writeStyleLibrary(l)) gives back `l`.
-// The one thing a file does not hold is LineStyle::source, which is the name
-// of the file itself and is stamped again by the reader.
+// understood - so that readStyleLibrary(writeStyleLibrary(l), name) gives
+// back `l` when every definition of `l` came from a file of that name.
+// Two things a file does not hold, because they are said by the name of the
+// file itself and are set again by the reader from the name it is given:
+// LineStyle::source, and LineStyle::symbol (see `sourceName` above). Read back
+// under no name, or under another, a definition differs in those two and in
+// nothing else.
 //
 // Numbers are written as the shortest plain decimal that reads back exactly:
 // never an exponent, because 12d's own files never use one and nothing here

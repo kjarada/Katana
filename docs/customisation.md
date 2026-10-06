@@ -79,7 +79,10 @@ and an attribute every code gets:
 ```
 
 That is exactly what the writer produces for this customisation, byte for
-byte (`TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted`).
+byte (`TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted`). The test holds
+its own copy of the text, and the `docs` test (`tools/check_docs.py`) fails
+when the block above and that copy differ by a character, so neither can be
+changed without the other.
 
 ### The members
 
@@ -165,11 +168,11 @@ radii are in the definition's units and angles in degrees, counter-clockwise.
 | `["pen", "name"]` | a colour name | the colour of what follows; `view_colour` is the entity's own |
 | `["text", {...}]` | one object | characters at the current point |
 
-The object of a text stroke: `text` (empty), `angle` (0), `height` (0),
-`justify` (empty; kept as written, such as `middle-centre`), `font` (empty),
-`widthFactor` (1), and `extra`, three numbers `[a, b, c]` (all 0) that are
-kept and not interpreted (`StrokeText::unnamed`; `docs/survey_coding.md`
-says why).
+The object of a text stroke: `text` (empty), `angle` (0), `height` (0; not
+negative), `justify` (empty; kept as written, such as `middle-centre`), `font`
+(empty), `widthFactor` (1), and `extra`, three numbers `[a, b, c]` (all 0)
+that are kept and not interpreted (`StrokeText::unnamed`;
+`docs/survey_coding.md` says why).
 
 **A rule** - one entry of `codes`. Any member may sit on a rule of any `sets`,
 as the model allows; which members a rule of each kind is expected to carry is
@@ -200,15 +203,28 @@ surface). These are the format's own words, kept in a table private to
 `src/katana_entity/customisation.cpp`.
 
 - **`symbol`**: `name` (a definition's name; empty), `colour` (empty: the
-  string's own), `size` (0: the definition's own size), `rotation`, `offset`,
-  `raise` (0).
-- **`text`**: `style`, `colour`, `units`, `justifyX`, `justifyY`, `weight`
-  (text, empty); `size`, `offset`, `raise`, `angle`, `slant` (0);
-  `widthFactor` (1); `underline`, `strikeout`, `italic` (false).
+  string's own), `size` (0: the definition's own size; not negative),
+  `rotation`, `offset`, `raise` (0).
+- **`text`**: `style`, `colour`, `units` (text, empty), `size` (0; not
+  negative), `justifyX`, `justifyY` (text, empty), `offset`, `raise`, `angle`,
+  `slant` (0), `widthFactor` (1), `underline`, `strikeout`, `italic` (false),
+  `weight` (TEXT, empty).
 - **a pipe**: `justify`, `shape`, `size1`, `size2` (TEXT, empty); `active`
   (false).
 - **an attribute**: `type`, which is `text` or `integer` (**required**);
   `name` (**required**, not empty); `value` (TEXT, empty).
+
+Each of these four lists, like the tables above and the members of a source,
+of `basedOn`, of `linework`, of `automation` and of a text stroke's object, is
+in the order the members are WRITTEN in ("Layout", rule 6).
+
+**What the numbers may be.** Any number a double holds, except that a
+`length`, a text stroke's `height` and the `size` of a symbol or of a text
+are not negative and a `factor` is above 0 - each refused by
+`entity::validate`, in its own words - and that `stretchMode` and `cycleMode`
+are whole numbers a 32-bit integer holds. A number being *finite* is not a
+rule of the file at all - JSON has no way to write one that is not - but see
+"Numbers a double cannot hold" below.
 
 **Text that stays text.** `weight`, a pipe's sizes and an attribute's value
 are text because they are not always numbers: a weight is `0` in one rule and
@@ -240,7 +256,8 @@ means "not said" and is the 0 the table gives.
 | a word outside its list | `ParseFailure` | `codes[2] "AC*": "sets" is "symbols", which is not one of ...` |
 | a required member missing | `ParseFailure` | `codes[4]: has no "key", which it must` |
 | a stroke of the wrong length or kind | `ParseFailure` | `symbols[0] "TEST Valve" strokes[9]: "arc" takes ...` |
-| a name a project could not record | `InvalidArgument` | `top level: "name": a customisation name cannot hold ...` |
+| a number a double cannot hold | `ParseFailure` | `linestyles[0] "A": "length" has a number too large to hold` |
+| a name a project could not record, or one that could not be told from another | `InvalidArgument` | `top level: "name": a customisation name cannot hold ...` |
 | two definitions of one name | `InvalidArgument` | `symbols[1] "A": the file holds two definitions of this name; ...` |
 | two colour names with one fold, or one that is a standard name | `InvalidArgument` | `colours "Red": a standard colour name cannot be given another colour ...` |
 | whatever `entity::validate` refuses of a definition, a rule or the linework codes | `InvalidArgument` | `codes[1] "W*M": a survey code key may only use ...` |
@@ -259,6 +276,18 @@ alone is ambiguous - several rules share one - and a place alone says nothing
 to the person who wrote the file. An unknown member's refusal carries, as the
 error's context, the members that entry does have.
 
+A stroke is as far as a place goes. Whatever is wrong inside one - an unknown
+member of a text stroke's object, a member given twice there, a number in its
+`extra` - is refused under `... strokes[9]`, by the member; nothing is named
+`strokes[9][1]`.
+
+`colours` is an object, and the members of a JSON object have no order: the
+reader goes through its names in the order of their BYTES, whatever order the
+file has them in. So of two names with one fold it is the later in that order
+which is the entry refused - `colours "sui_gas"` for `SUI Gas` and `sui_gas`,
+either way round - with both spellings beside it, the earlier first. The same
+holds for which of two unknown members is the one named.
+
 **Why strict.** A customisation is edited by hand, and the two mistakes a
 lenient reader hides are the two a person makes:
 
@@ -276,10 +305,52 @@ A whole number is refused when given `2.7` or `true` for the same reason: the
 library's own conversion cuts the first to 2 and reads the second as 1, each
 another value than the file gave.
 
+**Numbers a double cannot hold.** Two more values are JSON and are not read
+as another value:
+
+- *Too small.* `1e-400` is below the smallest double, and the JSON library
+  reads it as 0 with nothing said. Here 0 has meanings of its own - a `length`
+  "not said", a symbol's `size` "the definition's own" - and a `factor` of 0
+  is refused in words that blame a zero nobody wrote. So a number that is not
+  zero as written and would be read as zero is refused by its member:
+  `linestyles[0] "A": "length" has a number too small to hold: it is not zero,
+  and would be read as 0`, with the number as written beside it. A zero
+  written at length (`0e-400`, `-0.000`) is zero, and the smallest numbers a
+  double does hold (`5e-324`) are read as the nearest double, like any other
+  decimal.
+- *Too large.* `1e400` is past the largest double, and at such a number the
+  JSON library STOPS: nothing after it is read. The refusal names the entry
+  and the member as for any value of the wrong kind - `linestyles[0] "A":
+  "length" has a number too large to hold`, or `... strokes[9]: this stroke
+  has ...` - with the number and the line and column of its last character
+  beside it (`1e400 at line 2, column 45`). But the order of the checks below
+  can be kept only as far as the text had been read. A file that had said its
+  `format` by then is refused so (and one that had said a newer `version` is
+  told it is newer); a file that had not is `not a Katana customisation file`,
+  with the number and its place beside it, because that is all that is known
+  of it. The writer puts `format` and `version` first, so a file it wrote, or
+  one a person edited from such a file, is always the first case.
+
+**A value nested however deep is refused like any other.** A value may nest
+as deep as its text is long - 100,000 `[` are a file of 200 KB - and the
+reader goes down no level of the program's stack for a level of the value:
+the tree is built from parse events, the JSON library takes one apart without
+recursion, and what a refusal shows of a value is written out by the reader
+itself, which stops after 60 characters, where the library's `dump()` would
+write the whole value first, one stack frame a level. (That was a stack
+overflow at about 11,000 levels until 2026-10-06; the tests now read 100,000
+in every place a value can sit.) *Rejected: a limit on depth*, refusing the
+text at the eighth level, which is one more than the format has. It would
+have to stop the reading there, and a file of a newer version that does nest
+deeper would then be told it is not a customisation, where it should be told
+it is newer.
+
 **The order of the checks**: the text is JSON; its `format` is this one's; its
 `version` is not newer (so a newer file is told it is newer, not that its new
 members are unknown); no member is given twice; then the members, the
-top-level ones before the lists are gone through.
+top-level ones before the lists are gone through. A number too large to hold
+is the one refusal that comes before the whole text has been read, as said
+above.
 
 **Encoding.** The bytes are decoded by `core::decodeText` first, so a UTF-8
 byte order mark and UTF-16, which an editor on Windows saves readily, are
@@ -288,6 +359,9 @@ does for the formats that never said what they are: this format does say - it
 is JSON, and JSON is UTF-8 - and a guess at a code page would put a wrong
 character into a name silently, where a name is an identity. Such a file is
 `not a Katana customisation file`, with "the bytes are not UTF-8 text" beside
+it. So is one whose bytes break the promise of their own byte order mark - a
+UTF-8 mark over bytes that are not UTF-8, UTF-16 with an odd number of bytes
+or half a surrogate pair - with the decoder's account of what is wrong beside
 it. Malformed JSON gets the same message with the line and column beside it.
 
 A survey code file (`.mapfile`) and a style library (`.4d`) are simply not
@@ -331,7 +405,11 @@ people as text, and one stroke a line is the unit a diff shows.
 6. A rule is one line, its members in the order of the table above; so is a
    source. Whatever sits inside an entry - a rule's `symbol`, its attribute
    lists, a text stroke's object, a source's `notice` - is on that entry's
-   line.
+   line. The members of EVERY object are written in the order "The members"
+   lists them in, an object inside an entry included: a rule's `text` is
+   `style`, `colour`, `units`, `size`, `justifyX`, `justifyY`, `offset`,
+   `raise`, `angle`, `slant`, `widthFactor`, `underline`, `strikeout`,
+   `italic`, `weight`.
 7. A member is `"name": value`, one blank after the colon. On one line,
    members and values are separated by a comma and a blank, with no blank
    inside the brackets: `{"a": 1, "b": [0, 1]}`. Entries on lines of their own
@@ -430,8 +508,15 @@ the same names have in the CSS list, with two departures stated beside the
 table (`green` is the primary, and the greys sit either side of `grey`).
 `entity::standardColour`, `entity::standardColourNames` and
 `entity::nearestStandardColour` are that table; it was private to the archive
-module, whose three functions of the same names now forward to it, because
-`cad` resolves a customisation's colours and may not see that module.
+module, and moved because `cad` resolves a customisation's colours and may
+not see that module. The archive module's three names for them
+(`include/katana/archive12d/domain.hpp`) are using-declarations: the entity
+functions themselves, not three that forward. *Rejected: forwarding
+functions.* `nearestStandardColour` takes an `entity::Color`, so a plain call
+inside the archive namespace finds the entity function through its argument
+as well as the archive's own, and two functions of one signature make that
+call ambiguous in any file that sees both headers; one function found twice
+does not.
 
 **A customisation's own table**, `colours`: `"sui electricity": "#FF7F00"`. A
 colour is `#RRGGBB`, or `#RRGGBBAA` with an opacity, in either case of digit;
@@ -444,10 +529,21 @@ it is written in upper case. `entity::ColourTable` refuses
   that redefined `red` would draw two reds in one drawing.
 
 **One fold.** A colour name is compared after `entity::foldColourName` and in
-no other way: ASCII letters in lower case, blanks at the ends removed, `_` and
-`-` read as a blank, and `gray` as `grey` where it is the whole name or its
-last word (`Dark_Gray` is `dark grey`). Blanks inside a name are kept, so two
-are not one.
+no other way. In this order: ASCII letters to lower case; `_` and `-` read as
+a blank; blanks at the ends removed; and `gray` read as `grey` where it is
+the whole name or its last word (`Dark_Gray` is `dark grey`). Blanks inside a
+name are kept, so two are not one.
+
+The order matters at the ends. The fold came from the archive import, which
+trimmed FIRST and so left `red_` as `red ` - a "folded" name with a blank at
+its end, which folded again was `red`. Two answers from one fold is not a
+form to compare names in: a table could hold `red_` beside the standard `red`
+it is another spelling of, and `sui gas_` beside `sui gas`. Since 2026-10-06
+the separators become blanks before the ends are trimmed, so a separator at
+an end goes as a blank there does, and folding a folded name changes nothing
+(`FoldingAFoldedNameChangesNothing`). The one thing this changes for what
+existed before: an archive whose colour is named `red_` is now drawn red,
+where that name used to match no standard colour and leave the colour alone.
 
 **One resolver.** `entity::resolveColour` asks the table and then the standard
 names, and gives nothing for a name neither knows - which leaves a colour
@@ -460,19 +556,52 @@ resolve draws in the entity's own colour).
 linework controls are part of a customisation - a team writes `ST` or `S` as
 its field book does - so `LineworkCodes` and its `validate` moved from `cad`
 to this layer, where the file is read. `cad::LineworkCodes` is now an alias
-and `cad::validate(codes)` forwards, so nothing that named them changed.
+and `cad::validate` a using-declaration of `entity::validate`, so nothing
+that named them changed - `cad::validate(codes)` from outside, and a plain
+`validate(codes)` inside the `cad` namespace. *Rejected: a `cad::validate`
+that forwards*, which is what it first was. The codes are an entity type, so
+the plain call finds `entity::validate` through its argument as well, and
+beside a second function of the same signature it does not compile
+(`tests/cad/customisation/test_linework_code_names.cpp` holds both spellings
+of the call to compiling). It is the trap `docs/geometry.md` records for the
+chording functions, where the `cad` names were deleted; here the names are
+wanted, so they are made to name the one function.
+
 `entity::lineworkCodeMembers` lists the seven by the names the file, a refusal
-and a command use, so that the three cannot come to disagree about one.
+and a command use, so that the three cannot come to disagree about one. It is
+the only list of those words: `cad` had the same seven in a function from its
+control enumeration to text, whose last caller was the `validate` that moved,
+and that function went with it.
 
 ### The name
 
-`validateCustomisationName`: not empty, valid UTF-8, and with no line break,
-`/` or `\`. The name is written into a project as the record of what the
-drawing was drawn with, one name a line and never a path, and the project
-store refuses exactly these; a name that passed here and failed there would
-make every SAVE of the session fail. The same rule holds for a source's name,
-for `basedOn`'s and for a definition's `from` when it is not empty, since each
-of them reaches that record.
+`validateCustomisationName`: not empty, valid UTF-8, with no line break, `/`
+or `\`, no control character (U+0000 to U+001F and U+007F) and no blank at
+either end.
+
+The first part is what the project's store refuses. The name is written into
+a project as the record of what the drawing was drawn with, one name a line
+and never a path; a name that passed here and failed there would make every
+SAVE of the session fail.
+
+The second part - control characters, and a blank at an end - the store would
+take, and it is refused here because the name is an IDENTITY. A project is
+matched to its customisation by it, and a list shows it: `NSW ` and `NSW`
+would be two customisations that look like one, and a tab, an escape or a NUL
+cannot be seen where the name is shown (an escape sequence in a name would
+also be acted on by a terminal a reply is printed to). It is the rule a
+layer's name is held to (`validateLayerPath`), and it is in version 1 from
+the start because a rule added later would refuse files that exist by then,
+where one relaxed later refuses nothing. A blank INSIDE a name is part of it,
+and only the plain blank is looked for at the ends: a no-break space there is
+kept, as it is in a layer's name.
+
+The same rule holds for a source's name, for `basedOn`'s and for a
+definition's `from` when it is not empty, since each of them reaches that
+record. One consequence: the style library reader stamps a file's name on its
+definitions as it is, so a library read from a file whose name begins with a
+blank holds definitions this format refuses to write, naming each and its
+`from`, until they are given another source.
 
 ### What may never change without a new version
 
@@ -488,6 +617,9 @@ these changes while `version` stays 1:
 - a new member, for the same reason;
 - the fold of a colour name, and the set of standard names (a file that
   defines a name of its own is refused the day that name becomes standard);
+- what a name, a key or a number may be: a narrower rule would turn away
+  files that exist, and a wider one would let this build write, as version 1,
+  what an older build refuses;
 - what makes two rules the same rule in a merge: `sets` and `key` together.
 
 A build reads its own version and every older one, and refuses a newer file
@@ -569,6 +701,22 @@ survives being read and written.
   default").
 - **A source may be named twice** in `sources`; the format keeps the list as
   it is and leaves what that means to the session that made it.
+- **A number too large, in a file that says what it is afterwards.** The
+  reading stops at such a number ("Numbers a double cannot hold"), so a file
+  whose `format` comes AFTER it is told it is not a customisation, with the
+  number and its place beside it, where the same file with `format` first is
+  told which member holds it. Reading on would take a JSON reader of this
+  format's own.
+- **The style manager keeps a second table of standard colours.** The colour
+  menu of Styles and Linetypes (`src/katana_qt/style_manager.cpp`,
+  `kStandardColours` there) lists twelve colours "by the standard colour
+  names" from a table of its own, and two of them are not the standard
+  colour: its `orange` is 255, 128, 0 where the standard one is 255, 165, 0,
+  and its `brown` 150, 75, 0 where the standard one is 165, 42, 42. A style
+  given "orange" from that menu is therefore not the orange a rule's
+  `"colour": "orange"` draws. It should be filled from
+  `entity::standardColourNames`; left because the window's behaviour belongs
+  to the work that gives it Settings.
 - **No benchmark that can be repeated yet**, and the reader is slower than the
   readers it replaces. Measured once, on 2026-10-06, with a throwaway program
   (Release, GCC 16, best of 15 runs) on a GENERATED customisation of the
@@ -587,6 +735,12 @@ survives being read and written.
   ns (0.9 ms). The rest of the 43 is 6 ms for the strokes and 6 ms for the
   rules, which is allocation. The older readers were measured at 21 ms on the
   reference files (`docs/survey_coding.md`).
+
+  What the reader gained later that day - a number too small kept as such, a
+  number too large placed, and what a refusal shows written out by the reader
+  itself - is one comparison a real number and otherwise off the path a sound
+  file takes. Measured side by side with the same program, on a machine busy
+  with other builds: 45.0 ms before, 44.8 after.
 
   So what is left to take is the number conversion, about 21 ms of it, and
   the JSON library offers no way to replace it: only a scanner of this

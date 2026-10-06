@@ -280,10 +280,22 @@ constexpr const char* kSmallCustomisationText = R"json({
 
 // ---- the field-complete customisation -------------------------------------------------------
 
-// A rule with every field a rule has set to something other than its default.
-// The model lets any field sit on a rule of any section, and so does the
-// format, so one of these is made for each section.
-SurveyRule ruleWithEveryField(std::string key, SurveySection section, SurveyBreakline breakline)
+// A rule with every field a rule has, each at a value no other field of its
+// kind has: two members that held the same value could be crossed in the
+// reader - "underline" read into `strikeout` - and the rule would still come
+// back equal. The model lets any field sit on a rule of any section, and so
+// does the format, so one of these is made for each section.
+//
+// Five members are true-or-false, and with every one of them true no two
+// could be told apart. `variant` (0, 1 or 2) settles them so that each pair
+// differs in at least one variant:
+//
+//   variant        surface  hide   underline  strikeout  italic
+//      0            true    false    false      true      true
+//      1            false   true     true       false     true
+//      2            true    true     true       true      false
+SurveyRule ruleWithEveryField(std::string key, SurveySection section, SurveyBreakline breakline,
+                              int variant)
 {
     SurveyRule rule;
     rule.key = std::move(key);
@@ -295,11 +307,12 @@ SurveyRule ruleWithEveryField(std::string key, SurveySection section, SurveyBrea
     rule.group = "G - SERVICES";
     rule.comment = "every field, with a \"quote\" and a \\ backslash";
     rule.breakline = breakline;
-    rule.tinable = true;
-    rule.hide = true;
+    rule.tinable = variant != 1;
+    rule.hide = variant != 0;
     rule.symbol = SurveySymbol{"S Peg", "white", 1.5, 45, 0.2, -0.1};
-    rule.textStyle = SurveyTextStyle{"ISO", "red", "paper", 1.5,  "left", "bottom", 0.5,     0.25,
-                                     30,    10,    0.8,     true, true,   true,     "Normal"};
+    rule.textStyle =
+        SurveyTextStyle{"ISO", "red", "paper",      2.5,          "left",       "bottom", 0.5, 0.25,
+                        30,    10,    0.8,          variant != 0, variant != 1, variant != 2, "0"};
     rule.pipe = SurveyPipe{"Obvert", "diameter", "$PipeDiameter", "0.3", true};
     rule.vertexPipe = SurveyPipe{"Invert", "culvert", "0.375", "0.6", true};
     rule.segmentPipe = SurveyPipe{"Centre", "diameter", "1", "2", true};
@@ -326,9 +339,14 @@ Customisation fieldCompleteCustomisation()
     EXPECT_TRUE(customisation.colours.add("Half Clear", Color{1, 2, 3, 128}).ok());
     // Every spelling changed from its default, and one control switched off.
     customisation.linework = LineworkCodes{"S", "E", "C", "PC", "PT", "", "BOX"};
-    customisation.automation = CustomisationAutomation{false, true};
+    // Both off, where both are on when left out. (Which is which is pinned by
+    // the small customisation, where one is on and the other off.)
+    customisation.automation = CustomisationAutomation{false, false};
 
-    // A symbol with every member of a definition and every kind of stroke.
+    // A symbol with every member of a definition and every kind of stroke,
+    // and no number at the value it has when left out: a dot of radius 0, an
+    // arc from 0 or an anchor at x = 0 would come back the same from a reader
+    // that never read that number.
     LineStyle everything;
     everything.name = "S Everything";
     everything.group = "Survey/S";
@@ -337,16 +355,16 @@ Customisation fieldCompleteCustomisation()
     everything.length = 2.5;
     everything.factor = 3;
     everything.origin = {1, -2};
-    everything.anchor1 = {0, 0.75};
-    everything.anchor2 = {14, 0.75};
+    everything.anchor1 = {0.5, 0.75};
+    everything.anchor2 = {14, -0.25};
     everything.stretchMode = 2;
     everything.cycleMode = -1;
     everything.source = "Other Set";
     everything.symbol = true;
-    everything.strokes = {pen("pen 035"),     moveTo(0, 0), drawTo(3, 0.1),
-                          arc(-1.75, 0, 180), circle(0.5),  dot(0)};
-    addText(everything,
-            StrokeText{"W \"M\" \\ 1", 90, 1.5, "middle-centre", "Arial", 0.85, {0, -0.3, 0.035}});
+    everything.strokes = {pen("pen 035"),      moveTo(0, 0), drawTo(3, 0.1),
+                          arc(-1.75, 30, 180), circle(0.5),  dot(0.25)};
+    addText(everything, StrokeText{"W \"M\" \\ 1", 90, 1.5, "middle-centre", "Arial", 0.85,
+                                   {0.5, -0.3, 0.035}});
     addText(everything, StrokeText{}); // a text with nothing said: ["text", {}]
     everything.strokes.push_back(pen("view_colour"));
     everything.strokes.push_back(moveTo(0.00001, 12345678.125));
@@ -358,6 +376,15 @@ Customisation fieldCompleteCustomisation()
     world.source = "Everything";
     world.strokes = {moveTo(0, 0), drawTo(1, 0)};
     add(customisation, world);
+
+    // Drawn at vertices and NOT listed as a symbol: the two are said
+    // separately, and neither may be worked out from the other.
+    LineStyle marks;
+    marks.name = "V Marks";
+    marks.atVertices = true;
+    marks.source = "Everything";
+    marks.strokes = {dot(0)};
+    add(customisation, marks);
 
     LineStyle gate;
     gate.name = "T Gate";
@@ -373,21 +400,22 @@ Customisation fieldCompleteCustomisation()
     nothing.symbol = true;
     add(customisation, nothing);
 
-    // One rule a section, each with every field.
-    add(customisation, ruleWithEveryField("WM*", SurveySection::Map, SurveyBreakline::Line));
+    // One rule a section, each with every field, the three variants in turn.
+    add(customisation, ruleWithEveryField("WM*", SurveySection::Map, SurveyBreakline::Line, 0));
     add(customisation,
-        ruleWithEveryField("AC*", SurveySection::VertexSymbol, SurveyBreakline::Point));
+        ruleWithEveryField("AC*", SurveySection::VertexSymbol, SurveyBreakline::Point, 1));
     add(customisation,
-        ruleWithEveryField("1", SurveySection::VertexTextStyle, SurveyBreakline::Line));
-    add(customisation, ruleWithEveryField("*", SurveySection::Pipe, SurveyBreakline::Line));
-    add(customisation, ruleWithEveryField("VP*", SurveySection::VertexPipe, SurveyBreakline::Line));
+        ruleWithEveryField("1", SurveySection::VertexTextStyle, SurveyBreakline::Line, 2));
+    add(customisation, ruleWithEveryField("*", SurveySection::Pipe, SurveyBreakline::Line, 0));
     add(customisation,
-        ruleWithEveryField("SP*", SurveySection::SegmentPipe, SurveyBreakline::Line));
+        ruleWithEveryField("VP*", SurveySection::VertexPipe, SurveyBreakline::Line, 1));
     add(customisation,
-        ruleWithEveryField("LP*", SurveySection::StringAttribute, SurveyBreakline::Line));
+        ruleWithEveryField("SP*", SurveySection::SegmentPipe, SurveyBreakline::Line, 2));
     add(customisation,
-        ruleWithEveryField("PNAL", SurveySection::VertexAttribute, SurveyBreakline::Line));
-    add(customisation, ruleWithEveryField("TN*", SurveySection::Tinable, SurveyBreakline::Line));
+        ruleWithEveryField("LP*", SurveySection::StringAttribute, SurveyBreakline::Line, 0));
+    add(customisation,
+        ruleWithEveryField("PNAL", SurveySection::VertexAttribute, SurveyBreakline::Line, 1));
+    add(customisation, ruleWithEveryField("TN*", SurveySection::Tinable, SurveyBreakline::Line, 2));
 
     // Optionals that are present and say nothing: not the same as absent.
     SurveyRule present;
@@ -509,40 +537,77 @@ TEST(CustomisationFormat, ADefinitionWithEveryMemberIsWrittenInTheOrderTheFormat
 {
     const std::string text = writeCustomisation(fieldCompleteCustomisation());
     const std::string expected = R"json(
-    {"name": "S Everything", "group": "Survey/S", "units": "paper", "atVertices": true, "length": 2.5, "factor": 3, "origin": [1, -2], "anchors": [[0, 0.75], [14, 0.75]], "stretchMode": 2, "cycleMode": -1, "from": "Other Set", "strokes": [
+    {"name": "S Everything", "group": "Survey/S", "units": "paper", "atVertices": true, "length": 2.5, "factor": 3, "origin": [1, -2], "anchors": [[0.5, 0.75], [14, -0.25]], "stretchMode": 2, "cycleMode": -1, "from": "Other Set", "strokes": [
       ["pen", "pen 035"],
       ["move", 0, 0],
       ["draw", 3, 0.1],
-      ["arc", -1.75, 0, 180],
+      ["arc", -1.75, 30, 180],
       ["circle", 0.5],
-      ["dot", 0],
-      ["text", {"text": "W \"M\" \\ 1", "angle": 90, "height": 1.5, "justify": "middle-centre", "font": "Arial", "widthFactor": 0.85, "extra": [0, -0.3, 0.035]}],
+      ["dot", 0.25],
+      ["text", {"text": "W \"M\" \\ 1", "angle": 90, "height": 1.5, "justify": "middle-centre", "font": "Arial", "widthFactor": 0.85, "extra": [0.5, -0.3, 0.035]}],
       ["text", {}],
       ["pen", "view_colour"],
       ["move", 1e-05, 12345678.125]
     ]}
   ],)json";
     EXPECT_NE(text.find(expected), std::string::npos) << text;
+
+    // The linestyle drawn at vertices says so, and sits in "linestyles": the
+    // last of the three there, by name. Its source is the file's own name, so
+    // it has no "from"; its dot of radius 0 is written with its 0, since a
+    // stroke's values are never left out.
+    const std::string atVertices = R"json(
+    {"name": "V Marks", "atVertices": true, "strokes": [
+      ["dot", 0]
+    ]}
+  ],
+  "symbols": [)json";
+    EXPECT_NE(text.find(atVertices), std::string::npos) << text;
 }
 
 // The same for a rule: every member a rule has, and every member of its
 // symbol, its text, its three pipes and its three attribute lists, on the one
-// line a rule is written on. An attribute's empty value is left out.
+// line a rule is written on, for each of the fixture's three variants (its
+// first three rules). A member that is false where false is the value left
+// out - a text's flags - is not written; "surface" and "hide" are optionals,
+// written whenever present. An attribute's empty value is left out.
 TEST(CustomisationFormat, ARuleWithEveryFieldIsWrittenInTheOrderTheFormatFixes)
 {
     const std::string text = writeCustomisation(fieldCompleteCustomisation());
-    const std::string expected =
-        R"json(
-    {"key": "WM*", "sets": "feature", "layer": "SURVEY/SERVICES", "colour": "sui water", "draw": "line", "linestyle": "L Everything", "weight": "Normal", "group": "G - SERVICES", "comment": "every field, with a \"quote\" and a \\ backslash", "surface": true, "hide": true, )json"
+    // What the three have in common, by hand, in the three stretches the
+    // varying members sit between.
+    const std::string upToSurface =
+        R"json("layer": "SURVEY/SERVICES", "colour": "sui water", "draw": "DRAW", "linestyle": "L Everything", "weight": "Normal", "group": "G - SERVICES", "comment": "every field, with a \"quote\" and a \\ backslash", )json";
+    const std::string upToFlags =
         R"json("symbol": {"name": "S Peg", "colour": "white", "size": 1.5, "rotation": 45, "offset": 0.2, "raise": -0.1}, )json"
-        R"json("text": {"style": "ISO", "colour": "red", "units": "paper", "size": 1.5, "justifyX": "left", "justifyY": "bottom", "offset": 0.5, "raise": 0.25, "angle": 30, "slant": 10, "widthFactor": 0.8, "underline": true, "strikeout": true, "italic": true, "weight": "Normal"}, )json"
+        R"json("text": {"style": "ISO", "colour": "red", "units": "paper", "size": 2.5, "justifyX": "left", "justifyY": "bottom", "offset": 0.5, "raise": 0.25, "angle": 30, "slant": 10, "widthFactor": 0.8, )json";
+    const std::string fromWeight =
+        R"json("weight": "0"}, )json"
         R"json("pipe": {"justify": "Obvert", "shape": "diameter", "size1": "$PipeDiameter", "size2": "0.3", "active": true}, )json"
         R"json("vertexPipe": {"justify": "Invert", "shape": "culvert", "size1": "0.375", "size2": "0.6", "active": true}, )json"
         R"json("segmentPipe": {"justify": "Centre", "shape": "diameter", "size1": "1", "size2": "2", "active": true}, )json"
         R"json("attributes": [{"type": "text", "name": "Owner", "value": "Council & Co"}, {"type": "integer", "name": "Zone", "value": "1"}], )json"
         R"json("vertexAttributes": [{"type": "integer", "name": "N", "value": "2"}, {"type": "text", "name": "Old"}], )json"
         R"json("segmentAttributes": [{"type": "text", "name": "S", "value": "$Other"}]},)json";
-    EXPECT_NE(text.find(expected), std::string::npos) << text;
+    struct Variant {
+        const char* keyAndSets;
+        const char* draw;
+        const char* switches;
+        const char* flags;
+    };
+    for (const Variant& variant :
+         {Variant{R"("key": "WM*", "sets": "feature", )", "line",
+                  R"("surface": true, "hide": false, )", R"("strikeout": true, "italic": true, )"},
+          Variant{R"("key": "AC*", "sets": "symbol", )", "point",
+                  R"("surface": false, "hide": true, )", R"("underline": true, "italic": true, )"},
+          Variant{R"("key": "1", "sets": "text", )", "line", R"("surface": true, "hide": true, )",
+                  R"("underline": true, "strikeout": true, )"}}) {
+        std::string common = upToSurface;
+        common.replace(common.find("DRAW"), 4, variant.draw);
+        const std::string expected = std::string("\n    {") + variant.keyAndSets + common +
+                                     variant.switches + upToFlags + variant.flags + fromWeight;
+        EXPECT_NE(text.find(expected), std::string::npos) << expected << "\n\n" << text;
+    }
 }
 
 TEST(CustomisationFormat, RulesKeepTheirOrderBecauseOrderIsPrecedence)
@@ -590,8 +655,11 @@ TEST(CustomisationFormat, TheTextOfTheSmallCustomisationReadsAsTheValueItWasWrit
 
 // The example docs/customisation.md prints under "A worked example", character
 // for character: a file a person may well copy to start their own. It reads
-// as what it says, and it is laid out as the writer lays a file out - so the
-// document's example and the format cannot drift apart unseen.
+// as what it says, and it is laid out as the writer lays a file out. This is
+// a COPY of the document's text, and the `docs` test (tools/check_docs.py,
+// check_worked_example) fails when the document's block is not this raw
+// string - so the document's example and the format cannot drift apart
+// unseen. Change one and the other must change with it.
 TEST(CustomisationFormat, TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted)
 {
     const std::string example = R"json({
@@ -736,6 +804,25 @@ TEST(CustomisationFormat, LineworkAndAutomationPresentButEmptyAreTheDefaultsAndN
     EXPECT_EQ(partial.linework->end, "END");
     EXPECT_TRUE(partial.automation->codesOnSurveyImport);
     EXPECT_FALSE(partial.automation->lineworkOnSurveyImport);
+    // And the other switch on its own, so that neither is read as the other.
+    const Customisation other =
+        readCustomisation(customisationWith(R"("automation": {"codesOnSurveyImport": false})"));
+    EXPECT_FALSE(other.automation->codesOnSurveyImport);
+    EXPECT_TRUE(other.automation->lineworkOnSurveyImport);
+
+    // Each of the seven spellings is the one its own member gives: seven
+    // different words, one a control.
+    const Customisation seven = readCustomisation(customisationWith(
+        R"("linework": {"start": "a", "end": "b", "close": "c", "arcStart": "d", "arcEnd": "e",
+                        "join": "f", "rectangle": "g"})"));
+    ASSERT_TRUE(seven.linework.has_value());
+    EXPECT_EQ(seven.linework->start, "a");
+    EXPECT_EQ(seven.linework->end, "b");
+    EXPECT_EQ(seven.linework->close, "c");
+    EXPECT_EQ(seven.linework->arcStart, "d");
+    EXPECT_EQ(seven.linework->arcEnd, "e");
+    EXPECT_EQ(seven.linework->join, "f");
+    EXPECT_EQ(seven.linework->rectangle, "g");
 }
 
 TEST(CustomisationFormat, ADefinitionWithNoStrokesReadsWithOrWithoutAnEmptyList)
@@ -812,6 +899,140 @@ TEST(CustomisationFormat, TheArrayADefinitionSitsInSaysWhetherItIsASymbol)
     // Not whether it is drawn at vertices: that is said separately, and a
     // symbol need not be.
     EXPECT_FALSE(read.library.find("Mark")->atVertices);
+
+    // Nor the other way about: a definition drawn at vertices that sits in
+    // "linestyles" is not a symbol for that. All four combinations exist.
+    const Customisation vertex = readCustomisation(customisationWith(
+        R"("linestyles": [{"name": "V", "atVertices": true}],
+           "symbols": [{"name": "S", "atVertices": true}])"));
+    ASSERT_NE(vertex.library.find("V"), nullptr);
+    EXPECT_TRUE(vertex.library.find("V")->atVertices);
+    EXPECT_FALSE(vertex.library.find("V")->symbol);
+    ASSERT_NE(vertex.library.find("S"), nullptr);
+    EXPECT_TRUE(vertex.library.find("S")->atVertices);
+    EXPECT_TRUE(vertex.library.find("S")->symbol);
+    // Written back, each is in the list it was read from and says for itself
+    // that it is drawn at vertices.
+    EXPECT_EQ(writeCustomisation(vertex), "{\n"
+                                          "  \"format\": \"katana-customisation\",\n"
+                                          "  \"version\": 1,\n"
+                                          "  \"name\": \"T\",\n"
+                                          "  \"linestyles\": [\n"
+                                          "    {\"name\": \"V\", \"atVertices\": true}\n"
+                                          "  ],\n"
+                                          "  \"symbols\": [\n"
+                                          "    {\"name\": \"S\", \"atVertices\": true}\n"
+                                          "  ]\n"
+                                          "}\n");
+}
+
+// Each of the nine words a rule's "sets" may be is one section of the model,
+// and that section is written as that word. Taken from the format's own list
+// (docs/customisation.md, "A rule"), which gives them in the order of the
+// sections and says what each is about: "feature" is where a code goes and how
+// it is drawn - the layer, colour, line or point and linestyle the model's Map
+// section holds - "attributes" are those on the string and "surface" is
+// whether the code goes into one, which the model calls tinable. The round
+// trip alone cannot see two of these words exchanged, because the reader and
+// the writer share one table of them.
+TEST(CustomisationFormat, EachWordARuleSetsIsOneSectionOfTheModelAndIsWrittenAsThatWord)
+{
+    const std::vector<std::pair<std::string, SurveySection>> words = {
+        {"feature", SurveySection::Map},
+        {"symbol", SurveySection::VertexSymbol},
+        {"text", SurveySection::VertexTextStyle},
+        {"pipe", SurveySection::Pipe},
+        {"vertexPipe", SurveySection::VertexPipe},
+        {"segmentPipe", SurveySection::SegmentPipe},
+        {"attributes", SurveySection::StringAttribute},
+        {"vertexAttributes", SurveySection::VertexAttribute},
+        {"surface", SurveySection::Tinable},
+    };
+    ASSERT_EQ(words.size(), 9u);
+    for (const auto& [word, section] : words) {
+        const Customisation read = readCustomisation(
+            customisationWith("\"codes\": [{\"key\": \"A\", \"sets\": \"" + word + "\"}]"));
+        ASSERT_EQ(read.map.size(), 1u) << word;
+        EXPECT_EQ(read.map.rules()[0].section, section) << word;
+
+        Customisation made;
+        made.name = "T";
+        SurveyRule rule;
+        rule.key = "A";
+        rule.section = section;
+        add(made, rule);
+        EXPECT_EQ(writeCustomisation(made), "{\n"
+                                            "  \"format\": \"katana-customisation\",\n"
+                                            "  \"version\": 1,\n"
+                                            "  \"name\": \"T\",\n"
+                                            "  \"codes\": [\n"
+                                            "    {\"key\": \"A\", \"sets\": \"" +
+                                                word +
+                                                "\"}\n"
+                                                "  ]\n"
+                                                "}\n")
+            << word;
+    }
+}
+
+// The reference rules repeat themselves - 446 of the 1,624 say again, field
+// for field, what an earlier rule said - and the format keeps a customisation
+// as it is: two rules alike are two rules, each on its own line, and the
+// second keeps its place in the order.
+TEST(CustomisationFormat, TwoRulesAlikeInEveryFieldAreBothKeptAndBothWritten)
+{
+    const Customisation read = readCustomisation(customisationWith(
+        R"("codes": [{"key": "WM*", "sets": "feature", "layer": "SURVEY"},
+                     {"key": "AC*", "sets": "symbol"},
+                     {"key": "WM*", "sets": "feature", "layer": "SURVEY"}])"));
+    ASSERT_EQ(read.map.size(), 3u);
+    EXPECT_EQ(read.map.rules()[0], read.map.rules()[2]);
+    EXPECT_EQ(read.map.rules()[1].key, "AC*");
+    EXPECT_EQ(writeCustomisation(read),
+              "{\n"
+              "  \"format\": \"katana-customisation\",\n"
+              "  \"version\": 1,\n"
+              "  \"name\": \"T\",\n"
+              "  \"codes\": [\n"
+              "    {\"key\": \"WM*\", \"sets\": \"feature\", \"layer\": \"SURVEY\"},\n"
+              "    {\"key\": \"AC*\", \"sets\": \"symbol\"},\n"
+              "    {\"key\": \"WM*\", \"sets\": \"feature\", \"layer\": \"SURVEY\"}\n"
+              "  ]\n"
+              "}\n");
+}
+
+// "In name order" is the order of the names' bytes, as the library keeps
+// them: every upper-case letter is before every lower-case one ('Z' is 5A,
+// 'a' is 61), so "Zinc" is before "apple".
+TEST(CustomisationFormat, DefinitionsAreWrittenInTheOrderOfTheirBytesSoUpperCaseComesFirst)
+{
+    Customisation customisation;
+    customisation.name = "T";
+    for (const char* name : {"apple", "Zinc", "zinc", "Apple"}) {
+        LineStyle definition;
+        definition.name = name;
+        definition.source = "T";
+        add(customisation, definition);
+    }
+    LineStyle symbol;
+    symbol.name = "Mark";
+    symbol.source = "T";
+    symbol.symbol = true;
+    add(customisation, symbol);
+    EXPECT_EQ(writeCustomisation(customisation), "{\n"
+                                                 "  \"format\": \"katana-customisation\",\n"
+                                                 "  \"version\": 1,\n"
+                                                 "  \"name\": \"T\",\n"
+                                                 "  \"linestyles\": [\n"
+                                                 "    {\"name\": \"Apple\"},\n"
+                                                 "    {\"name\": \"Zinc\"},\n"
+                                                 "    {\"name\": \"apple\"},\n"
+                                                 "    {\"name\": \"zinc\"}\n"
+                                                 "  ],\n"
+                                                 "  \"symbols\": [\n"
+                                                 "    {\"name\": \"Mark\"}\n"
+                                                 "  ]\n"
+                                                 "}\n");
 }
 
 TEST(CustomisationFormat, ADefinitionsSourceIsItsFromOrElseTheFilesName)
@@ -839,20 +1060,48 @@ TEST(CustomisationFormat, NegativeZeroSurvivesWhereverANumberIs)
     definition.source = "Z";
     definition.length = -0.0; // equal to the default 0 by ==, and still not left out
     definition.origin = {-0.0, 0.0};
-    definition.strokes = {moveTo(-0.0, 0.0), arc(-0.0, -0.0, 0.0)};
+    definition.anchor1 = {0.0, -0.0};
+    definition.anchor2 = {-0.0, 0.0};
+    definition.strokes = {moveTo(-0.0, 0.0), arc(-0.0, -0.0, 0.0), circle(-0.0), dot(-0.0)};
+    addText(definition, StrokeText{"", -0.0, -0.0, "", "", -0.0, {-0.0, 0.0, -0.0}});
     add(customisation, definition);
     SurveyRule rule;
     rule.key = "Z";
-    rule.symbol = SurveySymbol{"", "", -0.0, -0.0, 0.0, 0.0};
+    rule.symbol = SurveySymbol{"", "", -0.0, -0.0, -0.0, -0.0};
+    SurveyTextStyle style;
+    style.size = -0.0;
+    style.offset = -0.0;
+    style.raise = -0.0;
+    style.angle = -0.0;
+    style.slant = -0.0;
+    style.widthFactor = -0.0;
+    rule.textStyle = style;
     add(customisation, rule);
 
+    // Every number a definition and a rule have, each written -0.0 where it
+    // is negative zero and 0 where it is zero: by hand from the layout, with
+    // nothing left out for being "equal to" a default of 0 or 1.
     const std::string text = writeCustomisation(customisation);
-    EXPECT_NE(text.find("\"length\": -0.0"), std::string::npos) << text;
-    EXPECT_NE(text.find("\"origin\": [-0.0, 0]"), std::string::npos) << text;
-    EXPECT_NE(text.find("[\"move\", -0.0, 0]"), std::string::npos) << text;
-    EXPECT_NE(text.find("[\"arc\", -0.0, -0.0, 0]"), std::string::npos) << text;
-    EXPECT_NE(text.find("\"symbol\": {\"size\": -0.0, \"rotation\": -0.0}"), std::string::npos)
-        << text;
+    EXPECT_EQ(
+        text,
+        R"json({
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "Z",
+  "linestyles": [
+    {"name": "Z", "length": -0.0, "origin": [-0.0, 0], "anchors": [[0, -0.0], [-0.0, 0]], "strokes": [
+      ["move", -0.0, 0],
+      ["arc", -0.0, -0.0, 0],
+      ["circle", -0.0],
+      ["dot", -0.0],
+      ["text", {"angle": -0.0, "height": -0.0, "widthFactor": -0.0, "extra": [-0.0, 0, -0.0]}]
+    ]}
+  ],
+  "codes": [
+    {"key": "Z", "sets": "feature", "symbol": {"size": -0.0, "rotation": -0.0, "offset": -0.0, "raise": -0.0}, "text": {"size": -0.0, "offset": -0.0, "raise": -0.0, "angle": -0.0, "slant": -0.0, "widthFactor": -0.0}}
+  ]
+}
+)json");
 
     const Customisation again = readCustomisation(text);
     const LineStyle* read = again.library.find("Z");
@@ -860,22 +1109,46 @@ TEST(CustomisationFormat, NegativeZeroSurvivesWhereverANumberIs)
     EXPECT_TRUE(std::signbit(read->length));
     EXPECT_TRUE(std::signbit(read->origin.x));
     EXPECT_FALSE(std::signbit(read->origin.y));
-    ASSERT_EQ(read->strokes.size(), 2u);
+    EXPECT_FALSE(std::signbit(read->anchor1.x));
+    EXPECT_TRUE(std::signbit(read->anchor1.y));
+    EXPECT_TRUE(std::signbit(read->anchor2.x));
+    EXPECT_FALSE(std::signbit(read->anchor2.y));
+    ASSERT_EQ(read->strokes.size(), 5u);
     EXPECT_TRUE(std::signbit(read->strokes[0].point.x));
     EXPECT_FALSE(std::signbit(read->strokes[0].point.y));
     EXPECT_TRUE(std::signbit(read->strokes[1].radius));
     EXPECT_TRUE(std::signbit(read->strokes[1].startAngle));
     EXPECT_FALSE(std::signbit(read->strokes[1].endAngle));
+    EXPECT_TRUE(std::signbit(read->strokes[2].radius));
+    EXPECT_TRUE(std::signbit(read->strokes[3].radius));
+    ASSERT_EQ(read->texts.size(), 1u);
+    EXPECT_TRUE(std::signbit(read->texts[0].angle));
+    EXPECT_TRUE(std::signbit(read->texts[0].height));
+    EXPECT_TRUE(std::signbit(read->texts[0].widthFactor));
+    EXPECT_TRUE(std::signbit(read->texts[0].unnamed[0]));
+    EXPECT_FALSE(std::signbit(read->texts[0].unnamed[1]));
+    EXPECT_TRUE(std::signbit(read->texts[0].unnamed[2]));
     ASSERT_EQ(again.map.size(), 1u);
-    EXPECT_TRUE(std::signbit(again.map.rules()[0].symbol->size));
-    EXPECT_TRUE(std::signbit(again.map.rules()[0].symbol->rotation));
-    EXPECT_FALSE(std::signbit(again.map.rules()[0].symbol->offset));
+    const SurveyRule& back = again.map.rules()[0];
+    ASSERT_TRUE(back.symbol.has_value());
+    EXPECT_TRUE(std::signbit(back.symbol->size));
+    EXPECT_TRUE(std::signbit(back.symbol->rotation));
+    EXPECT_TRUE(std::signbit(back.symbol->offset));
+    EXPECT_TRUE(std::signbit(back.symbol->raise));
+    ASSERT_TRUE(back.textStyle.has_value());
+    EXPECT_TRUE(std::signbit(back.textStyle->size));
+    EXPECT_TRUE(std::signbit(back.textStyle->offset));
+    EXPECT_TRUE(std::signbit(back.textStyle->raise));
+    EXPECT_TRUE(std::signbit(back.textStyle->angle));
+    EXPECT_TRUE(std::signbit(back.textStyle->slant));
+    EXPECT_TRUE(std::signbit(back.textStyle->widthFactor));
 }
 
-// A property over doubles: whatever finite number a stroke holds comes back
-// with the same BITS. The classes it claims to reach are counted and each
-// count is asserted, because a generator that never made a subnormal would
-// pass this without having tried one.
+// A property over doubles: whatever finite number a customisation holds comes
+// back with the same BITS, by every way the reader takes a number in. The
+// classes it claims to reach are counted and each count is asserted, because
+// a generator that never made a subnormal would pass this without having
+// tried one.
 TEST(CustomisationFormat, EveryFiniteDoubleComesBackBitForBit)
 {
     // The cases a text form is most likely to get wrong, named.
@@ -920,10 +1193,21 @@ TEST(CustomisationFormat, EveryFiniteDoubleComesBackBitForBit)
     for (int i = 0; i < 50; ++i) {
         values.push_back(std::bit_cast<double>(next() & 0x800FFFFFFFFFFFFFULL));
     }
-    if (values.size() % 2 != 0) {
+    // Taken two at a time and three at a time below, so a multiple of six.
+    while (values.size() % 6 != 0) {
         values.push_back(1.5);
     }
 
+    // Every value goes down each of the three ways the reader takes a number
+    // in, which share no code past the JSON library:
+    //   * a stroke's values, made into doubles as the text is parsed;
+    //   * a point read from the tree: a definition's origin and two anchors;
+    //   * a member read from the tree: the angle and width factor of a text
+    //     stroke's object and its three "extra" numbers, a rule's symbol
+    //     (rotation, offset, raise) and its text (offset, raise, angle, slant,
+    //     width factor).
+    // No member is used that the model restricts (a length, a factor, a
+    // size), so any finite double is a value each of these may hold.
     Customisation customisation;
     customisation.name = "D";
     LineStyle definition;
@@ -932,13 +1216,80 @@ TEST(CustomisationFormat, EveryFiniteDoubleComesBackBitForBit)
     for (std::size_t i = 0; i < values.size(); i += 2) {
         definition.strokes.push_back(moveTo(values[i], values[i + 1]));
     }
+    for (std::size_t i = 0; i < values.size(); i += 3) {
+        StrokeText text;
+        text.angle = values[i];
+        text.widthFactor = values[i + 1];
+        text.unnamed = {values[i], values[i + 1], values[i + 2]};
+        addText(definition, text);
+    }
     add(customisation, definition);
+    for (std::size_t i = 0; i < values.size(); i += 2) {
+        LineStyle points;
+        points.name = "P" + std::to_string(i / 2);
+        points.source = "D";
+        points.origin = {values[i], values[i + 1]};
+        points.anchor1 = {values[i + 1], values[i]};
+        points.anchor2 = {values[i], values[i]};
+        add(customisation, points);
+    }
+    for (std::size_t i = 0; i < values.size(); i += 3) {
+        SurveyRule rule;
+        rule.key = "R";
+        rule.symbol = SurveySymbol{"", "", 0, values[i], values[i + 1], values[i + 2]};
+        SurveyTextStyle style;
+        style.offset = values[i];
+        style.raise = values[i + 1];
+        style.angle = values[i + 2];
+        style.slant = values[i];
+        style.widthFactor = values[i + 1];
+        rule.textStyle = style;
+        add(customisation, rule);
+    }
 
     const std::string text = writeCustomisation(customisation);
     const Customisation again = readCustomisation(text);
     const LineStyle* read = again.library.find("D");
     ASSERT_NE(read, nullptr);
-    ASSERT_EQ(read->strokes.size(), values.size() / 2);
+    ASSERT_EQ(read->strokes.size(), values.size() / 2 + values.size() / 3);
+    ASSERT_EQ(read->texts.size(), values.size() / 3);
+    ASSERT_EQ(again.map.size(), values.size() / 3);
+
+    const auto same = [](double back, double value) {
+        return std::bit_cast<std::uint64_t>(back) == std::bit_cast<std::uint64_t>(value);
+    };
+    for (std::size_t i = 0; i < values.size(); i += 2) {
+        const double x = values[i];
+        const double y = values[i + 1];
+        const LineStyle* points = again.library.find("P" + std::to_string(i / 2));
+        ASSERT_NE(points, nullptr) << i;
+        ASSERT_TRUE(same(points->origin.x, x) && same(points->origin.y, y))
+            << "an origin, values " << i << ": wrote " << x << " and " << y << ", read "
+            << points->origin.x << " and " << points->origin.y;
+        ASSERT_TRUE(same(points->anchor1.x, y) && same(points->anchor1.y, x) &&
+                    same(points->anchor2.x, x) && same(points->anchor2.y, x))
+            << "the anchors, values " << i << ": " << x << " and " << y;
+    }
+    for (std::size_t i = 0; i < values.size(); i += 3) {
+        const double a = values[i];
+        const double b = values[i + 1];
+        const double c = values[i + 2];
+        const StrokeText& stroke = read->texts[i / 3];
+        ASSERT_TRUE(same(stroke.angle, a) && same(stroke.widthFactor, b))
+            << "a text stroke's angle and width factor, values " << i << ": " << a << " and " << b;
+        ASSERT_TRUE(same(stroke.unnamed[0], a) && same(stroke.unnamed[1], b) &&
+                    same(stroke.unnamed[2], c))
+            << "a text stroke's extra, values " << i << ": " << a << ", " << b << " and " << c;
+        const SurveyRule& rule = again.map.rules()[i / 3];
+        ASSERT_TRUE(rule.symbol.has_value() && rule.textStyle.has_value()) << i;
+        ASSERT_TRUE(same(rule.symbol->rotation, a) && same(rule.symbol->offset, b) &&
+                    same(rule.symbol->raise, c))
+            << "a rule's symbol, values " << i << ": " << a << ", " << b << " and " << c;
+        ASSERT_TRUE(same(rule.textStyle->offset, a) && same(rule.textStyle->raise, b) &&
+                    same(rule.textStyle->angle, c) && same(rule.textStyle->slant, a) &&
+                    same(rule.textStyle->widthFactor, b))
+            << "a rule's text, values " << i << ": " << a << ", " << b << " and " << c;
+    }
 
     std::size_t negative = 0;
     std::size_t subnormal = 0;
@@ -948,7 +1299,7 @@ TEST(CustomisationFormat, EveryFiniteDoubleComesBackBitForBit)
         const Stroke& stroke = read->strokes[i / 2];
         const double back = i % 2 == 0 ? stroke.point.x : stroke.point.y;
         ASSERT_EQ(std::bit_cast<std::uint64_t>(back), std::bit_cast<std::uint64_t>(values[i]))
-            << "value " << i << ": wrote " << values[i] << ", read " << back;
+            << "a stroke, value " << i << ": wrote " << values[i] << ", read " << back;
         negative += std::signbit(values[i]) ? 1 : 0;
         subnormal += std::fpclassify(values[i]) == FP_SUBNORMAL ? 1 : 0;
         beyondInteger += std::abs(values[i]) >= 18446744073709551616.0 ? 1 : 0;
@@ -980,6 +1331,12 @@ TEST(CustomisationFormat, TheOptionsLeaveOutLinestylesSymbolsOrCodesAndNothingEl
     EXPECT_EQ(rules.colours, whole.colours) << "the colours go with whatever is written";
     EXPECT_EQ(rules.linework, whole.linework);
     EXPECT_EQ(rules.name, "Site");
+    // "And nothing else": what was read is the whole value with only its
+    // definitions gone - the description, the notice, the sources, the base,
+    // the colours, the linework and the automation are all as they were.
+    Customisation withoutDefinitions = whole;
+    withoutDefinitions.library = katana::entity::StyleLibrary{};
+    EXPECT_TRUE(rules == withoutDefinitions);
 
     CustomisationWriteOptions symbolsOnly;
     symbolsOnly.linestyles = false;
@@ -987,6 +1344,12 @@ TEST(CustomisationFormat, TheOptionsLeaveOutLinestylesSymbolsOrCodesAndNothingEl
     const Customisation symbols = readCustomisation(writeCustomisation(whole, symbolsOnly));
     EXPECT_EQ(symbols.library.names(), (std::vector<std::string>{"Peg"}));
     EXPECT_TRUE(symbols.map.empty());
+    Customisation onlySymbols = whole;
+    onlySymbols.map = katana::entity::SurveyMap{};
+    for (const char* linestyle : {"Empty", "Fence", "Gate"}) {
+        ASSERT_TRUE(onlySymbols.library.remove(linestyle).ok()) << linestyle;
+    }
+    EXPECT_TRUE(symbols == onlySymbols);
 
     CustomisationWriteOptions linestylesOnly;
     linestylesOnly.symbols = false;
@@ -994,6 +1357,13 @@ TEST(CustomisationFormat, TheOptionsLeaveOutLinestylesSymbolsOrCodesAndNothingEl
     const Customisation linestyles = readCustomisation(writeCustomisation(whole, linestylesOnly));
     EXPECT_EQ(linestyles.library.names(), (std::vector<std::string>{"Empty", "Fence", "Gate"}));
     EXPECT_TRUE(linestyles.map.empty());
+    Customisation onlyLinestyles = whole;
+    onlyLinestyles.map = katana::entity::SurveyMap{};
+    ASSERT_TRUE(onlyLinestyles.library.remove("Peg").ok());
+    EXPECT_TRUE(linestyles == onlyLinestyles);
+
+    // With every option on, the whole value.
+    EXPECT_TRUE(readCustomisation(writeCustomisation(whole, CustomisationWriteOptions{})) == whole);
 }
 
 TEST(CustomisationFormat, OnlyTheNamedDefinitionsAreWrittenInNameOrderWhateverOrderTheyAreNamedIn)
@@ -1177,6 +1547,50 @@ TEST(Customisation, ANameIsOneLineOfTextAndNotAPath)
     EXPECT_EQ(notText.error().code, ErrorCode::InvalidArgument);
 }
 
+// A name is an identity - a project records it, and a drawing is matched to
+// its customisation by it - so two names that look alike must BE alike, and a
+// name must be something a person can see. The project's store would take
+// every one of these; they are refused here.
+TEST(Customisation, ANameHasNoBlankAtEitherEndAndNoCharacterThatCannotBeSeen)
+{
+    using katana::core::ErrorCode;
+    using katana::entity::validateCustomisationName;
+    // A blank before or after, and blanks alone.
+    for (const char* name : {"NSW ", " NSW", " ", "   ", " Site set "}) {
+        const auto status = validateCustomisationName(name);
+        ASSERT_FALSE(status.ok()) << '"' << name << '"';
+        EXPECT_EQ(status.error().code, ErrorCode::InvalidArgument);
+        EXPECT_NE(status.error().message.find("blank"), std::string::npos)
+            << status.error().describe();
+    }
+    // The control characters: U+0000 to U+001F and U+007F. A tab, an escape
+    // sequence that would colour a terminal, a NUL in the middle, a delete, a
+    // form feed; and a tab at an end is a control character before it is a
+    // blank.
+    for (const std::string& name :
+         {std::string("a\tb"), std::string("a\x1B[31mb"), std::string("a\0b", 3),
+          std::string("a\x7F"), std::string("\fNSW"), std::string("NSW\t"), std::string("\x01")}) {
+        const auto status = validateCustomisationName(name);
+        ASSERT_FALSE(status.ok()) << name.size() << " bytes";
+        EXPECT_EQ(status.error().code, ErrorCode::InvalidArgument);
+        EXPECT_NE(status.error().message.find("control character"), std::string::npos)
+            << status.error().describe();
+    }
+    // What is refused is shown with the character made visible, as JSON
+    // escapes it, so that the refusal itself can be read.
+    const auto escape = validateCustomisationName("a\x1B[31mb");
+    ASSERT_FALSE(escape.ok());
+    EXPECT_EQ(escape.error().context, "\"a\\u001b[31mb\"");
+
+    // A blank inside a name, two of them, and what is not ASCII (a no-break
+    // space, C2 A0, included: only the plain blank is looked for) are a name.
+    for (const char* name : {"Site set 2026", "a  b", "N S W", "Z\xC3\xBCrich S\xC3\xBC"
+                                                              "d",
+                             "NSW\xC2\xA0"}) {
+        EXPECT_TRUE(validateCustomisationName(name).ok()) << '"' << name << '"';
+    }
+}
+
 // FNV-1a, 64-bit, against the algorithm's published test vectors (Fowler,
 // Noll and Vo: the empty string, "a" and "foobar") - the vectors the cad
 // layer's sourceNameHash is pinned to, here in the 16 digits a file holds.
@@ -1186,6 +1600,10 @@ TEST(Customisation, TheDigestIsFnv1a64AsSixteenLowerCaseHexDigits)
     EXPECT_EQ(customisationDigest(""), "cbf29ce484222325");
     EXPECT_EQ(customisationDigest("a"), "af63dc4c8601ec8c");
     EXPECT_EQ(customisationDigest("foobar"), "85944171f73967e8");
+    // Sixteen digits ALWAYS: none of the three above begins with 0, so a
+    // digest written without its leading zeros would pass them. The same
+    // published list gives 0x08985907b541d342 for "fo".
+    EXPECT_EQ(customisationDigest("fo"), "08985907b541d342");
     // Every byte counts, a zero byte and one above 0x7F included.
     EXPECT_NE(customisationDigest(std::string("a\0", 2)), customisationDigest("a"));
     EXPECT_NE(customisationDigest("\xC3\xBC"), customisationDigest("\xC3\xBD"));

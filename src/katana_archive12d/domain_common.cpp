@@ -3,14 +3,11 @@
 #include <cstdint>
 
 #include "katana/archive12d/domain.hpp"
-#include "katana/entity/colour_names.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "plan_geometry.hpp"
 #include "text_utilities.hpp"
 
 namespace katana::archive12d {
-
-using katana::entity::Color;
 
 std::string_view symbolForLinestyle(std::string_view name)
 {
@@ -18,23 +15,8 @@ std::string_view symbolForLinestyle(std::string_view name)
 }
 
 // The standard colour names, their fold and their RGB are the entity layer's
-// (entity/colour_names.hpp): a customisation's own colour table is resolved
-// beside them there, by cad, which may not see this module. These three keep
-// the names the archive import and export have always called them by.
-std::vector<std::string> standardColourNames()
-{
-    return katana::entity::standardColourNames();
-}
-
-std::optional<Color> standardColour(std::string_view name)
-{
-    return katana::entity::standardColour(name);
-}
-
-std::string nearestStandardColour(const Color& colour)
-{
-    return katana::entity::nearestStandardColour(colour);
-}
+// (entity/colour_names.hpp); this module names them with using-declarations
+// (domain.hpp) and defines nothing of its own for them.
 
 std::string layerPathForModel(std::string_view modelName, std::string_view prefix)
 {

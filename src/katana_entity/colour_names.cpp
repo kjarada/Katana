@@ -72,9 +72,16 @@ constexpr std::array<NamedColour, 27> kStandardColours = {{
 
 std::string foldColourName(std::string_view name)
 {
-    std::string key = katana::core::lowered(katana::core::trimmed(name));
+    std::string key = katana::core::lowered(name);
     std::replace(key.begin(), key.end(), '_', ' ');
     std::replace(key.begin(), key.end(), '-', ' ');
+    // Trimmed AFTER the separators have become blanks, so that one at an end
+    // goes as a blank there does and "red_" is "red". The other order, which
+    // this had while it was the archive import's own, left "red " - a folded
+    // name with a blank at its end, which folded again was "red": two answers
+    // from one fold, and a table could then hold "red_" beside the standard
+    // red it is another spelling of.
+    key = std::string(katana::core::trimmed(key));
     if (key == "gray") {
         key = "grey";
     } else if (key.ends_with(" gray")) {
@@ -122,9 +129,9 @@ Status ColourTable::add(std::string name, const Color& colour)
         return makeError(ErrorCode::InvalidArgument, "a colour name is not valid UTF-8");
     }
     std::string folded = foldColourName(name);
-    // "_" folds to a blank: a name made of nothing but separators names
-    // nothing either.
-    if (katana::core::trimmed(folded).empty()) {
+    // Blanks and separators fold away at the ends: a name made of nothing
+    // else names nothing.
+    if (folded.empty()) {
         return makeError(ErrorCode::InvalidArgument, "a colour name is empty");
     }
     if (standardEntry(folded) != nullptr) {

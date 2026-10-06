@@ -48,12 +48,19 @@ namespace katana::entity {
 inline constexpr std::string_view kCustomisationFormat = "katana-customisation";
 inline constexpr int kCustomisationVersion = 1;
 
-// A customisation's name: not empty, valid UTF-8, and with no line break, '/'
-// or '\'. InvalidArgument otherwise. The name is written into a project as the
-// record of what the drawing was drawn with - one name a line, never a path -
-// and the project store refuses exactly these (storage::ProjectMetadata), so a
-// name that passed here and failed there would make every SAVE of the session
-// fail.
+// A customisation's name: not empty, valid UTF-8, with no line break, '/' or
+// '\', no control character (U+0000 to U+001F, U+007F) and no blank at either
+// end. InvalidArgument otherwise.
+//
+// The first three are what the project store refuses (storage::ProjectMetadata):
+// the name is written into a project as the record of what the drawing was
+// drawn with - one name a line, never a path - so a name that passed here and
+// failed there would make every SAVE of the session fail. The last two the
+// store would take. They are refused because the name is an IDENTITY, which a
+// project is matched to its customisation by: "NSW " and "NSW" would be two
+// customisations that look like one, and a tab or an escape cannot be seen
+// where the name is shown. A layer's name is held to the same
+// (validateLayerPath).
 [[nodiscard]] katana::core::Status validateCustomisationName(std::string_view name);
 
 // One customisation that went into this one, as the session's load record
@@ -134,16 +141,21 @@ struct CustomisationWriteOptions {
 // ParseFailure "not a Katana customisation file" for text that is not JSON or
 // whose "format" is not kCustomisationFormat - a survey code file (.mapfile)
 // and a style library (.4d) get exactly that, and so do bytes that are
-// neither UTF-8 nor UTF-16 (no code page is guessed at). Unsupported for a
-// "version" newer than kCustomisationVersion. ParseFailure, naming the entry
-// and the member (`codes[57] "WM*": unknown member "linesytle"`), for a member
-// the format does not know, a member given twice, a required member missing,
-// a value of the wrong type, a word outside an enumeration and a stroke of
-// the wrong length. InvalidArgument, naming the entry, for what is
-// well-formed and still not a customisation: a bad name, two definitions of
-// one name, a colour name the table refuses, and everything entity::validate
-// refuses of a definition, a rule or the linework codes. Indices count from
-// 0, as a JSON path does.
+// neither UTF-8 nor UTF-16 (no code page is guessed at), a byte order mark
+// over bytes that break it included. Unsupported for a "version" newer than
+// kCustomisationVersion. ParseFailure, naming the entry and the member
+// (`codes[57] "WM*": unknown member "linesytle"`), for a member the format
+// does not know, a member given twice, a required member missing, a value of
+// the wrong type, a word outside an enumeration, a stroke of the wrong length
+// and a number a double cannot hold - one too large, or one so small it would
+// be read as 0. InvalidArgument, naming the entry, for what is well-formed
+// and still not a customisation: a bad name, two definitions of one name, a
+// colour name the table refuses, and everything entity::validate refuses of
+// a definition, a rule or the linework codes. Indices count from 0, as a JSON
+// path does.
+//
+// A Result whatever the text: one nested a hundred thousand lists deep is
+// refused like any other, and nothing is thrown.
 [[nodiscard]] katana::core::Result<Customisation> customisationFromJson(std::string_view text);
 
 // Writes `customisation` as the text of a file: UTF-8, deterministic (the same
