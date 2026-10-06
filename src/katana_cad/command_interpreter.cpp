@@ -4,6 +4,7 @@
 #include "katana/cad/annotation/dimension_style_verbs.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/global_modify.hpp"
+#include "katana/cad/linework_verbs.hpp"
 #include "katana/core/text.hpp"
 
 #include "katana/cad/parcel.hpp"
@@ -572,6 +573,10 @@ Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS:
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK schedule.csv|scope ...  AS 5488 subsurface utilities:
           grade, verify, clear, check against a schema, on a schedule or what is drawn;
           DRAW schedule.csv, REGRADE scope, SCHEDULE out.csv scope (HELP UTILITY)
+Linework  LINEWORK [scope] [WHERE k=v ...] [ORDER number|entity] [PREVIEW]   joins coded
+          survey points into lines by the survey codes and their control codes, one undo
+          step; no scope word: the selection, else the drawing. Points their survey job
+          has strung, and lines already drawn, are left out and counted (HELP LINEWORK)
 Views     the desktop window's views (katana_cli and katana_mcp have none, and refuse these):
           VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id   a record per view;
           id is the view= a record gives, not its title's number
@@ -820,6 +825,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     const Tokens args(tokens->begin() + 1, tokens->end());
 
     if (verb == "HELP") {
+        if (!args.empty() && isLineworkVerb(args.front())) {
+            return lineworkVerbHelp();
+        }
         if (!args.empty() && plotting::isSheetVerb(args.front())) {
             return plotting::sheetVerbHelp();
         }
@@ -840,6 +848,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (plotting::isSheetVerb(verb)) {
         return plotting::runSheetVerb(document_, *tokens, sheetContext_);
+    }
+    if (isLineworkVerb(verb)) {
+        return runLineworkVerb(document_, *tokens, scopeViews_);
     }
     if (utilities::isUtilityVerb(verb)) {
         return utilities::runUtilityVerb(document_, *tokens, scopeViews_);

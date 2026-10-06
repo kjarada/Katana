@@ -1148,7 +1148,7 @@ tool to be able to act that way. Global Modify's scope and filter became the
 one mechanism for it (`include/katana/cad/scope_verbs.hpp`): one set of
 words, read by one parser and resolved by the one matcher,
 `cad::matchEntities`. Today `MODIFY`, the `UTILITY` verbs, `ZOOM`, `PROP TREE`
-and (since 2026-10-06) `CODE` and `CODE CENSUS` take them; the
+and (since 2026-10-06) `CODE`, `CODE CENSUS` and `LINEWORK` take them; the
 standing rule is that every verb that reads or changes drawing data
 is to take them too, and the others - `ERASE`, `CHLAYER`, `SELECT` and the
 rest - still act on the selection or their own arguments until they do.
@@ -1162,13 +1162,17 @@ Words are case-insensitive; `SEL`, `ALL` and `LAYER` are the aliases `MODIFY`
 already took. For `MODIFY` no scope word is the selection; a `UTILITY` verb
 needs a scope word or `WHERE`, since any other first word is its file's path.
 `WHERE` with no scope word before it is the selection, filtered, for every
-verb that reads the shared words but one - `EXPORT` and the GDAL verb's `FROM`
+verb that reads the shared words but two - `EXPORT` and the GDAL verb's `FROM`
 included, though `EXPORT` with no scope words at all is the whole drawing;
 `katana_mcp`'s `where` without `scope` is written `SELECTION WHERE`
-(`docs/interop.md`, "Export options"). The one is `CODE`, whose scope with no
-scope word is the whole drawing with or without a `WHERE`: it was the whole
-drawing before it took a scope, and a script's `CODE` must not come to mean
-whatever is selected (`docs/customisation.md`, "The verbs").
+(`docs/interop.md`, "Export options"). The two have a default of their own.
+`CODE`'s scope with no scope word is the whole drawing with or without a
+`WHERE`: it was the whole drawing before it took a scope, and a script's
+`CODE` must not come to mean whatever is selected (`docs/customisation.md`,
+"The verbs"). `LINEWORK`, with no scope word, with or without a bare `WHERE`,
+takes the selection when anything is selected and the whole drawing when
+nothing is, and its reply's `scope=` says which (`docs/survey_coding.md`,
+"`LINEWORK` on the command line").
 The `WHERE` keys are Global Modify's filter: `TYPE=point,line`,
 `LAYER=pat[,pat]`, `STYLE=pat|ByLayer`, `COLOUR=#RRGGBB|ByLayer`,
 `PROP=key[:pat]`, `TEXT=pat` and `DRAWN`, with `*` and `?` wildcards.

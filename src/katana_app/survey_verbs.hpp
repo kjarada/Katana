@@ -9,7 +9,7 @@
 //
 //   SURVEY READ <file> [FORMAT <id>]
 //   SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>] [SETTINGS <file>]
-//                 [SET <key>=<value> ...]
+//                 [SET <key>=<value> ...] [CODES on|off] [LINEWORK on|off]
 //
 // READ reads the file and says what the reader made of it, changing nothing.
 // IMPORT does what the import wizard's Import does: the reduction, the points
@@ -18,6 +18,25 @@
 // detected unless FORMAT names it; a detection that is not certain is
 // refused, naming the candidates, so that a file is never read with a reader
 // that only thinks it fits. Each option is given at most once.
+//
+// IMPORT ALSO CODES AND STRINGS WHAT IT DRAWS, in that same undo step (the
+// job's own finish, cad/survey_finish.hpp): the points go to the layers and
+// styles their survey codes give them, and are joined into lines - the
+// strings the file numbered itself, then the other points by their codes. It
+// is on unless something says otherwise, because a coded field file imported
+// as bare points on one layer is not what anyone imports it for:
+//   - CODES on|off and LINEWORK on|off say so for the one line;
+//   - without the word, the drawing's customisation does (its automation
+//     switches, both on until a customisation or a setting turns one off);
+//   - and with NO survey codes loaded nothing is asked of the job at all: it
+//     is imported exactly as it was before this existed - the same drawing,
+//     the same job and report, the same lines of this reply - and only the
+//     two records below are added, saying reason=no-survey-codes.
+// cad::surveyImportFinish decides all three, for this verb and the wizard
+// alike; the colours are the Document's resolver's and the control codes the
+// Document's. Strings are ordered by point number. A step with nothing to do
+// is said and is no failure; a step that FAILS (a rule that cannot become a
+// layer) fails the whole import, points included.
 //
 // The reduction runs with the wizard's starting settings - ReductionSettings'
 // defaults, holding the control the file declares - or, with SETTINGS, the
@@ -48,6 +67,9 @@
 //                                          (each line that is not the defaults')
 //   settings_warning text="line 3: ..."    (a SETTINGS key this version skipped)
 //   imported job=job-1 entities=4 layer=survey/points reduction_warnings=2  (IMPORT only)
+//                                          (entities= is the POINTS drawn, never the
+//                                          lines; reduction_warnings= counts what the
+//                                          finish left over too, cad::finishWarnings)
 //   held id=CP1 from=drawing entity=7 northing=5e+06 easting=5e+05 height=100
 //                                          (each point held; from=file has no entity)
 //   reduction method=radiation adjustments=0 rejected=0
@@ -55,6 +77,28 @@
 //     redundancy=6 variance_factor=0.1697573300133813 global_test=failed flagged=0 rejected=0
 //                                          (each adjustment run; none where absent)
 //   reduction_warning text="..."           (the first 20; then reduction_warnings_more=<n>)
+//   coded points=4 matched=3 unmatched_codes=1 layers=2 styles=2
+//                                          (points: those carrying a code; matched: those
+//                                          a rule answers; unmatched_codes: the distinct
+//                                          codes none does; the layers and styles the
+//                                          coding created)
+//     or  coded none reason=off|no-survey-codes|no-codes-in-file|no-rule-matches|no-points
+//   unmatched_code text=ZZ                 (each such code, the first 10; then
+//                                          unmatched_codes_more=<n>)
+//   linework lines=2 unplaced=3 layers=0 styles=0
+//                                          (lines drawn; strings of the file and points
+//                                          in no line - a survey mark is one, so the
+//                                          warnings say which of them are a fault; the
+//                                          layers and styles the LINES made beyond the
+//                                          coding's - under CODES off, all of them)
+//     or  linework none reason=<the same words>
+//   resection setup=S1 ...                 (each resected setup, then its flagged
+//   resection_residual setup=S1 ...        residuals: docs/survey.md)
+//
+// The coded and linework records follow the reduction's warnings and come
+// before the resections', not straight after `imported`: the lines from
+// `imported` to the first warning, and the resection records at the end, are
+// held where they stand by the tests written before these two existed.
 
 #include <string>
 #include <string_view>
