@@ -436,7 +436,8 @@ katana::core::Status checkLinetypeName(const Document& document, std::string_vie
     if (const LineStyle* definition = document.definitionFor(name); definition != nullptr) {
         if (definition->atVertices) {
             return makeError(ErrorCode::InvalidArgument,
-                             "that is a vertex symbol, not a linestyle: give it as the symbol",
+                             "that is an `at vertices` symbol, not a linestyle: give it as the "
+                             "symbol",
                              std::string(name));
         }
         return {};

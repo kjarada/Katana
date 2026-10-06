@@ -8,7 +8,7 @@
 //   centre  a grid of 64-pixel pictures (DefinitionThumbnails), captioned
 //           with the name and badged with how many entities draw it, under
 //           a FilterBar: search over name, group and survey code, and the
-//           chips All / In drawing / Used by codes / Missing / Vertex mode
+//           chips All / In drawing / Used by codes / Missing / At vertices
 //   right   a StylePreview at a plot scale (insertion crosshair, scale bar),
 //           the details of the current symbol - including how big it
 //           prints: "2 x 2 mm at 1:500, 1 x 1 m on the ground" - and the

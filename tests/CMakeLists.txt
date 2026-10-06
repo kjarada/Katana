@@ -1232,15 +1232,18 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The code manager explaining a fixture code. By hand from
     # test_survey.mapfile: WM01 is met by the prefix key WM* (rule #0 of the
-    # fixture, map_data), which puts it on the layer TEST SERVICES (the
-    # rule's model field).
+    # fixture, a feature rule), which puts it on the layer TEST SERVICES. The
+    # field is "layer" and the section "feature" - the Katana customisation
+    # format's words, where the window used to show the survey code file's
+    # `model` and `map_data`: the expression was changed from the table "The
+    # words a rule is shown by" in docs/customisation.md, not from a run.
     add_test(NAME qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
             "-DDRIVE=@formatSurveyCodes|testCode=WM01|?explainHeading|?explainFields"
-            "-DEXPECT=--dialog formatSurveyCodes opened surveyCodeManagerDialog \"Survey Code Manager\"[\r\n]+explainHeading: WM01: matched - met by the prefix key WM\\*[^\r\n]*[\r\n]+explainFields: model \\| TEST SERVICES \\| #[0-9]+ WM\\* \\(map_data\\)"
+            "-DEXPECT=--dialog formatSurveyCodes opened surveyCodeManagerDialog \"Survey Code Manager\"[\r\n]+explainHeading: WM01: matched - met by the prefix key WM\\*[^\r\n]*[\r\n]+explainFields: layer \\| TEST SERVICES \\| #[0-9]+ WM\\* \\(feature\\)"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_code_manager_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # What Format says in the real window, in general words: every item of

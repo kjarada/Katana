@@ -52,11 +52,6 @@ enum class StyleUnits {
     TwoPoint,
 };
 
-[[nodiscard]] const char* toString(StyleUnits units);
-// nullopt rather than a default for a word this does not know, so that a file
-// using a fourth kind is reported instead of silently drawn as a worldstyle.
-[[nodiscard]] std::optional<StyleUnits> parseStyleUnits(std::string_view text);
-
 enum class StrokeOp {
     Move,   // pen up to the point
     Draw,   // pen down to the point

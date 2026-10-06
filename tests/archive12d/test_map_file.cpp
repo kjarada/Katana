@@ -124,6 +124,48 @@ TEST(MapFile, ACodeGetsASymbolAndItsSizeAndRotation)
     EXPECT_EQ(map.map.stylesReferenced(), (std::vector<std::string>{"CULT Bollard"}));
 }
 
+TEST(MapFile, TheSymbolSectionMarkedV9IsReadAsTheSymbolSection)
+{
+    // A survey code file writes its symbols twice, the second time in a
+    // section marked v9 (docs/survey_coding.md, the table of sections), and
+    // both are the symbol section. No fixture here has that section and the
+    // files that do are not in every checkout, so this one is made by hand:
+    // AC* in each form, and TR* under the v9 name alone.
+    const auto map = read(R"(
+      <vertex_symbol_data>
+        <item><key>AC*</key><symbol_data><style>CULT Bollard</style><size>1.5</size></symbol_data></item>
+      </vertex_symbol_data>
+      <vertex_symbol_data_v9>
+        <item><key>AC*</key><symbol_data><style>CULT Bollard</style><size>1.5</size></symbol_data></item>
+        <item>
+          <key>TR*</key>
+          <symbol_data><style>VEGE Tree</style><size>3</size></symbol_data>
+          <hide>yes</hide>
+        </item>
+      </vertex_symbol_data_v9>)");
+    EXPECT_TRUE(map.warnings.empty()) << allWarnings(map);
+    // Three items, three rules: each form is read and neither is dropped.
+    ASSERT_EQ(map.map.size(), 3u);
+    for (const SurveyRule& rule : map.map.rules()) {
+        EXPECT_EQ(rule.section, katana::entity::SurveySection::VertexSymbol) << rule.key;
+    }
+    // TR* is in the v9 section only, so what TR07 resolves to came from it.
+    const auto tree = map.map.lookup("TR07");
+    ASSERT_TRUE(tree.resolved.symbol.has_value());
+    EXPECT_EQ(tree.resolved.symbol->style, "VEGE Tree");
+    EXPECT_EQ(tree.resolved.symbol->size, 3.0);
+    ASSERT_TRUE(tree.resolved.hide.has_value());
+    EXPECT_TRUE(*tree.resolved.hide);
+    // And it is tallied under its own name, as one section read and understood.
+    const auto tallied =
+        std::find_if(map.tally.begin(), map.tally.end(), [](const a12::ElementTally& tally) {
+            return tally.keyword == "vertex_symbol_data_v9";
+        });
+    ASSERT_NE(tallied, map.tally.end());
+    EXPECT_EQ(tallied->read, 1u);
+    EXPECT_EQ(tallied->imported, 1u);
+}
+
 TEST(MapFile, ACodeTakesTheUnionOfEveryRuleThatMatchesIt)
 {
     // 213 keys in the real mapfile carry more than one rule, each about a

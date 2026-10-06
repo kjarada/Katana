@@ -52,20 +52,17 @@ constexpr std::array<Word<SurveyBreakline>, 2> kDrawWords{{
     {SurveyBreakline::Point, "point"},
 }};
 
-// What a rule SETS. These are the format's own words and belong to it alone:
-// entity::toString(SurveySection) names the same sections for the survey code
-// tools' text, and is not what a file holds.
-constexpr std::array<Word<SurveySection>, 9> kSectionWords{{
-    {SurveySection::Map, "feature"},
-    {SurveySection::VertexSymbol, "symbol"},
-    {SurveySection::VertexTextStyle, "text"},
-    {SurveySection::Pipe, "pipe"},
-    {SurveySection::VertexPipe, "vertexPipe"},
-    {SurveySection::SegmentPipe, "segmentPipe"},
-    {SurveySection::StringAttribute, "attributes"},
-    {SurveySection::VertexAttribute, "vertexAttributes"},
-    {SurveySection::Tinable, "surface"},
-}};
+// What a rule SETS, in the words of entity's one table of them
+// (kSurveySectionWords, survey_map.hpp). entity::toString(SurveySection) reads
+// the same table for the survey code tools' text, so a file holds the word
+// the window shows for the same thing.
+constexpr std::array<Word<SurveySection>, kSurveySectionWords.size()> kSectionWords = [] {
+    std::array<Word<SurveySection>, kSurveySectionWords.size()> table{};
+    for (std::size_t i = 0; i < table.size(); ++i) {
+        table[i] = {kSurveySectionWords[i].section, kSurveySectionWords[i].word};
+    }
+    return table;
+}();
 
 // The model keeps an attribute's type as text; the format holds only these.
 constexpr std::array<std::string_view, 2> kAttributeTypes{"text", "integer"};
