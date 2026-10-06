@@ -587,7 +587,7 @@ const std::vector<Tool>& tools()
             "AREA), survey field files (SURVEY READ <file>; SURVEY IMPORT <file> [SETTINGS "
             "<file>] [SET key=value ...], where SET control=<id>;drawing;fixed;0;fixed;0;fixed;0 "
             "holds a point of the drawing, as FORWARD puts one there), survey codes (CODE, "
-            "MAPFILE, CUSTOMISE), AS 5488 subsurface utilities "
+            "CODE LIST, CODE CHECK, CUSTOMISE), AS 5488 subsurface utilities "
             "(UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW, REGRADE, SCHEDULE - on a schedule "
             "file, or on what is drawn by the scope words DRAWING | SELECTION | "
             "AREA x0,y0,x1,y1 | LAYERS a,b [ONLY], then [WHERE key=value ...]; UTILITY DRAW "

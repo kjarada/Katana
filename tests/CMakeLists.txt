@@ -2070,7 +2070,7 @@ endif()
 # The session verbs on the window's command line and the window's one
 # executor (docs/desktop.md, "One executor: the command runner"). Typed with
 # --command as an agent types them: INFO with an entity's id, CODE CENSUS,
-# MAPFILE CHECK, CUSTOMISE alone, COPC and IMPORT ... LOCAL, each of which the
+# CODE CHECK, CUSTOMISE alone, COPC and IMPORT ... LOCAL, each of which the
 # window once refused or misread. Run with --run-line as a dialog runs its
 # line: never a running tool's answer, with what it logged coming back.
 if(TARGET katana)
@@ -2085,7 +2085,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>RECT 0,0 10,5|>INFO 1|>INFO #1|>CUSTOMISE REPLACE \"${_fixture}/test_survey.mapfile\"|>CODE CENSUS|>MAPFILE CHECK|>CUSTOMISE"
+            "-DDRIVE=>RECT 0,0 10,5|>INFO 1|>INFO #1|>CUSTOMISE REPLACE \"${_fixture}/test_survey.mapfile\"|>CODE CENSUS|>CODE CHECK|>CUSTOMISE"
             "-DEXPECT=1  Polyline  layer=0  vertices=4  closed  length=30  area=50[\r\n]+1  Polyline  layer=0  vertices=4  closed  length=30  area=50.*0 entities carry a code in \"[^\"]*\", 0 distinct codes.*11 rules checked: 0 errors, [0-9]+ warnings?.*11 survey code rules over 8 distinct codes[\r\n]+Loaded files, in load order:.*\"test_survey\\.mapfile\", a survey code file"
             "-DFORBID=unknown command|usage: CUSTOMISE"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/session_verbs_headless.png"

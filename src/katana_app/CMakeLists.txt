@@ -137,18 +137,20 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CODE EXPLAIN KT01"
                 -c "CODE EXPLAIN kt01")
-    add_test(NAME cli.mapfile_list
+    # CODE LIST and CODE CHECK: the loaded codes one a line, and their lint.
+    # They were a verb of their own, named after the survey code file.
+    add_test(NAME cli.code_list
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
-                $<TARGET_FILE:katana_cli> -c "${_replace}" -c "MAPFILE LIST katana")
+                $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CODE LIST katana")
     # Loaded again WITHOUT replace: merged, so each of its (code, section)
     # groups - KT* feature, KX* feature, KT* symbol - replaces
     # itself. A code's loaded rules are gathered at its first rule (so that
     # what the load brought outranks what it left of that code), which makes
     # KX* rule #2: KT* feature, KT* symbol, KX* feature.
-    add_test(NAME cli.mapfile_check_after_a_merge
+    add_test(NAME cli.code_check_after_a_merge
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CUSTOMISE \"${_mapfile}\""
-                -c "MAPFILE CHECK")
+                -c "CODE CHECK")
     add_test(NAME cli.code_applies_and_reports
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "POINT 1,1" -c "SELECT ALL"
@@ -260,14 +262,20 @@ if(KATANA_BUILD_TESTS)
     set(_eol "[\r\n]+")
     set_tests_properties(cli.code_explain PROPERTIES PASS_REGULAR_EXPRESSION
         "Code \"KT01\": prefix match, matched${_eol}  layer: KATANA TEST  <- rule #0 KT\\* \\(feature\\).*  symbol: cross, size 2  <- rule #2 KT\\* \\(symbol\\)${_eol}  linestyle \"0\": a plain line${_eol}  symbol \"cross\": drawn by Katana itself${_eol}  colour \"red\": #FF0000${_eol}Code \"kt01\": no rule matches it${_eol}  near miss: key \"KT\\*\" differs only in letter case")
-    set_tests_properties(cli.mapfile_list PROPERTIES PASS_REGULAR_EXPRESSION
-        "KT\\*  \\[prefix; 2 rules: feature, symbol\\]  layer KATANA TEST; linestyle 0; symbol cross; colour red; \"\\[KT\\*\\] Katana test\"${_eol}1 of 2 codes match \"katana\"")
+    # A ';' is written "\\;": bare, it splits the expression into a list and the
+    # test passes on any one part (docs/testing.md). The line is the whole of
+    # what CODE LIST prints for KT*, by hand from the three rules above: its
+    # two sections, then layer, linestyle, symbol, colour and comment.
+    set_tests_properties(cli.code_list PROPERTIES PASS_REGULAR_EXPRESSION
+        "KT\\*  \\[prefix\\; 2 rules: feature, symbol\\]  layer KATANA TEST\\; linestyle 0\\; symbol cross\\; colour red\\; \"\\[KT\\*\\] Katana test\"${_eol}1 of 2 codes match \"katana\"")
     # The file's kind is said in the help's words: a survey code file, not a
     # style library.
-    set_tests_properties(cli.mapfile_check_after_a_merge PROPERTIES PASS_REGULAR_EXPRESSION
+    set_tests_properties(cli.code_check_after_a_merge PROPERTIES PASS_REGULAR_EXPRESSION
         "cli-codes\\.mapfile: survey code file, 0 added, 3 replaced \\(codes, once for each section\\): \"KT\\*\", \"KX\\*\", \"KT\\*\".*3 rules checked: 0 errors, 1 warning${_eol}  by kind: 1 no layer${_eol}  rule #2 KX\\* \\(feature\\): warning, no layer")
+    # Each reply begins with what its scope took: no scope word is the whole
+    # drawing, which holds the one point the test draws.
     set_tests_properties(cli.code_applies_and_reports PROPERTIES PASS_REGULAR_EXPRESSION
-        "1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*Layers created: KATANA TEST${_eol}Styles created: cross${_eol}.*  KT01: 1 entity, prefix, matched; layer 0 -> KATANA TEST; style cross \\(created\\); 1 changed${_eol}Applied as one command.*1 entity carries a code in \"code\", 1 distinct code${_eol}  KT01: 1, prefix, matched, layer KATANA TEST")
+        "scope=drawing matched=1${_eol}1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*Layers created: KATANA TEST${_eol}Styles created: cross${_eol}.*  KT01: 1 entity, prefix, matched\\; layer 0 -> KATANA TEST\\; style cross \\(created\\)\\; 1 changed${_eol}Applied as one command.*scope=drawing matched=1${_eol}1 entity carries a code in \"code\", 1 distinct code${_eol}  KT01: 1, prefix, matched, layer KATANA TEST")
 
     # CUSTOMISE alone names the files loaded, in load order - "is my code
     # file loaded?" is what a count could not answer - after the counts. The

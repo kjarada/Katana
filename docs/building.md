@@ -360,7 +360,7 @@ may not see GDAL, PDAL or the archive readers:
 | `COPC <source> <destination.copc.laz>` | yes | yes (since 2026-09-26) |
 | `GDAL VERSION`, `LIST`, `HELP`, and `GDAL <algorithm> ... [FROM ...] [TO ...]`: any of GDAL's algorithms, run by the one geoprocessing executor (`docs/geoprocessing.md`) | yes (with `KATANA_BUILD_IO`) | yes, as a background job |
 | `CUSTOMISE [REPLACE] <file>...`; `CUSTOMISE` alone reports what is loaded and from which files | yes | yes (the report since 2026-09-26) |
-| `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`, `MAPFILE CHECK` (the interpreter's since 2026-09-26; `docs/survey_coding.md`) | yes | yes |
+| `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST`, `CODE CHECK` (the interpreter's since 2026-09-26; the last two were `MAPFILE LIST` and `MAPFILE CHECK` until 2026-10-06; `docs/customisation.md`, "The verbs") | yes | yes |
 | `IMPORT <file.ifc>`, `EXPORT <file.ifc>`, `INFO <file.ifc>`, `IFC RULES` (`docs/ifc.md`) | yes, with or without `KATANA_BUILD_IO` | yes, with the same options, and File > Import IFC / Export IFC, which run these lines |
 | `UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW` (the interpreter's since 2026-09-25; `docs/subsurface_utilities.md`) | yes | yes |
 | `ZOOM`, `GRID`, `SNAP`, `QUIT` | `QUIT` only | yes |

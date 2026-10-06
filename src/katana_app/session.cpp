@@ -116,7 +116,7 @@ void reportCoverage(const katana::cad::Document& document)
 }
 
 // The standard colour names reach cad only through a callback: cad may not
-// see archive12d, which owns the table. The interpreter's CODE and MAPFILE
+// see archive12d, which owns the table. The interpreter's CODE and CODE
 // CHECK are given it (CommandInterpreter::setColourLookup).
 std::optional<katana::entity::Color> colourOf(std::string_view name)
 {

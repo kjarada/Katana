@@ -322,7 +322,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                    " has no menu; its tools start from the command line.");
     }
     views_->setReferenceData(&reference_);
-    // CODE and MAPFILE CHECK name colours by the standard table, which is
+    // CODE and CODE CHECK name colours by the standard table, which is
     // archive12d's and so out of the interpreter's reach (survey_code_verbs.hpp).
     interpreter_.setColourLookup(
         [](std::string_view name) { return katana::archive12d::standardColour(name); });

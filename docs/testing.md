@@ -174,9 +174,13 @@ on 2026-09-30, when the three GSI cases whose expressions pin the parser
 version passed against a reader built to say "parser=1.1": each quotes a
 warning or note with a `;` in it, and a fragment after one matched on its own
 (`cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record` had
-two). They are escaped now, and fail on 1.1. Not fixed: six other cases in
-the same file still carry a bare `;` - `cli.mapfile_list`,
-`cli.code_applies_and_reports`, `cli.list_refuses_words_it_does_not_take`,
+two). They are escaped now, and fail on 1.1. Two of the survey-code cases
+were escaped on 2026-10-06, when their verbs were reworded (`cli.code_list`,
+named after the verb `MAPFILE LIST` until then, and
+`cli.code_applies_and_reports`): each whole expression matched what its verb
+prints. Not fixed: four other cases in
+the same file still carry a bare `;` -
+`cli.list_refuses_words_it_does_not_take`,
 `cli.utility_draw_refuses_a_line_it_cannot_grade`,
 `cli.utility_view_is_refused_headless_naming_area` and
 `cli.utility_draw_of_geometry_with_no_method_is_refused_by_the_vertex` - so

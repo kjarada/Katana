@@ -1,8 +1,9 @@
 #pragma once
 
 // One command-line session: a Document, the CommandInterpreter over it, and
-// the verbs the front ends add above katana_cad - CUSTOMISE, CODE, MAPFILE,
-// the native DXF IMPORT/EXPORT and, with KATANA_BUILD_IO, the GDAL/PDAL ones.
+// the verbs the front ends add above katana_cad - CUSTOMISE, the native DXF
+// IMPORT/EXPORT and, with KATANA_BUILD_IO, the GDAL/PDAL ones. (CODE is the
+// interpreter's own, with CODE LIST and CODE CHECK.)
 //
 // katana_cli and katana_mcp both drive it, so a line typed at the command line
 // and a line sent by Claude over MCP (docs/mcp.md) do exactly the same thing.

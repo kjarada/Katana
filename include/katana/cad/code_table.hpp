@@ -4,8 +4,8 @@
 // gets what it gets, the map as a table of codes, which codes a drawing
 // actually carries, and what is wrong with a map before it is applied.
 //
-// These are the foundations of the survey-code manager, and of the CLI verbs
-// CODE EXPLAIN, CODE CENSUS, MAPFILE LIST and MAPFILE CHECK. They are here,
+// These are the foundations of the survey-code manager, and of the verbs
+// CODE EXPLAIN, CODE CENSUS, CODE LIST and CODE CHECK. They are here,
 // below both front ends, so that the GUI and the CLI print the SAME thing:
 // the two used to disagree about what applying codes had done.
 //
@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -164,6 +165,13 @@ struct CodeCensus {
 // found as applySurveyCodes finds it), counted, and classed against the
 // loaded map. Each distinct code is looked up once.
 [[nodiscard]] CodeCensus codeCensus(const Document& document, std::string_view property = {});
+// The same over `ids` alone - what a scope took (CODE CENSUS <scope>). An
+// EMPTY list is no entity, and so a census of nothing: unlike
+// SurveyCodingOptions::ids, where empty means every entity, because a scope
+// that took nothing must count nothing.
+[[nodiscard]] CodeCensus codeCensus(const Document& document,
+                                    std::span<const katana::entity::EntityId> ids,
+                                    std::string_view property = {});
 
 // ---- what is wrong with a map -----------------------------------------------------
 

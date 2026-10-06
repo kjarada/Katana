@@ -267,19 +267,37 @@ reads what happened; each edit is one undo step.
 prints it after the rest. The plain `TEXT p height "text"` and `DIM p p
 offset` are unchanged.
 
-The survey-code verbs (`CODE [property]`, `CODE EXPLAIN code`, `CODE CENSUS
-[property]`, `MAPFILE LIST [filter]`, `MAPFILE CHECK`; `docs/survey_coding.md`)
+The survey-code verbs (`CODE [scope] [WHERE ...] [PROPERTY name] [PREVIEW]`,
+`CODE CENSUS [scope] ...`, `CODE EXPLAIN code`, `CODE LIST [filter]`, `CODE
+CHECK`; `docs/customisation.md`, "The verbs", and `docs/survey_coding.md`)
 are handed to `runSurveyCodeVerb` (`include/katana/cad/survey_code_verbs.hpp`)
 since 2026-09-26; they were `katana_cli`'s own, and the window refused them.
-`CODE` is one undo step, and `MAPFILE CHECK` is refused - its whole lint in
+`CODE` is one undo step, and `CODE CHECK` is refused - its whole lint in
 the refusal, as `UTILITY CHECK` carries its check - when a rule has an error
-(`mapfileCheckReply`). The standard colour names they need were archive12d's,
-which cad may not see, so each front end passes the table with
-`CommandInterpreter::setColourLookup`; without one no colour is known and
-colours are left alone. (Since 2026-10-06 the names are the entity layer's,
-`include/katana/entity/colour_names.hpp`, which cad does see; the callback is
-still how they arrive, until cad asks `entity::resolveColour` itself -
-`docs/customisation.md`, "Colour names".)
+(`codeCheckReply`). `CODE` and `CODE CENSUS` take the shared scope and filter
+since 2026-10-06 and say what it took; with no scope word theirs is the whole
+DRAWING, under a bare `WHERE` too, where every other verb's is the selection,
+because `CODE` was the whole drawing before it took a scope. `CODE LIST` and
+`CODE CHECK` were `MAPFILE LIST` and `MAPFILE CHECK` until the same day:
+that verb was named after another program's file, which no longer loads, and
+is an unknown command now.
+
+The colour names they need are resolved through the Document
+(`cad::resolveColour`, `include/katana/cad/colour_lookup.hpp`: the
+customisation's own table, then the standard names of
+`include/katana/entity/colour_names.hpp`). The standard names were once a
+table cad could not see, so each front end passed it with
+`CommandInterpreter::setColourLookup`; that is still called, and is now asked
+only for a name the Document does not know.
+
+`CUSTOMISE` is the interpreter's too (`runCustomisationVerb`,
+`include/katana/cad/customisation_verbs.hpp`): the report, `JSON`, a load
+merged or in place, `EXPORT`, `RESET`, `KEEP`, `REVERT`, `REMOVE` and `SET`,
+with what `RESET`, `KEEP` and `REVERT` need handed over by the front end
+(`CommandInterpreter::setCustomisationHost`). `docs/customisation.md`, "The
+verbs", has the grammar, the replies and the decisions. The two front ends
+still take a `CUSTOMISE` line themselves, before the interpreter sees it,
+until each is ported to it.
 
 ### STATUS
 
@@ -307,7 +325,8 @@ their lines through too - `docs/desktop.md`, "One executor: the command
 runner") adds `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT`, `INFO <file>`, `REFS`,
 `COPC` (the geoprocessing executor's, which `katana_cli` and `katana_mcp` run
 too - `docs/interop.md`), `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
-report, `cad::customisationReport`), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
+report, `cad::customisationReport`; its own for now, although the interpreter has the
+family - above), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
 `SCRIPT <file> [CONTINUE]`,
 the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed
 `HELP` adds them to the interpreter's list (`windowHelpText`, `docs/desktop.md`,
@@ -1122,7 +1141,8 @@ layer/s, elements, filtered elements, like global change", and for every
 tool to be able to act that way. Global Modify's scope and filter became the
 one mechanism for it (`include/katana/cad/scope_verbs.hpp`): one set of
 words, read by one parser and resolved by the one matcher,
-`cad::matchEntities`. Today `MODIFY` and the `UTILITY` verbs take them; the
+`cad::matchEntities`. Today `MODIFY`, the `UTILITY` verbs, `ZOOM`, `PROP TREE`
+and (since 2026-10-06) `CODE` and `CODE CENSUS` take them; the
 standing rule is that every verb that reads or changes drawing data
 is to take them too, and the others - `ERASE`, `CHLAYER`, `SELECT` and the
 rest - still act on the selection or their own arguments until they do.
@@ -1136,10 +1156,13 @@ Words are case-insensitive; `SEL`, `ALL` and `LAYER` are the aliases `MODIFY`
 already took. For `MODIFY` no scope word is the selection; a `UTILITY` verb
 needs a scope word or `WHERE`, since any other first word is its file's path.
 `WHERE` with no scope word before it is the selection, filtered, for every
-verb that reads the shared words - `EXPORT` and the GDAL verb's `FROM`
+verb that reads the shared words but one - `EXPORT` and the GDAL verb's `FROM`
 included, though `EXPORT` with no scope words at all is the whole drawing;
 `katana_mcp`'s `where` without `scope` is written `SELECTION WHERE`
-(`docs/interop.md`, "Export options").
+(`docs/interop.md`, "Export options"). The one is `CODE`, whose scope with no
+scope word is the whole drawing with or without a `WHERE`: it was the whole
+drawing before it took a scope, and a script's `CODE` must not come to mean
+whatever is selected (`docs/customisation.md`, "The verbs").
 The `WHERE` keys are Global Modify's filter: `TYPE=point,line`,
 `LAYER=pat[,pat]`, `STYLE=pat|ByLayer`, `COLOUR=#RRGGBB|ByLayer`,
 `PROP=key[:pat]`, `TEXT=pat` and `DRAWN`, with `*` and `?` wildcards.

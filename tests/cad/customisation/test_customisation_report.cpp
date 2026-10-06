@@ -1,6 +1,8 @@
-// What a bare CUSTOMISE says (customisation_report.hpp): the window's command
-// line and katana_cli print this one text. Counted by hand from what each
-// test loads.
+// What a bare CUSTOMISE says (customisation_report.hpp). Two texts of one
+// summary while the front ends move to the interpreter's verb: the older
+// prose, which the window's and katana_cli's own CUSTOMISE and File > Drawing
+// Summary still print (the first tests), and the verb's records (the last).
+// Counted by hand from what each test loads.
 
 #include <gtest/gtest.h>
 
@@ -151,4 +153,137 @@ TEST(CustomisationReport, TheSummaryIsTheNumbersTheTextIsMadeFrom)
     EXPECT_EQ(summary.loaded, kLoaded);
     EXPECT_EQ(summary.notLoaded, std::vector<std::string>{"old symbols.4d"});
     EXPECT_EQ(summary.coverage.styles, 0u);
+}
+
+// ---- the verb's reply (formatCustomisationReply) -----------------------------------------
+//
+// What the interpreter's CUSTOMISE replies: the two count lines above, then
+// records. tests/cad/customisation/test_customisation_verbs.cpp drives it
+// through the verb; here it is given a summary written out by hand, which is
+// the only way to show it a name the open project is missing without a
+// project on disk.
+
+TEST(CustomisationReport, TheVerbsReplyIsTheCountsThenRecordsOfTheSessionThenTheCoverage)
+{
+    katana::cad::CustomisationSummary summary;
+    summary.definitions = 2;
+    summary.groups = 2;
+    summary.symbols = 1;
+    summary.linestyles = 1;
+    summary.rules = 2;
+    summary.codes = 1;
+    summary.loaded = {{"Site Styles", true, false, {}}, {"Site codes", false, true, {}}};
+    summary.notLoaded = {"old symbols", "plain"};
+    summary.name = "Site Styles";
+    summary.origin = katana::cad::CustomisationOrigin::Loaded;
+    summary.kept = false;
+    summary.colours = 3;
+    summary.automation.lineworkOnSurveyImport = false;
+    summary.linework.join = ""; // that control is off
+    EXPECT_EQ(katana::cad::formatCustomisationReply(summary),
+              "2 linestyle and symbol definitions in 2 groups: 1 offered as symbols, 1 as "
+              "linestyles (one definition can be both)\n"
+              "2 survey code rules over 1 distinct code\n"
+              "customisation name=\"Site Styles\" origin=loaded kept=no definitions=2 codes=1 "
+              "rules=2 colours=3\n"
+              "source name=\"Site Styles\" definitions=yes rules=no\n"
+              "source name=\"Site codes\" definitions=no rules=yes\n"
+              "automation auto.codes=on auto.linework=off\n"
+              "linework linework.start=ST linework.end=END linework.close=CL "
+              "linework.arcstart=BC linework.arcend=EC linework.join=\"\" "
+              "linework.rectangle=RECT\n"
+              "missing name=\"old symbols\"\n"
+              "missing name=plain\n"
+              "This drawing has no styles yet; import a drawing or survey that carries styles, "
+              "or make one in Format > Styles and Linetypes or with STYLE NEW, to see the "
+              "customisation take effect.\n");
+    // The one record a verb that changed the session ends its reply with.
+    EXPECT_EQ(katana::cad::customisationStateRecord(summary),
+              "customisation name=\"Site Styles\" origin=loaded kept=no definitions=2 codes=1 "
+              "rules=2 colours=3");
+}
+
+TEST(CustomisationReport, TheVerbsReplyOfNothingKeepsWhatTheProjectIsMissingAndNamesNoFileKind)
+{
+    katana::cad::CustomisationSummary summary;
+    summary.notLoaded = {"old symbols"};
+    const std::string reply = katana::cad::formatCustomisationReply(summary);
+    EXPECT_EQ(reply,
+              "No customisation is loaded.\n"
+              "  CUSTOMISE <file> [<file>...]  loads Katana customisation files\n"
+              "customisation name=\"\" origin=none kept=no definitions=0 codes=0 rules=0 "
+              "colours=0\n"
+              "automation auto.codes=on auto.linework=on\n"
+              "linework linework.start=ST linework.end=END linework.close=CL "
+              "linework.arcstart=BC linework.arcend=EC linework.join=JPN "
+              "linework.rectangle=RECT\n"
+              "missing name=\"old symbols\"\n");
+    // The kinds of file another program wrote are not what loads any more.
+    EXPECT_EQ(reply.find(".4d"), std::string::npos);
+    EXPECT_EQ(reply.find(".mapfile"), std::string::npos);
+}
+
+TEST(CustomisationReport, TheSummaryOfASessionReadsItsStateFromTheDocument)
+{
+    // The raw setters, as an editor calls them: an edited session with no
+    // name and no source, the switches and codes as they were set.
+    Document document;
+    load(document);
+    document.setAutomation({false, true});
+    katana::entity::LineworkCodes codes;
+    codes.start = "S";
+    ASSERT_TRUE(document.setLineworkCodes(codes).ok());
+    katana::entity::ColourTable colours;
+    ASSERT_TRUE(colours.add("site orange", katana::entity::Color{}).ok());
+    document.setColourTable(colours);
+
+    const katana::cad::CustomisationSummary summary = katana::cad::customisationSummary(document);
+    EXPECT_EQ(summary.definitions, 2u);
+    EXPECT_EQ(summary.rules, 2u);
+    EXPECT_EQ(summary.codes, 1u);
+    EXPECT_EQ(summary.name, "");
+    EXPECT_EQ(summary.origin, katana::cad::CustomisationOrigin::Edited);
+    EXPECT_FALSE(summary.kept);
+    EXPECT_EQ(summary.colours, 1u);
+    EXPECT_FALSE(summary.automation.codesOnSurveyImport);
+    EXPECT_TRUE(summary.automation.lineworkOnSurveyImport);
+    EXPECT_EQ(summary.linework.start, "S");
+    EXPECT_TRUE(summary.loaded.empty());
+    EXPECT_TRUE(summary.notLoaded.empty());
+}
+
+TEST(CustomisationReport, TheNamesTheRulesAskForThatNothingDefinesAreEachListedOnce)
+{
+    // load() gives a rule naming "TEST Fence", which the library defines.
+    // Added here: a linestyle and a symbol nothing defines (the linestyle
+    // named by two rules), a plain line, and a symbol Katana draws itself -
+    // neither of which needs a definition.
+    Document document;
+    load(document);
+    katana::entity::SurveyMap map = document.surveyMap();
+    const auto feature = [&map](const char* key, const char* linestyle) {
+        katana::entity::SurveyRule rule;
+        rule.key = key;
+        rule.model = "SOMEWHERE";
+        rule.linestyle = linestyle;
+        EXPECT_TRUE(map.add(rule).ok());
+    };
+    const auto symbol = [&map](const char* key, const char* name) {
+        katana::entity::SurveyRule rule;
+        rule.key = key;
+        rule.section = katana::entity::SurveySection::VertexSymbol;
+        rule.symbol = katana::entity::SurveySymbol{name, "", 1.0, 0.0, 0.0, 0.0};
+        EXPECT_TRUE(map.add(rule).ok());
+    };
+    feature("A1*", "ZZ Missing");
+    feature("A2*", "ZZ Missing");
+    feature("A3*", "0");
+    symbol("B1*", "AA Missing");
+    symbol("B2*", "cross");
+    document.setSurveyMap(map);
+    EXPECT_EQ(katana::cad::undefinedRuleNames(document),
+              (std::vector<std::string>{"AA Missing", "ZZ Missing"}));
+
+    const Document empty;
+    EXPECT_TRUE(katana::cad::undefinedRuleNames(empty).empty());
 }

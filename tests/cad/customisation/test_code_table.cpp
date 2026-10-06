@@ -629,15 +629,18 @@ struct Field {
 const std::vector<Field>& fields()
 {
     using S = SurveySection;
+    // "layer" and "surface" are SurveyRule::model and ::tinable, by the words
+    // every reply names them by (docs/customisation.md, "The words a rule is
+    // shown by"); the warning once said the survey code file's own two.
     static const std::vector<Field> all = {
-        {"model", {S::Map}, [](SurveyRule& r) { r.model = "SURVEY DETAIL"; }},
+        {"layer", {S::Map}, [](SurveyRule& r) { r.model = "SURVEY DETAIL"; }},
         {"colour", {S::Map}, [](SurveyRule& r) { r.colour = "white"; }},
         {"linestyle", {S::Map}, [](SurveyRule& r) { r.linestyle = "0"; }},
         {"weight", {S::Map}, [](SurveyRule& r) { r.weight = "0"; }},
         {"group", {S::Map}, [](SurveyRule& r) { r.group = "SURVEY"; }},
         {"breakline", {S::Map},
          [](SurveyRule& r) { r.breakline = katana::entity::SurveyBreakline::Line; }},
-        {"tinable", {S::Tinable}, [](SurveyRule& r) { r.tinable = true; }},
+        {"surface", {S::Tinable}, [](SurveyRule& r) { r.tinable = true; }},
         {"hide", {S::VertexSymbol}, [](SurveyRule& r) { r.hide = false; }},
         {"symbol", {S::VertexSymbol},
          [](SurveyRule& r) { r.symbol = katana::entity::SurveySymbol{.style = "cross"}; }},
@@ -746,7 +749,7 @@ TEST(LintSurveyMap, ASymbolRuleThatAlsoNamesALayerIsWarnedOfOnceNamingEachStrayF
     EXPECT_EQ(issues[0].severity, LintSeverity::Warning);
     // Both fields in one issue, in the order a rule's fields are listed, and
     // "them" for two.
-    EXPECT_EQ(issues[0].message.rfind("holds model, colour, which a ", 0), 0u)
+    EXPECT_EQ(issues[0].message.rfind("holds layer, colour, which a ", 0), 0u)
         << issues[0].message;
     EXPECT_NE(issues[0].message.find(" replaces them too"), std::string::npos)
         << issues[0].message;
