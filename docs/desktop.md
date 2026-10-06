@@ -13,8 +13,10 @@ The window (`MainWindow`) is a `QMainWindow` around a workspace of views, with d
 Reference Data panels. Its menu bar reads in the order a CAD user reads it -
 File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
 (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
-`helpMenu`). File keeps to files: the customisation is loaded from Format
-and from Survey > Survey Coding, beside the managers of what it brings. The
+`helpMenu`). File keeps to files: the managers of what a customisation brings
+are in Format and in Survey > Survey Coding, and a customisation FILE is
+loaded by the `CUSTOMISE` line, which has no menu item yet ("The Format
+menu", below). The
 status bar shows a view's running readout, how many entities are selected of
 how many, the current layer, the active snap and the cursor coordinates.
 
@@ -26,12 +28,77 @@ stylesheet, and the platform's font taken as the one font of the whole
 window - below, "Text"), sets the application icon, reads the switches, and
 builds the `MainWindow`: its actions and menus, its panels, View's Window
 section (`MainWindow::buildWindowMenu`) and the status bar, and records the
-layout it was built with for View > Reset Window Layout. The default
-customisation is loaded next, so the first drawing is drawn with it. Then an
+layout it was built with for View > Reset Window Layout. The session's
+customisation is installed next, so the first drawing is drawn with it ("The
+customisation a session starts with", below). Then an
 interactive run - one with no `--screenshot`, `--plot`, `--plot-sheets`,
 `--sheets-json` or batch `--script` - puts the window where the last session
 left it (`MainWindow::restoreSession`) and shows it, and the project and files
 on the command line are opened.
+
+**The customisation a session starts with.** `MainWindow::loadDefaultCustomisation`
+builds a `cad::CustomisationHost` - the built-in customisation of this run
+(`cad::builtInCustomisation`, which reads the seam
+`KATANA_BUILTIN_CUSTOMISATION`) and the path of the kept file - hands it to
+the interpreter (`CommandInterpreter::setCustomisationHost`, FIRST: it notes
+the kept file as it is at that moment, which `CUSTOMISE KEEP` later refuses
+to write over once it has changed) and calls `cad::startCustomisation`, which
+installs the kept customisation when the file is there and reads, else the
+built-in one, else nothing. The window logs what that reports:
+
+```
+Customisation: <name>, N definitions (M symbols) and K survey code rules, built in.
+Customisation: <name>, N definitions (M symbols) and K survey code rules, kept.
+```
+
+with the name the customisation gives itself, how many of its definitions it
+lists as symbols, and which of the two it is - each noun by its count, so a
+customisation of one rule has "1 survey code rule" - then, for a kept one
+made from another built-in than this program has, a line saying so and naming
+`CUSTOMISE RESET`
+(`qt_a_kept_customisation_made_from_another_built_in_is_installed_and_said_headless`).
+A problem - a built-in that does not parse, a kept file that does
+not read, the built-in then standing in for it - is an error line,
+`Customisation: <the problem>`, once. A build with no built-in and no kept
+file installs nothing and says nothing: it draws plain lines until a
+customisation is loaded, which is a state the program runs in, not a fault
+(`docs/customisation.md`; a build from a clean checkout has none).
+
+- **The kept file is named only by the environment variable
+  `KATANA_CUSTOMISATION`, for now.** A headless run must be the same on every
+  machine, so it reads no per-user place (`docs/headless.md`, "The
+  customisation a run starts with"); with the variable unset there is no kept
+  file, and `CUSTOMISE KEEP` and `REVERT` are refused naming it. Not done: an
+  interactive session has no per-user place either yet - that comes with
+  File > Settings - so a person who wants their customisation kept between
+  sessions sets the variable.
+- **`--customise FILE...`** then runs `CUSTOMISE "<file>" ...` through the
+  window's one executor (`main.cpp`, `customise`): merged into what the
+  session started with, as the typed line would. A typed, scripted or
+  `--customise` load lasts the session; `CUSTOMISE KEEP` is what makes it the
+  next start's.
+- **What the window does after a `CUSTOMISE` line it does for every change:**
+  the panels' pickers, the views and the managers follow the Document's
+  notification (`documentListener_`, each view's own, a manager's
+  `DocumentWatcher`), which an installed customisation raises as
+  `StyleLibrary | SurveyMap | Customisation`. No verb tells the window
+  anything, so a line run by a script, a dialog or an agent refreshes it as a
+  typed one does.
+- **Gone: the search beside the executable.** A build with nothing compiled
+  in used to look for style libraries and survey code files in the program's
+  folder (`findCustomisation`) and load what it found. That was a third
+  state, decided at run time by what happened to lie in a folder - the same
+  build drew differently on two machines - and it read the files of another
+  program, which Katana no longer reads at all. Rejected: keeping it for
+  Katana customisation files; the kept file is the one place for "my own",
+  and it is said, not searched for.
+
+`qt_the_window_starts_with_its_built_in_customisation_and_reset_returns_to_it_headless`
+starts a window on a fixture named through the seam, replaces its
+definitions, resets, and is refused a `KEEP`;
+`qt_a_customisation_is_kept_headless` and
+`qt_a_kept_customisation_is_what_the_next_window_starts_with_headless` keep
+one in one process and start with it in the next.
 
 **Where the window was.** Until 2026-09-26 every session opened a 1360 x 860
 window, whatever the screen: on a 1366 x 768 laptop it ran off the bottom,
@@ -314,8 +381,8 @@ the style while the stylesheet keeps drawing the items
 (`qt_widgets.Theme.AMenuSectionShowsItsTitleUnderTheStylesheet`, shown
 failing without that line). Every long menu is now in titled sections: File
 (Drawing, Import and Export, Scripts, Plot, Project), View (Display,
-Viewports, 3D Views, Window), Format (Tables and Libraries, Customisation
-Files, Across the Drawing, Annotation Styles), Annotate's editors and Leader
+Viewports, 3D Views, Window), Format (Tables and Libraries, Across the
+Drawing, Annotation Styles), Annotate's editors and Leader
 Manager, and the tool menus by their catalogue groups (Lines, Curves,
 Transform, Edit, Dimensions ...; `src/katana_qt/tools/tool_menus.hpp`). Second, for a
 choice list that cannot be typed into, Fusion drops a popup the height of
@@ -675,7 +742,8 @@ and lists those that reach more than one thing, since Qt disables an
 ambiguous shortcut for both. `katana --check-shortcuts` fails a run that has
 any, and `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` runs
 it. Ten underlined letters were changed to pass it (A&ttributes, Sym&bol
-Library, Loa&d Customisation, In&verse, Toggle Pe&rspective and others).
+Library, In&verse, Toggle Pe&rspective and others; one of the ten was on
+Load Customisation, an item that has since gone).
 The tool actions built from the catalogue have no underlined letters; their
 aliases are in their tooltips. Help > Keyboard Shortcuts lists the keys for a
 person ("The Command Reference and the keyboard shortcuts", below).
@@ -1528,9 +1596,6 @@ Format
   Symbol Library...                  formatSymbols       -> symbolLibraryDialog
   Survey Code Manager...             formatSurveyCodes   -> surveyCodeManagerDialog
   ---
-  Load Customisation...              loadCustomisation
-  Replace Loaded Customisation...    replaceCustomisation
-  ---
   Global Modify...                   formatGlobalModify  -> globalModifyDialog
   Purge Unused...                    formatPurge
   ---
@@ -1544,21 +1609,85 @@ the window"), and like every dialog that changes the drawing they run the
 verb lines they build through the one executor below.
 
 The Format toolbar carries Layers, the three managers and Global Modify. Survey > Survey
-Coding shows the same code manager, Load and Replace actions - the same
-`QAction` objects (`SurveyServices::codeManager`), so two menus cannot drift
-apart.
+Coding shows the same code manager - the same `QAction` object
+(`SurveyServices::codeManager`), so two menus cannot drift apart - and the
+window's Apply Survey Codes (`applySurveyCodes`), which is also on the Survey
+toolbar.
+
+**Loading a customisation file has no menu item.** Format had a section
+Customisation Files, and Survey > Survey Coding the same two items: Load
+Customisation and Replace Loaded Customisation (`loadCustomisation`,
+`replaceCustomisation`), each a file dialog over the style libraries and
+survey code files of another program. Katana no longer reads those files, and
+the two items went with them rather than be kept as doors to a format that
+is gone. Until File > Settings exists, a Katana customisation file
+(`docs/customisation.md`) is loaded in the window by
+
+- the typed line `CUSTOMISE <file>...` (merge) or `CUSTOMISE REPLACE
+  <file>...`, the interpreter's verb, which a script and the Run Script
+  dialog run too;
+- `katana --customise <file>...` at start-up.
+
+The managers' own Import buttons are no such door yet: the Survey Code
+Manager's and the Symbol Library's still read the older survey code files and
+style libraries, and take a Katana customisation file with the change that
+ports the two managers.
+
+Rejected: one item that opened a file dialog on `CUSTOMISE "<file>"`. It is
+what Settings' Import will be, with a path field a headless run can fill and
+the Replace choice beside it; a lone item here would be moved again within
+the same piece of work, and its object name pinned by tests in between.
+
+**Apply Survey Codes is the `CODE` line.** `MainWindow::applySurveyCodes` runs
+`CODE SELECTION` when something is selected, else `CODE DRAWING`, through the
+window's one executor ("One executor", below): echoed in the log, kept in the
+history, one undo step, and answered in the verb's words - what the scope
+took, the property the codes were read from, what was matched and created.
+It used to call `cad::applySurveyCodes` itself, with sentences of its own, a
+box when no codes were loaded, and a lookup of the standard colours only -
+so a colour the customisation defines was applied by the typed `CODE` and
+not by the menu item. With no codes loaded the item is now refused as the
+line is, in the log - `no survey codes are loaded; CUSTOMISE <file> loads a
+Katana customisation file` - and no box opens
+(`qt_apply_survey_codes_with_no_codes_loaded_is_refused_in_the_verbs_words_headless`).
+The import wizard's "Apply survey codes to the
+imported points" triggers this action with the points it made selected, so
+it runs `CODE SELECTION` too
+(`qt_apply_survey_codes_runs_the_code_line_on_the_selection_or_the_drawing_headless`).
 
 **`CustomisationWorkbench`** (`src/katana_qt/customisation/customisation_workbench.*`)
 is built like the Survey workbench: `MainWindow::buildFormatActions` makes the
 menu and the toolbar and hands them over with `CustomisationServices` - the
 Document, the view workspace, the window's action factory and log, whether
 the session is headless (asked each time, since the window learns it after it
-is built), and the window's own Layers, Load and Replace actions. So the
+is built), and the window's own Layers action. So the
 workbench never includes `main_window.hpp`, and a widget test builds it and
 drives it (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
 It owns what the managers share: the picture cache (`DefinitionThumbnails`),
-the session's linework control codes, and the one `CustomisationContext`
-each manager is built from.
+the linework control codes the code manager's Linework tab strings with, and
+the one `CustomisationContext` each manager is built from.
+
+- **The Linework tab strings with the customisation's control codes.** The
+  codes are the Document's (`customisationState().linework`: what a
+  customisation file says and `CUSTOMISE SET linework.*` sets), and the
+  workbench follows them (`CustomisationWorkbench::followLineworkCodes`,
+  from a `DocumentWatcher`, and once more before a code manager is made): a
+  change of them goes into the copy the tab reads and, where the manager
+  exists, into its seven fields and through its own Use These Codes, so a
+  plan the tab made with the old codes is thrown away and the log says
+  "Linework control codes set for this session." The workbench kept a copy
+  that nothing wrote to but the tab's own button, so the tab - the window's
+  only stringing tool - strung with `ST` and `END` whatever customisation
+  was loaded. Only a CHANGE of the Document's codes is taken: what the tab's
+  button set meanwhile stands through any other change of the customisation
+  (a switch, a `KEEP`).
+  `qt_the_linework_tab_strings_with_the_customisations_control_codes_headless`
+  strings four points as one line with the default start code and as two
+  once the customisation's is the token on the third.
+  Rejected: copying the codes in the Document's own listener, at once. The
+  tab's fields and its button are widgets, and a view reacting to a Document
+  listener defers to the event loop (`docs/cad.md`); and the button's line
+  in the log would come before the reply of the line that caused it.
 
 - **Non-modal, one of each, kept.** A manager is made the first time it is
   asked for and then hidden, not deleted, between uses (`QPointer` slots);
@@ -1585,8 +1714,23 @@ each manager is built from.
 - **Closing the window asks the code manager first** ("Failure modes",
   above: `confirmClose`).
 
-Loading and replacing a customisation are `docs/survey_coding.md` ("Loading a
-customisation"): a load merges, Replace is asked for.
+What a load does - a merge, or a Replace that is asked for - is
+`docs/customisation.md`, "The verbs".
+
+Not done:
+
+- The Linework tab's own Use These Codes still sets the workbench's copy of
+  the control codes (`CustomisationContext::lineworkCodes`) and not the
+  customisation: the codes typed there do not show in a bare `CUSTOMISE`, do
+  not reach `CUSTOMISE KEEP`, and last until the customisation's own next
+  change. The button is to run `CUSTOMISE SET linework.*` and the tab to read
+  the Document, after which the copy - and the workbench's filling of the
+  tab's fields by their object names - goes.
+- `CustomisationServices` still has the two members that carried the Load
+  and Replace actions. Nothing reads or sets them in the window; they stay
+  only while a widget test of the managers' texts still assigns them.
+- The tip of Survey Code Manager still calls the codes "the loaded survey
+  code files", which was true while the manager imported such files.
 
 ### Styles and Linetypes
 
@@ -1810,8 +1954,9 @@ never reaches into the window for it.
   `GDAL`, `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` - then `ONLINE`,
   `UTILITY`), then to a running tool (`ViewWorkspace::typeIntoTool`), and
   hands whatever is left to `dispatchLine` - the view verbs, the window's own
-  (`SCRIPT`, `CUSTOMISE`, `PLOTSHEETS`, `PLOT`, `SNAPSHOT`), a tool's alias,
-  and the interpreter. `runVerbLine` echoes the line and runs the same
+  (`SCRIPT`, `PLOTSHEETS`, `PLOT`, `SNAPSHOT`), a tool's alias,
+  and the interpreter (`CUSTOMISE` among its verbs, which the window read and
+  ran itself until 2026-10-06). `runVerbLine` echoes the line and runs the same
   `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
   line is kept in the interpreter's history and undone exactly as a typed one.
 - **Never a running tool's answer.** That step is the only one `runVerbLine`
@@ -1898,20 +2043,36 @@ Each now reaches the same code on every front end
   `katana_describe_entity` answered that the file did not exist.
 - `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST` and `CODE CHECK`
   are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`). They
-  resolve a colour name through the Document; what the window passes with
-  `CommandInterpreter::setColourLookup` is asked only for a name it does not
-  know. (`CODE LIST` and `CODE CHECK` were `MAPFILE LIST` and `MAPFILE CHECK`
-  until 2026-10-06.)
+  resolve a colour name through the Document - the customisation's own
+  table, then the standard names - and the window hands the interpreter no
+  lookup of its own any more (`CommandInterpreter::setColourLookup`): it had
+  only the standard names to give, which the Document knows. (`CODE LIST`
+  and `CODE CHECK` were `MAPFILE LIST` and `MAPFILE CHECK` until 2026-10-06.)
+  Survey > Apply Survey Codes runs `CODE SELECTION` or `CODE DRAWING` ("The
+  Format menu", above).
 - `COPC <source> <destination.copc.laz>`, each path one word or quoted, a
   background job whose `converted` record names the file
   (`docs/interop.md`, "IMPORT, EXPORT, INFO, REFS and COPC on every front
   end"). GIS > Convert Point Cloud to COPC offers to import the result once
   the job has converted it. In a headless session the menu item opens no
   file dialog and names this verb instead.
-- `CUSTOMISE` alone reports what is loaded, from which files, what the project
-  was drawn with that is not loaded, and what it covers in this drawing
-  (`cad::customisationReport`, the words `katana_cli` prints); it once
-  answered with its usage.
+- `CUSTOMISE`, the whole family, is the interpreter's
+  (`include/katana/cad/customisation_verbs.hpp`; `docs/customisation.md`,
+  "The verbs"): the report, `JSON`, a load (merge or `REPLACE`), `EXPORT`,
+  `RESET`, `KEEP`, `REVERT`, `REMOVE` and `SET`, answered in records. The
+  window had a tokenizer and a loader of its own for `CUSTOMISE [REPLACE]
+  <file>...`, beside `katana_cli`'s, written twice because the readers of
+  the older files lived where the interpreter could not see them - and the
+  two had come to differ. Both are gone from the window
+  (`MainWindow::dispatchLine` hands the line on), with the prose they
+  printed: a load now answers `loaded file=... name=... definitions_added=...`
+  a file, the names the rules ask for that nothing defines, and the
+  `customisation` record; a file named twice is `repeated file=...`; a file
+  of another program is refused as not a Katana customisation file, and
+  nothing is loaded. `CUSTOMISE` alone is the two count lines, the records
+  (the session's name and origin, its sources, the automation, the linework
+  codes, what the open project is missing) and what it covers in this
+  drawing.
 - `IMPORT <file> LOCAL` moves a DXF, vector file or .12da archive as one piece
   so its lower-left corner sits at 0,0, and asks nothing; a raster or a point
   cloud refuses it by name. The path and the `LOCAL` are read by
@@ -2011,12 +2172,14 @@ own code keeps, so nothing is written twice:
 - **Window**: `windowHelpText`, the verbs `MainWindow::dispatchLine` and
   `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
   `EXPORT`, `INFO <file>`, `REFS`, `COPC` - the geoprocessing executor's,
-  whose usage the Geoprocessing section gives - `CUSTOMISE`, `PLOTSHEETS`, `PLOT`,
+  whose usage the Geoprocessing section gives - `PLOTSHEETS`, `PLOT`,
   `SNAPSHOT`, `ZOOM`, `GRID`, `SNAP`, `EXAGGERATION`, `ONLINE`, `UTILITY`,
   `QUIT`, and `HELP`, which adds this section to the interpreter's), and the rule for a bare tool
   word - with the one word that means different things on the two command
   lines: a bare `LS` starts the List tool in the window and is `LABELSTYLE`
-  in `katana_cli`;
+  in `katana_cli`. `CUSTOMISE` had a block here while the window ran it
+  itself; it is under Commands now, with the interpreter's other verbs, and
+  `HELP CUSTOMISE` prints every word and every reply;
 - **the tools**, a section a menu: each tool's name, aliases, key, tip and id,
   from the tool catalogue.
 
@@ -2066,11 +2229,20 @@ non-modal and kept, following the Document through a `DocumentWatcher`
 - the current layer, style, annotation scale and coordinate system;
 - the selection;
 - the undo and redo depth with the next step each way;
-- the customisation, in the words a bare `CUSTOMISE` prints
-  (`cad::customisationSummary`): the loaded files in load order, the files the
-  project was drawn with that are not loaded, the counts and this drawing's
-  coverage; and the names the drawing's styles give that no loaded library
-  defines (`drawingSummaryUnresolved`). A double-click on one, or Show in Styles
+- the customisation, word for word what a bare `CUSTOMISE` replies
+  (`cad::formatCustomisationReply` of `cad::customisationSummary(document)`):
+  the counts, then the records - the session's name, origin and whether it
+  is kept, its sources in load order, the automation, the linework codes,
+  the names the project was drawn with that are not loaded - and this
+  drawing's coverage. The pane wraps at its edge: the records are longer
+  than it is wide (the linework record is 143 characters), and unwrapped the
+  end of each was out of sight behind a scroll bar
+  (`DrawingSummaryDialog.NoRecordOfTheCustomisationPaneIsCutAtThePanesEdge`).
+  It reads the Document's own state; the window once
+  kept the loaded files and the missing ones in lists of its own and handed
+  them over, and the pane printed an older prose of them. Then the names the
+  drawing's styles give that no loaded library defines
+  (`drawingSummaryUnresolved`). A double-click on one, or Show in Styles
   and Linetypes, opens Format > Styles and Linetypes on its Styles tab with the
   Missing chip and the name in the search, reached by the object names the
   manager's header lists (`MainWindow::showMissingInStyles`), so its styles
@@ -2078,7 +2250,11 @@ non-modal and kept, following the Document through a `DocumentWatcher`
 
 It changes nothing. Copy as JSON runs `STATUS JSON` through the one executor
 and copies the reply - exactly what `katana_status` and `katana://status` give
-(`docs/cad.md`, "STATUS") - and Load Customisation is the Format menu's item.
+(`docs/cad.md`, "STATUS"). It had a Load Customisation button
+(`drawingSummaryLoad`) that triggered the Format menu's item of that name;
+the item is gone ("The Format menu", above), and the button with it, since a
+trigger of a name that is no menu item fails without a word
+(`DrawingSummaryDialog.ItOffersNoButtonForTheRemovedLoadCustomisationItem`).
 The status bar has a permanent `statusSelectionCount` label, "3 selected / 120
 entities", refreshed with the panels.
 

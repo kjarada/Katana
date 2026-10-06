@@ -11,26 +11,37 @@
 // main_window.hpp - and, having no window in it, it can be built and driven by
 // a widget test.
 //
-// The menu:
-//   Layers...                      the window's action (services.layers)
-//   Styles and Linetypes...        formatStyles       -> styleManagerDialog
-//   Symbol Library...              formatSymbols      -> symbolLibraryDialog
-//   Survey Code Manager...         formatSurveyCodes  -> surveyCodeManagerDialog
-//   ---
-//   Load Customisation...          the window's actions (services.load...,
-//   Replace Loaded Customisation...  services.replace...)
-//   ---
-//   Global Modify...               formatGlobalModify -> globalModifyDialog
-//   Purge Unused...                formatPurge
+// The menu, in two titled sections:
+//   Tables and Libraries
+//     Layers...                    the window's action (services.layers)
+//     Styles and Linetypes...      formatStyles       -> styleManagerDialog
+//     Symbol Library...            formatSymbols      -> symbolLibraryDialog
+//     Survey Code Manager...       formatSurveyCodes  -> surveyCodeManagerDialog
+//   Across the Drawing
+//     Global Modify...             formatGlobalModify -> globalModifyDialog
+//     Purge Unused...              formatPurge
 // Each manager's action carries its dialog's object name as its data, which
 // is how the headless --dialog switch finds the dialog an action opened.
 //
+// There was a third section, Customisation Files, with the window's Load
+// Customisation and Replace Loaded Customisation: file dialogs over the style
+// libraries and survey code files of another program, which Katana no longer
+// reads. A customisation file is loaded by the CUSTOMISE line - typed, in a
+// script, or with --customise - which is the interpreter's
+// (cad/customisation_verbs.hpp); no menu item stands for it here.
+//
 // The workbench owns what the managers share: the picture cache
-// (DefinitionThumbnails), the session's linework control codes, and the one
-// CustomisationContext they are built from. Each manager is NON-MODAL, made
-// the first time it is asked for and kept - hidden, not deleted - between
-// uses, so the code manager's unapplied edits survive closing it; asking again
-// shows and raises the same one.
+// (DefinitionThumbnails), the linework control codes the code manager's
+// Linework tab strings with, and the one CustomisationContext they are built
+// from. Each manager is NON-MODAL, made the first time it is asked for and
+// kept - hidden, not deleted - between uses, so the code manager's unapplied
+// edits survive closing it; asking again shows and raises the same one.
+//
+// Those control codes are the CUSTOMISATION'S (the Document's
+// customisationState().linework: what a customisation file says and CUSTOMISE
+// SET linework.* sets), followed as they change - followLineworkCodes. The
+// tab kept a copy that nothing ever wrote to but its own button, and strung
+// with the defaults whatever was loaded.
 
 #include <functional>
 #include <memory>
@@ -57,6 +68,7 @@ class Document;
 namespace katana::qt {
 
 class DefinitionThumbnails;
+class DocumentWatcher;
 class GlobalModifyDialog;
 class StyleManagerDialog;
 class SurveyCodeManagerDialog;
@@ -80,9 +92,14 @@ struct CustomisationServices {
     // no file dialog. Asked each time, because the window learns it after it
     // is built. Unset: interactive.
     std::function<bool()> headless;
-    // Actions the window owns that the Format menu shows too, the same
-    // objects, so two menus cannot drift apart. Each may be null.
+    // The window's Layers action, which the Format menu shows too: the same
+    // object, so the menu and the toolbar cannot drift apart. May be null.
     QAction* layers = nullptr;
+    // NOT READ. These were the window's Load and Replace Loaded Customisation
+    // actions, which went with the files they loaded. Nothing passes them and
+    // the workbench shows neither; the two members are left only because
+    // tests/qt_widgets/customisation/test_general_texts.cpp, which another
+    // change is rewriting, still assigns them. They go with those two lines.
     QAction* loadCustomisation = nullptr;
     QAction* replaceCustomisation = nullptr;
     // The window's one executor, handed on to every manager
@@ -150,6 +167,8 @@ class CustomisationWorkbench {
     // own (the window's --style-manager grab).
     [[nodiscard]] CustomisationContext context();
     [[nodiscard]] DefinitionThumbnails& thumbnails() { return *thumbnails_; }
+    // The control codes the Linework tab strings with: the customisation's,
+    // as last followed, or what the tab's own Use These Codes put here since.
     [[nodiscard]] katana::cad::LineworkCodes& lineworkCodes() { return lineworkCodes_; }
 
   private:
@@ -157,11 +176,25 @@ class CustomisationWorkbench {
     // Select `ids` and frame them in the active plan view.
     void selectAndShow(const std::vector<katana::entity::EntityId>& ids);
     void log(const QString& text, bool isError) const;
+    // Takes the Document's linework control codes when they are not the ones
+    // last taken: into the copy the Linework tab reads and, where a code
+    // manager exists, into its seven fields and through its own Use These
+    // Codes - the tab's door, so a plan it made with the old codes is thrown
+    // away and it says in the log that the codes are set. Called from the
+    // event loop after any change of the Document, and before a code manager
+    // is made, which may be in the same turn as the change.
+    //
+    // Only a CHANGE of the Document's codes: what the tab's own button set
+    // meanwhile stands until then, since any other change of the
+    // customisation - a switch, a KEEP - is no reason to take it back.
+    void followLineworkCodes();
 
     QWidget& window_;
     CustomisationServices services_;
     std::unique_ptr<DefinitionThumbnails> thumbnails_;
     katana::cad::LineworkCodes lineworkCodes_{};
+    // The Document's own, as they were when last followed.
+    katana::cad::LineworkCodes followedLinework_{};
     QAction* stylesAction_ = nullptr;
     QAction* symbolsAction_ = nullptr;
     QAction* codesAction_ = nullptr;
@@ -171,6 +204,9 @@ class CustomisationWorkbench {
     QPointer<SymbolLibraryDialog> symbols_;
     QPointer<SurveyCodeManagerDialog> codes_;
     QPointer<GlobalModifyDialog> globalModify_;
+    // Last, so it is destroyed first: no delivery reaches a half-destroyed
+    // workbench.
+    std::unique_ptr<DocumentWatcher> watcher_;
 };
 
 } // namespace katana::qt

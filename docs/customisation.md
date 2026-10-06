@@ -776,10 +776,11 @@ survives being read and written.
 
 ### Not done
 
-- **The two programs do not read a file of it from their command lines
-  yet.** The verbs that read and write one are in the interpreter ("The
-  verbs", below), but `katana_cli` and the window still take a `CUSTOMISE`
-  line themselves; Settings comes with the work that follows.
+- **`katana_cli` does not read a file of it from its command line yet.** The
+  verbs that read and write one are in the interpreter ("The verbs", below),
+  and the desktop window runs them (2026-10-06: its typed `CUSTOMISE` and
+  `--customise`); `katana_cli` still takes a `CUSTOMISE` line itself.
+  Settings comes with the work that follows.
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
 - **Some of a rule's members are still shown by another word.** `CODE
@@ -864,13 +865,17 @@ family's whole reference (`cad::customisationVerbHelp`).
 **Where this stands.** The family is in the interpreter and is tested there
 (`tests/cad/customisation/test_customisation_verbs.cpp`,
 `tests/cad/customisation/test_survey_code_verbs.cpp`). `CODE` reaches every
-front end today. A `CUSTOMISE` line does not yet: `katana_cli` and the window
-each take it before the interpreter sees it, with the code they had, which
-still reads the older files (`src/katana_app/session.cpp`,
-`src/katana_qt/main_window.cpp`). Each is moved to this family by the work
+front end today. A `CUSTOMISE` line reaches the desktop window's (2026-10-06):
+the window hands the interpreter its host, starts through
+`startCustomisation` and has no `CUSTOMISE` of its own any more
+(`docs/desktop.md`, "How the window starts" and "The Format menu";
+`qt_customisation_merges_and_keeps_the_map_headless` and the headless tests
+beside it). It does not
+reach `katana_cli` yet, which takes the line before the interpreter sees it,
+with the code it had, which still reads the older files
+(`src/katana_app/session.cpp`). It is moved to this family by the work
 that ports it; until then what `docs/survey_coding.md` says of `CUSTOMISE
-<file>` is what those two programs do, and neither hands the interpreter a
-host.
+<file>` is what that program does, and it hands the interpreter no host.
 
 ### CUSTOMISE
 
@@ -971,10 +976,11 @@ which is what the merge replaces by. The `automation` and `linework` records
 carry the very keys `SET` takes, so either can be typed back after it.
 
 The bare report has a second, older text, `cad::formatCustomisationSummary`,
-which names a source by the kind of file it once was ("a style library"). The
-front ends' own `CUSTOMISE` and File > Drawing Summary still print it, and it
-goes with the last of them; the verb's text is `cad::formatCustomisationReply`,
-and both are made from one `CustomisationSummary`.
+which names a source by the kind of file it once was ("a style library").
+`katana_cli`'s own `CUSTOMISE` still prints it, and it goes with that; the
+window's `CUSTOMISE` and File > Drawing Summary printed it too until they
+moved to the verb's text, `cad::formatCustomisationReply`. Both are made from
+one `CustomisationSummary`.
 
 `CUSTOMISE JSON` is `cad::customisationJson`: one object, keys in
 alphabetical order, two blanks a level, with `name`, `origin`, `kept`,
@@ -1129,9 +1135,9 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 
 ### The verbs: not done
 
-- **The front ends do not use the family for `CUSTOMISE` yet** ("Where this
-  stands"). Until they do, `katana_cli --help` lists a Customise block twice,
-  the interpreter's and the session's own.
+- **`katana_cli` does not use the family for `CUSTOMISE` yet** ("Where this
+  stands"; the window does). Until it does, `katana_cli --help` lists a
+  Customise block twice, the interpreter's and the session's own.
 - **An unnamed session has no verb that names it.** `EXPORT ... NAME <name>`
   writes it under one, and loading that file with `REPLACE` gives the session
   the name; `KEEP` refuses it until then.
