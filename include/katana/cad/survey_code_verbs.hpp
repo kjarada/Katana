@@ -9,8 +9,11 @@
 //                               apply the loaded survey codes to the entities
 //                               the scope takes that carry a field code, as
 //                               ONE undo step; PREVIEW changes nothing
-//   CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>]
-//                               the codes those entities carry
+//   CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW]
+//                               the codes those entities carry (it changes
+//                               nothing, so PREVIEW asks nothing more of it:
+//                               the word is taken so that the two forms are
+//                               one grammar)
 //   CODE EXPLAIN <code>         why a code gets what it gets
 //   CODE LIST [<filter>]        the loaded survey codes, one code per line
 //   CODE CHECK                  lint them; refused when a rule has an error
@@ -38,6 +41,13 @@
 // drawings from GIS data carry - is still that property, and CODE LAYERS a is
 // the layer a. A property called as a scope word that CAN stand alone (ALL,
 // VIEW, SEL), or as a subcommand, is given as PROPERTY <name>.
+//
+// So is a property of SEVERAL words whose first is any of those words: with
+// a word after it even LAYER, LAYERS and AREA begin the scope form, and
+// nothing can tell CODE Layer a, the layer, from a property called "Layer a".
+// CODE Area m2 is refused (a window is four numbers) and CODE Layer a codes
+// layer a; that property is PROPERTY "Area m2". A property of several words
+// whose first is none of them is still the whole rest of the line.
 //
 // Every reply begins with what the scope took (scopeRecord); the rest is
 // code_table.hpp's formatter text, the words the Survey Code Manager shows.

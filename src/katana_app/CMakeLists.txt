@@ -155,6 +155,15 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "POINT 1,1" -c "SELECT ALL"
                 -c "PROP SET code KT01" -c "CODE" -c "CODE CENSUS")
+    # CODE on a scope, previewed: the scope words and PREVIEW reach katana_cli
+    # as they reach every front end. Two points coded KT01, entity 1 on layer
+    # 0 and entity 2 on layer a. The scope takes the one on layer a, the
+    # preview says what coding it would do, and LIST then shows it where it was.
+    add_test(NAME cli.code_on_a_scope_previews_and_changes_nothing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_replace}" -c "POINT 1,1" -c "LAYER NEW a"
+                -c "LAYER SET a" -c "POINT 2,2" -c "SELECT ALL" -c "PROP SET code KT01"
+                -c "CODE LAYERS a PREVIEW" -c "LIST")
     # A QUOTED path whose first word is "replace" is a file, not the REPLACE
     # keyword: taken for the keyword, the file was dropped ("REPLACE needs a
     # file") or, given twice, replaced the loaded map instead of merging. Run
@@ -276,6 +285,13 @@ if(KATANA_BUILD_TESTS)
     # drawing, which holds the one point the test draws.
     set_tests_properties(cli.code_applies_and_reports PROPERTIES PASS_REGULAR_EXPRESSION
         "scope=drawing matched=1${_eol}1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*Layers created: KATANA TEST${_eol}Styles created: cross${_eol}.*  KT01: 1 entity, prefix, matched\\; layer 0 -> KATANA TEST\\; style cross \\(created\\)\\; 1 changed${_eol}Applied as one command.*scope=drawing matched=1${_eol}1 entity carries a code in \"code\", 1 distinct code${_eol}  KT01: 1, prefix, matched, layer KATANA TEST")
+    # By hand: layer a holds entity 2 alone (matched=1); KT* gives the layer
+    # KATANA TEST and the symbol cross, so the row is the one above with the
+    # layer it would leave, a; a preview ends "Preview: nothing was changed.",
+    # and the point is still on layer a in the LIST that follows.
+    set_tests_properties(cli.code_on_a_scope_previews_and_changes_nothing PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "scope=layers layers=a sublayers=yes matched=1${_eol}1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*  KT01: 1 entity, prefix, matched\\; layer a -> KATANA TEST\\; style cross \\(created\\)\\; 1 changed${_eol}Preview: nothing was changed\\.${_eol}.*2  Point  layer=a  at 2,2")
 
     # CUSTOMISE alone names the files loaded, in load order - "is my code
     # file loaded?" is what a count could not answer - after the counts. The

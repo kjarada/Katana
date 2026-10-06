@@ -1115,13 +1115,17 @@ Decisions worth recording:
 - **Only text is a code.** A number in the code property is a measurement
   someone named badly; treating `1.5` as a field code would file it under
   whatever the rule for `1*` says.
-- **The colour comes through a callback.** The standard colour names were known
-  only to `archive12d`, which `cad` may not see, so the front ends pass
-  `archive12d::standardColour`. Without one, colours are left alone rather
-  than guessed at. (The names are the entity layer's since 2026-10-06 and
-  `archive12d::standardColour` is `entity::standardColour` by another name;
-  the callback stays until `cad` resolves a name itself -
-  `docs/customisation.md`, "Colour names".)
+- **A colour name is resolved by whoever is asked to code.** `applySurveyCodes`
+  takes the lookup as a callback (`SurveyCodingOptions::colourOf`), because
+  the standard colour names were once known only to `archive12d`, which `cad`
+  may not see; without one, colours are left alone rather than guessed at.
+  The `CODE` verb no longer depends on a front end for it: it resolves a name
+  through the Document (`cad::resolveColour`: the customisation's own table,
+  then the standard names, which are the entity layer's since 2026-10-06), and
+  what a front end passed with `CommandInterpreter::setColourLookup` is asked
+  only for a name neither knows (`docs/customisation.md`, "Colour names" and
+  "The verbs"). A name nothing knows - a plot pen, `pen 025` - still leaves
+  the colour alone.
 
 From the command line, the whole chain:
 
@@ -1129,6 +1133,7 @@ From the command line, the whole chain:
 katana_cli
   -c 'POINT 0,0' -c 'SELECT ALL' -c 'PROP SET code WM01 text' -c 'CODE' -c 'LIST'
 
+scope=drawing matched=1
 1 entity carries a code in "code": 1 matched, 0 fallback-only (only the bare * rule answers), 0 with no rule
 1 entity changed
 Layers created: SURVEY SERVICES
@@ -1139,9 +1144,11 @@ Applied as one command. UNDO puts it all back.
 1  Point  layer=SURVEY SERVICES  at 0,0
 ```
 
-(With the compiled-in customisation, so no CUSTOMISE is needed. The
-`DepthLocation` and `Depth Location` attributes come from the bare `*` pipe
-rules every code meets; see "Asking the map why".)
+(With the compiled-in customisation, so no CUSTOMISE is needed. The first
+line is what the scope took: `CODE` with no scope word is the whole drawing,
+which holds the one point. The `DepthLocation` and `Depth Location`
+attributes come from the bare `*` pipe rules every code meets; see "Asking
+the map why".)
 
 ## Asking the map why: explain, list, census, lint
 
@@ -1167,7 +1174,7 @@ scope word is the whole drawing, and how a line's first word is read.
 |---|---|---|
 | Why does this code get what it gets? | `explainCode` → `formatCodeExplanation` | `CODE EXPLAIN <code>` |
 | What does the map say, one code per line? | `codeTable`, `codeTableRowMatches` → `formatCodeTable` | `CODE LIST [<filter>]` |
-| Which codes do these entities carry? | `codeCensus` → `formatCodeCensus` | `CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>]` |
+| Which codes do these entities carry? | `codeCensus` → `formatCodeCensus` | `CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW]` |
 | What is wrong with the map before it is applied? | `lintSurveyMap`, `lintSurveyRule` → `formatLint` | `CODE CHECK` |
 
 **An explanation cites rules by index**, the only identity a rule has. For

@@ -164,7 +164,15 @@ std::string formatCustomisationReply(const CustomisationSummary& summary)
     std::ostringstream out;
     const bool nothing = nothingLoaded(summary);
     if (nothing) {
-        out << "No customisation is loaded.\n"
+        // A session may hold a customisation that brought neither kind - a
+        // name, a table of colours, the settings. "No customisation is
+        // loaded." above the record that names it and gives its origin
+        // contradicted the next line; what is true of it is that nothing in
+        // it draws.
+        out << (summary.origin == CustomisationOrigin::None
+                    ? "No customisation is loaded.\n"
+                    : "No linestyle or symbol definitions and no survey code rules are "
+                      "loaded.\n")
             << "  CUSTOMISE <file> [<file>...]  loads Katana customisation files\n";
     } else {
         writeCounts(out, summary);

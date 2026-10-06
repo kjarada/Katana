@@ -79,7 +79,9 @@ customisationSummary(const Document& document, const std::vector<CustomisationSo
 // ---- the verb's reply -------------------------------------------------------------------
 //
 // Lines ending in '\n': the two count lines formatCustomisationSummary begins
-// with (or that nothing is loaded, and how to load), then one record a line -
+// with (or that nothing is loaded and how to load; of a customisation that
+// brought neither kind - colours, settings - that no definitions and no rules
+// are loaded, never that no customisation is), then one record a line -
 //
 //   customisation name=NSW origin=builtIn kept=yes definitions=792 codes=632 rules=1624 colours=12
 //   source name=NSW definitions=yes rules=yes               one a source, in load order

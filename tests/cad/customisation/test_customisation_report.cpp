@@ -223,6 +223,40 @@ TEST(CustomisationReport, TheVerbsReplyOfNothingKeepsWhatTheProjectIsMissingAndN
     EXPECT_EQ(reply.find(".mapfile"), std::string::npos);
 }
 
+TEST(CustomisationReport, TheVerbsReplyNeverSaysNoCustomisationIsLoadedOfOneThatIs)
+{
+    // A customisation that brought neither kind: a name and a table of two
+    // colours, loaded. "No customisation is loaded." above the record that
+    // names it contradicted the next line. What is true is that it holds
+    // nothing that draws - and there is still no coverage to report of that.
+    katana::cad::CustomisationSummary summary;
+    summary.name = "Site colours";
+    summary.origin = katana::cad::CustomisationOrigin::Loaded;
+    summary.colours = 2;
+    summary.loaded = {{"Site colours", false, false, {}}};
+    const std::string reply = katana::cad::formatCustomisationReply(summary);
+    EXPECT_EQ(reply,
+              "No linestyle or symbol definitions and no survey code rules are loaded.\n"
+              "  CUSTOMISE <file> [<file>...]  loads Katana customisation files\n"
+              "customisation name=\"Site colours\" origin=loaded kept=no definitions=0 codes=0 "
+              "rules=0 colours=2\n"
+              "source name=\"Site colours\" definitions=no rules=no\n"
+              "automation auto.codes=on auto.linework=on\n"
+              "linework linework.start=ST linework.end=END linework.close=CL "
+              "linework.arcstart=BC linework.arcend=EC linework.join=JPN "
+              "linework.rectangle=RECT\n");
+    EXPECT_EQ(reply.find("No customisation is loaded"), std::string::npos);
+    // Every origin but "none" is a customisation that is there.
+    for (const auto origin :
+         {katana::cad::CustomisationOrigin::BuiltIn, katana::cad::CustomisationOrigin::Kept,
+          katana::cad::CustomisationOrigin::Edited}) {
+        summary.origin = origin;
+        EXPECT_TRUE(katana::cad::formatCustomisationReply(summary).starts_with(
+            "No linestyle or symbol definitions and no survey code rules are loaded.\n"))
+            << katana::cad::toString(origin);
+    }
+}
+
 TEST(CustomisationReport, TheSummaryOfASessionReadsItsStateFromTheDocument)
 {
     // The raw setters, as an editor calls them: an edited session with no
