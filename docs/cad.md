@@ -1122,7 +1122,7 @@ layer/s, elements, filtered elements, like global change", and for every
 tool to be able to act that way. Global Modify's scope and filter became the
 one mechanism for it (`include/katana/cad/scope_verbs.hpp`): one set of
 words, read by one parser and resolved by the one matcher,
-`cad::matchEntities`. Today `MODIFY` and the `UTILITY` verbs take them; the
+`cad::matchEntities`. Today `MODIFY`, the `UTILITY` verbs and `LINEWORK` take them; the
 standing rule is that every verb that reads or changes drawing data
 is to take them too, and the others - `ERASE`, `CHLAYER`, `SELECT` and the
 rest - still act on the selection or their own arguments until they do.
@@ -1140,6 +1140,10 @@ verb that reads the shared words - `EXPORT` and the GDAL verb's `FROM`
 included, though `EXPORT` with no scope words at all is the whole drawing;
 `katana_mcp`'s `where` without `scope` is written `SELECTION WHERE`
 (`docs/interop.md`, "Export options").
+The one verb with a default of its own is `LINEWORK`: with no scope word,
+with or without a bare `WHERE`, it takes the selection when anything is
+selected and the whole drawing when nothing is, and its reply's `scope=` says
+which (`docs/survey_coding.md`, "`LINEWORK` on the command line").
 The `WHERE` keys are Global Modify's filter: `TYPE=point,line`,
 `LAYER=pat[,pat]`, `STYLE=pat|ByLayer`, `COLOUR=#RRGGBB|ByLayer`,
 `PROP=key[:pat]`, `TEXT=pat` and `DRAWN`, with `*` and `?` wildcards.

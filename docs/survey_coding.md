@@ -1346,10 +1346,13 @@ Tokens after the name are matched ignoring ASCII case - they are keypad
 keywords, and `st` means `ST` - and the first token is always the name, so a
 code `CL` is a string called CL. An empty spelling switches a control off;
 `validate(LineworkCodes)` refuses a spelling with a blank and two controls
-spelled alike. In the application the spellings are SESSION data kept by the
-Format workbench (`CustomisationWorkbench::lineworkCodes`), which the Survey
-Code Manager's Linework tab shows and edits and every run reads; they start as
-the defaults each session and are not remembered between sessions.
+spelled alike. The spellings are part of a customisation and the session's
+are the Document's (`Document::customisationState().linework`): the
+`LINEWORK` verb and a survey import read them there. The Survey Code
+Manager's Linework tab still shows, edits and runs with a copy the Format
+workbench keeps (`CustomisationWorkbench::lineworkCodes`), which starts as
+the defaults each session - so until the tab runs the verb's line, a
+spelling changed in one is not the other's.
 
 **Curves are chorded.** `Polyline2` has no arc segment, and giving it one is a
 schema change deferred under D6. So each consecutive three curve points
@@ -1379,6 +1382,20 @@ and nothing else is: a point in no line always stays, and so does a point
 only a `JPN` join reached (a tree or an uncoded control point joined to is
 not replaced by the join line). `pointsRemoved` counts only what was deleted.
 
+**`skipLinesAlreadyDrawn`.** Off by default. On, a line planned now that the
+drawing already holds is not drawn a second time: a polyline carrying the
+same code and string number that runs through the same vertices at the same
+heights, closed alike, whatever drew it and whatever layer and style it has
+since been given. It is listed in `LineworkReport::alreadyDrawn` instead of
+`strings`, its points count as placed, and none of them is removed on its
+account whatever `keepPoints` says - the line that would stand in for them
+is not this run's. The comparison is exact, with no tolerance: a line is
+built from its points' own coordinates each time, so one that differs in the
+last place is the line of a point that moved. It is an option, and not what
+`processLinework` always does, because an import's own run must not have it:
+two imports of one file each draw, and own, their lines. The `LINEWORK` verb
+turns it on (below).
+
 **`drawSurveyFeatures` and the code property.** Pass it the options the
 import was given: the line goes on its code's layer, or with its points when
 the code names none. When the import wrote no code (`codeProperty` empty),
@@ -1387,10 +1404,11 @@ each line still gets its code, under `codePropertyCandidates().front()`
 code it carries. `coding.createLayers` governs every layer here, as in
 `processLinework`; `import.createLayers` is not read.
 
-Process Linework is the Survey Code Manager's Linework tab, previewed before
-it runs, against the drawing's map. Draw Survey Features has no command, menu
-item or dialog of its own: it runs inside an import that asks for linework
-(next section). `katana_cli` has no linework verb.
+Process Linework is the `LINEWORK` verb ("`LINEWORK` on the command line",
+below) and the Survey Code Manager's Linework tab, previewed before it runs,
+against the drawing's map. Draw Survey Features has no command, menu item or
+dialog of its own: it runs inside an import that asks for linework (next
+section).
 
 **A point is coded by its string name.** `applySurveyCodes` looks a POINT up
 by the string name of its field code, its linework controls left out
@@ -1596,11 +1614,13 @@ session's control codes are not job data.
 
 Not done:
 
-- No verb, wizard or dialog sets the options yet, so in every front end an
-  import still draws points only; the Survey Jobs dialog does not pass
+- `SURVEY IMPORT` sets the options (`docs/survey.md`, "SURVEY IMPORT codes
+  and strings what it draws"); the import wizard does not yet, and still
+  draws points only. The Survey Jobs dialog does not pass
   `SurveyJobReadjustment::finish`, so a new point of a finished job is styled
   without a colour lookup (and gets a second style when its rule names a
-  colour).
+  colour); `cad::surveyImportFinish(document).options` is what it should
+  pass.
 - **A job keeps no string numbers unless it was finished with survey codes
   loaded.** Imported with both options off, or into a drawing with no
   customisation, its points carry the code alone, and nothing adds the number
@@ -1619,9 +1639,160 @@ Not done:
 - A named line record whose code IS its end points' code numbers those ends
   as its own string, so the rest of that code's points are strung without
   them.
-- Process Linework run by hand over a finished job's points draws their
-  lines a second time - a job's `draw-linework` and its `placedPoints` are
-  what a verb can leave them out by.
+- The Survey Code Manager's Linework tab, which calls `processLinework`
+  itself, draws a finished job's lines a second time over its points. The
+  `LINEWORK` verb leaves those points out (next section); the tab does until
+  it runs the verb's line.
+
+### `LINEWORK` on the command line
+
+```
+LINEWORK [<scope>] [WHERE k=v ...] [ORDER number|entity] [PREVIEW]
+```
+
+`processLinework` as a verb of the shared interpreter
+(`include/katana/cad/linework_verbs.hpp`, `runLineworkVerb`), so the window's
+command line, `katana_cli`, `katana_mcp` and an agent all have it; `HELP
+LINEWORK` is its reference. Until 2026-10-06 the one way to string points was
+a tab of a dialog. What it decides:
+
+- **The scope is the shared one, and comes first** (`docs/cad.md`, "Scope and
+  filter"). With no scope word it is the selection when anything is selected
+  and the whole drawing when nothing is, also under a bare `WHERE`, and the
+  reply's `scope=` says which. Rejected: the selection always, as `MODIFY`
+  has it, refusing when nothing is selected. Stringing a survey is nearly
+  always done to all of it, and a typed `LINEWORK` in a drawing with nothing
+  selected would be refused for want of a word. A scope word after `ORDER`
+  or `PREVIEW` is refused by name rather than read as one: guessing it was
+  meant is how a line strings the whole drawing where it was to string one
+  layer.
+- **The control codes and the colours are the Document's**
+  (`customisationState().linework`, `cad::colourLookup`), as a survey
+  import's are, so a line strung by hand looks like one an import strung.
+- **A control code alone still makes a line**, and so does the fallback rule
+  (`onlyRuledLines` stays off): the run was asked for by name. An import's
+  own run draws only what a rule more specific than `*` makes a line.
+  `processLinework` decides it point by point, so where no rule makes the
+  code a line ONLY the points that carry a control code are joined: of `KB
+  ST`, `KB`, `KB CL` with no rule for `KB`, the first and third make the
+  line and the second is unplaced, with the reason. The help said "or a
+  control code asks for one" of the whole string until a review ran it; it
+  now says what happens
+  (`LineworkVerb.WithNoRuleForACodeOnlyItsPointsThatCarryAControlCodeAreJoined`).
+- **It never removes a point.** `keepPoints` is not offered: a point taken
+  out from under a survey job reads to its next re-adjustment as deleted by
+  hand. The tab keeps its box.
+- **`ORDER number|entity`**: by point number (the default; a point with none
+  has no place and is reported) or as drawn, which for an import is the
+  order the file listed the shots.
+- **`PREVIEW`** plans and reports. A run that draws nothing is no undo step;
+  one that draws is exactly one.
+- **Points their survey job has already strung are left out, and counted**
+  (`left_out=<n> reason=strung-by-their-job`). A job imported with linework
+  on drew its lines itself - the file's numbered strings among them, which
+  only the file knows - and owns them: a re-adjustment redraws them in place
+  and Remove Job deletes them. A second line through the same points would
+  lie on top of the job's and be nobody's. How it is known: the job's stored
+  options say `draw-linework`, the point is among the job's
+  `createdEntities`, and a polyline among those same `createdEntities`, still
+  in the drawing, carries the point's string name (its code's first word
+  followed by its string number - what a line drawn by linework carries
+  too). So a point of such a job whose string the job has NO line of - a rule
+  written since, a line deleted by hand - is strung by the verb like any
+  other. Three alternatives were rejected:
+  - every point of a job stored with `draw-linework`, whatever it drew. A job
+    imported when no rule made its codes lines would then never be strung by
+    anything, and the reply would say its job had strung points that are in
+    no line;
+  - handing the job's lines to `processLinework` as `earlierLines`, to be
+    redrawn rather than drawn again. A string by code is not the file's
+    string: `KB` 1 closed and begun again is two strings of the file and one
+    name, and the redrawn line would run through both - the verb would
+    reshape lines the job owns;
+  - leaving out any point whose string name some line in the drawing
+    carries, job or no job. Two surveys of one site both have a `KB1`.
+  A job whose option text cannot be read (damaged, or a newer Katana's)
+  refuses a run whose scope takes one of its points, naming the job: whether
+  it strung them is not known, and a guess either way draws twice or not at
+  all. A scope that takes nothing of it does not read it.
+- **A line the drawing already holds is not drawn again, and is counted**
+  (`left_out=<n> reason=already-drawn lines=<m>`: `m` lines, and the `n`
+  points they run through, each once). Added 2026-10-07, after a review ran
+  `LINEWORK` twice and got the same line twice: the job rule knows only what
+  a job's own record names, so a second run over loose points, over a job
+  imported with linework off, or over a string whose job line had been
+  erased and strung again, laid every line on top of the last and said
+  nothing of it. The verb now plans with
+  `LineworkOptions::skipLinesAlreadyDrawn`: a line is the line already drawn
+  when a polyline carries its code and string number and runs through the
+  same vertices at the same heights, closed alike. It is the VERY line that
+  is known, never its name. A string that has gained a point, or whose point
+  was moved or re-levelled, is another line: it is drawn, and the line that
+  was there stays until someone erases it. Two alternatives were rejected:
+  - redrawing the earlier line in place, as a job redraws its own
+    (`earlierLines`). The verb has no record of which line is whose, so it
+    would take whichever polyline carries the name - and a `KB1` of another
+    survey, anywhere in the drawing, would be dragged onto these points;
+  - comparing the vertices and not the heights. A string re-levelled and
+    strung again would then answer "already drawn" over a line that still
+    carries the old heights, which is a stale surface nobody was told of.
+
+The reply is records: `linework scope=... matched=<n> considered=<n>
+lines=<n> unplaced=<n> notes=<n>` (`matched` is what the scope took,
+`considered` the points among it that were looked at - those left to their
+job are not among them, those of a line already drawn are - and `lines` the
+lines drawn; `preview=yes` after them for a preview), the two `left_out`
+records when there is something to say, a `string`
+record for each line - its name, key and number, how many points and
+vertices, whether it closed, its layer, `join=yes` on a join and, once
+drawn, its entity - for the
+first 50 (`kLineworkStringsListed`), then `strings_more=<n>`, an `unplaced
+reason="..." points=<n>` record for each reason a point is in no line, and a
+`note kind="..." count=<n>` record for each kind of note. The reasons and
+kinds are `toString(UnplacedReason)` and `toString(LineworkNoteKind)`, the
+words the tab shows, quoted; a second set of one-word names for them would
+be a second vocabulary to keep in step. A scope that takes nothing is
+answered with zeros.
+
+Tests: `tests/cad/customisation/test_linework_verbs.cpp` - the grammar's
+refusals by name, the default scope and each scope word, the preview, a run
+as one undo step with the Document's colour and control codes, both orders,
+a rectangle, a closed string and a join told apart in their records, every
+reason a point is in no line in one reply, the left-out rule (a finished
+job; part of one, where only what the scope took is counted; a job imported
+with linework off, which is strung; a string whose line was deleted, which is
+strung again - once), a job with unreadable options and one a newer Katana
+wrote, a line already drawn (the second run, a string that gained a point,
+and what makes a line the same line, case by case), a drawing with no survey
+codes, a control code with and without a rule, points with no code, the cap
+of 50, and the help. `cli.linework_strings_points_by_their_control_codes_as_one_undo_step`
+runs it twice through `katana_cli`.
+
+Not done:
+
+- A line is known as drawn only when it is exactly the line this run plans.
+  After a point is added to a string, moved or re-levelled, or when the
+  other `ORDER` runs the string through its points another way, the string's
+  line is drawn anew and the earlier one is left where it was: the person
+  erases it. Nothing ties a line to the points it was strung through.
+- A job imported with `LINEWORK off`, strung afterwards by the verb, is
+  strung BY CODE and not as its file strung it: a string the file closed and
+  began again under one number (the fixture `gnss.fld`: `KB` 1 closed through
+  R001 to R003, then R004) comes out as one open line through all four
+  (`SurveyVerbs.AJobImportedWithLineworkOffIsStrungByTheVerbByCodeAndOnlyOnce`).
+  The file's own strings are drawn only by an import that asks for linework;
+  re-importing the job with it on is the way to get them.
+- A code no rule makes a line is strung only through the points that carry
+  a control code (above): a shot of that code between them with no control
+  code is left out, not joined.
+- The note that a string has no rule to style it is counted also when its
+  line was found already drawn.
+- The Survey menu has no Process Linework item and the Linework tab does not
+  run this line yet; nor does `katana_mcp`'s command tool name the verb in
+  its description (the line itself reaches it, and `katana_help` lists it).
+- The reply counts the notes by kind and does not list them; the tab's
+  preview still does. It does not say which layers and styles its lines
+  created, as `SURVEY IMPORT`'s `linework` record now does.
 
 ## The Survey Code Manager
 

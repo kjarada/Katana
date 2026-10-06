@@ -152,6 +152,28 @@ structured answer.
 (`McpServer.AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt`); it once lost
 them and refused every WKT whose names hold a blank.
 
+`SURVEY IMPORT` also codes and strings what it draws, in that one undo step,
+wherever survey codes are loaded: the points go to the layers and styles
+their codes give them and are joined into lines, unless `CODES off` or
+`LINEWORK off` says not to for the one line, or the customisation's two
+switches do for every import. The reply says what was done in two more
+records, after the reduction's warnings and before the `resection` records:
+`coded points= matched= unmatched_codes= layers= styles=`, then an
+`unmatched_code` record for each code no rule answers (the first ten, then
+`unmatched_codes_more=`), and `linework lines= unplaced= layers= styles=`,
+each counting the layers and styles its own step made. A step that did not
+run answers `coded none reason=<word>` or `linework none reason=<word>` -
+`off`, `no-survey-codes`, `no-codes-in-file`, `no-rule-matches` or
+`no-points` - and none of them fails the line (`docs/survey.md`, "SURVEY
+IMPORT codes and strings what it draws"). Points already in the drawing are
+strung by `LINEWORK [<scope>] [WHERE k=v ...] [ORDER number|entity]
+[PREVIEW]`, a verb of the shared interpreter that answers in records as well
+and leaves out, counted, the points their survey job has strung and the lines
+the drawing already holds (`docs/survey_coding.md`, "`LINEWORK` on the
+command line"; `HELP LINEWORK`). Not done: the command tool's description
+names neither the two words nor `LINEWORK`, so an agent finds them through
+`katana_help` and not from the tool list alone.
+
 The annotation styles are read and changed through `katana_run_commands`
 with the verbs the window's managers send (`docs/annotation.md`): `DIMSTYLE
 INFO name` answers one record of every field, the layers that name the style
