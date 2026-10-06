@@ -53,9 +53,11 @@ void load(Document& document)
     document.setSurveyMap(std::move(map));
 }
 
-const std::vector<CustomisationSource> kLoaded{{"lines.4d", true},
-                                               {"pits.4d", true},
-                                               {"site codes.mapfile", false}};
+// {name, brought definitions, brought rules}: two style libraries and a
+// survey code file.
+const std::vector<CustomisationSource> kLoaded{{"lines.4d", true, false, {}},
+                                               {"pits.4d", true, false, {}},
+                                               {"site codes.mapfile", false, true, {}}};
 
 } // namespace
 
@@ -105,6 +107,31 @@ TEST(CustomisationReport, CountsNamesTheFilesInLoadOrderAndSaysWhatTheDrawingUse
     EXPECT_NE(report.find("\"site codes.mapfile\", a survey code file\n"
                           "1 of this drawing's 1 styles are drawn with a loaded definition "
                           "(1 name one; the rest are plain lines)\n"),
+              std::string::npos)
+        << report;
+}
+
+TEST(CustomisationReport, ASourceIsSaidToBeWhatItBroughtBothKindsAndNeitherIncluded)
+{
+    // A source is named by what it brought. Definitions alone and rules alone
+    // keep the words they have always had; one Katana customisation brings
+    // both, and one that brought neither - a table of colours - is a source
+    // all the same. It once fell through to "a survey code file", the word
+    // for whatever had not brought definitions.
+    const std::vector<CustomisationSource> loaded{{"lines.4d", true, false, {}},
+                                                  {"site codes.mapfile", false, true, {}},
+                                                  {"NSW", true, true, {}},
+                                                  {"Site colours", false, false, {}}};
+    Document document;
+    load(document);
+    const std::string report = katana::cad::customisationReport(document, loaded, {});
+    EXPECT_NE(report.find(
+                  "Loaded files, in load order:\n"
+                  "  \"lines.4d\", a style library\n"
+                  "  \"site codes.mapfile\", a survey code file\n"
+                  "  \"NSW\", a customisation\n"
+                  "  \"Site colours\", a customisation with no definitions or survey code rules\n"
+                  "This drawing has no styles yet"),
               std::string::npos)
         << report;
 }

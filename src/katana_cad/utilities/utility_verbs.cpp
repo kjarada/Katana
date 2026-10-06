@@ -11,6 +11,7 @@
 
 #include "katana/cad/utilities/utility_data.hpp"
 #include "katana/cad/utilities/utility_drawing.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 #include "katana/core/text_encoding.hpp"
 #include "katana/survey/subsurface/clearance.hpp"
@@ -60,18 +61,9 @@ Error usage(std::string_view text)
 }
 
 // A path typed on the command line is UTF-8 text; on Windows a narrow string
-// would be read in the ANSI code page instead. Only for bytes that ARE UTF-8:
-// converting any others throws, and nothing up the call chain catches it.
-std::filesystem::path pathFrom(std::string_view utf8)
-{
-    std::u8string text;
-    text.reserve(utf8.size());
-    for (const char c : utf8) {
-        text += static_cast<char8_t>(c);
-    }
-    return std::filesystem::path(text);
-}
-
+// would be read in the ANSI code page instead (core::pathFromUtf8,
+// path_text.hpp, which every verb that names a file shares).
+//
 // The window's lines are always UTF-8. katana_cli's arguments, its console and
 // a script saved from an ANSI editor on Windows arrive in the ANSI code page,
 // where "café" is not UTF-8; those bytes are opened as the narrow name they
@@ -80,7 +72,7 @@ std::filesystem::path pathFrom(std::string_view utf8)
 std::ifstream openFile(const std::string& path)
 {
     if (core::isValidUtf8(path)) {
-        return std::ifstream(pathFrom(path), std::ios::binary);
+        return std::ifstream(core::pathFromUtf8(path), std::ios::binary);
     }
     return std::ifstream(path, std::ios::binary);
 }
@@ -88,7 +80,7 @@ std::ifstream openFile(const std::string& path)
 std::ofstream createFile(const std::string& path)
 {
     if (core::isValidUtf8(path)) {
-        return std::ofstream(pathFrom(path), std::ios::binary | std::ios::trunc);
+        return std::ofstream(core::pathFromUtf8(path), std::ios::binary | std::ios::trunc);
     }
     return std::ofstream(path, std::ios::binary | std::ios::trunc);
 }

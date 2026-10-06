@@ -268,6 +268,11 @@ constexpr std::string_view kCodePropertyKey = "code-property";
 constexpr std::string_view kPointNumberPropertyKey = "point-number-property";
 constexpr std::string_view kDescriptionPropertyKey = "description-property";
 constexpr std::string_view kRecordSourceKey = "record-source";
+// Whether the job's points were coded and strung when it was imported
+// (SurveyJobImport::finish). Written only when on, and absent is OFF: a job
+// from before these keys was neither, and its text must go on meaning that.
+constexpr std::string_view kApplyCodesKey = "apply-codes";
+constexpr std::string_view kDrawLineworkKey = "draw-linework";
 
 // A property name is the person's own text: a line break or a '%' in one is
 // percent-encoded, so that a line stays one line.
@@ -324,8 +329,56 @@ std::optional<std::string> percentDecoded(std::string_view text)
     return out;
 }
 
-std::string serialiseImportOptions(const SurveyImportOptions& options)
+void renderInto(SurveyJob& job, const survey::ReductionReport& report, std::string createdUtc)
 {
+    job.reportText = survey::renderText(report);
+    job.reportHtml = survey::renderHtml(report);
+    job.reportCreatedUtc = std::move(createdUtc);
+}
+
+// What the file strung, for the finish: the reduced project's points - all of
+// them, the drawing's control too, because a line runs through where the
+// reduction has a point whether or not the job drew it - with its
+// unpositioned points and its features, and nothing else of it (a project
+// whose observations are left out is still a valid one; one whose features
+// name a point that is left out is not). Moved out, not copied: the plan has
+// no further use for them once the drawable project is made.
+survey::SurveyProject stringsOf(survey::SurveyProject& reduced)
+{
+    survey::SurveyProject strings;
+    strings.points = std::move(reduced.points);
+    strings.unpositionedPoints = std::move(reduced.unpositionedPoints);
+    strings.features = std::move(reduced.features);
+    return strings;
+}
+
+// What of the finish a person may have to act on, said in the job's report:
+// the report is where they later ask why a job has no lines, or lost some.
+// Only that. What the finish DID is not a warning - a job coded and strung
+// with nothing left over adds none - and is in the command's finish report.
+void reportFinish(survey::ReductionReport& report, const SurveyFinishReport& finish)
+{
+    for (std::string& sentence : finishWarnings(finish)) {
+        warn(report, std::move(sentence));
+    }
+}
+
+// Whether a job's points are given their string numbers as they are drawn
+// (nameSurveyStrings): when the job is to be coded or strung AND the drawing
+// has survey codes. Not for a job that asks for neither, which is drawn as
+// it always was; and not with no codes loaded, where the finish does nothing
+// and must then leave nothing behind either - not one property - so that
+// asking for it by default changes no drawing that has no customisation.
+bool namesStrings(const Document& document, const SurveyFinishOptions& finish)
+{
+    return finish.any() && !document.surveyMap().empty();
+}
+
+} // namespace
+
+std::string writeSurveyJobOptions(const SurveyJobOptions& stored)
+{
+    const SurveyImportOptions& options = stored.import;
     std::string text;
     auto line = [&text](std::string_view key, std::string_view value) {
         text += key;
@@ -340,13 +393,18 @@ std::string serialiseImportOptions(const SurveyImportOptions& options)
     line(kPointNumberPropertyKey, percentEncoded(options.pointNumberProperty));
     line(kDescriptionPropertyKey, percentEncoded(options.descriptionProperty));
     line(kRecordSourceKey, options.recordSource ? "true" : "false");
+    // Only when on: an import that asked for neither writes the text it
+    // always wrote.
+    if (stored.applyCodes) {
+        line(kApplyCodesKey, "true");
+    }
+    if (stored.drawLinework) {
+        line(kDrawLineworkKey, "true");
+    }
     return text;
 }
 
-// The options the job's points were drawn with. Empty text is the defaults.
-// The text comes from a project file, which may have been damaged or edited
-// by hand, so every malformed line is an error naming the job and the line.
-Result<SurveyImportOptions> parseImportOptions(std::string_view text, std::string_view jobId)
+Result<SurveyJobOptions> readSurveyJobOptions(std::string_view text, std::string_view jobId)
 {
     const auto unreadable = [jobId](std::size_t lineNumber, std::string what) {
         return makeError(ErrorCode::ParseFailure,
@@ -354,7 +412,8 @@ Result<SurveyImportOptions> parseImportOptions(std::string_view text, std::strin
                              " cannot be read: line " + std::to_string(lineNumber) + ": " +
                              std::move(what));
     };
-    SurveyImportOptions options;
+    SurveyJobOptions stored;
+    SurveyImportOptions& options = stored.import;
     bool sawHeader = false;
     std::size_t lineNumber = 0;
     std::size_t start = 0;
@@ -399,6 +458,8 @@ Result<SurveyImportOptions> parseImportOptions(std::string_view text, std::strin
         bool* flag = key == kLayerPerCodeKey   ? &options.layerPerCode
                      : key == kCreateLayersKey ? &options.createLayers
                      : key == kRecordSourceKey ? &options.recordSource
+                     : key == kApplyCodesKey   ? &stored.applyCodes
+                     : key == kDrawLineworkKey ? &stored.drawLinework
                                                : nullptr;
         if (flag != nullptr) {
             if (value != "true" && value != "false") {
@@ -426,17 +487,8 @@ Result<SurveyImportOptions> parseImportOptions(std::string_view text, std::strin
         return unreadable(lineNumber, "it must begin with " + std::string(kImportOptionsHeader) +
                                           "=<version>");
     }
-    return options;
+    return stored;
 }
-
-void renderInto(SurveyJob& job, const survey::ReductionReport& report, std::string createdUtc)
-{
-    job.reportText = survey::renderText(report);
-    job.reportHtml = survey::renderHtml(report);
-    job.reportCreatedUtc = std::move(createdUtc);
-}
-
-} // namespace
 
 // ---- Import ------------------------------------------------------------------------
 
@@ -449,7 +501,12 @@ struct ImportSurveyJobCommand::State {
         survey::ReductionOutcome outcome;
         survey::SurveyProject drawable;
         std::vector<const survey::SurveyPoint*> drawn; // into `drawable`
-        CommandPtr draw;                               // nullptr: nothing to draw
+        // nullptr: nothing to draw. With a finish asked for, the points
+        // command inside the one that codes and strings what it creates.
+        CommandPtr draw;
+        // What that finish does, filled when `draw` runs; null when the
+        // import asked for none.
+        std::shared_ptr<SurveyFinishReport> finish;
     };
 
     Document* document = nullptr;
@@ -463,6 +520,7 @@ struct ImportSurveyJobCommand::State {
     std::size_t index = 0;
     std::string jobId;
     std::optional<survey::ReductionReport> report;
+    std::shared_ptr<SurveyFinishReport> finishReport;
     bool onList = false;
 
     [[nodiscard]] Result<Plan> build(const CommandContext& context) const
@@ -497,6 +555,12 @@ struct ImportSurveyJobCommand::State {
         plan.outcome = std::move(*outcome);
         plan.drawable =
             drawableProject(plan.outcome.reduced, drawingControlIds(request.job.settings));
+        const bool finishing = request.finish.any();
+        if (namesStrings(*document, request.finish)) {
+            // Before the import is planned, so the bridge writes each
+            // point's string number with its other fields.
+            nameSurveyStrings(plan.drawable.points, plan.outcome.reduced.features);
+        }
         SurveyPointImportReport drawing;
         auto draw = importSurveyPoints(*document, plan.drawable, options, request.existingPoints,
                                        &drawing);
@@ -504,6 +568,18 @@ struct ImportSurveyJobCommand::State {
             return draw.error();
         }
         plan.draw = std::move(*draw);
+        if (finishing) {
+            // INSIDE this command, around the points command: the features
+            // and the reduced coordinates the lines are drawn from are in
+            // this plan and nowhere else, the job must own the lines, and a
+            // Transaction around this command would validate it - reduce -
+            // twice. A null `draw` stays null, and the report says no points
+            // were drawn.
+            plan.finish = std::make_shared<SurveyFinishReport>();
+            plan.draw = withSurveyFinish(*document, std::move(plan.draw),
+                                         stringsOf(plan.outcome.reduced), options, request.finish,
+                                         plan.finish);
+        }
         if (plan.draw != nullptr) {
             if (auto status = plan.draw->validate(context); !status) {
                 return status.error();
@@ -578,14 +654,23 @@ Status ImportSurveyJobCommand::execute(CommandContext& context)
     // there would be dead weight.
     SurveyJob job = std::move(s.request.job);
     job.layer = s.request.importOptions.layer;
+    // The points and, after them, the lines a finish drew: the job owns both
+    // (Remove Job deletes this list), and placedPoints is the points alone.
     job.createdEntities = std::move(created);
     job.placedPoints = std::move(placed);
-    job.importOptions = serialiseImportOptions(s.request.importOptions);
+    // What was ASKED for, whether or not a step then had anything to do: a
+    // re-adjustment treats the job as the person chose to import it.
+    const SurveyFinishOptions& finish = s.request.finish;
+    job.importOptions = writeSurveyJobOptions(
+        SurveyJobOptions{s.request.importOptions, finish.codes, finish.linework});
 
     std::string stamp =
         s.request.context.createdUtc.empty() ? nowUtc() : s.request.context.createdUtc;
     if (job.importedUtc.empty()) {
         job.importedUtc = stamp;
+    }
+    if (plan.finish != nullptr) {
+        reportFinish(plan.outcome.report, *plan.finish);
     }
     renderInto(job, plan.outcome.report, std::move(stamp));
     // The whole job now, report and point lists included: validate() saw
@@ -606,6 +691,7 @@ Status ImportSurveyJobCommand::execute(CommandContext& context)
     jobs.push_back(std::move(job));
     s.onList = true;
     s.report = std::move(plan.outcome.report);
+    s.finishReport = std::move(plan.finish);
     s.drawCommand = std::move(plan.draw);
     s.request.raw = {};
     s.request.context = {};
@@ -670,6 +756,11 @@ const std::string& ImportSurveyJobCommand::jobId() const
 const survey::ReductionReport* ImportSurveyJobCommand::report() const
 {
     return state_->report ? &*state_->report : nullptr;
+}
+
+const SurveyFinishReport* ImportSurveyJobCommand::finishReport() const
+{
+    return state_->finishReport.get();
 }
 
 // ---- Re-adjust ---------------------------------------------------------------------
@@ -755,6 +846,9 @@ struct ReadjustSurveyJobCommand::State {
         JobRevision revision;                         // placedPoints without the new ones yet
         std::vector<EntityId> deleted;
         SurveyJobChanges changes;
+        // Filled when `entities` runs, for a job that is finished again;
+        // null otherwise.
+        std::shared_ptr<SurveyFinishReport> finish;
     };
 
     Document* document = nullptr;
@@ -769,6 +863,7 @@ struct ReadjustSurveyJobCommand::State {
     bool applied = false;
     std::optional<survey::ReductionReport> report;
     SurveyJobChanges appliedChanges;
+    std::shared_ptr<SurveyFinishReport> finishReport;
 
     [[nodiscard]] Result<Plan> build(const CommandContext& context) const;
 };
@@ -792,12 +887,18 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
     // the job's points stay together on the drawing. Read before the
     // reduction: options that cannot be read end the run before its costly
     // part.
-    auto drawOptions = parseImportOptions(job->importOptions, job->id);
-    if (!drawOptions) {
-        return drawOptions.error();
+    auto stored = readSurveyJobOptions(job->importOptions, job->id);
+    if (!stored) {
+        return stored.error();
     }
-    SurveyImportOptions options = std::move(*drawOptions);
+    SurveyImportOptions options = std::move(stored->import);
     options.layer = job->layer.empty() ? SurveyImportOptions{}.layer : job->layer;
+    // Whether the job is coded and strung is the JOB's, as it was imported -
+    // absent from its text, as in every job from before the finish existed,
+    // is off - and how is the caller's: a colour lookup is not job data.
+    SurveyFinishOptions finish = request.finish;
+    finish.codes = stored->applyCodes;
+    finish.linework = stored->drawLinework;
     auto raw = read(*job);
     if (!raw) {
         return raw.error();
@@ -938,6 +1039,10 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
         }
     }
     plan.pointNumberProperty = options.pointNumberProperty;
+    if (namesStrings(*document, finish)) {
+        // As the import did before it drew the others.
+        nameSurveyStrings(plan.fresh.points, outcome->reduced.features);
+    }
     SurveyPointImportReport drawing;
     CommandPtr draw;
     if (!plan.fresh.points.empty()) {
@@ -980,6 +1085,40 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
         plan.entities = std::move(transaction);
     } else {
         plan.entities = move != nullptr ? std::move(move) : std::move(draw);
+    }
+    if (finish.any() && plan.entities != nullptr) {
+        // Finished again, in this one undo step: the points drawn now are
+        // coded, and the job's lines - drawn from the coordinates this run
+        // has just replaced - are strung again from the new ones. A line
+        // this run still makes is the same entity afterwards, moved; only
+        // one it no longer makes is deleted. A run that changes nothing in
+        // the drawing leaves its lines be.
+        SurveyFinishEarlier earlier;
+        if (finish.linework) {
+            // One the person deleted by hand is still listed here; the finish
+            // passes over an id that is no longer a point in the drawing.
+            earlier.points.reserve(kept.size());
+            for (const SurveyJobPoint& placed : kept) {
+                earlier.points.push_back(placed.entity);
+            }
+            for (const EntityId id : job->createdEntities) {
+                const Entity* entity = model.entities.find(id);
+                if (entity != nullptr &&
+                    !std::holds_alternative<katana::entity::PointGeometry>(entity->geometry)) {
+                    earlier.lines.push_back(id);
+                }
+            }
+            // Under Overwrite a deleted point the run computes is drawn again
+            // and stands like any other; under Keep it stays deleted, and the
+            // finish says which of its lines still run through it.
+            if (keepEdits) {
+                earlier.deletedByHand = changes.deletedByHand;
+            }
+        }
+        plan.finish = std::make_shared<SurveyFinishReport>();
+        plan.entities =
+            withSurveyFinish(*document, std::move(plan.entities), stringsOf(outcome->reduced),
+                             options, std::move(finish), plan.finish, std::move(earlier));
     }
     if (plan.entities != nullptr) {
         if (auto status = plan.entities->validate(context); !status) {
@@ -1041,13 +1180,25 @@ Status ReadjustSurveyJobCommand::execute(CommandContext& context)
             return status;
         }
         // The new points follow the moved and deleted ones in the command's
-        // created list; only the drawing part creates anything.
+        // created list; only the drawing part creates anything - and, for a
+        // job finished again, the lines after them, which placedPoints
+        // passes over.
         const std::vector<EntityId> created = plan.entities->createdEntities();
         auto placed =
             placedPoints(context.model, created, plan.drawn, plan.pointNumberProperty);
         if (!placed) {
             (void)plan.entities->undo(context); // all or nothing
             return placed.error();
+        }
+        if (plan.finish != nullptr && !plan.finish->earlierLinesRemoved.empty()) {
+            // The lines this run no longer strings are gone from the drawing,
+            // so they are no longer the job's: known only now, because which
+            // go is decided when the linework step runs. The ones it redrew
+            // are the entities they were, and stay listed where they are.
+            const std::unordered_set<EntityId> gone(plan.finish->earlierLinesRemoved.begin(),
+                                                    plan.finish->earlierLinesRemoved.end());
+            std::erase_if(plan.revision.createdEntities,
+                          [&](EntityId id) { return gone.contains(id); });
         }
         plan.revision.createdEntities.insert(plan.revision.createdEntities.end(), created.begin(),
                                              created.end());
@@ -1065,6 +1216,9 @@ Status ReadjustSurveyJobCommand::execute(CommandContext& context)
             (void)plan.entities->undo(context);
         }
         return noSuchJob(s.request.jobId);
+    }
+    if (plan.finish != nullptr) {
+        reportFinish(plan.report, *plan.finish);
     }
     plan.revision.reportText = survey::renderText(plan.report);
     plan.revision.reportHtml = survey::renderHtml(plan.report);
@@ -1085,6 +1239,7 @@ Status ReadjustSurveyJobCommand::execute(CommandContext& context)
     s.entities = std::move(plan.entities);
     s.report = std::move(plan.report);
     s.appliedChanges = std::move(plan.changes);
+    s.finishReport = std::move(plan.finish);
     s.applied = true;
     s.request.context = {}; // the drawing's points, needed by the reduction only
     s.read = {};
@@ -1150,6 +1305,11 @@ const survey::ReductionReport* ReadjustSurveyJobCommand::report() const
 const SurveyJobChanges& ReadjustSurveyJobCommand::changes() const
 {
     return state_->appliedChanges;
+}
+
+const SurveyFinishReport* ReadjustSurveyJobCommand::finishReport() const
+{
+    return state_->finishReport.get();
 }
 
 // ---- Remove ------------------------------------------------------------------------

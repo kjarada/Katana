@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 
+#include "customisation_words.hpp"
 #include "katana/archive12d/reader.hpp"
 #include "lexer.hpp"
 #include "text_utilities.hpp"
@@ -176,7 +177,7 @@ class LibraryReader {
     {
         const Token kindToken = lexer_.next();
         const std::string kindWord = kindToken.text();
-        const auto units = katana::entity::parseStyleUnits(kindWord);
+        const auto units = detail::styleUnitsOfKind(kindWord);
 
         const Token nameToken = lexer_.next();
         if (nameToken.kind != TokenKind::Quoted) {

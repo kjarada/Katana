@@ -280,7 +280,15 @@ void Document::newDocument()
     currentStyle_.clear();
     ++modelRevision_;
     rememberTables();
-    notify(kReplaced);
+    // The customisation is kept; what the LAST project lacked of its own
+    // record is not: a new drawing recorded nothing. Left standing, a bare
+    // CUSTOMISE went on naming the old project's files.
+    const bool hadMissing = !customisation_.missingAtOpen.empty();
+    if (hadMissing) {
+        customisation_.missingAtOpen.clear();
+        ++customisationGeneration_;
+    }
+    notify(kReplaced | (hadMissing ? std::uint32_t{DocumentChange::Customisation} : 0u));
 }
 
 Status Document::open(const std::filesystem::path& projectDirectory)
@@ -328,7 +336,17 @@ Status Document::open(const std::filesystem::path& projectDirectory)
                       {{"entities", std::to_string(model_.entities.size())}});
     }
     rememberTables();
-    notify(kReplaced);
+    // What the project was drawn with that this session does not have. Worked
+    // out here, at the open, so that every front end is told the same names
+    // and the next save knows which it could not judge.
+    std::vector<std::string> missing = customisationNotLoaded(
+        metadata_.customisation, library_, customisation_.sources, customisationRenames());
+    const bool missingChanged = missing != customisation_.missingAtOpen;
+    if (missingChanged) {
+        customisation_.missingAtOpen = std::move(missing);
+        ++customisationGeneration_;
+    }
+    notify(kReplaced | (missingChanged ? std::uint32_t{DocumentChange::Customisation} : 0u));
     return {};
 }
 
@@ -342,8 +360,9 @@ Status Document::save()
     if (auto backup = store_->backup(); !backup) {
         return backup.error();
     }
-    if (auto status = saveContents(*store_); !status) {
-        return status;
+    const auto saved = saveContents(*store_);
+    if (!saved) {
+        return saved.error();
     }
     stack_->markSaved();
     metadataModified_ = false;
@@ -351,14 +370,24 @@ Status Document::save()
         logger_->info("storage", "project saved",
                       {{"entities", std::to_string(model_.entities.size())}});
     }
-    notify(DocumentChange::Saved);
+    // The record the save wrote is the metadata's now, when it differs.
+    notify(DocumentChange::Saved | (*saved ? std::uint32_t{DocumentChange::Metadata} : 0u));
     return {};
 }
 
-Status Document::saveContents(katana::storage::ProjectStore& store)
+katana::core::Result<bool> Document::saveContents(katana::storage::ProjectStore& store)
 {
     katana::storage::ProjectContents contents =
         katana::storage::captureModel(model_, metadata_);
+    // The record of what the drawing is drawn with, as the session stands at
+    // this save. Written into what is SAVED and not through setMetadata: that
+    // marks the drawing modified, and a save that then could not go ahead
+    // left a drawing nobody had touched asking to be saved - which is why the
+    // front ends, when they wrote it, first had to work out whether the save
+    // had anywhere to go.
+    contents.metadata.customisation =
+        customisationRecordToSave(metadata_.customisation, customisation_.missingAtOpen, library_,
+                                  customisation_.sources, customisationRenames());
     // LENT to the contents for the save and taken back after, rather than
     // copied: a job holds its field file whole, and copying tens of megabytes
     // on every save to hand it to a function that only reads it is waste.
@@ -369,7 +398,13 @@ Status Document::saveContents(katana::storage::ProjectStore& store)
         ~GiveBack() { owner = std::move(lent); }
     } giveBack{surveyJobs_, contents.surveyJobs};
     contents.surveyJobs = std::move(surveyJobs_);
-    return store.save(contents);
+    if (auto status = store.save(contents); !status) {
+        return status.error();
+    }
+    // Only now: a failed save leaves the metadata as it was.
+    const bool changed = metadata_.customisation != contents.metadata.customisation;
+    metadata_.customisation = std::move(contents.metadata.customisation);
+    return changed;
 }
 
 Status Document::saveAs(const std::filesystem::path& projectDirectory)
@@ -385,8 +420,8 @@ Status Document::saveAs(const std::filesystem::path& projectDirectory)
     if (created) {
         metadata_.createdUtc = created->metadata.createdUtc;
     }
-    if (auto status = saveContents(*store); !status) {
-        return status;
+    if (const auto saved = saveContents(*store); !saved) {
+        return saved.error();
     }
     store_ = std::make_unique<katana::storage::ProjectStore>(std::move(*store));
     stack_->markSaved();
@@ -495,6 +530,7 @@ void Document::setStyleLibrary(katana::entity::StyleLibrary library)
 {
     library_ = std::move(library);
     ++libraryGeneration_;
+    markCustomisationEdited();
     notify(DocumentChange::StyleLibrary);
 }
 
@@ -502,7 +538,243 @@ void Document::setSurveyMap(katana::entity::SurveyMap map)
 {
     surveyMap_ = std::move(map);
     ++surveyMapGeneration_;
+    markCustomisationEdited();
     notify(DocumentChange::SurveyMap);
+}
+
+// ---- the customisation's session state ------------------------------------------------------
+
+const char* toString(CustomisationOrigin origin)
+{
+    switch (origin) {
+    case CustomisationOrigin::None:
+        return "none";
+    case CustomisationOrigin::BuiltIn:
+        return "builtIn";
+    case CustomisationOrigin::Kept:
+        return "kept";
+    case CustomisationOrigin::Loaded:
+        return "loaded";
+    case CustomisationOrigin::Edited:
+        return "edited";
+    }
+    return "none";
+}
+
+void Document::markCustomisationEdited()
+{
+    if (customisation_.origin == CustomisationOrigin::Edited && !customisation_.kept) {
+        return;
+    }
+    customisation_.origin = CustomisationOrigin::Edited;
+    customisation_.kept = false;
+    ++customisationGeneration_;
+}
+
+std::vector<RenamedSource> Document::customisationRenames() const
+{
+    return builtinRenames(customisation_.builtIn);
+}
+
+std::vector<katana::core::Error>
+customisationFaults(const katana::entity::Customisation& customisation)
+{
+    std::vector<katana::core::Error> faults;
+    const auto fault = [&](std::string part, const katana::core::Error& refusal) {
+        faults.push_back(makeError(ErrorCode::InvalidArgument,
+                                   std::move(part) + ": " + refusal.message, refusal.context));
+    };
+    if (auto status = katana::entity::validateCustomisationName(customisation.name); !status) {
+        fault("its name", status.error());
+    }
+    for (const CustomisationSource& source : customisation.sources) {
+        if (auto status = katana::entity::validateCustomisationName(source.name); !status) {
+            fault("the name of one of its sources", status.error());
+        }
+    }
+    // A definition's source reaches a project's record exactly as the
+    // customisation's own name does (customisationRecord); one made in a
+    // session has none, and that is no fault.
+    customisation.library.forEach([&](const katana::entity::LineStyle& definition) {
+        if (definition.source.empty()) {
+            return;
+        }
+        if (auto status = katana::entity::validateCustomisationName(definition.source);
+            !status) {
+            fault("the source of its definition \"" + definition.name + "\"", status.error());
+        }
+    });
+    if (customisation.linework) {
+        if (auto status = katana::entity::validate(*customisation.linework); !status) {
+            fault("its linework codes", status.error());
+        }
+    }
+    if (customisation.basedOn) {
+        // Judged by the format's own writer, which is what a KEEP hands it
+        // to: what a digest looks like is the format's to say, and is said
+        // there, once. A customisation of nothing but this basedOn, under a
+        // name that is fine, can be refused for nothing else; the refusal
+        // already begins "basedOn: ".
+        katana::entity::Customisation probe;
+        probe.name = "basedOn";
+        probe.basedOn = customisation.basedOn;
+        if (const auto written = katana::entity::customisationToJson(probe); !written) {
+            faults.push_back(makeError(ErrorCode::InvalidArgument,
+                                       "its " + written.error().message,
+                                       written.error().context));
+        }
+    }
+    return faults;
+}
+
+Status Document::installCustomisation(katana::entity::Customisation customisation,
+                                      CustomisationOrigin origin, bool kept)
+{
+    // Everything is checked before anything is taken: a refusal leaves the
+    // session exactly as it was.
+    if (origin == CustomisationOrigin::None) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a customisation is installed with where it came from, which is never "
+                         "\"none\"");
+    }
+    if (const std::vector<katana::core::Error> faults = customisationFaults(customisation);
+        !faults.empty()) {
+        // The first is enough to refuse on; a load that wants them all asks
+        // for them all (mergeCustomisation).
+        return makeError(ErrorCode::InvalidArgument,
+                         "the customisation could not be kept or recorded: " +
+                             faults.front().message,
+                         faults.front().context);
+    }
+
+    library_ = std::move(customisation.library);
+    surveyMap_ = std::move(customisation.map);
+    customisation_.origin = origin;
+    customisation_.kept = kept;
+    customisation_.description = std::move(customisation.description);
+    customisation_.notice = std::move(customisation.notice);
+    customisation_.basedOn = std::move(customisation.basedOn);
+    customisation_.colours = std::move(customisation.colours);
+    // Said, or the DEFAULTS - never what the session had. An install takes
+    // the place of the whole session, and `kept` promises it is the session
+    // the next start would give: that start has no earlier session to have
+    // left its control codes behind. Left alone, a reset to the built-in kept
+    // the spellings and the switches it was meant to reset. (A load that
+    // says nothing leaves the session's alone through mergeCustomisation,
+    // which hands over a customisation that says both.)
+    customisation_.linework = customisation.linework
+                                  ? std::move(*customisation.linework)
+                                  : katana::entity::LineworkCodes{};
+    customisation_.automation =
+        customisation.automation.value_or(katana::entity::CustomisationAutomation{});
+    customisation_.sources = std::move(customisation.sources);
+    if (customisation_.sources.empty()) {
+        // A customisation that lists none is its own one source. Its notice
+        // stays the customisation's, above; a source's own notice is for one
+        // merged into another's.
+        customisation_.sources.push_back(
+            {customisation.name, !library_.empty(), !surveyMap_.empty(), {}});
+    }
+    customisation_.name = std::move(customisation.name);
+    noteCustomisationLoaded(customisation_.missingAtOpen, customisation_.sources,
+                            customisationRenames());
+    ++libraryGeneration_;
+    ++surveyMapGeneration_;
+    ++customisationGeneration_;
+    notify(DocumentChange::StyleLibrary | DocumentChange::SurveyMap |
+           DocumentChange::Customisation);
+    return {};
+}
+
+katana::entity::Customisation Document::customisation() const
+{
+    katana::entity::Customisation session;
+    session.name = customisation_.name;
+    session.description = customisation_.description;
+    session.notice = customisation_.notice;
+    session.sources = customisation_.sources;
+    session.basedOn = customisation_.basedOn;
+    session.colours = customisation_.colours;
+    session.linework = customisation_.linework;
+    session.automation = customisation_.automation;
+    session.library = library_;
+    session.map = surveyMap_;
+    return session;
+}
+
+void Document::setColourTable(katana::entity::ColourTable colours)
+{
+    if (colours == customisation_.colours) {
+        return;
+    }
+    customisation_.colours = std::move(colours);
+    customisation_.origin = CustomisationOrigin::Edited;
+    customisation_.kept = false;
+    ++customisationGeneration_;
+    // What a pen inside a definition resolves to has changed, so whatever
+    // was baked from the library is stale.
+    ++libraryGeneration_;
+    notify(DocumentChange::Customisation | DocumentChange::StyleLibrary);
+}
+
+Status Document::setLineworkCodes(katana::entity::LineworkCodes codes)
+{
+    if (auto status = katana::entity::validate(codes); !status) {
+        return status;
+    }
+    if (codes == customisation_.linework) {
+        return {};
+    }
+    customisation_.linework = std::move(codes);
+    customisation_.origin = CustomisationOrigin::Edited;
+    customisation_.kept = false;
+    ++customisationGeneration_;
+    notify(DocumentChange::Customisation);
+    return {};
+}
+
+void Document::setAutomation(katana::entity::CustomisationAutomation automation)
+{
+    if (automation == customisation_.automation) {
+        return;
+    }
+    customisation_.automation = automation;
+    customisation_.origin = CustomisationOrigin::Edited;
+    customisation_.kept = false;
+    ++customisationGeneration_;
+    notify(DocumentChange::Customisation);
+}
+
+void Document::setCustomisationKept(bool kept)
+{
+    if (kept == customisation_.kept) {
+        return;
+    }
+    customisation_.kept = kept;
+    ++customisationGeneration_;
+    notify(DocumentChange::Customisation);
+}
+
+void Document::setBuiltInCustomisationName(std::string name)
+{
+    if (name == customisation_.builtIn) {
+        return;
+    }
+    customisation_.builtIn = std::move(name);
+    ++customisationGeneration_;
+    notify(DocumentChange::Customisation);
+}
+
+void Document::recordCustomisationLoad(const std::vector<CustomisationSource>& load,
+                                       bool replacedDefinitions, bool replacedRules)
+{
+    katana::cad::recordCustomisationLoad(customisation_.sources, load, replacedDefinitions,
+                                         replacedRules);
+    noteCustomisationLoaded(customisation_.missingAtOpen, load, customisationRenames());
+    customisation_.origin = CustomisationOrigin::Loaded;
+    customisation_.kept = false;
+    ++customisationGeneration_;
+    notify(DocumentChange::Customisation);
 }
 
 const katana::entity::LineStyle* Document::definitionFor(std::string_view name) const

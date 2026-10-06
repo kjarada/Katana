@@ -7,10 +7,11 @@
 // the window refused a bare CUSTOMISE with its usage until 2026-09-26, and
 // logged the counts only at startup and after a load.
 //
-// The files arrive by name and kind (customisation_record.hpp), since cad may
-// not see archive12d, which reads them. The front end keeps both lists: the
-// files loaded this session in load order, and the names the last open found
-// the project recorded but not loaded, less those loaded since.
+// The sources arrive by name and what each brought (customisation_record.hpp).
+// Both lists are the Document's (customisationState): the sources loaded this
+// session in load order, and the names the last open found the project
+// recorded but not loaded, less those loaded since. They are still parameters
+// here so that the report can be tested without loading anything.
 
 #include <cstddef>
 #include <string>

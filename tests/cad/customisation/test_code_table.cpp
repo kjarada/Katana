@@ -1,8 +1,17 @@
 // The survey code library questioned: why a code gets what it gets, the map
 // as a table of codes, the codes a drawing carries, and what is wrong with a
 // map - and the one report text every front end prints.
+//
+// A rule's section and fields are named here by the Katana customisation
+// format's words ("feature", "layer", "surface", "at vertices"), which the
+// survey code tools show since the survey code file's own (`map_data`,
+// `model`, `tinable`, `mode vertex`) left the window. Each expectation holding
+// such a word was changed old to new from the table "The words a rule is
+// shown by" in docs/customisation.md, not from what a run printed.
 
 #include <gtest/gtest.h>
+
+#include <algorithm>
 
 #include "katana/cad/code_table.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -48,15 +57,15 @@ SurveyRule vertexSymbol(std::string key, std::string style, double size, std::st
 }
 
 // The shapes of the reference mapfile, cut down, by index:
-//   0  AC*  map_data: linestyle "0" - every symbol code says so
-//   1  AC*  vertex_symbol_data: the bollard
-//   2  1*   map_data: a text code on linestyle "0", yellow
-//   3  2*   map_data: another, cyan
-//   4  WM*  map_data: a real linestyle, a colour Katana does not know
-//   5  WM*  string_attribute_data: an attribute naming another ($)
-//   6  PABB map_data: an exact key, a linestyle no library here defines
-//   7  *    string_attribute_data: every code gets it
-//   8-11 *  pipe_data: the reference files carry sixteen of these in each
+//   0  AC*  feature: linestyle "0" - every symbol code says so
+//   1  AC*  symbol: the bollard
+//   2  1*   feature: a text code on linestyle "0", yellow
+//   3  2*   feature: another, cyan
+//   4  WM*  feature: a real linestyle, a colour Katana does not know
+//   5  WM*  attributes: an attribute naming another ($)
+//   6  PABB feature: an exact key, a linestyle no library here defines
+//   7  *    attributes: every code gets it
+//   8-11 *  pipe: the reference files carry sixteen of these in each
 //           pipe section, identical but for the DepthLocation they give
 SurveyMap referenceShapes()
 {
@@ -96,24 +105,30 @@ SurveyMap referenceShapes()
     return map;
 }
 
-LineStyle definition(std::string name, bool atVertices, std::string source)
+// `symbol`: its customisation lists it as a symbol (LineStyle::symbol). That
+// flag is what makes a definition a symbol now; these definitions once got
+// there by `source` holding the word "symbol", and the sources are kept only
+// as where each came from.
+LineStyle definition(std::string name, bool atVertices, std::string source, bool symbol = false)
 {
     LineStyle style;
     style.name = std::move(name);
     style.atVertices = atVertices;
     style.source = std::move(source);
+    style.symbol = symbol;
     return style;
 }
 
 katana::entity::StyleLibrary library()
 {
     katana::entity::StyleLibrary library;
-    for (LineStyle style : {definition("CULT Bollard", true, "symbols_test.4d"),
+    for (LineStyle style : {definition("CULT Bollard", true, "symbols_test.4d", true),
                             definition("WATR Main", false, "linestyles_test.4d"),
-                            // Not `mode vertex`, but from the symbol file: a
+                            // Not `mode vertex`, but listed as a symbol: a
                             // symbol all the same (decision D3).
-                            definition("SEWR Manhole Cover", false, "symbols_test.4d"),
-                            // Read from nowhere known.
+                            definition("SEWR Manhole Cover", false, "symbols_test.4d", true),
+                            // Made in a session: it names no customisation,
+                            // and nothing lists it as a symbol.
                             definition("MYST Thing", false, "")}) {
         EXPECT_TRUE(katana::entity::addOrReplace(library, std::move(style)).ok());
     }
@@ -178,7 +193,7 @@ TEST(ExplainCode, EachFieldNamesTheRuleItCameFromMostSpecificFirst)
     // rule the symbol, and the first `*` pipe row the pipe.
     ASSERT_EQ(why.fields.size(), 7u);
     const std::vector<std::tuple<std::string, std::string, std::size_t, SurveySection>> expected = {
-        {"model", "SURVEY DETAIL", 0, SurveySection::Map},
+        {"layer", "SURVEY DETAIL", 0, SurveySection::Map},
         {"colour", "white", 0, SurveySection::Map},
         {"linestyle", "0", 0, SurveySection::Map},
         {"group", "SURVEY - CULT", 0, SurveySection::Map},
@@ -300,9 +315,9 @@ TEST(ExplainCode, IsPrintedAsOneTextNamingEachRule)
     // the pipe comes from rule 8, the zone from 7, DepthLocation from 8.
     const std::string expected =
         "Code \"wm01\": only the bare * rule answers it: fallback-only, not matched\n"
-        "  pipe: diameter $PipeDiameter, Obvert  <- rule #8 * (pipe_data)\n"
-        "  string attribute Model Validation Zone = 1  <- rule #7 * (string_attribute_data)\n"
-        "  string attribute DepthLocation = Top of Pipe  <- rule #8 * (pipe_data)\n"
+        "  pipe: diameter $PipeDiameter, Obvert  <- rule #8 * (pipe)\n"
+        "  string attribute Model Validation Zone = 1  <- rule #7 * (attributes)\n"
+        "  string attribute DepthLocation = Top of Pipe  <- rule #8 * (pipe)\n"
         "  near miss: key \"WM*\" differs only in letter case\n";
     EXPECT_EQ(katana::cad::formatCodeExplanation(explain(referenceShapes(), "wm01")), expected);
 }
@@ -322,17 +337,17 @@ TEST(ExplainCode, ALaterRuleSayingSomethingElseIsShownAsOverruled)
     ASSERT_TRUE(map.add(mapData("A*", "SURVEY DETAIL", "red", "")).ok());      // 2
     ASSERT_TRUE(map.add(mapData("AC*", "SURVEY DETAIL", "white", "")).ok());   // 3
 
-    // By hand: AC* (0, 1, 3) before A* (2). model: 3, and 2 agrees. colour:
+    // By hand: AC* (0, 1, 3) before A* (2). layer: 3, and 2 agrees. colour:
     // 3 white, 2 red. hide: 0 no, 1 yes. symbol: 0, and 1 agrees.
     EXPECT_EQ(katana::cad::formatCodeExplanation(explain(map, "AC01")),
               "Code \"AC01\": prefix match, matched\n"
-              "  model: SURVEY DETAIL  <- rule #3 AC* (map_data)\n"
-              "  colour: white  <- rule #3 AC* (map_data)\n"
-              "    overruled: red  <- rule #2 A* (map_data)\n"
-              "  hide: no  <- rule #0 AC* (vertex_symbol_data)\n"
-              "    overruled: yes  <- rule #1 AC* (vertex_symbol_data)\n"
-              "  symbol: CULT Bollard, size 1.5  <- rule #0 AC* (vertex_symbol_data)\n"
-              "  symbol \"CULT Bollard\": defined, mode vertex\n"
+              "  layer: SURVEY DETAIL  <- rule #3 AC* (feature)\n"
+              "  colour: white  <- rule #3 AC* (feature)\n"
+              "    overruled: red  <- rule #2 A* (feature)\n"
+              "  hide: no  <- rule #0 AC* (symbol)\n"
+              "    overruled: yes  <- rule #1 AC* (symbol)\n"
+              "  symbol: CULT Bollard, size 1.5  <- rule #0 AC* (symbol)\n"
+              "  symbol \"CULT Bollard\": defined, at vertices\n"
               "  colour \"white\": #FFFFFF\n");
 }
 
@@ -422,8 +437,8 @@ TEST(CodeCensus, CountsEachDistinctCodeAndClassesItAgainstTheMap)
     EXPECT_FALSE(census.codes[2].matched);
 
     const std::string expected = "4 entities carry a code in \"code\", 3 distinct codes\n"
-                                 "  101: 1, prefix, matched, model SURVEY TEXT\n"
-                                 "  AC01: 2, prefix, matched, model SURVEY DETAIL\n"
+                                 "  101: 1, prefix, matched, layer SURVEY TEXT\n"
+                                 "  AC01: 2, prefix, matched, layer SURVEY DETAIL\n"
                                  "  ZZ99: 1, fallback only, not matched\n";
     EXPECT_EQ(katana::cad::formatCodeCensus(census), expected);
 }
@@ -506,11 +521,19 @@ TEST(LintSurveyMap, JudgesSymbolsAndLinestylesByWhatTheDefinitionIs)
     ASSERT_TRUE(map.add(vertexSymbol("MY*", "MYST Thing", 1.0)).ok());                      // 9
 
     // 0 and 8 put their code nowhere; 8 is also rule 0 again. 1 draws a
-    // vertex definition along a line. 2 uses a linestyle from the linestyle
-    // file as a symbol. 3 is from the symbol file and 9 from nowhere known:
-    // both are taken as symbols. 4 is a shape Katana draws. 5 names nothing
-    // and its symbol colour is unknown (UnresolvedSymbol sorts first). 6 and
-    // 7 are plain lines.
+    // vertex definition along a line. 2 uses a definition listed as a
+    // linestyle as a symbol. 3 is listed as a symbol and is taken as one. 4
+    // is a shape Katana draws. 5 names nothing and its symbol colour is
+    // unknown (UnresolvedSymbol sorts first). 6 and 7 are plain lines.
+    //
+    // 9 CHANGED, and not to match a run. "MYST Thing" names no source, and
+    // this test once pinned that such a definition "is given the benefit of
+    // the doubt" and passes as a symbol: the sign of a symbol was then the
+    // name of the file a definition came from, and one from nowhere known had
+    // no name to judge. Every definition now says which it is
+    // (LineStyle::symbol), so a definition of unknown kind no longer exists:
+    // one not listed as a symbol is a linestyle, and rule 9 uses a linestyle
+    // as a symbol exactly as rule 2 does.
     const std::vector<std::pair<std::size_t, LintKind>> expected = {
         {0, LintKind::NoModel},
         {1, LintKind::LinestyleIsVertex},
@@ -519,8 +542,15 @@ TEST(LintSurveyMap, JudgesSymbolsAndLinestylesByWhatTheDefinitionIs)
         {5, LintKind::UnknownColour},
         {8, LintKind::NoModel},
         {8, LintKind::DuplicateRule},
+        {9, LintKind::SymbolNotSymbolCapable},
     };
-    EXPECT_EQ(kinds(katana::cad::lintSurveyMap(map, library(), testColour, builtIn)), expected);
+    const auto issues = katana::cad::lintSurveyMap(map, library(), testColour, builtIn);
+    ASSERT_EQ(kinds(issues), expected);
+    // It says where the definition is listed so, when the definition says
+    // where it is from; one made in a session names no customisation.
+    EXPECT_EQ(issues[2].message,
+              "symbol \"WATR Main\" is a linestyle from \"linestyles_test.4d\", not a symbol");
+    EXPECT_EQ(issues[7].message, "symbol \"MYST Thing\" is a linestyle, not a symbol");
 
     // With no built-in test, "cross" is unresolved too; with no colour table
     // no colour is judged.
@@ -533,8 +563,198 @@ TEST(LintSurveyMap, JudgesSymbolsAndLinestylesByWhatTheDefinitionIs)
         {5, LintKind::UnresolvedSymbol},
         {8, LintKind::NoModel},
         {8, LintKind::DuplicateRule},
+        {9, LintKind::SymbolNotSymbolCapable},
     };
     EXPECT_EQ(kinds(bare), withoutHelpers);
+}
+
+// The definition alone decides, not where it came from: the same name and the
+// same source, listed as a symbol or not.
+TEST(LintSurveyMap, ADefinitionIsASymbolWhenItsCustomisationListsItAsOneWhateverItsSourceIsCalled)
+{
+    SurveyMap map;
+    ASSERT_TRUE(map.add(mapData("XX*", "SURVEY DETAIL", "", "")).ok());      // 0
+    ASSERT_TRUE(map.add(vertexSymbol("XX*", "TEST Thing", 1.0)).ok());        // 1
+    const auto warnedOf = [&](bool atVertices, std::string source, bool symbol) {
+        katana::entity::StyleLibrary one;
+        EXPECT_TRUE(katana::entity::addOrReplace(
+                        one, definition("TEST Thing", atVertices, std::move(source), symbol))
+                        .ok());
+        return kinds(katana::cad::lintSurveyMap(map, one, testColour, builtIn));
+    };
+    const std::vector<std::pair<std::size_t, LintKind>> notASymbol = {
+        {1, LintKind::SymbolNotSymbolCapable}};
+    const std::vector<std::pair<std::size_t, LintKind>> clean = {};
+    // A source whose name holds "symbol" was once enough. It is a name.
+    EXPECT_EQ(warnedOf(false, "My Symbols", false), notASymbol);
+    EXPECT_EQ(warnedOf(false, "symbols_test.4d", false), notASymbol);
+    // Listed as a symbol under a name that says nothing of the kind.
+    EXPECT_EQ(warnedOf(false, "NSW", true), clean);
+    EXPECT_EQ(warnedOf(false, "", true), clean);
+    // `mode vertex` is a symbol whatever it is listed as.
+    EXPECT_EQ(warnedOf(true, "linestyles_test.4d", false), clean);
+}
+
+// ---- a field its section does not use ---------------------------------------------
+
+namespace {
+
+std::vector<LintIssue> outsideSection(const SurveyRule& rule)
+{
+    std::vector<LintIssue> found;
+    for (LintIssue& issue : katana::cad::lintSurveyRule(rule, 0, library(), testColour, builtIn)) {
+        if (issue.kind == LintKind::FieldOutsideSection) {
+            found.push_back(std::move(issue));
+        }
+    }
+    return found;
+}
+
+// One field of a rule: the word the warning names it by, the sections that
+// use it, and how to set it. The table is what a survey code file's sections
+// each hold, written here from that format's own layout and not read from the
+// lint: where a code goes (model, colour, linestyle, weight, group, breakline)
+// in the feature section; its symbol and whether to hide it in the symbol
+// section; its text style in the text section; each pipe in its own pipe
+// section; the string's attributes in the pipe and the string-attribute
+// sections, each vertex's in the vertex-pipe and the vertex-attribute
+// sections, each segment's in the segment-pipe section; the surface flag in
+// its own.
+struct Field {
+    const char* word;
+    std::vector<SurveySection> usedBy;
+    void (*set)(SurveyRule&);
+};
+
+const std::vector<Field>& fields()
+{
+    using S = SurveySection;
+    static const std::vector<Field> all = {
+        {"model", {S::Map}, [](SurveyRule& r) { r.model = "SURVEY DETAIL"; }},
+        {"colour", {S::Map}, [](SurveyRule& r) { r.colour = "white"; }},
+        {"linestyle", {S::Map}, [](SurveyRule& r) { r.linestyle = "0"; }},
+        {"weight", {S::Map}, [](SurveyRule& r) { r.weight = "0"; }},
+        {"group", {S::Map}, [](SurveyRule& r) { r.group = "SURVEY"; }},
+        {"breakline", {S::Map},
+         [](SurveyRule& r) { r.breakline = katana::entity::SurveyBreakline::Line; }},
+        {"tinable", {S::Tinable}, [](SurveyRule& r) { r.tinable = true; }},
+        {"hide", {S::VertexSymbol}, [](SurveyRule& r) { r.hide = false; }},
+        {"symbol", {S::VertexSymbol},
+         [](SurveyRule& r) { r.symbol = katana::entity::SurveySymbol{.style = "cross"}; }},
+        {"text style", {S::VertexTextStyle},
+         [](SurveyRule& r) { r.textStyle = katana::entity::SurveyTextStyle{}; }},
+        {"pipe", {S::Pipe}, [](SurveyRule& r) { r.pipe = katana::entity::SurveyPipe{}; }},
+        {"vertex pipe", {S::VertexPipe},
+         [](SurveyRule& r) { r.vertexPipe = katana::entity::SurveyPipe{}; }},
+        {"segment pipe", {S::SegmentPipe},
+         [](SurveyRule& r) { r.segmentPipe = katana::entity::SurveyPipe{}; }},
+        {"string attributes", {S::Pipe, S::StringAttribute},
+         [](SurveyRule& r) { r.attributes = {{"text", "Source", "field"}}; }},
+        {"vertex attributes", {S::VertexPipe, S::VertexAttribute},
+         [](SurveyRule& r) { r.vertexAttributes = {{"text", "Pit", "Grated"}}; }},
+        {"segment attributes", {S::SegmentPipe},
+         [](SurveyRule& r) { r.segmentAttributes = {{"integer", "Count", "2"}}; }},
+    };
+    return all;
+}
+
+const std::vector<SurveySection>& sections()
+{
+    using S = SurveySection;
+    static const std::vector<SurveySection> all = {
+        S::Map,         S::VertexSymbol,    S::VertexTextStyle, S::Pipe,    S::VertexPipe,
+        S::SegmentPipe, S::StringAttribute, S::VertexAttribute, S::Tinable,
+    };
+    return all;
+}
+
+} // namespace
+
+TEST(LintSurveyRule, EveryFieldIsWarnedOfInEverySectionThatDoesNotUseItAndInNoOther)
+{
+    // 16 fields in 9 sections: 144 rules, each holding one field. 18 of the
+    // pairs belong - 6 feature fields, the surface flag, 2 symbol fields, the
+    // text style, 3 pipes, and the string's, each vertex's and each segment's
+    // attributes with 2, 2 and 1 homes: 6 + 1 + 2 + 1 + 3 + 2 + 2 + 1 = 18 -
+    // so 126 warn.
+    std::size_t belong = 0;
+    std::size_t warned = 0;
+    for (const Field& field : fields()) {
+        for (const SurveySection section : sections()) {
+            SurveyRule rule;
+            rule.key = "AB*";
+            rule.section = section;
+            field.set(rule);
+            const bool uses = std::find(field.usedBy.begin(), field.usedBy.end(), section) !=
+                              field.usedBy.end();
+            const auto issues = outsideSection(rule);
+            const std::string where = std::string(field.word) + " in " +
+                                      katana::entity::toString(section);
+            if (uses) {
+                ++belong;
+                EXPECT_TRUE(issues.empty()) << where;
+                continue;
+            }
+            ++warned;
+            ASSERT_EQ(issues.size(), 1u) << where;
+            EXPECT_EQ(issues[0].severity, LintSeverity::Warning) << where;
+            EXPECT_EQ(issues[0].key, "AB*");
+            EXPECT_EQ(issues[0].section, section);
+            // It names the field, first, in the words a person knows it by.
+            EXPECT_EQ(issues[0].message.rfind(std::string("holds ") + field.word + ",", 0), 0u)
+                << where << ": " << issues[0].message;
+        }
+    }
+    EXPECT_EQ(belong, 18u);
+    EXPECT_EQ(warned, 16u * 9u - 18u);
+}
+
+TEST(LintSurveyRule, ARuleHoldingOnlyWhatItsSectionUsesAndACommentIsNotWarnedOf)
+{
+    // Everything a section uses, together, and a comment, which any may hold.
+    for (const SurveySection section : sections()) {
+        SurveyRule rule;
+        rule.key = "AB*";
+        rule.section = section;
+        rule.comment = "a note about AB";
+        for (const Field& field : fields()) {
+            if (std::find(field.usedBy.begin(), field.usedBy.end(), section) !=
+                field.usedBy.end()) {
+                field.set(rule);
+            }
+        }
+        EXPECT_TRUE(outsideSection(rule).empty()) << katana::entity::toString(section);
+    }
+}
+
+TEST(LintSurveyMap, ASymbolRuleThatAlsoNamesALayerIsWarnedOfOnceNamingEachStrayField)
+{
+    // The hand-written rule the warning is for: a symbol rule given a layer
+    // and a colour as well. A lookup applies both, so it is no error - but a
+    // load that replaces this key's symbol rules takes the layer with them.
+    SurveyMap map;
+    SurveyRule rule = vertexSymbol("BL*", "CULT Bollard", 1.5);
+    rule.model = "SURVEY DETAIL";
+    rule.colour = "white";
+    ASSERT_TRUE(map.add(rule).ok());
+    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY SERVICES", "white", "WATR Main")).ok());
+
+    const auto issues = katana::cad::lintSurveyMap(map, library(), testColour, builtIn);
+    const std::vector<std::pair<std::size_t, LintKind>> expected = {
+        {0, LintKind::FieldOutsideSection}};
+    ASSERT_EQ(kinds(issues), expected);
+    EXPECT_EQ(issues[0].severity, LintSeverity::Warning);
+    // Both fields in one issue, in the order a rule's fields are listed, and
+    // "them" for two.
+    EXPECT_EQ(issues[0].message.rfind("holds model, colour, which a ", 0), 0u)
+        << issues[0].message;
+    EXPECT_NE(issues[0].message.find(" replaces them too"), std::string::npos)
+        << issues[0].message;
+
+    // Counted with the rest, under its own name.
+    const std::string text = katana::cad::formatLint(issues, map.size());
+    EXPECT_NE(text.find("2 rules checked: 0 errors, 1 warning\n"), std::string::npos) << text;
+    EXPECT_NE(text.find("  by kind: 1 field outside section\n"), std::string::npos) << text;
 }
 
 TEST(LintSurveyRule, CatchesAKeyWithBlanksAndAModelThatCannotBeALayerBeforeTheMapRefusesThem)
@@ -564,7 +784,7 @@ TEST(LintSurveyMap, IsPrintedAsOneTextWithTheCounts)
     EXPECT_EQ(katana::cad::formatLint(issues, map.size()),
               "2 rules checked: 0 errors, 1 warning\n"
               "  by kind: 1 unknown colour\n"
-              "  rule #0 WM* (map_data): warning, unknown colour: colour \"sui water potable\" "
+              "  rule #0 WM* (feature): warning, unknown colour: colour \"sui water potable\" "
               "is not a colour name Katana knows, so the entity keeps its own\n");
     EXPECT_EQ(katana::cad::formatLint({}, 3), "3 rules checked: no problems found\n");
 }
@@ -692,6 +912,6 @@ TEST(FormatCoverage, AVertexSymbolGivenAsALinetypeIsSaidToBeASymbolNotInNoLoaded
               "1 of this drawing's 3 styles are drawn with a loaded definition (3 name one; the "
               "rest are plain lines)\n"
               "  1 name is in no loaded library: \"PABB Pipe\"\n"
-              "  1 name is loaded as a `mode vertex` symbol, not a linestyle, so a linetype "
+              "  1 name is loaded as an `at vertices` symbol, not a linestyle, so a linetype "
               "naming it draws solid: \"CULT Bollard\"\n");
 }

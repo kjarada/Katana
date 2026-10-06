@@ -4,12 +4,19 @@
 // command"; in the interpreter every front end has them.
 //
 // The map is the cli.* tests' own, built rule by rule, by index:
-//   0  KT*  map_data: model KATANA TEST, colour red, linestyle "0"
-//   1  KX*  map_data with no model - a warning in the lint
-//   2  KT*  vertex_symbol_data: the built-in "cross", size 2
+//   0  KT*  feature: layer KATANA TEST, colour red, linestyle "0"
+//   1  KX*  feature with no layer - a warning in the lint
+//   2  KT*  symbol: the built-in "cross", size 2
 // The texts are code_table.hpp's formatters', which tests/cad/customisation/
 // test_code_table.cpp pins; what is pinned here is that the verbs reach them,
 // what they refuse, and that CODE is one undo step.
+//
+// A rule's section and fields are named here by the Katana customisation
+// format's words ("feature", "layer", "surface", "at vertices"), which the
+// survey code tools show since the survey code file's own (`map_data`,
+// `model`, `tinable`, `mode vertex`) left the window. Each expectation holding
+// such a word was changed old to new from the table "The words a rule is
+// shown by" in docs/customisation.md, not from what a run printed.
 
 #include <gtest/gtest.h>
 
@@ -170,23 +177,23 @@ TEST(SurveyCodeVerbs, ExplainCensusAndListAnswerWithTheManagersWords)
 {
     Session session;
     session.codedPoint();
-    // Rule #0 gives the model and #2 the symbol; the lookup gives the colour.
+    // Rule #0 gives the layer and #2 the symbol; the lookup gives the colour.
     const std::string explained = session.ok("code explain KT01");
     EXPECT_TRUE(explained.starts_with("Code \"KT01\": prefix match, matched\n")) << explained;
-    EXPECT_TRUE(contains(explained, "  model: KATANA TEST  <- rule #0 KT* (map_data)\n"));
-    EXPECT_TRUE(contains(explained, "  symbol: cross, size 2  <- rule #2 KT* (vertex_symbol_data)"));
+    EXPECT_TRUE(contains(explained, "  layer: KATANA TEST  <- rule #0 KT* (feature)\n"));
+    EXPECT_TRUE(contains(explained, "  symbol: cross, size 2  <- rule #2 KT* (symbol)"));
     EXPECT_TRUE(explained.ends_with("  colour \"red\": #FF0000")) << explained;
     // A code of several words is the rest of the line.
     EXPECT_TRUE(session.ok("CODE EXPLAIN KT 01").starts_with("Code \"KT 01\""));
 
     EXPECT_EQ(session.ok("CODE CENSUS"),
               "1 entity carries a code in \"code\", 1 distinct code\n"
-              "  KT01: 1, prefix, matched, model KATANA TEST");
+              "  KT01: 1, prefix, matched, layer KATANA TEST");
     EXPECT_EQ(session.ok("CODE CENSUS elsewhere"),
               "0 entities carry a code in \"elsewhere\", 0 distinct codes");
 
     const std::string listed = session.ok("MAPFILE LIST katana");
-    EXPECT_TRUE(listed.starts_with("KT*  [prefix; 2 rules: map_data, vertex_symbol_data]  model "
+    EXPECT_TRUE(listed.starts_with("KT*  [prefix; 2 rules: feature, symbol]  layer "
                                    "KATANA TEST"))
         << listed;
     EXPECT_TRUE(listed.ends_with("1 of 2 codes match \"katana\"")) << listed;
@@ -201,8 +208,8 @@ TEST(SurveyCodeVerbs, MapfileCheckWithOnlyWarningsIsAReply)
     Session session;
     EXPECT_EQ(session.ok("MAPFILE CHECK"),
               "3 rules checked: 0 errors, 1 warning\n"
-              "  by kind: 1 no model\n"
-              "  rule #1 KX* (map_data): warning, no model: a map_data rule with no model: its "
+              "  by kind: 1 no layer\n"
+              "  rule #1 KX* (feature): warning, no layer: a feature rule with no layer: its "
               "codes stay on whatever layer they are on");
 }
 
@@ -222,8 +229,8 @@ TEST(SurveyCodeVerbs, MapfileCheckRefusesALintWithAnErrorAndCarriesTheWholeLint)
               "the loaded survey codes have 1 error: a rule cannot be applied as written\n"
               "2 rules checked: 1 error, 1 warning\n"
               "  by kind: 1 unknown colour, 1 key whitespace\n"
-              "  rule #0  WM* (map_data): error, key whitespace: key \" WM*\" has blanks around it\n"
-              "  rule #1 AC* (map_data): warning, unknown colour: colour \"sui\" is not a colour "
+              "  rule #0  WM* (feature): error, key whitespace: key \" WM*\" has blanks around it\n"
+              "  rule #1 AC* (feature): warning, unknown colour: colour \"sui\" is not a colour "
               "name");
     // Warnings alone, and nothing at all, are replies.
     EXPECT_TRUE(katana::cad::mapfileCheckReply({colour}, 2).ok());

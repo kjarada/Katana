@@ -1612,8 +1612,8 @@ void MainWindow::showDrawingSummary()
         DrawingSummaryContext context;
         context.document = &document_;
         context.customisation = [this] {
-            return cad::customisationSummary(document_, customisation_,
-                                             customisationMissingAtOpen_);
+            return cad::customisationSummary(document_, document_.customisationState().sources,
+                                             document_.customisationState().missingAtOpen);
         };
         context.run = commandRunner();
         context.load = [this] { (void)triggerAction("loadCustomisation"); };
@@ -2620,7 +2620,6 @@ bool MainWindow::saveDocument()
     if (!document_.hasProject()) {
         return saveDocumentAs();
     }
-    recordCustomisation();
     recordReferences();
     const auto status = document_.save();
     if (!status) {
@@ -2644,7 +2643,6 @@ bool MainWindow::saveDocumentAs()
     if (!target.endsWith(".katana", Qt::CaseInsensitive)) {
         target += ".katana";
     }
-    recordCustomisation();
     recordReferences();
     const auto status = document_.saveAs(toPath(target));
     if (!status) {
@@ -3254,9 +3252,10 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
         // Alone, it reports what is loaded and what it covers here, in the
         // words katana_cli's CUSTOMISE says them (cad/customisation_report.hpp).
         if (paths.empty()) {
-            logMessage(QString::fromStdString(katana::cad::customisationReport(
-                                                  document_, customisation_,
-                                                  customisationMissingAtOpen_))
+            logMessage(QString::fromStdString(
+                           katana::cad::customisationReport(
+                               document_, document_.customisationState().sources,
+                               document_.customisationState().missingAtOpen))
                            .trimmed());
             return;
         }
@@ -3380,12 +3379,12 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
         return;
     }
     // As File > Save does - but only for a SAVE that has somewhere to go:
-    // writing the record marks the drawing modified, and an untitled SAVE
-    // with no directory fails, which left a drawing nobody touched asking to
-    // be saved.
+    // writing the reference layers marks the drawing modified, and an
+    // untitled SAVE with no directory fails, which left a drawing nobody
+    // touched asking to be saved. (The customisation record needs none of
+    // this: the save itself writes it, Document::save.)
     if (verb == "SAVE" &&
         katana::cad::typedSaveHasDestination(line.toStdString(), document_.hasProject())) {
-        recordCustomisation();
         recordReferences();
     }
     const auto reply = interpreter_.run(line.toStdString());
@@ -3836,8 +3835,10 @@ sourcesOf(const katana::archive12d::Customisation& loaded)
     std::vector<katana::cad::CustomisationSource> sources;
     for (const katana::archive12d::LoadedFile& file : loaded.files) {
         const std::u8string name = file.path.filename().u8string();
+        // A style library brings definitions and a survey code file rules.
+        const bool library = file.kind == katana::archive12d::CustomisationFile::StyleLibrary;
         sources.push_back({std::string(reinterpret_cast<const char*>(name.data()), name.size()),
-                           file.kind == katana::archive12d::CustomisationFile::StyleLibrary});
+                           library, !library, {}});
     }
     return sources;
 }
@@ -3883,7 +3884,7 @@ void MainWindow::loadDefaultCustomisation()
     if (!built.empty()) {
         document_.setStyleLibrary(built.library);
         document_.setSurveyMap(built.map);
-        katana::cad::recordCustomisationLoad(customisation_, sourcesOf(built), false, false);
+        document_.recordCustomisationLoad(sourcesOf(built), false, false);
         logMessage("Customisation: " + grouped(built.library.size()) + " definitions (" +
                    grouped(librarySymbolCount(document_)) + " symbols) and " +
                    grouped(built.map.size()) + " survey code rules, built in.");
@@ -3924,21 +3925,11 @@ void MainWindow::loadCustomisation(katana::archive12d::LoadMode mode)
     applyCustomisation(paths, mode);
 }
 
-void MainWindow::recordCustomisation()
-{
-    katana::storage::ProjectMetadata metadata = document_.metadata();
-    metadata.customisation = katana::cad::customisationRecordToSave(
-        metadata.customisation, customisationMissingAtOpen_, document_.styleLibrary(),
-        customisation_);
-    document_.setMetadata(std::move(metadata));
-}
-
 void MainWindow::reportMissingCustomisation()
 {
-    const std::vector<std::string> missing = katana::cad::customisationNotLoaded(
-        document_.metadata().customisation, document_.styleLibrary(), customisation_);
-    // Kept until loaded: saving this drawing must not forget them.
-    customisationMissingAtOpen_ = missing;
+    // Worked out by the open, and kept by the Document until loaded: saving
+    // this drawing must not forget them.
+    const std::vector<std::string>& missing = document_.customisationState().missingAtOpen;
     if (missing.empty()) {
         return;
     }
@@ -4056,11 +4047,10 @@ void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& pa
     // map.
     document_.setStyleLibrary(std::move(merged.library));
     document_.setSurveyMap(std::move(merged.map));
-    const std::vector<katana::cad::CustomisationSource> sources = sourcesOf(*loaded);
-    katana::cad::recordCustomisationLoad(customisation_, sources,
-                                         replace && merged.libraryLoaded,
-                                         replace && merged.mapLoaded);
-    katana::cad::noteCustomisationLoaded(customisationMissingAtOpen_, sources);
+    // The load's sources join the session's and come off what the open
+    // project is missing: the Document keeps both lists.
+    document_.recordCustomisationLoad(sourcesOf(*loaded), replace && merged.libraryLoaded,
+                                      replace && merged.mapLoaded);
     logMessage("Customisation now: " + grouped(document_.styleLibrary().size()) + " definitions (" +
                grouped(librarySymbolCount(document_)) + " symbols) and " +
                grouped(document_.surveyMap().size()) + " survey code rules.");

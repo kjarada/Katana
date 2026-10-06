@@ -14,6 +14,13 @@
 //   test_survey.mapfile vertex symbols AC* -> TEST Survey Mark (1.5, white),
 //                       TR* -> TEST Tree (3, green), PX* -> "TEST Missing
 //                       Symbol", which no library defines
+//
+// A definition drawn at each vertex is said to be "at vertices", the Katana
+// customisation format's `atVertices` in words, where the window used to
+// say "vertex" after the style library file's `mode vertex`: detailMode's
+// expectation was changed from the table "The words a rule is shown by" in
+// docs/customisation.md, not from what a run printed. The chip is still
+// found as "filterVertexmode": an objectName outlives its label.
 
 #include <gtest/gtest.h>
 
@@ -214,11 +221,14 @@ TEST(SymbolLibrary, TheGridListsTheFixturesSymbolsIncludingTheNonVertexOneTheMap
     plainChild<katana::qt::FilterBar>(dialog, "symbolFilter")->setText(QStringLiteral("ac*"));
     EXPECT_EQ(dialog.shownNames(), std::vector<std::string>{"TEST Survey Mark"});
 
-    // The Vertex mode chip: the three `mode vertex` definitions.
+    // The At vertices chip: the three definitions drawn at vertices.
     plainChild<katana::qt::FilterBar>(dialog, "symbolFilter")->setText({});
     child<QToolButton>(dialog, "filterVertexmode")->click();
     EXPECT_EQ(dialog.shownNames(),
               (std::vector<std::string>{"TEST Survey Mark", "TEST U Turn", "TEST Valve"}));
+    // The chip says what it lists, with the count of those three.
+    EXPECT_EQ(child<QToolButton>(dialog, "filterVertexmode")->text(),
+              QStringLiteral("At vertices (3)"));
 }
 
 TEST(SymbolLibrary, TheMissingChipListsAStylesUndefinedSymbolWithItsFallback)
@@ -334,7 +344,7 @@ TEST(SymbolLibrary, TheDetailsPaneStatesTheSurveyMarksPrintSizeWorkedByHandAt1To
     EXPECT_EQ(labelText(dialog, "detailExtent"), QStringLiteral("1 × 1 m"));
     EXPECT_EQ(labelText(dialog, "detailUnits"), QStringLiteral("World: metres on the ground"));
     EXPECT_EQ(labelText(dialog, "detailMode"),
-              QStringLiteral("vertex: drawn at each vertex of a string"));
+              QStringLiteral("at vertices: drawn at each vertex of a string"));
     EXPECT_EQ(labelText(dialog, "detailOrigin"), QStringLiteral("(0, 0)"));
     // move, draw, move, draw, move, circle.
     EXPECT_EQ(labelText(dialog, "detailContent"),

@@ -235,6 +235,30 @@ TEST(StylePreview, ASymbolDrawnAwayFromItsInsertionPointIsFlagged)
         << preview.notice().toStdString();
 }
 
+TEST(StylePreview, ASymbolAtVerticesAskedForAsALinestyleIsDrawnPlainAndTheNoticeSaysWhatItIs)
+{
+    // TEST Ring is in the library - as a symbol, drawn at vertices. Asked for
+    // as a LINESTYLE it is a plain line, and the notice names what it is by
+    // the phrase the Style Manager's "Drawn as" has for the same state (the
+    // table "The words a rule is shown by" in docs/customisation.md).
+    PreviewFixture fixture;
+    StylePreview preview(fixture.document);
+    preview.resize(400, 160);
+    preview.setLinestyle("TEST Ring");
+    (void)preview.grab();
+    EXPECT_EQ(preview.notice(),
+              QStringLiteral("\"TEST Ring\" is an `at vertices` symbol, not a linestyle: a line "
+                             "naming it is drawn plain."));
+
+    // A name nothing defines is the other notice, and says nothing of symbols.
+    preview.setLinestyle("TEST Nothing");
+    (void)preview.grab();
+    EXPECT_TRUE(preview.notice().contains(QStringLiteral("not defined"), Qt::CaseInsensitive))
+        << preview.notice().toStdString();
+    EXPECT_FALSE(preview.notice().contains(QStringLiteral("symbol")))
+        << preview.notice().toStdString();
+}
+
 TEST(StylePreview, TheScaleBarIsARoundNumberOfGroundMetresForTheChosenScale)
 {
     // Worked by hand for a 400-pixel-wide pane: the bar is the longest 1-2-5

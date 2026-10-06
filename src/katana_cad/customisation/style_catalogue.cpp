@@ -46,13 +46,11 @@ DefinitionKind classify(const LineStyle& definition, const SymbolEvidence& evide
     kind.linestyle = !definition.atVertices;
     kind.namedBySurveyRule = evidence.ruleSymbols.contains(definition.name);
     kind.namedByStyle = evidence.styleSymbols.contains(definition.name);
-    // The file NAME, folded: symbol libraries are conventionally named
-    // *symbols*.4d, and a customisation's author follows the convention in
-    // any case.
-    kind.fromSymbolFile =
-        katana::core::lowered(definition.source).find("symbol") != std::string::npos;
+    // What the definition's own customisation says of it. Not its source's
+    // name, which was once the sign: one customisation holds both kinds.
+    kind.listedAsSymbol = definition.symbol;
     kind.symbol =
-        kind.atVertices || kind.namedBySurveyRule || kind.namedByStyle || kind.fromSymbolFile;
+        kind.atVertices || kind.namedBySurveyRule || kind.namedByStyle || kind.listedAsSymbol;
     return kind;
 }
 
@@ -436,7 +434,8 @@ katana::core::Status checkLinetypeName(const Document& document, std::string_vie
     if (const LineStyle* definition = document.definitionFor(name); definition != nullptr) {
         if (definition->atVertices) {
             return makeError(ErrorCode::InvalidArgument,
-                             "that is a vertex symbol, not a linestyle: give it as the symbol",
+                             "that is an `at vertices` symbol, not a linestyle: give it as the "
+                             "symbol",
                              std::string(name));
         }
         return {};

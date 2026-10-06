@@ -14,33 +14,6 @@ using katana::core::makeError;
 using katana::core::Result;
 using katana::core::Status;
 
-const char* toString(StyleUnits units)
-{
-    switch (units) {
-    case StyleUnits::World:
-        return "worldstyle";
-    case StyleUnits::Paper:
-        return "paperstyle";
-    case StyleUnits::TwoPoint:
-        return "twoptstyle";
-    }
-    return "worldstyle";
-}
-
-std::optional<StyleUnits> parseStyleUnits(std::string_view text)
-{
-    if (text == "worldstyle") {
-        return StyleUnits::World;
-    }
-    if (text == "paperstyle") {
-        return StyleUnits::Paper;
-    }
-    if (text == "twoptstyle") {
-        return StyleUnits::TwoPoint;
-    }
-    return std::nullopt;
-}
-
 katana::geometry::Box2 LineStyle::bounds() const
 {
     katana::geometry::Box2 box;

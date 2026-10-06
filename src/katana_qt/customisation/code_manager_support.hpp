@@ -25,7 +25,7 @@ enum class DefinitionState {
     Plain,     // a linestyle that is the plain continuous line: "0", "1", "continuous"
     Defined,   // the library defines it (as the right kind, for a linestyle)
     BuiltIn,   // a symbol no library defines that Katana draws itself
-    WrongKind, // a linestyle naming a `mode vertex` definition: draws solid (D2)
+    WrongKind, // a linestyle naming a definition drawn at vertices: draws solid (D2)
     Undefined, // nothing defines it
 };
 

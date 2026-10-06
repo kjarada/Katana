@@ -131,8 +131,10 @@ sourcesOf(const katana::archive12d::Customisation& loaded)
     std::vector<katana::cad::CustomisationSource> sources;
     for (const katana::archive12d::LoadedFile& file : loaded.files) {
         const std::u8string name = file.path.filename().u8string();
+        // A style library brings definitions and a survey code file rules.
+        const bool library = file.kind == katana::archive12d::CustomisationFile::StyleLibrary;
         sources.push_back({std::string(reinterpret_cast<const char*>(name.data()), name.size()),
-                           file.kind == katana::archive12d::CustomisationFile::StyleLibrary});
+                           library, !library, {}});
     }
     return sources;
 }
@@ -153,9 +155,8 @@ std::string sampleOf(const std::vector<std::string>& names, std::size_t most = 8
 
 // Whatever customisation ships with the application or sits beside it, so a
 // session starts able to draw a survey rather than waiting to be told where
-// its linestyles are. What it loaded is added to `loaded`.
-void loadDefaultCustomisation(katana::cad::Document& document, const char* executable,
-                              std::vector<katana::cad::CustomisationSource>& loaded)
+// its linestyles are. What it loaded is recorded on the Document.
+void loadDefaultCustomisation(katana::cad::Document& document, const char* executable)
 {
     // Compiled in: nothing to find and nothing to load.
     const katana::archive12d::Customisation& built = katana::archive12d::builtinCustomisation();
@@ -173,7 +174,7 @@ void loadDefaultCustomisation(katana::cad::Document& document, const char* execu
                   << built.map.size() << " survey code rules, built in\n";
         document.setStyleLibrary(built.library);
         document.setSurveyMap(built.map);
-        katana::cad::recordCustomisationLoad(loaded, sourcesOf(built), false, false);
+        document.recordCustomisationLoad(sourcesOf(built), false, false);
         return;
     }
     const auto paths = katana::archive12d::findCustomisation(std::filesystem::path(executable));
@@ -194,7 +195,7 @@ void loadDefaultCustomisation(katana::cad::Document& document, const char* execu
               << paths.front().parent_path().string() << "\n";
     document.setStyleLibrary(found->library);
     document.setSurveyMap(found->map);
-    katana::cad::recordCustomisationLoad(loaded, sourcesOf(*found), false, false);
+    document.recordCustomisationLoad(sourcesOf(*found), false, false);
 }
 
 // CUSTOMISE [REPLACE] <file>...: a load MERGES into what is loaded (the lead's
@@ -208,9 +209,7 @@ void loadDefaultCustomisation(katana::cad::Document& document, const char* execu
 //
 // Whether REPLACE was given is decided by the caller, which alone knows
 // whether a word was quoted.
-bool runCustomise(katana::cad::Document& document,
-                  std::vector<katana::cad::CustomisationSource>& record,
-                  std::vector<std::string>& missingAtOpen, const std::vector<std::string>& paths,
+bool runCustomise(katana::cad::Document& document, const std::vector<std::string>& paths,
                   bool replace)
 {
     if (replace && paths.empty()) {
@@ -221,7 +220,9 @@ bool runCustomise(katana::cad::Document& document,
     // was drawn with that is not, and what it covers here - the words the
     // window's CUSTOMISE says too (cad/customisation_report.hpp).
     if (paths.empty()) {
-        std::cout << katana::cad::customisationReport(document, record, missingAtOpen);
+        std::cout << katana::cad::customisationReport(
+            document, document.customisationState().sources,
+            document.customisationState().missingAtOpen);
         return true;
     }
 
@@ -275,10 +276,10 @@ bool runCustomise(katana::cad::Document& document,
     }
     document.setStyleLibrary(std::move(merged.library));
     document.setSurveyMap(std::move(merged.map));
-    const std::vector<katana::cad::CustomisationSource> sources = sourcesOf(*loaded);
-    katana::cad::recordCustomisationLoad(record, sources, replace && merged.libraryLoaded,
-                                         replace && merged.mapLoaded);
-    katana::cad::noteCustomisationLoaded(missingAtOpen, sources);
+    // The load's sources join the session's and come off what the open
+    // project is missing: the Document keeps both lists.
+    document.recordCustomisationLoad(sourcesOf(*loaded), replace && merged.libraryLoaded,
+                                     replace && merged.mapLoaded);
     std::cout << "Loaded now: " << document.styleLibrary().size() << " definitions, "
               << document.surveyMap().size() << " survey code rules\n";
 
@@ -326,13 +327,6 @@ struct InteropState {
 struct SessionState {
     katana::cad::Document& document;
     katana::cad::CommandInterpreter& interpreter;
-    // The customisation files loaded, in load order: what a SAVE records
-    // in the project, and what an OPEN compares the project's record with.
-    std::vector<katana::cad::CustomisationSource> customisation{};
-    // What the last OPEN found the project recorded but not loaded, less
-    // what was loaded since: a SAVE keeps them in the record, since this
-    // session cannot judge a file it never had.
-    std::vector<std::string> customisationMissingAtOpen{};
 #if defined(KATANA_WITH_INTEROP)
     InteropState interop;
     // The geoprocessing executor's view of this session (geo/geo_verbs.hpp):
@@ -407,8 +401,7 @@ bool runLine(SessionState& session, const std::string& line)
                 paths.push_back(std::move(word));
             }
         }
-        return runCustomise(session.document, session.customisation,
-                            session.customisationMissingAtOpen, paths, replace);
+        return runCustomise(session.document, paths, replace);
     }
     // SURVEY READ and SURVEY IMPORT: a survey field file, through surveyio,
     // which the interpreter (cad) may not see (survey_verbs.hpp).
@@ -473,28 +466,22 @@ bool runLine(SessionState& session, const std::string& line)
         }
     }
 #endif
-    // The project records the customisation it was drawn with - the files'
-    // names, never their definitions, which are session data (D1) - so that
-    // opening it where they are not loaded can say so. Only for a SAVE that
-    // has somewhere to go, as in the window: writing the record marks the
-    // drawing modified whether or not the save then happens.
+    // The project records the customisation it was drawn with - names, never
+    // definitions, which are session data (D1) - and the save itself writes
+    // that record (Document::save), so nothing is done for it here.
     const std::string verb = upperVerb(line);
-    if (verb == "SAVE" &&
-        katana::cad::typedSaveHasDestination(line, session.document.hasProject())) {
-        katana::storage::ProjectMetadata metadata = session.document.metadata();
-        metadata.customisation = katana::cad::customisationRecordToSave(
-            metadata.customisation, session.customisationMissingAtOpen,
-            session.document.styleLibrary(), session.customisation);
-        session.document.setMetadata(std::move(metadata));
 #if defined(KATANA_WITH_INTEROP)
-        // And the reference layers it is worked on top of: their sources and
-        // display, read again when it opens (docs/interop.md, "Reference
-        // layers").
-        if (session.geo != nullptr) {
-            katana::app::geo::recordReferences(*session.geo);
-        }
-#endif
+    // The reference layers the drawing is worked on top of are recorded here:
+    // their sources and display, read again when it opens (docs/interop.md,
+    // "Reference layers"). Only for a SAVE that has somewhere to go, as in the
+    // window: writing them marks the drawing modified whether or not the save
+    // then happens.
+    if (verb == "SAVE" &&
+        katana::cad::typedSaveHasDestination(line, session.document.hasProject()) &&
+        session.geo != nullptr) {
+        katana::app::geo::recordReferences(*session.geo);
     }
+#endif
     const auto reply = session.interpreter.run(line);
     if (!reply) {
         // A refusal's first line is what was refused and why. Lines after it
@@ -519,11 +506,10 @@ bool runLine(SessionState& session, const std::string& line)
     }
     if (verb == "OPEN" && katana::cad::CommandInterpreter::replacesDocument(line)) {
         // A warning, not a refusal: the drawing opens and draws, but what a
-        // missing file defined draws as a plain line.
-        const std::vector<std::string> missing = katana::cad::customisationNotLoaded(
-            session.document.metadata().customisation, session.document.styleLibrary(),
-            session.customisation);
-        session.customisationMissingAtOpen = missing;
+        // missing file defined draws as a plain line. The open worked out
+        // which (Document::open); the words are this front end's.
+        const std::vector<std::string>& missing =
+            session.document.customisationState().missingAtOpen;
         if (!missing.empty()) {
             std::cerr << "warning: this project was drawn with customisation files that are not "
                          "loaded: "
@@ -559,7 +545,7 @@ struct Session::State {
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter{document};
 #if defined(KATANA_WITH_INTEROP)
-    SessionState session{document, interpreter, {}, {}, {}, nullptr};
+    SessionState session{document, interpreter, {}, nullptr};
     // Derived rasters of a drawing with no project go to a folder of this
     // session's own, so two sessions never find each other's files.
     katana::app::geo::Context geo{document,
@@ -570,7 +556,7 @@ struct Session::State {
                                   {},
                                   {}};
 #else
-    SessionState session{document, interpreter, {}, {}};
+    SessionState session{document, interpreter};
 #endif
 };
 
@@ -581,7 +567,7 @@ Session::Session(const char* executable) : state_(std::make_unique<State>())
 #endif
     state_->interpreter.setColourLookup(colourOf);
     if (executable != nullptr) {
-        loadDefaultCustomisation(state_->document, executable, state_->session.customisation);
+        loadDefaultCustomisation(state_->document, executable);
     }
 }
 

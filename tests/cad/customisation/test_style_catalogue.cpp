@@ -16,14 +16,19 @@ using katana::entity::StyleUnits;
 
 namespace {
 
+// `symbol`: its customisation lists it as a symbol (LineStyle::symbol). Two of
+// these definitions were once symbols because `source` held the word
+// "symbol"; the flag says so now, and the sources only say where each came
+// from.
 LineStyle definition(const char* name, bool atVertices, const char* source,
-                     const char* group = "")
+                     const char* group = "", bool symbol = false)
 {
     LineStyle style;
     style.name = name;
     style.atVertices = atVertices;
     style.source = source;
     style.group = group;
+    style.symbol = symbol;
     style.units = StyleUnits::World;
     // One stroke: a definition with none is legal but not a realistic one.
     style.strokes.push_back({katana::entity::StrokeOp::Draw, katana::geometry::Point2(1.0, 0.0)});
@@ -32,9 +37,9 @@ LineStyle definition(const char* name, bool atVertices, const char* source,
 
 // The drawing and customisation every test here reads.
 //
-//   library   WATR Main           linestyle file, not vertex   -> linestyle
-//             CULT Bollard        symbol file, `mode vertex`    -> symbol
-//             SEWR Manhole Cover  symbol file, NOT vertex       -> both (D3: the file)
+//   library   WATR Main           listed a linestyle, not vertex -> linestyle
+//             CULT Bollard        listed a symbol, `mode vertex` -> symbol
+//             SEWR Manhole Cover  listed a symbol, NOT vertex    -> both (D3: the listing)
 //             TREE Palm           other file, not vertex, named
 //                                 by style Palm's symbol        -> both (D3: a style)
 //             ELEC Pole           other file, not vertex, named
@@ -55,8 +60,9 @@ struct Catalogue : ::testing::Test {
         katana::entity::StyleLibrary library;
         for (LineStyle style : {
                  definition("WATR Main", false, "linestyles_test.4d", "Services/WATR"),
-                 definition("CULT Bollard", true, "symbols_test.4d", "Culture"),
-                 definition("SEWR Manhole Cover", false, "SYMBOLS_Test.4d", "Services/SEWR"),
+                 definition("CULT Bollard", true, "symbols_test.4d", "Culture", true),
+                 definition("SEWR Manhole Cover", false, "SYMBOLS_Test.4d", "Services/SEWR",
+                            true),
                  definition("TREE Palm", false, "extra.4d"),
                  definition("ELEC Pole", false, "extra.4d"),
                  definition("fence", false, "extra.4d"),
@@ -128,21 +134,23 @@ TEST_F(Catalogue, ADefinitionIsASymbolForAnyOfTheFourReasonsAndALinestyleWhenNot
     EXPECT_TRUE(bollard.symbol);
     EXPECT_FALSE(bollard.linestyle) << "`mode vertex` is never a line pattern (D8)";
     EXPECT_TRUE(bollard.atVertices);
-    EXPECT_TRUE(bollard.fromSymbolFile);
+    EXPECT_TRUE(bollard.listedAsSymbol);
 
-    // Not `mode vertex`, but read from a file whose name says symbol - in
-    // another case, which the rule folds.
+    // Not `mode vertex`, but its customisation lists it as a symbol. (It was
+    // once the NAME of its source that said so, "symbol" in any case; the
+    // definition says it itself now, so the expectation stands and the cause
+    // is new.)
     const DefinitionKind manhole = classifyDefinition(document, "SEWR Manhole Cover");
     EXPECT_EQ(manhole, (DefinitionKind{.linestyle = true,
                                        .symbol = true,
                                        .atVertices = false,
                                        .namedBySurveyRule = false,
                                        .namedByStyle = false,
-                                       .fromSymbolFile = true}));
+                                       .listedAsSymbol = true}));
 
     const DefinitionKind palm = classifyDefinition(document, "TREE Palm");
     EXPECT_TRUE(palm.symbol && palm.namedByStyle && palm.linestyle);
-    EXPECT_FALSE(palm.fromSymbolFile);
+    EXPECT_FALSE(palm.listedAsSymbol);
 
     const DefinitionKind pole = classifyDefinition(document, "ELEC Pole");
     EXPECT_TRUE(pole.symbol && pole.namedBySurveyRule);
@@ -155,6 +163,35 @@ TEST_F(Catalogue, ADefinitionIsASymbolForAnyOfTheFourReasonsAndALinestyleWhenNot
     // A model linetype or a built-in shape is not a library definition.
     EXPECT_FALSE(classifyDefinition(document, "dash").known());
     EXPECT_FALSE(classifyDefinition(document, "cross").known());
+}
+
+TEST_F(Catalogue, ADefinitionIsListedAsASymbolByItsCustomisationAndNotByTheNameOfItsSource)
+{
+    // The fixture above cannot tell the two apart: its symbols also come from
+    // sources named "symbols". Here the two disagree, both ways. One
+    // customisation holds linestyles and symbols under ONE name, so a source's
+    // name says nothing: "Roadside Symbols" would otherwise make every
+    // definition in it a symbol, and "NSW" none.
+    katana::entity::StyleLibrary library;
+    ASSERT_TRUE(
+        library.add(definition("KERB Line", false, "Roadside Symbols", "", false)).ok());
+    ASSERT_TRUE(library.add(definition("SIGN Post", false, "NSW", "", true)).ok());
+    document.setStyleLibrary(std::move(library));
+
+    const DefinitionKind kerb = classifyDefinition(document, "KERB Line");
+    EXPECT_FALSE(kerb.listedAsSymbol);
+    EXPECT_FALSE(kerb.symbol) << "its source's name is not what makes a symbol";
+    EXPECT_TRUE(kerb.linestyle);
+
+    const DefinitionKind post = classifyDefinition(document, "SIGN Post");
+    EXPECT_TRUE(post.listedAsSymbol);
+    EXPECT_TRUE(post.symbol);
+    EXPECT_TRUE(post.linestyle) << "not `mode vertex`, so a linestyle as well";
+
+    // And so in the picker: the post, not the kerb.
+    const std::vector<CatalogueEntry> choices = symbolChoices(document);
+    EXPECT_NE(find(choices, "SIGN Post"), nullptr);
+    EXPECT_EQ(find(choices, "KERB Line"), nullptr);
 }
 
 TEST_F(Catalogue, TheLinetypePickerOffersByLayerFirstThenEveryLinestyleSortedWithCaseFolded)
@@ -199,7 +236,7 @@ TEST_F(Catalogue, TheSymbolPickerOffersEveryD3SymbolAndTheBuiltInsALibraryDoesNo
     EXPECT_EQ(find(choices, "WATR Main"), nullptr);
     EXPECT_EQ(find(choices, "fence"), nullptr);
     ASSERT_NE(find(choices, "SEWR Manhole Cover"), nullptr)
-        << "a NON-vertex definition from a symbol file is a symbol";
+        << "a NON-vertex definition listed as a symbol is a symbol";
     ASSERT_NE(find(choices, "TREE Palm"), nullptr);
     EXPECT_EQ(find(choices, "TREE Palm")->users.styles, std::vector<std::string>{"Palm"});
     EXPECT_EQ(find(choices, "circle")->source, DefinitionSource::Library);
