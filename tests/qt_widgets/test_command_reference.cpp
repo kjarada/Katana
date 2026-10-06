@@ -167,16 +167,21 @@ TEST(CommandReference, TheWindowSectionNamesEveryVerbTheWindowRunsItself)
     // interpreter: the list the typed HELP adds to the interpreter's.
     const QString help = katana::qt::windowHelpText();
     for (const char* verb : {"SCRIPT", "IMPORT", "EXPORT", "INFO <file>", "REFS", "COPC",
-                             "CUSTOMISE", "PLOTSHEETS", "PLOT <file.pdf>", "SNAPSHOT", "GRID",
-                             "SNAP", "ONLINE", "UTILITY", "QUIT", "LABELSTYLE"}) {
+                             "PLOTSHEETS", "PLOT <file.pdf>", "SNAPSHOT", "GRID", "SNAP", "ONLINE",
+                             "UTILITY", "QUIT", "LABELSTYLE"}) {
         EXPECT_TRUE(help.contains(verb)) << verb;
     }
     // ZOOM went to the interpreter with VIEWS (cad/view_verbs.hpp): the
     // window no longer runs it itself, and the interpreter's help says both.
     EXPECT_FALSE(help.contains("ZOOM (Z)"));
+    // So did CUSTOMISE (cad/customisation_verbs.hpp): the window read and ran
+    // it itself while the files it loaded were out of the interpreter's
+    // reach. Said once, by the interpreter - the typed HELP prints both texts.
+    EXPECT_FALSE(help.contains("CUSTOMISE"));
     const QString commands = QString::fromStdString(katana::cad::CommandInterpreter::helpText());
     for (const char* verb : {"VIEWS [LIST]", "VIEWS LINK", "VIEWS UNLINK", "ZOOM (Z)",
-                             "CENTRE x,y [SCALE"}) {
+                             "CENTRE x,y [SCALE",
+                             "Customise CUSTOMISE [REPLACE] <file> [<file>...]"}) {
         EXPECT_TRUE(commands.contains(verb)) << verb;
     }
 }

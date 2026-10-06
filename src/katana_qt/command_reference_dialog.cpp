@@ -139,11 +139,14 @@ std::vector<ReferenceEntry> referenceEntries(const QString& help)
 QString windowHelpText()
 {
     // In the interpreter's layout, so the typed HELP reads as one text.
+    // CUSTOMISE had a block here while the window loaded customisation files
+    // itself; it is the interpreter's verb now, and the interpreter's help -
+    // which the typed HELP prints first - has it.
     return R"(Window    the verbs the desktop window's command line runs itself, beside the
-          interpreter's. IMPORT, EXPORT, INFO <file>, REFS, COPC and CUSTOMISE are
-          katana_cli's too, and UTILITY is the interpreter's, run here through the
-          utilities workbench; the rest are the window's alone, which katana_cli and
-          katana_mcp refuse by name
+          interpreter's. IMPORT, EXPORT, INFO <file>, REFS and COPC are katana_cli's
+          too, and UTILITY is the interpreter's, run here through the utilities
+          workbench; the rest are the window's alone, which katana_cli and katana_mcp
+          refuse by name
 Script    SCRIPT <file.kcs> [CONTINUE]   run a katana_cli script a line at a time, stopping
           at the first line refused unless CONTINUE (File > Run Script); a line starting
           with # is a note and runs nothing; several lines pasted run as a script, but
@@ -161,9 +164,6 @@ IFC       IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS] [NOELEMENTS] [NOSURFACES]
           IFC RULES <file.csv>   IFC 4.3 (File > Import IFC, Export IFC; docs/ifc.md)
 Refs      REFS   the reference layers: rasters and point clouds
 COPC      COPC <source> <destination.copc.laz>   convert a point cloud to COPC
-Customise CUSTOMISE [REPLACE] <file> [<file>...]   load style libraries (.4d) and survey
-          code files (.mapfile), merged into what is loaded; alone: what is loaded, from
-          which files, and what it covers in this drawing
 PlotSheet PLOTSHEETS [path] [format=pdf|pdfs|png|tiff] [style=colour|grey|mono] [sheets=1,3-5]
           [dpi=n] [lineweight=f] [folder=path] [pattern=text]   plot the sheets (HELP SHEETS)
 Plot      PLOT <file.pdf> [paper=A0..A4] [landscape|portrait] [fit|scale=N] [dpi=N]

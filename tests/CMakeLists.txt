@@ -209,6 +209,140 @@ if(TARGET katana)
     cmake_language(DEFER CALL katana_name_headless_checks_without_their_environment)
 endif()
 
+# Every test that runs one of the programs - a `qt_..._headless` check of the
+# window, a `cli.` line through katana_cli - says what customisation the
+# program starts with, so that it is the same test on a machine whose build
+# has a customisation compiled in and on one whose build has none (the
+# owner's has the third-party reference one; a clean checkout and every
+# release build have nothing). A program reads two environment variables
+# where it starts (cad/customisation_host.hpp):
+#
+#   KATANA_BUILTIN_CUSTOMISATION   the seam: `none` for no built-in, or a
+#                                  file that IS the built-in for this run
+#   KATANA_CUSTOMISATION           the file a customisation is kept in
+#                                  between runs; unset, there is none
+#
+# A test that sets neither starts with NOTHING: the scan below gives it
+# KATANA_BUILTIN_CUSTOMISATION=none, and unsets KATANA_CUSTOMISATION, which a
+# person may have set for their own sessions. A test of the built-in or of the
+# kept customisation sets the variable itself and names a committed fixture
+# (tests/data/customisation). The cli tests put their environment on a
+# `cmake -E env` command line, which the scan cannot read and need not: the
+# property is set on the process that command line starts from, so a variable
+# named on the command line still wins for katana_cli.
+#
+# TWO parts, which share nothing:
+#
+#   the scan    at configure time, GIVES the variable to the tests it knows
+#               for a program's by their names (`cli.` and `..._headless`),
+#               in every directory, as each was left by its own CMakeLists.
+#   the check   at TEST time, reads what ctest will really run and NAMES every
+#               test whose command names a program and which does not have
+#               the variable (tools/check_program_tests.cmake).
+#
+# They were one function once, which set the variable on its list of tests and
+# then named those of that same list without it: nothing the scan missed could
+# be named, so the test could not fail - a program test registered under
+# another name, or in a directory configured after this one (benchmarks is),
+# ran with whatever its machine had, and the test said "none".
+#
+# The scan is deferred to the end of the TOP directory, by when every
+# directory has been configured - not to the end of this one, which a
+# directory added after it is not in. A test of another directory is reached
+# with `DIRECTORY`, which CMake has had since 3.28, and an older CMake cannot
+# set a property there at all: every `cli.` test (src/katana_app) and the
+# window checks of tests/interop would be left to the machine, and the check
+# would name them at every run. So this directory asks for 3.28, in so many
+# words, where the top CMakeLists.txt still says 3.24 (the default build
+# already needs 3.30, for the C++26 compile feature; raising the declared
+# minimum also turns on every policy up to it - C++ module scanning of each
+# source among them - and is a decision for the build, not for this scan).
+if(CMAKE_VERSION VERSION_LESS 3.28)
+    message(FATAL_ERROR
+        "Katana's tests need CMake 3.28 or later (this is ${CMAKE_VERSION}): the scan that gives "
+        "every program test its starting customisation sets a property on tests of other "
+        "directories (set_property(TEST ... DIRECTORY ...)). Use a newer CMake, or configure "
+        "with -DKATANA_BUILD_TESTS=OFF.")
+endif()
+
+function(katana_directories_below directory out)
+    set(_found "${directory}")
+    get_property(_children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(_child IN LISTS _children)
+        katana_directories_below("${_child}" _below)
+        list(APPEND _found ${_below})
+    endforeach()
+    set(${out} "${_found}" PARENT_SCOPE)
+endfunction()
+
+function(katana_say_what_every_program_test_starts_with)
+    katana_directories_below("${CMAKE_SOURCE_DIR}" _directories)
+    foreach(_directory IN LISTS _directories)
+        get_property(_tests DIRECTORY "${_directory}" PROPERTY TESTS)
+        foreach(_test IN LISTS _tests)
+            if(NOT _test MATCHES "^cli[.]" AND NOT _test MATCHES "_headless$")
+                continue()
+            endif()
+            foreach(_setting "KATANA_BUILTIN_CUSTOMISATION=set:none" "KATANA_CUSTOMISATION=unset:")
+                string(REGEX REPLACE "=.*$" "" _variable "${_setting}")
+                get_test_property(${_test} ENVIRONMENT_MODIFICATION DIRECTORY "${_directory}"
+                    _modification)
+                get_test_property(${_test} ENVIRONMENT DIRECTORY "${_directory}" _environment)
+                if(NOT "${_modification};${_environment}" MATCHES "(^|;)${_variable}=")
+                    set_property(TEST ${_test} DIRECTORY "${_directory}"
+                        APPEND PROPERTY ENVIRONMENT_MODIFICATION "${_setting}")
+                endif()
+            endforeach()
+        endforeach()
+    endforeach()
+endfunction()
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+    CALL katana_say_what_every_program_test_starts_with)
+
+# The check. The programs are handed over in a file - written when the build
+# system is, so it holds each one's real path - and not on the command line,
+# where they would make this test one that names a program.
+set(_program_files "")
+foreach(_program katana katana_cli katana_mcp)
+    if(TARGET ${_program})
+        string(APPEND _program_files "$<TARGET_FILE:${_program}>\n")
+    endif()
+endforeach()
+if(_program_files)
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/program_files_$<CONFIG>.txt"
+        CONTENT "${_program_files}")
+    add_test(NAME every_program_test_says_which_built_in_customisation_it_starts_with
+        COMMAND ${CMAKE_COMMAND}
+            "-DCTEST=${CMAKE_CTEST_COMMAND}"
+            "-DBUILD=${CMAKE_BINARY_DIR}"
+            "-DCONFIGURATION=$<CONFIG>"
+            "-DPROGRAM_LIST=${CMAKE_CURRENT_BINARY_DIR}/program_files_$<CONFIG>.txt"
+            "-DVARIABLE=KATANA_BUILTIN_CUSTOMISATION"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_program_tests.cmake")
+    set_tests_properties(every_program_test_says_which_built_in_customisation_it_starts_with
+        PROPERTIES TIMEOUT 300)
+endif()
+# The check itself, on a listing with tests in it that it must name: a check
+# that cannot see one passes as quietly as one that finds none. The listing is
+# written by hand in ctest's format (tests/program_test_fixtures): ten tests,
+# of which seven name one of three programs - a window that starts with
+# nothing and one that does not say; a cli with a fixture in its ENVIRONMENT,
+# one with the variable on its own `cmake -E env` line, one that does not say
+# and one whose modification unsets what its environment set; an mcp that
+# unsets only the kept file's variable - and three do not: a unit suite, a
+# tool whose name only begins as a program's, and a test with no command.
+# Four of the seven do not say, and are named, in the listing's order. (By
+# hand from Git Bash, set MSYS_NO_PATHCONV=1: the shell rewrites /b/...)
+add_test(NAME the_program_test_check_names_a_test_left_to_the_machines_customisation
+    COMMAND ${CMAKE_COMMAND}
+        "-DLISTING=${CMAKE_CURRENT_SOURCE_DIR}/program_test_fixtures/listing.json"
+        "-DPROGRAMS=/b/bin/katana|/b/bin/katana_cli|/b/bin/katana_mcp"
+        "-DVARIABLE=KATANA_BUILTIN_CUSTOMISATION"
+        -P "${PROJECT_SOURCE_DIR}/tools/check_program_tests.cmake")
+set_tests_properties(the_program_test_check_names_a_test_left_to_the_machines_customisation
+    PROPERTIES PASS_REGULAR_EXPRESSION
+        "Of 7 tests that run a program, those that do not say which built-in customisation they start with: window_left_to_the_machine, cli_left_to_the_machine, cli_whose_modification_takes_it_away_again, mcp_that_only_unsets_the_kept_file[.]")
+
 # The geoprocessing verbs in the real window, one file per package of the
 # geoprocessing plan (tests/geo/headless/*.cmake), so the lanes add checks
 # without editing this file. Included here, in this directory's scope, so the
@@ -379,19 +513,31 @@ if(TARGET katana)
         TIMEOUT 180)
 endif()
 
-# The whole main window with a customisation loaded into it: the two
-# libraries and the survey code file read, resolved against each other, and
-# reported. This is the path the Format > Load Customisation menu item takes, so what
-# ctest exercises is what a person gets (PLAN.MD 20.3). It runs without the
-# files when they are not in the checkout - they carry their author's licence
-# notice - and then proves only that the switch does no harm.
+# The whole main window with a customisation loaded into it by --customise:
+# the three hand-written Katana customisation files of tests/data/customisation
+# in one CUSTOMISE line (the script globs them in name order: linestyles,
+# survey, symbols), merged into a session that starts with nothing, and
+# reported - the line a person types, so what ctest exercises is what a person
+# gets (PLAN.MD 20.3). By hand from the three files: 3 and 4 definitions, 11
+# rules over 8 keys - a key once for each section it has rules in is 7
+# feature, 3 symbol and 1 attributes, 11; the session takes its first file's
+# name; and with all three loaded the one name the rules ask for that nothing
+# defines is TEST Missing Symbol. The files are in every checkout, so this
+# loads on every machine: pointed at the older reference folder it loaded
+# nothing wherever that folder was absent, and proved only that the switch
+# did no harm. "J" below is the suffix, and the quote a record puts round a
+# path that holds a blank.
 if(TARGET katana)
+    set(_twins "${PROJECT_SOURCE_DIR}/tests/data/customisation")
+    set(_J "\\.customisation\\.json\"?")
+    set(_nothing_else "colours_added=0 colours_replaced=0 linework=no automation=no")
     add_test(NAME qt_customisation_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_headless.png"
-            "-DCUSTOMISE_DIR=${KATANA_CUSTOMISATION_DIR}"
+            "-DCUSTOMISE_DIR=${_twins}"
+            "-DEXPECT=loaded file=[^\r\n]*test_linestyles${_J} name=test_linestyles definitions_added=3 definitions_replaced=0 codes_added=0 codes_replaced=0 ${_nothing_else}[\r\n]+loaded file=[^\r\n]*test_survey${_J} name=test_survey definitions_added=0 definitions_replaced=0 codes_added=11 codes_replaced=0 ${_nothing_else}[\r\n]+loaded file=[^\r\n]*test_symbols${_J} name=test_symbols definitions_added=4 definitions_replaced=0 codes_added=0 codes_replaced=0 ${_nothing_else}[\r\n]+undefined names=1[\r\n]+undefined name=\"TEST Missing Symbol\"[\r\n]+customisation name=test_linestyles origin=loaded kept=no definitions=7 codes=8 rules=11 colours=0"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_customisation_headless PROPERTIES
         ENVIRONMENT_MODIFICATION
@@ -1058,36 +1204,251 @@ if(TARGET katana)
         TIMEOUT 180)
     # ---- the window's wiring of the managers' foundations ----------------------
     #
-    # Format > Load Customisation merges (audit QT-21), through the window's
-    # CUSTOMISE line, which runs the menu item's applyCustomisation: the
-    # hand-written fixture survey code file REPLACES the map, then the symbol fixture
-    # alone is MERGED in - and the map must still be there. By hand, from the
-    # fixtures' head comments: test_survey.mapfile has 11 rules, and
-    # test_symbols.4d 4 definitions, all named TEST ..., which no other
-    # library defines, so all 4 are added.
-    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
+    # A load MERGES (audit QT-21), typed as the CUSTOMISE line - the
+    # interpreter's verb, and the one door for a customisation file since
+    # Format > Load Customisation went: the hand-written fixture of survey
+    # codes REPLACES the codes, then the symbol fixture alone is MERGED in -
+    # and the codes must still be there. By hand from the two files:
+    # test_survey has 11 rules over 8 keys, and test_symbols 4 definitions,
+    # all new to a session that starts with nothing, so 4 are added and none
+    # replaced. The session is named by its first load. The rules ask for
+    # five names beside the plain "0"; the symbols file defines two of them
+    # (TEST Survey Mark, TEST Tree), so three are undefined, said in name
+    # order: the two linestyles of the file this test does not load, and
+    # TEST Missing Symbol, which no file defines.
     add_test(NAME qt_customisation_merges_and_keeps_the_map_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>CUSTOMISE REPLACE ${_fixture}/test_survey.mapfile|>CUSTOMISE ${_fixture}/test_symbols.4d"
-            "-DEXPECT=test_symbols\\.4d: style library, 4 added, 0 replaced[^\r\n]*[\r\n]+Customisation now: [0-9,]+ definitions \\([0-9,]+ symbols\\) and 11 survey code rules"
+            "-DDRIVE=>CUSTOMISE REPLACE \"${_twins}/test_survey.customisation.json\"|>CUSTOMISE \"${_twins}/test_symbols.customisation.json\""
+            "-DEXPECT=loaded file=[^\r\n]*test_symbols${_J} name=test_symbols definitions_added=4 definitions_replaced=0 codes_added=0 codes_replaced=0 ${_nothing_else}[\r\n]+undefined names=3[\r\n]+undefined name=\"TEST Dashed Kerb\"[\r\n]+undefined name=\"TEST Missing Symbol\"[\r\n]+undefined name=\"TEST Water Main\"[\r\n]+customisation name=test_survey origin=loaded kept=no definitions=4 codes=8 rules=11 colours=0"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_merge_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
-    # A file named twice in one CUSTOMISE is read once, as katana_cli reads it
+    # A file named twice in one CUSTOMISE is read once
     # (cad::distinctCustomisationFiles): the second naming is the same file
-    # by another spelling. By hand: the mapfile REPLACES the map, read once,
-    # so the map holds its 11 rules (the fixture's head comment); read twice
-    # it held 22.
+    # by another spelling, said as a `repeated` record before the ONE
+    # `loaded` record. By hand: the file REPLACES the codes, read once, so
+    # there are its 11 rules; read twice there were 22. Nothing is loaded
+    # that defines any of the five names its rules ask for.
     add_test(NAME qt_a_file_named_twice_in_one_load_is_read_once_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>CUSTOMISE REPLACE ${_fixture}/test_survey.mapfile ${_fixture}/../customisation/test_survey.mapfile"
-            "-DEXPECT=test_survey\\.mapfile is named twice in this load; it is read once\\..*Customisation now: [0-9,]+ definitions \\([0-9,]+ symbols\\) and 11 survey code rules"
+            "-DDRIVE=>CUSTOMISE REPLACE \"${_twins}/test_survey.customisation.json\" \"${_twins}/../customisation/test_survey.customisation.json\""
+            "-DEXPECT=repeated file=[^\r\n]*test_survey${_J}[\r\n]+loaded file=[^\r\n]*test_survey${_J} name=test_survey definitions_added=0 definitions_replaced=0 codes_added=11 codes_replaced=0 ${_nothing_else}[\r\n]+undefined names=5[\r\n]+.*customisation name=test_survey origin=loaded kept=no definitions=0 codes=8 rules=11 colours=0"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_named_twice_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
+    # What a window starts with, and that the interpreter was handed the host
+    # (cad/customisation_host.hpp). The built-in is the symbol fixture, named
+    # through the seam: the start-up line says its name, its 4 definitions -
+    # all in its "symbols" list - no rules, and that it is built in; CUSTOMISE
+    # alone says the same as records, the session kept (it is what the next
+    # start gives) and its own one source. A REPLACE of the definitions by the
+    # linestyle fixture leaves that file's 3, the 4 symbols gone, under the
+    # session's own name; RESET puts the built-in back - which only a session
+    # given its host can - and it is `kept` again, there being no kept file
+    # to be read in its place. And there is none: a headless window reads and
+    # writes no per-user place, so with KATANA_CUSTOMISATION unset KEEP is
+    # refused, naming the variable.
+    add_test(NAME qt_the_window_starts_with_its_built_in_customisation_and_reset_returns_to_it_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE|>CUSTOMISE REPLACE \"${_twins}/test_linestyles.customisation.json\"|>CUSTOMISE RESET|>CUSTOMISE KEEP"
+            "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*customisation name=test_symbols origin=builtIn kept=yes definitions=4 codes=0 rules=0 colours=0[\r\n]+source name=test_symbols definitions=yes rules=no[\r\n].*loaded file=[^\r\n]*test_linestyles${_J} name=test_linestyles definitions_added=3 definitions_replaced=0 codes_added=0 codes_replaced=0 ${_nothing_else}[\r\n]+removed definitions=4 codes=0[\r\n].*customisation name=test_symbols origin=loaded kept=no definitions=3 codes=0 rules=0 colours=0[\r\n]+reset name=test_symbols definitions=4 codes=0 rules=0 kept=yes[\r\n]+! InvalidState: CUSTOMISE KEEP needs a kept customisation file, and this session has none; the environment variable KATANA_CUSTOMISATION names one"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_built_in_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_window_starts_with_its_built_in_customisation_and_reset_returns_to_it_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:${_twins}/test_symbols.customisation.json"
+        TIMEOUT 180)
+
+    # The kept customisation, which a headless window has only where
+    # KATANA_CUSTOMISATION names the file: one run loads the fixture of
+    # survey codes and KEEPs it - written, with nothing there before to back
+    # up - and the next run starts with it and says so: its name, its 11
+    # rules over 8 keys, origin kept. Two processes, as the cli tests save in
+    # one and reopen in another.
+    set(_kept "${CMAKE_CURRENT_BINARY_DIR}/qt_kept_customisation")
+    add_test(NAME qt_kept_customisation_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_kept}")
+    add_test(NAME qt_a_customisation_is_kept_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE \"${_twins}/test_survey.customisation.json\"|>CUSTOMISE KEEP"
+            "-DEXPECT=kept file=[^\r\n]*qt_kept_customisation/customisation\\.json\"? written=yes name=test_survey definitions=0 codes=8 rules=11 backup=none"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_kept_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_a_kept_customisation_is_what_the_next_window_starts_with_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE"
+            "-DEXPECT=Customisation: test_survey, 0 definitions \\(0 symbols\\) and 11 survey code rules, kept\\..*11 survey code rules over 8 distinct codes[\r\n]+customisation name=test_survey origin=kept kept=yes definitions=0 codes=8 rules=11 colours=0[\r\n]+source name=test_survey definitions=no rules=yes"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_kept_start_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_customisation_is_kept_headless
+                         qt_a_kept_customisation_is_what_the_next_window_starts_with_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_CUSTOMISATION=set:${_kept}/customisation.json"
+        TIMEOUT 180)
+    set_tests_properties(qt_kept_customisation_cleanup PROPERTIES FIXTURES_SETUP qt_kept_clean)
+    set_tests_properties(qt_a_customisation_is_kept_headless PROPERTIES
+        FIXTURES_REQUIRED qt_kept_clean FIXTURES_SETUP qt_kept)
+    set_tests_properties(qt_a_kept_customisation_is_what_the_next_window_starts_with_headless
+        PROPERTIES FIXTURES_REQUIRED qt_kept)
+
+    # A kept customisation that does not read is SAID, once, as an error line,
+    # and the built-in stands in for it rather than the session starting with
+    # nothing (cad::startCustomisation). The kept file here is JSON of another
+    # format, which the reader refuses as not a Katana customisation file; the
+    # built-in is the symbol fixture, through the seam. The run goes on: a
+    # problem at start-up is not a refused step.
+    set(_not_one "${CMAKE_CURRENT_BINARY_DIR}/qt_not_a_customisation.json")
+    file(WRITE "${_not_one}" "{\"format\": \"another-format\", \"version\": 1, \"name\": \"x\"}\n")
+    add_test(NAME qt_a_kept_customisation_that_does_not_read_is_said_and_the_built_in_stands_in_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE"
+            "-DEXPECT=! Customisation: the kept customisation is not read, so the built-in customisation is used: [^\r\n]*not a Katana customisation file[^\r\n]*[\r\n]+Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*customisation name=test_symbols origin=builtIn "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_kept_unreadable_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_kept_customisation_that_does_not_read_is_said_and_the_built_in_stands_in_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:${_twins}/test_symbols.customisation.json;KATANA_CUSTOMISATION=set:${_not_one}"
+        TIMEOUT 180)
+
+    # Survey > Apply Survey Codes is the CODE line through the window's one
+    # executor: on the selection when there is one, else on the drawing. By
+    # hand: two points, both given the code WM01, which the fixture's prefix
+    # key WM* meets. With point 1 alone selected the scope takes 1 entity and
+    # the line is CODE SELECTION; with nothing selected it takes the
+    # drawing's 2 and the line is CODE DRAWING. The log (?commandLog, on one
+    # line) shows each line echoed and answered where it ran.
+    add_test(NAME qt_apply_survey_codes_runs_the_code_line_on_the_selection_or_the_drawing_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE \"${_twins}/test_survey.customisation.json\"|>POINT 1,1|>POINT 2,2|>SELECT ALL|>PROP SET code WM01|>SELECT 1|*applySurveyCodes|>SELECT NONE|*applySurveyCodes|?commandLog"
+            "-DEXPECT=scope=selection matched=1[\r\n]+1 entity carries a code in \"code\": 1 matched, 0 fallback-only[^\r\n]*[\r\n].*scope=drawing matched=2[\r\n]+2 entities carry a code in \"code\": 2 matched, 0 fallback-only.*commandLog: [^\r\n]*> CODE SELECTION scope=selection matched=1 [^\r\n]*> CODE DRAWING scope=drawing matched=2 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/apply_survey_codes_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # With no survey codes loaded - a session that starts with nothing, and
+    # nothing selected, so the line is CODE DRAWING - the item is refused in
+    # the verb's own words, in the log, and the run goes on. The window once
+    # had a box for this case ("No survey codes: Load a survey code file
+    # first: Format > Load Customisation...") and another for a failed run:
+    # FORBID holds this run to neither, here where the old code showed the
+    # first. (It stood on the test above, where codes ARE loaded and neither
+    # box could have shown whatever the window did.)
+    add_test(NAME qt_apply_survey_codes_with_no_codes_loaded_is_refused_in_the_verbs_words_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>POINT 1,1|*applySurveyCodes|?commandLog"
+            "-DEXPECT=! InvalidState: no survey codes are loaded; CUSTOMISE <file> loads a Katana customisation file[\r\n]+commandLog: [^\r\n]*> CODE DRAWING "
+            "-DFORBID=No survey codes|Survey codes failed|Load Customisation"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/apply_survey_codes_none_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
+    # The Survey Code Manager's Linework tab strings with the CUSTOMISATION'S
+    # control codes, and follows a change of them while it is open
+    # (CustomisationWorkbench::followLineworkCodes). By hand, over the three
+    # fixtures, whose rule WM* draws a line: four points coded WM1 are one
+    # string, joined in the order made, and the third is coded "WM1 GO".
+    # While the start code is the default ST, GO is a token nothing knows:
+    # ONE line through the four, and one note. After CUSTOMISE SET
+    # linework.start=GO the tab says it took the codes, shows GO, and the
+    # third point begins a second line: TWO lines of two points, no note.
+    # The tab kept a copy of its own once, and strung with ST whatever the
+    # customisation said.
+    add_test(NAME qt_the_linework_tab_strings_with_the_customisations_control_codes_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${_twins}"
+            "-DDRIVE=>POINT 0,0|>POINT 10,0|>POINT 20,0|>POINT 30,0|>SELECT ALL|>PROP SET code WM1|>SELECT 3|>PROP SET code \"WM1 GO\"|>SELECT NONE|@formatSurveyCodes|lineworkOrder=In the order observed|?lineworkStart|!lineworkPreview|?lineworkSummary|>CUSTOMISE SET linework.start=GO|?lineworkStart|!lineworkPreview|?lineworkSummary"
+            "-DEXPECT=lineworkStart: ST[\r\n]+.*lineworkSummary: Preview only: 1 lines from 4 points; 0 points not placed; 1 notes\\..*[\r\n]set linework\\.start=GO[\r\n]+Linework control codes set for this session\\.[\r\n]+lineworkStart: GO[\r\n]+.*lineworkSummary: Preview only: 2 lines from 4 points; 0 points not placed; 0 notes\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/linework_tab_codes_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
+    # A kept customisation made from ANOTHER built-in than this program has is
+    # installed all the same - it is the user's - and the start says so, once
+    # (cad::CustomisationStart::keptFromAnotherBuiltIn). The kept file says it
+    # is based on a customisation called "another"; the built-in, through the
+    # seam, is the symbol fixture, test_symbols. By hand from the file written
+    # here: ONE definition, in its "symbols" list, and ONE rule - so the
+    # start-up line has each noun in the singular, where it once said "1
+    # survey code rules" - and the rule's one key is its one code.
+    set(_from_another "${CMAKE_CURRENT_BINARY_DIR}/qt_kept_from_another_built_in.json")
+    file(WRITE "${_from_another}"
+"{\"format\": \"katana-customisation\", \"version\": 1, \"name\": \"mine\",
+ \"basedOn\": {\"name\": \"another\", \"digest\": \"0123456789abcdef\"},
+ \"symbols\": [{\"name\": \"MINE Mark\", \"atVertices\": true, \"strokes\": [[\"move\", 0, 0], [\"circle\", 0.5]]}],
+ \"codes\": [{\"key\": \"MK*\", \"sets\": \"symbol\", \"symbol\": {\"name\": \"MINE Mark\"}}]}
+")
+    add_test(NAME qt_a_kept_customisation_made_from_another_built_in_is_installed_and_said_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE"
+            "-DEXPECT=Customisation: mine, 1 definition \\(1 symbol\\) and 1 survey code rule, kept\\.[\r\n]+The kept customisation was made from another built-in customisation than this program has; CUSTOMISE RESET gives this program's\\.[\r\n].*customisation name=mine origin=kept kept=yes definitions=1 codes=1 rules=1 colours=0"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_kept_from_another_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_kept_customisation_made_from_another_built_in_is_installed_and_said_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:${_twins}/test_symbols.customisation.json;KATANA_CUSTOMISATION=set:${_from_another}"
+        TIMEOUT 180)
+
+    # --customise beside an import file: both are taken. The script once put
+    # the file after the switch, which takes every path up to the next switch
+    # - so the archive was read as a fourth customisation file, the one
+    # CUSTOMISE line refused them all, nothing was imported, and the run
+    # still wrote its picture and passed. Each record is pinned on its own
+    # elsewhere, from its file: the three fixtures' (qt_customisation_headless)
+    # and the archive's four surfaces
+    # (qt_import_tin_only_archive_adds_its_surfaces_headless). The
+    # customisation comes first: it is loaded before anything is opened.
+    add_test(NAME qt_a_customisation_folder_and_an_import_file_are_both_taken_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${_twins}"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/multiple_tins.12da"
+            "-DEXPECT=customisation name=test_linestyles origin=loaded kept=no definitions=7 codes=8 rules=11 colours=0[\r\n].*imported file=\"?[^ ]*/multiple_tins[.]12da\"? kind=archive entities=0 alignments=0 surfaces=4 "
+            "-DFORBID=not a Katana customisation file"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_and_import_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
+    # A --customise that is refused does not stop a run that takes a picture:
+    # it is said, in the reader's words, and the steps after it run - LIST
+    # here, of an empty drawing. (A batch run it fails: the tests beside
+    # qt_script_batch_run_fails_at_a_refused_line_headless.) The folder holds
+    # one file with the suffix the script looks for and JSON of another
+    # format in it.
+    set(_refused_folder "${CMAKE_CURRENT_BINARY_DIR}/qt_refused_customisation")
+    file(WRITE "${_refused_folder}/not_one.customisation.json"
+        "{\"format\": \"another-format\", \"version\": 1, \"name\": \"x\"}\n")
+    add_test(NAME qt_a_refused_customise_switch_leaves_a_screenshot_run_going_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${_refused_folder}"
+            "-DDRIVE=>LIST"
+            "-DEXPECT=! ParseFailure: not a Katana customisation file.*[\r\n]0 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_apply_survey_codes_runs_the_code_line_on_the_selection_or_the_drawing_headless
+        qt_apply_survey_codes_with_no_codes_loaded_is_refused_in_the_verbs_words_headless
+        qt_the_linework_tab_strings_with_the_customisations_control_codes_headless
+        qt_a_customisation_folder_and_an_import_file_are_both_taken_headless
+        qt_a_refused_customise_switch_leaves_a_screenshot_run_going_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
 
     # A typed SAVE that cannot save - an untitled drawing, no directory given
     # - leaves a drawing nobody touched unmodified, so a NEW after it asks
@@ -1114,9 +1475,11 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
     # The project records its customisation (ProjectMetadata::customisation):
-    # the site plan saved with the symbol fixture loaded, then opened by a
-    # second run that never loads it, which must say which file is missing -
-    # a warning in the log, the project opened all the same.
+    # a drawing saved with the symbol fixture loaded, then opened by a second
+    # run that never loads it, which must say which customisation is missing
+    # - a warning in the log, the project opened all the same. By NAME: what
+    # the fixture's "name" says, test_symbols, where the record once held the
+    # name of the file a library was read from.
     set(_recorded "${CMAKE_CURRENT_BINARY_DIR}/customisation_recorded.katana")
     set(_resaved "${CMAKE_CURRENT_BINARY_DIR}/customisation_resaved.katana")
     add_test(NAME qt_customisation_recorded_cleanup
@@ -1125,7 +1488,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>CUSTOMISE ${_fixture}/test_symbols.4d|>LINE 0,0 10,0|>SAVE ${_recorded}"
+            "-DDRIVE=>CUSTOMISE \"${_twins}/test_symbols.customisation.json\"|>LINE 0,0 10,0|>SAVE ${_recorded}"
             "-DEXPECT=saved to "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_record_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -1134,19 +1497,21 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>OPEN ${_recorded}"
-            "-DEXPECT=opened .*Warning: this project was drawn with customisation files that are not loaded: \"test_symbols\\.4d\""
+            "-DEXPECT=opened .*Warning: this project was drawn with customisations that are not loaded: \"test_symbols\"\\. CUSTOMISE <file> loads a Katana customisation file\\."
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_missing_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # Saved where the file is missing, the project still records it: the
-    # open warns, the save (to a copy, so the test above reads its own
+    # Saved where the customisation is missing, the project still records
+    # it: the open warns, the save (to a copy, so the test above reads its own
     # project) writes the record, and opening the copy warns again. By hand:
-    # this run never loads test_symbols.4d, so nothing it does can judge it.
+    # this run never loads test_symbols, so nothing it does can judge it. The
+    # closing quote and the full stop are in the expression, so a longer name
+    # cannot pass for it.
     add_test(NAME qt_saving_where_a_file_is_missing_keeps_it_recorded_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>OPEN ${_recorded}|>SAVE ${_resaved}|>NEW|>OPEN ${_resaved}"
-            "-DEXPECT=not loaded: \"test_symbols\\.4d\".*saved to .*new drawing.*opened .*not loaded: \"test_symbols\\.4d\""
+            "-DEXPECT=not loaded: \"test_symbols\"\\..*saved to .*new drawing.*opened .*not loaded: \"test_symbols\"\\."
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_resaved_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_customisation_recorded_cleanup PROPERTIES
@@ -1187,8 +1552,11 @@ if(TARGET katana)
     # ---- the menus: Format's managers, Purge Unused, the tools by alias -------
     #
     # Each manager opened THROUGH ITS FORMAT MENU ACTION (@ is --dialog), over
-    # the hand-written fixture customisation merged onto whatever is built
-    # in; the driver says what opened, and a manager opened modally would say
+    # the three hand-written fixture customisations (-DCUSTOMISE_DIR, one
+    # CUSTOMISE line) loaded into a session that starts with nothing - every
+    # program test does, unless it names its built-in (the scan at the head of
+    # this file) - so what a manager lists is the fixtures' and nothing else;
+    # the driver says what opened, and a manager opened modally would say
     # "(modal)" after its title, where each EXPECT wants the line to end. What each
     # manager then shows is read back with ? (--report).
     #
@@ -1197,42 +1565,47 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=>STYLE NEW Kerb|>STYLE NEW Water|@formatStyles|?styleTable"
             "-DEXPECT=--dialog formatStyles opened styleManagerDialog \"Styles and Linetypes\"[\r\n]+styleTable: Kerb \\|[^;]*; Water \\|"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_style_manager_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The same manager's Linetypes page (managerTabs, filled as a click on
     # its tab does) narrowed to the fixture's group Test/Lines. By hand from
-    # test_linestyles.4d's head comment: that group holds TEST Dashed Kerb, a
-    # paper linestyle, and TEST Gate, a two-point one, and nothing else. The
-    # Kerb chosen, the details pane explains its kind in the general words.
+    # test_linestyles: that group holds TEST Dashed Kerb, a paper linestyle,
+    # and TEST Gate, a two-point one, and nothing else. The Kerb chosen, the
+    # details pane explains its kind in the general words, and says where the
+    # definition came from: the NAME of its customisation, test_linestyles
+    # (LineStyle::source), where it was the name of the file a library was
+    # read from.
     add_test(NAME qt_the_style_manager_lists_a_library_group_s_linestyles_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@formatStyles|managerTabs=Linetypes|linetypeGroup=Test/Lines|linetypeTable=TEST Dashed Kerb|?linetypeTable|?libraryDetails"
-            "-DEXPECT=linetypeTable: TEST Dashed Kerb \\| Library \\| Test/Lines \\| paper \\|[^;\r\n]*; TEST Gate \\| Library \\| Test/Lines \\| two-point \\|[^;\r\n]*[\r\n]+libraryDetails: TEST Dashed Kerb Group: Test/Lines File: test_linestyles\\.4d Kind: Paper linestyle: millimetres on the plot, the same at every scale[^\r\n]*Library linestyles belong to the session's customisation and are read-only here\\."
+            "-DEXPECT=linetypeTable: TEST Dashed Kerb \\| Library \\| Test/Lines \\| paper \\|[^;\r\n]*; TEST Gate \\| Library \\| Test/Lines \\| two-point \\|[^;\r\n]*[\r\n]+libraryDetails: TEST Dashed Kerb Group: Test/Lines File: test_linestyles Kind: Paper linestyle: millimetres on the plot, the same at every scale[^\r\n]*Library linestyles belong to the session's customisation and are read-only here\\."
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_style_manager_linetypes_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # Symbols, searched for TEST. By hand from the fixture's head comments:
-    # its four definitions are all symbols by decision D3 - TEST Tree too,
-    # though it is not `mode vertex`, because rule TR* draws it as one - and
-    # PX* asks for TEST Missing Symbol, which nothing defines and the library
-    # lists as missing. Sorted by name, case folded, the five come together.
+    # Symbols, searched for TEST. By hand from the fixtures: the four
+    # definitions of test_symbols are all symbols - its "symbols" list says
+    # so, of TEST Tree too, which is not drawn at vertices, and rule TR* draws
+    # it as one besides - and PX* asks for TEST Missing Symbol, which nothing
+    # defines and the library lists as missing. Sorted by name, case folded,
+    # the five come together.
     add_test(NAME qt_format_menu_opens_the_symbol_library_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@formatSymbols|filterText=TEST|?symbolGrid"
             "-DEXPECT=--dialog formatSymbols opened symbolLibraryDialog \"Symbol Library\"[\r\n]+symbolGrid: [^\r\n]*TEST Missing Symbol ; TEST Survey Mark ; TEST Tree ; TEST U Turn ; TEST Valve"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_symbol_library_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # The code manager explaining a fixture code. By hand from
-    # test_survey.mapfile: WM01 is met by the prefix key WM* (rule #0 of the
-    # fixture, a feature rule), which puts it on the layer TEST SERVICES. The
+    # The code manager explaining a fixture code. By hand from test_survey:
+    # WM01 is met by the prefix key WM* (rule #0 of the fixture, a feature
+    # rule - and rule #0 of the session, which starts with nothing), which
+    # puts it on the layer TEST SERVICES. The
     # field is "layer" and the section "feature" - the Katana customisation
     # format's words, where the window used to show the survey code file's
     # `model` and `map_data`: the expression was changed from the table "The
@@ -1241,25 +1614,27 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@formatSurveyCodes|testCode=WM01|?explainHeading|?explainFields"
-            "-DEXPECT=--dialog formatSurveyCodes opened surveyCodeManagerDialog \"Survey Code Manager\"[\r\n]+explainHeading: WM01: matched - met by the prefix key WM\\*[^\r\n]*[\r\n]+explainFields: layer \\| TEST SERVICES \\| #[0-9]+ WM\\* \\(feature\\)"
+            "-DEXPECT=--dialog formatSurveyCodes opened surveyCodeManagerDialog \"Survey Code Manager\"[\r\n]+explainHeading: WM01: matched - met by the prefix key WM\\*[^\r\n]*[\r\n]+explainFields: layer \\| TEST SERVICES \\| #0 WM\\* \\(feature\\)"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_code_manager_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # What Format says in the real window, in general words: every item of
-    # the menu with its status tip (?formatMenu) - the window's own Load and
-    # Replace Loaded Customisation among the managers' - the log of a
-    # customisation loaded and of each manager opened, and none of it names
-    # another program's formats (FORBID, in either case). The widget tests
-    # walk the managers' own texts (qt_widgets.GeneralTexts.*).
+    # the menu with its status tip (?formatMenu), the log of a customisation
+    # loaded and of each manager opened, and none of it names another
+    # program or its file suffixes (FORBID). The menu no longer offers Load
+    # Customisation and Replace Loaded Customisation - the file dialogs over
+    # those suffixes - so Global Modify follows the Survey Code Manager with
+    # nothing between ("] ; "), and FORBID holds the run to that too. The
+    # widget tests walk the managers' own texts (qt_widgets.GeneralTexts.*).
     add_test(NAME qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=?formatMenu|@formatStyles|@formatSymbols|@formatSurveyCodes"
-            "-DEXPECT=test_survey\\.mapfile: survey code file, [0-9,]+ added[^\r\n]*[\r\n].*formatMenu: Format: Layers\\.\\.\\. \\[[^\r\n]*Styles and Linetypes\\.\\.\\. \\[[^\r\n]*library linestyles[^\r\n]*Load Customisation\\.\\.\\. \\[Load linestyle and symbol libraries \\(\\.4d\\) and survey code files \\(\\.mapfile\\)[^\r\n]*Replace Loaded Customisation\\.\\.\\. \\[[^\r\n]*[\r\n].*opened surveyCodeManagerDialog"
-            "-DFORBID=12[dD]"
+            "-DEXPECT=loaded file=[^\r\n]*test_survey${_J} name=test_survey [^\r\n]*codes_added=11[^\r\n]*[\r\n].*formatMenu: Format: Layers\\.\\.\\. \\[[^\r\n]*Styles and Linetypes\\.\\.\\. \\[[^\r\n]*library linestyles[^\r\n]*Survey Code Manager\\.\\.\\. \\[[^]]*\\] ; Global Modify\\.\\.\\. \\[[^]]*\\] ; Purge Unused\\.\\.\\. \\[[^\r\n]*[\r\n].*opened surveyCodeManagerDialog"
+            "-DFORBID=12[dD]|\\.4d|[.]mapfile|Load Customisation|Replace Loaded Customisation"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_texts_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # FORBID holds the application to what it SAYS, not to where the run
@@ -1297,7 +1672,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|>SELECT ALL|@formatSymbols|symbolGrid=TEST Survey Mark|?detailName|!assignToPoints|>STYLE USAGE TEST Survey Mark"
             "-DEXPECT=Imported 12 point\\(s\\).*detailName: TEST Survey Mark[\r\n]+12 points now in style \"TEST Survey Mark\" \\(new\\), drawing \"TEST Survey Mark\"\\..*style TEST Survey Mark: used by 12 entities"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/symbol_assign_headless.png"
@@ -1310,7 +1685,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=>STYLE NEW Spare|>STYLE NEW Kerb|%PropertiesToolBar|CurrentStyleCombo=Kerb|>LINE 0,0 10,0|*formatPurge|>STYLE USAGE Spare|>UNDO|>STYLE USAGE Spare|%CommandLineDock"
             "-DEXPECT=Purge Unused: purged 1 style, 0 linetypes and 0 hatch patterns \\(one Undo restores them\\)\\. Styles: Spare\\.[\r\n]+! [^\r\n]*Spare[^\r\n]*[\r\n]+1 undone[\r\n]+style Spare: unused"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/purge_unused_headless.png"
@@ -1358,14 +1733,17 @@ if(TARGET katana)
     # Quitting while the Survey Code Manager holds unapplied rule edits: they
     # live only in its buffer, so a headless QUIT, with nobody to ask, is
     # refused and said - as a quit with unsaved drawing changes is - rather
-    # than the edits going with the window. By hand: the built-in map's 1,624
-    # rules and a duplicate of rule 0 make 1625 in the buffer.
+    # than the edits going with the window. The codes are the built-in's, so
+    # the test names its built-in: the fixture of survey codes, through the
+    # seam (set below). By hand: its 11 rules and a duplicate of rule 0 make
+    # 12 in the buffer. The start-up line is this run's too - the fixture's
+    # name, its counts (no definitions, so no symbols) and that it is built in.
     add_test(NAME qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@formatSurveyCodes|!ruleDuplicate|?dirtyIndicator|>QUIT"
-            "-DEXPECT=dirtyIndicator: Unapplied edits:[^\r\n]* 1625 rules[.][\r\n]+! Unapplied Edits: the Survey Code Manager has rule edits that are not on the drawing"
+            "-DEXPECT=Customisation: test_survey, 0 definitions \\(0 symbols\\) and 11 survey code rules, built in\\..*dirtyIndicator: Unapplied edits:[^\r\n]* 12 rules[.][\r\n]+! Unapplied Edits: the Survey Code Manager has rule edits that are not on the drawing"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/quit_with_code_edits_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The tools a CAD user reaches for daily, in the menus the catalogue
@@ -1813,15 +2191,14 @@ if(TARGET katana)
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
-    # The quitting check counts the built-in map's rules, which come from the
-    # third-party customisation (src/katana_archive12d/CMakeLists.txt). A
-    # checkout without it has no rule to duplicate, so the check is skipped
-    # there rather than failed, as the suites that read it skip
-    # (tests/archive12d/CMakeLists.txt): the suite stays green without it.
-    if(NOT EXISTS "${KATANA_CUSTOMISATION_DIR}/survey_codes.mapfile")
-        set_tests_properties(qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
-            PROPERTIES DISABLED TRUE)
-    endif()
+    # The quitting check counts the built-in's rules, so it says what the
+    # built-in is: the fixture of survey codes, by the seam
+    # (cad/customisation_host.hpp). It counted the third-party reference
+    # customisation's 1,624 while that was the only built-in there could be,
+    # and was DISABLED in every checkout without those files - all but one.
+    set_property(TEST qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
+        APPEND PROPERTY ENVIRONMENT_MODIFICATION
+            "KATANA_BUILTIN_CUSTOMISATION=set:${_twins}/test_survey.customisation.json")
 
     set_tests_properties(qt_survey_inverse_headless qt_survey_area_headless
                          qt_survey_forward_headless qt_survey_angle_headless
@@ -2075,18 +2452,21 @@ endif()
 # line: never a running tool's answer, with what it logged coming back.
 if(TARGET katana)
     set(_gis "${PROJECT_SOURCE_DIR}/samples/gis")
-    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
     # A 10 x 5 rectangle: perimeter 30, area 50, described by INFO 1 and
-    # again by INFO #1 (a typed line's echo is not printed). The fixture survey code file
-    # holds 11 rules over 8 distinct codes (counted by hand in its head
-    # comment), none of which cannot be applied as written; the rectangle
-    # carries no code.
+    # again by INFO #1 (a typed line's echo is not printed). The fixture of
+    # survey codes holds 11 rules over 8 distinct codes (counted by hand from
+    # the file), none of which cannot be applied as written; the rectangle
+    # carries no code. CUSTOMISE alone is the interpreter's: after the two
+    # count lines, the session as records - named by the one file loaded,
+    # which is its one source and brought rules alone, with the settings a
+    # session starts with (both automation switches on, the seven linework
+    # control codes at their defaults).
     add_test(NAME qt_the_session_verbs_run_on_the_windows_command_line_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>RECT 0,0 10,5|>INFO 1|>INFO #1|>CUSTOMISE REPLACE \"${_fixture}/test_survey.mapfile\"|>CODE CENSUS|>CODE CHECK|>CUSTOMISE"
-            "-DEXPECT=1  Polyline  layer=0  vertices=4  closed  length=30  area=50[\r\n]+1  Polyline  layer=0  vertices=4  closed  length=30  area=50.*0 entities carry a code in \"[^\"]*\", 0 distinct codes.*11 rules checked: 0 errors, [0-9]+ warnings?.*11 survey code rules over 8 distinct codes[\r\n]+Loaded files, in load order:.*\"test_survey\\.mapfile\", a survey code file"
+            "-DDRIVE=>RECT 0,0 10,5|>INFO 1|>INFO #1|>CUSTOMISE REPLACE \"${_twins}/test_survey.customisation.json\"|>CODE CENSUS|>CODE CHECK|>CUSTOMISE"
+            "-DEXPECT=1  Polyline  layer=0  vertices=4  closed  length=30  area=50[\r\n]+1  Polyline  layer=0  vertices=4  closed  length=30  area=50.*0 entities carry a code in \"[^\"]*\", 0 distinct codes.*11 rules checked: 0 errors, [0-9]+ warnings?.*11 survey code rules over 8 distinct codes[\r\n]+customisation name=test_survey origin=loaded kept=no definitions=0 codes=8 rules=11 colours=0[\r\n]+source name=test_survey definitions=no rules=yes[\r\n]+automation auto\\.codes=on auto\\.linework=on[\r\n]+linework linework\\.start=ST linework\\.end=END linework\\.close=CL linework\\.arcstart=BC linework\\.arcend=EC linework\\.join=JPN linework\\.rectangle=RECT"
             "-DFORBID=unknown command|usage: CUSTOMISE"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/session_verbs_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -2323,6 +2703,28 @@ if(TARGET katana)
         COMMAND katana --script "${_scripts}/bad.kcs")
     set_tests_properties(qt_script_batch_run_fails_at_a_refused_line_headless PROPERTIES
         WILL_FAIL TRUE)
+    # A --customise that is refused fails a batch run, as a refused --command
+    # does, and before any step: the file here is JSON of another format
+    # (the one a kept customisation that does not read is tested with, above),
+    # so the one CUSTOMISE line is refused in the reader's words, the switch
+    # says it was, and good.kcs's first line - a rectangle - never runs. Two
+    # tests of one run, as the pair above is: a PASS expression sets the exit
+    # code aside, so the second holds the run to failing.
+    add_test(NAME qt_a_refused_customise_switch_stops_a_batch_run_before_its_script_headless
+        COMMAND katana --customise "${_not_one}" --script "${_scripts}/good.kcs")
+    set_tests_properties(qt_a_refused_customise_switch_stops_a_batch_run_before_its_script_headless
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "! ParseFailure: not a Katana customisation file[^\r\n]*[\r\n]+--customise [^\r\n]*qt_not_a_customisation[.]json was refused"
+        FAIL_REGULAR_EXPRESSION "rectangle created")
+    add_test(NAME qt_a_refused_customise_switch_fails_a_batch_run_headless
+        COMMAND katana --customise "${_not_one}" --script "${_scripts}/good.kcs")
+    set_tests_properties(qt_a_refused_customise_switch_fails_a_batch_run_headless PROPERTIES
+        WILL_FAIL TRUE)
+    set_tests_properties(qt_a_refused_customise_switch_stops_a_batch_run_before_its_script_headless
+        qt_a_refused_customise_switch_fails_a_batch_run_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     set_tests_properties(qt_script_switch_runs_every_line_of_a_script_headless
         qt_script_switch_stops_at_the_first_refused_line_headless
         qt_typed_script_continue_runs_every_line_headless
@@ -2369,20 +2771,23 @@ endif()
 # defines it is then replaced by the symbol fixture, so the name is
 # unresolved: the summary lists it, and Show in Styles and Linetypes leaves the
 # style manager showing only the styles that name it - kerb, not "other".
-# Copy as JSON runs STATUS JSON through the one executor. The fixture's survey
-# code file is loaded with the first library, so the survey code count is its
-# 11 rules (counted by hand in its header) and not the build's: a REPLACE of
-# libraries alone keeps the survey codes, and the built-in ones are the
-# gitignored reference customisation's, present in one checkout and not
-# another.
+# Copy as JSON runs STATUS JSON through the one executor. The fixture of
+# survey codes is loaded with the linestyles, so the survey code count is its
+# 11 rules (counted by hand from the file): a REPLACE of definitions alone
+# keeps the survey codes. Last, the summary's customisation pane, which is
+# what a bare CUSTOMISE replies, of the Document's own state (a report prints
+# a text box on one line, its line breaks as blanks): the first REPLACE
+# brought both kinds into a session with no name, so the session is named
+# test_linestyles; the second replaced the definitions, so test_linestyles,
+# which brought only those, is no source any more - test_survey (rules) and
+# test_symbols (definitions) are, in load order.
 if(TARGET katana)
-    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
     add_test(NAME qt_drawing_summary_and_status_json_describe_the_drawing_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>CUSTOMISE REPLACE \"${_fixture}/test_linestyles.4d\" \"${_fixture}/test_survey.mapfile\"|>STYLE NEW kerb|>STYLE NEW other|>STYLE SET kerb linetype \"TEST Dashed Kerb\"|>CUSTOMISE REPLACE \"${_fixture}/test_symbols.4d\"|>RECT 0,0 10,5|>SELECT ALL|>STATUS|>STATUS JSON|?statusSelectionCount|@fileDrawingSummary|?drawingSummaryDrawing|?drawingSummaryCurrent|?drawingSummarySelection|?drawingSummaryHistory|?drawingSummaryUnresolved|drawingSummaryUnresolved=TEST Dashed Kerb|!drawingSummaryShowMissing|?drawingSummaryStatus|!drawingSummaryCopyJson|?drawingSummaryStatus|@formatStyles|?styleTable"
-            "-DEXPECT=Entities: 1  Layers: 1  Alignments: 0[\r\n]+Current layer: 0[\r\n]+Selected: 1  Undo steps: 4  Redo steps: 0[\r\n]+Customisation: 4 linestyles and symbols, 11 survey code rules[\r\n]+{[\r\n]+  \"alignments\": 0,[\r\n]+  \"currentLayer\": \"0\",[\r\n]+  \"currentStyle\": \"\",[\r\n]+  \"entities\": 1,.*  \"undoSteps\": 4[\r\n]+}[\r\n]+statusSelectionCount: 1 selected / 1 entities[\r\n]+[^\r\n]*opened drawingSummaryDialog \"Drawing Summary\"[\r\n]+drawingSummaryDrawing: 1 entity, 1 layer, 0 alignments, 0 sheets[\r\n]+drawingSummaryCurrent: layer 0, style ByLayer, annotation scale 1:[0-9]+, no coordinate system[\r\n]+drawingSummarySelection: 1 entity selected[\r\n]+drawingSummaryHistory: 4 steps to undo \\(next: [^)]+\\), 0 steps to redo[\r\n]+drawingSummaryUnresolved: TEST Dashed Kerb[\r\n]+drawingSummaryStatus: Styles and Linetypes shows the styles that name TEST Dashed Kerb\\.[\r\n]+{.*}[\r\n]+drawingSummaryStatus: Copied the drawing's state as JSON \\(STATUS JSON\\)\\.[\r\n]+[^\r\n]*opened styleManagerDialog[^\r\n]*[\r\n]+styleTable: kerb \\| [^;\r\n]*TEST Dashed Kerb[^;\r\n]*[\r\n]"
+            "-DDRIVE=>CUSTOMISE REPLACE \"${_twins}/test_linestyles.customisation.json\" \"${_twins}/test_survey.customisation.json\"|>STYLE NEW kerb|>STYLE NEW other|>STYLE SET kerb linetype \"TEST Dashed Kerb\"|>CUSTOMISE REPLACE \"${_twins}/test_symbols.customisation.json\"|>RECT 0,0 10,5|>SELECT ALL|>STATUS|>STATUS JSON|?statusSelectionCount|@fileDrawingSummary|?drawingSummaryDrawing|?drawingSummaryCurrent|?drawingSummarySelection|?drawingSummaryHistory|?drawingSummaryUnresolved|drawingSummaryUnresolved=TEST Dashed Kerb|!drawingSummaryShowMissing|?drawingSummaryStatus|!drawingSummaryCopyJson|?drawingSummaryStatus|@formatStyles|?styleTable|?drawingSummaryCustomisation"
+            "-DEXPECT=Entities: 1  Layers: 1  Alignments: 0[\r\n]+Current layer: 0[\r\n]+Selected: 1  Undo steps: 4  Redo steps: 0[\r\n]+Customisation: 4 linestyles and symbols, 11 survey code rules[\r\n]+{[\r\n]+  \"alignments\": 0,[\r\n]+  \"currentLayer\": \"0\",[\r\n]+  \"currentStyle\": \"\",[\r\n]+  \"entities\": 1,.*  \"undoSteps\": 4[\r\n]+}[\r\n]+statusSelectionCount: 1 selected / 1 entities[\r\n]+[^\r\n]*opened drawingSummaryDialog \"Drawing Summary\"[\r\n]+drawingSummaryDrawing: 1 entity, 1 layer, 0 alignments, 0 sheets[\r\n]+drawingSummaryCurrent: layer 0, style ByLayer, annotation scale 1:[0-9]+, no coordinate system[\r\n]+drawingSummarySelection: 1 entity selected[\r\n]+drawingSummaryHistory: 4 steps to undo \\(next: [^)]+\\), 0 steps to redo[\r\n]+drawingSummaryUnresolved: TEST Dashed Kerb[\r\n]+drawingSummaryStatus: Styles and Linetypes shows the styles that name TEST Dashed Kerb\\.[\r\n]+{.*}[\r\n]+drawingSummaryStatus: Copied the drawing's state as JSON \\(STATUS JSON\\)\\.[\r\n]+[^\r\n]*opened styleManagerDialog[^\r\n]*[\r\n]+styleTable: kerb \\| [^;\r\n]*TEST Dashed Kerb[^;\r\n]*[\r\n].*drawingSummaryCustomisation: [^\r\n]*11 survey code rules over 8 distinct codes customisation name=test_linestyles origin=loaded kept=no definitions=4 codes=8 rules=11 colours=0 source name=test_survey definitions=no rules=yes source name=test_symbols definitions=yes rules=no automation auto\\.codes=on auto\\.linework=on "
             "-DFORBID=unknown command"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/drawing_summary_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -2459,17 +2864,46 @@ endif()
 # Point Cloud to COPC does; Import names every placement IMPORT takes
 # (docs/interop.md, "Placing an import"). Save of a drawing with no project is
 # Save As. The
-# empty drawing's Export says so in the log, not in a box.
+# empty drawing's Export says so in the log, not in a box. (Load Customisation
+# and Replace Loaded Customisation were triggered here too, and named their
+# CUSTOMISE lines: the two items are gone, which the pair of tests after this
+# one holds the window to.)
 if(TARGET katana)
     add_test(NAME qt_the_file_items_name_their_verbs_in_a_headless_run_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=*fileOpen|*fileSaveAs|*fileImport|*fileExportVector|>RECT 0,0 1,1|*fileExportVector|*loadCustomisation|*replaceCustomisation|*fileSave"
-            "-DEXPECT=type OPEN <directory> instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[LOCAL \\| ALONGSIDE \\| OFFSET=dE,dN\\] instead\\.[\r\n]+! Export: the drawing is empty\\.[\r\n]+rectangle created[\r\n]+[^\r\n]*type EXPORT <file> instead\\.[\r\n]+[^\r\n]*type CUSTOMISE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type CUSTOMISE REPLACE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\."
+            "-DDRIVE=*fileOpen|*fileSaveAs|*fileImport|*fileExportVector|>RECT 0,0 1,1|*fileExportVector|*fileSave"
+            "-DEXPECT=type OPEN <directory> instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[LOCAL \\| ALONGSIDE \\| OFFSET=dE,dN\\] instead\\.[\r\n]+! Export: the drawing is empty\\.[\r\n]+rectangle created[\r\n]+[^\r\n]*type EXPORT <file> instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\."
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/file_items_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_file_items_name_their_verbs_in_a_headless_run_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    # A customisation file is loaded by the typed line, and no menu item
+    # stands for it: the line loads the symbol fixture (4 definitions, by
+    # hand), and a trigger of either removed item is refused as the name of
+    # no menu item - the run stops there, exit 1 (REFUSED).
+    set(_loaded_first "customisation name=test_symbols origin=loaded kept=no definitions=4 codes=0 rules=0 colours=0")
+    add_test(NAME qt_load_customisation_is_no_menu_item_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE \"${_twins}/test_symbols.customisation.json\"|*loadCustomisation"
+            "-DREFUSED=${_loaded_first}.*--trigger loadCustomisation failed: [^\r\n]*no such menu item"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/load_customisation_no_item_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_replace_customisation_is_no_menu_item_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE \"${_twins}/test_symbols.customisation.json\"|*replaceCustomisation"
+            "-DREFUSED=${_loaded_first}.*--trigger replaceCustomisation failed: [^\r\n]*no such menu item"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/replace_customisation_no_item_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_load_customisation_is_no_menu_item_headless
+                         qt_replace_customisation_is_no_menu_item_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

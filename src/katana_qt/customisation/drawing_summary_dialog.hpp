@@ -7,18 +7,23 @@
 // in view and the window showed nowhere: the project's full path, what the
 // drawing holds (entities, layers, alignments, sheets), what is current
 // (layer, style, annotation scale, coordinate system), the selection, the
-// history with the next step each way, and the customisation - the loaded
-// files in load order, the files the project was drawn with that are not
-// loaded, the counts and this drawing's coverage (cad::customisationSummary,
-// the words a bare CUSTOMISE prints) - with the names no loaded library
-// defines listed: a double-click, or Show in Styles and Linetypes, opens
-// Format > Styles and Linetypes on its Missing chip, searching for that name.
+// history with the next step each way, and the customisation - what a bare
+// CUSTOMISE replies (cad::formatCustomisationReply of the Document's own
+// state): the counts, its name and where it came from, its sources in load
+// order, the automation and the linework codes, the names the project was
+// drawn with that are not loaded, and this drawing's coverage - with the
+// names no loaded library defines listed: a double-click, or Show in Styles
+// and Linetypes, opens Format > Styles and Linetypes on its Missing chip,
+// searching for that name.
 //
 // It changes nothing. Copy as JSON runs STATUS JSON through the window's one
 // executor and copies the reply, so what is copied is exactly what an agent
-// reads; Load Customisation is the Format menu's item. The dialog follows the
-// Document through a DocumentWatcher, refreshing once per turn of the event
-// loop however many commands ran.
+// reads. It had a Load Customisation button, which triggered the Format
+// menu's item of that name; the item went with the files it loaded (a
+// customisation is loaded by the CUSTOMISE line), and the button with it
+// rather than be left triggering a name that is no longer there. The dialog
+// follows the Document through a DocumentWatcher, refreshing once per turn of
+// the event loop however many commands ran.
 //
 // Object names:
 //   drawingSummaryDialog         the dialog (fileDrawingSummary)
@@ -34,7 +39,6 @@
 //   drawingSummaryShowMissing    the same for the chosen name
 //   drawingSummaryCopyJson       copy STATUS JSON
 //   drawingSummaryRefresh        read everything again
-//   drawingSummaryLoad           Format > Load Customisation
 //   drawingSummaryStatus         what happened last
 //   drawingSummaryClose          close
 
@@ -45,7 +49,6 @@
 #include <memory>
 
 #include "command_runner.hpp"
-#include "katana/cad/customisation_report.hpp"
 #include "katana/cad/document.hpp"
 
 class QLabel;
@@ -57,14 +60,13 @@ namespace katana::qt {
 class DocumentWatcher;
 
 struct DrawingSummaryContext {
+    // The drawing, and with it the customisation it is looked at through:
+    // the Document holds what is loaded and what the open project is missing
+    // (customisationState), which the window once kept in lists of its own
+    // and handed over beside it.
     katana::cad::Document* document = nullptr;
-    // What is loaded and what the project was drawn with but is not loaded:
-    // the window's lists, which the Document does not hold.
-    std::function<katana::cad::CustomisationSummary()> customisation;
     // Runs a line through the window's one executor (Copy as JSON).
     CommandRunner run;
-    // Format > Load Customisation.
-    std::function<void()> load;
     // Opens the style manager at its Missing chip, searching for `name`.
     std::function<void(const QString& name)> showMissing;
     // The project's coordinate system as the status bar says it

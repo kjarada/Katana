@@ -3,9 +3,15 @@
 // drawing as commands run, and that its buttons run the line and call the
 // window's hooks they name. The runner and the hooks are the test's own; the
 // headless qt_drawing_summary_* check drives the real window.
+//
+// The customisation pane is what a bare CUSTOMISE replies (docs/customisation.md,
+// "The verbs"): its expected text is written from that chapter's records and
+// from the fixture tests/data/customisation/test_survey.customisation.json -
+// 11 rules over 8 keys, counted by hand - not from a run.
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,6 +22,7 @@
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollBar>
 
 #include "customisation/drawing_summary_dialog.hpp"
 #include "katana/cad/command_interpreter.hpp"
@@ -66,10 +73,65 @@ TEST(DrawingSummaryDialog, ItSaysWhatTheDrawingHoldsAndWhatIsCurrent)
               "2 steps to undo (next: " + QString::fromStdString(std::string(document.history().undoName())) +
                   "), 1 step to redo (next: " +
                   QString::fromStdString(std::string(document.history().redoName())) + ")");
+    // Nothing was installed: no name, origin none, not kept, and the
+    // settings a session starts with - both automation switches on, the
+    // seven linework control codes at their defaults.
     EXPECT_EQ(child<QPlainTextEdit>(dialog, "drawingSummaryCustomisation")->toPlainText(),
               "No customisation is loaded.\n"
-              "  CUSTOMISE <file> [<file>...]  loads style libraries (.4d) and survey code files "
-              "(.mapfile)");
+              "  CUSTOMISE <file> [<file>...]  loads Katana customisation files\n"
+              "customisation name=\"\" origin=none kept=no definitions=0 codes=0 rules=0 "
+              "colours=0\n"
+              "automation auto.codes=on auto.linework=on\n"
+              "linework linework.start=ST linework.end=END linework.close=CL "
+              "linework.arcstart=BC linework.arcend=EC linework.join=JPN linework.rectangle=RECT");
+}
+
+TEST(DrawingSummaryDialog, TheCustomisationPaneIsTheCustomiseLinesReplyAndFollowsALoad)
+{
+    // The fixture's 11 rules over 8 keys loaded into an empty session, which
+    // takes the file's name and has it as its one source - of rules alone.
+    // The pane reads the Document, so it needs no list from the window.
+    const std::filesystem::path fixture =
+        std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() / "data" /
+        "customisation" / "test_survey.customisation.json";
+    Document document;
+    CommandInterpreter interpreter(document);
+    DrawingSummaryContext context;
+    context.document = &document;
+    DrawingSummaryDialog dialog(std::move(context));
+    const auto loaded = interpreter.run("CUSTOMISE \"" + fixture.generic_string() + "\"");
+    ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
+    katana::qt::test::processEvents();
+    const QString pane =
+        child<QPlainTextEdit>(dialog, "drawingSummaryCustomisation")->toPlainText();
+    EXPECT_TRUE(pane.contains("11 survey code rules over 8 distinct codes\n"
+                              "customisation name=test_survey origin=loaded kept=no definitions=0 "
+                              "codes=8 rules=11 colours=0\n"
+                              "source name=test_survey definitions=no rules=yes\n"
+                              "automation auto.codes=on auto.linework=on\n"))
+        << pane.toStdString();
+    EXPECT_FALSE(pane.contains("Loaded files, in load order")) << "the older prose";
+}
+
+TEST(DrawingSummaryDialog, NoRecordOfTheCustomisationPaneIsCutAtThePanesEdge)
+{
+    // The linework record is in every reply and is 143 characters long (the
+    // word, then its seven key=value pairs: 8 + 18 + 17 + 18 + 21 + 19 + 18 +
+    // 24) - wider than the pane in any fixed-width face at the dialog's own
+    // 640 pixels. Nothing of it may lie past the edge: the pane wraps, so
+    // there is nothing to scroll sideways. Left unwrapped, the record's last
+    // codes were out of sight behind a scroll bar.
+    Document document;
+    DrawingSummaryContext context;
+    context.document = &document;
+    DrawingSummaryDialog dialog(std::move(context));
+    dialog.show();
+    katana::qt::test::processEvents();
+    auto* pane = child<QPlainTextEdit>(dialog, "drawingSummaryCustomisation");
+    ASSERT_NE(pane, nullptr);
+    ASSERT_TRUE(pane->toPlainText().endsWith("linework.join=JPN linework.rectangle=RECT"));
+    EXPECT_EQ(pane->horizontalScrollBar()->maximum(), 0)
+        << "a record runs past the pane's edge";
 }
 
 TEST(DrawingSummaryDialog, ItFollowsTheDrawingAsCommandsRun)
@@ -152,16 +214,20 @@ TEST(DrawingSummaryDialog, ARefusedStatusCopiesNothingAndSaysWhy)
     EXPECT_EQ(label(dialog, "drawingSummaryStatus"), "STATUS JSON was refused: no");
 }
 
-TEST(DrawingSummaryDialog, LoadCallsTheFormatMenusItem)
+TEST(DrawingSummaryDialog, ItOffersNoButtonForTheRemovedLoadCustomisationItem)
 {
+    // The summary had a Load Customisation button that triggered the Format
+    // menu's item of that name. The item is gone - a customisation file is
+    // loaded by the CUSTOMISE line - and a button left behind would trigger
+    // a name that no longer exists, and fail without a word.
     Document document;
-    int loads = 0;
     DrawingSummaryContext context;
     context.document = &document;
-    context.load = [&loads] { ++loads; };
     DrawingSummaryDialog dialog(std::move(context));
-    child<QPushButton>(dialog, "drawingSummaryLoad")->click();
-    EXPECT_EQ(loads, 1);
+    EXPECT_EQ(dialog.findChild<QWidget*>("drawingSummaryLoad"), nullptr);
+    for (const QPushButton* each : dialog.findChildren<QPushButton*>()) {
+        EXPECT_FALSE(each->text().contains("Load Customisation")) << each->text().toStdString();
+    }
 }
 
 TEST(DrawingSummaryDialog, ADocumentThatGoesFirstLeavesTheDialogSafe)
