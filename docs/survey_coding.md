@@ -887,8 +887,11 @@ on 2026-10-06, with the NSW customisation compiled in (792 definitions,
 1,624 rules), `katana_cli -c CUSTOMISE` answered "No customisation is
 loaded." and `STATUS` "0 linestyles and symbols, 0 survey code rules", and
 `CUSTOMISE <the Katana customisation file>` was refused as neither a survey
-code file nor a library. Every test of the suite that had also been run in a
-checkout without the file - 6,950 of them - gave the result it gave there.
+code file nor a library. Built with them moved, on 2026-10-07, the same line
+begins `Customisation: NSW, 792 linestyles and symbols and 1624 survey code
+rules, built in` and its record says `origin=builtIn`. On both days every
+test of the suite that had also been run in a checkout without the file -
+6,950 of them, and then 7,200 - gave the result it gave there.
 
 *Not done: no test holds the file that is COMPILED IN to its census.* That it
 reads is tested (above), and what a conversion of the reference files gives
@@ -902,9 +905,15 @@ and its name and description, which are part of the bytes: the command run
 as that document spells it gave the file on 2026-10-07, and with another
 description did not), `tools/customisation_census.py --against` the census
 of that order found no figure different, and `katana`, `katana_cli` and
-`katana_mcp` each held those bytes whole. A test of it would convert the
-reference files and compare the result with `compiledInCustomisation()`, and
-skip where either is absent.
+`katana_mcp` each held those bytes whole. It was checked again through the
+running program on 2026-10-07: `CUSTOMISE EXPORT` of a `katana_cli` session
+started from the built-in wrote a file whose definitions, rules, colours,
+name, description and notice are the converted file's own, value for value
+(it adds the four members a session has and that file does not: `sources`,
+`linework`, `automation` and `basedOn`), and
+`tools/customisation_census.py` gave the same 22 figures for both. A test of
+it would convert the reference files and compare the result with
+`compiledInCustomisation()`, and skip where either is absent.
 
 ### What a session starts with
 

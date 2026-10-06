@@ -2345,9 +2345,58 @@ by the same variable (2026-10-07, once the session read it):
 folder of its own because the window's headless checks load every file of
 `tests/data/customisation` and pin what the three there hold.
 
+**The owner's own files** (2026-10-07; a local check, the files and the NSW
+customisation compiled in being the owner's): `katana_cli`, one `SURVEY
+IMPORT` each with nothing else said, each answered in under 1.5 s.
+
+| File | Points | `coded`: with a code, matched, codes with no rule | `linework`: lines, unplaced | Layers and styles at the end |
+|---|---|---|---|---|
+| the RTK job | 3 482 | 3 478, 3 477, 1 | 167, 220 | 9 and 61 |
+| the total-station job | 862 | 854, 854, 0 | 120, 35 | 7 and 32 |
+| the resection job | 4 834 | 4 807, 4 798, 1 | 493, 318 | 10 and 84 |
+| the SDR traverse | none | `none reason=no-points` | the same | 1 and none |
+| the GSI traverse | 57 | `none reason=no-codes-in-file` | the same | 3 and none |
+
+With `CODES off LINEWORK off` each draws the same points and nothing else,
+with the warnings recorded for it under "The reduction's resection" (none, 8,
+70 where no coordinate system is set, 47 and 24); coded, a file that draws
+points answers two or three warnings more, the finish's own. One `UNDO` takes
+a coded import back to no entities and no styles, and `REDO` brings it back
+(the layer `survey` stays, as the parent of a nested layer stays after any
+undo: audit MOD-07, `docs/audit/2026-09-23-defects.md`). The window's command
+line gives the resection job the same records, and `LINEWORK DRAWING` and
+`CODE DRAWING` typed after its import draw no line, change no entity and add
+no undo step.
+
+A count made outside Katana, from the text of the three field files alone -
+the measurements by feature code and string number, an opcode 16 coding its
+point a second time - gives the reader's own `features=` (209, 134 and 583
+strings) and, for the RTK job, 167 numbered strings of two points or more,
+which are its 167 lines. Each of the two codes with no rule is answered by no
+key of the customisation. Every vertex of the resection job's lines is one
+of its points, and 286 of its points are on no line.
+
 Not done:
 
-- The owner's own field files have not been run through the verb.
+- **The reasons a string or a point is in no line fall off a long reply.**
+  They are sentences of the job's report, after the reduction's own warnings,
+  and the reply lists the first 20 warnings: the resection job, with 73,
+  answers `linework lines=493 unplaced=318` and says nothing of the 318.
+  `LINEWORK DRAWING PREVIEW` typed after it does say, of the points alone
+  (27 with no code, 271 whose code is a point code, 16 the only point of
+  their string, and draws nothing: the job has strung the rest); the strings
+  of the file that are in no line are in the Survey Jobs dialog's report and
+  nowhere on the command line. The codes with no rule are not lost with
+  them: they have records of their own.
+- **A feature code and string number used again is one string**, as the
+  format has it (a measurement is appended to the earlier points of its
+  feature code and string number), and nothing says so where the join is out
+  of proportion with its line. Of the resection job's 493 lines, 4 have a
+  segment over 25 m that is more than six times the line's typical segment
+  (the longest 165 m); of the total-station job's 120, 6 (the longest 189
+  m), three of them strung by code alone, their points having no string
+  number in the file; of the RTK job's 167, none. A person has to find and
+  break them.
 - The import wizard does not ask `cad::surveyImportFinish` yet: it still
   draws points only and offers Apply Survey Codes as a second step.
 - A job imported with `LINEWORK off` and strung afterwards by `LINEWORK` is
