@@ -21,6 +21,23 @@ if(TARGET katana_interop)
     target_link_libraries(katana_benchmarks PRIVATE katana_interop)
     target_compile_definitions(katana_benchmarks PRIVATE KATANA_BENCH_WITH_INTEROP=1)
 endif()
+# bench_customisation.cpp measures a generated customisation and, where the
+# build has one to compile in, that very file: the one KATANA_BUILTIN_CUSTOMISATION
+# names, or resources/customisation/nsw.customisation.json when nothing names
+# one. The file is git-ignored and on the owner's machine only, so most builds
+# have none and measure the generated one alone. Globbed with
+# CONFIGURE_DEPENDS so that a file converted after the configure is found by
+# the next build.
+set(_katana_builtin_customisation "${KATANA_BUILTIN_CUSTOMISATION}")
+if(NOT _katana_builtin_customisation)
+    set(_katana_builtin_customisation
+        "${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json")
+endif()
+file(GLOB _katana_builtin_customisation_found CONFIGURE_DEPENDS "${_katana_builtin_customisation}")
+if(_katana_builtin_customisation_found)
+    target_compile_definitions(katana_benchmarks PRIVATE
+        KATANA_BENCH_BUILTIN_CUSTOMISATION="${_katana_builtin_customisation}")
+endif()
 katana_target_defaults(katana_benchmarks)
 set_target_properties(katana_benchmarks PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KATANA_BENCHMARK_OUTPUT_DIRECTORY}")

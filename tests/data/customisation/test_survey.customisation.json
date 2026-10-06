@@ -1,0 +1,18 @@
+{
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "test_survey",
+  "codes": [
+    {"key": "WM*", "sets": "feature", "layer": "TEST SERVICES", "colour": "blue", "draw": "line", "linestyle": "TEST Water Main", "weight": "0", "group": "TEST - SERVICES", "comment": "[WM*] Water main"},
+    {"key": "KB*", "sets": "feature", "layer": "TEST ROADS", "colour": "sui test purple", "draw": "line", "linestyle": "TEST Dashed Kerb", "weight": "0", "group": "TEST - ROADS", "comment": "[KB*] Kerb, in a colour no table knows"},
+    {"key": "AC*", "sets": "feature", "layer": "TEST FURNITURE", "colour": "white", "draw": "point", "linestyle": "0", "weight": "0", "group": "TEST - FURNITURE", "comment": "[AC*] Access chamber"},
+    {"key": "TR*", "sets": "feature", "layer": "TEST VEGETATION", "colour": "green", "draw": "point", "linestyle": "0", "weight": "0", "group": "TEST - VEGETATION", "comment": "[TR*] Tree"},
+    {"key": "1*", "sets": "feature", "layer": "TEST TEXT", "colour": "orange", "linestyle": "0", "group": "TEST - TEXT", "comment": "Text 1.5 mm"},
+    {"key": "2*", "sets": "feature", "layer": "TEST TEXT", "colour": "red", "linestyle": "0", "group": "TEST - TEXT", "comment": "Text 2.5 mm"},
+    {"key": "PX*", "sets": "feature", "layer": "TEST MISC", "colour": "yellow", "draw": "point", "linestyle": "0", "group": "TEST - MISC", "comment": "[PX*] Names a symbol no library defines"},
+    {"key": "AC*", "sets": "symbol", "comment": "[AC*] Access chamber", "hide": false, "symbol": {"name": "TEST Survey Mark", "colour": "white", "size": 1.5}},
+    {"key": "TR*", "sets": "symbol", "comment": "[TR*] Tree", "hide": false, "symbol": {"name": "TEST Tree", "colour": "green", "size": 3}},
+    {"key": "PX*", "sets": "symbol", "comment": "[PX*] Names a symbol no library defines", "symbol": {"name": "TEST Missing Symbol", "colour": "yellow", "size": 1}},
+    {"key": "*", "sets": "attributes", "comment": "Every code gets this", "attributes": [{"type": "text", "name": "Source", "value": "Katana test fixture"}]}
+  ]
+}

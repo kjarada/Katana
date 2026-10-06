@@ -61,6 +61,21 @@ endif()
 # (cmake/KatanaSign.cmake, docs/release.md "Signing").
 set(KATANA_PUBLISHER "Jarada" CACHE STRING "The publisher named in the programs, installer and signatures")
 
+# Where the reference customisation is kept in the legacy formats, the ones
+# the Katana customisation format is to take the place of: two style libraries
+# and two survey code files, with their colour table in a `support` folder
+# beside them. It is third-party material under its author's own licence, so
+# the folder is git-ignored - it is on the owner's machine and in no clone -
+# and nothing committed needs it. Only the converter of those formats
+# (src/katana_archive12d/legacy; docs/customisation.md, "Converting a
+# customisation from the legacy formats") is run on it, and only the test of
+# what the converter makes of it reads it: that test skips when the folder is
+# absent or holds no file in those formats, and FAILS when it holds some and
+# they are not the four. Defined here, above the modules and the tests,
+# because both the converter's module and its test suite are to see one value.
+set(KATANA_REFERENCE_CUSTOMISATION_DIR "${PROJECT_SOURCE_DIR}/docs/12d Refrence Files" CACHE PATH
+    "Folder of the reference customisation in the legacy formats; the converter's reference test reads it and skips when it is absent or holds no such file")
+
 # ---------------------------------------------------------------------------
 # Where things are built.
 #
