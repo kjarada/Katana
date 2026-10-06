@@ -1049,6 +1049,15 @@ TEST(CustomisationVerbs, APartNamesTheSourcesOfWhatItHoldsAndCarriesEveryNotice)
     // part's own, as that of any source left out is. What did NOT change is
     // the verb's side of the rule: a source is listed for what is written of
     // it, and no notice is lost.
+    //
+    // Nothing else this test pinned was changed or taken out. Its last case,
+    // the cross written from a session with no colour at all, stands as it
+    // was written: by the verb's own rule that was the one part of which a
+    // table of colours was no source, and by the one rule it says what the
+    // first case says, the session's colours being beside the point for a
+    // symbol with no pen. The two cases of TEST Painted are NEW with the one
+    // rule and take no case's place: a pen is all that makes the colours
+    // matter to a part of definitions, and no symbol here had one.
     Hosted session("part-sources");
     session.start();
     session.ok("CUSTOMISE " + typed(session.scratch.write("marks.json", kMarks)) + " " +
@@ -1134,14 +1143,29 @@ TEST(CustomisationVerbs, APartNamesTheSourcesOfWhatItHoldsAndCarriesEveryNotice)
     EXPECT_EQ(teal.colours.entries().front().name, "tint teal");
 
     // With no colour in the session at all, a table of colours is a source
-    // of nothing: the same symbol again.
+    // of nothing. First the case this test ended with before the one rule,
+    // its three expectations UNCHANGED: the cross again, of which Marks is
+    // the source and the table of colours none, its notice kept with the
+    // part's own. (Worked from the rule as the first case is, and to the
+    // same three answers: no pen, so no colour named, whatever the session
+    // holds.)
     session.document.setColourTable({});
-    const Customisation bare = part("bare.json", "ONLY \"TEST Painted\"");
-    EXPECT_TRUE(bare.sources.empty());
+    const Customisation bare = part("bare.json", "ONLY \"MARK Cross\"");
+    EXPECT_EQ(bare.sources, (Sources{{"Marks", true, false, marksNotice}}));
     EXPECT_EQ(bare.notice,
+              (std::vector<std::string>{"Written for these tests.", "Tints: free to use."}));
+    EXPECT_TRUE(bare.colours.empty());
+
+    // Then the painted symbol again, new as its case above is: its pen names
+    // a colour the session no longer has, so none is carried, the table of
+    // colours is no source of the part - which then has no source at all -
+    // and every source's notice is written with the part's own.
+    const Customisation barePainted = part("bare-painted.json", "ONLY \"TEST Painted\"");
+    EXPECT_TRUE(barePainted.sources.empty());
+    EXPECT_EQ(barePainted.notice,
               (std::vector<std::string>{"Written for these tests.", "Marks: drawn by hand.",
                                         "Tints: free to use."}));
-    EXPECT_TRUE(bare.colours.empty());
+    EXPECT_TRUE(barePainted.colours.empty());
 }
 
 TEST(CustomisationVerbs, TheCodesWrittenAndReadBackInTheirPlaceLeaveTheSourcesWithWhatEachBrought)

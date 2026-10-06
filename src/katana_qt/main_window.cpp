@@ -239,9 +239,9 @@ std::filesystem::path toPath(const QString& text)
 
 // How many of the loaded library's definitions are symbols by decision D3 -
 // what the Symbol Library lists: a `mode vertex` definition, one a survey rule
-// or a style draws as a symbol, one from a symbol file. Counting `mode vertex`
-// alone called 157 of the reference library's definitions symbols and left
-// out the trees and valves its mapfiles draw as symbols without it.
+// or a style draws as a symbol, one its customisation lists as one. Counting
+// `mode vertex` alone called 157 of the reference library's definitions symbols
+// and left out the trees and valves its mapfiles draw as symbols without it.
 std::size_t librarySymbolCount(const katana::cad::Document& document)
 {
     const std::vector<katana::cad::CatalogueEntry> choices = katana::cad::symbolChoices(document);
