@@ -16,6 +16,7 @@
 // `document` and `log` are set.
 
 #include <functional>
+#include <string>
 #include <vector>
 
 #include <QString>
@@ -37,6 +38,17 @@ struct LineworkCodes;
 namespace katana::qt {
 
 class DefinitionThumbnails;
+
+// What a manager asks the definition editor (definition_editor.hpp) to do
+// with a library definition. A new one is of the kind the manager that asked
+// lists: the symbol library's is a symbol, the Linetypes tab's a linestyle.
+enum class DefinitionEdit {
+    NewSymbol,
+    NewLinestyle,
+    Edit,
+    Duplicate,
+    Delete,
+};
 
 struct CustomisationContext {
     // The drawing being customised. Its StyleLibrary and SurveyMap are
@@ -81,6 +93,23 @@ struct CustomisationContext {
     // dialog then says it cannot run the line rather than doing the work
     // itself.
     CommandRunner run{};
+
+    // Opens the one definition editor on the library definition `name` - which
+    // a New does not read. The maker owns the editor, as it owns the managers,
+    // so a manager only asks. May be empty (a test, a manager built on its
+    // own): the buttons that would ask are then disabled.
+    std::function<void(DefinitionEdit what, const std::string& name)> editDefinition{};
+
+    // The session's customisation is about to be committed by an editor - a
+    // definition saved or deleted. An editor calls this BEFORE it commits
+    // and, when it is handed a function back, calls that AFTER the commit
+    // succeeded (never after one that was refused). It is how a session whose
+    // customisation is the kept one stays kept across an editor's own change,
+    // where a change typed on the command line lasts the session only: what
+    // "before" has to remember, and what "after" then does, is the maker's
+    // business, and an editor knows neither. May be empty, and may hand back
+    // nothing.
+    std::function<std::function<void()>()> beginCommit{};
 };
 
 } // namespace katana::qt

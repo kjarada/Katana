@@ -206,7 +206,13 @@ in its header (`survey/survey_dialogs.hpp`, `survey_import_wizard.hpp`,
 `survey_points_ui.hpp`, `src/katana_qt/ifc_dialogs.hpp`, the managers' own).
 File > Export IFC, for one, is `@fileExportIfc|ifcExportFile=out.ifc|!ifcExportPreview|?ifcExportClasses|!ifcExportExport`:
 the preview's table printed, then the file written
-(`qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless`). The
+(`qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless`). A
+dialog that another dialog's button opened has no action to be named by, and
+is a panel once it is shown: the definition editor is
+`@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|...|!definitionSave`,
+and `%symbolLibraryDialog` then makes the library the target again
+(`qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless`;
+`docs/desktop.md`, "The definition editor"). The
 IFC dialogs, which run lines, echo each on stderr as "> <line>" before its
 reply (`MainWindow::runIfcCommand`), so a test reads which line a press ran.
 

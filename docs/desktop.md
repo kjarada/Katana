@@ -257,7 +257,12 @@ then, with unsaved changes, save, discard or cancel (`confirmDiscard`). A
 headless run has nobody to answer either, so it refuses and says why in the
 log, never discarding anything unasked: a scripted `QUIT` with unapplied code
 edits, or `NEW` after an edit, is refused, and the script can Apply or Revert
-(`applyMap`, `revertMap`), `SAVE` or `UNDO` first. A failed save reports the
+(`applyMap`, `revertMap`), `SAVE` or `UNDO` first. The definition editor's
+unsaved form is asked about in the same call, before the code manager
+(discard, or stay; a headless run is refused and can press `definitionSave`
+or `definitionRevert`): "The definition editor", below. A yes there discards
+nothing by itself - the questions after it may still keep the window open -
+and is remembered until the form next changes. A failed save reports the
 error and leaves the modified flag set. A damaged project offers backup
 recovery and never deletes the damaged file.
 
@@ -1558,7 +1563,9 @@ workbench never includes `main_window.hpp`, and a widget test builds it and
 drives it (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
 It owns what the managers share: the picture cache (`DefinitionThumbnails`),
 the session's linework control codes, and the one `CustomisationContext`
-each manager is built from.
+each manager is built from. It owns the definition editor as well ("The
+definition editor", below), which has no menu item: a manager asks for it
+through the context.
 
 - **Non-modal, one of each, kept.** A manager is made the first time it is
   asked for and then hidden, not deleted, between uses (`QPointer` slots);
@@ -1582,8 +1589,8 @@ each manager is built from.
   session is asked first (the `confirm` hook, else a question box); a
   headless one is not. `qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless`
   purges, undoes and checks the style is back.
-- **Closing the window asks the code manager first** ("Failure modes",
-  above: `confirmClose`).
+- **Closing the window asks the definition editor and the code manager
+  first** ("Failure modes", above: `confirmClose`).
 
 Loading and replacing a customisation are `docs/survey_coding.md` ("Loading a
 customisation"): a load merges, Replace is asked for.
@@ -1604,7 +1611,7 @@ rows, filters and bulk edit are tested below Qt:
 | Tab | Shows | Does |
 |---|---|---|
 | Styles | `cad::styleRows`: each style, how many entities wear it, and whether its linetype or symbol is missing; the chips All / Used / Unused / Missing and a search | a form (linetype and symbol through `NamePicker`, weight, colour or ByLayer, hatch, symbol size, description) with Save and Revert; New, Duplicate, Rename, Merge Into, Delete, Purge; Apply to Selection, Select Users, Make Current |
-| Linetypes | `cad::linetypeRows`: the drawing's linetypes and the library's linestyles, by group, a name both hold marked (D2) | a pattern grid that edits a drawing linetype's dashes, gaps and dots in place; New, Duplicate, Rename, Merge Into, Delete, Purge; New Style Using This; Select Users |
+| Linetypes | `cad::linetypeRows`: the drawing's linetypes and the library's linestyles, by group, a name both hold marked (D2) | a pattern grid that edits a drawing linetype's dashes, gaps and dots in place; New, Duplicate, Rename, Merge Into, Delete, Purge; New Style Using This; Edit Definition (`linetypeEditDefinition`: a library linestyle, in the definition editor) and New Library Linestyle (`linetypeNewDefinition`: a new one, there); Select Users |
 | Hatch Patterns | `cad::hatchPatternRows`: each hatch pattern, solid or how many families, and who uses it (`entity::tableUsage`) | a family grid (angle in degrees, spacing in model units) or Solid, with a swatch drawn by `cad::hatchSegments`, Save and Revert; New, New Solid, Duplicate, Delete, Purge; New Style Using This; Select Users |
 | Diagnostics | `cad::styleDiagnostics`: `cad::missingNames`, then the D2 collisions, each with who uses it and what is drawn meanwhile | Select Users |
 
@@ -1742,6 +1749,7 @@ signal; each that changes the drawing is ONE undo step through
 | Replace in Styles | `cad::replaceSymbolInStyles`: every style naming the current symbol names the one in the inline `NamePicker`; refused while that is empty |
 | Import Definitions... (`importDefinitions`) | a Katana customisation file's DEFINITIONS and its colours, MERGED into the session's (D1: never a Replace from here), with what it added and replaced in the log |
 | Export Selected... (`exportSelected`) | the selected library definitions as a Katana customisation file, with the session's notice, the sources that brought it definitions and the colours their pens name |
+| New Symbol..., Edit Definition..., Duplicate Definition..., Delete Definition (`symbolNew`, `symbolEdit`, `symbolDuplicate`, `symbolDelete`; along the bottom, since they change the library and not the drawing) | ask the definition editor ("The definition editor", below) for a new symbol, or for the current symbol's definition; the last three need a symbol the library defines, not a built-in shape or a name nothing defines. The buttons do nothing themselves |
 
 **Import and Export are Katana customisation files** (`docs/customisation.md`;
 the file dialogs offer "Katana customisation (*.customisation.json *.json)").
@@ -1874,6 +1882,299 @@ the three colour fields of the rule form, the explanation, the lint, Apply
 Codes and Linework - is resolved by the Document (`cad::resolveColour`): the
 customisation's own colours first, which the fields list ahead of the
 standard names.
+
+### The definition editor
+
+Until 2026-10-06 nothing in the window could make, change, copy or delete a
+linestyle or symbol definition: the symbol grid is read-only, the Linetypes
+tab's library page was a label, and every library the window installed was a
+whole file's. The owner asked to edit the customisation; survey codes had
+their manager, and definitions now have theirs
+(`src/katana_qt/customisation/definition_editor.*`, `DefinitionEditorDialog`,
+object name `definitionEditorDialog`).
+
+**One editor, kept by the workbench, with no menu item.** A definition is
+reached from where it is listed, so the editor is asked for by the managers:
+the Symbol Library's `symbolNew`, `symbolEdit`, `symbolDuplicate` and
+`symbolDelete`, and the Linetypes tab's `linetypeEditDefinition` and
+`linetypeNewDefinition`. Each button does nothing itself: it calls
+`CustomisationContext::editDefinition`, which the workbench answers with the
+one dialog (`CustomisationWorkbench::editDefinition`), made the first time
+and kept like the managers. A new definition is of the kind the manager that
+asked lists - a symbol from the Symbol Library, a linestyle from the
+Linetypes tab, whose button sits with the tab's own rather than on the page
+of a library linestyle, so the FIRST linestyle of a library can be begun
+there - and its kind can still be changed in the form. The editor has
+`definitionNew`, `definitionDuplicate` and `definitionDelete` of its own. A
+headless run reaches it as a panel once a step has opened it:
+`@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=...`.
+*Rejected: an item of its own on the Format menu.* What it would open is an
+empty form: every use of the editor starts from a definition or from the
+list a new one belongs in, and Format > Symbol Library and Format > Styles
+and Linetypes are those lists. The managers' buttons are its menu items.
+
+**What it edits** is one `entity::LineStyle`:
+
+| Field | Object name | Holds |
+|---|---|---|
+| Name | `definitionName` | `name`; typed only while the definition is being made |
+| Group | `definitionGroup` | `group`, a `/` path |
+| Kind | `definitionKind` | `symbol`: which of a customisation's two lists holds it |
+| Units | `definitionUnits` | `world`, `paper` or `twoPoint` - the format's words, with what each means beside it (`definitionUnitsNote`) |
+| At vertices | `definitionAtVertices` | `atVertices` |
+| Length, Factor | `definitionLength`, `definitionFactor` | `length`, `factor` |
+| Origin | `definitionOriginX`, `definitionOriginY` | `origin` |
+| Anchors | `definitionAnchor1X`, `definitionAnchor1Y`, `definitionAnchor2X`, `definitionAnchor2Y` | `anchor1`, `anchor2`; typed into only while the units are `twoPoint` |
+| Modes | `definitionStretchMode`, `definitionCycleMode` | the two whole numbers; `twoPoint` only |
+| From | `definitionSource` | `source`, shown and not edited: where the definition came from |
+| Strokes | `definitionStrokes` | `strokes` and `texts`, as text |
+
+A number is shown as the shortest text that reads back as itself
+(`core::formatExactReal`) in a plain field, never a spin box: a spin box
+shows 0.30000000000000004 as 0.3, and a Save of a form nobody touched would
+then change the definition (QT-02's rule, above, was paid for by exactly
+that). An empty number is the value a file's missing member has, and text
+that is not a finite number - `inf`, `nan`, `1e999` - is refused as text that
+is no number. The anchors and modes of a definition whose units are not
+`twoPoint` are READ even though they cannot be typed into, so changing its
+length does not drop them
+(`AnUntouchedFormDescribesExactlyTheDefinitionItWasOpenedOn`). The units box,
+its note and the tips of the fields it enables all use the format's word,
+`twoPoint`, so the form says one thing by one name.
+
+**The strokes are text**, in the Katana customisation format's own form
+(`docs/customisation.md`, "The members"): one stroke a line,
+`["move", 0, 0]`, `["text", {"text": "W", "height": 1.5}]`. So what a person
+learns in the editor is what a customisation file holds, a line copied from
+one to the other means the same, and there is no second vocabulary of
+strokes to keep in step with the file's. They are read as they are typed by
+the format's own reader (`entity::definitionFromJson`); the dialog has no
+parser. What joins the lines for the reader, finds the line a refusal is
+about and words it is not the dialog's either: `cad::strokeText` and
+`cad::readStrokeText` (`include/katana/cad/definition_edit.hpp`), below Qt,
+where a refusal's wording is tested without a window
+(`tests/cad/customisation/test_definition_edit.cpp`). *Rejected: a table of strokes with editable cells.* The headless
+driver cannot edit a cell, so an agent could not drive it; "tables are
+read-only and a form edits" is the house rule ("The rules a dialog or panel
+follows"), because an edited cell runs code from inside the table's own
+signal; and the seven kinds of stroke take different values - two numbers,
+three, one, a name, an object of seven members - so a grid's columns would
+mean something else on every row.
+
+- *The comma at a line's end may be left off*, and a blank line is passed
+  over: a file needs the commas because it is JSON, and a person adding a
+  last line should not have to go back and end the one before. That is the
+  editor's one leniency, and the strict reader never sees it - the lines are
+  joined with commas before they are handed over.
+- *A line that does not read is named by its number in the box*
+  (`AStrokeLineWithATypoKeepsSaveDisabledAndNamesTheLine`), with the reader's
+  own refusal after it - `Line 3: definition "TEST Valve" strokes[2]: "drow"
+  is not a kind of stroke ...` - and is washed in the box. The reader names a
+  stroke by its place counted from 0, and says nothing of lines. So when the
+  strokes do not read, each line is read alone until one fails: that costs a
+  reading a line, and only of text that already failed.
+- *No refusal cites a place in text nobody typed.* The lines are read under
+  a first line of the editor's making, so the reader's "at line 2, column 14"
+  is of that text and is left off (`Line 1: ... this stroke has a number too
+  large to hold - 1e999`). For text that is not JSON the reason is asked of
+  the line by itself: read in place, a line short of its `]` was reported as
+  `unexpected '}'`, a brace of the wrapper
+  (`ARefusalNeverCitesAPlaceInTextNobodyTyped`).
+- *The box is read character for character*
+  (`QTextDocument::toRawText`), not as "plain text": Qt's `toPlainText`
+  hands a no-break space back as a blank and a line separator as a line
+  break, and both are characters a stroke's text may hold. A form opened on
+  such a text read as edited before anything was typed - every other
+  definition then refused, Revert no way out - and Save wrote the blank
+  (`ATextHoldingANoBreakSpaceOpensUneditedAndIsSavedCharacterForCharacter`).
+  The one character a line of the box cannot hold is a paragraph separator,
+  at which it breaks; a definition whose text has one is not opened, and is
+  told why, rather than shown as two lines that are no stroke.
+- *The box holds strokes and nothing else.* A line can end the list of
+  strokes and go on to give the definition members - `]], "atVertices": true,
+  ...` - and read as sound JSON. Only the strokes are taken from what was
+  read, and text that would have set anything else is refused
+  (`TheStrokesBoxHoldsStrokesAndNothingElseOfTheDefinition`), or a definition
+  could be saved that the fields above do not show.
+
+**A name is fixed once its definition exists.** Styles and survey code rules
+NAME a definition, and a library has no rename (`include/katana/entity/named_table.hpp`),
+so another name would be another definition, and everything naming the first
+left naming nothing - drawn as a plain line or a stand-in mark, with nothing
+said. Duplicate is how a definition comes by a new name: a copy equal but for
+its name, under the first free one (`TEST Valve 2`), which can be changed
+until it is saved - the first free in the library AND among the drawing's
+own linetypes (`cad::freeDefinitionName`), so a copy does not begin as a name
+in both. A blank at an end of a NEW name is taken off, since it cannot be
+seen where the name is shown and a rule naming `Valve` would miss `Valve `.
+A new definition is not made under a name no command line could name it by -
+one holding a double quote, or one that is a word of the `CUSTOMISE REMOVE`
+line itself (`CODE`, `FORCE`): saved, it could never be removed again
+(`ADefinitionIsNotMadeUnderANameNoLineCouldRemoveItBy`). One that already has
+such a name, out of a file, is opened and changed like any other.
+
+**The preview is of what is typed, not of what is saved**: as a symbol on
+its insertion point (`definitionPreview`) and, for a linestyle, along the
+sample line (`definitionLinePreview`), at the plot scale chosen
+(`definitionPlotScale`). `StylePreview` drew only NAMES found in the
+Document's library; `StylePreview::setDefinition` hands it a definition
+instead, which it keeps in a library of its own holding that one alone, so
+nothing is read from the Document's library and nothing put into it. The
+pane's cache of flattened definitions is emptied at every such call: it is
+keyed on a library's generation, and this library is a new one at each
+keystroke under the same name. A definition is pictured from its first
+stroke, before it has a name: the form is read under a stand-in name for the
+picture alone, since what a definition draws does not depend on what it is
+called (the pane stayed blank until a name was typed). While a line is half
+typed the last picture that read stays up and the message area says why the
+text does not - a pane that went blank at every keystroke of a stroke would
+be blank for most of the time one is typed - and a line under the panes
+(`definitionPreviewNote`) says the picture is not of what is typed now.
+
+**The message area** (`definitionIssues`) says the first thing wrong, in
+the reader's or `entity::validate`'s words; a name that is taken; and, while
+the form reads, who names the definition - `rule #1 AC* (symbol) draws it as
+its symbol`, `style "Marks" draws it as its symbol` - from
+`cad::definitionUsers` (`include/katana/cad/definition_users.hpp`). That is
+said of a NEW name too: a rule that names a symbol nothing defines is
+waiting for it. What those users are drawn as meanwhile is said from the same
+answer and not assumed: a name the drawing's own Linetype table also holds is
+dashed by that linetype, and a name that is a built-in shape is drawn as that
+shape - neither is "a plain line or a stand-in mark" - and a definition saved
+under such a name is drawn in their place. That is allowed, as decision D2
+allows a name in both, and said before Save
+(`ANameTheDrawingAlsoAnswersToIsSaidAsThatAndNotAsNamingNothing`). A
+definition with no strokes is saved, since the format holds one, and said to
+have none.
+
+**Committing.** The library is session data with no undo
+(`docs/survey_coding.md`), so:
+
+- **Save** (`definitionSave`) installs a copy of the session's library with
+  the definition added or replaced (`Document::setStyleLibrary`), as the
+  Survey Code Manager's Apply installs its map. It is enabled only while the
+  form reads as a definition and has something to save, and for a new
+  definition only while its name is free
+  (`ANameTheLibraryHoldsCannotBeMadeASecondTime`).
+- **Revert** (`definitionRevert`) shows the form as it was opened, or as the
+  library has had the definition since.
+- **Delete** (`definitionDelete`) runs the line `CUSTOMISE REMOVE "<name>"`
+  (`cad::removeDefinitionLine`) through the window's one executor ("One
+  executor", below), so it is echoed and an agent types the same. That verb
+  refuses a definition something names.
+  - *What the line answered is shown as it answered it.* The editor does
+    not say why a line failed: it once said "is used" of any failure on a
+    definition that had users, whatever the line had said
+    (`ALineThatFailsForAnotherReasonIsShownAsItFailedAndAFailedForceOffersNothing`).
+  - *Delete Anyway* (`definitionDeleteAnyway`; Keep It is
+    `definitionDeleteCancel`) is offered when the plain line failed and
+    something names the definition, under the list of what does; it runs the
+    line with `FORCE`. A `FORCE` that fails offers nothing further. The list
+    is of the definition the form is ON, whatever the form reads as at that
+    moment.
+  - *It exists only while that refusal is on the page.* The two buttons are
+    themselves hidden and disabled otherwise - not only the row they sit in,
+    which left the button pressable by a script, and one press then ran the
+    `FORCE` line on a definition in use with nothing listed - and
+    `remove(true)` is refused unless the refusal is showing
+    (`DeleteAnywayIsNotCarriedOutUnlessItsRefusalIsOnThePage`,
+    `qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless`).
+  - Both questions are built into the page: a box would hang a headless run.
+    What was deleted stays in the form, and Save puts it back - the only way
+    back there is.
+  - A name no line can name is refused before any line is run: one holding a
+    double quote, which a command line cannot carry, and one that is the
+    line's own word - the tokenizer drops the quotes, so
+    `CUSTOMISE REMOVE "CODE" FORCE` would be read as "remove the survey code
+    FORCE".
+- **`CustomisationContext::beginCommit`** is called before each commit, and
+  what it hands back is called after one that succeeded - never after one
+  that was refused. It is how a session whose customisation is the kept one
+  stays kept across an editor's own change while a typed change lasts the
+  session only: the maker of the context knows whether the session was kept
+  and runs `CUSTOMISE KEEP` afterwards; the editor knows neither and only
+  keeps the order (`TheCommitHookIsCalledBeforeASaveAndWhatItHandsBackAfterIt`).
+  *Rejected: the editor reading "kept" from the Document itself*, which would
+  put the rule for what is kept in every editor that commits.
+
+**One definition at a time.** Opening another while the form has edits that
+are not saved is REFUSED and said, in the message area and the log
+(`AnotherDefinitionIsNotOpenedOverEditsThatAreNotSaved`): there is no undo
+to get typed strokes back from, so Save or Revert comes first. *Rejected:
+dropping the edits*, which is what the style manager's form does on another
+row ("Not done" under "Styles and Linetypes") and is survivable there only
+because a style is three fields. Closing the dialog hides it and keeps the
+form, and says so in the log; closing the WINDOW asks first
+(`CustomisationWorkbench::confirmClose`). A yes is only remembered
+(`DefinitionEditorDialog::agreeToDiscard`), until the form next changes:
+the code manager and the unsaved drawing are asked about after it, and a
+Cancel at either keeps the window open - with the strokes still in the form.
+It once reverted the form on yes, and that Cancel then found them gone
+(`TheWindowIsNotClosedOverAFormThatIsNotSaved`).
+
+**Changed elsewhere.** The editor watches the Document as the managers do.
+A definition another load or command changed is taken up when the form is
+untouched; when it holds edits they are kept, the message area says the
+definition was changed elsewhere, and Revert shows the library's as it is
+now. One removed elsewhere stays in the form, and Save puts it back
+(`ADefinitionChangedElsewhereIsTakenUpUneditedAndSaidOverEdits`).
+
+Tested in `tests/qt_widgets/customisation/test_definition_editor.cpp`, with
+a customisation written out in the test and every saved definition compared
+with one built by hand; the unsaved-definition preview in
+`tests/qt_widgets/customisation/test_shared_style_preview.cpp`; who names a
+definition in `tests/cad/customisation/test_definition_users.cpp`; the
+strokes as text, the name a copy takes and the remove line in
+`tests/cad/customisation/test_definition_edit.cpp`; and the real window,
+headless, in `qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless`
+and `qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless`.
+
+Not done:
+
+- **No verb makes or changes ONE definition.** Save is a widget's call on
+  the Document, as the code manager's Apply is. On the command line a
+  definition is made or changed by writing it in a customisation file and
+  loading that; an agent has no shorter way.
+- **Waiting on other changes of the same work**, each to be struck here when
+  it lands:
+  - *`CUSTOMISE REMOVE` is not in this change.* The editor builds its line
+    and shows what the window answers; until the verb is there the window
+    reads `REMOVE` as a file's name and refuses, so Delete deletes nothing.
+    The end-to-end headless test of Delete comes with the verb. The verb is
+    to refuse by `cad::definitionUsers`, the function the editor lists with.
+  - *`CustomisationContext::beginCommit` is not answered.* The workbench
+    leaves it empty, so an editor's Save or Delete does not yet keep a kept
+    session kept; whoever knows whether the session was kept sets it.
+  - *The symbol catalogue does not list by `LineStyle::symbol` yet*
+    (`cad::symbolLibrary`): a symbol made here that is not at vertices is
+    saved with `symbol` set and is NOT in the Symbol Library's grid until a
+    style or a survey code names it - it is listed as a linestyle. Kind's
+    tip states what holds once the catalogue reads the flag. The headless
+    test ticks At vertices for that reason and says, at the test, to take
+    the step out then.
+- **A definition the form cannot show cannot be opened** - one the format
+  cannot write (a stroke carrying a member its kind does not use, texts that
+  are not its text strokes in order; `docs/customisation.md`, "What it
+  refuses"), or one a text of which holds a paragraph separator. The editor
+  says which and opens nothing
+  (`ADefinitionTheFormCannotShowIsNotOpenedOrCopiedAndIsSaidWhenItArrives`);
+  only a library built outside the editor can hold one.
+- **The Linetypes tab's library page still opens with library linestyles
+  "are read-only here"**, now followed by where one IS edited. The first
+  sentence is pinned by `qt_the_style_manager_lists_a_library_group_s_linestyles_headless`
+  and was kept: the page itself edits nothing, so it is true, though a page
+  that only said where a linestyle is edited would read better.
+- **The symbol library does not select what was just saved**, and the
+  editor has no list of its own: a definition is found in the manager that
+  lists it.
+- A text stroke's letters are previewed in the pane's own font, as every
+  preview's are.
+- **The theme has no rule for a disabled field**, only for a disabled button
+  (`src/katana_qt/theme.cpp`): a line, a choice or a number box that cannot
+  be typed into is drawn exactly as one that can. The editor dims its own
+  with a rule on the dialog, because a fixed name has to be told from one
+  that can still be typed; every other dialog's disabled fields still look
+  live. The rule belongs in the theme.
 
 ## Panels refresh on the event loop, never inside their own signal
 
