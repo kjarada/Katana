@@ -53,8 +53,10 @@ as session data outside the model, the loaded style library and survey map
 * The rest of what a session knows of its customisation is
   `customisationState()` (`include/katana/cad/customisation_state.hpp`): its
   name and origin, the sources that went into it, its colour table, linework
-  codes and automation switches, whether it is kept, and which names the open
-  project recorded that are not loaded. `installCustomisation` installs a
+  codes and automation switches, whether it is kept, which names the open
+  project recorded that are not loaded, and what its start found - a kept
+  file or a built-in that did not read (`docs/customisation.md`, "The
+  replies": `start`). `installCustomisation` installs a
   whole `entity::Customisation` and `customisation()` gives the session back
   as one. `DocumentChange::Customisation` is its change bit - outside
   `kDrawing`, and no part of a Replaced drawing - and
@@ -287,17 +289,20 @@ The colour names they need are resolved through the Document
 customisation's own table, then the standard names of
 `include/katana/entity/colour_names.hpp`). The standard names were once a
 table cad could not see, so each front end passed it with
-`CommandInterpreter::setColourLookup`; that is still called, and is now asked
-only for a name the Document does not know.
+`CommandInterpreter::setColourLookup`; it is asked now only for a name the
+Document does not know. The window still passes that table, which answers
+nothing more; `katana_cli` and `katana_mcp` pass none.
 
 `CUSTOMISE` is the interpreter's too (`runCustomisationVerb`,
 `include/katana/cad/customisation_verbs.hpp`): the report, `JSON`, a load
 merged or in place, `EXPORT`, `RESET`, `KEEP`, `REVERT`, `REMOVE` and `SET`,
 with what `RESET`, `KEEP` and `REVERT` need handed over by the front end
 (`CommandInterpreter::setCustomisationHost`). `docs/customisation.md`, "The
-verbs", has the grammar, the replies and the decisions. The two front ends
-still take a `CUSTOMISE` line themselves, before the interpreter sees it,
-until each is ported to it.
+verbs", has the grammar, the replies and the decisions. `katana_cli` and
+`katana_mcp` run it: their session hands the interpreter its host and takes
+no `CUSTOMISE` line of its own (`src/katana_app/session.cpp`). The window
+still takes the line itself, before the interpreter sees it, until it is
+ported too.
 
 ### STATUS
 
@@ -331,7 +336,8 @@ family - above), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
 the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed
 `HELP` adds them to the interpreter's list (`windowHelpText`, `docs/desktop.md`,
 "The Command Reference and the keyboard shortcuts"). `katana_cli` adds the
-same interoperability verbs and `CUSTOMISE` - its `--help` lists them - and
+same interoperability verbs - its `--help` lists them - but not `CUSTOMISE`,
+which there is the interpreter's own; and
 the interpreter's help says that `PLOTSHEETS` is the window's alone. Both read an `IMPORT` line's
 path and `LOCAL` with `CommandInterpreter::importArgument`, and hand `INFO`
 with an entity id (`CommandInterpreter::isEntityId`, a whole number or `#n`)

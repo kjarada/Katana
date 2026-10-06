@@ -776,10 +776,10 @@ survives being read and written.
 
 ### Not done
 
-- **The two programs do not read a file of it from their command lines
-  yet.** The verbs that read and write one are in the interpreter ("The
-  verbs", below), but `katana_cli` and the window still take a `CUSTOMISE`
-  line themselves; Settings comes with the work that follows.
+- **The window does not read a file of it from its command line yet.** The
+  verbs that read and write one are in the interpreter ("The verbs", below),
+  and `katana_cli` and `katana_mcp` run them; the window still takes a
+  `CUSTOMISE` line itself. Settings comes with the work that follows.
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
 - **Some of a rule's members are still shown by another word.** `CODE
@@ -864,13 +864,15 @@ family's whole reference (`cad::customisationVerbHelp`).
 **Where this stands.** The family is in the interpreter and is tested there
 (`tests/cad/customisation/test_customisation_verbs.cpp`,
 `tests/cad/customisation/test_survey_code_verbs.cpp`). `CODE` reaches every
-front end today. A `CUSTOMISE` line does not yet: `katana_cli` and the window
-each take it before the interpreter sees it, with the code they had, which
-still reads the older files (`src/katana_app/session.cpp`,
-`src/katana_qt/main_window.cpp`). Each is moved to this family by the work
-that ports it; until then what `docs/survey_coding.md` says of `CUSTOMISE
-<file>` is what those two programs do, and neither hands the interpreter a
-host.
+front end. `CUSTOMISE` reaches `katana_cli` and `katana_mcp` (since
+2026-10-06): their session takes no `CUSTOMISE` line of its own and hands the
+interpreter a host ("What katana_cli and katana_mcp start with", below). The
+window does not yet: it takes the line before the interpreter sees it, with
+the code it had, which still reads the older files
+(`src/katana_qt/main_window.cpp`), and hands over no host. It is moved to
+this family by the work that ports it; until then what
+`docs/survey_coding.md` says of `CUSTOMISE <file>` in the window is what the
+window does.
 
 ### CUSTOMISE
 
@@ -972,7 +974,7 @@ carry the very keys `SET` takes, so either can be typed back after it.
 
 The bare report has a second, older text, `cad::formatCustomisationSummary`,
 which names a source by the kind of file it once was ("a style library"). The
-front ends' own `CUSTOMISE` and File > Drawing Summary still print it, and it
+window's own `CUSTOMISE` and File > Drawing Summary still print it, and it
 goes with the last of them; the verb's text is `cad::formatCustomisationReply`,
 and both are made from one `CustomisationSummary`.
 
@@ -980,13 +982,34 @@ and both are made from one `CustomisationSummary`.
 alphabetical order, two blanks a level, with `name`, `origin`, `kept`,
 `description`, `notice`, `basedOn`, `builtIn`, `sources` (each with its
 notice), `counts`, `automation`, `linework`, `colours`, `problems`,
-`coverage` and `missing`. `automation`, `linework` and `basedOn` use the
-format's own member names, so the report reads against a file. `problems` is
-the lint `CODE CHECK` prints, counted - `rules`, `cannotApply`, `warnings`,
+`coverage`, `missing` and `start`. `automation`, `linework` and `basedOn` use
+the format's own member names, so the report reads against a file. `problems`
+is the lint `CODE CHECK` prints, counted - `rules`, `cannotApply`, `warnings`,
 `byKind` - and `undefined`, the names the rules ask for that nothing defines.
 It does not hold the definitions or the rules; a file does. It is a function
 so that a front end can hand a client the object without a line passing
 through the command history.
+
+`start` is `{problems: [sentence], keptFromAnotherBuiltIn}`: what
+`cad::startCustomisation` found when the session started - a kept file or a
+built-in that did not read, and a kept customisation made from another
+built-in than the program has. `startCustomisation` leaves both on the
+Document (`CustomisationState::startProblems`, `keptFromAnotherBuiltIn`;
+`Document::setCustomisationStart`) as well as handing them to the front end,
+because a front end says them once, at the start, where its errors go - and
+whoever asks what the session holds later is otherwise told `origin: builtIn`
+and not that the customisation it kept was refused. It is always written, `[]`
+and `false` when the start had nothing to say, so that a reader can tell
+"nothing went wrong" from a build that does not say; and it is of the START:
+a load, an edit, a `RESET` or a `KEEP` since does not change it. Recording it
+is no edit of the session - origin and `kept` stand. *Rejected: keeping it in
+the front end and adding it to what `katana_mcp` hands out.* The tool, the
+resource and this verb would then disagree about one report, and the window
+would need the same code again. The bare `CUSTOMISE` text does not repeat it
+("The verbs: not done").
+`CustomisationStart.WhatAStartFoundStaysOnTheDocumentAndIsInItsJsonReport`
+and `CustomisationStart.RecordingWhatAStartFoundIsNoEditOfTheSessionAndIsReportedOnce`
+hold it.
 
 ### The host: RESET, KEEP and REVERT
 
@@ -1029,6 +1052,90 @@ installing the built-in into an empty Document gives - so it cannot drift
 from what `RESET` leaves.
 
 `REVERT` reads the kept file again and installs it.
+
+### What katana_cli and katana_mcp start with
+
+The session those two programs share (`src/katana_app/session.cpp`) builds its
+host when it starts, hands it to the interpreter and then calls
+`cad::startCustomisation`:
+
+- **The built-in** is `cad::builtInCustomisation()`: the customisation
+  compiled into the program, or what the environment variable
+  `KATANA_BUILTIN_CUSTOMISATION` says in its place for one run - a Katana
+  customisation file, or `none` (`docs/survey_coding.md`, "The built-in, and
+  the seam").
+- **The kept file** is the one the environment variable `KATANA_CUSTOMISATION`
+  names, and nothing else. *Rejected: a per-user place*, which the desktop
+  window has. A command line run from a script, and a server an agent drives,
+  must do the same thing for every user and on every machine; a file that
+  happened to lie in somebody's profile would decide what a pipeline draws.
+  `CUSTOMISE KEEP` writes that file and the next start reads it; with the
+  variable unset, `KEEP` and `REVERT` are refused, naming it.
+
+Both variables name a file, and both are read through
+`core::environmentVariable` (`include/katana/core/path_text.hpp`), never
+`getenv`. On Windows `getenv` gives the bytes of the ANSI code page, in which
+a character the code page lacks is already a `?`: a kept file under a folder
+named in Japanese, on a machine set up for English, was a file under `??` -
+not there, which is the ordinary case of nothing kept, so the built-in started
+in its place with nothing said, and `CUSTOMISE KEEP` then failed to write it
+(found in review, 2026-10-07). The helper reads the value wide there and
+hands it back as UTF-8, which `core::pathFromUtf8` turns into the path;
+elsewhere the bytes are the variable's own.
+`PathText.AnEnvironmentVariableIsReadAsTheTextItHoldsWhateverTheCodePage` and
+`PathText.AFileAnEnvironmentVariableNamesOutsideTheCodePageIsTheFileRead`
+hold the helper, and
+`Session.AKeptFileUnderAFolderNoCodePageSpellsStartsTheSessionAndIsWhereKeepWrites`
+and `Session.ABuiltInTheSeamNamesUnderSuchAFolderStartsTheSession` the two
+variables, under a folder named in two scripts no one code page holds.
+
+What was installed is said in one line on standard output - in `katana_mcp`
+that is the client's log, since the protocol has standard output to itself:
+
+```
+Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, built in
+Customisation: Site, 800 linestyles and symbols and 1630 survey code rules, kept
+```
+
+Nothing is printed when nothing was installed. What went wrong goes to
+standard error, a line each as `error: <what>` - a built-in that does not
+read, a kept file that does not read ("... so the built-in customisation is
+used") - and the session starts all the same, as it did when the built-in was
+a set of files of which one could fail. A kept customisation made from another
+built-in than the program has (`CustomisationStart::keptFromAnotherBuiltIn`)
+starts, being the user's, with a `warning:` line that says so. The start-up
+line never holds the word `error`: dozens of the command line's tests fail on
+that word anywhere in what a run prints.
+
+Standard error is read by whoever started `katana_cli`; it is NOT read by an
+agent on the other side of `katana_mcp`, for which it is the client's log. So
+what went wrong, and the kept-from-another-built-in flag, are also in the
+session's report for as long as it runs: `CUSTOMISE JSON`,
+`katana_customisation {part: "summary"}` and `katana://customisation` carry
+them as `start` ("The replies", above; `docs/mcp.md`, "The customisation").
+
+A session constructed for no program - `Session(nullptr)`, which every test
+that drives one in-process uses - is handed NO host and reads neither
+variable: it starts empty on every machine, whatever the build compiled in,
+and `RESET`, `KEEP` and `REVERT` are refused there by name
+(`Session.ASessionOfNoProgramStartsEmptyWhateverTheEnvironmentNames`).
+
+*Removed: the search beside the program.* A build with no built-in used to
+look for customisation files beside the program, from the path it was
+started by, and load what it found. That was a third way
+a session could start, decided at run time by what lay in a folder, with a
+start-up line and a failure of its own; and what it found were the older
+files. A start is now the kept file, the built-in or nothing.
+
+Tests: `Session.*` in `tests/app/test_session.cpp` (the line, the streams,
+the refusals), and in `src/katana_app/CMakeLists.txt`
+`cli.customise_reset_gives_the_built_in_customisation_the_seam_names`,
+`cli.a_session_told_there_is_no_built_in_customisation_starts_empty`,
+`cli.customise_keep_writes_the_session_to_the_file_the_variable_names` with
+`cli.the_next_session_starts_with_the_kept_customisation`,
+`cli.a_kept_file_that_does_not_read_is_said_and_the_built_in_starts_in_its_place`
+and, for the same start read again through `CUSTOMISE JSON`,
+`cli.customise_json_says_what_went_wrong_when_the_session_started`.
 
 ### CODE
 
@@ -1129,9 +1236,35 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 
 ### The verbs: not done
 
-- **The front ends do not use the family for `CUSTOMISE` yet** ("Where this
-  stands"). Until they do, `katana_cli --help` lists a Customise block twice,
-  the interpreter's and the session's own.
+- **The window does not use the family for `CUSTOMISE` yet** ("Where this
+  stands"), and its Command Reference keeps a Customise block of its own
+  beside the interpreter's. (`katana_cli --help` listed two until its
+  session's own block went; it has the interpreter's alone now.)
+- **A kept file named in the caller's environment starts every program that
+  inherits it.** `KATANA_CUSTOMISATION` set for a user is read by every
+  `katana_cli` and `katana_mcp` that user starts - which is its purpose - and
+  so by a test suite run from that shell. The tests that pin a start-up clear
+  or set it themselves; nothing clears it for the rest.
+- **A start-up problem does not change the exit status.** `katana_cli` says
+  it on standard error and runs its lines; a script that must not run with
+  the wrong customisation has to read that line, or `start.problems` of
+  `CUSTOMISE JSON`.
+- **The bare `CUSTOMISE` text does not repeat what the start found.** It is
+  in `CUSTOMISE JSON` (`start`) and was said at the start; the records of the
+  bare reply have no line for it.
+- **Other variables that name a file are still read with `getenv`**:
+  `KATANA_ONLINE_CATALOGUE` and `KATANA_ONLINE_CACHE` in
+  `src/katana_qt/gis_online.cpp`, which on Windows cannot name a file outside
+  the ANSI code page. The window's own read of `KATANA_CUSTOMISATION`, when it
+  has one, must go through `core::environmentVariable` as the session's does.
+- **A file named on the command line still arrives through the code page.**
+  The arguments of `katana_cli` and `katana_mcp` are the narrow `argv`
+  (`src/katana_app/main.cpp`, `src/katana_app/mcp_main.cpp`), which on Windows
+  is the ANSI code page's: `katana_cli -c "CUSTOMISE <file>"` with a file under
+  a folder named outside the code page is refused as not found, its name
+  shown with `?` (tried 2026-10-07). The same line in a script saved as
+  UTF-8, or sent over MCP, names the file and loads it. Reading the arguments
+  wide is a change to both programs' start and was left for its own task.
 - **An unnamed session has no verb that names it.** `EXPORT ... NAME <name>`
   writes it under one, and loading that file with `REPLACE` gives the session
   the name; `KEEP` refuses it until then.
@@ -1150,5 +1283,6 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 - **`PREVIEW` needs the scope form.** `CODE feature_code` takes the whole
   rest of the line as the property; a preview of it is `CODE PROPERTY
   feature_code PREVIEW`.
-- **`CommandInterpreter::setColourLookup` is still there**, for the front
-  ends that call it; it answers nothing the Document does not.
+- **`CommandInterpreter::setColourLookup` is still there**, for the window,
+  which still calls it; it answers nothing the Document does not. The
+  session of `katana_cli` and `katana_mcp` no longer does.

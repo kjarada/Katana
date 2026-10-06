@@ -341,6 +341,10 @@ TEST(CustomisationVerbs, JsonIsTheSameAsOneObject)
     // Keys in alphabetical order, two blanks a level. By hand from kBuiltIn:
     // neither rule has anything wrong with it, the drawing has no styles, and
     // the session is based on the built-in itself, by the digest of its bytes.
+    // `start`, the last member, is what the start found: the built-in read and
+    // nothing was kept, so nothing went wrong and nothing was made from
+    // another built-in. (The member was added on 2026-10-07; before it the
+    // object ended at `sources`.)
     const std::string expected = R"({
   "automation": {
     "codesOnSurveyImport": true,
@@ -402,7 +406,11 @@ TEST(CustomisationVerbs, JsonIsTheSameAsOneObject)
       "notice": [],
       "rules": true
     }
-  ]
+  ],
+  "start": {
+    "keptFromAnotherBuiltIn": false,
+    "problems": []
+  }
 })";
     EXPECT_EQ(session.ok("CUSTOMISE JSON"), expected);
     EXPECT_EQ(session.ok("customise json"), expected);

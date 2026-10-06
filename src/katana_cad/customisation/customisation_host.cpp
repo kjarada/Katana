@@ -71,7 +71,10 @@ katana::core::Status installBuiltInCustomisation(Document& document,
     return document.installCustomisation(std::move(copy), CustomisationOrigin::BuiltIn, kept);
 }
 
-CustomisationStart startCustomisation(Document& document, const CustomisationHost& host)
+namespace {
+
+// The choice startCustomisation makes, and its report.
+CustomisationStart chooseAndInstall(Document& document, const CustomisationHost& host)
 {
     CustomisationStart report;
     const bool hasBuiltIn = host.builtIn.customisation != nullptr;
@@ -128,6 +131,20 @@ CustomisationStart startCustomisation(Document& document, const CustomisationHos
         }
         summarise(report, document, CustomisationOrigin::BuiltIn);
     }
+    return report;
+}
+
+} // namespace
+
+CustomisationStart startCustomisation(Document& document, const CustomisationHost& host)
+{
+    CustomisationStart report = chooseAndInstall(document, host);
+    // Left on the Document as well as handed back. The front end says it
+    // once, where its errors go; whoever asks what the session holds later -
+    // CUSTOMISE JSON, a client of katana_mcp, which is never shown that
+    // stream - is then still told that the customisation it kept is not the
+    // one it got.
+    document.setCustomisationStart(report.problems, report.keptFromAnotherBuiltIn);
     return report;
 }
 

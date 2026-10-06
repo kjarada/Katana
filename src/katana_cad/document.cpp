@@ -765,6 +765,19 @@ void Document::setBuiltInCustomisationName(std::string name)
     notify(DocumentChange::Customisation);
 }
 
+void Document::setCustomisationStart(std::vector<std::string> problems,
+                                     bool keptFromAnotherBuiltIn)
+{
+    if (problems == customisation_.startProblems &&
+        keptFromAnotherBuiltIn == customisation_.keptFromAnotherBuiltIn) {
+        return;
+    }
+    customisation_.startProblems = std::move(problems);
+    customisation_.keptFromAnotherBuiltIn = keptFromAnotherBuiltIn;
+    ++customisationGeneration_;
+    notify(DocumentChange::Customisation);
+}
+
 void Document::recordCustomisationLoad(const std::vector<CustomisationSource>& load,
                                        bool replacedDefinitions, bool replacedRules)
 {
