@@ -25,8 +25,14 @@
 
 namespace katana::cad {
 class Document;
-struct LineworkCodes;
 } // namespace katana::cad
+
+// The type cad::LineworkCodes names. It is declared where it is defined, in
+// the entity layer: an alias cannot be declared ahead of the header that makes
+// it.
+namespace katana::entity {
+struct LineworkCodes;
+} // namespace katana::entity
 
 namespace katana::qt {
 
@@ -66,7 +72,7 @@ struct CustomisationContext {
     // (cad/linework.hpp). Owned by the maker, which keeps them for the
     // session. May be null: a dialog then shows the defaults and cannot
     // change them.
-    katana::cad::LineworkCodes* lineworkCodes = nullptr;
+    katana::entity::LineworkCodes* lineworkCodes = nullptr;
 
     // The window's one executor (command_runner.hpp): a dialog that changes
     // the drawing builds the verb line a person would type and runs it here,

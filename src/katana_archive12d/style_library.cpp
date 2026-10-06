@@ -71,7 +71,12 @@ class LibraryReader {
   public:
     LibraryReader(katana::entity::StyleLibrary library, std::string_view text,
                   std::string source)
-        : lexer_(text), source_(std::move(source))
+        : lexer_(text), source_(std::move(source)),
+          // A style library holds one kind a file and says which only by its
+          // name: symbol libraries are conventionally named *symbols*.4d. The
+          // same test, folded the same way, that the catalogue makes of
+          // LineStyle::source - here it becomes the definition's own flag.
+          symbol_(detail::lowered(source_).find("symbol") != std::string::npos)
     {
         result_.library = std::move(library);
     }
@@ -199,6 +204,7 @@ class LibraryReader {
         style.name = nameToken.text();
         style.units = *units;
         style.source = source_;
+        style.symbol = symbol_;
         lexer_.collectComments = false; // the header is read; the rest is licence text
         readBody(style, depthOutside);
 
@@ -410,6 +416,7 @@ class LibraryReader {
 
     Lexer lexer_;
     std::string source_;
+    bool symbol_ = false; // the file's name says it is a symbol library
     StyleLibraryRead result_{};
     std::size_t suppressed_ = 0;
 };

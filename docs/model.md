@@ -206,9 +206,12 @@ drawing on screen.
 Geometry is stored as a versioned binary blob (schema 3 onwards,
 `geometry_blob.cpp`), which is what made opening a 50 000-entity project 4.6x
 faster. Properties, metadata and property defaults are JSON text via
-`katana_entity/serialization.cpp`, which keeps nlohmann confined to one
-translation unit and keeps those readable for debugging and diffing. (This
-paragraph said geometry was JSON too, from before schema 3.)
+`katana_entity/serialization.cpp`, which keeps nlohmann out of every header
+and keeps those readable for debugging and diffing. (This paragraph said
+geometry was JSON too, from before schema 3; and that nlohmann was confined
+to that one translation unit, until `src/katana_entity/customisation.cpp` -
+the Katana customisation format, `docs/customisation.md` - became the layer's
+second.)
 
 ### The tables, and the migration that made each
 

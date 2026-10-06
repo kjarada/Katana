@@ -12,6 +12,9 @@ add_library(katana_entity STATIC
     serialization.cpp
     style_library.cpp
     survey_map.cpp
+    colour_names.cpp
+    linework_codes.cpp
+    customisation.cpp
     validation.cpp
     text_block.cpp
     annotation.cpp

@@ -3,110 +3,37 @@
 #include <cstdint>
 
 #include "katana/archive12d/domain.hpp"
+#include "katana/entity/colour_names.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "plan_geometry.hpp"
 #include "text_utilities.hpp"
 
 namespace katana::archive12d {
 
-namespace {
-
 using katana::entity::Color;
-
-struct NamedColour {
-    std::string_view name;
-    Color colour;
-};
-
-// A 12da carries colour NAMES; the RGB behind a name lives in the 12d project
-// (colours.4d) and can be redefined there, so no table here can be "right".
-// These are the names 12d Model ships with, at the RGB the same names have in
-// the X11 / CSS colour list - the nearest thing to a public definition of what
-// "orange" or "brown" means. Two departures: X11's DarkGray (169) is LIGHTER
-// than its Gray (128), an accident of history that would draw "dark grey"
-// paler than "grey", so dark and light grey are set either side of grey
-// instead; and "green" is X11's Lime (0, 255, 0), the pure primary every CAD
-// palette means by it, not X11's half-bright Green.
-constexpr std::array<NamedColour, 27> kStandardColours = {{
-    {"red", {255, 0, 0, 255}},
-    {"green", {0, 255, 0, 255}},
-    {"blue", {0, 0, 255, 255}},
-    {"yellow", {255, 255, 0, 255}},
-    {"cyan", {0, 255, 255, 255}},
-    {"magenta", {255, 0, 255, 255}},
-    {"white", {255, 255, 255, 255}},
-    {"black", {0, 0, 0, 255}},
-    {"grey", {128, 128, 128, 255}},
-    {"orange", {255, 165, 0, 255}},
-    {"brown", {165, 42, 42, 255}},
-    {"purple", {128, 0, 128, 255}},
-    {"pink", {255, 192, 203, 255}},
-    {"violet", {238, 130, 238, 255}},
-    {"dark red", {139, 0, 0, 255}},
-    {"dark green", {0, 100, 0, 255}},
-    {"dark blue", {0, 0, 139, 255}},
-    {"dark cyan", {0, 139, 139, 255}},
-    {"dark magenta", {139, 0, 139, 255}},
-    {"dark orange", {255, 140, 0, 255}},
-    {"dark grey", {64, 64, 64, 255}},
-    {"light grey", {192, 192, 192, 255}},
-    {"light blue", {173, 216, 230, 255}},
-    {"light green", {144, 238, 144, 255}},
-    {"light cyan", {224, 255, 255, 255}},
-    {"light yellow", {255, 255, 224, 255}},
-    {"light pink", {255, 182, 193, 255}},
-}};
-
-} // namespace
 
 std::string_view symbolForLinestyle(std::string_view name)
 {
     return katana::entity::builtInSymbolFor(name);
 }
 
+// The standard colour names, their fold and their RGB are the entity layer's
+// (entity/colour_names.hpp): a customisation's own colour table is resolved
+// beside them there, by cad, which may not see this module. These three keep
+// the names the archive import and export have always called them by.
 std::vector<std::string> standardColourNames()
 {
-    std::vector<std::string> names;
-    names.reserve(kStandardColours.size());
-    for (const NamedColour& entry : kStandardColours) {
-        names.emplace_back(entry.name);
-    }
-    return names;
+    return katana::entity::standardColourNames();
 }
 
 std::optional<Color> standardColour(std::string_view name)
 {
-    std::string key = detail::lowered(detail::trimmed(name));
-    std::replace(key.begin(), key.end(), '_', ' ');
-    std::replace(key.begin(), key.end(), '-', ' ');
-    if (key == "gray") {
-        key = "grey";
-    } else if (key.ends_with(" gray")) {
-        key.replace(key.size() - 4, 4, "grey");
-    }
-    for (const NamedColour& entry : kStandardColours) {
-        if (entry.name == key) {
-            return entry.colour;
-        }
-    }
-    return std::nullopt;
+    return katana::entity::standardColour(name);
 }
 
 std::string nearestStandardColour(const Color& colour)
 {
-    std::string_view best = kStandardColours.front().name;
-    long bestDistance = -1;
-    for (const NamedColour& entry : kStandardColours) {
-        const long dr = static_cast<long>(entry.colour.r) - colour.r;
-        const long dg = static_cast<long>(entry.colour.g) - colour.g;
-        const long db = static_cast<long>(entry.colour.b) - colour.b;
-        const long distance = dr * dr + dg * dg + db * db;
-        if (bestDistance < 0 || distance < bestDistance) {
-            bestDistance = distance;
-            best = entry.name;
-        }
-    }
-    return std::string(best);
+    return katana::entity::nearestStandardColour(colour);
 }
 
 std::string layerPathForModel(std::string_view modelName, std::string_view prefix)

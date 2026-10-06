@@ -632,31 +632,6 @@ spellings(const LineworkCodes& codes)
 
 } // namespace
 
-Status validate(const LineworkCodes& codes)
-{
-    const auto all = spellings(codes);
-    for (std::size_t i = 0; i < all.size(); ++i) {
-        const std::string& spelling = *all[i].second;
-        if (std::any_of(spelling.begin(), spelling.end(), katana::core::isAsciiSpace)) {
-            return makeError(ErrorCode::InvalidArgument,
-                             "a linework control code cannot contain a blank: codes are split "
-                             "on blanks, so it could never be matched",
-                             std::string(toString(all[i].first)) + "=\"" + spelling + "\"");
-        }
-        for (std::size_t j = i + 1; j < all.size() && !spelling.empty(); ++j) {
-            if (katana::core::equalsIgnoringCase(spelling, *all[j].second)) {
-                return makeError(ErrorCode::InvalidArgument,
-                                 "two linework controls are spelled alike, so the token would "
-                                 "mean both",
-                                 std::string(toString(all[i].first)) + " and " +
-                                     std::string(toString(all[j].first)) + " are \"" +
-                                     spelling + "\"");
-            }
-        }
-    }
-    return {};
-}
-
 std::string_view toString(LineworkControl control)
 {
     switch (control) {
@@ -811,7 +786,9 @@ std::string_view toString(UnplacedFeatureReason reason)
 katana::core::Result<LineworkResult> processLinework(const Document& document,
                                                      const LineworkOptions& options)
 {
-    if (auto status = validate(options.codes); !status) {
+    // Named in full: the codes are an entity type, so an unqualified call finds
+    // entity::validate and this layer's forwarding validate alike.
+    if (auto status = katana::entity::validate(options.codes); !status) {
         return status.error();
     }
     if (!(std::isfinite(options.chordTolerance) && options.chordTolerance > 0.0)) {
