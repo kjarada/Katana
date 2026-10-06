@@ -58,6 +58,7 @@
 #include "katana/commands/command_stack.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
+#include "katana/entity/linework_codes.hpp"
 #include "katana/entity/survey_map.hpp"
 
 namespace katana::cad {
@@ -92,33 +93,18 @@ struct StringName {
 // The spellings of the control codes a point's code may carry after its string
 // name: "KB1 ST", "FL CL", "KB1 BC", "FN3 JPN 105".
 //
-// CONFIGURABLE, NOT SURVEY CODE FILE DATA. The defaults are spellings common in
-// field practice, chosen so that an untouched table does something sensible;
-// no product's file was copied for them:
-//   ST   start   - "start", the usual two-letter field abbreviation
-//   END  end     - written out in most code sets
-//   CL   close   - "close", as in "FL CL"
-//   BC   arcStart, EC arcEnd - "begin curve" / "end curve", the road-design
-//                  abbreviations surveyors already use for tangent points
-//   JPN  join    - "join point number": also draw a line from this point to
-//                  the point whose number follows ("JPN 105")
-//   RECT rectangle - "rectangle": three points make a rectangle (see below)
-// An empty spelling switches that control off.
-struct LineworkCodes {
-    std::string start = "ST";
-    std::string end = "END";
-    std::string close = "CL";
-    std::string arcStart = "BC";
-    std::string arcEnd = "EC";
-    std::string join = "JPN";
-    std::string rectangle = "RECT";
-};
+// CONFIGURABLE, NOT SURVEY CODE FILE DATA. The spellings are part of a
+// customisation, so the type and its validate live in the entity layer, where
+// a customisation is read and written (entity/linework_codes.hpp: the seven
+// controls, their defaults and where those come from). These two names keep
+// `cad::LineworkCodes` and `cad::validate(codes)` meaning what they did.
+using LineworkCodes = katana::entity::LineworkCodes;
 
-// Refuses a spelling containing a blank (a code is split on blanks, so it
-// could never be matched) and two controls spelled alike (a token that means
-// two things means neither). Spellings are compared ignoring ASCII case,
-// because tokens are matched that way - see `parseFieldCode`.
-[[nodiscard]] katana::core::Status validate(const LineworkCodes& codes);
+// entity::validate, under the name this layer has always called it by.
+[[nodiscard]] inline katana::core::Status validate(const LineworkCodes& codes)
+{
+    return katana::entity::validate(codes);
+}
 
 enum class LineworkControl { Start, End, Close, ArcStart, ArcEnd, Join, Rectangle };
 

@@ -487,6 +487,10 @@ TEST(SymbolLibrary, ExportWritesOnlyTheSelectedLibraryDefinitionsAndNamesTheRest
                   katana::entity::LineStyle valve =
                       *fixture.document.styleLibrary().find("TEST Valve");
                   valve.source.clear(); // a file does not hold its own name
+                  // ... nor what only that name says of a style library: that
+                  // its definitions are listed as symbols (LineStyle::symbol).
+                  // The text read back here was given no name.
+                  valve.symbol = false;
                   return valve;
               }());
     EXPECT_TRUE(fixture.loggedExactly(

@@ -81,6 +81,49 @@ worldstyle "B" { move 0 0 })",
     EXPECT_EQ(sourceOf(second->library, "C"), "first.4d") << "an earlier file's stamp is kept";
 }
 
+// LineStyle::symbol: "its customisation lists it as a symbol". A style library
+// has no such list - it holds one kind a file, and only the file's NAME says
+// which - so its reader sets the flag by that name: "symbol" anywhere in it,
+// in any case. Of the two definitions read here B is `mode vertex` and A is
+// not, and the flag says the same of both, because that is not what it means.
+TEST(Provenance, ADefinitionReadFromAFileNamedAsSymbolsIsListedAsASymbol)
+{
+    for (const char* source : {"user_symbols_test.4d", "SYMBOLS.4D", "My Symbol library.4d",
+                               "C:\\lines\\Symbols.4d"}) {
+        const auto library = read(kTwoDefinitions, source);
+        ASSERT_EQ(library.library.size(), 2u) << source;
+        EXPECT_TRUE(library.library.find("A")->symbol) << source;
+        EXPECT_TRUE(library.library.find("B")->symbol) << source;
+    }
+    // A folder called symbols is not the file's name; nor is "sym" the word.
+    for (const char* source : {"linestyles.4d", "sym.4d", "C:\\symbols\\lines.4d"}) {
+        const auto library = read(kTwoDefinitions, source);
+        ASSERT_EQ(library.library.size(), 2u) << source;
+        EXPECT_FALSE(library.library.find("A")->symbol) << source;
+        EXPECT_FALSE(library.library.find("B")->symbol) << source;
+    }
+    // Text that came from no file is of unknown kind, and is not listed.
+    auto unnamed = a12::readStyleLibrary(kTwoDefinitions);
+    ASSERT_TRUE(unnamed.ok());
+    EXPECT_FALSE(unnamed->library.find("A")->symbol);
+}
+
+TEST(Provenance, ReadingIntoALibraryListsAsSymbolsOnlyWhatTheSymbolFileDefines)
+{
+    auto first = a12::readStyleLibrary(R"(worldstyle "A" { move 0 0 }
+worldstyle "C" { move 0 0 })",
+                                       "linestyles.4d");
+    ASSERT_TRUE(first.ok());
+    // The symbol file redefines A and adds B; C is only in the first.
+    auto second = a12::readStyleLibraryInto(std::move(first->library), R"(worldstyle "A" { move 1 1 }
+worldstyle "B" { move 0 0 })",
+                                            "symbols.4d");
+    ASSERT_TRUE(second.ok());
+    EXPECT_TRUE(second->library.find("A")->symbol) << "the later definition won, flag and all";
+    EXPECT_TRUE(second->library.find("B")->symbol);
+    EXPECT_FALSE(second->library.find("C")->symbol) << "an earlier file's definition is as it was";
+}
+
 TEST(Provenance, ALoadedFileStampsItsNameAndNotItsPath)
 {
     const std::filesystem::path directory =
@@ -171,12 +214,17 @@ TEST(Provenance, TheReferenceSymbolFileIsWhereItsSymbolsSayTheyCameFrom)
     const auto loaded = a12::readCustomisation(paths);
     ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
     std::size_t fromSymbolFile = 0;
+    std::size_t listedAsSymbols = 0;
     loaded->library.forEach([&](const LineStyle& style) {
         std::string lower = style.source;
         std::transform(lower.begin(), lower.end(), lower.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         fromSymbolFile += lower.find("symbol") != std::string::npos ? 1 : 0;
+        listedAsSymbols += style.symbol ? 1 : 0;
     });
     EXPECT_EQ(fromSymbolFile, 474u);
     EXPECT_EQ(loaded->library.size() - fromSymbolFile, 318u);
+    // The reader says of each definition what its file's name says: the same
+    // 474, now as the definition's own flag.
+    EXPECT_EQ(listedAsSymbols, 474u);
 }

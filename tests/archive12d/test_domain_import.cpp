@@ -159,7 +159,8 @@ TEST(StandardColour, TheListedNamesAreTheTwentySevenTheTableKnowsEachDistinctAnd
 {
     // The code manager's colour field lists these, so each must be a name
     // standardColour draws, and nothing it knows may be missing from them:
-    // 14 plain names, 7 dark and 6 light, as the table in domain_common.cpp.
+    // 14 plain names, 7 dark and 6 light, as the table these functions forward
+    // to (src/katana_entity/colour_names.cpp).
     const std::vector<std::string> names = a12::standardColourNames();
     ASSERT_EQ(names.size(), 27u);
     EXPECT_EQ(names.front(), "red");

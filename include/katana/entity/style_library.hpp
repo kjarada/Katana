@@ -112,8 +112,9 @@ struct LineStyle {
     // the same shape as a layer path and for the same reason.
     std::string group{};
     StyleUnits units = StyleUnits::World;
-    // `mode vertex`: drawn at each vertex of a string rather than along it,
-    // which is what makes a definition a SYMBOL rather than a linestyle.
+    // `mode vertex`: drawn at each vertex of a string rather than along it.
+    // One sign that a definition is a symbol, and not the only one: see
+    // `symbol` below.
     bool atVertices = false;
     // The period of the pattern along a line, in the definition's units. 0
     // means the file said nothing, and the span of the strokes themselves is
@@ -133,13 +134,28 @@ struct LineStyle {
     int cycleMode = 0;
     std::vector<Stroke> strokes{};
     std::vector<StrokeText> texts{};
-    // The file this definition was read from - its NAME only, never a path, so
-    // a library carries no trace of where on someone's disk it came from.
-    // Empty for a definition made in code or in a session. A browser groups
-    // and filters by it, and it is part of what says a definition is a symbol:
-    // most symbols the reference mapfiles use are not `mode vertex`, but they
-    // all come from the symbol file (docs/survey_coding.md).
+    // Where this definition came from - a NAME only, never a path, so a library
+    // carries no trace of where on someone's disk it came from: the name of
+    // its customisation (entity/customisation.hpp), or of the file when a
+    // style library (.4d) was read. Empty for a definition made in code or in
+    // a session. A browser groups and filters by it and a project records it;
+    // until the catalogue and the lint are moved to `symbol` below, a name
+    // containing "symbol" is also how they tell a symbol (docs/survey_coding.md).
     std::string source{};
+    // Its customisation LISTS it as a symbol: in the Katana customisation
+    // format, the definition sits in the "symbols" array rather than in
+    // "linestyles". That is a statement by the customisation's author, and
+    // `atVertices` cannot stand in for it: most symbols the reference survey
+    // codes place are not `mode vertex`.
+    //
+    // It is a field of its own and NOT derived from `source`, which is how it
+    // used to be told (a file name containing "symbol"). One customisation
+    // holds both kinds under ONE name, so where a definition came from no
+    // longer says which kind it is - a customisation called "Symbols and
+    // lines" would make everything a symbol, and one called "NSW" nothing.
+    // The style library reader, which does still read one kind a file, sets
+    // this by that file-name rule.
+    bool symbol = false;
 
     // The box the Move and Draw strokes cover, with `factor` applied. Text,
     // arcs and circles are included by their point; a text's extent needs a
