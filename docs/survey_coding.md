@@ -863,7 +863,7 @@ case or blanks.
 **The table** has one row per distinct key, and the row shows what a code that
 key catches resolves to with the less specific keys included - for `WM*` that
 is `WM*`, then `W*`, then `*`. The filter is a substring of key, comment,
-group, model, colour, linestyle or symbol, case folded (D3).
+group, layer, colour, linestyle or symbol, case folded (D3).
 
 **The census** counts every distinct code the drawing carries, found as
 `applySurveyCodes` finds it, and classes each against the loaded map; each
@@ -874,16 +874,21 @@ written, a WARNING one that applies but not as its author meant.
 
 | Kind | Severity | Meaning |
 |---|---|---|
-| `InvalidLayerPath` | error | a model that cannot become a layer |
+| `InvalidLayerPath` | error | a layer that is not a layer path |
 | `KeyWhitespace` | error | a key with surrounding blanks, which no typed code matches |
 | `UnresolvedLinestyle` | warning | a linestyle no loaded library defines |
 | `UnresolvedSymbol` | warning | a symbol no library defines and Katana cannot draw |
 | `SymbolNotSymbolCapable` | warning | a symbol rule naming a definition known not to be a symbol (D3; one read from no known file gets the benefit of the doubt) |
-| `LinestyleIsVertex` | warning | a linestyle naming a `mode vertex` definition |
+| `LinestyleIsVertex` | warning | a linestyle naming an `at vertices` definition, which is a symbol |
 | `UnknownColour` | warning | a colour name the colour table does not know |
-| `NoModel` | warning | a `map_data` rule that puts its code nowhere |
+| `NoModel` | warning | a `feature` rule with no layer, which leaves its code where it is |
 | `DuplicateRule` | warning | the same as an earlier rule, field for field |
 | `ShadowedRule` | warning | earlier rules of its key already say all it says |
+
+The words in those texts - `feature`, `layer`, `at vertices` - are the Katana
+customisation format's, not the survey code file's (`map_data`, `model`,
+`mode vertex`); `docs/customisation.md`, "The words a rule is shown by",
+has the table.
 
 `SurveyMap::add` refuses a key with blanks and an invalid layer path, so those
 two can be met only by `lintSurveyRule` on a rule not yet in a map - an
@@ -917,7 +922,7 @@ The explanation of a code with a near miss, abridged:
 ```
 katana_cli -c 'CODE EXPLAIN wm01'
 Code "wm01": only the bare * rule answers it: fallback-only, not matched
-  string attribute DepthLocation = Top of Pipe  <- rule #664 * (pipe_data)
+  string attribute DepthLocation = Top of Pipe  <- rule #664 * (pipe)
   ...
   near miss: key "WM*" differs only in letter case
 ```
@@ -1086,7 +1091,7 @@ above, so the dialog decides nothing the CLI would say differently:
 
 | Tab | Over | Shows and does |
 |---|---|---|
-| Code Table (`codeTableTab`) | `cad::codeTable`, `explainCode` | a key per row with what it resolves to (layer, colour, line or point, linestyle, symbol, tinable, attributes), filtered; a code typed in `testCode` or a selected key explained field by field - the value, the rule that set it, the rules that lost - with previews of its linestyle and symbol; double-click an explained field for the rule that set it; a rule form by section, with Add, Update, Duplicate, Delete, Up and Down (earlier wins more ties) |
+| Code Table (`codeTableTab`) | `cad::codeTable`, `explainCode` | a key per row with what it resolves to (layer, colour, line or point, linestyle, symbol, surface, attributes), filtered; a code typed in `testCode` or a selected key explained field by field - the value, the rule that set it, the rules that lost - with previews of its linestyle and symbol; double-click an explained field for the rule that set it; a rule form by section, with Add, Update, Duplicate, Delete, Up and Down (earlier wins more ties) |
 | Codes in Drawing (`codesInDrawingTab`) | `cad::codeCensus` | every distinct code the drawing carries, classed matched, fallback only or unmatched against the BUFFER, so a rule being written shows against the drawing's codes before Apply; select the entities carrying one; start a new rule for an unmatched code keyed by `cad::suggestedKey` |
 | Issues (`codeIssuesTab`) | `cad::lintSurveyMap` | the lint of the buffer |
 | Apply Codes (`applyCodesTab`) | `cad::applySurveyCodes` | its report as a preview, for the selection or everything, then Execute as one undo step |
@@ -1139,8 +1144,11 @@ on the reference map, most of it the two pickers' pictures; its linestyle
 preview draws a linestyle small in the middle of its pane and its symbol
 preview is a blank white pane; its own `linestyleState`
 (`code_manager_support.cpp`) is a plain / defined / wrong-kind rule that does
-not read `cad::linetypeStatus` ("Saying whether it is working"); and the
-linework summary is not pluralised ("1 lines").
+not read `cad::linetypeStatus` ("Saying whether it is working"); the
+linework summary is not pluralised ("1 lines"); and the Code Table's Text
+chip has the objectName of the search field beside it, `filterText` (a chip
+is named after its first label), so the two are told apart only by their
+type.
 
 ## Saying whether it is working
 
@@ -1153,7 +1161,7 @@ one style whose linetype is `CULT Bollard`, a `mode vertex` symbol, gives
 
 ```
 0 of this drawing's 1 styles are drawn with a loaded definition (1 name one; the rest are plain lines)
-  1 name is loaded as a `mode vertex` symbol, not a linestyle, so a linetype naming it draws solid: "CULT Bollard"
+  1 name is loaded as an `at vertices` symbol, not a linestyle, so a linetype naming it draws solid: "CULT Bollard"
 ```
 
 `cad::customisationCoverage` is the one place that counts it, and it counts by

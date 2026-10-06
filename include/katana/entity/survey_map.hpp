@@ -21,6 +21,7 @@
 // of them. `lookup` is what combines them; see docs/survey_coding.md for how
 // ties are settled and on what evidence.
 
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <optional>
@@ -103,7 +104,8 @@ struct SurveyPipe {
 // Which section of the mapfile a rule came from. Kept because it is the
 // section, not the fields, that says what a rule is ABOUT - `<map_attributes>`
 // means attributes on the string inside `string_attribute_data` and
-// attributes on each vertex inside `vertex_attribute_data`.
+// attributes on each vertex inside `vertex_attribute_data`. A section added
+// here needs its word in kSurveySectionWords below.
 enum class SurveySection {
     Map,             // map_data: model, colour, breakline, linestyle, weight
     VertexSymbol,    // vertex_symbol_data and vertex_symbol_data_v9
@@ -116,8 +118,36 @@ enum class SurveySection {
     Tinable,         // tinable_data
 };
 
+// One section and the word for it.
+struct SurveySectionWord {
+    SurveySection section;
+    const char* word;
+};
+
+// The word for each section, in the enumeration's order: what a reply and a
+// label call it ("rule #2 KT* (feature)", the code manager's Section list)
+// and what a Katana customisation file holds as a rule's "sets". ONE table,
+// so that what a person reads in the window is what they write in the file.
+// A word changed or added here is a new version of that format
+// (docs/customisation.md).
+//
+// The element names in the comments above (`map_data`) are a survey code
+// file's, and are not these: they are kept with that file's reader and
+// writer, which are the only code to use them.
+inline constexpr std::array<SurveySectionWord, 9> kSurveySectionWords{{
+    {SurveySection::Map, "feature"},
+    {SurveySection::VertexSymbol, "symbol"},
+    {SurveySection::VertexTextStyle, "text"},
+    {SurveySection::Pipe, "pipe"},
+    {SurveySection::VertexPipe, "vertexPipe"},
+    {SurveySection::SegmentPipe, "segmentPipe"},
+    {SurveySection::StringAttribute, "attributes"},
+    {SurveySection::VertexAttribute, "vertexAttributes"},
+    {SurveySection::Tinable, "surface"},
+}};
+
+// The word kSurveySectionWords gives the section.
 [[nodiscard]] const char* toString(SurveySection section);
-[[nodiscard]] std::optional<SurveySection> parseSurveySection(std::string_view element);
 
 // Everything a rule can say. A rule sets only what its section is about; an
 // unset field is one it says nothing about, which is what lets rules combine.

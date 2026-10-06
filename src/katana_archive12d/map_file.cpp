@@ -4,6 +4,7 @@
 #include <array>
 #include <utility>
 
+#include "customisation_words.hpp"
 #include "katana/archive12d/reader.hpp"
 #include "katana/core/xml.hpp"
 #include "text_utilities.hpp"
@@ -91,7 +92,7 @@ class MapReader {
             if (section.name == "version" || section.name == "comments") {
                 continue;
             }
-            const auto which = katana::entity::parseSurveySection(section.name);
+            const auto which = detail::sectionOfElement(section.name);
             const auto items = section.childrenNamed("item");
             if (!which) {
                 count(section.name, false);

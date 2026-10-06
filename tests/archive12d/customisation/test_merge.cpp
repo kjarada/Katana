@@ -314,7 +314,11 @@ std::vector<std::string> shown(const std::vector<katana::entity::SurveyAttribute
     return out;
 }
 
-// Each rule's section, in map order.
+// Each rule's section, in map order - by entity's word for it, which is the
+// Katana customisation format's ("attributes", "vertexPipe") and no longer
+// the survey code file's element (`string_attribute_data`). The two lists
+// expected of this below were changed word for word from the table "The
+// words a rule is shown by" in docs/customisation.md, not from a run.
 std::vector<std::string> sections(const katana::entity::SurveyMap& map)
 {
     std::vector<std::string> out;
@@ -372,8 +376,8 @@ TEST(CustomisationMerge, ALoadedAttributeWinsOverTheSameAttributeFromTheOtherSec
     // rule goes in first, then the current one it leaves standing; the same
     // at SW*.
     EXPECT_EQ(sections(merged.map),
-              (std::vector<std::string>{"string_attribute_data", "pipe_data",
-                                        "vertex_attribute_data", "vertex_pipe_data"}));
+              (std::vector<std::string>{"attributes", "pipe", "vertexAttributes",
+                                        "vertexPipe"}));
 }
 
 TEST(CustomisationMerge, ALoadedGroupReplacingOneInPlaceStillGoesAheadOfItsKeysOtherSections)
@@ -406,7 +410,7 @@ TEST(CustomisationMerge, ALoadedGroupReplacingOneInPlaceStillGoesAheadOfItsKeysO
     // 2 current - 1 replaced + 1 loaded = 2: the loaded rule, then pipe_data.
     ASSERT_EQ(merged.map.size(), 2u);
     EXPECT_EQ(sections(merged.map),
-              (std::vector<std::string>{"string_attribute_data", "pipe_data"}));
+              (std::vector<std::string>{"attributes", "pipe"}));
     EXPECT_EQ(shown(merged.map.lookup("ANY").resolved.attributes),
               (std::vector<std::string>{"text DepthLocation=Invert"}));
 }

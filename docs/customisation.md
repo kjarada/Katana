@@ -196,8 +196,8 @@ a matter for the survey code lint, not for the format.
 `sets` is what the rule is about: `feature` (where the code goes and how it is
 drawn), `symbol`, `text`, `pipe`, `vertexPipe`, `segmentPipe`, `attributes`
 (on the string), `vertexAttributes` and `surface` (whether it goes into a
-surface). These are the format's own words, kept in a table private to
-`src/katana_entity/customisation.cpp`.
+surface). They are the words the survey code tools show for the same
+sections, from one table ("The words a rule is shown by", below).
 
 - **`symbol`**: `name` (a definition's name; empty), `colour` (empty: the
   string's own), `size` (0: the definition's own size), `rotation`, `offset`,
@@ -225,6 +225,90 @@ its default, and the reader keeps `{}` present. Inside those objects the
 model has no such distinction - a `size` of 0 and no size are one state in
 memory, as they were in the files this replaces - so a number left out there
 means "not said" and is the 0 the table gives.
+
+### The words a rule is shown by
+
+The words in the table below are the same in a file and in what the program
+shows: the nine `sets` words, `layer`, `surface`, and `at vertices` for a
+definition's `atVertices`. `rule #2 KT* (feature)` in a reply, `feature` in
+the Survey Code Manager's Section list and `"sets": "feature"` in a file are
+one thing by one name, so a person told that a `feature` rule has no `layer`
+knows which member of which entry to write. That is true of these words and
+not yet of every member: some are still shown by another word ("Not done").
+
+They used to differ: the survey code tools showed the element names of the
+survey code file (`.mapfile`) the rules were once read from, and a symbol's
+placement by the style library's (`.4d`) keyword. The words changed on
+2026-10-06 by this table, which is where every test expectation that changed
+with them was taken from:
+
+| Shown until then | The word now, in the file and in the window | What it names |
+|---|---|---|
+| `map_data` | `feature` | a rule about where the code goes and how it is drawn |
+| `vertex_symbol_data` | `symbol` | a rule about the symbol at each point |
+| `vertex_textstyle_data` | `text` | a rule about how the code's text is drawn |
+| `pipe_data` | `pipe` | a rule that draws the string as a pipe |
+| `vertex_pipe_data` | `vertexPipe` | the same at each vertex |
+| `segment_pipe_data` | `segmentPipe` | the same on each segment |
+| `string_attribute_data` | `attributes` | a rule that puts attributes on the string |
+| `vertex_attribute_data` | `vertexAttributes` | the same on each vertex |
+| `tinable_data` | `surface` | a rule about whether the code goes into a surface |
+| `model`, a rule's field | `layer` | the layer the code's entities go on |
+| `tinable`, a rule's field | `surface` | whether they go into a surface |
+| `mode vertex`, of a definition | `at vertices` | drawn at each vertex of a string, not along it: `atVertices` |
+| `a vertex symbol`, where a text says what a name is | an `at vertices` symbol | the same definition, named as a thing |
+
+So `CODE EXPLAIN` answers `layer: SURVEY SERVICES  <- rule #0 WM* (feature)`,
+the lint's kind is `no layer` and its message `a feature rule with no layer`,
+the code list's last column is headed `surface`, and a symbol is `defined, at
+vertices` - in the reply and in the Survey Code Manager's explanation alike.
+In the window the Code Table's chips are Feature and Surface and the Symbol
+Library's is At vertices.
+
+The last row is one state that had two names once `mode vertex` had gone: a
+linetype naming such a definition was "an `at vertices` symbol, not a
+linestyle" in the Style Manager's "Drawn as", and "a vertex symbol, not a
+linestyle" in `STYLE SET`'s refusal, the Survey Code Manager and the preview's
+notice. They all say the first now.
+
+Three texts were reworded past the table, because the word-for-word change
+read badly:
+
+- the lint's `model "A//B" cannot become a layer` is `layer "A//B" is not a
+  layer path`. Word for word it is "layer ... cannot become a layer"; and
+  "not a valid layer" is what the Survey Code Manager's Layer field says of
+  its two GOOD states, so the refusal shown under that field may not hold it;
+- its `a symbol (mode vertex), drawn at vertices rather than along the line`
+  is `a symbol (at vertices), drawn at each vertex rather than along the
+  line`, so the phrase is not said twice;
+- the rule form's `Goes into a TIN` is `Goes into a surface`.
+
+**One table for the nine section words**: `entity::kSurveySectionWords`
+(`include/katana/entity/survey_map.hpp`). `entity::toString(SurveySection)`
+reads it for every reply and label, and this format's reader and writer read
+it for `sets`, so the two cannot come to differ; a word changed in it is a new
+version of the format ("What may never change without a new version"). The
+Code Table's chips are built from it too - a chip says the word of the first
+section it stands for, with a capital - and not typed beside it, where a copy
+would go on showing the old word after the table changed.
+*Rejected: a second table of words for display* - "Layer and colour" for
+`feature`, say. Two vocabularies were the defect: what the window calls a
+thing is then not what a person may type.
+
+**The older files keep their own words, with their own code.** A survey code
+file is still read and written with `<map_data>` and a style library with
+`worldstyle`; those words are in a table beside that reader and writer
+(`src/katana_archive12d/customisation_words.hpp`), in both directions. The
+three functions that held them in the entity layer for the files' sake - the
+parse of a section's element, and a definition's kind word both ways - are
+gone from it: their only callers were those readers and writers.
+
+**What did not change**: C++ names (`SurveyRule::model`,
+`SurveySection::Map`, `LintKind::NoModel`), property keys, and the objectNames
+tests and headless scripts find widgets by - `ruleModel`, `ruleTinable`, and
+the chips `filterMap`, `filterTinable` and `filterVertexmode`, which keep the
+name their first label gave them while showing the new one
+(`FilterBar::setChipLabel`).
 
 ### The reader is strict
 
@@ -564,6 +648,22 @@ survives being read and written.
   the work that follows, and are recorded in this document then.
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
+- **Some of a rule's members are still shown by another word.** `CODE
+  EXPLAIN` and the Survey Code Manager's explanation say `breakline: Line` or
+  `Point` for what a file holds as `"draw": "line"` or `"point"`, `text style`
+  for `text`, `vertex pipe` and `segment pipe` for `vertexPipe` and
+  `segmentPipe`, and call an entry of `attributes`, `vertexAttributes` or
+  `segmentAttributes` a `string`, `vertex` or `segment` attribute
+  (`fieldSpecs` and `attributeScopes` in
+  `src/katana_cad/customisation/code_table.cpp`). They were not among the
+  words that changed ("The words a rule is shown by"), so for these a person
+  writing a file from an explanation needs the table of members above.
+- **One refusal still says `model`.** Linework that meets a rule whose layer
+  is not a layer name answers "the survey map gives a code a model that is
+  not a valid layer name", with `model=` beside it
+  (`src/katana_cad/customisation/linework.cpp`). No map can hold such a rule
+  (`SurveyMap::add` refuses it), so nobody is shown it; it was left because
+  that file was being rewritten by other work when the words changed.
 - **Explicit zero against "not said"** is not kept for a rule's symbol and
   text numbers, because the model does not keep it (above, "Absent is not a
   default").

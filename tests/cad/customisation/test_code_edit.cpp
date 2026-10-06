@@ -2,6 +2,11 @@
 // new rule for a drawing's code starts from, and attribute lists as text.
 // Every expected string is written out by hand from the rules the test
 // builds, with the working beside it - never captured from a run.
+//
+// The code list's last column is headed "surface", the Katana customisation
+// format's word for what a survey code file calls `tinable`: the three
+// headers below were changed from the table "The words a rule is shown by"
+// in docs/customisation.md, not from what a run printed.
 
 #include <gtest/gtest.h>
 
@@ -49,7 +54,7 @@ TEST(CodeListCsv, EachKeyIsOneRecordOfWhatItResolvesToWithUnsetFieldsLeftEmpty)
     water.comment = "Water main, 6\" cast iron";
     water.group = "SERVICES";
     ASSERT_TRUE(map.add(water).ok());
-    // AC*: a point code, in two sections - map_data and vertex_symbol_data.
+    // AC*: a point code, in two sections - feature and symbol.
     SurveyRule chamber;
     chamber.key = "AC*";
     chamber.model = "FURNITURE";
@@ -69,7 +74,7 @@ TEST(CodeListCsv, EachKeyIsOneRecordOfWhatItResolvesToWithUnsetFieldsLeftEmpty)
     tree.section = SurveySection::VertexSymbol;
     tree.symbol = SurveySymbol{.style = "Tree", .size = 0.0};
     ASSERT_TRUE(map.add(tree).ok());
-    // GS: tinable_data only.
+    // GS: surface only.
     SurveyRule ground;
     ground.key = "GS";
     ground.section = SurveySection::Tinable;
@@ -77,12 +82,12 @@ TEST(CodeListCsv, EachKeyIsOneRecordOfWhatItResolvesToWithUnsetFieldsLeftEmpty)
     ASSERT_TRUE(map.add(ground).ok());
 
     // Key order (byte order): "AC*" < "GS" < "TR*" < "WM*".
-    //   AC*: comment, no group, model, colour, point, "0", symbol, 1.5, no tinable
-    //   GS:  nothing but tinable yes
+    //   AC*: comment, no group, layer, colour, point, "0", symbol, 1.5, no surface
+    //   GS:  nothing but surface yes
     //   TR*: symbol "Tree", and its size 0 written as nothing
     //   WM*: the comment quoted, its quote doubled
     const std::string expected =
-        "code,description,group,layer,colour,line/point,linestyle,symbol,size,tinable\r\n"
+        "code,description,group,layer,colour,line/point,linestyle,symbol,size,surface\r\n"
         "AC*,Access chamber,,FURNITURE,white,point,0,Survey Mark,1.5,\r\n"
         "GS,,,,,,,,,yes\r\n"
         "TR*,,,,,,,Tree,,\r\n"
@@ -105,7 +110,7 @@ TEST(CodeListCsv, AKeyCaughtByALessSpecificKeyTakesWhatThatKeySaysAndItDoesNotSa
     // W*: its own model and group. WM*: its own comment, and W*'s model and
     // group, because lookup("WM*") meets both keys - WM* first.
     EXPECT_EQ(codeListCsv(map),
-              "code,description,group,layer,colour,line/point,linestyle,symbol,size,tinable\r\n"
+              "code,description,group,layer,colour,line/point,linestyle,symbol,size,surface\r\n"
               "W*,,SERVICES,WATER,,,,,,\r\n"
               "WM*,Water main,SERVICES,WATER,,,,,,\r\n");
 }
@@ -113,7 +118,7 @@ TEST(CodeListCsv, AKeyCaughtByALessSpecificKeyTakesWhatThatKeySaysAndItDoesNotSa
 TEST(CodeListCsv, AnEmptyMapIsTheHeaderAlone)
 {
     EXPECT_EQ(codeListCsv(SurveyMap{}),
-              "code,description,group,layer,colour,line/point,linestyle,symbol,size,tinable\r\n");
+              "code,description,group,layer,colour,line/point,linestyle,symbol,size,surface\r\n");
 }
 
 TEST(SuggestedKey, ACodeEndingInAStringNumberGetsAPrefixKeyOnWhatComesBeforeIt)

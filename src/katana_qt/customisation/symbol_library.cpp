@@ -54,8 +54,20 @@ const QStringList& chipLabels()
 {
     static const QStringList labels{QStringLiteral("All"), QStringLiteral("In drawing"),
                                     QStringLiteral("Used by codes"), QStringLiteral("Missing"),
-                                    QStringLiteral("Vertex mode")};
+                                    QStringLiteral("At vertices")};
     return labels;
+}
+
+// What each chip's objectName is made from (FilterBar::chipObjectName): the
+// label it was first shown with. The last was "Vertex mode", and tests and
+// headless scripts find it as "filterVertexmode", so the name outlives the
+// label.
+const QStringList& chipNames()
+{
+    static const QStringList names{QStringLiteral("All"), QStringLiteral("In drawing"),
+                                   QStringLiteral("Used by codes"), QStringLiteral("Missing"),
+                                   QStringLiteral("Vertex mode")};
+    return names;
 }
 
 QString text(const std::string& value)
@@ -139,7 +151,7 @@ QString unitSuffix(katana::entity::StyleUnits units)
 QString modeText(const katana::cad::CatalogueEntry& entry)
 {
     if (entry.atVertices) {
-        return QStringLiteral("vertex: drawn at each vertex of a string");
+        return QStringLiteral("at vertices: drawn at each vertex of a string");
     }
     QStringList reasons;
     if (entry.kind.namedBySurveyRule) {
@@ -284,7 +296,10 @@ void SymbolLibraryDialog::buildUi()
     auto* centre = new QWidget(splitter);
     auto* centreLayout = new QVBoxLayout(centre);
     centreLayout->setContentsMargins(0, 0, 0, 0);
-    filterBar_ = new FilterBar(chipLabels(), centre);
+    filterBar_ = new FilterBar(chipNames(), centre);
+    for (int index = 0; index < chipLabels().size(); ++index) {
+        filterBar_->setChipLabel(index, chipLabels()[index]);
+    }
     filterBar_->setObjectName(QStringLiteral("symbolFilter"));
     filterBar_->setPlaceholderText(QStringLiteral("Search name, group or survey code"));
     model_ = new SymbolGridModel(this);

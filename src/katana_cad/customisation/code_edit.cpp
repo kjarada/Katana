@@ -53,7 +53,7 @@ std::string codeListCsv(const katana::entity::SurveyMap& map)
 {
     std::string out;
     appendRecord(out, {"code", "description", "group", "layer", "colour", "line/point",
-                       "linestyle", "symbol", "size", "tinable"});
+                       "linestyle", "symbol", "size", "surface"});
     for (const CodeTableRow& row : codeTable(map)) {
         const SurveyRule& rule = row.combined;
         std::string breakline;

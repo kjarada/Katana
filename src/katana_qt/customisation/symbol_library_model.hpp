@@ -4,7 +4,7 @@
 // shown as a 64-pixel picture captioned with its name, with a badge for the
 // entities in the drawing that draw it, and filtered by the three things a
 // person narrows a library by - a group in the tree, a chip (All, In
-// drawing, Used by codes, Missing, Vertex mode) and a search over name,
+// drawing, Used by codes, Missing, At vertices) and a search over name,
 // group and survey code.
 //
 // A list model rather than a QSortFilterProxyModel over one: the filter is

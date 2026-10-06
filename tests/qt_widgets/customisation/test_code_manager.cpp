@@ -5,17 +5,24 @@
 //
 // The fixture, counted by hand from test_survey.mapfile (its head comment
 // carries the same counts): 11 rules over 8 keys, in file order
-//   #0 WM* map_data   TEST SERVICES, blue, Line, TEST Water Main
-//   #1 KB* map_data   TEST ROADS, "sui test purple" (no colour table knows it)
-//   #2 AC* map_data   TEST FURNITURE, white, Point, "0"
-//   #3 TR* map_data   TEST VEGETATION, green, Point, "0"
-//   #4 1*  map_data   TEST TEXT, orange
-//   #5 2*  map_data   TEST TEXT, red
-//   #6 PX* map_data   TEST MISC, yellow, Point, "0"
-//   #7 AC* vertex_symbol_data  TEST Survey Mark (mode vertex), 1.5
-//   #8 TR* vertex_symbol_data  TEST Tree (not mode vertex, from a symbol file)
-//   #9 PX* vertex_symbol_data  TEST Missing Symbol (defined nowhere)
-//   #10 *  string_attribute_data  text Source = Katana test fixture
+//   #0 WM* feature    TEST SERVICES, blue, Line, TEST Water Main
+//   #1 KB* feature    TEST ROADS, "sui test purple" (no colour table knows it)
+//   #2 AC* feature    TEST FURNITURE, white, Point, "0"
+//   #3 TR* feature    TEST VEGETATION, green, Point, "0"
+//   #4 1*  feature    TEST TEXT, orange
+//   #5 2*  feature    TEST TEXT, red
+//   #6 PX* feature    TEST MISC, yellow, Point, "0"
+//   #7 AC* symbol     TEST Survey Mark (at vertices), 1.5
+//   #8 TR* symbol     TEST Tree (not at vertices, from a symbol file)
+//   #9 PX* symbol     TEST Missing Symbol (defined nowhere)
+//   #10 *  attributes text Source = Katana test fixture
+//
+// A rule's section and fields are named here by the Katana customisation
+// format's words ("feature", "layer", "surface", "at vertices"), which the
+// survey code tools show since the survey code file's own (`map_data`,
+// `model`, `tinable`, `mode vertex`) left the window. Each expectation holding
+// such a word was changed old to new from the table "The words a rule is
+// shown by" in docs/customisation.md, not from what a run printed.
 
 #include <gtest/gtest.h>
 
@@ -146,7 +153,21 @@ const QTreeWidgetItem* rowWithText(const QTreeWidget& tree, int column, const QS
     return nullptr;
 }
 
-// Selects rule 0 (WM* map_data) and saves it with another layer, through the
+// The Code Table's row for `key`, under whichever group heading it sits.
+const QTreeWidgetItem* keyRow(const QTreeWidget& tree, const QString& key)
+{
+    for (int group = 0; group < tree.topLevelItemCount(); ++group) {
+        const QTreeWidgetItem* heading = tree.topLevelItem(group);
+        for (int row = 0; row < heading->childCount(); ++row) {
+            if (heading->child(row)->text(0) == key) {
+                return heading->child(row);
+            }
+        }
+    }
+    return nullptr;
+}
+
+// Selects rule 0 (WM* feature) and saves it with another layer, through the
 // form's own fields and buttons.
 void editWaterMainLayer(SurveyCodeManagerDialog& dialog, const QString& layer)
 {
@@ -205,7 +226,7 @@ TEST(SurveyCodeManager, TheCodeTableShowsEveryKeyOfTheFixtureUnderItsGroup)
     EXPECT_EQ(text->childCount(), 2);
     EXPECT_NE(rowWithText(*tree, 0, QStringLiteral("(no group)")), nullptr);
     // AC*'s row: its two rules beneath it, and what it resolves to - the
-    // map_data layer and the vertex symbol with its size.
+    // feature rule's layer and the vertex symbol with its size.
     const QTreeWidgetItem* furniture = rowWithText(*tree, 0, QStringLiteral("TEST - FURNITURE"));
     ASSERT_NE(furniture, nullptr);
     ASSERT_EQ(furniture->childCount(), 1);
@@ -214,8 +235,8 @@ TEST(SurveyCodeManager, TheCodeTableShowsEveryKeyOfTheFixtureUnderItsGroup)
     EXPECT_EQ(chamber->text(2), QStringLiteral("TEST FURNITURE"));
     EXPECT_EQ(chamber->text(4), QStringLiteral("Point"));
     EXPECT_EQ(chamber->text(6), QStringLiteral("TEST Survey Mark, 1.5"));
-    EXPECT_EQ(chamber->child(0)->text(0), QStringLiteral("#2 AC* (map_data)"));
-    EXPECT_EQ(chamber->child(1)->text(0), QStringLiteral("#7 AC* (vertex_symbol_data)"));
+    EXPECT_EQ(chamber->child(0)->text(0), QStringLiteral("#2 AC* (feature)"));
+    EXPECT_EQ(chamber->child(1)->text(0), QStringLiteral("#7 AC* (symbol)"));
     // KB*'s colour is a name no table knows: said so, not swatched.
     const QTreeWidgetItem* roads = rowWithText(*tree, 0, QStringLiteral("TEST - ROADS"));
     ASSERT_NE(roads, nullptr);
@@ -236,11 +257,57 @@ TEST(SurveyCodeManager, TheSearchAndTheSectionChipNarrowTheTable)
     search->setText(QStringLiteral("water"));
     EXPECT_EQ(keysShown(*tree), (std::set<std::string>{"WM*"}));
     search->clear();
-    // The Symbol chip: the three keys with a vertex_symbol_data rule.
+    // The Symbol chip: the three keys with a symbol rule.
     auto* symbolChip = bar->findChild<QAbstractButton*>(QStringLiteral("filterSymbol"));
     ASSERT_NE(symbolChip, nullptr);
     symbolChip->click();
     EXPECT_EQ(keysShown(*tree), (std::set<std::string>{"AC*", "PX*", "TR*"}));
+    // A chip says its section's word with a capital, and a chip of several
+    // sections the word of the first: `pipe` for the three pipe sections,
+    // `attributes` for the two attribute ones. All seven are written here by
+    // hand from the table of words in docs/customisation.md, since the dialog
+    // builds them from entity's table. The two first labelled "Map" and
+    // "Tinable" are still found by the objectNames those labels gave them.
+    const std::vector<std::pair<const char*, const char*>> chips{
+        {"filterAll", "All"},
+        {"filterMap", "Feature"},
+        {"filterSymbol", "Symbol"},
+        {"filterText", "Text"},
+        {"filterPipe", "Pipe"},
+        {"filterAttributes", "Attributes"},
+        {"filterTinable", "Surface"},
+    };
+    // The bar's own buttons are its chips (the search field's clear button
+    // is the field's child, not the bar's).
+    EXPECT_EQ(bar->findChildren<QAbstractButton*>(QString(), Qt::FindDirectChildrenOnly).size(), 7)
+        << "a chip this does not name";
+    for (const auto& [name, label] : chips) {
+        const auto* chip = bar->findChild<QAbstractButton*>(QString::fromLatin1(name));
+        ASSERT_NE(chip, nullptr) << name;
+        EXPECT_EQ(chip->text(), QString::fromLatin1(label)) << name;
+    }
+}
+
+TEST(SurveyCodeManager, TheFormOffersTheNineSectionsByTheWordsACustomisationFileHolds)
+{
+    ManagerFixture f;
+    SurveyCodeManagerDialog dialog(f.context);
+    auto* section = child<QComboBox>(dialog, "ruleSection");
+    ASSERT_NE(section, nullptr);
+    QStringList offered;
+    for (int row = 0; row < section->count(); ++row) {
+        offered << section->itemText(row);
+    }
+    // What "sets" takes in a Katana customisation, in the same order.
+    EXPECT_EQ(offered, (QStringList{"feature", "symbol", "text", "pipe", "vertexPipe",
+                                    "segmentPipe", "attributes", "vertexAttributes",
+                                    "surface"}));
+    // The eighth column of the table, between Symbol and Attributes.
+    auto* tree = child<QTreeWidget>(dialog, "codeTree");
+    ASSERT_NE(tree, nullptr);
+    EXPECT_EQ(tree->headerItem()->text(6), QStringLiteral("Symbol"));
+    EXPECT_EQ(tree->headerItem()->text(7), QStringLiteral("Surface"));
+    EXPECT_EQ(tree->headerItem()->text(8), QStringLiteral("Attributes"));
 }
 
 TEST(SurveyCodeManager, TestingACodeShowsTheRuleThatSetItsLayer)
@@ -252,12 +319,11 @@ TEST(SurveyCodeManager, TestingACodeShowsTheRuleThatSetItsLayer)
     ASSERT_NE(testCode, nullptr);
     ASSERT_NE(fields, nullptr);
     testCode->setText(QStringLiteral("WM01"));
-    // WM01 meets WM* (rule #0) and `*` (rule #10); its layer - the "model" field -
-    // comes from #0.
-    const QTreeWidgetItem* model = rowWithText(*fields, 0, QStringLiteral("model"));
+    // WM01 meets WM* (rule #0) and `*` (rule #10); its layer comes from #0.
+    const QTreeWidgetItem* model = rowWithText(*fields, 0, QStringLiteral("layer"));
     ASSERT_NE(model, nullptr);
     EXPECT_EQ(model->text(1), QStringLiteral("TEST SERVICES"));
-    EXPECT_EQ(model->text(2), QStringLiteral("#0 WM* (map_data)"));
+    EXPECT_EQ(model->text(2), QStringLiteral("#0 WM* (feature)"));
     auto* heading = child<QLabel>(dialog, "explainHeading");
     ASSERT_NE(heading, nullptr);
     EXPECT_TRUE(heading->text().contains(QStringLiteral("matched"))) << heading->text().toStdString();
@@ -267,7 +333,47 @@ TEST(SurveyCodeManager, TestingACodeShowsTheRuleThatSetItsLayer)
         rowWithText(*fields, 0, QStringLiteral("attribute (string)"));
     ASSERT_NE(attribute, nullptr);
     EXPECT_EQ(attribute->text(1), QStringLiteral("text Source = Katana test fixture"));
-    EXPECT_EQ(attribute->text(2), QStringLiteral("#10 * (string_attribute_data)"));
+    EXPECT_EQ(attribute->text(2), QStringLiteral("#10 * (attributes)"));
+}
+
+TEST(SurveyCodeManager, ADefinitionDrawnAtVerticesIsSaidToBeAtVerticesWhereverItIsNamed)
+{
+    ManagerFixture f;
+    SurveyCodeManagerDialog dialog(f.context);
+    auto* testCode = child<QLineEdit>(dialog, "testCode");
+    auto* definitions = child<QLabel>(dialog, "explainDefinitions");
+    auto* tree = child<QTreeWidget>(dialog, "codeTree");
+    ASSERT_NE(testCode, nullptr);
+    ASSERT_NE(definitions, nullptr);
+    ASSERT_NE(tree, nullptr);
+    const auto said = [&](const char* line) {
+        return definitions->text().split(QLatin1Char('\n')).contains(QString::fromLatin1(line));
+    };
+    // As a SYMBOL. AC01's (#7) is TEST Survey Mark, which the library draws at
+    // vertices: CODE EXPLAIN's own words for it. TR01's (#8) is TEST Tree,
+    // which it does not, so nothing is added.
+    testCode->setText(QStringLiteral("AC01"));
+    EXPECT_TRUE(said("Symbol TEST Survey Mark: defined, at vertices"))
+        << definitions->text().toStdString();
+    testCode->setText(QStringLiteral("TR01"));
+    EXPECT_TRUE(said("Symbol TEST Tree: defined")) << definitions->text().toStdString();
+
+    // As a LINESTYLE, which it cannot be: a new rule gives the same name as
+    // its linestyle. The table marks the name with what it is, and the
+    // explanation says that and what is drawn instead - by the phrase the
+    // Style Manager's "Drawn as" has for the same state.
+    katana::entity::SurveyRule marks;
+    marks.key = "SM*";
+    marks.model = "TEST MARKS";
+    marks.linestyle = "TEST Survey Mark";
+    ASSERT_TRUE(dialog.addRule(marks).ok());
+    const QTreeWidgetItem* row = keyRow(*tree, QStringLiteral("SM*"));
+    ASSERT_NE(row, nullptr);
+    EXPECT_EQ(row->text(5), QStringLiteral("TEST Survey Mark (an `at vertices` symbol)"));
+    testCode->setText(QStringLiteral("SM01"));
+    EXPECT_TRUE(said("Linestyle TEST Survey Mark: an `at vertices` symbol, not a linestyle: "
+                     "drawn as a plain line"))
+        << definitions->text().toStdString();
 }
 
 TEST(SurveyCodeManager, ACodeTypedInTheWrongCaseIsUnmatchedAndTheKeyItMissedIsNamed)
@@ -331,7 +437,7 @@ TEST(SurveyCodeManager, ApplyPutsTheBufferOnTheDocumentWhereExplainCodeSeesIt)
         [&](std::string_view name) { return f.document.definitionFor(name); },
         [](std::string_view name) { return katana::archive12d::standardColour(name); });
     const auto model = std::find_if(explained.fields.begin(), explained.fields.end(),
-                                    [](const auto& field) { return field.field == "model"; });
+                                    [](const auto& field) { return field.field == "layer"; });
     ASSERT_NE(model, explained.fields.end());
     EXPECT_EQ(model->value, "TEST WATER");
     EXPECT_EQ(model->rule, 0u);
@@ -569,8 +675,8 @@ TEST(SurveyCodeManager, ImportMergesAMapfileIntoTheBufferAndNotIntoTheDocument)
     EXPECT_EQ(dialog.buffer().size(), 11u);
     EXPECT_TRUE(f.document.surveyMap().empty());
     EXPECT_TRUE(dialog.dirty());
-    // A key once for each section it has rules in: 7 map_data keys, 3
-    // vertex_symbol_data keys and the one string_attribute_data key.
+    // A key once for each section it has rules in: 7 feature keys, 3
+    // symbol keys and the one attributes key.
     EXPECT_TRUE(f.loggedContaining(QStringLiteral("11 added, 0 replaced")));
 }
 
@@ -675,8 +781,8 @@ TEST(SurveyCodeManager, OnceItsDocumentHasGoneTheFormSavesEachRuleWithItsOwnName
     document.reset();
     katana::qt::test::processEvents();
 
-    // Saved with no edit, a rule is itself: #4 (1* map_data) keeps linestyle
-    // "0" and #8 (TR* vertex_symbol_data) symbol "TEST Tree" - from the
+    // Saved with no edit, a rule is itself: #4 (1* feature) keeps linestyle
+    // "0" and #8 (TR* symbol) symbol "TEST Tree" - from the
     // fixture's text - not the names the pickers were last loaded with.
     for (const std::size_t index : {std::size_t{4}, std::size_t{8}}) {
         dialog.selectRule(index);
@@ -752,10 +858,10 @@ TEST(SurveyCodeManager, DoubleClickingAnExplainedFieldOpensTheRuleThatSetIt)
     child<QLineEdit>(dialog, "testCode")->setText(QStringLiteral("AC01"));
     auto* fields = child<QTreeWidget>(dialog, "explainFields");
     ASSERT_NE(fields, nullptr);
-    // AC01's symbol comes from #7, AC* vertex_symbol_data.
+    // AC01's symbol comes from #7, AC* symbol.
     const QTreeWidgetItem* symbol = rowWithText(*fields, 0, QStringLiteral("symbol"));
     ASSERT_NE(symbol, nullptr);
-    EXPECT_EQ(symbol->text(2), QStringLiteral("#7 AC* (vertex_symbol_data)"));
+    EXPECT_EQ(symbol->text(2), QStringLiteral("#7 AC* (symbol)"));
     fields->itemDoubleClicked(const_cast<QTreeWidgetItem*>(symbol), 0);
     // The jump waits for the click to return (it rebuilds this list).
     EXPECT_FALSE(dialog.currentRule().has_value());
