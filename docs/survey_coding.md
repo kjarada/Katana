@@ -993,7 +993,8 @@ them, never both, or a kerb the file strung and whose points are also coded
   controller's line record: `survey::SurveyFeature`), taking positions from the
   project's coordinates rather than from point entities, so it works whether
   or not the points were imported. It draws a feature whatever its code's
-  breakline, because the file has said the points are one line.
+  breakline, because the file has said the points are one line - unless
+  `onlyRuledLines` is set, which is how an import uses it (below).
 
 Either returns ONE command - layers, lines, their styling and, when asked,
 the removal of the points - and a report. The lines are styled by calling
@@ -1076,9 +1077,9 @@ code it carries. `coding.createLayers` governs every layer here, as in
 `processLinework`; `import.createLayers` is not read.
 
 Process Linework is the Survey Code Manager's Linework tab, previewed before
-it runs, against the drawing's map. Draw Survey Features is not reachable from
-either front end yet - no command, menu item or dialog - and the survey
-import wizard does not call it; nor has `katana_cli` a linework verb.
+it runs, against the drawing's map. Draw Survey Features has no command, menu
+item or dialog of its own: it runs inside an import that asks for linework
+(next section). `katana_cli` has no linework verb.
 
 **A point is coded by its string name.** `applySurveyCodes` looks a POINT up
 by the string name of its field code, its linework controls left out
@@ -1086,6 +1087,230 @@ by the string name of its field code, its linework controls left out
 so the styling a point gets and the line it joins agree. It used to read the
 whole field, which left an exact-key point with a control token unmatched.
 Any other entity's code is still looked up whole.
+
+**A string name is the code followed by the string number.** A delimited list
+writes the name whole in its code column (`KJ01`). A field file whose records
+keep a code column and a string column gives a point the code alone (`KJ`),
+and the readers that share one project builder put the number only in the
+name of the `survey::SurveyFeature` that strings the point. Looked up by the
+code alone, strings 01 and 02 of `KJ` are one string, and a one-letter code
+`B` in string 12 never meets the key written for it, `B1*`: a key with a
+digit before its `*` answers only a name that includes the string number. So
+the number comes into the drawing beside the code, in the property `string`
+(`kSurveyStringProperty`): `nameSurveyStrings` gives each point the name of
+the first named feature OF ITS OWN CODE as a metadata key, and the import
+bridge writes it like any other. A feature of another code does not name the
+point (a point shot again under a second code is still of its first), and
+neither does a feature with no name.
+
+A survey job writes it only when the import is to be coded or strung AND the
+drawing has survey codes. Rejected: on every import, as the brief first had
+it. A job imported with both options off must be drawn as it always was, and
+so must one finished into a drawing with no customisation - a finish that is
+on by default may not change a drawing it does nothing to, not by one
+property. The cost is under "Not done" below.
+
+Three readers then agree, through one function, `surveyLookupName(map, code,
+string)`:
+
+- `applySurveyCodes` looks an entity up by its code followed by its string
+  number - a point's first token, another entity's whole code - and reports it
+  under that name (`B12`);
+- `processLinework` groups by the same name, so `KJ` in string 01 and `KJ` in
+  string 02 are two lines, and a point written `KJ01` whole joins the first;
+  the line carries what its points carry (the code, and `string` when they
+  have one), so it finds the rule they found;
+- `drawSurveyFeatures`, under `onlyRuledLines`, reads a feature's name as its
+  string number.
+
+The name is tried first and THE CODE ALONE SECOND, when no rule more specific
+than the bare `*` answers the name. Rejected: the name only. An exact key
+(`PABB`) does not match `PABB3`, so numbering a string would lose a rule the
+code had the day before, and a code nobody wrote a rule for would be reported
+once per string instead of once. The code is also what is looked up when the
+name's best rule is a prefix shorter than the code - `PA*`, a rule for a
+family of codes - and the code has an exact key: the family rule answers
+`PABB3`, and would otherwise have coded a numbered `PABB` string in place of
+`PABB`'s own rule. A prefix as long as the code or longer (`KJ*` for `KJ`,
+`B1*` for `B`) was written for the numbered names, and the name is looked up.
+An entity with no `string` property is read exactly as it was before the
+property existed.
+
+### One step from field file to finished drawing: `withSurveyFinish`
+
+Importing a coded field file took three steps a person had to know about -
+import, Apply Survey Codes, Process Linework - each its own undo step, the
+second replacing the selection and the third reachable from one dialog.
+`cad::withSurveyFinish` (`include/katana/cad/survey_finish.hpp`) makes them
+ONE command. It owns the command that draws the points, runs it, and then, as
+`SurveyFinishOptions` say (`codes`, `linework`; both OFF by default, so a
+caller that says nothing imports exactly as before):
+
+1. codes the points that command created (`applySurveyCodes`);
+2. draws the strings the file NUMBERED itself (`drawSurveyFeatures`): the
+   features that have a name and name a point of this import;
+3. strings the other created points by their codes (`processLinework`), so a
+   file with no such features - a delimited list coded `KB01 ST`, a controller
+   file with no string numbers - is strung by its codes.
+
+The decisions, and why:
+
+- **Each step is planned when it runs, and replayed by undo and redo** - what
+  the styling of linework's lines always did. `applySurveyCodes` and
+  `processLinework` read the drawing, and the points are not in it until the
+  import has run. `drawSurveyFeatures` and `processLinework` fix the layers
+  they create when they are planned, and creating a layer that exists is
+  refused: so the features are planned after the coding step has RUN, and the
+  code-strung lines after the features have.
+- **Inside the job command, not around it.** `ImportSurveyJobCommand` takes
+  the options as `SurveyJobImport::finish` and wraps its own points command.
+  Rejected: an outer `Transaction` of the job command, a coding step and a
+  linework step. The reduced coordinates and the features are a local of the
+  job command's `execute` (the project it draws drops the features, and the
+  raw project is let go), so a step added afterwards has nothing to draw
+  from; the job records `createdEntities` from its own points command, so
+  lines drawn by a later step would be nobody's and Remove Job would leave
+  them; and a `Transaction` validates its first part twice, each validation of
+  the job command being a reduction.
+- **It acts on what the import created, and nothing else.** An empty id list
+  means every entity to `applySurveyCodes` and every point to
+  `processLinework`, so neither is ever handed one: an import that drew
+  nothing codes nothing. A string of the file none of whose points the import
+  created is not drawn (`SurveyFeatureOptions::consider`): a longer copy of a
+  file topped up with Skip draws the strings that run through a new point,
+  not every string of the first copy a second time. It never deletes a point
+  (`keepPoints` stays on): a removed point would fail the job's pairing of
+  entities with points, or read later as deleted by hand.
+- **Only what a rule makes a line is drawn** (`onlyRuledLines` on both
+  functions): a string is a line when a rule MORE SPECIFIC than the bare `*`
+  says so. Some readers make a feature of every coded shot, so unfiltered
+  every survey mark of one code is joined to the next; and `lookup` inherits a
+  breakline from `*`, which answers a typo too. A control code alone draws
+  nothing here either - a line no rule describes is a surprise in a step
+  nobody asked for by name, and Process Linework still draws it when asked.
+  The others are reported: `UnplacedFeatureReason::NoRule` / `PointCode`,
+  `UnplacedReason::NoRule` / `PointCode`.
+- **Only a NAMED feature is a string of the file's own.** A field file that
+  keeps a string number beside the code gives each (code, number) a feature
+  named by the number: there the file has said which points are one line. A
+  feature with no name says only what its points' codes say - and a reader
+  whose format has no string numbers makes one per RUN of consecutive shots
+  of a code, so two kerbs shot in sections across a road are runs of one
+  point each, and a kerb with a tree shot in the middle ends at the tree.
+  Such a feature is not drawn; its points go to step 3, where their codes
+  group them as Process Linework would. Rejected: drawing every feature a
+  rule makes a line and leaving every point any feature names out of step 3
+  (what the brief asked for, and what this did at first). It is right only
+  for a reader whose feature IS the whole string: with the run-per-feature
+  reader it drew no kerb at all and reported that the step ran.
+- **A point is in at most one automatic line of its own string.** A point a
+  named feature OF ITS OWN CODE holds is that string's - the test by which
+  `nameSurveyStrings` numbers it - and the feature has answered for it, with
+  a line or with the reason there is none, so it is left out of step 3
+  (`SurveyFinishReport::pointsInFeatures`): its code would say the same of
+  it a second time. A named feature of ANOTHER code - a line keyed on a
+  controller between two kerb points and coded as a boundary - is drawn or
+  not on its own and leaves its ends in their own code's string. A feature
+  line carries the code and `string`, and is reported as the two (`KB 32`),
+  not by the number.
+- **A line runs through its points where they stand.** A vertex of a file's
+  string is taken from the point's entity when this import, or the job being
+  re-adjusted, has one in the drawing, so a point the person moved (and a
+  re-adjustment keeps where they put it) is still on its line, as it is on a
+  line strung by code. A point with no such entity is where the file puts
+  it: the drawing's control, a point a policy skipped, one deleted by hand.
+- **A step with nothing to do is not an error, and says why**
+  (`SurveyFinishSkip`: `no-survey-codes`, `no-codes-in-file`,
+  `no-rule-matches`, `no-points`). With no rule for any code the coding plan
+  is dropped whole - also the fallback rule's attributes that a `CODE` run
+  would attach - and an empty map skips the linework too: with no map nothing
+  says which codes are lines. With no survey codes loaded the drawing is
+  EXACTLY the one the import makes without the finish; with codes loaded and
+  no rule for the file's codes it differs by the `string` property alone. A
+  real failure (control codes spelled alike, a feature naming a point the
+  project lacks) fails the WHOLE import, points included. Rejected: drawing
+  the points and reporting the failed step, because an import that asked for
+  codes and silently got none looks like one whose codes matched nothing.
+
+`SurveyFinishReport` says, per step, what ran or why not: the points coded,
+matched and with no rule (`codesWithNoRule`), the layers and styles created,
+the lines drawn (`lines`: the reply's point count is `points`, never the
+created list, which now holds the lines too), and the features and points in
+no line with their reasons. `describe` gives all of it as sentences, for a
+log. `finishWarnings` gives only the sentences a person may have to act on -
+a step that was asked for and had nothing to go on, codes with no rule, a
+string or a point left out of every line for a reason other than being a
+point code or uncoded, a job's lines deleted or left stale - and those are
+what a job adds to its own report's warnings. Rejected: adding every
+sentence there. The report's warnings are what `SURVEY IMPORT` counts and
+lists as `reduction_warnings`, so an import that coded and strung everything
+would have answered with two warnings.
+
+**The job owns its lines.** `SurveyJob::createdEntities` holds the points and
+then the lines; `placedPoints` stays the points alone. Remove Job deletes
+both. The job's option text (`katana-survey-import-options=1`,
+`writeSurveyJobOptions` / `readSurveyJobOptions`) gains `apply-codes` and
+`draw-linework`, written only when on, and ABSENT IS OFF with the version
+unchanged: a job imported before the keys existed was not coded, and
+re-adjusting it must not start to. What is stored is what was asked for,
+whether or not a step then had anything to do.
+
+**Re-adjusting a finished job** finishes it again in its one undo step, as its
+stored text says: the points the run draws for the first time are coded (the
+others keep what they have), and - when the run changes the drawing at all -
+the job's lines are strung again from the new reduction, the file's numbered
+strings first and then the job's other points by code.
+
+- A line the run still makes is REDRAWN IN PLACE: the earlier line that
+  carries the same code and string number is the same entity afterwards - its
+  id, its layer, its style, its other properties - with the new vertices and
+  heights (`LineworkOptions::earlierLines`, `LineworkString::redrawn`). A line
+  none of whose points moved is not touched. Rejected: deleting the job's
+  lines and drawing them again, which this did at first. Every command
+  carries the associative update, which removes a label whose target is gone
+  and a smart leader with it and detaches a dimension: one point moved by a
+  millimetre took every label off every line of the job, with the place it
+  had been dragged to and the text typed over it, and the report said only
+  that lines "were deleted". It also undid a layer or a style the person had
+  given a line, which a re-adjustment never does to a point.
+- A line the run no longer makes is deleted, and what follows it goes with
+  it, as with any deleted entity. The report says how many, as a warning.
+- The earlier lines are touched only when the linework step runs: with no
+  survey codes loaded, or no rule for any code, they are left, and the
+  report says they are as the earlier adjustment drew them and how many.
+
+Whether is the job's; HOW is the caller's (`SurveyJobReadjustment::finish`:
+the colour lookup, the control codes, the order), because a function and the
+session's control codes are not job data.
+
+Not done:
+
+- No verb, wizard or dialog sets the options yet, so in every front end an
+  import still draws points only; the Survey Jobs dialog does not pass
+  `SurveyJobReadjustment::finish`, so a new point of a finished job is styled
+  without a colour lookup (and gets a second style when its rule names a
+  colour).
+- **A job keeps no string numbers unless it was finished with survey codes
+  loaded.** Imported with both options off, or into a drawing with no
+  customisation, its points carry the code alone, and nothing adds the number
+  later: the features are the reduction's and are not kept with the job, and
+  a re-adjustment numbers only a job stored as finished. `CODE` by hand then
+  looks `B` up, not `B12`, and never finds `B1*`; `LINEWORK` by hand joins
+  `KJ` 01 to `KJ` 02. Removing the job and importing it again, finished, is
+  the way to get them.
+- Where a job's line RUNS is the job's: a line the person reshaped is redrawn
+  by a re-adjustment like any other, lines having no record of how the job
+  left them as points have.
+- A point deleted by hand that `Keep` leaves deleted is still a vertex of a
+  string the file numbered, where the new run puts it (the report counts
+  those vertices), and is passed by on a string strung by code, which has
+  only the entities to read. The two kinds of line differ there.
+- A named line record whose code IS its end points' code numbers those ends
+  as its own string, so the rest of that code's points are strung without
+  them.
+- Process Linework run by hand over a finished job's points draws their
+  lines a second time - a job's `draw-linework` and its `placedPoints` are
+  what a verb can leave them out by.
 
 ## The Survey Code Manager
 
