@@ -23,6 +23,7 @@
 #include "katana/cad/plot.hpp"
 #include "katana/cad/style_drawing.hpp"
 #include "katana/cad/view_transform.hpp"
+#include "katana/entity/colour_names.hpp"
 
 class QPainter;
 
@@ -41,6 +42,14 @@ struct StylePaintTarget {
     // Every stroke in the entity pen, library pens ignored - the selection
     // highlight, which must read as one colour whatever the definition says.
     bool entityPenOnly = false;
+    // The colour names of the session's customisation
+    // (Document::customisationState().colours), which a library pen is
+    // resolved against before the standard names: the Document's one resolver
+    // (cad::resolveColour), reached through the table because nothing here
+    // sees a Document. Null: the standard names alone, which is all a
+    // painter handed a library and no session has. Borrowed for the paint,
+    // as `paper` is.
+    const katana::entity::ColourTable* colours = nullptr;
 };
 
 // Style texts at or above this many pixels are drawn at it: the same ceiling
@@ -54,13 +63,15 @@ inline constexpr double kMaximumStyleTextPixels = 2000.0;
 // cost of a zoomed-out drawing full of labelled linestyles.
 inline constexpr double kMinimumStyleTextPixels = 3.0;
 
-// The pen a library `colour` names, on the entity's pen: its colour from the
-// standard colour names (archive12d::standardColour), through the paper colour rule
-// when `paper` is given, with the entity pen's width, cap, style and alpha
-// kept. An empty name, or one the standard names do not know, is the entity
-// pen unchanged rather than a guess.
+// The pen a library `colour` names, on the entity's pen: its colour from
+// `colours` when given, then from the standard colour names
+// (entity::resolveColour), through the paper colour rule when `paper` is
+// given, with the entity pen's width, cap, style and alpha kept. An empty
+// name, or one neither knows ("pen 035"), is the entity pen unchanged rather
+// than a guess.
 [[nodiscard]] QPen stylePenFor(const QPen& entityPen, const std::string& pen,
-                               const katana::cad::PlotSettings* paper);
+                               const katana::cad::PlotSettings* paper,
+                               const katana::entity::ColourTable* colours = nullptr);
 
 void paintStyleText(QPainter& painter, const katana::cad::StyleTextMark& text,
                     const StylePaintTarget& target);

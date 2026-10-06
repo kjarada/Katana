@@ -13,7 +13,9 @@
 // Pictures are cached by (kind, name, pixel size, ground colour, library
 // generation). The generation, never a LineStyle*, is what keeps a picture
 // honest: Document::setStyleLibrary moves it, and the first request after
-// that drops every picture of the old library.
+// that drops every picture of the old library. A picture bakes in the colours
+// its pens resolved to, and the generation covers those too: a Document's
+// colour table moves it (Document::setColourTable).
 //
 // GUI thread only. A QImage could be painted elsewhere, but its fonts and a
 // Document may not be reached off the GUI thread, and a picker asks for a few
@@ -32,6 +34,7 @@
 #include <QSize>
 
 #include "katana/cad/style_resolver.hpp"
+#include "katana/entity/colour_names.hpp"
 #include "katana/entity/style_library.hpp"
 
 namespace katana::cad {
@@ -67,10 +70,16 @@ class DefinitionThumbnails {
     // black and a white library pen prints black (cad::paperColour, decision D7) -
     // and on a dark ground it is the screen, with a light entity pen. An
     // empty size gives a null image.
-    [[nodiscard]] DefinitionThumbnail thumbnail(const katana::entity::StyleLibrary& library,
-                                                std::uint64_t generation, ThumbnailKind kind,
-                                                std::string_view name, QSize size,
-                                                QColor ground);
+    //
+    // `colours` is the session's own colour names, which a pen inside a
+    // definition is resolved against before the standard ones
+    // (StylePaintTarget::colours); the Document form passes its
+    // customisation's. A caller that passes a table passes the generation
+    // that moves with it, as a Document's does.
+    [[nodiscard]] DefinitionThumbnail
+    thumbnail(const katana::entity::StyleLibrary& library, std::uint64_t generation,
+              ThumbnailKind kind, std::string_view name, QSize size, QColor ground,
+              const katana::entity::ColourTable* colours = nullptr);
     [[nodiscard]] DefinitionThumbnail thumbnail(const katana::cad::Document& document,
                                                 ThumbnailKind kind, std::string_view name,
                                                 QSize size, QColor ground);
@@ -91,6 +100,6 @@ class DefinitionThumbnails {
 [[nodiscard]] DefinitionThumbnail paintDefinitionThumbnail(
     katana::cad::DefinitionCache& definitions, const katana::entity::StyleLibrary& library,
     std::uint64_t generation, ThumbnailKind kind, std::string_view name, QSize size,
-    QColor ground);
+    QColor ground, const katana::entity::ColourTable* colours = nullptr);
 
 } // namespace katana::qt

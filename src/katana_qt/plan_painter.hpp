@@ -73,6 +73,7 @@
 #include "katana/cad/view_transform.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/annotation.hpp"
+#include "katana/entity/colour_names.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/style_library.hpp"
 #include "katana/geometry/point_splat.hpp"
@@ -98,6 +99,12 @@ struct PlanSource {
     // Document::libraryGeneration: what the cache's flattened definitions
     // are keyed on, since a library can be replaced under the same address.
     std::uint64_t libraryGeneration = 0;
+    // The colour names of the session's customisation, which a pen inside a
+    // library definition is resolved against before the standard names
+    // (StylePaintTarget::colours). Null: the standard names alone. A change
+    // of the table moves libraryGeneration too, which is what drops a symbol
+    // stamp painted with the old colours.
+    const katana::entity::ColourTable* colours = nullptr;
     const katana::geometry::SpatialIndex* index = nullptr;
     const katana::cad::SelectionSet* selection = nullptr;
     const katana::interop::ReferenceData* reference = nullptr;

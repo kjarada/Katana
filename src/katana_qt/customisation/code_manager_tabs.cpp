@@ -30,7 +30,7 @@
 #include "customisation/code_manager.hpp"
 #include "customisation/filter_bar.hpp"
 #include "customisation/name_picker.hpp"
-#include "katana/archive12d/domain.hpp"
+#include "katana/cad/colour_lookup.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/tables.hpp"
 
@@ -326,10 +326,7 @@ void SurveyCodeManagerDialog::rebuildIssues()
     issues_ = doc == nullptr
                   ? std::vector<katana::cad::LintIssue>{}
                   : katana::cad::lintSurveyMap(
-                        buffer_, doc->styleLibrary(),
-                        [](std::string_view name) {
-                            return katana::archive12d::standardColour(name);
-                        },
+                        buffer_, doc->styleLibrary(), katana::cad::colourLookup(*doc),
                         [](std::string_view name) {
                             return katana::entity::isBuiltInSymbolName(name);
                         });
@@ -464,9 +461,12 @@ katana::cad::SurveyCodingOptions SurveyCodeManagerDialog::codingOptions() const
     if (applySelection_->isChecked() && doc != nullptr) {
         options.ids = doc->selection().ids();
     }
-    options.colourOf = [](std::string_view name) {
-        return katana::archive12d::standardColour(name);
-    };
+    // The drawing's own resolver: its customisation's colours, then the
+    // standard names. It asks the Document it was made from, which is the
+    // one the planned command then runs on.
+    if (doc != nullptr) {
+        options.colourOf = katana::cad::colourLookup(*doc);
+    }
     options.createLayers = applyCreateLayers_->isChecked();
     options.createStyles = applyCreateStyles_->isChecked();
     options.setAttributes = applySetAttributes_->isChecked();
@@ -773,9 +773,9 @@ katana::cad::LineworkOptions SurveyCodeManagerDialog::lineworkOptions() const
     options.keepPoints = lineworkKeepPoints_->isChecked();
     options.codes = lineworkCodes();
     options.chordTolerance = lineworkChord_->value() / 1000.0; // mm on the form, metres here
-    options.coding.colourOf = [](std::string_view name) {
-        return katana::archive12d::standardColour(name);
-    };
+    if (doc != nullptr) {
+        options.coding.colourOf = katana::cad::colourLookup(*doc);
+    }
     return options;
 }
 
