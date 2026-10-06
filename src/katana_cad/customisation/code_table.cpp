@@ -182,14 +182,56 @@ const std::vector<AttributeScope>& attributeScopes()
     return !attribute.value.empty() && attribute.value.front() == '$';
 }
 
-// Whether a definition may be drawn at a vertex (decision D3). A definition of
-// unknown origin is given the benefit of the doubt: most symbols the
-// reference mapfiles name are not `mode vertex`, and without a file name
-// nothing else says what they are.
+// Whether a definition may be drawn at a vertex (decision D3): it is `mode
+// vertex`, or its customisation lists it as a symbol. There is no third case.
+// A definition read from nowhere known was once given the benefit of the
+// doubt, because the sign of a symbol was the NAME of the file it came from
+// and such a definition had none; now every definition says which it is, so
+// one that does not say "symbol" is a linestyle.
 [[nodiscard]] bool symbolCapable(const LineStyle& definition)
 {
-    return definition.atVertices || definition.source.empty() ||
-           katana::core::lowered(definition.source).find("symbol") != std::string::npos;
+    return definition.atVertices || definition.symbol;
+}
+
+// What a rule holds that its section does not use, in the words a person
+// knows the fields by; empty when everything it holds belongs. Each section
+// is about one aspect of a code, and the table is what the survey code file
+// writer enforced (it refused to write such a rule, having no element for the
+// field): where the code goes in `Map`; its symbol in `VertexSymbol`; its
+// text in `VertexTextStyle`; the three pipes each in their own; the string's
+// attributes in `Pipe` and `StringAttribute`, each vertex's in `VertexPipe`
+// and `VertexAttribute`, each segment's in `SegmentPipe`; `Tinable`'s flag in
+// its own. A comment may sit on any rule.
+[[nodiscard]] std::vector<std::string> fieldsOutsideSection(const SurveyRule& rule)
+{
+    const SurveySection s = rule.section;
+    std::vector<std::string> outside;
+    const auto unless = [&](bool belongs, bool held, const char* field) {
+        if (held && !belongs) {
+            outside.emplace_back(field);
+        }
+    };
+    const bool map = s == SurveySection::Map;
+    unless(map, !rule.model.empty(), "model");
+    unless(map, !rule.colour.empty(), "colour");
+    unless(map, !rule.linestyle.empty(), "linestyle");
+    unless(map, !rule.weight.empty(), "weight");
+    unless(map, !rule.group.empty(), "group");
+    unless(map, rule.breakline.has_value(), "breakline");
+    unless(s == SurveySection::Tinable, rule.tinable.has_value(), "tinable");
+    unless(s == SurveySection::VertexSymbol, rule.hide.has_value(), "hide");
+    unless(s == SurveySection::VertexSymbol, rule.symbol.has_value(), "symbol");
+    unless(s == SurveySection::VertexTextStyle, rule.textStyle.has_value(), "text style");
+    unless(s == SurveySection::Pipe, rule.pipe.has_value(), "pipe");
+    unless(s == SurveySection::VertexPipe, rule.vertexPipe.has_value(), "vertex pipe");
+    unless(s == SurveySection::SegmentPipe, rule.segmentPipe.has_value(), "segment pipe");
+    unless(s == SurveySection::Pipe || s == SurveySection::StringAttribute,
+           !rule.attributes.empty(), "string attributes");
+    unless(s == SurveySection::VertexPipe || s == SurveySection::VertexAttribute,
+           !rule.vertexAttributes.empty(), "vertex attributes");
+    unless(s == SurveySection::SegmentPipe, !rule.segmentAttributes.empty(),
+           "segment attributes");
+    return outside;
 }
 
 [[nodiscard]] std::string inQuotes(std::string_view text)
@@ -445,6 +487,8 @@ const char* toString(LintKind kind)
         return "shadowed rule";
     case LintKind::KeyWhitespace:
         return "key whitespace";
+    case LintKind::FieldOutsideSection:
+        return "field outside section";
     }
     return "issue";
 }
@@ -484,8 +528,12 @@ std::vector<LintIssue> lintSurveyRule(const SurveyRule& rule, std::size_t index,
                            " is in no loaded library and is not one Katana draws itself");
             }
         } else if (!symbolCapable(*found)) {
+            // Where it is listed so, when the definition says where it is
+            // from: one made in a session names no customisation.
             report(LintSeverity::Warning, LintKind::SymbolNotSymbolCapable,
-                   "symbol " + inQuotes(name) + " is a linestyle from " + inQuotes(found->source) +
+                   "symbol " + inQuotes(name) + " is a linestyle" +
+                       (found->source.empty() ? std::string{}
+                                              : " from " + inQuotes(found->source)) +
                        ", not a symbol");
         }
     }
@@ -520,6 +568,18 @@ std::vector<LintIssue> lintSurveyRule(const SurveyRule& rule, std::size_t index,
         report(LintSeverity::Error, LintKind::KeyWhitespace,
                "key " + inQuotes(rule.key) +
                    " has blanks around it, so it matches no code a surveyor types");
+    }
+    if (const std::vector<std::string> outside = fieldsOutsideSection(rule); !outside.empty()) {
+        // A warning, not an error: a lookup takes a field from whichever rule
+        // says it, so the rule applies. But a rule is known by its key IN ITS
+        // SECTION, and that is what a load replaces - so a field outside its
+        // section comes and goes with rules it has nothing to do with.
+        report(LintSeverity::Warning, LintKind::FieldOutsideSection,
+               "holds " + joined(outside) + ", which a " +
+                   std::string(katana::entity::toString(rule.section)) +
+                   " rule does not use: a load that replaces this key's " +
+                   std::string(katana::entity::toString(rule.section)) +
+                   " rules replaces " + (outside.size() == 1 ? "it" : "them") + " too");
     }
     std::stable_sort(issues.begin(), issues.end(),
                      [](const LintIssue& a, const LintIssue& b) { return a.kind < b.kind; });

@@ -26,8 +26,23 @@ LineStyle definition(const char* name, const char* source)
     return style;
 }
 
-CustomisationSource library(const char* name) { return {name, true}; }
-CustomisationSource mapfile(const char* name) { return {name, false}; }
+// A source is {name, brought definitions, brought rules, notice}: a style
+// library brought definitions and a survey code file rules. (One `library`
+// bool said which before one customisation could bring both.)
+CustomisationSource library(const char* name) { return {name, true, false, {}}; }
+CustomisationSource mapfile(const char* name) { return {name, false, true, {}}; }
+// One Katana customisation, which brings both.
+CustomisationSource whole(const char* name) { return {name, true, true, {}}; }
+
+// No rename is in play. customisationNotLoaded, noteCustomisationLoaded and
+// customisationRecordToSave each had a form that took no table and used the
+// built-in's, and five tests here - of names no table knows - called it. The
+// built-in's table now answers with the name of whatever customisation THIS
+// program has compiled in, so those forms made a test's answer a matter of
+// which machine built it, and answered a session with another built-in than
+// its own (the seam's); they are gone, the Document passes its own table, and
+// these tests say what they always meant. No expectation changed.
+const std::vector<katana::cad::RenamedSource> kNoRenames{};
 
 } // namespace
 
@@ -101,9 +116,10 @@ TEST(CustomisationRecord, OpeningNamesTheRecordedFilesThatAreNotLoadedInTheProje
     const std::vector<CustomisationSource> loaded{library("linestyles.4d")};
     const std::vector<std::string> recorded{"survey.mapfile", "linestyles.4d", "symbols.4d",
                                             "survey.mapfile"};
-    EXPECT_EQ(katana::cad::customisationNotLoaded(recorded, styles, loaded),
+    EXPECT_EQ(katana::cad::customisationNotLoaded(recorded, styles, loaded, kNoRenames),
               (std::vector<std::string>{"survey.mapfile", "symbols.4d"}));
-    EXPECT_TRUE(katana::cad::customisationNotLoaded({"linestyles.4d"}, styles, loaded).empty());
+    EXPECT_TRUE(
+        katana::cad::customisationNotLoaded({"linestyles.4d"}, styles, loaded, kNoRenames).empty());
 }
 
 // The reviewer's case: session 1 saved with test_symbols.4d loaded; session 2
@@ -120,12 +136,14 @@ TEST(CustomisationRecord, ASaveKeepsTheRecordedFilesTheOpenFoundMissingAndNoLoad
         loaded, {library("linestyles.4d"), mapfile("survey.mapfile")}, false, false);
     const std::vector<std::string> recorded{"linestyles.4d", "test_symbols.4d",
                                             "survey.mapfile"};
-    std::vector<std::string> missing = katana::cad::customisationNotLoaded(recorded, styles, loaded);
+    std::vector<std::string> missing =
+        katana::cad::customisationNotLoaded(recorded, styles, loaded, kNoRenames);
     ASSERT_EQ(missing, (std::vector<std::string>{"test_symbols.4d"}));
-    EXPECT_EQ(katana::cad::customisationRecordToSave(recorded, missing, styles, loaded),
-              (std::vector<std::string>{"linestyles.4d", "survey.mapfile", "test_symbols.4d"}));
+    EXPECT_EQ(
+        katana::cad::customisationRecordToSave(recorded, missing, styles, loaded, kNoRenames),
+        (std::vector<std::string>{"linestyles.4d", "survey.mapfile", "test_symbols.4d"}));
     // An unrelated load judges nothing it did not bring.
-    katana::cad::noteCustomisationLoaded(missing, {mapfile("other.mapfile")});
+    katana::cad::noteCustomisationLoaded(missing, {mapfile("other.mapfile")}, kNoRenames);
     EXPECT_EQ(missing, (std::vector<std::string>{"test_symbols.4d"}));
 }
 
@@ -140,14 +158,16 @@ TEST(CustomisationRecord, AFileLoadedSinceTheOpenAndThenReplacedIsNoLongerRecord
     ASSERT_TRUE(styles.add(definition("A", "new.4d")).ok());
     std::vector<CustomisationSource> loaded;
     const std::vector<std::string> recorded{"old.4d"};
-    std::vector<std::string> missing = katana::cad::customisationNotLoaded(recorded, styles, loaded);
+    std::vector<std::string> missing =
+        katana::cad::customisationNotLoaded(recorded, styles, loaded, kNoRenames);
     ASSERT_EQ(missing, (std::vector<std::string>{"old.4d"}));
     katana::cad::recordCustomisationLoad(loaded, {library("old.4d")}, false, false);
-    katana::cad::noteCustomisationLoaded(missing, {library("old.4d")});
+    katana::cad::noteCustomisationLoaded(missing, {library("old.4d")}, kNoRenames);
     EXPECT_TRUE(missing.empty());
     katana::cad::recordCustomisationLoad(loaded, {library("new.4d")}, true, false);
-    EXPECT_EQ(katana::cad::customisationRecordToSave(recorded, missing, styles, loaded),
-              (std::vector<std::string>{"new.4d"}));
+    EXPECT_EQ(
+        katana::cad::customisationRecordToSave(recorded, missing, styles, loaded, kNoRenames),
+        (std::vector<std::string>{"new.4d"}));
 }
 
 // A missing list left from an earlier drawing keeps nothing the current one
@@ -156,7 +176,8 @@ TEST(CustomisationRecord, AMissingListFromAnEarlierDrawingAddsNothingToANewOne)
 {
     StyleLibrary styles;
     const std::vector<CustomisationSource> loaded{mapfile("survey.mapfile")};
-    EXPECT_EQ(katana::cad::customisationRecordToSave({}, {"test_symbols.4d"}, styles, loaded),
+    EXPECT_EQ(katana::cad::customisationRecordToSave({}, {"test_symbols.4d"}, styles, loaded,
+                                                     kNoRenames),
               (std::vector<std::string>{"survey.mapfile"}));
 }
 
@@ -243,7 +264,9 @@ TEST(CustomisationRecord, ARecordedFormerNameIsAnsweredByTheFileThatNowHasItsPla
     const std::vector<std::string> missing =
         katana::cad::customisationNotLoaded(recorded, styles, loaded, renamed);
     EXPECT_EQ(missing, (std::vector<std::string>{"mine.4d"}));
-    EXPECT_EQ(katana::cad::customisationRecordToSave(recorded, missing, styles, loaded),
+    // The save is given the table the open was, as one session gives both:
+    // this call had none, and took the built-in's.
+    EXPECT_EQ(katana::cad::customisationRecordToSave(recorded, missing, styles, loaded, renamed),
               (std::vector<std::string>{"linestyles.4d", "survey_codes.mapfile", "mine.4d"}));
 }
 
@@ -267,36 +290,158 @@ TEST(CustomisationRecord, AFormerNameWhoseFileIsNotLoadedNowIsMissingAsRecorded)
               (std::vector<std::string>{"old_lines.4d"}));
 }
 
-// The built-in customisation's renames: one for each of its files, in load
-// order, each an earlier name that is not the name it has now. Nothing here
-// can spell the earlier names; that each is answered is the test above.
-TEST(CustomisationRecord, TheBuiltInCustomisationsFourFilesEachAnswerForTheNameTheyHadBefore)
+// The built-in customisation's renames. This test pinned FOUR renames, each
+// giving one of the four file names the built-in then had ("linestyles.4d"
+// ...), and that a record of those four names was missing nothing when the
+// four files were loaded. Both changed with the built-in itself, by the
+// decision that made it ONE Katana customisation with a name of its own:
+//
+// * every earlier name is answered by the name the built-in declares, which
+//   the caller gives - no file name is the answer any more; and
+// * the four general file names are themselves earlier names now, so the
+//   table holds eight: the four first names, known only by hash, then the
+//   four general ones, which can be spelt and are checked here against their
+//   own hashes.
+//
+// Nothing here can spell the first four; that a rename is answered is the
+// tests above.
+TEST(CustomisationRecord, TheBuiltInsEightEarlierNamesAreEachAnsweredByTheNameItDeclares)
 {
-    const auto renames = katana::cad::builtinRenames();
-    std::vector<std::string> now;
+    const auto renames = katana::cad::builtinRenames("Built In Test");
+    ASSERT_EQ(renames.size(), 8U);
     std::set<std::uint64_t> former;
     for (const katana::cad::RenamedSource& rename : renames) {
-        now.emplace_back(rename.now);
+        EXPECT_EQ(rename.now, "Built In Test");
         former.insert(rename.formerName);
-        EXPECT_NE(rename.formerName, katana::cad::sourceNameHash(rename.now)) << rename.now;
-        EXPECT_NE(rename.formerName, katana::cad::sourceNameHash("")) << rename.now;
+        EXPECT_NE(rename.formerName, katana::cad::sourceNameHash(rename.now));
+        EXPECT_NE(rename.formerName, katana::cad::sourceNameHash(""));
     }
-    EXPECT_EQ(now, (std::vector<std::string>{"linestyles.4d", "survey_codes.mapfile",
-                                             "survey_codes_names.mapfile", "symbols.4d"}));
-    EXPECT_EQ(former.size(), renames.size()) << "no two files had one name";
+    EXPECT_EQ(former.size(), renames.size()) << "no two earlier names are one";
 
-    // And a project that recorded the names the files have now is missing
-    // nothing when they are loaded.
+    // Two sets of four, each in the order the files loaded in.
+    const std::vector<std::string> general{"linestyles.4d", "survey_codes.mapfile",
+                                           "survey_codes_names.mapfile", "symbols.4d"};
+    for (std::size_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(renames[i].set, 0) << i;
+        EXPECT_EQ(renames[4 + i].set, 1) << i;
+        EXPECT_EQ(renames[4 + i].formerName, katana::cad::sourceNameHash(general[i]))
+            << general[i];
+    }
+}
+
+// The case the table was extended for. A project saved while the built-in was
+// four files records their four general names; the built-in is one
+// customisation now, loaded under its own name. By hand: each of the four is a
+// plain name, and each stands beside three other names of its set, so all four
+// are answered by "Built In Test", which is loaded (it brought rules, and
+// definition "A" still comes from it) - nothing is missing, and the save
+// records the one name the drawing is drawn with now.
+TEST(CustomisationRecord, ARecordOfTheFourGeneralNamesIsAnsweredByTheBuiltInUnderItsOwnName)
+{
+    const auto renames = katana::cad::builtinRenames("Built In Test");
+    const std::vector<std::string> recorded{"linestyles.4d", "survey_codes.mapfile",
+                                            "survey_codes_names.mapfile", "symbols.4d"};
     StyleLibrary styles;
-    ASSERT_TRUE(styles.add(definition("A", "linestyles.4d")).ok());
-    ASSERT_TRUE(styles.add(definition("B", "symbols.4d")).ok());
-    std::vector<CustomisationSource> loaded;
-    katana::cad::recordCustomisationLoad(
-        loaded,
-        {library("linestyles.4d"), mapfile("survey_codes.mapfile"),
-         mapfile("survey_codes_names.mapfile"), library("symbols.4d")},
-        false, false);
-    EXPECT_TRUE(katana::cad::customisationNotLoaded(now, styles, loaded).empty());
+    ASSERT_TRUE(styles.add(definition("A", "Built In Test")).ok());
+    const std::vector<CustomisationSource> loaded{whole("Built In Test")};
+
+    const std::vector<std::string> missing =
+        katana::cad::customisationNotLoaded(recorded, styles, loaded, renames);
+    EXPECT_TRUE(missing.empty());
+    EXPECT_EQ(katana::cad::customisationRecordToSave(recorded, missing, styles, loaded, renames),
+              (std::vector<std::string>{"Built In Test"}));
+
+    // Where the built-in is NOT loaded, what the four files brought is not
+    // there, and the warning names them as the project recorded them.
+    EXPECT_EQ(katana::cad::customisationNotLoaded(recorded, StyleLibrary{}, {}, renames),
+              recorded);
+    const std::vector<CustomisationSource> other{whole("Council")};
+    EXPECT_EQ(katana::cad::customisationNotLoaded(recorded, StyleLibrary{}, other, renames),
+              recorded);
+
+    // Opened without it and then given it: loading the built-in clears all
+    // four, as loading the four files did.
+    std::vector<std::string> atOpen = recorded;
+    katana::cad::noteCustomisationLoaded(atOpen, loaded, renames);
+    EXPECT_TRUE(atOpen.empty());
+}
+
+// A general name is one anybody's own file may have. By hand: "symbols.4d"
+// recorded alone has no other earlier name of its set beside it, so no rename
+// answers it; it is not loaded under its own name either, so it is missing,
+// and the save keeps it. Recorded twice it is still alone. Beside ONE other
+// general name it is the built-in's record, and both are answered.
+TEST(CustomisationRecord, ALoneGeneralNameIsStillSomeonesOwnFileAndTwoTogetherAreTheBuiltIns)
+{
+    const auto renames = katana::cad::builtinRenames("Built In Test");
+    StyleLibrary styles;
+    ASSERT_TRUE(styles.add(definition("A", "Built In Test")).ok());
+    const std::vector<CustomisationSource> loaded{whole("Built In Test")};
+
+    for (const std::vector<std::string>& recorded :
+         {std::vector<std::string>{"symbols.4d"},
+          std::vector<std::string>{"symbols.4d", "symbols.4d"},
+          std::vector<std::string>{"Built In Test", "symbols.4d"}}) {
+        const std::vector<std::string> missing =
+            katana::cad::customisationNotLoaded(recorded, styles, loaded, renames);
+        EXPECT_EQ(missing, (std::vector<std::string>{"symbols.4d"}));
+        EXPECT_EQ(
+            katana::cad::customisationRecordToSave(recorded, missing, styles, loaded, renames),
+            (std::vector<std::string>{"Built In Test", "symbols.4d"}));
+        // Loading the built-in does not bring a person's own file.
+        std::vector<std::string> atOpen = missing;
+        katana::cad::noteCustomisationLoaded(atOpen, loaded, renames);
+        EXPECT_EQ(atOpen, (std::vector<std::string>{"symbols.4d"}));
+    }
+
+    const std::vector<std::string> pair{"symbols.4d", "linestyles.4d"};
+    EXPECT_TRUE(katana::cad::customisationNotLoaded(pair, styles, loaded, renames).empty());
+}
+
+// Names of two SETS beside each other are evidence of neither: a record is
+// made at one time and holds the names of one set. By hand, with a table of
+// two plain earlier names in different sets, both renamed to the loaded
+// "now.json": each has no company of its own set, so neither is answered -
+// and put in ONE set, each is the other's company and both are.
+TEST(CustomisationRecord, APlainNameIsAnsweredOnlyBesideAnEarlierNameOfItsOwnSet)
+{
+    StyleLibrary styles;
+    const std::vector<CustomisationSource> loaded{mapfile("now.json")};
+    const std::vector<std::string> recorded{"first.4d", "second.4d"};
+    const auto table = [](int secondSet) {
+        return std::vector<katana::cad::RenamedSource>{
+            {katana::cad::sourceNameHash("first.4d"), "now.json", false, 0},
+            {katana::cad::sourceNameHash("second.4d"), "now.json", false, secondSet}};
+    };
+    EXPECT_EQ(katana::cad::customisationNotLoaded(recorded, styles, loaded, table(1)), recorded);
+    EXPECT_TRUE(katana::cad::customisationNotLoaded(recorded, styles, loaded, table(0)).empty());
+}
+
+// A program with no built-in has no name to answer with, and its table
+// answers nothing - not even a distinctive earlier name. By hand: a table
+// whose one rename gives no name, the recorded earlier name, and a source
+// with nothing to do with it.
+TEST(CustomisationRecord, ARenameWithNoNameToGiveAnswersNothing)
+{
+    StyleLibrary styles;
+    const std::vector<CustomisationSource> loaded{mapfile("other.json")};
+    const std::vector<katana::cad::RenamedSource> nameless{
+        {katana::cad::sourceNameHash("old.4d"), ""}};
+    EXPECT_EQ(katana::cad::customisationNotLoaded({"old.4d"}, styles, loaded, nameless),
+              (std::vector<std::string>{"old.4d"}));
+    std::vector<std::string> atOpen{"old.4d"};
+    katana::cad::noteCustomisationLoaded(atOpen, loaded, nameless);
+    EXPECT_EQ(atOpen, (std::vector<std::string>{"old.4d"}));
+
+    // The table built for no built-in is such a table, all eight of it.
+    for (const katana::cad::RenamedSource& rename : katana::cad::builtinRenames("")) {
+        EXPECT_TRUE(rename.now.empty());
+    }
+    const std::vector<std::string> recorded{"linestyles.4d", "survey_codes.mapfile",
+                                            "survey_codes_names.mapfile", "symbols.4d"};
+    EXPECT_EQ(katana::cad::customisationNotLoaded(recorded, styles, loaded,
+                                                  katana::cad::builtinRenames("")),
+              recorded);
 }
 
 // ---- a plain earlier name, and loading what a warning asked for ------------------------------
@@ -414,18 +559,100 @@ TEST(CustomisationRecord, TheSaveJudgesAPlainFormerNameAgainstTheWholeRecord)
         (std::vector<std::string>{"linestyles.4d", "survey_codes_names.mapfile"}));
 }
 
-// Only the second survey code file's earlier name was a plain one; the other
-// three carried the publisher's name and are distinctive. Nothing here can
-// spell them: the tests above are of what the flag does.
-TEST(CustomisationRecord, OnlyTheBuiltInSecondSurveyCodeFilesFormerNameIsTooPlainToStandAlone)
+// Of the four FIRST names only the second survey code file's was a plain one;
+// the other three carried the publisher's name and are distinctive. Nothing
+// here can spell them: the tests above are of what the flag does.
+//
+// This test told the plain one by the name its rename gave
+// ("survey_codes_names.mapfile"). Every rename gives the built-in's own name
+// now, so it is told by its place - third, the files' load order being
+// linestyles, the first survey codes, the second survey codes, symbols - and
+// the four general names, which this test did not know as earlier names, are
+// all plain: each is a name anyone's own file might have.
+TEST(CustomisationRecord, OfTheFirstNamesOnlyTheSecondSurveyCodeFilesIsPlainAndEveryGeneralNameIs)
 {
-    std::vector<std::string> plain;
-    for (const katana::cad::RenamedSource& rename : katana::cad::builtinRenames()) {
-        if (!rename.distinctive) {
-            plain.emplace_back(rename.now);
+    const auto renames = katana::cad::builtinRenames("Built In Test");
+    ASSERT_EQ(renames.size(), 8U);
+    std::vector<std::size_t> plain;
+    for (std::size_t i = 0; i < renames.size(); ++i) {
+        if (!renames[i].distinctive) {
+            plain.push_back(i);
         }
     }
-    EXPECT_EQ(plain, (std::vector<std::string>{"survey_codes_names.mapfile"}));
+    EXPECT_EQ(plain, (std::vector<std::size_t>{2, 4, 5, 6, 7}));
+}
+
+// ---- what a source brought -------------------------------------------------------------------
+
+// One customisation brings definitions AND rules, and a Replace takes the
+// place of one kind at a time. By hand: "NSW" brought both; a Replace that
+// brought rules alone ("Council codes") takes the rules "NSW" brought and
+// leaves its definitions, so "NSW" is still a source, of definitions only -
+// and, bringing definitions alone now, it is recorded only while some
+// definition still comes from it. A second Replace, of definitions, leaves
+// it bringing nothing, and it goes.
+TEST(CustomisationRecord, AReplaceOfOneKindLeavesASourceThatBroughtBothWithTheOtherKind)
+{
+    std::vector<CustomisationSource> loaded;
+    katana::cad::recordCustomisationLoad(loaded, {whole("NSW")}, false, false);
+    katana::cad::recordCustomisationLoad(loaded, {mapfile("Council codes")}, false, true);
+    EXPECT_EQ(loaded,
+              (std::vector<CustomisationSource>{library("NSW"), mapfile("Council codes")}));
+
+    StyleLibrary fromNsw;
+    ASSERT_TRUE(fromNsw.add(definition("A", "NSW")).ok());
+    EXPECT_EQ(katana::cad::customisationRecord(fromNsw, loaded),
+              (std::vector<std::string>{"NSW", "Council codes"}));
+    StyleLibrary fromElsewhere;
+    ASSERT_TRUE(fromElsewhere.add(definition("A", "mine")).ok());
+    EXPECT_EQ(katana::cad::customisationRecord(fromElsewhere, loaded),
+              (std::vector<std::string>{"Council codes", "mine"}))
+        << "its rules were replaced and none of its definitions is left";
+
+    katana::cad::recordCustomisationLoad(loaded, {library("Council symbols")}, true, false);
+    EXPECT_EQ(loaded, (std::vector<CustomisationSource>{mapfile("Council codes"),
+                                                        library("Council symbols")}));
+}
+
+// A source that brought both is taken at its word for its rules, which carry
+// no source name: it is recorded although no definition comes from it.
+TEST(CustomisationRecord, ASourceThatBroughtRulesIsRecordedWhateverBecameOfItsDefinitions)
+{
+    StyleLibrary styles;
+    ASSERT_TRUE(styles.add(definition("A", "mine")).ok());
+    EXPECT_EQ(katana::cad::customisationRecord(styles, {whole("NSW")}),
+              (std::vector<std::string>{"NSW", "mine"}));
+    EXPECT_EQ(katana::cad::customisationRecord(styles, {library("NSW")}),
+              (std::vector<std::string>{"mine"}));
+}
+
+// Loaded again in a merge, a source still brings what it brought before: the
+// definitions of the first load are still there. By hand: "A" brought both,
+// then a file of the same name brings rules alone - one source, both kinds,
+// with the notice the earlier load gave, the later one giving none.
+TEST(CustomisationRecord, ASourceLoadedAgainStillBringsWhatItBroughtBeforeAndKeepsItsNotice)
+{
+    std::vector<CustomisationSource> loaded;
+    CustomisationSource first = whole("A");
+    first.notice = {"Not for resale."};
+    katana::cad::recordCustomisationLoad(loaded, {first, mapfile("B")}, false, false);
+    katana::cad::recordCustomisationLoad(loaded, {mapfile("A")}, false, false);
+    ASSERT_EQ(loaded.size(), 2U);
+    EXPECT_EQ(loaded[0], mapfile("B"));
+    EXPECT_EQ(loaded[1], first) << "moved to the end, still bringing both, notice kept";
+}
+
+// A table of colours brings neither kind. No Replace takes its place, and a
+// project drawn with its colours records it.
+TEST(CustomisationRecord, ASourceThatBroughtNeitherKindOutlivesAReplaceAndIsRecorded)
+{
+    const CustomisationSource colours{"Site colours", false, false, {}};
+    std::vector<CustomisationSource> loaded;
+    katana::cad::recordCustomisationLoad(loaded, {colours, whole("NSW")}, false, false);
+    katana::cad::recordCustomisationLoad(loaded, {whole("Council")}, true, true);
+    EXPECT_EQ(loaded, (std::vector<CustomisationSource>{colours, whole("Council")}));
+    EXPECT_EQ(katana::cad::customisationRecord(StyleLibrary{}, loaded),
+              (std::vector<std::string>{"Site colours", "Council"}));
 }
 
 // ---- a definition renamed since the drawing was saved ----------------------------------------

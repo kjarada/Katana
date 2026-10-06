@@ -48,7 +48,23 @@ as session data outside the model, the loaded style library and survey map
   of flattened definitions, thumbnails or code lookups keys on those counters
   - never on a `LineStyle*` or `SurveyRule*`, which dangle when the whole is
   replaced, and never on "a listener fired", which a selection click also
-  does.
+  does. Both are an EDIT of the session's customisation: its origin becomes
+  `edited` and it is no longer kept.
+* The rest of what a session knows of its customisation is
+  `customisationState()` (`include/katana/cad/customisation_state.hpp`): its
+  name and origin, the sources that went into it, its colour table, linework
+  codes and automation switches, whether it is kept, and which names the open
+  project recorded that are not loaded. `installCustomisation` installs a
+  whole `entity::Customisation` and `customisation()` gives the session back
+  as one. `DocumentChange::Customisation` is its change bit - outside
+  `kDrawing`, and no part of a Replaced drawing - and
+  `customisationGeneration()` its counter; a colour table also bumps
+  `libraryGeneration()`, since what is baked from a definition holds the
+  colours its pens resolved to. `open` works out the missing names, and a save
+  writes the record of the customisation into what it saves instead of
+  through `setMetadata`, so a save that cannot go ahead marks nothing
+  modified. A default Document has no customisation and installs none
+  (`docs/survey_coding.md`, "The customisation on the Document").
 
 * `execute`/`undo`/`redo` delegate to the command stack. `execute` wraps each
   command with the associative update (`cad/annotation/associative.hpp`):
@@ -1662,7 +1678,7 @@ listed here so a later change can find the code that carries each one.
 |---|---|---|
 | D1 | The style library and survey map are SESSION data on `cad::Document`: not undoable, not in the project. Map edits are made in an editor buffer and committed with `setSurveyMap` (Apply/Revert), and persist by EXPORT. A load MERGES by default; Replace is explicit. | `Document::setStyleLibrary`/`setSurveyMap` and the generation counters; `archive12d::mergeCustomisation` and `LoadMode`, which both front ends call (Format > Load Customisation... and Replace Loaded Customisation..., `CUSTOMISE [REPLACE]` in either command line; QT-21 fixed); the Survey Code Manager's buffer, Apply and Revert, and its Export Code File... (`writeMapFile`); the symbol library's Export Selected to .4d (`writeStyleLibrary`). No CLI export verb. `docs/survey_coding.md` |
 | D2 | A linetype name: a non-vertex library definition wins (no dash on its strokes), else a model Linetype, else solid. `ByLayer` as a Style linetype inherits the layer's. | `cad::resolveLinetype`; `entity::isByLayer`, `resolvedLinetype`; `linetypeChoices`, `linetypeCollisions`; `STYLE SET ... linetype`; 12da export's `linestyleOf` |
-| D3 | A library definition is a symbol if `mode vertex`, or a VertexSymbol rule names it, or a `Style::symbol` names it, or its file's name contains "symbol". Pickers always keep an unknown current name, marked (the QT-02 fix). Names are case-sensitive; search folds case. | `cad::classifyDefinition`, `symbolChoices`, `keepCurrent`, `filterChoices`; `LineStyle::source`; `codeTableRowMatches`; the lint's `SymbolNotSymbolCapable`; in the dialogs, `NamePicker` and the code manager's case-sensitive completers; the window's "(N symbols)" and CUSTOMISE's count |
+| D3 | A library definition is a symbol if `mode vertex`, or a VertexSymbol rule names it, or a `Style::symbol` names it, or its customisation lists it as a symbol (`LineStyle::symbol`; until 2026-10-06 the sign was its file's name containing "symbol", which one customisation holding both kinds under one name can no longer give). Pickers always keep an unknown current name, marked (the QT-02 fix). Names are case-sensitive; search folds case. | `cad::classifyDefinition` (`DefinitionKind::listedAsSymbol`), `symbolChoices`, `keepCurrent`, `filterChoices`; `LineStyle::symbol`; `codeTableRowMatches`; the lint's `SymbolNotSymbolCapable`; in the dialogs, `NamePicker` and the code manager's case-sensitive completers; the window's "(N symbols)" and CUSTOMISE's count |
 | D4 | Survey coding chooses a code's style by appearance and reuses one that draws alike; new names follow from the rules. | `cad::applySurveyCodes` (`Appearance`, `drawsAs`, `existingStyleFor`, `nameFor`) |
 | D5 | A code only the bare `*` answers is "fallback-only", not matched. | `entity::SurveyMatchKind`, `SurveyMatch::matched()`; `SurveyCodingReport::fallbackOnly`; `cad::splitStringName` |
 | D6 | No storage schema migrations this round. | Why symbol rotation, a linetype scale and true arcs in linework wait; the metadata change is a key, not a column |
