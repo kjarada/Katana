@@ -100,15 +100,17 @@ struct StringName {
 // `cad::LineworkCodes` and `cad::validate(codes)` meaning what they did.
 using LineworkCodes = katana::entity::LineworkCodes;
 
-// entity::validate, under the name this layer has always called it by.
-[[nodiscard]] inline katana::core::Status validate(const LineworkCodes& codes)
-{
-    return katana::entity::validate(codes);
-}
+// entity::validate ITSELF, under the name this layer has always called it by
+// - not a function here that forwards to it. The codes are an entity type, so
+// a plain `validate(codes)` inside this namespace finds entity::validate
+// through its argument as well as whatever is called `validate` here; beside
+// a second function of the same signature that call does not compile
+// ("ambiguous"), and with this it finds the one function twice.
+using katana::entity::validate;
 
+// The words the seven controls are known by - "start", "arcStart" - are
+// entity::lineworkCodeMembers(), the one list of them.
 enum class LineworkControl { Start, End, Close, ArcStart, ArcEnd, Join, Rectangle };
-
-[[nodiscard]] std::string_view toString(LineworkControl control);
 
 // A point's code taken apart.
 struct FieldCode {

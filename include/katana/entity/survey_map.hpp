@@ -186,9 +186,10 @@ struct SurveyMatch {
 
 // Besides text being text and numbers being finite: a key has no surrounding
 // whitespace (a field code never has, so such a key can match nothing a
-// surveyor types), and a model, when there is one, is a valid layer path
+// surveyor types), a model, when there is one, is a valid layer path
 // (it becomes one when the code is applied, and failing there would fail the
-// whole application over one rule).
+// whole application over one rule), and the size of a symbol or of a text is
+// not negative (0 is "the definition's own" and "not said").
 [[nodiscard]] katana::core::Status validate(const SurveyRule& rule);
 
 // A rule's identity is its INDEX, and its index is also its precedence: among

@@ -204,19 +204,29 @@ Status validate(const SurveyRule& rule)
             return makeError(ErrorCode::InvalidArgument, "a symbol name is not valid UTF-8",
                              rule.key);
         }
-        if (!(std::isfinite(rule.symbol->size) && rule.symbol->size >= 0.0 &&
-              std::isfinite(rule.symbol->rotation) && std::isfinite(rule.symbol->offset) &&
-              std::isfinite(rule.symbol->raise))) {
+        if (!(std::isfinite(rule.symbol->size) && std::isfinite(rule.symbol->rotation) &&
+              std::isfinite(rule.symbol->offset) && std::isfinite(rule.symbol->raise))) {
             return makeError(ErrorCode::InvalidArgument, "a symbol's numbers are not finite",
+                             rule.key);
+        }
+        // Said apart from the above: -1 is finite, and a refusal that called
+        // it "not finite" sent its reader looking for the wrong mistake. 0 is
+        // the definition's own size; below it there is no size to draw at.
+        if (rule.symbol->size < 0.0) {
+            return makeError(ErrorCode::InvalidArgument, "a symbol's size cannot be negative",
                              rule.key);
         }
     }
     if (rule.textStyle) {
         const SurveyTextStyle& text = *rule.textStyle;
-        if (!(std::isfinite(text.size) && text.size >= 0.0 && std::isfinite(text.offset) &&
+        if (!(std::isfinite(text.size) && std::isfinite(text.offset) &&
               std::isfinite(text.raise) && std::isfinite(text.angle) &&
               std::isfinite(text.slant) && std::isfinite(text.widthFactor))) {
             return makeError(ErrorCode::InvalidArgument, "a text style's numbers are not finite",
+                             rule.key);
+        }
+        if (text.size < 0.0) {
+            return makeError(ErrorCode::InvalidArgument, "a text style's size cannot be negative",
                              rule.key);
         }
     }

@@ -329,6 +329,16 @@ documented in the commit that adds it. Documents
 still being brought up to this standard are named in the script's
 `NOT_YET_CHECKED` list, which shrinks as each is fixed.
 
+One check goes further than "what is cited exists". The worked example in
+`docs/customisation.md` is a file a person may copy to start their own, so
+it must be exactly what the writer writes;
+`TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted` proves that of the copy
+it holds in a raw string, and the `docs` test fails when the document's block
+is not that copy, character for character. *Rejected: having the entity test
+read the document.* That suite is given no path into the source tree, and a
+unit test that passes or fails by where the checkout sits is the wrong place
+for a check on a document.
+
 Run it alone with `python tools/check_docs.py` from the checkout root; it
 prints each broken reference with its file and line.
 

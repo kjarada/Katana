@@ -583,9 +583,12 @@ written and get back what was given (`tests/archive12d/customisation/`).
 UTF-8, in name order, one command per line as the reference libraries are written. Every field is
 written - the three kinds, `mode vertex`, group, length, factor, origins,
 anchors, stretch and cycle mode, pens, every stroke, and a text's three
-numbers kept but not understood - so `readStyleLibrary(writeStyleLibrary(l))`
-is `l`. The one thing a file cannot hold is `LineStyle::source`, which is the
-file's own name and is stamped again when it is read. `names` picks the
+numbers kept but not understood - so `readStyleLibrary(writeStyleLibrary(l),
+name)` is `l` when `l` came from a file of that name. Two things a file
+cannot hold, because the file's own NAME says them and the reader sets both
+again from the name it is given: `LineStyle::source`, and `LineStyle::symbol`
+(whether that name holds "symbol"). Read back under no name, a definition
+differs from what was written in those two and in nothing else. `names` picks the
 definitions to write, and a name the library lacks fails the write rather than
 leaving a file the person believes holds it; `comments` become the `//` head
 where a published library carries its licence.
@@ -802,10 +805,13 @@ Decisions worth recording:
 - **Only text is a code.** A number in the code property is a measurement
   someone named badly; treating `1.5` as a field code would file it under
   whatever the rule for `1*` says.
-- **The colour comes through a callback.** The standard colour names are known to
-  `archive12d`, which `cad` may not see, so the front ends pass
+- **The colour comes through a callback.** The standard colour names were known
+  only to `archive12d`, which `cad` may not see, so the front ends pass
   `archive12d::standardColour`. Without one, colours are left alone rather
-  than guessed at.
+  than guessed at. (The names are the entity layer's since 2026-10-06 and
+  `archive12d::standardColour` is `entity::standardColour` by another name;
+  the callback stays until `cad` resolves a name itself -
+  `docs/customisation.md`, "Colour names".)
 
 From the command line, the whole chain:
 

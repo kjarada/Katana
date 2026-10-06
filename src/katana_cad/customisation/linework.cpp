@@ -632,27 +632,6 @@ spellings(const LineworkCodes& codes)
 
 } // namespace
 
-std::string_view toString(LineworkControl control)
-{
-    switch (control) {
-    case LineworkControl::Start:
-        return "start";
-    case LineworkControl::End:
-        return "end";
-    case LineworkControl::Close:
-        return "close";
-    case LineworkControl::ArcStart:
-        return "arcStart";
-    case LineworkControl::ArcEnd:
-        return "arcEnd";
-    case LineworkControl::Join:
-        return "join";
-    case LineworkControl::Rectangle:
-        return "rectangle";
-    }
-    return "unknown";
-}
-
 bool FieldCode::has(LineworkControl control) const
 {
     return std::find(controls.begin(), controls.end(), control) != controls.end();
@@ -786,9 +765,7 @@ std::string_view toString(UnplacedFeatureReason reason)
 katana::core::Result<LineworkResult> processLinework(const Document& document,
                                                      const LineworkOptions& options)
 {
-    // Named in full: the codes are an entity type, so an unqualified call finds
-    // entity::validate and this layer's forwarding validate alike.
-    if (auto status = katana::entity::validate(options.codes); !status) {
+    if (auto status = validate(options.codes); !status) {
         return status.error();
     }
     if (!(std::isfinite(options.chordTolerance) && options.chordTolerance > 0.0)) {

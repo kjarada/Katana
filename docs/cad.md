@@ -257,10 +257,13 @@ are handed to `runSurveyCodeVerb` (`include/katana/cad/survey_code_verbs.hpp`)
 since 2026-09-26; they were `katana_cli`'s own, and the window refused them.
 `CODE` is one undo step, and `MAPFILE CHECK` is refused - its whole lint in
 the refusal, as `UTILITY CHECK` carries its check - when a rule has an error
-(`mapfileCheckReply`). The standard colour names they need are archive12d's,
+(`mapfileCheckReply`). The standard colour names they need were archive12d's,
 which cad may not see, so each front end passes the table with
 `CommandInterpreter::setColourLookup`; without one no colour is known and
-colours are left alone.
+colours are left alone. (Since 2026-10-06 the names are the entity layer's,
+`include/katana/entity/colour_names.hpp`, which cad does see; the callback is
+still how they arrive, until cad asks `entity::resolveColour` itself -
+`docs/customisation.md`, "Colour names".)
 
 ### STATUS
 

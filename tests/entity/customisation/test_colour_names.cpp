@@ -42,6 +42,63 @@ TEST(ColourNames, AFoldedNameIsLowerCaseTrimmedAndReadsUnderscoreAndHyphenAsABla
     EXPECT_EQ(foldColourName("dark__red"), "dark  red");
 }
 
+// '_' and '-' are read as a blank, and a folded name has no blank at either
+// end: so a separator at an end goes, as a blank there does. ("red_" used to
+// fold to "red " - trimmed first, the separator turned into a blank
+// afterwards - which is a name with a blank at its end and, to the standard
+// names, not red.)
+TEST(ColourNames, ASeparatorAtEitherEndIsFoldedAwayLikeABlankThere)
+{
+    EXPECT_EQ(foldColourName("red_"), "red");
+    EXPECT_EQ(foldColourName("_red"), "red");
+    EXPECT_EQ(foldColourName("-red-"), "red");
+    EXPECT_EQ(foldColourName(" _ Dark_Green - "), "dark green");
+    EXPECT_EQ(foldColourName("sui gas_"), "sui gas");
+    EXPECT_EQ(foldColourName("_"), "");
+    EXPECT_EQ(foldColourName(" -_- "), "");
+    // "gray" is looked for in what is left: it is the last word once the
+    // separator after it has gone.
+    EXPECT_EQ(foldColourName("Dark_Gray_"), "dark grey");
+    EXPECT_EQ(foldColourName("-gray-"), "grey");
+
+    // So the standard names and a table read such a name as they read it
+    // with a blank there.
+    EXPECT_EQ(standardColour("red_"), (Color{255, 0, 0, 255}));
+    EXPECT_EQ(standardColour("_Light-Grey_"), standardColour("light grey"));
+    ColourTable table;
+    ASSERT_TRUE(table.add("sui gas_", Color{255, 255, 0, 255}).ok());
+    EXPECT_EQ(table.find("sui gas"), (Color{255, 255, 0, 255}));
+    EXPECT_EQ(table.find("SUI-GAS "), (Color{255, 255, 0, 255}));
+    const auto alike = table.add("sui gas", Color{1, 2, 3, 255});
+    ASSERT_FALSE(alike.ok()) << "\"sui gas_\" and \"sui gas\" are one name";
+    EXPECT_EQ(alike.error().code, ErrorCode::InvalidArgument);
+    const auto standard = table.add("red_", Color{1, 2, 3, 255});
+    ASSERT_FALSE(standard.ok()) << "\"red_\" is the standard red";
+    EXPECT_EQ(standard.error().code, ErrorCode::InvalidArgument);
+}
+
+// The fold is the form a name is COMPARED in, so folding what is already
+// folded must change nothing: otherwise "the fold of a name" would depend on
+// how many times it had been taken, and a table keyed by one fold would not
+// be found by another. Every kind of name the fold does something to is here,
+// and each is checked to be one it does change.
+TEST(ColourNames, FoldingAFoldedNameChangesNothing)
+{
+    std::size_t changed = 0;
+    for (const char* name :
+         {"red", "RED", "  Dark Green\t", "dark_green", "Dark-Green", "red_", "_red", "-red-",
+          " _ Dark_Green - ", "gray", "Dark_Gray_", "-gray-", "sui dark-gray", "grayish",
+          "gray blue", "dark  red", "dark__red", "_", " -_- ", "", "GR\xC3\x9CN", "a_-_b",
+          "\tsui_water potable\n"}) {
+        const std::string once = foldColourName(name);
+        EXPECT_EQ(foldColourName(once), once) << '"' << name << '"';
+        changed += once != name ? 1 : 0;
+    }
+    // By hand: of the 23 names, "red", "grayish", "gray blue", "dark  red" and
+    // "" are already in their folded form; the fold changes the other 18.
+    EXPECT_EQ(changed, 18u);
+}
+
 TEST(ColourNames, GrayIsGreyWhereItIsTheWholeNameOrItsLastWord)
 {
     EXPECT_EQ(foldColourName("gray"), "grey");

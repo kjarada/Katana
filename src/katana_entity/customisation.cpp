@@ -169,15 +169,114 @@ struct Refusal {
     return Json(std::string(text)).dump(-1, ' ', false, Json::error_handler_t::replace);
 }
 
-// A value as the file wrote it, cut short: what a refusal shows of a value of
-// the wrong type.
-[[nodiscard]] std::string shown(const Json& value)
+// ---- what the tree holds that JSON cannot say -------------------------------------
+//
+// Two things stand in the tree the reader builds for something the text held
+// that a tree cannot hold as itself. Each is a BINARY value, because JSON text
+// has none: nothing a file can say is mistaken for either.
+//
+//   * Where a definition's strokes were: a subtype, which says which entry of
+//     Parsed::strokes they are (they are read as the text is parsed and never
+//     become a tree).
+//   * A number the reader cannot hold: no subtype, and for its bytes the
+//     number as the text wrote it. Whatever reads a number refuses it by the
+//     member it is in; anything else refuses it as it would any value of the
+//     wrong kind, and shows it as written.
+
+[[nodiscard]] Json strokesPlace(std::size_t which)
 {
-    constexpr std::size_t kLongest = 60;
-    std::string text = value.dump(-1, ' ', false, Json::error_handler_t::replace);
-    if (text.size() > kLongest) {
+    return Json::binary(Json::binary_t::container_type{}, which);
+}
+
+[[nodiscard]] bool isStrokesPlace(const Json& value)
+{
+    return value.is_binary() && value.get_binary().has_subtype();
+}
+
+[[nodiscard]] Json lostNumber(std::string_view written)
+{
+    return Json::binary(Json::binary_t::container_type(written.begin(), written.end()));
+}
+
+[[nodiscard]] bool isLostNumber(const Json& value)
+{
+    return value.is_binary() && !value.get_binary().has_subtype();
+}
+
+constexpr std::string_view kTooLarge = "has a number too large to hold";
+constexpr std::string_view kTooSmall =
+    "has a number too small to hold: it is not zero, and would be read as 0";
+
+// Whether a number's text, which the JSON library read as zero, says some
+// other number: a digit that is not 0 before any exponent. ("0e-400" and
+// "-0.000" are zero; "1e-400" is below the smallest double and is not.)
+[[nodiscard]] bool saysMoreThanZero(std::string_view written)
+{
+    for (const char c : written) {
+        if (c == 'e' || c == 'E') {
+            break;
+        }
+        if (c >= '1' && c <= '9') {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The most a refusal shows of a value.
+constexpr std::size_t kLongestShown = 60;
+
+// Appends `value` as a file would write it on one line, and stops once enough
+// is written to be cut off. NOT the JSON library's dump(): that writes the
+// whole value before any of it is cut, going down a level of the program's
+// stack for every level of the value - and a value may nest as deep as its
+// text is long. 100,000 "[" are a file of 200 KB, and were a stack overflow.
+// This goes down a level only after writing a character, so never deeper than
+// kLongestShown.
+void appendShown(std::string& text, const Json& value)
+{
+    if (text.size() > kLongestShown) {
+        return;
+    }
+    if (value.is_array()) {
+        text += '[';
+        for (auto item = value.begin(); item != value.end(); ++item) {
+            if (text.size() > kLongestShown) {
+                return;
+            }
+            text += item == value.begin() ? "" : ",";
+            appendShown(text, *item);
+        }
+        text += ']';
+    } else if (value.is_object()) {
+        text += '{';
+        for (auto item = value.begin(); item != value.end(); ++item) {
+            if (text.size() > kLongestShown) {
+                return;
+            }
+            text += item == value.begin() ? "" : ",";
+            text += Json(item.key()).dump(-1, ' ', false, Json::error_handler_t::replace);
+            text += ':';
+            appendShown(text, item.value());
+        }
+        text += '}';
+    } else if (isLostNumber(value)) {
+        const Json::binary_t& written = value.get_binary();
+        text.append(written.begin(), written.end());
+    } else if (isStrokesPlace(value)) {
+        text += "[...]"; // a list of strokes, which is not kept as it was written
+    } else {
+        // Text, a number, true, false or null: nothing below it to go down to.
+        text += value.dump(-1, ' ', false, Json::error_handler_t::replace);
+    }
+}
+
+// What a refusal shows, cut at kLongestShown bytes.
+[[nodiscard]] std::string cutShort(std::string text)
+{
+    if (text.size() > kLongestShown) {
         // Never in the middle of a character: step back over continuation bytes.
-        std::size_t cut = kLongest;
+        std::size_t cut = kLongestShown;
         while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
             --cut;
         }
@@ -185,6 +284,15 @@ struct Refusal {
         text += "...";
     }
     return text;
+}
+
+// A value as the file wrote it, cut short: what a refusal shows of a value of
+// the wrong type.
+[[nodiscard]] std::string shown(const Json& value)
+{
+    std::string text;
+    appendShown(text, value);
+    return cutShort(std::move(text));
 }
 
 [[nodiscard]] std::string counted(std::size_t count, std::string_view one, std::string_view many)
@@ -998,6 +1106,18 @@ struct Duplicate {
     std::string member{};
 };
 
+// A number past the largest a double holds, at which the JSON library stops
+// reading: where it is, and what the text wrote.
+struct TooLarge {
+    // To the object the number is in - itself a member, or in a list under
+    // one - or, inside a stroke, to the stroke.
+    std::vector<Step> path{};
+    std::string member{}; // of that object; empty in a stroke
+    bool stroke = false;
+    std::string written{}; // "1e400"
+    std::string at{};      // "line 2, column 45": of its last character
+};
+
 // The strokes of one definition, read while the text is parsed rather than
 // from a tree of it. A library is 35,000 strokes, and a tree holds each as a
 // list of its own with its word as text of its own - most of what a tree of
@@ -1021,6 +1141,9 @@ struct Parsed {
     std::optional<Duplicate> duplicate{};
     // By the number the tree holds where a definition's "strokes" would be.
     std::vector<StrokesRead> strokes{};
+    // Set when the reading stopped at such a number: `root` is then only
+    // what the text held BEFORE it.
+    std::optional<TooLarge> tooLarge{};
 };
 
 // Which text is being read: it decides where a list of strokes can be.
@@ -1049,8 +1172,16 @@ class TreeBuilder {
     {
         return number(Json(value), static_cast<double>(value));
     }
-    bool number_float(Json::number_float_t value, const Json::string_t& /*written*/)
+    bool number_float(Json::number_float_t value, const Json::string_t& written)
     {
+        // A number below the smallest a double holds comes from the library
+        // as 0, with nothing said. But 0 is not what the file wrote, and here
+        // 0 has meanings of its own - a length "not said", a size "the
+        // definition's own" - so it is kept as what it is, a number this
+        // cannot hold, and refused where it is read.
+        if (value == 0.0 && saysMoreThanZero(written)) {
+            return scalar(lostNumber(written));
+        }
         return number(Json(value), value);
     }
     bool string(Json::string_t& value)
@@ -1076,19 +1207,32 @@ class TreeBuilder {
     bool end_object() { return end(); }
     bool start_array(std::size_t /*size*/) { return begin(false); }
     bool end_array() { return end(); }
-    bool parse_error(std::size_t /*position*/, const std::string& /*token*/,
-                     const Json::exception& error)
+    bool parse_error(std::size_t position, const std::string& token, const Json::exception& error)
     {
         reason_ = error.what();
+        // The one thing the library refuses that IS JSON: a number past the
+        // largest double ("number overflow", its error 406). Its place is
+        // kept, because what follows it will never be read.
+        constexpr int kNumberOverflow = 406;
+        if (error.id == kNumberOverflow) {
+            tooLarge_ = here();
+            tooLarge_->written = token;
+            stoppedAt_ = position;
+        }
         return false;
     }
 
     // ---- what was built ----------------------------------------------------------
     // Why the text is not JSON, after a parse that failed.
     [[nodiscard]] const std::string& reason() const { return reason_; }
+    // Whether it failed at a number too large to hold, and how far into the
+    // text that number ends.
+    [[nodiscard]] bool stoppedAtANumber() const { return tooLarge_.has_value(); }
+    [[nodiscard]] std::size_t stoppedAt() const { return stoppedAt_; }
     [[nodiscard]] Parsed take()
     {
-        return Parsed{std::move(root_), std::move(duplicate_), std::move(strokes_)};
+        return Parsed{std::move(root_), std::move(duplicate_), std::move(strokes_),
+                      std::move(tooLarge_)};
     }
 
   private:
@@ -1128,16 +1272,46 @@ class TreeBuilder {
         }
     }
 
-    // Every open container but the root, by where it sits in its parent.
-    [[nodiscard]] std::vector<Step> path() const
+    // Where the innermost of the first `count` open containers is: each of
+    // them but the root, by where it sits in its parent - and no further than
+    // a stroke. A stroke is the smallest place a refusal names
+    // (`symbols[0] "TEST Valve" strokes[9]`); what is wrong inside one, in a
+    // text stroke's object, is said of that stroke.
+    [[nodiscard]] std::vector<Step> path(std::size_t count) const
     {
         std::vector<Step> steps;
-        for (std::size_t i = 0; i + 1 < open_.size(); ++i) {
+        for (std::size_t i = 0; i + 1 < count; ++i) {
             const Frame& parent = open_[i];
             steps.push_back(parent.object ? Step{parent.key, 0, false}
                                           : Step{{}, parent.children - 1, true});
+            if (open_[i + 1].role == Role::Stroke) {
+                break;
+            }
         }
         return steps;
+    }
+
+    // Where the value now being read is, as a refusal names a place: the
+    // object it is a member of - or, when it is in a list, the object that
+    // list is a member of - with that member; or the stroke it is a value of.
+    [[nodiscard]] TooLarge here() const
+    {
+        TooLarge place;
+        for (std::size_t i = open_.size(); i-- > 0;) {
+            if (open_[i].object) {
+                place.member = open_[i].key;
+                place.path = path(i + 1);
+                return place;
+            }
+            if (open_[i].role == Role::Stroke) {
+                place.stroke = true;
+                place.path = path(i + 1);
+                return place;
+            }
+        }
+        // In no object at all: lists alone, or the text is the value itself.
+        place.path = path(open_.size());
+        return place;
     }
 
     // Puts a value where the innermost open list or object wants it, and says
@@ -1155,7 +1329,7 @@ class TreeBuilder {
         }
         if (const auto existing = parent.node->find(parent.key); existing != parent.node->end()) {
             if (!duplicate_) {
-                duplicate_ = Duplicate{path(), parent.key};
+                duplicate_ = Duplicate{path(open_.size()), parent.key};
             }
             *existing = std::move(value); // refused later; the text is read to its end first
             return &*existing;
@@ -1205,10 +1379,9 @@ class TreeBuilder {
             return true;
         }
         if (!object && beginsStrokes()) {
-            // The tree holds a number where the strokes would be: which entry
-            // of strokes_ they are. A binary value, because JSON text has
-            // none - nothing a file can say is mistaken for it.
-            place(Json::binary(Json::binary_t::container_type{}, strokes_.size()));
+            // The tree holds, where the strokes would be, which entry of
+            // strokes_ they are.
+            place(strokesPlace(strokes_.size()));
             strokes_.emplace_back();
             open_.push_back(Frame{Role::Strokes, nullptr, false, false, {}, 0});
             return true;
@@ -1249,16 +1422,22 @@ class TreeBuilder {
                open_[2].object && open_[2].key == "strokes";
     }
 
-    // The stroke being read as the text wrote it, for a refusal to show.
+    // The stroke being read as the text wrote it, for a refusal to show:
+    // written straight from its values, which are never copied to do it (a
+    // copy of a value goes as deep into the stack as the value is nested).
     [[nodiscard]] std::string shownStroke() const
     {
-        Json stroke = Json::array();
-        for (const StrokeValue& value : values_) {
-            stroke.push_back(value.kind == StrokeValue::Kind::Word
-                                 ? Json(std::string(value.word->word))
-                                 : value.written);
+        std::string text = "[";
+        for (std::size_t i = 0; i < values_.size() && text.size() <= kLongestShown; ++i) {
+            text += i == 0 ? "" : ",";
+            if (values_[i].kind == StrokeValue::Kind::Word) {
+                text += inQuotes(values_[i].word->word);
+            } else {
+                appendShown(text, values_[i].written);
+            }
         }
-        return shown(stroke);
+        text += ']';
+        return cutShort(std::move(text));
     }
 
     // The first problem of a definition's strokes is the one a refusal names;
@@ -1339,7 +1518,19 @@ class TreeBuilder {
         case StrokeOp::Circle:
         case StrokeOp::Dot:
             if (!numbers()) {
-                refused(", each a number");
+                // A number too small to hold is among the values as what it
+                // is (number_float), and is said to be that.
+                const bool lost =
+                    std::any_of(values_.begin() + 1, values_.end(), [](const StrokeValue& value) {
+                        return isLostNumber(value.written);
+                    });
+                if (lost) {
+                    std::string what = "this stroke ";
+                    what += kTooSmall;
+                    problem(std::move(what), shownStroke());
+                } else {
+                    refused(", each a number");
+                }
                 return;
             }
             if (kind.op == StrokeOp::Move || kind.op == StrokeOp::Draw) {
@@ -1377,19 +1568,41 @@ class TreeBuilder {
     std::vector<StrokeValue> values_{}; // of the stroke being read
     std::vector<StrokesRead> strokes_{};
     std::optional<Duplicate> duplicate_{};
+    std::optional<TooLarge> tooLarge_{};
+    std::size_t stoppedAt_ = 0; // bytes of the text read when it stopped
     std::string reason_{};
 };
 
+// "line 2, column 45" for the last of the first `read` bytes of `text`: where
+// the JSON library stands when it has read that far, counted as it counts for
+// its own messages - lines from 1, and the column of the last byte read.
+[[nodiscard]] std::string lineAndColumn(std::string_view text, std::size_t read)
+{
+    const std::string_view before = text.substr(0, std::min(read, text.size()));
+    const auto line = 1 + std::count(before.begin(), before.end(), '\n');
+    const std::size_t lineBreak = before.rfind('\n');
+    const std::size_t column =
+        before.size() - (lineBreak == std::string_view::npos ? 0 : lineBreak + 1);
+    return "line " + std::to_string(line) + ", column " + std::to_string(column);
+}
+
 // The bytes of a text as JSON. Anything that is not JSON is `notThis` - the
 // one message a caller's own kind of text gets - with the reason, and for
-// malformed JSON the line and column, as the context.
+// malformed JSON the line and column, as the context. The one exception comes
+// back in what is returned, for the caller to refuse: a number too large to
+// hold (Parsed::tooLarge), where what the text is depends on how far it had
+// been read.
 [[nodiscard]] Parsed parseJson(std::string_view bytes, std::string_view notThis, TextKind kind)
 {
     // Decoded first: the JSON library steps over a UTF-8 byte order mark and
     // nothing else, and an editor on Windows saves UTF-16 readily.
     auto decoded = katana::core::decodeText(bytes);
     if (!decoded) {
-        throw Refusal{decoded.error().code, decoded.error().message, decoded.error().context};
+        // A byte order mark over bytes that are not what it promises - a
+        // file cut short, or damaged. Still bytes that are neither UTF-8 nor
+        // UTF-16, and so the same message as those below, with the decoder's
+        // account of what is wrong beside it.
+        throw Refusal{ErrorCode::ParseFailure, std::string(notThis), decoded.error().message};
     }
     // Bytes that are neither UTF-8 nor UTF-16 are decoded as Windows-1252 for
     // the formats that never said what they are. This one does say: it is
@@ -1401,6 +1614,12 @@ class TreeBuilder {
     }
     TreeBuilder builder(kind);
     if (!Json::sax_parse(decoded->text, &builder)) {
+        if (builder.stoppedAtANumber()) {
+            const std::string at = lineAndColumn(decoded->text, builder.stoppedAt());
+            Parsed text = builder.take();
+            text.tooLarge->at = at;
+            return text;
+        }
         // "[json.exception.parse_error.101] parse error at line 3, column 7: ...":
         // the bracketed id is the library's and says nothing to a person.
         std::string reason = builder.reason();
@@ -1418,8 +1637,10 @@ class TreeBuilder {
     return builder.take();
 }
 
-// Where a duplicate member is, in the words every other refusal uses. `base`
-// names the root when it is an entry itself (a definition read on its own).
+// Where something noticed while the text was parsed is - a member given
+// twice, a number too large to hold - in the words every other refusal uses.
+// `base` names the root when it is an entry itself (a definition read on its
+// own).
 [[nodiscard]] std::string placeOf(const Json& root, const std::vector<Step>& path,
                                   std::string_view base)
 {
@@ -1461,6 +1682,26 @@ void refuseDuplicate(const Parsed& text, std::string_view base)
                "member " + inQuotes(text.duplicate->member) +
                    " is given twice, and only one of them could be kept");
     }
+}
+
+// What a refusal shows beside a number too large to hold: the number, and
+// where in the text it is.
+[[nodiscard]] std::string writtenAt(const TooLarge& number)
+{
+    return number.written + " at " + number.at;
+}
+
+// Refuses the number too large to hold that the reading of `text` stopped at,
+// by the entry and the member it is in, as a value of the wrong kind is
+// refused.
+[[noreturn]] void refuseTooLarge(const Parsed& text, std::string_view base)
+{
+    const TooLarge& number = *text.tooLarge;
+    std::string what = number.stroke ? std::string("this stroke") : inQuotes(number.member);
+    what += ' ';
+    what += kTooLarge;
+    refuse(ErrorCode::ParseFailure, placeOf(text.root, number.path, base), what,
+           writtenAt(number));
 }
 
 // One object of the file being read. Every member is taken through here by
@@ -1526,6 +1767,9 @@ class Members {
         const Json* value = find(name);
         if (value == nullptr) {
             return fallback;
+        }
+        if (isLostNumber(*value)) {
+            wrong(name, kTooSmall, *value);
         }
         if (!value->is_number()) {
             wrong(name, "must be a number", *value);
@@ -1635,6 +1879,10 @@ class Members {
 
 [[nodiscard]] Point2 pointOf(const Json& json, std::string_view where, std::string_view member)
 {
+    if (json.is_array() && json.size() == 2 && (isLostNumber(json[0]) || isLostNumber(json[1]))) {
+        refuse(ErrorCode::ParseFailure, where, inQuotes(member) + " " + std::string(kTooSmall),
+               shown(json));
+    }
     if (!json.is_array() || json.size() != 2 || !json[0].is_number() || !json[1].is_number()) {
         refuse(ErrorCode::ParseFailure, where,
                inQuotes(member) + " must be a point, written [x, y]", shown(json));
@@ -1686,9 +1934,12 @@ class Members {
     text.font = members.text("font", d.font);
     text.widthFactor = members.real("widthFactor", d.widthFactor);
     if (const Json* extra = members.find("extra")) {
-        if (!extra->is_array() || extra->size() != text.unnamed.size() ||
-            !std::all_of(extra->begin(), extra->end(),
-                         [](const Json& value) { return value.is_number(); })) {
+        const bool three = extra->is_array() && extra->size() == text.unnamed.size();
+        if (three && std::any_of(extra->begin(), extra->end(), isLostNumber)) {
+            members.wrong("extra", kTooSmall, *extra);
+        }
+        if (!three || !std::all_of(extra->begin(), extra->end(),
+                                   [](const Json& value) { return value.is_number(); })) {
             members.wrong("extra", "must be three numbers, written [a, b, c]", *extra);
         }
         for (std::size_t i = 0; i < text.unnamed.size(); ++i) {
@@ -1738,7 +1989,7 @@ class Members {
     if (strokes != nullptr) {
         // A list of strokes was read as the parse went by, and the tree holds
         // only which one it was; anything else here is not a list.
-        if (!strokes->is_binary()) {
+        if (!isStrokesPlace(*strokes)) {
             members.wrong("strokes", "must be a list, written [...]", *strokes);
         }
         StrokesRead& read = strokesRead.at(strokes->get_binary().subtype());
@@ -1892,6 +2143,26 @@ readAttributes(const Json& json, const std::string& where, std::string_view memb
     return rule;
 }
 
+[[nodiscard]] bool saysThisFormat(const Json& format)
+{
+    return format.is_string() && format.get_ref<const std::string&>() == kCustomisationFormat;
+}
+
+// A version past the newest this build reads.
+[[nodiscard]] bool isNewer(const Json& version)
+{
+    return version.is_number_unsigned() &&
+           version.get<std::uint64_t>() > static_cast<std::uint64_t>(kCustomisationVersion);
+}
+
+[[noreturn]] void refuseNewer(const Json& version)
+{
+    throw Refusal{ErrorCode::Unsupported,
+                  "the customisation was written by a newer version of Katana",
+                  "version " + shown(version) + "; this build reads version " +
+                      std::to_string(kCustomisationVersion)};
+}
+
 // The root is a customisation of a version this build reads, or the refusal
 // that says which it is not. Before anything else is looked at: a newer file
 // may hold members this build would call unknown, and what it must be told is
@@ -1907,7 +2178,7 @@ void requireCustomisation(const Json& root)
         throw Refusal{ErrorCode::ParseFailure, std::string(kNotACustomisation),
                       "it has no \"format\""};
     }
-    if (!format->is_string() || format->get_ref<const std::string&>() != kCustomisationFormat) {
+    if (!saysThisFormat(*format)) {
         throw Refusal{ErrorCode::ParseFailure, std::string(kNotACustomisation),
                       "its \"format\" is " + shown(*format)};
     }
@@ -1923,12 +2194,42 @@ void requireCustomisation(const Json& root)
         refuse(ErrorCode::ParseFailure, kTopLevel,
                "\"version\" is " + shown(*version) + ", and the first version is 1");
     }
-    if (version->get<std::uint64_t>() > static_cast<std::uint64_t>(kCustomisationVersion)) {
-        throw Refusal{ErrorCode::Unsupported,
-                      "the customisation was written by a newer version of Katana",
-                      "version " + shown(*version) + "; this build reads version " +
-                          std::to_string(kCustomisationVersion)};
+    if (isNewer(*version)) {
+        refuseNewer(*version);
     }
+}
+
+// What a file is told whose reading stopped at a number too large to hold.
+// Everything else the reader refuses is refused with the whole text read, in
+// the order docs/customisation.md gives: is it this format, is it newer, then
+// what is wrong with it. Here there is only what the text held BEFORE the
+// number - the JSON library cannot go on past one - so that order is kept as
+// far as the text had got. A file that had said its "format" is refused by
+// the entry and the member, as for any value of the wrong kind (and one that
+// had said it is newer is told that); a file that had not is not known to be
+// a customisation at all, and gets the message every other text gets, with
+// the number and its place beside it. The writer puts "format" and "version"
+// first, so a file it wrote, or one edited from such a file, is the first
+// case.
+[[noreturn]] void refuseTooLargeInFile(const Parsed& file)
+{
+    const Json& root = file.root;
+    const auto said = [&root](std::string_view member) -> const Json* {
+        if (!root.is_object()) {
+            return nullptr;
+        }
+        const auto found = root.find(member);
+        return found == root.end() ? nullptr : &*found;
+    };
+    const Json* format = said("format");
+    if (format == nullptr || !saysThisFormat(*format)) {
+        throw Refusal{ErrorCode::ParseFailure, std::string(kNotACustomisation),
+                      "it " + std::string(kTooLarge) + ", " + writtenAt(*file.tooLarge)};
+    }
+    if (const Json* version = said("version"); version != nullptr && isNewer(*version)) {
+        refuseNewer(*version);
+    }
+    refuseTooLarge(file, {});
 }
 
 [[nodiscard]] Customisation readCustomisation(Parsed& file)
@@ -2110,6 +2411,25 @@ Status validateCustomisationName(std::string_view name)
                          "records it as one line, and it is not a path",
                          inQuotes(name));
     }
+    // Those three are what the project's store refuses. These two it would
+    // take, and are refused because a name is an IDENTITY - a project is
+    // matched to its customisation by it - and must be what a person sees:
+    // the same rule a layer's name is held to (validateLayerPath).
+    if (std::any_of(name.begin(), name.end(), [](char c) {
+            const auto byte = static_cast<unsigned char>(c);
+            return byte < 0x20 || byte == 0x7F;
+        })) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a customisation name cannot hold a control character: a tab, an "
+                         "escape and the like cannot be seen where the name is shown",
+                         inQuotes(name));
+    }
+    if (name.front() == ' ' || name.back() == ' ') {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a customisation name cannot begin or end with a blank: it would look "
+                         "like the name without it, and be another",
+                         inQuotes(name));
+    }
     return {};
 }
 
@@ -2125,6 +2445,9 @@ Result<Customisation> customisationFromJson(std::string_view text)
 {
     return guarded<Customisation>([&] {
         Parsed file = parseJson(text, kNotACustomisation, TextKind::File);
+        if (file.tooLarge) {
+            refuseTooLargeInFile(file);
+        }
         requireCustomisation(file.root);
         refuseDuplicate(file, {});
         return readCustomisation(file);
@@ -2154,12 +2477,17 @@ Result<LineStyle> definitionFromJson(std::string_view text, bool symbol,
         Parsed file = parseJson(text, kNotADefinition, TextKind::Definition);
         if (!file.root.is_object()) {
             throw Refusal{ErrorCode::ParseFailure, std::string(kNotADefinition),
-                          "the text is JSON, but not an object"};
+                          file.tooLarge
+                              ? "it " + std::string(kTooLarge) + ", " + writtenAt(*file.tooLarge)
+                              : std::string("the text is JSON, but not an object")};
         }
         std::string where = "definition";
         if (const auto name = file.root.find("name");
             name != file.root.end() && name->is_string()) {
             where += " " + inQuotes(name->get_ref<const std::string&>());
+        }
+        if (file.tooLarge) {
+            refuseTooLarge(file, where);
         }
         refuseDuplicate(file, where);
         LineStyle definition =
