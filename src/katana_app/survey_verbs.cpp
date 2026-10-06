@@ -19,6 +19,8 @@
 
 #include "import_records.hpp"
 #include "katana/cad/command_interpreter.hpp"
+#include "katana/cad/linework_verbs.hpp"
+#include "katana/cad/survey_finish.hpp"
 #include "katana/cad/survey_job.hpp"
 #include "katana/cad/survey_points.hpp"
 #include "katana/core/text.hpp"
@@ -40,15 +42,21 @@ namespace surveyio = katana::surveyio;
 
 constexpr const char* kUsage =
     "SURVEY READ <file> [FORMAT <id>] | SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>] "
-    "[SETTINGS <file>] [SET <key>=<value> ...]";
+    "[SETTINGS <file>] [SET <key>=<value> ...] [CODES on|off] [LINEWORK on|off]";
 
 // The words that begin an option, and so end SET's items: a key of the
 // settings text is never one of them.
-constexpr std::string_view kOptions[] = {"FORMAT", "LAYER", "SETTINGS", "SET"};
+constexpr std::string_view kOptions[] = {"FORMAT", "LAYER", "SETTINGS", "SET", "CODES",
+                                         "LINEWORK"};
 
 // Warnings listed in the reply; the rest are counted. The job's report keeps
 // every one of them (Survey > Survey Jobs).
 constexpr std::size_t kListedWarnings = 20;
+
+// Codes no rule answers that the reply names, each a record; the rest are
+// counted. Ten is enough to see whether the wrong customisation is loaded or
+// one code was mistyped, and CODE CENSUS lists them all.
+constexpr std::size_t kListedUnmatchedCodes = 10;
 
 bool sameWord(std::string_view a, std::string_view b)
 {
@@ -81,6 +89,10 @@ struct SurveyLine {
     std::optional<std::string> layer;
     std::optional<std::string> settingsFile;
     std::vector<std::string> set; // SET's items, as given
+    // CODES and LINEWORK, when the line says either: without the word the
+    // drawing's customisation decides (cad::surveyImportFinish).
+    std::optional<bool> codes;
+    std::optional<bool> linework;
 };
 
 Result<SurveyLine> parse(std::string_view line)
@@ -129,6 +141,15 @@ Result<SurveyLine> parse(std::string_view line)
             parsed.format = value;
         } else if (option == "LAYER") {
             parsed.layer = value;
+        } else if (option == "CODES" || option == "LINEWORK") {
+            // Two words and no others: "yes", "1" or a mistyped "of" taken
+            // for one of them would code, or not code, a whole job unasked.
+            const bool on = sameWord(value, "on");
+            if (!on && !sameWord(value, "off")) {
+                return refused(std::string(option) + " takes on or off, and '" + value +
+                               "' is neither");
+            }
+            (option == "CODES" ? parsed.codes : parsed.linework) = on;
         } else {
             parsed.settingsFile = value;
         }
@@ -485,6 +506,75 @@ std::string heldRecords(const survey::ReductionSettings& settings,
     return records;
 }
 
+// What the import did with the survey codes, each after a line break: the
+// coding and then the linework, each as what it did or as "none" with the one
+// word of why not. `asked` is what the line and the drawing's customisation
+// asked for; `report` what the job's finish then did - null when nothing was
+// handed on, which is the plain import of a line that said off and of a
+// drawing with no survey codes.
+std::string finishRecords(const katana::cad::SurveyImportFinish& asked,
+                          const katana::cad::SurveyFinishReport* report)
+{
+    using katana::cad::SurveyFinishSkip;
+    // Off is said before anything else: it is the line's choice or the
+    // customisation's, whatever the file and the codes would have made of it.
+    const auto whyNot = [&asked](bool wanted, SurveyFinishSkip skipped) {
+        return !wanted                    ? std::string("off")
+               : !asked.surveyCodesLoaded ? std::string(toString(SurveyFinishSkip::NoSurveyCodes))
+                                          : std::string(toString(skipped));
+    };
+    const auto count = [](std::size_t n) { return std::to_string(n); };
+
+    std::string records;
+    if (report != nullptr && report->codesRan()) {
+        records += "\ncoded points=" + count(report->coding.coded) +
+                   " matched=" + count(report->coding.matched) +
+                   " unmatched_codes=" + count(report->codesWithNoRule().size()) +
+                   " layers=" + count(report->coding.layersCreated.size()) +
+                   " styles=" + count(report->coding.stylesCreated.size());
+    } else {
+        records += "\ncoded none reason=" +
+                   whyNot(asked.codesAsked,
+                          report != nullptr ? report->whyNotCoded : SurveyFinishSkip::NotAsked);
+    }
+    // The codes themselves, whether the step ran or stopped at them: "no rule
+    // matches" is no use to anyone without the codes it is about.
+    if (report != nullptr) {
+        const std::vector<std::string> unknown = report->codesWithNoRule();
+        for (std::size_t i = 0; i < unknown.size() && i < kListedUnmatchedCodes; ++i) {
+            records += "\nunmatched_code text=" + recordText(unknown[i]);
+        }
+        if (unknown.size() > kListedUnmatchedCodes) {
+            records +=
+                "\nunmatched_codes_more=" + count(unknown.size() - kListedUnmatchedCodes);
+        }
+    }
+    if (report != nullptr && report->lineworkRan()) {
+        // The layers and the styles the LINES made: those the whole finish
+        // created less the coding's, which its own record has counted. With
+        // CODES off that is every one of them - a line is put on its rule's
+        // layer and styled by it whether or not its points were - and unsaid
+        // they appeared in the drawing with no record to account for them.
+        const auto beyond = [](std::vector<std::string> all,
+                               const std::vector<std::string>& coding) {
+            std::erase_if(all, [&coding](const std::string& name) {
+                return std::find(coding.begin(), coding.end(), name) != coding.end();
+            });
+            return all.size();
+        };
+        records += "\nlinework lines=" + count(report->lines.size()) +
+                   " unplaced=" + count(report->unplaced()) + " layers=" +
+                   count(beyond(report->layersCreated(), report->coding.layersCreated)) +
+                   " styles=" +
+                   count(beyond(report->stylesCreated(), report->coding.stylesCreated));
+    } else {
+        records += "\nlinework none reason=" +
+                   whyNot(asked.lineworkAsked,
+                          report != nullptr ? report->whyNotStrung : SurveyFinishSkip::NotAsked);
+    }
+    return records;
+}
+
 } // namespace
 
 std::string reductionRecords(const survey::ReductionReport& report)
@@ -589,6 +679,14 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
     request.raw = std::move(read->project);
     request.context = std::move(*context);
     request.importOptions = importOptions;
+    // Coded and strung inside the job's own command, so one UNDO takes back
+    // the points, their codes and their lines: as CODES and LINEWORK say,
+    // else as the drawing's customisation does, and not at all where no
+    // survey codes are loaded (cad::surveyImportFinish, which the wizard
+    // asks too).
+    const katana::cad::SurveyImportFinish finish =
+        katana::cad::surveyImportFinish(document, parsed->codes, parsed->linework);
+    request.finish = finish.options;
     // The command's own reduction, cad::reduceForDrawing, as the wizard's.
     auto command =
         std::make_unique<katana::cad::ImportSurveyJobCommand>(document, std::move(request));
@@ -598,8 +696,13 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
     }
     reply += "\n" + describeSettings(*settings, *wanted);
     const survey::ReductionReport* report = job->report();
-    reply += "\nimported job=" + recordText(job->jobId()) +
-             " entities=" + std::to_string(document.lastCreatedEntities().size()) +
+    const katana::cad::SurveyFinishReport* finished = job->finishReport();
+    // The POINTS drawn, as it always was: a finished import's created
+    // entities are its points and then its lines, and the lines have a record
+    // of their own below.
+    const std::size_t points =
+        finished != nullptr ? finished->points : document.lastCreatedEntities().size();
+    reply += "\nimported job=" + recordText(job->jobId()) + " entities=" + std::to_string(points) +
              " layer=" + recordText(importOptions.layer) + " reduction_warnings=" +
              std::to_string(report != nullptr ? report->warnings.size() : 0);
     reply += held;
@@ -615,6 +718,12 @@ Result<std::string> runSurveyLine(katana::cad::Document& document, std::string_v
             reply += "\nreduction_warnings_more=" +
                      std::to_string(report->warnings.size() - kListedWarnings);
         }
+    }
+    // What the import made of the survey codes: after the reduction's
+    // warnings, the last of which are the finish's own, and before the
+    // resections, whose records end the reply as they always have.
+    reply += finishRecords(finish, finished);
+    if (report != nullptr) {
         // Each setup the reduction positioned by resection, as the report's
         // Resections table has it: where, from which points, how well (one
         // sigma, metres), its redundancy (plan + heights), how many of its
@@ -695,13 +804,20 @@ const char* surveyHelpText()
     return "Survey    SURVEY READ <file> [FORMAT <id>]  what a survey field file holds, as\n"
            "          the reader made it; nothing is changed\n"
            "          SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>] [SETTINGS <file>]\n"
-           "          [SET <key>=<value> ...]  reduced and drawn as a survey job, one undo\n"
-           "          step: with the defaults and the control the file declares, or a\n"
-           "          SETTINGS file's (the settings text a job keeps), each SET item one\n"
-           "          line of that text; SET control=CP1;drawing;fixed;0;fixed;0;fixed;0\n"
-           "          holds the drawing's point CP1 (refused where the drawing has two\n"
-           "          CP1s apart); the reply says where each point was held and what the\n"
-           "          adjustment made of the data (key=value records, docs/survey.md)\n";
+           "          [SET <key>=<value> ...] [CODES on|off] [LINEWORK on|off]  reduced and\n"
+           "          drawn as a survey job, one undo step: with the defaults and the\n"
+           "          control the file declares, or a SETTINGS file's (the settings text a\n"
+           "          job keeps), each SET item one line of that text; SET\n"
+           "          control=CP1;drawing;fixed;0;fixed;0;fixed;0 holds the drawing's point\n"
+           "          CP1 (refused where the drawing has two CP1s apart); the reply says\n"
+           "          where each point was held and what the adjustment made of the data\n"
+           "          (key=value records, docs/survey.md).\n"
+           "          The points are coded by the loaded survey codes and strung into\n"
+           "          lines in that same step - the file's numbered strings, then the\n"
+           "          rest by code - unless CODES off or LINEWORK off says not to, or the\n"
+           "          customisation does; the reply's coded and linework records say what\n"
+           "          was done, or \"none\" and why (reason=off, no-survey-codes,\n"
+           "          no-codes-in-file, no-rule-matches, no-points)\n";
 }
 
 } // namespace katana::app
