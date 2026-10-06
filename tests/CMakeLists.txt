@@ -1230,6 +1230,50 @@ if(TARGET katana)
             "-DEXPECT=--dialog formatSymbols opened symbolLibraryDialog \"Symbol Library\"[\r\n]+symbolGrid: [^\r\n]*TEST Missing Symbol ; TEST Survey Mark ; TEST Tree ; TEST U Turn ; TEST Valve"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_symbol_library_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The definition editor, which no menu item opens: the symbol library's
+    # New Symbol asks for it, and it is then a panel of its own (%). A symbol
+    # is typed as two strokes and saved, and the library - made the target
+    # again - lists it and says what it holds. By hand: a move and a draw are
+    # 2 strokes, with no text and no pen change; made in the editor, it came
+    # from no customisation. No customisation is loaded: nothing here reads
+    # a file.
+    #
+    # `definitionAtVertices=on` is in the steps because the symbol catalogue
+    # does not list a definition by LineStyle::symbol yet (entity/
+    # style_library.hpp says the move is pending; cad::symbolLibrary), so a
+    # symbol made in a session is in the grid only when it is at vertices.
+    # WHEN THE CATALOGUE READS `symbol`, TAKE THAT STEP OUT: New Symbol, a
+    # name, strokes and Save - the path a person takes - is then what this
+    # guards, and with the step left in it would go on passing with `symbol`
+    # lost.
+    add_test(NAME qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionAtVertices=on|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|?definitionHeading|%symbolLibraryDialog|symbolGrid=TEST Post|?detailName|?detailSource|?detailContent"
+            "-DEXPECT=Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n]+definitionHeading: Symbol \"TEST Post\"[\r\n]+detailName: TEST Post[\r\n]+detailSource: Made in this session[\r\n]+detailContent: 2 strokes, 0 texts, 0 pen changes"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definition_editor_new_symbol_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Delete Anyway deletes, with FORCE, what something uses, and the library
+    # has no undo: it is offered only under Delete's refusal, with what uses
+    # the definition listed. A press of it out of nowhere - here on a symbol
+    # just saved, which nothing has refused to delete - is turned down by the
+    # driver as any disabled button's is. The button ITSELF is disabled and
+    # hidden, not only the row it sits in: with the row alone hidden this
+    # press was accepted, and ran the FORCE line.
+    add_test(NAME qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|!definitionDeleteAnyway"
+            "-DREFUSED=Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n]+.*--press: definitionEditorDialog's button definitionDeleteAnyway is disabled"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definition_editor_delete_anyway_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless
+                         qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # The code manager explaining a fixture code. By hand from
     # test_survey.mapfile: WM01 is met by the prefix key WM* (rule #0 of the
     # fixture, a feature rule), which puts it on the layer TEST SERVICES. The

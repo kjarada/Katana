@@ -205,6 +205,13 @@ class SymbolLibraryDialog : public QDialog {
     QPushButton* selectUsing_ = nullptr;
     QPushButton* load_ = nullptr;
     QPushButton* export_ = nullptr;
+    // symbolNew, symbolEdit, symbolDuplicate, symbolDelete: each asks the
+    // maker's definition editor (CustomisationContext::editDefinition) and
+    // does nothing itself.
+    QPushButton* newDefinition_ = nullptr;
+    QPushButton* editDefinition_ = nullptr;
+    QPushButton* duplicateDefinition_ = nullptr;
+    QPushButton* deleteDefinition_ = nullptr;
 
     // Last, so it is destroyed first: no delivery reaches a half-destroyed
     // dialog, and it is how every action knows the Document is still there.

@@ -85,8 +85,30 @@ StylePreview::StylePreview(katana::cad::Document& document, QWidget* parent)
     registration_ = document.addListener([this] { update(); });
 }
 
+const katana::entity::StyleLibrary& StylePreview::shownLibrary() const
+{
+    return unsaved_ ? *unsaved_ : document_->styleLibrary();
+}
+
+std::uint64_t StylePreview::shownGeneration() const
+{
+    return unsaved_ ? unsavedGeneration_ : document_->libraryGeneration();
+}
+
+void StylePreview::forgetUnsaved()
+{
+    if (unsaved_) {
+        unsaved_.reset();
+        // What it holds was flattened from the unsaved definition, under a
+        // count that is no generation of the Document's library - but may
+        // equal one.
+        definitions_.clear();
+    }
+}
+
 void StylePreview::setStyle(const katana::entity::Style& style)
 {
+    forgetUnsaved();
     showing_ = Showing::Style;
     style_ = style;
     update();
@@ -94,6 +116,7 @@ void StylePreview::setStyle(const katana::entity::Style& style)
 
 void StylePreview::setSymbol(const std::string& name, double size)
 {
+    forgetUnsaved();
     showing_ = Showing::Symbol;
     name_ = name;
     symbolSize_ = size;
@@ -102,13 +125,36 @@ void StylePreview::setSymbol(const std::string& name, double size)
 
 void StylePreview::setLinestyle(const std::string& name)
 {
+    forgetUnsaved();
     showing_ = Showing::Linestyle;
     name_ = name;
     update();
 }
 
+void StylePreview::setDefinition(const katana::entity::LineStyle& definition, DefinitionAs as)
+{
+    // A library of its own, holding this definition alone: everything below
+    // draws a NAME found in a library, and the Document's either lacks this
+    // one or holds it as it was before the edit.
+    katana::entity::StyleLibrary library;
+    if (!library.add(definition)) {
+        clear();
+        return;
+    }
+    unsaved_ = std::move(library);
+    // The cache would answer a second edit with the first's strokes: same
+    // name, and no generation of a library to tell them apart by.
+    ++unsavedGeneration_;
+    definitions_.clear();
+    showing_ = as == DefinitionAs::Symbol ? Showing::Symbol : Showing::Linestyle;
+    name_ = definition.name;
+    symbolSize_ = 0.0;
+    update();
+}
+
 void StylePreview::clear()
 {
+    forgetUnsaved();
     showing_ = Showing::Nothing;
     update();
 }
@@ -161,7 +207,7 @@ katana::cad::StyleDrawing StylePreview::layOutLine(QSize area)
     katana::cad::DashOptions dashes;
     dashes.viewScale = pixelsPerMetre;
 
-    const katana::entity::StyleLibrary& library = document_->styleLibrary();
+    const katana::entity::StyleLibrary& library = shownLibrary();
     if (showing_ == Showing::Style) {
         const katana::entity::Model& model = document_->model();
         QStringList notes;
@@ -210,7 +256,7 @@ katana::cad::StyleDrawing StylePreview::layOutLine(QSize area)
 
 katana::cad::StyleDrawing StylePreview::layOutSymbol(QSize area, const QFont& font)
 {
-    const katana::entity::StyleLibrary& library = document_->styleLibrary();
+    const katana::entity::StyleLibrary& library = shownLibrary();
     const katana::cad::ResolvedSymbol resolved = katana::cad::resolveSymbol(library, name_);
     if (resolved.kind == katana::cad::SymbolKind::BuiltInFallback) {
         notice_ = tr("\"%1\" is not defined: drawn as the built-in \"%2\".")
@@ -221,8 +267,8 @@ katana::cad::StyleDrawing StylePreview::layOutSymbol(QSize area, const QFont& fo
     // A built-in shape with no size of its own is given 2 mm of paper - any
     // size would do, since the pane is fitted to the symbol.
     katana::cad::StyleDrawing drawing = katana::cad::pointSymbolDrawing(
-        definitions_, library, document_->libraryGeneration(), name_, Point2(0.0, 0.0),
-        symbolSize_, 0.0, paperScale(), 2.0 * paperScale());
+        definitions_, library, shownGeneration(), name_, Point2(0.0, 0.0), symbolSize_, 0.0,
+        paperScale(), 2.0 * paperScale());
 
     // Centred on the insertion point, and scaled so the symbol's reach from
     // it fits either way: the crosshair is always the pane's centre, and an
