@@ -828,7 +828,9 @@ survives being read and written.
   made once, on 2026-10-06, with a throwaway program (Release, GCC 16, best
   of 15 runs) on a GENERATED customisation of the reference one's size - 792
   definitions, 35,684 strokes in the reference mix with coordinates of three
-  decimals, 1,624 rules, 1.7 MB of text:
+  decimals, 1,624 rules, 1.7 MB of text (the strokes of the order the
+  reference libraries were then converted in; 35,692 since, which is eight
+  strokes in thirty-five thousand and changes nothing below):
 
   | | Before | With strokes read from the parse events |
   |---|---|---|
@@ -1136,31 +1138,68 @@ would hide
 It is converted - by the owner, on the machine that has it - with
 
 ```
-katana_customisation_convert --name NSW --description "<a sentence>"
+katana_customisation_convert --name NSW
+    --description "Linestyles, symbols and survey codes of the NSW customisation."
     --notice-from "<linestyle library>" --notice-from "<symbol library>"
     --colours "<folder>/support/colours.4d"
     --strip-leading-word <publisher's word> --strip-leading-word <vendor's word>
     --remove-word <publisher's word>
     -o resources/customisation/nsw.customisation.json
-    "<linestyle library>" "<survey code file>" "<names file>" "<symbol library>"
+    "<symbol library>" "<survey code file>" "<names file>" "<linestyle library>"
 ```
 
-The four files in that order is the documented load order, the one the
-program has always loaded them in: the symbol library last, and the names
-file after the survey code file, whose rules win a field both set.
+The four files in that order is the documented load order: the symbol
+library FIRST and the linestyle library LAST, and the names file after the
+survey code file, whose rules win a field both set. The two notices are
+asked for as they always were, the linestyle library's first; that is no
+part of the load order.
 
-**That order is an open decision, and the owner's.** Three names are given by
-BOTH libraries, as three different definitions. Read last, the symbol
-library's are the ones kept - and two of those three names are what four
-rules give as their LINESTYLE, while no rule places any of the three as a
-symbol. So four rules are left drawing a line with a symbol (the survey code
-check reports two of them as such), and the conversion says so in its report:
-three `definition_replaced` lines that change kind, two warnings. With the
-symbol library given FIRST the three linestyles are kept instead and no rule
-names a definition of the other kind - 471 symbols and 321 linestyles in
-place of 474 and 318, which moves every figure below that counts them. *Not
-done here:* those figures are what the rest of this work is pinned to, so the
-order was kept and the choice recorded for the owner.
+**The name and the description are given word for word, because the file's
+bytes depend on them.** Both are written into the file. Three things are
+therefore this command's and no other's: the size in the table below; the
+check that the compiled-in file is byte for byte a fresh conversion
+(`docs/survey_coding.md`, "The built-in, and the seam"); and the digest of
+those bytes, by which a customisation a user kept is told from another
+edition of the built-in (`CustomisationStart::keptFromAnotherBuiltIn`).
+Converted with another sentence the file is another edition, and every copy
+kept from this one is reported as made from another. They are Katana's own
+words and no part of the reference files, so a committed file may spell them,
+as it may not the two words below. Until 2026-10-07 the description stood
+here as `"<a sentence>"`, and the file could be made again only by reading
+the sentence out of the file itself. Run on that day as it is spelt here,
+with nothing put in but the files and the two words, the command gave the
+compiled-in file byte for byte; with that placeholder for a description it
+gave a file fifty bytes shorter.
+
+**The linestyle library is last by decision** (2026-10-06, when the whole of
+this work was first built together with the customisation compiled in). Three
+names are given by BOTH libraries, as three different definitions, and a
+customisation holds one definition a name: the later library's. Two of those
+three names are what four rules give as their LINESTYLE, and no rule places
+any of the three as a symbol. So the library read last is the one whose
+definitions the rules were written for, and no rule of the converted file
+names a definition of the other kind: the three `definition_replaced` lines
+of its report that change kind each say `kept_as=linestyle`, and it has no
+warning of one.
+
+*Rejected: the order the program always loaded these files in*, the symbol
+library last, which is the order this document gave until then. It keeps the
+symbol library's three, and leaves those four rules drawing a line with a
+symbol's strokes (the survey code check reported two of them as such, and
+the conversion said so in two warnings). It gives 474 symbols and 318
+linestyles, 157 of the 792 at vertices and 35,684 strokes, which are the
+figures the ones below took the place of. It is still the order the older
+loader reads the four files in, which is why `docs/survey_coding.md` counts
+157 at vertices where this document counts 155.
+
+*Not done: both definitions of such a name.* The symbol library's three are
+not in the converted file, so a person cannot place them by hand either. A
+style library is ONE table by name (`entity::StyleLibrary`); a rule and a
+style name a definition by that name and nothing else; and the format lists
+a name under `linestyles` or under `symbols`, a name given twice being
+refused. Keeping both would take a name that means two definitions by who
+asks, in the model, the format and every lookup - for three symbols no rule
+of the reference survey code files places.
 
 The two words are the publisher's, which begins most group paths, and the
 vendor's, which begins a few; they are arguments so that no committed file
@@ -1175,21 +1214,30 @@ What the conversion of 2026-10-06 gave, each figure also the census's:
 | | |
 |---|---|
 | definitions | 792, from 796 blocks: four names are defined twice, three of them once in each library |
-| definitions replaced | 4: one within the linestyle library, by a block of the same words; three of the linestyle library's by the symbol library's, each a different definition - two of those names the linestyle of four rules, none placed as a symbol |
-| listed as symbols / not | 474 / 318 |
-| drawn at vertices | 157 |
+| definitions replaced | 4: one within the linestyle library, by a block of the same words; three of the symbol library's by the linestyle library's, each a different definition - two of those names the linestyle of four rules, none placed as a symbol |
+| listed as symbols / not | 471 / 321 |
+| drawn at vertices | 155 |
 | group paths | 71 |
-| strokes | 35,684: 17,014 move, 17,220 draw, 104 arc, 312 circle, 178 dot, 342 pen, 514 text |
+| strokes | 35,692: 17,020 move, 17,222 draw, 104 arc, 312 circle, 178 dot, 342 pen, 514 text |
 | rules | 1,624 (725 and 899) over 632 keys |
 | names the rules use | 426, of which 5 are defined by neither library |
+| rules naming a definition of the other kind | none: no rule's linestyle is listed as a symbol, and no rule's symbol as a linestyle |
 | colour names the rules use | 22: 9 standard, 7 given a colour from the table, 6 left unresolved - every one a plot pen |
 | standard names the table colours otherwise | 2: they draw in the standard colour |
 | characters read by an inferred encoding | 82, all in the linestyle library (Windows-1252) |
-| warnings | 4: an `<item>` that names no code, the inferred encoding, and the two names kept as symbols that rules give as their linestyle |
+| warnings | 2: an `<item>` that names no code, and the inferred encoding |
 | leading words taken off | 29 definition names, 786 group paths, 1,029 rule groups, 8 rule references |
 | comments changed | 1 |
 | notice | 16 lines: the two libraries' blocks of 8, which differ |
-| the file | 1,541,413 bytes |
+| the file | 1,541,462 bytes |
+
+Seven of these rows are what the decision above changed. In the other order
+they were: the three replaced the other way round, 474 / 318 listed as
+symbols or not, 157 at vertices, 35,684 strokes (17,014 move and 17,220
+draw), four rules naming a definition of the other kind, 4 warnings and
+1,541,413 bytes. The rest are the same in either order - the 792 definitions,
+71 group paths, 1,624 rules and 632 keys among them: the order moves no name,
+group, rule or key.
 
 **Where the figures come from.** Two scripts in `tools/`, neither using any of
 Katana's code:
@@ -1200,61 +1248,89 @@ Katana's code:
   REPORTS besides: what carried a word, the blocks replaced and how the rules
   name them, the characters an inferred encoding gave, the libraries' notice
   lines and, given the colour table (`--colours TABLE`), the colour names by
-  where their colour comes from;
+  where their colour comes from. **The order it is given the files in is the
+  load order it counts**, as it is the converter's: it finds what each file
+  is by looking inside it (and which library is the symbol library by its
+  name, as the format has it), keeps the later library's block of a name
+  both define, and says the order back as `loadOrder`. Until the decision
+  above it had ONE order written into it, the linestyle library first -
+  which made it the census of that order alone, and would have left the
+  figures of the other order with no source but the converter. Given the
+  files that way round it still gives the earlier figures, every one;
 - `tools/customisation_census.py`, given a Katana customisation, counts it
   with the standard `json` module under the same names, and with
   `--against <census.json>` compares the two figure by figure and exits 1 if
   any differs.
 
-The converted file gave the first script's figures in all 21 it can be asked
-for. The others - eleven, with the words and the table given - describe the
-legacy files and the conversion rather than the result: blocks read, a file
-and replaced, strokes read, rules a file, items with no key, what carried a
-word, what was replaced, the inferred encoding, the notice lines, the
-colours. `TheReferenceCustomisationConvertsToTheFiguresOfItsCensus` holds
-the converter and its REPORT to all of them, with the 29 names the earlier
-clean-up gave the definitions that carried the publisher's word, every one of
-which must be defined. No figure in that test is the converter's own.
+The converted file gave the first script's figures in all 22 it can be asked
+for - and, as a check that the comparison can fail, differs in six of them
+from the census of the other order. One of the 22 is what the decision is
+about, counted over every name the rules use and not only the three both
+libraries define: the rules that name a definition of the other kind
+(`rulesNamingTheOtherKind`), none in this order and four in the other. The
+others - twelve, with the words and the table given - describe the legacy
+files and the conversion rather than the result: the order given, blocks
+read, a file and replaced, strokes read, rules a file, items with no key,
+what carried a word, what was replaced, the inferred encoding, the notice
+lines, the colours. `TheReferenceCustomisationConvertsToTheFiguresOfItsCensus`
+holds the converter and its REPORT to all of them, with the 29 names the
+earlier clean-up gave the definitions that carried the publisher's word,
+every one of which must be defined. No figure in that test is the
+converter's own: converted in the other order, it fails on every figure the
+order moves.
 
 ### What reading and writing cost
 
-`benchmarks/bench_customisation.cpp`, Release, GCC 16.2, on 2026-10-06 on a
-machine busy with other builds; the median of five repetitions, in
-milliseconds. The generated customisation is made in code to the reference
-one's size and mix (792 definitions, 35,684 strokes with coordinates of three
+`benchmarks/bench_customisation.cpp`, Release, GCC 16.2, late on 2026-10-06
+with no other build seen running; the median of five repetitions, in
+milliseconds, the coefficient of variation of the five between 1 and 5 % in
+every row. The generated customisation is made in code to the reference
+one's size and mix (792 definitions, 35,692 strokes with coordinates of three
 decimals, 1,624 rules), so that the measurement can be repeated in any clone;
 the built-in column is the converted reference file, where the build has one.
 
-| | Generated, 1,558,760 bytes | Built-in, 1,541,413 bytes |
+| | Generated, 1,559,276 bytes | Built-in, 1,541,462 bytes |
 |---|---|---|
-| writing, whole | 7.3 | 7.4 |
-| writing, definitions alone | 4.7 | 4.9 |
-| writing, rules alone | 2.2 | 2.1 |
-| reading, whole | 42.6 | 38.8 |
-| reading, definitions alone | 36.0 | 34.0 |
-| reading, rules alone | 6.0 | 5.5 |
-| the 69,270 numbers of the strokes, by `strtod` | 21.5 | |
-| the same, by `std::from_chars` | 0.6 | |
+| writing, whole | 7.4 | 7.3 |
+| writing, definitions alone | 4.9 | 4.8 |
+| writing, rules alone | 2.3 | 2.1 |
+| reading, whole | 42.9 | 40.6 |
+| reading, definitions alone | 36.7 | 32.9 |
+| reading, rules alone | 6.7 | 5.6 |
+| reading the file as it is on disk | | 39.9 |
+| the 69,286 numbers of the strokes, by `strtod` | 22.8 | |
+| the same, by `std::from_chars` | 0.7 | |
+
+This is the second table of that day. It was measured again when the order of
+the reference libraries was decided ("The reference customisation"), because
+the sizes moved with it: the generated mix follows the census, 8 strokes and
+16 numbers more, and the built-in is 49 bytes longer. Nothing in the reader
+or the writer changed between the two, and the rows differ by what two runs
+of one program differ by on this machine (the end of this section). The
+first table, earlier that day and on the mix and the file of the other order
+(1,558,760 and 1,541,413 bytes, 69,270 numbers): 7.3 and 7.4 to write the
+whole, 42.6 and 38.8 to read it, 36.0 and 34.0 for the definitions alone,
+6.0 and 5.5 for the rules alone, 21.5 and 0.6 for the numbers.
 
 **Reading is about twice the older readers**, which were measured at 21 ms on
-the four reference files (`docs/survey_coding.md`): 39 ms for the reference
+the four reference files (`docs/survey_coding.md`): 40 ms for the reference
 customisation itself, once, at the first use of the built-in. The benchmark
-says where it goes. The definitions are 34 of the 39, and a definition is
+says where it goes. The definitions are 33 of the 41, and a definition is
 almost nothing but numbers; converting the numbers of the strokes with the C
 library's `strtod`, which is what the JSON library hands each one to, takes
-21.5 ms with nothing else done, and `std::from_chars` does the same work in
-0.6. So about half of a read is one function called 69,270 times, and the
+22.8 ms with nothing else done, and `std::from_chars` does the same work in
+0.7. So about half of a read is one function called 69,286 times, and the
 rest is the JSON library's scanning and the building of the strokes and
 rules.
 
-The figures are the machine's as much as the code's. Run twice more the same
-evening, with nothing changed in the reader or the writer: under two other
-builds every row was about twice the table - reading the reference file
-83.8 ms, writing it 16.7 - and so were the two rows that run none of Katana's
-code (41.8 and 1.3 ms for the numbers alone); with the machine quiet again the
-table came back (40.0 ms to read the reference file, 7.5 to write it, 24.1
-and 0.6 for the numbers). The proportions are what to take from it: half of a
-read is `strtod`.
+The figures are the machine's as much as the code's. The first table was run
+twice more that evening, with nothing changed in the reader or the writer:
+under two other builds every row was about twice the table - reading the
+reference file 83.8 ms, writing it 16.7 - and so were the two rows that run
+none of Katana's code (41.8 and 1.3 ms for the numbers alone); with the
+machine quiet again the table came back (40.0 ms to read the reference file,
+7.5 to write it, 24.1 and 0.6 for the numbers). The proportions are what to
+take from it: half of a read is `strtod`.
 
 *Not done, and nothing was changed to get these figures:* the only way to
 take that half is a number scanner of the format's own in place of the JSON
@@ -1310,8 +1386,11 @@ converter fills the table for all three.
 - **The converter's readers are still the product's.** `katana_archive12d`
   holds them, and the three programs link that library, until the work that
   moves them into `src/katana_archive12d/legacy/` beside the converter.
-- **The order of the reference libraries is not settled** ("The reference
-  customisation"): as converted, four rules draw a line with a symbol.
+- **A name both libraries define keeps one definition.** The order of the
+  reference libraries is settled ("The reference customisation"), and what it
+  costs is recorded there: the symbol library's definitions of three names
+  are not in the converted file. Holding both would take a library that is
+  more than one table by name.
 - **A telephone number is in the reference customisation.** Ten of its symbol
   definitions draw a text that holds one - the same number in each - and five
   of the ten are placed as symbols by ten rules (five codes, two rules each),
@@ -1324,7 +1403,7 @@ converter fills the table for all three.
 - **No colour for a definition's pen** (above), and **no `sources`**: a
   converted customisation does not say which files it was made from.
 - **No warning fails a conversion** - a reader's or the conversion's own. It
-  is printed with the report. The reference files give four; a definition a
+  is printed with the report. The reference files give two; a definition a
   library reader passed over would be reported the same way, and is a loss
   the person converting has to notice.
 - **A console may not show the report's characters outside ASCII.** The

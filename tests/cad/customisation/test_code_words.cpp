@@ -33,11 +33,13 @@ using katana::entity::SurveySection;
 namespace {
 
 // Two definitions drawn at vertices - symbols, never line patterns - and
-// nothing else.
+// nothing else. Their names, and the one below that nothing defines, are
+// invented as the other fixtures' are ("TEST ..."): a name a real
+// customisation defines is its author's, and a fixture is committed.
 katana::entity::StyleLibrary marks()
 {
     katana::entity::StyleLibrary library;
-    for (const char* name : {"MARK Peg", "MARK Nail"}) {
+    for (const char* name : {"TEST Peg", "TEST Nail"}) {
         LineStyle style;
         style.name = name;
         style.atVertices = true;
@@ -101,12 +103,12 @@ TEST(CodeWords, WhetherACodeGoesIntoASurfaceIsExplainedAsItsSurface)
 
 TEST(CodeWords, ALinestyleNamingADefinitionDrawnAtVerticesIsSaidToBeASymbolAtVertices)
 {
-    // PG* draws its line with MARK Peg, which the library holds as a symbol.
+    // PG* draws its line with TEST Peg, which the library holds as a symbol.
     const katana::entity::StyleLibrary library = marks();
     SurveyRule pegs;
     pegs.key = "PG*";
     pegs.model = "SURVEY MARKS";
-    pegs.linestyle = "MARK Peg";
+    pegs.linestyle = "TEST Peg";
     SurveyMap map;
     ASSERT_TRUE(map.add(pegs).ok());
 
@@ -114,7 +116,7 @@ TEST(CodeWords, ALinestyleNamingADefinitionDrawnAtVerticesIsSaidToBeASymbolAtVer
     const std::vector<LintIssue> issues = katana::cad::lintSurveyRule(pegs, 0, library, {}, {});
     ASSERT_EQ(issues.size(), 1u);
     EXPECT_EQ(issues[0].kind, LintKind::LinestyleIsVertex);
-    EXPECT_EQ(issues[0].message, "linestyle \"MARK Peg\" is a symbol (at vertices), drawn at each "
+    EXPECT_EQ(issues[0].message, "linestyle \"TEST Peg\" is a symbol (at vertices), drawn at each "
                                  "vertex rather than along the line");
 
     // The explanation: the layer and the linestyle from rule #0, then what
@@ -124,8 +126,8 @@ TEST(CodeWords, ALinestyleNamingADefinitionDrawnAtVerticesIsSaidToBeASymbolAtVer
     EXPECT_EQ(katana::cad::formatCodeExplanation(why),
               "Code \"PG1\": prefix match, matched\n"
               "  layer: SURVEY MARKS  <- rule #0 PG* (feature)\n"
-              "  linestyle: MARK Peg  <- rule #0 PG* (feature)\n"
-              "  linestyle \"MARK Peg\": defined, but as a symbol (at vertices)\n");
+              "  linestyle: TEST Peg  <- rule #0 PG* (feature)\n"
+              "  linestyle \"TEST Peg\": defined, but as a symbol (at vertices)\n");
 }
 
 TEST(CodeWords, ALayerThatIsNotALayerPathIsAnErrorNamingTheLayerAndNeverSayingValidLayer)
@@ -152,14 +154,14 @@ TEST(CodeWords, TwoLinetypesNamingSymbolsAtVerticesAreCountedInThePluralByThatWo
 {
     // Two styles, each naming a definition the library holds only as a
     // symbol: neither resolves, both name one, and the names come in name
-    // order ("MARK Nail" before "MARK Peg").
+    // order ("TEST Nail" before "TEST Peg").
     Document document;
-    styledWith(document, {{"pegs", "MARK Peg"}, {"nails", "MARK Nail"}});
+    styledWith(document, {{"pegs", "TEST Peg"}, {"nails", "TEST Nail"}});
     EXPECT_EQ(katana::cad::formatCoverage(katana::cad::customisationCoverage(document)),
               "0 of this drawing's 2 styles are drawn with a loaded definition (2 name one; the "
               "rest are plain lines)\n"
               "  2 names are loaded as `at vertices` symbols, not linestyles, so a linetype "
-              "naming one draws solid: \"MARK Nail\", \"MARK Peg\"\n");
+              "naming one draws solid: \"TEST Nail\", \"TEST Peg\"\n");
 }
 
 TEST(CodeWords, TheStyleManagerSaysALinetypeNamingASymbolIsDrawnSolidAndWhy)
@@ -167,12 +169,12 @@ TEST(CodeWords, TheStyleManagerSaysALinetypeNamingASymbolIsDrawnSolidAndWhy)
     // One style whose linetype is a symbol: drawn as the continuous line, and
     // the reason is that the name is defined - as a symbol at vertices.
     Document document;
-    styledWith(document, {{"pegs", "MARK Peg"}});
+    styledWith(document, {{"pegs", "TEST Peg"}});
     const std::vector<katana::cad::StyleDiagnostic> diagnostics =
         katana::cad::styleDiagnostics(document);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(diagnostics[0].kind, katana::cad::StyleDiagnosticKind::MissingLinetype);
-    EXPECT_EQ(diagnostics[0].name, "MARK Peg");
+    EXPECT_EQ(diagnostics[0].name, "TEST Peg");
     EXPECT_EQ(diagnostics[0].drawnAs,
               "a solid line (continuous): an `at vertices` symbol, not a linestyle");
 }
@@ -180,19 +182,19 @@ TEST(CodeWords, TheStyleManagerSaysALinetypeNamingASymbolIsDrawnSolidAndWhy)
 TEST(CodeWords, GivingASymbolAtVerticesAsALinetypeIsRefusedInTheStyleManagersWords)
 {
     // What STYLE SET, LAYER LTYPE and Global Modify ask before taking a
-    // linetype name. MARK Peg is defined - as a symbol - so it is refused by
+    // linetype name. TEST Peg is defined - as a symbol - so it is refused by
     // what it is, in the words "Drawn as" has for the same state above, and
     // not as a name nothing defines.
     Document document;
     document.setStyleLibrary(marks());
-    const katana::core::Status asked = katana::cad::checkLinetypeName(document, "MARK Peg");
+    const katana::core::Status asked = katana::cad::checkLinetypeName(document, "TEST Peg");
     ASSERT_FALSE(asked.ok());
     EXPECT_EQ(asked.error().code, katana::core::ErrorCode::InvalidArgument);
     EXPECT_EQ(asked.error().message,
               "that is an `at vertices` symbol, not a linestyle: give it as the symbol");
-    EXPECT_EQ(asked.error().context, "MARK Peg");
+    EXPECT_EQ(asked.error().context, "TEST Peg");
     // A name nothing defines is the other refusal, and says nothing of symbols.
-    const katana::core::Status missing = katana::cad::checkLinetypeName(document, "MARK Spike");
+    const katana::core::Status missing = katana::cad::checkLinetypeName(document, "TEST Spike");
     ASSERT_FALSE(missing.ok());
     EXPECT_EQ(missing.error().code, katana::core::ErrorCode::NotFound);
     EXPECT_EQ(missing.error().message.find("symbol"), std::string::npos)

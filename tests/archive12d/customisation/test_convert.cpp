@@ -17,7 +17,8 @@
 // * The small inputs below are written here, and what each becomes is worked
 //   out beside it from the rule being tested.
 // * The reference customisation's figures are those of a census that uses none
-//   of this program's code (tools/reference_census.py over the four files;
+//   of this program's code (tools/reference_census.py over the four files, in
+//   the load order they are converted in, which is part of what it counts;
 //   tools/customisation_census.py gives the same from a converted file).
 
 #include <gtest/gtest.h>
@@ -1598,7 +1599,9 @@ namespace {
 
 struct Reference {
     std::vector<a12::LegacyFile> inLoadOrder{};
-    std::vector<a12::LegacyFile> libraries{}; // the linestyle library, then the symbol library
+    // The linestyle library, then the symbol library: whose notice comes
+    // first. That is no part of the load order, and did not change with it.
+    std::vector<a12::LegacyFile> libraries{};
     std::optional<a12::LegacyFile> colours{};
 };
 
@@ -1622,11 +1625,19 @@ bool holds(const std::string& name, std::string_view word)
     return lower.find(word) != std::string::npos;
 }
 
-// The documented load order: the linestyle library, the survey code file, the
-// names file, the symbol library. Which library is the symbol one is said by
-// its name, as the reader itself goes by; so is which survey code file is the
-// names file. A file that is neither kind - a note, a converted customisation
-// - is passed over.
+// The documented load order: the symbol library, the survey code file, the
+// names file, the linestyle library. The linestyle library is LAST by
+// decision (docs/customisation.md, "The reference customisation", has it and
+// what was rejected): a customisation holds one definition a name, the later
+// library's is the one kept, three names are defined by both libraries, and
+// the survey code rules give two of the three as their LINESTYLE and none as
+// a symbol. It was the other way round - the symbol library last, the order
+// these files were always loaded in - which left four rules drawing a line
+// with a symbol's strokes.
+//
+// Which library is the symbol one is said by its name, as the reader itself
+// goes by; so is which survey code file is the names file. A file that is
+// neither kind - a note, a converted customisation - is passed over.
 ReferenceFolder referenceFolder(const std::filesystem::path& directory)
 {
     ReferenceFolder folder;
@@ -1675,7 +1686,7 @@ ReferenceFolder referenceFolder(const std::filesystem::path& directory)
         return folder;
     }
     Reference& reference = folder.reference;
-    reference.inLoadOrder = {linestyles[0], codes[0], names[0], symbols[0]};
+    reference.inLoadOrder = {symbols[0], codes[0], names[0], linestyles[0]};
     reference.libraries = {linestyles[0], symbols[0]};
     const std::filesystem::path table = directory / "support" / "colours.4d";
     if (std::filesystem::is_regular_file(table, ignored)) {
@@ -1758,16 +1769,21 @@ TEST(CustomisationConvert, AReferenceFolderIsSkippedOnlyWhenItHoldsNoLegacyFileA
               "code files: 1, names files: 0 - the reference customisation is one of each");
 
     // The four: no problem, and in the documented load order whatever their
-    // names sort as.
+    // names sort as - the symbol library first and the linestyle library
+    // last (referenceFolder says why), the survey code file before the names
+    // file. The notice is asked of the linestyle library first all the same.
     writeFile(three / "a_names.mapfile", surveyCodes(feature("A*", "<comment>a</comment>")));
     const ReferenceFolder four = referenceFolder(three);
     EXPECT_FALSE(four.empty);
     EXPECT_TRUE(four.problem.empty()) << four.problem;
     ASSERT_EQ(four.reference.inLoadOrder.size(), 4u);
-    EXPECT_EQ(four.reference.inLoadOrder[0].name, "lines.4d");
+    EXPECT_EQ(four.reference.inLoadOrder[0].name, "x_symbols.4d");
     EXPECT_EQ(four.reference.inLoadOrder[1].name, "codes.mapfile");
     EXPECT_EQ(four.reference.inLoadOrder[2].name, "a_names.mapfile");
-    EXPECT_EQ(four.reference.inLoadOrder[3].name, "x_symbols.4d");
+    EXPECT_EQ(four.reference.inLoadOrder[3].name, "lines.4d");
+    ASSERT_EQ(four.reference.libraries.size(), 2u);
+    EXPECT_EQ(four.reference.libraries[0].name, "lines.4d");
+    EXPECT_EQ(four.reference.libraries[1].name, "x_symbols.4d");
     EXPECT_FALSE(four.reference.colours.has_value()) << "no support folder here";
 
     // And a fifth legacy file beside them is one too many.
@@ -1814,14 +1830,27 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
     const Customisation& nsw = conversion.customisation;
     const a12::ConvertReport& report = conversion.report;
 
-    // ---- the census (tools/reference_census.py over the four files) ---------
-    // 796 blocks, four of them defined twice: 792 definitions. 474 from the
-    // symbol library, which is what makes them symbols, and 318 not.
+    // ---- the census (tools/reference_census.py over the four files, given in
+    // this load order, which it says back as `loadOrder`) ----------------------
+    // 796 blocks, four of them defined twice: 792 definitions. The symbol
+    // library gives 474 names and the linestyle library 321; three names are
+    // in both, and the linestyle library, read last, is the one that keeps
+    // them. So 471 are from the symbol library, which is what makes them
+    // symbols, and 321 are not.
+    //
+    // While the symbol library was the one read last these were 474 and 318,
+    // with 157 at vertices and 17,014 moves and 17,220 draws among 35,684
+    // strokes. Those figures went with the order (referenceFolder has the
+    // decision), and what stands here now is the census of the order this
+    // test converts in - not what the converter gave when it was turned
+    // round. 792, 71, 1,624 and 632 are the same either way: the order moves
+    // no name, group, rule or key.
     EXPECT_EQ(nsw.library.size(), 792u);
     EXPECT_EQ(report.definitions, 792u);
-    EXPECT_EQ(report.symbols, 474u);
-    EXPECT_EQ(report.linestyles, 318u);
-    EXPECT_EQ(report.atVertices, 157u);
+    EXPECT_EQ(report.symbols, 471u);
+    EXPECT_EQ(report.linestyles, 321u);
+    // Two of the three names are at vertices as symbols and not as linestyles.
+    EXPECT_EQ(report.atVertices, 155u);
     EXPECT_EQ(report.groups, 71u);
     EXPECT_EQ(katana::entity::styleGroups(nsw.library).size(), 71u);
     EXPECT_EQ(nsw.map.size(), 1624u); // 725 + 899
@@ -1842,16 +1871,18 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
         }
         EXPECT_EQ(style.source, "NSW") << style.name;
     });
-    EXPECT_EQ(symbols, 474u);
-    EXPECT_EQ(atVertices, 157u);
-    EXPECT_EQ(strokes[StrokeOp::Move], 17014u);
-    EXPECT_EQ(strokes[StrokeOp::Draw], 17220u);
+    EXPECT_EQ(symbols, 471u);
+    EXPECT_EQ(atVertices, 155u);
+    // The census's `opsInLibrary`: 35,692 strokes. The three linestyles kept
+    // hold six moves and two draws more than the three symbols that went.
+    EXPECT_EQ(strokes[StrokeOp::Move], 17020u);
+    EXPECT_EQ(strokes[StrokeOp::Draw], 17222u);
     EXPECT_EQ(strokes[StrokeOp::Arc], 104u);
     EXPECT_EQ(strokes[StrokeOp::Circle], 312u);
     EXPECT_EQ(strokes[StrokeOp::Dot], 178u);
     EXPECT_EQ(strokes[StrokeOp::Pen], 342u);
     EXPECT_EQ(strokes[StrokeOp::Text], 514u);
-    EXPECT_EQ(report.strokes, 17014u + 17220u + 104u + 312u + 178u + 342u + 514u);
+    EXPECT_EQ(report.strokes, 17020u + 17222u + 104u + 312u + 178u + 342u + 514u);
 
     // A water main, end to end: a code, through the rules, to a definition.
     const auto water = nsw.map.lookup("WM01");
@@ -1918,10 +1949,14 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
 
     // ---- what went (the census's `replaced`) -----------------------------------
     // Four blocks of the 796 were replaced. One within the linestyle library,
-    // by a block that says the same words. Three of the linestyle library's
-    // by the symbol library's, read last, each a different definition - and
-    // two of those three names are what four rules give as their linestyle,
-    // while no rule places any of them as a symbol.
+    // by a block that says the same words. Three of the symbol library's by
+    // the linestyle library's, read last, each a different definition
+    // (`acrossFilesKept`: 3 of the linestyle library's, none of the symbol
+    // library's) - and two of those three names are what four rules give as
+    // their linestyle, while no rule places any of them as a symbol. So no
+    // rule names one as the kind that went (`acrossFilesNamedAsTheKindThatWent`:
+    // none), which is what the order was decided for: with the symbol
+    // library last it was those four rules.
     ASSERT_EQ(report.replaced.size(), 4u);
     std::size_t withinAFile = 0;
     std::size_t acrossFiles = 0;
@@ -1929,6 +1964,7 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
     std::size_t linestyleRules = 0;
     std::size_t namesWithLinestyleRules = 0;
     std::size_t symbolRules = 0;
+    std::size_t rulesNamingTheKindThatWent = 0;
     for (const a12::ReplacedDefinition& entry : report.replaced) {
         theSame += entry.differs ? 0 : 1;
         if (entry.keptFrom == entry.droppedFrom) {
@@ -1937,12 +1973,13 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
             continue;
         }
         ++acrossFiles;
-        EXPECT_TRUE(entry.keptAsSymbol) << entry.name;
-        EXPECT_FALSE(entry.droppedAsSymbol) << entry.name;
+        EXPECT_FALSE(entry.keptAsSymbol) << entry.name;
+        EXPECT_TRUE(entry.droppedAsSymbol) << entry.name;
         EXPECT_TRUE(entry.differs) << entry.name;
         linestyleRules += entry.linestyleRules;
         namesWithLinestyleRules += entry.linestyleRules != 0 ? 1 : 0;
         symbolRules += entry.symbolRules;
+        rulesNamingTheKindThatWent += entry.keptAsSymbol ? entry.linestyleRules : entry.symbolRules;
     }
     EXPECT_EQ(withinAFile, 1u);
     EXPECT_EQ(acrossFiles, 3u);
@@ -1950,17 +1987,41 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
     EXPECT_EQ(linestyleRules, 4u);
     EXPECT_EQ(namesWithLinestyleRules, 2u);
     EXPECT_EQ(symbolRules, 0u);
+    EXPECT_EQ(rulesNamingTheKindThatWent, 0u);
+    // And in the customisation itself, not only in the report of what was
+    // replaced (the census's `rulesNamingTheOtherKind`, counted over every
+    // name the rules use): no rule gives as its linestyle a definition listed
+    // as a symbol, and none places as a symbol one that is not. With the
+    // symbol library read last, four rules did the first.
+    std::size_t linesDrawnWithASymbol = 0;
+    std::size_t symbolsThatAreLinestyles = 0;
+    for (const SurveyRule& rule : nsw.map.rules()) {
+        if (const LineStyle* style = nsw.library.find(rule.linestyle)) {
+            linesDrawnWithASymbol += style->symbol ? 1 : 0;
+        }
+        if (rule.symbol) {
+            if (const LineStyle* style = nsw.library.find(rule.symbol->style)) {
+                symbolsThatAreLinestyles += style->symbol ? 0 : 1;
+            }
+        }
+    }
+    EXPECT_EQ(linesDrawnWithASymbol, 0u);
+    EXPECT_EQ(symbolsThatAreLinestyles, 0u);
 
     // ---- the notice, the warnings and the colours -------------------------------
     // Each library opens with a block of eight comment lines, and the two
     // blocks differ (the census's `noticeLines`).
     EXPECT_EQ(nsw.notice.size(), 16u);
-    // Four warnings. The reader's one, and it is right: an <item> that names
+    // Two warnings. The reader's one, and it is right: an <item> that names
     // no code. The linestyle library, which is neither UTF-8 nor marked as
     // UTF-16 and holds 82 characters outside ASCII (`inferredEncoding`): said
     // once, though the file is named twice - to convert and for its notice.
-    // And the two names kept as symbols that rules give as their linestyle.
-    ASSERT_EQ(report.warnings.size(), 4u);
+    // And NONE of a definition kept as one kind in place of the other: there
+    // were two, for the two names kept as symbols that rules give as their
+    // linestyle, while the symbol library was read last (that warning itself
+    // is ADefinitionThatLostItsPlaceIsNamedWithWhatWentAndHowTheRulesUseIt's
+    // to test).
+    ASSERT_EQ(report.warnings.size(), 2u);
     const auto warningsHolding = [&](std::string_view piece) {
         return std::count_if(report.warnings.begin(), report.warnings.end(),
                              [&](const std::string& warning) {
@@ -1971,10 +2032,8 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
     EXPECT_EQ(warningsHolding(": neither UTF-8 nor marked as UTF-16, so read as Windows-1252 by "
                               "inference; characters outside ASCII that rest on it: 82"),
               1);
-    EXPECT_EQ(warningsHolding(" is kept as a symbol in place of the linestyle of "), 2);
-    EXPECT_EQ(warningsHolding("; rules naming it as their linestyle: 2 (the library given last "
-                              "is the one kept)"),
-              2);
+    EXPECT_EQ(warningsHolding(" in place of the "), 0);
+    EXPECT_EQ(warningsHolding("(the library given last is the one kept)"), 0);
     if (reference->colours) {
         // The census's `colours`, given the table: the rules, their symbols
         // and their texts use 22 names by fold. Nine are standard names;

@@ -1,11 +1,30 @@
-# tools/reference_census.py <linestyles> <survey codes> <names> <symbols>
+# tools/reference_census.py <file> <file> <file> <file>
 #                            [--strip WORD]... [--remove WORD]...
 #                            [--colours TABLE] [--output FILE]
 #
 # An independent census of a customisation kept in the legacy formats: two
-# style libraries (.4d) and two survey code files (.mapfile), named in that
-# order - the linestyle library, the survey code file, the names file, the
-# symbol library.
+# style libraries (.4d), one of linestyles and one of symbols, and two survey
+# code files (.mapfile), the survey code file and the names file.
+#
+# THE FOUR ARE GIVEN IN LOAD ORDER, and the order is part of what is counted,
+# as it is part of what a conversion does: of two libraries that define one
+# name the block of the one given LATER is the definition kept, and the rules
+# of the survey code file given EARLIER come first, where order is precedence.
+# So the files are named here as they are named to the converter
+# (docs/customisation.md, "The reference customisation"), and the census says
+# the order it was given, as `loadOrder`. The order was once written into this
+# script - the linestyle library, then the symbol library - which made it the
+# census of one order only: with the libraries given the other way round,
+# three names are another definition each and the figures that count them
+# differ.
+#
+# What each file IS is found by looking inside it, never by its place on the
+# command line: a survey code file is XML that holds a <map_file>, and
+# anything else that holds a paperstyle, worldstyle or twoptstyle block is a
+# style library. Which library is the SYMBOL library is said by its file name
+# holding "symbol", in any letter case - the format keeps one kind a library
+# and says which nowhere else - and which survey code file is the NAMES file
+# by its name holding "names". One of each, or there is no census.
 #
 # It uses none of Katana's code: a small tokenizer for the style library
 # grammar and the standard library's XML parser for the survey code files. Its
@@ -30,7 +49,13 @@
 #                     of - within one file and across the two, how many of them
 #                     are word for word the block that replaced them, and how
 #                     many rules name one replaced across the files as their
-#                     linestyle or as their symbol;
+#                     linestyle or as their symbol; then what the ORDER made
+#                     of those replaced across the files: which library's
+#                     block each name kept, and how many rules name one as
+#                     the kind that WENT - as their linestyle where the symbol
+#                     library's block is the one kept, as their symbol where
+#                     the linestyle library's is. Those rules would draw with
+#                     a definition they were not written for;
 #   inferredEncoding  for each file, the characters outside ASCII it holds when
 #                     it is neither UTF-8 nor marked as UTF-16 and so is read
 #                     as Windows-1252;
@@ -46,6 +71,7 @@
 # instead, with lines ended by a line feed on every platform.
 import collections
 import json
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -154,6 +180,22 @@ def tokens(text):
 
 
 KINDS = {'paperstyle': 'paper', 'worldstyle': 'world', 'twoptstyle': 'twoPoint'}
+
+
+def role_of(path):
+    # What a file is - `linestyles`, `symbols`, `codes` or `names` - from what
+    # it holds and, between two of one format, from its name (the head of this
+    # script says why the name). The order on the command line says nothing
+    # of it: that is the order the files are loaded in.
+    text = read_text(path)
+    name = os.path.basename(path).lower()
+    if '<map_file' in text:
+        return 'names' if 'names' in name else 'codes'
+    if re.search(r'\b(?:%s)\s+"' % '|'.join(KINDS), text):
+        return 'symbols' if 'symbol' in name else 'linestyles'
+    raise SystemExit('%s: neither a style library nor a survey code file' % path)
+
+
 # How many arguments each command takes, so a command's words are not mistaken
 # for the next command.
 ARGS = {'group': 1, 'mode': 1, 'length': 1, 'factor': 1, 'xorigin': 1, 'yorigin': 1,
@@ -282,10 +324,21 @@ def main():
         colour_table = args[at + 1]
         del args[at:at + 2]
     if len(args) != 4:
-        raise SystemExit('usage: reference_census.py <linestyles> <survey codes> <names> '
-                         '<symbols> [--strip WORD]... [--remove WORD]... [--colours TABLE] '
-                         '[--output FILE]')
-    linestyles, codes, names, symbols = args
+        raise SystemExit('usage: reference_census.py <file> <file> <file> <file> '
+                         '[--strip WORD]... [--remove WORD]... [--colours TABLE] '
+                         '[--output FILE]\n'
+                         'the four files - a linestyle library, a symbol library, a survey '
+                         'code file and a names file - in LOAD ORDER')
+    # In the order given: the load order.
+    files = [(role_of(path), path) for path in args]
+    load_order = [role for role, _ in files]
+    if sorted(load_order) != ['codes', 'linestyles', 'names', 'symbols']:
+        raise SystemExit('reference_census.py: the four files are to be one linestyle library, '
+                         'one symbol library, one survey code file and one names file; these '
+                         'are, in the order given: %s' % ', '.join(load_order))
+    path_of = {role: path for role, path in files}
+    linestyles, codes, names, symbols = (path_of[role] for role in
+                                         ('linestyles', 'codes', 'names', 'symbols'))
 
     library = {}
     origin = {}
@@ -296,9 +349,11 @@ def main():
     replacements = []
     per_file_blocks = {}
     ops_read = collections.Counter()
-    # The load order of the libraries: the linestyles, then the symbols, a
-    # later block taking the place of an earlier one of its name.
-    for label, path in (('linestyles', linestyles), ('symbols', symbols)):
+    # The libraries in the order they were given, a later block taking the
+    # place of an earlier one of its name.
+    for label, path in files:
+        if label not in ('linestyles', 'symbols'):
+            continue
         read = read_library(path)
         per_file_blocks[label] = collections.Counter(b['units'] for b in read)
         for block in read:
@@ -318,8 +373,11 @@ def main():
     rules = []
     per_file_rules = {}
     keyless = {}
-    # ... and the survey code file before the names file.
-    for label, path in (('codes', codes), ('names', names)):
+    # ... and the survey code files in the order THEY were given, the rules of
+    # the earlier one first.
+    for label, path in files:
+        if label not in ('codes', 'names'):
+            continue
         read, skipped = read_rules(path)
         per_file_rules[label] = len(read)
         keyless[label] = skipped
@@ -368,6 +426,7 @@ def main():
                  if begins_with_a_word(r.get(word, ''), strip))
 
     census = {
+        'loadOrder': load_order,
         'blocksRead': blocks,
         'blocksPerFile': {k: dict(v) for k, v in per_file_blocks.items()},
         'blocksReplaced': replaced,
@@ -391,6 +450,21 @@ def main():
         'referencedSymbols': len(referenced_symbols),
         'referenced': len(referenced),
         'unresolved': [n for n in referenced if n not in library],
+        # Rules that name a definition of the OTHER library's kind: as their
+        # linestyle one the symbol library gave, as their symbol one the
+        # linestyle library gave. It is counted over every name the rules
+        # use, not only those both libraries define, and is what the load
+        # order decides for those: a line drawn with a symbol's strokes.
+        'rulesNamingTheOtherKind': {
+            'linestyleFromSymbolsFile': {
+                'rules': sum(1 for r in rules if origin.get(r.get('linestyle')) == 'symbols'),
+                'names': len({r['linestyle'] for r in rules
+                              if origin.get(r.get('linestyle')) == 'symbols'})},
+            'symbolFromLinestylesFile': {
+                'rules': sum(1 for r in rules if origin.get(r.get('symbol')) == 'linestyles'),
+                'names': len({r['symbol'] for r in rules
+                              if origin.get(r.get('symbol')) == 'linestyles'})},
+        },
         'colourNames': dict(sorted(colours.items())),
         'namesBeginningWithAStrippedWord': still,
         'WM01': {w: first_match('WM01', w) for w in ('model', 'linestyle', 'breakline', 'colour')},
@@ -402,6 +476,15 @@ def main():
         census['AC01symbolAtVertices'] = library[symbol]['atVertices']
     # What a conversion reports beyond the counts above.
     across = {name for name, was, now, _ in replacements if was != now}
+    # What the ORDER made of those: `origin` is the library whose block each
+    # name has now, the one given later. A rule that names one as the kind of
+    # the OTHER library - as its linestyle where the symbol library's block
+    # was kept, as its symbol where the linestyle library's was - names a
+    # definition it was not written for.
+    kept_as_symbol = {name for name in across if origin[name] == 'symbols'}
+    kept_as_linestyle = across - kept_as_symbol
+    astray = ([r['linestyle'] for r in rules if r.get('linestyle') in kept_as_symbol] +
+              [r['symbol'] for r in rules if r.get('symbol') in kept_as_linestyle])
     census['replaced'] = {
         'withinAFile': sum(1 for _, was, now, _ in replacements if was == now),
         'acrossFiles': sum(1 for _, was, now, _ in replacements if was != now),
@@ -412,6 +495,9 @@ def main():
         'acrossFilesNamedAsSymbol': {
             'rules': sum(1 for r in rules if r.get('symbol') in across),
             'names': len({r['symbol'] for r in rules if r.get('symbol') in across})},
+        'acrossFilesKept': {'linestyles': len(kept_as_linestyle),
+                            'symbols': len(kept_as_symbol)},
+        'acrossFilesNamedAsTheKindThatWent': {'rules': len(astray), 'names': len(set(astray))},
     }
     census['inferredEncoding'] = {
         label: read_text_and_guess(path)[1]

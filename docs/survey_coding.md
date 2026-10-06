@@ -41,7 +41,10 @@ record, with the comment "the style of a point and the style of a line are
 one thing".
 
 **`mode vertex` is not what makes a symbol, and this file used to say it
-was.** It is one signal among four. Measured with a script outside Katana:
+was.** It is one signal among four. Measured with a script outside Katana,
+with the symbol library read last as it then was (under the table of the
+two libraries, in the first "What the reader takes" below, is what the other
+order gives):
 157 of the 792 definitions say `mode vertex` (156 of them in the symbol
 library, one in the linestyle library), while the symbol library alone holds
 474; and of the 193 symbols `survey_codes.mapfile` names that a library defines,
@@ -180,8 +183,16 @@ uses none of Katana's code:
 knows. A keyword it did not know would be counted and named rather than
 skipped quietly, which is the same promise `readArchive` makes.
 
-Four definitions appear in both files, so "already exists" is the normal case
-and the later file wins - a customisation is loaded in layers.
+Three names appear in both files, and a fourth twice in the linestyle library
+(by a count outside Katana, `tools/reference_census.py`: four blocks replaced,
+three across the files and one within one). So "already exists" is the normal
+case and the later file wins - a customisation is loaded in layers. "Loaded
+as one" above is in the order this reader was always given the two, the
+linestyle library first, so the three names are the symbol library's there
+and 157 counts them so. The NSW customisation that is compiled in is
+converted with the libraries the other way round, by decision, and holds 155
+at vertices, 471 listed as symbols and 321 not (`docs/customisation.md`,
+"The reference customisation", has the decision and both sets of figures).
 
 ## The three files link up
 
@@ -831,7 +842,29 @@ to report and never throw.
 
 The older embedding (`tools/embed_customisation.py`, four files) and
 `archive12d::builtinCustomisation()` are still what the front ends call, and
-stay until they are moved.
+stay until they are moved. So a build that HAS the built-in does not show it
+yet: on 2026-10-06, with the NSW customisation compiled in (792 definitions,
+1,624 rules), `katana_cli -c CUSTOMISE` answered "No customisation is
+loaded." and `STATUS` "0 linestyles and symbols, 0 survey code rules", and
+`CUSTOMISE <the Katana customisation file>` was refused as neither a survey
+code file nor a library. Every test of the suite that had also been run in a
+checkout without the file - 6,950 of them - gave the result it gave there.
+
+*Not done: no test holds the file that is COMPILED IN to its census.* That it
+reads is tested (above), and what a conversion of the reference files gives
+is tested (`TheReferenceCustomisationConvertsToTheFiguresOfItsCensus`,
+`docs/customisation.md`); nothing ties the two, so a file converted in
+another order of the libraries, or by an earlier converter, would be compiled
+in unnoticed. It was checked by hand when the order of the libraries was
+decided: the file was byte for byte a fresh conversion by the documented
+command (`docs/customisation.md`, "The reference customisation" - its order,
+and its name and description, which are part of the bytes: the command run
+as that document spells it gave the file on 2026-10-07, and with another
+description did not), `tools/customisation_census.py --against` the census
+of that order found no figure different, and `katana`, `katana_cli` and
+`katana_mcp` each held those bytes whole. A test of it would convert the
+reference files and compare the result with `compiledInCustomisation()`, and
+skip where either is absent.
 
 ### What a session starts with
 
@@ -1789,13 +1822,19 @@ committed. The reference customisation is kept there under general names:
 **The load order is the files' name order**, which is the order the script
 embeds them and `builtinCustomisation` reads them, and it is what the table
 above lists. It matters twice. Between the two libraries the LATER file wins
-a definition both give, so `symbols.4d` wins the four names it shares with
-`linestyles.4d`. Between the two survey code files the EARLIER rule wins a
-field both give (rules of equal specificity keep the order they were read,
-"How a code resolves"), so `survey_codes.mapfile` has to sort ahead of
-`survey_codes_names.mapfile`, and it does, because `.` sorts before `_`. A
-file the script does not recognise as a style library or a survey code file,
-by looking inside it, is left out.
+a definition both give, so `symbols.4d` wins the three names it shares with
+`linestyles.4d` (three, not the four this said: the fourth replacement is a
+name the linestyle library gives twice). That is this older embedding's
+order and no longer the built-in's: the Katana customisation compiled in
+(`KATANA_BUILTIN_CUSTOMISATION`, "The built-in, and the seam" above) is
+converted with the linestyle library LAST, because the survey code rules
+draw lines with two of those three names and place none as a symbol
+(`docs/customisation.md`, "The reference customisation"). Between the two
+survey code files the EARLIER rule wins a field both give (rules of equal
+specificity keep the order they were read, "How a code resolves"), so
+`survey_codes.mapfile` has to sort ahead of `survey_codes_names.mapfile`, and
+it does, because `.` sorts before `_`. A file the script does not recognise
+as a style library or a survey code file, by looking inside it, is left out.
 
 The tests read the same folder (`KATANA_CUSTOMISATION_FILES` in
 `tests/archive12d`; `-DCUSTOMISE_DIR` of `qt_customisation_headless`), and every
