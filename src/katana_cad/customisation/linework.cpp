@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <map>
 #include <set>
 #include <utility>
 
+#include "katana/commands/change_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/layer_path.hpp"
@@ -92,8 +94,35 @@ struct Candidate {
     std::string number{};
     std::string codeText{}; // the code as the point carries it
     FieldCode code{};
+    // The string number it carries beside its code (kSurveyStringProperty);
+    // empty when the code holds the whole string name.
+    std::string string{};
     std::string layer{};
 };
+
+// What the rules MORE SPECIFIC than the bare "*" make of a string name: the
+// first of them, most specific first, that says line or point decides. The
+// fallback rule is left out on purpose - it answers every name, a typo
+// included, so "it says line" is not a rule about THIS name.
+enum class RuledAs { Line, Point, NoRule };
+
+[[nodiscard]] RuledAs ruledAs(const katana::entity::SurveyMap& map, std::string_view name)
+{
+    bool any = false;
+    for (const katana::entity::SurveyRule* rule : map.match(name)) {
+        if (rule->key == "*") {
+            break; // most specific first: only the fallback is left
+        }
+        any = true;
+        if (rule->breakline) {
+            return *rule->breakline == katana::entity::SurveyBreakline::Line ? RuledAs::Line
+                                                                             : RuledAs::Point;
+        }
+    }
+    // Rules that never say it is a line leave it a point, as processLinework
+    // has always read a resolved breakline that is unset.
+    return any ? RuledAs::Point : RuledAs::NoRule;
+}
 
 // A stretch of one string between its start and its end.
 struct Run {
@@ -459,13 +488,29 @@ class LineBuilder {
     // code under SOME name, because that is what the rules style it by, and a
     // property with an empty name is one the rest of Katana refuses. The name
     // used is the report's `property`, so the two cannot disagree.
+    //
+    // `earlierLines` are the lines an earlier run drew of the same strings
+    // (LineworkOptions::earlierLines): filed here by what makes a line the
+    // line of one string, earliest first whatever order they were given in.
     LineBuilder(const Document& document, const std::string& property, bool createLayers,
-                LineworkReport& report)
+                const std::vector<EntityId>& earlierLines, LineworkReport& report)
         : document_(document),
           property_(property.empty() ? codePropertyCandidates().front() : property),
           createLayers_(createLayers), report_(report)
     {
         report_.property = property_;
+        std::vector<EntityId> ids = earlierLines;
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        for (const EntityId id : ids) {
+            const Entity* line = document_.model().entities.find(id);
+            // Only a polyline: what a line drawn here is. One the person has
+            // since made something else of is no longer a line to redraw.
+            if (line != nullptr &&
+                std::holds_alternative<katana::geometry::Polyline2>(line->geometry)) {
+                earlier_[identityOf(*line)].push_back(line);
+            }
+        }
     }
 
     // A rule's model is Katana's layer. With none - or one that is missing and
@@ -511,9 +556,30 @@ class LineBuilder {
             }
         }
         katana::entity::setHeights(entity.properties, shape.heights);
-        lines_.push_back(std::move(entity));
-        if (!document_.model().layers.contains(built.layer)) {
-            layersNeeded_.insert(built.layer);
+
+        const auto earlier = earlier_.find(identityOf(entity));
+        if (earlier != earlier_.end() && !earlier->second.empty()) {
+            // The line of this string that an earlier run drew: the same
+            // entity, moved. Deleting it and creating this one would take
+            // every label, leader and dimension on it away with it, and what
+            // the person has since given it - a layer, a style - as well, as
+            // a re-adjustment never does to a point either. Only where it
+            // runs, and how high, is this run's to say.
+            const Entity& was = *earlier->second.front();
+            earlier->second.pop_front();
+            Entity redrawn = was;
+            redrawn.geometry = std::move(entity.geometry);
+            katana::entity::setHeights(redrawn.properties, shape.heights);
+            built.layer = was.layer;
+            built.redrawn = was.id;
+            if (!(redrawn == was)) { // one that already runs there is not touched
+                redrawn_.push_back(std::move(redrawn));
+            }
+        } else {
+            lines_.push_back(std::move(entity));
+            if (!document_.model().layers.contains(built.layer)) {
+                layersNeeded_.insert(built.layer);
+            }
         }
 
         built.closed = shape.closed;
@@ -542,8 +608,10 @@ class LineBuilder {
     // code, number and symbol are still only on it.
     [[nodiscard]] const std::set<EntityId>& runMembers() const { return runMembers_; }
 
-    // Layers, lines, their styling and the removal of `remove`, as one
-    // command; nullptr when no line was built.
+    // Layers, the new lines and their styling, the earlier lines given their
+    // new vertices, and the removal of `remove`, as one command; nullptr when
+    // there is none of them - no line was built, or every line built is an
+    // earlier one that already runs where this run puts it.
     [[nodiscard]] cmd::CommandPtr finish(std::string name, SurveyCodingOptions coding,
                                          std::vector<EntityId> remove)
     {
@@ -553,7 +621,7 @@ class LineBuilder {
                       [&](const UnplacedPoint& point) { return placed_.contains(point.id); });
         std::stable_sort(report_.unplaced.begin(), report_.unplaced.end(),
                          [](const UnplacedPoint& a, const UnplacedPoint& b) { return a.id < b.id; });
-        if (lines_.empty()) {
+        if (lines_.empty() && redrawn_.empty() && remove.empty()) {
             return {};
         }
         report_.layersCreated.assign(layersNeeded_.begin(), layersNeeded_.end());
@@ -564,15 +632,27 @@ class LineBuilder {
             layer.name = layerName;
             transaction->add(cmd::createLayer(std::move(layer)));
         }
-        cmd::CommandPtr create = cmd::createEntities(std::move(lines_));
-        const cmd::Command& created = *create;
-        transaction->add(std::move(create));
+        if (!lines_.empty()) {
+            cmd::CommandPtr create = cmd::createEntities(std::move(lines_));
+            const cmd::Command& created = *create;
+            transaction->add(std::move(create));
 
-        auto styling = std::make_shared<SurveyCodingReport>();
-        report_.styling = styling;
-        coding.property = property_;
-        transaction->add(std::make_unique<StyleLinesCommand>(document_, created,
-                                                             std::move(coding), std::move(styling)));
+            auto styling = std::make_shared<SurveyCodingReport>();
+            report_.styling = styling;
+            coding.property = property_;
+            transaction->add(std::make_unique<StyleLinesCommand>(
+                document_, created, std::move(coding), std::move(styling)));
+        }
+        if (!redrawn_.empty()) {
+            cmd::ChangeSet change;
+            change.modify = std::move(redrawn_);
+            transaction->add(std::make_unique<cmd::ChangeSetCommand>(
+                "REDRAW_LINEWORK",
+                [change = std::move(change)](
+                    const cmd::CommandContext&) -> katana::core::Result<cmd::ChangeSet> {
+                    return change;
+                }));
+        }
 
         report_.pointsRemoved = remove.size();
         if (!remove.empty()) {
@@ -582,11 +662,25 @@ class LineBuilder {
     }
 
   private:
+    // What makes a line the line of ONE string, here and in the run that drew
+    // it before: the code it carries and its string number.
+    using Identity = std::pair<std::string, std::string>;
+
+    [[nodiscard]] Identity identityOf(const Entity& line) const
+    {
+        const std::string* code = codeOf(line, property_);
+        return {code != nullptr ? *code : std::string{}, std::string(surveyStringOf(line))};
+    }
+
     const Document& document_;
     std::string property_;
     bool createLayers_ = true;
     LineworkReport& report_;
     std::vector<Entity> lines_{};
+    // The earlier run's lines not yet taken, earliest first, and those taken
+    // that this run moves, as they are to be.
+    std::map<Identity, std::deque<const Entity*>> earlier_{};
+    std::vector<Entity> redrawn_{};
     std::set<EntityId> placed_{};
     std::set<EntityId> runMembers_{};
     std::set<std::string> layersNeeded_{};
@@ -777,6 +871,10 @@ std::string_view toString(UnplacedFeatureReason reason)
         return "fewer than two of its points have a position";
     case UnplacedFeatureReason::Coincident:
         return "its positioned points are all in one place";
+    case UnplacedFeatureReason::NoRule:
+        return "no rule for its code";
+    case UnplacedFeatureReason::PointCode:
+        return "its code is a point code";
     }
     return "unknown";
 }
@@ -828,13 +926,32 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
         options.property.empty() ? findCodeProperty(points) : options.property;
     NoteSink note{report.notes};
 
-    // Resolved once per name rather than once per point: a survey of 30,000
-    // points has a few hundred names, and lookup walks every rule.
-    std::map<std::string, katana::entity::SurveyMatch> resolved;
-    auto resolve = [&](const std::string& name) -> const katana::entity::SurveyMatch& {
+    // Resolved once per string name rather than once per point: a survey of
+    // 30,000 points has a few hundred names, and lookup walks every rule.
+    // A name is its code and, where the points carry one beside it, their
+    // string number - the first point of the name, in entity order, says
+    // which - and that pair is what is looked up (surveyLookupName) and what
+    // the line then carries, so the line finds the rule its points found.
+    struct Named {
+        std::string code{};
+        std::string string{};
+        std::string lookup{};
+        katana::entity::SurveyMatch match{};
+        RuledAs ruled = RuledAs::NoRule; // asked only under onlyRuledLines
+    };
+    std::map<std::string, Named> resolved;
+    auto resolve = [&](const std::string& name, const Candidate& first) -> const Named& {
         auto found = resolved.find(name);
         if (found == resolved.end()) {
-            found = resolved.emplace(name, map.lookup(name)).first;
+            Named named;
+            named.code = first.code.name;
+            named.string = first.string;
+            named.lookup = surveyLookupName(map, named.code, named.string);
+            named.match = map.lookup(named.lookup);
+            if (options.onlyRuledLines) {
+                named.ruled = ruledAs(map, named.lookup);
+            }
+            found = resolved.emplace(name, std::move(named)).first;
         }
         return found->second;
     };
@@ -846,6 +963,7 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
         const std::string* code = codeOf(*entity, property);
         candidate.codeText = code != nullptr ? *code : std::string{};
         candidate.code = parseFieldCode(candidate.codeText, options.codes);
+        candidate.string = std::string(surveyStringOf(*entity));
         auto unplace = [&](UnplacedReason reason) {
             report.unplaced.push_back(
                 UnplacedPoint{entity->id, candidate.number, candidate.codeText, reason});
@@ -861,18 +979,26 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
             note(candidate, LineworkNoteKind::JoinWithoutTarget);
         }
 
-        const katana::entity::SurveyMatch& match = resolve(candidate.code.name);
-        const bool line = match.resolved.breakline == katana::entity::SurveyBreakline::Line ||
-                          !candidate.code.controls.empty();
+        // The string name: the code's first token, followed by the string
+        // number the point carries beside it when it carries one.
+        const std::string name = candidate.code.name + candidate.string;
+        const Named& named = resolve(name, candidate);
+        const bool line =
+            options.onlyRuledLines
+                ? named.ruled == RuledAs::Line
+                : named.match.resolved.breakline == katana::entity::SurveyBreakline::Line ||
+                      !candidate.code.controls.empty();
         if (!line) {
-            unplace(match.empty() ? UnplacedReason::NoRule : UnplacedReason::PointCode);
+            const bool noRule = options.onlyRuledLines ? named.ruled == RuledAs::NoRule
+                                                       : named.match.empty();
+            unplace(noRule ? UnplacedReason::NoRule : UnplacedReason::PointCode);
             continue;
         }
         if (options.order == LineworkOrder::PointNumber && candidate.number.empty()) {
             unplace(UnplacedReason::NoPointNumber);
             continue;
         }
-        strings[candidate.code.name].push_back(std::move(candidate));
+        strings[name].push_back(std::move(candidate));
     }
 
     // Every point in the drawing by number, for joins: a join may reach a
@@ -884,7 +1010,8 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
     const auto byNumber = anyJoin ? pointsByNumber(model, options.pointNumberProperty)
                                   : std::map<std::string, std::vector<const Entity*>>{};
 
-    LineBuilder builder(document, property, options.coding.createLayers, report);
+    LineBuilder builder(document, property, options.coding.createLayers, options.earlierLines,
+                        report);
     auto unplace = [&](const Candidate& point, UnplacedReason reason) {
         report.unplaced.push_back(UnplacedPoint{point.id, point.number, point.codeText, reason});
     };
@@ -904,21 +1031,28 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
             }
         }
 
-        const StringName split = splitStringName(map, name);
+        const Named& named = resolved.at(name); // resolved when its first point was read
+        const StringName split = splitStringName(map, named.lookup);
         if (!split.matched) {
             note(candidates.front(), LineworkNoteKind::NoRuleForName, name);
         } else if (split.fallbackOnly) {
             note(candidates.front(), LineworkNoteKind::FallbackOnlyName, name);
         }
-        auto layer = builder.layerFor(resolve(name), name, candidates.front().layer);
+        auto layer = builder.layerFor(named.match, name, candidates.front().layer);
         if (!layer) {
             return layer.error();
         }
         LineworkString header;
         header.name = name;
         header.key = split.key;
-        header.number = split.number;
+        // A number carried apart is the number: "B" in string "12" is keyed
+        // by "B1*", and what that key leaves of the name is "2".
+        header.number = named.string.empty() ? split.number : named.string;
         header.layer = *layer;
+        // An empty value is not written, so points that hold the whole name
+        // in their code make a line that does too, as before.
+        const std::vector<std::pair<std::string, std::string>> carried = {
+            {std::string(kSurveyStringProperty), named.string}};
 
         for (const Run& run : runsOf(candidates)) {
             if (run.points.size() < 2) {
@@ -933,7 +1067,7 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
                 }
                 continue;
             }
-            builder.emit(header, name, shape, run.points);
+            builder.emit(header, named.code, shape, run.points, carried);
         }
 
         for (const Candidate& from : candidates) {
@@ -958,7 +1092,7 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
             shape.add(to.at, to.height);
             LineworkString joined = header;
             joined.join = true;
-            builder.emit(std::move(joined), name, shape, {&from, &to});
+            builder.emit(std::move(joined), named.code, shape, {&from, &to}, carried);
         }
     }
 
@@ -989,6 +1123,14 @@ drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject
     if (auto status = katana::survey::validateProject(project); !status) {
         return status.error();
     }
+    const std::vector<bool>& consider = options.consider;
+    if (!consider.empty() && consider.size() != project.features.size()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the list saying which survey features to draw must have one entry "
+                         "for each feature",
+                         "entries=" + std::to_string(consider.size()) +
+                             " features=" + std::to_string(project.features.size()));
+    }
 
     const katana::entity::SurveyMap& map = document.surveyMap();
     const SurveyImportOptions& import = options.import;
@@ -1004,10 +1146,35 @@ drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject
     // An import that wrote no code (an empty import.codeProperty) still
     // gives the LINES theirs, under the first candidate name - see
     // LineBuilder - or nothing would style them, and nothing would say so.
-    LineBuilder builder(document, import.codeProperty, options.coding.createLayers, report);
+    LineBuilder builder(document, import.codeProperty, options.coding.createLayers,
+                        options.earlierLines, report);
+    const bool ruled = options.onlyRuledLines;
     for (std::size_t index = 0; index < project.features.size(); ++index) {
+        if (!consider.empty() && !consider[index]) {
+            continue; // nothing was asked of it: neither drawn nor unplaced
+        }
         const katana::survey::SurveyFeature& feature = project.features[index];
-        const std::string& name = feature.name.empty() ? feature.code : feature.name;
+        // Under onlyRuledLines the name is a string number, so the feature is
+        // called by its code and number and looked up by the two together;
+        // otherwise by whatever the file calls it, and its code is looked up.
+        const std::string name = feature.name.empty()            ? feature.code
+                                 : ruled && !feature.code.empty() ? feature.code + " " + feature.name
+                                                                  : feature.name;
+        const std::string lookupName =
+            ruled ? surveyLookupName(map, feature.code, feature.name) : feature.code;
+        auto unplace = [&](UnplacedFeatureReason reason) {
+            result.unplaced.push_back(UnplacedFeature{index, name, feature.code, reason});
+        };
+        if (ruled) {
+            // Before anything is read of its points: a feature the rules do
+            // not make a line says so, not that it was too short to be one.
+            const RuledAs as = ruledAs(map, lookupName);
+            if (as != RuledAs::Line) {
+                unplace(as == RuledAs::NoRule ? UnplacedFeatureReason::NoRule
+                                              : UnplacedFeatureReason::PointCode);
+                continue;
+            }
+        }
 
         // The feature's points as candidates, in the file's order. They carry
         // no control codes: a feature says its closure itself, and shapeOf
@@ -1034,9 +1201,6 @@ drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject
             candidates.push_back(std::move(candidate));
             sources.push_back(&point);
         }
-        auto unplace = [&](UnplacedFeatureReason reason) {
-            result.unplaced.push_back(UnplacedFeature{index, name, feature.code, reason});
-        };
         if (candidates.size() < 2) {
             unplace(UnplacedFeatureReason::TooFewPoints);
             continue;
@@ -1056,8 +1220,9 @@ drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject
 
         // The rules are keyed on the CODE, and the line carries the code, so
         // the code is what is split and resolved - the name may be anything
-        // the file calls the string ("Kerb 1").
-        const StringName split = splitStringName(map, feature.code);
+        // the file calls the string ("Kerb 1"). Under onlyRuledLines the name
+        // is the string number and `lookupName` is what the two resolve by.
+        const StringName split = splitStringName(map, lookupName);
         if (!split.matched) {
             note(candidates.front(), LineworkNoteKind::NoRuleForName, feature.code);
         } else if (split.fallbackOnly) {
@@ -1073,7 +1238,7 @@ drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject
                              "feature=" + name + " layer=" + pointsLayer + " " +
                                  status.error().context);
         }
-        auto layer = builder.layerFor(map.lookup(feature.code), feature.code, pointsLayer);
+        auto layer = builder.layerFor(map.lookup(lookupName), feature.code, pointsLayer);
         if (!layer) {
             return layer.error();
         }
@@ -1087,10 +1252,15 @@ drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject
         LineworkString built;
         built.name = name;
         built.key = split.key;
-        built.number = split.number;
+        built.number = ruled && !feature.name.empty() ? feature.name : split.number;
         built.layer = *layer;
+        // The string number beside the code, as the feature's points carry
+        // it, so applySurveyCodes looks the line up by the same two.
+        const std::string stringProperty =
+            ruled ? std::string(kSurveyStringProperty) : std::string{};
         builder.emit(std::move(built), feature.code, shape, run.points,
-                     {{import.descriptionProperty, feature.description}});
+                     {{import.descriptionProperty, feature.description},
+                      {stringProperty, feature.name}});
     }
 
     result.command = builder.finish("DRAW_SURVEY_FEATURES", options.coding, {});

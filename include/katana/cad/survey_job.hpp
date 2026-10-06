@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/survey_finish.hpp"
 #include "katana/cad/survey_import.hpp"
 #include "katana/cad/survey_points.hpp"
 #include "katana/commands/command.hpp"
@@ -99,12 +100,55 @@ struct SurveyJobImport {
     // drawn again, whatever this says: it is the drawing's point, not the
     // job's.
     ExistingPointPolicy existingPoints = ExistingPointPolicy::Refuse;
+    // Whether the points are also coded and strung, in the same undo step
+    // (survey_finish.hpp); both off by default. The lines come from the
+    // REDUCED project's features and coordinates, which exist only while the
+    // command runs - which is why the finish is part of this command and not
+    // a step a caller could add after it. The two choices are kept with the
+    // job (SurveyJobOptions), so a re-adjustment treats it as it was imported.
+    SurveyFinishOptions finish{};
 };
+
+// What a job's stored option text (SurveyJob::importOptions) says: how its
+// points were drawn, and whether they were coded and strung. Kept as text
+// with the job so that a re-adjustment in a later session draws a new point
+// where and as the others went, and treats it as they were treated.
+//
+// The text is key=value lines under a versioned first line. A key a later
+// build adds is skipped by this one; text from a NEWER version is refused
+// rather than half read. `apply-codes` and `draw-linework` are written only
+// when they are on, and ABSENT IS OFF: a job imported before those keys
+// existed was not coded, and re-adjusting it must not start to.
+struct SurveyJobOptions {
+    SurveyImportOptions import{}; // less its layer, which is SurveyJob::layer
+    bool applyCodes = false;      // "apply-codes"
+    bool drawLinework = false;    // "draw-linework"
+};
+
+[[nodiscard]] std::string writeSurveyJobOptions(const SurveyJobOptions& options);
+
+// Empty text is the defaults. The text comes from a project file, which may
+// have been damaged or edited by hand, so every malformed line is a
+// ParseFailure naming `jobId` and the line; Unsupported for a newer version.
+[[nodiscard]] katana::core::Result<SurveyJobOptions>
+readSurveyJobOptions(std::string_view text, std::string_view jobId);
 
 // Reduces and adjusts `raw`, draws the result (as importSurveyProject does,
 // provenance and all), and adds the job to the document with the rendered
 // report. Undo removes the points and the job; redo restores both with the
 // same entity ids and the same job id.
+//
+// With SurveyJobImport::finish the points are coded and strung as part of the
+// same command. The job then owns the lines too: SurveyJob::createdEntities
+// and createdEntities() hold the points and then the lines (placedPoints
+// stays the points alone, so that is the count of points), and Remove Job
+// deletes both. What the finish did is finishReport(); the job's own report
+// gains a warning only for what a person may have to act on (finishWarnings:
+// a step with nothing to go on, a code with no rule, a string left out of
+// every line), so a job coded and strung with nothing left over reports
+// exactly the reduction's warnings. With no survey codes loaded the finish
+// does nothing at all, and the drawing is the one the same import makes
+// without it.
 //
 // validate() fails - and nothing is changed - when the reduction fails, with
 // the reduction's own error: an import whose adjustment cannot run is not
@@ -130,6 +174,10 @@ class ImportSurveyJobCommand final : public katana::commands::Command {
     // reduction. Empty / nullptr before.
     [[nodiscard]] const std::string& jobId() const;
     [[nodiscard]] const katana::survey::ReductionReport* report() const;
+    // After a successful execute() of an import that asked for a finish:
+    // what the coding and the linework did, or why not. nullptr before, and
+    // for an import that asked for neither.
+    [[nodiscard]] const SurveyFinishReport* finishReport() const;
 
   private:
     // Behind a pointer so the implementation can change without touching
@@ -162,6 +210,13 @@ struct SurveyJobReadjustment {
     // The version of the reader the SurveyJobReader used, which becomes the
     // job's parserVersion; empty leaves the job's as it was.
     std::string parserVersion{};
+    // HOW a job that was imported coded or strung is finished again: the
+    // colour lookup and the other coding options, the control codes, the
+    // order. WHETHER is the job's own, as it was imported (SurveyJobOptions),
+    // so `finish.codes` and `finish.linework` are not read here. Pass what
+    // the import was passed, or a new point's style differs from its
+    // neighbours' (a colour name with no lookup has no RGB).
+    SurveyFinishOptions finish{};
 };
 
 // What one re-adjustment did to the drawing, by point id, in the order of the
@@ -196,6 +251,29 @@ struct SurveyJobChanges {
 // point of the job's that the new settings hold as control FROM THE DRAWING
 // is left where it stands, under either policy: the run was held to it there.
 //
+// A job imported with a finish is finished again, in the same undo step, as
+// its stored options say (SurveyJobOptions): the points this run draws for
+// the first time are coded - the others keep what they have - and, when the
+// run changes the drawing at all, the lines the job owns are strung again
+// from the new reduction, the file's numbered strings first and then the
+// job's other points by their codes.
+//   - A line this run still makes (the same code and string number) is
+//     REDRAWN IN PLACE: the same entity, with its id, its layer and style
+//     and so every label, leader and dimension on it, at the new vertices -
+//     as a point of the job is moved and not replaced. A line none of whose
+//     points moved is not touched.
+//   - A line this run no longer makes is deleted, and what was attached to
+//     it goes with it, as with any deleted entity; the report says how many.
+//   - A line runs through each point where the point STANDS: one the person
+//     moved and HandEditPolicy::Keep leaves there is still on its line. Where
+//     the line itself runs is the job's: a line the person reshaped is
+//     redrawn like any other, lines having no record of how the job left
+//     them, as points have.
+// When the linework step has nothing to go on (no survey codes loaded, no
+// rule for any code) the job's lines are left as the earlier run drew them,
+// and the report says so and how many. A job imported without a finish is
+// re-adjusted exactly as it always was.
+//
 // NotFound for a job the document does not have; InvalidArgument when the
 // job with its new report and points would be too large for a project to
 // keep; the reader's or the reduction's own error otherwise - each with
@@ -218,6 +296,11 @@ class ReadjustSurveyJobCommand final : public katana::commands::Command {
     [[nodiscard]] const katana::survey::ReductionReport* report() const;
     // After a successful execute(): what it did to the drawing.
     [[nodiscard]] const SurveyJobChanges& changes() const;
+    // After a successful execute() that finished the job again: how many new
+    // points were coded, and the lines redrawn in place, created and deleted.
+    // nullptr before, for a job imported without a finish, and for a run that
+    // changed nothing in the drawing (its lines then stand as they are).
+    [[nodiscard]] const SurveyFinishReport* finishReport() const;
 
   private:
     struct State;

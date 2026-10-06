@@ -95,14 +95,24 @@ of them can never meet.
 
 ```
 field file ──> surveyio (parse only) ──> survey::SurveyProject ──> cad bridge ──> one Command ──> Document
-                 declares a CRS,                                    layers, styles,      one undo step
-                 transforms nothing                                 codes
+                 declares a CRS,                                    layers, points       one undo step
+                 transforms nothing                                 (+ the finish: codes, styles, lines)
 ```
 
 The bridge returns a single `CommandPtr`, the same shape
 `cad/survey_coding.hpp` already uses. That is what makes an entire import one
 undo step, which the brief asks for in its section 19 - not a special case, just
 the command pattern the application already has.
+
+The bridge itself makes layers and points and nothing else: every point lands
+on the import's layer, ByLayer, with its code in a property. Coding those
+points (their rule's layer, style and attributes) and stringing them into
+lines is the FINISH, `cad::withSurveyFinish` (`cad/survey_finish.hpp`), which
+wraps the bridge's command so that import, codes and lines are still that one
+command and one undo step. It is off unless asked for
+(`SurveyFinishOptions`, `SurveyJobImport::finish`); `docs/survey_coding.md`,
+"One step from field file to finished drawing", has what it does and why it
+is composed inside the job command rather than around it.
 
 ## How five parsers were written at once without colliding
 
@@ -2841,8 +2851,12 @@ float, close - through `SurveyServices::chrome`, which the workbench tells to
 forget the dock before deleting it.
 
 Not done: Process Linework is reached only through the Survey Code Manager's
-Linework tab, Draw Survey Features not at all, and the wizard does not call
-`drawSurveyFeatures` (`docs/survey_coding.md`); the Point Manager is
+Linework tab, and the wizard and `SURVEY IMPORT` do not yet ask for the
+finish that codes and strings an import (`cad::withSurveyFinish`,
+`docs/survey_coding.md`), so both still draw points only; undoing an import
+that created a nested layer (`survey/points`) takes that layer away and
+leaves the parent it created with it (`survey`), because the layer command's
+undo removes only the layer it was given; the Point Manager is
 read-only, and its chrome has been seen only in a screenshot; the survey tools
 are not in the interactive-tool catalogue (`docs/cad.md`); no headless test
 presses Use Selection; under the offscreen platform there is
