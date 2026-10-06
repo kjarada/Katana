@@ -32,11 +32,12 @@ namespace katana::cad {
 // SurveyMap::lookup combines them. Columns:
 //
 //   code, description, group, layer, colour, line/point, linestyle, symbol,
-//   size, tinable
+//   size, surface
 //
 // description is the rule comment, layer is the rule's model (which becomes
 // the layer), line/point is the breakline ("line" or "point"), size is the
-// symbol's size and tinable "yes" or "no". A field the rules do not set is
+// symbol's size and surface is the rule's tinable ("yes" or "no": whether
+// the code goes into a surface). A field the rules do not set is
 // EMPTY, never a default: absent is not zero, and a symbol size of 0 is the
 // map's own way of saying "the definition's size", so it is empty too.
 // Records end with CRLF, as RFC 4180 says, including the last.

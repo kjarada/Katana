@@ -196,8 +196,8 @@ katana::cad::StyleDrawing StylePreview::layOutLine(QSize area)
         katana::cad::resolveLinetype(noModel, library, name_);
     if (resolved.kind != katana::cad::LinetypeKind::LibraryDefinition) {
         notice_ = library.contains(name_)
-                      ? tr("\"%1\" is a vertex symbol, not a linestyle: a line naming it is "
-                           "drawn plain.")
+                      ? tr("\"%1\" is an `at vertices` symbol, not a linestyle: a line naming it "
+                           "is drawn plain.")
                             .arg(fromName(name_))
                       : tr("\"%1\" is not defined: drawn as a solid line.").arg(fromName(name_));
     }

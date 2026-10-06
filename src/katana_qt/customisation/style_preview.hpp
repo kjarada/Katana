@@ -15,8 +15,8 @@
 //     layer here and is drawn as a plain line.
 //   * one library definition as a LINESTYLE (setLinestyle): laid along the
 //     same sample, as the resolver lays it for a line whose linetype names it
-//     - a `mode vertex` definition or an unknown name is a plain line, said
-//     in the notice.
+//     - a definition drawn at vertices or an unknown name is a plain line,
+//     said in the notice.
 //   * one definition as a SYMBOL (setSymbol): cad::pointSymbolDrawing at the
 //     model origin - the insertion point - which is marked with a crosshair,
 //     with a warning when the origin lies outside what the symbol draws (it

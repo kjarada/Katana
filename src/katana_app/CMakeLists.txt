@@ -113,8 +113,10 @@ if(KATANA_BUILD_TESTS)
     # The survey-code verbs, on a mapfile of the tests' own: its shape is the
     # reference mapfile's, its codes are not. REPLACE puts it in place of the
     # compiled-in map, so what is expected does not depend on whether this
-    # checkout has the reference customisation. By index: 0 KT* map_data,
-    # 1 KX* map_data with no model, 2 KT* a built-in symbol, "cross".
+    # checkout has the reference customisation. By index: 0 KT* feature,
+    # 1 KX* feature with no layer, 2 KT* a built-in symbol, "cross". (The
+    # file is a survey code file, so its elements are that file's: <map_data>
+    # is what the replies call a feature rule and <model> its layer.)
     set(_mapfile "${CMAKE_CURRENT_BINARY_DIR}/cli-codes.mapfile")
     file(WRITE "${_mapfile}" [=[<?xml version="1.0"?>
 <xml12d xmlns="http://www.12d.com/schema/xml12d-10.0">
@@ -139,10 +141,10 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "MAPFILE LIST katana")
     # Loaded again WITHOUT replace: merged, so each of its (code, section)
-    # groups - KT* map_data, KX* map_data, KT* vertex_symbol_data - replaces
+    # groups - KT* feature, KX* feature, KT* symbol - replaces
     # itself. A code's loaded rules are gathered at its first rule (so that
     # what the load brought outranks what it left of that code), which makes
-    # KX* rule #2: KT* map_data, KT* vertex_symbol_data, KX* map_data.
+    # KX* rule #2: KT* feature, KT* symbol, KX* feature.
     add_test(NAME cli.mapfile_check_after_a_merge
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CUSTOMISE \"${_mapfile}\""
@@ -250,17 +252,22 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "not loaded: \"test_symbols\\.4d\"[\r\n]")
 
     # "[\r\n]+" where a line ends: the console writes CRLF on Windows.
+    # A rule's section and fields are in the Katana customisation format's
+    # words (feature, symbol, layer), which the replies give since the survey
+    # code file's own (map_data, vertex_symbol_data, model) left them: the four
+    # expressions below were changed word for word from the table "The words
+    # a rule is shown by" in docs/customisation.md, not from what a run printed.
     set(_eol "[\r\n]+")
     set_tests_properties(cli.code_explain PROPERTIES PASS_REGULAR_EXPRESSION
-        "Code \"KT01\": prefix match, matched${_eol}  model: KATANA TEST  <- rule #0 KT\\* \\(map_data\\).*  symbol: cross, size 2  <- rule #2 KT\\* \\(vertex_symbol_data\\)${_eol}  linestyle \"0\": a plain line${_eol}  symbol \"cross\": drawn by Katana itself${_eol}  colour \"red\": #FF0000${_eol}Code \"kt01\": no rule matches it${_eol}  near miss: key \"KT\\*\" differs only in letter case")
+        "Code \"KT01\": prefix match, matched${_eol}  layer: KATANA TEST  <- rule #0 KT\\* \\(feature\\).*  symbol: cross, size 2  <- rule #2 KT\\* \\(symbol\\)${_eol}  linestyle \"0\": a plain line${_eol}  symbol \"cross\": drawn by Katana itself${_eol}  colour \"red\": #FF0000${_eol}Code \"kt01\": no rule matches it${_eol}  near miss: key \"KT\\*\" differs only in letter case")
     set_tests_properties(cli.mapfile_list PROPERTIES PASS_REGULAR_EXPRESSION
-        "KT\\*  \\[prefix; 2 rules: map_data, vertex_symbol_data\\]  model KATANA TEST; linestyle 0; symbol cross; colour red; \"\\[KT\\*\\] Katana test\"${_eol}1 of 2 codes match \"katana\"")
+        "KT\\*  \\[prefix; 2 rules: feature, symbol\\]  layer KATANA TEST; linestyle 0; symbol cross; colour red; \"\\[KT\\*\\] Katana test\"${_eol}1 of 2 codes match \"katana\"")
     # The file's kind is said in the help's words: a survey code file, not a
     # style library.
     set_tests_properties(cli.mapfile_check_after_a_merge PROPERTIES PASS_REGULAR_EXPRESSION
-        "cli-codes\\.mapfile: survey code file, 0 added, 3 replaced \\(codes, once for each section\\): \"KT\\*\", \"KX\\*\", \"KT\\*\".*3 rules checked: 0 errors, 1 warning${_eol}  by kind: 1 no model${_eol}  rule #2 KX\\* \\(map_data\\): warning, no model")
+        "cli-codes\\.mapfile: survey code file, 0 added, 3 replaced \\(codes, once for each section\\): \"KT\\*\", \"KX\\*\", \"KT\\*\".*3 rules checked: 0 errors, 1 warning${_eol}  by kind: 1 no layer${_eol}  rule #2 KX\\* \\(feature\\): warning, no layer")
     set_tests_properties(cli.code_applies_and_reports PROPERTIES PASS_REGULAR_EXPRESSION
-        "1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*Layers created: KATANA TEST${_eol}Styles created: cross${_eol}.*  KT01: 1 entity, prefix, matched; layer 0 -> KATANA TEST; style cross \\(created\\); 1 changed${_eol}Applied as one command.*1 entity carries a code in \"code\", 1 distinct code${_eol}  KT01: 1, prefix, matched, model KATANA TEST")
+        "1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*Layers created: KATANA TEST${_eol}Styles created: cross${_eol}.*  KT01: 1 entity, prefix, matched; layer 0 -> KATANA TEST; style cross \\(created\\); 1 changed${_eol}Applied as one command.*1 entity carries a code in \"code\", 1 distinct code${_eol}  KT01: 1, prefix, matched, layer KATANA TEST")
 
     # CUSTOMISE alone names the files loaded, in load order - "is my code
     # file loaded?" is what a count could not answer - after the counts. The

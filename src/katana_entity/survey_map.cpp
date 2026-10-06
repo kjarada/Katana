@@ -70,61 +70,14 @@ template <class T> void takeIfUnset(std::optional<T>& into, const std::optional<
 
 const char* toString(SurveySection section)
 {
-    switch (section) {
-    case SurveySection::Map:
-        return "map_data";
-    case SurveySection::VertexSymbol:
-        return "vertex_symbol_data";
-    case SurveySection::VertexTextStyle:
-        return "vertex_textstyle_data";
-    case SurveySection::Pipe:
-        return "pipe_data";
-    case SurveySection::VertexPipe:
-        return "vertex_pipe_data";
-    case SurveySection::SegmentPipe:
-        return "segment_pipe_data";
-    case SurveySection::StringAttribute:
-        return "string_attribute_data";
-    case SurveySection::VertexAttribute:
-        return "vertex_attribute_data";
-    case SurveySection::Tinable:
-        return "tinable_data";
+    for (const SurveySectionWord& entry : kSurveySectionWords) {
+        if (entry.section == section) {
+            return entry.word;
+        }
     }
-    return "map_data";
-}
-
-std::optional<SurveySection> parseSurveySection(std::string_view element)
-{
-    if (element == "map_data") {
-        return SurveySection::Map;
-    }
-    // A mapfile writes the symbol section twice, once in a form marked v9. Both say
-    // the same thing, so both are read as the same section.
-    if (element == "vertex_symbol_data" || element == "vertex_symbol_data_v9") {
-        return SurveySection::VertexSymbol;
-    }
-    if (element == "vertex_textstyle_data") {
-        return SurveySection::VertexTextStyle;
-    }
-    if (element == "pipe_data") {
-        return SurveySection::Pipe;
-    }
-    if (element == "vertex_pipe_data") {
-        return SurveySection::VertexPipe;
-    }
-    if (element == "segment_pipe_data") {
-        return SurveySection::SegmentPipe;
-    }
-    if (element == "string_attribute_data") {
-        return SurveySection::StringAttribute;
-    }
-    if (element == "vertex_attribute_data") {
-        return SurveySection::VertexAttribute;
-    }
-    if (element == "tinable_data") {
-        return SurveySection::Tinable;
-    }
-    return std::nullopt;
+    // A value outside the enumeration: the first section's word, as the
+    // switch this replaced gave.
+    return kSurveySectionWords.front().word;
 }
 
 const char* toString(SurveyMatchKind kind)
@@ -187,7 +140,7 @@ Status validate(const SurveyRule& rule)
     if (!rule.model.empty()) {
         if (auto status = validateLayerPath(rule.model); !status) {
             return makeError(ErrorCode::InvalidArgument,
-                             "the model of rule \"" + rule.key +
+                             "the layer of rule \"" + rule.key +
                                  "\" is not a valid layer path: " + status.error().message,
                              rule.model);
         }

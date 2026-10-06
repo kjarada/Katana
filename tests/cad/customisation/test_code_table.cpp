@@ -1,6 +1,13 @@
 // The survey code library questioned: why a code gets what it gets, the map
 // as a table of codes, the codes a drawing carries, and what is wrong with a
 // map - and the one report text every front end prints.
+//
+// A rule's section and fields are named here by the Katana customisation
+// format's words ("feature", "layer", "surface", "at vertices"), which the
+// survey code tools show since the survey code file's own (`map_data`,
+// `model`, `tinable`, `mode vertex`) left the window. Each expectation holding
+// such a word was changed old to new from the table "The words a rule is
+// shown by" in docs/customisation.md, not from what a run printed.
 
 #include <gtest/gtest.h>
 
@@ -48,15 +55,15 @@ SurveyRule vertexSymbol(std::string key, std::string style, double size, std::st
 }
 
 // The shapes of the reference mapfile, cut down, by index:
-//   0  AC*  map_data: linestyle "0" - every symbol code says so
-//   1  AC*  vertex_symbol_data: the bollard
-//   2  1*   map_data: a text code on linestyle "0", yellow
-//   3  2*   map_data: another, cyan
-//   4  WM*  map_data: a real linestyle, a colour Katana does not know
-//   5  WM*  string_attribute_data: an attribute naming another ($)
-//   6  PABB map_data: an exact key, a linestyle no library here defines
-//   7  *    string_attribute_data: every code gets it
-//   8-11 *  pipe_data: the reference files carry sixteen of these in each
+//   0  AC*  feature: linestyle "0" - every symbol code says so
+//   1  AC*  symbol: the bollard
+//   2  1*   feature: a text code on linestyle "0", yellow
+//   3  2*   feature: another, cyan
+//   4  WM*  feature: a real linestyle, a colour Katana does not know
+//   5  WM*  attributes: an attribute naming another ($)
+//   6  PABB feature: an exact key, a linestyle no library here defines
+//   7  *    attributes: every code gets it
+//   8-11 *  pipe: the reference files carry sixteen of these in each
 //           pipe section, identical but for the DepthLocation they give
 SurveyMap referenceShapes()
 {
@@ -178,7 +185,7 @@ TEST(ExplainCode, EachFieldNamesTheRuleItCameFromMostSpecificFirst)
     // rule the symbol, and the first `*` pipe row the pipe.
     ASSERT_EQ(why.fields.size(), 7u);
     const std::vector<std::tuple<std::string, std::string, std::size_t, SurveySection>> expected = {
-        {"model", "SURVEY DETAIL", 0, SurveySection::Map},
+        {"layer", "SURVEY DETAIL", 0, SurveySection::Map},
         {"colour", "white", 0, SurveySection::Map},
         {"linestyle", "0", 0, SurveySection::Map},
         {"group", "SURVEY - CULT", 0, SurveySection::Map},
@@ -300,9 +307,9 @@ TEST(ExplainCode, IsPrintedAsOneTextNamingEachRule)
     // the pipe comes from rule 8, the zone from 7, DepthLocation from 8.
     const std::string expected =
         "Code \"wm01\": only the bare * rule answers it: fallback-only, not matched\n"
-        "  pipe: diameter $PipeDiameter, Obvert  <- rule #8 * (pipe_data)\n"
-        "  string attribute Model Validation Zone = 1  <- rule #7 * (string_attribute_data)\n"
-        "  string attribute DepthLocation = Top of Pipe  <- rule #8 * (pipe_data)\n"
+        "  pipe: diameter $PipeDiameter, Obvert  <- rule #8 * (pipe)\n"
+        "  string attribute Model Validation Zone = 1  <- rule #7 * (attributes)\n"
+        "  string attribute DepthLocation = Top of Pipe  <- rule #8 * (pipe)\n"
         "  near miss: key \"WM*\" differs only in letter case\n";
     EXPECT_EQ(katana::cad::formatCodeExplanation(explain(referenceShapes(), "wm01")), expected);
 }
@@ -322,17 +329,17 @@ TEST(ExplainCode, ALaterRuleSayingSomethingElseIsShownAsOverruled)
     ASSERT_TRUE(map.add(mapData("A*", "SURVEY DETAIL", "red", "")).ok());      // 2
     ASSERT_TRUE(map.add(mapData("AC*", "SURVEY DETAIL", "white", "")).ok());   // 3
 
-    // By hand: AC* (0, 1, 3) before A* (2). model: 3, and 2 agrees. colour:
+    // By hand: AC* (0, 1, 3) before A* (2). layer: 3, and 2 agrees. colour:
     // 3 white, 2 red. hide: 0 no, 1 yes. symbol: 0, and 1 agrees.
     EXPECT_EQ(katana::cad::formatCodeExplanation(explain(map, "AC01")),
               "Code \"AC01\": prefix match, matched\n"
-              "  model: SURVEY DETAIL  <- rule #3 AC* (map_data)\n"
-              "  colour: white  <- rule #3 AC* (map_data)\n"
-              "    overruled: red  <- rule #2 A* (map_data)\n"
-              "  hide: no  <- rule #0 AC* (vertex_symbol_data)\n"
-              "    overruled: yes  <- rule #1 AC* (vertex_symbol_data)\n"
-              "  symbol: CULT Bollard, size 1.5  <- rule #0 AC* (vertex_symbol_data)\n"
-              "  symbol \"CULT Bollard\": defined, mode vertex\n"
+              "  layer: SURVEY DETAIL  <- rule #3 AC* (feature)\n"
+              "  colour: white  <- rule #3 AC* (feature)\n"
+              "    overruled: red  <- rule #2 A* (feature)\n"
+              "  hide: no  <- rule #0 AC* (symbol)\n"
+              "    overruled: yes  <- rule #1 AC* (symbol)\n"
+              "  symbol: CULT Bollard, size 1.5  <- rule #0 AC* (symbol)\n"
+              "  symbol \"CULT Bollard\": defined, at vertices\n"
               "  colour \"white\": #FFFFFF\n");
 }
 
@@ -422,8 +429,8 @@ TEST(CodeCensus, CountsEachDistinctCodeAndClassesItAgainstTheMap)
     EXPECT_FALSE(census.codes[2].matched);
 
     const std::string expected = "4 entities carry a code in \"code\", 3 distinct codes\n"
-                                 "  101: 1, prefix, matched, model SURVEY TEXT\n"
-                                 "  AC01: 2, prefix, matched, model SURVEY DETAIL\n"
+                                 "  101: 1, prefix, matched, layer SURVEY TEXT\n"
+                                 "  AC01: 2, prefix, matched, layer SURVEY DETAIL\n"
                                  "  ZZ99: 1, fallback only, not matched\n";
     EXPECT_EQ(katana::cad::formatCodeCensus(census), expected);
 }
@@ -564,7 +571,7 @@ TEST(LintSurveyMap, IsPrintedAsOneTextWithTheCounts)
     EXPECT_EQ(katana::cad::formatLint(issues, map.size()),
               "2 rules checked: 0 errors, 1 warning\n"
               "  by kind: 1 unknown colour\n"
-              "  rule #0 WM* (map_data): warning, unknown colour: colour \"sui water potable\" "
+              "  rule #0 WM* (feature): warning, unknown colour: colour \"sui water potable\" "
               "is not a colour name Katana knows, so the entity keeps its own\n");
     EXPECT_EQ(katana::cad::formatLint({}, 3), "3 rules checked: no problems found\n");
 }
@@ -692,6 +699,6 @@ TEST(FormatCoverage, AVertexSymbolGivenAsALinetypeIsSaidToBeASymbolNotInNoLoaded
               "1 of this drawing's 3 styles are drawn with a loaded definition (3 name one; the "
               "rest are plain lines)\n"
               "  1 name is in no loaded library: \"PABB Pipe\"\n"
-              "  1 name is loaded as a `mode vertex` symbol, not a linestyle, so a linetype "
+              "  1 name is loaded as an `at vertices` symbol, not a linestyle, so a linetype "
               "naming it draws solid: \"CULT Bollard\"\n");
 }

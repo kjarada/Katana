@@ -59,9 +59,12 @@ namespace {
 
 // The Code Table's section chips, and the sections each stands for: the
 // three pipe sections are one subject to a person, and so are the two
-// attribute sections.
+// attribute sections. `named` is the label a chip's objectName was made from
+// when it was first shown ("filterMap", "filterTinable"): tests and headless
+// scripts find a chip by that name, so it outlives the label. What a chip
+// SAYS is sectionChipLabel's, and is written nowhere here.
 struct SectionChip {
-    const char* label;
+    const char* named;
     std::vector<SurveySection> sections;
 };
 
@@ -77,6 +80,24 @@ const std::vector<SectionChip>& sectionChips()
         {"Tinable", {SurveySection::Tinable}},
     };
     return chips;
+}
+
+// What a chip says: the word of the first section it stands for, from
+// entity::toString - the one table the Section list and a customisation
+// file's "sets" take theirs from - with a capital, as a chip is written. A
+// copy typed here would go on saying the old word when that table changed.
+// Not translated either: it is the word a file holds, in every language.
+// Empty for the chip that stands for no section, which the caller names.
+[[nodiscard]] QString sectionChipLabel(const SectionChip& chip)
+{
+    if (chip.sections.empty()) {
+        return {};
+    }
+    QString word = QString::fromLatin1(katana::entity::toString(chip.sections.front()));
+    if (!word.isEmpty()) {
+        word[0] = word[0].toUpper();
+    }
+    return word;
 }
 
 // Tree columns.
@@ -693,9 +714,13 @@ QWidget* SurveyCodeManagerDialog::buildCodeTableTab()
     leftLayout->setContentsMargins(0, 0, 0, 0);
     QStringList chips;
     for (const SectionChip& chip : sectionChips()) {
-        chips << tr(chip.label);
+        chips << QString::fromLatin1(chip.named);
     }
     tableFilter_ = new FilterBar(chips, left);
+    for (int index = 0; index < chips.size(); ++index) {
+        const QString word = sectionChipLabel(sectionChips()[static_cast<std::size_t>(index)]);
+        tableFilter_->setChipLabel(index, word.isEmpty() ? tr("All") : word);
+    }
     tableFilter_->setObjectName(QStringLiteral("codeTableFilter"));
     tableFilter_->setPlaceholderText(tr("Search keys, descriptions, layers, linestyles, symbols"));
     tableFilter_->onTextChanged = [this](const QString&) { rebuildCodeTable(); };
@@ -706,7 +731,7 @@ QWidget* SurveyCodeManagerDialog::buildCodeTableTab()
     tree_->setObjectName(QStringLiteral("codeTree"));
     tree_->setColumnCount(ColumnCount);
     tree_->setHeaderLabels({tr("Key"), tr("Description"), tr("Layer"), tr("Colour"),
-                            tr("Line/Point"), tr("Linestyle"), tr("Symbol"), tr("Tinable"),
+                            tr("Line/Point"), tr("Linestyle"), tr("Symbol"), tr("Surface"),
                             tr("Attributes")});
     tree_->setIconSize(kThumbnailSize);
     tree_->setUniformRowHeights(true);
@@ -1089,7 +1114,7 @@ void SurveyCodeManagerDialog::explain(const std::string& code)
         if (linestyle.plain) {
             state = tr("the plain continuous line: needs no definition");
         } else if (linestyle.defined && linestyle.vertexMode) {
-            state = tr("a vertex symbol, not a linestyle: drawn as a plain line");
+            state = tr("an `at vertices` symbol, not a linestyle: drawn as a plain line");
         } else if (linestyle.defined) {
             state = tr("defined in the loaded library");
         } else {
@@ -1101,7 +1126,7 @@ void SurveyCodeManagerDialog::explain(const std::string& code)
     if (!symbol.name.empty()) {
         QString state;
         if (symbol.defined) {
-            state = symbol.vertexMode ? tr("defined, a vertex symbol") : tr("defined");
+            state = symbol.vertexMode ? tr("defined, at vertices") : tr("defined");
         } else if (symbol.builtIn) {
             state = tr("drawn by Katana itself: no library needed");
         } else {

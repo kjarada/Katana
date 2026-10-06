@@ -42,9 +42,11 @@ using BuiltInSymbolTest = std::function<bool(std::string_view)>;
 // specific first, that says anything about it - the rule SurveyMap::lookup
 // takes it from.
 struct CodeFieldSource {
-    // "model", "colour", "linestyle", "weight", "group", "comment",
-    // "breakline", "tinable", "hide", "symbol", "text style", "pipe",
-    // "vertex pipe" or "segment pipe".
+    // "layer", "colour", "linestyle", "weight", "group", "comment",
+    // "breakline", "surface", "hide", "symbol", "text style", "pipe",
+    // "vertex pipe" or "segment pipe". "layer" is SurveyRule::model and
+    // "surface" SurveyRule::tinable, by the words a customisation file has
+    // for them.
     std::string field{};
     std::string value{}; // as text, for a person to read
     std::size_t rule = 0; // its index in SurveyMap::rules()
@@ -67,7 +69,7 @@ struct CodeDefinition {
     std::string name{};       // as the rules give it; empty when they give none
     bool plain = false;       // the plain continuous line: "0", "1", "continuous"
     bool defined = false;     // the library has a definition of this name
-    bool vertexMode = false;  // ... and it is `mode vertex`
+    bool vertexMode = false;  // ... and it is drawn at vertices (`atVertices`)
     bool builtIn = false;     // a symbol no library defines but Katana draws itself
 };
 
@@ -174,10 +176,10 @@ enum class LintKind {
     UnresolvedLinestyle,    // a linestyle no loaded library defines
     UnresolvedSymbol,       // a symbol no library defines and Katana cannot draw
     SymbolNotSymbolCapable, // a symbol rule naming a definition known not to be a symbol
-    LinestyleIsVertex,      // a linestyle naming a `mode vertex` definition
+    LinestyleIsVertex,      // a linestyle naming a definition drawn at vertices
     UnknownColour,          // a colour name the colour table does not know
-    InvalidLayerPath,       // a model that cannot become a layer
-    NoModel,                // a map_data rule that puts its code nowhere
+    InvalidLayerPath,       // a layer (SurveyRule::model) that is not a layer path
+    NoModel,                // a feature rule with no layer: its code stays where it is
     DuplicateRule,          // the same as an earlier rule, field for field
     ShadowedRule,           // earlier rules with its key already say all it says
     KeyWhitespace,          // a key with surrounding blanks, which matches no code typed

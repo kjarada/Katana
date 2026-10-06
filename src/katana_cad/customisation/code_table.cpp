@@ -117,7 +117,7 @@ struct FieldSpec {
 const std::vector<FieldSpec>& fieldSpecs()
 {
     static const std::vector<FieldSpec> specs = {
-        {"model", [](const SurveyRule& r) { return !r.model.empty(); },
+        {"layer", [](const SurveyRule& r) { return !r.model.empty(); },
          [](const SurveyRule& r) { return r.model; }},
         {"colour", [](const SurveyRule& r) { return !r.colour.empty(); },
          [](const SurveyRule& r) { return r.colour; }},
@@ -131,7 +131,7 @@ const std::vector<FieldSpec>& fieldSpecs()
          [](const SurveyRule& r) { return r.comment; }},
         {"breakline", [](const SurveyRule& r) { return r.breakline.has_value(); },
          [](const SurveyRule& r) { return std::string(katana::entity::toString(*r.breakline)); }},
-        {"tinable", [](const SurveyRule& r) { return r.tinable.has_value(); },
+        {"surface", [](const SurveyRule& r) { return r.tinable.has_value(); },
          [](const SurveyRule& r) { return yesNo(*r.tinable); }},
         {"hide", [](const SurveyRule& r) { return r.hide.has_value(); },
          [](const SurveyRule& r) { return yesNo(*r.hide); }},
@@ -438,7 +438,7 @@ const char* toString(LintKind kind)
     case LintKind::InvalidLayerPath:
         return "invalid layer path";
     case LintKind::NoModel:
-        return "no model";
+        return "no layer";
     case LintKind::DuplicateRule:
         return "duplicate rule";
     case LintKind::ShadowedRule:
@@ -470,7 +470,8 @@ std::vector<LintIssue> lintSurveyRule(const SurveyRule& rule, std::size_t index,
             // along the line (decision D2).
             report(LintSeverity::Warning, LintKind::LinestyleIsVertex,
                    "linestyle " + inQuotes(rule.linestyle) +
-                       " is a symbol (mode vertex), drawn at vertices rather than along the line");
+                       " is a symbol (at vertices), drawn at each vertex rather than along the "
+                       "line");
         }
     }
     if (rule.symbol && !rule.symbol->style.empty()) {
@@ -507,12 +508,12 @@ std::vector<LintIssue> lintSurveyRule(const SurveyRule& rule, std::size_t index,
     if (!rule.model.empty()) {
         if (auto status = katana::entity::validateLayerPath(rule.model); !status) {
             report(LintSeverity::Error, LintKind::InvalidLayerPath,
-                   "model " + inQuotes(rule.model) +
-                       " cannot become a layer: " + status.error().message);
+                   "layer " + inQuotes(rule.model) +
+                       " is not a layer path: " + status.error().message);
         }
     } else if (rule.section == SurveySection::Map) {
         report(LintSeverity::Warning, LintKind::NoModel,
-               "a map_data rule with no model: its codes stay on whatever layer they are on");
+               "a feature rule with no layer: its codes stay on whatever layer they are on");
     }
     if (!rule.key.empty() && (katana::core::isAsciiSpace(rule.key.front()) ||
                               katana::core::isAsciiSpace(rule.key.back()))) {
@@ -696,14 +697,14 @@ std::string formatCodeExplanation(const CodeExplanation& explanation)
             out << "in no loaded library, so drawn as a plain line\n";
         } else {
             out << (explanation.linestyle.vertexMode
-                        ? "defined, but as a symbol (mode vertex)\n"
+                        ? "defined, but as a symbol (at vertices)\n"
                         : "defined\n");
         }
     }
     if (!explanation.symbol.name.empty()) {
         out << "  symbol " << inQuotes(explanation.symbol.name) << ": ";
         if (explanation.symbol.defined) {
-            out << (explanation.symbol.vertexMode ? "defined, mode vertex\n" : "defined\n");
+            out << (explanation.symbol.vertexMode ? "defined, at vertices\n" : "defined\n");
         } else if (explanation.symbol.builtIn) {
             out << "drawn by Katana itself\n";
         } else {
@@ -746,7 +747,7 @@ std::string formatCodeTable(const std::vector<CodeTableRow>& rows, std::string_v
         std::vector<std::string> parts;
         const SurveyRule& combined = row.combined;
         if (!combined.model.empty()) {
-            parts.push_back("model " + combined.model);
+            parts.push_back("layer " + combined.model);
         }
         if (!combined.linestyle.empty()) {
             parts.push_back("linestyle " + combined.linestyle);
@@ -789,7 +790,7 @@ std::string formatCodeCensus(const CodeCensus& census)
         out << "  " << row.code << ": " << row.entities << ", "
             << katana::entity::toString(row.kind) << (row.matched ? ", matched" : ", not matched");
         if (!row.model.empty()) {
-            out << ", model " << row.model;
+            out << ", layer " << row.model;
         }
         out << "\n";
     }
@@ -860,10 +861,10 @@ std::string formatCoverage(const CustomisationCoverage& coverage)
         }
         out << "  "
             << counted(coverage.notLinestyles.size(),
-                       "name is loaded as a `mode vertex` symbol, not a linestyle, so a linetype "
-                       "naming it",
-                       "names are loaded as `mode vertex` symbols, not linestyles, so a linetype "
-                       "naming one")
+                       "name is loaded as an `at vertices` symbol, not a linestyle, so a "
+                       "linetype naming it",
+                       "names are loaded as `at vertices` symbols, not linestyles, so a "
+                       "linetype naming one")
             << " draws solid: " << joined(names) << "\n";
     }
     return out.str();

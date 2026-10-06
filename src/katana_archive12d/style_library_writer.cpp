@@ -9,6 +9,8 @@
 #include <string>
 #include <system_error>
 
+#include "customisation_words.hpp"
+
 namespace katana::archive12d {
 
 namespace {
@@ -95,7 +97,7 @@ void writeStroke(std::string& out, const LineStyle& style, const Stroke& stroke)
 
 void writeDefinition(std::string& out, const LineStyle& style)
 {
-    out += katana::entity::toString(style.units);
+    out += detail::styleKindWord(style.units);
     out += ' ';
     out += quoted(style.name);
     out += " {\n";
