@@ -752,9 +752,12 @@ TEST(SurveyImportSettings, ASettingsFileIsDecodedAsAnyTextFileIs)
 // ---- SURVEY IMPORT codes and strings what it draws --------------------------------------
 //
 // The customisation is the hand-written fixture
-// tests/data/customisation/test_field_codes.customisation.json, installed on
+// tests/data/field_codes/test_field_codes.customisation.json, installed on
 // the Document as a loaded one (CUSTOMISE is the front ends' to run; what a
-// drawing has loaded is the Document's). Its rules, read by hand:
+// drawing has loaded is the Document's). It has a folder of its own: the
+// headless checks of the window load EVERY customisation file of
+// tests/data/customisation (-DCUSTOMISE_DIR), and pin what those three hold.
+// Its rules, read by hand:
 //   KB*   a LINE on FIELD KERB, linestyle "FIELD Kerb", colour "field kerb" -
 //         a name only the fixture's own colour table knows: #C04000
 //   EB*   a LINE on FIELD EDGE, a plain line, colour "blue" (a standard name)
@@ -788,7 +791,7 @@ using katana::geometry::Polyline2;
 void installFieldCodes(Document& document)
 {
     const std::string path = std::string(KATANA_SURVEYIO_DATA) +
-                             "/../../data/customisation/test_field_codes.customisation.json";
+                             "/../../data/field_codes/test_field_codes.customisation.json";
     std::ifstream stream(path, std::ios::binary);
     ASSERT_TRUE(stream.good()) << path;
     const std::string bytes{std::istreambuf_iterator<char>(stream),

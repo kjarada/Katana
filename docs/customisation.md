@@ -1113,12 +1113,13 @@ the customisation it said was not loaded.
 which is what the merge replaces by. The `automation` and `linework` records
 carry the very keys `SET` takes, so either can be typed back after it.
 
-The bare report has a second, older text, `cad::formatCustomisationSummary`,
-which names a source by the kind of file it once was ("a style library").
-Nothing prints it any more: `katana_cli`'s own `CUSTOMISE`, the window's and
-File > Drawing Summary each printed it until they moved to the verb's text,
-`cad::formatCustomisationReply`. Both are made from one
-`CustomisationSummary`.
+The bare report had a second, older text (`cad::formatCustomisationSummary`,
+and `cad::customisationReport` over it), which named a source by the kind of
+file it once was ("a style library"). `katana_cli`'s own `CUSTOMISE`, the
+window's and File > Drawing Summary each printed it until they moved to the
+verb's text, `cad::formatCustomisationReply`; with the last of them gone the
+two functions and their four tests were deleted (2026-10-07). The reply is
+made from a `CustomisationSummary`, as that text was.
 
 `CUSTOMISE JSON` is `cad::customisationJson`: one object, keys in
 alphabetical order, two blanks a level, with `name`, `origin`, `kept`,
@@ -1336,8 +1337,9 @@ went with it and is an unknown command now. Their replies are unchanged.
 
 **Colours.** The verbs resolve a colour name through the Document
 (`cad::resolveColour`: the customisation's own table, then the standard
-names). What a front end passed with `CommandInterpreter::setColourLookup` is
-asked only for a name neither knows.
+names). A front end once passed more names with
+`CommandInterpreter::setColourLookup`; none does, and the setter is gone
+(2026-10-07).
 
 ### The verbs: decisions, and what was rejected
 
@@ -1475,9 +1477,8 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 - **Other variables that name a file are still read with `getenv`**:
   `KATANA_ONLINE_CATALOGUE` and `KATANA_ONLINE_CACHE` in
   `src/katana_qt/gis_online.cpp`, which on Windows cannot name a file outside
-  the ANSI code page. The window's own read of `KATANA_CUSTOMISATION` is
-  Qt's (`qEnvironmentVariable`, wide on Windows) where the session's is
-  `core::environmentVariable`: two ways to one answer.
+  the ANSI code page. (`KATANA_CUSTOMISATION` is read through
+  `core::environmentVariable` by the window as by the session.)
 - **A file named on the command line still arrives through the code page.**
   The arguments of `katana_cli` and `katana_mcp` are the narrow `argv`
   (`src/katana_app/main.cpp`, `src/katana_app/mcp_main.cpp`), which on Windows
@@ -1505,12 +1506,14 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   definition** (`cad::definitionUsers`,
   `include/katana/cad/definition_users.hpp`), and still WORD the answer two
   ways. The verb's refusal says `rule #7 AC* (symbol) names it` and `the
-  drawing's style "Marks" names it`; the editor's list says `rule #7 AC*
+  drawing's style "Marks" names it` (`DefinitionUsers::cited`); the editor's
+  own list, beside a definition nobody is deleting, says `rule #7 AC*
   (symbol) draws it as its symbol` and `style "Marks" draws it as its
-  symbol` (`DefinitionUsers::describe`). The editor shows the verb's refusal
-  as it came and then its own list, so a person reads the users twice. One
-  wording is a choice between the verb's pinned text and the editor's; it
-  was left with whoever next changes either.
+  symbol` (`DefinitionUsers::describe`). A person no longer reads both under
+  a refused Delete: the editor shows the verb's refusal as it came and does
+  not repeat the users it cites (2026-10-07; `docs/desktop.md`, "The
+  definition editor"). One wording for both is still a choice between the
+  verb's pinned text and the editor's.
 - **`REMOVE` says "what names it then draws plain" of every definition.**
   That is untrue of a name the drawing's own Linetype table also holds (a
   line naming it is then dashed by that linetype) and of a name that is a
@@ -1538,6 +1541,8 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 - **`PREVIEW` needs the scope form.** `CODE feature_code` takes the whole
   rest of the line as the property; a preview of it is `CODE PROPERTY
   feature_code PREVIEW`.
-- **`CommandInterpreter::setColourLookup` is still there**, for the window,
-  which still calls it; it answers nothing the Document does not. The
-  session of `katana_cli` and `katana_mcp` no longer does.
+- **`runSurveyCodeVerb` still takes a colour lookup of a caller's own**,
+  asked after the Document for a name it does not know. No program passes
+  one - `CommandInterpreter::setColourLookup`, through which a front end did,
+  is gone - so the parameter is reached by its two tests alone, and goes
+  when someone next changes that function's signature.

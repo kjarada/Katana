@@ -238,6 +238,14 @@ TEST_F(McpServer, TheCommandToolNamesTheSurveyFieldFileVerbs)
                               "SET key=value", "SET control=<id>;drawing;", "FORWARD"}) {
         EXPECT_NE(description.find(words), std::string::npos) << words;
     }
+    // What an import does with the survey codes, and the verb that strings
+    // coded points afterwards: an agent that is not told of the two words
+    // cannot turn the coding off, and one not told of LINEWORK draws the
+    // lines by hand.
+    for (const char* words : {"[CODES on|off] [LINEWORK on|off]", "LINEWORK [<scope>]",
+                              "[ORDER number|entity] [PREVIEW]", "HELP LINEWORK"}) {
+        EXPECT_NE(description.find(words), std::string::npos) << words;
+    }
 }
 
 TEST_F(McpServer, AnUnknownToolIsInvalidParams)

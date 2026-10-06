@@ -19,12 +19,18 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/linework_verbs.hpp"
 #include "katana/cad/survey_job.hpp"
+#include "katana/commands/entity_commands.hpp"
+#include "katana/entity/entity.hpp"
+#include "katana/entity/survey_map.hpp"
 #include "katana/survey/reduction_report.hpp"
 #include "katana/surveyio/reader.hpp"
 #include "survey/reduction_report_view.hpp"
@@ -76,7 +82,10 @@ std::string readFile(const std::string& path)
 // network_metres.rw5 imported as a job: a setup on A backsighting B and a
 // setup on B backsighting A, each shooting P and Q, with A and B held fixed
 // in a horizontal network - what the wizard does, through the same command.
-std::string importNetworkJob(Document& document)
+// `coded`: the points are coded as they are drawn, as SURVEY IMPORT ... CODES
+// on LINEWORK off codes them (cad::surveyImportFinish), so the job remembers
+// that it was and a re-adjustment codes what it draws.
+std::string importNetworkJob(Document& document, bool coded = false)
 {
     const std::string name = "network_metres.rw5";
     std::string bytes = readFile(std::string(KATANA_SURVEY_UI_DATA) + "/" + name);
@@ -99,11 +108,33 @@ std::string importNetworkJob(Document& document)
     request.context = std::move(*context);
     request.context.input = katana::qt::reportInputFor(*read, name);
     request.context.createdUtc = "2026-09-24T10:00:00Z";
+    if (coded) {
+        request.finish = cad::surveyImportFinish(document, true, false).options;
+    }
     auto command = std::make_unique<cad::ImportSurveyJobCommand>(document, std::move(request));
     const cad::ImportSurveyJobCommand* import = command.get();
     const auto status = document.execute(std::move(command));
     EXPECT_TRUE(status.ok()) << (status ? "" : status.error().describe());
     return import->jobId();
+}
+
+// The drawn point whose number (the property "point", as an import writes it)
+// is `number`; null when the drawing holds none.
+const katana::entity::Entity* pointNumbered(const Document& document, const std::string& number)
+{
+    const katana::entity::Entity* found = nullptr;
+    document.model().entities.forEach([&](const katana::entity::Entity& entity) {
+        const auto property = entity.properties.find("point");
+        if (!std::holds_alternative<katana::entity::PointGeometry>(entity.geometry) ||
+            property == entity.properties.end()) {
+            return;
+        }
+        const auto* text = std::get_if<std::string>(&property->second);
+        if (text != nullptr && *text == number) {
+            found = &entity;
+        }
+    });
+    return found;
 }
 
 struct Session {
@@ -342,4 +373,66 @@ TEST(SurveyJobsDialog, ItsPreviewRefusesToHoldAPointTheDrawingHasAtTwoPlaces)
                                  "known"))
         << message.toStdString();
     EXPECT_EQ(session.document.surveyJobs().front(), before);
+}
+
+// A job imported CODED is coded again where its re-adjustment draws a point:
+// here P, deleted by hand and drawn again because Apply was told to overwrite
+// hand edits. network_metres.rw5 shoots P and Q with the code PEG, and the
+// one rule gives PEG a layer, a linestyle and a colour BY NAME - "red", a
+// standard name. By hand: the import makes ONE style for the two, named after
+// the linestyle and coloured #FF0000. A point drawn again must wear that
+// style. The dialog once asked for the re-adjustment with no colour lookup:
+// "red" then had no RGB, the neighbours' style was not one that draws it, and
+// the point got a second style, "Peg Line (red)".
+TEST(SurveyJobsDialog, APointItsReadjustmentDrawsAgainWearsTheStyleItsNeighboursWear)
+{
+    Document document;
+    katana::entity::SurveyMap map;
+    katana::entity::SurveyRule peg;
+    peg.key = "PEG*";
+    peg.model = "SURVEY PEG";
+    peg.linestyle = "Peg Line";
+    peg.colour = "red";
+    peg.breakline = katana::entity::SurveyBreakline::Line;
+    ASSERT_TRUE(map.add(peg).ok());
+    document.setSurveyMap(map);
+    importNetworkJob(document, true);
+
+    const katana::entity::Style* style = document.model().styles.find("Peg Line");
+    ASSERT_NE(style, nullptr) << "the import coded its points";
+    ASSERT_EQ(style->color, std::optional(katana::entity::Color{255, 0, 0, 255}));
+    ASSERT_EQ(document.model().styles.all().size(), 1u);
+    for (const char* number : {"P", "Q"}) {
+        const katana::entity::Entity* point = pointNumbered(document, number);
+        ASSERT_NE(point, nullptr) << number;
+        ASSERT_EQ(point->layer, "SURVEY PEG") << number;
+        ASSERT_EQ(point->style, "Peg Line") << number;
+    }
+    const katana::entity::EntityId first = pointNumbered(document, "P")->id;
+    ASSERT_TRUE(document.execute(katana::commands::deleteEntities({first})).ok());
+    ASSERT_EQ(pointNumbered(document, "P"), nullptr);
+
+    std::vector<QString> log;
+    katana::qt::SurveyDialogContext context{&document, nullptr,
+                                            [&log](const QString& text, bool) {
+                                                log.push_back(text);
+                                            }};
+    SurveyJobsDialog dialog(context, nullptr);
+    dialog.show();
+    QApplication::processEvents();
+    click(dialog, "editAdjustment");
+    choose(dialog, "handEdits", "overwrite them with the new coordinates");
+    click(dialog, "previewAdjustment");
+    click(dialog, "applyAdjustment");
+
+    const katana::entity::Entity* again = pointNumbered(document, "P");
+    ASSERT_NE(again, nullptr) << (log.empty() ? "nothing logged" : log.back().toStdString());
+    EXPECT_NE(again->id, first) << "a point drawn now, not the one deleted";
+    EXPECT_EQ(again->layer, "SURVEY PEG");
+    EXPECT_EQ(again->style, "Peg Line");
+    std::vector<std::string> styles;
+    for (const katana::entity::Style& each : document.model().styles.all()) {
+        styles.push_back(each.name);
+    }
+    EXPECT_EQ(styles, std::vector<std::string>{"Peg Line"});
 }

@@ -79,6 +79,20 @@ struct DefinitionUsers {
     //   layer "survey/services" names it as its linetype
     // A rule naming it both ways says "as its linestyle and its symbol".
     [[nodiscard]] std::vector<std::string> describe() const;
+    // The styles that name it, each ONCE and ascending, however each names
+    // it - the union of linetypeStyles and symbolStyles: what a removal
+    // counts, and cites.
+    [[nodiscard]] std::vector<std::string> styles() const;
+    // The same users as CUSTOMISE REMOVE's refusal cites them, a line each,
+    // in the order above, a style once:
+    //   "TEST Valve": rule #1 AC* (symbol) names it
+    //   "TEST Valve": the drawing's style "Marks" names it
+    //   "TEST Valve": the drawing's layer "survey/marks" names it
+    // `name` is the definition's. The verb's words live here, beside
+    // describe()'s, so that the window's definition editor can tell that a
+    // refusal it shows already lists who names the definition, and does not
+    // say its own list a second time under it.
+    [[nodiscard]] std::vector<std::string> cited(std::string_view name) const;
     // Something names it as a linetype - a rule's linestyle, a style's or a
     // layer's linetype - or as a symbol: which of the two notes above matter.
     [[nodiscard]] bool namedAsLinetype() const;

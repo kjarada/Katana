@@ -249,20 +249,31 @@ endif()
 # The scan is deferred to the end of the TOP directory, by when every
 # directory has been configured - not to the end of this one, which a
 # directory added after it is not in. A test of another directory is reached
-# with `DIRECTORY`, which CMake has had since 3.28, and an older CMake cannot
-# set a property there at all: every `cli.` test (src/katana_app) and the
-# window checks of tests/interop would be left to the machine, and the check
-# would name them at every run. So this directory asks for 3.28, in so many
-# words, where the top CMakeLists.txt still says 3.24 (the default build
-# already needs 3.30, for the C++26 compile feature; raising the declared
-# minimum also turns on every policy up to it - C++ module scanning of each
-# source among them - and is a decision for the build, not for this scan).
+# with `DIRECTORY`, which CMake has had since 3.28.
+#
+# AN OLDER CMAKE cannot set a property there at all, and the top
+# CMakeLists.txt and the presets still say 3.24 (raising the declared minimum
+# also turns on every policy up to it - C++ module scanning of each source
+# among them - and is a decision for the build, not for this scan). This
+# directory once REFUSED to configure with one. It degrades instead: the scan
+# is then deferred to the end of THIS directory and gives the variables to
+# the program tests it can reach from here - those of tests/ itself, which are
+# most of the window's checks - and the check is not registered, since it
+# would name every `cli.` test (src/katana_app) and the window checks of the
+# directories below at every run, for a reason nobody running it can mend.
+# Those tests then start with whatever the build compiled in and the caller's
+# environment holds; one STATUS line says so as the tree is configured.
+set(_katana_scan_reaches_every_directory TRUE)
 if(CMAKE_VERSION VERSION_LESS 3.28)
-    message(FATAL_ERROR
-        "Katana's tests need CMake 3.28 or later (this is ${CMAKE_VERSION}): the scan that gives "
-        "every program test its starting customisation sets a property on tests of other "
-        "directories (set_property(TEST ... DIRECTORY ...)). Use a newer CMake, or configure "
-        "with -DKATANA_BUILD_TESTS=OFF.")
+    set(_katana_scan_reaches_every_directory FALSE)
+    message(STATUS
+        "CMake ${CMAKE_VERSION} is older than 3.28 and cannot set a property on a test of "
+        "another directory: only the program tests of tests/ are given their starting "
+        "customisation (KATANA_BUILTIN_CUSTOMISATION=none, KATANA_CUSTOMISATION unset). The "
+        "`cli.` tests and the window checks of other directories start with what this build "
+        "compiled in and the caller's environment holds, and the test that names a program "
+        "test left so (every_program_test_says_which_built_in_customisation_it_starts_with) "
+        "is not registered.")
 endif()
 
 function(katana_directories_below directory out)
@@ -275,8 +286,16 @@ function(katana_directories_below directory out)
     set(${out} "${_found}" PARENT_SCOPE)
 endfunction()
 
-function(katana_say_what_every_program_test_starts_with)
-    katana_directories_below("${CMAKE_SOURCE_DIR}" _directories)
+# `every_directory`: TRUE where this CMake can reach a test of another
+# directory (3.28); FALSE to take the tests of the directory it is called at
+# the end of, and no other - without the `DIRECTORY` word, which an older
+# CMake does not know and is never shown (a command is read when it is run).
+function(katana_say_what_every_program_test_starts_with every_directory)
+    if(every_directory)
+        katana_directories_below("${CMAKE_SOURCE_DIR}" _directories)
+    else()
+        set(_directories "${CMAKE_CURRENT_SOURCE_DIR}")
+    endif()
     foreach(_directory IN LISTS _directories)
         get_property(_tests DIRECTORY "${_directory}" PROPERTY TESTS)
         foreach(_test IN LISTS _tests)
@@ -285,30 +304,46 @@ function(katana_say_what_every_program_test_starts_with)
             endif()
             foreach(_setting "KATANA_BUILTIN_CUSTOMISATION=set:none" "KATANA_CUSTOMISATION=unset:")
                 string(REGEX REPLACE "=.*$" "" _variable "${_setting}")
-                get_test_property(${_test} ENVIRONMENT_MODIFICATION DIRECTORY "${_directory}"
-                    _modification)
-                get_test_property(${_test} ENVIRONMENT DIRECTORY "${_directory}" _environment)
-                if(NOT "${_modification};${_environment}" MATCHES "(^|;)${_variable}=")
+                if(every_directory)
+                    get_test_property(${_test} ENVIRONMENT_MODIFICATION DIRECTORY "${_directory}"
+                        _modification)
+                    get_test_property(${_test} ENVIRONMENT DIRECTORY "${_directory}" _environment)
+                else()
+                    get_test_property(${_test} ENVIRONMENT_MODIFICATION _modification)
+                    get_test_property(${_test} ENVIRONMENT _environment)
+                endif()
+                if("${_modification};${_environment}" MATCHES "(^|;)${_variable}=")
+                    continue()
+                endif()
+                if(every_directory)
                     set_property(TEST ${_test} DIRECTORY "${_directory}"
+                        APPEND PROPERTY ENVIRONMENT_MODIFICATION "${_setting}")
+                else()
+                    set_property(TEST ${_test}
                         APPEND PROPERTY ENVIRONMENT_MODIFICATION "${_setting}")
                 endif()
             endforeach()
         endforeach()
     endforeach()
 endfunction()
-cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
-    CALL katana_say_what_every_program_test_starts_with)
+if(_katana_scan_reaches_every_directory)
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+        CALL katana_say_what_every_program_test_starts_with TRUE)
+else()
+    cmake_language(DEFER CALL katana_say_what_every_program_test_starts_with FALSE)
+endif()
 
 # The check. The programs are handed over in a file - written when the build
 # system is, so it holds each one's real path - and not on the command line,
-# where they would make this test one that names a program.
+# where they would make this test one that names a program. Not registered
+# where the scan could not reach every directory (an older CMake, above).
 set(_program_files "")
 foreach(_program katana katana_cli katana_mcp)
     if(TARGET ${_program})
         string(APPEND _program_files "$<TARGET_FILE:${_program}>\n")
     endif()
 endforeach()
-if(_program_files)
+if(_program_files AND _katana_scan_reaches_every_directory)
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/program_files_$<CONFIG>.txt"
         CONTENT "${_program_files}")
     add_test(NAME every_program_test_says_which_built_in_customisation_it_starts_with
@@ -1652,9 +1687,11 @@ if(TARGET katana)
     #   - Delete is REFUSED, and the log holds the verb's own words - one of
     #     the one definition is in use, and the rule that names it - as the
     #     window logs any refused line: "! " and the error with its code;
-    #   - the editor shows those words as they came, then its own list of
-    #     what names the definition and what Delete Anyway would do (a point
-    #     is all that draws it, so a stand-in mark is all that follows);
+    #   - the editor shows those words as they came, ONCE - they cite the
+    #     rule, so the editor's own list of what names the definition does
+    #     not follow them, as it did until 2026-10-07 - and then what Delete
+    #     Anyway would do (a point is all that draws it, so a stand-in mark
+    #     is all that follows);
     #   - Delete Anyway runs the line with FORCE, and the verb's reply counts
     #     the one rule that still names what is gone;
     #   - the form then holds a definition the library does not.
@@ -1665,7 +1702,7 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@formatSymbols|symbolGrid=TEST Survey Mark|!symbolEdit|%definitionEditorDialog|!definitionDelete|?definitionIssues|!definitionDeleteAnyway|?definitionHeading|?definitionIssues"
-            "-DEXPECT=! InvalidState: CUSTOMISE REMOVE: 1 of the 1 definition named is in use, so nothing was removed[^\r\n]* FORCE removes what is used too, and what names it then draws plain[\r\n]+  \"TEST Survey Mark\": rule #7 AC\\* \\(symbol\\) names it[\r\n]+definitionIssues: \"TEST Survey Mark\" was not deleted: InvalidState: CUSTOMISE REMOVE: 1 of the 1 definition named is in use, so nothing was removed[^\r\n]* FORCE removes what is used too, and what names it then draws plain \"TEST Survey Mark\": rule #7 AC\\* \\(symbol\\) names it It is named by: rule #7 AC\\* \\(symbol\\) draws it as its symbol Delete Anyway runs the line again with FORCE\\. A point naming it is then drawn as a stand-in mark\\.[\r\n]+removed definition=\"TEST Survey Mark\" rules=1 styles=0 layers=0[\r\n]+definitionHeading: Symbol \"TEST Survey Mark\" - not in the library[\r\n]+definitionIssues: \"TEST Survey Mark\" was deleted from the library\\. It is still shown here: Save puts it back\\."
+            "-DEXPECT=! InvalidState: CUSTOMISE REMOVE: 1 of the 1 definition named is in use, so nothing was removed[^\r\n]* FORCE removes what is used too, and what names it then draws plain[\r\n]+  \"TEST Survey Mark\": rule #7 AC\\* \\(symbol\\) names it[\r\n]+definitionIssues: \"TEST Survey Mark\" was not deleted: InvalidState: CUSTOMISE REMOVE: 1 of the 1 definition named is in use, so nothing was removed[^\r\n]* FORCE removes what is used too, and what names it then draws plain \"TEST Survey Mark\": rule #7 AC\\* \\(symbol\\) names it Delete Anyway runs the line again with FORCE\\. A point naming it is then drawn as a stand-in mark\\.[\r\n]+removed definition=\"TEST Survey Mark\" rules=1 styles=0 layers=0[\r\n]+definitionHeading: Symbol \"TEST Survey Mark\" - not in the library[\r\n]+definitionIssues: \"TEST Survey Mark\" was deleted from the library\\. It is still shown here: Save puts it back\\."
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definition_editor_delete_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless

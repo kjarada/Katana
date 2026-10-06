@@ -69,13 +69,11 @@ class CommandInterpreter {
         sheetContext_ = std::move(provider);
     }
 
-    // More colour names for CODE (survey_code_verbs.hpp), from a front end
-    // that has some. The verb asks the Document first - its customisation's
-    // own table, then the standard names (colour_lookup.hpp) - and this only
-    // for a name neither knows. It was once the ONLY source of colours, when
-    // the standard names were a table cad could not see; the front ends
-    // still pass that table, which now answers nothing the Document has not.
-    void setColourLookup(ColourLookup colourOf) { colourOf_ = std::move(colourOf); }
+    // (There was a setColourLookup here: the colour names CODE needs, from a
+    // front end, when the standard names were a table cad could not see. The
+    // Document resolves them now - its customisation's own table, then the
+    // standard names (colour_lookup.hpp) - and the setter went on 2026-10-07
+    // with the last front end that called it.)
 
     // What CUSTOMISE RESET, KEEP and REVERT need that the Document does not
     // hold (customisation_verbs.hpp): the program's built-in customisation
@@ -230,7 +228,6 @@ class CommandInterpreter {
     std::vector<std::string> history_;
     std::optional<katana::geometry::Point2> lastPoint_;
     katana::cad::plotting::SheetVerbContextProvider sheetContext_;
-    ColourLookup colourOf_;
     CustomisationVerbContext customisation_;
     ScopeViewProvider scopeViews_;
     ViewHostProvider viewHost_;

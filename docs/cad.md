@@ -289,9 +289,11 @@ The colour names they need are resolved through the Document
 customisation's own table, then the standard names of
 `include/katana/entity/colour_names.hpp`). The standard names were once a
 table cad could not see, so each front end passed it with
-`CommandInterpreter::setColourLookup`; it is asked now only for a name the
-Document does not know, and no front end passes one any more: neither the
-window nor `katana_cli` and `katana_mcp`.
+`CommandInterpreter::setColourLookup`. No front end passes one any more, and
+the setter went with the last that did (2026-10-07): the interpreter hands
+`runSurveyCodeVerb` no lookup, and the parameter that function still has for
+a caller's own names is reached only by its tests
+(`SurveyCodeVerbs.AColourNameNothingKnowsIsLeftAloneAndACallersOwnIsAskedLast`).
 
 `CUSTOMISE` is the interpreter's too (`runCustomisationVerb`,
 `include/katana/cad/customisation_verbs.hpp`): the report, `JSON`, a load
@@ -329,15 +331,13 @@ PDAL or the archive and customisation readers: the application's command line
 their lines through too - `docs/desktop.md`, "One executor: the command
 runner") adds `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT`, `INFO <file>`, `REFS`,
 `COPC` (the geoprocessing executor's, which `katana_cli` and `katana_mcp` run
-too - `docs/interop.md`), `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
-report, `cad::customisationReport`; its own for now, although the interpreter has the
-family - above), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
+too - `docs/interop.md`), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
 `SCRIPT <file> [CONTINUE]`,
 the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed
 `HELP` adds them to the interpreter's list (`windowHelpText`, `docs/desktop.md`,
 "The Command Reference and the keyboard shortcuts"). `katana_cli` adds the
-same interoperability verbs - its `--help` lists them - but not `CUSTOMISE`,
-which there is the interpreter's own; and
+same interoperability verbs - its `--help` lists them. Neither adds
+`CUSTOMISE`, which is the interpreter's own in both (above); and
 the interpreter's help says that `PLOTSHEETS` is the window's alone. Both read an `IMPORT` line's
 path and `LOCAL` with `CommandInterpreter::importArgument`, and hand `INFO`
 with an entity id (`CommandInterpreter::isEntityId`, a whole number or `#n`)

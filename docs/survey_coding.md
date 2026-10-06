@@ -1166,9 +1166,9 @@ Decisions worth recording:
   The `CODE` verb no longer depends on a front end for it: it resolves a name
   through the Document (`cad::resolveColour`: the customisation's own table,
   then the standard names, which are the entity layer's since 2026-10-06), and
-  what a front end passed with `CommandInterpreter::setColourLookup` is asked
-  only for a name neither knows (`docs/customisation.md`, "Colour names" and
-  "The verbs"). A name nothing knows - a plot pen, `pen 025` - still leaves
+  no front end passes names of its own any more
+  (`CommandInterpreter::setColourLookup` is gone; `docs/customisation.md`,
+  "Colour names" and "The verbs"). A name nothing knows - a plot pen, `pen 025` - still leaves
   the colour alone.
 
 From the command line, the whole chain:
@@ -1675,11 +1675,13 @@ Not done:
 
 - `SURVEY IMPORT` sets the options (`docs/survey.md`, "SURVEY IMPORT codes
   and strings what it draws"); the import wizard does not yet, and still
-  draws points only. The Survey Jobs dialog does not pass
-  `SurveyJobReadjustment::finish`, so a new point of a finished job is styled
-  without a colour lookup (and gets a second style when its rule names a
-  colour); `cad::surveyImportFinish(document).options` is what it should
-  pass.
+  draws points only. The Survey Jobs dialog passes
+  `cad::surveyImportFinish(document).options` as
+  `SurveyJobReadjustment::finish` since 2026-10-07: it passed nothing, so a
+  point a re-adjustment drew for the first time was styled without a colour
+  lookup and got a second style, `<name> (<colour>)`, when its rule names a
+  colour
+  (`SurveyJobsDialog.APointItsReadjustmentDrawsAgainWearsTheStyleItsNeighboursWear`).
 - **A job keeps no string numbers unless it was finished with survey codes
   loaded.** Imported with both options off, or into a drawing with no
   customisation, its points carry the code alone, and nothing adds the number
@@ -1948,11 +1950,12 @@ These two were "Import Code File..." and "Export Code File..." (`importMapfile`,
 `exportMapfile`), reading and writing another program's survey code file,
 until 2026-10-06. Not done:
 
-- Apply does not KEEP. It calls the commit hook round its commit, before
-  `setSurveyMap` and what the hook hands back after
-  (`CustomisationContext::beginCommit`), but the workbench leaves the hook
-  empty, so the session is left "not kept" (`docs/desktop.md`, "The
-  definition editor", "Not done").
+- Apply keeps a session that was the kept one, where the session has a
+  kept file: it calls the commit hook round its commit, before `setSurveyMap`
+  and what the hook hands back after (`CustomisationContext::beginCommit`),
+  and the workbench answers with the `CUSTOMISE KEEP` line (`docs/desktop.md`,
+  "The definition editor"). An interactive session has no kept file of its
+  own until File > Settings.
 - **The buffer does not know where its rules came from.** Import Codes takes
   a file's rules and nothing else, so the file's notice and its sources stop
   at the buffer: after Apply (`Document::setSurveyMap`, an edit) the session
