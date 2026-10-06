@@ -11,13 +11,15 @@ katana_add_test_suite(app
         test_survey_verbs.cpp
 )
 # The sample GIS data an import is tried on; the survey fixtures, the
-# import wizard's network among them; and whether the session has the GIS
-# module at all, as katana_app decides it (src/katana_app/CMakeLists.txt),
-# since without it IMPORT reads only a DXF.
+# import wizard's network among them; the three Katana customisation files a
+# session is given to load, or to start with as its built-in; and whether the
+# session has the GIS module at all, as katana_app decides it
+# (src/katana_app/CMakeLists.txt), since without it IMPORT reads only a DXF.
 target_compile_definitions(katana_app_tests PRIVATE
     KATANA_GIS_SAMPLES="${PROJECT_SOURCE_DIR}/samples/gis"
     KATANA_SURVEYIO_DATA="${PROJECT_SOURCE_DIR}/tests/surveyio/data"
-    KATANA_SURVEY_UI_DATA="${PROJECT_SOURCE_DIR}/tests/qt_widgets/survey/data")
+    KATANA_SURVEY_UI_DATA="${PROJECT_SOURCE_DIR}/tests/qt_widgets/survey/data"
+    KATANA_CUSTOMISATION_DATA="${PROJECT_SOURCE_DIR}/tests/data/customisation")
 if(TARGET katana_interop)
     target_compile_definitions(katana_app_tests PRIVATE KATANA_TEST_WITH_INTEROP=1)
 endif()

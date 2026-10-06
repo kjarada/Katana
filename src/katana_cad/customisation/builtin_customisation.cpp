@@ -3,7 +3,6 @@
 
 #include "katana/cad/customisation_host.hpp"
 
-#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -72,8 +71,10 @@ const BuiltInCustomisation& compiledInCustomisation()
 BuiltInCustomisation builtInCustomisation()
 {
     // THE one place the seam is read. What it means is the function below's.
-    const char* value = std::getenv(kBuiltInCustomisationVariable);
-    return builtInCustomisationFor(value == nullptr ? std::string_view() : std::string_view(value),
+    // Through core, never getenv: on Windows that gives the ANSI code page's
+    // bytes, in which a file named outside the code page is a file named
+    // with '?' (core/path_text.hpp).
+    return builtInCustomisationFor(katana::core::environmentVariable(kBuiltInCustomisationVariable),
                                    compiledInCustomisation());
 }
 
@@ -86,10 +87,11 @@ BuiltInCustomisation builtInCustomisationFor(std::string_view seam,
     if (katana::core::lowered(seam) == "none") {
         return {};
     }
-    // As text, through core's one conversion: an environment gives narrow
-    // bytes - on Windows in the ANSI code page - and a path built straight
-    // from those THROWS at the first that is not UTF-8 (path_text.hpp), out
-    // of a function that promises to report and never throw.
+    // As text, through core's one conversion: on Windows the seam's value
+    // arrives as UTF-8, but elsewhere, and from any other caller, the text
+    // may be narrow bytes that are not - and a path built straight from
+    // those THROWS at the first of them (path_text.hpp), out of a function
+    // that promises to report and never throw.
     const std::filesystem::path path = katana::core::pathFromUtf8(seam);
     auto file = readCustomisationFile(path);
     if (!file) {

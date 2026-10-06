@@ -77,6 +77,11 @@ struct LineOutcome {
 [[nodiscard]] std::string scopeWordsOf(const std::string& kind, const Json& area,
                                        const Json& layers, bool only, const Json& where);
 
+// katana_customisation (mcp_customisation.cpp): the session's customisation
+// as structured data - what is loaded, its survey code rules, its definitions
+// and the rules' lint. Read from the Document, in every build.
+[[nodiscard]] Tool customisationTool();
+
 // The geoprocessing tools (geo/mcp_geo_tools.cpp): katana_gdal_catalogue,
 // katana_gdal_describe, katana_gdal_run, and the lanes' after them.
 [[nodiscard]] std::vector<Tool> geoTools();

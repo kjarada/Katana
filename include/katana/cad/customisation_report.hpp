@@ -126,6 +126,13 @@ customisationSummary(const Document& document, const std::vector<CustomisationSo
 //                written), and undefinedRuleNames
 //   coverage     {styles, named, resolved, builtIn, unresolved, notLinestyles}
 //   missing      [name], what the open project recorded and the session lacks
+//   start        {problems: [sentence], keptFromAnotherBuiltIn} - what
+//                startCustomisation found when the session started
+//                (CustomisationState::startProblems): a kept file or a
+//                built-in that did not read, and a kept customisation made
+//                from another built-in than the program has. Always there,
+//                [] and false when the start had nothing to say; it is of the
+//                START, and nothing done since changes it
 //
 // automation, linework and basedOn use the member names of the Katana
 // customisation format, so the report reads against a file. It does not hold
