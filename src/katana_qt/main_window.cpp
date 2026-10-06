@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "katana/core/cpu_features.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 #if defined(KATANA_HAS_GPU)
 #include "gpu/renderer_choice.hpp"
@@ -107,11 +108,9 @@
 #include "katana/dxf/reader.hpp"
 #include "katana/entity/curve_pieces.hpp"
 #include "katana/entity/entity_geometry.hpp"
-#include "katana/archive12d/customisation.hpp"
-#include "katana/cad/customisation_report.hpp"
+#include "katana/cad/customisation_host.hpp"
+#include "katana/cad/customisation_record.hpp"
 #include "katana/archive12d/domain.hpp"
-#include "katana/cad/style_catalogue.hpp"
-#include "katana/cad/survey_coding.hpp"
 #include "katana/cad/view_link.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/dxf/reader.hpp"
@@ -237,19 +236,6 @@ std::filesystem::path toPath(const QString& text)
     return std::filesystem::path(text.toStdWString());
 }
 
-// How many of the loaded library's definitions are symbols by decision D3 -
-// what the Symbol Library lists: a `mode vertex` definition, one a survey rule
-// or a style draws as a symbol, one its customisation lists as one. Counting
-// `mode vertex` alone called 157 of the reference library's definitions symbols
-// and left out the trees and valves its mapfiles draw as symbols without it.
-std::size_t librarySymbolCount(const katana::cad::Document& document)
-{
-    const std::vector<katana::cad::CatalogueEntry> choices = katana::cad::symbolChoices(document);
-    return static_cast<std::size_t>(std::ranges::count_if(choices, [](const auto& entry) {
-        return entry.source == katana::cad::DefinitionSource::Library;
-    }));
-}
-
 // A colour as a rounded square, for a list's colour column.
 QIcon colourSwatch(const QColor& colour)
 {
@@ -322,10 +308,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                    " has no menu; its tools start from the command line.");
     }
     views_->setReferenceData(&reference_);
-    // CODE and CODE CHECK name colours by the standard table, which is
-    // archive12d's and so out of the interpreter's reach (survey_code_verbs.hpp).
-    interpreter_.setColourLookup(
-        [](std::string_view name) { return katana::archive12d::standardColour(name); });
+    // No colour lookup is handed to the interpreter: CODE resolves a colour
+    // name through the Document - the customisation's own table, then the
+    // standard names (cad/colour_lookup.hpp) - and the window has no names
+    // beyond those. (It passed the standard table while cad could not see it.)
+    //
     // GENERATE on the command line lays out what Generate Sheets would: what
     // the plan view draws, and the visible surfaces for the sections; SHEETS
     // CHECK and ARRANGE see what the painter sees. The same context the
@@ -584,30 +571,16 @@ void MainWindow::buildActions()
                           [this](const QString& text, bool isError) { logMessage(text, isError); });
     });
 
-    QAction* customiseAction =
-        makeAction(Icon::Import, "Loa&d Customisation...",
-                   "Load linestyle and symbol libraries (.4d) and survey code files (.mapfile) "
-                   "on top of what is loaded: a file's definitions and codes take the place of "
-                   "the same ones, and everything else is kept",
-                   {}, "loadCustomisation");
-    connect(customiseAction, &QAction::triggered, this,
-            [this] { loadCustomisation(katana::archive12d::LoadMode::Merge); });
-    // Replacing is asked for, never the default (D1): a person loading their
-    // own symbol file wants it added to the 792 definitions already loaded,
-    // not in their place. An action, not a question box, so that a headless
-    // run never meets a box nobody can answer.
-    QAction* replaceCustomisationAction =
-        makeAction(Icon::Import, "&Replace Loaded Customisation...",
-                   "Load libraries and survey code files IN PLACE of the loaded ones: a "
-                   "library replaces the whole library, a survey code file every survey code; "
-                   "a kind the files do not bring is kept",
-                   {}, "replaceCustomisation");
-    connect(replaceCustomisationAction, &QAction::triggered, this,
-            [this] { loadCustomisation(katana::archive12d::LoadMode::Replace); });
-
+    // Shown under Survey > Survey Coding and on the Survey toolbar. (Load
+    // Customisation and Replace Loaded Customisation were made here too, for
+    // Format and Survey: they opened a file dialog over another program's
+    // style libraries and survey code files, and went with those. A Katana
+    // customisation file is loaded by the CUSTOMISE line.)
     QAction* codeAction = makeAction(Icon::Import, "Appl&y Survey Codes",
-                                     "Give every entity carrying a field code the layer, style "
-                                     "and attributes the loaded survey codes say it should have",
+                                     "Give the selected entities that carry a field code - every "
+                                     "one in the drawing when nothing is selected - the layer, "
+                                     "style and attributes the loaded survey codes say: the CODE "
+                                     "line, one undo step",
                                      {}, "applySurveyCodes");
     connect(codeAction, &QAction::triggered, this, [this] { applySurveyCodes(); });
 
@@ -632,8 +605,9 @@ void MainWindow::buildActions()
     QMenu* gisMenu = topMenu("&GIS", "gisMenu");
     QMenu* helpMenu = topMenu("&Help", "helpMenu");
 
-    // File keeps to files: the customisation is loaded from Format (and
-    // Survey > Survey Coding), where the managers of what it brings are.
+    // File keeps to files: the managers of what a customisation brings are
+    // in Format (and Survey > Survey Coding), and a customisation file is
+    // loaded by the CUSTOMISE line, which has no menu item yet.
     // Its seventeen items are in titled sections, as the long menus all are:
     // a style that draws titles (theme.cpp) says what each group is for.
     fileMenu->addSection("Drawing");
@@ -956,7 +930,7 @@ void MainWindow::buildActions()
     // ---- Format --------------------------------------------------------------------
     // Before Survey, whose Survey Coding section shows the code manager's
     // action too.
-    buildFormatActions(*formatMenu, layersAction, customiseAction, replaceCustomisationAction);
+    buildFormatActions(*formatMenu, layersAction);
     // Annotate > Edit Text...: the annotation workbench's, which exists only
     // from here, after the tools filled the menu.
     annotation_->addEditTextAction(*annotateMenu);
@@ -968,7 +942,7 @@ void MainWindow::buildActions()
     annotation_->addLeaderActions(*annotateMenu);
 
     // ---- Survey ------------------------------------------------------------------------
-    buildSurveyActions(*surveyMenu, customiseAction, replaceCustomisationAction, codeAction);
+    buildSurveyActions(*surveyMenu, codeAction);
 
     // ---- Terrain and civil -----------------------------------------------------------
     QAction* cloudSurface = makeAction(Icon::SurfaceFromCloud, "Surface From &Point Cloud...",
@@ -1271,8 +1245,7 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
     gisBar->addAction(info);
 }
 
-void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
-                                    QAction* replaceCustomisationAction, QAction* codeAction)
+void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* codeAction)
 {
     SurveyServices services;
     services.document = &document_;
@@ -1283,8 +1256,6 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
         return makeAction(icon, text, tip, shortcut, name);
     };
     services.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
-    services.loadCustomisation = customiseAction;
-    services.replaceCustomisation = replaceCustomisationAction;
     services.applySurveyCodes = codeAction;
     services.codeManager = format_->codeManagerAction();
     services.run = commandRunner();
@@ -1321,8 +1292,7 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
     utilities_ = std::make_unique<UtilityWorkbench>(*this, std::move(utilities), surveyMenu);
 }
 
-void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction,
-                                    QAction* customiseAction, QAction* replaceCustomisationAction)
+void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction)
 {
     CustomisationServices services;
     services.document = &document_;
@@ -1334,9 +1304,10 @@ void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction,
     services.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
     services.headless = [this] { return headless_; };
     services.layers = layersAction;
-    services.loadCustomisation = customiseAction;
-    services.replaceCustomisation = replaceCustomisationAction;
     services.run = commandRunner();
+    // Asked at each commit of an editor: the host is made after the window
+    // is built (loadDefaultCustomisation).
+    services.hasKeptFile = [this] { return keptCustomisationFile_; };
     QToolBar* formatBar = makeToolBar("Format", Qt::TopToolBarArea);
     formatBar->addAction(layersAction);
     format_ = std::make_unique<CustomisationWorkbench>(*this, std::move(services), formatMenu,
@@ -1611,12 +1582,7 @@ void MainWindow::showDrawingSummary()
     if (summaryDialog_ == nullptr) {
         DrawingSummaryContext context;
         context.document = &document_;
-        context.customisation = [this] {
-            return cad::customisationSummary(document_, document_.customisationState().sources,
-                                             document_.customisationState().missingAtOpen);
-        };
         context.run = commandRunner();
-        context.load = [this] { (void)triggerAction("loadCustomisation"); };
         context.showMissing = [this](const QString& name) { showMissingInStyles(name); };
         context.crs = [this] { return projectCrsLabel(document_); };
         summaryDialog_ = new DrawingSummaryDialog(std::move(context), this);
@@ -3209,69 +3175,11 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
         runScript(command->path, command->continueOnError);
         return;
     }
-    // CUSTOMISE [REPLACE] <file>..., as katana_cli has it and for the same
-    // reason (katana_cad may not see the library readers): the files are merged
-    // into what is loaded, or with REPLACE - an unquoted first word - take
-    // the place of the kinds they bring. A quoted path may hold spaces.
+    // CUSTOMISE is not here: it is the interpreter's
+    // (cad/customisation_verbs.hpp), and reaches it at the end of this
+    // function as CODE does. The window had a tokenizer and a loader of its
+    // own for it, beside katana_cli's, and the two had come to differ.
     //
-    // CUSTOMISE REMOVE is NOT taken here: it is the interpreter's
-    // (cad/customisation_verbs.hpp), and the one line of that family a dialog
-    // of this window runs - the definition editor's Delete
-    // (cad::removeDefinitionLine). Taken here, REMOVE was read as a file's
-    // name and Delete deleted nothing. The rest of the family reaches the
-    // window when this whole block goes and the interpreter takes every
-    // CUSTOMISE line; until then a file so called is given with its directory
-    // (./REMOVE), as the family's own rule has it.
-    if ((verb == "CUSTOMISE" || verb == "CUSTOMIZE") && argument != "REMOVE") {
-        const QString rest = line.mid(words.front().size());
-        std::vector<std::filesystem::path> paths;
-        bool replace = false;
-        qsizetype at = 0;
-        while (at < rest.size()) {
-            if (rest[at].isSpace()) {
-                ++at;
-                continue;
-            }
-            if (rest[at] == '"') {
-                const qsizetype end = rest.indexOf('"', at + 1);
-                if (end < 0) {
-                    logMessage("CUSTOMISE: a quoted path is never closed", true);
-                    return;
-                }
-                paths.push_back(toPath(rest.mid(at + 1, end - at - 1)));
-                at = end + 1;
-                continue;
-            }
-            qsizetype end = at;
-            while (end < rest.size() && !rest[end].isSpace()) {
-                ++end;
-            }
-            const QString word = rest.mid(at, end - at);
-            at = end;
-            if (paths.empty() && !replace && word.toUpper() == "REPLACE") {
-                replace = true;
-                continue;
-            }
-            paths.push_back(toPath(word));
-        }
-        if (paths.empty() && replace) {
-            logMessage("usage: CUSTOMISE [REPLACE] <file> [<file>...]", true);
-            return;
-        }
-        // Alone, it reports what is loaded and what it covers here, in the
-        // words katana_cli's CUSTOMISE says them (cad/customisation_report.hpp).
-        if (paths.empty()) {
-            logMessage(QString::fromStdString(
-                           katana::cad::customisationReport(
-                               document_, document_.customisationState().sources,
-                               document_.customisationState().missingAtOpen))
-                           .trimmed());
-            return;
-        }
-        applyCustomisation(paths, replace ? katana::archive12d::LoadMode::Replace
-                                          : katana::archive12d::LoadMode::Merge);
-        return;
-    }
     // IMPORT, EXPORT, INFO <file>, REFS and COPC are not here: they are the
     // executor katana_cli and katana_mcp run (src/katana_app/geo), which the
     // geo workbench runs as jobs (runWorkbenchLine). INFO <id> is left to the
@@ -3837,101 +3745,82 @@ void MainWindow::importWithPlacement(const QString& path)
 
 namespace {
 
-// The files of a load by name and kind, for the record a project keeps.
-std::vector<katana::cad::CustomisationSource>
-sourcesOf(const katana::archive12d::Customisation& loaded)
-{
-    std::vector<katana::cad::CustomisationSource> sources;
-    for (const katana::archive12d::LoadedFile& file : loaded.files) {
-        const std::u8string name = file.path.filename().u8string();
-        // A style library brings definitions and a survey code file rules.
-        const bool library = file.kind == katana::archive12d::CustomisationFile::StyleLibrary;
-        sources.push_back({std::string(reinterpret_cast<const char*>(name.data()), name.size()),
-                           library, !library, {}});
-    }
-    return sources;
-}
-
-// Up to `most` names, quoted, and how many more: loading the reference
-// library replaces hundreds, and a log line of them all says nothing.
-QString sampleOf(const std::vector<std::string>& names, std::size_t most = 8)
+// Every name, quoted: what a project was drawn with that is not loaded is a
+// short list, and each of its names is one a person has to go and find.
+QString quotedNames(const std::vector<std::string>& names)
 {
     QStringList quoted;
-    for (std::size_t i = 0; i < names.size() && i < most; ++i) {
-        quoted << "\"" + QString::fromStdString(names[i]) + "\"";
+    for (const std::string& name : names) {
+        quoted << "\"" + QString::fromStdString(name) + "\"";
     }
-    QString text = quoted.join(", ");
-    if (names.size() > most) {
-        text += " and " + QString::number(names.size() - most) + " more";
-    }
-    return text;
+    return quoted.join(", ");
+}
+
+// "1 survey code rule", "11 survey code rules", "1,624 survey code rules":
+// the count grouped, and the noun by it. A customisation of one rule was
+// said to have "1 survey code rules".
+QString countOf(std::size_t count, const char* one, const char* many)
+{
+    return grouped(count) + ' ' + QLatin1String(count == 1 ? one : many);
 }
 
 } // namespace
 
-// The customisation that is PART OF THIS BUILD. Nothing is found, loaded or
-// configured: its linestyles, symbols and survey codes are compiled in, so a
-// survey drawing is drawn with them from the moment it is opened.
+// What the session starts with (cad/customisation_host.hpp): the
+// customisation the user kept, else the one built into the program, else
+// nothing - a build from a clean checkout has none, and then draws plain
+// lines until a customisation is loaded. cad chooses and installs; the window
+// builds the host and says what was installed.
 //
-// A build made without one falls back to looking beside the executable, so a
-// checkout that does not carry the customisation - it is third-party material
-// under its own licence - can still be given one. Format > Load
-// Customisation... adds to either; Format > Replace Loaded Customisation...
-// takes the place of the kinds it brings.
+// The built-in is cad's for THIS RUN (builtInCustomisation, which reads the
+// seam KATANA_BUILTIN_CUSTOMISATION, so a test starts the same on a machine
+// whose build has one and on one whose build has not). The kept file is
+// named ONLY by the environment variable KATANA_CUSTOMISATION for now: a
+// headless run must be the same every time, so it reads no per-user place,
+// and the per-user place of an interactive session comes with File >
+// Settings. The window once looked for style libraries and survey code files
+// beside the executable when nothing was compiled in - a third state, decided
+// at run time by what happened to lie in a folder - and that is gone.
 void MainWindow::loadDefaultCustomisation()
 {
-    const katana::archive12d::Customisation& built = katana::archive12d::builtinCustomisation();
-    // A file of it that could not be read cost only itself, and is said, once
-    // (audit A12-06): unsaid, a damaged file drew every drawing's linestyles
-    // as plain lines without a word.
-    for (const std::string& error : built.errors) {
-        logMessage("The built-in customisation: " + QString::fromStdString(error), true);
+    cad::CustomisationHost host;
+    host.builtIn = cad::builtInCustomisation();
+    // Read as the session of katana_cli and katana_mcp reads it
+    // (core::environmentVariable: wide on Windows, UTF-8 out), so a kept file
+    // in a folder whose name is outside the code page is still found - and so
+    // that two front ends do not read one variable two ways.
+    const std::string kept = katana::core::environmentVariable(cad::kKeptCustomisationVariable);
+    if (!kept.empty()) {
+        host.keptFile = katana::core::pathFromUtf8(kept);
     }
-    for (const std::string& warning : built.warnings) {
-        logMessage("Warning: the built-in customisation: " + QString::fromStdString(warning));
+    // What an editor's own commit asks before it runs CUSTOMISE KEEP
+    // (CustomisationServices::hasKeptFile).
+    keptCustomisationFile_ = !host.keptFile.empty();
+    // The interpreter first: it notes the kept file as it is NOW, which is
+    // what CUSTOMISE KEEP later refuses to write over once it has changed
+    // (CommandInterpreter::setCustomisationHost).
+    interpreter_.setCustomisationHost(host);
+    const cad::CustomisationStart start = cad::startCustomisation(document_, host);
+    // A built-in that does not parse, a kept file that does not read: said,
+    // once, here. Unsaid, a damaged file drew every drawing's linestyles as
+    // plain lines without a word (audit A12-06).
+    for (const std::string& problem : start.problems) {
+        logMessage("Customisation: " + QString::fromStdString(problem), true);
     }
-    if (!built.empty()) {
-        document_.setStyleLibrary(built.library);
-        document_.setSurveyMap(built.map);
-        document_.recordCustomisationLoad(sourcesOf(built), false, false);
-        logMessage("Customisation: " + grouped(built.library.size()) + " definitions (" +
-                   grouped(librarySymbolCount(document_)) + " symbols) and " +
-                   grouped(built.map.size()) + " survey code rules, built in.");
+    if (start.installed == cad::CustomisationOrigin::None) {
         return;
     }
-    const auto paths = katana::archive12d::findCustomisation(
-        std::filesystem::path(QCoreApplication::applicationFilePath().toStdString()));
-    if (!paths.empty()) {
-        applyCustomisation(paths);
+    logMessage("Customisation: " + QString::fromStdString(start.name) + ", " +
+               countOf(start.definitions, "definition", "definitions") + " (" +
+               countOf(start.symbols, "symbol", "symbols") + ") and " +
+               countOf(start.rules, "survey code rule", "survey code rules") + ", " +
+               (start.installed == cad::CustomisationOrigin::Kept ? "kept." : "built in."));
+    if (start.keptFromAnotherBuiltIn) {
+        // Installed all the same - it is the user's - but they may want to
+        // know that the program's own has moved on since they kept theirs.
+        logMessage("The kept customisation was made from another built-in customisation than "
+                   "this program has; CUSTOMISE RESET gives this program's.");
     }
-}
-
-// Loading a customisation: the linestyle library, the symbol library and
-// the survey code file. Several files at once, because they are useless
-// apart - and WHICH is which is decided by looking inside each one, since
-// `.4d` is the extension of both a style library and a survey code file
-// (docs/survey_coding.md).
-void MainWindow::loadCustomisation(katana::archive12d::LoadMode mode)
-{
-    const bool replace = mode == katana::archive12d::LoadMode::Replace;
-    if (refuseFileDialog(replace ? "CUSTOMISE REPLACE <file> [<file>...]"
-                                 : "CUSTOMISE <file> [<file>...]")) {
-        return;
-    }
-    const QStringList chosen = QFileDialog::getOpenFileNames(
-        this, replace ? "Replace Loaded Customisation" : "Load Customisation", QString(),
-        "Customisation files (*.4d *.mapfile);;Style and symbol libraries (*.4d);;"
-        "Survey code files (*.mapfile);;All files (*)");
-    if (chosen.isEmpty()) {
-        logMessage("Loading a customisation was cancelled.");
-        return;
-    }
-    std::vector<std::filesystem::path> paths;
-    paths.reserve(static_cast<std::size_t>(chosen.size()));
-    for (const QString& one : chosen) {
-        paths.emplace_back(toPath(one));
-    }
-    applyCustomisation(paths, mode);
 }
 
 void MainWindow::reportMissingCustomisation()
@@ -3943,175 +3832,24 @@ void MainWindow::reportMissingCustomisation()
         return;
     }
     // Not an error box: the drawing opens and draws, but what a missing
-    // file defined draws as a plain line until it is loaded.
-    logMessage("Warning: this project was drawn with customisation files that are not loaded: " +
-               sampleOf(missing, missing.size()) +
-               ". Load them with Format > Load Customisation...");
+    // customisation defined draws as a plain line until it is loaded. By
+    // name, as the project records them - never a path - and with the line
+    // that loads one: the menu item this sentence once named is gone.
+    logMessage("Warning: this project was drawn with customisations that are not loaded: " +
+               quotedNames(missing) + ". CUSTOMISE <file> loads a Katana customisation file.");
 }
 
-// Applying the loaded survey codes to the drawing. One undoable step, and a
-// report - including which property the codes were read from, because "no
-// entity carries a code" and "they carry it under another name" are
-// different problems and look identical from the outside (PLAN.MD 20.3).
+// Survey > Apply Survey Codes: the CODE line a person would type, through the
+// one executor, so it is echoed, kept in the history, one undo step and
+// answered in the verb's own words - which say the property the codes were
+// read from, because "no entity carries a code" and "they carry it under
+// another name" look the same from outside (cad/survey_code_verbs.hpp). On
+// the selection when there is one, which is also how the import wizard codes
+// only the points it has just made.
 void MainWindow::applySurveyCodes()
 {
-    if (document_.surveyMap().empty()) {
-        warnUser("No survey codes",
-                 "Load a survey code file first: Format > Load Customisation...");
-        return;
-    }
-    katana::cad::SurveyCodingOptions options;
-    options.colourOf = [](std::string_view name) {
-        return katana::archive12d::standardColour(name);
-    };
-    if (!document_.selection().empty()) {
-        options.ids = document_.selection().ids();
-        logMessage("Applying survey codes to the " + grouped(options.ids.size()) + " selected.");
-    }
-    katana::cad::SurveyCodingReport report;
-    auto command = katana::cad::applySurveyCodes(document_, options, &report);
-    if (!command) {
-        warnUser("Survey codes failed", QString::fromStdString(command.error().describe()));
-        return;
-    }
-    logMessage(grouped(report.coded) + " entities carry a \"" +
-               QString::fromStdString(report.property) + "\", " + grouped(report.matched) +
-               " of them codes the loaded survey codes have a rule for.");
-    if (!report.unmatchedCodes.empty()) {
-        logMessage(grouped(report.unmatchedCodes.size()) + " codes have no rule, starting with \"" +
-                   QString::fromStdString(report.unmatchedCodes.front()) + "\"");
-    }
-    if (!report.missingDefinitions.empty()) {
-        logMessage(grouped(report.missingDefinitions.size()) +
-                   " linestyles or symbols named but not in the loaded library");
-    }
-    if (*command == nullptr) {
-        logMessage("Nothing to change.");
-        return;
-    }
-    if (const auto status = document_.execute(std::move(*command)); !status) {
-        warnUser("Survey codes failed", QString::fromStdString(status.error().describe()));
-        return;
-    }
-    logMessage("Applied: " + grouped(report.layersCreated.size()) + " layers and " +
-               grouped(report.stylesCreated.size()) + " styles created. Undo puts it all back.");
-}
-
-void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& paths,
-                                    katana::archive12d::LoadMode mode)
-{
-    // Each file once, by the command line's rule: read twice, every rule of
-    // a file named twice would sit in the map twice.
-    const katana::cad::DistinctFiles distinct = katana::cad::distinctCustomisationFiles(paths);
-    for (const std::filesystem::path& repeat : distinct.repeats) {
-        logMessage(fromPath(repeat) + " is named twice in this load; it is read once.");
-    }
-    auto loaded = katana::archive12d::readCustomisation(distinct.files);
-    if (!loaded) {
-        warnUser("Customisation failed", QString::fromStdString(loaded.error().describe()));
-        return;
-    }
-    for (const std::string& warning : loaded->warnings) {
-        logMessage("Warning: " + QString::fromStdString(warning));
-    }
-    // Into what is loaded, through the one merge the command line's
-    // CUSTOMISE uses too (audit QT-21): installing the load's library and
-    // map wholesale threw away the other 792 definitions for one symbol
-    // file, and every survey rule for a library with no mapfile.
-    katana::archive12d::CustomisationMerge merged = katana::archive12d::mergeCustomisation(
-        document_.styleLibrary(), document_.surveyMap(), *loaded, mode);
-    const bool replace = mode == katana::archive12d::LoadMode::Replace;
-    for (const katana::archive12d::FileMerge& file : merged.files) {
-        const bool map = file.kind == katana::archive12d::CustomisationFile::MapFile;
-        // The window's own words for the two kinds, not the reader's name
-        // for its format: this line is read by a person, who knows them as
-        // a style library and a survey code file.
-        QString line = (file.name.empty() ? QString("(no file)") : QString::fromStdString(file.name)) +
-                       ": " + (map ? QString("survey code file") : QString("style library")) +
-                       ", " + grouped(file.added.size()) + " added, " +
-                       grouped(file.replaced.size()) + " replaced" +
-                       (map ? " (codes, once for each section)" : "");
-        if (!file.added.empty()) {
-            line += "; added " + sampleOf(file.added);
-        }
-        if (!file.replaced.empty()) {
-            line += "; replaced " + sampleOf(file.replaced);
-        }
-        logMessage(line);
-    }
-    for (const std::string& problem : merged.problems) {
-        logMessage("Not installed: " + QString::fromStdString(problem), true);
-    }
-    if (!merged.removedDefinitions.empty()) {
-        logMessage(grouped(merged.removedDefinitions.size()) +
-                   " definitions the load did not bring are gone: " +
-                   sampleOf(merged.removedDefinitions));
-    }
-    if (!merged.removedKeys.empty()) {
-        logMessage(grouped(merged.removedKeys.size()) +
-                   " codes the load did not bring are gone: " + sampleOf(merged.removedKeys));
-    }
-    // Both installed unconditionally: a kind the load did not bring comes
-    // back as it was (mergeCustomisation), so a symbol file alone keeps the
-    // map.
-    document_.setStyleLibrary(std::move(merged.library));
-    document_.setSurveyMap(std::move(merged.map));
-    // The load's sources join the session's and come off what the open
-    // project is missing: the Document keeps both lists.
-    document_.recordCustomisationLoad(sourcesOf(*loaded), replace && merged.libraryLoaded,
-                                      replace && merged.mapLoaded);
-    logMessage("Customisation now: " + grouped(document_.styleLibrary().size()) + " definitions (" +
-               grouped(librarySymbolCount(document_)) + " symbols) and " +
-               grouped(document_.surveyMap().size()) + " survey code rules.");
-    // A customisation need not be self-contained. Naming what is missing is
-    // the difference between a symbol that is plainly absent and one that is
-    // silently drawn as a plain mark. Judged against everything now loaded,
-    // since a mapfile may name what an earlier load defined.
-    std::vector<std::string> missing;
-    for (const std::string& name : document_.surveyMap().stylesReferenced()) {
-        if (!katana::cad::isPlainLinestyle(name) && document_.definitionFor(name) == nullptr &&
-            !katana::entity::isBuiltInSymbolName(name)) {
-            missing.push_back(name);
-        }
-    }
-    if (!missing.empty()) {
-        logMessage(grouped(missing.size()) +
-                   " names the survey codes ask for are in no loaded library: " +
-                   sampleOf(missing));
-    }
-    reportCustomisationCoverage();
-}
-
-// What the loaded customisation means for THIS drawing. Without it, "the
-// linestyles are not showing" is indistinguishable from "this drawing's
-// styles are plain continuous lines" and from "nothing is loaded at all".
-void MainWindow::reportCustomisationCoverage()
-{
-    const katana::cad::CustomisationCoverage coverage =
-        katana::cad::customisationCoverage(document_);
-    if (coverage.styles == 0) {
-        logMessage("This drawing has no styles yet; import a drawing or survey that carries "
-                   "styles, or make one in Format > Styles and Linetypes, to see the "
-                   "customisation take effect.");
-        return;
-    }
-    logMessage(grouped(coverage.resolved) + " of this drawing's " + grouped(coverage.styles) +
-               " styles are drawn with a loaded definition (" + grouped(coverage.named) +
-               " name one; the rest are plain continuous lines).");
-    if (!coverage.unresolved.empty()) {
-        logMessage(grouped(coverage.unresolved.size()) +
-                   " names are in no loaded library, starting with \"" +
-                   QString::fromStdString(coverage.unresolved.front()) + "\"");
-    }
-    // The other reason a style draws a fallback, with a different fix: the
-    // library IS loaded and defines the name - as a symbol, which a line
-    // cannot be drawn with, so it is drawn solid (D2). Pick a linestyle.
-    if (!coverage.notLinestyles.empty()) {
-        logMessage(grouped(coverage.notLinestyles.size()) +
-                   " linetype names are symbols, not linestyles, so those lines are drawn "
-                   "solid; starting with \"" +
-                   QString::fromStdString(coverage.notLinestyles.front()) + "\"");
-    }
+    (void)runVerbLine(document_.selection().empty() ? QStringLiteral("CODE DRAWING")
+                                                    : QStringLiteral("CODE SELECTION"));
 }
 
 void MainWindow::importFile()

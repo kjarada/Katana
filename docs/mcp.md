@@ -16,10 +16,17 @@ scope words in its description, since that is what a client reads first.
 The window can then open the same project.
 
 It is the session `katana_cli` runs (`src/katana_app/session.hpp`), served to a
-client instead of typed. Every tool is a shape over the command line's verbs, so
-there is one implementation of each, pinned by the `cli.*` tests, and Claude can
-do nothing that a person at `katana_cli` could not. Every change is one
-undoable command, as it is when typed.
+client instead of typed. Every tool that changes anything is a shape over the
+command line's verbs, so there is one implementation of each, pinned by the
+`cli.*` tests, and Claude can do nothing that a person at `katana_cli` could
+not. Every change is one undoable command, as it is when typed. (Two tools run
+no line and change nothing: `katana_status` and `katana_customisation` read
+the Document for what no reply holds as structure.)
+
+The session starts with the customisation `katana_cli` starts with - the
+kept file the environment variable `KATANA_CUSTOMISATION` names, else the
+program's built-in one - and says which in the client's log
+(`docs/customisation.md`, "What katana_cli and katana_mcp start with").
 
 ## Connecting a client
 
@@ -72,6 +79,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; the options of "I3 and I4" below (layers, where, sql, a scope, clip, fields, crs, a raster's band, a cloud's budget, preview ...); `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
 | `katana_export` | DXF always; GIS vector formats and .12da archives (with the session's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
+| `katana_customisation` | the session's customisation as structured data: `part` is `summary`, `codes`, `definitions` or `problems`, with `filter`, `name`, `offset` and `limit` ("The customisation", below) | nothing: read from the Document, through `cad` and the customisation format's own writer |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
 and are pinned now by `McpServer.DescribeEntityDescribesTheEntityItNames` and
@@ -152,6 +160,28 @@ structured answer.
 (`McpServer.AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt`); it once lost
 them and refused every WKT whose names hold a blank.
 
+`SURVEY IMPORT` also codes and strings what it draws, in that one undo step,
+wherever survey codes are loaded: the points go to the layers and styles
+their codes give them and are joined into lines, unless `CODES off` or
+`LINEWORK off` says not to for the one line, or the customisation's two
+switches do for every import. The reply says what was done in two more
+records, after the reduction's warnings and before the `resection` records:
+`coded points= matched= unmatched_codes= layers= styles=`, then an
+`unmatched_code` record for each code no rule answers (the first ten, then
+`unmatched_codes_more=`), and `linework lines= unplaced= layers= styles=`,
+each counting the layers and styles its own step made. A step that did not
+run answers `coded none reason=<word>` or `linework none reason=<word>` -
+`off`, `no-survey-codes`, `no-codes-in-file`, `no-rule-matches` or
+`no-points` - and none of them fails the line (`docs/survey.md`, "SURVEY
+IMPORT codes and strings what it draws"). Points already in the drawing are
+strung by `LINEWORK [<scope>] [WHERE k=v ...] [ORDER number|entity]
+[PREVIEW]`, a verb of the shared interpreter that answers in records as well
+and leaves out, counted, the points their survey job has strung and the lines
+the drawing already holds (`docs/survey_coding.md`, "`LINEWORK` on the
+command line"; `HELP LINEWORK`). The command tool's description names the
+two words and `LINEWORK` with its grammar, so an agent finds them from the
+tool list alone (`McpServer.TheCommandToolNamesTheSurveyFieldFileVerbs`).
+
 The annotation styles are read and changed through `katana_run_commands`
 with the verbs the window's managers send (`docs/annotation.md`): `DIMSTYLE
 INFO name` answers one record of every field, the layers that name the style
@@ -181,12 +211,13 @@ server used to ignore such an argument: `{"split": true}` given to
 agent had asked for one per drawing layer, and said nothing
 (`McpServer.AnArgumentTheToolDoesNotDeclareIsRefusedByNameAndNothingRuns`).
 
-The help (`katana://help`) and the status (`katana://status`) are also
+The help (`katana://help`), the status (`katana://status`) and the
+customisation (`katana://customisation`, "The customisation" below) are also
 resources, for a client that attaches context rather than calling tools. The
 status - the tool's text and structured content, and the resource - is the
 interpreter's `STATUS` and `STATUS JSON` (`docs/cad.md`, "STATUS"), so an
 agent driving the window or `katana_cli` reads the same record. With the GIS
-module, `katana://formats` is the third: `FORMATS JSON`, every format this
+module, `katana://formats` is the fourth: `FORMATS JSON`, every format this
 GDAL reads and writes (`katana_formats`, below).
 
 Annotation needs no tool of its own: its verbs reply in `key=value` records
@@ -195,6 +226,150 @@ Annotation needs no tool of its own: its verbs reply in `key=value` records
 line of its own (`label=4 piece=0 suppressed=yes`), so an agent can select it
 or pin it elsewhere with `LABEL SET id at=x,y`, as the window's Label Layout
 Report does (`McpServer.LabelLayoutNamesTheLabelsWithNoRoomSoAnAgentCanMoveThem`).
+
+## The customisation
+
+A session's customisation is what turns field codes into a drawing: the
+linestyle and symbol definitions, the survey code rules, the colours and the
+settings (`docs/customisation.md`). An agent reads it as data with one tool
+and one resource, and changes it with the `CUSTOMISE` lines every front end
+runs.
+
+### Reading: katana_customisation and katana://customisation
+
+| In | Out |
+|---|---|
+| `{part: "summary"}` | cad's report as one object, with no `part` or `total` beside its members: `name`, `origin`, `kept`, `description`, `notice`, `basedOn`, `builtIn`, `sources` (each with its notice), `counts`, `automation`, `linework`, `colours`, `problems` (counted), `coverage`, `missing`, `start` - what `CUSTOMISE JSON` prints (`docs/customisation.md`, "The replies") |
+| `{part: "codes", filter?, offset?, limit?}` | `{part, total, offset, limit, codes: [{index, key, sets, ...}]}`: one object a survey code rule |
+| `{part: "definitions", filter?, offset?, limit?}` | `{part, total, offset, limit, definitions: [{name, kind, group, units, atVertices, from}]}` |
+| `{part: "definitions", name}` | the same with the ONE definition of that name, whole: those six members and everything else its file holds, `strokes` included |
+| `{part: "problems", filter?, offset?, limit?}` | `{part, total, offset, limit, rules, cannotApply, warnings, problems: [{index, key, sets, severity, kind, message}]}`: the lint `CODE CHECK` prints |
+
+- **The summary is one object, and the only part with no envelope.** It is
+  `cad::customisationJson` whole: no `part`, `total`, `offset` or `limit`
+  stands beside cad's members, and the three lists alone are `{part, total,
+  offset, limit, <part>: [...]}`. The tool's description says so, since a
+  client that looked for `part` in every reply found none in this one.
+  *Rejected: adding `part: "summary"` beside cad's members, or putting the
+  object inside the lists' envelope.* The tool, the resource and `CUSTOMISE
+  JSON` would then give three different objects for one report, and a member
+  cad adds later could meet one of the tool's own under the same name. A
+  caller knows which part it asked for.
+- **`start` is what went wrong when the session started**:
+  `{problems: [sentence], keptFromAnotherBuiltIn}`. A kept file that did not
+  read - and what started in its place - and a built-in that did not read are
+  `problems`; a kept customisation made from another built-in than the program
+  has is the flag. Both are also printed once at the start, on standard
+  error, which is the client's log and never reaches the agent: one whose
+  kept file had been refused read `origin: builtIn` in the summary and
+  nothing of why. It is always there, `[]` and `false` when the start had
+  nothing to say, and it is of the START - a load or an edit since does not
+  change it (`docs/customisation.md`, "What katana_cli and katana_mcp start
+  with").
+- **A rule and a definition are the objects a file holds, and one member
+  more.** Each is written by the Katana customisation format's own writer
+  (`entity::customisationToJson`, `entity::definitionToJson`) and read back as
+  JSON, so a member is spelt here exactly as `docs/customisation.md`, "The
+  members", spells it. The tool has no words of its own for what a
+  customisation holds. A member at its default is left out, as in a file.
+  *Rejected: building the objects from the model by hand*, which is a second
+  writer of every member the format has one for, and would go on saying an
+  old word after the format's table changed.
+  **`index` (a rule) and `kind` (a definition) are the tool's own and no
+  file's.** A file says a rule's place by its order in `codes` and a
+  definition's kind by the list it is in, `linestyles` or `symbols`, and its
+  reader is strict: an entry copied into a file whole is refused for that
+  member (`codes[0] "WM*": unknown member "index"`). With it taken off, a
+  rule, or a definition read whole by `name`, is an entry of a file and loads.
+  An entry of the definitions LIST is not: it has no strokes, and merged in
+  it would put a definition that draws nothing in the place of the one of
+  its name.
+- **`index` is a rule's identity.** It is its place in the map, which is its
+  precedence and what `CODE EXPLAIN` and `CODE CHECK` cite it by ("rule #57");
+  an issue of `problems` carries the `index` of its rule, so the two lists
+  join.
+- **A definition's list entry says six things for every definition** - `kind`
+  is `linestyle` or `symbol`, by the list of its file it sits in; `units` and
+  `atVertices` are said even where a file leaves them at their default;
+  `from` is the customisation it came from - and never its strokes. A
+  library is tens of thousands of strokes; they come only for the one
+  definition `name` picks, matched as it is written.
+- **The lists are paged.** `total` is how many entries `filter` took,
+  `offset` and `limit` choose the page (100 unless said, at most 1,000), and
+  an offset past the end is an empty page. `filter` is a substring with
+  letter case ignored: of a rule's key, comment or layer; of a definition's
+  name or group; of an issue's key, kind or message. `rules`, `cannotApply`
+  and `warnings` count the whole lint, whatever the filter - the three
+  numbers the summary's `problems` has, by the same names.
+- **An argument that says nothing for the part is refused**, as an
+  undeclared one is: a `filter` on the summary, a `name` with `codes`, a
+  `filter` beside a `name`. Ignored, the call would answer something other
+  than what was asked.
+- **The text is the same object**, for a client older than structured
+  content.
+- **It reads the Document, not a line.** The verbs that list a customisation
+  reply in text made for a person - a line a code, not an object a rule -
+  and a read sent through a line would sit in the command history of a
+  session it never changed. `katana://customisation` is the summary, the same
+  function (`cad::customisationJson`), as `katana://status` is the status.
+
+`McpServer.TheCustomisationSummaryIsCadsReportAsAToolAndAsAResource`,
+`McpServer.TheCodesPartGivesEachRuleAsItsFileHoldsItFilteredAndPaged`,
+`McpServer.TheDefinitionsPartListsEachDefinitionAndGivesStrokesOnlyForTheOneNamed`
+and `McpServer.TheProblemsPartIsTheRulesLintAnObjectAnIssue` pin them, on the
+three files of `tests/data/customisation` and on what their text holds.
+`McpServer.ARuleOrADefinitionTheToolGaveLoadsBackOnceTheToolsOwnMemberIsTakenOff`
+loads a rule and a definition back both ways, refused with the tool's member
+and read back the same without it. The two tests of `start` run a PROGRAM's
+session, as `katana_mcp` has one, with the two start-up variables set:
+`McpServer.WhatWentWrongWhenTheSessionStartedIsInTheSummaryAndTheResource`
+(the kept file holds a rule copied from the tool, `index` and all) and
+`McpServer.AKeptCustomisationMadeFromAnotherBuiltInIsSaidInTheSummary`.
+
+### Changing: export, edit the JSON, load it back
+
+There is no tool that edits a rule or a definition, and none is wanted
+(`docs/customisation.md`, "The verbs: decisions, and what was rejected": the
+file is the one door for an edit). An agent edits a customisation as a person
+with an editor does, through `katana_run_commands`:
+
+1. `CUSTOMISE EXPORT "<file>"` writes the session as ONE Katana customisation
+   file, in JSON, a rule and a stroke a line. With `CODES`, `LINESTYLES`,
+   `SYMBOLS` or `ONLY <definition>...` it writes that part alone.
+2. The agent changes the JSON: a rule's `layer`, a new entry in `codes`, a
+   definition's strokes. The format is strict - a member it does not know, or
+   a value of the wrong kind, is refused naming the entry - so a mistake is a
+   refusal that says where, not a rule silently dropped. An entry taken from
+   `katana_customisation` goes in without the tool's own member, `index` or
+   `kind` ("Reading", above).
+3. `CUSTOMISE REPLACE "<file>"` loads it in the place of what is loaded, or
+   `CUSTOMISE "<file>"` MERGES it: a definition takes the place of the one of
+   its name, and the rules a file gives a key in a section take the place of
+   that key's rules there. So a file holding only what changes - two rules,
+   one symbol - is an edit, and nothing else in the session moves.
+
+`CUSTOMISE REMOVE` deletes definitions and `CUSTOMISE REMOVE CODE` a key's
+rules (a merge cannot delete), `CUSTOMISE SET` sets the two automation
+switches and the linework codes, and `CUSTOMISE` alone, or the tool above,
+says what the session holds afterwards. A load is all or nothing: one file
+that does not read, or one thing refused in one, loads none of them, and the
+reply lists every reason. A survey code file (`.mapfile`) or a style library
+(`.4d`) of another program is not a Katana customisation file and is refused
+as that.
+
+A change lasts the session. `CUSTOMISE KEEP` makes it what the next start
+gives, and is refused unless the server was started with
+`KATANA_CUSTOMISATION` naming the file to keep it in: an agent trying a
+customisation must not be rewriting its user's by accident. A kept file that
+does not read at the next start is not what starts - the built-in is - and
+the summary's `start.problems` says so and why.
+
+`McpServer.ACustomisationIsEditedByExportingItChangingTheJsonAndLoadingItBack`
+runs the round trip: it exports, moves one rule to another layer in the JSON,
+loads the file back and reads the rule with the tool. `katana_run_commands`'
+description names the lines, and `katana_customisation`'s says that it only
+reads and where an edit goes
+(`McpServer.TheToolListSaysHowACustomisationIsLoadedWrittenAndRead`).
 
 ## Geoprocessing tools
 
@@ -371,7 +546,9 @@ structured content is `{gdal_version, formats: [...]}`, or the driver's
 `{format, open_options, creation_options, layer_creation_options}`. An
 unknown driver, or a `kind` or `capability` that is neither word, is
 refused. `McpServer.FormatsReturnsStructuredDrivers` pins it, and
-`McpServer.TheHelpAndStatusAreResources` counts the third resource.
+`McpServer.TheHelpAndStatusAreResources` counts it among the resources: four
+with the GIS module and three without, each one more than before
+`katana://customisation` was added.
 
 ### D1: katana_dataset_info
 
@@ -520,18 +697,24 @@ project that matters.
 
 * `src/katana_app/session.cpp` - the session both front ends share: the
   Document, its `CommandInterpreter`, and the verbs above `katana_cad`
-  (`CUSTOMISE`; `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` and the
+  (`IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` and the
   geoprocessing verbs through the executor in `src/katana_app/geo/`, the one
-  the window runs; a build without GDAL has the DXF `IMPORT` and `EXPORT` of
-  `dxf_verbs.cpp`).
+  the window runs; `SURVEY`; a build without GDAL has the DXF `IMPORT` and
+  `EXPORT` of `dxf_verbs.cpp`). When it starts it builds the customisation's
+  host and starts the Document with it.
   `CODE` was here until 2026-09-26 and is the interpreter's now, with `CODE
   LIST` and `CODE CHECK` (once a verb of their own, `MAPFILE`), so the window
-  has them too (`docs/cad.md`). It was
+  has them too (`docs/cad.md`); `CUSTOMISE` was here, with a parser and a
+  loader of its own, until 2026-10-06, and is the interpreter's family now
+  (`docs/customisation.md`, "The verbs"). It was
   `katana_cli`'s `main.cpp`; `src/katana_app/main.cpp` is now only the command
   line's argument handling.
 * `src/katana_app/mcp_server.cpp` - `Server::handle`: one JSON-RPC message in,
   its reply out, and the tools. It has no I/O of its own, which is what lets
   `tests/app/test_mcp_server.cpp` drive it message by message.
+* `src/katana_app/mcp_customisation.cpp` - `katana_customisation`, built from
+  the helpers of `src/katana_app/mcp_tools.hpp` as the geoprocessing tools
+  are.
 * `src/katana_app/mcp_main.cpp` - the process: the stdio transport
   (newline-delimited JSON-RPC 2.0) and `--project`.
 

@@ -6,7 +6,10 @@ is `docs/testing.md`.
 
 ## Toolchain
 
-C++26 (`KATANA_CXX_STANDARD`, default 26; 23 also builds), CMake 3.24 or later,
+C++26 (`KATANA_CXX_STANDARD`, default 26; 23 also builds), CMake 3.24 or later
+(with one older than 3.28 the tests still configure, and say that the
+program tests of other directories are not given their starting
+customisation: `docs/headless.md`, "The customisation a run starts with"),
 Ninja, and the libraries Qt 6 (Widgets), Eigen, PROJ, CGAL, SQLite,
 nlohmann-json, GDAL and PDAL. On Windows every one of them comes from MSYS2
 UCRT64 (`C:/msys64/ucrt64`), with GCC 16.2. MSYS2 is a rolling toolchain - it
@@ -359,7 +362,7 @@ may not see GDAL, PDAL or the archive readers:
 | `INFO <id>` or `INFO #<id>`: an entity, the interpreter's - taken for a file only when a file of that name exists (both took every `INFO` for a file until 2026-09-26) | yes | yes |
 | `COPC <source> <destination.copc.laz>` | yes | yes (since 2026-09-26) |
 | `GDAL VERSION`, `LIST`, `HELP`, and `GDAL <algorithm> ... [FROM ...] [TO ...]`: any of GDAL's algorithms, run by the one geoprocessing executor (`docs/geoprocessing.md`) | yes (with `KATANA_BUILD_IO`) | yes, as a background job |
-| `CUSTOMISE [REPLACE] <file>...`; `CUSTOMISE` alone reports what is loaded and from which files | yes | yes (the report since 2026-09-26) |
+| `CUSTOMISE`: the interpreter's family - `[REPLACE] <file>...` loads Katana customisation files, `EXPORT`, `RESET`, `KEEP`, `REVERT`, `REMOVE`, `SET`, and alone what is loaded, as records (`docs/customisation.md`, "The verbs") | yes (since 2026-10-06; a survey code file or a style library of another program is refused) | not yet: its own `CUSTOMISE [REPLACE] <file>...`, which still reads those older files, and alone a report of what is loaded and from which files |
 | `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST`, `CODE CHECK` (the interpreter's since 2026-09-26; the last two were `MAPFILE LIST` and `MAPFILE CHECK` until 2026-10-06; `docs/customisation.md`, "The verbs") | yes | yes |
 | `IMPORT <file.ifc>`, `EXPORT <file.ifc>`, `INFO <file.ifc>`, `IFC RULES` (`docs/ifc.md`) | yes, with or without `KATANA_BUILD_IO` | yes, with the same options, and File > Import IFC / Export IFC, which run these lines |
 | `UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW` (the interpreter's since 2026-09-25; `docs/subsurface_utilities.md`) | yes | yes |
@@ -381,8 +384,12 @@ nothing is read from that folder at run time.
 
 The folder is git-ignored: its files are third-party material under their own
 licence. A checkout without it builds an empty table - Katana then draws plain
-lines - and the tests that read it skip or prove only that loading nothing does
-no harm (`qt_customisation_headless`). Point `KATANA_CUSTOMISATION_DIR` at a
+lines - and the tests that read it skip. (No test of the WINDOW depends on it
+any more: each says what customisation the window starts with,
+`docs/headless.md`, "The customisation a run starts with". Nor does a
+`cli.` test: `katana_cli` starts its session through
+`cad::startCustomisation` and reads the same variable.) Point
+`KATANA_CUSTOMISATION_DIR` at a
 customisation kept elsewhere to build with it without moving it.
 `docs/survey_coding.md` has what the files hold and how to swap them.
 

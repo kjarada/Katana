@@ -53,8 +53,10 @@ as session data outside the model, the loaded style library and survey map
 * The rest of what a session knows of its customisation is
   `customisationState()` (`include/katana/cad/customisation_state.hpp`): its
   name and origin, the sources that went into it, its colour table, linework
-  codes and automation switches, whether it is kept, and which names the open
-  project recorded that are not loaded. `installCustomisation` installs a
+  codes and automation switches, whether it is kept, which names the open
+  project recorded that are not loaded, and what its start found - a kept
+  file or a built-in that did not read (`docs/customisation.md`, "The
+  replies": `start`). `installCustomisation` installs a
   whole `entity::Customisation` and `customisation()` gives the session back
   as one. `DocumentChange::Customisation` is its change bit - outside
   `kDrawing`, and no part of a Replaced drawing - and
@@ -287,19 +289,22 @@ The colour names they need are resolved through the Document
 customisation's own table, then the standard names of
 `include/katana/entity/colour_names.hpp`). The standard names were once a
 table cad could not see, so each front end passed it with
-`CommandInterpreter::setColourLookup`; that is still called, and is now asked
-only for a name the Document does not know.
+`CommandInterpreter::setColourLookup`. No front end passes one any more, and
+the setter went with the last that did (2026-10-07): the interpreter hands
+`runSurveyCodeVerb` no lookup, and the parameter that function still has for
+a caller's own names is reached only by its tests
+(`SurveyCodeVerbs.AColourNameNothingKnowsIsLeftAloneAndACallersOwnIsAskedLast`).
 
 `CUSTOMISE` is the interpreter's too (`runCustomisationVerb`,
 `include/katana/cad/customisation_verbs.hpp`): the report, `JSON`, a load
 merged or in place, `EXPORT`, `RESET`, `KEEP`, `REVERT`, `REMOVE` and `SET`,
 with what `RESET`, `KEEP` and `REVERT` need handed over by the front end
 (`CommandInterpreter::setCustomisationHost`). `docs/customisation.md`, "The
-verbs", has the grammar, the replies and the decisions. The two front ends
-still take a `CUSTOMISE` line themselves, before the interpreter sees it,
-until each is ported to it - all but `CUSTOMISE REMOVE` in the window, which
-it hands on and the interpreter answers, since the definition editor's
-Delete runs that line (`docs/desktop.md`, "The definition editor").
+verbs", has the grammar, the replies and the decisions. Every front end runs
+it and none takes a `CUSTOMISE` line of its own: the session of `katana_cli`
+and `katana_mcp` hands the interpreter its host
+(`src/katana_app/session.cpp`), and so does the desktop window
+(`docs/desktop.md`, "How the window starts").
 
 ### STATUS
 
@@ -326,14 +331,13 @@ PDAL or the archive and customisation readers: the application's command line
 their lines through too - `docs/desktop.md`, "One executor: the command
 runner") adds `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT`, `INFO <file>`, `REFS`,
 `COPC` (the geoprocessing executor's, which `katana_cli` and `katana_mcp` run
-too - `docs/interop.md`), `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
-report, `cad::customisationReport`; its own for now, although the interpreter has the
-family - above), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
+too - `docs/interop.md`), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
 `SCRIPT <file> [CONTINUE]`,
 the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed
 `HELP` adds them to the interpreter's list (`windowHelpText`, `docs/desktop.md`,
 "The Command Reference and the keyboard shortcuts"). `katana_cli` adds the
-same interoperability verbs and `CUSTOMISE` - its `--help` lists them - and
+same interoperability verbs - its `--help` lists them. Neither adds
+`CUSTOMISE`, which is the interpreter's own in both (above); and
 the interpreter's help says that `PLOTSHEETS` is the window's alone. Both read an `IMPORT` line's
 path and `LOCAL` with `CommandInterpreter::importArgument`, and hand `INFO`
 with an entity id (`CommandInterpreter::isEntityId`, a whole number or `#n`)
@@ -1144,7 +1148,7 @@ tool to be able to act that way. Global Modify's scope and filter became the
 one mechanism for it (`include/katana/cad/scope_verbs.hpp`): one set of
 words, read by one parser and resolved by the one matcher,
 `cad::matchEntities`. Today `MODIFY`, the `UTILITY` verbs, `ZOOM`, `PROP TREE`
-and (since 2026-10-06) `CODE` and `CODE CENSUS` take them; the
+and (since 2026-10-06) `CODE`, `CODE CENSUS` and `LINEWORK` take them; the
 standing rule is that every verb that reads or changes drawing data
 is to take them too, and the others - `ERASE`, `CHLAYER`, `SELECT` and the
 rest - still act on the selection or their own arguments until they do.
@@ -1158,13 +1162,17 @@ Words are case-insensitive; `SEL`, `ALL` and `LAYER` are the aliases `MODIFY`
 already took. For `MODIFY` no scope word is the selection; a `UTILITY` verb
 needs a scope word or `WHERE`, since any other first word is its file's path.
 `WHERE` with no scope word before it is the selection, filtered, for every
-verb that reads the shared words but one - `EXPORT` and the GDAL verb's `FROM`
+verb that reads the shared words but two - `EXPORT` and the GDAL verb's `FROM`
 included, though `EXPORT` with no scope words at all is the whole drawing;
 `katana_mcp`'s `where` without `scope` is written `SELECTION WHERE`
-(`docs/interop.md`, "Export options"). The one is `CODE`, whose scope with no
-scope word is the whole drawing with or without a `WHERE`: it was the whole
-drawing before it took a scope, and a script's `CODE` must not come to mean
-whatever is selected (`docs/customisation.md`, "The verbs").
+(`docs/interop.md`, "Export options"). The two have a default of their own.
+`CODE`'s scope with no scope word is the whole drawing with or without a
+`WHERE`: it was the whole drawing before it took a scope, and a script's
+`CODE` must not come to mean whatever is selected (`docs/customisation.md`,
+"The verbs"). `LINEWORK`, with no scope word, with or without a bare `WHERE`,
+takes the selection when anything is selected and the whole drawing when
+nothing is, and its reply's `scope=` says which (`docs/survey_coding.md`,
+"`LINEWORK` on the command line").
 The `WHERE` keys are Global Modify's filter: `TYPE=point,line`,
 `LAYER=pat[,pat]`, `STYLE=pat|ByLayer`, `COLOUR=#RRGGBB|ByLayer`,
 `PROP=key[:pat]`, `TEXT=pat` and `DRAWN`, with `*` and `?` wildcards.

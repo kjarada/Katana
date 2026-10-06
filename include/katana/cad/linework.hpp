@@ -199,6 +199,22 @@ struct LineworkOptions {
     // exactly as they are, and LineworkString::redrawn says which were taken.
     // Empty, as it always was: every line is a new entity.
     std::vector<katana::entity::EntityId> earlierLines{};
+    // On, a line planned now that THE DRAWING ALREADY HOLDS is not drawn a
+    // second time: a polyline that carries the same code and string number
+    // and runs through the same vertices at the same heights, closed alike -
+    // whatever drew it, and whatever layer and style it has been given
+    // since. It is listed in LineworkReport::alreadyDrawn in place of
+    // `strings`, its points are in a line (not unplaced) and none of them is
+    // removed on its account, whatever keepPoints says: the line this run
+    // would stand in for them with is not this run's. For a run a person
+    // repeats over the same points (the LINEWORK verb), where a second line
+    // on top of the first is nobody's and looks like nothing. Only the very
+    // line: a string that has gained a point, or whose point was moved or
+    // re-levelled, is another line and is drawn. A line taken as one of
+    // `earlierLines` is redrawn as that says and is not asked about here.
+    // Off, as it always was - and as an import's own run must have it: two
+    // imports of one file each draw, and own, their lines.
+    bool skipLinesAlreadyDrawn = false;
 };
 
 // Why a point is not in any line.
@@ -283,6 +299,11 @@ struct LineworkReport {
     std::size_t considered = 0; // point entities looked at
     std::size_t notPoints = 0;  // entities asked about that are not points
     std::vector<LineworkString> strings{}; // by name, then in the order built
+    // LineworkOptions::skipLinesAlreadyDrawn only: the lines planned that the
+    // drawing already holds and that are therefore not drawn again, in the
+    // order planned, each as `strings` would have listed it - but `layer` is
+    // the layer the line in the drawing is on.
+    std::vector<LineworkString> alreadyDrawn{};
     std::vector<UnplacedPoint> unplaced{}; // in entity order
     std::vector<LineworkNote> notes{};
     std::vector<std::string> layersCreated{}; // in name order
@@ -302,7 +323,8 @@ struct LineworkResult {
     // the removal of the points they replace. nullptr when there is nothing to
     // build - "nothing to do" and "failed" stay distinguishable, the contract
     // applySurveyCodes and importSurveyProject follow. Also nullptr when every
-    // line planned is an earlier line that already has these vertices.
+    // line planned is an earlier line that already has these vertices, or one
+    // the drawing already holds (skipLinesAlreadyDrawn).
     katana::commands::CommandPtr command{};
     LineworkReport report{};
 };

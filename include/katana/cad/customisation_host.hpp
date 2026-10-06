@@ -171,7 +171,10 @@ struct CustomisationStart {
 // start.)
 //
 // It also tells the Document the built-in's name, which answers the names a
-// project recorded for the built-in's earlier files.
+// project recorded for the built-in's earlier files, and what this start
+// found - the report's `problems` and `keptFromAnotherBuiltIn`
+// (Document::setCustomisationStart) - so that a report of the session asked
+// for later (customisationJson) still says what a front end said once.
 [[nodiscard]] CustomisationStart startCustomisation(Document& document,
                                                     const CustomisationHost& host);
 

@@ -492,8 +492,12 @@ class LineBuilder {
     // `earlierLines` are the lines an earlier run drew of the same strings
     // (LineworkOptions::earlierLines): filed here by what makes a line the
     // line of one string, earliest first whatever order they were given in.
+    //
+    // `skipDrawn` is LineworkOptions::skipLinesAlreadyDrawn: every coded
+    // polyline of the drawing is then filed the same way, to be compared with
+    // each line before it is drawn.
     LineBuilder(const Document& document, const std::string& property, bool createLayers,
-                const std::vector<EntityId>& earlierLines, LineworkReport& report)
+                const std::vector<EntityId>& earlierLines, bool skipDrawn, LineworkReport& report)
         : document_(document),
           property_(property.empty() ? codePropertyCandidates().front() : property),
           createLayers_(createLayers), report_(report)
@@ -510,6 +514,16 @@ class LineBuilder {
                 std::holds_alternative<katana::geometry::Polyline2>(line->geometry)) {
                 earlier_[identityOf(*line)].push_back(line);
             }
+        }
+        if (skipDrawn) {
+            // Only the ones that carry a code: a line drawn here always does,
+            // and most of a drawing's polylines carry none.
+            document_.model().entities.forEach([&](const Entity& entity) {
+                if (std::holds_alternative<katana::geometry::Polyline2>(entity.geometry) &&
+                    codeOf(entity, property_) != nullptr) {
+                    drawn_[identityOf(entity)].push_back(&entity);
+                }
+            });
         }
     }
 
@@ -558,6 +572,7 @@ class LineBuilder {
         katana::entity::setHeights(entity.properties, shape.heights);
 
         const auto earlier = earlier_.find(identityOf(entity));
+        bool standing = false; // the drawing holds this very line already
         if (earlier != earlier_.end() && !earlier->second.empty()) {
             // The line of this string that an earlier run drew: the same
             // entity, moved. Deleting it and creating this one would take
@@ -575,6 +590,12 @@ class LineBuilder {
             if (!(redrawn == was)) { // one that already runs there is not touched
                 redrawn_.push_back(std::move(redrawn));
             }
+        } else if (const Entity* drawn = drawnAlready(entity)) {
+            // A second line on top of it would be nobody's and look like
+            // nothing: it is reported where it stands, and nothing is drawn
+            // or created for it.
+            built.layer = drawn->layer;
+            standing = true;
         } else {
             lines_.push_back(std::move(entity));
             if (!document_.model().layers.contains(built.layer)) {
@@ -591,13 +612,15 @@ class LineBuilder {
             if (member->id != katana::entity::kInvalidEntityId) {
                 built.points.push_back(member->id);
                 placed_.insert(member->id);
-                if (!built.join) {
+                // A line this run did not draw stands in for no point: its
+                // points are in a line, and are never removed on its account.
+                if (!built.join && !standing) {
                     runMembers_.insert(member->id);
                 }
             }
             built.pointNumbers.push_back(member->number);
         }
-        report_.strings.push_back(std::move(built));
+        (standing ? report_.alreadyDrawn : report_.strings).push_back(std::move(built));
     }
 
     [[nodiscard]] const std::set<EntityId>& placed() const { return placed_; }
@@ -672,6 +695,33 @@ class LineBuilder {
         return {code != nullptr ? *code : std::string{}, std::string(surveyStringOf(line))};
     }
 
+    // The polyline of the drawing that `line`, as it is about to be drawn,
+    // already is (LineworkOptions::skipLinesAlreadyDrawn): one of its code
+    // and string number that runs through the same vertices at the same
+    // heights, closed alike. nullptr when there is none, and always when the
+    // option is off. Compared exactly, with no tolerance: a line is built
+    // from its points' own coordinates each time, so one that differs in the
+    // last place is the line of a point that has moved. Heights are read
+    // back through the one reader on both sides, so a height the writer does
+    // not keep (a non-finite one) compares as the absence it becomes.
+    [[nodiscard]] const Entity* drawnAlready(const Entity& line) const
+    {
+        const auto found = drawn_.find(identityOf(line));
+        if (found == drawn_.end()) {
+            return nullptr;
+        }
+        const std::size_t vertices =
+            std::get<katana::geometry::Polyline2>(line.geometry).vertices.size();
+        const auto heights = katana::entity::heightsOf(line.properties, vertices);
+        for (const Entity* drawn : found->second) {
+            if (drawn->geometry == line.geometry &&
+                katana::entity::heightsOf(drawn->properties, vertices) == heights) {
+                return drawn;
+            }
+        }
+        return nullptr;
+    }
+
     const Document& document_;
     std::string property_;
     bool createLayers_ = true;
@@ -681,6 +731,8 @@ class LineBuilder {
     // that this run moves, as they are to be.
     std::map<Identity, std::deque<const Entity*>> earlier_{};
     std::vector<Entity> redrawn_{};
+    // skipLinesAlreadyDrawn: the drawing's coded polylines, in entity order.
+    std::map<Identity, std::vector<const Entity*>> drawn_{};
     std::set<EntityId> placed_{};
     std::set<EntityId> runMembers_{};
     std::set<std::string> layersNeeded_{};
@@ -988,7 +1040,7 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
                                   : std::map<std::string, std::vector<const Entity*>>{};
 
     LineBuilder builder(document, property, options.coding.createLayers, options.earlierLines,
-                        report);
+                        options.skipLinesAlreadyDrawn, report);
     auto unplace = [&](const Candidate& point, UnplacedReason reason) {
         report.unplaced.push_back(UnplacedPoint{point.id, point.number, point.codeText, reason});
     };
@@ -1123,8 +1175,11 @@ drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject
     // An import that wrote no code (an empty import.codeProperty) still
     // gives the LINES theirs, under the first candidate name - see
     // LineBuilder - or nothing would style them, and nothing would say so.
+    // Never asked whether the drawing holds a line already: a feature is
+    // drawn by the import that owns it, and a second import of one file
+    // draws, and owns, its own.
     LineBuilder builder(document, import.codeProperty, options.coding.createLayers,
-                        options.earlierLines, report);
+                        options.earlierLines, false, report);
     const bool ruled = options.onlyRuledLines;
     for (std::size_t index = 0; index < project.features.size(); ++index) {
         if (!consider.empty() && !consider[index]) {

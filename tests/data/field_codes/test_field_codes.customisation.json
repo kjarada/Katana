@@ -1,0 +1,19 @@
+{
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "test_field_codes",
+  "description": "Hand-written for the survey import tests: rules for the codes the field-file fixtures under tests/surveyio/data carry (KB, EB, CTRL), one colour of its own and one linestyle.",
+  "colours": {"field kerb": "#C04000"},
+  "linestyles": [
+    {"name": "FIELD Kerb", "group": "Field/Lines", "units": "paper", "length": 4, "strokes": [
+      ["move", 0, 0],
+      ["draw", 3, 0],
+      ["move", 4, 0]
+    ]}
+  ],
+  "codes": [
+    {"key": "KB*", "sets": "feature", "layer": "FIELD KERB", "colour": "field kerb", "draw": "line", "linestyle": "FIELD Kerb", "comment": "A kerb: a line, in the customisation's own colour and linestyle"},
+    {"key": "EB*", "sets": "feature", "layer": "FIELD EDGE", "colour": "blue", "draw": "line", "linestyle": "0", "comment": "An edge of bitumen: a plain line in a standard colour"},
+    {"key": "CTRL", "sets": "feature", "layer": "FIELD CONTROL", "colour": "red", "draw": "point", "linestyle": "0", "comment": "A control mark: a point code, never strung"}
+  ]
+}

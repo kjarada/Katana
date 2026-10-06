@@ -4,17 +4,25 @@
 // the cli.* tests; this pins the streams, which a merged ctest log cannot.
 // IMPORT replies in records (docs/interop.md), so its checks read fields.
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
 
 #include <gtest/gtest.h>
 
+#include "katana/cad/customisation_host.hpp"
+#include "katana/cad/customisation_state.hpp"
+#include "katana/core/path_text.hpp"
 #include "session.hpp"
+#include "start_environment.hpp"
 
 namespace {
 
 using katana::app::Session;
+using katana::app::tests::kTwoScripts;
+using katana::app::tests::ScopedVariable;
+using katana::app::tests::StartEnvironment;
 
 // A directory of the test's own, removed afterwards.
 struct ScratchDirectory {
@@ -64,7 +72,236 @@ bool contains(const std::string& text, const std::string& part)
     return text.find(part) != std::string::npos;
 }
 
+// One of the committed Katana customisation files (tests/data/customisation).
+// By their text: test_symbols holds four symbols and no rule, test_survey
+// eleven rules and no definition.
+std::string customisationFile(const char* name)
+{
+    return (std::filesystem::path(KATANA_CUSTOMISATION_DATA) / name).generic_string();
+}
+
 } // namespace
+
+// ---- what a session starts with ---------------------------------------------------------------
+
+TEST(Session, AProgramsSessionStartsWithTheBuiltInOfTheRunAndSaysWhichOnStdout)
+{
+    const std::string symbols = customisationFile("test_symbols.customisation.json");
+    const StartEnvironment environment(symbols.c_str(), nullptr);
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session session("katana_cli");
+    const std::string out = testing::internal::GetCapturedStdout();
+    const std::string err = testing::internal::GetCapturedStderr();
+    // The line names what was installed, and holds no word a script takes
+    // for a failure.
+    EXPECT_EQ(out, "Customisation: test_symbols, 4 linestyles and symbols and 0 survey code "
+                   "rules, built in\n");
+    EXPECT_EQ(err, "");
+    EXPECT_EQ(session.document().styleLibrary().size(), 4U);
+    EXPECT_EQ(session.document().customisationState().origin,
+              katana::cad::CustomisationOrigin::BuiltIn);
+    EXPECT_EQ(session.document().customisationState().name, "test_symbols");
+
+    // The interpreter was handed the host: RESET has a built-in to go back
+    // to, and KEEP is refused for the one thing this run was not given - a
+    // kept file - naming the variable that would give it one.
+    const Printed reset = run(session, "CUSTOMISE RESET");
+    EXPECT_TRUE(reset.ok) << reset.err;
+    EXPECT_EQ(reset.out, "reset name=test_symbols definitions=4 codes=0 rules=0 kept=yes\n");
+    const Printed keep = run(session, "CUSTOMISE KEEP");
+    EXPECT_FALSE(keep.ok);
+    EXPECT_EQ(keep.out, "");
+    EXPECT_TRUE(contains(keep.err, "KATANA_CUSTOMISATION")) << keep.err;
+}
+
+TEST(Session, ASessionOfNoProgramStartsEmptyWhateverTheEnvironmentNames)
+{
+    // Both variables name files that read: a program's session would start
+    // with the kept one. A session given no program reads neither, so about
+    // thirty suites that construct one see the same empty Document on every
+    // machine.
+    const std::string symbols = customisationFile("test_symbols.customisation.json");
+    const std::string survey = customisationFile("test_survey.customisation.json");
+    const StartEnvironment environment(symbols.c_str(), survey.c_str());
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session session(nullptr);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "");
+    EXPECT_EQ(testing::internal::GetCapturedStderr(), "");
+    EXPECT_TRUE(session.document().styleLibrary().empty());
+    EXPECT_EQ(session.document().surveyMap().size(), 0U);
+    EXPECT_EQ(session.document().customisationState().origin,
+              katana::cad::CustomisationOrigin::None);
+
+    // And it was handed no host: the words that need one are refused by name.
+    for (const char* line : {"CUSTOMISE RESET", "CUSTOMISE KEEP", "CUSTOMISE REVERT"}) {
+        const Printed refused = run(session, line);
+        EXPECT_FALSE(refused.ok) << line;
+        EXPECT_EQ(refused.out, "") << line;
+        EXPECT_TRUE(refused.err.starts_with(std::string("error: InvalidState: ") + line + " needs "))
+            << refused.err;
+    }
+    // The rest of the family is there all the same.
+    const Printed report = run(session, "CUSTOMISE");
+    EXPECT_TRUE(report.ok) << report.err;
+    EXPECT_TRUE(report.out.starts_with("No customisation is loaded.\n")) << report.out;
+}
+
+TEST(Session, AKeptFileNamedByTheVariableStartsTheSessionInTheBuiltInsPlace)
+{
+    // A copy, so that nothing a session does can touch the committed file.
+    const ScratchDirectory scratch("kept");
+    const std::filesystem::path kept = scratch.path / "kept.customisation.json";
+    std::filesystem::copy_file(customisationFile("test_survey.customisation.json"), kept);
+    const std::string symbols = customisationFile("test_symbols.customisation.json");
+    const StartEnvironment environment(symbols.c_str(), kept.generic_string().c_str());
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session session("katana_cli");
+    const std::string out = testing::internal::GetCapturedStdout();
+    const std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(out, "Customisation: test_survey, 0 linestyles and symbols and 11 survey code "
+                   "rules, kept\n");
+    // The file says nothing of what it was made from, so nothing is said of
+    // another built-in.
+    EXPECT_EQ(err, "");
+    EXPECT_EQ(session.document().customisationState().origin,
+              katana::cad::CustomisationOrigin::Kept);
+    EXPECT_EQ(session.document().surveyMap().size(), 11U);
+    EXPECT_TRUE(session.document().styleLibrary().empty());
+}
+
+TEST(Session, AKeptCustomisationMadeFromAnotherBuiltInStartsAndSaysSoOnStderr)
+{
+    // It names what it was made from, and that is not this run's built-in
+    // (test_symbols). It is the user's, so it is what starts; the warning is
+    // for them to know the program's own has moved on.
+    const ScratchDirectory scratch("kept-from-another");
+    const std::string kept = scratch.file(
+        "kept.customisation.json",
+        R"({"format": "katana-customisation", "version": 1, "name": "Mine",
+ "basedOn": {"name": "Some Other", "digest": "0123456789abcdef"},
+ "codes": [{"key": "MN*", "sets": "feature", "layer": "MINE"}]})");
+    const std::string symbols = customisationFile("test_symbols.customisation.json");
+    // `file` gives the path quoted for a line; the variable takes it bare.
+    const std::string bare = kept.substr(1, kept.size() - 2);
+    const StartEnvironment environment(symbols.c_str(), bare.c_str());
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session session("katana_cli");
+    const std::string out = testing::internal::GetCapturedStdout();
+    const std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(out, "Customisation: Mine, 0 linestyles and symbols and 1 survey code rules, kept\n");
+    EXPECT_EQ(err, "warning: the kept customisation was made from another built-in customisation "
+                   "than this program has; CUSTOMISE RESET gives this program's\n");
+    EXPECT_EQ(session.document().customisationState().name, "Mine");
+}
+
+TEST(Session, AStartUpProblemIsSaidOnStderrAndTheSessionStartsAllTheSame)
+{
+    // The seam names a file that is not there: there is no built-in for the
+    // run, and that is said - one line, where errors go, naming the variable
+    // and the file - rather than the session starting with whatever this
+    // build compiled in, or failing to start.
+    const ScratchDirectory scratch("no-built-in");
+    const std::string absent = (scratch.path / "absent.customisation.json").generic_string();
+    const StartEnvironment environment(absent.c_str(), nullptr);
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session session("katana_cli");
+    const std::string out = testing::internal::GetCapturedStdout();
+    const std::string err = testing::internal::GetCapturedStderr();
+    // Nothing was installed, so no line says anything was.
+    EXPECT_EQ(out, "");
+    EXPECT_TRUE(err.starts_with("error: ")) << err;
+    EXPECT_TRUE(contains(err, katana::cad::kBuiltInCustomisationVariable)) << err;
+    EXPECT_TRUE(contains(err, "absent.customisation.json")) << err;
+    EXPECT_EQ(std::count(err.begin(), err.end(), '\n'), 1) << err;
+    EXPECT_TRUE(session.document().styleLibrary().empty());
+    EXPECT_EQ(session.document().customisationState().origin,
+              katana::cad::CustomisationOrigin::None);
+    EXPECT_TRUE(run(session, "POINT 1,1").ok);
+}
+
+// The two variables name FILES, and a file may sit under a folder named in
+// any script. They were read with getenv, which on Windows gives the ANSI
+// code page's bytes: a name the code page cannot spell arrived as '?', the
+// kept file was "not there" - the ordinary case, so nothing was said and the
+// built-in started in its place - and CUSTOMISE KEEP then failed to write it.
+// The folder here is named in two scripts no one code page holds.
+
+TEST(Session, AKeptFileUnderAFolderNoCodePageSpellsStartsTheSessionAndIsWhereKeepWrites)
+{
+    const ScratchDirectory scratch("kept-under-two-scripts");
+    const std::filesystem::path folder =
+        scratch.path / katana::core::pathFromUtf8("kept-" + kTwoScripts);
+    std::filesystem::create_directories(folder);
+    const std::filesystem::path kept = folder / "k.customisation.json";
+    std::filesystem::copy_file(customisationFile("test_survey.customisation.json"), kept);
+    const std::string symbols = customisationFile("test_symbols.customisation.json");
+    const ScopedVariable builtInVariable(katana::cad::kBuiltInCustomisationVariable,
+                                         symbols.c_str());
+    const ScopedVariable keptVariable(katana::cad::kKeptCustomisationVariable, kept);
+
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session session("katana_cli");
+    const std::string out = testing::internal::GetCapturedStdout();
+    const std::string err = testing::internal::GetCapturedStderr();
+    // The kept file starts the session: the survey fixture's eleven rules and
+    // no definition, not the built-in's four symbols.
+    EXPECT_EQ(out, "Customisation: test_survey, 0 linestyles and symbols and 11 survey code "
+                   "rules, kept\n");
+    EXPECT_EQ(err, "");
+    EXPECT_EQ(session.document().customisationState().origin,
+              katana::cad::CustomisationOrigin::Kept);
+    EXPECT_EQ(session.document().surveyMap().size(), 11U);
+
+    // And it is where KEEP writes. An edit first, so that the session is no
+    // longer the file: coding on a survey import is switched off.
+    const Printed set = run(session, "CUSTOMISE SET auto.codes=off");
+    EXPECT_TRUE(set.ok) << set.err;
+    const Printed keep = run(session, "CUSTOMISE KEEP");
+    EXPECT_TRUE(keep.ok) << keep.err;
+    EXPECT_EQ(keep.err, "");
+    const auto written = katana::cad::readCustomisationFile(kept);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    ASSERT_TRUE(written->customisation.automation.has_value());
+    EXPECT_FALSE(written->customisation.automation->codesOnSurveyImport);
+    EXPECT_TRUE(written->customisation.automation->lineworkOnSurveyImport);
+    EXPECT_EQ(written->customisation.map.size(), 11U);
+    // The file that was there stays beside it.
+    std::filesystem::path backup = kept;
+    backup += ".bak";
+    EXPECT_TRUE(std::filesystem::exists(backup));
+}
+
+TEST(Session, ABuiltInTheSeamNamesUnderSuchAFolderStartsTheSession)
+{
+    const ScratchDirectory scratch("built-in-under-two-scripts");
+    const std::filesystem::path folder =
+        scratch.path / katana::core::pathFromUtf8("built-in-" + kTwoScripts);
+    std::filesystem::create_directories(folder);
+    const std::filesystem::path builtIn = folder / "b.customisation.json";
+    std::filesystem::copy_file(customisationFile("test_symbols.customisation.json"), builtIn);
+    const ScopedVariable builtInVariable(katana::cad::kBuiltInCustomisationVariable, builtIn);
+    const ScopedVariable keptVariable(katana::cad::kKeptCustomisationVariable, nullptr);
+
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session session("katana_cli");
+    const std::string out = testing::internal::GetCapturedStdout();
+    const std::string err = testing::internal::GetCapturedStderr();
+    // Read through the code page the seam named a file that is not there,
+    // which is a problem said on stderr, and no built-in.
+    EXPECT_EQ(out, "Customisation: test_symbols, 4 linestyles and symbols and 0 survey code "
+                   "rules, built in\n");
+    EXPECT_EQ(err, "");
+    EXPECT_EQ(session.document().styleLibrary().size(), 4U);
+}
+
+// ---- the streams ------------------------------------------------------------------------------
 
 TEST(Session, ARefusalThatCarriesAReportPrintsTheReportWhereAReportGoes)
 {
