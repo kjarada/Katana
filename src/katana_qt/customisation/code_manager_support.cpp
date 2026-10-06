@@ -1,8 +1,6 @@
 #include "customisation/code_manager_support.hpp"
 
 #include <fstream>
-#include <functional>
-#include <set>
 #include <string_view>
 #include <utility>
 
@@ -174,87 +172,20 @@ std::string exportedCustomisationName(const katana::cad::Document* document,
 }
 
 std::vector<katana::entity::CustomisationSourceNote>
-sourcesOfPart(std::vector<katana::entity::CustomisationSourceNote> sources,
-              CustomisationPart part, bool withColours)
+sourcesOfImportedDefinitions(std::vector<katana::entity::CustomisationSourceNote> sources,
+                             bool withColours)
 {
     std::vector<katana::entity::CustomisationSourceNote> standing;
     standing.reserve(sources.size());
     for (katana::entity::CustomisationSourceNote& source : sources) {
-        const bool brought =
-            part == CustomisationPart::Codes ? source.rules : source.definitions;
         const bool neither = !source.definitions && !source.rules;
-        if (!brought && !(neither && withColours)) {
+        if (!source.definitions && !(neither && withColours)) {
             continue;
         }
-        source.definitions = brought && part == CustomisationPart::Definitions;
-        source.rules = brought && part == CustomisationPart::Codes;
+        source.rules = false;
         standing.push_back(std::move(source));
     }
     return standing;
-}
-
-katana::entity::Customisation exportedPart(katana::entity::Customisation session,
-                                           CustomisationPart part,
-                                           const std::vector<std::string>& only)
-{
-    // The name, the description, the notice and what it is based on stay as
-    // the session has them: everything below takes something OUT.
-    katana::entity::Customisation written = std::move(session);
-    if (part == CustomisationPart::Codes) {
-        written.library = {};
-    } else {
-        written.map = {};
-        if (!only.empty()) {
-            katana::entity::StyleLibrary chosen;
-            for (const std::string& name : only) {
-                if (const katana::entity::LineStyle* definition = written.library.find(name)) {
-                    // Refused only for a name given twice, which is then
-                    // there once: the definition came out of a library.
-                    (void)chosen.add(*definition);
-                }
-            }
-            written.library = std::move(chosen);
-        }
-    }
-    written.linework.reset();
-    written.automation.reset();
-
-    // The colours what is left NAMES, by the fold a name is found by: the
-    // three places a rule names one (the lint's own three,
-    // cad::lintSurveyRule) and a definition's pens.
-    std::set<std::string, std::less<>> named;
-    const auto names = [&](const std::string& colour) {
-        if (!colour.empty()) {
-            named.insert(katana::entity::foldColourName(colour));
-        }
-    };
-    for (const katana::entity::SurveyRule& rule : written.map.rules()) {
-        names(rule.colour);
-        if (rule.symbol) {
-            names(rule.symbol->colour);
-        }
-        if (rule.textStyle) {
-            names(rule.textStyle->colour);
-        }
-    }
-    written.library.forEach([&](const katana::entity::LineStyle& definition) {
-        for (const katana::entity::Stroke& stroke : definition.strokes) {
-            if (stroke.op == katana::entity::StrokeOp::Pen) {
-                names(stroke.pen);
-            }
-        }
-    });
-    katana::entity::ColourTable carried;
-    for (const katana::entity::ColourTable::Entry& colour : written.colours.entries()) {
-        if (named.contains(katana::entity::foldColourName(colour.name))) {
-            // Cannot be refused: the entry comes out of a table that took it.
-            (void)carried.add(colour.name, colour.colour);
-        }
-    }
-    written.colours = std::move(carried);
-    written.sources =
-        sourcesOfPart(std::move(written.sources), part, !written.colours.empty());
-    return written;
 }
 
 katana::core::Status writeFileBytes(const std::filesystem::path& path, std::string_view bytes)

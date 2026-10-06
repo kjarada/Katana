@@ -833,8 +833,9 @@ is a field of the definition (`LineStyle::symbol`) set by the list it sits
 in, and is not worked out from `source` as it used to be (a file name holding
 "symbol"): one customisation holds both kinds under one name. The style
 library reader, which still reads one kind a file, sets the flag by that
-file-name rule; the catalogue and the lint still ask the name itself and are
-moved to the flag by the work that follows this.
+file-name rule. The symbol catalogue (`cad::symbolLibrary`) and the lint read
+the flag, so a definition listed as a symbol is one wherever symbols are
+shown, whether or not it is drawn at vertices or anything names it yet.
 
 **An attribute's type is two words.** The model keeps it as text; the format
 holds `text` or `integer`, the two kinds an attribute can be set as.
@@ -850,9 +851,11 @@ survives being read and written.
   yet.** The verbs that read and write one are in the interpreter ("The
   verbs", below), and the Symbol Library and the Survey Code Manager read
   and write one from their own buttons (`docs/desktop.md`), but `katana_cli`
-  and the window still take a `CUSTOMISE` line themselves, and neither
-  starts a session from one (`docs/survey_coding.md`, "What a session starts
-  with"); Settings comes with the work that follows.
+  and the window still take a `CUSTOMISE` line themselves - all but
+  `CUSTOMISE REMOVE` in the window, which its definition editor runs and
+  the interpreter answers - and neither starts a session from one
+  (`docs/survey_coding.md`, "What a session starts with"); Settings comes
+  with the work that follows.
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
 - **Some of a rule's members are still shown by another word.** `CODE
@@ -1006,23 +1009,33 @@ session with no name - rules made in an editor with no customisation ever
 installed - is refused until `NAME` gives one.
 
 **A part** - anything a kind word or `ONLY` chose - is a fragment for
-someone else's session, or for this one later:
+someone else's session, or for this one later. What it holds is ONE rule,
+`cad::customisationPart` (`include/katana/cad/customisation_part.hpp`), which
+the window's two export buttons write by too - the Survey Code Manager's
+Export Codes is `CODES` of the rules being edited, and the Symbol Library's
+Export Selected is `ONLY` the selected symbols (`docs/desktop.md`) - so the
+same symbols are the same file whichever wrote them:
 
 - It is written without the linework codes, the automation and `basedOn`.
   Merged in, it must not reset anyone's control codes, and it is not a copy
   of the built-in to be told from another edition.
-- It keeps the session's name unless `NAME` gives another: it is a part of
-  that customisation.
-- The colours go with it, whole.
+- It keeps the session's name, description and notice, unless `NAME` gives
+  another name: it is a part of that customisation.
+- **It carries the colours that what is written NAMES**, and no others: a
+  rule's colour, its symbol's and its text's; a pen stroke of a definition.
+  Names are compared as colour names are (`entity::foldColourName`).
 - **It lists a source only for what it holds of it**: with `definitions`
   when one of the definitions written came from that source
   (`LineStyle::source`), with `rules` when the rules are written and that
   source brought some, with neither when the source brought neither kind (a
-  table of colours) and there are colours to write. A source the part holds
+  table of colours) and the part carries a colour. A source the part holds
   nothing of is left out.
 - **Every notice goes with it.** The notice of a source that is left out is
-  written with the part's own, after it: nothing says whose the colours
-  are, and an author's notice is never dropped by an export.
+  written with the part's own, after it, each line once: nothing says whose
+  a colour is, and an author's notice is never dropped by an export.
+
+The whole session is not a part: an export with no kind word, and `KEEP`,
+write everything as it is.
 
 Where a file is loaded its sources are taken at their word: each becomes a
 source of that session by name, and a project's record of what it was drawn
@@ -1035,7 +1048,11 @@ rules included.
 nothing, when one of them is still named - by a survey code rule as its
 linestyle or its symbol, by a style of the drawing as its linetype or its
 symbol, or by a layer of the drawing as its linetype - listing every rule,
-style and layer that names it. `FORCE` removes it all the same, and what
+style and layer that names it. Who names it is asked of
+`cad::definitionUsers`, the function the window's definition editor lists a
+definition's users with, so a name counts as it is DRAWN: the name itself,
+and the earlier name of a definition since renamed where the library has no
+definition of that earlier name. `FORCE` removes it all the same, and what
 names it then draws plain. `REMOVE CODE` removes every rule of each key, in
 every section; a key is matched as it is written.
 
@@ -1255,8 +1272,42 @@ merged from two customisations would come back as one source, so `EXPORT f
 CODES`, an edit and `REPLACE f` - the round trip an agent makes - would leave
 the session with other sources than it had. Narrowed, the same sources come
 back, each with what it brought.
-*Rejected: dropping the notice of a source that is left out.* The colours go
-with every part and nothing says whose they are.
+*Rejected: dropping the notice of a source that is left out.* A part carries
+colours, and nothing says whose they are.
+
+**One rule for a part, whoever writes it** (`cad::customisationPart`). The
+verb and the window's two export buttons were written side by side and cut a
+session down by two rules, so two symbols exported from the Symbol Library
+and by `EXPORT ... ONLY` were two different files. Each rule had half of it
+right, and the one rule is the two halves:
+
+- *Rejected: every colour with every part* (the verb's first rule). Loaded,
+  a part would overwrite colours of the same names in a colleague's session
+  that nothing in the file uses. The managers' rule is kept: the colours
+  NAMED - and so a table of colours is a source only of a part that carries
+  a colour.
+- *Rejected: every source that brought the session that KIND* (the managers'
+  first rule). An export of two symbols listed every customisation that had
+  brought the session any definition, though not one of its definitions was
+  in the file; listed, it passes for loaded wherever the file goes. The
+  verb's rule is kept: the sources of what is WRITTEN. The managers' reason
+  for the wider list was that the session's own entry is the one a later
+  load gives the file's notice to (`customisation_merge.hpp`); narrowed, a
+  file whose name is none of its sources' has its notice given to each
+  source it lists. That is a notice shown more widely than its author meant,
+  which is the safe side of the two.
+- *Rejected: dropping the notice of a source left out with it* (the
+  managers' first rule), for the reason above.
+- *Rejected: keeping `basedOn`* (the managers' first rule). A file of two
+  symbols then says it is an edition of the built-in; a session with no name
+  that loads it takes that with the name, and kept, would be told from the
+  built-in at a start as a copy made from another edition
+  (`docs/survey_coding.md`, "What a session starts with").
+
+What is NOT this rule's: Import Definitions in the Symbol Library decides
+which of a FILE's sources it takes (`sourcesOfImportedDefinitions`,
+`src/katana_qt/customisation/code_manager_support.hpp`). It goes by what the
+file says each source brought, and takes every colour the file has.
 
 **`PREVIEW` is a word of a census too, and does nothing there.** *Rejected:
 refusing it*, which is what was first written ("a census changes nothing, so
@@ -1320,13 +1371,33 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   project's record is names, and a name cannot say "a part of".
 - **`FORCE` is read as the last word and `CODE` as the first** of a `REMOVE`.
   A definition called `FORCE` is removed by `REMOVE FORCE FORCE`, and one
-  called `CODE` by listing it after another name.
-- **Who uses a definition** is asked by a function private to the verb
-  (`usesOfDefinition`, `src/katana_cad/customisation/customisation_verbs.cpp`),
-  which counts the rules, the drawing's styles and the drawing's layers that
-  name it. A shared function for the question is being written; this one is
-  replaced by it, and what replaces it must count the layers too. An entity
-  is not asked: it reaches a definition only through its style or its layer.
+  called `CODE` by listing it after another name. The window's definition
+  editor builds no line for either name (`cad::removeDefinitionLine`), and
+  those two are the only words it refuses: every other word of the family
+  is a keyword only as `CUSTOMISE`'s first word
+  (`TheLineAnEditorBuildsToRemoveADefinitionIsReadAsThatDefinitionAlone`).
+- **`REMOVE` and the window's definition editor ask one function who uses a
+  definition** (`cad::definitionUsers`,
+  `include/katana/cad/definition_users.hpp`), and still WORD the answer two
+  ways. The verb's refusal says `rule #7 AC* (symbol) names it` and `the
+  drawing's style "Marks" names it`; the editor's list says `rule #7 AC*
+  (symbol) draws it as its symbol` and `style "Marks" draws it as its
+  symbol` (`DefinitionUsers::describe`). The editor shows the verb's refusal
+  as it came and then its own list, so a person reads the users twice. One
+  wording is a choice between the verb's pinned text and the editor's; it
+  was left with whoever next changes either.
+- **`REMOVE` says "what names it then draws plain" of every definition.**
+  That is untrue of a name the drawing's own Linetype table also holds (a
+  line naming it is then dashed by that linetype) and of a name that is a
+  built-in symbol shape (a point naming it is drawn as that shape).
+  `cad::definitionUsers` answers both (`drawingLinetype`, `builtInShape`)
+  and the editor says them; the verb's sentence does not read them yet.
+- **A style that names a definition as its linetype AND its symbol** is one
+  user to the verb - cited once, counted once in `styles=` - and two lines
+  of the editor's list, which says how each names it
+  (`AStyleThatNamesADefinitionBothWaysIsCitedAndCountedOnce`). An entity is
+  not asked by either: it reaches a definition only through its style or
+  its layer.
 - **`CODE CHECK` says "0 errors" when it succeeds.** It is the reply the verb
   had under its old name, kept word for word, and `UTILITY CHECK` counts the
   same way ("0 errors, 0 warnings"); so a test of the command line that runs

@@ -39,6 +39,7 @@
 #include "katana/cad/code_edit.hpp"
 #include "katana/cad/colour_lookup.hpp"
 #include "katana/cad/customisation_host.hpp"
+#include "katana/cad/customisation_part.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/customisation.hpp"
@@ -375,11 +376,18 @@ katana::core::Status SurveyCodeManagerDialog::apply()
     if (doc == nullptr) {
         return makeError(ErrorCode::InvalidState, "the drawing this manager edits is closed");
     }
+    // Round the commit, the hook every editor of the customisation calls
+    // (CustomisationContext::beginCommit; the definition editor's Save is
+    // the model): before it, since setSurveyMap leaves the session "not
+    // kept" and only the maker of the context can have noted that it was;
+    // and what it hands back after it, which is where a session that was
+    // kept is kept again. This manager knows neither.
+    const std::function<void()> committed =
+        context_.beginCommit ? context_.beginCommit() : std::function<void()>();
     doc->setSurveyMap(buffer_);
-    // KEEP STEP, wired by the lead: when the session was kept before this
-    // commit (customisationState().kept, read BEFORE setSurveyMap, which
-    // clears it) the line `CUSTOMISE KEEP` runs here through context_.run.
-    // Nothing is kept yet.
+    if (committed) {
+        committed();
+    }
     baseline_ = buffer_;
     invalidatePlans();
     updateDirty();
@@ -662,23 +670,23 @@ katana::core::Status SurveyCodeManagerDialog::importCodes(const std::filesystem:
 katana::core::Status SurveyCodeManagerDialog::exportCodes(const std::filesystem::path& path) const
 {
     // The session's customisation with the rules being edited in the place
-    // of its own, cut down to its codes by the rule both managers export by
-    // (exportedPart): the session's name and its author's notice, the sources
-    // that brought it rules, and the colours these rules name - not its
-    // definitions, and nothing of its control codes or switches, which a
-    // file of codes for a colleague must not reset. With the drawing closed
-    // there is no session to say any of that, and the rules go under the
-    // file's own name.
+    // of its own, cut down to its codes by the one rule a part is written by
+    // (cad::customisationPart, which CUSTOMISE EXPORT ... CODES cuts by too):
+    // the session's name and its author's notice, the sources that brought
+    // it rules, and the colours these rules name - not its definitions, and
+    // nothing of its control codes or switches, which a file of codes for a
+    // colleague must not reset. With the drawing closed there is no session
+    // to say any of that, and the rules go under the file's own name.
     const katana::cad::Document* doc = document();
     katana::entity::Customisation session =
         doc != nullptr ? doc->customisation() : katana::entity::Customisation{};
     session.name = exportedCustomisationName(doc, path);
     session.map = buffer_;
-    const katana::entity::Customisation codes =
-        exportedPart(std::move(session), CustomisationPart::Codes);
     katana::entity::CustomisationWriteOptions options;
     options.linestyles = false;
     options.symbols = false;
+    const katana::entity::Customisation codes =
+        katana::cad::customisationPart(std::move(session), options);
     const auto written = katana::entity::customisationToJson(codes, options);
     if (!written) {
         return written.error();

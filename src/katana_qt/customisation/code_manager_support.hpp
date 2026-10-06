@@ -4,9 +4,9 @@
 // symbol name a rule gives stands against the loaded library, a colour
 // swatch, and the colour-name field. The last section is shared with the
 // symbol library too, since both managers read and write Katana customisation
-// files: the filter their file dialogs offer, the ONE rule for what a manager
-// writes of a session and takes of a file's sources, the name a
-// customisation written from a session goes under, and the writing of a file.
+// files: the filter their file dialogs offer, which of a file's sources an
+// import of its definitions takes, the name a customisation written from a
+// session goes under, and the writing of a file.
 
 #include <filesystem>
 #include <optional>
@@ -81,65 +81,33 @@ void setColourField(QComboBox* box, const std::string& name);
 [[nodiscard]] std::string exportedCustomisationName(const katana::cad::Document* document,
                                                     const std::filesystem::path& file);
 
-// The two kinds of thing a customisation holds that a manager deals in: the
-// Survey Code Manager its survey code rules, the Symbol Library its linestyle
-// and symbol definitions.
-enum class CustomisationPart { Codes, Definitions };
+// What a manager WRITES of a session is not here: Export Codes and Export
+// Selected cut the session down by cad::customisationPart
+// (katana/cad/customisation_part.hpp), the one rule CUSTOMISE EXPORT writes a
+// part by too.
 
-// Of `sources` - a customisation's own list of what went into it - those that
-// stand beside ONE part of it, each as what it brought to that part:
+// Of `sources` - the list a FILE gives of what went into it - those an
+// import of the file's DEFINITIONS hands the merge, each as what it brought
+// to them:
 //
-//   it brought the part's kind    kept, and said to have brought that kind
-//                                 ALONE: its other kind is not there
-//   it brought the other kind     dropped, its notice with it: nothing of it
-//   alone                         is there
-//   it brought neither (a table   kept only `withColours`, when the part
-//   of colours)                   carries colours it may have brought
+//   it brought definitions        kept, and said to have brought those
+//                                 ALONE: its rules are not taken
+//   it brought rules alone        dropped, its notice with it: nothing of it
+//                                 is taken
+//   it brought neither (a table   kept only `withColours`, when the import
+//   of colours)                   takes colours it may have brought
 //
-// Both directions ask this, which is why it is one function: what Export
-// writes beside the rules or the definitions, and what Import Definitions
-// hands the merge beside a file's definitions. A source left listed with
-// nothing of it taken passes for LOADED - Document::installCustomisation
-// takes every listed name off what the open project is missing - so a
-// project's warning that a customisation is missing would go away with not
-// one of its rules in the session.
+// A source left listed with nothing of it taken passes for LOADED -
+// Document::installCustomisation takes every listed name off what the open
+// project is missing - so a project's warning that a customisation is missing
+// would go away with not one of its rules in the session.
+//
+// It goes by what the file SAYS each source brought - the import takes every
+// definition of the file - where a part being WRITTEN goes by where each
+// written definition came from (cad::customisationPart).
 [[nodiscard]] std::vector<katana::entity::CustomisationSourceNote>
-sourcesOfPart(std::vector<katana::entity::CustomisationSourceNote> sources,
-              CustomisationPart part, bool withColours);
-
-// What a manager writes of `session` (Document::customisation(), with the
-// name it is to go under and, for Codes, the rules being edited in place of
-// its map): the ONE rule for Export Codes and Export Selected.
-//
-//   name, description,  the session's, as they are. A notice is "carried
-//   notice, basedOn     with the data and shown to whoever uses it"
-//                       (entity/customisation.hpp): a part of a customisation
-//                       is its author's data too
-//   sources             sourcesOfPart: those that brought this kind, each
-//                       with its own notice
-//   colours             those of the session's that what is written NAMES - a
-//                       rule's colour, its symbol's and its text's; a
-//                       definition's pens - compared as colour names are
-//                       (entity::foldColourName). Without them the part would
-//                       draw elsewhere in other colours than here; the rest
-//                       would overwrite colours of whoever loads it that
-//                       nothing in the file uses
-//   linework,           absent: the file says nothing of them, so loading it
-//   automation          leaves the session's own alone. "A file of symbols
-//                       for a colleague must not reset their control codes"
-//                       (entity/customisation.hpp), nor a file of codes
-//   the other kind      absent
-//
-// For Definitions, `only` names the definitions wanted - every one when it is
-// empty; a name the library lacks is simply not there, and the caller that
-// must not lose one silently passes the same names to the writer
-// (CustomisationWriteOptions::only), which refuses.
-//
-// It reads nothing but the value, so it can sit beside a CUSTOMISE EXPORT
-// verb unchanged the day the buttons run that line instead.
-[[nodiscard]] katana::entity::Customisation
-exportedPart(katana::entity::Customisation session, CustomisationPart part,
-             const std::vector<std::string>& only = {});
+sourcesOfImportedDefinitions(std::vector<katana::entity::CustomisationSourceNote> sources,
+                             bool withColours);
 
 // `bytes` as the whole of the file at `path`. FileExportFailure, with the
 // path beside it, when it cannot be opened or written.

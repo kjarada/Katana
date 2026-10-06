@@ -24,16 +24,21 @@
 // line, `["move", x, y]` with a blank after each comma, a number as its
 // shortest text, and a comma ending every line but the last.
 //
-// The verb CUSTOMISE REMOVE is another change's and is not in this build. The
-// editor only builds its line and hands it to the runner it was given, so
-// these tests give it a runner that does what the verb is designed to do -
-// refuse a definition something uses until FORCE - and assert on the lines
-// and on the runner's own words, which the editor shows as they came. A
-// second runner fails every line for a reason that has nothing to do with
-// use, which is what the real window answers until the verb is there.
+// The editor does not remove a definition: it builds the line CUSTOMISE
+// REMOVE and hands it to the runner it was given. Most tests here give it a
+// runner of their own that does what the verb does - refuse a definition
+// something uses until FORCE - so that what is asserted is the editor's: the
+// lines it built, and the runner's own words shown as they came. A second
+// runner fails every line for a reason that has nothing to do with use, as a
+// line can. ONE test gives it the verb itself, the interpreter over the same
+// Document (TheVerbItselfRefusesADefinitionInUseAndDeleteAnywayRemovesIt):
+// the editor and the verb were written side by side, and that is where they
+// meet below the window. The real window's run of the same is
+// qt_a_definition_a_survey_code_names_is_refused_by_delete_and_removed_by_delete_anyway_headless.
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -66,6 +71,7 @@
 #include "customisation/definition_editor.hpp"
 #include "customisation/style_preview.hpp"
 #include "customisation/symbol_library.hpp"
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/definition_users.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/style_manager_rows.hpp"
@@ -826,6 +832,93 @@ TEST(DefinitionEditor, DeleteOfADefinitionARuleNamesIsRefusedListingTheRuleAndDe
     EXPECT_TRUE(f.inLibrary("TEST Valve") == valve());
     EXPECT_TRUE(f.loggedExactly(
         QStringLiteral("Symbol \"TEST Valve\" added to the library: 6 strokes, 0 texts.")));
+}
+
+// The window's executor as far as an editor can tell (MainWindow::runVerbLine
+// over runInterpreterLine): the line run by the interpreter, a reply logged
+// as it is and a refusal as the error with its code (core::Error::describe).
+VerbOutcome runAsTheWindowDoes(katana::cad::CommandInterpreter& interpreter, const QString& line)
+{
+    VerbOutcome outcome;
+    const auto reply = interpreter.run(line.toStdString());
+    if (reply) {
+        outcome.ok = true;
+        outcome.reply = QString::fromStdString(*reply);
+    } else {
+        outcome.error = QString::fromStdString(reply.error().describe());
+    }
+    return outcome;
+}
+
+TEST(DefinitionEditor, TheVerbItselfRefusesADefinitionInUseAndDeleteAnywayRemovesIt)
+{
+    // The editor's line run by CUSTOMISE REMOVE itself, with no stand-in
+    // between them. By hand from the head of this file: "TEST Valve" is named
+    // by rule #1 (AC*, a symbol rule) and by the style Marks, and "TEST
+    // Spare" by nothing.
+    EditorFixture f;
+    katana::cad::CommandInterpreter interpreter(f.document);
+    f.context.run = [&](const QString& line) {
+        f.ran << line;
+        return runAsTheWindowDoes(interpreter, line);
+    };
+
+    // One nothing names goes by the plain line: the verb answers with its
+    // record of what it removed, and the editor says the definition is gone.
+    {
+        DefinitionEditorDialog spareEditor(f.context);
+        spareEditor.show();
+        ASSERT_TRUE(spareEditor.editDefinition("TEST Spare"));
+        press(spareEditor, "definitionDelete");
+        EXPECT_EQ(f.ran, (QStringList{QStringLiteral("CUSTOMISE REMOVE \"TEST Spare\"")}));
+        EXPECT_EQ(f.document.styleLibrary().find("TEST Spare"), nullptr);
+        EXPECT_TRUE(issues(spareEditor)
+                        .startsWith(QStringLiteral("\"TEST Spare\" was deleted from the library.")))
+            << issues(spareEditor).toStdString();
+        EXPECT_TRUE(withdrawn(spareEditor, "definitionDeleteAnyway"));
+    }
+    f.ran.clear();
+
+    DefinitionEditorDialog dialog(f.context);
+    dialog.show();
+    ASSERT_TRUE(dialog.editDefinition("TEST Valve"));
+    press(dialog, "definitionDelete");
+    // Refused. The verb's own words come first, as the window logs a refused
+    // line, and they cite who names the definition - the verb asks the
+    // function the editor lists with (cad::definitionUsers), and words each
+    // user its own way. Then the editor's list, and what Delete Anyway would
+    // do: a point is all that draws the valve, so a stand-in mark is all
+    // that follows.
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("CUSTOMISE REMOVE \"TEST Valve\"")}));
+    EXPECT_EQ(issues(dialog),
+              QStringLiteral(
+                  "\"TEST Valve\" was not deleted: InvalidState: CUSTOMISE REMOVE: 1 of the 1 "
+                  "definition named is in use, so nothing was removed; FORCE removes what is "
+                  "used too, and what names it then draws plain\n"
+                  "  \"TEST Valve\": rule #1 AC* (symbol) names it\n"
+                  "  \"TEST Valve\": the drawing's style \"Marks\" names it\n"
+                  "It is named by:\n"
+                  "  rule #1 AC* (symbol) draws it as its symbol\n"
+                  "  style \"Marks\" draws it as its symbol\n"
+                  "Delete Anyway runs the line again with FORCE. A point naming it is then "
+                  "drawn as a stand-in mark."));
+    EXPECT_TRUE(saysAnError(dialog));
+    EXPECT_TRUE(f.inLibrary("TEST Valve") == valve());
+    ASSERT_TRUE(offered(dialog, "definitionDeleteAnyway"));
+
+    press(dialog, "definitionDeleteAnyway");
+    EXPECT_EQ(f.ran, (QStringList{QStringLiteral("CUSTOMISE REMOVE \"TEST Valve\""),
+                                  QStringLiteral("CUSTOMISE REMOVE \"TEST Valve\" FORCE")}));
+    EXPECT_EQ(f.document.styleLibrary().find("TEST Valve"), nullptr);
+    // The kerb is all that is left of the three, and the two rules still
+    // stand: the verb removes a definition and nothing that names one.
+    EXPECT_EQ(f.document.styleLibrary().names(), std::vector<std::string>{"TEST Kerb"});
+    EXPECT_EQ(f.document.surveyMap().size(), 2u);
+    EXPECT_TRUE(withdrawn(dialog, "definitionDeleteAnyway"));
+    EXPECT_TRUE(issues(dialog).startsWith(QStringLiteral(
+        "\"TEST Valve\" was deleted from the library. It is still shown here: Save puts it "
+        "back.")))
+        << issues(dialog).toStdString();
 }
 
 TEST(DefinitionEditor, DeleteAnywayIsNotCarriedOutUnlessItsRefusalIsOnThePage)
@@ -1834,6 +1927,62 @@ TEST(DefinitionEditor, TheSymbolLibrarysFourButtonsOpenTheOneEditorTheWorkbenchK
     for (const char* name : {"symbolNew", "symbolEdit", "symbolDuplicate", "symbolDelete"}) {
         EXPECT_FALSE(enabled(alone, name)) << name;
     }
+}
+
+TEST(DefinitionEditor, ASymbolMadeHereIsListedByTheSymbolLibraryThoughItIsNotAtVertices)
+{
+    // New Symbol, a name, strokes and Save - the path a person takes - leave
+    // At vertices unticked. The Symbol Library lists what cad::symbolLibrary
+    // gives it, and that holds a definition its customisation LISTS as a
+    // symbol (LineStyle::symbol, which New Symbol from the library sets):
+    // nothing has to name it, and it need not be drawn at vertices. (The
+    // catalogue once read no such flag, and a symbol made here was missing
+    // from the grid until a style or a survey code named it - which the
+    // headless test of this path then hid by ticking At vertices.)
+    Bench b;
+    b.trigger("formatSymbols");
+    katana::qt::SymbolLibraryDialog* symbols = b.bench->symbolLibrary();
+    ASSERT_NE(symbols, nullptr);
+    const auto listed = [&](const char* name) {
+        // The library reloads on the event loop after a commit, as every
+        // panel does.
+        katana::qt::test::processEvents();
+        const std::vector<std::string> shown = symbols->shownNames();
+        return std::find(shown.begin(), shown.end(), std::string(name)) != shown.end();
+    };
+    ASSERT_TRUE(listed("TEST Valve")) << "the grid lists what the library holds";
+    ASSERT_FALSE(listed("TEST Post"));
+
+    press(*symbols, "symbolNew");
+    DefinitionEditorDialog* editor = b.bench->definitionEditor();
+    ASSERT_NE(editor, nullptr);
+    fill(*editor, "definitionName", QStringLiteral("TEST Post"));
+    strokes(*editor, QStringLiteral("[\"move\", 0, 0],\n[\"draw\", 0, 2]"));
+    ASSERT_FALSE(child<QCheckBox>(*editor, "definitionAtVertices")->isChecked());
+    ASSERT_TRUE(enabled(*editor, "definitionSave")) << issues(*editor).toStdString();
+    press(*editor, "definitionSave");
+
+    const LineStyle post = b.f.inLibrary("TEST Post");
+    EXPECT_TRUE(post.symbol);
+    EXPECT_FALSE(post.atVertices);
+    EXPECT_TRUE(katana::cad::definitionUsers(b.f.document, "TEST Post").empty())
+        << "no rule, style or layer names it";
+    EXPECT_TRUE(listed("TEST Post"));
+
+    // The control: the same two strokes saved as a LINESTYLE - Kind changed
+    // in the form - are in no list of symbols, and the grid does not show
+    // them.
+    press(*symbols, "symbolNew");
+    fill(*editor, "definitionName", QStringLiteral("TEST Rail"));
+    choose(*editor, "definitionKind", QStringLiteral("Linestyle"));
+    strokes(*editor, QStringLiteral("[\"move\", 0, 0],\n[\"draw\", 0, 2]"));
+    ASSERT_TRUE(enabled(*editor, "definitionSave")) << issues(*editor).toStdString();
+    press(*editor, "definitionSave");
+    const LineStyle rail = b.f.inLibrary("TEST Rail");
+    EXPECT_FALSE(rail.symbol);
+    EXPECT_FALSE(rail.atVertices);
+    EXPECT_FALSE(listed("TEST Rail"));
+    EXPECT_TRUE(listed("TEST Post"));
 }
 
 TEST(DefinitionEditor, TheLinetypesTabOpensTheSameEditorOnALibraryLinestyle)

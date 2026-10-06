@@ -30,6 +30,7 @@
 #include "icons.hpp"
 #include "katana/cad/customisation_host.hpp"
 #include "katana/cad/customisation_merge.hpp"
+#include "katana/cad/customisation_part.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/symbol_assign.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -1148,9 +1149,10 @@ bool SymbolLibraryDialog::importDefinitionsFile(const std::filesystem::path& pat
     // And without the sources that brought the file only rules. A source it
     // lists becomes one of the session's, by name, and is taken off what the
     // open project is missing: one left in with its rules flag cleared would
-    // pass for loaded, with none of its rules here (sourcesOfPart).
-    taken.sources = sourcesOfPart(std::move(taken.sources), CustomisationPart::Definitions,
-                                  !taken.colours.empty());
+    // pass for loaded, with none of its rules here
+    // (sourcesOfImportedDefinitions).
+    taken.sources =
+        sourcesOfImportedDefinitions(std::move(taken.sources), !taken.colours.empty());
     const QString leftAlone =
         left.isEmpty()
             ? QString()
@@ -1177,6 +1179,15 @@ bool SymbolLibraryDialog::importDefinitionsFile(const std::filesystem::path& pat
         }
         return false;
     }
+    // Round the commit, the hook every editor of the customisation calls
+    // (CustomisationContext::beginCommit; the definition editor's Save is
+    // the model): before the install, which leaves the session "not kept",
+    // and what it hands back after an install that was TAKEN - never after
+    // one that was refused, when nothing changed and there is nothing to
+    // keep. Called only now that the file has read and merged: a file that
+    // does not is no commit at all.
+    const std::function<void()> committed =
+        context_.beginCommit ? context_.beginCommit() : std::function<void()>();
     // The install judges the session's own parts, which the merge did not:
     // heeded, and nothing is said to have been merged unless it was.
     if (const auto installed = document_->installCustomisation(
@@ -1186,10 +1197,9 @@ bool SymbolLibraryDialog::importDefinitionsFile(const std::filesystem::path& pat
             true);
         return false;
     }
-    // KEEP STEP, wired by the lead: when the session was kept before this
-    // commit (customisationState().kept, read BEFORE installCustomisation,
-    // which clears it) the line `CUSTOMISE KEEP` runs here through
-    // context_.run. Nothing is kept yet.
+    if (committed) {
+        committed();
+    }
     const auto mergedLine = [](const std::string& name, const QString& into,
                                const std::vector<std::string>& added,
                                const std::vector<std::string>& replaced) {
@@ -1241,19 +1251,20 @@ bool SymbolLibraryDialog::exportSelectedTo(const std::filesystem::path& path)
         return false;
     }
     // The session's customisation cut down to the selected definitions by
-    // the rule both managers export by (exportedPart): the session's name and
-    // its author's notice, the sources that brought it definitions, and the
-    // colours the selected pens name - without which a pen of "sui water
+    // the one rule a part is written by (cad::customisationPart, which
+    // CUSTOMISE EXPORT ... ONLY cuts by too): the session's name and its
+    // author's notice, the sources the selected definitions came from, and
+    // the colours the selected pens name - without which a pen of "sui water
     // potable" would draw in the entity's colour wherever the file went. Not
     // the session's rules, control codes or switches: a file of two symbols
     // for a colleague must not reset theirs.
     katana::entity::Customisation session = document_->customisation();
     session.name = exportedCustomisationName(document_, path);
-    const katana::entity::Customisation selected =
-        exportedPart(std::move(session), CustomisationPart::Definitions, names);
     katana::entity::CustomisationWriteOptions options;
     options.codes = false;
     options.only = names;
+    const katana::entity::Customisation selected =
+        katana::cad::customisationPart(std::move(session), options);
     const auto written = katana::entity::customisationToJson(selected, options);
     if (!written) {
         log(QStringLiteral("Export to %1: %2").arg(pathText(path), describe(written.error())),

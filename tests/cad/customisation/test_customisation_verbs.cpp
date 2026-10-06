@@ -47,10 +47,14 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/customisation_host.hpp"
 #include "katana/cad/customisation_verbs.hpp"
+#include "katana/cad/definition_edit.hpp"
+#include "katana/cad/definition_users.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/commands/entity_commands.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/customisation.hpp"
+#include "katana/entity/tables.hpp"
 
 namespace fs = std::filesystem;
 using katana::cad::BuiltInCustomisation;
@@ -1028,7 +1032,23 @@ TEST(CustomisationVerbs, APartNamesTheSourcesOfWhatItHoldsAndCarriesEveryNotice)
     // The built-in with Marks and Tints merged in (the head of this file):
     // sources Small Built In (definitions, rules), Marks (definitions, rules,
     // its notice) and Tints (neither kind, its notice); the session's own
-    // notice is the built-in's.
+    // notice is the built-in's. Two colours: the built-in's sui gas, which
+    // its FE* rule names, and Tints' tint teal, which nothing names until a
+    // definition below is given a pen of it.
+    //
+    // The rule is cad::customisationPart's - the one rule the verb and the
+    // two managers' export buttons write a part by (customisation_part.hpp).
+    // SEVEN EXPECTATIONS HERE CHANGED when the verb took it, each marked
+    // "was" below. This test first pinned the verb's own rule, by which every
+    // colour of the session went with every part, so that a table of colours
+    // was a source of every part while the session had a colour at all. By
+    // the one rule a part carries only the colours its written rules and
+    // pens NAME - the rest would overwrite colours of whoever loads it that
+    // nothing in it uses - and so a table of colours is a source only of a
+    // part that carries a colour; left out, its notice is written with the
+    // part's own, as that of any source left out is. What did NOT change is
+    // the verb's side of the rule: a source is listed for what is written of
+    // it, and no notice is lost.
     Hosted session("part-sources");
     session.start();
     session.ok("CUSTOMISE " + typed(session.scratch.write("marks.json", kMarks)) + " " +
@@ -1038,56 +1058,90 @@ TEST(CustomisationVerbs, APartNamesTheSourcesOfWhatItHoldsAndCarriesEveryNotice)
     ASSERT_EQ(session.state().sources, (Sources{{"Small Built In", true, true, {}},
                                                  {"Marks", true, true, marksNotice},
                                                  {"Tints", false, false, tintsNotice}}));
+    ASSERT_EQ(session.state().colours.size(), 2u);
     const auto part = [&session](const std::string& name, const std::string& words) {
         const fs::path file = session.scratch.root / name;
         session.ok("CUSTOMISE EXPORT " + typed(file) + " " + words);
         return parsed(contentsOf(file));
     };
 
-    // One symbol, which came from Marks. Nothing of the built-in's is
-    // written, so it is no source of the part; Tints is, for the colours,
-    // which go with every part and are all a table of colours brings.
+    // One symbol, which came from Marks and has no pen. Nothing of the
+    // built-in's is written, so it is no source of the part. No colour is
+    // named, so none is carried (was: both), Tints is no source (was: one,
+    // "for the colours, which go with every part"), and its notice is
+    // written after the part's own (was: the part's own alone).
     const Customisation cross = part("cross.json", "ONLY \"MARK Cross\" NAME Crosses");
-    EXPECT_EQ(cross.sources,
-              (Sources{{"Marks", true, false, marksNotice}, {"Tints", false, false, tintsNotice}}));
-    EXPECT_EQ(cross.notice, std::vector<std::string>{"Written for these tests."});
-    EXPECT_EQ(cross.colours.size(), 2u);
+    EXPECT_EQ(cross.sources, (Sources{{"Marks", true, false, marksNotice}}));
+    EXPECT_EQ(cross.notice,
+              (std::vector<std::string>{"Written for these tests.", "Tints: free to use."}));
+    EXPECT_TRUE(cross.colours.empty());
 
     // The codes alone: every source that brought rules, said to have brought
-    // rules and no more.
+    // rules and no more. FE* names sui gas, so that colour is carried - not
+    // tint teal, which no rule names - and with a colour in the part the
+    // table of colours is a source of it: nothing says whose a colour is.
     const Customisation codes = part("codes.json", "CODES");
     EXPECT_EQ(codes.sources, (Sources{{"Small Built In", false, true, {}},
                                       {"Marks", false, true, marksNotice},
                                       {"Tints", false, false, tintsNotice}}));
+    EXPECT_EQ(codes.notice, std::vector<std::string>{"Written for these tests."});
     EXPECT_EQ(codes.map.size(), 3u);
+    ASSERT_EQ(codes.colours.size(), 1u);
+    EXPECT_EQ(codes.colours.entries().front().name, "sui gas");
 
-    // The linestyles alone: TEST Fence, the built-in's. Marks brought a
-    // symbol and a rule and neither is written, so it is not a source of
-    // this part - and its notice is not dropped for that: it is written with
-    // the part's own, after it.
+    // The linestyles alone: TEST Fence, the built-in's, which has no pen.
+    // Marks brought a symbol and a rule and neither is written, so it is not
+    // a source of this part - and its notice is not dropped for that: it is
+    // written with the part's own, after it. Nor is Tints a source, no
+    // colour being carried (was: one), and its notice follows (was: absent).
     const Customisation lines = part("lines.json", "LINESTYLES");
-    EXPECT_EQ(lines.sources, (Sources{{"Small Built In", true, false, {}},
-                                      {"Tints", false, false, tintsNotice}}));
+    EXPECT_EQ(lines.sources, (Sources{{"Small Built In", true, false, {}}}));
     EXPECT_EQ(lines.notice,
-              (std::vector<std::string>{"Written for these tests.", "Marks: drawn by hand."}));
+              (std::vector<std::string>{"Written for these tests.", "Marks: drawn by hand.",
+                                        "Tints: free to use."}));
+    EXPECT_TRUE(lines.colours.empty());
 
-    // With no colour left to write, a table of colours is no source of a
-    // part either; its notice is kept the same way.
-    session.document.setColourTable({});
-    const Customisation bare = part("bare.json", "ONLY \"MARK Cross\"");
-    EXPECT_EQ(bare.sources, (Sources{{"Marks", true, false, marksNotice}}));
-    EXPECT_EQ(bare.notice,
-              (std::vector<std::string>{"Written for these tests.", "Tints: free to use."}));
-    EXPECT_TRUE(bare.colours.empty());
-
-    // Loaded into an empty session, the first part brings the two sources it
-    // lists and nothing of the built-in's but the notice it carries.
+    // Loaded into an empty session, the first part brings the one source it
+    // lists (was: Tints too) and, of the rest, the notices it carries (was:
+    // the built-in's alone).
     Bare other;
     other.ok("CUSTOMISE " + typed(session.scratch.root / "cross.json"));
     EXPECT_EQ(other.state().name, "Crosses");
-    EXPECT_EQ(other.state().notice, std::vector<std::string>{"Written for these tests."});
-    EXPECT_EQ(other.state().sources,
-              (Sources{{"Marks", true, false, marksNotice}, {"Tints", false, false, tintsNotice}}));
+    EXPECT_EQ(other.state().notice,
+              (std::vector<std::string>{"Written for these tests.", "Tints: free to use."}));
+    EXPECT_EQ(other.state().sources, (Sources{{"Marks", true, false, marksNotice}}));
+
+    // A symbol made in this session, with a pen of the table's colour spelled
+    // another way (one name, by the fold a colour name is compared in). The
+    // part carries that one colour, as the table spells it, and so the table
+    // of colours is a source of it; the symbol itself came from no
+    // customisation and adds none.
+    katana::entity::StyleLibrary library = session.document.styleLibrary();
+    katana::entity::LineStyle painted;
+    painted.name = "TEST Painted";
+    painted.symbol = true;
+    painted.atVertices = true;
+    painted.strokes = {
+        katana::entity::Stroke{.op = katana::entity::StrokeOp::Pen, .pen = "Tint_Teal"},
+        katana::entity::Stroke{.op = katana::entity::StrokeOp::Circle, .radius = 1.0}};
+    ASSERT_TRUE(library.add(painted).ok());
+    session.document.setStyleLibrary(std::move(library));
+    const Customisation teal = part("painted.json", "ONLY \"TEST Painted\"");
+    EXPECT_EQ(teal.sources, (Sources{{"Tints", false, false, tintsNotice}}));
+    EXPECT_EQ(teal.notice,
+              (std::vector<std::string>{"Written for these tests.", "Marks: drawn by hand."}));
+    ASSERT_EQ(teal.colours.size(), 1u);
+    EXPECT_EQ(teal.colours.entries().front().name, "tint teal");
+
+    // With no colour in the session at all, a table of colours is a source
+    // of nothing: the same symbol again.
+    session.document.setColourTable({});
+    const Customisation bare = part("bare.json", "ONLY \"TEST Painted\"");
+    EXPECT_TRUE(bare.sources.empty());
+    EXPECT_EQ(bare.notice,
+              (std::vector<std::string>{"Written for these tests.", "Marks: drawn by hand.",
+                                        "Tints: free to use."}));
+    EXPECT_TRUE(bare.colours.empty());
 }
 
 TEST(CustomisationVerbs, TheCodesWrittenAndReadBackInTheirPlaceLeaveTheSourcesWithWhatEachBrought)
@@ -1632,6 +1686,116 @@ TEST(CustomisationVerbs, ALayersLinetypeAndAStylesSymbolAreUsesOfADefinitionToo)
               "removed definition=\"TEST Hedge\" rules=0 styles=0 layers=1\n"
               "removed definition=\"TEST Stake\" rules=0 styles=1 layers=0");
     EXPECT_EQ(session.document.styleLibrary().size(), 2u);
+}
+
+TEST(CustomisationVerbs, AStyleThatNamesADefinitionBothWaysIsCitedAndCountedOnce)
+{
+    // REMOVE asks cad::definitionUsers who names a definition - the function
+    // the window's definition editor lists them with. That answer says HOW
+    // each user names it, so a style whose linetype AND symbol are the
+    // definition is in it twice; the verb says only THAT a style names it.
+    // Three styles, made as a file's are (no verb checks what a style names):
+    // Alpha draws its points with the stake, Both names it both ways, Zed
+    // names it as its linetype. By hand: 3 styles, each cited once, in name
+    // order.
+    Hosted session("remove-both-ways");
+    session.start();
+    addDefinition(session.document, "TEST Stake", true);
+    const auto style = [&session](const char* name, const char* linetype, const char* symbol) {
+        katana::entity::Style made;
+        made.name = name;
+        made.linetype = linetype;
+        made.symbol = symbol;
+        ASSERT_TRUE(session.document.execute(katana::commands::createStyle(made)).ok()) << name;
+    };
+    style("Zed", "TEST Stake", "");
+    style("Both", "TEST Stake", "TEST Stake");
+    style("Alpha", "", "TEST Stake");
+    const katana::cad::DefinitionUsers users =
+        katana::cad::definitionUsers(session.document, "TEST Stake");
+    ASSERT_EQ(users.linetypeStyles, (std::vector<std::string>{"Both", "Zed"}));
+    ASSERT_EQ(users.symbolStyles, (std::vector<std::string>{"Alpha", "Both"}));
+
+    const katana::core::Error refusal = session.refused("CUSTOMISE REMOVE \"TEST Stake\"");
+    EXPECT_EQ(refusal.code, ErrorCode::InvalidState);
+    EXPECT_EQ(refusal.message,
+              "CUSTOMISE REMOVE: 1 of the 1 definition named is in use, so nothing was removed; "
+              "FORCE removes what is used too, and what names it then draws plain\n"
+              "  \"TEST Stake\": the drawing's style \"Alpha\" names it\n"
+              "  \"TEST Stake\": the drawing's style \"Both\" names it\n"
+              "  \"TEST Stake\": the drawing's style \"Zed\" names it");
+    EXPECT_EQ(session.ok("CUSTOMISE REMOVE \"TEST Stake\" FORCE"),
+              "removed definition=\"TEST Stake\" rules=0 styles=3 layers=0");
+}
+
+TEST(CustomisationVerbs, TheLineAnEditorBuildsToRemoveADefinitionIsReadAsThatDefinitionAlone)
+{
+    // The window's definition editor does not remove a definition: it runs
+    // the line cad::removeDefinitionLine builds (definition_edit.hpp), and
+    // this verb reads it. The two were written side by side, so here they
+    // meet: every name that function will put on a line is read back by the
+    // verb as that one definition - and the names it refuses to put on one
+    // are exactly the words this verb would read as its own.
+    //
+    // By hand from the tokenizer's contract (cad/annotation/command_words.hpp:
+    // it splits on blanks, groups quoted words, removes the quotes and has no
+    // escape) and from this family's grammar (CODE is a keyword only as
+    // REMOVE's first word, FORCE only as its last; every other word of the
+    // family is a keyword only as CUSTOMISE's first). So inside the quotes a
+    // name may hold anything but a double quote or a line break - blanks at
+    // its ends, two in a row, '#', ';', '=', an apostrophe, text outside
+    // ASCII - and may BE any word of the family but those two.
+    Bare session;
+    const std::vector<std::string> names{
+        "TEST Valve", " led by a blank", "two  blanks", "ends in one ", "REMOVE", "SET",
+        "ONLY",       "JSON",            "replace",     "CODES",        "KEEP",   "Code Red",
+        "Forced",     "FORCE main",      "main FORCE",  "7 up",         "a#b",    "#first",
+        "a;b",        "auto.codes=on",   "it's",        "\xC3\x9C" "ber Mark"};
+    for (const std::string& name : names) {
+        addDefinition(session.document, name);
+    }
+    ASSERT_EQ(session.document.styleLibrary().size(), names.size());
+
+    std::size_t left = names.size();
+    bool force = false;
+    for (const std::string& name : names) {
+        // Plain and forced by turns: both lines are the editor's.
+        const auto line = katana::cad::removeDefinitionLine(name, force);
+        ASSERT_TRUE(line.ok()) << name << ": " << line.error().describe();
+        EXPECT_EQ(*line, "CUSTOMISE REMOVE \"" + name + "\"" + (force ? " FORCE" : ""));
+        const std::string reply = session.ok(*line);
+        EXPECT_TRUE(reply.starts_with("removed definition=")) << name << ": " << reply;
+        EXPECT_TRUE(reply.ends_with(" rules=0 styles=0 layers=0")) << name << ": " << reply;
+        EXPECT_FALSE(session.document.styleLibrary().contains(name)) << name;
+        EXPECT_EQ(session.document.styleLibrary().size(), --left) << name;
+        force = !force;
+    }
+
+    // The two words no line can carry as a name, in any case - and why: the
+    // verb reads each as its own word, so the line an editor would have built
+    // does something else or nothing. A library can hold such a name, out of
+    // a file.
+    for (const char* word : {"CODE", "code", "FORCE", "Force"}) {
+        addDefinition(session.document, word);
+        for (const bool forced : {false, true}) {
+            const auto line = katana::cad::removeDefinitionLine(word, forced);
+            ASSERT_FALSE(line.ok()) << word;
+            EXPECT_EQ(line.error().code, ErrorCode::InvalidArgument) << word;
+        }
+        // Written out all the same, the plain line is a usage refusal: CODE
+        // with no key after it, or FORCE with no definition before it.
+        const katana::core::Error plain =
+            session.refused(std::string("CUSTOMISE REMOVE \"") + word + "\"");
+        EXPECT_EQ(plain.code, ErrorCode::InvalidArgument) << word;
+        EXPECT_TRUE(plain.message.starts_with("usage: CUSTOMISE REMOVE ")) << plain.message;
+        EXPECT_TRUE(session.document.styleLibrary().contains(word)) << word;
+    }
+    // And "remove the definition CODE anyway" is read as "remove the survey
+    // code FORCE", which no rule has.
+    const katana::core::Error misread = session.refused("CUSTOMISE REMOVE \"CODE\" FORCE");
+    EXPECT_EQ(misread.code, ErrorCode::NotFound);
+    EXPECT_EQ(misread.context, "\"FORCE\"");
+    EXPECT_TRUE(session.document.styleLibrary().contains("CODE"));
 }
 
 TEST(CustomisationVerbs, RemovingWhatIsNotThereRemovesNothing)

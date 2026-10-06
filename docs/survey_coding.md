@@ -1693,9 +1693,12 @@ buffer is as it was.
 customisation of survey codes alone, under the session's name - or, while the
 session has none, the file's own name without `.customisation.json`. The file
 is the session's customisation with the buffer's rules in the place of its
-own, cut down to its codes by the ONE rule both managers export by
-(`exportedPart`, `src/katana_qt/customisation/code_manager_support.hpp`;
-`docs/desktop.md`, "Symbol Library", has the table and the reasons):
+own, cut down to its codes by the ONE rule a part of a customisation is
+written by - both managers' exports and `CUSTOMISE EXPORT <file> CODES`
+(`cad::customisationPart`, `include/katana/cad/customisation_part.hpp`;
+`docs/desktop.md`, "Symbol Library", has the table, and
+`docs/customisation.md`, "One rule for a part, whoever writes it", the
+reasons):
 
 - the rules, in the buffer's order - order is precedence, so a rule moved
   between two of another section is written between them
@@ -1704,14 +1707,18 @@ own, cut down to its codes by the ONE rule both managers export by
   brought the session rules, each with its own notice. A notice is "carried
   with the data and shown to whoever uses it" (`docs/customisation.md`), and
   the export first wrote a name and the rules and nothing else, so every rule
-  of a customisation went out under its name without its author's terms;
+  of a customisation went out under its name without its author's terms. The
+  notice of a source the file leaves out - one that brought definitions
+  alone - is written after the session's own: until 2026-10-07 it was
+  dropped with its source, by a rule of the managers' own;
 - the colours of the session's customisation that the rules NAME - a rule's
   colour, its symbol's and its text's, the three places the lint looks - so
   that a code coloured "sui water potable" is that colour where the file
   goes; the table of colours is then a source of the file too;
 - NOT the session's definitions, and nothing of its linework codes or its
   automation switches: a file of codes for a colleague must not reset their
-  control codes.
+  control codes. Nor what the session is based on: a file of codes is not an
+  edition of the built-in.
 
 It reads back as the buffer, rule for rule
 (`ExportedCodesAreAKatanaCustomisationOfTheRulesAloneThatReadsBackAsTheBuffer`),
@@ -1727,8 +1734,11 @@ These two were "Import Code File..." and "Export Code File..." (`importMapfile`,
 `exportMapfile`), reading and writing another program's survey code file,
 until 2026-10-06. Not done:
 
-- Apply does not KEEP - the session is left "not kept" until `CUSTOMISE KEEP`
-  is wired to the manager's commit.
+- Apply does not KEEP. It calls the commit hook round its commit, before
+  `setSurveyMap` and what the hook hands back after
+  (`CustomisationContext::beginCommit`), but the workbench leaves the hook
+  empty, so the session is left "not kept" (`docs/desktop.md`, "The
+  definition editor", "Not done").
 - **The buffer does not know where its rules came from.** Import Codes takes
   a file's rules and nothing else, so the file's notice and its sources stop
   at the buffer: after Apply (`Document::setSurveyMap`, an edit) the session

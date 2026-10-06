@@ -3213,7 +3213,16 @@ void MainWindow::dispatchLine(const QString& line, LineSource source)
     // reason (katana_cad may not see the library readers): the files are merged
     // into what is loaded, or with REPLACE - an unquoted first word - take
     // the place of the kinds they bring. A quoted path may hold spaces.
-    if (verb == "CUSTOMISE" || verb == "CUSTOMIZE") {
+    //
+    // CUSTOMISE REMOVE is NOT taken here: it is the interpreter's
+    // (cad/customisation_verbs.hpp), and the one line of that family a dialog
+    // of this window runs - the definition editor's Delete
+    // (cad::removeDefinitionLine). Taken here, REMOVE was read as a file's
+    // name and Delete deleted nothing. The rest of the family reaches the
+    // window when this whole block goes and the interpreter takes every
+    // CUSTOMISE line; until then a file so called is given with its directory
+    // (./REMOVE), as the family's own rule has it.
+    if ((verb == "CUSTOMISE" || verb == "CUSTOMIZE") && argument != "REMOVE") {
         const QString rest = line.mid(words.front().size());
         std::vector<std::filesystem::path> paths;
         bool replace = false;
