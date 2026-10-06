@@ -436,8 +436,11 @@ with what the loaded customisation means for the drawing open
 Every definition read is stamped with the NAME of the file it came from
 (`LineStyle::source`, from `archive12d::sourceFileName`) - never the path, so
 a library carries no trace of whose disk it was loaded from. A browser groups
-and filters by it, and it is one of D3's four signals that a definition is a
-symbol.
+and filters by it. It was also one of D3's four signals that a definition is a
+symbol - "symbol" anywhere in the file's name - until each definition came to
+say so itself (`LineStyle::symbol`): one customisation holds both kinds under
+one name, so where a definition came from no longer says which it is. This
+reader, which does read one kind a file, sets the flag by that file-name rule.
 
 ### A load goes ON TOP of what is loaded (decision D1)
 
@@ -508,25 +511,25 @@ stored as one `customisation` metadata key, the names separated by line feeds
 a name that is empty or holds a line break or a path separator. See
 `docs/model.md` for the metadata keys an older build keeps for a newer one.
 
-Both front ends fill it through `include/katana/cad/customisation_record.hpp`,
-since `cad` cannot see `archive12d` and a file reaches it as a name and a kind
-(`CustomisationSource`):
+The rules are in `include/katana/cad/customisation_record.hpp`, and the
+Document applies them itself ("The customisation on the Document" below);
+each front end did, before, through lists of its own. A source reaches the
+record as a name and what it brought (`CustomisationSource`):
 
 - **Every load is recorded** (`recordCustomisationLoad`), the built-in's files
-  first. A file loaded again moves to the end; a Replace of a kind drops the
-  earlier files of that kind, which no longer contribute.
-- **A save writes the record** (`customisationRecordToSave`): the loaded files
-  in load order - a library file only while some definition still comes from
-  it - then any definition's `LineStyle::source` no loaded file accounts for,
-  then the names the project already recorded that its OPEN found missing and
-  no load has brought since (`noteCustomisationLoaded`). This session cannot
-  judge those, so saving must not forget them, or every later open anywhere
-  would draw plain lines without a word. File > Save and Save As write it
-  (`MainWindow::recordCustomisation`); a typed `SAVE` writes it only when it
-  can save (`typedSaveHasDestination`: a directory, or none when the drawing
-  already has a project), because writing the metadata marks the drawing
-  modified and a `SAVE` that could not go ahead would leave a drawing nobody
-  touched asking to be saved.
+  first. A source loaded again moves to the end; a Replace of a kind takes
+  what the earlier sources brought of that kind, and a source left bringing
+  neither kind goes.
+- **A save writes the record** (`customisationRecordToSave`): the loaded
+  sources in load order - one that brought definitions alone only while some
+  definition still comes from it - then any definition's `LineStyle::source`
+  no loaded source accounts for, then the names the project already recorded
+  that its OPEN found missing and no load has brought since
+  (`noteCustomisationLoaded`). This session cannot judge those, so saving
+  must not forget them, or every later open anywhere would draw plain lines
+  without a word. The save itself writes it, into what it saves
+  (`Document::save`), so no front end does and a `SAVE` that cannot go ahead
+  marks nothing modified.
 - **An open warns** (`customisationNotLoaded`): the recorded names that are
   not loaded now, in the project's order, compared exactly. The window logs
   "Warning: this project was drawn with customisation files that are not
@@ -544,16 +547,18 @@ earlier definition. Both are known to `include/katana/cad/customisation_record.h
 only by hash (`sourceNameHash`, FNV-1a), so no earlier name is spelt in the
 repository:
 
-- **An earlier file name is answered by the file that took its place**
+- **An earlier file name is answered by what took its place**
   (`builtinRenames`, `RenamedSource`): `customisationNotLoaded` reports it
-  missing only when that file is, so such a project opens without a warning
+  missing only when that is, so such a project opens without a warning
   nobody could clear, and `noteCustomisationLoaded` - through the same helper,
-  so the two cannot disagree - clears it when a load brings the file under its
-  new name; the save then records the new names. One earlier name was a plain
-  one a person's own file could have (`RenamedSource::distinctive` false): it
-  is answered only in a record that also holds a distinctive earlier name of
-  the same set, so recorded alone, or beside the new names, it is that
-  person's file - reported missing and kept by the save.
+  so the two cannot disagree - clears it when a load brings it under its new
+  name; the save then records the new name. One earlier name was a plain one
+  a person's own file could have (`RenamedSource::distinctive` false): it is
+  answered only in a record that also holds another earlier name of the same
+  set, so recorded alone, or beside names that are not of its set, it is that
+  person's file - reported missing and kept by the save. The table has grown
+  a second set, the four general names, and answers with the built-in's own
+  name ("What a project records, now that the Document keeps it" below).
 - **An earlier definition name** is given its current one by
   `definitionNameNow` (`builtinDefinitionRenames`), asked only after an exact
   lookup missed, so a person's own definition that still has such a name is
@@ -565,13 +570,318 @@ repository:
 An older build opening a project this one saved warns about the four general
 names; nothing on this side can change that.
 
-Not done: a save that has somewhere to go but still fails (an I/O error, a
-directory `ProjectStore::create` refuses) leaves the record written and the
-drawing marked modified, because `Document::setMetadata` cannot be taken
-back; `Document::save` taking the metadata and committing it only on success
-would fix it. A library file loaded whose every definition a later file
-replaced counts as not loaded, so opening names it - a warning in excess, not
-one missed.
+Fixed (2026-10-06): a save that has somewhere to go but still fails (an I/O
+error, a directory `ProjectStore::create` refuses) used to leave the record
+written and the drawing marked modified, because `Document::setMetadata`
+cannot be taken back. The save now writes the record into what it saves and
+commits it to the metadata only on success
+(`CustomisationState.ASaveThatFailsPartWayLeavesTheRecordAndTheDrawingAsTheyWere`
+makes the store refuse a save and finds the metadata, the modified flag and
+the project untouched).
+
+Not done: a source that brought definitions alone, every one of which a later
+load replaced, counts as not loaded, so opening names it - a warning in
+excess, not one missed. And any later install of a customisation whose
+sources still list it takes it off the missing names, so the next save lets
+it go: the session loaded it and replaced it, which is a judgement, but it is
+made at the install rather than at the load.
+
+Not done, and the reason this change is committed only together with the one
+that moves the front ends onto `startCustomisation`: **until a front end
+hands over a host, the built-in's earlier names are answered by nothing.**
+The Document answers them with the name its host's built-in declares
+(`CustomisationState::builtIn`), and neither front end tells it one yet; the
+table they used before answered each first name with one of the four general
+file names. So a project recording the four first names now opens with a
+warning of four missing files, and every save keeps them - wherever the four
+files are loaded under their general names: compiled in, found beside the
+program, or named to `CUSTOMISE`. In a build that has the four files
+compiled in, `tests/archive12d/test_builtin_renames.cpp` also fails (it
+expects four renames naming the four files; there are eight, naming the
+built-in), and is retired with the reader it tests.
+
+Two more things the front ends do differently since the Document took the
+record over, both meant: `NEW` clears the names the last open found missing
+(they were the old project's), and EVERY `Document::save` and `saveAs` writes
+the record - a script, a test or a tool that saves a Document, where only a
+front end's own Save and typed `SAVE` did.
+
+## The customisation on the Document: state, merge, start-up
+
+(2026-10-06.) The Katana customisation format (`docs/customisation.md`) made a
+customisation ONE value, `entity::Customisation`. This is what `cad` does with
+one: where a session's customisation lives, how another is merged into it, and
+what a session starts with. **No verb and neither front end uses it yet.** The
+window and `katana_cli` still seed from the older built-in and load style
+libraries and survey code files as the sections above describe, until they
+are moved onto `startCustomisation` and a shared `CUSTOMISE` verb; this is the
+ground those stand on, with its own tests.
+
+### The state
+
+The library and the survey map were all a Document held; each front end kept
+the rest in lists of its own, and a verb in the shared interpreter can reach
+neither. `Document::customisationState()`
+(`include/katana/cad/customisation_state.hpp`) now holds everything else the
+session knows of its customisation:
+
+| Member | What it is |
+|---|---|
+| `name`, `description`, `notice` | the customisation's own; a session whose library or map was set directly keeps the name it had |
+| `origin` | `none`, `builtIn`, `kept`, `loaded` or `edited` (`CustomisationOrigin`) |
+| `sources` | what went into the session, in load order: name, whether it brought definitions, whether it brought rules, its notice |
+| `basedOn` | the customisation a kept or edited copy started from: a name and the digest of its file |
+| `colours` | the colour table |
+| `linework` | the linework control codes - the defaults until a customisation or a setter says otherwise |
+| `automation` | what is applied to survey data without being asked for |
+| `kept` | the session is what the next start would give |
+| `missingAtOpen` | the names the open project recorded that this session lacks |
+| `builtIn` | the name the host's built-in declares, installed or not |
+
+It is session data as the library and the map are: not undoable, not in the
+project, kept across NEW and OPEN. **A default Document has none of it and
+installs none**; about thirty tests and `Session(nullptr)` rely on a Document
+that starts empty.
+
+- `installCustomisation(customisation, origin, kept)` installs a whole one in
+  the session's place; `customisation()` gives the session back as one - what
+  an export or a KEEP writes, and what a merge starts from. The two are
+  inverses, also through the file (`CustomisationState.TheSessionAsOneCustomisationInstallsBackAsTheSameSession`).
+  A customisation that lists no sources is its own one source. **One that says
+  nothing of the linework codes or the switches installs the DEFAULTS**, not
+  what the session had: an install takes the place of the whole session, and
+  installed `kept` it must be the session the next start gives - a start that
+  has no earlier session to have left its spellings behind. Rejected: leaving
+  the session's alone, which is what this did at first. It is the MERGE's
+  rule, and a load gets it there (the session always says its own, and the
+  merge carries them forward); on an install it meant a reset to the built-in
+  kept the control codes and the switches it was asked to reset, while the
+  state read `builtIn` and `kept`.
+- An install is refused, and nothing changes, for whatever would make the
+  session unfit to be kept or recorded (`customisationFaults`): its name, a
+  source's name or a definition's `source` that a project's record could not
+  hold - the store refuses a name with a line break or a path separator, and
+  every save of the session would then fail - linework codes `validate`
+  refuses, and a `basedOn` the kept file's writer refuses. One list, which a
+  merge reports whole for each customisation of a load, so what a load is
+  told and what an install refuses cannot come to differ. A customisation
+  read from a file has passed all of it already; one built in code has not.
+- The raw `setStyleLibrary` / `setSurveyMap` are what an editor calls, and an
+  edit they are: origin `edited`, `kept` false. `setColourTable`,
+  `setLineworkCodes` and `setAutomation` are the same for their parts.
+- `DocumentChange::Customisation` is bit 18. It is outside `kDrawing` (a name
+  or a switch draws nothing) and no part of a Replaced drawing (the
+  customisation is kept). What does change the drawing is reported with it: an
+  install also names `StyleLibrary` and `SurveyMap`, a colour table
+  `StyleLibrary`. **A colour table bumps `libraryGeneration` too**, because a
+  sprite or a thumbnail of a definition bakes in the colours its pens resolved
+  to and is dropped only on that counter.
+- The raw setters still notify EXACTLY what they did
+  (`DocumentChanges.MetadataLibraryAndSurveyMapEachReportTheirOwnPart` pins it),
+  although they now also mark the origin. A panel showing the origin compares
+  `customisationGeneration()`, which every change of the state moves. Rejected:
+  a second notification from the setter - every plan view repaints on each.
+
+**Rejected: deriving `kept` from the origin.** A reset to the built-in while a
+kept file exists is `builtIn` and NOT what the next start gives. It is a flag
+of its own, set by whoever knows.
+
+### What a project records, now that the Document keeps it
+
+Five call sites in two front ends wrote the record before a save and worked
+out what was missing after an open. That logic is the Document's:
+
+- **`Document::open` works out `missingAtOpen`** (`customisationNotLoaded`),
+  and reports `Customisation` when it changed. The front end says the warning
+  in its own words from that list. **`newDocument` clears it** - left standing,
+  a bare `CUSTOMISE` after OPEN then NEW went on naming the old project's
+  files.
+- **A save writes the record INTO WHAT IT SAVES** (`customisationRecordToSave`
+  in `Document::saveContents`) and `metadata()` reads it back only once the
+  save has succeeded. It no longer goes through `setMetadata`, which marks the
+  drawing modified - so the old trouble is gone at the root: a `SAVE` that
+  cannot go ahead leaves an untouched drawing unmodified, and a save that
+  fails part way leaves the metadata as it was. `typedSaveHasDestination`
+  stays for the reference layers, which a front end still writes through
+  `setMetadata`.
+- **A source carries two flags** (`CustomisationSource`: `definitions`,
+  `rules`) where it had one `library` bool. A style library brought
+  definitions and a survey code file rules, but one Katana customisation
+  brings both, and a Replace takes the place of one kind at a time: a source
+  that brought both then keeps the other kind, and one left with neither goes.
+  A source that brought definitions ALONE is recorded only while some
+  definition still comes from it; one that brought rules is taken at its word.
+  `CustomisationSource` is the very entry a file keeps in its `"sources"`, so
+  the session's load record is written and read back without a second type.
+- **The built-in's earlier names are answered by the built-in's own name.**
+  `builtinRenames(builtIn)` gives eight entries in two sets: the four first
+  file names, known by hash, and the four general names the files had next
+  (`linestyles.4d`, `survey_codes.mapfile`, `survey_codes_names.mapfile`,
+  `symbols.4d`). The general names are all PLAIN - anyone's own files might
+  have them - and a plain name is answered only beside ANOTHER earlier name of
+  its own set: the record of the built-in holds all four, and a person's own
+  `symbols.4d` recorded alone is still that person's file, missing when it is.
+  The name is not written in the source: the Document passes the name its
+  host's built-in declares (`CustomisationState::builtIn`), and
+  `builtinRenames()` with none takes the compiled-in customisation's, which is
+  empty - and answers nothing - in a build that has none. That form is for a
+  caller with no Document to ask. `customisationNotLoaded`,
+  `noteCustomisationLoaded` and `customisationRecordToSave` take the table
+  they are given and no longer have a form that takes none: it answered with
+  whatever this program had compiled in, which is not the built-in of a run
+  the seam gave another, and it made a test's answer a matter of which
+  machine built it.
+
+**Rejected: answering with the session's own name.** After `CUSTOMISE REPLACE`
+with a council's customisation the session is that council's, and the four
+names a project recorded for the built-in's files would be "answered" by a
+customisation that has none of what they brought.
+
+**Rejected: marking the general names distinctive.** Then a person's own
+`symbols.4d`, missing, passes as loaded - the one mistake the record may not
+make. Marked plain under the old rule (answered only beside a DISTINCTIVE
+name) they answered nothing, since a record of the four holds no distinctive
+name; hence the set.
+
+### The merge
+
+`cad::mergeCustomisation(current, loaded, LoadMode)`
+(`include/katana/cad/customisation_merge.hpp`) is the rule of "A load goes ON
+TOP of what is loaded" above, unchanged, over `entity::Customisation`: the
+session and one or more loaded customisations in, what to install and a
+report out. The twelve tests it came with were moved with it and keep their
+expectations (`tests/cad/customisation/test_customisation_merge.cpp`); the
+older merge stays where it is until the front ends leave it.
+
+What one customisation holds beyond definitions and rules is merged by what
+it is:
+
+- **Colours by name**, compared as colour names are (`entity::foldColourName`):
+  a loaded name takes the place of the session's, in both modes. A colour is
+  no kind a Replace takes the place of.
+- **Linework codes and automation only when the loaded customisation SAYS
+  them.** A file of symbols for a colleague must not reset their control
+  codes; absent is not the defaults.
+- **Sources are recorded**, each loaded customisation by name with what it
+  brought and its notice. One that LISTS its sources - every customisation a
+  session writes does - brings those instead. **Its own notice is never
+  dropped**: a session writes it at the top level and leaves the entry of its
+  own name without one, so merged into another session it goes onto that
+  entry (a line said in both places is said once). One that lists no source
+  of its name - written under another name than the session had - gives it to
+  every source it lists, since nothing says which of them it came with.
+  Rejected: an entry of its own name that brought neither kind, which would
+  put a name into every project's record only for customisations that happen
+  to have a notice.
+- **The session keeps its name.** A load is added to it. It takes the first
+  loaded customisation's name, description and notice when it has no name
+  yet, and when a Replace brought BOTH kinds - nothing of the session's
+  definitions or rules is then left for its name to be about.
+- **A load is all or nothing.** Every problem is listed, each naming its
+  customisation, and with any problem `merged` is the session as it was. The
+  two front ends had come to differ on exactly this: one failed a load with a
+  problem, the other installed the rest.
+
+### The built-in, and the seam
+
+One Katana customisation file is compiled into `katana_cad` with `#embed`
+(`src/katana_cad/customisation/builtin_customisation.cpp`), as the plot frame
+is. The file is NOT in the repository - it is third-party material,
+git-ignored - so a clean checkout and every CI build have none, and that is a
+state the program runs in rather than a fault:
+
+- `KATANA_BUILTIN_CUSTOMISATION` (a CMake FILEPATH,
+  `resources/customisation/nsw.customisation.json` by default) names the file.
+  Present, it is embedded; absent, the program has no built-in. Whether it is
+  there is asked of the file (`if(EXISTS ... AND NOT IS_DIRECTORY ...)`), not
+  of a glob: to a glob the path is a pattern, so a checkout under a directory
+  with a `[` in its name had no built-in though the file was there, and a
+  directory of that name was taken for the file. A `CONFIGURE_DEPENDS` glob is
+  still there, over the path with its pattern characters bracketed, for the
+  one thing it is for: a file put there after the configure is picked up by
+  the next build.
+- `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes its absence a configure
+  error, for a release job that must not ship drawing plain lines. The
+  configure checks that the file is THERE; that it READS is a test's to say
+  (`CustomisationHost.TheCompiledInCustomisationIsReadOrThereIsNoneAndNeverOneThatDidNotRead`),
+  which fails a build whose compiled-in file is not a customisation.
+- `compiledInCustomisation()` parses it once, at the first call. One that does
+  not parse is REPORTED, never thrown: the program starts and says so.
+
+**The seam.** The environment variable `KATANA_BUILTIN_CUSTOMISATION` says
+what "the built-in" is for one run, whatever was compiled in: unset, the
+compiled-in one; `none`, no built-in; anything else, that Katana customisation
+FILE is the built-in. It is read in one place, `builtInCustomisation()` -
+which is what a front end asks for its host, not `compiledInCustomisation()`.
+It exists so that a test of a program is the same test on a machine whose
+build has the built-in and on one whose build has not. A file the seam names
+that does not read gives NO built-in and the reason - never the compiled-in
+one in its place, which would pass a test that named a fixture and was given
+something else.
+
+What the variable's value MEANS is a function of its own,
+`builtInCustomisationFor(seam, compiledIn)`, so that the rule is tested
+against a stand-in for the compiled-in customisation: tested only through
+the environment, "whatever is compiled in" could not fail in a build that
+compiled nothing in, which is every clone and CI. The file is named as text,
+through `core::pathFromUtf8`: an environment gives narrow bytes, on Windows
+in the ANSI code page, and a `std::filesystem::path` built straight from
+those throws at the first that is not UTF-8 - out of a function that promises
+to report and never throw.
+
+The older embedding (`tools/embed_customisation.py`, four files) and
+`archive12d::builtinCustomisation()` are still what the front ends call, and
+stay until they are moved.
+
+### What a session starts with
+
+A front end hands over a `CustomisationHost`
+(`include/katana/cad/customisation_host.hpp`): the built-in, which a build may
+not have, and the path of the file the user keeps their own in, which a front
+end may not have. `startCustomisation(document, host)` installs the kept file
+when it exists and reads (origin `kept`), else the built-in (origin
+`builtIn`), else nothing, and what it installs is `kept`. Its report says
+what was installed, with counts, and every problem in a sentence.
+
+- A kept file that does not read is REPORTED and the built-in stands in for
+  it, rather than the session starting with nothing.
+- The built-in is installed based on ITSELF (`basedOn` its own name and the
+  digest of its own bytes), so a copy kept from it later says what it was made
+  from - whatever the built-in's file says IT was made from. A built-in that
+  was itself exported from a session names an earlier customisation; kept as
+  that, every copy made from it carried a digest that is not this built-in's
+  and was reported as made from another, at every start. A kept file whose
+  `basedOn` is not this built-in's name and digest is installed all the same
+  and reported (`keptFromAnotherBuiltIn`): it is the user's, and they may want
+  to know the built-in has moved on.
+- What a start installs is the session the NEXT start would give, the control
+  codes and the switches included: starting over a changed session - which is
+  what a reset to the built-in is - leaves the session a new Document started
+  with the same host has
+  (`CustomisationStart.StartingOverAChangedSessionGivesTheSessionAFreshStartGives`).
+- A Document given no host installs nothing.
+
+Reading a file's bytes and turning typed text into a path are core's
+(`include/katana/core/path_text.hpp`): the UTF-8 path helper was private to
+the sheet verbs, with a second copy in the utility verbs. `ifc::pathFromUtf8`
+is core's now too, under the name its callers use; its own conversion threw
+on a name that is not UTF-8. What the standard library does with narrow bytes
+was probed rather than assumed (GCC 16.2, 2026-10-06): `std::filesystem::path`
+converts them as UTF-8 and throws at the first byte that is not. Not done:
+`src/katana_surveyio/reader.cpp` keeps a private copy of the old conversion
+for a file named inside a field file. Whether a name that is not UTF-8 can
+reach it was not looked into, and it was left as it is.
+
+### One resolver for a colour name
+
+`cad::resolveColour(document, name)` (`include/katana/cad/colour_lookup.hpp`)
+is the Document's customisation table, then the standard names;
+`colourLookup(document)` is the same as a function, in the shape
+`SurveyCodingOptions::colourOf` and `ColourLookup` take. It asks the Document
+at each call, so it follows a table installed later. **A caller that passes no
+lookup still gets no colours** - it is offered, not applied behind anyone's
+back, and `ColourLookup.SurveyCodingGivenNoLookupStillLeavesColoursAloneWhateverTheDocumentKnows`
+holds that.
 
 ## Writing it back
 
@@ -878,12 +1188,13 @@ written, a WARNING one that applies but not as its author meant.
 | `KeyWhitespace` | error | a key with surrounding blanks, which no typed code matches |
 | `UnresolvedLinestyle` | warning | a linestyle no loaded library defines |
 | `UnresolvedSymbol` | warning | a symbol no library defines and Katana cannot draw |
-| `SymbolNotSymbolCapable` | warning | a symbol rule naming a definition known not to be a symbol (D3; one read from no known file gets the benefit of the doubt) |
+| `SymbolNotSymbolCapable` | warning | a symbol rule naming a definition that is not a symbol: neither `mode vertex` nor listed as one by its customisation (D3, `LineStyle::symbol`). A definition read from no known file once got the benefit of the doubt, when the sign was the file's name; every definition says which it is now |
 | `LinestyleIsVertex` | warning | a linestyle naming a `mode vertex` definition |
 | `UnknownColour` | warning | a colour name the colour table does not know |
 | `NoModel` | warning | a `map_data` rule that puts its code nowhere |
 | `DuplicateRule` | warning | the same as an earlier rule, field for field |
 | `ShadowedRule` | warning | earlier rules of its key already say all it says |
+| `FieldOutsideSection` | warning | a field its section does not use - a symbol rule that also names a layer. A lookup applies it, so it is no error; but a rule is known by its key IN ITS SECTION and that is what a load replaces, so the field comes and goes with rules it has nothing to do with. The table of which section uses which field is the one the survey code file writer enforced by refusing to write such a rule |
 
 `SurveyMap::add` refuses a key with blanks and an invalid layer path, so those
 two can be met only by `lintSurveyRule` on a rule not yet in a map - an

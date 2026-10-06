@@ -181,6 +181,12 @@ enum class LintKind {
     DuplicateRule,          // the same as an earlier rule, field for field
     ShadowedRule,           // earlier rules with its key already say all it says
     KeyWhitespace,          // a key with surrounding blanks, which matches no code typed
+    // A field its section does not use: a symbol rule that also names a layer.
+    // The model allows it and a lookup applies it; a rule's identity in a
+    // load is its key in its section, though, so such a field is replaced
+    // along with rules it does not belong to. (Last, so that the order the
+    // issues of one rule are listed in is unchanged for the kinds before it.)
+    FieldOutsideSection,
 };
 
 [[nodiscard]] const char* toString(LintSeverity severity);
@@ -201,12 +207,12 @@ struct LintIssue {
 // KeyWhitespace and InvalidLayerPath can only be seen here, on a rule not
 // yet in a map. `index` is what the issues cite.
 //
-// A symbol is taken to be symbol-capable when it is `mode vertex` or was read
-// from a file whose name contains "symbol" (decision D3); one read from
-// somewhere unknown (LineStyle::source empty) is given the benefit of the
-// doubt, because most symbols the reference mapfiles use are not `mode
-// vertex`. `colourOf` and `isBuiltInSymbol` may be empty: then no colour is
-// checked, and no symbol name is excused as built in.
+// A symbol is taken to be symbol-capable when it is `mode vertex` or its
+// customisation lists it as a symbol (LineStyle::symbol; decision D3) - most
+// symbols the reference survey codes use are not `mode vertex`. A definition
+// says which it is, so none is of unknown kind: one not listed as a symbol is
+// a linestyle. `colourOf` and `isBuiltInSymbol` may be empty: then no colour
+// is checked, and no symbol name is excused as built in.
 [[nodiscard]] std::vector<LintIssue> lintSurveyRule(const katana::entity::SurveyRule& rule,
                                                     std::size_t index,
                                                     const katana::entity::StyleLibrary& library,

@@ -106,9 +106,10 @@ parseRulesArguments(std::string_view argument);
 // naming the file when it cannot be written.
 [[nodiscard]] core::Result<std::string> writeDefaultRules(std::string_view path);
 
-// A path given as UTF-8 text, as the filesystem takes it on every platform
-// (on Windows a narrow std::filesystem::path would read it in the ANSI code
-// page).
+// A path given as text: core::pathFromUtf8 (core/path_text.hpp), under the
+// name the IFC verbs and both front ends already call it by. UTF-8 is read as
+// UTF-8, and bytes that are not - a name from an ANSI console - as the narrow
+// name they are, where building the path from them threw.
 [[nodiscard]] std::filesystem::path pathFromUtf8(std::string_view text);
 
 // What an export names, read and checked, ready for writeIfc: the graded

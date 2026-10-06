@@ -148,7 +148,7 @@ QString modeText(const katana::cad::CatalogueEntry& entry)
     if (entry.kind.namedByStyle) {
         reasons << QStringLiteral("a style names it as one");
     }
-    if (entry.kind.fromSymbolFile) {
+    if (entry.kind.listedAsSymbol) {
         reasons << QStringLiteral("its file is a symbol file");
     }
     return QStringLiteral("along a line; a symbol because %1")
