@@ -32,14 +32,23 @@ using katana::entity::SurveyMatchKind;
 // key holds a blank (SurveyMap::add refuses it). So a point is coded by its
 // string name, as processLinework reads the same field. Any other entity's
 // code is taken as it is: the lines linework makes carry the name alone.
-[[nodiscard]] std::string codeToLookUp(const Entity& entity, const std::string& code)
+//
+// Either is then followed by the string number the entity carries beside its
+// code, when it carries one (surveyLookupName says when that name is the one
+// looked up). Without one this is the code, exactly as it was.
+[[nodiscard]] std::string codeToLookUp(const katana::entity::SurveyMap& map, const Entity& entity,
+                                       const std::string& code)
 {
-    if (entity.type() != katana::entity::EntityType::Point) {
-        return code;
+    std::string name = code;
+    if (entity.type() == katana::entity::EntityType::Point) {
+        FieldCode field = parseFieldCode(code, LineworkCodes{});
+        // Blanks alone have no first token; the field is then reported as it is.
+        if (!field.name.empty()) {
+            name = std::move(field.name);
+        }
     }
-    FieldCode field = parseFieldCode(code, LineworkCodes{});
-    // Blanks alone have no first token; the field is then reported as it is.
-    return field.name.empty() ? code : std::move(field.name);
+    const std::string_view string = surveyStringOf(entity);
+    return string.empty() ? name : surveyLookupName(map, name, string);
 }
 
 using katana::core::lowered;
@@ -240,6 +249,46 @@ const std::vector<std::string>& codePropertyCandidates()
     return candidates;
 }
 
+std::string_view surveyStringOf(const Entity& entity)
+{
+    const auto found = entity.properties.find(kSurveyStringProperty);
+    if (found == entity.properties.end()) {
+        return {};
+    }
+    const auto* text = std::get_if<std::string>(&found->second);
+    return text != nullptr ? katana::core::trimmed(*text) : std::string_view{};
+}
+
+std::string surveyLookupName(const katana::entity::SurveyMap& map, std::string_view code,
+                             std::string_view string)
+{
+    if (code.empty() || string.empty()) {
+        return std::string(code);
+    }
+    std::string name(code);
+    name += string;
+    // Most specific first, so when the first rule is the bare "*" nothing
+    // else answers the name: a handful of hash probes, not a combined lookup.
+    const auto rules = map.match(name);
+    if (rules.empty() || rules.front()->key == "*") {
+        return std::string(code);
+    }
+    // The best rule for the name. An exact key, or a prefix as long as the
+    // code or longer ("KJ*" for KJ, "B1*" for B), was written for the
+    // numbered names of this code. A SHORTER prefix ("PA*" for PABB) is a
+    // rule for a family of codes: it answers the code itself too, and less
+    // well than an exact key the code has of its own - which the number must
+    // not take the code away from.
+    const std::string& best = rules.front()->key;
+    if (best.back() == '*' && best.size() - 1 < code.size()) {
+        const auto own = map.match(code);
+        if (!own.empty() && own.front()->key == code) {
+            return std::string(code);
+        }
+    }
+    return name;
+}
+
 const std::string* surveyCodeOf(const Entity& entity, const std::string& property)
 {
     for (const katana::entity::PropertyMap* where : {&entity.properties, &entity.metadata}) {
@@ -375,7 +424,7 @@ applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
         }
         if (const std::string* code = surveyCodeOf(*entity, property); code != nullptr) {
             ++tally.coded;
-            entitiesByCode[codeToLookUp(*entity, *code)].push_back(id);
+            entitiesByCode[codeToLookUp(map, *entity, *code)].push_back(id);
         }
     }
 
