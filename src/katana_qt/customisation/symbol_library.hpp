@@ -15,10 +15,11 @@
 //           actions
 //
 // WHAT IS LISTED is cad::symbolLibrary: decision D3's symbols (a definition
-// is a symbol when it is `mode vertex`, a survey code draws it as one, a
-// style names it as one, or its file is a symbol file), the built-in shapes,
-// and every symbol name a style or a code gives that nothing defines, marked
-// in the pickers' amber with the shape it is drawn as instead.
+// is a symbol when it is drawn at vertices, a survey code draws it as one, a
+// style names it as one, or its customisation lists it as a symbol), the
+// built-in shapes, and every symbol name a style or a code gives that
+// nothing defines, marked in the pickers' amber with the shape it is drawn
+// as instead.
 //
 // THE ACTIONS. Model changes go through Document::execute, one undo step
 // each, and only ever from a button - never from the grid's own selection
@@ -32,18 +33,24 @@
 //                               selected and shown (CustomisationContext)
 //   Replace in Styles           cad::replaceSymbolInStyles: every style
 //                               naming the current symbol names another
-//   Load .4d...                 archive12d::readCustomisation, MERGED into
-//                               the session's library (decision D1: never a
-//                               Replace from here), with what each file
-//                               added and replaced written to the log
-//   Export Selected to .4d...   archive12d::writeStyleLibrary of the
-//                               selected library definitions
+//   Import Definitions...       a Katana customisation file's DEFINITIONS
+//                               and colours (docs/customisation.md), MERGED
+//                               into the session's through
+//                               cad::mergeCustomisation (decision D1: never
+//                               a Replace from here), with what it added and
+//                               replaced written to the log; its survey code
+//                               rules and settings are left alone and counted
+//   Export Selected...          the selected library definitions as a Katana
+//                               customisation file, with the session's
+//                               notice, the sources that brought it
+//                               definitions and the colours their pens name
 //
-// HEADLESS. A headless session never opens a file dialog: loading and
-// exporting are loadLibraryFile / exportSelectedTo, taking a path, which the
-// buttons call once a file dialog has given one. In a headless session (the
-// offscreen platform, or setHeadless) the buttons ask chooseLoadFile /
-// chooseExportFile when set and otherwise say in the log what to call.
+// HEADLESS. A headless session never opens a file dialog: importing and
+// exporting are importDefinitionsFile / exportSelectedTo, taking a path,
+// which the buttons call once a file dialog has given one. In a headless
+// session (the offscreen platform, or setHeadless) the buttons ask
+// chooseImportFile / chooseExportFile when set and otherwise say in the log
+// what to call.
 //
 // LIFETIME. The dialog may outlive its Document: it watches it through a
 // DocumentWatcher (its last member) and does nothing once it has gone.
@@ -123,11 +130,25 @@ class SymbolLibraryDialog : public QDialog {
     // Refused (and logged) for an empty `replacement`: taking a symbol off
     // its styles is not a replacement.
     bool replaceInStyles(const std::string& replacement);
-    // Reads a customisation file (a .4d library, or a survey code file - the
-    // extension does not say which) and MERGES it into the session's
-    // customisation.
-    bool loadLibraryFile(const std::filesystem::path& path);
-    // Writes the selected library definitions to a .4d file. Built-in and
+    // Reads a Katana customisation file and MERGES its definitions and its
+    // colours into the session's customisation (cad::mergeCustomisation,
+    // then Document::installCustomisation, as every load is). The survey
+    // code rules, linework codes and automation switches the file also holds
+    // are not taken - the Survey Code Manager imports rules - and the log
+    // says how many were left; a source the file lists that brought it
+    // nothing but rules is not made a source of the session either
+    // (sourcesOfPart, code_manager_support.hpp). False, with the reason in
+    // the log and the session as it was, for a file that does not read (one
+    // in another format is "not a Katana customisation file") or holds
+    // neither.
+    bool importDefinitionsFile(const std::filesystem::path& path);
+    // Writes the selected library definitions to a Katana customisation file
+    // under the session's name (exportedCustomisationName), with what of the
+    // session belongs with them (exportedPart, code_manager_support.hpp): its
+    // description and its author's notice, the sources that brought it
+    // definitions, each with its notice, and the colours the selected pens
+    // name, so that the file draws elsewhere as it draws here. Not its
+    // rules, and not its linework codes or automation switches. Built-in and
     // undefined names cannot be written, and are named in the log.
     bool exportSelectedTo(const std::filesystem::path& path);
 
@@ -136,7 +157,7 @@ class SymbolLibraryDialog : public QDialog {
     void setHeadless(bool headless) { headless_ = headless; }
     [[nodiscard]] bool headless() const { return headless_; }
     // Asked instead of a file dialog when set; an empty path cancels.
-    std::function<std::filesystem::path()> chooseLoadFile{};
+    std::function<std::filesystem::path()> chooseImportFile{};
     std::function<std::filesystem::path()> chooseExportFile{};
 
   private:
@@ -155,7 +176,7 @@ class SymbolLibraryDialog : public QDialog {
     void updatePrintSize();
     void showFilledRows();
     void updateActions();
-    void loadClicked();
+    void importClicked();
     void exportClicked();
     [[nodiscard]] QImage pictureOf(const katana::cad::SymbolLibraryEntry& entry) const;
     [[nodiscard]] const katana::cad::SymbolLibraryEntry* currentEntry() const;

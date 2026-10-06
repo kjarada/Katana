@@ -22,8 +22,8 @@
 #include "customisation/code_manager.hpp"
 #include "customisation/code_manager_support.hpp"
 #include "customisation/name_picker.hpp"
-#include "katana/archive12d/domain.hpp"
 #include "katana/cad/code_edit.hpp"
+#include "katana/cad/colour_lookup.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/tables.hpp"
 
@@ -199,7 +199,7 @@ QWidget* SurveyCodeManagerDialog::buildRuleForm()
     ruleModelStatus_->setObjectName(QStringLiteral("ruleModelStatus"));
     ruleColour_ = new QComboBox(mapPage);
     ruleColour_->setObjectName(QStringLiteral("ruleColour"));
-    makeColourField(ruleColour_);
+    makeColourField(ruleColour_, context_.document);
     ruleBreakline_ = choiceField(mapPage, "ruleBreakline", {tr("(not set)"), tr("Line"), tr("Point")});
     ruleLinestyle_ = new NamePicker(context_, katana::cad::NameRole::Linetype, false, mapPage);
     ruleLinestyle_->setObjectName(QStringLiteral("ruleLinestyle"));
@@ -221,7 +221,7 @@ QWidget* SurveyCodeManagerDialog::buildRuleForm()
     ruleSymbol_->setObjectName(QStringLiteral("ruleSymbol"));
     ruleSymbolColour_ = new QComboBox(symbolPage);
     ruleSymbolColour_->setObjectName(QStringLiteral("ruleSymbolColour"));
-    makeColourField(ruleSymbolColour_);
+    makeColourField(ruleSymbolColour_, context_.document);
     ruleSymbolSize_ = lineField(symbolPage, "ruleSymbolSize");
     ruleSymbolSize_->setPlaceholderText(tr("the definition's own size"));
     ruleSymbolRotation_ = lineField(symbolPage, "ruleSymbolRotation");
@@ -243,7 +243,7 @@ QWidget* SurveyCodeManagerDialog::buildRuleForm()
     ruleTextStyle_ = lineField(textPage, "ruleTextStyle");
     ruleTextColour_ = new QComboBox(textPage);
     ruleTextColour_->setObjectName(QStringLiteral("ruleTextColour"));
-    makeColourField(ruleTextColour_);
+    makeColourField(ruleTextColour_, context_.document);
     ruleTextType_ = choiceField(textPage, "ruleTextType", {QString(), QStringLiteral("paper"),
                                                            QStringLiteral("world")}, true);
     ruleTextSize_ = lineField(textPage, "ruleTextSize");
@@ -498,7 +498,7 @@ katana::core::Result<SurveyRule> SurveyCodeManagerDialog::formRule() const
     // Start from the rule being edited, so that what the form does not show
     // (a text style's slant, a pipe rule's attributes) is kept - unless the
     // section changed, when the old section's fields would be ones the new
-    // section cannot carry (the mapfile writer refuses those).
+    // section is not about (the lint reports a field outside its section).
     SurveyRule rule;
     if (formIndex_) {
         if (auto current = buffer_.at(*formIndex_); current && current->section == section) {
@@ -603,8 +603,7 @@ void SurveyCodeManagerDialog::updateFormIssues()
         doc == nullptr
             ? std::vector<katana::cad::LintIssue>{}
             : katana::cad::lintSurveyRule(
-                  *rule, index, doc->styleLibrary(),
-                  [](std::string_view name) { return katana::archive12d::standardColour(name); },
+                  *rule, index, doc->styleLibrary(), katana::cad::colourLookup(*doc),
                   [](std::string_view name) { return katana::entity::isBuiltInSymbolName(name); });
 
     // The layer, checked as the entity tables check it (lint's

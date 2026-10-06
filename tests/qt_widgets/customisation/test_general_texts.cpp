@@ -3,13 +3,20 @@
 // another program. Every text a widget can show is walked - titles, tips,
 // button and label texts, placeholders, a combo's items and a view's cells
 // and headers, an action's text and tips - over the committed hand-written
-// fixture customisation (tests/archive12d/data/customisation), with a style
-// on a library linestyle and one on the plain line selected, so the texts
-// that depend on a selection are shown too. The file dialogs the managers
-// open are caught as they open, read and cancelled.
+// fixture customisation (tests/data/customisation, read through
+// fixture_customisation.hpp), with a style on a library linestyle and one on
+// the plain line selected, so the texts that depend on a selection are shown
+// too. The file dialogs the managers open are caught as they open, read and
+// cancelled.
 //
 // Each test also asserts a text it expects in the new words, so a walk that
 // found nothing cannot pass for one that found nothing wrong.
+//
+// The three managers are held to one thing more since they read and write
+// Katana customisation files: none of their texts names a file of the older
+// formats - a `.4d` or `.mapfile` suffix, a "survey code file", a "style
+// library", a "symbol file". The Format menu's own items are not yet: the
+// window's loading of a customisation is other work's.
 
 #include <gtest/gtest.h>
 
@@ -43,8 +50,8 @@
 
 #include "customisation/code_manager.hpp"
 #include "customisation/customisation_workbench.hpp"
+#include "customisation/fixture_customisation.hpp"
 #include "customisation/symbol_library.hpp"
-#include "katana/archive12d/customisation.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -56,12 +63,6 @@ using katana::qt::CustomisationServices;
 using katana::qt::CustomisationWorkbench;
 
 namespace {
-
-const std::filesystem::path kFixture = std::filesystem::path(__FILE__)
-                                           .parent_path()
-                                           .parent_path()
-                                           .parent_path() /
-                                       "archive12d" / "data" / "customisation";
 
 // One text a person can read, and where it was found.
 struct Seen {
@@ -204,6 +205,23 @@ void expectNoneNamesAnotherProgram(const std::vector<Seen>& seen)
     }
 }
 
+// Fails once for each text that names a file of the formats the managers no
+// longer read or write, in any letter case. What they read and write now is
+// a "Katana customisation (*.customisation.json *.json)". "mapfile" is
+// looked for bare, with no dot before it: "the mapfile" in a tip names that
+// format as surely as its suffix does.
+void expectNoneNamesAnOlderFormat(const std::vector<Seen>& seen)
+{
+    for (const Seen& each : seen) {
+        for (const char* word :
+             {".4d", "mapfile", "survey code file", "style library", "symbol file"}) {
+            EXPECT_FALSE(each.text.contains(QString::fromLatin1(word), Qt::CaseInsensitive))
+                << each.where.toStdString() << " says \"" << word
+                << "\": " << each.text.toStdString();
+        }
+    }
+}
+
 bool anyContains(const std::vector<Seen>& seen, const QString& part)
 {
     for (const Seen& each : seen) {
@@ -270,14 +288,7 @@ struct Bench {
 
     Bench()
     {
-        auto loaded = katana::archive12d::readCustomisation(
-            {kFixture / "test_linestyles.4d", kFixture / "test_survey.mapfile",
-             kFixture / "test_symbols.4d"});
-        EXPECT_TRUE(loaded.ok()) << (loaded.ok() ? "" : loaded.error().describe());
-        if (loaded.ok()) {
-            document.setStyleLibrary(loaded->library);
-            document.setSurveyMap(loaded->map);
-        }
+        katana::qt::test::installCustomisationFixtures(document);
         for (const auto& [name, linetype] : std::vector<std::pair<const char*, const char*>>{
                  {"Kerb", "TEST Dashed Kerb"}, {"Plain", "1"}}) {
             katana::entity::Style style;
@@ -367,9 +378,14 @@ TEST(GeneralTexts, NoTextTheStyleManagerShowsNamesAnotherProgram)
     }
 
     expectNoneNamesAnotherProgram(seen);
+    expectNoneNamesAnOlderFormat(seen);
     EXPECT_GT(seen.size(), 100u) << "the walk found the dialog's texts";
     EXPECT_TRUE(anyContains(seen, "Paper linestyle: millimetres on the plot"));
     EXPECT_TRUE(anyContains(seen, "Library linestyles belong to the session's customisation"));
+    // Where a library linestyle came from is a customisation, by its name:
+    // TEST Dashed Kerb is test_linestyles'. It used to be a file.
+    EXPECT_TRUE(anyContains(seen, "Customisation: test_linestyles"));
+    EXPECT_FALSE(child<QLabel>(*dialog, "libraryDetails")->text().contains("File:"));
 }
 
 TEST(GeneralTexts, NoTextTheSymbolLibraryOrItsFileDialogsShowNamesAnotherProgram)
@@ -383,9 +399,9 @@ TEST(GeneralTexts, NoTextTheSymbolLibraryOrItsFileDialogsShowNamesAnotherProgram
     katana::qt::test::processEvents();
     std::vector<Seen> seen = textsIn(*dialog);
 
-    // The file dialogs a person gets from Load and Export, opened for real.
+    // The file dialogs a person gets from Import and Export, opened for real.
     dialog->setHeadless(false);
-    for (const char* name : {"loadLibrary", "exportSelected"}) {
+    for (const char* name : {"importDefinitions", "exportSelected"}) {
         auto* button = child<QPushButton>(*dialog, name);
         ASSERT_NE(button, nullptr);
         ASSERT_TRUE(button->isEnabled()) << name;
@@ -395,14 +411,18 @@ TEST(GeneralTexts, NoTextTheSymbolLibraryOrItsFileDialogsShowNamesAnotherProgram
         for (Seen& each : peek.texts(QString::fromLatin1(name))) {
             seen.push_back(std::move(each));
         }
-        EXPECT_TRUE(peek.filters.contains(QStringLiteral("Style and symbol libraries (*.4d)")))
+        EXPECT_TRUE(peek.filters.contains(
+            QStringLiteral("Katana customisation (*.customisation.json *.json)")))
             << name << ": " << peek.filters.join(" ;; ").toStdString();
     }
 
     expectNoneNamesAnotherProgram(seen);
+    expectNoneNamesAnOlderFormat(seen);
     EXPECT_GT(seen.size(), 50u) << "the walk found the dialog's texts";
-    EXPECT_TRUE(anyContains(seen, "Merge a style or symbol library (.4d)"));
-    EXPECT_TRUE(anyContains(seen, "symbols_export.4d"));
+    EXPECT_TRUE(anyContains(
+        seen, "Merge the linestyle and symbol definitions of a Katana customisation file"));
+    EXPECT_TRUE(anyContains(seen, "Import Definitions from a Katana Customisation"));
+    EXPECT_TRUE(anyContains(seen, "symbols.customisation.json"));
 }
 
 TEST(GeneralTexts, NoTextTheSurveyCodeManagerOrItsFileDialogsShowNamesAnotherProgram)
@@ -421,7 +441,7 @@ TEST(GeneralTexts, NoTextTheSurveyCodeManagerOrItsFileDialogsShowNamesAnotherPro
     std::vector<Seen> seen = textsIn(*dialog);
 
     dialog->setInteractive(true);
-    for (const char* name : {"importMapfile", "exportMapfile", "exportCodeList"}) {
+    for (const char* name : {"importCodes", "exportCodes", "exportCodeList"}) {
         auto* button = child<QPushButton>(*dialog, name);
         ASSERT_NE(button, nullptr);
         FileDialogPeek peek;
@@ -434,8 +454,10 @@ TEST(GeneralTexts, NoTextTheSurveyCodeManagerOrItsFileDialogsShowNamesAnotherPro
     dialog->setInteractive(false);
 
     expectNoneNamesAnotherProgram(seen);
+    expectNoneNamesAnOlderFormat(seen);
     EXPECT_GT(seen.size(), 100u) << "the walk found the dialog's texts";
     EXPECT_TRUE(anyContains(seen, "the plain continuous line"));
-    EXPECT_TRUE(anyContains(seen, "Survey code files (*.mapfile *.map *.xml)"));
-    EXPECT_TRUE(anyContains(seen, "Import Survey Code File"));
+    EXPECT_TRUE(anyContains(seen, "Katana customisation (*.customisation.json *.json)"));
+    EXPECT_TRUE(anyContains(seen, "Import Survey Codes"));
+    EXPECT_TRUE(anyContains(seen, "Export Survey Codes"));
 }

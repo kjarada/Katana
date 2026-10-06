@@ -293,6 +293,9 @@ void StylePreview::paintEvent(QPaintEvent* /*event*/)
     // own length, not a pen width longer.
     target.entityPen.setCapStyle(Qt::FlatCap);
     target.paper = paper ? &paperSettings() : nullptr;
+    // A pen inside the definition is the colour the drawing resolves its
+    // name to: the session's customisation, then the standard names.
+    target.colours = &document_->customisationState().colours;
     paintStyleDrawing(painter, drawing, target);
 
     if (showing_ == Showing::Symbol) {

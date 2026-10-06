@@ -936,13 +936,14 @@ character XML 1.0 cannot carry. One loss the writer cannot help:
 doubles where 0 means absent, so an explicit `<rotation>0</rotation>` goes
 out as no element; telling them apart needs `std::optional` in the model.
 
-**Where the writers are reached.** The Survey Code Manager's Export Code
-File... writes its BUFFER with `writeMapFile`, as UTF-16LE with a byte order
-mark, as the reference files are written, and Export Code List CSV... writes
-`cad::codeListCsv` (RFC 4180, UTF-8 with no byte order mark, so Excel may
-misread a name that is not ASCII). The symbol library's Export Selected to
-.4d... writes the selected library definitions with `writeStyleLibrary`.
-`katana_cli` has no export verb for either.
+**Where the writers are reached.** No longer from the window: since
+2026-10-06 the Survey Code Manager's Export Codes... and the symbol library's
+Export Selected... write Katana customisation files
+(`entity::customisationToJson`; "The Survey Code Manager" below and
+`docs/desktop.md`, "Symbol Library"), and these two writers are reached only
+by their own tests. Export Code List CSV... still writes `cad::codeListCsv`
+(RFC 4180, UTF-8 with no byte order mark, so Excel may misread a name that is
+not ASCII). `katana_cli` has no export verb for either.
 
 ## Drawing it
 
@@ -1655,12 +1656,76 @@ buffer has unapplied edits both tabs say so (`applyDirtyNote`,
 `lineworkDirtyNote`), and Execute plans again when the drawing, the library or
 the map moved since the preview, rather than apply yesterday's answer.
 
-**Import Code File...** reads a survey code file - or any customisation
-file, as the loader decides by content - and merges its rules into the BUFFER for review
-before Apply, Merge by default (D1) and Replace with `importReplace` ticked;
-library definitions in the file are reported but not loaded, since this
-dialog edits the map. **Export Code File...** and **Export Code List CSV...**
-write the buffer ("Writing it back").
+**Import Codes...** (`importCodes`) reads a Katana customisation file
+(`docs/customisation.md`; `cad::readCustomisationFile`) and merges ITS RULES
+into the BUFFER for review before Apply, Merge by default (D1) and Replace
+with `importReplace` ticked. The merge is `cad::mergeCustomisation`, the one
+every load goes through, handed the buffer as the session and the file's
+rules as the load - so Merge and Replace mean here what they mean to
+`CUSTOMISE`: a key's rules in a section take the place of that key's in that
+section, or the file's rules become the whole buffer. The log names the load
+by its customisation and counts a key once for each section it has rules in
+("test_survey (merge): 11 added, 0 replaced ..."). The definitions, colours,
+linework codes and automation switches the file also holds are NOT taken:
+they are counted in the log ("definitions (7), colours (2), the linework
+codes"), which says where they are loaded - the Symbol Library's Import
+Definitions, or the `CUSTOMISE` line for a whole customisation. A file with
+no rules, and a file that is not a Katana customisation (one of the older
+formats is told "not a Katana customisation file"), are refused and the
+buffer is as it was.
+
+**Export Codes...** (`exportCodes`) writes the buffer as a Katana
+customisation of survey codes alone, under the session's name - or, while the
+session has none, the file's own name without `.customisation.json`. The file
+is the session's customisation with the buffer's rules in the place of its
+own, cut down to its codes by the ONE rule both managers export by
+(`exportedPart`, `src/katana_qt/customisation/code_manager_support.hpp`;
+`docs/desktop.md`, "Symbol Library", has the table and the reasons):
+
+- the rules, in the buffer's order - order is precedence, so a rule moved
+  between two of another section is written between them
+  (`ExportedCodesKeepTheirOrderWhereSectionsInterleave`);
+- the session's description and its author's NOTICE, and the sources that
+  brought the session rules, each with its own notice. A notice is "carried
+  with the data and shown to whoever uses it" (`docs/customisation.md`), and
+  the export first wrote a name and the rules and nothing else, so every rule
+  of a customisation went out under its name without its author's terms;
+- the colours of the session's customisation that the rules NAME - a rule's
+  colour, its symbol's and its text's, the three places the lint looks - so
+  that a code coloured "sui water potable" is that colour where the file
+  goes; the table of colours is then a source of the file too;
+- NOT the session's definitions, and nothing of its linework codes or its
+  automation switches: a file of codes for a colleague must not reset their
+  control codes.
+
+It reads back as the buffer, rule for rule
+(`ExportedCodesAreAKatanaCustomisationOfTheRulesAloneThatReadsBackAsTheBuffer`),
+and a session of four customisations is written byte for byte as worked out
+by hand
+(`ExportedCodesCarryTheSessionsNoticeItsRuleSourcesAndTheColoursTheRulesName`).
+*Rejected: writing the session's whole customisation with the buffer's rules
+in it.* What an edited buffer is, is rules; the session's definitions are
+not being edited here and belong to `CUSTOMISE EXPORT`. **Export Code List
+CSV...** writes `cad::codeListCsv` of the buffer.
+
+These two were "Import Code File..." and "Export Code File..." (`importMapfile`,
+`exportMapfile`), reading and writing another program's survey code file,
+until 2026-10-06. Not done:
+
+- Apply does not KEEP - the session is left "not kept" until `CUSTOMISE KEEP`
+  is wired to the manager's commit.
+- **The buffer does not know where its rules came from.** Import Codes takes
+  a file's rules and nothing else, so the file's notice and its sources stop
+  at the buffer: after Apply (`Document::setSurveyMap`, an edit) the session
+  holds the imported rules and lists no source for them, and an export then
+  names the sources of the session's OWN rules. An author's notice that came
+  with imported rules is therefore not carried on. It needs the buffer to
+  keep the sources its imports brought and Apply to record them
+  (`Document::recordCustomisationLoad`), which belongs with the work that
+  wires Apply to `CUSTOMISE KEEP`. Until then a customisation whose notice
+  must travel is loaded whole, with the `CUSTOMISE` line.
+- An export is the manager's own work, not a `CUSTOMISE EXPORT ... CODES`
+  line, which writes the SESSION's rules and cannot be handed a buffer.
 
 **Closing never loses an edit unasked.** The manager is kept, hidden, between
 uses, so its buffer outlives closing it. Closing it with unapplied edits
@@ -1678,10 +1743,12 @@ duplicates a rule and quits.
 
 Every editable combo in it (colours, text size type, pipe justify and shape,
 property names) has a case-sensitive completer, so a typed name keeps its case
-(D3), and no button is a default, so Enter in a field presses nothing. The
-colour field lists `archive12d::standardColourNames()` - the names
-`standardColour` draws, from its own table, so the dialog keeps no copy of
-the table. Not done: the dialog takes about 2.4 s to build in a Debug build
+(D3), and no button is a default, so Enter in a field presses nothing. A
+colour field lists the names the session's customisation defines and then
+`entity::standardColourNames()` - each from the table that resolves it
+(`cad::resolveColour`), so the dialog offers exactly what is drawn and keeps
+no copy of either - and is filled again when the customisation's colours
+change, keeping what it shows. Not done: the dialog takes about 2.4 s to build in a Debug build
 on the reference map, most of it the two pickers' pictures; its linestyle
 preview draws a linestyle small in the middle of its pane and its symbol
 preview is a blank white pane; its own `linestyleState`
