@@ -366,10 +366,14 @@ QStandardItem* NamePicker::addEntry(const CatalogueEntry& entry)
         }
         break;
     case DefinitionSource::Library:
-        tip = tr("Library %1 from %2")
-                  .arg(role_ == NameRole::Symbol ? tr("symbol") : tr("linestyle"),
-                       entry.sourceFile.empty() ? tr("the loaded library")
-                                                : fromName(entry.sourceFile));
+        // A definition's source is the NAME of the customisation it came
+        // from; one made in a session has none.
+        tip = entry.sourceFile.empty()
+                  ? tr("Library %1 made in this session")
+                        .arg(role_ == NameRole::Symbol ? tr("symbol") : tr("linestyle"))
+                  : tr("Library %1 from the customisation %2")
+                        .arg(role_ == NameRole::Symbol ? tr("symbol") : tr("linestyle"),
+                             fromName(entry.sourceFile));
         if (!entry.group.empty()) {
             tip += tr(", group %1").arg(fromName(entry.group));
         }

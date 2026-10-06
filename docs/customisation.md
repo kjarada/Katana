@@ -778,8 +778,11 @@ survives being read and written.
 
 - **The two programs do not read a file of it from their command lines
   yet.** The verbs that read and write one are in the interpreter ("The
-  verbs", below), but `katana_cli` and the window still take a `CUSTOMISE`
-  line themselves; Settings comes with the work that follows.
+  verbs", below), and the Symbol Library and the Survey Code Manager read
+  and write one from their own buttons (`docs/desktop.md`), but `katana_cli`
+  and the window still take a `CUSTOMISE` line themselves, and neither
+  starts a session from one (`docs/survey_coding.md`, "What a session starts
+  with"); Settings comes with the work that follows.
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
 - **Some of a rule's members are still shown by another word.** `CODE

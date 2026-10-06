@@ -32,6 +32,7 @@
 #include "katana/cad/plotting/legend.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/core/error.hpp"
+#include "katana/entity/colour_names.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/style_library.hpp"
 #include "sheet_painter.hpp"
@@ -54,6 +55,9 @@ struct LegendSampleContext {
     const katana::entity::Model* model = nullptr;
     // Library linestyles and symbols; null draws the built-in shapes.
     const katana::entity::StyleLibrary* library = nullptr;
+    // The session's own colour names, for a pen inside a library definition
+    // (StylePaintTarget::colours); null resolves the standard names alone.
+    const katana::entity::ColourTable* colours = nullptr;
     // The paper colour rule; null leaves colours as they are.
     const katana::cad::PlotSettings* plot = nullptr;
     // Device pixels per paper millimetre: what a line weight is multiplied by.

@@ -81,7 +81,8 @@ linestylePicture(katana::cad::DefinitionCache& definitions,
 DefinitionThumbnail paintDefinitionThumbnail(katana::cad::DefinitionCache& definitions,
                                              const katana::entity::StyleLibrary& library,
                                              std::uint64_t generation, ThumbnailKind kind,
-                                             std::string_view name, QSize size, QColor ground)
+                                             std::string_view name, QSize size, QColor ground,
+                                             const katana::entity::ColourTable* colours)
 {
     DefinitionThumbnail result;
     if (size.isEmpty()) {
@@ -121,6 +122,7 @@ DefinitionThumbnail paintDefinitionThumbnail(katana::cad::DefinitionCache& defin
     target.entityPen = QPen(paper ? QColor(Qt::black) : QColor(224, 224, 224), kInkPixels);
     target.entityPen.setCapStyle(Qt::FlatCap);
     target.paper = paper ? &paperSettings : nullptr;
+    target.colours = colours;
     paintStyleDrawing(painter, drawing, target);
     return result;
 }
@@ -128,7 +130,8 @@ DefinitionThumbnail paintDefinitionThumbnail(katana::cad::DefinitionCache& defin
 DefinitionThumbnail DefinitionThumbnails::thumbnail(const katana::entity::StyleLibrary& library,
                                                     std::uint64_t generation, ThumbnailKind kind,
                                                     std::string_view name, QSize size,
-                                                    QColor ground)
+                                                    QColor ground,
+                                                    const katana::entity::ColourTable* colours)
 {
     if (generation_ != generation) {
         images_.clear(); // every picture of the replaced library, at once
@@ -142,8 +145,8 @@ DefinitionThumbnail DefinitionThumbnails::thumbnail(const katana::entity::StyleL
     if (images_.size() >= kMaximumEntries) {
         images_.clear();
     }
-    DefinitionThumbnail painted =
-        paintDefinitionThumbnail(definitions_, library, generation, kind, name, size, ground);
+    DefinitionThumbnail painted = paintDefinitionThumbnail(definitions_, library, generation,
+                                                           kind, name, size, ground, colours);
     images_.emplace(std::move(key), painted);
     return painted;
 }
@@ -153,7 +156,7 @@ DefinitionThumbnail DefinitionThumbnails::thumbnail(const katana::cad::Document&
                                                     QSize size, QColor ground)
 {
     return thumbnail(document.styleLibrary(), document.libraryGeneration(), kind, name, size,
-                     ground);
+                     ground, &document.customisationState().colours);
 }
 
 void DefinitionThumbnails::clear()

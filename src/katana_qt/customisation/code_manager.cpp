@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <array>
-#include <fstream>
 #include <map>
 #include <set>
+#include <span>
 #include <utility>
 
 #include <QCheckBox>
@@ -36,11 +36,12 @@
 #include "customisation/filter_bar.hpp"
 #include "customisation/name_picker.hpp"
 #include "customisation/style_preview.hpp"
-#include "katana/archive12d/domain.hpp"
-#include "katana/archive12d/map_file.hpp"
 #include "katana/cad/code_edit.hpp"
+#include "katana/cad/colour_lookup.hpp"
+#include "katana/cad/customisation_host.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
-#include "katana/core/text_encoding.hpp"
+#include "katana/entity/customisation.hpp"
 #include "katana/entity/tables.hpp"
 
 namespace katana::qt {
@@ -177,21 +178,10 @@ const QSize kThumbnailSize{48, 16};
                                                  : QStringLiteral("unmatched");
 }
 
-[[nodiscard]] katana::core::Status writeFile(const std::filesystem::path& path,
-                                             std::string_view bytes)
+// A file's name as a person reads it, for the log: never its folder.
+[[nodiscard]] QString fileName(const std::filesystem::path& path)
 {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return makeError(ErrorCode::FileExportFailure, "cannot open the file for writing",
-                         path.string());
-    }
-    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-    out.close();
-    if (!out) {
-        return makeError(ErrorCode::FileExportFailure, "the file could not be written",
-                         path.string());
-    }
-    return {};
+    return text(katana::core::pathToUtf8(path.filename()));
 }
 
 } // namespace
@@ -215,16 +205,16 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
 
     // Files: what comes into the buffer and what goes out of it.
     auto* files = new QHBoxLayout;
-    auto* importButton = new QPushButton(tr("Import Code File..."), this);
-    importButton->setObjectName(QStringLiteral("importMapfile"));
-    importButton->setToolTip(tr("Read a survey code file (.mapfile) and merge its rules into "
-                                "the rules being edited, for review before Apply"));
+    auto* importButton = new QPushButton(tr("Import Codes..."), this);
+    importButton->setObjectName(QStringLiteral("importCodes"));
+    importButton->setToolTip(tr("Read a Katana customisation file and merge its survey code "
+                                "rules into the rules being edited, for review before Apply"));
     importReplace_ = new QCheckBox(tr("Replace instead of merging"), this);
     importReplace_->setObjectName(QStringLiteral("importReplace"));
-    auto* exportButton = new QPushButton(tr("Export Code File..."), this);
-    exportButton->setObjectName(QStringLiteral("exportMapfile"));
-    exportButton->setToolTip(tr("Write the rules being edited to a survey code file "
-                                "(.mapfile)"));
+    auto* exportButton = new QPushButton(tr("Export Codes..."), this);
+    exportButton->setObjectName(QStringLiteral("exportCodes"));
+    exportButton->setToolTip(tr("Write the rules being edited to a Katana customisation file "
+                                "that holds the survey codes alone"));
     auto* csvButton = new QPushButton(tr("Export Code List CSV..."), this);
     csvButton->setObjectName(QStringLiteral("exportCodeList"));
     files->addWidget(importButton);
@@ -263,32 +253,32 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
 
     connect(importButton, &QPushButton::clicked, this, [this] {
         if (!interactive_) {
-            log(tr("Import Code File needs a file chosen in an interactive session"), true);
+            log(tr("Import Codes needs a file chosen in an interactive session"), true);
             return;
         }
         const QString path = QFileDialog::getOpenFileName(
-            this, tr("Import Survey Code File"), {},
-            tr("Survey code files (*.mapfile *.map *.xml);;All files (*)"));
+            this, tr("Import Survey Codes"), {},
+            customisationFileFilter() + tr(";;All files (*)"));
         if (path.isEmpty()) {
             return;
         }
-        const auto mode = importReplace_->isChecked() ? katana::archive12d::LoadMode::Replace
-                                                      : katana::archive12d::LoadMode::Merge;
-        if (const auto status = importMapfile(path.toStdWString(), mode); !status) {
+        const auto mode = importReplace_->isChecked() ? katana::cad::LoadMode::Replace
+                                                      : katana::cad::LoadMode::Merge;
+        if (const auto status = importCodes(path.toStdWString(), mode); !status) {
             log(text(status.error().describe()), true);
         }
     });
     connect(exportButton, &QPushButton::clicked, this, [this] {
         if (!interactive_) {
-            log(tr("Export Code File needs a file chosen in an interactive session"), true);
+            log(tr("Export Codes needs a file chosen in an interactive session"), true);
             return;
         }
-        const QString path = QFileDialog::getSaveFileName(
-            this, tr("Export Survey Code File"), {}, tr("Survey code files (*.mapfile)"));
+        const QString path = QFileDialog::getSaveFileName(this, tr("Export Survey Codes"), {},
+                                                          customisationFileFilter());
         if (path.isEmpty()) {
             return;
         }
-        if (const auto status = exportMapfile(path.toStdWString()); !status) {
+        if (const auto status = exportCodes(path.toStdWString()); !status) {
             log(text(status.error().describe()), true);
         }
     });
@@ -316,7 +306,7 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
 
     // No button is a default: QDialog makes the first auto-default button
     // its default when shown, and Enter in any field - a typed code, a layer
-    // name - would press it (Import Code File..., or Delete). Buttons here are
+    // name - would press it (Import Codes..., or Delete). Buttons here are
     // pressed, never defaulted to.
     for (QPushButton* button : findChildren<QPushButton*>()) {
         button->setAutoDefault(false);
@@ -386,6 +376,10 @@ katana::core::Status SurveyCodeManagerDialog::apply()
         return makeError(ErrorCode::InvalidState, "the drawing this manager edits is closed");
     }
     doc->setSurveyMap(buffer_);
+    // KEEP STEP, wired by the lead: when the session was kept before this
+    // commit (customisationState().kept, read BEFORE setSurveyMap, which
+    // clears it) the line `CUSTOMISE KEEP` runs here through context_.run.
+    // Nothing is kept yet.
     baseline_ = buffer_;
     invalidatePlans();
     updateDirty();
@@ -481,6 +475,12 @@ void SurveyCodeManagerDialog::documentChanged(const DocumentChanges& changes)
         }
     }
     if (changes.library) {
+        // A change of the customisation's colours arrives as one of the
+        // library too (Document::setColourTable), so the fields that list
+        // them are filled again here, with the swatches that follow.
+        for (QComboBox* field : {ruleColour_, ruleSymbolColour_, ruleTextColour_}) {
+            refreshColourField(field, doc);
+        }
         ruleLinestyle_->refresh();
         ruleSymbol_->refresh();
         rebuildCodeTable();
@@ -590,47 +590,67 @@ void SurveyCodeManagerDialog::newRuleFromCode(const std::string& code)
 
 // ---- files -------------------------------------------------------------------------
 
-katana::core::Status SurveyCodeManagerDialog::importMapfile(const std::filesystem::path& path,
-                                                            katana::archive12d::LoadMode mode)
+katana::core::Status SurveyCodeManagerDialog::importCodes(const std::filesystem::path& path,
+                                                          katana::cad::LoadMode mode)
 {
-    auto loaded = katana::archive12d::readCustomisation({path});
-    if (!loaded) {
-        return loaded.error();
+    auto file = katana::cad::readCustomisationFile(path);
+    if (!file) {
+        return file.error();
     }
-    if (loaded->map.empty()) {
+    const katana::entity::Customisation& held = file->customisation;
+    if (held.map.empty()) {
         return makeError(ErrorCode::NotFound, "the file holds no survey code rules",
-                         path.filename().string());
+                         katana::core::pathToUtf8(path.filename()));
     }
-    const katana::cad::Document* doc = document();
-    const katana::entity::StyleLibrary library =
-        doc != nullptr ? doc->styleLibrary() : katana::entity::StyleLibrary{};
-    katana::archive12d::CustomisationMerge merged =
-        katana::archive12d::mergeCustomisation(library, buffer_, *loaded, mode);
-    buffer_ = std::move(merged.map);
-    for (const katana::archive12d::FileMerge& file : merged.files) {
-        if (file.kind != katana::archive12d::CustomisationFile::MapFile) {
-            continue;
-        }
-        // archive12d counts a key once for each section it has rules in.
+    // The merge every load goes through (cad/customisation_merge.hpp), over
+    // the two things this manager has a say in: the buffer as "the session"
+    // and the file's rules, under the file's name, as the load. So Merge and
+    // Replace mean here exactly what they mean to CUSTOMISE, and what else
+    // the file holds cannot reach the buffer or the drawing.
+    katana::entity::Customisation session;
+    session.map = buffer_;
+    katana::entity::Customisation rules;
+    rules.name = held.name;
+    rules.map = held.map;
+    katana::cad::CustomisationMerge merged = katana::cad::mergeCustomisation(
+        session, std::span<const katana::entity::Customisation>(&rules, 1), mode);
+    if (!merged.ok()) {
+        // All or nothing, as the merge is: the buffer is as it was.
+        return makeError(ErrorCode::InvalidArgument,
+                         "the file's survey code rules could not be merged: " +
+                             merged.problems.front(),
+                         katana::core::pathToUtf8(path.filename()));
+    }
+    buffer_ = std::move(merged.merged.map);
+    for (const katana::cad::CustomisationLoad& load : merged.loads) {
+        // The merge counts a key once for each section it has rules in.
         log(tr("%1 (%2): %3 added, %4 replaced in the rules being edited - a key once for "
                "each section it has rules in.")
-                .arg(text(file.name), QString::fromLatin1(katana::archive12d::toString(mode)))
-                .arg(file.added.size())
-                .arg(file.replaced.size()));
+                .arg(text(load.name), QString::fromLatin1(katana::cad::toString(mode)))
+                .arg(load.addedKeys.size())
+                .arg(load.replacedKeys.size()));
     }
     if (!merged.removedKeys.empty()) {
         log(tr("%1 keys removed by Replace.").arg(merged.removedKeys.size()));
     }
-    if (!loaded->library.empty()) {
-        log(tr("%1 library definitions in the file were not loaded: this manager edits the "
-               "survey map. Load libraries through the customisation loader.")
-                .arg(loaded->library.size()));
+    QStringList left;
+    if (!held.library.empty()) {
+        left << tr("definitions (%1)").arg(held.library.size());
     }
-    for (const std::string& warning : loaded->warnings) {
-        log(tr("Warning: %1").arg(text(warning)));
+    if (!held.colours.empty()) {
+        left << tr("colours (%1)").arg(held.colours.size());
     }
-    for (const std::string& problem : merged.problems) {
-        log(tr("Warning: %1").arg(text(problem)));
+    if (held.linework) {
+        left << tr("the linework codes");
+    }
+    if (held.automation) {
+        left << tr("the automation switches");
+    }
+    if (!left.isEmpty()) {
+        log(tr("Not imported from %1, as this manager edits the survey code rules: %2. Import "
+               "Definitions in the Symbol Library takes definitions and colours; the line "
+               "CUSTOMISE <file> loads a whole customisation.")
+                .arg(fileName(path), left.join(QStringLiteral(", "))));
     }
     formIndex_.reset();
     bufferChanged();
@@ -639,33 +659,45 @@ katana::core::Status SurveyCodeManagerDialog::importMapfile(const std::filesyste
     return {};
 }
 
-katana::core::Status SurveyCodeManagerDialog::exportMapfile(const std::filesystem::path& path) const
+katana::core::Status SurveyCodeManagerDialog::exportCodes(const std::filesystem::path& path) const
 {
-    katana::archive12d::MapFileWriteOptions options;
-    options.comments = {"Written by Katana's survey code manager"};
-    auto xml = katana::archive12d::writeMapFile(buffer_, options);
-    if (!xml) {
-        return xml.error();
+    // The session's customisation with the rules being edited in the place
+    // of its own, cut down to its codes by the rule both managers export by
+    // (exportedPart): the session's name and its author's notice, the sources
+    // that brought it rules, and the colours these rules name - not its
+    // definitions, and nothing of its control codes or switches, which a
+    // file of codes for a colleague must not reset. With the drawing closed
+    // there is no session to say any of that, and the rules go under the
+    // file's own name.
+    const katana::cad::Document* doc = document();
+    katana::entity::Customisation session =
+        doc != nullptr ? doc->customisation() : katana::entity::Customisation{};
+    session.name = exportedCustomisationName(doc, path);
+    session.map = buffer_;
+    const katana::entity::Customisation codes =
+        exportedPart(std::move(session), CustomisationPart::Codes);
+    katana::entity::CustomisationWriteOptions options;
+    options.linestyles = false;
+    options.symbols = false;
+    const auto written = katana::entity::customisationToJson(codes, options);
+    if (!written) {
+        return written.error();
     }
-    auto bytes = katana::core::encodeUtf16LittleEndian(*xml);
-    if (!bytes) {
-        return bytes.error();
-    }
-    if (auto status = writeFile(path, *bytes); !status) {
+    if (auto status = writeFileBytes(path, *written); !status) {
         return status;
     }
-    log(tr("Exported %1 rules to %2.").arg(buffer_.size()).arg(text(path.filename().string())));
+    log(tr("Exported %1 rules to %2.").arg(buffer_.size()).arg(fileName(path)));
     return {};
 }
 
 katana::core::Status SurveyCodeManagerDialog::exportCodeList(const std::filesystem::path& path) const
 {
-    if (auto status = writeFile(path, katana::cad::codeListCsv(buffer_)); !status) {
+    if (auto status = writeFileBytes(path, katana::cad::codeListCsv(buffer_)); !status) {
         return status;
     }
     log(tr("Exported the code list (%1 codes) to %2.")
             .arg(buffer_.keys().size())
-            .arg(text(path.filename().string())));
+            .arg(fileName(path)));
     return {};
 }
 
@@ -773,7 +805,7 @@ void SurveyCodeManagerDialog::rebuildCodeTable()
         item->setText(DescriptionColumn, text(rule.comment));
         item->setText(LayerColumn, text(rule.model));
         if (!rule.colour.empty()) {
-            const auto rgb = katana::archive12d::standardColour(rule.colour);
+            const auto rgb = colourOf(doc, rule.colour);
             if (rgb) {
                 item->setIcon(ColourColumn, colourSwatch(*rgb, kThumbnailSize.height()));
                 item->setText(ColourColumn, text(rule.colour));
@@ -781,8 +813,9 @@ void SurveyCodeManagerDialog::rebuildCodeTable()
                 item->setText(ColourColumn, tr("%1 (no RGB)").arg(text(rule.colour)));
                 item->setForeground(ColourColumn, kUndefinedNameColour);
                 item->setToolTip(ColourColumn,
-                                 tr("A colour name the colour table does not know: applying "
-                                    "the code leaves the entity's colour as it is"));
+                                 tr("A colour name neither the customisation's colours nor "
+                                    "the standard names know: applying the code leaves the "
+                                    "entity's colour as it is"));
             }
         }
         item->setText(BreaklineColumn, breaklineText(rule.breakline));
@@ -1050,7 +1083,7 @@ void SurveyCodeManagerDialog::explain(const std::string& code)
     }
     const katana::cad::CodeExplanation explanation = katana::cad::explainCode(
         buffer_, code, [doc](std::string_view name) { return doc->definitionFor(name); },
-        [](std::string_view name) { return katana::archive12d::standardColour(name); });
+        katana::cad::colourLookup(*doc));
 
     QString how;
     switch (explanation.kind) {
