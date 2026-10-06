@@ -71,10 +71,12 @@ namespace katana::cad {
 [[nodiscard]] bool isSurveyCodeVerb(std::string_view verb);
 
 // Runs one CODE line: `args` are the words AFTER the verb, the quotes removed
-// (CommandInterpreter::tokenize). `colourOf` is what a front end passed for
-// the names the Document does not know, and may be empty; `views` answers the
-// scope word VIEW, and is empty headless. InvalidState when no survey codes
-// are loaded; a refused CODE changes nothing.
+// (CommandInterpreter::tokenize). `colourOf` is more colour names from a
+// caller that has some, asked only for a name the Document does not know;
+// it may be empty, and the interpreter passes none (no front end has names of
+// its own since the Document resolves them). `views` answers the scope word
+// VIEW, and is empty headless. InvalidState when no survey codes are loaded;
+// a refused CODE changes nothing.
 [[nodiscard]] katana::core::Result<std::string>
 runSurveyCodeVerb(Document& document, const std::vector<std::string>& args,
                   const ColourLookup& colourOf, const ScopeViewProvider& views);

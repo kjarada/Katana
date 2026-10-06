@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "katana/core/cpu_features.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 #if defined(KATANA_HAS_GPU)
 #include "gpu/renderer_choice.hpp"
@@ -1304,6 +1305,9 @@ void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction)
     services.headless = [this] { return headless_; };
     services.layers = layersAction;
     services.run = commandRunner();
+    // Asked at each commit of an editor: the host is made after the window
+    // is built (loadDefaultCustomisation).
+    services.hasKeptFile = [this] { return keptCustomisationFile_; };
     QToolBar* formatBar = makeToolBar("Format", Qt::TopToolBarArea);
     formatBar->addAction(layersAction);
     format_ = std::make_unique<CustomisationWorkbench>(*this, std::move(services), formatMenu,
@@ -3781,12 +3785,17 @@ void MainWindow::loadDefaultCustomisation()
 {
     cad::CustomisationHost host;
     host.builtIn = cad::builtInCustomisation();
-    // As Qt reads the environment - UTF-16 on Windows - so a kept file in a
-    // folder whose name is outside the code page is still found.
-    const QString kept = qEnvironmentVariable(cad::kKeptCustomisationVariable);
-    if (!kept.isEmpty()) {
-        host.keptFile = toPath(kept);
+    // Read as the session of katana_cli and katana_mcp reads it
+    // (core::environmentVariable: wide on Windows, UTF-8 out), so a kept file
+    // in a folder whose name is outside the code page is still found - and so
+    // that two front ends do not read one variable two ways.
+    const std::string kept = katana::core::environmentVariable(cad::kKeptCustomisationVariable);
+    if (!kept.empty()) {
+        host.keptFile = katana::core::pathFromUtf8(kept);
     }
+    // What an editor's own commit asks before it runs CUSTOMISE KEEP
+    // (CustomisationServices::hasKeptFile).
+    keptCustomisationFile_ = !host.keptFile.empty();
     // The interpreter first: it notes the kept file as it is NOW, which is
     // what CUSTOMISE KEEP later refuses to write over once it has changed
     // (CommandInterpreter::setCustomisationHost).

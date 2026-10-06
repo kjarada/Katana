@@ -121,6 +121,10 @@ class FoldedNameCompleter final : public QCompleter {
     target.view.fit(paintedExtent(drawing, painter.font()), kMarginFraction);
     target.entityPen = QPen(theme::text(), 1.5);
     target.entityPen.setCapStyle(Qt::FlatCap);
+    // The session's own colour names, as every other picture of a Document's
+    // style gets them (StylePaintTarget::colours). A model linetype is dashes
+    // and names no pen today, so nothing here is coloured by it yet.
+    target.colours = &document.customisationState().colours;
     paintStyleDrawing(painter, drawing, target);
     return image;
 }

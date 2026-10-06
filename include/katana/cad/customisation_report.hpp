@@ -5,24 +5,21 @@
 // loaded, and what it covers in THIS drawing. One result and its formatters,
 // as code_table.hpp has them, so every front end says the same words.
 //
-// There are two texts of it while the front ends move to the shared CUSTOMISE
-// verb (customisation_verbs.hpp):
+// The text is formatCustomisationReply: what the bare CUSTOMISE of the shared
+// verb (customisation_verbs.hpp) replies and File > Drawing Summary shows - the
+// two count lines, then key=value records, then the coverage.
+// customisationJson is the same as one JSON object, for CUSTOMISE JSON and for
+// a front end that hands a client structured data.
 //
-//   formatCustomisationReply    what the verb's bare CUSTOMISE replies: the
-//                               two count lines, then key=value records, then
-//                               the coverage. customisationJson is the same as
-//                               one JSON object, for CUSTOMISE JSON and for a
-//                               front end that hands a client structured data.
-//   formatCustomisationSummary  the older prose ("Loaded files, in load
-//                               order: ..."), which names a source by the kind
-//                               of file it once was. The two front ends' own
-//                               CUSTOMISE and File > Drawing Summary still
-//                               print it; it goes with the last of them.
+// There was a second, older text beside it (formatCustomisationSummary, and
+// customisationReport over it): prose that named a source by the kind of file
+// it once was ("Loaded files, in load order: ..."), which each front end's own
+// CUSTOMISE printed. It went with the last of those, 2026-10-07.
 //
-// Both are made from ONE summary. The form of customisationSummary that takes
-// the sources and the missing names as arguments is the older text's, so that
-// it can be tested without loading anything; the form that takes the Document
-// alone reads them from its state (customisation_state.hpp), where they live.
+// The form of customisationSummary that takes the sources and the missing
+// names as arguments describes LISTS, so that the numbers can be tested
+// without loading anything; the form that takes the Document alone reads them
+// from its state (customisation_state.hpp), where they live.
 
 #include <cstddef>
 #include <string>
@@ -66,20 +63,11 @@ customisationSummary(const Document& document, const std::vector<CustomisationSo
 // codes.
 [[nodiscard]] CustomisationSummary customisationSummary(const Document& document);
 
-// Plain text, lines ending in '\n'. With nothing loaded it says so and how to
-// load, and nothing more but the project's missing files: there is no coverage
-// to report of nothing.
-[[nodiscard]] std::string formatCustomisationSummary(const CustomisationSummary& summary);
-
-// The two above in one call: what the front ends' own CUSTOMISE prints.
-[[nodiscard]] std::string customisationReport(const Document& document,
-                                              const std::vector<CustomisationSource>& loaded,
-                                              const std::vector<std::string>& missingAtOpen);
-
 // ---- the verb's reply -------------------------------------------------------------------
 //
-// Lines ending in '\n': the two count lines formatCustomisationSummary begins
-// with (or that nothing is loaded and how to load; of a customisation that
+// Lines ending in '\n': the two count lines - definitions by what they are
+// offered as, rules over distinct codes - (or that nothing is loaded and how
+// to load, with no coverage to report of nothing; of a customisation that
 // brought neither kind - colours, settings - that no definitions and no rules
 // are loaded, never that no customisation is), then one record a line -
 //

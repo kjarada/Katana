@@ -753,6 +753,10 @@ class MainWindow final : public QMainWindow {
     bool refreshingStyles_ = false;     // ditto, for the current-style choice
     bool refreshPending_ = false;       // a refreshAll() is queued on the event loop
     bool headless_ = false;
+    // This session's host names a kept customisation file (set where the
+    // host is made, loadDefaultCustomisation): whether an editor's own commit
+    // is followed by CUSTOMISE KEEP (CustomisationServices::hasKeptFile).
+    bool keptCustomisationFile_ = false;
     int historyCursor_ = 0;         // position while browsing command history
     int errorsLogged_ = 0;          // logMessage's errors so far, for runCommand
     // What runVerbLine's line has logged so far, while it runs: logMessage

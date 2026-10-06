@@ -1633,10 +1633,12 @@ is gone. Until File > Settings exists, a Katana customisation file
   dialog run too;
 - `katana --customise <file>...` at start-up.
 
-The managers' own Import buttons are no such door yet: the Survey Code
-Manager's and the Symbol Library's still read the older survey code files and
-style libraries, and take a Katana customisation file with the change that
-ports the two managers.
+The managers' own Import buttons read a Katana customisation file too, each
+its own part of one: the Survey Code Manager's Import Codes... its rules into
+the manager's buffer, the Symbol Library's Import Definitions... its
+definitions and colours into the session ("Symbol Library" and "Survey Code
+Manager", below). Neither is the whole of a file, and neither runs the
+`CUSTOMISE` line.
 
 Rejected: one item that opened a file dialog on `CUSTOMISE "<file>"`. It is
 what Settings' Import will be, with a path field a headless run can fill and
@@ -2006,23 +2008,26 @@ linetype ByLayer and weight 0.25, and under D8 a line later put in that style
 draws the symbol at its vertices; the grid's pictures are on the dark screen
 ground only, though the preview switches; the dialog reloads whole (two
 `tableUsage` passes) on every command the watcher reports, not measured on a
-250,000-entity drawing; an import is not KEPT - it calls the commit hook
-round its install, before it and what the hook hands back after one that was
-taken (`CustomisationContext::beginCommit`,
-`ImportCallsTheCommitHookBeforeTheInstallAndWhatItHandsBackAfterOneThatWasTaken`),
-but the workbench leaves the hook empty, so the session is left "not kept"
-("The definition editor", "Not done"); a project's record
+250,000-entity drawing; a project's record
 is of NAMES, so importing the definitions of a customisation that brought
 both kinds clears a warning that it is missing although its rules are still
-not here (only a source that brought rules alone is left out); a linetype
-picker's picture of a DRAWING linetype (`modelLinetypeImage`) is not handed
-the colours; and Import and Export do the work themselves rather than running
-a `CUSTOMISE` line. The verb exists now and cuts a part down by the same
-function, so Export Selected writes what `CUSTOMISE EXPORT ... ONLY` writes;
-the button cannot RUN that line yet because the window still takes every
-`CUSTOMISE` line but `REMOVE` itself and reads its words as files ("One
-executor", below). It becomes the line when the window hands the family to
-the interpreter.
+not here (only a source that brought rules alone is left out); and Import and
+Export do the work themselves rather than running a `CUSTOMISE` line. The
+verb cuts a part down by the same function, so Export Selected writes what
+`CUSTOMISE EXPORT ... ONLY` writes, and since 2026-10-07 the window hands
+every `CUSTOMISE` line to the interpreter, so the button COULD run that line;
+making it do so is left with File > Settings, whose Import and Export are
+the same two lines.
+
+An import into a session that was the kept one is kept again: Import
+Definitions calls the commit hook round its install - before it, and what
+the hook hands back after one that was taken
+(`ImportCallsTheCommitHookBeforeTheInstallAndWhatItHandsBackAfterOneThatWasTaken`)
+- and the workbench answers the hook with the `CUSTOMISE KEEP` line ("The
+definition editor", below). A linetype picker's picture of a DRAWING linetype
+(`modelLinetypeImage`) is handed the session's colours as every other picture
+is; such a linetype is dashes and names no pen, so nothing is coloured by
+them yet.
 
 ### Survey Code Manager
 
@@ -2234,19 +2239,32 @@ have none.
   executor", below), so it is echoed and an agent types the same. That verb
   is the interpreter's (`docs/customisation.md`, "The verbs") and refuses a
   definition something names, by the function the editor lists with
-  (`cad::definitionUsers`). The window hands `CUSTOMISE REMOVE` on to it -
-  the one line of that family it does not take itself yet; until
-  2026-10-07 it read `REMOVE` as a file's name, and Delete deleted nothing.
+  (`cad::definitionUsers`). The window takes no `CUSTOMISE` line itself
+  (2026-10-07): while it did, it read `REMOVE` as a file's name, and Delete
+  deleted nothing.
   - *What the line answered is shown as it answered it.* The editor does
     not say why a line failed: it once said "is used" of any failure on a
     definition that had users, whatever the line had said
     (`ALineThatFailsForAnotherReasonIsShownAsItFailedAndAFailedForceOffersNothing`).
+  - *Who names the definition is said ONCE.* The verb's refusal cites each
+    user in its own words (`rule #7 AC* (symbol) names it`;
+    `cad::DefinitionUsers::cited`), and until 2026-10-07 the editor put its
+    own list of the same users under it (`rule #7 AC* (symbol) draws it as
+    its symbol`), so a person read them twice. Decided then: the verb's
+    reply, once. The editor's list is added only where what is on the
+    page does NOT cite every user - a line that failed for another reason
+    cites nobody, and a refusal that came before something else named the
+    definition does not cite that - asked of the function the verb makes its
+    lines with, not read out of the reply
+    (`TheVerbItselfRefusesADefinitionInUseAndDeleteAnywayRemovesIt`).
+    *Rejected: never adding the list*, which would offer `FORCE` over a user
+    nothing on the page names.
   - *Delete Anyway* (`definitionDeleteAnyway`; Keep It is
     `definitionDeleteCancel`) is offered when the plain line failed and
-    something names the definition, under the list of what does; it runs the
-    line with `FORCE`. A `FORCE` that fails offers nothing further. The list
-    is of the definition the form is ON, whatever the form reads as at that
-    moment.
+    something names the definition, under what names it; it runs the line
+    with `FORCE`. A `FORCE` that fails offers nothing further. The users are
+    those of the definition the form is ON, whatever the form reads as at
+    that moment.
   - *It exists only while that refusal is on the page.* The two buttons are
     themselves hidden and disabled otherwise - not only the row they sit in,
     which left the button pressable by a script, and one press then ran the
@@ -2274,6 +2292,22 @@ have none.
   that commits to the session's customisation calls it the same way: this
   one's Save and Delete, the Survey Code Manager's Apply and the Symbol
   Library's Import Definitions.
+  - *The workbench answers it* (`CustomisationWorkbench::context`): it reads
+    `customisationState().kept` when asked, and hands back the line
+    `CUSTOMISE KEEP`, through the window's one executor, ONLY when the
+    session was the kept one and the session has a kept file
+    (`CustomisationServices::hasKeptFile`, which the window sets from its
+    host's kept-file path). A customisation typed, scripted or loaded with
+    `--customise` is "not kept", and an editor's change on top of it lasts
+    the session as it does. With no kept file nothing is handed back: `KEEP`
+    would only be refused, in the log, after every Save. The line is run as
+    a typed one, so it is echoed, and what `KEEP` refuses - a kept file
+    changed on disk since it was read - is said as it would be to a person
+    who typed it. Tested with a host and a kept file of the test's own, each
+    of the three commits in turn
+    (`CustomisationWorkbench.AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAndItStaysKept`,
+    `ASessionThatWasNotTheKeptOneIsNotKeptByAnEditorsCommit`,
+    `WithNoKeptFileAnEditorsCommitRunsNoLineAndLogsNoRefusal`).
 
 **One definition at a time.** Opening another while the form has edits that
 are not saved is REFUSED and said, in the message area and the log
@@ -2320,21 +2354,13 @@ Not done:
   the Document, as the code manager's Apply is. On the command line a
   definition is made or changed by writing it in a customisation file and
   loading that; an agent has no shorter way.
-- **`CustomisationContext::beginCommit` is not answered.** The workbench
-  leaves it empty, so an editor's commit - this one's Save or Delete, the
-  Survey Code Manager's Apply, the Symbol Library's Import Definitions -
-  does not yet keep a kept session kept; whoever knows whether the session
-  was kept sets it (`CustomisationWorkbench::context`). Every one of those
-  already calls it, before and after.
-- **A refused Delete lists what names the definition twice**, in two
-  wordings: the verb's refusal, shown as it came (`rule #7 AC* (symbol)
-  names it`), and under it the editor's own list (`rule #7 AC* (symbol)
-  draws it as its symbol`). Both are asked of `cad::definitionUsers`; the
-  verb words its answer itself, and its words are pinned
-  (`docs/customisation.md`, "The verbs: not done").
-- **Delete is the window's only.** `katana_cli` and `katana_mcp` still take
-  a `CUSTOMISE` line themselves and read `REMOVE` as a file's name; the verb
-  reaches them when their own handling of the line goes.
+- **An interactive session has no kept file of its own yet.** An editor's
+  commit keeps a kept session kept only where the session has a kept file,
+  and until File > Settings gives each user one that is a session started
+  with `KATANA_CUSTOMISATION` set.
+- **A user of a definition is still worded two ways**, by the verb and by
+  the editor's own list (`docs/customisation.md`, "The verbs: not done"),
+  though no longer both under one refusal.
 - **A definition the form cannot show cannot be opened** - one the format
   cannot write (a stroke carrying a member its kind does not use, texts that
   are not its text strokes in order; `docs/customisation.md`, "What it
@@ -2496,9 +2522,10 @@ Each now reaches the same code on every front end
 - `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST` and `CODE CHECK`
   are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`). They
   resolve a colour name through the Document - the customisation's own
-  table, then the standard names - and the window hands the interpreter no
-  lookup of its own any more (`CommandInterpreter::setColourLookup`): it had
-  only the standard names to give, which the Document knows. (`CODE LIST`
+  table, then the standard names - and no front end hands the interpreter
+  a lookup of its own any more: the window had only the standard names to
+  give, which the Document knows, and `CommandInterpreter::setColourLookup`
+  went with its last caller. (`CODE LIST`
   and `CODE CHECK` were `MAPFILE LIST` and `MAPFILE CHECK` until 2026-10-06.)
   Survey > Apply Survey Codes runs `CODE SELECTION` or `CODE DRAWING` ("The
   Format menu", above).

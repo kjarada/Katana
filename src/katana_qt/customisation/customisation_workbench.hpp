@@ -105,16 +105,17 @@ struct CustomisationServices {
     // The window's Layers action, which the Format menu shows too: the same
     // object, so the menu and the toolbar cannot drift apart. May be null.
     QAction* layers = nullptr;
-    // NOT READ. These were the window's Load and Replace Loaded Customisation
-    // actions, which went with the files they loaded. Nothing passes them and
-    // the workbench shows neither; the two members are left only because
-    // tests/qt_widgets/customisation/test_general_texts.cpp, which another
-    // change is rewriting, still assigns them. They go with those two lines.
-    QAction* loadCustomisation = nullptr;
-    QAction* replaceCustomisation = nullptr;
     // The window's one executor, handed on to every manager
     // (CustomisationContext::run). May be empty (a test).
     CommandRunner run;
+    // True when this session has a kept customisation file - the one
+    // CUSTOMISE KEEP writes and the next start reads (the window: its host's
+    // kept-file path, cad/customisation_host.hpp). It decides whether an
+    // editor's own commit is followed by a CUSTOMISE KEEP line
+    // (CustomisationWorkbench::context, beginCommit). Asked each time, because
+    // the window makes its host after it is built. Unset, or false: no line is
+    // ever run, so a session with no kept file never logs KEEP's refusal.
+    std::function<bool()> hasKeptFile;
 };
 
 class CustomisationWorkbench {

@@ -2311,7 +2311,7 @@ output. A record is found by its first word, so its place costs a reader
 nothing.
 
 Tests, each worked by hand from a field-file fixture and the hand-written
-customisation `tests/data/customisation/test_field_codes.customisation.json`
+customisation `tests/data/field_codes/test_field_codes.customisation.json`
 (a kerb that is a line in a colour of the customisation's own, an edge that
 is a plain blue line, a control mark that is a point code): the `SurveyVerbs`
 cases of `tests/app/test_survey_verbs.cpp` - the points on their layers and
@@ -2329,32 +2329,27 @@ differ in both records
 a standard colour name; the records' place; the refusals - and
 `SurveyImportFinishChoice` in
 `tests/cad/customisation/test_linework_verbs.cpp` for the function itself.
-Every `cli.survey_import_*` test passes as it was written: `katana_cli`
-there has no survey codes.
+Every `cli.survey_import_*` test older than these passes as it was written:
+`katana_cli` there has no survey codes, each test of a program being started
+with `KATANA_BUILTIN_CUSTOMISATION=none` (`docs/headless.md`, "The
+customisation a run starts with").
+
+Through the real program, with that fixture named as the built-in of the run
+by the same variable (2026-10-07, once the session read it):
+`cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step`
+- the five points on their layers, the closed line, the two records, and ONE
+`UNDO` back to an empty drawing;
+`cli.survey_import_with_codes_and_linework_off_draws_its_points_alone`; and
+`cli.linework_typed_after_an_import_strings_its_points_by_their_codes_once`,
+`LINEWORK` by hand after an import told `LINEWORK off`. The fixture has a
+folder of its own because the window's headless checks load every file of
+`tests/data/customisation` and pin what the three there hold.
 
 Not done:
 
-- No real-binary test names a fixture customisation as the built-in and
-  imports with it, and the owner's own field files have not been run through
-  the verb: both wait for `katana_cli` to start from the Katana customisation
-  format.
-- **The three new program tests rest on a seam `katana_cli` did not yet read
-  when they were written.** They set `KATANA_BUILTIN_CUSTOMISATION=none`,
-  which a session started through `cad::startCustomisation` honours; the
-  session of that day seeded from the older built-in table and ignored it.
-  With that table empty, as a clean checkout has it, they pass. Where survey
-  codes are compiled in by the older road,
-  `cli.survey_import_says_why_it_coded_nothing_and_takes_codes_off` gets a
-  coded import, `cli.linework_strings_points_by_their_control_codes_as_one_undo_step`
-  fails wherever `KB` has a rule, and the older `cli.survey_import_*` tests
-  run coded. They go to main only together with the session's port
-  (`src/katana_app/CMakeLists.txt` says so beside them).
+- The owner's own field files have not been run through the verb.
 - The import wizard does not ask `cad::surveyImportFinish` yet: it still
   draws points only and offers Apply Survey Codes as a second step.
-- `katana_mcp`'s command tool describes `SURVEY IMPORT` without the two
-  words and does not name `LINEWORK` (`src/katana_app/mcp_server.cpp`); the
-  lines themselves reach it, `katana_help` lists both, and `docs/mcp.md`
-  describes the records.
 - A job imported with `LINEWORK off` and strung afterwards by `LINEWORK` is
   strung by code, not as the file strung it (`docs/survey_coding.md`,
   "`LINEWORK` on the command line", Not done).

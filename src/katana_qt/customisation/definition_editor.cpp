@@ -227,6 +227,24 @@ QString listed(const std::vector<std::string>& each)
     return out.join(QLatin1Char('\n'));
 }
 
+// True when `shown` holds every one of `lines`, and there is one to hold:
+// whether the reply on the page already cites each user of a definition as
+// CUSTOMISE REMOVE's refusal cites it (cad::DefinitionUsers::cited). Not a
+// reading of the reply - the lines are the verb's own, made by the function
+// the verb makes them with.
+bool citesEvery(const QString& shown, const std::vector<std::string>& lines)
+{
+    if (lines.empty()) {
+        return false;
+    }
+    for (const std::string& line : lines) {
+        if (!shown.contains(text(line))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 DefinitionEditorDialog::DefinitionEditorDialog(const CustomisationContext& context,
@@ -1223,7 +1241,17 @@ void DefinitionEditorDialog::refresh()
             // under it would be FORCE unexplained.
             const katana::cad::DefinitionUsers users =
                 katana::cad::definitionUsers(*context_.document, *existing_);
-            parts << QStringLiteral("It is named by:\n%1").arg(listed(users.describe()));
+            // ONCE. The verb's refusal, shown above as it came, cites who
+            // names the definition, in its own words (DefinitionUsers::cited),
+            // and a person read the same users twice when this list followed
+            // it. The list goes here only where what is shown above does not
+            // cite every one of them: a line that failed for another reason
+            // cites nobody, and a refusal that came before something else
+            // came to name the definition does not cite that - and FORCE is
+            // never offered with nothing saying what it passes over.
+            if (!citesEvery(said_, users.cited(*existing_))) {
+                parts << QStringLiteral("It is named by:\n%1").arg(listed(users.describe()));
+            }
             parts << (QStringList{QStringLiteral(
                           "Delete Anyway runs the line again with FORCE.")} +
                       drawnWithoutIt(users))

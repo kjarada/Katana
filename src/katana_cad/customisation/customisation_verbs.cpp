@@ -617,21 +617,6 @@ Result<std::string> revert(Document& document, CustomisationVerbContext& context
 
 // ---- removing -----------------------------------------------------------------------------
 
-// The drawing's styles that name a definition, each once and in name order:
-// the shared answer (definition_users.hpp) lists a style under its linetype
-// AND under its symbol when it names the definition both ways, since it says
-// how each names it; this verb counts and cites a style once.
-std::vector<std::string> stylesNaming(const DefinitionUsers& users)
-{
-    std::vector<std::string> styles;
-    // Both lists are ascending, as the header promises, so this is the union
-    // in the same order.
-    std::set_union(users.linetypeStyles.begin(), users.linetypeStyles.end(),
-                   users.symbolStyles.begin(), users.symbolStyles.end(),
-                   std::back_inserter(styles));
-    return styles;
-}
-
 // What names a definition is asked of cad::definitionUsers - the function the
 // window's definition editor lists a definition's users with, so that what
 // REMOVE refuses for is what a person is shown beside Delete: the survey code
@@ -660,8 +645,9 @@ Result<std::string> removeDefinitions(Document& document, Words names, bool forc
                          unknown);
     }
 
-    // What each name's record counts: the rules, the styles (each once) and
-    // the layers that name it.
+    // What each name's record counts: the rules, the styles (each once - the
+    // shared answer lists a style under its linetype AND under its symbol
+    // when it names the definition both ways) and the layers that name it.
     struct Counted {
         std::size_t rules = 0;
         std::size_t styles = 0;
@@ -672,18 +658,12 @@ Result<std::string> removeDefinitions(Document& document, Words names, bool forc
     std::string listing;
     for (const std::string& name : names) {
         const DefinitionUsers users = definitionUsers(document, name);
-        const std::vector<std::string> styles = stylesNaming(users);
-        uses.push_back(Counted{users.rules.size(), styles.size(), users.layers.size()});
+        uses.push_back(Counted{users.rules.size(), users.styles().size(), users.layers.size()});
         used += users.empty() ? 0 : 1;
-        for (const DefinitionRule& rule : users.rules) {
-            listing += "\n  \"" + name + "\": rule #" + number(rule.index) + " " + rule.key + " (" +
-                       std::string(katana::entity::toString(rule.section)) + ") names it";
-        }
-        for (const std::string& style : styles) {
-            listing += "\n  \"" + name + "\": the drawing's style \"" + style + "\" names it";
-        }
-        for (const std::string& layer : users.layers) {
-            listing += "\n  \"" + name + "\": the drawing's layer \"" + layer + "\" names it";
+        // In the words the window's editor looks for under its Delete
+        // (DefinitionUsers::cited), so it does not list the users again.
+        for (const std::string& line : users.cited(name)) {
+            listing += "\n  " + line;
         }
     }
     if (used != 0 && !force) {

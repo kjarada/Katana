@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "katana/cad/linework_verbs.hpp"
 #include "katana/cad/survey_job.hpp"
 #include "katana/cad/survey_points.hpp"
 #include "katana/surveyio/reader.hpp"
@@ -605,6 +606,14 @@ void SurveyJobsDialog::applyAdjustment()
     request.context = std::move(*context);
     request.handEdits = policy;
     request.parserVersion = read_->parserVersion;
+    // HOW a job that was imported coded or strung is finished again: as an
+    // import into this drawing is (cad::surveyImportFinish) - colours through
+    // the Document's resolver, the customisation's control codes, strings by
+    // point number. WHETHER is the job's own, as it was imported, and is not
+    // read from this. Left empty, a point this run draws for the first time
+    // was given a second style, "<name> (<colour>)", beside the one its
+    // neighbours wear: a colour name with no lookup has no RGB.
+    request.finish = cad::surveyImportFinish(document_).options;
     auto command = std::make_unique<cad::ReadjustSurveyJobCommand>(
         document_, std::move(request),
         cachedJobReader(jobId, std::shared_ptr<const survey::SurveyProject>(read_, &read_->project)),

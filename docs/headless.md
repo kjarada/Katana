@@ -173,8 +173,8 @@ The window starts with a customisation - linestyles, symbols and survey codes
 `cad::startCustomisation`; `docs/desktop.md`, "How the window starts"), and
 two environment variables say which. The window reads them once, at start-up.
 (The seam is cad's own, `cad::builtInCustomisation`, so every front end that
-hands a host over reads it the same way; `katana_cli` and `katana_mcp` come
-onto it with the change that moves the session to `startCustomisation`.)
+hands a host over reads it the same way: `katana_cli` and `katana_mcp` do,
+through their session's `startCustomisation`.)
 
 | Variable | What it says |
 |---|---|
@@ -220,19 +220,26 @@ test that did not say would be two tests. Two parts, which share nothing:
 The two were one function, which set the variable on its own list of tests
 and then named those of that list without it - so nothing the scan missed
 could be named, and the test could not fail. A test of another directory is
-reached with `set_property(TEST ... DIRECTORY ...)`, which needs CMake 3.28,
-and `tests/CMakeLists.txt` refuses an older one in so many words: there the
-scan could not reach the `cli.` tests at all. (The top `CMakeLists.txt` still
-declares 3.24. Raising that also turns on every policy up to the new minimum,
-C++ module scanning of each source among them, which is a decision about the
-build and not about this scan.) Rejected: one line in each test's own
+reached with `set_property(TEST ... DIRECTORY ...)`, which needs CMake 3.28.
+With an older one `tests/CMakeLists.txt` does what it can and says so (it
+refused to configure at all until 2026-10-07): the scan is deferred to the
+end of `tests/` and reaches that directory's own program tests, the `cli.`
+tests and the window checks of other directories are left to the build and
+the caller's environment, and the check is not registered - it would name
+them at every run, for a reason nobody running the suite can mend. One
+`message(STATUS ...)` says all of that as the tree is configured. (The top
+`CMakeLists.txt` and the presets declare 3.24. Raising that also turns on
+every policy up to the new minimum, C++ module scanning of each source among
+them, which is a decision about the build and not about this scan.) There is
+no older CMake on the machines this was written on: the degraded path was
+run with the scan's own text in a throwaway project that sets
+`CMAKE_VERSION` to 3.27 first. Rejected: one line in each test's own
 properties - nearly four hundred tests, and the next one added would forget
 it. What the check cannot see is a program started from inside a script or a
 test executable without being named on the command line; there is none.
 
-Until `katana_cli` starts its session through `cad::startCustomisation`, the
-variable does nothing for the `cli.` tests: the session still seeds itself
-from the older compiled-in table and does not read the seam
+The `cli.` tests are held by the same variable: `katana_cli` starts its
+session through `cad::startCustomisation` and reads the seam
 (`src/katana_app/session.cpp`).
 
 ## The steps: driving dialogs, docks and the command line

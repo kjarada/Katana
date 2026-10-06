@@ -7,8 +7,9 @@ is `docs/testing.md`.
 ## Toolchain
 
 C++26 (`KATANA_CXX_STANDARD`, default 26; 23 also builds), CMake 3.24 or later
-(3.28 for the tests, which `tests/CMakeLists.txt` asks for itself:
-`docs/headless.md`, "The customisation a run starts with"),
+(with one older than 3.28 the tests still configure, and say that the
+program tests of other directories are not given their starting
+customisation: `docs/headless.md`, "The customisation a run starts with"),
 Ninja, and the libraries Qt 6 (Widgets), Eigen, PROJ, CGAL, SQLite,
 nlohmann-json, GDAL and PDAL. On Windows every one of them comes from MSYS2
 UCRT64 (`C:/msys64/ucrt64`), with GCC 16.2. MSYS2 is a rolling toolchain - it
@@ -385,11 +386,10 @@ The folder is git-ignored: its files are third-party material under their own
 licence. A checkout without it builds an empty table - Katana then draws plain
 lines - and the tests that read it skip. (No test of the WINDOW depends on it
 any more: each says what customisation the window starts with,
-`docs/headless.md`, "The customisation a run starts with". The `cli.` tests
-are given the same variable and still depend on the build: `katana_cli`
-seeds its session from this compiled-in table, `src/katana_app/session.cpp`,
-and reads the variable only once the session starts through
-`cad::startCustomisation`.) Point `KATANA_CUSTOMISATION_DIR` at a
+`docs/headless.md`, "The customisation a run starts with". Nor does a
+`cli.` test: `katana_cli` starts its session through
+`cad::startCustomisation` and reads the same variable.) Point
+`KATANA_CUSTOMISATION_DIR` at a
 customisation kept elsewhere to build with it without moving it.
 `docs/survey_coding.md` has what the files hold and how to swap them.
 

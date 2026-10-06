@@ -1751,21 +1751,14 @@ if(KATANA_BUILD_TESTS)
     # RTK job above draws its 5 points and nothing is asked of the job: the two
     # records say why, each after the other - no survey codes, unless the line
     # itself said off, which is said first. What a customisation then does with
-    # the same file is worked by hand in tests/app/test_survey_verbs.cpp
-    # (SurveyVerbs), in process.
+    # the same file is the three tests at the end of this file, through the
+    # program, and tests/app/test_survey_verbs.cpp (SurveyVerbs), in process.
     #
-    # THE SEAM, AND WHAT IT DOES NOT YET DO. KATANA_BUILTIN_CUSTOMISATION=none
-    # tells a session that starts through cad::builtInCustomisation() to start
-    # with no customisation. When these two tests and the LINEWORK one below
-    # were written katana_cli did not start that way: its session seeded from
-    # the older built-in table and never read the variable (session.cpp,
-    # loadDefaultCustomisation), so the word did nothing and the three held
-    # only because that table is empty in a clean checkout. On a build that
-    # compiles survey codes in by that older road the first expects
-    # no-survey-codes and gets a coded import, the LINEWORK test fails wherever
-    # KB has a rule, and the unchanged cli.survey_import_* tests above run
-    # coded. They belong on main ONLY TOGETHER WITH the session's port to
-    # cad::startCustomisation, which is what makes the seam true here.
+    # KATANA_BUILTIN_CUSTOMISATION=none is the seam (cad/customisation_host.hpp):
+    # the session starts through cad::startCustomisation and reads it, so these
+    # start with no customisation whatever the build compiled in. They were
+    # written before the session did - it then seeded from an older table and
+    # never read the variable - and held only where that table was empty.
     add_test(NAME cli.survey_import_says_why_it_coded_nothing_and_takes_codes_off
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 "KATANA_BUILTIN_CUSTOMISATION=none"
@@ -1802,5 +1795,89 @@ if(KATANA_BUILD_TESTS)
         PROPERTIES
         PASS_REGULAR_EXPRESSION
         "linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1 preview=yes[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0 entity=3[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+linework scope=drawing matched=3 considered=2 lines=0 unplaced=0 notes=1[\r\n]+left_out=2 reason=already-drawn lines=1[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+3 entities[\r\n]+.*Polyline +layer=0 +vertices=2[^\r\n]*length=10[^0-9.].*Entities: 2 "
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # SURVEY IMPORT and LINEWORK on a program that HAS survey codes: the
+    # hand-written fixture tests/data/field_codes/test_field_codes, named as
+    # the built-in of the run through the seam, and the RTK job gnss.fld above.
+    # Every value below is worked out from those two files, by hand. (The
+    # fixture is not beside the three of tests/data/customisation: the window's
+    # headless checks load every file of that folder and pin what three hold.)
+    #
+    # The customisation: one linestyle, "FIELD Kerb", no symbol, and three
+    # rules - KB* a LINE on FIELD KERB in that linestyle, EB* a line, CTRL a
+    # point code - so the session says 1 and 3 as it starts.
+    #
+    # The file, in the order its points are drawn (cli.survey_import_gnss_
+    # field_file): CM1 keyed in with no code at 500000,6200000; then the four
+    # shots coded KB with string number 1 - R001 at 500010,6200020, R002 at
+    # 500020,6200020, R003 at 500020,6200030, and, after the bare 20 that
+    # CLOSES the string, R004 at 500040,6200040, which begins KB 1 again and
+    # is alone in it.
+    #
+    # So an import that says nothing of codes or linework - both switches are
+    # on until a customisation says otherwise - draws the 5 points; codes the
+    # 4 that carry KB (all four matched, by KB*, onto the ONE layer FIELD KERB
+    # in the ONE style named after the linestyle); and strings the file's
+    # lines: the closed KB 1 through R001, R002 and R003, which makes no layer
+    # and no style of its own. Two things are in no line - CM1, which has no
+    # code, and the second KB 1, of one point, which is a fault and so the
+    # last of the reduction's warnings. The line is a right-angled triangle
+    # with legs of 10: 10 + 10 + sqrt(200) = 34.1421..., area 50. LIST shows
+    # the points on their layers and the line; ONE undo takes points, line,
+    # layers, style and job back, to an empty drawing. KATANA_CUSTOMISATION is
+    # unset for the run, so that a kept file of the caller's cannot start it.
+    # (Between the start-up line and `imported` stand the file's own records,
+    # as SURVEY READ gives them, and `settings`: docs/survey.md, "The reply".)
+    set(_field_codes
+        "${PROJECT_SOURCE_DIR}/tests/data/field_codes/test_field_codes.customisation.json")
+    set(_field_start "Customisation: test_field_codes, 1 linestyles and symbols and 3 survey code rules, built in")
+    set(_gnss_onto "SURVEY IMPORT \"${_fld_gnss}\" LAYER fieldwork")
+    add_test(NAME cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                $<TARGET_FILE:katana_cli> -c "${_gnss_onto}" -c "LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(
+        cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "${_field_start}${_eol}.*imported job=job-1 entities=5 layer=fieldwork [^\r\n]+${_eol}.*reduction_warning text=\"1 string\\(s\\) of the file are in no line \\(fewer than two of its points have a position: 1\\)\\.\"${_eol}coded points=4 matched=4 unmatched_codes=0 layers=1 styles=1${_eol}linework lines=1 unplaced=2 layers=0 styles=0${_eol}(.*[\r\n])?6 entities${_eol}[^\r\n]*Point +layer=fieldwork +at 500000,6200000${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500010,6200020${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500020,6200020${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500020,6200030${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500040,6200040${_eol}[^\r\n]*Polyline +layer=FIELD KERB +vertices=3 +closed +length=34[.]1421[0-9]* +area=50${_eol}.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+    # ... and with both words off it is the import of before, though the
+    # codes are there: the 5 points on the layer the line named, no layer or
+    # line of a rule, and no warning about a string - nothing was strung.
+    add_test(NAME cli.survey_import_with_codes_and_linework_off_draws_its_points_alone
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                $<TARGET_FILE:katana_cli> -c "${_gnss_onto} CODES off LINEWORK off" -c "LIST"
+                -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.survey_import_with_codes_and_linework_off_draws_its_points_alone
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "${_field_start}${_eol}.*imported job=job-1 entities=5 layer=fieldwork [^\r\n]+${_eol}.*coded none reason=off${_eol}linework none reason=off${_eol}(.*[\r\n])?5 entities${_eol}[^\r\n]*Point +layer=fieldwork +at 500000,6200000${_eol}[^\r\n]*Point +layer=fieldwork +at 500010,6200020${_eol}[^\r\n]*Point +layer=fieldwork +at 500020,6200020${_eol}[^\r\n]*Point +layer=fieldwork +at 500020,6200030${_eol}[^\r\n]*Point +layer=fieldwork +at 500040,6200040${_eol}.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error|FIELD KERB|Polyline|in no line")
+    # LINEWORK typed after an import that was told LINEWORK off. The points
+    # are coded (the first two records), and the verb then strings them BY
+    # THEIR CODES, not as the file strung them: the four shots of KB 1 in
+    # point order are one OPEN line of 4 vertices, R001 to R004 - 10 + 10 +
+    # sqrt(20*20 + 10*10) = 42.3606... long - on FIELD KERB, and CM1 has no
+    # code. The job took the first entity id for its number, so the points are
+    # entities 2 to 6 and the line is 7. Asked again, the verb finds the line
+    # the drawing holds and draws nothing: the 4 points it runs through are
+    # left out, 1 line. That second run is no undo step, so ONE undo takes the
+    # line back and leaves the import's 5 points. The scope is said, DRAWING,
+    # so that the test does not rest on what an import leaves selected.
+    add_test(NAME cli.linework_typed_after_an_import_strings_its_points_by_their_codes_once
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                $<TARGET_FILE:katana_cli> -c "${_gnss_onto} LINEWORK off" -c "LINEWORK DRAWING"
+                -c "LINEWORK DRAWING" -c "LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.linework_typed_after_an_import_strings_its_points_by_their_codes_once
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "coded points=4 matched=4 unmatched_codes=0 layers=1 styles=1${_eol}linework none reason=off${_eol}(.*[\r\n])?linework scope=drawing matched=5 considered=5 lines=1 unplaced=1 notes=0${_eol}string name=KB1 key=KB\\* number=1 points=4 vertices=4 closed=no layer=\"FIELD KERB\" entity=7${_eol}unplaced reason=\"no code\" points=1${_eol}linework scope=drawing matched=6 considered=5 lines=0 unplaced=1 notes=0${_eol}left_out=4 reason=already-drawn lines=1${_eol}unplaced reason=\"no code\" points=1${_eol}6 entities${_eol}.*Polyline +layer=FIELD KERB +vertices=4 +open +length=42[.]3606[0-9]*${_eol}.*Entities: 5 "
         FAIL_REGULAR_EXPRESSION "error")
 endif()

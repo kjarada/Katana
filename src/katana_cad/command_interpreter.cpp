@@ -859,7 +859,8 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     // every verb is (canonicalVerb): handed the line's own first word they
     // tested it again, and refused an alias the interpreter had accepted.
     if (isSurveyCodeVerb(verb)) {
-        return runSurveyCodeVerb(document_, args, colourOf_, scopeViews_);
+        // No colour names of a front end's own: the Document resolves them.
+        return runSurveyCodeVerb(document_, args, {}, scopeViews_);
     }
     if (isCustomisationVerb(verb)) {
         return runCustomisationVerb(document_, args, customisation_);

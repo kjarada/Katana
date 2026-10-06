@@ -886,22 +886,42 @@ TEST(DefinitionEditor, TheVerbItselfRefusesADefinitionInUseAndDeleteAnywayRemove
     // Refused. The verb's own words come first, as the window logs a refused
     // line, and they cite who names the definition - the verb asks the
     // function the editor lists with (cad::definitionUsers), and words each
-    // user its own way. Then the editor's list, and what Delete Anyway would
-    // do: a point is all that draws the valve, so a stand-in mark is all
-    // that follows.
+    // user its own way. They are said ONCE: the editor does not put its own
+    // list of the same two under them, as it did until 2026-10-07. Then what
+    // Delete Anyway would do: a point is all that draws the valve, so a
+    // stand-in mark is all that follows.
     EXPECT_EQ(f.ran, (QStringList{QStringLiteral("CUSTOMISE REMOVE \"TEST Valve\"")}));
-    EXPECT_EQ(issues(dialog),
-              QStringLiteral(
-                  "\"TEST Valve\" was not deleted: InvalidState: CUSTOMISE REMOVE: 1 of the 1 "
-                  "definition named is in use, so nothing was removed; FORCE removes what is "
-                  "used too, and what names it then draws plain\n"
-                  "  \"TEST Valve\": rule #1 AC* (symbol) names it\n"
-                  "  \"TEST Valve\": the drawing's style \"Marks\" names it\n"
-                  "It is named by:\n"
-                  "  rule #1 AC* (symbol) draws it as its symbol\n"
-                  "  style \"Marks\" draws it as its symbol\n"
-                  "Delete Anyway runs the line again with FORCE. A point naming it is then "
-                  "drawn as a stand-in mark."));
+    const QString refusal = QStringLiteral(
+        "\"TEST Valve\" was not deleted: InvalidState: CUSTOMISE REMOVE: 1 of the 1 "
+        "definition named is in use, so nothing was removed; FORCE removes what is "
+        "used too, and what names it then draws plain\n"
+        "  \"TEST Valve\": rule #1 AC* (symbol) names it\n"
+        "  \"TEST Valve\": the drawing's style \"Marks\" names it\n");
+    const QString offer = QStringLiteral("Delete Anyway runs the line again with FORCE. A point "
+                                         "naming it is then drawn as a stand-in mark.");
+    EXPECT_EQ(issues(dialog), refusal + offer);
+    EXPECT_FALSE(issues(dialog).contains(QStringLiteral("It is named by:")));
+
+    // Something else comes to name the valve while that refusal is on the
+    // page: a second style. The verb's words above are of the drawing as it
+    // was and do not cite it, so the editor's own list - of all three, as
+    // they stand now - goes under them: FORCE is never offered over a user
+    // nothing on the page names.
+    katana::entity::Style more;
+    more.name = "More";
+    more.symbol = "TEST Valve";
+    ASSERT_TRUE(f.document.execute(katana::commands::createStyle(more)).ok());
+    katana::qt::test::processEvents();
+    ASSERT_TRUE(offered(dialog, "definitionDeleteAnyway"));
+    EXPECT_EQ(issues(dialog), refusal + QStringLiteral(
+                                            "It is named by:\n"
+                                            "  rule #1 AC* (symbol) draws it as its symbol\n"
+                                            "  style \"Marks\" draws it as its symbol\n"
+                                            "  style \"More\" draws it as its symbol\n") +
+                                  offer);
+    ASSERT_TRUE(f.document.undo().ok());
+    katana::qt::test::processEvents();
+    EXPECT_EQ(issues(dialog), refusal + offer) << "and goes again with what it listed";
     EXPECT_TRUE(saysAnError(dialog));
     EXPECT_TRUE(f.inLibrary("TEST Valve") == valve());
     ASSERT_TRUE(offered(dialog, "definitionDeleteAnyway"));
