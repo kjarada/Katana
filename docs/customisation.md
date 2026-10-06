@@ -847,15 +847,13 @@ survives being read and written.
 
 ### Not done
 
-- **The window does not read a file of it from its command line yet.** The
-  verbs that read and write one are in the interpreter ("The verbs", below),
-  and `katana_cli` and `katana_mcp` run them; the Symbol Library and the
-  Survey Code Manager read and write one from their own buttons
-  (`docs/desktop.md`). The window still takes a `CUSTOMISE` line itself - all
-  but `CUSTOMISE REMOVE`, which its definition editor runs and the
-  interpreter answers - and does not start a session from one
-  (`docs/survey_coding.md`, "What a session starts with"). Settings comes
-  with the work that follows.
+- **No menu item reads or writes the whole of one yet.** The verbs that read
+  and write one are in the interpreter ("The verbs", below), and every front
+  end runs them: `katana_cli` and `katana_mcp`, and the desktop window's
+  typed `CUSTOMISE` and `--customise` (2026-10-07). The Symbol Library and
+  the Survey Code Manager read and write their own part of one from their
+  buttons (`docs/desktop.md`). Settings, with a per-user place for the kept
+  file, comes with the work that follows.
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
 - **Some of a rule's members are still shown by another word.** `CODE
@@ -940,15 +938,16 @@ family's whole reference (`cad::customisationVerbHelp`).
 **Where this stands.** The family is in the interpreter and is tested there
 (`tests/cad/customisation/test_customisation_verbs.cpp`,
 `tests/cad/customisation/test_survey_code_verbs.cpp`). `CODE` reaches every
-front end. `CUSTOMISE` reaches `katana_cli` and `katana_mcp` (since
-2026-10-06): their session takes no `CUSTOMISE` line of its own and hands the
-interpreter a host ("What katana_cli and katana_mcp start with", below). The
-window does not yet: it takes the line before the interpreter sees it, with
-the code it had, which still reads the older files
-(`src/katana_qt/main_window.cpp`), and hands over no host. It is moved to
-this family by the work that ports it; until then what
-`docs/survey_coding.md` says of `CUSTOMISE <file>` in the window is what the
-window does.
+front end, and since 2026-10-07 so does `CUSTOMISE`: no front end takes the
+line itself any more, and each hands the interpreter a host and starts
+through `startCustomisation`. The session of `katana_cli` and `katana_mcp`
+does it in `src/katana_app/session.cpp` ("What katana_cli and katana_mcp
+start with", below; the `cli.customise_*` tests); the desktop window in
+`MainWindow::loadDefaultCustomisation` (`docs/desktop.md`, "How the window
+starts" and "The Format menu";
+`qt_customisation_merges_and_keeps_the_map_headless` and the headless tests
+beside it). The two programs' tokenizers and loaders for the line, which
+had come to differ, are gone, and the older files they read no longer load.
 
 ### CUSTOMISE
 
@@ -1115,10 +1114,11 @@ which is what the merge replaces by. The `automation` and `linework` records
 carry the very keys `SET` takes, so either can be typed back after it.
 
 The bare report has a second, older text, `cad::formatCustomisationSummary`,
-which names a source by the kind of file it once was ("a style library"). The
-window's own `CUSTOMISE` and File > Drawing Summary still print it, and it
-goes with the last of them; the verb's text is `cad::formatCustomisationReply`,
-and both are made from one `CustomisationSummary`.
+which names a source by the kind of file it once was ("a style library").
+Nothing prints it any more: `katana_cli`'s own `CUSTOMISE`, the window's and
+File > Drawing Summary each printed it until they moved to the verb's text,
+`cad::formatCustomisationReply`. Both are made from one
+`CustomisationSummary`.
 
 `CUSTOMISE JSON` is `cad::customisationJson`: one object, keys in
 alphabetical order, two blanks a level, with `name`, `origin`, `kept`,
@@ -1457,23 +1457,14 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 
 ### The verbs: not done
 
-- **The window does not use the family for `CUSTOMISE` yet** ("Where this
-  stands"), and its Command Reference keeps a Customise block of its own
-  beside the interpreter's. (`katana_cli --help` listed two until its
-  session's own block went; it has the interpreter's alone now.) There,
-  `CODE` with nothing loaded says `CUSTOMISE <file> loads a Katana
-  customisation file`, which is true of this family and not yet of what the
-  window runs for that line.
-- **A quoted verb slips past the window's own `CUSTOMISE`.** The window tests
-  the line's first word as typed, and the interpreter removes quotes, so
-  `"CUSTOMISE" JSON` reaches this family there today, with no host, beside
-  the older code that an unquoted line still gets. It closes when the
-  window's interception goes.
 - **A kept file named in the caller's environment starts every program that
-  inherits it.** `KATANA_CUSTOMISATION` set for a user is read by every
-  `katana_cli` and `katana_mcp` that user starts - which is its purpose - and
-  so by a test suite run from that shell. The tests that pin a start-up clear
-  or set it themselves; nothing clears it for the rest.
+  inherits it** - which is its purpose. A test suite run from that shell is
+  kept clear of it: the scan in `tests/CMakeLists.txt` unsets
+  `KATANA_CUSTOMISATION` on every program test (`cli.*`, `*_headless`) that
+  does not set it itself, and the in-process tests that pin a start-up clear
+  or set it themselves (`tests/app/start_environment.hpp`). A program test
+  under another name is not reached by the scan, and the check that names
+  such a test asks only about the built-in's variable.
 - **A start-up problem does not change the exit status.** `katana_cli` says
   it on standard error and runs its lines; a script that must not run with
   the wrong customisation has to read that line, or `start.problems` of
@@ -1484,8 +1475,9 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 - **Other variables that name a file are still read with `getenv`**:
   `KATANA_ONLINE_CATALOGUE` and `KATANA_ONLINE_CACHE` in
   `src/katana_qt/gis_online.cpp`, which on Windows cannot name a file outside
-  the ANSI code page. The window's own read of `KATANA_CUSTOMISATION`, when it
-  has one, must go through `core::environmentVariable` as the session's does.
+  the ANSI code page. The window's own read of `KATANA_CUSTOMISATION` is
+  Qt's (`qEnvironmentVariable`, wide on Windows) where the session's is
+  `core::environmentVariable`: two ways to one answer.
 - **A file named on the command line still arrives through the code page.**
   The arguments of `katana_cli` and `katana_mcp` are the narrow `argv`
   (`src/katana_app/main.cpp`, `src/katana_app/mcp_main.cpp`), which on Windows

@@ -84,7 +84,8 @@ platform's text size: it neither reads nor writes the place, layout, text
 size and toolbar choices an interactive session keeps
 (`MainWindow::restoreSession`, `docs/desktop.md`, "How the window starts"),
 so a screenshot is the same on every machine and a test leaves no settings
-behind.
+behind. The same goes for the customisation: a headless run reads no
+per-user place for one ("The customisation a run starts with", below).
 
 **`--plot out.pdf`** plots the drawing and exits (`docs/cad.md`, "Plotting to
 PDF"). `--fit` (the default) picks the first standard scale at which the
@@ -151,7 +152,7 @@ imported (anything else), in order, before any step runs.
 | `--plot-style colour\|grey\|mono`, `--line-weight-scale F` | with `--plot-sheets` or `--plot`: print in colour, greyscale or monochrome, every line weight times F (0.1 to 5) |
 | `--dpi N` with `--plot-sheets` | the resolution of a PNG or TIFF and of a PDF's 3D snapshot (the page setup's, 300 by default) |
 | `--sheets-json FILE` | write the project's sheets as JSON (`-`: to stdout) and exit; before `--plot-sheets` when both are given |
-| `--customise FILE...` | load style libraries and survey code files - every path until the next switch - merged into the built-in customisation before anything is drawn |
+| `--customise FILE...` | load Katana customisation files (`docs/customisation.md`) - every path until the next switch - before anything is opened: ONE line, `CUSTOMISE "<file>" ...`, through the window's one executor, merged into what the session started with, all or nothing, and answered with the verb's records (`loaded file= ...`). Each path is made absolute first, so a file called as one of the verb's keywords (`reset`, `json`) is still a file. A refused line fails a run that only writes or runs a script batch, as a refused `--command` does, before any step runs (`qt_a_refused_customise_switch_stops_a_batch_run_before_its_script_headless`, `qt_a_refused_customise_switch_fails_a_batch_run_headless`); a screenshot run goes on (`qt_a_refused_customise_switch_leaves_a_screenshot_run_going_headless`). The style libraries and survey code files of another program, which the switch once took, are refused as not a Katana customisation file |
 | `--action NAME` | trigger the menu item with that object name after the imports, as a click does; repeatable, in order, before the steps |
 | `--select-all` | select every entity on an unlocked layer before the actions run |
 | `--toggle-layer NAME` | flip the layer's visibility box through the layer panel and refuse to go on if the panel was rebuilt inside its own signal (`desktop.md`, "Panels refresh on the event loop") |
@@ -164,6 +165,75 @@ imported (anything else), in order, before any step runs.
 | `--check-toolbars` | measure every icon-only button with a menu on a toolbar or in a dock's title bar (the tool families, Undo, Redo, each view's kind switcher) from its own rendering - where it draws its icon, and what its menu adds - print a `toolbar button` or `title bar button` line for each, and fail the run, with a `menu sign clash:` line, when a menu's sign is drawn over the icon or not at all (`tools::menuSignClashes`; `desktop.md`, "Tool families on the toolbars"). It measures once the `--action` switches and the steps have run, so a `--trigger viewToolBarIconsLarge` or a `--command` starting a tool is measured; on a scaled screen it judges in device pixels, and each line says so |
 | `--script FILE` | run a `katana_cli` script (`.kcs`) in the window, a step among the others: the window's `SCRIPT` verb through its one executor, each line its own undo step, stopping at the first refused (`desktop.md`, "Run Script"). A script that stops fails the run, exit 1. Without `--screenshot`, `--plot` or `--plot-sheets` the run is a batch, as `katana_cli`'s is: never shown, over when its steps are, and failed by the first step refused |
 | the steps | below |
+
+## The customisation a run starts with
+
+The window starts with a customisation - linestyles, symbols and survey codes
+- before it opens anything (`MainWindow::loadDefaultCustomisation`,
+`cad::startCustomisation`; `docs/desktop.md`, "How the window starts"), and
+two environment variables say which. The window reads them once, at start-up.
+(The seam is cad's own, `cad::builtInCustomisation`, so every front end that
+hands a host over reads it the same way; `katana_cli` and `katana_mcp` come
+onto it with the change that moves the session to `startCustomisation`.)
+
+| Variable | What it says |
+|---|---|
+| `KATANA_BUILTIN_CUSTOMISATION` | the seam (`include/katana/cad/customisation_host.hpp`): unset, the built-in is the customisation compiled into the program, when the build has one; `none`, there is no built-in for this run; a path, THAT Katana customisation file is the built-in. One that does not read is said, and the run has no built-in - never the compiled-in one in its place |
+| `KATANA_CUSTOMISATION` | the kept customisation file: what `CUSTOMISE KEEP` writes and the next start reads in the place of the built-in. Unset, a headless run has none, and `KEEP` and `REVERT` are refused naming the variable. It is the ONLY way a headless run reads or writes one: it looks in no per-user place, so that it is the same run on every machine |
+
+The start-up line says what was installed, on stderr with the rest of the
+log: `Customisation: <name>, N definitions (M symbols) and K survey code
+rules, built in.` or `..., kept.` A run with nothing to install says nothing.
+
+**Every program test says what it starts with.** A build on the owner's
+machine has a customisation compiled in and a clean checkout has none, and a
+test that did not say would be two tests. Two parts, which share nothing:
+
+- **The scan**, at configure time (`tests/CMakeLists.txt`,
+  `katana_say_what_every_program_test_starts_with`), gives every
+  `qt_..._headless` and `cli.` test, in whichever directory it is
+  registered, `KATANA_BUILTIN_CUSTOMISATION=none` and unsets
+  `KATANA_CUSTOMISATION` - unless the test sets that variable itself, as the
+  tests of the built-in and of the kept customisation do, naming a small
+  committed fixture in `tests/data/customisation`
+  (`qt_the_window_starts_with_its_built_in_customisation_and_reset_returns_to_it_headless`,
+  `qt_a_kept_customisation_is_what_the_next_window_starts_with_headless`).
+  It is deferred to the end of the TOP directory, so a directory added after
+  `tests/` (`benchmarks`) is reached too. The `cli.` tests carry their
+  environment on a `cmake -E env` command line, which the scan cannot read
+  and need not: the test property is set on the process that line starts
+  from, so a variable named there still wins.
+- **The check**, at test time
+  (`every_program_test_says_which_built_in_customisation_it_starts_with`,
+  `tools/check_program_tests.cmake`), reads what ctest itself will run -
+  `ctest --show-only=json-v1`, every directory's tests with the properties
+  they really have - and names every test whose COMMAND names `katana`,
+  `katana_cli` or `katana_mcp` and which does not give the variable a value:
+  in `ENVIRONMENT`, as `set:` in `ENVIRONMENT_MODIFICATION`, or on its own
+  `cmake -E env` line. An empty value, `unset:` and `reset:` do not say. It
+  goes by the command, not the name, so a program test registered under
+  another name is named and fails the suite until it says.
+  `the_program_test_check_names_a_test_left_to_the_machines_customisation`
+  runs the check on a hand-written listing (`tests/program_test_fixtures`)
+  with four tests in it that it must name.
+
+The two were one function, which set the variable on its own list of tests
+and then named those of that list without it - so nothing the scan missed
+could be named, and the test could not fail. A test of another directory is
+reached with `set_property(TEST ... DIRECTORY ...)`, which needs CMake 3.28,
+and `tests/CMakeLists.txt` refuses an older one in so many words: there the
+scan could not reach the `cli.` tests at all. (The top `CMakeLists.txt` still
+declares 3.24. Raising that also turns on every policy up to the new minimum,
+C++ module scanning of each source among them, which is a decision about the
+build and not about this scan.) Rejected: one line in each test's own
+properties - nearly four hundred tests, and the next one added would forget
+it. What the check cannot see is a program started from inside a script or a
+test executable without being named on the command line; there is none.
+
+Until `katana_cli` starts its session through `cad::startCustomisation`, the
+variable does nothing for the `cli.` tests: the session still seeds itself
+from the older compiled-in table and does not read the seam
+(`src/katana_app/session.cpp`).
 
 ## The steps: driving dialogs, docks and the command line
 
@@ -307,8 +377,8 @@ Its variables:
 | Variable | Switch or check |
 |---|---|
 | `-DAPP`, `-DPROJECT`, `-DOUTPUT` | the executable, the project to copy, the PNG to write (required) |
-| `-DIMPORT=<file>` | a file to import first |
-| `-DCUSTOMISE_DIR=<dir>` | `--customise` with every `.4d` and `.mapfile` in it; absent files are reported and the run goes on |
+| `-DIMPORT=<file>` | a file to import first. It is put before every switch, `--customise` above all, which takes each path up to the next switch: after it, the file was read as one more customisation file, the one `CUSTOMISE` line loaded nothing, and nothing was imported (`qt_a_customisation_folder_and_an_import_file_are_both_taken_headless`) |
+| `-DCUSTOMISE_DIR=<dir>` | `--customise` with every `*.customisation.json` in it, in name order - one `CUSTOMISE` line; a directory that holds none is reported and the run goes on, so give an `-DEXPECT` naming what must have loaded (`qt_customisation_headless`) |
 | `-DTOGGLE_LAYER`, `-DSTYLE_MANAGER=ON`, `-DLAYER_MANAGER=ON`, `-DATTRIBUTES=<id>`, `-DDATASET_INFO`, `-DIMPORT_OPTIONS`, `-DSELECT_ALL=ON`, `-DCHECK_SHORTCUTS=ON`, `-DCHECK_MENUS=ON`, `-DCHECK_TOOLBARS=ON` | the switches of the same names |
 | `-DACTIONS=a,b` | `--action` for each, commas because a CMake list does not survive `cmake -D` |
 | `-DDIALOG=NAME` (or `-DSURVEY_DIALOG`) with `-DFILL=f=t\|f=t` and `-DPRESS=a,b` | one dialog, filled and pressed |
@@ -326,9 +396,10 @@ of doing nothing. Give it a regex that names what came before the refusal as
 well, so that a run stopped earlier for another reason cannot pass.
 
 `-DFORBID` is how a test holds what the application SAYS to a vocabulary:
-the Format menu and the customisation log name no other program
+the Format menu and the customisation log name no other program, none of its
+file suffixes, and neither of the two menu items that loaded them
 (`qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless`,
-`-DFORBID=12[dD]`). It is matched after the run's own paths - the copy, the
+`-DFORBID=12[dD]|...`). It is matched after the run's own paths - the copy, the
 output, the project, the customisation folder, the work folder, the
 application's folder and the checkout - are replaced by `<path>`, so where a
 checkout or worktree sits cannot fail it; the rest of a line that holds a path
@@ -370,14 +441,18 @@ A modal box in a headless run is a hang until the test's timeout. So
   edit, fails, and the script can Apply or Revert, `SAVE` or `UNDO` first
   (`desktop.md`, "Failure modes");
 - File > Open, Save As (and Save of a drawing with no project), Import and
-  Export Vector, and Format > Load and Replace Customisation, open no file
-  dialog and name the line that does the same - `OPEN <directory>`,
-  `SAVE <directory>`, `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`,
-  `EXPORT <file>`,
-  `CUSTOMISE [REPLACE] <file>...` - since `--trigger` reaches them by their
-  object names (`MainWindow::refuseFileDialog`,
+  Export Vector open no file dialog and name the line that does the same -
+  `OPEN <directory>`, `SAVE <directory>`,
+  `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT <file>` - since
+  `--trigger` reaches them by their object names
+  (`MainWindow::refuseFileDialog`,
   `qt_the_file_items_name_their_verbs_in_a_headless_run_headless`); Export of
-  an empty drawing says so in the log, not in a box;
+  an empty drawing says so in the log, not in a box. Format > Load
+  Customisation and Replace Loaded Customisation were two more: they are no
+  menu items any more, and a `--trigger` of either fails the run as the name
+  of no menu item (`qt_load_customisation_is_no_menu_item_headless`,
+  `qt_replace_customisation_is_no_menu_item_headless`) - a customisation file
+  is the `CUSTOMISE` line or `--customise`;
 - File > Run Script's Browse opens no file dialog and says to fill
   `scriptPath` instead; a script's run shows no progress dialog, and the
   person's Recent Scripts list is left alone;

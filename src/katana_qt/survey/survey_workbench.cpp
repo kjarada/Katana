@@ -136,12 +136,6 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
     if (services_.codeManager != nullptr) {
         menu.addAction(services_.codeManager);
     }
-    if (services_.loadCustomisation != nullptr) {
-        menu.addAction(services_.loadCustomisation);
-    }
-    if (services_.replaceCustomisation != nullptr) {
-        menu.addAction(services_.replaceCustomisation);
-    }
     if (services_.applySurveyCodes != nullptr) {
         menu.addAction(services_.applySurveyCodes);
     }

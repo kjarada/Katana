@@ -23,8 +23,6 @@
 #include "command_runner.hpp"
 #include "icons.hpp"
 #include "theme.hpp"
-#include "katana/archive12d/customisation.hpp"
-#include "katana/cad/customisation_record.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/cad/corridor.hpp"
@@ -156,18 +154,21 @@ class MainWindow final : public QMainWindow {
     // click on that box crashed the application and nothing had tested it.
     [[nodiscard]] katana::core::Status toggleLayerThroughPanel(const QString& layer);
 
-    // Loads a customisation - linestyle and symbol libraries, survey code files -
-    // ON TOP OF what is loaded (archive12d::mergeCustomisation; the lead's
-    // D1), or in place of the loaded kinds it brings with LoadMode::Replace,
-    // and reports what each file added and replaced into the message log.
-    // Public because the headless --customise switch drives the same path
-    // the menu item does, so what a test exercises is what a person gets.
-    void applyCustomisation(
-        const std::vector<std::filesystem::path>& paths,
-        katana::archive12d::LoadMode mode = katana::archive12d::LoadMode::Merge);
-    // The customisation the application ships with or finds beside itself,
-    // loaded at startup so a survey drawing is drawn with its linestyles,
-    // symbols and survey codes without anyone being asked for them.
+    // The customisation this session starts with, so that a survey drawing is
+    // drawn with its linestyles, symbols and survey codes without anyone
+    // being asked for them: the one the user kept, else the one built into
+    // the program, else none (cad::startCustomisation; what it installed is
+    // logged, with its name and which of the two it is). It also hands the
+    // interpreter the host - the built-in and the kept file - that CUSTOMISE
+    // RESET, KEEP and REVERT need. Once, by main(), after setHeadless and
+    // before anything is opened.
+    //
+    // Loading a customisation FILE is not the window's own any more: it is
+    // the interpreter's CUSTOMISE line (cad/customisation_verbs.hpp), typed,
+    // run by a script, or made by main() for --customise and run through
+    // runVerbLine. What the window shows of the customisation - the pickers,
+    // the views, the managers - follows the Document's notification, as it
+    // does for every other change, so no verb has to tell it.
     void loadDefaultCustomisation();
 
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
@@ -306,11 +307,10 @@ class MainWindow final : public QMainWindow {
     // drift.
     void buildGisActions(QMenu& gisMenu, QAction* exportAction);
     // The Survey menu and toolbar; the workbench fills both (PLAN.MD 45).
-    void buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
-                            QAction* replaceCustomisationAction, QAction* codeAction);
+    // `codeAction` is Apply Survey Codes, which the window makes.
+    void buildSurveyActions(QMenu& surveyMenu, QAction* codeAction);
     // The Format menu and toolbar; the customisation workbench fills both.
-    void buildFormatActions(QMenu& formatMenu, QAction* layersAction, QAction* customiseAction,
-                            QAction* replaceCustomisationAction);
+    void buildFormatActions(QMenu& formatMenu, QAction* layersAction);
     // Draw, Modify and Annotate, menus and toolbars, generated from the tool
     // catalogue (tools/tool_menus.hpp), with Select heading the Draw toolbar.
     void buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& annotateMenu);
@@ -437,13 +437,15 @@ class MainWindow final : public QMainWindow {
 
     // ---- import / export (PLAN.MD Phase 20) ---------------------------------
     void importFile();
-    void loadCustomisation(katana::archive12d::LoadMode mode);
+    // Survey > Apply Survey Codes: the line CODE SELECTION when something is
+    // selected, else CODE DRAWING, through runVerbLine - echoed, logged and
+    // undone as the typed line is. It called cad::applySurveyCodes itself
+    // once, a second path with words and omissions of its own.
     void applySurveyCodes();
-    // After an open: says which files the project records that are not
-    // loaded (the Document works out which, and its save writes the record).
-    // A warning; the project opens all the same.
+    // After an open: says which customisations the project records that are
+    // not loaded (the Document works out which, and its save writes the
+    // record). A warning; the project opens all the same.
     void reportMissingCustomisation();
-    void reportCustomisationCoverage();
     // File > Import's step for a DXF or a .12da archive, whose only choice
     // is where it lands (ImportPlacementDialog), and then the IMPORT line
     // it makes, through runVerbLine.
@@ -534,7 +536,7 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] bool confirmDiscard();
     // In a headless session, logs that no file dialog opens and names `verb`,
     // the line that does the same without one, and returns true: what File >
-    // Open, Save As, Import, Export Vector and Load Customisation do there.
+    // Open, Save As, Import and Export Vector do there.
     bool refuseFileDialog(const QString& verb);
     void newDocument();
     void openDocument();
@@ -562,8 +564,9 @@ class MainWindow final : public QMainWindow {
     enum class LineSource { Typed, Executor };
     // Everything a line can be once no tool took it: a '#' comment, a view
     // verb (ZOOM, GRID, SNAP, EXAGGERATION), the window's own verbs (SCRIPT,
-    // CUSTOMISE, IMPORT, EXPORT, INFO <file>, REFS, COPC, PLOTSHEETS, PLOT,
-    // SNAPSHOT, HELP), a tool's alias when typed, or the interpreter's.
+    // IMPORT, EXPORT, INFO <file>, REFS, COPC, PLOTSHEETS, PLOT, SNAPSHOT,
+    // HELP), a tool's alias when typed, or the interpreter's - CUSTOMISE
+    // among those, which the window once read and ran itself.
     // Shared by the typed line and runVerbLine, so the two differ only where
     // `source` says.
     void dispatchLine(const QString& line, LineSource source);

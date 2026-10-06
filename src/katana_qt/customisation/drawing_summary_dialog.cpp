@@ -11,9 +11,11 @@
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTextOption>
 #include <QVBoxLayout>
 
 #include "customisation/document_watcher.hpp"
+#include "katana/cad/customisation_report.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "theme.hpp"
@@ -75,7 +77,13 @@ DrawingSummaryDialog::DrawingSummaryDialog(DrawingSummaryContext context, QWidge
     customisation_->setObjectName("drawingSummaryCustomisation");
     customisation_->setReadOnly(true);
     customisation_->setFont(katana::qt::theme::monospaceFont());
-    customisation_->setLineWrapMode(QPlainTextEdit::NoWrap);
+    // Wrapped at the pane's edge, between words where it can: the reply's
+    // records are longer than the pane is wide (the linework record is 143
+    // characters), and left unwrapped the end of each lay out of sight
+    // behind a scroll bar. A record still begins its own line and starts with
+    // its word, so a wrapped one reads as one.
+    customisation_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    customisation_->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
     customisation_->setMinimumHeight(150);
 
     auto* unresolvedLabel =
@@ -97,15 +105,11 @@ DrawingSummaryDialog::DrawingSummaryDialog(DrawingSummaryContext context, QWidge
                         "Copy the drawing's state as STATUS JSON gives it", this);
     auto* refreshButton =
         button("drawingSummaryRefresh", "Refresh", "Read the drawing's state again", this);
-    auto* load = button("drawingSummaryLoad", "Load Customisation...",
-                        "Load style libraries and survey code files (Format > Load Customisation)",
-                        this);
     auto* close = button("drawingSummaryClose", "Close", "Close the summary", this);
     status_ = valueLabel("drawingSummaryStatus", this);
     auto* buttons = new QHBoxLayout;
     buttons->addWidget(copy);
     buttons->addWidget(refreshButton);
-    buttons->addWidget(load);
     buttons->addStretch(1);
     buttons->addWidget(close);
 
@@ -126,11 +130,6 @@ DrawingSummaryDialog::DrawingSummaryDialog(DrawingSummaryContext context, QWidge
     connect(refreshButton, &QPushButton::clicked, this, [this] {
         refresh();
         status_->setText("Read again.");
-    });
-    connect(load, &QPushButton::clicked, this, [this] {
-        if (context_.load) {
-            context_.load();
-        }
     });
     connect(close, &QPushButton::clicked, this, [this] { hide(); });
     // A double-click on a name, or the button on the chosen one - which is
@@ -191,10 +190,10 @@ void DrawingSummaryDialog::refresh()
                       counted(status.redoSteps, "step", "steps") + " to redo" +
                       next(document.history().redoName()));
 
-    const katana::cad::CustomisationSummary summary =
-        context_.customisation ? context_.customisation()
-                               : katana::cad::customisationSummary(document, {}, {});
-    QString report = qs(katana::cad::formatCustomisationSummary(summary));
+    // What a bare CUSTOMISE replies, word for word, of the Document's own
+    // state: the pane and the command line cannot come to say it differently.
+    const katana::cad::CustomisationSummary summary = katana::cad::customisationSummary(document);
+    QString report = qs(katana::cad::formatCustomisationReply(summary));
     while (report.endsWith('\n')) {
         report.chop(1);
     }

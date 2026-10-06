@@ -2879,12 +2879,13 @@ Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, Parcel
 Report, the Angle and Bearing Calculator), Traverse and Levelling (Traverse,
 Level Book) and Coordinates (the Coordinate Converter) - plus a Survey Coding
 section that shows actions the window and the Format workbench own: the
-Survey Code Manager,
-Load Customisation, Replace Loaded Customisation and Apply Survey Codes
-(`docs/survey_coding.md`). The first three are the same `QAction` objects as
-on the Format menu (`SurveyServices::codeManager`, `loadCustomisation`,
-`replaceCustomisation`), so the two menus cannot drift; Apply Survey Codes
-(`applySurveyCodes`) is on this menu and the Survey toolbar only. The menu
+Survey Code Manager and Apply Survey Codes
+(`docs/survey_coding.md`). The first is the same `QAction` object as
+on the Format menu (`SurveyServices::codeManager`), so the two menus cannot
+drift; Apply Survey Codes (`applySurveyCodes`), which runs the `CODE` line on
+the selection or the drawing, is on this menu and the Survey toolbar only.
+(Load Customisation and Replace Loaded Customisation were here too until
+2026-10-06: `docs/desktop.md`, "The Format menu".) The menu
 ends with Subsurface Utilities (AS 5488), added by a workbench of its own
 (`src/katana_qt/survey/utility_workbench.*`, `docs/subsurface_utilities.md`).
 `MainWindow` only makes the menu and toolbar - on a second toolbar row, with

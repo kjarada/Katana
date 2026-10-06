@@ -438,8 +438,10 @@ failures. What was wrong with each, and why it was fixed where it was:
 
 What still skips in that run, and why, all for reasons outside the program:
 
-- the tests that read the gitignored reference customisation, and the headless
-  quit check that is disabled without it;
+- the tests that read the gitignored reference customisation (the headless
+  quit check was disabled without it too, until it was given a committed
+  fixture as its built-in: `docs/headless.md`, "The customisation a run
+  starts with");
 - the two `OnlineLive.*` cases (`KATANA_ONLINE_TESTS=1`);
 - the `gpu.*/Hardware` device cases, since the container has no GPU;
 - `GdalAdapter.GdalIsPointedAtTheCertificatesBesideLibcurl`, where the
