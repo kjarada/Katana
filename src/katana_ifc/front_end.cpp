@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iterator>
 
+#include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 #include "katana/survey/subsurface/utility_csv.hpp"
 
@@ -120,7 +121,9 @@ core::Error inFile(core::Error error, const std::string& path)
 
 std::filesystem::path pathFromUtf8(std::string_view text)
 {
-    return std::filesystem::path(std::u8string(text.begin(), text.end()));
+    // Core's, and not a conversion of this module's own: the one it had threw
+    // on a name that is not UTF-8, which core's reads as the narrow name it is.
+    return core::pathFromUtf8(text);
 }
 
 namespace {

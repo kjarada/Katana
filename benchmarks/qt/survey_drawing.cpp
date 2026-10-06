@@ -53,12 +53,6 @@ const std::vector<Color>& palette()
     return colours;
 }
 
-bool endsWith(const std::string& text, const std::string& suffix)
-{
-    return text.size() >= suffix.size() &&
-           text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
-}
-
 // A wandering string: a kerb, a fence, a drainage line - consecutive
 // vertices a few metres apart, turning gently, as a surveyed string does.
 Polyline2 wander(Stream& stream, const Point2& start, std::size_t vertices, double step)
@@ -92,9 +86,13 @@ katana::core::Result<SurveyDrawingSummary> buildSurveyDrawing(katana::cad::Docum
         if (style.strokes.empty()) {
             return;
         }
-        if (style.atVertices || endsWith(style.source, "symbols.4d")) {
+        // By what each definition says it is (LineStyle::symbol), not by the
+        // name of the file it came from: one customisation now holds both
+        // kinds under one name, and a test of the name would build no
+        // linestyle styles at all without a word.
+        if (style.atVertices || style.symbol) {
             symbols.push_back(style.name);
-        } else if (endsWith(style.source, "linestyles.4d")) {
+        } else {
             linestyles.push_back(style.name);
         }
     });

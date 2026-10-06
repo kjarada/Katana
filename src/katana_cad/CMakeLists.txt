@@ -57,6 +57,48 @@ target_sources(katana_cad PRIVATE ${_cad_drawing_sources})
 # a missing file is a build error, not a blank title block.
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/plotting/frame.cpp" PROPERTIES
     COMPILE_OPTIONS "--embed-dir=${PROJECT_SOURCE_DIR}/resources/plot_frames")
+# The built-in customisation: one Katana customisation file compiled in with
+# #embed (customisation/builtin_customisation.cpp), as the plot frame is. The
+# difference is that the file is NOT in the repository - it is third-party
+# material, git-ignored, and a clean checkout and every CI build have none - so
+# its absence is the normal case and compiles a program with no built-in rather
+# than failing the build.
+set(KATANA_BUILTIN_CUSTOMISATION
+    "${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json"
+    CACHE FILEPATH "The Katana customisation file compiled into the program; none when it does not exist")
+# For a build that must not ship without one (a release job): its absence is
+# then a configure error and not a program that draws plain lines.
+option(KATANA_REQUIRE_BUILTIN_CUSTOMISATION
+    "Fail the configure when KATANA_BUILTIN_CUSTOMISATION does not exist" OFF)
+# WHETHER it is there is asked of the file itself. A glob is no judge of that:
+# the path is a PATTERN to it, so a checkout under "work [2026]" matched
+# nothing though the file was there - no built-in, without a word, and
+# KATANA_REQUIRE_BUILTIN_CUSTOMISATION failing for a file in plain sight -
+# while a DIRECTORY of that name matched, and broke the #embed.
+#
+# The glob stays for the one thing it is for: CONFIGURE_DEPENDS re-runs the
+# configure when what it finds changes, so a file put there after the
+# configure is picked up by the next build instead of waiting for someone to
+# remember to configure again. The characters a pattern would read are
+# bracketed, each standing for itself, so that it watches exactly this path.
+string(REGEX REPLACE "([][*?])" "[\\1]" _katana_builtin_pattern "${KATANA_BUILTIN_CUSTOMISATION}")
+file(GLOB _katana_builtin_watched CONFIGURE_DEPENDS "${_katana_builtin_pattern}")
+if(EXISTS "${KATANA_BUILTIN_CUSTOMISATION}" AND NOT IS_DIRECTORY "${KATANA_BUILTIN_CUSTOMISATION}")
+    get_filename_component(_katana_builtin_directory "${KATANA_BUILTIN_CUSTOMISATION}" DIRECTORY)
+    get_filename_component(_katana_builtin_name "${KATANA_BUILTIN_CUSTOMISATION}" NAME)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/customisation/builtin_customisation.cpp" PROPERTIES
+        COMPILE_OPTIONS "--embed-dir=${_katana_builtin_directory}"
+        COMPILE_DEFINITIONS "KATANA_BUILTIN_CUSTOMISATION_FILE=\"${_katana_builtin_name}\"")
+    message(STATUS "Built-in customisation: ${KATANA_BUILTIN_CUSTOMISATION}")
+elseif(KATANA_REQUIRE_BUILTIN_CUSTOMISATION)
+    message(FATAL_ERROR
+        "KATANA_REQUIRE_BUILTIN_CUSTOMISATION is ON and the built-in customisation is not there:\n"
+        "  ${KATANA_BUILTIN_CUSTOMISATION}\n"
+        "Put the file there, or set KATANA_BUILTIN_CUSTOMISATION to where it is.")
+else()
+    message(STATUS "Built-in customisation: none (${KATANA_BUILTIN_CUSTOMISATION} is not a file)")
+endif()
 # Survey jobs (survey_job*.cpp) are globbed so the files implementing them can
 # be added without editing this list.
 file(GLOB _cad_survey_job_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/survey_job*.cpp")

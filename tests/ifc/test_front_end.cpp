@@ -697,3 +697,20 @@ TEST(IfcReplies, AnImportAndADescriptionAreRecordsOfWhatWasRead)
     EXPECT_TRUE(sawAlignment);
     EXPECT_TRUE(described.starts_with("ifc described file=\"x.ifc\""));
 }
+
+// katana_cli's arguments arrive in the ANSI code page on Windows, where the
+// "é" of "café" is the one byte E9 - not UTF-8. This module's own conversion
+// threw on such a name, out of a verb nothing catches; it is core's now
+// (core/path_text.hpp), which reads those bytes as the narrow name they are.
+TEST(IfcFrontEnd, APathThatIsNotUtf8IsTheNarrowNameItIsAndIsNotThrownOn)
+{
+    std::filesystem::path narrow;
+    ASSERT_NO_THROW(narrow = ifc::pathFromUtf8("caf\xE9.ifc"));
+    // Whatever character the platform makes of E9, the rest is untouched.
+    EXPECT_TRUE(narrow.extension() == std::filesystem::path(".ifc"));
+    EXPECT_FALSE(narrow.stem().empty());
+
+    // And UTF-8 is still read as UTF-8: "Zürich", its u-umlaut the two bytes
+    // C3 BC, is six characters whatever the platform's own encoding.
+    EXPECT_EQ(ifc::pathFromUtf8("Z\xC3\xBCrich").u32string().size(), 6u);
+}
