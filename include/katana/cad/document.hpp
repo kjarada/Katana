@@ -19,6 +19,7 @@
 #include <string_view>
 #include <vector>
 
+#include "katana/cad/customisation_state.hpp"
 #include "katana/cad/drawing/drafting.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/commands/command_stack.hpp"
@@ -97,6 +98,19 @@ struct DocumentChange {
         // Session state, not drawing: nothing is redrawn for it, but the
         // toggles that show it are re-read.
         Drafting = 1u << 17,
+        // The customisation's session state (Document::customisationState):
+        // its name, origin, sources, colours, linework codes, automation,
+        // whether it is kept, and what the open project is missing. Not in
+        // kDrawing - a name or a switch draws nothing; what does change the
+        // drawing is reported with it (a whole customisation installed also
+        // names StyleLibrary and SurveyMap, a new colour table StyleLibrary)
+        // - and not in a Replaced drawing, which keeps its customisation.
+        //
+        // setStyleLibrary and setSurveyMap report their own part ALONE, as
+        // they always have, although they also mark the origin edited: a
+        // listener that shows the origin tests those two bits as well, or
+        // compares customisationGeneration().
+        Customisation = 1u << 18,
     };
 
     // Every table bit.
@@ -198,19 +212,93 @@ class Document {
     // through. Undoing a line should not silently unload a library.
     [[nodiscard]] const katana::entity::StyleLibrary& styleLibrary() const { return library_; }
     [[nodiscard]] const katana::entity::SurveyMap& surveyMap() const { return surveyMap_; }
+    // What an editor calls with the library or the map it changed. Either is
+    // an EDIT of the session's customisation: its origin becomes Edited and
+    // it is no longer kept (customisationState). A whole customisation is
+    // installed with installCustomisation instead, which says where it came
+    // from.
     void setStyleLibrary(katana::entity::StyleLibrary library);
     void setSurveyMap(katana::entity::SurveyMap map);
-    // Counters bumped by every setStyleLibrary / setSurveyMap. A cache of
-    // flattened definitions, thumbnails or code lookups keys on these, never
-    // on a LineStyle* or SurveyRule* (both dangle when the whole library or
-    // map is replaced) and never on "a listener fired" (which a selection
-    // click also does).
+    // Counters bumped by every change of the library or of the survey map. A
+    // cache of flattened definitions, thumbnails or code lookups keys on
+    // these, never on a LineStyle* or SurveyRule* (both dangle when the whole
+    // library or map is replaced) and never on "a listener fired" (which a
+    // selection click also does). A change of the colour table bumps
+    // libraryGeneration too: a sprite or a thumbnail of a definition bakes in
+    // the colours its pens resolved to, and is dropped only on this.
     [[nodiscard]] std::uint64_t libraryGeneration() const { return libraryGeneration_; }
     [[nodiscard]] std::uint64_t surveyMapGeneration() const { return surveyMapGeneration_; }
     // The definition a style's `symbol` or `linetype` names, or nullptr. One
     // place to ask, so that "which library does this name come from" is not a
     // question every caller answers for itself.
     [[nodiscard]] const katana::entity::LineStyle* definitionFor(std::string_view name) const;
+
+    // ---- the customisation's session state (customisation_state.hpp) ---------
+    //
+    // Everything else the session knows of its customisation: its name and
+    // where it came from, the sources that went into it, its colours, linework
+    // codes and automation switches, whether it is kept, and which names the
+    // open project recorded that are not loaded. Session data, as the library
+    // and the map are: not undoable, not in the project, kept across a new or
+    // an opened drawing. A default Document has none of it (an empty state,
+    // origin None), and nothing here installs a customisation unasked: a front
+    // end does, with startCustomisation (customisation_host.hpp).
+    [[nodiscard]] const CustomisationState& customisationState() const { return customisation_; }
+    // Counts every change of the state above, the raw setters' included (they
+    // mark the origin edited). What a panel showing the state compares.
+    [[nodiscard]] std::uint64_t customisationGeneration() const
+    {
+        return customisationGeneration_;
+    }
+    // Installs a WHOLE customisation in the place of the session's: library,
+    // map, colours, name, description, notice, basedOn, sources - a
+    // customisation that lists no sources is its own one source - linework
+    // codes and automation, with `origin` as where it came from and `kept` as
+    // whether it is what the next start would give. Linework codes or
+    // automation it does not say are the DEFAULTS, not the session's: the
+    // session it leaves is the one a start with it would give, whatever was
+    // there before - a reset to the built-in resets the control codes too.
+    // (Keeping the session's where a load says nothing is the merge's rule,
+    // and mergeCustomisation hands over a customisation that says both.) What
+    // the open project is missing loses the names the new sources bring. One
+    // notification: StyleLibrary | SurveyMap | Customisation.
+    //
+    // InvalidArgument, and nothing changes, for origin None and for whatever
+    // customisationFaults finds (customisation_state.hpp) - a name, a source's
+    // name, a definition's source, linework codes or a basedOn: the session
+    // is what a KEEP writes and a project records, and neither could take
+    // them.
+    [[nodiscard]] katana::core::Status
+    installCustomisation(katana::entity::Customisation customisation, CustomisationOrigin origin,
+                         bool kept = false);
+    // The session as one customisation - what an export or a KEEP writes, and
+    // what a merge starts from: the library, the map and the state above.
+    // Linework and automation are always said. installCustomisation of it
+    // gives the session back.
+    [[nodiscard]] katana::entity::Customisation customisation() const;
+    // The three parts of the state an editor or a setting changes on their
+    // own. Each is an edit of the session, as the raw setters above are:
+    // origin Edited, no longer kept. Setting the value it already has is
+    // nothing at all. setLineworkCodes refuses (InvalidArgument) what
+    // entity::validate refuses. A colour table also bumps libraryGeneration
+    // and reports StyleLibrary with Customisation.
+    void setColourTable(katana::entity::ColourTable colours);
+    [[nodiscard]] katana::core::Status setLineworkCodes(katana::entity::LineworkCodes codes);
+    void setAutomation(katana::entity::CustomisationAutomation automation);
+    // Whether the session is what the next start would give: true after it
+    // was written to the kept file, false once it differs again.
+    void setCustomisationKept(bool kept);
+    // The name the host's built-in customisation declares (empty: none), for
+    // the record's renames. startCustomisation sets it.
+    void setBuiltInCustomisationName(std::string name);
+    // For a load installed through the raw setters - a front end that read
+    // the files itself: adds its sources to the session's
+    // (cad::recordCustomisationLoad) and takes them off what the open project
+    // is missing (noteCustomisationLoaded). The origin becomes Loaded.
+    // installCustomisation needs no such call; it takes the sources with the
+    // customisation.
+    void recordCustomisationLoad(const std::vector<CustomisationSource>& load,
+                                 bool replacedDefinitions, bool replacedRules);
 
     // Broad-phase index over the entities, kept in step with the model
     // (PLAN.MD Phase 18). Maintained incrementally from the per-entity changes
@@ -274,6 +362,18 @@ class Document {
     [[nodiscard]] katana::commands::EntityAttributes currentAttributes() const;
 
     // ---- persistence ---------------------------------------------------------
+    //
+    // The customisation is not saved, but a RECORD of it is: the names the
+    // drawing is drawn with (storage::ProjectMetadata::customisation;
+    // customisation_record.hpp has the rules). The Document keeps that record
+    // itself, where each front end once did. A save writes it INTO WHAT IT
+    // SAVES, and metadata() reads it back only once the save has succeeded:
+    // it never goes through setMetadata, so a save that cannot go ahead
+    // leaves an untouched drawing unmodified. open() works out which recorded
+    // names this session lacks (customisationState().missingAtOpen), for the
+    // front end to warn of and for the next save to keep; newDocument() has
+    // none.
+    //
     // Discards the drawing and starts an empty, unsaved one.
     void newDocument();
     [[nodiscard]] katana::core::Status open(const std::filesystem::path& projectDirectory);
@@ -362,8 +462,16 @@ class Document {
     friend class SurveyJobAccess;
 
     void rebuildStack();
-    // The model, the metadata and the survey jobs into `store` in one save.
-    [[nodiscard]] katana::core::Status saveContents(katana::storage::ProjectStore& store);
+    // The model, the metadata and the survey jobs into `store` in one save,
+    // with the customisation record as it stands now; on success the record
+    // saved becomes the metadata's, and the return says whether that changed
+    // it.
+    [[nodiscard]] katana::core::Result<bool> saveContents(katana::storage::ProjectStore& store);
+    // The origin is Edited and the session no longer kept; counted only when
+    // that changes something.
+    void markCustomisationEdited();
+    // The record's renames, answered with the host's built-in.
+    [[nodiscard]] std::vector<RenamedSource> customisationRenames() const;
     // Whole index from the current model; picks the cell size from the data.
     void rebuildSpatialIndex();
     // The index after one command: incremental for an ordinary edit, a
@@ -383,8 +491,10 @@ class Document {
     katana::entity::Model model_;
     katana::entity::StyleLibrary library_;
     katana::entity::SurveyMap surveyMap_;
+    CustomisationState customisation_{};
     std::uint64_t libraryGeneration_ = 0;
     std::uint64_t surveyMapGeneration_ = 0;
+    std::uint64_t customisationGeneration_ = 0;
     std::uint64_t modelRevision_ = 0;
     katana::geometry::SpatialIndex index_;
     // How many entities the model held when the index last chose its cell

@@ -17,6 +17,10 @@
 //    rule key it is coded by ("WM*") and a string number ("01"). The split is
 //    reported rather than used for grouping: two names are two strings whatever
 //    they split into, because "WM01" and "WM1" are two strings in the field.
+//    A point whose file kept the number apart from the code carries it beside
+//    the code (kSurveyStringProperty, survey_coding.hpp), and its string name
+//    is the two together: "KJ" in string "01" and "KJ" in string "02" are two
+//    strings, and a point written "KJ01" whole is in the first of them.
 //
 // 2. CONTROL CODES ARE DATA. A survey code file has no start/end/close codes
 //    - it forms strings by name alone - so what "ST" means is not in any
@@ -174,6 +178,27 @@ struct LineworkOptions {
     // applySurveyCodes. `createLayers` also governs the layers the lines are
     // put on.
     SurveyCodingOptions coding{};
+    // On, a string is a line only when a rule MORE SPECIFIC than the bare "*"
+    // makes its name one: neither the fallback rule's breakline nor a control
+    // code alone draws anything, and such a point is unplaced as NoRule. For
+    // a run nobody asked for by name - the one an import makes of its own
+    // points (survey_finish.hpp) - where a line no rule of the customisation
+    // describes would be a surprise, not a result. Off, as it always was: the
+    // resolved breakline or a control code makes a line, and the report notes
+    // which lines had no rule.
+    bool onlyRuledLines = false;
+    // Lines an EARLIER run drew of these same points - a survey job's, when
+    // it is re-adjusted (survey_finish.hpp). A line planned now that carries
+    // the code and the string number one of them carries IS that line again:
+    // the polyline keeps its entity - its id, its layer, its style, its other
+    // properties, and so every label, leader and dimension that follows it -
+    // and is given the vertices and heights planned now, where a new line
+    // would be created, layered and styled. They are taken in order: the
+    // first such line planned takes the earliest of them (the lowest id).
+    // Only a polyline is taken; the ones no line planned here takes are left
+    // exactly as they are, and LineworkString::redrawn says which were taken.
+    // Empty, as it always was: every line is a new entity.
+    std::vector<katana::entity::EntityId> earlierLines{};
 };
 
 // Why a point is not in any line.
@@ -235,7 +260,10 @@ struct LineworkNote {
 struct LineworkString {
     std::string name{};   // "WM01"
     std::string key{};    // "WM*" - see StringName
-    std::string number{}; // "01"
+    // "01": what the key leaves of the name, or - for points and features
+    // that carry their string number apart from the code - that number as it
+    // is carried ("12" for code B in string 12, whose key is "B1*").
+    std::string number{};
     std::vector<katana::entity::EntityId> points{}; // in the order joined
     std::vector<std::string> pointNumbers{};         // the same, by number
     bool closed = false;
@@ -244,6 +272,10 @@ struct LineworkString {
     std::size_t curves = 0;       // curves chorded into it
     std::size_t vertices = 0;     // vertices of the polyline, chords included
     std::string layer{};
+    // The line of an earlier run that this one is (the options' earlierLines):
+    // kept as that entity and given these vertices, and `layer` is the layer
+    // it is on. kInvalidEntityId for a line that is created.
+    katana::entity::EntityId redrawn = katana::entity::kInvalidEntityId;
 };
 
 struct LineworkReport {
@@ -257,9 +289,11 @@ struct LineworkReport {
     // Points deleted because a run of their string replaced them (keepPoints
     // off); join targets no run placed are never among them.
     std::size_t pointsRemoved = 0;
-    // What applySurveyCodes did to the lines. It runs when the command first
-    // executes - it cannot plan styles for lines that do not exist yet - so
-    // this is empty until then, and filled by that execution.
+    // What applySurveyCodes did to the lines that were CREATED. It runs when
+    // the command first executes - it cannot plan styles for lines that do
+    // not exist yet - so this is empty until then, and filled by that
+    // execution. Null when no line is created: a line redrawn as an earlier
+    // one keeps the style it has.
     std::shared_ptr<const SurveyCodingReport> styling{};
 };
 
@@ -267,7 +301,8 @@ struct LineworkResult {
     // ONE undoable command: layers, lines, their styling and (keepPoints off)
     // the removal of the points they replace. nullptr when there is nothing to
     // build - "nothing to do" and "failed" stay distinguishable, the contract
-    // applySurveyCodes and importSurveyProject follow.
+    // applySurveyCodes and importSurveyProject follow. Also nullptr when every
+    // line planned is an earlier line that already has these vertices.
     katana::commands::CommandPtr command{};
     LineworkReport report{};
 };
@@ -286,6 +321,11 @@ struct LineworkResult {
 // closes, "RECT" ends it as a rectangle. The line goes on the rule's model
 // (a rule's model is Katana's layer), or the first point's layer when the rule
 // names none.
+//
+// The line carries what its points carry: the string name in the code
+// property, or - when the points keep their string number apart - the code
+// there and the number under kSurveyStringProperty, so that applySurveyCodes
+// finds the rule for the line that it found for the points.
 //
 // Curves. "BC" begins a curve at a point and "EC" ends it; each consecutive
 // three curve points define an arc ((p0,p1,p2), (p2,p3,p4), ...), and when one
@@ -324,12 +364,41 @@ struct SurveyFeatureOptions {
     // As LineworkOptions::coding: how the lines are styled, and whether a
     // missing layer may be created.
     SurveyCodingOptions coding{};
+    // On, the code table decides WHETHER a feature is a line as well as how
+    // it looks, and the feature is read as a field file means it - its code
+    // and, in `name`, its string number:
+    //   * it is drawn only when a rule MORE SPECIFIC than the bare "*" makes
+    //     its string name (surveyLookupName of code and name) a line; the
+    //     others are in `unplaced` as NoRule or PointCode. Some readers make
+    //     a feature of EVERY coded shot, so without this every survey mark of
+    //     one code is joined to the next;
+    //   * the line carries the code in the code property and the name under
+    //     kSurveyStringProperty, as its points do, and is reported as the two
+    //     ("KB 32", number "32"), not by the number alone.
+    // Off, as it always was: every feature with two positioned points is
+    // drawn, named by its name, and its code alone is looked up.
+    bool onlyRuledLines = false;
+    // WHICH features, when not all of them: one entry per feature of the
+    // project, in its order, and a feature whose entry is false is passed
+    // over - not drawn, and not in `unplaced` either, since nothing was asked
+    // of it. The whole project is validated all the same. Empty means every
+    // feature; any other size than the project's is InvalidArgument. A list
+    // of flags and not of indices, so that "none of them" is a list of
+    // falses and can never be mistaken for the empty list that means all.
+    std::vector<bool> consider{};
+    // As LineworkOptions::earlierLines: the lines an earlier run drew of
+    // these features, each of which is redrawn as the same entity by the
+    // feature that carries its code and string number.
+    std::vector<katana::entity::EntityId> earlierLines{};
 };
 
 // Why a feature is not drawn.
 enum class UnplacedFeatureReason {
     TooFewPoints, // fewer than two of its points have a position: no line
     Coincident,   // its positioned points are all in one place: no length to draw
+    // onlyRuledLines only, and decided before the two above:
+    NoRule,    // no rule more specific than the bare "*" knows its string name
+    PointCode, // its rules make it a point, or never say it is a line
 };
 
 [[nodiscard]] std::string_view toString(UnplacedFeatureReason reason);
@@ -343,12 +412,14 @@ struct UnplacedFeature {
 
 struct SurveyFeatureResult {
     // ONE undoable command: the layers and the lines, with their styling;
-    // nullptr when no feature makes a line.
+    // nullptr when no feature makes a line (or every line is an earlier one
+    // that already has these vertices).
     katana::commands::CommandPtr command{};
     // One LineworkString per feature drawn, in the project's order: `name` is
     // the feature's name, or its code when it has none; `key` and `number`
     // split its CODE (the code is what the rules are keyed on and what the
-    // line carries); `points` is EMPTY, because the points are the project's
+    // line carries) - under onlyRuledLines, see there for all three;
+    // `points` is EMPTY, because the points are the project's
     // and need not be in the drawing, and `pointNumbers` holds the project's
     // point ids in the order joined. Also the notes (a point without a
     // position, a close on two points, a code no rule knows), layersCreated
@@ -366,10 +437,11 @@ struct SurveyFeatureResult {
 //
 // Fails with survey::validateProject's error for an inconsistent project, as
 // importSurveyProject does; with InvalidArgument for a rule model that is not a
-// valid layer name, or with NotFound for a layer the drawing lacks when
-// coding.createLayers is off and neither the rule's model nor the points'
-// layer exists (a line put on some other layer would look right and be wrong).
-// Never fails on a feature it cannot draw: that is in `unplaced`.
+// valid layer name or for a `consider` list of the wrong length; or with
+// NotFound for a layer the drawing lacks when coding.createLayers is off and
+// neither the rule's model nor the points' layer exists (a line put on some
+// other layer would look right and be wrong). Never fails on a feature it
+// cannot draw: that is in `unplaced`.
 //
 // The command must be executed on THIS document, as processLinework's.
 [[nodiscard]] katana::core::Result<SurveyFeatureResult>

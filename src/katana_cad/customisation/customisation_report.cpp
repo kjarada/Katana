@@ -69,8 +69,21 @@ std::string formatCustomisationSummary(const CustomisationSummary& summary)
     if (!summary.loaded.empty()) {
         out << "Loaded files, in load order:\n";
         for (const CustomisationSource& file : summary.loaded) {
-            out << "  \"" << file.name << "\", a "
-                << (file.library ? "style library" : "survey code file") << "\n";
+            // By what it brought: definitions alone are a style library's,
+            // rules alone a survey code file's, and both one customisation's.
+            // One that brought NEITHER is still a source - a table of
+            // colours, a set of control codes - and is said to be that, not
+            // passed off as the survey code file it would otherwise fall
+            // through to.
+            const char* kind = "a customisation with no definitions or survey code rules";
+            if (file.definitions && file.rules) {
+                kind = "a customisation";
+            } else if (file.definitions) {
+                kind = "a style library";
+            } else if (file.rules) {
+                kind = "a survey code file";
+            }
+            out << "  \"" << file.name << "\", " << kind << "\n";
         }
     }
     // What the OPEN warned of, kept in view: said once at the open, it

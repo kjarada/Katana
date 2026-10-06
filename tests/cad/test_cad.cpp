@@ -1550,24 +1550,27 @@ TEST(CadInterpreter, StyleEditsAreUndoableAndTheOtherTablesStillAre)
 
 namespace {
 
-// A library as a customisation load gives one: a linestyle from a linestyle
-// file, a vertex symbol, and a NON-vertex symbol from a symbol file - the
-// kind most symbols in use are (docs/survey_coding.md).
+// A library as a customisation load gives one: a linestyle, a vertex symbol,
+// and a NON-vertex definition its customisation lists as a symbol - the kind
+// most symbols in use are (docs/survey_coding.md). `symbol` is that listing
+// (LineStyle::symbol); the two symbols were once symbols because their
+// source's name held the word.
 void loadManagerLibrary(Document& document)
 {
     katana::entity::StyleLibrary library;
-    const auto add = [&](const char* name, bool atVertices, const char* source) {
+    const auto add = [&](const char* name, bool atVertices, const char* source, bool symbol) {
         katana::entity::LineStyle style;
         style.name = name;
         style.atVertices = atVertices;
         style.source = source;
+        style.symbol = symbol;
         style.strokes.push_back(
             {katana::entity::StrokeOp::Draw, katana::geometry::Point2(1.0, 0.0)});
         ASSERT_TRUE(library.add(style).ok());
     };
-    add("WATR Main", false, "linestyles_test.4d");
-    add("CULT Bollard", true, "symbols_test.4d");
-    add("SEWR Manhole Cover", false, "symbols_test.4d");
+    add("WATR Main", false, "linestyles_test.4d", false);
+    add("CULT Bollard", true, "symbols_test.4d", true);
+    add("SEWR Manhole Cover", false, "symbols_test.4d", true);
     document.setStyleLibrary(std::move(library));
 }
 
@@ -1603,8 +1606,8 @@ TEST(CadInterpreter, StyleSymbolsListsTheCataloguesSymbolsAndFiltersThem)
     Session session;
     loadManagerLibrary(session.document);
     const std::string all = session.ok("STYLE SYMBOLS");
-    // The built-ins, the vertex symbol, and the non-vertex one from the
-    // symbol file; not the linestyle.
+    // The built-ins, the vertex symbol, and the non-vertex one listed as a
+    // symbol; not the linestyle.
     EXPECT_NE(all.find("  manhole  (built-in)"), std::string::npos) << all;
     EXPECT_NE(all.find("  CULT Bollard  (library)"), std::string::npos) << all;
     EXPECT_NE(all.find("  SEWR Manhole Cover  (library)"), std::string::npos) << all;

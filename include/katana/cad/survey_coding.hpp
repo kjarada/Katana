@@ -78,6 +78,44 @@ struct SurveyCodingOptions {
 // Where a field code is looked for, in order, when none is named.
 [[nodiscard]] const std::vector<std::string>& codePropertyCandidates();
 
+// ---- string names --------------------------------------------------------------------
+//
+// A point's STRING NAME is its code followed by its string number: "KJ01" is
+// string 01 of code KJ, and the rules are keyed on that name ("KJ*", and
+// "B1*" for the strings 10 to 19 of a one-letter code B). A delimited list
+// writes the name whole in its code column. A field file whose records keep
+// the two apart (a code column and a string column) gives a point the code
+// alone, and the number comes into the drawing beside it, in this property -
+// as the file's own metadata key when it has one, else from the feature that
+// strings the point (survey_finish.hpp, nameSurveyStrings).
+//
+// An entity WITHOUT the property is read exactly as before it existed.
+inline constexpr std::string_view kSurveyStringProperty = "string";
+
+// The string number `entity` carries: the text under kSurveyStringProperty,
+// less blanks at either end; empty when it has none or holds something that
+// is not text (a number there is some other program's field, not a string
+// number this import wrote).
+[[nodiscard]] std::string_view surveyStringOf(const katana::entity::Entity& entity);
+
+// The name `code` is looked up by when its entity carries the string number
+// `string`: the string name (`code` followed by `string`) when a rule MORE
+// SPECIFIC than the bare "*" answers it, else `code` alone.
+//
+// The name first, because that is what the keys are written for: code "B" in
+// string "12" is "B12", which "B1*" answers and "B" never could. The code
+// alone second, so that numbering a string never LOSES a rule the code had -
+// an exact key "PABB" still answers PABB in string 3, whose name "PABB3" it
+// does not match - and so that a code nobody wrote a rule for is reported
+// once, as itself, rather than once per string. For the same reason the code
+// is also the answer when the name's best rule is a prefix SHORTER than the
+// code ("PA*", a rule for every code that begins PA) and the code has an
+// exact key of its own: that key is the more specific rule for it, numbered
+// or not. With no `string` the answer is `code`; with no `code` there is no
+// name and the answer is empty.
+[[nodiscard]] std::string surveyLookupName(const katana::entity::SurveyMap& map,
+                                           std::string_view code, std::string_view string);
+
 // The code an entity carries under `property`, or nullptr. Only TEXT is a
 // code: a number there is a measurement someone named badly, and treating
 // "1.5" as a field code would put it in whatever model the rule for `1*`
@@ -212,6 +250,9 @@ struct CustomisationCoverage {
 // A POINT is coded by the string name of its field code, its linework
 // controls left out (parseFieldCode in linework.hpp): "PABB ST" is coded as
 // PABB, and reported under PABB. Any other entity's code is looked up whole.
+// Either is followed by the entity's string number when it carries one
+// (kSurveyStringProperty, surveyLookupName): a point coded "B" in string
+// "12" is coded, and reported, as B12.
 [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
 applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
                  SurveyCodingReport* report = nullptr);

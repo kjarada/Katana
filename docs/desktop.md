@@ -1700,7 +1700,7 @@ window (`src/katana_qt/customisation/symbol_library.*`):
 - **centre**, a grid of 64-pixel pictures from the shared cache, captioned
   with the name and badged with how many entities draw it, under a filter
   bar: a search over name, group and survey code, and the chips All / In
-  drawing / Used by codes / Missing / Vertex mode;
+  drawing / Used by codes / Missing / At vertices;
 - **right**, a `StylePreview` at a plot scale (the insertion point marked,
   and a warning when it lies outside what the symbol draws), the details,
   and the actions.

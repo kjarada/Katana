@@ -21,6 +21,7 @@
 #include "katana/cad/plotting/sheet_json.hpp"
 #include "katana/cad/plotting/tables.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
@@ -92,23 +93,10 @@ Error usage(std::string_view text)
     return makeError(ErrorCode::InvalidArgument, "usage: " + std::string(text));
 }
 
-// A path typed on the command line is UTF-8 text; on Windows a narrow string
-// would be read in the ANSI code page instead.
-std::filesystem::path pathFrom(std::string_view utf8)
-{
-    std::u8string text;
-    text.reserve(utf8.size());
-    for (const char c : utf8) {
-        text += static_cast<char8_t>(c);
-    }
-    return std::filesystem::path(text);
-}
-
-std::string pathText(const std::filesystem::path& path)
-{
-    const std::u8string text = path.u8string();
-    return std::string(text.begin(), text.end());
-}
+// A path typed on the command line is UTF-8 text, and is said back as UTF-8:
+// core's (path_text.hpp), which every verb that reads or writes a file shares.
+using katana::core::pathFromUtf8;
+using katana::core::pathToUtf8;
 
 // ---- values --------------------------------------------------------------------------
 
@@ -899,7 +887,7 @@ Result<std::string> sheetsVerb(Document& document, const Words& args,
         if (args.size() == 1) {
             return sheetSetToJson(**set);
         }
-        if (const Status status = writeSheetSetFile(**set, pathFrom(args[1])); !status) {
+        if (const Status status = writeSheetSetFile(**set, pathFromUtf8(args[1])); !status) {
             return status.error();
         }
         return std::format("wrote {} to {}", countOf((*set)->sheets.size(), "sheet", "sheets"),
@@ -915,7 +903,7 @@ Result<std::string> sheetsVerb(Document& document, const Words& args,
         if (args.size() != 2) {
             return usage(kUsage);
         }
-        auto loaded = readSheetSetFile(pathFrom(args[1]));
+        auto loaded = readSheetSetFile(pathFromUtf8(args[1]));
         if (!loaded) {
             return loaded.error();
         }
@@ -935,7 +923,7 @@ Result<std::string> sheetsVerb(Document& document, const Words& args,
         if (args.size() != 2) {
             return usage(kUsage);
         }
-        auto loaded = readSheetSetFile(pathFrom(args[1]));
+        auto loaded = readSheetSetFile(pathFromUtf8(args[1]));
         if (!loaded) {
             return loaded.error();
         }
@@ -1339,7 +1327,7 @@ Result<std::string> imageOption(const Document& document, const Viewport& viewpo
                          std::format("file= is for image views, not {}", toString(viewport.kind)),
                          option.word);
     }
-    return importImageAsset(document, pathFrom(option.value), kMaximumImageBytes, "image");
+    return importImageAsset(document, pathFromUtf8(option.value), kMaximumImageBytes, "image");
 }
 
 // The options of VIEW ADD and VIEW SET applied to `viewport` on `sheet`:
@@ -2363,7 +2351,7 @@ Result<std::string> titleBlockVerb(Document& document, const Words& args)
             }
             return std::string("logo=\"\"");
         }
-        auto name = importLogo(document, pathFrom(args[1]));
+        auto name = importLogo(document, pathFromUtf8(args[1]));
         if (!name) {
             return name.error();
         }
@@ -2576,7 +2564,7 @@ Result<PlotSheetsRequest> parsePlotSheets(const SheetSet& set, const std::vector
                 return makeError(ErrorCode::InvalidArgument,
                                  std::format("expected option=value; usage: {}", kUsage), args[i]);
             }
-            request.path = pathFrom(args[i]);
+            request.path = pathFromUtf8(args[i]);
             continue;
         }
         const std::string& key = option->key;
@@ -2627,7 +2615,7 @@ Result<PlotSheetsRequest> parsePlotSheets(const SheetSet& set, const std::vector
             if (option->value.empty()) {
                 return makeError(ErrorCode::InvalidArgument, "folder= names a folder", option->word);
             }
-            folder = pathFrom(option->value);
+            folder = pathFromUtf8(option->value);
         } else if (key == "pattern" || key == "names") {
             const std::string pattern = unescaped(option->value);
             if (Status valid = validateFileNamePattern(pattern); !valid) {
@@ -2644,7 +2632,7 @@ Result<PlotSheetsRequest> parsePlotSheets(const SheetSet& set, const std::vector
             return makeError(ErrorCode::InvalidArgument,
                              "give the PDF's path or folder=, not both: folder= is where a file a "
                              "sheet goes",
-                             pathText(request.path));
+                             pathToUtf8(request.path));
         }
         if (request.format == "pdf") {
             return makeError(ErrorCode::InvalidArgument,
@@ -3052,13 +3040,13 @@ Status writeSheetSetFile(const SheetSet& set, const std::filesystem::path& path)
     std::ofstream out(path, std::ios::binary);
     if (!out) {
         return makeError(ErrorCode::FileExportFailure, "the file cannot be written",
-                         pathText(path));
+                         pathToUtf8(path));
     }
     out << *json << '\n';
     out.close();
     if (!out) {
         return makeError(ErrorCode::FileExportFailure, "the file cannot be written",
-                         pathText(path));
+                         pathToUtf8(path));
     }
     return {};
 }
@@ -3067,16 +3055,16 @@ Result<SheetSet> readSheetSetFile(const std::filesystem::path& path)
 {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        return makeError(ErrorCode::NotFound, "the file cannot be opened", pathText(path));
+        return makeError(ErrorCode::NotFound, "the file cannot be opened", pathToUtf8(path));
     }
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     if (in.bad()) {
-        return makeError(ErrorCode::FileImportFailure, "the file cannot be read", pathText(path));
+        return makeError(ErrorCode::FileImportFailure, "the file cannot be read", pathToUtf8(path));
     }
     auto set = sheetSetFromJson(text);
     if (!set) {
         return makeError(set.error().code, set.error().message,
-                         pathText(path) + (set.error().context.empty()
+                         pathToUtf8(path) + (set.error().context.empty()
                                                ? std::string{}
                                                : ": " + set.error().context));
     }
