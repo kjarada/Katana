@@ -199,7 +199,10 @@ given into the build tree first, and a test that needs a project of its own
 writes it there. The same holds for a person: open a copy of a sample.
 
 Fixtures live beside their suite (`tests/archive12d/data/`,
-`tests/surveyio/`); `samples/` holds a small project (`samples/site_plan`), the
+`tests/surveyio/`), except the three small customisations of
+`tests/data/customisation/`, which more than one suite is to load
+(`docs/customisation.md`, "The fixtures, and what the converter is held to");
+`samples/` holds a small project (`samples/site_plan`), the
 script that draws it and a few GIS files. The owner's large real archives are
 kept outside the repository and used for measuring and looking, never
 committed and never needed by a test. A test that reads the git-ignored

@@ -48,6 +48,12 @@ struct StyleLibraryRead {
     // for NSW definitions appear in both library files, so this is expected
     // and is reported rather than treated as an error.
     std::size_t replaced = 0;
+    // Each definition that count stands for, AS IT WAS before the one of this
+    // text took its place, in the order they were replaced. A count says that
+    // a name was given twice and not which, nor whether the two differ - and
+    // one that differs is a definition somebody drew and nobody will see
+    // (the converter of these files names each: legacy/convert.hpp).
+    std::vector<katana::entity::LineStyle> replacedDefinitions{};
     // The `//` header, which is where these files carry their licence.
     std::vector<std::string> comments{};
 };

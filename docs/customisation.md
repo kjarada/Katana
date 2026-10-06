@@ -6,7 +6,8 @@ mean and how linework is processed. `docs/survey_coding.md` says what each of
 those IS and how a code is applied. This document is about the customisation
 as one thing: the value that holds one and the file that keeps it.
 
-Its first chapter, below, is the file format. The chapters on the
+Its first chapter, below, is the file format, and its last is the converter
+that makes such a file from the older formats. The chapters on the
 customisation built into the program, on the commands that load and edit one
 and on Settings are added by the work that builds them; until then
 `docs/survey_coding.md` describes what the program does today.
@@ -691,9 +692,12 @@ survives being read and written.
 
 ### Not done
 
-- **Nothing reads or writes a file yet.** This is the value, the format and
-  its tests; the commands, the built-in customisation and Settings come with
-  the work that follows, and are recorded in this document then.
+- **Nothing in the program reads or writes a file yet.** This is the value,
+  the format and its tests; the commands, the built-in customisation and
+  Settings come with the work that follows, and are recorded in this document
+  then. The one thing that writes a file today is the converter of the older
+  formats, a developer's tool ("Converting a customisation from the legacy
+  formats", below).
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
 - **Explicit zero against "not said"** is not kept for a rule's symbol and
@@ -717,11 +721,14 @@ survives being read and written.
   `"colour": "orange"` draws. It should be filled from
   `entity::standardColourNames`; left because the window's behaviour belongs
   to the work that gives it Settings.
-- **No benchmark that can be repeated yet**, and the reader is slower than the
-  readers it replaces. Measured once, on 2026-10-06, with a throwaway program
-  (Release, GCC 16, best of 15 runs) on a GENERATED customisation of the
-  reference one's size - 792 definitions, 35,684 strokes in the reference
-  mix with coordinates of three decimals, 1,624 rules, 1.7 MB of text:
+- **The reader is slower than the readers it replaces.** The measurement
+  that can be repeated is `benchmarks/bench_customisation.cpp`, and its
+  figures are under "What reading and writing cost" at the end of this
+  document. What follows is the first measurement, kept for what it found:
+  made once, on 2026-10-06, with a throwaway program (Release, GCC 16, best
+  of 15 runs) on a GENERATED customisation of the reference one's size - 792
+  definitions, 35,684 strokes in the reference mix with coordinates of three
+  decimals, 1,624 rules, 1.7 MB of text:
 
   | | Before | With strokes read from the parse events |
   |---|---|---|
@@ -746,4 +753,480 @@ survives being read and written.
   the JSON library offers no way to replace it: only a scanner of this
   format's own would. *Not done*: that is a second JSON reader in the
   program, and it should be decided on a benchmark that can be repeated, on
-  the converted reference customisation - which comes with the conversion.
+  the converted reference customisation. Both now exist, and say the same
+  ("What reading and writing cost").
+
+## Converting a customisation from the legacy formats
+
+The Katana customisation format is to be the ONE format a customisation is
+read in. At this point the program itself still reads only the older ones
+("Not done", above); the work that follows moves it to this format and takes
+their readers out. A customisation kept in the older formats - style
+libraries (`.4d`) and survey code files (`.mapfile`) - is turned into the
+Katana format once, by a developer, with `katana_customisation_convert`:
+
+```
+katana_customisation_convert --name <name> [--description <text>]
+    [--notice-from <file>]... [--colours <table>]
+    [--strip-leading-word <word>]... [--remove-word <word>]...
+    [-o <output>] <style library or survey code file>...
+```
+
+It is a tool of the build tree and not of the product. It is built with
+everything else, so that it cannot rot unseen, but it is never installed
+(`cmake/KatanaPackaging.cmake` installs three programs by name) and none of
+`katana`, `katana_cli` and `katana_mcp` links it: what it does is a static
+library of its own, `katana_legacy_customisation`
+(`src/katana_archive12d/legacy/convert.hpp`, `convert.cpp`), which only the
+program (`convert_main.cpp`, beside them) and the archive module's tests
+link. The library publishes that one directory, so the two include
+`convert.hpp` and the module's private headers stay private. The program reads
+its command line and nothing more, so everything below is tested as functions
+(`tests/archive12d/customisation/test_convert.cpp`):
+
+```
+core::Result<Conversion> convertLegacyCustomisation(const std::vector<LegacyFile>& files, const ConvertOptions& options);
+core::Result<Conversion> convertLegacyFiles(const ConvertRequest& request);
+std::string              toText(const ConvertReport& report);
+```
+
+The first takes files as bytes, the second by path - it reads them, converts
+and writes `-o` - and a `Conversion` is the `entity::Customisation`, its text
+as `entity::customisationToJson` writes it, and a report. The readers of the
+older formats are still in `katana_archive12d`, which the library links; they
+are to move into that directory when they leave the product. One of them
+gained one thing to say for the converter: `StyleLibraryRead::
+replacedDefinitions`, each definition a library replaced AS IT WAS, where the
+reader used to give a count and nothing else.
+
+### What a conversion does
+
+**The order of the files is their meaning**, so they are given in load order
+and never sorted. A later library wins a definition both give; an earlier
+survey code file wins a field both set, because its rules come first and
+order is precedence. What each file IS is decided by looking inside it, as
+the loader of those files always did: the extension says nothing, `.4d` being
+the extension of both kinds.
+
+It converts from what the readers MADE of the files - a `StyleLibrary` and a
+`SurveyMap` - and never from their text. *Rejected: a translation of the text
+itself.* The readers apply defaults and pass over what they cannot read (an
+`<item>` with no key, a rotation written as an empty element), and a second
+reading of the same text would be a second opinion of what a file means.
+
+- **`linestyles` or `symbols`.** A definition goes to `symbols` when
+  `LineStyle::symbol` is set, which the style library reader does for a file
+  whose NAME holds "symbol": the older format keeps one kind a file and says
+  which nowhere else.
+- **Every definition's `from` is the customisation.** Its source becomes
+  `--name`; the files it was read from are no longer what it came from, and
+  their names are not carried.
+- **What a conversion cannot know, it leaves unsaid.** No `sources` (a
+  customisation that lists none is its own one source), no `linework` and no
+  `automation`: the older files say nothing of control codes or of what is
+  applied unasked, and "says nothing" keeps a session's own when the file is
+  merged into it.
+- **The rules are kept as they are**, in the order read, duplicates and
+  shadowed rules included ("Decisions, and what was rejected").
+- **`--notice-from <file>`** (repeatable) takes that file's LEADING `//`
+  comment block as the notice: the run of comment lines it opens with, each
+  as written with the marker and one blank after it taken off, ending at the
+  first line that is not a comment. A block the same as the one before it is
+  taken once. A file asked for a notice and holding none is refused: carrying
+  the author's words with the data is why one asks.
+- **`--colours <table>`** gives a colour to every name a rule uses - its own,
+  its symbol's, its text's - that the standard names lack. The table is text,
+  a colour a line: `R G B <index> "name"`, whatever follows the name ignored.
+  A name is matched by `entity::foldColourName`, so `sui_gas` in the table is
+  the `sui gas` of a rule, and is written into `colours` as the rules first
+  spell it. A name the table gives two colours is refused, but only when a
+  rule uses it: a table of nine hundred colours need not be sound where
+  nothing reads it.
+- **A plot pen is never given a colour**: a name that is `pen`, digits and at
+  most one letter (`pen 035`, `pen 12a`), though the table has one. Such a
+  name is a pen of the plotter the files were written for, not a colour of
+  the drawing. Unresolved, it leaves the entity's own colour alone
+  (`entity::resolveColour`), which is how these codes have always been drawn;
+  resolved, every one of them would change colour on the day of the
+  conversion.
+- **`--strip-leading-word <word>`** (repeatable) takes a word, with the
+  blanks after it, off the FRONT of every definition name, every group path,
+  every rule's `group` and every `linestyle` and symbol name a rule gives -
+  so that a rule still names the definition it named. It is matched as
+  written (case is not folded, as names are not), at most one word a text,
+  the first given that begins it; a text that is nothing but the word keeps
+  it.
+- **`--remove-word <word>`** (repeatable) takes a word out of rule
+  `comment`s wherever it stands as a whole word, with the blanks around it;
+  one blank is left where it had blanks on both sides.
+
+**What went is named.** The older formats keep linestyles and symbols in
+separate files, where one name may be both; a customisation has ONE
+definition a name, so of two that share a name the later file's is kept and
+the other goes. That is the order doing what it means - and it is never done
+silently, because the definition that went is one somebody drew. Each is a
+line of the report: its name as the files give it, the file kept and the file
+dropped, the kind each file made it, whether the two differ (leaving out
+their file and kind), and how many rules name it as their linestyle and as
+their symbol. Where a name is kept as one kind and rules use it as the OTHER
+kind, the one that went, that is a warning besides. Those rules are left
+naming a definition they were not written for (a line drawn with what is now
+a symbol), and giving the libraries in the other order keeps the one the
+rules mean. A definition replaced by one of its own kind is listed and not
+warned of: no order of the files would keep anything else.
+
+**What a conversion cannot carry, it says.**
+
+- *A standard colour name the table colours otherwise.* A customisation's
+  table may not redefine a standard name ("Colour names"), so `brown` is the
+  standard brown whatever the table has for it. Where the table has another
+  colour, the name is reported with both (`colour_kept_standard`): it is a
+  colour the table's author meant and the drawing will not have.
+- *Characters read by a guess.* A file that is neither UTF-8 nor marked as
+  UTF-16 is read as Windows-1252 (`core::decodeText`), and its characters
+  outside ASCII - a diameter sign in a definition's name - are what that
+  guess makes of them: a wrong one is a wrong character in the customisation
+  and an error nowhere. A warning names the file, the encoding and how many
+  such characters there are; once a file, and only when there are any.
+- *A file that gave nothing.* What a file is, is asked of a keyword anywhere
+  in its text, so a comment is enough to make one a style library of no
+  definitions. A library no definition was read from, and a survey code file
+  no rule was read from, are warnings.
+
+The text is read back before it is handed over, and the conversion fails if
+it does not come back as the value it was written from. The file is this
+tool's whole product and is compiled into a build; a fault found there would
+be found by a user. For the same reason it is written beside the output first
+(`<output>.partial`) and then put in its place, as the DXF and IFC writers
+do: a write that fails leaves the file that was there, never half of a new
+one (`AWriteThatFailsLeavesTheFileThatWasThere`).
+
+**What a rename may not do.** Taking a word off can make two things one, and
+both are refused, naming them, rather than settled by a rule nobody chose:
+
+- two definitions arriving at one name - `"ACME Kerb" and "Kerb" would both
+  be "Kerb"`;
+- a rule coming to name a definition it did not name: a reference that was
+  the name of NO definition (`ACME Tree`, defined nowhere) which without its
+  word is one (`Tree`), or one (`Post`) that a renamed definition (`ACME
+  Post`) would come to be called. A reference that names nothing before and
+  nothing after is renamed like any other and stays unresolved.
+
+### The report
+
+On success the program prints what it did as `key=value` lines, a text value
+quoted as every reply's is (`core::replyQuoted`), and exits 0; on any failure
+it prints the reason on standard error, writes nothing and exits 1 - an
+exception included, which `main` catches so that the exit code is never
+anything else. A list is its count and then a line an entry, and an entry of
+several facts is a record of them on its line. The three fixtures below,
+converted together:
+
+```
+name="Site"
+files=3
+definitions=7
+symbols=4
+linestyles=3
+at_vertices=3
+groups=4
+strokes=36
+definitions_replaced=0
+rules=11
+keys=8
+colours_resolved=0
+colours_unresolved=1
+colour_unresolved="sui test purple"
+colours_kept_standard=0
+names_renamed=0
+groups_renamed=0
+references_renamed=0
+rule_groups_renamed=0
+comments_changed=0
+unresolved_references=2
+unresolved_reference="0"
+unresolved_reference="TEST Missing Symbol"
+notice_lines=0
+warnings=0
+```
+
+and then `bytes`, the length of the text, and `output`, where it was written.
+The two lists whose entries are records, when they have something to say:
+
+```
+definition_replaced="Gate" kept="site_symbols.4d" kept_as=symbol dropped="site_lines.4d" dropped_as=linestyle differs=yes linestyle_rules=2 symbol_rules=0
+colour_kept_standard="brown" standard="#A52A2A" table="#964B00"
+```
+
+`unresolved_references` are the linestyle and symbol names the rules use that
+no definition has. They are reported and are not an error: a customisation
+need not be self-contained, and `0` is the plain continuous line. `warnings`
+is what the readers of the older formats said of the files and what the
+conversion found in them itself ("What went is named", "What a conversion
+cannot carry, it says"), each under its file's name; none of them fails a
+conversion, and each is for the person converting to read. Without `-o`
+nothing is written and the report alone is printed, which is how to see what
+a conversion would give.
+
+The report is UTF-8, and so are the arguments: on Windows the program takes
+its command line as the UTF-16 it is and never in the ANSI code page, in
+which a file name outside it does not arrive, a name arrives as bytes the
+format refuses, and a word to strip matches nothing.
+
+### The fixtures, and what the converter is held to
+
+`tests/data/customisation/` holds three small customisations in the Katana
+format: `test_linestyles.customisation.json` (3 linestyles),
+`test_symbols.customisation.json` (4 symbols) and
+`test_survey.customisation.json` (11 rules over 8 keys). They are the three
+fixtures of `tests/archive12d/data/customisation/` over again, and they were
+WRITTEN BY HAND, from those files' text and the format chapter above, before
+the converter was first run on them. That is the point of them: a converter
+tested against its own output agrees with itself. Each legacy fixture,
+converted under its twin's name, must equal the twin - the value whole, and
+the text byte for byte, since the twins are written in the writer's layout
+(`EachLegacyFixtureConvertsToItsHandWrittenTwin`,
+`TheTwinsAreInTheWritersLayoutByteForByte`). They must never be replaced by
+what the converter writes. And because a file cannot show how it was made,
+`TheTwinsHoldWhatTheLegacyFixturesSay` states what each twin holds, value by
+value, from the legacy fixtures' text - anchors, modes, a text's every
+member, a weight, a `hide` that is said and one that is not: a twin
+regenerated from a converter that had lost a field would agree with that
+converter, and fail there.
+
+`test_survey` has no `colours`: its one unknown colour name was invented for
+the legacy fixture as a name no table knows, nothing gives it an RGB, and so
+it stays unresolved here as there.
+
+They are in a directory of no one suite because more than one loads them: the
+converter's tests today, and the command line, the window and the widget
+tests with the work that follows.
+
+One thing a checkout does to them: git's `core.autocrlf` hands a text file to
+a Windows working tree with CRLF line ends. The reader takes either, but a
+comparison of bytes does not, so the tests take the carriage returns off a
+twin's text before comparing it. *Not done*: a `.gitattributes` rule keeping
+these files' line feeds, which would also keep a digest of one
+(`customisationDigest`) the same on every platform - a test that pins such a
+digest of a committed file will need it.
+
+The other small inputs are written in the test, and what each becomes is
+worked out beside it. The program itself has four tests, the cases of
+`tests/archive12d/check_convert_program.cmake` (`customisation_convert.*`),
+because the functions' tests pass with an option wired to the wrong member or
+to none: a fixture converted to its twin with the exit code, the report and
+the line ends checked, and a missing `--name` refused with exit code 1; every
+option given at once, each seen in the report and in the file written; an
+unknown option, an option without its value and `--help`; and a name, a word,
+a file and an output outside ASCII.
+
+### The reference customisation
+
+The customisation the survey coding was built against is two style libraries
+and two survey code files, with a colour table in a `support` folder beside
+them. It is third-party material under its author's own licence and its two
+libraries carry a notice against copying, so it is in no clone: the folder
+is git-ignored, and the cache variable `KATANA_REFERENCE_CUSTOMISATION_DIR`
+names it (`docs/building.md`). Nothing committed needs it, and the test that
+converts it skips where the folder is absent or holds no file in the legacy
+formats - and FAILS where it holds some that are not the four, which a skip
+would hide
+(`AReferenceFolderIsSkippedOnlyWhenItHoldsNoLegacyFileAndRefusedWhenItHoldsTheWrongOnes`).
+
+It is converted - by the owner, on the machine that has it - with
+
+```
+katana_customisation_convert --name NSW --description "<a sentence>"
+    --notice-from "<linestyle library>" --notice-from "<symbol library>"
+    --colours "<folder>/support/colours.4d"
+    --strip-leading-word <publisher's word> --strip-leading-word <vendor's word>
+    --remove-word <publisher's word>
+    -o resources/customisation/nsw.customisation.json
+    "<linestyle library>" "<survey code file>" "<names file>" "<symbol library>"
+```
+
+The four files in that order is the documented load order, the one the
+program has always loaded them in: the symbol library last, and the names
+file after the survey code file, whose rules win a field both set.
+
+**That order is an open decision, and the owner's.** Three names are given by
+BOTH libraries, as three different definitions. Read last, the symbol
+library's are the ones kept - and two of those three names are what four
+rules give as their LINESTYLE, while no rule places any of the three as a
+symbol. So four rules are left drawing a line with a symbol (the survey code
+check reports two of them as such), and the conversion says so in its report:
+three `definition_replaced` lines that change kind, two warnings. With the
+symbol library given FIRST the three linestyles are kept instead and no rule
+names a definition of the other kind - 471 symbols and 321 linestyles in
+place of 474 and 318, which moves every figure below that counts them. *Not
+done here:* those figures are what the rest of this work is pinned to, so the
+order was kept and the choice recorded for the owner.
+
+The two words are the publisher's, which begins most group paths, and the
+vendor's, which begins a few; they are arguments so that no committed file
+spells them
+(`tests/archive12d/customisation/test_convert.cpp` finds them in the data, as
+what stands before a group path's first blank and is no part of the path).
+The output folder is git-ignored too, and is where the build looks for the
+customisation to compile in.
+
+What the conversion of 2026-10-06 gave, each figure also the census's:
+
+| | |
+|---|---|
+| definitions | 792, from 796 blocks: four names are defined twice, three of them once in each library |
+| definitions replaced | 4: one within the linestyle library, by a block of the same words; three of the linestyle library's by the symbol library's, each a different definition - two of those names the linestyle of four rules, none placed as a symbol |
+| listed as symbols / not | 474 / 318 |
+| drawn at vertices | 157 |
+| group paths | 71 |
+| strokes | 35,684: 17,014 move, 17,220 draw, 104 arc, 312 circle, 178 dot, 342 pen, 514 text |
+| rules | 1,624 (725 and 899) over 632 keys |
+| names the rules use | 426, of which 5 are defined by neither library |
+| colour names the rules use | 22: 9 standard, 7 given a colour from the table, 6 left unresolved - every one a plot pen |
+| standard names the table colours otherwise | 2: they draw in the standard colour |
+| characters read by an inferred encoding | 82, all in the linestyle library (Windows-1252) |
+| warnings | 4: an `<item>` that names no code, the inferred encoding, and the two names kept as symbols that rules give as their linestyle |
+| leading words taken off | 29 definition names, 786 group paths, 1,029 rule groups, 8 rule references |
+| comments changed | 1 |
+| notice | 16 lines: the two libraries' blocks of 8, which differ |
+| the file | 1,541,413 bytes |
+
+**Where the figures come from.** Two scripts in `tools/`, neither using any of
+Katana's code:
+
+- `tools/reference_census.py`, given the four legacy files in that order and
+  the words (`--strip WORD`, `--remove WORD`), counts them with a small
+  tokenizer and the standard XML parser - and counts what a conversion
+  REPORTS besides: what carried a word, the blocks replaced and how the rules
+  name them, the characters an inferred encoding gave, the libraries' notice
+  lines and, given the colour table (`--colours TABLE`), the colour names by
+  where their colour comes from;
+- `tools/customisation_census.py`, given a Katana customisation, counts it
+  with the standard `json` module under the same names, and with
+  `--against <census.json>` compares the two figure by figure and exits 1 if
+  any differs.
+
+The converted file gave the first script's figures in all 21 it can be asked
+for. The others - eleven, with the words and the table given - describe the
+legacy files and the conversion rather than the result: blocks read, a file
+and replaced, strokes read, rules a file, items with no key, what carried a
+word, what was replaced, the inferred encoding, the notice lines, the
+colours. `TheReferenceCustomisationConvertsToTheFiguresOfItsCensus` holds
+the converter and its REPORT to all of them, with the 29 names the earlier
+clean-up gave the definitions that carried the publisher's word, every one of
+which must be defined. No figure in that test is the converter's own.
+
+### What reading and writing cost
+
+`benchmarks/bench_customisation.cpp`, Release, GCC 16.2, on 2026-10-06 on a
+machine busy with other builds; the median of five repetitions, in
+milliseconds. The generated customisation is made in code to the reference
+one's size and mix (792 definitions, 35,684 strokes with coordinates of three
+decimals, 1,624 rules), so that the measurement can be repeated in any clone;
+the built-in column is the converted reference file, where the build has one.
+
+| | Generated, 1,558,760 bytes | Built-in, 1,541,413 bytes |
+|---|---|---|
+| writing, whole | 7.3 | 7.4 |
+| writing, definitions alone | 4.7 | 4.9 |
+| writing, rules alone | 2.2 | 2.1 |
+| reading, whole | 42.6 | 38.8 |
+| reading, definitions alone | 36.0 | 34.0 |
+| reading, rules alone | 6.0 | 5.5 |
+| the 69,270 numbers of the strokes, by `strtod` | 21.5 | |
+| the same, by `std::from_chars` | 0.6 | |
+
+**Reading is about twice the older readers**, which were measured at 21 ms on
+the four reference files (`docs/survey_coding.md`): 39 ms for the reference
+customisation itself, once, at the first use of the built-in. The benchmark
+says where it goes. The definitions are 34 of the 39, and a definition is
+almost nothing but numbers; converting the numbers of the strokes with the C
+library's `strtod`, which is what the JSON library hands each one to, takes
+21.5 ms with nothing else done, and `std::from_chars` does the same work in
+0.6. So about half of a read is one function called 69,270 times, and the
+rest is the JSON library's scanning and the building of the strokes and
+rules.
+
+The figures are the machine's as much as the code's. Run twice more the same
+evening, with nothing changed in the reader or the writer: under two other
+builds every row was about twice the table - reading the reference file
+83.8 ms, writing it 16.7 - and so were the two rows that run none of Katana's
+code (41.8 and 1.3 ms for the numbers alone); with the machine quiet again the
+table came back (40.0 ms to read the reference file, 7.5 to write it, 24.1
+and 0.6 for the numbers). The proportions are what to take from it: half of a
+read is `strtod`.
+
+*Not done, and nothing was changed to get these figures:* the only way to
+take that half is a number scanner of the format's own in place of the JSON
+library's, which is a second JSON reader in the program. It is the owner's
+to decide against 20 ms at start-up; the benchmark is there to decide it on.
+
+### Decisions about the converter, and what was rejected
+
+**The words to strip are arguments, and matched as written.** *Rejected:
+finding them* (the commonest first word of the group paths), which is what
+the reference test does to avoid spelling them. A tool that decides by itself
+what is a publisher's mark would one day take a real first word off every
+path of somebody's library. *Rejected: folding case*, since a definition's
+name is compared with regard to case everywhere else: `acme Kerb` and `ACME
+Kerb` are two names, and a word stripped from one and not the other would be
+a surprise in either direction.
+
+**A definition that went is reported, and the conversion does not choose.**
+Two libraries that give one name is the normal case of these files, so it is
+not refused. *Rejected: keeping whichever kind the rules use*, which looks
+kind and is a rule nobody chose - it would make the result depend on the
+survey code files as well as on the order, and where rules use a name both
+ways it has no answer. *Rejected: carrying both under two names*: the rules
+name one. The order stays the whole of the meaning, and the report gives the
+person converting what they need to choose it: what went, whether it
+differed, and which kind the rules were written for.
+
+**A standard colour stands, and the table's other colour for it is said.**
+*Rejected: writing the table's colour into `colours`*, which the format
+refuses, and for the reason given under "Colour names" - an archive import
+has no customisation to ask, and would draw the same name in another colour.
+*Rejected: renaming the colour in the rules* to carry it: a conversion that
+rewrote what the rules say would no longer be one.
+
+**A colour is written under the rules' spelling, not the table's.** The table
+says `sui_gas` and the rules `sui gas`; they are one name by the fold, and
+the file is read by the people who read its rules.
+
+**Only the rules' colours are looked up, not the pens inside definitions.** A
+definition's `pen` names its colour the same way, and the reference
+libraries' pens are a plot pen and `view_colour`, which is the entity's own:
+neither is to be given a colour. A library whose strokes name a colour of the
+table's would draw in the entity's colour as it does today; *not done*,
+because nothing here needs it and a pen that begins to resolve changes how a
+definition is drawn.
+
+**Text colours are looked up with the rest.** The survey code lint checks a
+rule's own colour, its symbol's and its text's with one resolver, so the
+converter fills the table for all three.
+
+### Not done by the converter
+
+- **The converter's readers are still the product's.** `katana_archive12d`
+  holds them, and the three programs link that library, until the work that
+  moves them into `src/katana_archive12d/legacy/` beside the converter.
+- **The order of the reference libraries is not settled** ("The reference
+  customisation"): as converted, four rules draw a line with a symbol.
+- **A telephone number is in the reference customisation.** Ten of its symbol
+  definitions draw a text that holds one - the same number in each - and five
+  of the ten are placed as symbols by ten rules (five codes, two rules each),
+  so a survey coded with those draws it. It is faithful to the source, and no
+  option of the converter takes a stroke out of a definition; whether a
+  general product ships it is the owner's to decide before the file is
+  compiled in.
+- **Two standard colour names draw in the standard colour, not the table's**
+  (`colour_kept_standard`). Reported, and all that can be done here.
+- **No colour for a definition's pen** (above), and **no `sources`**: a
+  converted customisation does not say which files it was made from.
+- **No warning fails a conversion** - a reader's or the conversion's own. It
+  is printed with the report. The reference files give four; a definition a
+  library reader passed over would be reported the same way, and is a loss
+  the person converting has to notice.
+- **A console may not show the report's characters outside ASCII.** The
+  program writes UTF-8 and leaves the console's code page alone; redirected,
+  the report is what it should be.

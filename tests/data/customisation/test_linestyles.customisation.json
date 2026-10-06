@@ -1,0 +1,28 @@
+{
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "test_linestyles",
+  "linestyles": [
+    {"name": "TEST Dashed Kerb", "group": "Test/Lines", "units": "paper", "length": 4, "strokes": [
+      ["move", 0, 0],
+      ["draw", 1.5, 0],
+      ["move", 2, 0],
+      ["draw", 3, 0],
+      ["move", 4, 0]
+    ]},
+    {"name": "TEST Gate", "group": "Test/Lines", "units": "twoPoint", "anchors": [[0, 0], [4, 0]], "stretchMode": 2, "cycleMode": 2, "strokes": [
+      ["move", 0, 0],
+      ["draw", 4, 0],
+      ["move", 0, 0],
+      ["arc", 4, 0, 90]
+    ]},
+    {"name": "TEST Water Main", "group": "Test/Services", "length": 6, "strokes": [
+      ["pen", "blue"],
+      ["move", 0, 0],
+      ["draw", 4.5, 0],
+      ["move", 5, -0.25],
+      ["draw", 5, 0.25],
+      ["move", 6, 0]
+    ]}
+  ]
+}

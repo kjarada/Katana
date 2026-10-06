@@ -32,6 +32,50 @@ target_compile_definitions(katana_archive12d_tests PRIVATE
 # there rather than fail: the suite must stay green without it.
 target_compile_definitions(katana_archive12d_tests PRIVATE
     KATANA_CUSTOMISATION_FILES="${KATANA_CUSTOMISATION_DIR}")
+# The converter of the older customisation formats (src/katana_archive12d/legacy):
+# customisation/test_convert.cpp calls its functions, so the suite links its
+# library - which nothing that ships does.
+if(TARGET katana_legacy_customisation)
+    target_link_libraries(katana_archive12d_tests PRIVATE katana_legacy_customisation)
+endif()
+# What the converter is held to: the three small customisations in the Katana
+# format, written by hand as the twins of the three fixtures under data/
+# customisation. They are in a directory of no one module because the window,
+# katana_cli and the widget tests load them too.
+target_compile_definitions(katana_archive12d_tests PRIVATE
+    KATANA_CUSTOMISATION_TEST_DATA="${PROJECT_SOURCE_DIR}/tests/data/customisation")
+# The reference customisation in the legacy formats (the top-level
+# CMakeLists.txt says what it is and why it is in no clone): the conversion
+# test reads it, SKIPS when the folder is absent or holds no such file, and
+# fails when it holds some that are not the four.
+target_compile_definitions(katana_archive12d_tests PRIVATE
+    KATANA_REFERENCE_CUSTOMISATION_FILES="${KATANA_REFERENCE_CUSTOMISATION_DIR}")
+# The program itself: that its command line reaches the functions the suite
+# above tests - every option of it, since the functions' tests would pass with
+# an option wired to the wrong member or to none - that it writes the file it
+# is asked for, and that a failure is exit code 1 with the reason. Everything
+# it DOES is tested through the functions. One script, a case a test, each
+# with a directory of its own so that they can run at once.
+if(TARGET katana_customisation_convert)
+    foreach(_case IN ITEMS
+            "fixture:the_program_converts_a_fixture_to_its_hand_written_twin"
+            "options:every_option_of_the_command_line_reaches_the_conversion"
+            "usage:an_unknown_option_or_an_option_without_its_value_is_exit_code_1"
+            "unicode:names_and_paths_outside_ascii_are_taken_as_they_were_typed")
+        string(REGEX REPLACE ":.*$" "" _case_word "${_case}")
+        string(REGEX REPLACE "^[^:]*:" "" _case_name "${_case}")
+        add_test(NAME customisation_convert.${_case_name}
+            COMMAND ${CMAKE_COMMAND}
+                    "-DCASE=${_case_word}"
+                    "-DPROGRAM=$<TARGET_FILE:katana_customisation_convert>"
+                    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/data/customisation/test_symbols.4d"
+                    "-DTWIN=${PROJECT_SOURCE_DIR}/tests/data/customisation/test_symbols.customisation.json"
+                    "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/converted/${_case_word}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/check_convert_program.cmake")
+        set_tests_properties(customisation_convert.${_case_name}
+            PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
+    endforeach()
+endif()
 # The renames the drawing side knows (cad's customisation record) checked
 # against the built-in customisation itself. Only where cad is configured too,
 # which a module filter can leave out.

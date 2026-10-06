@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -213,6 +214,12 @@ class LibraryReader {
             count(kindWord, false);
             return true;
         }
+        // Copied before it goes: what is replaced is handed back as it was
+        // (StyleLibraryRead::replacedDefinitions).
+        std::optional<LineStyle> before;
+        if (const LineStyle* was = result_.library.find(style.name)) {
+            before = *was;
+        }
         auto replaced = katana::entity::addOrReplace(result_.library, std::move(style));
         if (!replaced) {
             warn("definition \"" + nameToken.text() +
@@ -221,6 +228,9 @@ class LibraryReader {
             return true;
         }
         result_.replaced += *replaced ? 1 : 0;
+        if (*replaced && before) {
+            result_.replacedDefinitions.push_back(std::move(*before));
+        }
         count(kindWord, true);
         return true;
     }

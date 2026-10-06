@@ -64,3 +64,35 @@ target_link_libraries(katana_archive12d
 add_executable(katana_12da_probe probe_main.cpp)
 katana_target_defaults(katana_12da_probe)
 target_link_libraries(katana_12da_probe PRIVATE katana_archive12d)
+
+# The converter of the older customisation formats - style libraries (.4d) and
+# survey code files (.mapfile) in, one Katana customisation out (legacy/
+# convert.hpp; docs/customisation.md, "Converting a customisation from the
+# legacy formats"). A developer's tool, like the probe above: built with
+# everything else so that it cannot rot, never installed
+# (cmake/KatanaPackaging.cmake installs three programs by name, and this is
+# not one), and linked by none of katana, katana_cli and katana_mcp.
+#
+# What it does is a library of its own, so that the tests call the functions
+# rather than run a program, and so that nothing that links katana_archive12d
+# for the .12da archive gets the converter with it. The directory is where the
+# readers of the older formats are to move when they leave the product; until
+# then they are still in katana_archive12d, which this links.
+add_library(katana_legacy_customisation STATIC legacy/convert.cpp)
+katana_target_defaults(katana_legacy_customisation)
+# Its header is a tool's, not the program's, so it is not under include/. The
+# two things that link the library reach it as "convert.hpp": the directory
+# published is legacy/ ALONE, never this module's own, whose private headers
+# (the lexer, the text utilities, the embedded customisation) stay out of
+# reach of everything that links this.
+target_include_directories(katana_legacy_customisation PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/legacy")
+target_link_libraries(katana_legacy_customisation PUBLIC katana_archive12d)
+
+add_executable(katana_customisation_convert legacy/convert_main.cpp)
+katana_target_defaults(katana_customisation_convert)
+target_link_libraries(katana_customisation_convert PRIVATE katana_legacy_customisation)
+if(WIN32)
+    # CommandLineToArgvW: the command line as UTF-16, which is the only form
+    # of it that holds every file name (convert_main.cpp).
+    target_link_libraries(katana_customisation_convert PRIVATE shell32)
+endif()

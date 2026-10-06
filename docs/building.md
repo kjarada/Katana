@@ -254,6 +254,7 @@ Every `KATANA_*` cache variable, with its default:
 | `KATANA_MODULE_FILTER` | empty | configure only the listed modules and their suites, e.g. `"katana_core;katana_math;katana_geometry"`; the configure fails, naming the module, when a listed module needs one that is not listed |
 | `KATANA_DEPLOY_RUNTIME` | `ON` | copy the runtime DLLs and the GDAL and PROJ data beside the programs ("The build tree runs on its own too") |
 | `KATANA_CUSTOMISATION_DIR` | `resources/customisation` | the folder whose customisation is compiled in ("The customisation folder") |
+| `KATANA_REFERENCE_CUSTOMISATION_DIR` | the reference folder under `docs/`, git-ignored | where the reference customisation is kept in the legacy formats; only the converter's reference test reads it, and skips when the folder is absent or holds no such file ("The reference folder and the converter") |
 | `KATANA_CCACHE` | `ON` | compile through ccache when it is installed and no `CMAKE_CXX_COMPILER_LAUNCHER` is given ("Build and test speed") |
 
 `KATANA_MODULE_FILTER` makes a small build quick: the numerics and survey
@@ -274,6 +275,7 @@ failed at link time with no explanation.
 | `katana_benchmarks` | yes | every `benchmarks/bench_*.cpp`, globbed |
 | `katana_runtime` | yes | deploys the runtime beside the programs (Windows, `KATANA_DEPLOY_RUNTIME`) |
 | `katana_12da_probe` | yes | what an archive file holds and what Katana would take from it (`src/katana_archive12d/probe_main.cpp`) |
+| `katana_customisation_convert` | yes | style libraries and survey code files in, one Katana customisation out (`src/katana_archive12d/legacy/convert_main.cpp`); with its library `katana_legacy_customisation` it is a developer's tool, never installed and linked by none of the three programs ("The reference folder and the converter") |
 | `run-benchmarks` | no | runs `katana_benchmarks` with `--benchmark_min_time=0.2s` |
 | `format`, `format-check` | no | clang-format over the first-party sources; `format-check` fails if a file would change |
 | `katana_make_icons` | no | writes `resources/katana.ico`, a 256 px PNG and `resources/icon_sheet.png` from the icon painters; the output is committed (`docs/desktop.md`) |
@@ -391,6 +393,50 @@ configuring, and never add them to git: `third_party/_cache` (without it the
 configure tries to download GoogleTest), `resources/customisation`, and the
 licensed reference files kept under `docs/` that the customisation was made
 from.
+
+### The reference folder and the converter
+
+The reference customisation - two style libraries and two survey code files
+in the legacy formats, with their colour table in a `support` folder beside
+them - is kept in a git-ignored folder under `docs/`, which the cache
+variable `KATANA_REFERENCE_CUSTOMISATION_DIR` names (the root
+`CMakeLists.txt` defines it, above the modules and the tests, so that both see
+one value). It is third-party material under its author's own licence: on the
+owner's machine and in no clone, and nothing committed needs it. One test
+reads it, `TheReferenceCustomisationConvertsToTheFiguresOfItsCensus`: it
+skips where the folder is absent or holds no file in the legacy formats, and
+FAILS where it holds some that are not the four - a file missing, or one too
+many, is a mistake to be told of. Point the variable elsewhere to convert a
+customisation kept elsewhere:
+
+```sh
+cmake --preset release -DKATANA_REFERENCE_CUSTOMISATION_DIR=D:/Survey/Reference
+```
+
+`katana_customisation_convert` turns those files into ONE file in the Katana
+customisation format: `resources/customisation/nsw.customisation.json`,
+git-ignored as well, which is the file the built-in customisation is to be
+compiled in from. `docs/customisation.md`, "Converting a customisation
+from the legacy formats", has its command line, what it does to names and
+colours, and the figures of the reference conversion. It is built in `all`
+beside `katana_12da_probe`, into `<build>/bin`, and like the probe it has no
+install rule: `cmake --install`, the bundle and the packages hold `katana`,
+`katana_cli` and `katana_mcp` only.
+
+The converted file sits in the folder `KATANA_CUSTOMISATION_DIR` names, and
+that machinery must not take it for a legacy file. The embedding does not: it
+takes only what holds a style library's or a survey code file's own keywords,
+and the Katana format holds neither - checked on the converted reference
+file on 2026-10-06. Two of the old tests are less careful
+(`TheWholeReferenceCustomisationLoadsFromItsFiles`,
+`TheReferenceSymbolFileIsWhereItsSymbolsSayTheyCameFrom`): they hand EVERY
+regular file of that folder to the legacy loader, and skip only below four
+files of any kind. With the converted file alone they skip; with the four
+legacy files copied in beside it they would FAIL on the fifth. So the legacy
+files stay in the reference folder and are never copied beside the converted
+one, until the work that replaces that machinery removes those tests.
+`benchmarks/bench_customisation.cpp` measures the converted file when it is
+there, found again at each build.
 
 ## Bundling
 
