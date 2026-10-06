@@ -12,6 +12,7 @@
 
 #include "customisation/code_manager.hpp"
 #include "customisation/customisation_context.hpp"
+#include "customisation/definition_editor.hpp"
 #include "customisation/definition_thumbnails.hpp"
 #include "customisation/global_modify_dialog.hpp"
 #include "customisation/symbol_library.hpp"
@@ -130,7 +131,9 @@ CustomisationWorkbench::~CustomisationWorkbench()
 {
     // Here, not left to the window's children: the dialogs paint from the
     // cache and read the linework codes this object owns, which go as soon
-    // as this body ends - and the Document goes after that.
+    // as this body ends - and the Document goes after that. The editor
+    // first: the managers ask for it through this object.
+    delete definitions_.data();
     delete globalModify_.data();
     delete codes_.data();
     delete symbols_.data();
@@ -143,6 +146,10 @@ SurveyCodeManagerDialog* CustomisationWorkbench::codeManager() const { return co
 GlobalModifyDialog* CustomisationWorkbench::globalModify() const
 {
     return globalModify_.data();
+}
+DefinitionEditorDialog* CustomisationWorkbench::definitionEditor() const
+{
+    return definitions_.data();
 }
 
 bool CustomisationWorkbench::headless() const
@@ -168,6 +175,11 @@ CustomisationContext CustomisationWorkbench::context()
     };
     context.lineworkCodes = &lineworkCodes_;
     context.run = services_.run;
+    context.editDefinition = [this](DefinitionEdit what, const std::string& name) {
+        editDefinition(what, name);
+    };
+    // beginCommit is left empty: nothing here knows yet whether the session's
+    // customisation is the kept one, which is what it is for.
     return context;
 }
 
@@ -259,8 +271,51 @@ GlobalModifyDialog& CustomisationWorkbench::showGlobalModify()
     return *globalModify_;
 }
 
+DefinitionEditorDialog& CustomisationWorkbench::showDefinitionEditor()
+{
+    if (definitions_.isNull()) {
+        definitions_ = new DefinitionEditorDialog(context(), &window_);
+        definitions_->setModal(false);
+    }
+    raise(*definitions_);
+    return *definitions_;
+}
+
+bool CustomisationWorkbench::editDefinition(DefinitionEdit what, const std::string& name)
+{
+    // Shown before it is asked, so a refusal - the form holds edits to another
+    // definition - is read where it is said.
+    return showDefinitionEditor().request(what, name);
+}
+
 bool CustomisationWorkbench::confirmClose()
 {
+    // The definition editor's form, like the code manager's buffer below, is
+    // the only place its unsaved text exists. Asked once of a form as it
+    // stands: a yes is remembered by the editor until the form next changes.
+    if (!definitions_.isNull() && definitions_->dirty() && !definitions_->discardAgreed()) {
+        if (headless()) {
+            log("Unsaved Definition: the definition editor has edits that are not saved, and a "
+                "headless run has nobody to ask whether to discard them; Save or Revert them "
+                "first.",
+                true);
+            return false;
+        }
+        raise(*definitions_);
+        const QString question =
+            "The definition editor has edits that are not saved. Discard them?";
+        const bool yes = confirm ? confirm(question)
+                                 : QMessageBox::question(&window_, "Unsaved Definition",
+                                                         question) == QMessageBox::Yes;
+        if (!yes) {
+            return false;
+        }
+        // Remembered, and NOTHING reverted: the code manager below and the
+        // window's own unsaved-drawing question are still to come, and a
+        // Cancel at either keeps the window - which must then still hold
+        // what was typed. The edits go when the window does.
+        definitions_->agreeToDiscard();
+    }
     if (codes_.isNull() || !codes_->dirty()) {
         return true;
     }

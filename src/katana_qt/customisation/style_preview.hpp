@@ -21,6 +21,10 @@
 //     model origin - the insertion point - which is marked with a crosshair,
 //     with a warning when the origin lies outside what the symbol draws (it
 //     will sit away from the point it is put on).
+//   * an UNSAVED definition (setDefinition), either way: the definition editor
+//     previews what is typed before any of it is in the library. It is drawn
+//     from a library of its own that holds that definition alone, so the
+//     Document's library is neither read for it nor changed by it.
 //
 // SCALE. Lines are shown at their PRINTED size: a plot millimetre is
 // kPixelsPerPaperMillimetre pixels (a 96-dpi screen), and the model units one
@@ -42,6 +46,7 @@
 // listener), and draws nothing once the Document has gone.
 
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -52,6 +57,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/style_resolver.hpp"
 #include "katana/cad/view_transform.hpp"
+#include "katana/entity/style_library.hpp"
 #include "katana/entity/tables.hpp"
 
 namespace katana::qt {
@@ -83,6 +89,12 @@ class StylePreview : public QWidget {
     // definition's own.
     void setSymbol(const std::string& name, double size = 0.0);
     void setLinestyle(const std::string& name);
+    // A definition that is not in the Document's library, or not yet as it is
+    // given here: shown as setSymbol or setLinestyle would show it once it
+    // was, a symbol at its own size. Copied. One the library would refuse
+    // (entity::validate) shows nothing, as clear() does.
+    enum class DefinitionAs { Symbol, Linestyle };
+    void setDefinition(const katana::entity::LineStyle& definition, DefinitionAs as);
     void clear();
 
     // 1:N. Any positive N is accepted; kPlotScales are the ones a dialog
@@ -123,6 +135,12 @@ class StylePreview : public QWidget {
   private:
     enum class Showing { Nothing, Style, Symbol, Linestyle };
 
+    // Where a name is looked up, and the generation its flattened definitions
+    // are cached under: the Document's library, or the unsaved definition's.
+    [[nodiscard]] const katana::entity::StyleLibrary& shownLibrary() const;
+    [[nodiscard]] std::uint64_t shownGeneration() const;
+    // Back to the Document's library, for the setters that show a name.
+    void forgetUnsaved();
     [[nodiscard]] katana::cad::StyleDrawing layOutLine(QSize area);
     [[nodiscard]] katana::cad::StyleDrawing layOutSymbol(QSize area, const QFont& font);
     void paintInsertionMark(QPainter& painter) const;
@@ -136,6 +154,12 @@ class StylePreview : public QWidget {
     double symbolSize_ = 0.0;
     int denominator_ = 500;
     PreviewGround ground_ = PreviewGround::Paper;
+
+    // setDefinition's: a library holding the unsaved definition alone, and a
+    // count of the definitions shown so. The cache below keys on a library's
+    // generation, and this library is a new one at every keystroke.
+    std::optional<katana::entity::StyleLibrary> unsaved_{};
+    std::uint64_t unsavedGeneration_ = 0;
 
     katana::cad::DefinitionCache definitions_{};
     katana::cad::ViewTransform view_{};

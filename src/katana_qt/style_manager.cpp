@@ -1188,7 +1188,8 @@ struct StyleManagerDialog::Impl {
                                    "to end the clash.<br>");
         }
         text += QStringLiteral("<br><i>Library linestyles belong to the session's "
-                               "customisation and are read-only here.</i>");
+                               "customisation and are read-only here. Edit Definition opens "
+                               "this one in the definition editor.</i>");
         libraryDetails->setText(text);
     }
 
@@ -2411,6 +2412,22 @@ QWidget* StyleManagerDialog::Impl::buildLinetypesPage()
     newStyleUsing = button("New Style Using This", "newStyleUsing",
                            "A drawing style whose linetype is this linestyle", libraryPage);
     libraryLayout->addWidget(newStyleUsing, 0, Qt::AlignRight);
+    // The definition editor's door here (customisation/definition_editor.hpp):
+    // the editor is the maker's, and has New, Duplicate and Delete of its own.
+    auto* editDefinition =
+        button("Edit Definition...", "linetypeEditDefinition",
+               "Change this linestyle's definition - its strokes, units and length - in the "
+               "definition editor, which also makes, copies and deletes one",
+               libraryPage);
+    editDefinition->setEnabled(static_cast<bool>(context.editDefinition));
+    connectGuarded(editDefinition, &QPushButton::clicked, [this] {
+        const auto rows = selectedLinetypeRows();
+        if (rows.size() == 1 && rows.front()->origin == LinetypeOrigin::Library &&
+            context.editDefinition) {
+            context.editDefinition(DefinitionEdit::Edit, rows.front()->name);
+        }
+    });
+    libraryLayout->addWidget(editDefinition, 0, Qt::AlignRight);
     linetypeDetail->addWidget(libraryPage);
     sideLayout->addWidget(linetypeDetail, 1);
 
@@ -2475,6 +2492,20 @@ QWidget* StyleManagerDialog::Impl::buildLinetypesPage()
         buttonLayout->addWidget(each);
     }
     buttonLayout->addStretch(1);
+    // The definition editor's other door here: a library linestyle is begun
+    // from the tab that lists them, with none to select first (the library
+    // page above shows only for one that exists).
+    auto* newDefinition =
+        button("New Library Linestyle...", "linetypeNewDefinition",
+               "Make a linestyle definition in the session's library, in the definition editor",
+               buttons);
+    newDefinition->setEnabled(static_cast<bool>(context.editDefinition));
+    connectGuarded(newDefinition, &QPushButton::clicked, [this] {
+        if (context.editDefinition) {
+            context.editDefinition(DefinitionEdit::NewLinestyle, {});
+        }
+    });
+    buttonLayout->addWidget(newDefinition);
     buttonLayout->addWidget(selectLinetypeUsers);
     layout->addWidget(buttons);
     return page;

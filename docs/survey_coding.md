@@ -374,8 +374,11 @@ it whole with `setStyleLibrary` or `setSurveyMap` (Apply; Revert throws the
 buffer away). Each bumps `libraryGeneration()` or `surveyMapGeneration()` and
 notifies the listeners, and an edit is kept by EXPORTING it to a file - see
 "Writing it back" below - not by saving the project. The Survey Code Manager
-is that editor for the map ("The Survey Code Manager" below). The library has
-no editing buffer: the symbol library loads into it (merged) and exports from
+is that editor for the map ("The Survey Code Manager" below). The definition
+editor is that editor for the library, one definition at a time
+(`docs/desktop.md`, "The definition editor"): its form is the buffer, and Save
+installs a copy of the library with that one definition added or replaced.
+Otherwise the symbol library loads into the library (merged) and exports from
 it, and the style manager edits the drawing's styles and linetypes, which are
 commands like any other.
 
