@@ -1164,7 +1164,9 @@ with `ReductionSettings`' defaults and the control the file declares, the
 points on `survey/points`, the job kept for Survey > Survey Jobs - as one undo
 step (`cad::ImportSurveyJobCommand`); `SETTINGS` and `SET` give it the
 wizard's other reduction options and control from the drawing ("The
-reduction settings of SURVEY IMPORT", below). The format is detected unless FORMAT
+reduction settings of SURVEY IMPORT", below), and in that same step it codes
+and strings what it draws ("SURVEY IMPORT codes and strings what it draws",
+below). The format is detected unless FORMAT
 names it, and a detection that is not certain is refused, naming the
 candidates. The verb lives in the session and not the interpreter because
 `cad` may not see `surveyio`; the window runs the same function
@@ -1869,7 +1871,10 @@ takes every reduction option that step offers:
 
 ```
 SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>] [SETTINGS <file>] [SET <key>=<value> ...]
+              [CODES on|off] [LINEWORK on|off]
 ```
+
+(`CODES` and `LINEWORK` are the next section's.)
 
 **One grammar, the job's own.** Both options are the stable text form of the
 settings (`include/katana/survey/reduction_settings.hpp`) that a survey job
@@ -2175,8 +2180,7 @@ Not done:
 - The verb has neither of the wizard's two other import options: what to do
   with an id the drawing already has (`cad::ExistingPointPolicy`; the verb
   refuses the import, as the wizard's default does) and a layer per field
-  code. Apply Survey Codes is the window's action; `CODE` does it on a line,
-  to the whole drawing.
+  code. The survey codes it applies itself (next section).
 - The window can neither save the settings to a file nor load them from one,
   so a `SETTINGS` file is written by hand or by a program, in the form above.
 - The wizard's Import logs a sentence, not the `SURVEY IMPORT` line it
@@ -2209,6 +2213,149 @@ Not done:
   prism_constant.m=-1e6` 1 000 km, each with no warning. Bounds a surveyor
   would accept belong to that validation
   (`src/katana_survey/reduction_settings.cpp`).
+
+## SURVEY IMPORT codes and strings what it draws
+
+Until 2026-10-06 a coded field file came in as bare points on one layer, and
+the layers, the styles and the lines were two more steps a person had to know
+about - `CODE`, then the Survey Code Manager's Linework tab - each its own
+undo step. The owner asked that processing survey data use the customisation.
+The verb now does, in its ONE undo step, through the job's own finish
+(`cad::withSurveyFinish` inside `cad::ImportSurveyJobCommand`;
+`docs/survey_coding.md`, "One step from field file to finished drawing", has
+the composition and its reasons). What is decided here is the front end:
+when the finish is asked for, and what the reply says of it.
+
+```
+SURVEY IMPORT <file> ... [CODES on|off] [LINEWORK on|off]
+```
+
+**Whether.** Three things decide it, in this order, in one function that the
+import wizard is to ask as well (`cad::surveyImportFinish`,
+`include/katana/cad/linework_verbs.hpp`):
+
+1. `CODES on|off` and `LINEWORK on|off`, for the one line. Two words and no
+   others: a `yes` or a mistyped `of` taken for one of them would code, or
+   not code, a whole job unasked. Each at most once, and neither on `SURVEY
+   READ`.
+2. Without the word, the drawing's customisation: its two automation switches
+   (`Document::customisationState().automation`), which a customisation file
+   sets and which are both ON until one says otherwise. On by default because
+   bare points on one layer are not what anyone imports a coded file for.
+3. With NO survey codes loaded, nothing is asked of the job at all, whatever
+   1 and 2 say. The job is then imported exactly as before this existed: the
+   same entities, the same job text and report, the same reply but for the
+   two records below. Rejected: asking anyway, which `cad` supports (the
+   finish then does nothing and says `no-survey-codes`). It would store the
+   job as one to finish and add two warnings to its report, so every import
+   into a drawing with no customisation - the program as a clean checkout
+   builds it - would answer `reduction_warnings` two higher and keep another
+   job text than the wizard's; and a re-adjustment codes only the points it
+   draws for the first time, so a job stored that way would come out half
+   coded once codes were loaded. A job imported with no codes loaded is a job
+   that was not coded, and `CODE` and `LINEWORK` are there for it.
+
+**How.** The colours are the Document's resolver's (`cad::colourLookup`: the
+customisation's own table, then the standard names), so a rule's colour name
+means on a line what it means in the window. The control codes are the
+Document's (`customisationState().linework`). Strings are ordered by point
+number; the verb has no `ORDER` (`LINEWORK` has).
+
+**The reply.** `imported ... entities=<n>` is still the POINTS drawn - a
+finished import's created entities are its points and then its lines, and the
+lines have a record of their own. `reduction_warnings=` counts what the
+finish left over as well, since those sentences are warnings of the job's
+report (`cad::finishWarnings`): a code with no rule, a string of the file in
+no line for a reason other than being a point code. Then, after the
+reduction's warnings:
+
+```
+coded points=4 matched=3 unmatched_codes=1 layers=2 styles=2
+unmatched_code text=ZZ
+linework lines=2 unplaced=3 layers=0 styles=0
+```
+
+- `coded`: `points` is the points that carry a code, `matched` those a rule
+  answers, `unmatched_codes` the distinct codes no rule more specific than
+  `*` answers, `layers` and `styles` what the coding created. Each of those
+  codes is an `unmatched_code` record, in name order, the first ten, then
+  `unmatched_codes_more=<n>` - the brief had the count alone, and a count of
+  codes nobody can read names nothing to fix.
+- `linework`: `lines` drawn, and `unplaced` - the strings of the file and the
+  points in no line. Most of those are no fault (a survey mark is a point),
+  which is why the count is not a warning and the warnings say which are.
+  `layers` and `styles` are what the LINES made that the coding had not:
+  everything the finish created (`SurveyFinishReport::layersCreated`,
+  `SurveyFinishReport::stylesCreated`) less the coding's own. With the codes
+  on that is usually nothing, since a line goes on the layer and wears the
+  style its points were just given; with `CODES off` the line makes them
+  itself, and until 2026-10-07 the reply then said `coded none reason=off`
+  while a layer and a style appeared that no record accounted for. Each
+  record counts its own step, so the two never count one layer twice.
+- A step that did not run is `coded none reason=<word>` or `linework none
+  reason=<word>`: `off` (the line or the customisation said so),
+  `no-survey-codes`, `no-codes-in-file`, `no-rule-matches` (then with the
+  `unmatched_code` records) or `no-points` (the import drew none). None of
+  them fails the line, and no reply holds the word a script checks a failed
+  line by.
+
+**Where the two records stand.** After the reduction's warnings and before
+the `resection` records, not straight after `imported` as first planned.
+The lines from `imported` through `held` and `reduction` to the first
+warning, and the resection records at the very end, are held where they
+stand by tests older than the records
+(`SurveyImportSettings.TheReplySaysWhereEachHeldPointWasHeld`,
+`cli.survey_import_resection_field_file`, whose `LIST` follows the last
+`resection_residual`), and an expected value is not changed to suit new
+output. A record is found by its first word, so its place costs a reader
+nothing.
+
+Tests, each worked by hand from a field-file fixture and the hand-written
+customisation `tests/data/field_codes/test_field_codes.customisation.json`
+(a kerb that is a line in a colour of the customisation's own, an edge that
+is a plain blue line, a control mark that is a point code): the `SurveyVerbs`
+cases of `tests/app/test_survey_verbs.cpp` - the points on their layers and
+in their styles and the file's closed string drawn, with ONE undo back to the
+drawing before
+(`SurveyVerbs.AnImportCodesItsPointsAndStringsTheFilesLinesAndOneUndoTakesItAllBack`);
+`CODES off`, `LINEWORK off` and both; the switches as the default and each
+word over its own switch, on and off; a drawing with no survey codes, whose
+three replies differ by the two records alone; every `none` reason; an
+unmatched code counted and named, and twelve of them of which ten are named
+(`SurveyVerbs.TenCodesWithNoRuleAreNamedInNameOrderAndTheRestAreCounted`);
+a rule that names a layer and no appearance, so that `layers` and `styles`
+differ in both records
+(`SurveyVerbs.EachRecordCountsTheLayersAndTheStylesItsOwnStepMadeAndTheTwoAreNotOneNumber`);
+a standard colour name; the records' place; the refusals - and
+`SurveyImportFinishChoice` in
+`tests/cad/customisation/test_linework_verbs.cpp` for the function itself.
+Every `cli.survey_import_*` test older than these passes as it was written:
+`katana_cli` there has no survey codes, each test of a program being started
+with `KATANA_BUILTIN_CUSTOMISATION=none` (`docs/headless.md`, "The
+customisation a run starts with").
+
+Through the real program, with that fixture named as the built-in of the run
+by the same variable (2026-10-07, once the session read it):
+`cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step`
+- the five points on their layers, the closed line, the two records, and ONE
+`UNDO` back to an empty drawing;
+`cli.survey_import_with_codes_and_linework_off_draws_its_points_alone`; and
+`cli.linework_typed_after_an_import_strings_its_points_by_their_codes_once`,
+`LINEWORK` by hand after an import told `LINEWORK off`. The fixture has a
+folder of its own because the window's headless checks load every file of
+`tests/data/customisation` and pin what the three there hold.
+
+Not done:
+
+- The owner's own field files have not been run through the verb.
+- The import wizard does not ask `cad::surveyImportFinish` yet: it still
+  draws points only and offers Apply Survey Codes as a second step.
+- A job imported with `LINEWORK off` and strung afterwards by `LINEWORK` is
+  strung by code, not as the file strung it (`docs/survey_coding.md`,
+  "`LINEWORK` on the command line", Not done).
+- A delimited point list cannot be imported by the verb at all
+  (`surveyio::readSurvey` has no reader for one), so its codes are applied
+  only by the wizard's second step or by `CODE` and `LINEWORK`.
 
 ## The reduction's resection
 
@@ -2727,12 +2874,13 @@ Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, Parcel
 Report, the Angle and Bearing Calculator), Traverse and Levelling (Traverse,
 Level Book) and Coordinates (the Coordinate Converter) - plus a Survey Coding
 section that shows actions the window and the Format workbench own: the
-Survey Code Manager,
-Load Customisation, Replace Loaded Customisation and Apply Survey Codes
-(`docs/survey_coding.md`). The first three are the same `QAction` objects as
-on the Format menu (`SurveyServices::codeManager`, `loadCustomisation`,
-`replaceCustomisation`), so the two menus cannot drift; Apply Survey Codes
-(`applySurveyCodes`) is on this menu and the Survey toolbar only. The menu
+Survey Code Manager and Apply Survey Codes
+(`docs/survey_coding.md`). The first is the same `QAction` object as
+on the Format menu (`SurveyServices::codeManager`), so the two menus cannot
+drift; Apply Survey Codes (`applySurveyCodes`), which runs the `CODE` line on
+the selection or the drawing, is on this menu and the Survey toolbar only.
+(Load Customisation and Replace Loaded Customisation were here too until
+2026-10-06: `docs/desktop.md`, "The Format menu".) The menu
 ends with Subsurface Utilities (AS 5488), added by a workbench of its own
 (`src/katana_qt/survey/utility_workbench.*`, `docs/subsurface_utilities.md`).
 `MainWindow` only makes the menu and toolbar - on a second toolbar row, with
@@ -2850,10 +2998,11 @@ The Point Manager dock wears the window's dock chrome - minimise to the tray,
 float, close - through `SurveyServices::chrome`, which the workbench tells to
 forget the dock before deleting it.
 
-Not done: Process Linework is reached only through the Survey Code Manager's
-Linework tab, and the wizard and `SURVEY IMPORT` do not yet ask for the
-finish that codes and strings an import (`cad::withSurveyFinish`,
-`docs/survey_coding.md`), so both still draw points only; undoing an import
+Not done: the Survey menu has no Process Linework item - it is the `LINEWORK`
+verb and the Survey Code Manager's Linework tab (`docs/survey_coding.md`,
+"`LINEWORK` on the command line") - and the wizard does not yet ask for the
+finish that codes and strings an import as `SURVEY IMPORT` does
+(`cad::surveyImportFinish`), so it still draws points only; undoing an import
 that created a nested layer (`survey/points`) takes that layer away and
 leaves the parent it created with it (`survey`), because the layer command's
 undo removes only the layer it was given; the Point Manager is

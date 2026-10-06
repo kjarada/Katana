@@ -66,8 +66,10 @@ int main(int argc, char* argv[])
     }
 
     // After the arguments, so that --help and a bad argument say nothing of
-    // the customisation loaded.
-    katana::app::Session session(argc > 0 ? argv[0] : nullptr);
+    // the customisation loaded. Never nullptr, which is a session of no
+    // program and starts with no customisation (session.hpp): a katana_cli
+    // started with no argv[0] is still katana_cli.
+    katana::app::Session session(argc > 0 ? argv[0] : "katana_cli");
     if (!batch.empty()) {
         return runBatch(session, batch);
     }

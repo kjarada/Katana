@@ -13,8 +13,10 @@ The window (`MainWindow`) is a `QMainWindow` around a workspace of views, with d
 Reference Data panels. Its menu bar reads in the order a CAD user reads it -
 File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
 (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
-`helpMenu`). File keeps to files: the customisation is loaded from Format
-and from Survey > Survey Coding, beside the managers of what it brings. The
+`helpMenu`). File keeps to files: the managers of what a customisation brings
+are in Format and in Survey > Survey Coding, and a customisation FILE is
+loaded by the `CUSTOMISE` line, which has no menu item yet ("The Format
+menu", below). The
 status bar shows a view's running readout, how many entities are selected of
 how many, the current layer, the active snap and the cursor coordinates.
 
@@ -26,12 +28,77 @@ stylesheet, and the platform's font taken as the one font of the whole
 window - below, "Text"), sets the application icon, reads the switches, and
 builds the `MainWindow`: its actions and menus, its panels, View's Window
 section (`MainWindow::buildWindowMenu`) and the status bar, and records the
-layout it was built with for View > Reset Window Layout. The default
-customisation is loaded next, so the first drawing is drawn with it. Then an
+layout it was built with for View > Reset Window Layout. The session's
+customisation is installed next, so the first drawing is drawn with it ("The
+customisation a session starts with", below). Then an
 interactive run - one with no `--screenshot`, `--plot`, `--plot-sheets`,
 `--sheets-json` or batch `--script` - puts the window where the last session
 left it (`MainWindow::restoreSession`) and shows it, and the project and files
 on the command line are opened.
+
+**The customisation a session starts with.** `MainWindow::loadDefaultCustomisation`
+builds a `cad::CustomisationHost` - the built-in customisation of this run
+(`cad::builtInCustomisation`, which reads the seam
+`KATANA_BUILTIN_CUSTOMISATION`) and the path of the kept file - hands it to
+the interpreter (`CommandInterpreter::setCustomisationHost`, FIRST: it notes
+the kept file as it is at that moment, which `CUSTOMISE KEEP` later refuses
+to write over once it has changed) and calls `cad::startCustomisation`, which
+installs the kept customisation when the file is there and reads, else the
+built-in one, else nothing. The window logs what that reports:
+
+```
+Customisation: <name>, N definitions (M symbols) and K survey code rules, built in.
+Customisation: <name>, N definitions (M symbols) and K survey code rules, kept.
+```
+
+with the name the customisation gives itself, how many of its definitions it
+lists as symbols, and which of the two it is - each noun by its count, so a
+customisation of one rule has "1 survey code rule" - then, for a kept one
+made from another built-in than this program has, a line saying so and naming
+`CUSTOMISE RESET`
+(`qt_a_kept_customisation_made_from_another_built_in_is_installed_and_said_headless`).
+A problem - a built-in that does not parse, a kept file that does
+not read, the built-in then standing in for it - is an error line,
+`Customisation: <the problem>`, once. A build with no built-in and no kept
+file installs nothing and says nothing: it draws plain lines until a
+customisation is loaded, which is a state the program runs in, not a fault
+(`docs/customisation.md`; a build from a clean checkout has none).
+
+- **The kept file is named only by the environment variable
+  `KATANA_CUSTOMISATION`, for now.** A headless run must be the same on every
+  machine, so it reads no per-user place (`docs/headless.md`, "The
+  customisation a run starts with"); with the variable unset there is no kept
+  file, and `CUSTOMISE KEEP` and `REVERT` are refused naming it. Not done: an
+  interactive session has no per-user place either yet - that comes with
+  File > Settings - so a person who wants their customisation kept between
+  sessions sets the variable.
+- **`--customise FILE...`** then runs `CUSTOMISE "<file>" ...` through the
+  window's one executor (`main.cpp`, `customise`): merged into what the
+  session started with, as the typed line would. A typed, scripted or
+  `--customise` load lasts the session; `CUSTOMISE KEEP` is what makes it the
+  next start's.
+- **What the window does after a `CUSTOMISE` line it does for every change:**
+  the panels' pickers, the views and the managers follow the Document's
+  notification (`documentListener_`, each view's own, a manager's
+  `DocumentWatcher`), which an installed customisation raises as
+  `StyleLibrary | SurveyMap | Customisation`. No verb tells the window
+  anything, so a line run by a script, a dialog or an agent refreshes it as a
+  typed one does.
+- **Gone: the search beside the executable.** A build with nothing compiled
+  in used to look for style libraries and survey code files in the program's
+  folder (`findCustomisation`) and load what it found. That was a third
+  state, decided at run time by what happened to lie in a folder - the same
+  build drew differently on two machines - and it read the files of another
+  program, which Katana no longer reads at all. Rejected: keeping it for
+  Katana customisation files; the kept file is the one place for "my own",
+  and it is said, not searched for.
+
+`qt_the_window_starts_with_its_built_in_customisation_and_reset_returns_to_it_headless`
+starts a window on a fixture named through the seam, replaces its
+definitions, resets, and is refused a `KEEP`;
+`qt_a_customisation_is_kept_headless` and
+`qt_a_kept_customisation_is_what_the_next_window_starts_with_headless` keep
+one in one process and start with it in the next.
 
 **Where the window was.** Until 2026-09-26 every session opened a 1360 x 860
 window, whatever the screen: on a 1366 x 768 laptop it ran off the bottom,
@@ -257,7 +324,12 @@ then, with unsaved changes, save, discard or cancel (`confirmDiscard`). A
 headless run has nobody to answer either, so it refuses and says why in the
 log, never discarding anything unasked: a scripted `QUIT` with unapplied code
 edits, or `NEW` after an edit, is refused, and the script can Apply or Revert
-(`applyMap`, `revertMap`), `SAVE` or `UNDO` first. A failed save reports the
+(`applyMap`, `revertMap`), `SAVE` or `UNDO` first. The definition editor's
+unsaved form is asked about in the same call, before the code manager
+(discard, or stay; a headless run is refused and can press `definitionSave`
+or `definitionRevert`): "The definition editor", below. A yes there discards
+nothing by itself - the questions after it may still keep the window open -
+and is remembered until the form next changes. A failed save reports the
 error and leaves the modified flag set. A damaged project offers backup
 recovery and never deletes the damaged file.
 
@@ -314,8 +386,8 @@ the style while the stylesheet keeps drawing the items
 (`qt_widgets.Theme.AMenuSectionShowsItsTitleUnderTheStylesheet`, shown
 failing without that line). Every long menu is now in titled sections: File
 (Drawing, Import and Export, Scripts, Plot, Project), View (Display,
-Viewports, 3D Views, Window), Format (Tables and Libraries, Customisation
-Files, Across the Drawing, Annotation Styles), Annotate's editors and Leader
+Viewports, 3D Views, Window), Format (Tables and Libraries, Across the
+Drawing, Annotation Styles), Annotate's editors and Leader
 Manager, and the tool menus by their catalogue groups (Lines, Curves,
 Transform, Edit, Dimensions ...; `src/katana_qt/tools/tool_menus.hpp`). Second, for a
 choice list that cannot be typed into, Fusion drops a popup the height of
@@ -675,7 +747,8 @@ and lists those that reach more than one thing, since Qt disables an
 ambiguous shortcut for both. `katana --check-shortcuts` fails a run that has
 any, and `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` runs
 it. Ten underlined letters were changed to pass it (A&ttributes, Sym&bol
-Library, Loa&d Customisation, In&verse, Toggle Pe&rspective and others).
+Library, In&verse, Toggle Pe&rspective and others; one of the ten was on
+Load Customisation, an item that has since gone).
 The tool actions built from the catalogue have no underlined letters; their
 aliases are in their tooltips. Help > Keyboard Shortcuts lists the keys for a
 person ("The Command Reference and the keyboard shortcuts", below).
@@ -1528,9 +1601,6 @@ Format
   Symbol Library...                  formatSymbols       -> symbolLibraryDialog
   Survey Code Manager...             formatSurveyCodes   -> surveyCodeManagerDialog
   ---
-  Load Customisation...              loadCustomisation
-  Replace Loaded Customisation...    replaceCustomisation
-  ---
   Global Modify...                   formatGlobalModify  -> globalModifyDialog
   Purge Unused...                    formatPurge
   ---
@@ -1544,21 +1614,89 @@ the window"), and like every dialog that changes the drawing they run the
 verb lines they build through the one executor below.
 
 The Format toolbar carries Layers, the three managers and Global Modify. Survey > Survey
-Coding shows the same code manager, Load and Replace actions - the same
-`QAction` objects (`SurveyServices::codeManager`), so two menus cannot drift
-apart.
+Coding shows the same code manager - the same `QAction` object
+(`SurveyServices::codeManager`), so two menus cannot drift apart - and the
+window's Apply Survey Codes (`applySurveyCodes`), which is also on the Survey
+toolbar.
+
+**Loading a customisation file has no menu item.** Format had a section
+Customisation Files, and Survey > Survey Coding the same two items: Load
+Customisation and Replace Loaded Customisation (`loadCustomisation`,
+`replaceCustomisation`), each a file dialog over the style libraries and
+survey code files of another program. Katana no longer reads those files, and
+the two items went with them rather than be kept as doors to a format that
+is gone. Until File > Settings exists, a Katana customisation file
+(`docs/customisation.md`) is loaded in the window by
+
+- the typed line `CUSTOMISE <file>...` (merge) or `CUSTOMISE REPLACE
+  <file>...`, the interpreter's verb, which a script and the Run Script
+  dialog run too;
+- `katana --customise <file>...` at start-up.
+
+The managers' own Import buttons read a Katana customisation file too, each
+its own part of one: the Survey Code Manager's Import Codes... its rules into
+the manager's buffer, the Symbol Library's Import Definitions... its
+definitions and colours into the session ("Symbol Library" and "Survey Code
+Manager", below). Neither is the whole of a file, and neither runs the
+`CUSTOMISE` line.
+
+Rejected: one item that opened a file dialog on `CUSTOMISE "<file>"`. It is
+what Settings' Import will be, with a path field a headless run can fill and
+the Replace choice beside it; a lone item here would be moved again within
+the same piece of work, and its object name pinned by tests in between.
+
+**Apply Survey Codes is the `CODE` line.** `MainWindow::applySurveyCodes` runs
+`CODE SELECTION` when something is selected, else `CODE DRAWING`, through the
+window's one executor ("One executor", below): echoed in the log, kept in the
+history, one undo step, and answered in the verb's words - what the scope
+took, the property the codes were read from, what was matched and created.
+It used to call `cad::applySurveyCodes` itself, with sentences of its own, a
+box when no codes were loaded, and a lookup of the standard colours only -
+so a colour the customisation defines was applied by the typed `CODE` and
+not by the menu item. With no codes loaded the item is now refused as the
+line is, in the log - `no survey codes are loaded; CUSTOMISE <file> loads a
+Katana customisation file` - and no box opens
+(`qt_apply_survey_codes_with_no_codes_loaded_is_refused_in_the_verbs_words_headless`).
+The import wizard's "Apply survey codes to the
+imported points" triggers this action with the points it made selected, so
+it runs `CODE SELECTION` too
+(`qt_apply_survey_codes_runs_the_code_line_on_the_selection_or_the_drawing_headless`).
 
 **`CustomisationWorkbench`** (`src/katana_qt/customisation/customisation_workbench.*`)
 is built like the Survey workbench: `MainWindow::buildFormatActions` makes the
 menu and the toolbar and hands them over with `CustomisationServices` - the
 Document, the view workspace, the window's action factory and log, whether
 the session is headless (asked each time, since the window learns it after it
-is built), and the window's own Layers, Load and Replace actions. So the
+is built), and the window's own Layers action. So the
 workbench never includes `main_window.hpp`, and a widget test builds it and
 drives it (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
 It owns what the managers share: the picture cache (`DefinitionThumbnails`),
-the session's linework control codes, and the one `CustomisationContext`
-each manager is built from.
+the linework control codes the code manager's Linework tab strings with, and
+the one `CustomisationContext` each manager is built from. It owns the definition
+editor as well ("The definition editor", below), which has no menu item: a
+manager asks for it through the context.
+
+- **The Linework tab strings with the customisation's control codes.** The
+  codes are the Document's (`customisationState().linework`: what a
+  customisation file says and `CUSTOMISE SET linework.*` sets), and the
+  workbench follows them (`CustomisationWorkbench::followLineworkCodes`,
+  from a `DocumentWatcher`, and once more before a code manager is made): a
+  change of them goes into the copy the tab reads and, where the manager
+  exists, into its seven fields and through its own Use These Codes, so a
+  plan the tab made with the old codes is thrown away and the log says
+  "Linework control codes set for this session." The workbench kept a copy
+  that nothing wrote to but the tab's own button, so the tab - the window's
+  only stringing tool - strung with `ST` and `END` whatever customisation
+  was loaded. Only a CHANGE of the Document's codes is taken: what the tab's
+  button set meanwhile stands through any other change of the customisation
+  (a switch, a `KEEP`).
+  `qt_the_linework_tab_strings_with_the_customisations_control_codes_headless`
+  strings four points as one line with the default start code and as two
+  once the customisation's is the token on the third.
+  Rejected: copying the codes in the Document's own listener, at once. The
+  tab's fields and its button are widgets, and a view reacting to a Document
+  listener defers to the event loop (`docs/cad.md`); and the button's line
+  in the log would come before the reply of the line that caused it.
 
 - **Non-modal, one of each, kept.** A manager is made the first time it is
   asked for and then hidden, not deleted, between uses (`QPointer` slots);
@@ -1582,11 +1720,26 @@ each manager is built from.
   session is asked first (the `confirm` hook, else a question box); a
   headless one is not. `qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless`
   purges, undoes and checks the style is back.
-- **Closing the window asks the code manager first** ("Failure modes",
-  above: `confirmClose`).
+- **Closing the window asks the definition editor and the code manager
+  first** ("Failure modes", above: `confirmClose`).
 
-Loading and replacing a customisation are `docs/survey_coding.md` ("Loading a
-customisation"): a load merges, Replace is asked for.
+What a load does - a merge, or a Replace that is asked for - is
+`docs/customisation.md`, "The verbs".
+
+Not done:
+
+- The Linework tab's own Use These Codes still sets the workbench's copy of
+  the control codes (`CustomisationContext::lineworkCodes`) and not the
+  customisation: the codes typed there do not show in a bare `CUSTOMISE`, do
+  not reach `CUSTOMISE KEEP`, and last until the customisation's own next
+  change. The button is to run `CUSTOMISE SET linework.*` and the tab to read
+  the Document, after which the copy - and the workbench's filling of the
+  tab's fields by their object names - goes.
+- `CustomisationServices` still has the two members that carried the Load
+  and Replace actions. Nothing reads or sets them in the window; they stay
+  only while a widget test of the managers' texts still assigns them.
+- The tip of Survey Code Manager still calls the codes "the loaded survey
+  code files", which was true while the manager imported such files.
 
 ### Styles and Linetypes
 
@@ -1604,7 +1757,7 @@ rows, filters and bulk edit are tested below Qt:
 | Tab | Shows | Does |
 |---|---|---|
 | Styles | `cad::styleRows`: each style, how many entities wear it, and whether its linetype or symbol is missing; the chips All / Used / Unused / Missing and a search | a form (linetype and symbol through `NamePicker`, weight, colour or ByLayer, hatch, symbol size, description) with Save and Revert; New, Duplicate, Rename, Merge Into, Delete, Purge; Apply to Selection, Select Users, Make Current |
-| Linetypes | `cad::linetypeRows`: the drawing's linetypes and the library's linestyles, by group, a name both hold marked (D2) | a pattern grid that edits a drawing linetype's dashes, gaps and dots in place; New, Duplicate, Rename, Merge Into, Delete, Purge; New Style Using This; Select Users |
+| Linetypes | `cad::linetypeRows`: the drawing's linetypes and the library's linestyles, by group, a name both hold marked (D2) | a pattern grid that edits a drawing linetype's dashes, gaps and dots in place; New, Duplicate, Rename, Merge Into, Delete, Purge; New Style Using This; Edit Definition (`linetypeEditDefinition`: a library linestyle, in the definition editor) and New Library Linestyle (`linetypeNewDefinition`: a new one, there); Select Users |
 | Hatch Patterns | `cad::hatchPatternRows`: each hatch pattern, solid or how many families, and who uses it (`entity::tableUsage`) | a family grid (angle in degrees, spacing in model units) or Solid, with a swatch drawn by `cad::hatchSegments`, Save and Revert; New, New Solid, Duplicate, Delete, Purge; New Style Using This; Select Users |
 | Diagnostics | `cad::styleDiagnostics`: `cad::missingNames`, then the D2 collisions, each with who uses it and what is drawn meanwhile | Select Users |
 
@@ -1706,11 +1859,13 @@ window (`src/katana_qt/customisation/symbol_library.*`):
   and the actions.
 
 What is listed is `cad::symbolLibrary`: D3's symbols (a definition is a
-symbol when it is `mode vertex`, a survey code draws it as one, a style names
-it as one, or its file is a symbol file), the built-in shapes, and every
-symbol name a style OR A SURVEY CODE gives that nothing defines, in the
-pickers' amber with the shape it is drawn as instead. The codes' names are the
-library's own addition: `cad::missingNames` looks only at styles and layers.
+symbol when it is drawn at vertices, a survey code draws it as one, a style
+names it as one, or its customisation lists it as a symbol), the built-in
+shapes, and every symbol name a style OR A SURVEY CODE gives that nothing
+defines, in the pickers' amber with the shape it is drawn as instead. The
+codes' names are the library's own addition: `cad::missingNames` looks only at
+styles and layers. The details' Source is the NAME of the customisation a
+definition came from (`LineStyle::source`), or "Made in this session".
 
 **How big it prints.** The details say what a point wearing the symbol
 prints: "2 x 2 mm at 1:500, 1 x 1 m on the ground". `cad::symbolPrintSize`
@@ -1738,17 +1893,141 @@ signal; each that changes the drawing is ONE undo step through
 | Set on Style | the chosen style's symbol (an inline style picker; `updateStyleIfChanged`) |
 | Select Points Using | the points wearing a style that names it, selected and framed |
 | Replace in Styles | `cad::replaceSymbolInStyles`: every style naming the current symbol names the one in the inline `NamePicker`; refused while that is empty |
-| Load .4d... | `archive12d::readCustomisation`, MERGED into the session's library (D1: never a Replace from here), each file's added and replaced definitions in the log |
-| Export Selected to .4d... | `archive12d::writeStyleLibrary` of the selected library definitions |
+| Import Definitions... (`importDefinitions`) | a Katana customisation file's DEFINITIONS and its colours, MERGED into the session's (D1: never a Replace from here), with what it added and replaced in the log |
+| Export Selected... (`exportSelected`) | the selected library definitions as a Katana customisation file, with the session's notice, the sources they came from and the colours their pens name |
+| New Symbol..., Edit Definition..., Duplicate Definition..., Delete Definition (`symbolNew`, `symbolEdit`, `symbolDuplicate`, `symbolDelete`; along the bottom, since they change the library and not the drawing) | ask the definition editor ("The definition editor", below) for a new symbol, or for the current symbol's definition; the last three need a symbol the library defines, not a built-in shape or a name nothing defines. The buttons do nothing themselves |
 
-A headless session opens no file dialog: Load and Export are
-`loadLibraryFile` and `exportSelectedTo`, which take a path, and the buttons
-say in the log what to call. Not done: Assign makes a style with linetype
-ByLayer and weight 0.25, and under D8 a line later put in that style draws
-the symbol at its vertices; the grid's pictures are on the dark screen ground
-only, though the preview switches; and the dialog reloads whole (two
+**Import and Export are Katana customisation files** (`docs/customisation.md`;
+the file dialogs offer "Katana customisation (*.customisation.json *.json)").
+They were style library files of another program's format until 2026-10-06.
+
+- **Import** reads the file with `cad::readCustomisationFile`, hands its
+  definitions and colours to `cad::mergeCustomisation` over
+  `Document::customisation`, and installs the result with
+  `Document::installCustomisation` - the path every load takes, so the
+  session's record of what went into it gains the file's customisation as a
+  source of definitions. The log names the load by its customisation: "Merged
+  test_symbols into the library: 3 added (...), 1 replaced (TEST Tree)", and
+  the same for "the colours" when it brought any. What it does NOT take is
+  said in the log with its count: the file's survey code rules, its linework
+  codes and its automation switches. *Rejected: taking the rules too*, which
+  is what the button did when a file held one kind. A customisation holds
+  everything, and rules loaded from a symbol browser would go round the
+  Survey Code Manager's buffer, where a person reviews rules before Apply -
+  and silently under any edits that buffer holds. A whole customisation is
+  loaded by the `CUSTOMISE` line.
+
+  A file that LISTS its sources - every customisation a session writes does -
+  brings them as the session's sources, and of those the import hands on only
+  the ones that brought the file definitions, each as a source of definitions
+  alone, and a table of colours when the file has colours
+  (`sourcesOfImportedDefinitions`,
+  `src/katana_qt/customisation/code_manager_support.hpp`). A source that
+  brought the file nothing but rules is left out. *Rejected: keeping it with
+  its `rules` flag cleared*, which is what the import first did. Every source
+  a load lists is taken off the names the open project is missing
+  (`Document::installCustomisation`) and is recorded by the next save, so a
+  project that warned "B is missing" lost the warning - for good - by an
+  import of definitions from a file that merely listed B, with not one of B's
+  rules in the session
+  (`ImportingDefinitionsLeavesOutASourceThatBroughtOnlyRules`).
+- **Export** writes the session's customisation CUT DOWN to the selected
+  definitions (`cad::customisationPart`,
+  `include/katana/cad/customisation_part.hpp`; then
+  `entity::customisationToJson` with the same
+  `CustomisationWriteOptions::only`), under the session's name - or, while
+  the session has none, the file's own name without `.customisation.json`.
+  It is the ONE rule a part of a customisation is written by: both managers'
+  exports and `CUSTOMISE EXPORT` with a kind word or `ONLY`
+  (`docs/customisation.md`, "The verbs"), so Export Selected writes the file
+  `CUSTOMISE EXPORT <file> ONLY <the selected names>` writes:
+
+  | Of the session | In the file |
+  |---|---|
+  | name, description, notice | as they are |
+  | sources | those that brought what is WRITTEN, each said to have brought that alone, with its own notice: of definitions, a source one of the written definitions came from; of rules, a source that brought rules, when rules are written; a source that brought neither kind (a table of colours) only when the file carries a colour |
+  | the notice of a source left out | written with the session's own, after it, each line once |
+  | colours | those that what is written NAMES - a definition's pens; a rule's colour, its symbol's and its text's - compared as colour names are |
+  | linework codes, automation switches | not written: the file says nothing of them |
+  | `basedOn` | not written: a part is not an edition of the built-in |
+  | the other kind (rules here; definitions for Export Codes) | not written |
+
+  The notice is there because a customisation's notice is "carried with the
+  data and shown to whoever uses it" (`docs/customisation.md`), and two
+  symbols out of a customisation are still its author's data: an export that
+  wrote them under the session's name with no notice passed them on without
+  the terms they came with. The settings are left out because a merge takes
+  them from any file that says them, and a file of two symbols for a
+  colleague must not reset their control codes. The colours are those NAMED,
+  no more: without them a pen of the customisation's own colour would draw in
+  the entity's colour wherever the file went, and with all of them a load
+  would overwrite colours of the same names that nothing in the file uses.
+  *Rejected: the definitions and a name alone* (the first form, which lost
+  the notice); *the whole session with the other kind switched off*, which
+  carries the control codes and every colour. A definition reads back exactly
+  as the session holds it, where it came from and that it is listed as a
+  symbol included, which the older file could not hold
+  (`ExportWritesOnlyTheSelectedLibraryDefinitionsAndNamesTheRest`,
+  `AnExportCarriesTheSessionsNoticeAndTheSourcesThatBroughtDefinitions`).
+
+  The sources are those the SELECTED definitions came from. Until
+  2026-10-07 they were every source that had brought the session a
+  definition, and the notice of a source left out was dropped with it: the
+  managers and the `CUSTOMISE EXPORT` verb were written side by side and cut
+  a session down by two rules. *Rejected, with the reason kept*: the wider
+  list was there because the session's own entry is the one a later load
+  gives the file's notice to (`include/katana/cad/customisation_merge.hpp`:
+  a notice "goes with the source of its name, or with every source it lists
+  when none has its name"), so that a list narrowed to the selection's
+  sources hangs the session's notice on somebody else's symbols. It does.
+  But a source listed with nothing of it in the file passes for LOADED
+  wherever the file goes - which is the fault the import above was changed
+  to stop - and a notice shown beside more than its author meant is the
+  safe side of the two. The decision, and what each of the two rules had
+  right, is `docs/customisation.md` ("One rule for a part, whoever writes
+  it"); the rule itself is tested below Qt
+  (`tests/cad/customisation/test_customisation_part.cpp`).
+- **A pen inside a definition is the colour the session resolves its name
+  to**: the customisation's own colours, then the standard names. The one
+  painter every picture goes through (`paintStyleDrawing`) takes the table as
+  `StylePaintTarget::colours`, and the grid's pictures, the preview, the plan
+  (`PlanSource::colours`) and a sheet's legend all hand it the Document's. A
+  name neither knows still draws in the entity's pen, as it always did
+  (`APenIsTheColourTheCustomisationGivesItsNameAndTheEntitysPenWhenNothingDoes`).
+  A changed colour table moves the library's generation, which is what drops
+  the pictures and symbol stamps painted with the old colours: a stamp's key
+  holds its symbol and the entity's pen, not the colour a pen inside it
+  resolved to (`ASymbolStampedOnThePlanIsDrawnAgainWhenTheCustomisationsColoursChange`,
+  which keeps one cache across the change as a view does; the legend's
+  wiring is `ASheetsLegendDrawsAPenInTheColourThePlansSourceGivesIt`).
+
+A headless session opens no file dialog: Import and Export are
+`importDefinitionsFile` and `exportSelectedTo`, which take a path, and the
+buttons say in the log what to call. Not done: Assign makes a style with
+linetype ByLayer and weight 0.25, and under D8 a line later put in that style
+draws the symbol at its vertices; the grid's pictures are on the dark screen
+ground only, though the preview switches; the dialog reloads whole (two
 `tableUsage` passes) on every command the watcher reports, not measured on a
-250,000-entity drawing.
+250,000-entity drawing; a project's record
+is of NAMES, so importing the definitions of a customisation that brought
+both kinds clears a warning that it is missing although its rules are still
+not here (only a source that brought rules alone is left out); and Import and
+Export do the work themselves rather than running a `CUSTOMISE` line. The
+verb cuts a part down by the same function, so Export Selected writes what
+`CUSTOMISE EXPORT ... ONLY` writes, and since 2026-10-07 the window hands
+every `CUSTOMISE` line to the interpreter, so the button COULD run that line;
+making it do so is left with File > Settings, whose Import and Export are
+the same two lines.
+
+An import into a session that was the kept one is kept again: Import
+Definitions calls the commit hook round its install - before it, and what
+the hook hands back after one that was taken
+(`ImportCallsTheCommitHookBeforeTheInstallAndWhatItHandsBackAfterOneThatWasTaken`)
+- and the workbench answers the hook with the `CUSTOMISE KEEP` line ("The
+definition editor", below). A linetype picker's picture of a DRAWING linetype
+(`modelLinetypeImage`) is handed the session's colours as every other picture
+is; such a linetype is dashes and names no pen, so nothing is coloured by
+them yet.
 
 ### Survey Code Manager
 
@@ -1762,6 +2041,349 @@ it runs) and Linework (`cad::processLinework`, and the session's control
 codes). Its edits go to a BUFFER and reach the drawing only on Apply; Revert
 takes the drawing's map back; closing with unapplied edits asks. That, and
 what each tab shows, is `docs/survey_coding.md` ("The Survey Code Manager").
+
+Import Codes... (`importCodes`) and Export Codes... (`exportCodes`) read and
+write Katana customisation files, as the Symbol Library does: Import merges a
+file's RULES into the buffer for review and leaves everything else in it
+alone, and Export writes the buffer as a customisation of survey codes alone,
+cut out of the session by the rule the Symbol Library's Export is cut by
+("Symbol Library", above; `cad::customisationPart`, which is what
+`CUSTOMISE EXPORT <file> CODES` writes by): the session's name and notice,
+the sources that brought it rules, the notice of each source left out, the
+colours the rules name, and none of its settings. Apply calls the commit
+hook round its `setSurveyMap`, as the definition editor's Save does
+(`ApplyCallsTheCommitHookBeforeTheMapIsSetAndWhatItHandsBackAfter`).
+Every colour the manager shows or applies - the swatches of the Code Table,
+the three colour fields of the rule form, the explanation, the lint, Apply
+Codes and Linework - is resolved by the Document (`cad::resolveColour`): the
+customisation's own colours first, which the fields list ahead of the
+standard names.
+
+### The definition editor
+
+Until 2026-10-06 nothing in the window could make, change, copy or delete a
+linestyle or symbol definition: the symbol grid is read-only, the Linetypes
+tab's library page was a label, and every library the window installed was a
+whole file's. The owner asked to edit the customisation; survey codes had
+their manager, and definitions now have theirs
+(`src/katana_qt/customisation/definition_editor.*`, `DefinitionEditorDialog`,
+object name `definitionEditorDialog`).
+
+**One editor, kept by the workbench, with no menu item.** A definition is
+reached from where it is listed, so the editor is asked for by the managers:
+the Symbol Library's `symbolNew`, `symbolEdit`, `symbolDuplicate` and
+`symbolDelete`, and the Linetypes tab's `linetypeEditDefinition` and
+`linetypeNewDefinition`. Each button does nothing itself: it calls
+`CustomisationContext::editDefinition`, which the workbench answers with the
+one dialog (`CustomisationWorkbench::editDefinition`), made the first time
+and kept like the managers. A new definition is of the kind the manager that
+asked lists - a symbol from the Symbol Library, a linestyle from the
+Linetypes tab, whose button sits with the tab's own rather than on the page
+of a library linestyle, so the FIRST linestyle of a library can be begun
+there - and its kind can still be changed in the form. The editor has
+`definitionNew`, `definitionDuplicate` and `definitionDelete` of its own. A
+headless run reaches it as a panel once a step has opened it:
+`@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=...`.
+*Rejected: an item of its own on the Format menu.* What it would open is an
+empty form: every use of the editor starts from a definition or from the
+list a new one belongs in, and Format > Symbol Library and Format > Styles
+and Linetypes are those lists. The managers' buttons are its menu items.
+
+**What it edits** is one `entity::LineStyle`:
+
+| Field | Object name | Holds |
+|---|---|---|
+| Name | `definitionName` | `name`; typed only while the definition is being made |
+| Group | `definitionGroup` | `group`, a `/` path |
+| Kind | `definitionKind` | `symbol`: which of a customisation's two lists holds it |
+| Units | `definitionUnits` | `world`, `paper` or `twoPoint` - the format's words, with what each means beside it (`definitionUnitsNote`) |
+| At vertices | `definitionAtVertices` | `atVertices` |
+| Length, Factor | `definitionLength`, `definitionFactor` | `length`, `factor` |
+| Origin | `definitionOriginX`, `definitionOriginY` | `origin` |
+| Anchors | `definitionAnchor1X`, `definitionAnchor1Y`, `definitionAnchor2X`, `definitionAnchor2Y` | `anchor1`, `anchor2`; typed into only while the units are `twoPoint` |
+| Modes | `definitionStretchMode`, `definitionCycleMode` | the two whole numbers; `twoPoint` only |
+| From | `definitionSource` | `source`, shown and not edited: where the definition came from |
+| Strokes | `definitionStrokes` | `strokes` and `texts`, as text |
+
+A number is shown as the shortest text that reads back as itself
+(`core::formatExactReal`) in a plain field, never a spin box: a spin box
+shows 0.30000000000000004 as 0.3, and a Save of a form nobody touched would
+then change the definition (QT-02's rule, above, was paid for by exactly
+that). An empty number is the value a file's missing member has, and text
+that is not a finite number - `inf`, `nan`, `1e999` - is refused as text that
+is no number. The anchors and modes of a definition whose units are not
+`twoPoint` are READ even though they cannot be typed into, so changing its
+length does not drop them
+(`AnUntouchedFormDescribesExactlyTheDefinitionItWasOpenedOn`). The units box,
+its note and the tips of the fields it enables all use the format's word,
+`twoPoint`, so the form says one thing by one name.
+
+**The strokes are text**, in the Katana customisation format's own form
+(`docs/customisation.md`, "The members"): one stroke a line,
+`["move", 0, 0]`, `["text", {"text": "W", "height": 1.5}]`. So what a person
+learns in the editor is what a customisation file holds, a line copied from
+one to the other means the same, and there is no second vocabulary of
+strokes to keep in step with the file's. They are read as they are typed by
+the format's own reader (`entity::definitionFromJson`); the dialog has no
+parser. What joins the lines for the reader, finds the line a refusal is
+about and words it is not the dialog's either: `cad::strokeText` and
+`cad::readStrokeText` (`include/katana/cad/definition_edit.hpp`), below Qt,
+where a refusal's wording is tested without a window
+(`tests/cad/customisation/test_definition_edit.cpp`). *Rejected: a table of strokes with editable cells.* The headless
+driver cannot edit a cell, so an agent could not drive it; "tables are
+read-only and a form edits" is the house rule ("The rules a dialog or panel
+follows"), because an edited cell runs code from inside the table's own
+signal; and the seven kinds of stroke take different values - two numbers,
+three, one, a name, an object of seven members - so a grid's columns would
+mean something else on every row.
+
+- *The comma at a line's end may be left off*, and a blank line is passed
+  over: a file needs the commas because it is JSON, and a person adding a
+  last line should not have to go back and end the one before. That is the
+  editor's one leniency, and the strict reader never sees it - the lines are
+  joined with commas before they are handed over.
+- *A line that does not read is named by its number in the box*
+  (`AStrokeLineWithATypoKeepsSaveDisabledAndNamesTheLine`), with the reader's
+  own refusal after it - `Line 3: definition "TEST Valve" strokes[2]: "drow"
+  is not a kind of stroke ...` - and is washed in the box. The reader names a
+  stroke by its place counted from 0, and says nothing of lines. So when the
+  strokes do not read, each line is read alone until one fails: that costs a
+  reading a line, and only of text that already failed.
+- *No refusal cites a place in text nobody typed.* The lines are read under
+  a first line of the editor's making, so the reader's "at line 2, column 14"
+  is of that text and is left off (`Line 1: ... this stroke has a number too
+  large to hold - 1e999`). For text that is not JSON the reason is asked of
+  the line by itself: read in place, a line short of its `]` was reported as
+  `unexpected '}'`, a brace of the wrapper
+  (`ARefusalNeverCitesAPlaceInTextNobodyTyped`).
+- *The box is read character for character*
+  (`QTextDocument::toRawText`), not as "plain text": Qt's `toPlainText`
+  hands a no-break space back as a blank and a line separator as a line
+  break, and both are characters a stroke's text may hold. A form opened on
+  such a text read as edited before anything was typed - every other
+  definition then refused, Revert no way out - and Save wrote the blank
+  (`ATextHoldingANoBreakSpaceOpensUneditedAndIsSavedCharacterForCharacter`).
+  The one character a line of the box cannot hold is a paragraph separator,
+  at which it breaks; a definition whose text has one is not opened, and is
+  told why, rather than shown as two lines that are no stroke.
+- *The box holds strokes and nothing else.* A line can end the list of
+  strokes and go on to give the definition members - `]], "atVertices": true,
+  ...` - and read as sound JSON. Only the strokes are taken from what was
+  read, and text that would have set anything else is refused
+  (`TheStrokesBoxHoldsStrokesAndNothingElseOfTheDefinition`), or a definition
+  could be saved that the fields above do not show.
+
+**A name is fixed once its definition exists.** Styles and survey code rules
+NAME a definition, and a library has no rename (`include/katana/entity/named_table.hpp`),
+so another name would be another definition, and everything naming the first
+left naming nothing - drawn as a plain line or a stand-in mark, with nothing
+said. Duplicate is how a definition comes by a new name: a copy equal but for
+its name, under the first free one (`TEST Valve 2`), which can be changed
+until it is saved - the first free in the library AND among the drawing's
+own linetypes (`cad::freeDefinitionName`), so a copy does not begin as a name
+in both. A blank at an end of a NEW name is taken off, since it cannot be
+seen where the name is shown and a rule naming `Valve` would miss `Valve `.
+A new definition is not made under a name no command line could name it by -
+one holding a double quote, or one that is a word of the `CUSTOMISE REMOVE`
+line itself (`CODE`, `FORCE`): saved, it could never be removed again
+(`ADefinitionIsNotMadeUnderANameNoLineCouldRemoveItBy`). One that already has
+such a name, out of a file, is opened and changed like any other.
+
+**The preview is of what is typed, not of what is saved**: as a symbol on
+its insertion point (`definitionPreview`) and, for a linestyle, along the
+sample line (`definitionLinePreview`), at the plot scale chosen
+(`definitionPlotScale`). `StylePreview` drew only NAMES found in the
+Document's library; `StylePreview::setDefinition` hands it a definition
+instead, which it keeps in a library of its own holding that one alone, so
+nothing is read from the Document's library and nothing put into it. The
+pane's cache of flattened definitions is emptied at every such call: it is
+keyed on a library's generation, and this library is a new one at each
+keystroke under the same name. A definition is pictured from its first
+stroke, before it has a name: the form is read under a stand-in name for the
+picture alone, since what a definition draws does not depend on what it is
+called (the pane stayed blank until a name was typed). While a line is half
+typed the last picture that read stays up and the message area says why the
+text does not - a pane that went blank at every keystroke of a stroke would
+be blank for most of the time one is typed - and a line under the panes
+(`definitionPreviewNote`) says the picture is not of what is typed now.
+
+**The message area** (`definitionIssues`) says the first thing wrong, in
+the reader's or `entity::validate`'s words; a name that is taken; and, while
+the form reads, who names the definition - `rule #1 AC* (symbol) draws it as
+its symbol`, `style "Marks" draws it as its symbol` - from
+`cad::definitionUsers` (`include/katana/cad/definition_users.hpp`). That is
+said of a NEW name too: a rule that names a symbol nothing defines is
+waiting for it. What those users are drawn as meanwhile is said from the same
+answer and not assumed: a name the drawing's own Linetype table also holds is
+dashed by that linetype, and a name that is a built-in shape is drawn as that
+shape - neither is "a plain line or a stand-in mark" - and a definition saved
+under such a name is drawn in their place. That is allowed, as decision D2
+allows a name in both, and said before Save
+(`ANameTheDrawingAlsoAnswersToIsSaidAsThatAndNotAsNamingNothing`). A
+definition with no strokes is saved, since the format holds one, and said to
+have none.
+
+**Committing.** The library is session data with no undo
+(`docs/survey_coding.md`), so:
+
+- **Save** (`definitionSave`) installs a copy of the session's library with
+  the definition added or replaced (`Document::setStyleLibrary`), as the
+  Survey Code Manager's Apply installs its map. It is enabled only while the
+  form reads as a definition and has something to save, and for a new
+  definition only while its name is free
+  (`ANameTheLibraryHoldsCannotBeMadeASecondTime`).
+- **Revert** (`definitionRevert`) shows the form as it was opened, or as the
+  library has had the definition since.
+- **Delete** (`definitionDelete`) runs the line `CUSTOMISE REMOVE "<name>"`
+  (`cad::removeDefinitionLine`) through the window's one executor ("One
+  executor", below), so it is echoed and an agent types the same. That verb
+  is the interpreter's (`docs/customisation.md`, "The verbs") and refuses a
+  definition something names, by the function the editor lists with
+  (`cad::definitionUsers`). The window takes no `CUSTOMISE` line itself
+  (2026-10-07): while it did, it read `REMOVE` as a file's name, and Delete
+  deleted nothing.
+  - *What the line answered is shown as it answered it.* The editor does
+    not say why a line failed: it once said "is used" of any failure on a
+    definition that had users, whatever the line had said
+    (`ALineThatFailsForAnotherReasonIsShownAsItFailedAndAFailedForceOffersNothing`).
+  - *Who names the definition is said ONCE.* The verb's refusal cites each
+    user in its own words (`rule #7 AC* (symbol) names it`;
+    `cad::DefinitionUsers::cited`), and until 2026-10-07 the editor put its
+    own list of the same users under it (`rule #7 AC* (symbol) draws it as
+    its symbol`), so a person read them twice. Decided then: the verb's
+    reply, once. The editor's list is added only where what is on the
+    page does NOT cite every user - a line that failed for another reason
+    cites nobody, and a refusal that came before something else named the
+    definition does not cite that - asked of the function the verb makes its
+    lines with, not read out of the reply
+    (`TheVerbItselfRefusesADefinitionInUseAndDeleteAnywayRemovesIt`).
+    *Rejected: never adding the list*, which would offer `FORCE` over a user
+    nothing on the page names.
+  - *Delete Anyway* (`definitionDeleteAnyway`; Keep It is
+    `definitionDeleteCancel`) is offered when the plain line failed and
+    something names the definition, under what names it; it runs the line
+    with `FORCE`. A `FORCE` that fails offers nothing further. The users are
+    those of the definition the form is ON, whatever the form reads as at
+    that moment.
+  - *It exists only while that refusal is on the page.* The two buttons are
+    themselves hidden and disabled otherwise - not only the row they sit in,
+    which left the button pressable by a script, and one press then ran the
+    `FORCE` line on a definition in use with nothing listed - and
+    `remove(true)` is refused unless the refusal is showing
+    (`DeleteAnywayIsNotCarriedOutUnlessItsRefusalIsOnThePage`,
+    `qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless`).
+  - Both questions are built into the page: a box would hang a headless run.
+    What was deleted stays in the form, and Save puts it back - the only way
+    back there is.
+  - A name no line can name is refused before any line is run: one holding a
+    double quote, which a command line cannot carry, and one that is the
+    line's own word - the tokenizer drops the quotes, so
+    `CUSTOMISE REMOVE "CODE" FORCE` would be read as "remove the survey code
+    FORCE".
+- **`CustomisationContext::beginCommit`** is called before each commit, and
+  what it hands back is called after one that succeeded - never after one
+  that was refused. It is how a session whose customisation is the kept one
+  stays kept across an editor's own change while a typed change lasts the
+  session only: the maker of the context knows whether the session was kept
+  and runs `CUSTOMISE KEEP` afterwards; the editor knows neither and only
+  keeps the order (`TheCommitHookIsCalledBeforeASaveAndWhatItHandsBackAfterIt`).
+  *Rejected: the editor reading "kept" from the Document itself*, which would
+  put the rule for what is kept in every editor that commits. Every editor
+  that commits to the session's customisation calls it the same way: this
+  one's Save and Delete, the Survey Code Manager's Apply and the Symbol
+  Library's Import Definitions.
+  - *The workbench answers it* (`CustomisationWorkbench::context`): it reads
+    `customisationState().kept` when asked, and hands back the line
+    `CUSTOMISE KEEP`, through the window's one executor, ONLY when the
+    session was the kept one and the session has a kept file
+    (`CustomisationServices::hasKeptFile`, which the window sets from its
+    host's kept-file path). A customisation typed, scripted or loaded with
+    `--customise` is "not kept", and an editor's change on top of it lasts
+    the session as it does. With no kept file nothing is handed back: `KEEP`
+    would only be refused, in the log, after every Save. The line is run as
+    a typed one, so it is echoed, and what `KEEP` refuses - a kept file
+    changed on disk since it was read - is said as it would be to a person
+    who typed it. Tested with a host and a kept file of the test's own, each
+    of the three commits in turn
+    (`CustomisationWorkbench.AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAndItStaysKept`,
+    `ASessionThatWasNotTheKeptOneIsNotKeptByAnEditorsCommit`,
+    `WithNoKeptFileAnEditorsCommitRunsNoLineAndLogsNoRefusal`).
+
+**One definition at a time.** Opening another while the form has edits that
+are not saved is REFUSED and said, in the message area and the log
+(`AnotherDefinitionIsNotOpenedOverEditsThatAreNotSaved`): there is no undo
+to get typed strokes back from, so Save or Revert comes first. *Rejected:
+dropping the edits*, which is what the style manager's form does on another
+row ("Not done" under "Styles and Linetypes") and is survivable there only
+because a style is three fields. Closing the dialog hides it and keeps the
+form, and says so in the log; closing the WINDOW asks first
+(`CustomisationWorkbench::confirmClose`). A yes is only remembered
+(`DefinitionEditorDialog::agreeToDiscard`), until the form next changes:
+the code manager and the unsaved drawing are asked about after it, and a
+Cancel at either keeps the window open - with the strokes still in the form.
+It once reverted the form on yes, and that Cancel then found them gone
+(`TheWindowIsNotClosedOverAFormThatIsNotSaved`).
+
+**Changed elsewhere.** The editor watches the Document as the managers do.
+A definition another load or command changed is taken up when the form is
+untouched; when it holds edits they are kept, the message area says the
+definition was changed elsewhere, and Revert shows the library's as it is
+now. One removed elsewhere stays in the form, and Save puts it back
+(`ADefinitionChangedElsewhereIsTakenUpUneditedAndSaidOverEdits`).
+
+Tested in `tests/qt_widgets/customisation/test_definition_editor.cpp`, with
+a customisation written out in the test and every saved definition compared
+with one built by hand; the unsaved-definition preview in
+`tests/qt_widgets/customisation/test_shared_style_preview.cpp`; who names a
+definition in `tests/cad/customisation/test_definition_users.cpp`; the
+strokes as text, the name a copy takes and the remove line in
+`tests/cad/customisation/test_definition_edit.cpp`; and the real window,
+headless, in `qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless`,
+`qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless`
+and `qt_a_definition_a_survey_code_names_is_refused_by_delete_and_removed_by_delete_anyway_headless`.
+The widget tests give the editor a runner of their own for `CUSTOMISE
+REMOVE`, so that what they assert is the editor's; one gives it the verb
+itself (`TheVerbItselfRefusesADefinitionInUseAndDeleteAnywayRemovesIt`), and
+that every line the editor can build is read by the verb as that one
+definition is `TheLineAnEditorBuildsToRemoveADefinitionIsReadAsThatDefinitionAlone`
+(`tests/cad/customisation/test_customisation_verbs.cpp`).
+
+Not done:
+
+- **No verb makes or changes ONE definition.** Save is a widget's call on
+  the Document, as the code manager's Apply is. On the command line a
+  definition is made or changed by writing it in a customisation file and
+  loading that; an agent has no shorter way.
+- **An interactive session has no kept file of its own yet.** An editor's
+  commit keeps a kept session kept only where the session has a kept file,
+  and until File > Settings gives each user one that is a session started
+  with `KATANA_CUSTOMISATION` set.
+- **A user of a definition is still worded two ways**, by the verb and by
+  the editor's own list (`docs/customisation.md`, "The verbs: not done"),
+  though no longer both under one refusal.
+- **A definition the form cannot show cannot be opened** - one the format
+  cannot write (a stroke carrying a member its kind does not use, texts that
+  are not its text strokes in order; `docs/customisation.md`, "What it
+  refuses"), or one a text of which holds a paragraph separator. The editor
+  says which and opens nothing
+  (`ADefinitionTheFormCannotShowIsNotOpenedOrCopiedAndIsSaidWhenItArrives`);
+  only a library built outside the editor can hold one.
+- **The Linetypes tab's library page still opens with library linestyles
+  "are read-only here"**, now followed by where one IS edited. The first
+  sentence is pinned by `qt_the_style_manager_lists_a_library_group_s_linestyles_headless`
+  and was kept: the page itself edits nothing, so it is true, though a page
+  that only said where a linestyle is edited would read better.
+- **The symbol library does not select what was just saved**, and the
+  editor has no list of its own: a definition is found in the manager that
+  lists it.
+- A text stroke's letters are previewed in the pane's own font, as every
+  preview's are.
+- **The theme has no rule for a disabled field**, only for a disabled button
+  (`src/katana_qt/theme.cpp`): a line, a choice or a number box that cannot
+  be typed into is drawn exactly as one that can. The editor dims its own
+  with a rule on the dialog, because a fixed name has to be told from one
+  that can still be typed; every other dialog's disabled fields still look
+  live. The rule belongs in the theme.
 
 ## Panels refresh on the event loop, never inside their own signal
 
@@ -1810,8 +2432,9 @@ never reaches into the window for it.
   `GDAL`, `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` - then `ONLINE`,
   `UTILITY`), then to a running tool (`ViewWorkspace::typeIntoTool`), and
   hands whatever is left to `dispatchLine` - the view verbs, the window's own
-  (`SCRIPT`, `CUSTOMISE`, `PLOTSHEETS`, `PLOT`, `SNAPSHOT`), a tool's alias,
-  and the interpreter. `runVerbLine` echoes the line and runs the same
+  (`SCRIPT`, `PLOTSHEETS`, `PLOT`, `SNAPSHOT`), a tool's alias,
+  and the interpreter (`CUSTOMISE` among its verbs, which the window read and
+  ran itself until 2026-10-06). `runVerbLine` echoes the line and runs the same
   `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
   line is kept in the interpreter's history and undone exactly as a typed one.
 - **Never a running tool's answer.** That step is the only one `runVerbLine`
@@ -1896,19 +2519,39 @@ Each now reaches the same code on every front end
   `qt_info_hash_id_is_the_entity_beside_a_file_of_that_name_headless`). The window, and the session under
   `katana_cli` and `katana_mcp`, once took every `INFO` for `INFO <file>`, so
   `katana_describe_entity` answered that the file did not exist.
-- `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST` and `MAPFILE CHECK`
-  are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`), given the
-  standard colour table by `CommandInterpreter::setColourLookup`.
+- `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST` and `CODE CHECK`
+  are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`). They
+  resolve a colour name through the Document - the customisation's own
+  table, then the standard names - and no front end hands the interpreter
+  a lookup of its own any more: the window had only the standard names to
+  give, which the Document knows, and `CommandInterpreter::setColourLookup`
+  went with its last caller. (`CODE LIST`
+  and `CODE CHECK` were `MAPFILE LIST` and `MAPFILE CHECK` until 2026-10-06.)
+  Survey > Apply Survey Codes runs `CODE SELECTION` or `CODE DRAWING` ("The
+  Format menu", above).
 - `COPC <source> <destination.copc.laz>`, each path one word or quoted, a
   background job whose `converted` record names the file
   (`docs/interop.md`, "IMPORT, EXPORT, INFO, REFS and COPC on every front
   end"). GIS > Convert Point Cloud to COPC offers to import the result once
   the job has converted it. In a headless session the menu item opens no
   file dialog and names this verb instead.
-- `CUSTOMISE` alone reports what is loaded, from which files, what the project
-  was drawn with that is not loaded, and what it covers in this drawing
-  (`cad::customisationReport`, the words `katana_cli` prints); it once
-  answered with its usage.
+- `CUSTOMISE`, the whole family, is the interpreter's
+  (`include/katana/cad/customisation_verbs.hpp`; `docs/customisation.md`,
+  "The verbs"): the report, `JSON`, a load (merge or `REPLACE`), `EXPORT`,
+  `RESET`, `KEEP`, `REVERT`, `REMOVE` and `SET`, answered in records. The
+  window had a tokenizer and a loader of its own for `CUSTOMISE [REPLACE]
+  <file>...`, beside `katana_cli`'s, written twice because the readers of
+  the older files lived where the interpreter could not see them - and the
+  two had come to differ. Both are gone from the window
+  (`MainWindow::dispatchLine` hands the line on), with the prose they
+  printed: a load now answers `loaded file=... name=... definitions_added=...`
+  a file, the names the rules ask for that nothing defines, and the
+  `customisation` record; a file named twice is `repeated file=...`; a file
+  of another program is refused as not a Katana customisation file, and
+  nothing is loaded. `CUSTOMISE` alone is the two count lines, the records
+  (the session's name and origin, its sources, the automation, the linework
+  codes, what the open project is missing) and what it covers in this
+  drawing.
 - `IMPORT <file> LOCAL` moves a DXF, vector file or .12da archive as one piece
   so its lower-left corner sits at 0,0, and asks nothing; a raster or a point
   cloud refuses it by name. The path and the `LOCAL` are read by
@@ -2008,12 +2651,14 @@ own code keeps, so nothing is written twice:
 - **Window**: `windowHelpText`, the verbs `MainWindow::dispatchLine` and
   `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
   `EXPORT`, `INFO <file>`, `REFS`, `COPC` - the geoprocessing executor's,
-  whose usage the Geoprocessing section gives - `CUSTOMISE`, `PLOTSHEETS`, `PLOT`,
+  whose usage the Geoprocessing section gives - `PLOTSHEETS`, `PLOT`,
   `SNAPSHOT`, `ZOOM`, `GRID`, `SNAP`, `EXAGGERATION`, `ONLINE`, `UTILITY`,
   `QUIT`, and `HELP`, which adds this section to the interpreter's), and the rule for a bare tool
   word - with the one word that means different things on the two command
   lines: a bare `LS` starts the List tool in the window and is `LABELSTYLE`
-  in `katana_cli`;
+  in `katana_cli`. `CUSTOMISE` had a block here while the window ran it
+  itself; it is under Commands now, with the interpreter's other verbs, and
+  `HELP CUSTOMISE` prints every word and every reply;
 - **the tools**, a section a menu: each tool's name, aliases, key, tip and id,
   from the tool catalogue.
 
@@ -2063,11 +2708,20 @@ non-modal and kept, following the Document through a `DocumentWatcher`
 - the current layer, style, annotation scale and coordinate system;
 - the selection;
 - the undo and redo depth with the next step each way;
-- the customisation, in the words a bare `CUSTOMISE` prints
-  (`cad::customisationSummary`): the loaded files in load order, the files the
-  project was drawn with that are not loaded, the counts and this drawing's
-  coverage; and the names the drawing's styles give that no loaded library
-  defines (`drawingSummaryUnresolved`). A double-click on one, or Show in Styles
+- the customisation, word for word what a bare `CUSTOMISE` replies
+  (`cad::formatCustomisationReply` of `cad::customisationSummary(document)`):
+  the counts, then the records - the session's name, origin and whether it
+  is kept, its sources in load order, the automation, the linework codes,
+  the names the project was drawn with that are not loaded - and this
+  drawing's coverage. The pane wraps at its edge: the records are longer
+  than it is wide (the linework record is 143 characters), and unwrapped the
+  end of each was out of sight behind a scroll bar
+  (`DrawingSummaryDialog.NoRecordOfTheCustomisationPaneIsCutAtThePanesEdge`).
+  It reads the Document's own state; the window once
+  kept the loaded files and the missing ones in lists of its own and handed
+  them over, and the pane printed an older prose of them. Then the names the
+  drawing's styles give that no loaded library defines
+  (`drawingSummaryUnresolved`). A double-click on one, or Show in Styles
   and Linetypes, opens Format > Styles and Linetypes on its Styles tab with the
   Missing chip and the name in the search, reached by the object names the
   manager's header lists (`MainWindow::showMissingInStyles`), so its styles
@@ -2075,7 +2729,11 @@ non-modal and kept, following the Document through a `DocumentWatcher`
 
 It changes nothing. Copy as JSON runs `STATUS JSON` through the one executor
 and copies the reply - exactly what `katana_status` and `katana://status` give
-(`docs/cad.md`, "STATUS") - and Load Customisation is the Format menu's item.
+(`docs/cad.md`, "STATUS"). It had a Load Customisation button
+(`drawingSummaryLoad`) that triggered the Format menu's item of that name;
+the item is gone ("The Format menu", above), and the button with it, since a
+trigger of a name that is no menu item fails without a word
+(`DrawingSummaryDialog.ItOffersNoButtonForTheRemovedLoadCustomisationItem`).
 The status bar has a permanent `statusSelectionCount` label, "3 selected / 120
 entities", refreshed with the panels.
 

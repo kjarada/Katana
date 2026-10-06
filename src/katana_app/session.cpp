@@ -1,13 +1,10 @@
 // The command-line session that katana_cli and katana_mcp both drive: one
 // Document, the CommandInterpreter over it, and the verbs the front ends add
-// above katana_cad (CUSTOMISE, IMPORT, EXPORT, INFO <file>, COPC...). Each line is
+// above katana_cad (IMPORT, EXPORT, INFO <file>, SURVEY, COPC...). Each line is
 // reported on std::cout (what it did) and std::cerr (errors and warnings), as
 // katana_cli always has; katana_mcp captures both around each line.
 
-#include <algorithm>
 #include <cctype>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -17,16 +14,12 @@
 #include <vector>
 
 #include "katana/cad/command_interpreter.hpp"
-#include "katana/archive12d/customisation.hpp"
-#include "katana/archive12d/domain.hpp"
-#include "katana/cad/code_table.hpp"
+#include "katana/cad/customisation_host.hpp"
 #include "katana/cad/customisation_record.hpp"
-#include "katana/cad/customisation_report.hpp"
+#include "katana/cad/customisation_state.hpp"
 #include "katana/cad/document.hpp"
-#include "katana/cad/style_catalogue.hpp"
-#include "katana/cad/survey_coding.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
-#include "katana/entity/tables.hpp"
 #include "dxf_verbs.hpp"
 #include "ifc_verbs.hpp"
 #include "survey_verbs.hpp"
@@ -100,210 +93,76 @@ const char* windowOnlyVerb(const std::string& verb)
     return nullptr;
 }
 
-// CUSTOMISE is here rather than in CommandInterpreter for the same reason
-// IMPORT is: the interpreter belongs to katana_cad, which may not see
-// archive12d, where the customisation readers live. Unlike IMPORT it needs
-// no third-party library, so it is outside the interoperability guard and is
-// offered even in a build with no GDAL.
-// What the loaded customisation means for THIS drawing. "The linestyles are
-// not showing" looks identical whether nothing is loaded, the library does
-// not define what the drawing names, or the drawing's styles are plain
-// continuous lines - so say which.
-void reportCoverage(const katana::cad::Document& document)
-{
-    // The words are cad's, so the application's log says the same.
-    std::cout << katana::cad::formatCoverage(katana::cad::customisationCoverage(document));
-}
-
-// The standard colour names reach cad only through a callback: cad may not
-// see archive12d, which owns the table. The interpreter's CODE and MAPFILE
-// CHECK are given it (CommandInterpreter::setColourLookup).
-std::optional<katana::entity::Color> colourOf(std::string_view name)
-{
-    return katana::archive12d::standardColour(name);
-}
-
-// The files of a load, by name and kind, for the record a project keeps of
-// what it was drawn with (cad/customisation_record.hpp).
-std::vector<katana::cad::CustomisationSource>
-sourcesOf(const katana::archive12d::Customisation& loaded)
-{
-    std::vector<katana::cad::CustomisationSource> sources;
-    for (const katana::archive12d::LoadedFile& file : loaded.files) {
-        const std::u8string name = file.path.filename().u8string();
-        // A style library brings definitions and a survey code file rules.
-        const bool library = file.kind == katana::archive12d::CustomisationFile::StyleLibrary;
-        sources.push_back({std::string(reinterpret_cast<const char*>(name.data()), name.size()),
-                           library, !library, {}});
-    }
-    return sources;
-}
-
-// Up to `most` names, quoted, and how many more: a load of the reference
-// library replaces hundreds, and a line of them all says nothing.
-std::string sampleOf(const std::vector<std::string>& names, std::size_t most = 8)
+// `names`, each in quotes, with commas between.
+std::string quotedNames(const std::vector<std::string>& names)
 {
     std::string text;
-    for (std::size_t i = 0; i < names.size() && i < most; ++i) {
-        text += (i == 0 ? "\"" : ", \"") + names[i] + "\"";
-    }
-    if (names.size() > most) {
-        text += " and " + std::to_string(names.size() - most) + " more";
+    for (const std::string& name : names) {
+        text += (text.empty() ? "\"" : ", \"") + name + "\"";
     }
     return text;
 }
 
-// Whatever customisation ships with the application or sits beside it, so a
-// session starts able to draw a survey rather than waiting to be told where
-// its linestyles are. What it loaded is recorded on the Document.
-void loadDefaultCustomisation(katana::cad::Document& document, const char* executable)
+// What a program's session is handed for its customisation
+// (cad/customisation_host.hpp): the built-in of this run - the one compiled
+// in, or what the seam KATANA_BUILTIN_CUSTOMISATION says in its place - and
+// the kept file, which here is the one KATANA_CUSTOMISATION names and nothing
+// else. No per-user place is read: a command line, and a server an agent
+// drives, must do the same thing on every machine and for every user.
+//
+// The variable is read through core, never getenv: on Windows that gives the
+// ANSI code page's bytes, in which a file named outside the code page is a
+// file named with '?'. Such a kept file was not found, so not read, with
+// nothing said, and CUSTOMISE KEEP then failed to write it
+// (core/path_text.hpp).
+katana::cad::CustomisationHost hostOfThisRun()
 {
-    // Compiled in: nothing to find and nothing to load.
-    const katana::archive12d::Customisation& built = katana::archive12d::builtinCustomisation();
-    // A file of it that could not be read cost only itself, and is said
-    // here (audit A12-06): unsaid, a damaged file drew every drawing's
-    // linestyles as plain lines without a word.
-    for (const std::string& error : built.errors) {
-        std::cerr << "error: the built-in customisation: " << error << "\n";
+    katana::cad::CustomisationHost host;
+    host.builtIn = katana::cad::builtInCustomisation();
+    if (const std::string kept =
+            katana::core::environmentVariable(katana::cad::kKeptCustomisationVariable);
+        !kept.empty()) {
+        host.keptFile = katana::core::pathFromUtf8(kept);
     }
-    for (const std::string& warning : built.warnings) {
-        std::cerr << "warning: the built-in customisation: " << warning << "\n";
-    }
-    if (!built.empty()) {
-        std::cout << "Customisation: " << built.library.size() << " linestyles and symbols and "
-                  << built.map.size() << " survey code rules, built in\n";
-        document.setStyleLibrary(built.library);
-        document.setSurveyMap(built.map);
-        document.recordCustomisationLoad(sourcesOf(built), false, false);
-        return;
-    }
-    const auto paths = katana::archive12d::findCustomisation(std::filesystem::path(executable));
-    if (paths.empty()) {
-        return;
-    }
-    auto found = katana::archive12d::readCustomisation(paths);
-    if (!found) {
-        std::cerr << "warning: the customisation beside this program could not be read: "
-                  << found.error().describe() << "\n";
-        return;
-    }
-    for (const std::string& warning : found->warnings) {
-        std::cerr << "warning: " << warning << "\n";
-    }
-    std::cout << "Customisation: " << found->library.size() << " definitions and "
-              << found->map.size() << " survey code rules, from "
-              << paths.front().parent_path().string() << "\n";
-    document.setStyleLibrary(found->library);
-    document.setSurveyMap(found->map);
-    document.recordCustomisationLoad(sourcesOf(*found), false, false);
+    return host;
 }
 
-// CUSTOMISE [REPLACE] <file>...: a load MERGES into what is loaded (the lead's
-// decision D1) through archive12d::mergeCustomisation - the merge the window's
-// Format > Load Customisation makes, so the two cannot come to differ. A
-// load's definitions replace those of the same name, and the rules it gives a
-// key in a section replace that key's rules there; everything else loaded is
-// kept. REPLACE swaps out what the load brought - and only that: a load with
-// no survey code file never installs an empty map, nor one with no library an empty
-// library (audit QT-21).
-//
-// Whether REPLACE was given is decided by the caller, which alone knows
-// whether a word was quoted.
-bool runCustomise(katana::cad::Document& document, const std::vector<std::string>& paths,
-                  bool replace)
+// The customisation a program's session starts with, so that it can draw a
+// survey rather than wait to be told where its linestyles are: the kept one
+// when there is one and it reads, else the built-in, else none - cad's choice
+// (startCustomisation), said here in this front end's words. The interpreter
+// is handed the host FIRST: it notes the kept file as it is at that moment,
+// and CUSTOMISE KEEP refuses to write over one that is another later.
+void startWithTheHostsCustomisation(katana::cad::Document& document,
+                                    katana::cad::CommandInterpreter& interpreter)
 {
-    if (replace && paths.empty()) {
-        std::cerr << "error: InvalidArgument: CUSTOMISE REPLACE needs a file\n";
-        return false;
+    const katana::cad::CustomisationHost host = hostOfThisRun();
+    interpreter.setCustomisationHost(host);
+    const katana::cad::CustomisationStart start = katana::cad::startCustomisation(document, host);
+    // What went wrong is said, and the session starts all the same (audit
+    // A12-06): unsaid, a built-in or a kept file that did not read drew every
+    // drawing's linestyles as plain lines without a word. Said HERE it reaches
+    // whoever reads this program's standard error, which a client of
+    // katana_mcp does not: for that reader startCustomisation has left the
+    // same sentences on the Document, and CUSTOMISE JSON, katana_customisation
+    // and katana://customisation give them as `start`.
+    for (const std::string& problem : start.problems) {
+        std::cerr << "error: " << problem << "\n";
     }
-    // Alone, it reports: what is loaded, from which files, what the project
-    // was drawn with that is not, and what it covers here - the words the
-    // window's CUSTOMISE says too (cad/customisation_report.hpp).
-    if (paths.empty()) {
-        std::cout << katana::cad::customisationReport(
-            document, document.customisationState().sources,
-            document.customisationState().missingAtOpen);
-        return true;
+    if (start.installed == katana::cad::CustomisationOrigin::None) {
+        return;
     }
-
-    // A file named twice in one load is read once: read twice, each of its
-    // rules would be in the map twice. The window's CUSTOMISE and Format > Load
-    // go through the same rule.
-    const katana::cad::DistinctFiles distinct = katana::cad::distinctCustomisationFiles(
-        std::vector<std::filesystem::path>(paths.begin(), paths.end()));
-    for (const std::filesystem::path& repeat : distinct.repeats) {
-        std::cout << "  " << repeat.string() << " is named twice in this load; it is read once\n";
+    const bool kept = start.installed == katana::cad::CustomisationOrigin::Kept;
+    std::cout << "Customisation: " << start.name << ", " << start.definitions
+              << " linestyles and symbols and " << start.rules << " survey code rules, "
+              << (kept ? "kept" : "built in") << "\n";
+    if (start.keptFromAnotherBuiltIn) {
+        // It is the user's, so it is what starts; they may still want to know
+        // that the program's own has moved on since they kept theirs.
+        std::cerr << "warning: the kept customisation was made from another built-in "
+                     "customisation than this program has; CUSTOMISE RESET gives this "
+                     "program's\n";
     }
-    auto loaded = katana::archive12d::readCustomisation(distinct.files);
-    if (!loaded) {
-        std::cerr << "error: " << loaded.error().describe() << "\n";
-        return false;
-    }
-    for (const std::string& warning : loaded->warnings) {
-        std::cout << "  warning: " << warning << "\n";
-    }
-    const auto mode =
-        replace ? katana::archive12d::LoadMode::Replace : katana::archive12d::LoadMode::Merge;
-    katana::archive12d::CustomisationMerge merged = katana::archive12d::mergeCustomisation(
-        document.styleLibrary(), document.surveyMap(), *loaded, mode);
-    // What each file did to what was loaded before it: a person loading their
-    // own symbol file wants to see it ADDED to the rest, not put in its place.
-    // The kind is said in the words the help and the window use ("survey code
-    // file", "style library"), not the reader's name for the format.
-    for (const katana::archive12d::FileMerge& file : merged.files) {
-        const bool map = file.kind == katana::archive12d::CustomisationFile::MapFile;
-        std::cout << "  " << (file.name.empty() ? std::string("(no file)") : file.name) << ": "
-                  << (map ? "survey code file" : "style library") << ", " << file.added.size()
-                  << " added, " << file.replaced.size() << " replaced"
-                  << (map ? " (codes, once for each section)" : "");
-        if (!file.replaced.empty()) {
-            std::cout << ": " << sampleOf(file.replaced);
-        }
-        std::cout << "\n";
-    }
-    for (const std::string& problem : merged.problems) {
-        std::cerr << "error: not installed: " << problem << "\n";
-    }
-    if (!merged.removedDefinitions.empty()) {
-        std::cout << "  " << merged.removedDefinitions.size()
-                  << " definitions the load did not bring are gone: "
-                  << sampleOf(merged.removedDefinitions) << "\n";
-    }
-    if (!merged.removedKeys.empty()) {
-        std::cout << "  " << merged.removedKeys.size()
-                  << " codes the load did not bring are gone: " << sampleOf(merged.removedKeys)
-                  << "\n";
-    }
-    document.setStyleLibrary(std::move(merged.library));
-    document.setSurveyMap(std::move(merged.map));
-    // The load's sources join the session's and come off what the open
-    // project is missing: the Document keeps both lists.
-    document.recordCustomisationLoad(sourcesOf(*loaded), replace && merged.libraryLoaded,
-                                     replace && merged.mapLoaded);
-    std::cout << "Loaded now: " << document.styleLibrary().size() << " definitions, "
-              << document.surveyMap().size() << " survey code rules\n";
-
-    // A customisation need not be self-contained. Saying what is missing is
-    // the difference between a symbol that is plainly absent and one that is
-    // silently drawn as a dot. Judged against everything now loaded, since a
-    // survey code file may name what an earlier load defined.
-    std::vector<std::string> missing;
-    for (const std::string& name : document.surveyMap().stylesReferenced()) {
-        if (!katana::cad::isPlainLinestyle(name) && document.definitionFor(name) == nullptr &&
-            !katana::entity::isBuiltInSymbolName(name)) {
-            missing.push_back(name);
-        }
-    }
-    if (!missing.empty()) {
-        std::cout << "  " << missing.size()
-                  << " names the survey codes ask for that no loaded library defines:";
-        for (std::size_t i = 0; i < missing.size() && i < 8; ++i) {
-            std::cout << (i == 0 ? " " : ", ") << "\"" << missing[i] << "\"";
-        }
-        std::cout << (missing.size() > 8 ? ", ...\n" : "\n");
-    }
-    reportCoverage(document);
-    return true;
 }
 
 #if defined(KATANA_WITH_INTEROP)
@@ -347,11 +206,11 @@ bool runLine(SessionState& session, const std::string& line)
         !body.empty() && body.front() == '#') {
         return true;
     }
-    // HELP (or ?) alone is the whole session's help - CUSTOMISE, IFC and the
-    // geo executor's families too, which the interpreter cannot know of - so
+    // HELP (or ?) alone is the whole session's help - IFC, SURVEY and the geo
+    // executor's families too, which the interpreter cannot know of - so
     // katana_cli -c HELP and katana_run_commands say what katana_help and
-    // --help say. With a word (HELP SHEETS, HELP UTILITY) it stays the
-    // interpreter's.
+    // --help say. With a word (HELP SHEETS, HELP UTILITY, HELP CUSTOMISE) it
+    // stays the interpreter's.
     if (const std::string_view body = katana::core::trimmed(line);
         body.find_first_of(" \t") == std::string_view::npos &&
         (upperVerb(line) == "HELP" || upperVerb(line) == "?")) {
@@ -361,47 +220,6 @@ bool runLine(SessionState& session, const std::string& line)
     if (const char* why = windowOnlyVerb(upperVerb(line))) {
         std::cerr << "error: Unsupported: " << upperVerb(line) << ' ' << why << '\n';
         return false;
-    }
-    if (upperVerb(line) == "CUSTOMISE" || upperVerb(line) == "CUSTOMIZE") {
-        // Paths may have spaces, so they are taken as quoted words where they
-        // are quoted and as plain words where they are not.
-        std::vector<std::string> paths;
-        // REPLACE is the keyword only as the first word, UNQUOTED and whole:
-        // a quoted "replace me.mapfile" is a file. Upper-casing the first
-        // blank-delimited word of the first path took that file for the
-        // keyword and dropped it - or, given twice, replaced the loaded map
-        // with it instead of merging.
-        bool replace = false;
-        std::size_t at = line.find_first_of(" \t");
-        while (at != std::string::npos && at < line.size()) {
-            while (at < line.size() && (line[at] == ' ' || line[at] == '\t')) {
-                ++at;
-            }
-            if (at >= line.size()) {
-                break;
-            }
-            if (line[at] == '"') {
-                const std::size_t end = line.find('"', at + 1);
-                if (end == std::string::npos) {
-                    std::cerr << "error: InvalidArgument: a quoted path is never closed\n";
-                    return false;
-                }
-                paths.push_back(line.substr(at + 1, end - at - 1));
-                at = end + 1;
-            } else {
-                const std::size_t end = line.find_first_of(" \t", at);
-                std::string word = line.substr(at, end == std::string::npos ? end : end - at);
-                at = end;
-                // An unquoted word has no blanks, so upperVerb upper-cases
-                // the whole of it.
-                if (paths.empty() && !replace && upperVerb(word) == "REPLACE") {
-                    replace = true;
-                    continue;
-                }
-                paths.push_back(std::move(word));
-            }
-        }
-        return runCustomise(session.document, paths, replace);
     }
     // SURVEY READ and SURVEY IMPORT: a survey field file, through surveyio,
     // which the interpreter (cad) may not see (survey_verbs.hpp).
@@ -466,9 +284,12 @@ bool runLine(SessionState& session, const std::string& line)
         }
     }
 #endif
-    // The project records the customisation it was drawn with - names, never
-    // definitions, which are session data (D1) - and the save itself writes
-    // that record (Document::save), so nothing is done for it here.
+    // CUSTOMISE is the interpreter's, like any other verb below: it was taken
+    // here, with a parser of this session's own, while the readers of a
+    // customisation lived where katana_cad could not see them. The project's
+    // record of what it was drawn with - names, never definitions, which are
+    // session data (D1) - is written by the save itself (Document::save), so
+    // nothing is done for that here either.
     const std::string verb = upperVerb(line);
 #if defined(KATANA_WITH_INTEROP)
     // The reference layers the drawing is worked on top of are recorded here:
@@ -506,14 +327,16 @@ bool runLine(SessionState& session, const std::string& line)
     }
     if (verb == "OPEN" && katana::cad::CommandInterpreter::replacesDocument(line)) {
         // A warning, not a refusal: the drawing opens and draws, but what a
-        // missing file defined draws as a plain line. The open worked out
-        // which (Document::open); the words are this front end's.
+        // missing customisation defined draws as a plain line. The open
+        // worked out which (Document::open); the words are this front end's.
+        // A project records its customisations by NAME - the name a file
+        // declares, not the file's - so they are not called files here.
         const std::vector<std::string>& missing =
             session.document.customisationState().missingAtOpen;
         if (!missing.empty()) {
-            std::cerr << "warning: this project was drawn with customisation files that are not "
+            std::cerr << "warning: this project was drawn with customisations that are not "
                          "loaded: "
-                      << sampleOf(missing, missing.size()) << "\n";
+                      << quotedNames(missing) << "\n";
         }
     }
 #if defined(KATANA_WITH_INTEROP)
@@ -565,9 +388,11 @@ Session::Session(const char* executable) : state_(std::make_unique<State>())
 #if defined(KATANA_WITH_INTEROP)
     state_->session.geo = &state_->geo;
 #endif
-    state_->interpreter.setColourLookup(colourOf);
+    // No colour callback is handed over: the interpreter resolves a colour
+    // name through the Document - the customisation's own table, then the
+    // standard names - which is everything this session could have answered.
     if (executable != nullptr) {
-        loadDefaultCustomisation(state_->document, executable);
+        startWithTheHostsCustomisation(state_->document, state_->interpreter);
     }
 }
 
@@ -595,11 +420,10 @@ bool Session::isQuit(const std::string& line)
 
 std::string Session::helpText()
 {
+    // The interpreter's help, CUSTOMISE and CODE among it, then a blank line
+    // and the verbs this session adds above katana_cad.
     std::string text = katana::cad::CommandInterpreter::helpText();
-    text += "\n"
-            "Customise CUSTOMISE [REPLACE] <file> [<file>...]  load style\n"
-            "          libraries (.4d) and survey code files (.mapfile), merged\n"
-            "          into what is loaded; CUSTOMISE alone reports what is loaded\n";
+    text += "\n";
     text += katana::app::ifcHelpText();
     text += katana::app::surveyHelpText();
 #if defined(KATANA_WITH_INTEROP)

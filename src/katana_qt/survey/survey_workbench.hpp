@@ -19,8 +19,8 @@
 //                           Parcel Report..., Angle and Bearing Calculator...
 //   Traverse and Levelling  Traverse..., Level Book...
 //   Coordinates             Coordinate Converter...
-//   Survey Coding           the window's customisation actions and the
-//                           Format menu's Survey Code Manager
+//   Survey Coding           the Format menu's Survey Code Manager, and the
+//                           window's Apply Survey Codes (the CODE line)
 // Each action's object name (surveyImport, surveyJobs, surveyExport,
 // surveyPointManager,
 // surveyPointReport, surveyInverse, surveyForward, surveyArea,
@@ -76,10 +76,10 @@ struct SurveyServices {
         makeAction;
     // The command log. isError also flashes the message in the status bar.
     std::function<void(const QString& text, bool isError)> log;
-    // Actions the window already owns and shows under File; the Survey menu
-    // shows the same objects, so the two menus cannot drift apart.
-    QAction* loadCustomisation = nullptr;
-    QAction* replaceCustomisation = nullptr;
+    // The window's Apply Survey Codes, which runs the CODE line on the
+    // selection, or on the drawing when nothing is selected. Shown under
+    // Survey Coding and on the toolbar, and what the import wizard triggers
+    // for the points it made. May be null (a test).
     QAction* applySurveyCodes = nullptr;
     // The Format menu's Survey Code Manager (CustomisationWorkbench), shown
     // under Survey Coding as well: where a surveyor looks for the code

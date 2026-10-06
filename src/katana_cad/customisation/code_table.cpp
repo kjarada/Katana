@@ -211,14 +211,17 @@ const std::vector<AttributeScope>& attributeScopes()
             outside.emplace_back(field);
         }
     };
+    // By the words every other reply names a field by ("layer" and "surface"
+    // for SurveyRule::model and ::tinable; docs/customisation.md, "The words a
+    // rule is shown by"): CODE CHECK prints this beside CODE EXPLAIN's.
     const bool map = s == SurveySection::Map;
-    unless(map, !rule.model.empty(), "model");
+    unless(map, !rule.model.empty(), "layer");
     unless(map, !rule.colour.empty(), "colour");
     unless(map, !rule.linestyle.empty(), "linestyle");
     unless(map, !rule.weight.empty(), "weight");
     unless(map, !rule.group.empty(), "group");
     unless(map, rule.breakline.has_value(), "breakline");
-    unless(s == SurveySection::Tinable, rule.tinable.has_value(), "tinable");
+    unless(s == SurveySection::Tinable, rule.tinable.has_value(), "surface");
     unless(s == SurveySection::VertexSymbol, rule.hide.has_value(), "hide");
     unless(s == SurveySection::VertexSymbol, rule.symbol.has_value(), "symbol");
     unless(s == SurveySection::VertexTextStyle, rule.textStyle.has_value(), "text style");
@@ -426,8 +429,14 @@ bool codeTableRowMatches(const CodeTableRow& row, std::string_view filter)
 
 CodeCensus codeCensus(const Document& document, std::string_view property)
 {
+    return codeCensus(document, document.model().entities.ids(), property);
+}
+
+CodeCensus codeCensus(const Document& document, std::span<const katana::entity::EntityId> given,
+                      std::string_view property)
+{
     const katana::entity::Model& model = document.model();
-    const std::vector<katana::entity::EntityId> ids = model.entities.ids();
+    const std::vector<katana::entity::EntityId> ids(given.begin(), given.end());
     CodeCensus census;
     census.property = property.empty() ? findCodeProperty(model, ids) : std::string(property);
 

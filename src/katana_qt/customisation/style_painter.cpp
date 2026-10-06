@@ -13,7 +13,6 @@
 #include <QPolygonF>
 #include <QString>
 
-#include "katana/archive12d/domain.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::qt {
@@ -47,12 +46,18 @@ namespace {
 } // namespace
 
 QPen stylePenFor(const QPen& entityPen, const std::string& pen,
-                 const katana::cad::PlotSettings* paper)
+                 const katana::cad::PlotSettings* paper,
+                 const katana::entity::ColourTable* colours)
 {
     if (pen.empty()) {
         return entityPen; // "view_colour" in a library: whatever the entity is
     }
-    const auto colour = katana::archive12d::standardColour(pen);
+    // The customisation's own names, then the standard ones. A table with
+    // nothing in it is not asked: it would fold the name to find nothing, on
+    // the path every stroke of a drawing with no colours of its own takes.
+    const auto colour = colours != nullptr && !colours->empty()
+                            ? katana::entity::resolveColour(*colours, pen)
+                            : katana::entity::standardColour(pen);
     if (!colour) {
         return entityPen; // a pen name with no RGB here: not a guess
     }
@@ -208,7 +213,7 @@ void paintStyleDrawing(QPainter& painter, const katana::cad::StyleDrawing& drawi
         }
         if (name != lastName) {
             lastName = name;
-            lastPen = stylePenFor(target.entityPen, name, target.paper);
+            lastPen = stylePenFor(target.entityPen, name, target.paper, target.colours);
         }
         return lastPen;
     };

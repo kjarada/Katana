@@ -65,6 +65,7 @@ class Sample {
         target_.entityPen = pen_;
         target_.entityPen.setCapStyle(Qt::FlatCap);
         target_.paper = context.plot;
+        target_.colours = context.colours;
     }
 
     bool paint()

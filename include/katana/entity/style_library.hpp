@@ -133,9 +133,9 @@ struct LineStyle {
     // carries no trace of where on someone's disk it came from: the name of
     // its customisation (entity/customisation.hpp), or of the file when a
     // style library (.4d) was read. Empty for a definition made in code or in
-    // a session. A browser groups and filters by it and a project records it;
-    // until the catalogue and the lint are moved to `symbol` below, a name
-    // containing "symbol" is also how they tell a symbol (docs/survey_coding.md).
+    // a session. A browser groups and filters by it and a project records it.
+    // It says nothing of which KIND a definition is - `symbol` below does, and
+    // the catalogue and the lint read that (they once asked this name).
     std::string source{};
     // Its customisation LISTS it as a symbol: in the Katana customisation
     // format, the definition sits in the "symbols" array rather than in

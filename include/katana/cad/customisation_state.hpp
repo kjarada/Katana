@@ -71,6 +71,20 @@ struct CustomisationState {
     // names a project recorded for the built-in's earlier files are answered
     // with (builtinRenames).
     std::string builtIn{};
+    // What went wrong when the session's customisation was STARTED
+    // (startCustomisation, customisation_host.hpp), a sentence each: a
+    // built-in that did not read, a kept file that did not read and what
+    // started in its place. A front end says them once, at the start, where
+    // its errors go - which a client of katana_mcp never reads, so that an
+    // agent whose kept file was refused was told `origin: builtIn` and no
+    // more. Kept here they are in the report whenever it is asked for
+    // (customisationJson, "start"). They describe the start: nothing after
+    // it changes them, and a session never started with a host has none.
+    std::vector<std::string> startProblems{};
+    // The kept customisation the session started with was made from another
+    // built-in than the host has, or another edition of it
+    // (CustomisationStart::keptFromAnotherBuiltIn). Of the start, as above.
+    bool keptFromAnotherBuiltIn = false;
 
     friend bool operator==(const CustomisationState&, const CustomisationState&) = default;
 };
