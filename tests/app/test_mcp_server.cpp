@@ -18,12 +18,14 @@
 
 #include "mcp_server.hpp"
 #include "session.hpp"
+#include "start_environment.hpp"
 
 namespace {
 
 using Json = nlohmann::json;
 using katana::app::Session;
 using katana::app::mcp::Server;
+using katana::app::tests::StartEnvironment;
 
 // A directory of its own per test, removed afterwards.
 class TempDir {
@@ -60,21 +62,33 @@ class McpServer : public ::testing::Test {
     Server server{session, "9.9.9"};
     int nextId = 1;
 
-    Json request(const std::string& method, Json params = Json::object())
+    // A message to `other`: the fixture's server, or one of a test's own over
+    // a PROGRAM's session, which the fixture's is not.
+    Json requestOf(Server& other, const std::string& method, Json params = Json::object())
     {
         const Json message{
             {"jsonrpc", "2.0"}, {"id", nextId++}, {"method", method}, {"params", params}};
-        const auto reply = server.handle(message.dump());
+        const auto reply = other.handle(message.dump());
         EXPECT_TRUE(reply.has_value()) << method;
         return reply ? Json::parse(*reply) : Json();
     }
 
-    Json call(const std::string& tool, Json arguments = Json::object())
+    Json request(const std::string& method, Json params = Json::object())
     {
-        const Json reply =
-            request("tools/call", Json{{"name", tool}, {"arguments", std::move(arguments)}});
+        return requestOf(server, method, std::move(params));
+    }
+
+    Json callOf(Server& other, const std::string& tool, Json arguments = Json::object())
+    {
+        const Json reply = requestOf(
+            other, "tools/call", Json{{"name", tool}, {"arguments", std::move(arguments)}});
         EXPECT_TRUE(reply.contains("result")) << reply.dump();
         return reply.value("result", Json::object());
+    }
+
+    Json call(const std::string& tool, Json arguments = Json::object())
+    {
+        return callOf(server, tool, std::move(arguments));
     }
 
     static std::string textOf(const Json& result)
@@ -82,11 +96,43 @@ class McpServer : public ::testing::Test {
         return result["content"][0]["text"].get<std::string>();
     }
 
-    void initialize()
+    void initializeOf(Server& other)
     {
-        (void)request("initialize", Json{{"protocolVersion", "2025-06-18"},
-                                         {"capabilities", Json::object()},
-                                         {"clientInfo", {{"name", "test"}, {"version", "1"}}}});
+        (void)requestOf(other, "initialize",
+                        Json{{"protocolVersion", "2025-06-18"},
+                             {"capabilities", Json::object()},
+                             {"clientInfo", {{"name", "test"}, {"version", "1"}}}});
+    }
+
+    void initialize() { initializeOf(server); }
+
+    // One line through katana_run_commands.
+    Json runLine(const std::string& line)
+    {
+        return call("katana_run_commands", Json{{"commands", Json::array({line})}});
+    }
+
+    // One of the committed Katana customisation files (tests/data/customisation):
+    // its path, and its path quoted for a line.
+    static std::string customisationPath(const char* name)
+    {
+        return (std::filesystem::path(KATANA_CUSTOMISATION_DATA) / name).generic_string();
+    }
+    static std::string customisationFile(const char* name)
+    {
+        return "\"" + customisationPath(name) + "\"";
+    }
+
+    // The three of them in one load, as an agent loads a customisation: by
+    // their text, 3 linestyles, 4 symbols, and 11 rules over 8 distinct keys.
+    // The session had no name, so it takes the first one's, test_linestyles.
+    void loadTheThreeCustomisationFiles()
+    {
+        const Json loaded =
+            runLine("CUSTOMISE " + customisationFile("test_linestyles.customisation.json") + " " +
+                    customisationFile("test_symbols.customisation.json") + " " +
+                    customisationFile("test_survey.customisation.json"));
+        ASSERT_FALSE(loaded["isError"].get<bool>()) << textOf(loaded);
     }
 };
 
@@ -406,8 +452,9 @@ TEST_F(McpServer, AnAgentImportsAFileWithNoCoordinatesHoldingAPointOfTheDrawing)
 }
 
 // HELP sent as a command is the session's whole help, what katana_help and
-// --help give: CUSTOMISE and IFC are the session's, not the
-// interpreter's, and the interpreter's own HELP left them out.
+// --help give: IFC is the session's, not the interpreter's, and the
+// interpreter's own HELP leaves it out. (CUSTOMISE was the session's too; it
+// is the interpreter's now, and its block opens with the same words.)
 TEST_F(McpServer, HelpSentAsACommandIsTheWholeSessionHelp)
 {
     initialize();
@@ -996,12 +1043,23 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
 {
     initialize();
     const Json list = request("resources/list")["result"]["resources"];
+    // The help, the status and - one more than there were, since 2026-10-06 -
+    // the customisation (McpServer.TheCustomisationSummaryIsCadsReportAsAToolAndAsAResource):
+    // that one added resource is the whole reason each count below went up
+    // by one, from 3 and 2.
 #if defined(KATANA_TEST_WITH_INTEROP)
     // And the formats GDAL reads and writes (McpServer.FormatsReturnsStructuredDrivers).
-    ASSERT_EQ(list.size(), 3U);
+    ASSERT_EQ(list.size(), 4U);
 #else
-    ASSERT_EQ(list.size(), 2U);
+    ASSERT_EQ(list.size(), 3U);
 #endif
+    std::vector<std::string> uris;
+    for (const Json& resource : list) {
+        uris.push_back(resource["uri"].get<std::string>());
+    }
+    for (const char* uri : {"katana://help", "katana://status", "katana://customisation"}) {
+        EXPECT_NE(std::find(uris.begin(), uris.end(), uri), uris.end()) << uri;
+    }
     const Json help = request("resources/read", Json{{"uri", "katana://help"}});
     EXPECT_NE(help["result"]["contents"][0]["text"].get<std::string>().find("CUSTOMISE"),
               std::string::npos);
@@ -1051,6 +1109,572 @@ TEST_F(McpServer, TheStatusToolAndResourceSayWhatTheStatusVerbSays)
                     "Current layer: 0\n"
                     "Selected: 1  Undo steps: 1  Redo steps: 0\n"
                     "Customisation: 0 linestyles and symbols, 0 survey code rules");
+}
+
+// ---- the customisation ----------------------------------------------------------------------
+//
+// katana_customisation and katana://customisation (docs/mcp.md, "The
+// customisation"). What is expected is counted from the text of the three
+// committed fixtures and from the format's chapter of docs/customisation.md:
+// a rule and a definition come back as the very objects their file holds.
+
+// What an agent reads first says how a customisation is loaded and written,
+// and names no file or verb of another program.
+TEST_F(McpServer, TheToolListSaysHowACustomisationIsLoadedWrittenAndRead)
+{
+    initialize();
+    const Json tools = request("tools/list")["result"]["tools"];
+    std::string commands;
+    Json customisation;
+    for (const Json& tool : tools) {
+        if (tool["name"] == "katana_run_commands") {
+            commands = tool["description"].get<std::string>();
+        } else if (tool["name"] == "katana_customisation") {
+            customisation = tool;
+        }
+    }
+    ASSERT_FALSE(commands.empty());
+    ASSERT_TRUE(customisation.is_object());
+    const std::string description = customisation["description"].get<std::string>();
+    for (const char* words : {"CODE LIST", "CODE CHECK", "CUSTOMISE <file>",
+                              "CUSTOMISE EXPORT <file>", "HELP CUSTOMISE"}) {
+        EXPECT_NE(commands.find(words), std::string::npos) << words;
+    }
+    // The round trip that edits one, where the tool that only reads sends it.
+    for (const char* words : {"CUSTOMISE EXPORT <file>", "CUSTOMISE <file>",
+                              "CUSTOMISE REPLACE <file>", "katana_run_commands"}) {
+        EXPECT_NE(description.find(words), std::string::npos) << words;
+    }
+    // Two things a caller cannot work out and must be told: the summary is
+    // one object with none of the lists' envelope, and an entry read here
+    // goes into a file only without the one member that is the tool's own
+    // (McpServer.ARuleOrADefinitionTheToolGaveLoadsBackOnceTheToolsOwnMemberIsTakenOff).
+    for (const char* words : {"with no part, total, offset or limit",
+                              "index from a rule, kind from a definition"}) {
+        EXPECT_NE(description.find(words), std::string::npos) << words;
+    }
+    // MAPFILE listed and checked the codes until it became CODE LIST and CODE
+    // CHECK; it and the two file kinds it was named with no longer exist here.
+    for (const char* gone : {"MAPFILE", ".mapfile", ".4d"}) {
+        EXPECT_EQ(commands.find(gone), std::string::npos) << gone;
+        EXPECT_EQ(description.find(gone), std::string::npos) << gone;
+    }
+    EXPECT_EQ(customisation["inputSchema"]["required"], Json::array({"part"}));
+    EXPECT_EQ(customisation["inputSchema"]["properties"]["part"]["enum"],
+              Json::array({"summary", "codes", "definitions", "problems"}));
+    EXPECT_TRUE(customisation["annotations"]["readOnlyHint"].get<bool>());
+}
+
+TEST_F(McpServer, TheCustomisationSummaryIsCadsReportAsAToolAndAsAResource)
+{
+    initialize();
+    // A session of no program starts with nothing, and says so.
+    const Json empty = call("katana_customisation", Json{{"part", "summary"}});
+    ASSERT_FALSE(empty["isError"].get<bool>()) << textOf(empty);
+    EXPECT_EQ(empty["structuredContent"]["origin"], "none");
+    EXPECT_EQ(empty["structuredContent"]["name"], "");
+    EXPECT_EQ(empty["structuredContent"]["counts"]["definitions"], 0);
+    EXPECT_EQ(empty["structuredContent"]["counts"]["rules"], 0);
+
+    loadTheThreeCustomisationFiles();
+    const Json summary = call("katana_customisation", Json{{"part", "summary"}});
+    ASSERT_FALSE(summary["isError"].get<bool>()) << textOf(summary);
+    const Json& content = summary["structuredContent"];
+    EXPECT_EQ(content["name"], "test_linestyles");
+    EXPECT_EQ(content["origin"], "loaded");
+    EXPECT_EQ(content["kept"], false);
+    EXPECT_EQ(content["counts"]["definitions"], 7); // 3 linestyles and 4 symbols
+    EXPECT_EQ(content["counts"]["rules"], 11);
+    EXPECT_EQ(content["counts"]["codes"], 8);
+    // Each file is a source, by the name it declares, with what it brought.
+    ASSERT_EQ(content["sources"].size(), 3U);
+    EXPECT_EQ(content["sources"][0]["name"], "test_linestyles");
+    EXPECT_EQ(content["sources"][0]["definitions"], true);
+    EXPECT_EQ(content["sources"][0]["rules"], false);
+    EXPECT_EQ(content["sources"][1]["name"], "test_symbols");
+    EXPECT_EQ(content["sources"][2]["name"], "test_survey");
+    EXPECT_EQ(content["sources"][2]["definitions"], false);
+    EXPECT_EQ(content["sources"][2]["rules"], true);
+    // The one name the rules ask for that nothing defines, as the survey
+    // fixture's own comment says of its PX* rule.
+    EXPECT_EQ(content["problems"]["undefined"], Json::array({"TEST Missing Symbol"}));
+    // None of the three files says the settings, so they are the defaults.
+    EXPECT_EQ(content["automation"]["codesOnSurveyImport"], true);
+    EXPECT_EQ(content["automation"]["lineworkOnSurveyImport"], true);
+    EXPECT_EQ(content["linework"]["start"], "ST");
+    EXPECT_EQ(content["linework"]["rectangle"], "RECT");
+    // It is cad's object and nothing beside it: the lists' envelope is not
+    // put round one object, and no member of the tool's own stands among
+    // cad's, so the tool, the resource and the verb give one object.
+    for (const char* own : {"part", "total", "offset", "limit"}) {
+        EXPECT_FALSE(content.contains(own)) << own;
+    }
+    // This session is no program's: it was never started with a host, so
+    // nothing went wrong at a start, and nothing was kept to have been made
+    // from another built-in.
+    EXPECT_EQ(content["start"],
+              (Json{{"keptFromAnotherBuiltIn", false}, {"problems", Json::array()}}));
+    // The text is the same object, for a client without structured content.
+    EXPECT_EQ(Json::parse(textOf(summary)), content);
+
+    // The resource is that object, and both are what CUSTOMISE JSON prints.
+    const Json resource = request("resources/read", Json{{"uri", "katana://customisation"}});
+    ASSERT_TRUE(resource.contains("result")) << resource.dump();
+    EXPECT_EQ(resource["result"]["contents"][0]["mimeType"], "application/json");
+    const std::string read = resource["result"]["contents"][0]["text"].get<std::string>();
+    EXPECT_EQ(Json::parse(read), content);
+    const Json typed = runLine("CUSTOMISE JSON");
+    ASSERT_FALSE(typed["isError"].get<bool>()) << textOf(typed);
+    EXPECT_EQ(typed["structuredContent"]["commands"][0]["output"], read);
+
+    // A summary is one object: an argument that pages or filters a list is
+    // refused, not ignored.
+    const Json filtered =
+        call("katana_customisation", Json{{"part", "summary"}, {"filter", "tree"}});
+    EXPECT_TRUE(filtered["isError"].get<bool>());
+    EXPECT_NE(textOf(filtered).find("\"filter\" does not go with part \"summary\""),
+              std::string::npos)
+        << textOf(filtered);
+}
+
+TEST_F(McpServer, TheCodesPartGivesEachRuleAsItsFileHoldsItFilteredAndPaged)
+{
+    initialize();
+    loadTheThreeCustomisationFiles();
+    const Json all = call("katana_customisation", Json{{"part", "codes"}});
+    ASSERT_FALSE(all["isError"].get<bool>()) << textOf(all);
+    const Json& content = all["structuredContent"];
+    EXPECT_EQ(content["part"], "codes");
+    EXPECT_EQ(content["total"], 11);
+    EXPECT_EQ(content["offset"], 0);
+    EXPECT_EQ(content["limit"], 100);
+    ASSERT_EQ(content["codes"].size(), 11U);
+    // Rules 0, 7 and 10 of test_survey, member for member as its text has
+    // them - a feature rule, a symbol rule with its object and an attributes
+    // rule with its list - each with its place in the map.
+    EXPECT_EQ(content["codes"][0], (Json{{"index", 0},
+                                         {"key", "WM*"},
+                                         {"sets", "feature"},
+                                         {"layer", "TEST SERVICES"},
+                                         {"colour", "blue"},
+                                         {"draw", "line"},
+                                         {"linestyle", "TEST Water Main"},
+                                         {"weight", "0"},
+                                         {"group", "TEST - SERVICES"},
+                                         {"comment", "[WM*] Water main"}}));
+    EXPECT_EQ(content["codes"][7],
+              (Json{{"index", 7},
+                    {"key", "AC*"},
+                    {"sets", "symbol"},
+                    {"comment", "[AC*] Access chamber"},
+                    {"hide", false},
+                    {"symbol",
+                     {{"name", "TEST Survey Mark"}, {"colour", "white"}, {"size", 1.5}}}}));
+    EXPECT_EQ(content["codes"][10],
+              (Json{{"index", 10},
+                    {"key", "*"},
+                    {"sets", "attributes"},
+                    {"comment", "Every code gets this"},
+                    {"attributes", Json::array({Json{{"type", "text"},
+                                                     {"name", "Source"},
+                                                     {"value", "Katana test fixture"}}})}}));
+    EXPECT_EQ(Json::parse(textOf(all)), content);
+
+    // The filter is a substring of a rule's key, comment or layer, with
+    // letter case ignored. "tree" is in the comment of the two TR* rules
+    // ("[TR*] Tree") and nowhere else; "test text" is the layer of 1* and 2*;
+    // "px*" is the key of the two PX* rules.
+    const auto indices = [&](const std::string& filter) {
+        const Json found =
+            call("katana_customisation", Json{{"part", "codes"}, {"filter", filter}});
+        std::vector<int> list;
+        for (const Json& rule : found["structuredContent"]["codes"]) {
+            list.push_back(rule["index"].get<int>());
+        }
+        EXPECT_EQ(found["structuredContent"]["total"], list.size()) << filter;
+        return list;
+    };
+    EXPECT_EQ(indices("tree"), (std::vector<int>{3, 8}));
+    EXPECT_EQ(indices("test text"), (std::vector<int>{4, 5}));
+    EXPECT_EQ(indices("px*"), (std::vector<int>{6, 9}));
+    EXPECT_EQ(indices("no rule says this"), std::vector<int>{});
+
+    // A page: `total` is still every match, the list only the page.
+    const Json page =
+        call("katana_customisation", Json{{"part", "codes"}, {"offset", 9}, {"limit", 5}});
+    EXPECT_EQ(page["structuredContent"]["total"], 11);
+    EXPECT_EQ(page["structuredContent"]["offset"], 9);
+    EXPECT_EQ(page["structuredContent"]["limit"], 5);
+    ASSERT_EQ(page["structuredContent"]["codes"].size(), 2U);
+    EXPECT_EQ(page["structuredContent"]["codes"][0]["index"], 9);
+    EXPECT_EQ(page["structuredContent"]["codes"][1]["index"], 10);
+    // Past the end is an empty page, not a refusal.
+    const Json past = call("katana_customisation", Json{{"part", "codes"}, {"offset", 11}});
+    EXPECT_FALSE(past["isError"].get<bool>()) << textOf(past);
+    EXPECT_EQ(past["structuredContent"]["total"], 11);
+    EXPECT_TRUE(past["structuredContent"]["codes"].empty());
+
+    // What is not a page, a part, or this part's argument is refused by name.
+    for (const Json& bad : {Json{{"part", "codes"}, {"limit", 0}},
+                            Json{{"part", "codes"}, {"limit", 1001}},
+                            Json{{"part", "codes"}, {"offset", -1}},
+                            Json{{"part", "codes"}, {"name", "TEST Tree"}},
+                            Json{{"part", "rules"}}, Json::object()}) {
+        const Json refused = call("katana_customisation", bad);
+        EXPECT_TRUE(refused["isError"].get<bool>()) << bad.dump();
+        EXPECT_FALSE(refused.contains("structuredContent")) << bad.dump();
+    }
+    EXPECT_NE(textOf(call("katana_customisation", Json{{"part", "rules"}}))
+                  .find("\"part\" is summary, codes, definitions or problems"),
+              std::string::npos);
+    EXPECT_NE(textOf(call("katana_customisation", Json{{"part", "codes"}, {"name", "TEST Tree"}}))
+                  .find("\"name\" picks one definition: it goes with part \"definitions\""),
+              std::string::npos);
+}
+
+TEST_F(McpServer, TheDefinitionsPartListsEachDefinitionAndGivesStrokesOnlyForTheOneNamed)
+{
+    initialize();
+    loadTheThreeCustomisationFiles();
+    const Json all = call("katana_customisation", Json{{"part", "definitions"}});
+    ASSERT_FALSE(all["isError"].get<bool>()) << textOf(all);
+    const Json& content = all["structuredContent"];
+    EXPECT_EQ(content["part"], "definitions");
+    EXPECT_EQ(content["total"], 7);
+    ASSERT_EQ(content["definitions"].size(), 7U);
+    // In name order, linestyles and symbols together; each says its kind by
+    // the list of its file it sits in, its units and whether it is drawn at
+    // vertices even where its file leaves them at their default (TEST Water
+    // Main says no units, which is world), and the customisation it is from.
+    // No entry of a list holds strokes.
+    const auto entry = [](const char* name, const char* kind, const char* group,
+                          const char* units, bool atVertices, const char* from) {
+        return Json{{"name", name},   {"kind", kind},           {"group", group},
+                    {"units", units}, {"atVertices", atVertices}, {"from", from}};
+    };
+    EXPECT_EQ(content["definitions"],
+              Json::array({entry("TEST Dashed Kerb", "linestyle", "Test/Lines", "paper", false,
+                                 "test_linestyles"),
+                           entry("TEST Gate", "linestyle", "Test/Lines", "twoPoint", false,
+                                 "test_linestyles"),
+                           entry("TEST Survey Mark", "symbol", "Test/Marks", "world", true,
+                                 "test_symbols"),
+                           entry("TEST Tree", "symbol", "Test/Vegetation", "world", false,
+                                 "test_symbols"),
+                           entry("TEST U Turn", "symbol", "Test/Marks", "world", true,
+                                 "test_symbols"),
+                           entry("TEST Valve", "symbol", "Test/Marks", "world", true,
+                                 "test_symbols"),
+                           entry("TEST Water Main", "linestyle", "Test/Services", "world", false,
+                                 "test_linestyles")}));
+
+    // A filter is a substring of a name or a group: three sit in Test/Marks.
+    const Json marks =
+        call("katana_customisation", Json{{"part", "definitions"}, {"filter", "MARKS"}});
+    EXPECT_EQ(marks["structuredContent"]["total"], 3);
+    const Json water =
+        call("katana_customisation", Json{{"part", "definitions"}, {"filter", "water"}});
+    ASSERT_EQ(water["structuredContent"]["definitions"].size(), 1U);
+    EXPECT_EQ(water["structuredContent"]["definitions"][0]["name"], "TEST Water Main");
+
+    // Named, it is the one definition whole: the six facts and its strokes,
+    // as test_symbols writes them - a move, a draw and an arc of radius -0.5.
+    const Json one =
+        call("katana_customisation", Json{{"part", "definitions"}, {"name", "TEST U Turn"}});
+    ASSERT_FALSE(one["isError"].get<bool>()) << textOf(one);
+    EXPECT_EQ(one["structuredContent"]["total"], 1);
+    ASSERT_EQ(one["structuredContent"]["definitions"].size(), 1U);
+    Json whole = entry("TEST U Turn", "symbol", "Test/Marks", "world", true, "test_symbols");
+    whole["strokes"] = Json::array({Json::array({"move", 0, 0}), Json::array({"draw", 1, 0}),
+                                    Json::array({"arc", -0.5, -90, 90})});
+    EXPECT_EQ(one["structuredContent"]["definitions"][0], whole);
+
+    // A name is matched as written; one nothing has is refused, naming it,
+    // and so is a name together with what narrows a list.
+    for (const char* missing : {"TEST Nothing", "test u turn"}) {
+        const Json refused =
+            call("katana_customisation", Json{{"part", "definitions"}, {"name", missing}});
+        EXPECT_TRUE(refused["isError"].get<bool>()) << missing;
+        EXPECT_NE(textOf(refused).find("no definition is called \"" + std::string(missing) + "\""),
+                  std::string::npos)
+            << textOf(refused);
+    }
+    const Json both = call("katana_customisation", Json{{"part", "definitions"},
+                                                        {"name", "TEST U Turn"},
+                                                        {"filter", "marks"}});
+    EXPECT_TRUE(both["isError"].get<bool>());
+    EXPECT_NE(textOf(both).find("\"filter\" does not go with \"name\""), std::string::npos)
+        << textOf(both);
+}
+
+TEST_F(McpServer, TheProblemsPartIsTheRulesLintAnObjectAnIssue)
+{
+    // Three rules, of which one is wrong in one way: KX* is a feature rule
+    // with no layer, which the lint warns of (docs/survey_coding.md, the lint
+    // table, NoModel) in the words "no layer". Nothing else: red is a
+    // standard colour, which needs no front end to say so, "0" is the plain
+    // line and cross a symbol Katana draws itself.
+    initialize();
+    const TempDir dir("customisation problems");
+    const std::string file = dir.file("codes.customisation.json");
+    std::ofstream(file, std::ios::binary)
+        << R"({"format": "katana-customisation", "version": 1, "name": "codes", "codes": [
+  {"key": "KT*", "sets": "feature", "layer": "KATANA TEST", "colour": "red", "linestyle": "0"},
+  {"key": "KX*", "sets": "feature", "colour": "red"},
+  {"key": "KT*", "sets": "symbol", "symbol": {"name": "cross", "size": 2}}
+]})";
+    const Json loaded = runLine("CUSTOMISE \"" + file + "\"");
+    ASSERT_FALSE(loaded["isError"].get<bool>()) << textOf(loaded);
+
+    const Json problems = call("katana_customisation", Json{{"part", "problems"}});
+    ASSERT_FALSE(problems["isError"].get<bool>()) << textOf(problems);
+    const Json& content = problems["structuredContent"];
+    EXPECT_EQ(content["part"], "problems");
+    EXPECT_EQ(content["total"], 1);
+    EXPECT_EQ(content["rules"], 3);
+    EXPECT_EQ(content["cannotApply"], 0);
+    EXPECT_EQ(content["warnings"], 1);
+    EXPECT_EQ(content["problems"],
+              Json::array({Json{{"index", 1},
+                                {"key", "KX*"},
+                                {"sets", "feature"},
+                                {"severity", "warning"},
+                                {"kind", "no layer"},
+                                {"message", "a feature rule with no layer: its codes stay on "
+                                            "whatever layer they are on"}}}));
+    // `index` is the rule's own, the one part codes gives it.
+    const Json codes = call("katana_customisation", Json{{"part", "codes"}, {"filter", "kx"}});
+    ASSERT_EQ(codes["structuredContent"]["codes"].size(), 1U);
+    EXPECT_EQ(codes["structuredContent"]["codes"][0]["index"], 1);
+
+    // A filter narrows the list - by key, kind or message - and not the
+    // counts of the whole lint beside it.
+    const Json byKind =
+        call("katana_customisation", Json{{"part", "problems"}, {"filter", "NO LAYER"}});
+    EXPECT_EQ(byKind["structuredContent"]["total"], 1);
+    const Json none =
+        call("katana_customisation", Json{{"part", "problems"}, {"filter", "unresolved"}});
+    EXPECT_EQ(none["structuredContent"]["total"], 0);
+    EXPECT_TRUE(none["structuredContent"]["problems"].empty());
+    EXPECT_EQ(none["structuredContent"]["warnings"], 1);
+    EXPECT_EQ(none["structuredContent"]["rules"], 3);
+}
+
+// THE way an agent edits a customisation (docs/mcp.md): write the session out
+// as one file, change the JSON, load it in the session's place.
+TEST_F(McpServer, ACustomisationIsEditedByExportingItChangingTheJsonAndLoadingItBack)
+{
+    initialize();
+    loadTheThreeCustomisationFiles();
+    const TempDir dir("customisation round trip");
+    const std::string file = dir.file("session.customisation.json");
+    const Json exported = runLine("CUSTOMISE EXPORT \"" + file + "\"");
+    ASSERT_FALSE(exported["isError"].get<bool>()) << textOf(exported);
+
+    // The edit: the water main's rule, the first of the eleven, moves to a
+    // layer of its own.
+    Json edited;
+    {
+        std::ifstream in(file, std::ios::binary);
+        ASSERT_TRUE(in.good());
+        edited = Json::parse(in);
+    }
+    ASSERT_EQ(edited["codes"][0]["key"], "WM*");
+    ASSERT_EQ(edited["codes"][0]["layer"], "TEST SERVICES");
+    edited["codes"][0]["layer"] = "TEST WATER";
+    std::ofstream(file, std::ios::binary | std::ios::trunc) << edited.dump(2);
+
+    const Json replaced = runLine("CUSTOMISE REPLACE \"" + file + "\"");
+    ASSERT_FALSE(replaced["isError"].get<bool>()) << textOf(replaced);
+    const Json rule = call("katana_customisation", Json{{"part", "codes"}, {"filter", "wm*"}});
+    ASSERT_EQ(rule["structuredContent"]["codes"].size(), 1U);
+    EXPECT_EQ(rule["structuredContent"]["codes"][0]["index"], 0);
+    EXPECT_EQ(rule["structuredContent"]["codes"][0]["layer"], "TEST WATER");
+    // And nothing else went: the same seven definitions, eleven rules and
+    // three sources as before the round trip.
+    const Json after = call("katana_customisation", Json{{"part", "summary"}})["structuredContent"];
+    EXPECT_EQ(after["counts"]["definitions"], 7);
+    EXPECT_EQ(after["counts"]["rules"], 11);
+    EXPECT_EQ(after["counts"]["codes"], 8);
+    EXPECT_EQ(after["sources"].size(), 3U);
+    EXPECT_EQ(after["name"], "test_linestyles");
+}
+
+// A rule and a definition come back as the objects a file holds - and one
+// member more each, the tool's own: a rule's `index`, a definition's `kind`.
+// A file says neither (a rule's place is its order, a definition's kind the
+// list it is in) and its reader is strict, so an entry copied across whole is
+// refused for that member; with it taken off, it loads. The docs said only
+// "an agent that has read a rule can write one".
+TEST_F(McpServer, ARuleOrADefinitionTheToolGaveLoadsBackOnceTheToolsOwnMemberIsTakenOff)
+{
+    initialize();
+    loadTheThreeCustomisationFiles();
+    const TempDir dir("customisation entries back");
+    // A customisation file holding the one entry, in the list it belongs to.
+    const auto fileOf = [&dir](const char* name, const char* list, const Json& entry) {
+        const std::string file = dir.file(name);
+        std::ofstream(file, std::ios::binary | std::ios::trunc)
+            << Json{{"format", "katana-customisation"},
+                    {"version", 1},
+                    {"name", "edit"},
+                    {list, Json::array({entry})}}
+                   .dump(2);
+        return "\"" + file + "\"";
+    };
+    const auto waterMain = [this] {
+        return call("katana_customisation", Json{{"part", "codes"}, {"filter", "wm*"}})
+            ["structuredContent"];
+    };
+    const auto uTurn = [this] {
+        return call("katana_customisation", Json{{"part", "definitions"}, {"name", "TEST U Turn"}})
+            ["structuredContent"]["definitions"][0];
+    };
+
+    // ---- a rule: the water main's, the first of the eleven.
+    Json rule = waterMain()["codes"][0];
+    ASSERT_EQ(rule["index"], 0);
+    ASSERT_EQ(rule["layer"], "TEST SERVICES");
+    // As the tool gives it: refused for `index`, naming the entry, and
+    // nothing is loaded.
+    const Json ruleRefused =
+        runLine("CUSTOMISE " + fileOf("rule as given.customisation.json", "codes", rule));
+    EXPECT_TRUE(ruleRefused["isError"].get<bool>());
+    EXPECT_NE(textOf(ruleRefused).find("codes[0] \"WM*\": unknown member \"index\""),
+              std::string::npos)
+        << textOf(ruleRefused);
+    EXPECT_EQ(waterMain()["codes"][0], rule);
+    // Without it - and on another layer, so that the load shows - it loads,
+    // and takes the place of the key's rule in that section: still rule 0,
+    // still eleven rules.
+    Json edited = rule;
+    edited.erase("index");
+    edited["layer"] = "TEST WATER";
+    const Json ruleLoaded =
+        runLine("CUSTOMISE " + fileOf("rule.customisation.json", "codes", edited));
+    ASSERT_FALSE(ruleLoaded["isError"].get<bool>()) << textOf(ruleLoaded);
+    Json expected = edited;
+    expected["index"] = 0;
+    const Json after = waterMain();
+    EXPECT_EQ(after["total"], 1);
+    ASSERT_EQ(after["codes"].size(), 1U);
+    EXPECT_EQ(after["codes"][0], expected);
+    EXPECT_EQ(call("katana_customisation", Json{{"part", "codes"}})["structuredContent"]["total"],
+              11);
+
+    // ---- a definition, read whole by its name.
+    const Json definition = uTurn();
+    ASSERT_EQ(definition["kind"], "symbol");
+    ASSERT_EQ(definition["strokes"].size(), 3U);
+    const Json definitionRefused = runLine(
+        "CUSTOMISE " + fileOf("definition as given.customisation.json", "symbols", definition));
+    EXPECT_TRUE(definitionRefused["isError"].get<bool>());
+    EXPECT_NE(textOf(definitionRefused).find("unknown member \"kind\""), std::string::npos)
+        << textOf(definitionRefused);
+    EXPECT_NE(textOf(definitionRefused).find("TEST U Turn"), std::string::npos)
+        << textOf(definitionRefused);
+    EXPECT_EQ(uTurn(), definition);
+    // Without `kind`, in the list that says its kind - and in another group,
+    // so that the load shows - it loads in the place of the definition of its
+    // name and reads back as the object that was written: a symbol, by that
+    // list, and from test_symbols still, since it says so although its file
+    // is called "edit". Seven definitions as before.
+    Json plain = definition;
+    plain.erase("kind");
+    plain["group"] = "Test/Edited";
+    const Json definitionLoaded =
+        runLine("CUSTOMISE " + fileOf("definition.customisation.json", "symbols", plain));
+    ASSERT_FALSE(definitionLoaded["isError"].get<bool>()) << textOf(definitionLoaded);
+    Json moved = definition;
+    moved["group"] = "Test/Edited";
+    EXPECT_EQ(uTurn(), moved);
+    EXPECT_EQ(call("katana_customisation", Json{{"part", "definitions"}})["structuredContent"]
+                  ["total"],
+              7);
+}
+
+// What went wrong when the session STARTED is said once, on standard error -
+// the client's log, which an agent is never shown. Here it is the agent's own
+// case: it copied a rule out of katana_customisation into the file its server
+// keeps the customisation in, `index` and all, and the server was started
+// again. The session starts with the built-in, and the summary told it only
+// `origin: builtIn`.
+TEST_F(McpServer, WhatWentWrongWhenTheSessionStartedIsInTheSummaryAndTheResource)
+{
+    const TempDir dir("customisation start problem");
+    const std::string kept = dir.file("kept.customisation.json");
+    std::ofstream(kept, std::ios::binary)
+        << R"({"format": "katana-customisation", "version": 1, "name": "Mine",
+ "codes": [{"index": 0, "key": "WM*", "sets": "feature", "layer": "MINE"}]})";
+    const std::string symbols = customisationPath("test_symbols.customisation.json");
+    const StartEnvironment environment(symbols.c_str(), kept.c_str());
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session started("katana_mcp");
+    (void)testing::internal::GetCapturedStdout();
+    const std::string log = testing::internal::GetCapturedStderr();
+    Server own(started, "9.9.9");
+    initializeOf(own);
+
+    const Json summary = callOf(own, "katana_customisation", Json{{"part", "summary"}});
+    ASSERT_FALSE(summary["isError"].get<bool>()) << textOf(summary);
+    const Json& content = summary["structuredContent"];
+    // The built-in started in the kept file's place: the symbol fixture.
+    EXPECT_EQ(content["origin"], "builtIn");
+    EXPECT_EQ(content["name"], "test_symbols");
+    EXPECT_EQ(content["counts"]["definitions"], 4);
+    // And why: cad's sentence, which holds the reader's own refusal - the
+    // entry and the member - and the file.
+    EXPECT_EQ(content["start"]["keptFromAnotherBuiltIn"], false);
+    ASSERT_EQ(content["start"]["problems"].size(), 1U);
+    const std::string problem = content["start"]["problems"][0].get<std::string>();
+    EXPECT_TRUE(problem.starts_with(
+        "the kept customisation is not read, so the built-in customisation is used: "
+        "ParseFailure: codes[0] \"WM*\": unknown member \"index\""))
+        << problem;
+    EXPECT_NE(problem.find("kept.customisation.json"), std::string::npos) << problem;
+    // It is the line the log had, and all the log had.
+    EXPECT_EQ(log, "error: " + problem + "\n");
+    EXPECT_EQ(Json::parse(textOf(summary)), content);
+
+    // The resource is the same object.
+    const Json resource =
+        requestOf(own, "resources/read", Json{{"uri", "katana://customisation"}});
+    ASSERT_TRUE(resource.contains("result")) << resource.dump();
+    EXPECT_EQ(Json::parse(resource["result"]["contents"][0]["text"].get<std::string>()), content);
+}
+
+TEST_F(McpServer, AKeptCustomisationMadeFromAnotherBuiltInIsSaidInTheSummary)
+{
+    // The kept file names what it was made from, and that is not this run's
+    // built-in (test_symbols). It is the user's, so it is what starts -
+    // nothing is wrong - and the summary says the program's own has moved on,
+    // which the log's warning said and an agent did not see.
+    const TempDir dir("customisation kept from another");
+    const std::string kept = dir.file("kept.customisation.json");
+    std::ofstream(kept, std::ios::binary)
+        << R"({"format": "katana-customisation", "version": 1, "name": "Mine",
+ "basedOn": {"name": "Some Other", "digest": "0123456789abcdef"},
+ "codes": [{"key": "MN*", "sets": "feature", "layer": "MINE"}]})";
+    const std::string symbols = customisationPath("test_symbols.customisation.json");
+    const StartEnvironment environment(symbols.c_str(), kept.c_str());
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session started("katana_mcp");
+    (void)testing::internal::GetCapturedStdout();
+    (void)testing::internal::GetCapturedStderr();
+    Server own(started, "9.9.9");
+    initializeOf(own);
+
+    const Json summary = callOf(own, "katana_customisation", Json{{"part", "summary"}});
+    ASSERT_FALSE(summary["isError"].get<bool>()) << textOf(summary);
+    const Json& content = summary["structuredContent"];
+    EXPECT_EQ(content["origin"], "kept");
+    EXPECT_EQ(content["name"], "Mine");
+    EXPECT_EQ(content["kept"], true);
+    EXPECT_EQ(content["builtIn"], "test_symbols");
+    EXPECT_EQ(content["start"],
+              (Json{{"keptFromAnotherBuiltIn", true}, {"problems", Json::array()}}));
 }
 
 TEST_F(McpServer, NothingACommandPrintsLeaksOntoTheRealStreams)

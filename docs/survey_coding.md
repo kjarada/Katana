@@ -394,8 +394,12 @@ It lives beside the readers rather than in a front end because both front ends
 need it, and it needs no third-party library, so it costs `archive12d` nothing
 of the property that lets it build with `-DKATANA_BUILD_IO=OFF`.
 
-Loading the real customisation, from the command line (each long list of
-names cut short here):
+Loading the real customisation from the command line, as `katana_cli` did it
+until 2026-10-06. (Its `CUSTOMISE` is the interpreter's now and reads a Katana
+customisation file - `docs/customisation.md`, "The verbs" - so these four
+files are refused there as not one; the window's own `CUSTOMISE` still loads
+them, through this reader, with the same per-file lines.) Each long list of
+names is cut short here:
 
 ```
 R=resources/customisation
@@ -469,37 +473,47 @@ currentMap, loaded, LoadMode)` is the rule:
   installed by a load that did not bring one. `FileMerge` reports, per file,
   the definitions or keys it added and those it replaced.
 
-**Both front ends load through it** (audit QT-21, fixed). The window's
-`MainWindow::applyCustomisation` - behind Format > Load and Replace, the typed
-`CUSTOMISE` and `--customise` - and `katana_cli`'s `CUSTOMISE [REPLACE]
-<file>...` (`runCustomise`, `src/katana_app/session.cpp`) read the files, call
+**The window loads through it** (audit QT-21, fixed), and so did `katana_cli`
+until 2026-10-06, when its `CUSTOMISE` became the interpreter's, which merges
+Katana customisation files by the same rule on the one customisation type
+(`cad::mergeCustomisation`, "The merge" below) and replies in records. The
+window's `MainWindow::applyCustomisation` - behind Format > Load and Replace,
+the typed `CUSTOMISE` and `--customise` - reads the files, calls
 `mergeCustomisation` with the library and map loaded now and what the files
-brought, install both results
+brought, installs both results
 (a kind the load did not bring comes back as it was, so a symbol file alone
-keeps the map) and print its `files`, one line each: the definitions or codes
+keeps the map) and prints its `files`, one line each: the definitions or codes
 it added and replaced. A Replace also says what went (`removedDefinitions`,
 `removedKeys`), and a definition or rule that could not be installed is an
 error line of its own. The load then names what the mapfile asks for that no
 loaded library defines, judged against everything loaded, since a mapfile may
-name what an earlier load defined. REPLACE is a replace only as the unquoted
-first word, in any case - a quoted path that begins with "replace" is a path.
-In the window a Replace is an action of its own, never a question, so a
-headless run never meets a box.
+name what an earlier load defined. In the window REPLACE is a replace only as
+the unquoted first word, in any case - a quoted path that begins with
+"replace" is a path; in the interpreter's family, which sees a line's words
+with their quotes already removed, a keyword is the whole first word, so a
+quoted path with a blank in it is still a path and a file called exactly
+`replace` is written `./replace`. In the window a Replace is an action of its
+own, never a question, so a headless run never meets a box.
 
 **A file named twice in one load is read once**, in both front ends
 (`cad::distinctCustomisationFiles`): read twice, every rule of it would sit in
 the map twice, since both copies are the load's and the merge keeps them all.
-Each later naming is said - "... is named twice in this load; it is read
-once". Two namings are one file when their absolute, lexically normal paths
+Each later naming is said - in the window "... is named twice in this load;
+it is read once", in `katana_cli` and `katana_mcp` a `repeated file=` record.
+Two namings are one file when their absolute, lexically normal paths
 are equal or `std::filesystem::equivalent` says so; a pair it cannot tell
 apart is read twice, which doubles rules but never drops a file.
 
-**The built-in's faults are said** (audit A12-06, fixed). At start-up each
-front end logs `builtinCustomisation()`'s errors and warnings once - the
+**The built-in's faults are said** (audit A12-06, fixed). At start-up the
+window logs `builtinCustomisation()`'s errors and warnings once - the
 second survey code file, `survey_codes_names.mapfile`, has one `map_data` item
-with no key, so every start says so, the CLI on stderr - and then what it installed: "Customisation: 792
-definitions (475 symbols) and 1,624 survey code rules, built in." in the
-window's log, the numbers grouped in the user's locale.
+with no key, so every start says so - and then what it installed:
+"Customisation: 792 definitions (475 symbols) and 1,624 survey code rules,
+built in." in its log, the numbers grouped in the user's locale. `katana_cli`
+and `katana_mcp` no longer start from those four files: their session starts
+through `startCustomisation` and says what it installed and what went wrong
+in its own two lines (`docs/customisation.md`, "What katana_cli and katana_mcp
+start with").
 
 ### What the project records
 
@@ -534,9 +548,11 @@ record as a name and what it brought (`CustomisationSource`):
   not loaded now, in the project's order, compared exactly. The window logs
   "Warning: this project was drawn with customisation files that are not
   loaded: ... Load them with Format > Load Customisation..." and the CLI
-  prints the same warning on stderr. Not an error: the drawing opens and
-  draws, and what a missing file defined draws as a plain line until it is
-  loaded.
+  prints the same names on stderr - "warning: this project was drawn with
+  customisations that are not loaded: ...", since what a project records of a
+  Katana customisation is the name it declares and not a file's. Not an
+  error: the drawing opens and draws, and what a missing file defined draws
+  as a plain line until it is loaded.
 
 **The built-in's files, and 29 of its definitions, have new names**
 (2026-09-24). The files were given the general names they have now, and 29
@@ -590,12 +606,13 @@ Not done, and the reason this change is committed only together with the one
 that moves the front ends onto `startCustomisation`: **until a front end
 hands over a host, the built-in's earlier names are answered by nothing.**
 The Document answers them with the name its host's built-in declares
-(`CustomisationState::builtIn`), and neither front end tells it one yet; the
-table they used before answered each first name with one of the four general
-file names. So a project recording the four first names now opens with a
-warning of four missing files, and every save keeps them - wherever the four
-files are loaded under their general names: compiled in, found beside the
-program, or named to `CUSTOMISE`. In a build that has the four files
+(`CustomisationState::builtIn`). `katana_cli` and `katana_mcp` tell it one
+since 2026-10-06 (their session starts through `startCustomisation`); the
+window does not yet, and the table it used before answered each first name
+with one of the four general file names. So in the window a project recording
+the four first names opens with a warning of four missing files, and every
+save keeps them - wherever the four files are loaded under their general
+names: compiled in or named to its `CUSTOMISE`. In a build that has the four files
 compiled in, `tests/archive12d/test_builtin_renames.cpp` also fails (it
 expects four renames naming the four files; there are eight, naming the
 built-in), and is retired with the reader it tests.
@@ -611,11 +628,12 @@ front end's own Save and typed `SAVE` did.
 (2026-10-06.) The Katana customisation format (`docs/customisation.md`) made a
 customisation ONE value, `entity::Customisation`. This is what `cad` does with
 one: where a session's customisation lives, how another is merged into it, and
-what a session starts with. **No verb and neither front end uses it yet.** The
-window and `katana_cli` still seed from the older built-in and load style
-libraries and survey code files as the sections above describe, until they
-are moved onto `startCustomisation` and a shared `CUSTOMISE` verb; this is the
-ground those stand on, with its own tests.
+what a session starts with. **The shared `CUSTOMISE` verb stands on it, and
+`katana_cli` and `katana_mcp` start through it** (`docs/customisation.md`,
+"The verbs" and "What katana_cli and katana_mcp start with"). **The window
+does not use it yet**: it still seeds from the older built-in and loads style
+libraries and survey code files as the sections above describe, until it is
+moved onto `startCustomisation` and the shared verb.
 
 ### The state
 
@@ -637,6 +655,7 @@ session knows of its customisation:
 | `kept` | the session is what the next start would give |
 | `missingAtOpen` | the names the open project recorded that this session lacks |
 | `builtIn` | the name the host's built-in declares, installed or not |
+| `startProblems`, `keptFromAnotherBuiltIn` | what the session's start found: what went wrong, a sentence each, and whether the kept customisation was made from another built-in than the host has ("What a session starts with") |
 
 It is session data as the library and the map are: not undoable, not in the
 project, kept across NEW and OPEN. **A default Document has none of it and
@@ -823,15 +842,20 @@ What the variable's value MEANS is a function of its own,
 `builtInCustomisationFor(seam, compiledIn)`, so that the rule is tested
 against a stand-in for the compiled-in customisation: tested only through
 the environment, "whatever is compiled in" could not fail in a build that
-compiled nothing in, which is every clone and CI. The file is named as text,
-through `core::pathFromUtf8`: an environment gives narrow bytes, on Windows
-in the ANSI code page, and a `std::filesystem::path` built straight from
-those throws at the first that is not UTF-8 - out of a function that promises
-to report and never throw.
+compiled nothing in, which is every clone and CI. The variable is read
+through `core::environmentVariable`, never `getenv`: on Windows that gives
+the bytes of the ANSI code page, in which a file named outside the code page
+is a file named with `?` and is not found (`docs/customisation.md`, "What
+katana_cli and katana_mcp start with"). The file is then named as text,
+through `core::pathFromUtf8`: text handed to `builtInCustomisationFor` may
+still be narrow bytes that are not UTF-8, and a `std::filesystem::path` built
+straight from those throws at the first of them - out of a function that
+promises to report and never throw.
 
 The older embedding (`tools/embed_customisation.py`, four files) and
-`archive12d::builtinCustomisation()` are still what the front ends call, and
-stay until they are moved.
+`archive12d::builtinCustomisation()` are still what the window calls, and
+stay until it is moved; the session of `katana_cli` and `katana_mcp` asks
+`builtInCustomisation()` and no longer reads the four files.
 
 ### What a session starts with
 
@@ -859,9 +883,16 @@ what was installed, with counts, and every problem in a sentence.
   what a reset to the built-in is - leaves the session a new Document started
   with the same host has
   (`CustomisationStart.StartingOverAChangedSessionGivesTheSessionAFreshStartGives`).
+- What a start found is left on the Document as well as handed back: the
+  report's problems and `keptFromAnotherBuiltIn`
+  (`CustomisationState::startProblems`, `Document::setCustomisationStart`),
+  which `CUSTOMISE JSON` gives as `start` for as long as the session runs
+  (`docs/customisation.md`, "The replies"). A front end says them once, where
+  its errors go, and a client of `katana_mcp` is never shown that.
 - A Document given no host installs nothing.
 
-Reading a file's bytes and turning typed text into a path are core's
+Reading a file's bytes, turning typed text into a path and reading an
+environment variable that names a file are core's
 (`include/katana/core/path_text.hpp`): the UTF-8 path helper was private to
 the sheet verbs, with a second copy in the utility verbs. `ifc::pathFromUtf8`
 is core's now too, under the name its callers use; its own conversion threw
@@ -942,7 +973,9 @@ mark, as the reference files are written, and Export Code List CSV... writes
 `cad::codeListCsv` (RFC 4180, UTF-8 with no byte order mark, so Excel may
 misread a name that is not ASCII). The symbol library's Export Selected to
 .4d... writes the selected library definitions with `writeStyleLibrary`.
-`katana_cli` has no export verb for either.
+`katana_cli` writes neither of those files: its `CUSTOMISE EXPORT` writes the
+session as one Katana customisation file (`docs/customisation.md`, "The
+verbs").
 
 ## Drawing it
 
