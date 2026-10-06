@@ -1896,9 +1896,12 @@ Each now reaches the same code on every front end
   `qt_info_hash_id_is_the_entity_beside_a_file_of_that_name_headless`). The window, and the session under
   `katana_cli` and `katana_mcp`, once took every `INFO` for `INFO <file>`, so
   `katana_describe_entity` answered that the file did not exist.
-- `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST` and `MAPFILE CHECK`
-  are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`), given the
-  standard colour table by `CommandInterpreter::setColourLookup`.
+- `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST` and `CODE CHECK`
+  are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`). They
+  resolve a colour name through the Document; what the window passes with
+  `CommandInterpreter::setColourLookup` is asked only for a name it does not
+  know. (`CODE LIST` and `CODE CHECK` were `MAPFILE LIST` and `MAPFILE CHECK`
+  until 2026-10-06.)
 - `COPC <source> <destination.copc.laz>`, each path one word or quoted, a
   background job whose `converted` record names the file
   (`docs/interop.md`, "IMPORT, EXPORT, INFO, REFS and COPC on every front

@@ -226,7 +226,7 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"}, {"PARC", "PARCEL"}, {"ST", "STYLE"},
         {"RADIATE", "FORWARD"}, {"?", "HELP"}, {"LE", "LEADER"}, {"MT", "MTEXT"},
         {"TS", "TEXTSTYLE"}, {"LS", "LABELSTYLE"}, {"GM", "MODIFY"}, {"GMODIFY", "MODIFY"},
-        {"GLOBALMODIFY", "MODIFY"}, {"Z", "ZOOM"},
+        {"GLOBALMODIFY", "MODIFY"}, {"Z", "ZOOM"}, {"CUSTOMIZE", "CUSTOMISE"},
     };
     return table;
 }
@@ -515,11 +515,25 @@ Survey    INVERSE p p | INVERSE line-id   distance, azimuth, bearing; height dif
           36.8699 (decimal degrees) or a bearing N36d52m11.63sE ("N 36 52 11.63 E" quoted)
           AREA [id...]   area and perimeter of closed polylines and circles, each and in
           total (the selection when no ids); hectares when the project unit is the metre
-Codes     CODE [property]   apply the loaded survey codes to every entity carrying a field
-          code (the property found when not named), one undo step
-          CODE EXPLAIN code   why a code gets what it gets  |  CODE CENSUS [property]   the
-          codes this drawing carries  |  MAPFILE LIST [filter] | CHECK   the loaded survey
-          codes, one per line, or checked: CHECK fails when a rule has an error
+Codes     CODE [scope] [WHERE k=v ...] [PROPERTY name] [PREVIEW]   apply the loaded survey
+          codes to the entities the scope takes that carry a field code (the property
+          found when not named), one undo step; PREVIEW reports and changes nothing.
+          With no scope word it is the whole DRAWING, under a bare WHERE too: CODE has
+          always been the whole drawing, where MODIFY with none is the selection
+          CODE CENSUS [scope] [WHERE k=v ...] [PROPERTY name]   the codes those entities
+          carry  |  CODE EXPLAIN code   why a code gets what it gets
+          CODE LIST [filter]   the loaded survey codes, one per line  |  CODE CHECK   the
+          same checked: it fails when a rule has an error
+          CODE name and CODE CENSUS name still read name as the property; one called
+          as a scope word or a subcommand is PROPERTY name
+Customise CUSTOMISE [REPLACE] <file> [<file>...]   load Katana customisation files, merged
+          into what is loaded (REPLACE: in the place of each kind they bring); all or
+          nothing. CUSTOMISE alone reports what is loaded, CUSTOMISE JSON as JSON
+          CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME name] [ONLY name...]
+          CUSTOMISE RESET (the built-in one) | KEEP (this one, for the next start) | REVERT
+          CUSTOMISE REMOVE name... [FORCE] | REMOVE CODE key...
+          CUSTOMISE SET auto.codes=on|off auto.linework=on|off linework.start=ST ...
+          (HELP CUSTOMISE: every word and every reply)
 DimStyle  DIMSTYLE LIST | INFO name | NEW name [field value ...] | DELETE name
           DIMSTYLE SET name field value [field value ...]   every pair one undo step
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
@@ -527,11 +541,12 @@ DimStyle  DIMSTYLE LIST | INFO name | NEW name [field value ...] | DELETE name
           LAYER DIMSTYLE layer style   attaches one
 Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER   (selection)
 Global    MODIFY [scope] [WHERE k=v ...] SET k=v ... [PREVIEW]   global modify, one undo step
-Scope     MODIFY and the UTILITY verbs: SELECTION | DRAWING | VIEW [id] [EXTENTS]
+Scope     MODIFY, CODE and the UTILITY verbs: SELECTION | DRAWING | VIEW [id] [EXTENTS]
           (the window's plan view as on screen; EXTENTS: its layers anywhere; id is the
           view=N a reply gives, not its title's number) | AREA x0,y0,x1,y1 |
           LAYERS a,b [ONLY] (ONLY: not their sublayers). MODIFY with none takes the
-          selection; a UTILITY verb takes a scope word or WHERE, else reads a file
+          selection and CODE the drawing; a UTILITY verb takes a scope word or WHERE,
+          else reads a file
           WHERE: TYPE=point,line LAYER=pat STYLE=pat|ByLayer COLOUR=#RRGGBB|ByLayer
           PROP=key[:pat] (PROP=:pat: any property) TEXT=pat DRAWN ('*' '?' wildcards)
           SET entities: LAYER= COLOUR= STYLE=name|ByLayer VISIBLE=yes|no PROP=key:value
@@ -578,6 +593,11 @@ Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM
 Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
 {
     return katana::cad::tokenize(line);
+}
+
+void CommandInterpreter::setCustomisationHost(CustomisationHost host)
+{
+    customisation_ = customisationVerbContext(std::move(host));
 }
 
 Result<CommandInterpreter::ImportArgument> CommandInterpreter::importArgument(std::string_view rest)
@@ -804,6 +824,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (!args.empty() && utilities::isUtilityVerb(args.front())) {
             return utilities::utilityVerbHelp();
         }
+        // Asked by either spelling, as the verb is run by either.
+        if (!args.empty() && isCustomisationVerb(canonicalVerb(args.front()))) {
+            return customisationVerbHelp();
+        }
         return helpText();
     }
     if (isAnnotationVerb(verb, args)) {
@@ -818,8 +842,14 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     if (utilities::isUtilityVerb(verb)) {
         return utilities::runUtilityVerb(document_, *tokens, scopeViews_);
     }
+    // Both families are handed the words AFTER the verb, which was read as
+    // every verb is (canonicalVerb): handed the line's own first word they
+    // tested it again, and refused an alias the interpreter had accepted.
     if (isSurveyCodeVerb(verb)) {
-        return runSurveyCodeVerb(document_, *tokens, colourOf_);
+        return runSurveyCodeVerb(document_, args, colourOf_, scopeViews_);
+    }
+    if (isCustomisationVerb(verb)) {
+        return runCustomisationVerb(document_, args, customisation_);
     }
     // PLINE is the drawing system's (isDrawingVerb, above), so each replies
     // with the id of what it made.

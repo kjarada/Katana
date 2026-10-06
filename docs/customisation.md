@@ -6,10 +6,11 @@ mean and how linework is processed. `docs/survey_coding.md` says what each of
 those IS and how a code is applied. This document is about the customisation
 as one thing: the value that holds one and the file that keeps it.
 
-Its first chapter, below, is the file format. The chapters on the
-customisation built into the program, on the commands that load and edit one
-and on Settings are added by the work that builds them; until then
-`docs/survey_coding.md` describes what the program does today.
+Its first chapter, below, is the file format; its second, "The verbs", the
+commands that load, write, keep and edit a customisation. The chapters on the
+customisation built into the program and on Settings are added by the work
+that builds them; until then `docs/survey_coding.md` describes what the
+program does today.
 
 ## The format
 
@@ -775,9 +776,10 @@ survives being read and written.
 
 ### Not done
 
-- **Nothing reads or writes a file yet.** This is the value, the format and
-  its tests; the commands, the built-in customisation and Settings come with
-  the work that follows, and are recorded in this document then.
+- **The two programs do not read a file of it from their command lines
+  yet.** The verbs that read and write one are in the interpreter ("The
+  verbs", below), but `katana_cli` and the window still take a `CUSTOMISE`
+  line themselves; Settings comes with the work that follows.
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
 - **Some of a rule's members are still shown by another word.** `CODE
@@ -847,3 +849,306 @@ survives being read and written.
   format's own would. *Not done*: that is a second JSON reader in the
   program, and it should be decided on a benchmark that can be repeated, on
   the converted reference customisation - which comes with the conversion.
+
+## The verbs
+
+Two verbs of the shared `CommandInterpreter` work on a session's
+customisation: `CUSTOMISE`, which loads, writes, keeps and edits it
+(`include/katana/cad/customisation_verbs.hpp`), and `CODE`, which applies its
+survey codes to a drawing and answers questions about them
+(`include/katana/cad/survey_code_verbs.hpp`). Being the interpreter's, each is
+ONE implementation for the window's command line, `katana_cli`, `katana_mcp`
+and an agent. `HELP` lists both in brief and `HELP CUSTOMISE` prints the
+family's whole reference (`cad::customisationVerbHelp`).
+
+**Where this stands.** The family is in the interpreter and is tested there
+(`tests/cad/customisation/test_customisation_verbs.cpp`,
+`tests/cad/customisation/test_survey_code_verbs.cpp`). `CODE` reaches every
+front end today. A `CUSTOMISE` line does not yet: `katana_cli` and the window
+each take it before the interpreter sees it, with the code they had, which
+still reads the older files (`src/katana_app/session.cpp`,
+`src/katana_qt/main_window.cpp`). Each is moved to this family by the work
+that ports it; until then what `docs/survey_coding.md` says of `CUSTOMISE
+<file>` is what those two programs do, and neither hands the interpreter a
+host.
+
+### CUSTOMISE
+
+| Line | What it does |
+|---|---|
+| `CUSTOMISE` | what is loaded: two count lines, then records, then what this drawing uses of it |
+| `CUSTOMISE JSON` | the same as one JSON object (`cad::customisationJson`) |
+| `CUSTOMISE <file>...` | merges Katana customisation files into the session |
+| `CUSTOMISE REPLACE <file>...` | loads them in the place of each KIND they bring |
+| `CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>] [ONLY <definition>...]` | writes the session, or a part of it |
+| `CUSTOMISE RESET` | the program's built-in customisation in the place of the session's |
+| `CUSTOMISE KEEP` | writes the session to the kept file, which the next start reads |
+| `CUSTOMISE REVERT` | reads the kept file again |
+| `CUSTOMISE REMOVE <definition>... [FORCE]` | removes definitions; refused while one is in use, unless `FORCE` |
+| `CUSTOMISE REMOVE CODE <key>...` | removes every rule of each key |
+| `CUSTOMISE SET <key>=<value>...` | `auto.codes` and `auto.linework` (`on`, `off`); `linework.start`, `.end`, `.close`, `.arcstart`, `.arcend`, `.join`, `.rectangle` (a spelling; empty switches that control off) |
+
+**A keyword is the whole first word**, in any case, and `CUSTOMIZE` is the
+same verb: the interpreter reads the verb as it reads every verb, alias
+included, and hands the family the words after it. A file that is literally
+called as a keyword is given with its directory, `./json`, as a file called
+as a scope word is.
+
+**A load** reads every file with `entity::customisationFromJson`, merges them
+with `cad::mergeCustomisation` and installs the result with
+`Document::installCustomisation`. It is all or nothing: when one file does
+not read, or the merge or the install refuses one thing, nothing is loaded
+and every reason is listed. One file that does not read is refused in the
+reader's own words, the file beside them - a survey code file or a style
+library of another program is `not a Katana customisation file`. A file
+named twice is read once, and the reply says so. What Merge and Replace each
+do to definitions, rules, colours, the settings and the sources is the
+merge's to say (`include/katana/cad/customisation_merge.hpp`).
+
+**An export** writes the whole session, or a part: with a kind word, those
+kinds alone; with `ONLY`, those definitions - and no codes, unless `CODES` is
+said too, which is what a window's "export the selected symbols" means. A
+PART is written without the linework codes, the automation and `basedOn`: it
+is a fragment for someone else's session, or for this one later, and merged
+in it must not reset their control codes. The colours and every notice go
+with it. After `ONLY` every word is a definition; one called `NAME` is listed
+by giving `NAME <name>` before `ONLY`. A file that is there is written over,
+and the reply says it was (`replaced=yes`). A session with no name - rules
+made in an editor with no customisation ever installed - is refused until
+`NAME` gives one.
+
+**`REMOVE`** takes definitions out of the library and refuses, changing
+nothing, when one of them is still named - by a survey code rule as its
+linestyle or its symbol, or by a style of the drawing as its linetype or its
+symbol - listing every rule and style that names it. `FORCE` removes it all
+the same, and what names it then draws plain. `REMOVE CODE` removes every
+rule of each key, in every section; a key is matched as it is written.
+
+**`SET`** changes the two switches and the seven control codes. Every item is
+read before any is set, and the codes are judged by `entity::validate`, so
+one refused item sets none of them.
+
+### The replies
+
+Every reply is records, one a line: a leading word, then `key=value` fields
+(`cad::recordValue` quotes a value that needs it; `core::readReplyRecord`
+reads a line back). A file's path is written with `/` on every platform - a
+backslash in a record is an escape. No reply to a line that succeeded holds
+the word `error`: a script, and dozens of the command line's own tests, take
+that word for a failure. (So the JSON report's count of rules that cannot be
+applied is `cannotApply`. `CODE CHECK`'s older reply does say "0 errors", and
+is left as it is.)
+
+```
+CUSTOMISE                 the two count lines, then
+                          customisation name=<n> origin=none|builtIn|kept|loaded|edited kept=yes|no definitions=<n> codes=<n> rules=<n> colours=<n>
+                          source name=<n> definitions=yes|no rules=yes|no        one a source, in load order
+                          automation auto.codes=on|off auto.linework=on|off
+                          linework linework.start=ST linework.end=END ... linework.rectangle=RECT
+                          missing name=<n>                                        one a name the open project recorded and the session lacks
+                          then the coverage lines
+CUSTOMISE [REPLACE] f...  repeated file=<f>                                       a file named twice
+                          loaded file=<f> name=<n> definitions_added=<n> definitions_replaced=<n> codes_added=<n> codes_replaced=<n> colours_added=<n> colours_replaced=<n> linework=yes|no automation=yes|no
+                          removed definitions=<n> codes=<n>                       REPLACE, when it removed any
+                          removed definition=<name>   removed code=<key>          up to 20 of each
+                          undefined names=<n>                                     names the rules ask for that nothing defines
+                          undefined name=<name>                                   up to 20
+                          customisation name=...                                  what is loaded now
+CUSTOMISE EXPORT f ...    exported file=<f> name=<n> definitions=<n> codes=<n> rules=<n> replaced=yes|no
+CUSTOMISE RESET           reset name=<n> definitions=<n> codes=<n> rules=<n> kept=yes|no
+CUSTOMISE KEEP            kept file=<f> written=yes name=<n> definitions=<n> codes=<n> rules=<n> backup=<f>.bak|none
+                          kept file=<f> written=no reason=the-session-is-the-built-in backup=<f>.bak|none
+CUSTOMISE REVERT          reverted file=<f> name=<n> definitions=<n> codes=<n> rules=<n>
+CUSTOMISE REMOVE a b      removed definition=<name> rules=<n> styles=<n>          one a name: the rules and styles that still name it
+CUSTOMISE REMOVE CODE k   removed code=<key> rules=<n>                            one a key
+CUSTOMISE SET k=v ...     set <k>=<v> ...
+```
+
+`codes=` is distinct keys and `rules=` rules, as the count line has them
+("1,624 survey code rules over 632 distinct codes"); `codes_added` and
+`codes_replaced` count a key once for each section a file gives it rules in,
+which is what the merge replaces by. The `automation` and `linework` records
+carry the very keys `SET` takes, so either can be typed back after it.
+
+The bare report has a second, older text, `cad::formatCustomisationSummary`,
+which names a source by the kind of file it once was ("a style library"). The
+front ends' own `CUSTOMISE` and File > Drawing Summary still print it, and it
+goes with the last of them; the verb's text is `cad::formatCustomisationReply`,
+and both are made from one `CustomisationSummary`.
+
+`CUSTOMISE JSON` is `cad::customisationJson`: one object, keys in
+alphabetical order, two blanks a level, with `name`, `origin`, `kept`,
+`description`, `notice`, `basedOn`, `builtIn`, `sources` (each with its
+notice), `counts`, `automation`, `linework`, `colours`, `problems`,
+`coverage` and `missing`. `automation`, `linework` and `basedOn` use the
+format's own member names, so the report reads against a file. `problems` is
+the lint `CODE CHECK` prints, counted - `rules`, `cannotApply`, `warnings`,
+`byKind` - and `undefined`, the names the rules ask for that nothing defines.
+It does not hold the definitions or the rules; a file does. It is a function
+so that a front end can hand a client the object without a line passing
+through the command history.
+
+### The host: RESET, KEEP and REVERT
+
+Three of the words need what the Document does not hold: the program's
+built-in customisation and the path of the file the user's own is kept in. A
+front end hands both to the interpreter as a host
+(`CommandInterpreter::setCustomisationHost`, `cad::CustomisationHost`), as it
+hands over its views. A session given none - a test's bare Document, a tool -
+has every other word, and these three refused by name; so is `RESET` in a
+build with no built-in, and `KEEP` and `REVERT` where the front end keeps no
+file.
+
+`RESET` installs the built-in whole, the control codes and the switches
+included, through the one function a start with no kept file uses
+(`cad::installBuiltInCustomisation`). It writes nothing.
+
+`KEEP` writes the session, as `entity::customisationToJson` writes it, to a
+file beside the kept one and renames that into its place; the file that was
+there stays beside it as `.bak`. The session says what it was made from
+(`basedOn`: the built-in's name and the digest of its bytes, stamped when the
+built-in was installed), so the kept file says it too, and a later start can
+tell that the built-in has moved on.
+
+It refuses to write over a kept file that
+
+- **changed on disk since this session read it.** The host's kept file is
+  noted, by the digest of its bytes, when the host is handed over, and again
+  at each `KEEP` and `REVERT`. A second Katana that kept its own in between
+  would otherwise lose it without a word. `REVERT` reads the file as it is
+  now, after which it is the one this session saw; `EXPORT` first keeps what
+  this session has;
+- **does not read** as a customisation: its owner may mean to mend it;
+- **was written by a newer Katana**, which holds what this one cannot write
+  back.
+
+When the session IS the built-in, nothing is written and the kept file is set
+aside as `.bak` (`written=no reason=the-session-is-the-built-in`). "Is the
+built-in" is asked of the install itself - the session is compared with what
+installing the built-in into an empty Document gives - so it cannot drift
+from what `RESET` leaves.
+
+`REVERT` reads the kept file again and installs it.
+
+### CODE
+
+```
+CODE [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW]    apply the loaded codes, one undo step
+CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>]       the codes those entities carry
+CODE EXPLAIN <code>                                       why a code gets what it gets
+CODE LIST [<filter>]                                      the loaded codes, one a line
+CODE CHECK                                                their lint; refused when a rule has an error
+```
+
+The scope and filter are the one grammar every verb on drawing data takes
+(`docs/cad.md`, "Scope and filter"), read by the one parser, and the reply
+begins with what the scope took (`cad::scopeRecord`): `scope=layers
+layers=survey sublayers=yes matched=212`. A scope that takes nothing is
+reported, and codes nothing.
+
+**With no scope word the scope is the whole drawing - under a bare `WHERE`
+too.** Every other verb reads no scope word as the selection. `CODE` was the
+whole drawing before it took a scope, and it is typed in scripts and sent by
+agents as that one word.
+
+**The first word decides how the rest is read**: a subcommand (`EXPLAIN`,
+`CENSUS`, `LIST`, `CHECK`); else a scope word, `WHERE`, `PROPERTY` or
+`PREVIEW`, which begin the grammar above; else the property, as the whole
+rest of the line, which is what `CODE feature_code` has always meant. A word
+that needs the word after it and has none begins nothing: `LAYER`, `LAYERS`
+and `AREA` need their list or their window, so `CODE Layer` - an attribute
+many drawings from GIS data carry - is still that property, and `CODE LAYERS
+a` is the layer `a`. A property called as a scope word that stands alone
+(`ALL`, `VIEW`, `SEL`) or as a subcommand is given as `PROPERTY <name>`.
+
+`CODE LIST` and `CODE CHECK` were a verb of their own, `MAPFILE`, named after
+the survey code file of another program. That file no longer loads; the verb
+went with it and is an unknown command now. Their replies are unchanged.
+
+**Colours.** The verbs resolve a colour name through the Document
+(`cad::resolveColour`: the customisation's own table, then the standard
+names). What a front end passed with `CommandInterpreter::setColourLookup` is
+asked only for a name neither knows.
+
+### The verbs: decisions, and what was rejected
+
+**One family, in the interpreter.** `CUSTOMISE` had been written twice, by
+hand, in the two front ends, because the readers of the older files lived
+where `cad` could not see them. The two had come to differ: one refused a
+load with a problem in it and the other installed what was left.
+
+**A keyword is the whole first word.** *Rejected: "a quoted word is a file"*,
+the rule the session's own parser kept. The command line removes quotes
+before a verb sees its words, so the rule cannot move into the interpreter.
+*Rejected: a `LOAD` keyword.* It would buy nothing - a word that is no
+keyword is already a file - and `CUSTOMISE [REPLACE] <file>` is the form
+every help text and script has.
+
+**The fragment is the one door for an edit.** Nothing edits a rule or a
+definition in place. A customisation file holding only what changes is merged
+in: it replaces a definition by its name and a key's rules by their section,
+which is exactly what an editor's Apply means, so a dialog writes the
+fragment and runs the line. *Rejected: verbs that set one member of one
+rule.* That is a second writer of every member the format already has one
+writer for, and a rule has no name to be addressed by - only its place.
+`REMOVE` exists because a merge cannot delete, and `SET` because the switches
+and the control codes are settings, not data.
+
+**A load is all or nothing, and every problem is listed.** *Rejected:
+installing what read and reporting the rest.* Half a customisation draws a
+survey with half its symbols, and nothing on screen says which half.
+
+**`CODE` with no scope word is the drawing.** *Rejected: the selection, as
+the other verbs have it.* The same line would then code something else the
+day something happened to be selected, with no word of it in a script. The
+positional property is kept for the same reason. *Rejected: reading every
+scope word as a scope* - `CODE Layer` would be refused for a missing layer
+list where it had always worked.
+
+**`KEEP` is said, not implied.** A typed, scripted or agent's line changes
+the session; `KEEP` makes it what the next start gives. *Rejected: writing
+every change at once.* One line would then last a session in `katana_cli`
+and for ever in the window, and an agent trying a customisation would be
+rewriting its user's.
+
+**The host is handed over.** *Rejected: `cad` reading the built-in for
+itself in `RESET`.* A session with no host - every test's - would then be
+installed with whatever the machine's build happened to hold.
+
+**A kept copy of the built-in is retired, not written.** *Rejected: writing
+it.* It would be read at every later start in the place of the built-in,
+and so hide every later edition of the built-in for ever.
+
+**A kept file that changed is not written over.** *Rejected: the last writer
+wins.* Two windows share one kept file, and the loser would not be told.
+
+**The words of the new lint warning.** `CODE CHECK` prints the warning for a
+field its section does not use, which named two fields by the survey code
+file's words (`model`, `tinable`) where every other reply says `layer` and
+`surface` ("The words a rule is shown by"). It says the format's two now.
+
+### The verbs: not done
+
+- **The front ends do not use the family for `CUSTOMISE` yet** ("Where this
+  stands"). Until they do, `katana_cli --help` lists a Customise block twice,
+  the interpreter's and the session's own.
+- **An unnamed session has no verb that names it.** `EXPORT ... NAME <name>`
+  writes it under one, and loading that file with `REPLACE` gives the session
+  the name; `KEEP` refuses it until then.
+- **`FORCE` is read as the last word and `CODE` as the first** of a `REMOVE`.
+  A definition called `FORCE` is removed by `REMOVE FORCE FORCE`, and one
+  called `CODE` by listing it after another name.
+- **Who uses a definition** is asked by a function private to the verb, which
+  counts the rules and the drawing's styles that name it. A LAYER whose
+  linetype names it is not counted. A shared function for the question is
+  being written; this one is replaced by it.
+- **The refusal "nothing was loaded, for N reasons"** lists what the merge
+  refuses of a load. A file that reads has already passed everything the
+  merge looks for, so no file reaches it today and no test does.
+- **Two Katanas keeping in the same instant** are not locked against each
+  other: the check and the write are two steps.
+- **`PREVIEW` needs the scope form.** `CODE feature_code` takes the whole
+  rest of the line as the property; a preview of it is `CODE PROPERTY
+  feature_code PREVIEW`.
+- **`CommandInterpreter::setColourLookup` is still there**, for the front
+  ends that call it; it answers nothing the Document does not.

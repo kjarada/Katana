@@ -159,7 +159,7 @@ the wrong mark.
 
 The rule has two halves since the managers' foundations were built (decision
 D3): **storage never folds case, a search always does.** `cad::filterChoices`
-(the linetype and symbol pickers) and `cad::codeTableRowMatches` (MAPFILE
+(the linetype and symbol pickers) and `cad::codeTableRowMatches` (CODE
 LIST's filter) match a substring with case ignored, and `cad::explainCode`
 reports a key the code would have met but for its case or surrounding blanks
 (`NearMissKind`) - the only way "wm01" getting nothing from the rule for
@@ -1156,14 +1156,19 @@ The verbs are the `CommandInterpreter`'s (`include/katana/cad/survey_code_verbs.
 since 2026-09-26, so the window's command line, `katana_cli` and `katana_mcp`
 all have them; until then they were `katana_cli`'s own, and the window
 answered "unknown command". `CODE` itself - apply the loaded codes, one undo
-step - is one of them too.
+step - is one of them too. Since 2026-10-06 `CODE` and `CODE CENSUS` take the
+shared scope and filter (`CODE LAYERS survey WHERE TYPE=point PREVIEW`), each
+reply beginning with what the scope took, and the two verbs that were
+`MAPFILE LIST` and `MAPFILE CHECK` are `CODE LIST` and `CODE CHECK`:
+`docs/customisation.md`, "The verbs", has the grammar, why `CODE` with no
+scope word is the whole drawing, and how a line's first word is read.
 
 | Question | Function | Verb (every command line) |
 |---|---|---|
 | Why does this code get what it gets? | `explainCode` → `formatCodeExplanation` | `CODE EXPLAIN <code>` |
-| What does the map say, one code per line? | `codeTable`, `codeTableRowMatches` → `formatCodeTable` | `MAPFILE LIST [<filter>]` |
-| Which codes does this drawing carry? | `codeCensus` → `formatCodeCensus` | `CODE CENSUS [<property>]` |
-| What is wrong with the map before it is applied? | `lintSurveyMap`, `lintSurveyRule` → `formatLint` | `MAPFILE CHECK` |
+| What does the map say, one code per line? | `codeTable`, `codeTableRowMatches` → `formatCodeTable` | `CODE LIST [<filter>]` |
+| Which codes do these entities carry? | `codeCensus` → `formatCodeCensus` | `CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>]` |
+| What is wrong with the map before it is applied? | `lintSurveyMap`, `lintSurveyRule` → `formatLint` | `CODE CHECK` |
 
 **An explanation cites rules by index**, the only identity a rule has. For
 each field it names the FIRST rule, most specific first, that says anything
@@ -1209,10 +1214,10 @@ has the table.
 
 `SurveyMap::add` refuses a key with blanks and an invalid layer path, so those
 two can be met only by `lintSurveyRule` on a rule not yet in a map - an
-editor's form before it commits. `MAPFILE CHECK` fails the command when any
+editor's form before it commits. `CODE CHECK` fails the command when any
 error is found, so a script stops: the refusal's first line counts the errors
 and the lint follows it, as `UTILITY CHECK` carries its check
-(`mapfileCheckReply`, tested on hand-made issues because no map can hold such
+(`codeCheckReply`, tested on hand-made issues because no map can hold such
 a rule today). On the compiled-in pair of mapfiles, run
 on 2026-09-24:
 

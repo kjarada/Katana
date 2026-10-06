@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "katana/cad/code_table.hpp"
+#include "katana/cad/customisation_verbs.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/import_placement.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
@@ -68,11 +69,22 @@ class CommandInterpreter {
         sheetContext_ = std::move(provider);
     }
 
-    // A standard colour name's RGB, for CODE and MAPFILE CHECK
-    // (survey_code_verbs.hpp): the table is archive12d's, which cad may not
-    // see, so the front end that can see it passes it. Unset, no colour is
-    // known - CODE leaves colours alone and CHECK checks none.
+    // More colour names for CODE (survey_code_verbs.hpp), from a front end
+    // that has some. The verb asks the Document first - its customisation's
+    // own table, then the standard names (colour_lookup.hpp) - and this only
+    // for a name neither knows. It was once the ONLY source of colours, when
+    // the standard names were a table cad could not see; the front ends
+    // still pass that table, which now answers nothing the Document has not.
     void setColourLookup(ColourLookup colourOf) { colourOf_ = std::move(colourOf); }
+
+    // What CUSTOMISE RESET, KEEP and REVERT need that the Document does not
+    // hold (customisation_verbs.hpp): the program's built-in customisation
+    // and the path of the kept file. A front end hands it over where its
+    // session starts, BEFORE it calls startCustomisation - the kept file is
+    // noted as it is at this moment, and KEEP refuses to write over one that
+    // is another later. A session given none - a test's bare Document, a
+    // tool - has the rest of CUSTOMISE, and those three refused by name.
+    void setCustomisationHost(CustomisationHost host);
 
     // The rest of a front end's IMPORT line, after the verb: the path, one
     // layer of surrounding quotes removed so that a path may hold blanks, and
@@ -219,6 +231,7 @@ class CommandInterpreter {
     std::optional<katana::geometry::Point2> lastPoint_;
     katana::cad::plotting::SheetVerbContextProvider sheetContext_;
     ColourLookup colourOf_;
+    CustomisationVerbContext customisation_;
     ScopeViewProvider scopeViews_;
     ViewHostProvider viewHost_;
 };

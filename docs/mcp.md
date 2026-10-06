@@ -524,8 +524,9 @@ project that matters.
   geoprocessing verbs through the executor in `src/katana_app/geo/`, the one
   the window runs; a build without GDAL has the DXF `IMPORT` and `EXPORT` of
   `dxf_verbs.cpp`).
-  `CODE` and `MAPFILE` were here until 2026-09-26 and are the interpreter's
-  now, so the window has them too (`docs/cad.md`). It was
+  `CODE` was here until 2026-09-26 and is the interpreter's now, with `CODE
+  LIST` and `CODE CHECK` (once a verb of their own, `MAPFILE`), so the window
+  has them too (`docs/cad.md`). It was
   `katana_cli`'s `main.cpp`; `src/katana_app/main.cpp` is now only the command
   line's argument handling.
 * `src/katana_app/mcp_server.cpp` - `Server::handle`: one JSON-RPC message in,
