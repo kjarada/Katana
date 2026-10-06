@@ -432,13 +432,15 @@ section they appear in, and names the first eight.
 The plain lines `0` and `1` and the built-in symbol names are not listed as
 missing: they draw without a library.)
 
-In the application it is **Format > Load Customisation...**, and **Format >
-Replace Loaded Customisation...** for a replace - the same two actions are on
-Survey > Survey Coding - or `CUSTOMISE [REPLACE] <file>...` typed on its
-command line, or `katana --customise <file>...` at start-up. Each takes
-several files at once and writes the same report into the command log, ending
-with what the loaded customisation means for the drawing open
-("Saying whether it is working" below).
+The desktop window no longer loads these files (2026-10-06). It had **Format >
+Load Customisation...** and **Format > Replace Loaded Customisation...** -
+the same two actions on Survey > Survey Coding - a `CUSTOMISE [REPLACE]
+<file>...` of its own and `katana --customise <file>...`, each writing this
+report into the command log. The two menu items are gone, and the window's
+`CUSTOMISE` and `--customise` are the interpreter's verb over Katana
+customisation files (`docs/customisation.md`, "The verbs"; `docs/desktop.md`,
+"The Format menu"): a style library or a survey code file given to them is
+refused as not a Katana customisation file.
 
 Every definition read is stamped with the NAME of the file it came from
 (`LineStyle::source`, from `archive12d::sourceFileName`) - never the path, so
@@ -476,47 +478,50 @@ currentMap, loaded, LoadMode)` is the rule:
   installed by a load that did not bring one. `FileMerge` reports, per file,
   the definitions or keys it added and those it replaced.
 
-**The window loads through it** (audit QT-21, fixed), and so did `katana_cli`
-until 2026-10-06, when its `CUSTOMISE` became the interpreter's, which merges
-Katana customisation files by the same rule on the one customisation type
-(`cad::mergeCustomisation`, "The merge" below) and replies in records. The
-window's `MainWindow::applyCustomisation` - behind Format > Load and Replace,
-the typed `CUSTOMISE` and `--customise` - reads the files, calls
-`mergeCustomisation` with the library and map loaded now and what the files
-brought, installs both results
-(a kind the load did not bring comes back as it was, so a symbol file alone
-keeps the map) and prints its `files`, one line each: the definitions or codes
-it added and replaced. A Replace also says what went (`removedDefinitions`,
-`removedKeys`), and a definition or rule that could not be installed is an
-error line of its own. The load then names what the mapfile asks for that no
-loaded library defines, judged against everything loaded, since a mapfile may
-name what an earlier load defined. In the window REPLACE is a replace only as
-the unquoted first word, in any case - a quoted path that begins with
-"replace" is a path; in the interpreter's family, which sees a line's words
-with their quotes already removed, a keyword is the whole first word, so a
-quoted path with a blank in it is still a path and a file called exactly
-`replace` is written `./replace`. In the window a Replace is an action of its
-own, never a question, so a headless run never meets a box.
+**Both front ends loaded through it** (audit QT-21, fixed), each with a loader
+of its own - the window's behind Format > Load and Replace, its typed
+`CUSTOMISE` and `--customise`; `katana_cli`'s `runCustomise` - until
+2026-10-07, when the second of them went. `CUSTOMISE` is the interpreter's
+verb in every front end now, which merges Katana customisation files by the
+same rule on the one customisation type (`cad::mergeCustomisation`, "The
+merge" below) and replies in records; no program reaches this function any
+more, and it stays with the readers of the older files until they leave.
+A loader read the files, called `mergeCustomisation` with the library and map
+loaded and what the files brought, installed both results (a kind the load
+did not bring came back as it was, so a symbol file alone kept the map) and
+printed its `files`, one line each: the definitions or codes it added and
+replaced. A Replace also said what went (`removedDefinitions`,
+`removedKeys`), and a definition or rule that could not be installed was an
+error line of its own. The load then named what the mapfile asked for that no
+loaded library defined, judged against everything loaded, since a mapfile may
+name what an earlier load defined. There REPLACE was a replace only as the
+unquoted first word, in any case - a quoted path that began with "replace"
+was a path; in the interpreter's family, which sees a line's words with their
+quotes already removed, a keyword is the whole first word, so a quoted path
+with a blank in it is still a path and a file called exactly `replace` is
+written `./replace`.
 
 **A file named twice in one load is read once**, in both front ends
 (`cad::distinctCustomisationFiles`): read twice, every rule of it would sit in
 the map twice, since both copies are the load's and the merge keeps them all.
-Each later naming is said - in the window "... is named twice in this load;
-it is read once", in `katana_cli` and `katana_mcp` a `repeated file=` record.
-Two namings are one file when their absolute, lexically normal paths
+Each later naming is said - a `repeated file=<file>` record of the
+interpreter's `CUSTOMISE`, which every front end runs (the two loaders said
+"... is named twice in this load; it is read once"). Two namings are one file
+when their absolute, lexically normal paths
 are equal or `std::filesystem::equivalent` says so; a pair it cannot tell
 apart is read twice, which doubles rules but never drops a file.
 
-**The built-in's faults are said** (audit A12-06, fixed). At start-up the
-window logs `builtinCustomisation()`'s errors and warnings once - the
+**The built-in's faults are said** (audit A12-06, fixed). Each front end
+logged `builtinCustomisation()`'s errors and warnings once as it started - the
 second survey code file, `survey_codes_names.mapfile`, has one `map_data` item
-with no key, so every start says so - and then what it installed:
-"Customisation: 792 definitions (475 symbols) and 1,624 survey code rules,
-built in." in its log, the numbers grouped in the user's locale. `katana_cli`
-and `katana_mcp` no longer start from those four files: their session starts
-through `startCustomisation` and says what it installed and what went wrong
-in its own two lines (`docs/customisation.md`, "What katana_cli and katana_mcp
-start with").
+with no key, so every start said so - and then what it installed. Neither
+starts from those four files any more: both start through
+`cad::startCustomisation`, over a built-in that is one Katana customisation
+file, and say what was installed and what went wrong in lines of their own.
+The window's names the customisation and says built in or kept, and a problem
+is `Customisation: <problem>` (`docs/desktop.md`, "How the window starts");
+the session of `katana_cli` and `katana_mcp` says both in its own two lines
+(`docs/customisation.md`, "What katana_cli and katana_mcp start with").
 
 ### What the project records
 
@@ -549,13 +554,14 @@ record as a name and what it brought (`CustomisationSource`):
   marks nothing modified.
 - **An open warns** (`customisationNotLoaded`): the recorded names that are
   not loaded now, in the project's order, compared exactly. The window logs
-  "Warning: this project was drawn with customisation files that are not
-  loaded: ... Load them with Format > Load Customisation..." and the CLI
-  prints the same names on stderr - "warning: this project was drawn with
-  customisations that are not loaded: ...", since what a project records of a
-  Katana customisation is the name it declares and not a file's. Not an
-  error: the drawing opens and draws, and what a missing file defined draws
-  as a plain line until it is loaded.
+  "Warning: this project was drawn with customisations that are not loaded:
+  ... CUSTOMISE <file> loads a Katana customisation file." (it named Format >
+  Load Customisation until that item went) and the CLI prints the same names
+  on stderr - "warning: this project was drawn with customisations that are
+  not loaded: ...". What a project records of a Katana customisation is the
+  name it declares and not a file's. Not an error: the drawing opens and
+  draws, and what a missing customisation defined draws as a plain line until
+  it is loaded.
 
 **The built-in's files, and 29 of its definitions, have new names**
 (2026-09-24). The files were given the general names they have now, and 29
@@ -605,20 +611,19 @@ sources still list it takes it off the missing names, so the next save lets
 it go: the session loaded it and replaced it, which is a judgement, but it is
 made at the install rather than at the load.
 
-Not done, and the reason this change is committed only together with the one
-that moves the front ends onto `startCustomisation`: **until a front end
-hands over a host, the built-in's earlier names are answered by nothing.**
-The Document answers them with the name its host's built-in declares
-(`CustomisationState::builtIn`). `katana_cli` and `katana_mcp` tell it one
-since 2026-10-06 (their session starts through `startCustomisation`); the
-window does not yet, and the table it used before answered each first name
-with one of the four general file names. So in the window a project recording
-the four first names opens with a warning of four missing files, and every
-save keeps them - wherever the four files are loaded under their general
-names: compiled in or named to its `CUSTOMISE`. In a build that has the four files
-compiled in, `tests/archive12d/test_builtin_renames.cpp` also fails (it
-expects four renames naming the four files; there are eight, naming the
-built-in), and is retired with the reader it tests.
+Closed (2026-10-07): **every front end hands over a host, so the built-in's
+earlier names are answered.** The Document answers them with the name its
+host's built-in declares (`CustomisationState::builtIn`), and both the
+session of `katana_cli` and `katana_mcp` and the window
+(`MainWindow::loadDefaultCustomisation`) start through `startCustomisation`:
+a project recording the earlier names opens without a warning wherever the
+built-in is installed. The table the front ends used before answered each
+first name with one of the four general file names, and while one of them
+still used it a project recording the four first names opened there with a
+warning of four missing files. Still open: in a build that has the four files
+compiled in, `tests/archive12d/test_builtin_renames.cpp` fails (it expects
+four renames naming the four files; there are eight, naming the built-in),
+and is retired with the reader it tests.
 
 Two more things the front ends do differently since the Document took the
 record over, both meant: `NEW` clears the names the last open found missing
@@ -631,12 +636,14 @@ front end's own Save and typed `SAVE` did.
 (2026-10-06.) The Katana customisation format (`docs/customisation.md`) made a
 customisation ONE value, `entity::Customisation`. This is what `cad` does with
 one: where a session's customisation lives, how another is merged into it, and
-what a session starts with. **The shared `CUSTOMISE` verb stands on it, and
-`katana_cli` and `katana_mcp` start through it** (`docs/customisation.md`,
-"The verbs" and "What katana_cli and katana_mcp start with"). **The window
-does not use it yet**: it still seeds from the older built-in and loads style
-libraries and survey code files as the sections above describe, until it is
-moved onto `startCustomisation` and the shared verb.
+what a session starts with. **Every front end stands on it** (2026-10-07):
+the shared `CUSTOMISE` verb (`docs/customisation.md`, "The verbs"), the
+session of `katana_cli` and `katana_mcp` ("What katana_cli and katana_mcp
+start with", there) and the desktop window (`docs/desktop.md`, "How the
+window starts") all start through `startCustomisation` and run that verb.
+Seeding from the older built-in and loading style libraries and survey code
+files, as the sections above describe, is how they worked before; those
+readers are reached now only by their own tests.
 
 ### The state
 
@@ -1396,12 +1403,15 @@ keywords, and `st` means `ST` - and the first token is always the name, so a
 code `CL` is a string called CL. An empty spelling switches a control off;
 `validate(LineworkCodes)` refuses a spelling with a blank and two controls
 spelled alike. The spellings are part of a customisation and the session's
-are the Document's (`Document::customisationState().linework`): the
-`LINEWORK` verb and a survey import read them there. The Survey Code
-Manager's Linework tab still shows, edits and runs with a copy the Format
-workbench keeps (`CustomisationWorkbench::lineworkCodes`), which starts as
-the defaults each session - so until the tab runs the verb's line, a
-spelling changed in one is not the other's.
+are the Document's (`Document::customisationState().linework`: what a
+customisation file says and `CUSTOMISE SET linework.*` sets). The `LINEWORK`
+verb and a survey import read them there, and so does the Survey Code
+Manager's Linework tab, through the Format workbench, which follows them as
+they change (`CustomisationWorkbench::followLineworkCodes`,
+`docs/desktop.md`, "The Format menu"). The tab's own Use These Codes still
+changes the workbench's copy alone (`CustomisationWorkbench::lineworkCodes`):
+such codes last until the customisation's next change of them, and are not
+what `CUSTOMISE KEEP` writes.
 
 **Curves are chorded.** `Polyline2` has no arc segment, and giving it one is a
 schema change deferred under D6. So each consecutive three curve points
@@ -2023,8 +2033,9 @@ fix:
   as a symbol, so the fix is to choose a linestyle; telling that person the
   name is "in no loaded library" sends them looking for a library they have.
   `cad::formatCoverage`, which CUSTOMISE prints, gives these their own line,
-  as above; the window's log (`MainWindow::reportCustomisationCoverage`) does
-  not mention them yet, and prints only the `unresolved` line.
+  as above. (The window logged a coverage of its own after a load, which
+  left this line out; it went with the window's loader, and the window's
+  `CUSTOMISE` prints `formatCoverage` as every front end's does.)
 
 The coverage looks at the styles' names only; a layer's missing linetype is
 in `cad::missingNames`, the managers' list of the same thing for every Style
@@ -2094,8 +2105,10 @@ file the script does not recognise as a style library or a survey code file,
 by looking inside it, is left out.
 
 The tests read the same folder (`KATANA_CUSTOMISATION_FILES` in
-`tests/archive12d`; `-DCUSTOMISE_DIR` of `qt_customisation_headless`), and every
-test of it skips when it is empty or absent.
+`tests/archive12d`), and every
+test of it skips when it is empty or absent. (`qt_customisation_headless` read
+it too, through `-DCUSTOMISE_DIR`; it loads the committed Katana-format
+fixtures of `tests/data/customisation` now, on every machine.)
 `Customisation.TheBuiltInCustomisationIsFourGenerallyNamedFilesInLoadOrder`
 holds the four names and their order, and
 `Customisation.NoWordBeginsTheGroupPathOfMostBuiltInDefinitions` keeps a
@@ -2119,9 +2132,11 @@ four names, the 29 renames above - so with another one they report the
 differences rather than skip; `KATANA_CUSTOMISATION_DIR` set to an empty
 directory builds none, and those tests skip.
 
-Without rebuilding, Format > Load Customisation... (or `CUSTOMISE <file>...`)
-goes on top of what is built in - its definitions and codes take the place of
-the same ones, everything else is kept - and Format > Replace Loaded
-Customisation... (`CUSTOMISE REPLACE <file>...`) takes the place of each kind
-it brings. That is how a site tries a new library without reissuing the
-application.
+Without rebuilding, `CUSTOMISE <file>...` goes on top of what is built in -
+its definitions and codes take the place of the same ones, everything else
+is kept - and `CUSTOMISE REPLACE <file>...` takes the place of each kind it
+brings. That is how a site tries a new library without reissuing the
+application. (The window's two menu items for this, Format > Load
+Customisation and Replace Loaded Customisation, are gone; in the window the
+line takes Katana customisation files, `docs/desktop.md`, "The Format
+menu".)

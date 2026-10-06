@@ -32,6 +32,7 @@
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
+#include "command_word.hpp"
 #include "dataset_info_dialog.hpp"
 #include "layer_manager.hpp"
 #include "style_manager.hpp"
@@ -435,6 +436,28 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
     return false;
 }
 
+// --customise FILE...: the line CUSTOMISE "<file>" ... a person would type,
+// run through the window's one executor, so the switch loads by the
+// interpreter's verb and is answered as the typed line is. Each file is made
+// absolute first: the verb takes its first word for a keyword when it is one
+// (cad/customisation_verbs.hpp), and a file called reset or json in the
+// working directory is still a file. Whether the line ran; a path that cannot
+// be carried on a line (it holds a double quote) is said and loads nothing.
+bool customise(katana::qt::MainWindow& window, const QStringList& files)
+{
+    QString line = QStringLiteral("CUSTOMISE");
+    for (const QString& file : files) {
+        const auto word = katana::qt::commandWord(QFileInfo(file).absoluteFilePath(),
+                                                  QStringLiteral("--customise"));
+        if (!word) {
+            std::fprintf(stderr, "%s\n", word.error().describe().c_str());
+            return false;
+        }
+        line += ' ' + *word;
+    }
+    return window.runVerbLine(line).ok;
+}
+
 } // namespace
 
 // Usage:
@@ -510,11 +533,15 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 // come through it cleanly (MainWindow::toggleLayerThroughPanel). It is the
 // regression test for a crash on the first click of that box.
 //
-// --customise loads linestyle and symbol libraries and survey code files before
-// anything is drawn, so a screenshot shows the drawing as the customisation
-// says it should look. It takes every path until the next switch, because a
-// customisation is several files and which is which is decided by looking
-// inside them rather than by their extension.
+// --customise loads Katana customisation files (docs/customisation.md) before
+// anything is opened, so a screenshot shows the drawing as the customisation
+// says it should look. It takes every path until the next switch and runs
+// them as ONE line, CUSTOMISE "<file>" ..., through the window's one executor
+// (customise, below): merged into what the session started with, all or
+// nothing, and answered in the verb's own records. A refused line fails a run
+// that only writes or runs a script batch, as a refused --command does there.
+// The style libraries and survey code files of another program, which this
+// switch once took, are not read.
 //
 // --style-manager opens the styles and linetypes manager before the
 // screenshot and grabs THAT window instead of the main one, so the dialog -
@@ -657,7 +684,7 @@ int main(int argc, char* argv[])
     bool dpiGiven = false;
     std::optional<QString> screenshotPath;
     std::optional<QString> toggleLayer;
-    std::vector<std::filesystem::path> customisation;
+    QStringList customisation;
     bool styleManager = false;
     bool attributeManager = false;
     bool layerManager = false;
@@ -724,10 +751,11 @@ int main(int argc, char* argv[])
         } else if (argument == "--toggle-layer") {
             toggleLayer = value();
         } else if (argument == "--customise") {
-            // Every path until the next switch: a customisation is several
-            // files and they are useless apart.
+            // Every path until the next switch: a customisation may come as
+            // several files - one's codes naming another's symbols - and
+            // they are loaded together, as one line.
             while (i + 1 < arguments.size() && !arguments.at(i + 1).startsWith("--")) {
-                customisation.emplace_back(arguments.at(++i).toStdString());
+                customisation << arguments.at(++i);
             }
         } else if (argument == "--style-manager") {
             styleManager = true;
@@ -822,13 +850,16 @@ int main(int argc, char* argv[])
 
     katana::qt::MainWindow window;
     window.setHeadless(writesOnly || scriptBatch || screenshotPath.has_value());
-    // Before anything is opened, so the first drawing is drawn with it. A
-    // --customise on the command line is merged in next, as Format > Load
-    // Customisation would, and so is loaded when a project is opened: its
-    // record of what it was drawn with is compared with what is loaded.
+    // Before anything is opened, so the first drawing is drawn with it: the
+    // customisation the session starts with (the kept one, else the built-in
+    // one), then --customise merged into it as the typed CUSTOMISE line
+    // would. Both are there when a project is opened, whose record of what
+    // it was drawn with is compared with what is loaded.
     window.loadDefaultCustomisation();
-    if (!customisation.empty()) {
-        window.applyCustomisation(customisation);
+    if (!customisation.isEmpty() && !customise(window, customisation) &&
+        (writesOnly || scriptBatch)) {
+        std::fprintf(stderr, "--customise %s was refused\n", qPrintable(customisation.join(' ')));
+        return 1;
     }
     if (!writesOnly && !screenshotPath && !scriptBatch) {
         // Where the last session left the window, or fitted to the screen:

@@ -290,19 +290,19 @@ customisation's own table, then the standard names of
 `include/katana/entity/colour_names.hpp`). The standard names were once a
 table cad could not see, so each front end passed it with
 `CommandInterpreter::setColourLookup`; it is asked now only for a name the
-Document does not know. The window still passes that table, which answers
-nothing more; `katana_cli` and `katana_mcp` pass none.
+Document does not know, and no front end passes one any more: neither the
+window nor `katana_cli` and `katana_mcp`.
 
 `CUSTOMISE` is the interpreter's too (`runCustomisationVerb`,
 `include/katana/cad/customisation_verbs.hpp`): the report, `JSON`, a load
 merged or in place, `EXPORT`, `RESET`, `KEEP`, `REVERT`, `REMOVE` and `SET`,
 with what `RESET`, `KEEP` and `REVERT` need handed over by the front end
 (`CommandInterpreter::setCustomisationHost`). `docs/customisation.md`, "The
-verbs", has the grammar, the replies and the decisions. `katana_cli` and
-`katana_mcp` run it: their session hands the interpreter its host and takes
-no `CUSTOMISE` line of its own (`src/katana_app/session.cpp`). The window
-still takes the line itself, before the interpreter sees it, until it is
-ported too.
+verbs", has the grammar, the replies and the decisions. Every front end runs
+it and none takes a `CUSTOMISE` line of its own: the session of `katana_cli`
+and `katana_mcp` hands the interpreter its host
+(`src/katana_app/session.cpp`), and so does the desktop window
+(`docs/desktop.md`, "How the window starts").
 
 ### STATUS
 

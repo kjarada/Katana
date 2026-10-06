@@ -80,10 +80,17 @@ struct CustomisationContext {
     std::function<void(const std::vector<katana::entity::EntityId>& ids)> selectAndShow{};
 
     // The session's survey control codes (start, end, close, arc...) that
-    // linework processing reads - configurable, and not survey code file data
+    // linework processing reads - configurable, and not survey code rules
     // (cad/linework.hpp). Owned by the maker, which keeps them for the
     // session. May be null: a dialog then shows the defaults and cannot
-    // change them.
+    // change them. (The window's maker keeps this in step with the
+    // customisation's own control codes - the Document's
+    // customisationState().linework, what a customisation file says and
+    // CUSTOMISE SET linework.* sets - as they change
+    // (CustomisationWorkbench::followLineworkCodes). A dialog that writes
+    // here changes the maker's copy alone, not the customisation: the
+    // dialogs are still to read and set the Document's; docs/desktop.md,
+    // "The Format menu", Not done.)
     katana::entity::LineworkCodes* lineworkCodes = nullptr;
 
     // The window's one executor (command_runner.hpp): a dialog that changes
