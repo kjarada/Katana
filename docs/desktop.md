@@ -1748,7 +1748,7 @@ signal; each that changes the drawing is ONE undo step through
 | Select Points Using | the points wearing a style that names it, selected and framed |
 | Replace in Styles | `cad::replaceSymbolInStyles`: every style naming the current symbol names the one in the inline `NamePicker`; refused while that is empty |
 | Import Definitions... (`importDefinitions`) | a Katana customisation file's DEFINITIONS and its colours, MERGED into the session's (D1: never a Replace from here), with what it added and replaced in the log |
-| Export Selected... (`exportSelected`) | the selected library definitions as a Katana customisation file, with the session's notice, the sources that brought it definitions and the colours their pens name |
+| Export Selected... (`exportSelected`) | the selected library definitions as a Katana customisation file, with the session's notice, the sources they came from and the colours their pens name |
 | New Symbol..., Edit Definition..., Duplicate Definition..., Delete Definition (`symbolNew`, `symbolEdit`, `symbolDuplicate`, `symbolDelete`; along the bottom, since they change the library and not the drawing) | ask the definition editor ("The definition editor", below) for a new symbol, or for the current symbol's definition; the last three need a symbol the library defines, not a built-in shape or a name nothing defines. The buttons do nothing themselves |
 
 **Import and Export are Katana customisation files** (`docs/customisation.md`;
@@ -1774,7 +1774,8 @@ They were style library files of another program's format until 2026-10-06.
   A file that LISTS its sources - every customisation a session writes does -
   brings them as the session's sources, and of those the import hands on only
   the ones that brought the file definitions, each as a source of definitions
-  alone, and a table of colours when the file has colours (`sourcesOfPart`,
+  alone, and a table of colours when the file has colours
+  (`sourcesOfImportedDefinitions`,
   `src/katana_qt/customisation/code_manager_support.hpp`). A source that
   brought the file nothing but rules is left out. *Rejected: keeping it with
   its `rules` flag cleared*, which is what the import first did. Every source
@@ -1785,18 +1786,24 @@ They were style library files of another program's format until 2026-10-06.
   rules in the session
   (`ImportingDefinitionsLeavesOutASourceThatBroughtOnlyRules`).
 - **Export** writes the session's customisation CUT DOWN to the selected
-  definitions (`exportedPart` in the same header; then
-  `entity::customisationToJson` with `CustomisationWriteOptions::only`),
-  under the session's name - or, while the session has none, the file's own
-  name without `.customisation.json`. It is the one rule both managers export
-  by:
+  definitions (`cad::customisationPart`,
+  `include/katana/cad/customisation_part.hpp`; then
+  `entity::customisationToJson` with the same
+  `CustomisationWriteOptions::only`), under the session's name - or, while
+  the session has none, the file's own name without `.customisation.json`.
+  It is the ONE rule a part of a customisation is written by: both managers'
+  exports and `CUSTOMISE EXPORT` with a kind word or `ONLY`
+  (`docs/customisation.md`, "The verbs"), so Export Selected writes the file
+  `CUSTOMISE EXPORT <file> ONLY <the selected names>` writes:
 
   | Of the session | In the file |
   |---|---|
-  | name, description, notice, `basedOn` | as they are |
-  | sources | those that brought the exported kind, each said to have brought that kind alone, with its own notice; a source that brought neither kind (a table of colours) only when the file carries a colour |
+  | name, description, notice | as they are |
+  | sources | those that brought what is WRITTEN, each said to have brought that alone, with its own notice: of definitions, a source one of the written definitions came from; of rules, a source that brought rules, when rules are written; a source that brought neither kind (a table of colours) only when the file carries a colour |
+  | the notice of a source left out | written with the session's own, after it, each line once |
   | colours | those that what is written NAMES - a definition's pens; a rule's colour, its symbol's and its text's - compared as colour names are |
   | linework codes, automation switches | not written: the file says nothing of them |
+  | `basedOn` | not written: a part is not an edition of the built-in |
   | the other kind (rules here; definitions for Export Codes) | not written |
 
   The notice is there because a customisation's notice is "carried with the
@@ -1817,13 +1824,23 @@ They were style library files of another program's format until 2026-10-06.
   (`ExportWritesOnlyTheSelectedLibraryDefinitionsAndNamesTheRest`,
   `AnExportCarriesTheSessionsNoticeAndTheSourcesThatBroughtDefinitions`).
 
-  The sources are every one that brought the session definitions, not only
-  those the SELECTED definitions came from. The session's own entry is the
-  one a later load gives the file's notice to
-  (`include/katana/cad/customisation_merge.hpp`: a notice "goes with the
-  source of its name, or with every source it lists when none has its
-  name"), so a list narrowed to the selection's sources would hang the
-  session's notice on somebody else's symbols.
+  The sources are those the SELECTED definitions came from. Until
+  2026-10-07 they were every source that had brought the session a
+  definition, and the notice of a source left out was dropped with it: the
+  managers and the `CUSTOMISE EXPORT` verb were written side by side and cut
+  a session down by two rules. *Rejected, with the reason kept*: the wider
+  list was there because the session's own entry is the one a later load
+  gives the file's notice to (`include/katana/cad/customisation_merge.hpp`:
+  a notice "goes with the source of its name, or with every source it lists
+  when none has its name"), so that a list narrowed to the selection's
+  sources hangs the session's notice on somebody else's symbols. It does.
+  But a source listed with nothing of it in the file passes for LOADED
+  wherever the file goes - which is the fault the import above was changed
+  to stop - and a notice shown beside more than its author meant is the
+  safe side of the two. The decision, and what each of the two rules had
+  right, is `docs/customisation.md` ("One rule for a part, whoever writes
+  it"); the rule itself is tested below Qt
+  (`tests/cad/customisation/test_customisation_part.cpp`).
 - **A pen inside a definition is the colour the session resolves its name
   to**: the customisation's own colours, then the standard names. The one
   painter every picture goes through (`paintStyleDrawing`) takes the table as
@@ -1845,17 +1862,23 @@ linetype ByLayer and weight 0.25, and under D8 a line later put in that style
 draws the symbol at its vertices; the grid's pictures are on the dark screen
 ground only, though the preview switches; the dialog reloads whole (two
 `tableUsage` passes) on every command the watcher reports, not measured on a
-250,000-entity drawing; an import is not KEPT (the session is left "not kept"
-until `CUSTOMISE KEEP` is wired to the managers' commits); a project's record
+250,000-entity drawing; an import is not KEPT - it calls the commit hook
+round its install, before it and what the hook hands back after one that was
+taken (`CustomisationContext::beginCommit`,
+`ImportCallsTheCommitHookBeforeTheInstallAndWhatItHandsBackAfterOneThatWasTaken`),
+but the workbench leaves the hook empty, so the session is left "not kept"
+("The definition editor", "Not done"); a project's record
 is of NAMES, so importing the definitions of a customisation that brought
 both kinds clears a warning that it is missing although its rules are still
 not here (only a source that brought rules alone is left out); a linetype
 picker's picture of a DRAWING linetype (`modelLinetypeImage`) is not handed
 the colours; and Import and Export do the work themselves rather than running
-a `CUSTOMISE` line - Export Selected becomes `CUSTOMISE EXPORT ... ONLY` once
-that verb exists AND cuts a part down by the rule above, which is written
-over the customisation's value alone (`exportedPart`) so that it can move
-beside the verb unchanged.
+a `CUSTOMISE` line. The verb exists now and cuts a part down by the same
+function, so Export Selected writes what `CUSTOMISE EXPORT ... ONLY` writes;
+the button cannot RUN that line yet because the window still takes every
+`CUSTOMISE` line but `REMOVE` itself and reads its words as files ("One
+executor", below). It becomes the line when the window hands the family to
+the interpreter.
 
 ### Survey Code Manager
 
@@ -1875,8 +1898,12 @@ write Katana customisation files, as the Symbol Library does: Import merges a
 file's RULES into the buffer for review and leaves everything else in it
 alone, and Export writes the buffer as a customisation of survey codes alone,
 cut out of the session by the rule the Symbol Library's Export is cut by
-("Symbol Library", above): the session's name and notice, the sources that
-brought it rules, the colours the rules name, and none of its settings.
+("Symbol Library", above; `cad::customisationPart`, which is what
+`CUSTOMISE EXPORT <file> CODES` writes by): the session's name and notice,
+the sources that brought it rules, the notice of each source left out, the
+colours the rules name, and none of its settings. Apply calls the commit
+hook round its `setSurveyMap`, as the definition editor's Save does
+(`ApplyCallsTheCommitHookBeforeTheMapIsSetAndWhatItHandsBackAfter`).
 Every colour the manager shows or applies - the swatches of the Code Table,
 the three colour fields of the rule form, the explanation, the lint, Apply
 Codes and Linework - is resolved by the Document (`cad::resolveColour`): the
@@ -2061,7 +2088,11 @@ have none.
 - **Delete** (`definitionDelete`) runs the line `CUSTOMISE REMOVE "<name>"`
   (`cad::removeDefinitionLine`) through the window's one executor ("One
   executor", below), so it is echoed and an agent types the same. That verb
-  refuses a definition something names.
+  is the interpreter's (`docs/customisation.md`, "The verbs") and refuses a
+  definition something names, by the function the editor lists with
+  (`cad::definitionUsers`). The window hands `CUSTOMISE REMOVE` on to it -
+  the one line of that family it does not take itself yet; until
+  2026-10-07 it read `REMOVE` as a file's name, and Delete deleted nothing.
   - *What the line answered is shown as it answered it.* The editor does
     not say why a line failed: it once said "is used" of any failure on a
     definition that had users, whatever the line had said
@@ -2095,7 +2126,10 @@ have none.
   and runs `CUSTOMISE KEEP` afterwards; the editor knows neither and only
   keeps the order (`TheCommitHookIsCalledBeforeASaveAndWhatItHandsBackAfterIt`).
   *Rejected: the editor reading "kept" from the Document itself*, which would
-  put the rule for what is kept in every editor that commits.
+  put the rule for what is kept in every editor that commits. Every editor
+  that commits to the session's customisation calls it the same way: this
+  one's Save and Delete, the Survey Code Manager's Apply and the Symbol
+  Library's Import Definitions.
 
 **One definition at a time.** Opening another while the form has edits that
 are not saved is REFUSED and said, in the message area and the log
@@ -2126,8 +2160,15 @@ with one built by hand; the unsaved-definition preview in
 definition in `tests/cad/customisation/test_definition_users.cpp`; the
 strokes as text, the name a copy takes and the remove line in
 `tests/cad/customisation/test_definition_edit.cpp`; and the real window,
-headless, in `qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless`
-and `qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless`.
+headless, in `qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless`,
+`qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless`
+and `qt_a_definition_a_survey_code_names_is_refused_by_delete_and_removed_by_delete_anyway_headless`.
+The widget tests give the editor a runner of their own for `CUSTOMISE
+REMOVE`, so that what they assert is the editor's; one gives it the verb
+itself (`TheVerbItselfRefusesADefinitionInUseAndDeleteAnywayRemovesIt`), and
+that every line the editor can build is read by the verb as that one
+definition is `TheLineAnEditorBuildsToRemoveADefinitionIsReadAsThatDefinitionAlone`
+(`tests/cad/customisation/test_customisation_verbs.cpp`).
 
 Not done:
 
@@ -2135,23 +2176,21 @@ Not done:
   the Document, as the code manager's Apply is. On the command line a
   definition is made or changed by writing it in a customisation file and
   loading that; an agent has no shorter way.
-- **Waiting on other changes of the same work**, each to be struck here when
-  it lands:
-  - *`CUSTOMISE REMOVE` is not in this change.* The editor builds its line
-    and shows what the window answers; until the verb is there the window
-    reads `REMOVE` as a file's name and refuses, so Delete deletes nothing.
-    The end-to-end headless test of Delete comes with the verb. The verb is
-    to refuse by `cad::definitionUsers`, the function the editor lists with.
-  - *`CustomisationContext::beginCommit` is not answered.* The workbench
-    leaves it empty, so an editor's Save or Delete does not yet keep a kept
-    session kept; whoever knows whether the session was kept sets it.
-  - *The symbol catalogue does not list by `LineStyle::symbol` yet*
-    (`cad::symbolLibrary`): a symbol made here that is not at vertices is
-    saved with `symbol` set and is NOT in the Symbol Library's grid until a
-    style or a survey code names it - it is listed as a linestyle. Kind's
-    tip states what holds once the catalogue reads the flag. The headless
-    test ticks At vertices for that reason and says, at the test, to take
-    the step out then.
+- **`CustomisationContext::beginCommit` is not answered.** The workbench
+  leaves it empty, so an editor's commit - this one's Save or Delete, the
+  Survey Code Manager's Apply, the Symbol Library's Import Definitions -
+  does not yet keep a kept session kept; whoever knows whether the session
+  was kept sets it (`CustomisationWorkbench::context`). Every one of those
+  already calls it, before and after.
+- **A refused Delete lists what names the definition twice**, in two
+  wordings: the verb's refusal, shown as it came (`rule #7 AC* (symbol)
+  names it`), and under it the editor's own list (`rule #7 AC* (symbol)
+  draws it as its symbol`). Both are asked of `cad::definitionUsers`; the
+  verb words its answer itself, and its words are pinned
+  (`docs/customisation.md`, "The verbs: not done").
+- **Delete is the window's only.** `katana_cli` and `katana_mcp` still take
+  a `CUSTOMISE` line themselves and read `REMOVE` as a file's name; the verb
+  reaches them when their own handling of the line goes.
 - **A definition the form cannot show cannot be opened** - one the format
   cannot write (a stroke carrying a member its kind does not use, texts that
   are not its text strokes in order; `docs/customisation.md`, "What it
@@ -2224,7 +2263,12 @@ never reaches into the window for it.
   `UTILITY`), then to a running tool (`ViewWorkspace::typeIntoTool`), and
   hands whatever is left to `dispatchLine` - the view verbs, the window's own
   (`SCRIPT`, `CUSTOMISE`, `PLOTSHEETS`, `PLOT`, `SNAPSHOT`), a tool's alias,
-  and the interpreter. `runVerbLine` echoes the line and runs the same
+  and the interpreter. Of `CUSTOMISE` the window takes the loading of files,
+  reading every word after the verb as one; `CUSTOMISE REMOVE` it hands on to
+  the interpreter's family (`docs/customisation.md`, "The verbs"), since the
+  definition editor's Delete runs that line, and the rest of the family
+  follows when the window stops taking the verb at all. `runVerbLine` echoes
+  the line and runs the same
   `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
   line is kept in the interpreter's history and undone exactly as a typed one.
 - **Never a running tool's answer.** That step is the only one `runVerbLine`

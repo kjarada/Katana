@@ -179,7 +179,11 @@ CustomisationContext CustomisationWorkbench::context()
         editDefinition(what, name);
     };
     // beginCommit is left empty: nothing here knows yet whether the session's
-    // customisation is the kept one, which is what it is for.
+    // customisation is the kept one, which is what it is for. Every editor
+    // that commits already calls it, before and after - the definition
+    // editor's Save and Delete, the Survey Code Manager's Apply and the Symbol
+    // Library's Import Definitions - so answering it here is the whole of
+    // keeping a kept session kept across their changes.
     return context;
 }
 

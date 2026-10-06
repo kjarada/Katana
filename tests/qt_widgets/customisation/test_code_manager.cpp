@@ -34,8 +34,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <set>
 #include <string>
@@ -654,6 +656,81 @@ TEST(SurveyCodeManager, TheLineworkCodesAreTheSessionsAndAnAmbiguousSetIsRefused
     EXPECT_EQ(f.lineworkCodes.start, "BEG");
 }
 
+TEST(SurveyCodeManager, ApplyCallsTheCommitHookBeforeTheMapIsSetAndWhatItHandsBackAfter)
+{
+    // CustomisationContext::beginCommit is how a session whose customisation
+    // is the kept one stays kept across an editor's own commit. Its maker
+    // has to be asked BEFORE the commit - Apply's setSurveyMap leaves the
+    // session "not kept", so only before it can "was it kept?" be answered -
+    // and what it hands back is called AFTER, which is where it keeps again.
+    // The manager knows neither; it calls, in that order, as the definition
+    // editor's Save does. A counting hook that notes at each call the survey
+    // map's generation, and whether the session says it is kept, shows which
+    // side of the commit the call came on.
+    ManagerFixture f;
+    // The session as a start leaves one: kept.
+    ASSERT_TRUE(f.document
+                    .installCustomisation(f.document.customisation(),
+                                          katana::cad::CustomisationOrigin::Kept, true)
+                    .ok());
+    ASSERT_TRUE(f.document.customisationState().kept);
+    int begun = 0;
+    int finished = 0;
+    bool handBack = true;
+    std::uint64_t mapAtBegin = 0;
+    std::uint64_t mapAtFinish = 0;
+    bool keptAtBegin = false;
+    bool keptAtFinish = true;
+    f.context.beginCommit = [&]() -> std::function<void()> {
+        ++begun;
+        mapAtBegin = f.document.surveyMapGeneration();
+        keptAtBegin = f.document.customisationState().kept;
+        if (!handBack) {
+            return {};
+        }
+        return [&] {
+            ++finished;
+            mapAtFinish = f.document.surveyMapGeneration();
+            keptAtFinish = f.document.customisationState().kept;
+        };
+    };
+    SurveyCodeManagerDialog dialog(f.context);
+
+    // Opening the manager and editing its buffer commit nothing.
+    editWaterMainLayer(dialog, QStringLiteral("TEST WATER"));
+    EXPECT_EQ(begun, 0);
+
+    const std::uint64_t before = f.document.surveyMapGeneration();
+    ASSERT_TRUE(dialog.apply().ok());
+    EXPECT_EQ(begun, 1);
+    EXPECT_EQ(finished, 1);
+    EXPECT_EQ(mapAtBegin, before) << "asked before the map was set";
+    EXPECT_TRUE(keptAtBegin) << "and so while the session still said it was kept";
+    EXPECT_EQ(mapAtFinish, before + 1) << "answered once it had been";
+    EXPECT_FALSE(keptAtFinish) << "which is what the answer is there to put right";
+    EXPECT_EQ(f.document.surveyMap().rules()[0].model, "TEST WATER");
+
+    // A maker that hands nothing back - the session was not kept - is asked
+    // all the same, and that is all.
+    handBack = false;
+    editWaterMainLayer(dialog, QStringLiteral("TEST MAINS"));
+    ASSERT_TRUE(dialog.apply().ok());
+    EXPECT_EQ(begun, 2);
+    EXPECT_EQ(finished, 1);
+    EXPECT_EQ(f.document.surveyMap().rules()[0].model, "TEST MAINS");
+
+    // The Apply button is that call.
+    handBack = true;
+    editWaterMainLayer(dialog, QStringLiteral("TEST PIPES"));
+    auto* applyButton = child<QPushButton>(dialog, "applyMap");
+    ASSERT_NE(applyButton, nullptr);
+    ASSERT_TRUE(applyButton->isEnabled());
+    applyButton->click();
+    EXPECT_EQ(begun, 3);
+    EXPECT_EQ(finished, 2);
+    EXPECT_EQ(f.document.surveyMap().rules()[0].model, "TEST PIPES");
+}
+
 TEST(SurveyCodeManager, ExportedCodesAreAKatanaCustomisationOfTheRulesAloneThatReadsBackAsTheBuffer)
 {
     ManagerFixture f;
@@ -711,10 +788,25 @@ TEST(SurveyCodeManager, ExportedCodesAreAKatanaCustomisationOfTheRulesAloneThatR
 // The file a session of four customisations, each with its author's notice,
 // exports its codes to (fixture_customisation.hpp, installNoticedSession) -
 // written out by hand from docs/customisation.md, "Layout". The session's own
-// name, description and notice; of its four sources the two that brought
-// rules, each with its notice, and the table of colours, because the file
-// carries one of its colours; the colour a rule names and not the other; and
-// the rules. No definitions, and nothing of the linework codes.
+// name, description and notice, and after it the notice of the one source the
+// file leaves out; of its four sources the two that brought rules, each with
+// its notice, and the table of colours, because the file carries one of its
+// colours; the colour a rule names and not the other; and the rules. No
+// definitions, nothing of the linework codes, and not what the session is
+// based on.
+//
+// TWO THINGS HERE CHANGED when the managers took the one rule a part is
+// written by (cad::customisationPart, which CUSTOMISE EXPORT ... CODES writes
+// by too); this file first pinned the managers' own:
+//   - "Marks drawn by hand." is in the notice. The marks' customisation
+//     brought definitions alone, so nothing of it is written and it is no
+//     source of the file; by the managers' rule its notice went with it. By
+//     the one rule the notice of a source left out is written with the
+//     part's own - nothing says whose a colour is, and no export drops an
+//     author's notice.
+//   - no "basedOn", though the session has one (the fixture's base says what
+//     it was made from): a part is not an edition of the built-in, to be
+//     told from another edition at a start. The managers' rule kept it.
 const char* const kNoticedCodes =
     "{\n"
     "  \"format\": \"katana-customisation\",\n"
@@ -722,7 +814,8 @@ const char* const kNoticedCodes =
     "  \"name\": \"base\",\n"
     "  \"description\": \"The base set.\",\n"
     "  \"notice\": [\n"
-    "    \"Base: all rights reserved.\"\n"
+    "    \"Base: all rights reserved.\",\n"
+    "    \"Marks drawn by hand.\"\n"
     "  ],\n"
     "  \"sources\": [\n"
     "    {\"name\": \"base\", \"rules\": true},\n"
@@ -751,6 +844,7 @@ TEST(SurveyCodeManager, ExportedCodesCarryTheSessionsNoticeItsRuleSourcesAndTheC
               std::vector<std::string>{"Base: all rights reserved."});
     ASSERT_EQ(document.customisationState().sources.size(), 4u);
     ASSERT_EQ(document.customisationState().colours.size(), 2u);
+    ASSERT_TRUE(document.customisation().basedOn.has_value());
     CustomisationContext context;
     context.document = &document;
     context.log = [](const QString&, bool) {};
@@ -764,10 +858,11 @@ TEST(SurveyCodeManager, ExportedCodesCarryTheSessionsNoticeItsRuleSourcesAndTheC
     // The colleague the file is for loads it as a whole customisation is
     // loaded (mergeCustomisation, then installCustomisation: what CUSTOMISE
     // <file> does). They are shown the notice - their session had no name, so
-    // it takes the file's with its description and notice - and each source
-    // keeps its own. And their own spelling of Start, BEG, is as they left
-    // it: the file says nothing of the control codes, which a merge takes
-    // from any file that does.
+    // it takes the file's with its description and notice, the two lines the
+    // file carries (was: the session's one) - and each source keeps its own.
+    // And their own spelling of Start, BEG, is as they left it: the file says
+    // nothing of the control codes, which a merge takes from any file that
+    // does.
     {
         Document colleague;
         katana::entity::LineworkCodes theirs;
@@ -778,7 +873,10 @@ TEST(SurveyCodeManager, ExportedCodesCarryTheSessionsNoticeItsRuleSourcesAndTheC
         const katana::cad::CustomisationState& state = colleague.customisationState();
         EXPECT_EQ(state.name, "base");
         EXPECT_EQ(state.description, "The base set.");
-        EXPECT_EQ(state.notice, std::vector<std::string>{"Base: all rights reserved."});
+        EXPECT_EQ(state.notice, (std::vector<std::string>{"Base: all rights reserved.",
+                                                          "Marks drawn by hand."}));
+        // Their session is not said to be made from the author's base.
+        EXPECT_FALSE(colleague.customisation().basedOn.has_value());
         EXPECT_EQ(state.sources,
                   (std::vector<katana::entity::CustomisationSourceNote>{
                       {"base", false, true, {}},
@@ -792,7 +890,9 @@ TEST(SurveyCodeManager, ExportedCodesCarryTheSessionsNoticeItsRuleSourcesAndTheC
 
     // With the one rule that names a colour gone from the buffer, the file
     // carries no colour, and so nothing of the table of colours: it is not a
-    // source of this file, and its notice does not travel with it.
+    // source of this file. Its notice is written with the part's own, after
+    // the marks' (was: "does not travel with it" - the managers' own rule,
+    // which the one rule replaced: no export drops an author's notice).
     ASSERT_TRUE(dialog.removeRule(0).ok());
     ASSERT_TRUE(dialog.exportCodes(path).ok());
     auto read = katana::entity::customisationFromJson(readBytes(path));
@@ -802,7 +902,10 @@ TEST(SurveyCodeManager, ExportedCodesCarryTheSessionsNoticeItsRuleSourcesAndTheC
               (std::vector<katana::entity::CustomisationSourceNote>{
                   {"base", false, true, {}},
                   {"client", false, true, {"Client codes, for this job only."}}}));
-    EXPECT_EQ(read->notice, std::vector<std::string>{"Base: all rights reserved."});
+    EXPECT_EQ(read->notice,
+              (std::vector<std::string>{"Base: all rights reserved.", "Marks drawn by hand.",
+                                        "Tints: free to use."}));
+    EXPECT_FALSE(read->basedOn.has_value());
     EXPECT_EQ(read->description, "The base set.");
     EXPECT_TRUE(read->map == dialog.buffer());
 }

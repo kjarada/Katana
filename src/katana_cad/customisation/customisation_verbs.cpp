@@ -6,13 +6,16 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <system_error>
 #include <utility>
 
 #include "katana/cad/customisation_merge.hpp"
+#include "katana/cad/customisation_part.hpp"
 #include "katana/cad/customisation_record.hpp"
 #include "katana/cad/customisation_report.hpp"
+#include "katana/cad/definition_users.hpp"
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
@@ -292,45 +295,6 @@ bool isExportWord(const std::string& word)
     return false;
 }
 
-// What a PART of the session says of where it came from. A file's `sources`
-// are taken at their word where the file is loaded: each becomes a source of
-// that session, by name, and both a project's record of what it was drawn
-// with and the warning that one of those is not loaded go by name. So a part
-// lists a source only for what the part itself HOLDS of it:
-//
-//   definitions   one of the definitions written came from it (`writtenFrom`,
-//                 the LineStyle::source of each)
-//   rules         the rules are written (`rulesWritten`) and it brought some
-//   neither       it brought neither kind - a table of colours - and there
-//                 are colours, which go with every part
-//
-// Written with the session's list as it stood, one symbol exported for a
-// colleague said it was the whole customisation, rules and all, and loaded it
-// answered for a customisation that was not there. A source the part holds
-// nothing of is left out, and its notice is written with the part's own:
-// nothing says whose the colours are, and an author's notice is never dropped
-// by an export.
-void narrowSourcesToPart(Customisation& part,
-                         const std::set<std::string, std::less<>>& writtenFrom, bool rulesWritten)
-{
-    std::vector<katana::entity::CustomisationSourceNote> held;
-    for (katana::entity::CustomisationSourceNote& source : part.sources) {
-        const bool broughtNeither = !source.definitions && !source.rules;
-        source.definitions = writtenFrom.contains(source.name);
-        source.rules = source.rules && rulesWritten;
-        if (source.definitions || source.rules || (broughtNeither && !part.colours.empty())) {
-            held.push_back(std::move(source));
-            continue;
-        }
-        for (std::string& line : source.notice) {
-            if (std::find(part.notice.begin(), part.notice.end(), line) == part.notice.end()) {
-                part.notice.push_back(std::move(line));
-            }
-        }
-    }
-    part.sources = std::move(held);
-}
-
 Result<std::string> exportTo(const Document& document, const Words& args)
 {
     if (args.empty()) {
@@ -441,28 +405,22 @@ Result<std::string> exportTo(const Document& document, const Words& args)
     }
 
     // The definitions the writer will choose, by the rule it chooses by
-    // (entity::CustomisationWriteOptions): counted for the reply, and each
-    // one's source noted for what a part says of its sources.
+    // (entity::CustomisationWriteOptions), counted for the reply.
     const std::set<std::string, std::less<>> chosen(options.only.begin(), options.only.end());
     std::size_t definitions = 0;
-    std::set<std::string, std::less<>> writtenFrom;
     session.library.forEach([&](const katana::entity::LineStyle& definition) {
         const bool kind = definition.symbol ? options.symbols : options.linestyles;
         if (kind && (chosen.empty() || chosen.contains(definition.name))) {
             ++definitions;
-            writtenFrom.insert(definition.source);
         }
     });
     if (part) {
         // A part of the session is a fragment for someone else's, or for
-        // this one later. Merged in, it must not reset their control codes
-        // and switches, and it is not a copy of the built-in to be told from
-        // another edition. The colours and every notice go with it; of the
-        // sources, those it holds something of.
-        session.linework.reset();
-        session.automation.reset();
-        session.basedOn.reset();
-        narrowSourcesToPart(session, writtenFrom, options.codes && !session.map.empty());
+        // this one later, cut down by the one rule everything that writes a
+        // part cuts by (customisation_part.hpp) - the two managers' export
+        // buttons too, so that the same symbols are the same file whichever
+        // wrote them.
+        session = customisationPart(std::move(session), options);
     }
     const auto text = katana::entity::customisationToJson(session, options);
     if (!text) {
@@ -659,47 +617,29 @@ Result<std::string> revert(Document& document, CustomisationVerbContext& context
 
 // ---- removing -----------------------------------------------------------------------------
 
-// What names a definition: the survey code rules that give it as their
-// linestyle or their symbol, by index; the drawing's styles that give it as
-// their linetype or their symbol, by name; and the drawing's layers that give
-// it as their linetype, by name - an entity with no style of its own is drawn
-// with its layer's.
-//
-// TO BE REPLACED BY THE SHARED FUNCTION WHEN IT LANDS: a public cad function
-// answering exactly this is being written in another tree as this is. It is
-// one function, called from one place (removeDefinitions), so that the swap
-// is one edit. What replaces it must count the layers too: without them
-// REMOVE took a definition a layer was drawn with, unforced and unsaid.
-struct DefinitionUse {
-    std::vector<std::size_t> rules{};
-    std::vector<std::string> styles{};
-    std::vector<std::string> layers{};
-
-    [[nodiscard]] bool any() const { return !rules.empty() || !styles.empty() || !layers.empty(); }
-};
-
-DefinitionUse usesOfDefinition(const Document& document, std::string_view name)
+// The drawing's styles that name a definition, each once and in name order:
+// the shared answer (definition_users.hpp) lists a style under its linetype
+// AND under its symbol when it names the definition both ways, since it says
+// how each names it; this verb counts and cites a style once.
+std::vector<std::string> stylesNaming(const DefinitionUsers& users)
 {
-    DefinitionUse use;
-    const std::vector<katana::entity::SurveyRule>& rules = document.surveyMap().rules();
-    for (std::size_t i = 0; i < rules.size(); ++i) {
-        if (rules[i].linestyle == name || (rules[i].symbol && rules[i].symbol->style == name)) {
-            use.rules.push_back(i);
-        }
-    }
-    document.model().styles.forEach([&](const katana::entity::Style& style) {
-        if (style.linetype == name || style.symbol == name) {
-            use.styles.push_back(style.name);
-        }
-    });
-    for (const katana::entity::Layer& layer : document.model().layers.all()) {
-        if (layer.linetype == name) {
-            use.layers.push_back(layer.name);
-        }
-    }
-    return use;
+    std::vector<std::string> styles;
+    // Both lists are ascending, as the header promises, so this is the union
+    // in the same order.
+    std::set_union(users.linetypeStyles.begin(), users.linetypeStyles.end(),
+                   users.symbolStyles.begin(), users.symbolStyles.end(),
+                   std::back_inserter(styles));
+    return styles;
 }
 
+// What names a definition is asked of cad::definitionUsers - the function the
+// window's definition editor lists a definition's users with, so that what
+// REMOVE refuses for is what a person is shown beside Delete: the survey code
+// rules that give it as their linestyle or their symbol, the drawing's styles
+// that give it as their linetype or their symbol, and the drawing's layers
+// that give it as their linetype (an entity with no style of its own is drawn
+// with its layer's). A name is a use as the resolver would draw it: the name
+// itself, or the earlier name of a definition since renamed.
 Result<std::string> removeDefinitions(Document& document, Words names, bool force)
 {
     names = distinct(names);
@@ -720,23 +660,29 @@ Result<std::string> removeDefinitions(Document& document, Words names, bool forc
                          unknown);
     }
 
-    const std::vector<katana::entity::SurveyRule>& rules = document.surveyMap().rules();
-    std::vector<DefinitionUse> uses;
+    // What each name's record counts: the rules, the styles (each once) and
+    // the layers that name it.
+    struct Counted {
+        std::size_t rules = 0;
+        std::size_t styles = 0;
+        std::size_t layers = 0;
+    };
+    std::vector<Counted> uses;
     std::size_t used = 0;
     std::string listing;
     for (const std::string& name : names) {
-        uses.push_back(usesOfDefinition(document, name));
-        const DefinitionUse& use = uses.back();
-        used += use.any() ? 1 : 0;
-        for (const std::size_t index : use.rules) {
-            const katana::entity::SurveyRule& rule = rules[index];
-            listing += "\n  \"" + name + "\": rule #" + number(index) + " " + rule.key + " (" +
+        const DefinitionUsers users = definitionUsers(document, name);
+        const std::vector<std::string> styles = stylesNaming(users);
+        uses.push_back(Counted{users.rules.size(), styles.size(), users.layers.size()});
+        used += users.empty() ? 0 : 1;
+        for (const DefinitionRule& rule : users.rules) {
+            listing += "\n  \"" + name + "\": rule #" + number(rule.index) + " " + rule.key + " (" +
                        std::string(katana::entity::toString(rule.section)) + ") names it";
         }
-        for (const std::string& style : use.styles) {
+        for (const std::string& style : styles) {
             listing += "\n  \"" + name + "\": the drawing's style \"" + style + "\" names it";
         }
-        for (const std::string& layer : use.layers) {
+        for (const std::string& layer : users.layers) {
             listing += "\n  \"" + name + "\": the drawing's layer \"" + layer + "\" names it";
         }
     }
@@ -756,9 +702,9 @@ Result<std::string> removeDefinitions(Document& document, Words names, bool forc
     std::string reply;
     for (std::size_t i = 0; i < names.size(); ++i) {
         reply += "removed definition=" + recordValue(names[i]) +
-                 " rules=" + number(uses[i].rules.size()) +
-                 " styles=" + number(uses[i].styles.size()) +
-                 " layers=" + number(uses[i].layers.size()) + "\n";
+                 " rules=" + number(uses[i].rules) +
+                 " styles=" + number(uses[i].styles) +
+                 " layers=" + number(uses[i].layers) + "\n";
     }
     return trimmedReply(std::move(reply));
 }
@@ -974,7 +920,8 @@ Export    CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>]
           (and no codes unless CODES is said); NAME, under that name.
           A part is written without the linework codes and the automation, so that merging it
           resets nobody's, and lists as its sources only those it holds something of: where
-          it is loaded a source is taken at its word. The colours and every notice go with it.
+          it is loaded a source is taken at its word. The colours its rules and pens name go
+          with it, and every notice. The window's two export buttons write a part the same way.
           A file that is there is written over, and the reply says so:
           exported file= name= definitions= codes= rules= replaced=yes|no
           The file is the first word; a file called as one of EXPORT's own words is given

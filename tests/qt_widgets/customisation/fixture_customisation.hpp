@@ -107,9 +107,11 @@ inline void installCustomisationFixtures(
 //
 // Four customisations, loaded in this order into an empty Document:
 //
-//   base    description "The base set.", notice "Base: all rights reserved.";
-//           one symbol, BASE Peg, whose pen is "tint teal"; one rule, PG*
-//           feature, layer BASE PEGS, colour "tint teal", drawn as a point
+//   base    description "The base set.", notice "Base: all rights reserved.",
+//           based on "base" 0123456789abcdef (it says what it was made from,
+//           as a copy kept from a built-in does); one symbol, BASE Peg, whose
+//           pen is "tint teal"; one rule, PG* feature, layer BASE PEGS,
+//           colour "tint teal", drawn as a point
 //   client  notice "Client codes, for this job only."; one rule, FN* feature,
 //           layer CLIENT FENCES - rules alone, and no colour named
 //   marks   notice "Marks drawn by hand."; one symbol, MARK Cross, with no
@@ -118,11 +120,11 @@ inline void installCustomisationFixtures(
 //           "tint rose" #FF007F - neither definitions nor rules
 //
 // What the session then is, by cad/customisation_merge.hpp: it had no name, so
-// it is named "base" and takes base's description and notice; its sources, in
-// load order, are base (definitions and rules; no notice of its own, that
-// having become the session's), client (rules, its notice), marks
-// (definitions, its notice) and tints (neither, its notice). Its rules are
-// PG* then FN*; its colours both of tints'.
+// it is named "base" and takes base's description and notice, and what base
+// is based on; its sources, in load order, are base (definitions and rules;
+// no notice of its own, that having become the session's), client (rules, its
+// notice), marks (definitions, its notice) and tints (neither, its notice).
+// Its rules are PG* then FN*; its colours both of tints'.
 inline constexpr const char* kNoticedBase = R"({
   "format": "katana-customisation",
   "version": 1,
@@ -131,6 +133,7 @@ inline constexpr const char* kNoticedBase = R"({
   "notice": [
     "Base: all rights reserved."
   ],
+  "basedOn": {"name": "base", "digest": "0123456789abcdef"},
   "symbols": [
     {"name": "BASE Peg", "atVertices": true, "strokes": [
       ["pen", "tint teal"],

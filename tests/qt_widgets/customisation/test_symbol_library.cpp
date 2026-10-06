@@ -34,8 +34,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -634,6 +636,61 @@ TEST(SymbolLibrary, ImportTakesAFilesDefinitionsAndColoursAndLeavesItsRulesAndSe
     EXPECT_FALSE(extra->rules);
 }
 
+TEST(SymbolLibrary, ImportCallsTheCommitHookBeforeTheInstallAndWhatItHandsBackAfterOneThatWasTaken)
+{
+    // CustomisationContext::beginCommit is how a session whose customisation
+    // is the kept one stays kept across an editor's own commit: its maker is
+    // asked BEFORE - the install leaves the session "not kept", so only
+    // before it can "was it kept?" be answered - and what it hands back is
+    // called AFTER an install that was taken. The library knows neither; it
+    // calls, in that order, as the definition editor's Save does. A counting
+    // hook that notes at each call the library's generation, and whether the
+    // session says it is kept, shows which side of the commit a call came on.
+    LibraryFixture fixture({"test_linestyles"});
+    // The session as a start leaves one: kept.
+    ASSERT_TRUE(fixture.document
+                    .installCustomisation(fixture.document.customisation(),
+                                          katana::cad::CustomisationOrigin::Kept, true)
+                    .ok());
+    ASSERT_TRUE(fixture.document.customisationState().kept);
+    int begun = 0;
+    int finished = 0;
+    std::uint64_t libraryAtBegin = 0;
+    std::uint64_t libraryAtFinish = 0;
+    bool keptAtBegin = false;
+    bool keptAtFinish = true;
+    fixture.context.beginCommit = [&]() -> std::function<void()> {
+        ++begun;
+        libraryAtBegin = fixture.document.libraryGeneration();
+        keptAtBegin = fixture.document.customisationState().kept;
+        return [&] {
+            ++finished;
+            libraryAtFinish = fixture.document.libraryGeneration();
+            keptAtFinish = fixture.document.customisationState().kept;
+        };
+    };
+    SymbolLibraryDialog dialog(fixture.context);
+
+    // What is not a commit does not trouble the hook: a file that is not
+    // there, and one that reads and holds nothing a symbol library takes -
+    // the fixture of survey codes, which has rules and no definition or
+    // colour.
+    EXPECT_FALSE(dialog.importDefinitionsFile(scratchFile("no-such.customisation.json")));
+    EXPECT_FALSE(dialog.importDefinitionsFile(customisationFixtureFile("test_survey")));
+    EXPECT_EQ(begun, 0);
+    EXPECT_TRUE(fixture.document.customisationState().kept);
+
+    const std::uint64_t before = fixture.document.libraryGeneration();
+    ASSERT_TRUE(dialog.importDefinitionsFile(customisationFixtureFile("test_symbols")));
+    EXPECT_EQ(begun, 1);
+    EXPECT_EQ(finished, 1);
+    EXPECT_EQ(libraryAtBegin, before) << "asked before the library was touched";
+    EXPECT_TRUE(keptAtBegin) << "and so while the session still said it was kept";
+    EXPECT_GT(libraryAtFinish, before) << "answered once it had been";
+    EXPECT_FALSE(keptAtFinish) << "which is what the answer is there to put right";
+    EXPECT_TRUE(fixture.document.styleLibrary().contains("TEST Valve"));
+}
+
 TEST(SymbolLibrary, ImportingDefinitionsLeavesOutASourceThatBroughtOnlyRules)
 {
     // A project drawn with a customisation "B", opened where B is not
@@ -784,25 +841,36 @@ TEST(SymbolLibrary, ExportWritesOnlyTheSelectedLibraryDefinitionsAndNamesTheRest
     std::filesystem::remove(path);
     // A Katana customisation file, under the session's name - the first
     // fixture loaded. Of the three customisations the session was loaded
-    // from, the two that brought definitions are this file's sources, in the
-    // order they were loaded, each one line (docs/customisation.md, "Layout",
-    // rules 4, 6 and 11); then the lists at once: the session has no colours.
+    // from, the ONE both selected symbols came from is this file's source,
+    // one line (docs/customisation.md, "Layout", rules 4, 6 and 11); then the
+    // lists at once: the session has no colours, and no source it leaves out
+    // has a notice to carry.
+    //
+    // CHANGED when the managers took the one rule a part is written by
+    // (cad::customisationPart, which CUSTOMISE EXPORT ... ONLY writes by
+    // too). This pinned the managers' own rule, by which every customisation
+    // that brought the session ANY definition was listed - test_linestyles
+    // too, with not one of its definitions in the file. A file's sources are
+    // taken at their word where it is loaded, by name: so listed, two symbols
+    // passed for the linestyles' customisation as well, and would have taken
+    // away a project's warning that it is missing. By the one rule a part
+    // lists the sources of what is WRITTEN.
     const std::string head = "{\n"
                              "  \"format\": \"katana-customisation\",\n"
                              "  \"version\": 1,\n"
                              "  \"name\": \"test_symbols\",\n"
                              "  \"sources\": [\n"
-                             "    {\"name\": \"test_symbols\", \"definitions\": true},\n"
-                             "    {\"name\": \"test_linestyles\", \"definitions\": true}\n"
+                             "    {\"name\": \"test_symbols\", \"definitions\": true}\n"
                              "  ],\n"
                              "  \"symbols\": [\n";
     EXPECT_EQ(written.substr(0, head.size()), head);
     auto read = katana::entity::customisationFromJson(written);
     ASSERT_TRUE(read.ok()) << read.error().describe();
-    // The source that brought the session's rules is no source of this file.
+    // Neither the source that brought the session's rules nor the one that
+    // brought its linestyles is a source of this file.
     EXPECT_EQ(read->sources, (std::vector<katana::entity::CustomisationSourceNote>{
-                                 {"test_symbols", true, false, {}},
-                                 {"test_linestyles", true, false, {}}}));
+                                 {"test_symbols", true, false, {}}}));
+    EXPECT_TRUE(read->notice.empty());
     EXPECT_EQ(read->library.names(), (std::vector<std::string>{"TEST Survey Mark", "TEST Valve"}));
     // The format is lossless: the valve reads back as the session holds it,
     // where it came from and that it is listed as a symbol included - the two
@@ -824,12 +892,26 @@ TEST(SymbolLibrary, ExportWritesOnlyTheSelectedLibraryDefinitionsAndNamesTheRest
 // The file a session of four customisations, each with its author's notice,
 // exports two of its symbols to (fixture_customisation.hpp,
 // installNoticedSession) - written out by hand from docs/customisation.md,
-// "Layout". The session's own name, description and notice; of its four
-// sources the two that brought definitions, each with its notice, and the
-// table of colours, because the file carries one of its colours; the colour
-// a pen names and not the other; and the two symbols, in name order, the one
-// that is not the session's own saying where it is from. No rules, and
-// nothing of the linework codes.
+// "Layout". The session's own name, description and notice, and after it the
+// notice of the one source the file leaves out; of its four sources the two
+// the symbols came from, each with its notice, and the table of colours,
+// because the file carries one of its colours; the colour a pen names and
+// not the other; and the two symbols, in name order, the one that is not the
+// session's own saying where it is from. No rules, nothing of the linework
+// codes, and not what the session is based on.
+//
+// TWO THINGS HERE CHANGED when the managers took the one rule a part is
+// written by (cad::customisationPart, which CUSTOMISE EXPORT writes a part by
+// too); this file first pinned the managers' own:
+//   - "Client codes, for this job only." is in the notice. The client's
+//     customisation brought rules alone, so nothing of it is written and it
+//     is no source of the file; by the managers' rule its notice went with
+//     it. By the one rule the notice of a source left out is written with
+//     the part's own - nothing says whose a colour is, and no export drops
+//     an author's notice.
+//   - no "basedOn", though the session has one (the fixture's base says what
+//     it was made from): a part is not an edition of the built-in, to be
+//     told from another edition at a start. The managers' rule kept it.
 const char* const kNoticedSymbols =
     "{\n"
     "  \"format\": \"katana-customisation\",\n"
@@ -837,7 +919,8 @@ const char* const kNoticedSymbols =
     "  \"name\": \"base\",\n"
     "  \"description\": \"The base set.\",\n"
     "  \"notice\": [\n"
-    "    \"Base: all rights reserved.\"\n"
+    "    \"Base: all rights reserved.\",\n"
+    "    \"Client codes, for this job only.\"\n"
     "  ],\n"
     "  \"sources\": [\n"
     "    {\"name\": \"base\", \"definitions\": true},\n"
@@ -865,6 +948,7 @@ TEST(SymbolLibrary, AnExportCarriesTheSessionsNoticeAndTheSourcesThatBroughtDefi
     katana::qt::test::installNoticedSession(document);
     ASSERT_EQ(document.customisationState().name, "base");
     ASSERT_EQ(document.customisationState().sources.size(), 4u);
+    ASSERT_TRUE(document.customisation().basedOn.has_value());
     DefinitionThumbnails thumbnails;
     CustomisationContext context;
     context.document = &document;
@@ -881,17 +965,29 @@ TEST(SymbolLibrary, AnExportCarriesTheSessionsNoticeAndTheSourcesThatBroughtDefi
     select("MARK Cross");
     const std::filesystem::path path = scratchFile("noticed.customisation.json");
 
-    // The cross alone has no pen: the file carries no colour, and so nothing
-    // of the table of colours - it is no source of this file.
+    // The cross alone, which came from marks and has no pen. The file
+    // carries no colour, and so nothing of the table of colours: it is no
+    // source of this file.
+    //
+    // CHANGED with the one rule (the comment above kNoticedSymbols): the
+    // sources were `base` and `marks`, every source that brought the session
+    // a definition, and are `marks` alone - nothing of base's is written, and
+    // listed it would pass for loaded wherever the file went. And the notice
+    // was the session's alone; it is followed now by the notice of each
+    // source left out that has one, in their order: the client's and the
+    // table of colours'.
     ASSERT_TRUE(dialog.exportSelectedTo(path));
     auto read = katana::entity::customisationFromJson(readBytes(path));
     ASSERT_TRUE(read.ok()) << read.error().describe();
     EXPECT_EQ(read->library.names(), std::vector<std::string>{"MARK Cross"});
     EXPECT_TRUE(read->colours.empty());
-    EXPECT_EQ(read->notice, std::vector<std::string>{"Base: all rights reserved."});
+    EXPECT_EQ(read->notice,
+              (std::vector<std::string>{"Base: all rights reserved.",
+                                        "Client codes, for this job only.",
+                                        "Tints: free to use."}));
     EXPECT_EQ(read->sources, (std::vector<katana::entity::CustomisationSourceNote>{
-                                 {"base", true, false, {}},
                                  {"marks", true, false, {"Marks drawn by hand."}}}));
+    EXPECT_FALSE(read->basedOn.has_value());
 
     // With the peg, whose pen is one of the table's colours: the whole file.
     select("BASE Peg");
@@ -900,8 +996,9 @@ TEST(SymbolLibrary, AnExportCarriesTheSessionsNoticeAndTheSourcesThatBroughtDefi
 
     // The colleague the file is for imports its definitions into a session
     // of their own, which has no name yet: it takes the file's, with its
-    // description and notice, and each source the file lists keeps its own
-    // notice (cad/customisation_merge.hpp). They are shown whose data it is.
+    // description and notice - the two lines the file carries (was: the
+    // session's one) - and each source the file lists keeps its own notice
+    // (cad/customisation_merge.hpp). They are shown whose data it is.
     {
         Document colleague;
         DefinitionThumbnails theirThumbnails;
@@ -914,7 +1011,9 @@ TEST(SymbolLibrary, AnExportCarriesTheSessionsNoticeAndTheSourcesThatBroughtDefi
         const katana::cad::CustomisationState& state = colleague.customisationState();
         EXPECT_EQ(state.name, "base");
         EXPECT_EQ(state.description, "The base set.");
-        EXPECT_EQ(state.notice, std::vector<std::string>{"Base: all rights reserved."});
+        EXPECT_EQ(state.notice,
+                  (std::vector<std::string>{"Base: all rights reserved.",
+                                            "Client codes, for this job only."}));
         EXPECT_EQ(state.sources, (std::vector<katana::entity::CustomisationSourceNote>{
                                      {"base", true, false, {}},
                                      {"marks", true, false, {"Marks drawn by hand."}},

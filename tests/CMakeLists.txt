@@ -1213,7 +1213,7 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
             "-DDRIVE=@formatStyles|managerTabs=Linetypes|linetypeGroup=Test/Lines|linetypeTable=TEST Dashed Kerb|?linetypeTable|?libraryDetails"
-            "-DEXPECT=linetypeTable: TEST Dashed Kerb \\| Library \\| Test/Lines \\| paper \\|[^;\r\n]*; TEST Gate \\| Library \\| Test/Lines \\| two-point \\|[^;\r\n]*[\r\n]+libraryDetails: TEST Dashed Kerb Group: Test/Lines File: test_linestyles\\.4d Kind: Paper linestyle: millimetres on the plot, the same at every scale[^\r\n]*Library linestyles belong to the session's customisation and are read-only here\\."
+            "-DEXPECT=linetypeTable: TEST Dashed Kerb \\| Library \\| Test/Lines \\| paper \\|[^;\r\n]*; TEST Gate \\| Library \\| Test/Lines \\| two-point \\|[^;\r\n]*[\r\n]+libraryDetails: TEST Dashed Kerb Group: Test/Lines Customisation: test_linestyles\\.4d Kind: Paper linestyle: millimetres on the plot, the same at every scale[^\r\n]*Library linestyles belong to the session's customisation and are read-only here\\."
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_style_manager_linetypes_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Symbols, searched for TEST. By hand from the fixture's head comments:
@@ -1238,19 +1238,18 @@ if(TARGET katana)
     # from no customisation. No customisation is loaded: nothing here reads
     # a file.
     #
-    # `definitionAtVertices=on` is in the steps because the symbol catalogue
-    # does not list a definition by LineStyle::symbol yet (entity/
-    # style_library.hpp says the move is pending; cad::symbolLibrary), so a
-    # symbol made in a session is in the grid only when it is at vertices.
-    # WHEN THE CATALOGUE READS `symbol`, TAKE THAT STEP OUT: New Symbol, a
-    # name, strokes and Save - the path a person takes - is then what this
-    # guards, and with the step left in it would go on passing with `symbol`
-    # lost.
+    # New Symbol, a name, strokes and Save - the path a person takes - and
+    # nothing else: At vertices is NOT ticked. The symbol is in the grid
+    # because the definition is listed as a symbol (LineStyle::symbol, which
+    # New Symbol sets and cad::symbolLibrary reads), and no rule or style
+    # names it. The steps once ticked At vertices, in a tree whose catalogue
+    # did not read that flag yet, and would then have gone on passing with
+    # the flag lost.
     add_test(NAME qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionAtVertices=on|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|?definitionHeading|%symbolLibraryDialog|symbolGrid=TEST Post|?detailName|?detailSource|?detailContent"
+            "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|?definitionHeading|%symbolLibraryDialog|symbolGrid=TEST Post|?detailName|?detailSource|?detailContent"
             "-DEXPECT=Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n]+definitionHeading: Symbol \"TEST Post\"[\r\n]+detailName: TEST Post[\r\n]+detailSource: Made in this session[\r\n]+detailContent: 2 strokes, 0 texts, 0 pen changes"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definition_editor_new_symbol_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -1269,8 +1268,35 @@ if(TARGET katana)
             "-DREFUSED=Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n]+.*--press: definitionEditorDialog's button definitionDeleteAnyway is disabled"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definition_editor_delete_anyway_refused_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Delete, end to end: the editor's line is CUSTOMISE REMOVE, run by the
+    # window's one executor and answered by the interpreter's verb. By hand
+    # from the fixture's head comment (test_survey.mapfile): its eleven rules
+    # are seven feature rules, then three symbol rules, then one of
+    # attributes, so the first symbol rule is #7, AC*, and the symbol it
+    # draws is TEST Survey Mark - which no other rule, and in an empty
+    # drawing no style or layer, names. So:
+    #   - Delete is REFUSED, and the log holds the verb's own words - one of
+    #     the one definition is in use, and the rule that names it - as the
+    #     window logs any refused line: "! " and the error with its code;
+    #   - the editor shows those words as they came, then its own list of
+    #     what names the definition and what Delete Anyway would do (a point
+    #     is all that draws it, so a stand-in mark is all that follows);
+    #   - Delete Anyway runs the line with FORCE, and the verb's reply counts
+    #     the one rule that still names what is gone;
+    #   - the form then holds a definition the library does not.
+    # The refusal's ";" is passed over with [^\r\n]*: nothing else is.
+    add_test(NAME qt_a_definition_a_survey_code_names_is_refused_by_delete_and_removed_by_delete_anyway_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=@formatSymbols|symbolGrid=TEST Survey Mark|!symbolEdit|%definitionEditorDialog|!definitionDelete|?definitionIssues|!definitionDeleteAnyway|?definitionHeading|?definitionIssues"
+            "-DEXPECT=! InvalidState: CUSTOMISE REMOVE: 1 of the 1 definition named is in use, so nothing was removed[^\r\n]* FORCE removes what is used too, and what names it then draws plain[\r\n]+  \"TEST Survey Mark\": rule #7 AC\\* \\(symbol\\) names it[\r\n]+definitionIssues: \"TEST Survey Mark\" was not deleted: InvalidState: CUSTOMISE REMOVE: 1 of the 1 definition named is in use, so nothing was removed[^\r\n]* FORCE removes what is used too, and what names it then draws plain \"TEST Survey Mark\": rule #7 AC\\* \\(symbol\\) names it It is named by: rule #7 AC\\* \\(symbol\\) draws it as its symbol Delete Anyway runs the line again with FORCE\\. A point naming it is then drawn as a stand-in mark\\.[\r\n]+removed definition=\"TEST Survey Mark\" rules=1 styles=0 layers=0[\r\n]+definitionHeading: Symbol \"TEST Survey Mark\" - not in the library[\r\n]+definitionIssues: \"TEST Survey Mark\" was deleted from the library\\. It is still shown here: Save puts it back\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definition_editor_delete_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless
                          qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless
+                         qt_a_definition_a_survey_code_names_is_refused_by_delete_and_removed_by_delete_anyway_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

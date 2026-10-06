@@ -84,8 +84,10 @@ class SurveyCodeManagerDialog : public QDialog {
     // The buffer differs from the drawing's map: the one it was taken from,
     // last applied, or last seen changed elsewhere.
     [[nodiscard]] bool dirty() const;
-    // The buffer onto the Document (setSurveyMap). InvalidState when the
-    // Document is gone.
+    // The buffer onto the Document (setSurveyMap), with the commit hook
+    // called round it (CustomisationContext::beginCommit): before it, and
+    // what it hands back after. InvalidState when the Document is gone - no
+    // commit, so the hook is not called.
     [[nodiscard]] katana::core::Status apply();
     // The Document's map back into the buffer, discarding the edits.
     void revert();
@@ -131,10 +133,11 @@ class SurveyCodeManagerDialog : public QDialog {
     // The buffer as a Katana customisation file of survey codes alone: its
     // rules in their order, under the session's name
     // (exportedCustomisationName) and with what of the session belongs with
-    // them (exportedPart, code_manager_support.hpp) - its description and its
-    // author's notice, the sources that brought it rules, each with its
-    // notice, and the colours the rules name. Not its definitions, and not
-    // its linework codes or automation switches.
+    // them (cad::customisationPart, the one rule CUSTOMISE EXPORT ... CODES
+    // writes a part by too) - its description and its author's notice, the
+    // sources that brought it rules, each with its notice, the notice of
+    // every source left out, and the colours the rules name. Not its
+    // definitions, and not its linework codes or automation switches.
     [[nodiscard]] katana::core::Status exportCodes(const std::filesystem::path& path) const;
     // The buffer's code list (cad::codeListCsv), UTF-8.
     [[nodiscard]] katana::core::Status exportCodeList(const std::filesystem::path& path) const;

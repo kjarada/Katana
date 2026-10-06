@@ -137,19 +137,24 @@ class SymbolLibraryDialog : public QDialog {
     // are not taken - the Survey Code Manager imports rules - and the log
     // says how many were left; a source the file lists that brought it
     // nothing but rules is not made a source of the session either
-    // (sourcesOfPart, code_manager_support.hpp). False, with the reason in
+    // (sourcesOfImportedDefinitions, code_manager_support.hpp). The commit
+    // hook is called round the install (CustomisationContext::beginCommit):
+    // before it, and what it hands back after one that was taken. False,
+    // with the reason in
     // the log and the session as it was, for a file that does not read (one
     // in another format is "not a Katana customisation file") or holds
     // neither.
     bool importDefinitionsFile(const std::filesystem::path& path);
     // Writes the selected library definitions to a Katana customisation file
     // under the session's name (exportedCustomisationName), with what of the
-    // session belongs with them (exportedPart, code_manager_support.hpp): its
-    // description and its author's notice, the sources that brought it
-    // definitions, each with its notice, and the colours the selected pens
-    // name, so that the file draws elsewhere as it draws here. Not its
-    // rules, and not its linework codes or automation switches. Built-in and
-    // undefined names cannot be written, and are named in the log.
+    // session belongs with them (cad::customisationPart, the one rule
+    // CUSTOMISE EXPORT ... ONLY writes a part by too): its description and
+    // its author's notice, the sources the selected definitions came from,
+    // each with its notice, the notice of every source left out, and the
+    // colours the selected pens name, so that the file draws elsewhere as it
+    // draws here. Not its rules, and not its linework codes or automation
+    // switches. Built-in and undefined names cannot be written, and are
+    // named in the log.
     bool exportSelectedTo(const std::filesystem::path& path);
 
     // ---- file dialogs ----------------------------------------------------------------
