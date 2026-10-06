@@ -14,11 +14,15 @@
 //
 //   A library definition is offered as a SYMBOL if any of: it is `mode
 //   vertex`; a VertexSymbol rule of the survey map names it; a Style::symbol
-//   names it; its source file's name contains "symbol" in any case (symbol
-//   libraries are conventionally named *symbols*.4d). It is offered as a
-//   LINESTYLE if it is not `mode vertex`. It may be both: most symbols the
-//   reference survey code files use are not `mode vertex`, which is why
-//   atVertices alone cannot decide.
+//   names it; its customisation LISTS it as a symbol (LineStyle::symbol). It
+//   is offered as a LINESTYLE if it is not `mode vertex`. It may be both: most
+//   symbols the reference survey codes use are not `mode vertex`, which is
+//   why atVertices alone cannot decide.
+//
+//   The fourth reason was once the NAME of the file a definition was read
+//   from ("symbol" anywhere in it). One customisation now holds both kinds
+//   under one name, so where a definition came from no longer says which it
+//   is, and each definition says so itself.
 //
 //   A picker never relies on its list being complete: keepCurrent puts the
 //   value being edited back, marked, when the list lacks it. That - not a
@@ -56,7 +60,7 @@ struct DefinitionKind {
     bool atVertices = false;
     bool namedBySurveyRule = false; // a VertexSymbol rule names it
     bool namedByStyle = false;      // some Style::symbol names it
-    bool fromSymbolFile = false;    // LineStyle::source contains "symbol", any case
+    bool listedAsSymbol = false;    // its customisation lists it as one: LineStyle::symbol
 
     [[nodiscard]] bool known() const { return linestyle || symbol; }
 

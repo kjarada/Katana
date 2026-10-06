@@ -439,11 +439,9 @@ class MainWindow final : public QMainWindow {
     void importFile();
     void loadCustomisation(katana::archive12d::LoadMode mode);
     void applySurveyCodes();
-    // Before a save: the project records the names of the customisation
-    // files it was drawn with (storage::ProjectMetadata::customisation).
-    void recordCustomisation();
     // After an open: says which files the project records that are not
-    // loaded. A warning; the project opens all the same.
+    // loaded (the Document works out which, and its save writes the record).
+    // A warning; the project opens all the same.
     void reportMissingCustomisation();
     void reportCustomisationCoverage();
     // File > Import's step for a DXF or a .12da archive, whose only choice
@@ -698,13 +696,6 @@ class MainWindow final : public QMainWindow {
     QComboBox* propertyStyle_ = nullptr;
     QToolButton* propertyStyleApply_ = nullptr;
     QComboBox* currentStyle_ = nullptr;
-    // The customisation files loaded this session, in load order: what a
-    // save records in the project (cad/customisation_record.hpp).
-    std::vector<katana::cad::CustomisationSource> customisation_;
-    // The files the last open found the project recorded but not loaded, less
-    // those loaded since: a save keeps them in the record, since this session
-    // cannot judge a file it never had.
-    std::vector<std::string> customisationMissingAtOpen_;
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
     // The drop-down lists of the Edit toolbar's Undo and Redo buttons

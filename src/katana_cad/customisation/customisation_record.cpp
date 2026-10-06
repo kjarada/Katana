@@ -5,27 +5,47 @@
 #include <set>
 #include <system_error>
 
+#include "katana/cad/customisation_host.hpp"
 #include "katana/core/text.hpp"
 
 namespace katana::cad {
 
 void recordCustomisationLoad(std::vector<CustomisationSource>& loaded,
-                             const std::vector<CustomisationSource>& load, bool replacedLibrary,
-                             bool replacedMap)
+                             const std::vector<CustomisationSource>& load,
+                             bool replacedDefinitions, bool replacedRules)
 {
-    std::erase_if(loaded, [&](const CustomisationSource& file) {
-        // Replaced: what the earlier files of that kind brought is gone.
-        if (file.library ? replacedLibrary : replacedMap) {
-            return true;
+    // Replaced: what the earlier sources brought of that kind is gone. One
+    // that brought the other kind as well still brings that; one that now
+    // brings neither goes. A source that never brought either - a table of
+    // colours - is no kind a Replace takes the place of, and stays.
+    std::vector<CustomisationSource> standing;
+    standing.reserve(loaded.size() + load.size());
+    for (CustomisationSource& source : loaded) {
+        const bool brought = source.definitions || source.rules;
+        source.definitions = source.definitions && !replacedDefinitions;
+        source.rules = source.rules && !replacedRules;
+        if (!brought || source.definitions || source.rules) {
+            standing.push_back(std::move(source));
         }
-        // Loaded again: it is now as recent as this load.
-        return std::find(load.begin(), load.end(), file) != load.end();
-    });
-    for (const CustomisationSource& file : load) {
-        // Named twice in one load, it was read twice; it is one file.
-        if (std::find(loaded.begin(), loaded.end(), file) == loaded.end()) {
-            loaded.push_back(file);
+    }
+    loaded = std::move(standing);
+    for (const CustomisationSource& source : load) {
+        CustomisationSource entry = source;
+        // Loaded again - or named twice in this load, which read it twice and
+        // is still one source: it is now as recent as this load, and what it
+        // brought before and still brings is its own as well.
+        const auto earlier =
+            std::find_if(loaded.begin(), loaded.end(),
+                         [&](const CustomisationSource& one) { return one.name == source.name; });
+        if (earlier != loaded.end()) {
+            entry.definitions = entry.definitions || earlier->definitions;
+            entry.rules = entry.rules || earlier->rules;
+            if (entry.notice.empty()) {
+                entry.notice = std::move(earlier->notice);
+            }
+            loaded.erase(earlier);
         }
+        loaded.push_back(std::move(entry));
     }
 }
 
@@ -39,13 +59,15 @@ std::vector<std::string> customisationRecord(const katana::entity::StyleLibrary&
         }
     });
     std::vector<std::string> names;
-    for (const CustomisationSource& file : loaded) {
-        // A survey code file's rules carry no file name, so a loaded one is taken
-        // at its word; a library file is recorded only while it still
-        // defines something.
-        if ((!file.library || sources.contains(file.name)) &&
-            std::find(names.begin(), names.end(), file.name) == names.end()) {
-            names.push_back(file.name);
+    for (const CustomisationSource& source : loaded) {
+        // Rules carry no source name, so a source that brought any is taken at
+        // its word, and so is one that brought neither kind (its colours are
+        // still what names are drawn in); one that brought definitions alone
+        // is recorded only while it still defines something.
+        const bool definitionsAlone = source.definitions && !source.rules;
+        if ((!definitionsAlone || sources.contains(source.name)) &&
+            std::find(names.begin(), names.end(), source.name) == names.end()) {
+            names.push_back(source.name);
         }
     }
     // Definitions from a file no load here accounts for - the library was
@@ -68,20 +90,43 @@ std::uint64_t sourceNameHash(std::string_view name)
     return hash;
 }
 
-std::span<const RenamedSource> builtinRenames()
+std::vector<RenamedSource> builtinRenames(std::string_view builtIn)
 {
-    // Each file's earlier name, hashed by sourceNameHash, and the name it has
-    // now. Written out by a script over the two sets of names when the files
-    // were renamed; the test of this table checks the names it gives now,
-    // which are all it can see.
-    static constexpr std::array<RenamedSource, 4> kRenames{{
-        {0x851e5f2b3efc2d70ULL, "linestyles.4d"},
-        {0x4203f483f25be01eULL, "survey_codes.mapfile"},
-        // Its earlier name is a plain one a person's own file may well have.
-        {0xc03aa2ccdeee0553ULL, "survey_codes_names.mapfile", false},
-        {0x01bf8dab227e48e7ULL, "symbols.4d"},
+    // The four files' first names, hashed by sourceNameHash, in load order.
+    // Written out by a script over the two sets of names when the files were
+    // given general ones: nothing here can spell them.
+    struct Former {
+        std::uint64_t hash;
+        bool distinctive;
+    };
+    static constexpr std::array<Former, 4> kFirstNames{{
+        {0x851e5f2b3efc2d70ULL, true},  // the linestyle library
+        {0x4203f483f25be01eULL, true},  // the first survey code file
+        // A plain name, one a person's own file may well have.
+        {0xc03aa2ccdeee0553ULL, false}, // the second survey code file
+        {0x01bf8dab227e48e7ULL, true},  // the symbol library
     }};
-    return kRenames;
+    // The names the four files had next, until the built-in became one
+    // customisation: general names, so every one of them is plain.
+    static constexpr std::array<std::string_view, 4> kGeneralNames{
+        "linestyles.4d", "survey_codes.mapfile", "survey_codes_names.mapfile", "symbols.4d"};
+
+    std::vector<RenamedSource> renames;
+    renames.reserve(kFirstNames.size() + kGeneralNames.size());
+    for (const Former& former : kFirstNames) {
+        renames.push_back({former.hash, std::string(builtIn), former.distinctive, 0});
+    }
+    for (const std::string_view name : kGeneralNames) {
+        renames.push_back({sourceNameHash(name), std::string(builtIn), false, 1});
+    }
+    return renames;
+}
+
+std::vector<RenamedSource> builtinRenames()
+{
+    const BuiltInCustomisation& compiledIn = compiledInCustomisation();
+    return builtinRenames(compiledIn.customisation ? compiledIn.customisation->name
+                                                   : std::string());
 }
 
 namespace {
@@ -96,10 +141,11 @@ namespace {
     return found == renamed.end() ? nullptr : &*found;
 }
 
-// The rename that answers for `name` in a project's `record`: its own, when the
-// earlier name is distinctive or the record also holds a distinctive earlier
-// name - the record of the renamed set, not of someone's own file that shares
-// a plain name. customisationNotLoaded, noteCustomisationLoaded and
+// The rename that answers for `name` in a project's `record`: its own, when
+// the earlier name is distinctive or the record also holds ANOTHER earlier
+// name of the same set - the record of the renamed set, not of someone's own
+// file that shares a plain name. Nothing, when the rename has no name to
+// answer with. customisationNotLoaded, noteCustomisationLoaded and
 // customisationRecordToSave all ask this, so they cannot come to disagree
 // about which recorded names a rename answers.
 [[nodiscard]] const RenamedSource* renameAnswering(std::string_view name,
@@ -107,24 +153,24 @@ namespace {
                                                    std::span<const RenamedSource> renamed)
 {
     const RenamedSource* rename = renameOf(name, renamed);
-    if (rename == nullptr || rename->distinctive) {
+    if (rename == nullptr || rename->now.empty()) {
+        return nullptr;
+    }
+    if (rename->distinctive) {
         return rename;
     }
     const bool renamedSet = std::any_of(record.begin(), record.end(), [&](const std::string& other) {
+        // The name itself is no company: recorded twice, it is still alone.
+        if (other == name) {
+            return false;
+        }
         const RenamedSource* beside = renameOf(other, renamed);
-        return beside != nullptr && beside->distinctive;
+        return beside != nullptr && beside->set == rename->set;
     });
     return renamedSet ? rename : nullptr;
 }
 
 } // namespace
-
-std::vector<std::string> customisationNotLoaded(const std::vector<std::string>& recorded,
-                                                const katana::entity::StyleLibrary& library,
-                                                const std::vector<CustomisationSource>& loaded)
-{
-    return customisationNotLoaded(recorded, library, loaded, builtinRenames());
-}
 
 std::vector<std::string> customisationNotLoaded(const std::vector<std::string>& recorded,
                                                 const katana::entity::StyleLibrary& library,
@@ -181,12 +227,6 @@ DistinctFiles distinctCustomisationFiles(const std::vector<std::filesystem::path
 }
 
 void noteCustomisationLoaded(std::vector<std::string>& missingAtOpen,
-                             const std::vector<CustomisationSource>& load)
-{
-    noteCustomisationLoaded(missingAtOpen, load, builtinRenames());
-}
-
-void noteCustomisationLoaded(std::vector<std::string>& missingAtOpen,
                              const std::vector<CustomisationSource>& load,
                              std::span<const RenamedSource> renamed)
 {
@@ -198,14 +238,6 @@ void noteCustomisationLoaded(std::vector<std::string>& missingAtOpen,
             return file.name == name || (rename != nullptr && file.name == rename->now);
         });
     });
-}
-
-std::vector<std::string> customisationRecordToSave(const std::vector<std::string>& recorded,
-                                                   const std::vector<std::string>& missingAtOpen,
-                                                   const katana::entity::StyleLibrary& library,
-                                                   const std::vector<CustomisationSource>& loaded)
-{
-    return customisationRecordToSave(recorded, missingAtOpen, library, loaded, builtinRenames());
 }
 
 std::vector<std::string> customisationRecordToSave(const std::vector<std::string>& recorded,
