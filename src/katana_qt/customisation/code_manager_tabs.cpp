@@ -6,10 +6,8 @@
 // step, logged and undone as a typed line (code_manager.hpp).
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <optional>
-#include <utility>
 
 #include <QComboBox>
 #include <QCompleter>
@@ -33,6 +31,7 @@
 #include "command_word.hpp"
 #include "customisation/code_manager.hpp"
 #include "customisation/filter_bar.hpp"
+#include "customisation/linework_labels.hpp"
 #include "customisation/name_picker.hpp"
 #include "customisation/scope_filter_widget.hpp"
 #include "katana/cad/colour_lookup.hpp"
@@ -721,20 +720,19 @@ QWidget* SurveyCodeManagerDialog::buildLineworkTab()
 
     auto* codes = new QGroupBox(tr("Control codes"), right);
     auto* codesForm = new QFormLayout(codes);
-    const std::array<std::pair<const char*, QString>, 7> fields{{
-        {"lineworkStart", tr("Start")},
-        {"lineworkEnd", tr("End")},
-        {"lineworkClose", tr("Close")},
-        {"lineworkArcStart", tr("Begin curve")},
-        {"lineworkArcEnd", tr("End curve")},
-        {"lineworkJoin", tr("Join to point")},
-        {"lineworkRectangle", tr("Rectangle")},
-    }};
-    for (const auto& [name, label] : fields) {
+    // One field a control, in the order the controls are declared in: the
+    // fields are read back by that order (typedLineworkCodes). The words a
+    // person reads each by are linework_labels.hpp's, the one list File >
+    // Settings shows them under as well; the object name is "linework" and
+    // the control's name capitalised (arcStart: lineworkArcStart).
+    for (const katana::entity::LineworkCodeMember& member : katana::entity::lineworkCodeMembers()) {
+        QString name =
+            QString::fromLatin1(member.name.data(), static_cast<qsizetype>(member.name.size()));
+        name[0] = name[0].toUpper();
         auto* field = new QLineEdit(codes);
-        field->setObjectName(QString::fromLatin1(name));
+        field->setObjectName(QStringLiteral("linework") + name);
         field->setToolTip(tr("Typed after the code, matched ignoring case; empty switches it off"));
-        codesForm->addRow(label, field);
+        codesForm->addRow(lineworkControlLabel(member.name), field);
         lineworkCodeFields_.push_back(field);
     }
     lineworkCodesStatus_ = new QLabel(codes);

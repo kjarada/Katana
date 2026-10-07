@@ -8,11 +8,11 @@
 // of the second kind, keyed by the first, so that a control has one name in
 // the window: File > Settings lists the seven spellings under it
 // (settings_dialog.cpp), and the controls' one editor, the Survey Code
-// Manager's Linework tab, is to label its seven fields from it
-// (code_manager_tabs.cpp, buildLineworkTab: `lineworkControlLabel("arcStart")`
-// where it writes tr("Begin curve")). While the tab still writes the words
-// out itself, SettingsDialog.TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem
-// reads the tab's labels against this list and fails when either moves alone.
+// Manager's Linework tab, labels its seven fields from it
+// (code_manager_tabs.cpp, buildLineworkTab). The tab once wrote the words out
+// itself; SettingsDialog.TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem
+// still reads the tab's labels against Settings' page, so a field built
+// without the list fails there.
 //
 // Header only, and nothing of the managers in it: either dialog includes it
 // without the other.

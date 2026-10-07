@@ -28,7 +28,8 @@
 // libraries and survey code files of another program, which Katana no longer
 // reads. A customisation file is loaded by the CUSTOMISE line - typed, in a
 // script, or with --customise - which is the interpreter's
-// (cad/customisation_verbs.hpp); no menu item stands for it here.
+// (cad/customisation_verbs.hpp), and from File > Settings, which this object
+// makes (below); no item of Format or Survey stands for it.
 //
 // The workbench owns what the managers share: the picture cache
 // (DefinitionThumbnails) and the one CustomisationContext they are built

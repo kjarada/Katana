@@ -589,7 +589,8 @@ void MainWindow::buildActions()
     // Customisation and Replace Loaded Customisation were made here too, for
     // Format and Survey: they opened a file dialog over another program's
     // style libraries and survey code files, and went with those. A Katana
-    // customisation file is loaded by the CUSTOMISE line.)
+    // customisation file is loaded in File > Settings, or by the CUSTOMISE
+    // line.)
     QAction* codeAction = makeAction(Icon::Import, "Appl&y Survey Codes",
                                      "Give the selected entities that carry a field code - every "
                                      "one in the drawing when nothing is selected - the layer, "

@@ -947,19 +947,26 @@ TEST(SurveyImportWizard, TheOptionsStepSaysHowSurveyCodesAreLoadedByTheLineThatL
     // with no survey codes loaded what brings some. It sent people to Format >
     // Load Customisation and called what that loaded "a survey code file": the
     // menu item is gone and that kind of file no longer loads. What loads
-    // survey codes is the CUSTOMISE line, of a Katana customisation file - the
-    // words CODE itself refuses with when none are loaded
-    // (cad/survey_code_verbs.hpp, requireMap).
+    // survey codes is a Katana customisation file: File > Settings > Import,
+    // which exists since 2026-10-07 and shows the same menu path the person
+    // would take (docs/desktop.md, "Settings"), or the CUSTOMISE <file> line -
+    // the words CODE itself refuses with when none are loaded
+    // (cad/survey_code_verbs.hpp, requireMap). Worked by hand from that
+    // sentence, not from a run.
     Session session;
     driveToOptions(session, fixture("fld/gnss.fld"));
     const auto* note = child<QLabel>(*session.wizard, "finishNote");
     ASSERT_NE(note, nullptr);
     const QString text = note->text();
-    EXPECT_TRUE(text.contains("the CUSTOMISE line")) << text.toStdString();
     EXPECT_TRUE(text.contains("Katana customisation file")) << text.toStdString();
+    EXPECT_TRUE(text.contains("load one in File > Settings > Import")) << text.toStdString();
+    EXPECT_TRUE(text.contains("type CUSTOMISE <file> on the command line"))
+        << text.toStdString();
     EXPECT_FALSE(text.contains("Load Customisation")) << text.toStdString();
     EXPECT_FALSE(text.contains("survey code file")) << text.toStdString();
     EXPECT_FALSE(text.contains("Format >")) << text.toStdString();
+    // Shown as it is written: "<file>" is not markup for the label to read.
+    EXPECT_EQ(note->textFormat(), Qt::PlainText);
 }
 
 // The two boxes are the customisation's two switches when the Options step is

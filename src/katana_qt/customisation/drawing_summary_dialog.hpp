@@ -19,9 +19,10 @@
 // It changes nothing. Copy as JSON runs STATUS JSON through the window's one
 // executor and copies the reply, so what is copied is exactly what an agent
 // reads. It had a Load Customisation button, which triggered the Format
-// menu's item of that name; the item went with the files it loaded (a
-// customisation is loaded by the CUSTOMISE line), and the button with it
-// rather than be left triggering a name that is no longer there. The dialog
+// menu's item of that name; the item went with the files it loaded, and the
+// button with it rather than be left triggering a name that is no longer
+// there. A customisation is loaded in File > Settings (settings_dialog.hpp) or
+// by the CUSTOMISE line, and the heading over the report says so. The dialog
 // follows the Document through a DocumentWatcher, refreshing once per turn of
 // the event loop however many commands ran.
 //
@@ -32,6 +33,7 @@
 //   drawingSummaryCurrent        layer, style, annotation scale, CRS
 //   drawingSummarySelection      how many are selected
 //   drawingSummaryHistory        undo and redo depth, and the next of each
+//   drawingSummaryCustomisationLabel  its heading, which names File > Settings
 //   drawingSummaryCustomisation  the customisation report (read-only)
 //   drawingSummaryUnresolved     the names no loaded library defines; a
 //                                double-click opens the style manager at

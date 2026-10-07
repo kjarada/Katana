@@ -2942,7 +2942,9 @@ and copies the reply - exactly what `katana_status` and `katana://status` give
 (`docs/cad.md`, "STATUS"). It had a Load Customisation button
 (`drawingSummaryLoad`) that triggered the Format menu's item of that name;
 the item is gone ("The Format menu", above), and the button with it, since a
-trigger of a name that is no menu item fails without a word
+trigger of a name that is no menu item fails without a word. The heading over
+its customisation report (`drawingSummaryCustomisationLabel`) says where the
+customisation is changed now - "File > Settings loads, writes or resets it"
 (`DrawingSummaryDialog.ItOffersNoButtonForTheRemovedLoadCustomisationItem`).
 The status bar has a permanent `statusSelectionCount` label, "3 selected / 120
 entities", refreshed with the panels.
@@ -3681,6 +3683,11 @@ Decisions, and what was rejected:
   `src/katana_qt/customisation/linework_labels.hpp`, keyed by the format's
   names and checked against `entity::lineworkCodeMembers`
   (`TheOneListOfLineworkLabelsNamesEveryControlInTheOrderTheFormatListsThem`).
+  The Linework tab builds its seven fields by looping over
+  `entity::lineworkCodeMembers` and labels each from that list
+  (`lineworkControlLabel`), where it once wrote the seven words out itself;
+  `TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem` reads the tab's
+  labels against what Settings shows.
 - *Decided: a reset made in Settings is kept.* Resetting in Settings means
   the built-in is what the next session starts with, so the reset is followed
   by `KEEP` like every other edit made here, and the kept file is set aside
@@ -3721,11 +3728,6 @@ Not done:
   aside one `.bak` deep, and the second edit kept after it is the end of what
   was there. Keeping more than one earlier file would be `CUSTOMISE KEEP`'s
   to do (`src/katana_cad/customisation/customisation_verbs.cpp`).
-- **The Linework tab still writes its seven labels out itself**
-  (`src/katana_qt/customisation/code_manager_tabs.cpp`), where it is to
-  label its fields from the one list (`lineworkControlLabel`). Until it does,
-  `TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem` reads the tab's
-  labels against what Settings shows and fails when either moves alone.
 - **The host's two facts are read when the dialog is first opened**, not at
   each press: right while a host cannot change in a running session.
 - **Revert to Kept is enabled whenever the host has a kept file**, whether or

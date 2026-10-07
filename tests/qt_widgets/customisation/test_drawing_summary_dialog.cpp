@@ -218,13 +218,20 @@ TEST(DrawingSummaryDialog, ItOffersNoButtonForTheRemovedLoadCustomisationItem)
 {
     // The summary had a Load Customisation button that triggered the Format
     // menu's item of that name. The item is gone - a customisation file is
-    // loaded by the CUSTOMISE line - and a button left behind would trigger
-    // a name that no longer exists, and fail without a word.
+    // loaded in File > Settings or by the CUSTOMISE line - and a button left
+    // behind would trigger a name that no longer exists, and fail without a
+    // word. What the dialog does is say where to go: the heading over the
+    // customisation report names the menu path, which the window has
+    // (File > Settings, fileSettings).
     Document document;
     DrawingSummaryContext context;
     context.document = &document;
     DrawingSummaryDialog dialog(std::move(context));
     EXPECT_EQ(dialog.findChild<QWidget*>("drawingSummaryLoad"), nullptr);
+    const auto* heading = dialog.findChild<QLabel*>("drawingSummaryCustomisationLabel");
+    ASSERT_NE(heading, nullptr);
+    EXPECT_TRUE(heading->text().contains("File > Settings")) << heading->text().toStdString();
+    EXPECT_FALSE(heading->text().contains("Load Customisation"));
     for (const QPushButton* each : dialog.findChildren<QPushButton*>()) {
         EXPECT_FALSE(each->text().contains("Load Customisation")) << each->text().toStdString();
     }
