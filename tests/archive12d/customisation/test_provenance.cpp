@@ -1,6 +1,4 @@
-// Where a definition came from (LineStyle::source), and a built-in
-// customisation that reports the files it could not read instead of losing
-// them (audit A12-06).
+// Where a definition read from a legacy file came from (LineStyle::source).
 
 #include <gtest/gtest.h>
 
@@ -8,11 +6,10 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
-#include <set>
 #include <string>
 
-#include "katana/archive12d/customisation.hpp"
-#include "katana/archive12d/style_library.hpp"
+#include "customisation.hpp"
+#include "style_library.hpp"
 
 #include "../reference_files.hpp"
 
@@ -139,63 +136,6 @@ TEST(Provenance, ALoadedFileStampsItsNameAndNotItsPath)
     EXPECT_EQ(sourceOf(loaded->library, "A"), "my_symbols.4d");
     ASSERT_EQ(loaded->files.size(), 1u);
     EXPECT_EQ(loaded->files[0].path, path) << "the report keeps the path the caller gave";
-}
-
-// ---- A12-06: one unreadable file costs only itself ----------------------------------------------
-
-TEST(Provenance, AFileThatCannotBeReadCostsOnlyItselfAndIsNamed)
-{
-    const std::string library = "worldstyle \"Kept\" { move 0 0 draw 1 0 }";
-    // An unterminated quote fails the whole read of a library (see
-    // StyleLibrary.AQuoteThatIsNeverClosedFailsTheWholeRead).
-    const std::string broken = "worldstyle \"Lost { move 0 0 }";
-    const std::string mapfile =
-        "<xml12d><map_file><map_data><item><key>WM*</key><model>M</model></item></map_data>"
-        "</map_file></xml12d>";
-    const std::string neither = "just some notes";
-
-    const a12::Customisation built = a12::readEachCustomisationFile({
-        {"a_linestyles.4d", library},
-        {"b_broken.4d", broken},
-        {"c_rules.mapfile", mapfile},
-        {"d_notes.txt", neither},
-    });
-
-    // The bug this guards against: reading into the customisation being built
-    // left its library MOVED-FROM when b_broken.4d failed, so the definition
-    // a_linestyles.4d had brought was gone, and nothing said so.
-    EXPECT_EQ(built.library.size(), 1u);
-    EXPECT_EQ(sourceOf(built.library, "Kept"), "a_linestyles.4d");
-    EXPECT_EQ(built.map.size(), 1u) << "a file after the broken one is still read";
-    ASSERT_EQ(built.errors.size(), 2u);
-    EXPECT_NE(built.errors[0].find("b_broken.4d"), std::string::npos) << built.errors[0];
-    EXPECT_NE(built.errors[1].find("d_notes.txt"), std::string::npos) << built.errors[1];
-    ASSERT_EQ(built.files.size(), 2u) << "only the files that were read are listed as loaded";
-    EXPECT_EQ(built.files[0].path, std::filesystem::path("a_linestyles.4d"));
-    EXPECT_EQ(built.files[1].path, std::filesystem::path("c_rules.mapfile"));
-}
-
-TEST(Provenance, TheBuiltInCustomisationStampsEachDefinitionWithTheFileItWasEmbeddedFrom)
-{
-    const a12::Customisation& built = a12::builtinCustomisation();
-    if (built.library.empty()) {
-        GTEST_SKIP() << "this build has no customisation compiled in";
-    }
-    EXPECT_TRUE(built.errors.empty()) << built.errors.front();
-    std::set<std::string> libraryFiles;
-    for (const a12::LoadedFile& file : built.files) {
-        if (file.kind == a12::CustomisationFile::StyleLibrary) {
-            libraryFiles.insert(file.path.string());
-        }
-    }
-    std::size_t unstamped = 0;
-    built.library.forEach([&](const LineStyle& style) {
-        if (!libraryFiles.contains(style.source) ||
-            style.source.find_first_of("/\\") != std::string::npos) {
-            ++unstamped;
-        }
-    });
-    EXPECT_EQ(unstamped, 0u) << "every built-in definition names one of the embedded library files";
 }
 
 TEST(Provenance, TheReferenceSymbolFileIsWhereItsSymbolsSayTheyCameFrom)

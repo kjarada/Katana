@@ -30,7 +30,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 
-#include "katana/archive12d/customisation.hpp"
+#include "katana/cad/customisation_host.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/cad/layer_overrides.hpp"
@@ -63,7 +63,16 @@ Fixture& fixture()
 {
     static std::unique_ptr<Fixture> made = [] {
         auto f = std::make_unique<Fixture>();
-        f->document.setStyleLibrary(katana::archive12d::builtinCustomisation().library);
+        // The linestyles and symbols the program was built with, when it was built with
+        // any: the customisation is not in the repository, so a clean checkout has none.
+        // The survey drawing then falls back to the standard shapes (survey_drawing.cpp),
+        // which are a different, smaller set of strokes - so a run says which it measured
+        // (the `libraryDefinitions` counter) and two runs are compared only when it is
+        // the same.
+        const katana::cad::BuiltInCustomisation& builtIn = katana::cad::compiledInCustomisation();
+        if (builtIn.customisation) {
+            f->document.setStyleLibrary(builtIn.customisation->library);
+        }
         auto built = katana::bench::buildSurveyDrawing(f->document);
         if (!built) {
             std::fprintf(stderr, "survey drawing: %s\n", built.error().describe().c_str());

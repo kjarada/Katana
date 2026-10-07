@@ -14,10 +14,10 @@
 //       <map_data>
 //         <item>
 //           <key>WM*</key>
-//           <model>SURVEY SERVICES</model>
-//           <colour>sui water potable</colour>
+//           <model>TEST SERVICES</model>
+//           <colour>sui test water</colour>
 //           <breakline>Line</breakline>
-//           <linestyle>WATR Main</linestyle>
+//           <linestyle>TEST Water Main</linestyle>
 //           <weight>0</weight>
 //         </item>
 //

@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-#include "katana/archive12d/customisation.hpp"
+#include "customisation.hpp"
 #include "katana/archive12d/domain.hpp"
 #include "katana/entity/style_library.hpp"
 
@@ -48,7 +48,6 @@ TEST(CustomisationFixture, TheWholeFixtureReadsWithoutAWarningAndCountsAsWritten
 {
     const a12::Customisation fixture = loadFixture();
     EXPECT_TRUE(fixture.warnings.empty()) << fixture.warnings.front();
-    EXPECT_TRUE(fixture.errors.empty());
 
     // 3 linestyles + 4 symbols; no name is defined twice.
     EXPECT_EQ(fixture.library.size(), 7u);

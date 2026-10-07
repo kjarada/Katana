@@ -1,15 +1,14 @@
-// Loading a whole customisation from files (PLAN.MD 20.3, slice 6), and the
-// customisation compiled into the build.
+// Loading a whole customisation from files in the legacy formats (PLAN.MD
+// 20.3, slice 6).
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
-#include <map>
 #include <string>
 
-#include "katana/archive12d/customisation.hpp"
+#include "customisation.hpp"
 
 #include "reference_files.hpp"
 
@@ -136,117 +135,4 @@ TEST(Customisation, TheWholeReferenceCustomisationLoadsFromItsFiles)
     const auto missing = loaded->unresolvedStyles();
     EXPECT_NE(std::find(missing.begin(), missing.end(), "0"), missing.end());
     EXPECT_NE(std::find(missing.begin(), missing.end(), "Circle Single"), missing.end());
-}
-
-TEST(Customisation, ACustomisationIsFoundBesideTheApplicationWithoutBeingNamed)
-{
-    // An installed Katana keeps it in share/katana/customisation; a build
-    // tree has it in the source. Both are searched, in that order, so that a
-    // survey drawing is drawn with its linestyles and symbols without anyone
-    // being asked where they are.
-    const std::filesystem::path exe = "/opt/katana/bin/katana.exe";
-    const auto places = a12::customisationSearchPath(exe);
-    ASSERT_GE(places.size(), 2u);
-    EXPECT_EQ(places[0], std::filesystem::path("/opt/katana/share/katana/customisation"));
-
-    // Nothing there is not an error: Katana then draws the plain continuous
-    // line.
-    EXPECT_TRUE(a12::findCustomisation("/no/such/place/katana.exe").empty());
-}
-
-TEST(Customisation, WhatIsFoundIsDecidedByLookingInsideEachFileNotByItsName)
-{
-    const std::filesystem::path directory =
-        std::filesystem::temp_directory_path() / "katana_found_customisation" / "bin";
-    const std::filesystem::path share =
-        directory.parent_path() / "share" / "katana" / "customisation";
-    std::filesystem::create_directories(share);
-    // Two customisation files and one that is neither, all with extensions
-    // that say nothing useful.
-    std::ofstream(share / "a.4d") << "worldstyle \"S\" { move 0 0 draw 1 0 }";
-    std::ofstream(share / "b.4d")
-        << "<xml12d><map_file><map_data><item><key>W*</key><model>M</model></item>"
-           "</map_data></map_file></xml12d>";
-    std::ofstream(share / "notes.4d") << "just some notes, not a customisation at all";
-
-    const auto found = a12::findCustomisation(directory / "katana.exe");
-    ASSERT_EQ(found.size(), 2u) << "the notes are not a customisation file";
-    const auto loaded = a12::readCustomisation(found);
-    ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
-    EXPECT_EQ(loaded->library.size(), 1u);
-    EXPECT_EQ(loaded->map.size(), 1u);
-
-    std::filesystem::remove_all(directory.parent_path());
-}
-
-// ---- the customisation compiled into the build -------------------------------------------------
-//
-// These SKIP in a build made without one: it is third-party material under its
-// own licence, and the suite must stay green without it.
-
-namespace {
-
-bool builtInCustomisationPresent()
-{
-    const a12::Customisation& built = a12::builtinCustomisation();
-    return !built.files.empty() || !built.errors.empty();
-}
-
-} // namespace
-
-// Its files have general names, and are read in this order: the style
-// libraries' later file wins a definition both give (the symbol library, after
-// the linestyles), and the survey code files' earlier one wins a field both
-// give (survey_codes.mapfile, before the names file). Every definition says
-// which of the two libraries it came from.
-TEST(Customisation, TheBuiltInCustomisationIsFourGenerallyNamedFilesInLoadOrder)
-{
-    if (!builtInCustomisationPresent()) {
-        GTEST_SKIP() << "this build has no customisation compiled in";
-    }
-    const a12::Customisation& built = a12::builtinCustomisation();
-    EXPECT_TRUE(built.errors.empty()) << built.errors.front();
-    std::vector<std::string> names;
-    std::vector<a12::CustomisationFile> kinds;
-    for (const a12::LoadedFile& file : built.files) {
-        names.push_back(file.path.filename().string());
-        kinds.push_back(file.kind);
-    }
-    EXPECT_EQ(names, (std::vector<std::string>{"linestyles.4d", "survey_codes.mapfile",
-                                               "survey_codes_names.mapfile", "symbols.4d"}));
-    EXPECT_EQ(kinds, (std::vector<a12::CustomisationFile>{
-                         a12::CustomisationFile::StyleLibrary, a12::CustomisationFile::MapFile,
-                         a12::CustomisationFile::MapFile, a12::CustomisationFile::StyleLibrary}));
-    std::size_t elsewhere = 0;
-    built.library.forEach([&](const katana::entity::LineStyle& style) {
-        elsewhere += style.source == "linestyles.4d" || style.source == "symbols.4d" ? 0 : 1;
-    });
-    EXPECT_EQ(elsewhere, 0u) << "every definition comes from one of the two libraries";
-}
-
-// A group path says what a definition is (Survey/DRAIN, Design/LNMK). A word
-// put in front of most of them says only whose the customisation was, and is
-// not wanted: no first word - up to the first blank - may begin the group path
-// of more than half the built-in definitions. Nothing here names such a word;
-// the test finds it if there is one.
-TEST(Customisation, NoWordBeginsTheGroupPathOfMostBuiltInDefinitions)
-{
-    if (!builtInCustomisationPresent()) {
-        GTEST_SKIP() << "this build has no customisation compiled in";
-    }
-    const a12::Customisation& built = a12::builtinCustomisation();
-    std::map<std::string, std::size_t> firstWords;
-    std::size_t grouped = 0;
-    built.library.forEach([&](const katana::entity::LineStyle& style) {
-        if (style.group.empty()) {
-            return;
-        }
-        ++grouped;
-        ++firstWords[style.group.substr(0, style.group.find(' '))];
-    });
-    ASSERT_GT(grouped, 0u) << "the built-in definitions are grouped";
-    for (const auto& [word, count] : firstWords) {
-        EXPECT_LE(count * 2, grouped)
-            << "\"" << word << "\" begins " << count << " of " << grouped << " group paths";
-    }
 }

@@ -10,9 +10,9 @@
 #include <string_view>
 #include <utility>
 
-#include "katana/archive12d/customisation.hpp"
-#include "katana/archive12d/map_file.hpp"
-#include "katana/archive12d/style_library.hpp"
+#include "customisation.hpp"
+#include "map_file.hpp"
+#include "style_library.hpp"
 #include "katana/core/text.hpp"
 #include "katana/core/text_encoding.hpp"
 #include "katana/entity/colour_names.hpp"
