@@ -271,3 +271,48 @@ file(GLOB _katana_update_e2e_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR
 foreach(_katana_update_e2e_test IN LISTS _katana_update_e2e_tests)
     include("${_katana_update_e2e_test}")
 endforeach()
+
+# ---- the release tools, tested (tests/update/tool_tests, T3) -------------------------------
+#
+# tools/update_make_manifest.py, update_keytool.py, update_verify_release.py,
+# update_release_sign.py and update_make_fixtures.py are the producer, the owner's key step,
+# the independent verifier, the offline signer and the fixture generator. Their tests are
+# stdlib unittest (no pytest), each file one ctest so that --parallel runs them side by side,
+# and they judge the tools with oracles outside them: Python's zipfile, hashlib, the RFC 8032
+# vectors and the openssl command line (3.0 or later: pkeyutl -rawin).
+#
+# Python and openssl are build-time conveniences, never requirements (Rule 1): without either
+# there are no such tests rather than failing ones. They are not registered as skipped,
+# because a skipped unittest exits 0 and would pass as quietly as one that ran. The tests
+# need Python 3.10 or later (sys.stdlib_module_names holds the verifier to the standard library).
+set(_katana_tool_tests_ready OFF)
+if(Python3_Interpreter_FOUND AND Python3_VERSION VERSION_GREATER_EQUAL 3.10)
+    find_program(KATANA_OPENSSL_EXECUTABLE openssl)
+    if(KATANA_OPENSSL_EXECUTABLE)
+        execute_process(COMMAND "${KATANA_OPENSSL_EXECUTABLE}" version
+            OUTPUT_VARIABLE _katana_openssl_version RESULT_VARIABLE _katana_openssl_status
+            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        set(_katana_openssl_major 0)
+        if(_katana_openssl_status EQUAL 0 AND _katana_openssl_version MATCHES "^OpenSSL ([0-9]+)[.]")
+            set(_katana_openssl_major ${CMAKE_MATCH_1})
+        endif()
+        if(_katana_openssl_major GREATER_EQUAL 3)
+            set(_katana_tool_tests_ready ON)
+        else()
+            message(STATUS "Update tool tests: ${KATANA_OPENSSL_EXECUTABLE} is '${_katana_openssl_version}', "
+                           "not OpenSSL 3 or later; the release tools' tests are not registered")
+        endif()
+    else()
+        message(STATUS "Update tool tests: no openssl on PATH; the release tools' tests are not registered")
+    endif()
+endif()
+if(_katana_tool_tests_ready)
+    foreach(_katana_tool_test IN ITEMS make_manifest keytool verify_release release_sign fixtures)
+        add_test(NAME update_tools_${_katana_tool_test}
+            COMMAND "${KATANA_PYTHON}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tool_tests/test_${_katana_tool_test}.py")
+        set_tests_properties(update_tools_${_katana_tool_test} PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "KATANA_OPENSSL=set:${KATANA_OPENSSL_EXECUTABLE};KATANA_CMAKE=set:${CMAKE_COMMAND}"
+            TIMEOUT 1800)
+    endforeach()
+endif()

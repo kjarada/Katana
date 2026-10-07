@@ -1,0 +1,4 @@
+# Fixtures are exact bytes: a manifest is signed as the bytes it is, a zip is binary, and the
+# trees are hashed. A checkout that rewrote line ends (core.autocrlf on Windows) would break
+# every hash and every signature.
+* -text
