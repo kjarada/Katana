@@ -7,6 +7,7 @@
 #include <system_error>
 #include <utility>
 
+#include "katana/cad/style_catalogue.hpp"
 #include "katana/core/path_text.hpp"
 
 namespace katana::cad {
@@ -39,10 +40,7 @@ void summarise(CustomisationStart& report, const Document& document, Customisati
     report.installed = origin;
     report.name = document.customisationState().name;
     report.definitions = document.styleLibrary().size();
-    report.symbols = 0;
-    document.styleLibrary().forEach([&](const katana::entity::LineStyle& definition) {
-        report.symbols += definition.symbol ? 1 : 0;
-    });
+    report.symbols = symbolDefinitionCount(document);
     report.rules = document.surveyMap().size();
     report.colours = document.customisationState().colours.size();
 }

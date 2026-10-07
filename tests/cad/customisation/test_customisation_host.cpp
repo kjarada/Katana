@@ -616,6 +616,39 @@ TEST(CustomisationStart, TheBuiltInIsInstalledWhenNothingIsKept)
     EXPECT_FALSE(document.isModified());
 }
 
+// A symbol is what the catalogue offers as one: a definition a survey rule
+// names as its vertex symbol is a symbol though nobody listed it as one and it
+// is not drawn at vertices. The start's count is the report's (CUSTOMISE), not
+// the count of definitions listed as symbols - they were 471 and 472 over the
+// owner's built-in.
+TEST(CustomisationStart, TheStartCountsSymbolsAsCustomiseDoes)
+{
+    // Counted by hand: 2 definitions, both plain linestyles (none listed as a
+    // symbol, none at vertices); the one rule names "TEST Mark" as its
+    // vertex symbol, so exactly 1 of them is offered as a symbol.
+    const std::string text = R"({
+      "format": "katana-customisation", "version": 1, "name": "Evidence",
+      "linestyles": [
+        {"name": "TEST Mark", "strokes": [["move", 0, 0], ["draw", 1, 0]]},
+        {"name": "TEST Wall", "strokes": [["move", 0, 0], ["draw", 2, 0]]}
+      ],
+      "codes": [
+        {"key": "MK*", "sets": "symbol", "symbol": {"name": "TEST Mark", "size": 1}}
+      ]
+    })";
+    const Scratch scratch("symbol-count");
+    CustomisationHost host;
+    host.builtIn = builtInFrom(text);
+    host.keptFile = scratch.root / "customisation.json";
+
+    Document document;
+    const CustomisationStart report = katana::cad::startCustomisation(document, host);
+
+    EXPECT_EQ(report.definitions, 2u);
+    EXPECT_EQ(report.symbols, 1u);
+    EXPECT_EQ(katana::cad::customisationSummary(document).symbols, report.symbols);
+}
+
 TEST(CustomisationStart, TheKeptFileIsInstalledInPreferenceToTheBuiltIn)
 {
     const Scratch scratch("kept");

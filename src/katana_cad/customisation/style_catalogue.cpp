@@ -275,6 +275,13 @@ std::vector<CatalogueEntry> symbolChoices(const Document& document)
     return entries;
 }
 
+std::size_t symbolDefinitionCount(const Document& document)
+{
+    const std::vector<CatalogueEntry> choices = symbolChoices(document);
+    return static_cast<std::size_t>(
+        std::ranges::count(choices, DefinitionSource::Library, &CatalogueEntry::source));
+}
+
 std::vector<CatalogueEntry> keepCurrent(std::vector<CatalogueEntry> choices,
                                         std::string_view current)
 {

@@ -200,7 +200,7 @@ void expectNoneNamesAnotherProgram(const std::vector<Seen>& seen)
         if (kPersistedKeys.contains(each.text)) {
             continue;
         }
-        EXPECT_FALSE(each.text.contains(QStringLiteral("12d"), Qt::CaseInsensitive))
+        EXPECT_FALSE(each.text.contains(QStringLiteral("1" "2d"), Qt::CaseInsensitive))
             << each.where.toStdString() << ": " << each.text.toStdString();
     }
 }

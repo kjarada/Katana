@@ -144,9 +144,9 @@ customisationNotLoaded(const std::vector<std::string>& recorded,
 // A load's files, each once, in the order first named: read twice, a file's
 // every rule would sit in the map twice, since both copies are the load's and
 // the merge keeps them all. `repeats` holds each later naming, as named, for
-// the front end to say it was read once. Both front ends (the window's
-// CUSTOMISE and Format > Load, the command line's CUSTOMISE) go through this,
-// so they cannot come to differ on the same line again.
+// the front end to say it was read once. Both front ends (the window's CUSTOMISE
+// and File > Settings > Import, the command line's CUSTOMISE) go through this, so
+// they cannot come to differ on the same line again.
 struct DistinctFiles {
     // Absolute and lexically normal: what is read.
     std::vector<std::filesystem::path> files{};

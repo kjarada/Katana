@@ -66,7 +66,7 @@ CustomisationSummary customisationSummary(const Document& document,
     const katana::entity::StyleLibrary& library = document.styleLibrary();
     summary.definitions = library.size();
     summary.groups = katana::entity::styleGroups(library).size();
-    summary.symbols = fromLibrary(symbolChoices(document));
+    summary.symbols = symbolDefinitionCount(document);
     summary.linestyles = fromLibrary(linetypeChoices(document, false));
     summary.rules = document.surveyMap().size();
     summary.codes = document.surveyMap().keys().size();

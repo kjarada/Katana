@@ -1007,8 +1007,8 @@ TEST(CustomisationWorkbench, SettingsShowsAndUsesWhatTheWindowsHostOffers)
         EXPECT_FALSE(named<QPushButton>(&settings, "settingsKeep")->isEnabled());
         EXPECT_FALSE(named<QPushButton>(&settings, "settingsRevert")->isEnabled());
         EXPECT_EQ(named<QLabel>(&settings, "settingsActiveKept")->text(),
-                  "Not kept: the next start does not give this customisation.\nThis session "
-                  "has no kept file; the environment variable KATANA_CUSTOMISATION names one.");
+                  "Nothing is kept: the next start gives no customisation. The environment "
+                  "variable KATANA_CUSTOMISATION names a file to keep one in.");
     }
     // One whose host has a built-in and a kept file. The session is the
     // built-in as started, which is kept, so Keep has nothing to do yet.

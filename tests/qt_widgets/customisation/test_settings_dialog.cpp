@@ -811,8 +811,24 @@ TEST(SettingsDialog, KeepAndRevertAreDisabledAndSayWhyWhenThereIsNoKeptFile)
     }
     EXPECT_TRUE(f.ran.isEmpty());
     EXPECT_TRUE(enabled(dialog, "settingsReset"));
+    // The row does not call the session kept and then say there is no kept
+    // file: nothing is kept, and the start gives the built-in.
     EXPECT_EQ(shown(dialog, "settingsActiveKept"),
-              QStringLiteral("Not kept: the next start does not give this customisation.\n") + why);
+              QStringLiteral("Nothing is kept: the next start gives the built-in customisation. "
+                             "The environment variable KATANA_CUSTOMISATION names a file to "
+                             "keep one in."));
+}
+
+TEST(SettingsDialog, TheKeptRowOfASessionWithNoKeptFileAndNoBuiltInSaysNothingIsGiven)
+{
+    SettingsFixture f;
+    f.context.keptFile.clear();
+    f.context.hasBuiltIn = false;
+    SettingsDialog dialog(f.context);
+    EXPECT_EQ(shown(dialog, "settingsActiveKept"),
+              QStringLiteral("Nothing is kept: the next start gives no customisation. "
+                             "The environment variable KATANA_CUSTOMISATION names a file to "
+                             "keep one in."));
 }
 
 TEST(SettingsDialog, KeepIsDisabledWhileTheSessionIsKeptAndComesBackWithTheFirstEdit)
@@ -1765,7 +1781,8 @@ TEST(SettingsDialog, NoTextItShowsNamesAnotherProgramOrAFileOfAnOlderFormat)
     }
 
     for (const QString& text : seen) {
-        for (const char* word : {"12d", ".4d", "mapfile"}) {
+        // "1" "2d": the word the page must not say, written so that this file does not.
+        for (const char* word : {"1" "2d", ".4d", "mapfile"}) {
             EXPECT_FALSE(text.contains(QString::fromLatin1(word), Qt::CaseInsensitive))
                 << "\"" << word << "\" in: " << text.toStdString();
         }

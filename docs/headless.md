@@ -498,7 +498,9 @@ A modal box in a headless run is a hang until the test's timeout. So
   menu items any more, and a `--trigger` of either fails the run as the name
   of no menu item (`qt_load_customisation_is_no_menu_item_headless`,
   `qt_replace_customisation_is_no_menu_item_headless`) - a customisation file
-  is the `CUSTOMISE` line or `--customise`;
+  is the `CUSTOMISE` line, `--customise`, or File > Settings > Import (its
+  Import path field and button, driven as `settingsImportPath` and
+  `settingsImport`);
 - File > Run Script's Browse opens no file dialog and says to fill
   `scriptPath` instead; a script's run shows no progress dialog, and the
   person's Recent Scripts list is left alone;
