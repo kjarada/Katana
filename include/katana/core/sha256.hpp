@@ -10,9 +10,10 @@
 //
 // Streaming because the update engine hashes files of tens of megabytes and
 // must not hold them: the installed tree is hashed fresh, file by file, every
-// time a plan is made and again before a swap. Nothing here copies or holds
-// the input; the object is a 64-byte block and eight words however long the
-// message.
+// time a plan is made and again before a swap. Whole blocks are hashed where
+// the caller left them and the message is never held: the object is a 64-byte
+// block (it keeps the tail of fewer than 64 bytes between calls) and eight
+// words, however long the message.
 //
 // The implementation, src/katana_core/sha256.cpp, is portable scalar code
 // with no hardware path: SHA-NI or ARM crypto would be one more thing that
@@ -61,9 +62,9 @@ class Sha256 {
 [[nodiscard]] std::string sha256Hex(std::string_view bytes);
 
 // The lower-case hexadecimal SHA-256 of the file's bytes, read in blocks.
-// NotFound when the file cannot be opened (absent, a directory, not
-// readable); FileImportFailure when reading it fails part way. The context is
-// the path.
+// NotFound when the file cannot be opened (absent, not a regular file - a
+// directory, a device, a pipe - or not readable); FileImportFailure when
+// reading it fails part way. The context is the path in UTF-8.
 [[nodiscard]] Result<std::string> sha256FileHex(const std::filesystem::path& path);
 
 // 64 lower-case hexadecimal characters -> the digest. ParseFailure on any

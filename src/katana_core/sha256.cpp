@@ -196,11 +196,17 @@ std::string sha256Hex(std::string_view bytes)
 
 Result<std::string> sha256FileHex(const std::filesystem::path& path)
 {
-    // A directory opens as a stream on some platforms and then reads as
-    // nothing, which would pass for the digest of an empty file.
+    // Only a regular file is hashed. A directory opens as a stream on some
+    // platforms and then reads as nothing, and so does the null device (NUL,
+    // /dev/null): either would pass for the digest of an empty file. A pipe or
+    // the console would block the open or the read for good. A path that does
+    // not exist is left to the open below, which says so.
     std::error_code unknown;
-    if (std::filesystem::is_directory(path, unknown)) {
-        return makeError(ErrorCode::NotFound, "the file cannot be opened: it is a directory",
+    const std::filesystem::file_status status = std::filesystem::status(path, unknown);
+    if (std::filesystem::exists(status) && !std::filesystem::is_regular_file(status)) {
+        return makeError(ErrorCode::NotFound,
+                         "the file cannot be opened: it is not a regular file (a directory, "
+                         "a device or a pipe)",
                          pathToUtf8(path));
     }
     std::ifstream in(path, std::ios::binary);

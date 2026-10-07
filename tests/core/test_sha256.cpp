@@ -34,15 +34,23 @@
 
 #if defined(_WIN32)
 #include <process.h>
+// For LockFileEx, which the failed-read test uses to make a read fail part way.
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #else
 #include <unistd.h>
 #endif
 
+#include "katana/core/path_text.hpp"
 #include "katana/core/sha256.hpp"
 
 namespace fs = std::filesystem;
 using katana::core::ErrorCode;
 using katana::core::parseSha256Hex;
+using katana::core::pathFromUtf8;
 using katana::core::Sha256;
 using katana::core::Sha256Digest;
 using katana::core::sha256FileHex;
@@ -428,6 +436,92 @@ TEST(Sha256, ADirectoryIsNotFoundRatherThanTheDigestOfAnEmptyFile)
     ASSERT_FALSE(digest.ok()) << "a directory hashed as " << digest.value();
     EXPECT_EQ(digest.error().code, ErrorCode::NotFound);
 }
+
+TEST(Sha256, ADeviceIsNotFoundRatherThanTheDigestOfWhatItYields)
+{
+    // The null device opens, reads as nothing and so would pass for an empty file; a
+    // pipe or the console would not even end. Only a regular file is hashed. (Nothing
+    // is created here: the device is already there, and a refusal is made before the
+    // open, so a regression that opens it is a wrong digest and not a hang.)
+#if defined(_WIN32)
+    const fs::path device = "NUL";
+#else
+    const fs::path device = "/dev/null";
+#endif
+    const auto digest = sha256FileHex(device);
+    ASSERT_FALSE(digest.ok()) << "a device hashed as " << digest.value();
+    EXPECT_EQ(digest.error().code, ErrorCode::NotFound);
+}
+
+TEST(Sha256, AFileUnderAFolderNamedInNonAsciiLettersIsHashedAndNamedInUtf8)
+{
+    // %LOCALAPPDATA% sits under the user's own name, which is often not ASCII. The
+    // folder is "cafe" with an acute e, a space and the character for "day", spelled
+    // as the UTF-8 bytes (so this file's own encoding does not matter).
+    const std::string folderName = "caf\xC3\xA9 \xE6\x97\xA5";
+    Scratch scratch("unicode");
+    const fs::path folder = scratch.root / pathFromUtf8(folderName);
+    fs::create_directories(folder);
+    writeFile(folder / "abc.txt", "abc");
+
+    const auto digest = sha256FileHex(folder / "abc.txt");
+    ASSERT_TRUE(digest.ok()) << digest.error().describe();
+    EXPECT_EQ(digest.value(), kAbc);
+
+    // The error says where in UTF-8, whatever the narrow code page of the process.
+    const auto missing = sha256FileHex(folder / "absent.txt");
+    ASSERT_FALSE(missing.ok());
+    EXPECT_EQ(missing.error().code, ErrorCode::NotFound);
+    EXPECT_NE(missing.error().context.find(folderName), std::string::npos)
+        << missing.error().describe();
+    EXPECT_NE(missing.error().context.find("absent.txt"), std::string::npos)
+        << missing.error().describe();
+}
+
+#if defined(_WIN32)
+TEST(Sha256, AReadThatFailsPartWayIsAFailureNotTheDigestOfWhatWasRead)
+{
+    // Another handle holds 4096 bytes in the middle of the file locked, so reading
+    // across them fails (ERROR_LOCK_VIOLATION) after the bytes before were read. The
+    // digest of those bytes must not be handed back as the digest of the file.
+    struct Handle {
+        HANDLE handle = INVALID_HANDLE_VALUE;
+        ~Handle()
+        {
+            if (handle != INVALID_HANDLE_VALUE) {
+                CloseHandle(handle); // also releases the lock
+            }
+        }
+    };
+
+    Scratch scratch("locked");
+    const fs::path file = scratch.root / "locked.bin";
+    writeFile(file, patternBytes(0, 524288));
+
+    Handle holder;
+    holder.handle = CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                                FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(holder.handle, INVALID_HANDLE_VALUE);
+    OVERLAPPED range{};
+    range.Offset = 300000;
+    ASSERT_TRUE(LockFileEx(holder.handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0,
+                           4096, 0, &range));
+
+    const auto locked = sha256FileHex(file);
+    ASSERT_FALSE(locked.ok()) << "hashed as " << locked.value();
+    EXPECT_EQ(locked.error().code, ErrorCode::FileImportFailure);
+    EXPECT_NE(locked.error().context.find("locked.bin"), std::string::npos)
+        << locked.error().describe();
+
+    // Unlocked, the same file is hashed: it was the lock that failed the read. The
+    // digest is hashlib's for the 524288-byte pattern (kPattern, above).
+    ASSERT_TRUE(UnlockFileEx(holder.handle, 0, 4096, 0, &range));
+    const auto unlocked = sha256FileHex(file);
+    ASSERT_TRUE(unlocked.ok()) << unlocked.error().describe();
+    EXPECT_EQ(unlocked.value(), "202f75b6b7bea0f70d6fe412355f10ea2aaf3acd569eb2b55f70b69d4ba4f9f3");
+}
+#endif
 
 // ---- the text form -----------------------------------------------------------------------
 
