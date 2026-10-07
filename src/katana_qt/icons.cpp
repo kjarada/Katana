@@ -384,6 +384,7 @@ const std::vector<Icon>& allIcons()
         Icon::ViewUnlinked, Icon::ViewLinked,
         Icon::ZoomIn,       Icon::ZoomOut,
         Icon::ZoomSelection,
+        Icon::Settings,     Icon::SurveyLinework,
     };
     return icons;
 }
@@ -1316,6 +1317,21 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.dashed(rectangle(3, 3, 12.5, 12.5), true);
         ink.stroke(circle(15, 15, 4.6));
         ink.line(18.3, 18.3, 21.5, 21.5, false, 2.4);
+        break;
+    case Icon::Settings:
+        // Three sliders, each knob somewhere else along its track, so that at
+        // 16 px the three do not line up into a bar.
+        for (const QPointF& knob : {QPointF(15.5, 6), QPointF(8, 12), QPointF(13, 18)}) {
+            ink.line(3.5, knob.y(), 20.5, knob.y());
+            ink.dot(knob.x(), knob.y(), 2.5, true);
+        }
+        break;
+    case Icon::SurveyLinework:
+        // The line first, so that each mark's ring is drawn over its end.
+        ink.stroke(polyline({{4.5, 17.5}, {11.5, 6.5}, {19.5, 14.5}}), true);
+        drawMark(ink, 4.5, 17.5, false);
+        drawMark(ink, 11.5, 6.5, false);
+        drawMark(ink, 19.5, 14.5, false);
         break;
     }
     painter.restore();

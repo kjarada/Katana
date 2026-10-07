@@ -862,7 +862,7 @@ if(TARGET katana)
             "-DEXPECT=2 entities"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/vector_import_dialog_run_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # File > Export Vector's dialog, opened for a file as the menu opens it
+    # File > Export > Export Drawing's dialog, opened for a file as the menu opens it
     # once its file dialog has answered (^FILE), over a drawing the command
     # line made: layer "other" holds lots A and B alone, so the filter takes
     # two, Preview writes nothing and Run writes those two under the name
@@ -1543,6 +1543,158 @@ if(TARGET katana)
     set_tests_properties(qt_a_kept_customisation_made_from_another_built_in_is_installed_and_said_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:${_twins}/test_symbols.customisation.json;KATANA_CUSTOMISATION=set:${_from_another}"
+        TIMEOUT 180)
+
+    # ---- File > Settings in the real window --------------------------------------
+    #
+    # The item opens the one Settings dialog, non-modal (no " (modal)" after
+    # what --dialog says opened), and its controls run the CUSTOMISE lines
+    # through the window's executor. By hand, from the fixture test_survey
+    # (11 rules over 8 keys, a key in a section 11 times, no definition; five
+    # names its rules ask for that nothing defines) and the reply formats of
+    # docs/customisation.md, "The replies":
+    #  - Import into a session that starts with nothing: a merge, all 11
+    #    added, and the session takes the file's name;
+    #  - the page follows the Document: its name, "11 over 8 codes";
+    #  - the box unticked as the driver fills it runs SET, and CUSTOMISE JSON
+    #    then has the switch off beside the other, on by default;
+    #  - Export writes the whole session to a file of this folder that the
+    #    set-up test removed first, so it replaces nothing.
+    # The second test reads that file in ANOTHER window, which also starts
+    # with nothing: the same 11 added over 8 codes, the control codes and the
+    # switches said (a whole session always says both), and the switch still
+    # off.
+    set(_settings_out "${CMAKE_CURRENT_BINARY_DIR}/qt_settings_exported.customisation.json")
+    add_test(NAME qt_settings_exported_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${_settings_out}")
+    add_test(NAME qt_settings_imports_sets_and_exports_by_the_customise_lines_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@fileSettings|settingsImportPath=${_twins}/test_survey.customisation.json|!settingsImport|?settingsActiveName|?settingsActiveRules|settingsAutoCodes=off|>CUSTOMISE JSON|settingsExportPath=${_settings_out}|!settingsExport|?settingsStatus"
+            "-DEXPECT=--dialog fileSettings opened settingsDialog \"Settings\"[\r\n]+loaded file=[^\r\n]*test_survey${_J} name=test_survey definitions_added=0 definitions_replaced=0 codes_added=11 codes_replaced=0 ${_nothing_else}[\r\n]+undefined names=5[\r\n].*customisation name=test_survey origin=loaded kept=no definitions=0 codes=8 rules=11 colours=0[\r\n]+settingsActiveName: test_survey[\r\n]+settingsActiveRules: 11 over 8 codes[\r\n]+set auto\\.codes=off[\r\n].*\"automation\": {[\r\n]+ +\"codesOnSurveyImport\": false,[\r\n]+ +\"lineworkOnSurveyImport\": true[\r\n].*exported file=[^\r\n]*qt_settings_exported${_J} name=test_survey definitions=0 codes=8 rules=11 replaced=no[\r\n]+settingsStatus: > CUSTOMISE EXPORT \"[^\"]*qt_settings_exported\\.customisation\\.json\" exported file="
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/settings_dialog_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_what_settings_exported_loads_again_with_the_same_counts_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE REPLACE \"${_settings_out}\"|>CUSTOMISE"
+            "-DEXPECT=loaded file=[^\r\n]*qt_settings_exported${_J} name=test_survey definitions_added=0 definitions_replaced=0 codes_added=11 codes_replaced=0 colours_added=0 colours_replaced=0 linework=yes automation=yes[\r\n]+undefined names=5[\r\n].*customisation name=test_survey origin=loaded kept=no definitions=0 codes=8 rules=11 colours=0[\r\n].*automation auto\\.codes=off auto\\.linework=on"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/settings_exported_read_back_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_settings_imports_sets_and_exports_by_the_customise_lines_headless
+                         qt_what_settings_exported_loads_again_with_the_same_counts_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    set_tests_properties(qt_settings_exported_cleanup
+        PROPERTIES FIXTURES_SETUP qt_settings_export_clean)
+    set_tests_properties(qt_settings_imports_sets_and_exports_by_the_customise_lines_headless
+        PROPERTIES FIXTURES_REQUIRED qt_settings_export_clean FIXTURES_SETUP qt_settings_exported)
+    set_tests_properties(qt_what_settings_exported_loads_again_with_the_same_counts_headless
+        PROPERTIES FIXTURES_REQUIRED qt_settings_exported)
+
+    # What is edited in Settings is KEPT, and a reset made there is kept too -
+    # which retires the kept file. Four windows, one after another, with the
+    # symbol fixture as the built-in (4 definitions, all symbols, no rule)
+    # and KATANA_CUSTOMISATION naming a file of this folder that the set-up
+    # test removed: a headless window keeps a file ONLY where that variable
+    # names one. By hand, from the two fixtures:
+    #  1. It starts with the built-in, which is "kept" - the next start would
+    #     give it - with no file there yet. The survey fixture imported in
+    #     Settings is merged (the session keeps its own name; of the five
+    #     names the rules ask for the built-in defines two, so three are
+    #     undefined) and leaves the session not kept, so the dialog runs KEEP
+    #     behind its line: written, with nothing there before to back up.
+    #  2. The next window starts with that file - 4 definitions and 11 rules,
+    #     "kept" - and is not told it was made from another built-in, having
+    #     been kept from this very one.
+    #  3. Reset to Built-in leaves the built-in, not kept (the file is what a
+    #     start would give), so the dialog runs KEEP - and a session that IS
+    #     the built-in is kept by setting the file aside as .bak, nothing
+    #     written. Revert to Kept then has none to read and is refused in the
+    #     verb's words (docs/desktop.md, "Settings").
+    #  4. The fourth window starts with the built-in again, and the file set
+    #     aside still holds what the first kept: loaded in the place of both
+    #     kinds, 4 definitions and 11 rules over 8 codes.
+    set(_settings_kept "${CMAKE_CURRENT_BINARY_DIR}/qt_settings_kept")
+    add_test(NAME qt_settings_kept_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_settings_kept}")
+    add_test(NAME qt_an_import_made_in_settings_is_kept_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@fileSettings|?settingsActiveKept|settingsImportPath=${_twins}/test_survey.customisation.json|!settingsImport|?settingsStatus|?settingsActiveKept"
+            "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*settingsActiveKept: Kept: the next start gives this customisation\\. Kept file: [^\r\n]*qt_settings_kept/customisation\\.json[\r\n]+loaded file=[^\r\n]*test_survey${_J} name=test_survey definitions_added=0 definitions_replaced=0 codes_added=11 codes_replaced=0 ${_nothing_else}[\r\n]+undefined names=3[\r\n].*customisation name=test_symbols origin=loaded kept=no definitions=4 codes=8 rules=11 colours=0[\r\n]+kept file=[^\r\n]*qt_settings_kept/customisation\\.json\"? written=yes name=test_symbols definitions=4 codes=8 rules=11 backup=none[\r\n]+settingsStatus: > CUSTOMISE \"[^\"]*test_survey\\.customisation\\.json\" loaded file=[^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=yes [^\r\n]*[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/settings_kept_1_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_what_settings_kept_is_what_the_next_window_starts_with_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@fileSettings|?settingsActiveOrigin|?settingsActiveRules|?settingsActiveKept"
+            "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 11 survey code rules, kept\\..*settingsActiveOrigin: Kept by you[\r\n]+settingsActiveRules: 11 over 8 codes[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
+            "-DFORBID=made from another built-in"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/settings_kept_2_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_a_reset_made_in_settings_retires_the_kept_file_and_revert_has_none_to_read_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@fileSettings|!settingsReset|?settingsStatus|?settingsActiveOrigin|!settingsRevert|?settingsStatus"
+            "-DEXPECT=and 11 survey code rules, kept\\..*reset name=test_symbols definitions=4 codes=0 rules=0 kept=no[\r\n]+kept file=[^\r\n]*qt_settings_kept/customisation\\.json\"? written=no reason=the-session-is-the-built-in backup=[^\r\n]*qt_settings_kept/customisation\\.json\\.bak\"?[\r\n]+settingsStatus: > CUSTOMISE RESET reset name=test_symbols [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=no reason=the-session-is-the-built-in [^\r\n]*[\r\n]+settingsActiveOrigin: Built in[\r\n]+! NotFound: CUSTOMISE REVERT: no customisation is kept[^\r\n]*[\r\n]+settingsStatus: > CUSTOMISE REVERT Refused: NotFound: CUSTOMISE REVERT: no customisation is kept"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/settings_kept_3_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_after_a_reset_made_in_settings_the_next_window_starts_with_the_built_in_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE REPLACE \"${_settings_kept}/customisation.json.bak\""
+            "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*loaded file=[^\r\n]*qt_settings_kept/customisation\\.json\\.bak\"? name=test_symbols [^\r\n]*[\r\n].*customisation name=test_symbols origin=loaded kept=no definitions=4 codes=8 rules=11 colours=0"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/settings_kept_4_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_an_import_made_in_settings_is_kept_headless
+                         qt_what_settings_kept_is_what_the_next_window_starts_with_headless
+                         qt_a_reset_made_in_settings_retires_the_kept_file_and_revert_has_none_to_read_headless
+                         qt_after_a_reset_made_in_settings_the_next_window_starts_with_the_built_in_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:${_twins}/test_symbols.customisation.json;KATANA_CUSTOMISATION=set:${_settings_kept}/customisation.json"
+        TIMEOUT 180)
+    # Each window needs what the one before it left, so they run in order.
+    set_tests_properties(qt_settings_kept_cleanup PROPERTIES FIXTURES_SETUP qt_settings_kept_0)
+    set_tests_properties(qt_an_import_made_in_settings_is_kept_headless
+        PROPERTIES FIXTURES_REQUIRED qt_settings_kept_0 FIXTURES_SETUP qt_settings_kept_1)
+    set_tests_properties(qt_what_settings_kept_is_what_the_next_window_starts_with_headless
+        PROPERTIES FIXTURES_REQUIRED qt_settings_kept_1 FIXTURES_SETUP qt_settings_kept_2)
+    set_tests_properties(qt_a_reset_made_in_settings_retires_the_kept_file_and_revert_has_none_to_read_headless
+        PROPERTIES FIXTURES_REQUIRED qt_settings_kept_2 FIXTURES_SETUP qt_settings_kept_3)
+    set_tests_properties(qt_after_a_reset_made_in_settings_the_next_window_starts_with_the_built_in_headless
+        PROPERTIES FIXTURES_REQUIRED qt_settings_kept_3)
+
+    # Survey > Process Linework is the LINEWORK line through the window's one
+    # executor, as Apply Survey Codes is the CODE line: on the selection when
+    # there is one, else on the drawing, the scope word written so that the
+    # echoed line says which. The data and every number are those worked by
+    # hand for cli.linework_strings_points_by_their_control_codes_as_one_undo_step
+    # (src/katana_app/CMakeLists.txt): no survey codes; points 1 and 2, ten
+    # metres apart, coded "KB ST" and "KB END". With both selected the line
+    # is LINEWORK SELECTION: 2 taken, both points, one line of two - entity
+    # 3 - noted as unstyled. With nothing selected it is LINEWORK DRAWING
+    # over the 2 points and that line: the line is already there, so nothing
+    # is drawn and its 2 points are left out. The log (?commandLog, on one
+    # line) shows each line echoed and answered where it ran.
+    add_test(NAME qt_process_linework_runs_the_linework_line_on_the_selection_or_the_drawing_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>POINT 0,0|>POINT 10,0|>SELECT 1|>PROP SET code \"KB ST\" text|>PROP SET point 1 text|>SELECT 2|>PROP SET code \"KB END\" text|>PROP SET point 2 text|>SELECT ALL|*surveyLinework|>SELECT NONE|*surveyLinework|?commandLog"
+            "-DEXPECT=linework scope=selection matched=2 considered=2 lines=1 unplaced=0 notes=1[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0 entity=3[\r\n].*linework scope=drawing matched=3 considered=2 lines=0 unplaced=0 notes=1[\r\n]+left_out=2 reason=already-drawn lines=1[\r\n].*commandLog: [^\r\n]*> LINEWORK SELECTION linework scope=selection matched=2 [^\r\n]*> LINEWORK DRAWING linework scope=drawing matched=3 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/process_linework_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_process_linework_runs_the_linework_line_on_the_selection_or_the_drawing_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 
     # --customise beside an import file: both are taken. The script once put
@@ -2575,15 +2727,19 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces_headless.png"
             "-DEXPECT=ifc exported file=\"qt_ifc_surfaces\\.ifc\".*counts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=0 entities_skipped=0 surfaces=4.*class name=IfcGeographicElement count=4.*Surface '[^']+': [0-9]+ vertices, [0-9]+ triangles.*ifc imported file=\"qt_ifc_surfaces\\.ifc\" schema=IFC4X3_ADD2 crs=\"[^\"]*\" entities=0 alignments=0 surfaces=4"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # The File menu offers both, and a typed line with a word the verb does
-    # not take is refused in the command line's own words.
+    # The File menu offers both - each in its submenu, File > Import and File
+    # > Export, since every import and export went under those two (a menu's
+    # report lists its own items, so the two submenus are asked by their
+    # names, where `?fileMenu` listed both items until then) - and a typed
+    # line with a word the verb does not take is refused in the command
+    # line's own words.
     add_test(NAME qt_ifc_menu_items_and_the_verbs_refusals_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
-            "-DDRIVE=%fileMenu|?fileMenu|>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc UTILITIS x.csv|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc LOCALLY|>EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_unclosed.ifc"
+            "-DDRIVE=%fileMenu|?fileImportMenu|?fileExportMenu|>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc UTILITIS x.csv|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc LOCALLY|>EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_unclosed.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_menu_headless.png"
-            "-DEXPECT=fileMenu: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING, NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, PREVIEW.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL, NOALIGNMENTS.*! InvalidArgument: a quoted path is never closed"
+            "-DEXPECT=fileImportMenu: Import: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*[\r\n]+fileExportMenu: Export: [^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING, NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, PREVIEW.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL, NOALIGNMENTS.*! InvalidArgument: a quoted path is never closed"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # --import-options on a .ifc builds File > Import IFC's dialog for it.
     add_test(NAME qt_ifc_import_options_are_the_import_dialog_headless
@@ -3159,8 +3315,52 @@ if(TARGET katana)
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
-    # A customisation file is loaded by the typed line, and no menu item
-    # stands for it: the line loads the symbol fixture (4 definitions, by
+    # The GIS menu's three imports and Dataset Information ask for a file
+    # first too, and were not guarded: reached by name in a headless run each
+    # opened a file dialog nobody could close, and the run waited on it until
+    # its timeout. Each is refused as File's items above are, naming the line
+    # and the words of it that are its own kind of data's (docs/interop.md,
+    # "Import options": a vector file's layers, filter and target layer; a
+    # raster's band, size and name; a cloud's budget, class and resolution),
+    # and INFO for Dataset Information.
+    add_test(NAME qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=*importVectorData|*importRaster|*importPointCloud|*datasetInformation"
+            "-DEXPECT=type IMPORT <file> \\[layers=a,b\\] \\[where=\"<filter>\"\\] \\[target=<layer>\\] instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[band=N\\] \\[maxpixels=N\\] \\[name=<n>\\] instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[budget=N\\] \\[class=N\\] \\[resolution=<m>\\] instead\\.[\r\n]+[^\r\n]*type INFO <file> instead\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/gis_file_items_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The menus as the window says them (docs/desktop.md, "The File menu"):
+    # File's fifteen items, with every import under File > Import and every
+    # export under File > Export - File's own, then Survey's, then GIS's -
+    # Settings above Quit, and Survey > Survey Coding ending with the code
+    # manager, Apply Survey Codes and Process Linework before the utilities.
+    # Each list is the WHOLE of its menu from its title to the end of the
+    # line, every item with a status tip (${_tip}: a bracket holding
+    # something), in the tree's order; a menu's report lists its own items,
+    # so each submenu is asked by its name. The other nine menus are listed
+    # so that FORBID reads every top-level item of the window: none names
+    # another program. The log (?commandLog) is there for the error an item
+    # missing from a submenu's list would leave in it (fillMenuByName).
+    set(_tip "\\[[^]]+\\]")
+    add_test(NAME qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=?commandLog|?fileMenu|?fileImportMenu|?fileExportMenu|?surveyMenu|?editMenu|?viewMenu|?drawMenu|?modifyMenu|?annotateMenu|?formatMenu|?terrainMenu|?gisMenu|?helpMenu"
+            "-DEXPECT=fileMenu: File: New ${_tip} ; Open Project\\.\\.\\. ${_tip} ; Save ${_tip} ; Save As\\.\\.\\. ${_tip} ; Import ${_tip} ; Export ${_tip} ; Run Script\\.\\.\\. ${_tip} ; Recent Scripts ${_tip} ; Plot to PDF\\.\\.\\. ${_tip} ; Sheets\\.\\.\\. ${_tip} ; Plot Sheets to PDF\\.\\.\\. ${_tip} ; Project Coordinate System\\.\\.\\. ${_tip} ; Drawing Summary\\.\\.\\. ${_tip} ; Settings\\.\\.\\. ${_tip} ; Quit ${_tip}[\r\n]+fileImportMenu: Import: Import Any File\\.\\.\\. ${_tip} ; Import IFC\\.\\.\\. ${_tip} ; Import Survey Points\\.\\.\\. ${_tip} ; Import Vector Data\\.\\.\\. ${_tip} ; Import Raster\\.\\.\\. ${_tip} ; Import Point Cloud\\.\\.\\. ${_tip} ; Online Data\\.\\.\\. ${_tip}[\r\n]+fileExportMenu: Export: Export Drawing\\.\\.\\. ${_tip} ; Export IFC\\.\\.\\. ${_tip} ; Export View as Image\\.\\.\\. ${_tip} ; Export Survey Points\\.\\.\\. ${_tip} ; Export Surface as DEM\\.\\.\\. ${_tip} ; Export Point Cloud\\.\\.\\. ${_tip}[\r\n]+surveyMenu: Survey: [^\r\n]*Coordinate Converter\\.\\.\\. ${_tip} ; Survey Code Manager\\.\\.\\. ${_tip} ; Apply Survey Codes ${_tip} ; Process Linework ${_tip} ; Draw Utility Schedule\\.\\.\\. [^\r\n]*[\r\n].*helpMenu: Help: "
+            "-DFORBID=12[dD]|no menu item is named"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/file_menus_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless
+                         qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    # A customisation file is loaded by the typed line - which File >
+    # Settings' Import runs - and the two items that opened a file dialog
+    # for one are gone: the line loads the symbol fixture (4 definitions, by
     # hand), and a trigger of either removed item is refused as the name of
     # no menu item - the run stops there, exit 1 (REFUSED).
     set(_loaded_first "customisation name=test_symbols origin=loaded kept=no definitions=4 codes=0 rules=0 colours=0")

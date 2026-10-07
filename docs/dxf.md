@@ -2,7 +2,7 @@
 
 `katana_dxf` (`include/katana/dxf/`, `src/katana_dxf/`) reads and writes DXF
 drawings itself, with no third-party library. Both front ends send every
-`.dxf` to it: File > Import, File > Export Vector, a path given to
+`.dxf` to it: File > Import > Import Any File, File > Export > Export Drawing, a path given to
 `katana.exe`, and the `IMPORT` and `EXPORT` verbs of the window's command line
 and of `katana_cli`. GDAL still reads and writes the GIS formats; it no longer
 sees a DXF.

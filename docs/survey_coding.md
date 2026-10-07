@@ -1518,9 +1518,11 @@ code it carries. `coding.createLayers` governs every layer here, as in
 `processLinework`; `import.createLayers` is not read.
 
 Process Linework is the `LINEWORK` verb ("`LINEWORK` on the command line",
-below), and in the window the Survey Code Manager's Linework tab, whose
-Execute runs that verb's line and whose Preview is the verb's own plan
-(`cad::planLinework`), against the drawing's map. Draw Survey Features has no command, menu item or
+below) - which Survey > Process Linework runs in the window, on the
+selection or, with nothing selected, the drawing - and the Survey Code
+Manager's Linework tab, whose Execute runs that verb's line and whose
+Preview is the verb's own plan (`cad::planLinework`), against the drawing's
+map. Draw Survey Features has no command, menu item or
 dialog of its own: it runs inside an import that asks for linework (next
 section).
 
@@ -1946,7 +1948,6 @@ Not done:
   code is left out, not joined.
 - The note that a string has no rule to style it is counted also when its
   line was found already drawn.
-- The Survey menu has no Process Linework item.
 - The reply counts the notes by kind and does not list them; the tab's
   preview still does. It does not say which layers and styles its lines
   created, as `SURVEY IMPORT`'s `linework` record now does.
@@ -2053,8 +2054,10 @@ until 2026-10-06. Not done:
   kept file: it calls the commit hook round its commit, before `setSurveyMap`
   and what the hook hands back after (`CustomisationContext::beginCommit`),
   and the workbench answers with the `CUSTOMISE KEEP` line (`docs/desktop.md`,
-  "The definition editor"). An interactive session has no kept file of its
-  own until File > Settings.
+  "The definition editor"). An interactive session's kept file is in its
+  per-user place; a headless one has a kept file only where
+  `KATANA_CUSTOMISATION` names it (`docs/desktop.md`, "How the window
+  starts").
 - **The buffer does not know where its rules came from.** Import Codes takes
   a file's rules and nothing else, so the file's notice and its sources stop
   at the buffer: after Apply (`Document::setSurveyMap`, an edit) the session

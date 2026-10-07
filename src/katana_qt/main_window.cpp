@@ -76,6 +76,7 @@
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QRegularExpression>
 #include <QScreen>
 #include <QGuiApplication>
@@ -307,6 +308,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         logMessage("The tool category " + QString::fromStdString(category) +
                    " has no menu; its tools start from the command line.");
     }
+    // And an item File > Import or Export lists by a name no action has
+    // (fillMenuByName): an error, since the item is missing from the menu.
+    for (const QString& problem : std::as_const(menuProblems_)) {
+        logMessage(problem, true);
+    }
     views_->setReferenceData(&reference_);
     // No colour lookup is handed to the interpreter: CODE resolves a colour
     // name through the Document - the customisation's own table, then the
@@ -498,14 +504,22 @@ void MainWindow::buildActions()
     QAction* saveAsAction =
         makeAction(Icon::SaveAs, "Save &As...", "Save the project under another name",
                    QKeySequence::SaveAs, "fileSaveAs");
+    // "Any File", where it was "Import...": it heads a submenu of imports
+    // now, and is the one that takes whatever it is given, routed by what the
+    // file holds. Its letter is A: I is the submenu's in File and Import
+    // Survey Points' inside it.
     QAction* importAction =
-        makeAction(Icon::Import, "&Import...",
+        makeAction(Icon::Import, "Import &Any File...",
                    "Import a drawing, an image or a point cloud (DXF, IFC, SHP, GeoTIFF, LAS ...)",
                    QKeySequence(Qt::CTRL | Qt::Key_I), "fileImport");
-    QAction* exportAction = makeAction(Icon::Export, "Export &Vector...",
-                                       "Export the drawing (DXF, IFC, GeoPackage, GeoJSON, SHP ...)",
-                                       QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E),
-                                       "fileExportVector");
+    // "Drawing", where it was "Vector": it writes DXF, archives and IFC as
+    // well as the GIS vector formats, and what it takes is the drawing. Shown
+    // in GIS too, the same object.
+    QAction* exportAction =
+        makeAction(Icon::Export, "Export Dra&wing...",
+                   "Export the drawing, or a scope of it, to a file: DXF, an archive, IFC 4.3 or "
+                   "a GIS vector format (GeoPackage, GeoJSON, SHP ...)",
+                   QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E), "fileExportVector");
     QAction* plotAction = makeAction(Icon::Plot, "&Plot to PDF...",
                                      "Plot the drawing to a sheet at a standard scale",
                                      QKeySequence::Print, "filePlot");
@@ -542,7 +556,7 @@ void MainWindow::buildActions()
                    "their property sets, terrain as surfaces",
                    QKeySequence(), "fileImportIfc");
     QAction* exportIfcAction = makeAction(
-        Icon::Export, "&Export IFC...",
+        Icon::Export, "Export I&FC...",
         "Export IFC 4.3: alignments, the drawing by class and an AS 5488 utility investigation, "
         "with a preview of the class each object becomes",
         QKeySequence(), "fileExportIfc");
@@ -583,6 +597,15 @@ void MainWindow::buildActions()
                                      "line, one undo step",
                                      {}, "applySurveyCodes");
     connect(codeAction, &QAction::triggered, this, [this] { applySurveyCodes(); });
+    // Beside it under Survey > Survey Coding: what is done with coded points
+    // next. It was one tab of the Survey Code Manager and nothing else.
+    QAction* lineworkAction =
+        makeAction(Icon::SurveyLinework, "P&rocess Linework",
+                   "Join the selected coded points into lines - every coded point in the "
+                   "drawing when nothing is selected - by their codes and the linework control "
+                   "codes: the LINEWORK line, one undo step",
+                   {}, "surveyLinework");
+    connect(lineworkAction, &QAction::triggered, this, [this] { surveyLinework(); });
 
     // The menu bar, in the order a CAD user reads it: the file, editing and
     // viewing it, the three tool menus, Format for how things are drawn,
@@ -605,16 +628,39 @@ void MainWindow::buildActions()
     QMenu* gisMenu = topMenu("&GIS", "gisMenu");
     QMenu* helpMenu = topMenu("&Help", "helpMenu");
 
-    // File keeps to files: the managers of what a customisation brings are
-    // in Format (and Survey > Survey Coding), and a customisation file is
-    // loaded by the CUSTOMISE line, which has no menu item yet.
-    // Its seventeen items are in titled sections, as the long menus all are:
-    // a style that draws titles (theme.cpp) says what each group is for.
+    // File is the drawing as a file, what comes into it and goes out of it,
+    // and the program's own settings: fifteen items in titled sections, as
+    // the long menus all are (a style that draws titles, theme.cpp, says what
+    // each group is for).
+    //
+    // EVERY import and every export is under one of two submenus here,
+    // whichever menu also shows it: File's own (any file, IFC, a view's
+    // picture), then Survey's and GIS's under their names. A person looking
+    // for "how do I get this file in" looks in File first, and imports were
+    // in three menus. The items are the SAME QAction objects the Survey and
+    // GIS menus show - never a second action that runs the first, which would
+    // be a second text, tip and enabled state to drift - and are put in by
+    // their object names at the END of this function, once those menus have
+    // made them (fillMenuByName).
+    //
+    // The managers of what a customisation brings stay in Format and Survey >
+    // Survey Coding; the customisation as a whole - load a file, write one,
+    // reset, keep - is File > Settings, above Quit.
     fileMenu->addSection("Drawing");
     fileMenu->addActions({newAction, openAction, saveAction, saveAsAction});
     fileMenu->addSection("Import and Export");
-    fileMenu->addActions(
-        {importAction, exportAction, importIfcAction, exportIfcAction, exportImageAction});
+    QMenu* importMenu = fileMenu->addMenu("&Import");
+    importMenu->setObjectName("fileImportMenu");
+    importMenu->setIcon(katana::qt::icon(Icon::Import));
+    importMenu->menuAction()->setStatusTip(
+        "Bring a file into the drawing: any file as it comes, IFC, survey points, or GIS data "
+        "with its options");
+    QMenu* exportMenu = fileMenu->addMenu("&Export");
+    exportMenu->setObjectName("fileExportMenu");
+    exportMenu->setIcon(katana::qt::icon(Icon::Export));
+    exportMenu->menuAction()->setStatusTip(
+        "Write the drawing, a view's picture, survey points, a surface or a point cloud to a "
+        "file");
     fileMenu->addSection("Scripts");
     fileMenu->addAction(runScriptAction);
     recentScriptsMenu_ = fileMenu->addMenu("Recen&t Scripts");
@@ -942,7 +988,7 @@ void MainWindow::buildActions()
     annotation_->addLeaderActions(*annotateMenu);
 
     // ---- Survey ------------------------------------------------------------------------
-    buildSurveyActions(*surveyMenu, codeAction);
+    buildSurveyActions(*surveyMenu, codeAction, lineworkAction);
 
     // ---- Terrain and civil -----------------------------------------------------------
     QAction* cloudSurface = makeAction(Icon::SurfaceFromCloud, "Surface From &Point Cloud...",
@@ -1075,6 +1121,40 @@ void MainWindow::buildActions()
     helpMenu->addActions({reference, sheetCommands, shortcuts});
     helpMenu->addSeparator();
     helpMenu->addAction(about);
+
+    // ---- File, finished ---------------------------------------------------------------
+    // Last, when every menu has made its actions. Settings is the Format
+    // workbench's (it owns the dialog), shown above Quit; and File's two
+    // submenus take File's own items and then Survey's and GIS's by name.
+    fileMenu->insertAction(quitAction, format_->settingsAction());
+    fillMenuByName(
+        *importMenu,
+        {{"", {"fileImport", "fileImportIfc"}},
+         {"Survey", {"surveyImport"}},
+         {"GIS", {"importVectorData", "importRaster", "importPointCloud", "onlineData"}}});
+    fillMenuByName(*exportMenu,
+                   {{"", {"fileExportVector", "fileExportIfc", "fileExportViewImage"}},
+                    {"Survey", {"surveyExport"}},
+                    {"GIS", {"exportSurfaceDem", "exportPointCloud"}}});
+}
+
+void MainWindow::fillMenuByName(QMenu& menu, const std::vector<MenuPart>& parts)
+{
+    const QString where = "File > " + QString(menu.title()).remove('&');
+    for (const MenuPart& part : parts) {
+        if (*part.section != '\0') {
+            menu.addSection(QString::fromLatin1(part.section));
+        }
+        for (const char* name : part.items) {
+            auto* action = findChild<QAction*>(QString::fromLatin1(name));
+            if (action == nullptr) {
+                menuProblems_ << where + ": no menu item is named " + QString::fromLatin1(name) +
+                                     ", so it is left out of this menu.";
+                continue;
+            }
+            menu.addAction(action);
+        }
+    }
 }
 
 // Every GDAL and PDAL capability the program has, in one menu, grouped by the
@@ -1245,7 +1325,8 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
     gisBar->addAction(info);
 }
 
-void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* codeAction)
+void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* codeAction,
+                                    QAction* lineworkAction)
 {
     SurveyServices services;
     services.document = &document_;
@@ -1257,6 +1338,7 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* codeAction)
     };
     services.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
     services.applySurveyCodes = codeAction;
+    services.surveyLinework = lineworkAction;
     services.codeManager = format_->codeManagerAction();
     services.run = commandRunner();
     services.headless = [this] { return headless_; };
@@ -1305,9 +1387,15 @@ void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction)
     services.headless = [this] { return headless_; };
     services.layers = layersAction;
     services.run = commandRunner();
-    // Asked at each commit of an editor: the host is made after the window
-    // is built (loadDefaultCustomisation).
-    services.hasKeptFile = [this] { return keptCustomisationFile_; };
+    // Asked at each commit of an editor, and when File > Settings is first
+    // opened: the host is made after the window is built
+    // (loadDefaultCustomisation). The path is shown with '/', as every path
+    // the window shows is.
+    services.hasKeptFile = [this] { return !keptCustomisationFile_.empty(); };
+    services.hasBuiltIn = [this] { return hasBuiltInCustomisation_; };
+    services.keptFile = [this] {
+        return QDir::fromNativeSeparators(fromPath(keptCustomisationFile_));
+    };
     QToolBar* formatBar = makeToolBar("Format", Qt::TopToolBarArea);
     formatBar->addAction(layersAction);
     format_ = std::make_unique<CustomisationWorkbench>(*this, std::move(services), formatMenu,
@@ -3774,13 +3862,24 @@ QString countOf(std::size_t count, const char* one, const char* many)
 //
 // The built-in is cad's for THIS RUN (builtInCustomisation, which reads the
 // seam KATANA_BUILTIN_CUSTOMISATION, so a test starts the same on a machine
-// whose build has one and on one whose build has not). The kept file is
-// named ONLY by the environment variable KATANA_CUSTOMISATION for now: a
-// headless run must be the same every time, so it reads no per-user place,
-// and the per-user place of an interactive session comes with File >
-// Settings. The window once looked for style libraries and survey code files
-// beside the executable when nothing was compiled in - a third state, decided
-// at run time by what happened to lie in a folder - and that is gone.
+// whose build has one and on one whose build has not).
+//
+// THE KEPT FILE, in order:
+//   1. the file the environment variable KATANA_CUSTOMISATION names, whatever
+//      kind of session this is;
+//   2. else, in an INTERACTIVE session, customisation.json in the per-user
+//      place Qt gives the application (QStandardPaths::AppConfigLocation -
+//      where the online sources a person adds are kept too, gis_online.cpp);
+//   3. else none: a HEADLESS run with the variable unset. It must be the same
+//      run on every machine, so it reads and writes no per-user place - as it
+//      keeps no window layout - and CUSTOMISE KEEP and REVERT are then
+//      refused, naming the variable.
+// The file need not exist: nothing is kept until a KEEP writes it, and the
+// folder is made then. This is called after setHeadless for rule 3.
+//
+// The window once looked for style libraries and survey code files beside the
+// executable when nothing was compiled in - a third state, decided at run
+// time by what happened to lie in a folder - and that is gone.
 void MainWindow::loadDefaultCustomisation()
 {
     cad::CustomisationHost host;
@@ -3792,10 +3891,19 @@ void MainWindow::loadDefaultCustomisation()
     const std::string kept = katana::core::environmentVariable(cad::kKeptCustomisationVariable);
     if (!kept.empty()) {
         host.keptFile = katana::core::pathFromUtf8(kept);
+    } else if (!headless_) {
+        // Empty where the platform has no such place: the session then keeps
+        // none, as a headless one does.
+        const QString place = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+        if (!place.isEmpty()) {
+            host.keptFile = toPath(place + "/customisation.json");
+        }
     }
-    // What an editor's own commit asks before it runs CUSTOMISE KEEP
-    // (CustomisationServices::hasKeptFile).
-    keptCustomisationFile_ = !host.keptFile.empty();
+    // What the Format workbench asks: before an editor's own commit runs
+    // CUSTOMISE KEEP, and for File > Settings to show
+    // (CustomisationServices::hasKeptFile, keptFile, hasBuiltIn).
+    keptCustomisationFile_ = host.keptFile;
+    hasBuiltInCustomisation_ = host.builtIn.customisation != nullptr;
     // The interpreter first: it notes the kept file as it is NOW, which is
     // what CUSTOMISE KEEP later refuses to write over once it has changed
     // (CommandInterpreter::setCustomisationHost).
@@ -3850,6 +3958,18 @@ void MainWindow::applySurveyCodes()
 {
     (void)runVerbLine(document_.selection().empty() ? QStringLiteral("CODE DRAWING")
                                                     : QStringLiteral("CODE SELECTION"));
+}
+
+// Survey > Process Linework: the LINEWORK line, the same way and for the same
+// reasons - one undo step, answered in the verb's records (what the scope
+// took, each line strung, each reason a point is in none;
+// cad/linework_verbs.hpp). LINEWORK with no scope word chooses the selection
+// or the drawing itself; the item writes the word, so that the echoed line in
+// the log says which this click was.
+void MainWindow::surveyLinework()
+{
+    (void)runVerbLine(document_.selection().empty() ? QStringLiteral("LINEWORK DRAWING")
+                                                    : QStringLiteral("LINEWORK SELECTION"));
 }
 
 void MainWindow::importFile()
@@ -3942,8 +4062,8 @@ void MainWindow::exportVectorFile()
 
 QDialog* MainWindow::showExportOptions(const QString& selected)
 {
-    // The Export Vector dialog (gis_export_dialog.hpp): its scope and
-    // options are the EXPORT line it shows, and Run hands that line to the
+    // File > Export > Export Drawing's dialog (gis_export_dialog.hpp): its
+    // scope and options are the EXPORT line it shows, and Run hands that line to the
     // one executor, as if typed (docs/interop.md, "Export options"). One per
     // window, made the first time and kept, as every GIS dialog is.
     // Found by its name, as addGisToolAction finds a GIS dialog: the class
@@ -4383,8 +4503,18 @@ void MainWindow::finishImport(const QDialog& dialog)
     (void)runVerbLine(*line);
 }
 
+// The three imports and Dataset Information open a file dialog first, and a
+// headless session has nobody to close one: --trigger importRaster waited on
+// it until the run's timeout. Each is refused there as File's own items are
+// (refuseFileDialog), naming the line that does the same and the words of it
+// that are this kind of data's (docs/interop.md, "Import options"); the
+// dialog itself is reached headless with --import-options or --dataset-info.
 void MainWindow::importVectorWithOptions()
 {
+    if (refuseFileDialog(
+            "IMPORT <file> [layers=a,b] [where=\"<filter>\"] [target=<layer>]")) {
+        return;
+    }
     const QString chosen = QFileDialog::getOpenFileName(
         this, "Import Vector Data", QString(),
         "Vector data (" + patternsFor(interop::vectorExtensions()) + ' ' +
@@ -4396,6 +4526,9 @@ void MainWindow::importVectorWithOptions()
 
 void MainWindow::importRasterWithOptions()
 {
+    if (refuseFileDialog("IMPORT <file> [band=N] [maxpixels=N] [name=<n>]")) {
+        return;
+    }
     const QString chosen = QFileDialog::getOpenFileName(
         this, "Import Raster", QString(),
         "Raster (" + patternsFor(interop::rasterExtensions()) + ' ' +
@@ -4407,6 +4540,9 @@ void MainWindow::importRasterWithOptions()
 
 void MainWindow::importPointCloudWithOptions()
 {
+    if (refuseFileDialog("IMPORT <file> [budget=N] [class=N] [resolution=<m>]")) {
+        return;
+    }
     const QString chosen = QFileDialog::getOpenFileName(
         this, "Import Point Cloud", QString(),
         "Point cloud (" + patternsFor(interop::pointCloudExtensions()) + ");;All files (*)");
@@ -4417,6 +4553,9 @@ void MainWindow::importPointCloudWithOptions()
 
 void MainWindow::showDatasetInformation()
 {
+    if (refuseFileDialog("INFO <file>")) {
+        return;
+    }
     const QString chosen = QFileDialog::getOpenFileName(
         this, "Dataset Information", QString(),
         "GIS data and point clouds (" + patternsFor(interop::vectorExtensions()) + ' ' +
