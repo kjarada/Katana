@@ -37,6 +37,167 @@ add_test(NAME packaging_installs_only_present_first_party_files
     COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR} -DKATANA_BINARY=${CMAKE_BINARY_DIR}
             -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
 
+# The programs do not hold the older customisation formats. Their readers and
+# writers (src/katana_archive12d/legacy) are the converter's, and the program
+# reads one format, the Katana customisation; a reader that found its way back
+# into katana, katana_cli or katana_mcp would be a second way to load a file
+# that nobody had decided to keep. Two checks, each proved on a fixture below.
+#
+#   the link closure   every library a program links, however far down and
+#                      however it is linked (PUBLIC, PRIVATE, through an
+#                      INTERFACE library), holds no katana_legacy_customisation.
+#                      Walked at configure time, which is when CMake knows it,
+#                      and reported by an echo test as the headless scan is.
+#   the install rules  tools/check_install_rules.cmake: the only programs
+#                      installed are katana, katana_cli and katana_mcp, so the
+#                      converter is never handed on.
+#
+# What a target links is its LINK_LIBRARIES (everything it was given, private
+# included) and its INTERFACE_LINK_LIBRARIES (what it hands on, and where a
+# static library's private links appear, as $<LINK_ONLY:...>): both are read for
+# every target, and an entry is searched for names of targets rather than parsed,
+# since a generator expression wraps them. Over-approximate on purpose - a name
+# that is a target is followed, wherever it sits - because the check is only
+# useful if it errs towards finding one.
+function(katana_link_closure target out)
+    set(_todo "${target}")
+    set(_seen "")
+    while(_todo)
+        list(POP_FRONT _todo _current)
+        if(_current IN_LIST _seen)
+            continue()
+        endif()
+        list(APPEND _seen "${_current}")
+        foreach(_property IN ITEMS LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+            get_target_property(_value ${_current} ${_property})
+            if(NOT _value)
+                continue()
+            endif()
+            foreach(_entry IN LISTS _value)
+                string(REGEX MATCHALL "[A-Za-z_][A-Za-z0-9_:.+-]*" _words "${_entry}")
+                foreach(_word IN LISTS _words)
+                    if(TARGET ${_word})
+                        list(APPEND _todo ${_word})
+                    endif()
+                endforeach()
+            endforeach()
+        endforeach()
+    endwhile()
+    set(${out} "${_seen}" PARENT_SCOPE)
+endfunction()
+
+# The programs of `programs` whose closure holds `forbidden`, as
+# "<program> (<library>)" entries, and the ones whose walk did not reach
+# katana_core - a walk that found nothing because it saw nothing.
+function(katana_programs_holding programs forbidden holding blind)
+    set(_holding "")
+    set(_blind "")
+    foreach(_program IN LISTS programs)
+        if(NOT TARGET ${_program})
+            continue()
+        endif()
+        katana_link_closure(${_program} _closure)
+        foreach(_library IN LISTS forbidden)
+            if(_library IN_LIST _closure)
+                list(APPEND _holding "${_program} (${_library})")
+            endif()
+        endforeach()
+        if(NOT "katana_core" IN_LIST _closure)
+            list(APPEND _blind "${_program}")
+        endif()
+    endforeach()
+    set(${holding} "${_holding}" PARENT_SCOPE)
+    set(${blind} "${_blind}" PARENT_SCOPE)
+endfunction()
+
+function(katana_register_link_closure_checks)
+    if(NOT TARGET katana_legacy_customisation)
+        return()
+    endif()
+    set(_forbidden katana_legacy_customisation)
+    katana_programs_holding("katana;katana_cli;katana_mcp" "${_forbidden}" _holding _blind)
+    foreach(_list IN ITEMS _holding _blind)
+        if(${_list})
+            string(JOIN ", " ${_list}_text ${${_list}})
+        else()
+            set(${_list}_text "none")
+        endif()
+    endforeach()
+    add_test(NAME the_programs_link_none_of_the_legacy_customisation_readers
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "Programs whose link closure holds the legacy customisation readers: ${_holding_text}. Programs whose walk did not reach katana_core: ${_blind_text}.")
+    set_tests_properties(the_programs_link_none_of_the_legacy_customisation_readers PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "readers: none[.] Programs whose walk did not reach katana_core: none[.]")
+
+    # The check on a closure that holds one, and on one that does not. The
+    # library under test is linked two targets down and PRIVATELY, which is
+    # how katana_app links katana_archive12d: an INTERFACE library hands on
+    # what a static library keeps to itself only as $<LINK_ONLY:...>, and a
+    # walk that read INTERFACE_LINK_LIBRARIES of the outer target alone, or
+    # looked for the name only at the first level, would not see it. The
+    # fixtures are never built (EXCLUDE_FROM_ALL).
+    add_library(katana_link_closure_fixture_middle STATIC EXCLUDE_FROM_ALL
+        "${CMAKE_CURRENT_SOURCE_DIR}/link_closure_fixtures/empty.cpp")
+    target_link_libraries(katana_link_closure_fixture_middle PRIVATE katana_legacy_customisation)
+    add_library(katana_link_closure_fixture_outer INTERFACE)
+    target_link_libraries(katana_link_closure_fixture_outer INTERFACE katana_link_closure_fixture_middle)
+    add_library(katana_link_closure_fixture_clean INTERFACE)
+    target_link_libraries(katana_link_closure_fixture_clean INTERFACE katana_archive12d)
+    katana_programs_holding("katana_link_closure_fixture_outer;katana_link_closure_fixture_clean"
+        "${_forbidden}" _fixture_holding _fixture_blind)
+    string(JOIN ", " _fixture_text ${_fixture_holding})
+    add_test(NAME the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "Fixture programs whose link closure holds the legacy customisation readers: ${_fixture_text}.")
+    set_tests_properties(the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there
+        PROPERTIES PASS_REGULAR_EXPRESSION
+            "readers: katana_link_closure_fixture_outer [(]katana_legacy_customisation[)][.]")
+endfunction()
+cmake_language(DEFER CALL katana_register_link_closure_checks)
+
+# ... and the install rules, on three install scripts written here, each as
+# CMake writes one: a build's programs and nothing else; those and the converter
+# installed from a directory below (the check follows the scripts the top one
+# includes); and no program at all, which would make the check pass with
+# nothing to check. The files named are never read, only named.
+set(_install_fixture_root "${CMAKE_CURRENT_BINARY_DIR}/install_fixtures")
+function(katana_write_install_fixture name programs below)
+    set(_dir "${_install_fixture_root}/${name}")
+    file(MAKE_DIRECTORY "${_dir}/below")
+    set(_top "# A top-level install script, as CMake writes it.\n")
+    string(APPEND _top "file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/share\" TYPE FILE FILES \"${PROJECT_SOURCE_DIR}/README.md\")\n")
+    foreach(_program IN LISTS programs)
+        string(APPEND _top "file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/bin\" TYPE EXECUTABLE FILES \"${_dir}/bin/${_program}.exe\")\n")
+    endforeach()
+    if(below)
+        string(APPEND _top "include(\"${_dir}/below/cmake_install.cmake\")\n")
+        set(_sub "")
+        foreach(_program IN LISTS below)
+            string(APPEND _sub "file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/bin\" TYPE EXECUTABLE FILES \"${_dir}/bin/${_program}\")\n")
+        endforeach()
+        file(WRITE "${_dir}/below/cmake_install.cmake" "${_sub}")
+    endif()
+    file(WRITE "${_dir}/cmake_install.cmake" "${_top}")
+endfunction()
+katana_write_install_fixture(the_programs "katana;katana_cli;katana_mcp" "")
+katana_write_install_fixture(a_converter_from_a_directory_below "katana;katana_cli;katana_mcp"
+    "katana_customisation_convert")
+katana_write_install_fixture(no_program "" "")
+foreach(_fixture IN ITEMS the_programs a_converter_from_a_directory_below no_program)
+    add_test(NAME packaging_check_on_fixture_${_fixture}
+        COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
+                -DKATANA_BINARY=${_install_fixture_root}/${_fixture}
+                -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
+endforeach()
+set_tests_properties(packaging_check_on_fixture_the_programs PROPERTIES
+    PASS_REGULAR_EXPRESSION "Programs installed: katana, katana_cli, katana_mcp[.]")
+set_tests_properties(packaging_check_on_fixture_a_converter_from_a_directory_below PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "installs the program katana_customisation_convert, which is not one of katana, katana_cli, katana_mcp")
+set_tests_properties(packaging_check_on_fixture_no_program PROPERTIES
+    PASS_REGULAR_EXPRESSION "No install rule for a program was found")
+
 # What the documents cite exists - repository paths, Class::member names,
 # test names - no document cites the removed root plan or instructions, and
 # docs/index.md lists every document (docs/testing.md, "The docs test").

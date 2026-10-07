@@ -62,18 +62,25 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
     # shipped sample should be the drawing and nothing else.
     PATTERN "backups" EXCLUDE
     PATTERN "cache" EXCLUDE)
-# The built-in customisation is COMPILED INTO the binary (see
-# src/katana_archive12d/CMakeLists.txt and tools/embed_customisation.py), so
-# there is nothing to install beside it: its linestyles, symbols and survey
-# codes travel inside the executable and need no files at run time.
+# The built-in customisation is COMPILED INTO the binary (#embed, see
+# src/katana_cad/CMakeLists.txt), so there is nothing to install beside it: its
+# linestyles, symbols and survey codes travel inside the executable and need no
+# files at run time.
 #
-# Its SOURCES are a different matter and must never be installed. The folders
-# it is compiled from (resources/customisation, and the reference files under
-# docs/) are third-party material kept untracked on the owner's machine: they
-# are inputs to the build, not part of the product, and a bundle is something
-# that gets handed to other people. No install rule here takes anything from
-# resources/ or docs/; the test packaging_installs_only_present_first_party_files
+# Its SOURCES are a different matter and must never be installed. The file it
+# is compiled from (resources/customisation) and the reference files it was
+# converted from (under docs/) are third-party material kept untracked on the
+# owner's machine: they are inputs to the build, not part of the product, and a
+# bundle is something that gets handed to other people. No install rule here
+# takes anything from resources/ or docs/; the test
+# packaging_installs_only_present_first_party_files
 # (tools/check_install_rules.cmake) fails if one ever does.
+#
+# The programs installed are the three above, by name, and no others: the
+# converter of the older customisation formats is built beside them and
+# carries the readers of those formats, which the product does not. The same
+# check fails on a fourth program, and a test of the link closure
+# (tests/CMakeLists.txt) fails if one of the three links them.
 
 # Only files that exist. An install rule naming a missing file is not skipped:
 # `cmake --install` stops at it, after the programs are copied and before the
