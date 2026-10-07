@@ -6,14 +6,27 @@
 // until now Process Linework was one tab of the Survey Code Manager and
 // nothing else.
 //
-//   LINEWORK [<scope>] [WHERE k=v ...] [ORDER number|entity] [PREVIEW]
+//   LINEWORK [<scope>] [WHERE k=v ...] [PROPERTY <name>] [ORDER number|entity]
+//            [CHORD <length>] [PREVIEW]
 //
 // <scope> is the shared scope and filter words (scope_verbs.hpp), and comes
 // first. With no scope word it is THE SELECTION WHEN ANYTHING IS SELECTED,
 // ELSE THE WHOLE DRAWING - also under a bare WHERE - and the reply says which
-// (scope=). ORDER says how the points of one string are ordered: by their
-// point number (the default) or by entity, which for an import is the order
-// the file listed them. PREVIEW plans and reports, and changes nothing.
+// (scope=). PROPERTY names the property the codes are read from, as CODE's
+// PROPERTY does; without it the property is found (codePropertyCandidates).
+// ORDER says how the points of one string are ordered: by their point number
+// (the default) or by entity, which for an import is the order the file listed
+// them. CHORD is how far, in the drawing's units, the straight segments drawn
+// for a curve ("BC" ... "EC") may stray from it: LineworkOptions::
+// chordTolerance, 0.005 unless said. PREVIEW plans and reports, and changes
+// nothing. Each of the verb's own words is given at most once.
+//
+// PROPERTY and CHORD came with the Survey Code Manager's Linework tab, which
+// had both as controls of its own while it ran processLinework itself: it now
+// runs this line (CLAUDE.md section 1, one code path), and a control the line
+// could not say would have had to go. A property is what CODE already takes,
+// so that points coded under a name of the drawing's own can be strung as
+// they were coded; a chord length is geometry no survey code holds.
 //
 // It is cad::processLinework over the points the scope takes, with what the
 // drawing's customisation says of linework: the control codes are the
@@ -118,6 +131,49 @@ runLineworkVerb(Document& document, const std::vector<std::string>& tokens,
 // (strings_more=). A survey of a few thousand points strings a few hundred
 // lines, and a reply is read by a person in a log as well as by an agent.
 inline constexpr std::size_t kLineworkStringsListed = 50;
+
+// ---- the plan, apart from the words -------------------------------------------------
+//
+// What a LINEWORK line plans over the entities its scope took: the verb's own
+// planning, for a caller that shows the WHOLE plan before the line is run.
+// The Survey Code Manager's Linework tab is one - its Preview lists every
+// line, every point in none and every note, where the reply counts them - and
+// its Execute then runs the line. What it previewed must therefore be planned
+// by the function the line is planned by, not by a second reading of the
+// rules at the top of this header (the Document's control codes and colours,
+// no point removed, the points their job has strung left out, a line already
+// drawn not drawn again): two readings come to differ, and the preview would
+// then show something Execute does not do.
+
+// What a line says beyond its scope and PREVIEW.
+struct LineworkWords {
+    // PROPERTY. Empty: found, as applySurveyCodes finds it.
+    std::string property{};
+    LineworkOrder order = LineworkOrder::PointNumber; // ORDER
+    // CHORD, in model units. None: LineworkOptions::chordTolerance as it
+    // stands.
+    std::optional<double> chord{};
+};
+
+struct LineworkPlan {
+    // Of the entities asked about, the points their survey job has already
+    // strung: left out of `planned`. In the order asked.
+    std::vector<katana::entity::EntityId> strungByTheirJob{};
+    // processLinework over the rest. An empty report and no command when
+    // nothing is left to look at: an empty list is never handed on, because
+    // to processLinework it means every point in the drawing.
+    LineworkResult planned{};
+};
+
+// Plans, and changes nothing. `matched` is what a scope took (matchScope, or
+// matchEntities for a caller that holds a ModifyScope and ModifyFilter). The
+// errors are runLineworkVerb's, less the grammar's and the scope's: a survey
+// job whose option text cannot be read, and processLinework's own (a chord
+// length that is not a positive finite number among them). The command, when
+// there is one, must be executed on `document`.
+[[nodiscard]] katana::core::Result<LineworkPlan>
+planLinework(const Document& document, const std::vector<katana::entity::EntityId>& matched,
+             const LineworkWords& words);
 
 // ---- what a survey import does beyond drawing its points ---------------------------
 //

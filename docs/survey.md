@@ -2144,6 +2144,13 @@ same settings value - and
 imports the file with no coordinates both ways, CP1 held from the drawing
 and two settings changed from the defaults, and requires the same job - its
 report but for its time - and the same points on the drawing, bit for bit.
+`SurveyImportWizard.WithSurveyCodesLoadedItsImportIsStillTheSurveyImportLines`
+holds them together where the import does more than draw points: the fixture
+of field codes loaded into both drawings and the RTK job `gnss.fld` imported
+both ways, with the same job - its stored `apply-codes` and `draw-linework`
+among it - and the same entities, layers, styles and lines, compared whole
+("SURVEY IMPORT codes and strings what it draws", below: one function decides
+the finish for both).
 
 Tests: `cli.survey_import_holds_a_point_of_the_drawing` (the file alone
 places nothing; held, its three points where they are worked by hand beside
@@ -2231,8 +2238,9 @@ SURVEY IMPORT <file> ... [CODES on|off] [LINEWORK on|off]
 ```
 
 **Whether.** Three things decide it, in this order, in one function that the
-import wizard is to ask as well (`cad::surveyImportFinish`,
-`include/katana/cad/linework_verbs.hpp`):
+import wizard asks as well (`cad::surveyImportFinish`,
+`include/katana/cad/linework_verbs.hpp`; the wizard hands it its two boxes
+where the verb hands it its two words - "The import wizard", below):
 
 1. `CODES on|off` and `LINEWORK on|off`, for the one line. Two words and no
    others: a `yes` or a mistyped `of` taken for one of them would code, or
@@ -2397,14 +2405,14 @@ Not done:
   m), three of them strung by code alone, their points having no string
   number in the file; of the RTK job's 167, none. A person has to find and
   break them.
-- The import wizard does not ask `cad::surveyImportFinish` yet: it still
-  draws points only and offers Apply Survey Codes as a second step.
 - A job imported with `LINEWORK off` and strung afterwards by `LINEWORK` is
   strung by code, not as the file strung it (`docs/survey_coding.md`,
   "`LINEWORK` on the command line", Not done).
 - A delimited point list cannot be imported by the verb at all
-  (`surveyio::readSurvey` has no reader for one), so its codes are applied
-  only by the wizard's second step or by `CODE` and `LINEWORK`.
+  (`surveyio::readSurvey` has no reader for one). The wizard imports one and
+  codes and strings it in the same command ("The import wizard", below); from
+  a line its points are coded and strung afterwards, by `CODE` and
+  `LINEWORK`.
 
 ## The reduction's resection
 
@@ -3016,19 +3024,85 @@ with:
   default - a clash more often means the wrong file than a wanted update),
   Skip, Replace (the drawing's point deleted in the same command, so one undo
   puts it back) or Keep Both (the report says the drawing now has two).
-- **One command.** Import makes one undoable command
-  (`cad::importSurveyPoints`), frames the views and logs the report; step 5
-  can apply the loaded survey codes afterwards with the window's own Apply
-  Survey Codes action. The note under that step's boxes (`optionsNote`) says
-  what loads them - `CUSTOMISE <file>`, of a Katana customisation file, the
-  words `CODE` refuses with when none are loaded. It named Format > Load
-  Customisation and "a survey code file" until 2026-10-07, after the menu
-  item had gone and that kind of file had stopped loading
-  (`SurveyImportWizard.TheOptionsStepSaysHowSurveyCodesAreLoadedByTheLineThatLoadsThem`;
-  in the real window,
-  `qt_the_import_wizards_options_note_names_the_customise_line_headless`).
-  After Import the wizard hides and goes back to step 1
-  with its fields kept, as a wizard's Finish does.
+- **One command, codes and lines included.** Import makes ONE undoable
+  command, frames the views and logs the report. After Import the wizard
+  hides and goes back to step 1 with its fields kept, as a wizard's Finish
+  does.
+
+**The wizard's import codes and strings what it draws** (2026-10-07), as
+`SURVEY IMPORT` does, in that one command. The Options step has two boxes,
+Apply survey codes to the imported points (`applyCodes`) and Draw linework
+through the imported points (`drawLinework`), and a note under them
+(`finishNote`) that says what Import will then do.
+
+- **One function decides the finish, for the wizard and the verb**
+  (`cad::surveyImportFinish`): the wizard hands it the two boxes where the
+  line hands it `CODES` and `LINEWORK`, and gets back the options it gives
+  the import - with the Document's colours and control codes, strings ordered
+  by point number - or nothing at all while no survey codes are loaded. So
+  the two cannot differ, and
+  `SurveyImportWizard.WithSurveyCodesLoadedItsImportIsStillTheSurveyImportLines`
+  compares the whole job and the whole drawing.
+- **The boxes start as the customisation has them switched** (its automation,
+  both on until a customisation or `CUSTOMISE SET auto.*` says otherwise),
+  once for each file read; going back and forth over one file keeps what the
+  person ticked. They are enabled only while the session has survey codes;
+  without any they are unticked and the note says so. Rejected: reading the
+  switches every time the step is shown, which would undo a tick whenever
+  the person went Back; and reading them once when the wizard is built,
+  which a switch set in Settings before the next import would never reach
+  (the wizard is kept between uses).
+- **A field file** is a survey job, and the finish is the job's own
+  (`SurveyJobImport::finish`): the job stores `apply-codes` and
+  `draw-linework`, a re-adjustment treats it as it was imported, and Remove
+  Job takes its lines with its points. **A point list** is no job: its
+  points' command (`cad::importSurveyPoints`) is wrapped in
+  `cad::withSurveyFinish` with no strings of the file's own, so its points
+  are joined by their codes.
+- **A layer per field code gives way to the codes.** `layerPerCode` is
+  disabled, with the reason in its tip, while the codes are applied: the
+  codes move each coded point to its rule's layer, and the layer made for its
+  code beneath the import's would be left empty. Its tick is kept for when
+  the codes are switched off again, and is not used meanwhile.
+- **The report.** Before Import the report pane says what is asked: a line
+  beginning `Survey codes:` and one beginning `Linework:`. What the finish
+  DID follows the import, because the finish plans against points that are
+  in the drawing: the log, and the end of the report pane, get
+  `cad::describe`'s sentences - the points drawn, how many carry a code and
+  how many of those have a rule, the layers and styles made, the codes with
+  no rule (the first twelve by name), the lines drawn, and the strings and
+  points in no line with why. Rejected: a second, wizard-made forecast of
+  what the finish will do, worked out from the file and the rules before the
+  import; it would be a second implementation of the coding's own report.
+- **Gone:** the second undo step. The wizard was handed the window's Apply
+  Survey Codes action in its context, and after
+  its import selected what it had drawn and triggered it: two undo steps, the
+  person's selection replaced, and no lines at all. Its note sent the person
+  to a menu item that no longer exists to "load a survey code file".
+
+Tests (`tests/qt_widgets/survey/test_survey_import_wizard.cpp`, each worked
+by hand from the fixture
+`tests/data/field_codes/test_field_codes.customisation.json` and the file it
+imports): the equivalence above; one undo step back to the drawing
+before, with the selection left alone, for a field file
+(`AFieldFilesImportWithItsCodesAndLinesIsOneUndoStep`) and for a point list
+written in the test (`APointListsImportWithItsCodesAndLinesIsOneUndoStep`,
+which also ticks a layer per code and finds none made); the boxes taken from
+the switches, kept across Back and Next, and a layer per code giving way
+(`TheFinishBoxesStartAsTheCustomisationHasThemAndALayerPerCodeGivesWayToTheCodes`);
+and a session with no survey codes
+(`WithNoSurveyCodesTheFinishBoxesAreDisabledAndTheNoteSaysWhy`). Through the
+real window, with the fixture as the built-in of the run:
+`qt_survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step_headless`.
+Every other `qt_survey_*` check runs with no built-in and draws its points
+and nothing else, as before.
+The note, for a session with no survey codes, says what brings some: the
+CUSTOMISE line, of a Katana customisation file (it named Format > Load
+Customisation and "a survey code file" until 2026-10-07, after the menu item had
+gone and that kind of file had stopped loading;
+`SurveyImportWizard.TheOptionsStepSaysHowSurveyCodesAreLoadedByTheLineThatLoadsThem`,
+and in the real window
+`qt_the_import_wizards_options_note_names_the_customise_line_headless`).
 
 Saved layout templates live in the user's settings (`survey/templates`), and
 every open template list - the wizard's and the Export dialog's - is refilled
@@ -3049,7 +3123,7 @@ checks the log with `-DEXPECT`, the files written with
 Replace and writes again, and both files must equal the reference), and
 requires a refusal with `-DREFUSED=<regex>` - exit 1, never a crash, with the
 regex naming what came before the refusal so a run stopped earlier cannot
-pass. Fourteen `qt_survey_*` tests run this way.
+pass. Sixteen `qt_survey_*` tests run this way.
 
 The Point Manager dock wears the window's dock chrome - minimise to the tray,
 float, close - through `SurveyServices::chrome`, which the workbench tells to
@@ -3057,9 +3131,12 @@ forget the dock before deleting it.
 
 Not done: the Survey menu has no Process Linework item - it is the `LINEWORK`
 verb and the Survey Code Manager's Linework tab (`docs/survey_coding.md`,
-"`LINEWORK` on the command line") - and the wizard does not yet ask for the
-finish that codes and strings an import as `SURVEY IMPORT` does
-(`cad::surveyImportFinish`), so it still draws points only; undoing an import
+"`LINEWORK` on the command line"); the wizard's note points a session with no
+survey codes at the `CUSTOMISE` line, there being no menu item that loads a
+customisation yet; the wizard cannot order a point list's strings as the file
+listed them (strings are ordered by point number, as the verb's are), so a
+list whose point ids are not numbers in walking order is strung afterwards
+with `LINEWORK ... ORDER entity`; undoing an import
 that created a nested layer (`survey/points`) takes that layer away and
 leaves the parent it created with it (`survey`), because the layer command's
 undo removes only the layer it was given; the Point Manager is

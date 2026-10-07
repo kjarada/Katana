@@ -241,9 +241,12 @@ TEST_F(McpServer, TheCommandToolNamesTheSurveyFieldFileVerbs)
     // What an import does with the survey codes, and the verb that strings
     // coded points afterwards: an agent that is not told of the two words
     // cannot turn the coding off, and one not told of LINEWORK draws the
-    // lines by hand.
-    for (const char* words : {"[CODES on|off] [LINEWORK on|off]", "LINEWORK [<scope>]",
-                              "[ORDER number|entity] [PREVIEW]", "HELP LINEWORK"}) {
+    // lines by hand. The verb's own words as HELP LINEWORK lists them, with
+    // PROPERTY and CHORD since the verb took them (ledger_C3.md, 1.5: this
+    // held "[ORDER number|entity] [PREVIEW]", which CHORD now stands between).
+    for (const char* words :
+         {"[CODES on|off] [LINEWORK on|off]", "LINEWORK [<scope>]",
+          "[PROPERTY <name>] [ORDER number|entity] [CHORD <length>] [PREVIEW]", "HELP LINEWORK"}) {
         EXPECT_NE(description.find(words), std::string::npos) << words;
     }
 }

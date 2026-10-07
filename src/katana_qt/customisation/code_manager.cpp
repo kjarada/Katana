@@ -21,8 +21,8 @@
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QRadioButton>
 #include <QScrollArea>
+#include <QShowEvent>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabWidget>
@@ -325,11 +325,8 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
     rebuildIssues();
     refreshCensus();
     loadLineworkCodes();
-    if (context_.document != nullptr) {
-        const QString count = QString::number(context_.document->selection().size());
-        applySelection_->setText(tr("Selection (%1)").arg(count));
-        lineworkSelection_->setText(tr("Selection (%1)").arg(count));
-    }
+    reloadScopes();
+    showLines();
     loadForm(SurveyRule{}, std::nullopt);
     updateDirty();
 }
@@ -358,9 +355,13 @@ void SurveyCodeManagerDialog::log(const QString& message, bool isError) const
     }
 }
 
-const katana::cad::LineworkCodes& SurveyCodeManagerDialog::lineworkCodes() const
+void SurveyCodeManagerDialog::showEvent(QShowEvent* event)
 {
-    return context_.lineworkCodes != nullptr ? *context_.lineworkCodes : localCodes_;
+    // The manager is kept between uses: the layers and the views open now,
+    // not those of when it was built or last shown.
+    reloadScopes();
+    showLines();
+    QDialog::showEvent(event);
 }
 
 // ---- the buffer --------------------------------------------------------------------
@@ -389,7 +390,6 @@ katana::core::Status SurveyCodeManagerDialog::apply()
         committed();
     }
     baseline_ = buffer_;
-    invalidatePlans();
     updateDirty();
     log(tr("Survey map applied: %1 rules over %2 codes.")
             .arg(buffer_.size())
@@ -419,7 +419,6 @@ void SurveyCodeManagerDialog::revert()
 
 void SurveyCodeManagerDialog::bufferChanged()
 {
-    invalidatePlans();
     rebuildCodeTable();
     rebuildIssues();
     filterCensus();
@@ -456,7 +455,19 @@ void SurveyCodeManagerDialog::updateDirty()
 void SurveyCodeManagerDialog::documentChanged(const DocumentChanges& changes)
 {
     katana::cad::Document* doc = document();
-    if (doc == nullptr || !changes.any()) {
+    if (doc == nullptr) {
+        return;
+    }
+    // The control codes are the customisation's, which the watcher has no
+    // flag for (a CUSTOMISE SET moves none of the generations it compares),
+    // so they are compared here at every delivery: a change of them - this
+    // tab's own line, a typed one, a customisation loaded - fills the seven
+    // fields again. Nothing else does, so what a person is typing there
+    // survives a selection click.
+    if (!(doc->customisationState().linework == shownLinework_)) {
+        loadLineworkCodes();
+    }
+    if (!changes.any()) {
         return;
     }
     if (changes.surveyMap && !(doc->surveyMap() == baseline_)) {
@@ -501,12 +512,9 @@ void SurveyCodeManagerDialog::documentChanged(const DocumentChanges& changes)
     if (changes.model) {
         refreshCensus();
         updateFormIssues();
-    }
-    if (changes.model || changes.selection || changes.surveyMap || changes.library) {
-        invalidatePlans();
-        const QString count = QString::number(doc->selection().size());
-        applySelection_->setText(tr("Selection (%1)").arg(count));
-        lineworkSelection_->setText(tr("Selection (%1)").arg(count));
+        // A layer made or deleted since: the lists the two scopes tick from.
+        reloadScopes();
+        showLines();
     }
 }
 

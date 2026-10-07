@@ -1033,23 +1033,22 @@ if(TARGET katana)
             "-DEXPECT=Records read: 12.*Points to create: 12.*Imported 12 point\\(s\\) from survey_points_pnezd\\.csv.*SurveyPointsDock: 12 points, 2 shown"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    # The note under the wizard's Options step says what loads survey codes,
-    # and it is read here in the real window - without walking to the step:
-    # the note is in the dialog whichever page is in front. It named Format >
-    # Load Customisation and "a survey code file" after the menu item had gone
-    # and that kind of file had stopped loading; what loads survey codes is
-    # the CUSTOMISE line, of a Katana customisation file.
-    #
-    # The report holds the "<file>" the note shows. The label's text is plain
-    # (Qt::PlainText), and --report read every label as markup: a word in
-    # angle brackets was on the screen and not in the report, so this
-    # expression could not have been met.
+    # The note under the wizard's Options step (finishNote) says what the
+    # step's two boxes will do, and for a session with no survey codes what
+    # brings some; it is read here in the real window, walked to the step
+    # (the note is filled in when the step is reached, not before). It named
+    # Format > Load Customisation and "a survey code file" after the menu item
+    # had gone and that kind of file had stopped loading; what loads survey
+    # codes is the CUSTOMISE line, of a Katana customisation file. This group
+    # runs with no built-in, so the session has none. The report wraps a long
+    # label at the width of the window, which differs with the font, so the
+    # expression leaves the words between its three phrases open.
     add_test(NAME qt_the_import_wizards_options_note_names_the_customise_line_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=@surveyImport|?optionsNote"
-            "-DEXPECT=optionsNote: [^\r\n]*Survey codes need a loaded customisation that has some - CUSTOMISE <file> on the command line loads a Katana customisation file - and are applied to the imported points only"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|?finishNote"
+            "-DEXPECT=finishNote: [^\r\n]*Survey codes: the session has none.*Katana customisation file.*the CUSTOMISE line"
             "-DFORBID=Load Customisation|survey code file"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_options_note_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -1065,6 +1064,37 @@ if(TARGET katana)
             "-DEXPECT=survey file=setup\\.fld format=opcode-field-file .*imported job=job-1 entities=4 layer=survey/points.*Entities: 4 "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_verb_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The wizard in a window that HAS survey codes: the hand-written fixture
+    # tests/data/field_codes/test_field_codes, named as the built-in of the
+    # run through the seam, and the RTK job gnss.fld - the pair
+    # cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step
+    # works by hand (src/katana_app/CMakeLists.txt), which is the same import
+    # from a line. The customisation is one linestyle and three rules, and
+    # says nothing of its switches, so both are on: the Options step shows
+    # both boxes ticked. Import draws the 5 points; codes the 4 that carry KB
+    # (all matched, by KB*, onto the ONE layer FIELD KERB in the ONE style
+    # named after its linestyle); and strings the file's closed string KB 1
+    # through R001, R002 and R003 - a right-angled triangle with legs of 10,
+    # 10 + 10 + sqrt(200) = 34.1421... round and 50 in area. The log says so
+    # in the finish's own sentences, LIST shows 6 entities, and ONE undo
+    # takes the points, the line, the layers, the style and the job back.
+    # (Every other wizard check here runs with no built-in - the seam is
+    # `none` - and so draws its points and nothing else, as it always did.)
+    set(_wizard_codes
+        "${PROJECT_SOURCE_DIR}/tests/data/field_codes/test_field_codes.customisation.json")
+    add_test(NAME qt_survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/fld/gnss.fld|!next|!next|!next|!next|!next|?applyCodes|?drawLinework|layer=fieldwork|!next|!import|>LIST|>UNDO|>STATUS"
+            "-DEXPECT=Customisation: test_field_codes, 1 definition [^\r\n]*and 3 survey code rules, built in\\..*applyCodes: Apply survey codes to the imported points, checked[\r\n]+drawLinework: Draw linework through the imported points, checked[\r\n].*Imported survey job job-1 from gnss\\.fld [^\r\n]*point\\(s\\) on fieldwork[^\r\n]*[\r\n]+Survey codes were applied to the 5 point\\(s\\) drawn: 4 carry a code and 4 of those have a rule; 1 layer\\(s\\) and 1 style\\(s\\) were created\\.[\r\n]+Linework: 1 line\\(s\\) drawn\\.[\r\n].*6 entities[\r\n]+[^\r\n]*Point +layer=fieldwork +at 500000,6200000[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500010,6200020[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500020,6200020[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500020,6200030[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500040,6200040[\r\n]+[^\r\n]*Polyline +layer=FIELD KERB +vertices=3 +closed +length=34[.]1421[0-9]* +area=50[\r\n].*Entities: 0 "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_codes_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(
+        qt_survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_BUILTIN_CUSTOMISATION=set:${_wizard_codes}"
+        TIMEOUT 180)
     # A headerless file does not say which column is the northing: Next on the
     # layout page is refused until the order is confirmed, and then its 3
     # points import.
@@ -1459,23 +1489,31 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
     # The Survey Code Manager's Linework tab strings with the CUSTOMISATION'S
-    # control codes, and follows a change of them while it is open
-    # (CustomisationWorkbench::followLineworkCodes). By hand, over the three
-    # fixtures, whose rule WM* draws a line: four points coded WM1 are one
-    # string, joined in the order made, and the third is coded "WM1 GO".
-    # While the start code is the default ST, GO is a token nothing knows:
-    # ONE line through the four, and one note. After CUSTOMISE SET
-    # linework.start=GO the tab says it took the codes, shows GO, and the
-    # third point begins a second line: TWO lines of two points, no note.
-    # The tab kept a copy of its own once, and strung with ST whatever the
-    # customisation said.
+    # control codes - it reads the Document's - and follows a change of them
+    # while it is open; and its Execute is the LINEWORK line, through the
+    # window's one executor. By hand, over the three fixtures, whose rule WM*
+    # draws a line: four points coded WM1 are one string, joined in the order
+    # made, and the third is coded "WM1 GO". The tab shows the line it will
+    # run - the whole drawing, in the order observed - and its summaries
+    # begin with what that scope takes, the 4 points. While the start code is
+    # the default ST, GO is a token nothing knows: ONE line through the four,
+    # and one note. After CUSTOMISE SET linework.start=GO the tab shows GO,
+    # and the third point begins a second line: TWO lines of two points, no
+    # note. Execute then runs the line: it is echoed in the log (?commandLog,
+    # on one line) and answered there in the verb's records, and the tab says
+    # what was drawn from that answer.
+    # (The window once followed the codes into a copy of its own and pressed
+    # the tab's Use These Codes to do it, which logged "Linework control codes
+    # set for this session." after the SET line's reply: FORBID holds the run
+    # to no such line, the tab reading the Document itself now.)
     add_test(NAME qt_the_linework_tab_strings_with_the_customisations_control_codes_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
-            "-DDRIVE=>POINT 0,0|>POINT 10,0|>POINT 20,0|>POINT 30,0|>SELECT ALL|>PROP SET code WM1|>SELECT 3|>PROP SET code \"WM1 GO\"|>SELECT NONE|@formatSurveyCodes|lineworkOrder=In the order observed|?lineworkStart|!lineworkPreview|?lineworkSummary|>CUSTOMISE SET linework.start=GO|?lineworkStart|!lineworkPreview|?lineworkSummary"
-            "-DEXPECT=lineworkStart: ST[\r\n]+.*lineworkSummary: Preview only: 1 lines from 4 points; 0 points not placed; 1 notes\\..*[\r\n]set linework\\.start=GO[\r\n]+Linework control codes set for this session\\.[\r\n]+lineworkStart: GO[\r\n]+.*lineworkSummary: Preview only: 2 lines from 4 points; 0 points not placed; 0 notes\\."
+            "-DDRIVE=>POINT 0,0|>POINT 10,0|>POINT 20,0|>POINT 30,0|>SELECT ALL|>PROP SET code WM1|>SELECT 3|>PROP SET code \"WM1 GO\"|>SELECT NONE|@formatSurveyCodes|lineworkOrder=In the order observed|?lineworkStart|?lineworkCommand|!lineworkPreview|?lineworkSummary|>CUSTOMISE SET linework.start=GO|?lineworkStart|!lineworkPreview|?lineworkSummary|!lineworkExecute|?lineworkSummary|?commandLog"
+            "-DEXPECT=lineworkStart: ST[\r\n]+lineworkCommand: LINEWORK DRAWING ORDER entity[\r\n]+.*lineworkSummary: 4 matched\\. Preview only: 1 lines from 4 points; 0 points not placed; 1 notes\\..*[\r\n]set linework\\.start=GO[\r\n]+lineworkStart: GO[\r\n]+.*lineworkSummary: 4 matched\\. Preview only: 2 lines from 4 points; 0 points not placed; 0 notes\\..*lineworkSummary: Executed as one undoable step: 2 lines drawn\\. linework scope=drawing matched=4 considered=4 lines=2 unplaced=0 notes=0[\r\n]+commandLog: [^\r\n]*> LINEWORK DRAWING ORDER entity linework scope=drawing matched=4 considered=4 lines=2 unplaced=0 notes=0 "
+            "-DFORBID=control codes set for this"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/linework_tab_codes_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 

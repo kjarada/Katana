@@ -573,10 +573,11 @@ Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS:
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK schedule.csv|scope ...  AS 5488 subsurface utilities:
           grade, verify, clear, check against a schema, on a schedule or what is drawn;
           DRAW schedule.csv, REGRADE scope, SCHEDULE out.csv scope (HELP UTILITY)
-Linework  LINEWORK [scope] [WHERE k=v ...] [ORDER number|entity] [PREVIEW]   joins coded
-          survey points into lines by the survey codes and their control codes, one undo
-          step; no scope word: the selection, else the drawing. Points their survey job
-          has strung, and lines already drawn, are left out and counted (HELP LINEWORK)
+Linework  LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]
+          [CHORD length] [PREVIEW]   joins coded survey points into lines by the survey
+          codes and their control codes, one undo step; no scope word: the selection, else
+          the drawing. Points their survey job has strung, and lines already drawn, are left out
+          and counted (HELP LINEWORK)
 Views     the desktop window's views (katana_cli and katana_mcp have none, and refuse these):
           VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id   a record per view;
           id is the view= a record gives, not its title's number

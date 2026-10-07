@@ -303,6 +303,26 @@ TEST(LineworkVerb, AWordTheGrammarDoesNotTakeIsRefusedByNameAndNothingIsDrawn)
         {"LINEWORK ORDER sideways", ErrorCode::ParseFailure, "ORDER takes number", "sideways"},
         {"LINEWORK ORDER number ORDER entity", ErrorCode::ParseFailure, "ORDER is given twice",
          "ORDER"},
+        // PROPERTY and CHORD each take the word after them, once.
+        {"LINEWORK PROPERTY", ErrorCode::ParseFailure,
+         "PROPERTY needs the property's name after it", "PROPERTY"},
+        {"LINEWORK PROPERTY \"\"", ErrorCode::ParseFailure,
+         "PROPERTY needs the property's name after it", "PROPERTY"},
+        {"LINEWORK PROPERTY code PROPERTY code", ErrorCode::ParseFailure,
+         "PROPERTY is given twice", "PROPERTY"},
+        {"LINEWORK CHORD", ErrorCode::ParseFailure, "CHORD needs a length after it", "CHORD"},
+        {"LINEWORK CHORD 0.1 CHORD 0.1", ErrorCode::ParseFailure, "CHORD is given twice",
+         "CHORD"},
+        // A chord length is a length: zero would ask for chords without end,
+        // and a negative, a non-finite or a worded one measures nothing.
+        {"LINEWORK CHORD 0", ErrorCode::ParseFailure, "CHORD takes a length greater than 0",
+         "0"},
+        {"LINEWORK CHORD -0.005", ErrorCode::ParseFailure, "CHORD takes a length greater than 0",
+         "-0.005"},
+        {"LINEWORK CHORD inf", ErrorCode::ParseFailure, "CHORD takes a length greater than 0",
+         "inf"},
+        {"LINEWORK CHORD fine", ErrorCode::ParseFailure, "CHORD takes a length greater than 0",
+         "fine"},
         // A scope after the verb's own words is not read as one.
         {"LINEWORK PREVIEW DRAWING", ErrorCode::ParseFailure,
          "the scope and its WHERE come first", "DRAWING"},
@@ -560,6 +580,212 @@ TEST(LineworkVerb, OrderSaysWhetherAStringRunsByPointNumberOrAsItsPointsWereDraw
                   "entity=6"}));
     EXPECT_EQ(verticesOf(*document.model().entities.find(6)),
               (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(20, 0), Point2(30, 0)}));
+}
+
+// PROPERTY, as CODE has it: three shots of one kerb whose code is kept under
+// "fcode", a name that is not among those a code is looked for under
+// (codePropertyCandidates: code, 12d.name, Code, CODE, feature_code). Found,
+// they carry no code at all; named, they are KB1: one line through the three.
+TEST(LineworkVerb, PropertyNamesThePropertyTheCodesAreReadFrom)
+{
+    Document document;
+    document.setSurveyMap(kerbMap());
+    std::vector<Entity> shots;
+    for (int i = 0; i < 3; ++i) {
+        Entity shot;
+        shot.geometry = katana::entity::PointGeometry{Point2(10.0 * i, 0.0)};
+        shot.properties.insert_or_assign("point",
+                                         katana::entity::PropertyValue(std::to_string(i + 1)));
+        shot.properties.insert_or_assign("fcode", katana::entity::PropertyValue(std::string("KB1")));
+        shots.push_back(std::move(shot));
+    }
+    addEntities(document, std::move(shots));
+
+    EXPECT_EQ(linesOf(run(document, "LINEWORK PREVIEW")),
+              (std::vector<std::string>{
+                  "linework scope=drawing matched=3 considered=3 lines=0 unplaced=3 notes=0 "
+                  "preview=yes",
+                  "unplaced reason=\"no code\" points=3"}));
+    EXPECT_EQ(linesOf(run(document, "LINEWORK PROPERTY fcode PREVIEW")),
+              (std::vector<std::string>{
+                  "linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0 "
+                  "preview=yes",
+                  "string name=KB1 key=KB* number=1 points=3 vertices=3 closed=no layer=KERB"}));
+
+    // Drawn, the line carries the code where its points carry it, so that
+    // CODE PROPERTY fcode finds the rule for the line that it finds for them.
+    run(document, "LINEWORK DRAWING PROPERTY fcode");
+    const std::vector<const Entity*> lines = polylinesOf(document);
+    ASSERT_EQ(lines.size(), 1U);
+    EXPECT_EQ(verticesOf(*lines.front()),
+              (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(20, 0)}));
+    EXPECT_EQ(textProperty(*lines.front(), "fcode"), "KB1");
+    EXPECT_EQ(textProperty(*lines.front(), "code"), "<absent>");
+}
+
+// CHORD: a half circle of radius 10 about the origin, as
+// tests/cad/customisation/test_linework.cpp works it - begun at (10,0),
+// through (0,10), ended at (-10,0), each quarter chorded on its own.
+//   unsaid, 0.005: the largest step is 2 acos(1 - 0.005/10) = 0.063248 rad,
+//     and a quarter, 1.570796 rad, is 24.84 of them: 25 chords a quarter,
+//     1 + 25 + 25 = 51 vertices;
+//   CHORD 0.35: 2 acos(1 - 0.35/10) = 2 x 15.2 = 30.4 degrees, so 3 chords of
+//     30 degrees a quarter: 1 + 3 + 3 = 7 vertices, at 0, 30 ... 180 degrees.
+TEST(LineworkVerb, ChordSaysHowFarTheSegmentsDrawnForACurveMayStrayFromIt)
+{
+    Document document;
+    document.setSurveyMap(kerbMap());
+    addPoints(document, {{"1", 10, 0, "KB1 BC"}, {"2", 0, 10, "KB1"}, {"3", -10, 0, "KB1 EC"}});
+
+    EXPECT_EQ(linesOf(run(document, "LINEWORK PREVIEW")),
+              (std::vector<std::string>{
+                  "linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0 "
+                  "preview=yes",
+                  "string name=KB1 key=KB* number=1 points=3 vertices=51 closed=no layer=KERB"}));
+    EXPECT_EQ(linesOf(run(document, "LINEWORK CHORD 0.35 PREVIEW")),
+              (std::vector<std::string>{
+                  "linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0 "
+                  "preview=yes",
+                  "string name=KB1 key=KB* number=1 points=3 vertices=7 closed=no layer=KERB"}));
+
+    run(document, "LINEWORK CHORD 0.35");
+    const std::vector<const Entity*> lines = polylinesOf(document);
+    ASSERT_EQ(lines.size(), 1U);
+    const std::vector<Point2>& vertices = verticesOf(*lines.front());
+    ASSERT_EQ(vertices.size(), 7U);
+    EXPECT_EQ(vertices[3], Point2(0, 10)) << "the surveyed point is a vertex, exactly";
+    // The middle of each 30 degree chord is 10 cos 15 deg = 9.659 from the
+    // centre: 0.341 inside the arc, within the 0.35 asked for.
+    for (std::size_t i = 1; i < vertices.size(); ++i) {
+        const Point2 middle = (vertices[i - 1] + vertices[i]) * 0.5;
+        EXPECT_NEAR(10.0 - middle.length(), 0.341, 0.001) << "chord " << i;
+    }
+}
+
+// ---- the plan, apart from the words ------------------------------------------------------
+
+// planLinework is what the verb plans with, for a caller that shows the whole
+// plan: over the two kerbs and the mark it is KB1 and KB2 and the mark in no
+// line, with every point named - and nothing is changed.
+TEST(LineworkPlan, IsTheVerbsOwnPlanInFullAndChangesNothing)
+{
+    Document document;
+    document.setSurveyMap(kerbMap());
+    const std::vector<EntityId> ids = twoKerbsAndAMark(document);
+    const std::uint64_t revision = document.modelRevision();
+
+    const auto plan = planLinework(document, ids, {});
+
+    ASSERT_TRUE(plan.ok()) << plan.error().describe();
+    EXPECT_TRUE(plan->strungByTheirJob.empty());
+    EXPECT_NE(plan->planned.command, nullptr);
+    const LineworkReport& report = plan->planned.report;
+    EXPECT_EQ(report.considered, 6U);
+    ASSERT_EQ(report.strings.size(), 2U);
+    EXPECT_EQ(report.strings[0].name, "KB1");
+    EXPECT_EQ(report.strings[0].pointNumbers, (std::vector<std::string>{"1", "2", "3"}));
+    EXPECT_EQ(report.strings[1].name, "KB2");
+    EXPECT_EQ(report.strings[1].pointNumbers, (std::vector<std::string>{"4", "5"}));
+    ASSERT_EQ(report.unplaced.size(), 1U);
+    EXPECT_EQ(report.unplaced[0].pointNumber, "6");
+    EXPECT_EQ(report.unplaced[0].reason, UnplacedReason::PointCode);
+    EXPECT_EQ(document.model().entities.size(), 6U);
+    EXPECT_EQ(document.history().undoCount(), 1U);
+    EXPECT_EQ(document.modelRevision(), revision);
+}
+
+// An empty list is a scope that took nothing. It is never handed on: to
+// processLinework an empty list is every point in the drawing.
+TEST(LineworkPlan, AnEmptyListPlansNothingRatherThanEveryPoint)
+{
+    Document document;
+    document.setSurveyMap(kerbMap());
+    twoKerbsAndAMark(document);
+
+    const auto plan = planLinework(document, {}, {});
+
+    ASSERT_TRUE(plan.ok()) << plan.error().describe();
+    EXPECT_EQ(plan->planned.command, nullptr);
+    EXPECT_EQ(plan->planned.report.considered, 0U);
+    EXPECT_TRUE(plan->planned.report.strings.empty());
+    EXPECT_TRUE(plan->planned.report.unplaced.empty());
+}
+
+// The two things the verb leaves out are left out of the plan too: the points
+// their job has strung (the job's four, entities 2 to 5) are named and not
+// planned, and a line the drawing already holds is listed as already drawn
+// and makes no command.
+TEST(LineworkPlan, LeavesOutWhatTheVerbLeavesOutAndSaysWhich)
+{
+    Document document;
+    document.setSurveyMap(jointMap());
+    importTwoJoints(document, true, true);
+    // Two loose shots of another string: entities 8 and 9.
+    const std::vector<EntityId> loose =
+        addPoints(document, {{"10", 0, 20, "KJ77"}, {"11", 10, 20, "KJ77"}});
+    ASSERT_EQ(loose, (std::vector<EntityId>{8, 9}));
+    std::vector<EntityId> everything;
+    document.model().entities.forEach(
+        [&](const Entity& entity) { everything.push_back(entity.id); });
+
+    const auto first = planLinework(document, everything, {});
+    ASSERT_TRUE(first.ok()) << first.error().describe();
+    EXPECT_EQ(first->strungByTheirJob, (std::vector<EntityId>{2, 3, 4, 5}));
+    EXPECT_EQ(first->planned.report.considered, 2U);
+    ASSERT_EQ(first->planned.report.strings.size(), 1U);
+    EXPECT_EQ(first->planned.report.strings[0].name, "KJ77");
+    EXPECT_NE(first->planned.command, nullptr);
+
+    // Drawn by the verb; planned again, that line is the drawing's already.
+    run(document, "LINEWORK DRAWING");
+    everything.clear();
+    document.model().entities.forEach(
+        [&](const Entity& entity) { everything.push_back(entity.id); });
+    const auto second = planLinework(document, everything, {});
+    ASSERT_TRUE(second.ok()) << second.error().describe();
+    EXPECT_EQ(second->planned.command, nullptr);
+    EXPECT_TRUE(second->planned.report.strings.empty());
+    ASSERT_EQ(second->planned.report.alreadyDrawn.size(), 1U);
+    EXPECT_EQ(second->planned.report.alreadyDrawn[0].name, "KJ77");
+}
+
+// The words reach the plan as they reach the verb's: the property, the order
+// and the chord length (the half circle of the CHORD test above, 7 vertices
+// at 0.35), and a chord length that is no length is processLinework's refusal.
+TEST(LineworkPlan, TakesThePropertyTheOrderAndTheChordLengthALineWouldSay)
+{
+    Document document;
+    document.setSurveyMap(kerbMap());
+    // Drawn 3, 1, 2: by number the string runs 1, 2, 3; as drawn, 3, 1, 2.
+    const std::vector<EntityId> ids =
+        addPoints(document, {{"3", -10, 0, "KB1 EC"}, {"1", 10, 0, "KB1 BC"}, {"2", 0, 10, "KB1"}});
+
+    LineworkWords words;
+    words.chord = 0.35;
+    const auto byNumber = planLinework(document, ids, words);
+    ASSERT_TRUE(byNumber.ok()) << byNumber.error().describe();
+    ASSERT_EQ(byNumber->planned.report.strings.size(), 1U);
+    EXPECT_EQ(byNumber->planned.report.strings[0].pointNumbers,
+              (std::vector<std::string>{"1", "2", "3"}));
+    EXPECT_EQ(byNumber->planned.report.strings[0].vertices, 7U);
+
+    words.order = LineworkOrder::EntityOrder;
+    const auto asDrawn = planLinework(document, ids, words);
+    ASSERT_TRUE(asDrawn.ok()) << asDrawn.error().describe();
+    ASSERT_EQ(asDrawn->planned.report.strings.size(), 1U);
+    EXPECT_EQ(asDrawn->planned.report.strings[0].pointNumbers,
+              (std::vector<std::string>{"3", "1", "2"}));
+
+    words.property = "fcode"; // which none of the three carries
+    const auto elsewhere = planLinework(document, ids, words);
+    ASSERT_TRUE(elsewhere.ok()) << elsewhere.error().describe();
+    EXPECT_TRUE(elsewhere->planned.report.strings.empty());
+    EXPECT_EQ(elsewhere->planned.report.unplaced.size(), 3U);
+
+    words.chord = 0.0;
+    const auto refused = planLinework(document, ids, words);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
 }
 
 // The fields of a string record that a line of plain shots cannot tell apart:
@@ -1105,17 +1331,23 @@ TEST(LineworkVerb, AReplyListsFiftyLinesAndCountsTheRest)
 
 TEST(LineworkVerb, TheHelpNamesTheVerbAndHelpLineworkIsItsOwnText)
 {
+    // The grammar as each says it, on two lines since PROPERTY and CHORD joined
+    // it (ledger_C3.md, section 1: the one line each held before, and these).
     const std::string help = CommandInterpreter::helpText();
-    EXPECT_NE(help.find("LINEWORK [scope] [WHERE k=v ...] [ORDER number|entity] [PREVIEW]"),
+    EXPECT_NE(help.find("LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]\n"
+                        "          [CHORD length] [PREVIEW]"),
               std::string::npos);
     EXPECT_NE(help.find("HELP LINEWORK"), std::string::npos);
 
     Document document;
     const std::string own = run(document, "HELP LINEWORK");
     EXPECT_EQ(own, lineworkVerbHelp());
-    for (const char* words : {"LINEWORK [<scope>] [WHERE k=v ...] [ORDER number|entity] [PREVIEW]",
-                              "left_out=<n> reason=strung-by-their-job", "strings_more=<n>",
-                              "ONE undo step"}) {
+    for (const char* words :
+         {"LINEWORK [<scope>] [WHERE k=v ...] [PROPERTY <name>] [ORDER number|entity]\n"
+          "         [CHORD <length>] [PREVIEW]",
+          "PROPERTY  the property the codes are read from, as CODE's PROPERTY",
+          "CHORD     how far, in the drawing's units, the straight segments drawn for a curve",
+          "left_out=<n> reason=strung-by-their-job", "strings_more=<n>", "ONE undo step"}) {
         EXPECT_NE(own.find(words), std::string::npos) << words;
     }
     // A reply, the help included, never holds the word a script's check for
