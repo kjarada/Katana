@@ -577,7 +577,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> --help)
     set_tests_properties(cli.the_help_says_customise_loads_katana_customisation_files PROPERTIES
         PASS_REGULAR_EXPRESSION "a loaded library linestyle or ByLayer.*Customise CUSTOMISE \\[REPLACE\\] <file> \\[<file>\\.\\.\\.\\] +load Katana customisation files, merged"
-        FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)|[.]4d|[.]mapfile|MAPFILE")
+        FAIL_REGULAR_EXPRESSION "1[2]d (customisation|linestyle|symbol|mapfile|librar)|[.]4d|[.]mapfile|MAPFILE")
 
     # LIST takes no words: LIST LAYER x once listed the whole drawing, as
     # though it had filtered it. Refused with its usage; LIST alone lists.

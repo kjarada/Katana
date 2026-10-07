@@ -2038,7 +2038,7 @@ They were style library files of another program's format until 2026-10-06.
   everything, and rules loaded from a symbol browser would go round the
   Survey Code Manager's buffer, where a person reviews rules before Apply -
   and silently under any edits that buffer holds. A whole customisation is
-  loaded by the `CUSTOMISE` line.
+  loaded by the `CUSTOMISE` line or in File > Settings > Import.
 
   A file that LISTS its sources - every customisation a session writes does -
   brings them as the session's sources, and of those the import hands on only
@@ -3523,7 +3523,7 @@ today, Customisation (`settingsCustomisation`); a second is one more
 
 | Part | Object names | What it shows or runs |
 |---|---|---|
-| What is active | `settingsActiveName`, `settingsActiveOrigin`, `settingsActiveDefinitions`, `settingsActiveSymbols`, `settingsActiveRules`, `settingsActiveKept`, `settingsActiveProblems` | the name; the origin in plain words (None, Built in, Kept by you, Loaded this session, Edited this session); how many definitions, how many of them symbols, and the rules over how many codes; "Kept" or "Not kept" with the kept file's path, or that the session has none; what the START of the session found, in the error colour, hidden when it found nothing |
+| What is active | `settingsActiveName`, `settingsActiveOrigin`, `settingsActiveDefinitions`, `settingsActiveSymbols`, `settingsActiveRules`, `settingsActiveKept`, `settingsActiveProblems` | the name; the origin in plain words (None, Built in, Kept by you, Loaded this session, Edited this session); how many definitions, how many of them symbols, and the rules over how many codes; "Kept" or "Not kept" with the kept file's path, or - when the session has no kept file - "Nothing is kept: the next start gives the built-in customisation" (or "no customisation", where the program has none) and the variable that names a file to keep one in; what the START of the session found, in the error colour, hidden when it found nothing |
 | The notice | `settingsShowNotice`, `settingsNotice` | the author's notice, read-only and hidden until asked for: the customisation's own, then each source's under `From <name>:`. The toggle is hidden while there is none |
 | Import | `settingsImportPath`, `settingsImportBrowse`, `settingsImportReplace`, `settingsImport` | `CUSTOMISE "<file>"`, or with Replace instead of merging ticked `CUSTOMISE REPLACE "<file>"` |
 | Export | `settingsExportPath`, `settingsExportBrowse`, `settingsExport` | `CUSTOMISE EXPORT "<file>"` |

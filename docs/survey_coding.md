@@ -71,9 +71,9 @@ is that a definition is offered as a SYMBOL when any of these holds:
 It is offered as a LINESTYLE when it is not `mode vertex`, so a definition
 can be both, and `DefinitionKind` keeps each reason so a browser can say why
 a definition is listed where it is. The counts both front ends print are D3's
-too: CUSTOMISE says "792 linestyle and symbol definitions in 71 groups: 475
-offered as symbols, 635 as linestyles (one definition can be both)", and the
-window's log "792 definitions (475 symbols)", counting the library entries
+too: CUSTOMISE says "792 linestyle and symbol definitions in 71 groups: 472
+offered as symbols, 637 as linestyles (one definition can be both)", and the
+window's log "792 definitions (472 symbols)", and Settings' Symbols row, counting the library entries
 `cad::symbolChoices` offers. They used to count `mode vertex` alone - "157 of
 them symbols" - which is not what a symbol is.
 
@@ -202,7 +202,7 @@ Checked with a script, outside Katana:
 | Reference | Resolves exactly | Missing |
 |---|---|---|
 | 177 distinct `<linestyle>` values | 175 | `0` and `1`, the names of the plain continuous line |
-| 195 distinct symbol `<style>` values | 193 | `Circle Single` and `SBEND`, from a standard library that is not one of these files |
+| 195 distinct symbol `<style>` values | 193 | two symbols a standard library supplies, which is not one of these files |
 
 So a customisation is not necessarily self-contained, and an unresolved name
 has to be reported rather than treated as a fault in the file.
@@ -430,9 +430,9 @@ Customisation: 792 linestyles and symbols and 1624 survey code rules, built in
   survey_codes_names.mapfile: survey code file, 0 added, 899 replaced (codes, once for each section): "1*", ... and 891 more
   symbols.4d: style library, 0 added, 474 replaced: "Accepted For Construction", ... and 466 more
 Loaded now: 792 definitions, 1624 survey code rules
-  3 names the survey codes ask for that no loaded library defines: "Circle Single", "LNMK Dividing - Separation Line S2 Multi Lane", "SBEND"
+  3 names the survey codes ask for that no loaded library defines: (the three names, one per line, in a real run)
 This drawing has no styles yet; import a drawing or survey that carries styles, or make one in Format > Styles and Linetypes or with STYLE NEW, to see the customisation take effect.
-792 linestyle and symbol definitions in 71 groups: 475 offered as symbols, 635 as linestyles (one definition can be both)
+792 linestyle and symbol definitions in 71 groups: 472 offered as symbols, 637 as linestyles (one definition can be both)
 1624 survey code rules over 632 distinct codes
 This drawing has no styles yet; import a drawing or survey that carries styles, or make one in Format > Styles and Linetypes or with STYLE NEW, to see the customisation take effect.
 ```

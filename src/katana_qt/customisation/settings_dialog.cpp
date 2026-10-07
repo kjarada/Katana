@@ -29,6 +29,7 @@
 #include "katana/cad/customisation_host.hpp"
 #include "katana/cad/customisation_state.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/style_catalogue.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/linework_codes.hpp"
 #include "katana/entity/style_library.hpp"
@@ -155,12 +156,22 @@ QString noKeptFile()
         .arg(QLatin1String(katana::cad::kKeptCustomisationVariable));
 }
 
-QString keptWords(bool kept, const QString& keptFile)
+// The Kept row. With a kept file it says whether the session is what that
+// file gives the next start. With none there is nothing to be kept: the next
+// start gives the built-in (or nothing, in a program without one), and the row
+// says that instead of the contradiction "kept ... no kept file".
+QString keptWords(bool kept, const QString& keptFile, bool hasBuiltIn)
 {
+    if (keptFile.isEmpty()) {
+        return QStringLiteral("Nothing is kept: the next start gives %1. The environment variable "
+                              "%2 names a file to keep one in.")
+            .arg(hasBuiltIn ? QStringLiteral("the built-in customisation")
+                            : QStringLiteral("no customisation"),
+                 QLatin1String(katana::cad::kKeptCustomisationVariable));
+    }
     return (kept ? QStringLiteral("Kept: the next start gives this customisation.")
                  : QStringLiteral("Not kept: the next start does not give this customisation.")) +
-           QLatin1Char('\n') +
-           (keptFile.isEmpty() ? noKeptFile() : QStringLiteral("Kept file: %1").arg(keptFile));
+           QLatin1Char('\n') + QStringLiteral("Kept file: %1").arg(keptFile);
 }
 
 // Where CUSTOMISE KEEP leaves the kept file that was there: beside it, under
@@ -600,14 +611,10 @@ void SettingsDialog::refresh()
     }
     name_->setText(name);
     origin_->setText(originWords(state.origin));
-    std::size_t symbols = 0;
-    document.styleLibrary().forEach([&symbols](const katana::entity::LineStyle& definition) {
-        symbols += definition.symbol ? 1 : 0;
-    });
     definitions_->setText(QString::number(document.styleLibrary().size()));
-    symbols_->setText(QString::number(symbols));
+    symbols_->setText(QString::number(katana::cad::symbolDefinitionCount(document)));
     rules_->setText(rulesWords(document.surveyMap().size(), document.surveyMap().keys().size()));
-    kept_->setText(keptWords(state.kept, context_.keptFile));
+    kept_->setText(keptWords(state.kept, context_.keptFile, context_.hasBuiltIn));
 
     const QStringList problems = startProblemsOf(state);
     problems_->setText(problems.join(QLatin1Char('\n')));

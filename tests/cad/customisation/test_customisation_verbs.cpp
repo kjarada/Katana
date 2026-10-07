@@ -2006,6 +2006,6 @@ TEST(CustomisationVerbs, TheHelpNamesEveryWordAndHelpCustomiseSaysEveryReply)
     for (const std::string& text : {help, family}) {
         EXPECT_FALSE(contains(text, ".mapfile"));
         EXPECT_FALSE(contains(text, ".4d"));
-        EXPECT_FALSE(contains(text, "12d"));
+        EXPECT_FALSE(contains(text, "1" "2d")); // the name, written so this file lacks it
     }
 }

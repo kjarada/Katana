@@ -3135,11 +3135,7 @@ The Point Manager dock wears the window's dock chrome - minimise to the tray,
 float, close - through `SurveyServices::chrome`, which the workbench tells to
 forget the dock before deleting it.
 
-Not done: the Survey menu has no Process Linework item - it is the `LINEWORK`
-verb and the Survey Code Manager's Linework tab (`docs/survey_coding.md`,
-"`LINEWORK` on the command line"); the wizard's note points a session with no
-survey codes at the `CUSTOMISE` line, there being no menu item that loads a
-customisation yet; the wizard cannot order a point list's strings as the file
+Not done: the wizard cannot order a point list's strings as the file
 listed them (strings are ordered by point number, as the verb's are), so a
 list whose point ids are not numbers in walking order is strung afterwards
 with `LINEWORK ... ORDER entity`; undoing an import

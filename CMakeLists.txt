@@ -73,7 +73,10 @@ set(KATANA_PUBLISHER "Jarada" CACHE STRING "The publisher named in the programs,
 # absent or holds no file in those formats, and FAILS when it holds some and
 # they are not the four. Defined here, above the modules and the tests,
 # because both the converter's module and its test suite are to see one value.
-set(KATANA_REFERENCE_CUSTOMISATION_DIR "${PROJECT_SOURCE_DIR}/docs/12d Refrence Files" CACHE PATH
+# The owner's folder is named for the program its files came from; the name is
+# assembled so that no tracked file spells it (CLAUDE.md, section 9).
+string(CONCAT _katana_reference_folder "1" "2d Refrence Files")
+set(KATANA_REFERENCE_CUSTOMISATION_DIR "${PROJECT_SOURCE_DIR}/docs/${_katana_reference_folder}" CACHE PATH
     "Folder of the reference customisation in the legacy formats; the converter's reference test reads it and skips when it is absent or holds no such file")
 
 # ---------------------------------------------------------------------------

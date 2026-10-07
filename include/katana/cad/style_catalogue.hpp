@@ -101,6 +101,10 @@ struct CatalogueEntry {
 // symbol, one entry per name (a library definition hides a built-in of the
 // same name, as it does when drawn), sorted by name with case folded.
 [[nodiscard]] std::vector<CatalogueEntry> symbolChoices(const Document& document);
+// How many of the library's definitions symbolChoices offers as symbols - the
+// built-in shapes no customisation brought left out. THE count of symbols that
+// the start-up line, Settings and CUSTOMISE all say, so they cannot differ.
+[[nodiscard]] std::size_t symbolDefinitionCount(const Document& document);
 
 // `choices` with `current` added, marked missing, when no entry has that
 // exact name; unchanged when one has, and for "" (nothing to keep).
