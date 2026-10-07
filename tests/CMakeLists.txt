@@ -1039,16 +1039,20 @@ if(TARGET katana)
     # (the note is filled in when the step is reached, not before). It named
     # Format > Load Customisation and "a survey code file" after the menu item
     # had gone and that kind of file had stopped loading; what loads survey
-    # codes is the CUSTOMISE line, of a Katana customisation file. This group
-    # runs with no built-in, so the session has none. The report wraps a long
-    # label at the width of the window, which differs with the font, so the
-    # expression leaves the words between its three phrases open.
+    # codes is a Katana customisation file, loaded in File > Settings > Import
+    # or by the CUSTOMISE <file> line. This group runs with no built-in, so the
+    # session has none. The label's text is plain (Qt::PlainText), and --report
+    # read every label as markup until 2026-10-07: a word in angle brackets was
+    # on the screen and not in the report, so "<file>" is what shows that this
+    # expression can be met. The report wraps a long label at the width of the
+    # window, which differs with the font, so the expression allows a break
+    # between any two words of a phrase.
     add_test(NAME qt_the_import_wizards_options_note_names_the_customise_line_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|?finishNote"
-            "-DEXPECT=finishNote: [^\r\n]*Survey codes: the session has none.*Katana customisation file.*the CUSTOMISE line"
+            "-DEXPECT=finishNote: [^\r\n]*Survey codes: the session has none.*Katana customisation file.*load one in File[ \r\n]+>[ \r\n]+Settings[ \r\n]+>[ \r\n]+Import.*type[ \r\n]+CUSTOMISE[ \r\n]+<file>[ \r\n]+on"
             "-DFORBID=Load Customisation|survey code file"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_options_note_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")

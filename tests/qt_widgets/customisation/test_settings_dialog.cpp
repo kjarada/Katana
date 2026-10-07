@@ -1445,10 +1445,10 @@ TEST(SettingsDialog, TheOneListOfLineworkLabelsNamesEveryControlInTheOrderTheFor
 TEST(SettingsDialog, TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem)
 {
     // The editor itself: the Survey Code Manager, whose Linework tab labels
-    // its seven fields in a form. The words are read from it, not written
-    // out again here, because this is the test that holds the two lists
-    // together - the tab's own and the one Settings reads
-    // (linework_labels.hpp) - until the tab reads that one too.
+    // its seven fields in a form from the one list Settings reads
+    // (linework_labels.hpp). The words are read from the tab, not written
+    // out again here: this is the test that finds a field the tab built
+    // without that list, or a list that gained a control the tab lacks.
     Document managed;
     katana::qt::CustomisationContext managerContext;
     managerContext.document = &managed;

@@ -810,6 +810,10 @@ QWidget* SurveyImportWizard::buildOptionsPage()
     // What the two boxes will do, as they stand (showFinishChoice).
     finishNote_ = mutedLabel({}, page);
     finishNote_->setObjectName("finishNote");
+    // Plain text, said rather than left to the label's guess: what stands in
+    // angle brackets in this note (CUSTOMISE <file>) is a word of a command
+    // line, never markup.
+    finishNote_->setTextFormat(Qt::PlainText);
     layout->addWidget(finishNote_);
     layout->addWidget(mutedLabel(
         "Refusing is the default for ids the drawing already has: such an import is more often "
@@ -973,7 +977,12 @@ void SurveyImportWizard::showFinishChoice()
                       "and their lines."
                     : " The points are drawn on the layer above and nothing else is done.";
     } else {
-        note += " A Katana customisation file brings survey codes (the CUSTOMISE line).";
+        // What loads survey codes is a Katana customisation file: Settings'
+        // Import, or the line that runs. It said Format > Load Customisation
+        // and "a survey code file" until 2026-10-07, after that menu item had
+        // gone and that kind of file had stopped loading.
+        note += " A Katana customisation file brings survey codes: load one in File > Settings > "
+                "Import, or type CUSTOMISE <file> on the command line.";
     }
     finishNote_->setText(note);
 }

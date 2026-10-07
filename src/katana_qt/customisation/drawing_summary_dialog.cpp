@@ -115,7 +115,13 @@ DrawingSummaryDialog::DrawingSummaryDialog(DrawingSummaryContext context, QWidge
 
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(form);
-    layout->addWidget(new QLabel("Customisation:", this));
+    // Says where the customisation is changed: the summary only shows it, and
+    // had a Load Customisation button for that until the item it triggered
+    // went (drawing_summary_dialog.hpp).
+    auto* customisationLabel =
+        new QLabel("Customisation (File > Settings loads, writes or resets it):", this);
+    customisationLabel->setObjectName("drawingSummaryCustomisationLabel");
+    layout->addWidget(customisationLabel);
     layout->addWidget(customisation_, 1);
     layout->addWidget(unresolvedLabel);
     layout->addWidget(unresolved_);

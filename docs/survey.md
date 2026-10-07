@@ -3100,10 +3100,12 @@ real window, with the fixture as the built-in of the run:
 `qt_survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step_headless`.
 Every other `qt_survey_*` check runs with no built-in and draws its points
 and nothing else, as before.
-The note, for a session with no survey codes, says what brings some: the
-CUSTOMISE line, of a Katana customisation file (it named Format > Load
-Customisation and "a survey code file" until 2026-10-07, after the menu item had
-gone and that kind of file had stopped loading;
+The note, for a session with no survey codes, says what brings some: a
+Katana customisation file, loaded in File > Settings > Import or by typing
+`CUSTOMISE <file>` (it named Format > Load Customisation and "a survey code
+file" until 2026-10-07, after the menu item had gone and that kind of file had
+stopped loading; the label is plain text, so the `<file>` is on the screen and in
+`--report` alike;
 `SurveyImportWizard.TheOptionsStepSaysHowSurveyCodesAreLoadedByTheLineThatLoadsThem`,
 and in the real window
 `qt_the_import_wizards_options_note_names_the_customise_line_headless`).
