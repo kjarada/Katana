@@ -283,7 +283,7 @@ TEST(CustomisationHost, AFileThatIsNotThereOrIsNoCustomisationIsRefusedNamingThe
 TEST(CustomisationHost, TheCompiledInCustomisationIsReadOrThereIsNoneAndNeverOneThatDidNotRead)
 {
     // Whichever this build is. With none: none, and NO PROBLEM - an absent
-    // built-in is the ordinary case, not a fault. With one: it was read, and
+    // built-in is a state a build may be in, not a fault. With one: it was read, and
     // carries the digest of its bytes. What this build may not be is the
     // third thing: a file compiled in that is no customisation. The program
     // still starts with that, and says so; a release made from such a build
@@ -380,9 +380,10 @@ TEST(CustomisationHost, TheSeamIsPutBackAsItWasWhenATestEnds)
 // ---- the rule of the seam, against a built-in that IS compiled in ----------------------------
 //
 // The tests above go through the environment and whatever this build compiled
-// in - nothing, in a clone and in CI - so "whatever is compiled in" and "never
-// the compiled-in one in its place" could not fail there. These give the rule
-// a compiled-in customisation to override.
+// in - the tracked NSW customisation in a default build, nothing in one whose
+// KATANA_BUILTIN_CUSTOMISATION names no file - so "whatever is compiled in"
+// and "never the compiled-in one in its place" could not fail in the second.
+// These give the rule a compiled-in customisation to override in both.
 
 TEST(CustomisationHost, WithNothingSaidTheBuiltInIsTheCompiledInOneAsItIs)
 {

@@ -319,8 +319,16 @@ These are kept on purpose:
   utility tools (`docs/subsurface_utilities.md`, `samples/utilities/`, the
   `UTILITY CHECK` tests, `tools/utility_schema_domains.py`).
 
-Third-party reference files live gitignored on the owner's machine and are
-never installed or committed.
+The original third-party reference files live gitignored on the owner's
+machine and are never installed or committed. The one file derived from them
+that is tracked is `resources/customisation/nsw.customisation.json`, the
+converted NSW built-in, committed on the owner's decision of 2026-10-08. The
+converter copies the libraries' notice into its `notice` member; the owner
+removed that text from the committed file by hand (two rows of dashes are all
+that is left of it), so the file is not what the converter writes. Tracked
+tests, docs and fixtures still use invented names only, and quote counts, never
+the names or the notice, so the rule above holds for them. Why the file is tracked, and what that does and does
+not settle: `docs/customisation.md`, "Why the built-in is in the repository".
 
 ## 10. Honesty and leaving it better
 

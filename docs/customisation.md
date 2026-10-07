@@ -19,9 +19,10 @@ document is the reasons.
 
 1. **The NSW customisation is built in, and applies at start-up.** Its
    linestyles, symbols and survey code rules are there the first time the
-   program runs, with nothing to load. (A build made from a clean checkout has
-   no built-in: the NSW file is git-ignored, "Why it is not in the repository",
-   below, and such a build starts with no customisation until a file is loaded.)
+   program runs, with nothing to load. (The NSW file is in the repository,
+   "Why the built-in is in the repository", below, so a build made from a clean
+   checkout has it. Only a build pointed at a file that does not exist starts
+   with no customisation until one is loaded.)
 2. **To use another customisation, load its file in File > Settings > Import.**
    It is merged onto the built-in automatically - a definition of a name takes
    the place of the one of that name, a code's rules take the place of that
@@ -1885,15 +1886,18 @@ Three CMake variables and one environment variable say what it is:
 
 | | What it is | Default |
 |---|---|---|
-| `KATANA_BUILTIN_CUSTOMISATION` (CMake, FILEPATH) | the Katana customisation file compiled in. Present at configure time it is embedded; absent, the program has NO built-in - a state it runs in, not a fault. Whether it is there is asked of the file, not of a glob, so a checkout under a directory with `[` in its name still has it; a `CONFIGURE_DEPENDS` glob over the path remains, so a file put there after the configure is found by the next build | `resources/customisation/nsw.customisation.json`, git-ignored |
-| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` (CMake, option) | its absence is a configure error, for a release job that must not ship drawing plain lines | `OFF` |
+| `KATANA_BUILTIN_CUSTOMISATION` (CMake, FILEPATH) | the Katana customisation file compiled in. Present at configure time it is embedded; absent, the program has NO built-in - a state it runs in, not a fault. Whether it is there is asked of the file, not of a glob, so a checkout under a directory with `[` in its name still has it; a `CONFIGURE_DEPENDS` glob over the path remains, so a file put there after the configure is found by the next build | `resources/customisation/nsw.customisation.json`, tracked |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` (CMake, option) | its absence is a configure error. The file is tracked, so the default build always has it; the option is for a release job, where the tracked file having been deleted or a path given wrongly would otherwise ship a program that draws plain lines | `OFF` |
 | `KATANA_REFERENCE_CUSTOMISATION_DIR` (CMake, PATH) | where the reference customisation is kept in the legacy formats. It is NOT what is compiled in: the converter reads it and the legacy readers' own tests do, and the program never does | the git-ignored reference folder under `docs/` |
 
-The file is made once, by the owner, on the machine that has the reference
-files, with `katana_customisation_convert` ("The reference customisation",
-below, has the command), and kept where `KATANA_BUILTIN_CUSTOMISATION` finds
-it. Both folders are git-ignored; `docs/building.md`, "The built-in
-customisation and the reference folder", has how a build is pointed at another.
+The built-in is a tracked file. The owner made it, on the machine that has the
+reference files, with `katana_customisation_convert` ("The reference
+customisation", below, has the command), and a new edition is made the same
+way and committed over it. `.gitattributes` marks it `-text`, so its bytes are
+the same in every checkout whatever `core.autocrlf` says: they are embedded,
+and the digest of them is what tells one edition from another. The reference
+folder is git-ignored; `docs/building.md`, "The built-in customisation and the
+reference folder", has how a build is pointed at another file.
 There is no script: the build needs nothing but the compiler, where the
 embedding this replaced ran Python over a folder of four files on every build.
 
@@ -1913,24 +1917,44 @@ the suite gives every program test `none` unless it names a committed fixture
 (`docs/headless.md`, "The customisation a run starts with"; the deferred scan
 of `tests/CMakeLists.txt` and `tools/check_program_tests.cmake`).
 
-### Why it is not in the repository
+### Why the built-in is in the repository
 
-It is made from third-party material under its author's own licence, and the
-two libraries it comes from carry a notice against copying or use without
-authorisation, so neither those files nor the file made from them is
-committed, installed or generated into the tree: `.gitignore` says so, and the
-install check refuses an install from `resources/customisation` or `docs`. The
-notice is carried INSIDE the converted file (`notice`), shown to whoever uses
-it. A checkout therefore builds a program with no built-in, and that is the
-normal case - every CI build and every clone - not a fault: it draws plain
-lines, says so, and every test that needs the data skips. How the file reaches
-a RELEASE build is the owner's decision and is not made here: until it is, a
-release is built without it unless the job is given the file, and
-`KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes the job fail rather than ship
-without one. *Rejected: committing the converted file* (the licence says no,
-and a file in the repository cannot be taken back); *rejected: generating it
-at build time from the reference files* (the reference files would then be an
-input of every build, and Python a requirement of it).
+The owner decided, on 2026-10-08, that the converted file is committed, and it
+is. `katana_customisation_convert` made it from reference files that are not in
+the repository and stay out of it (`.gitignore`), so it is the one file derived
+from them that is tracked. The converter copies the two libraries' notice into
+the file's `notice` member, 16 lines, and that notice says the library files may
+not be copied or used without authorisation. The owner removed that text from
+the committed file by hand, on the same day, so two rows of dashes are all its
+`notice` holds and the file is 1,540,630 bytes, not the 1,541,462 the converter
+writes (definitions, rules and colours are the same). Converting again gives
+the longer file; the committed one is the owner's edit of it and no program
+writes it. The decision to commit the file and to remove the notice is the
+owner's; nothing in the repository records that anyone granted a permission,
+and none is claimed here. The libraries' notice still exists in the reference
+files, and anyone who redistributes a build, or a copy of the repository, should
+read it first. Committed, the file stays in the history even if a later commit
+removes it.
+
+What was rejected, and why it was dropped. *Rejected: the file ignored, with
+`KATANA_REQUIRE_BUILTIN_CUSTOMISATION` for a release that must not do without
+it.* That was the arrangement until this decision. A clean checkout, CI and
+every release build had no NSW customisation: the program drew plain lines, the
+tests that need the data skipped, and a release had the built-in only when the
+job was handed the file. *Rejected: generating it at build time from the
+reference files* (they would then be an input of every build, and Python a
+requirement of it).
+
+What does not change. The reference files themselves are never committed and
+never installed. The install check still refuses an install from
+`resources/customisation` or `docs`: the built-in is compiled into the
+programs, not installed beside them. A tracked test, document or fixture
+names nothing of the data - counts only, as the rule on names in this project
+has it. A build without the file, one where `KATANA_BUILTIN_CUSTOMISATION`
+names a path that does not exist, still configures and builds, has no
+built-in, says so, and skips the tests that need the data.
+`KATANA_REQUIRE_BUILTIN_CUSTOMISATION` stays an option, `OFF`: it guards a
+release job against the tracked file having been deleted or a path being wrong.
 
 ### What holds the product to it
 
@@ -1940,7 +1964,10 @@ input of every build, and Python a requirement of it).
   35,692 strokes, 1,624 rules in 632 distinct keys, 7 colours, 5 names no
   library defines - counted by `tools/customisation_census.py` over the file
   and by `tools/reference_census.py` over the four files it was converted from.
-  No name of the data is in a tracked file: counts only.
+  No name of the data is in a tracked test or document: counts only (the
+  converted file holds them, being the data). The file is tracked, so these run
+  in every build from a clean checkout and skip only in one whose build has no
+  built-in.
 - `BuiltInRenames.*` (`test_builtin_renames.cpp`): the names a project saved
   before the built-in was one customisation recorded are answered by its name,
   against a committed fixture and against the compiled-in file.
@@ -2204,8 +2231,12 @@ a Windows working tree with CRLF line ends. The reader takes either, but a
 comparison of bytes does not, so the tests take the carriage returns off a
 twin's text before comparing it. *Not done*: a `.gitattributes` rule keeping
 these files' line feeds, which would also keep a digest of one
-(`customisationDigest`) the same on every platform - a test that pins such a
-digest of a committed file will need it.
+(`customisationDigest`) the same on every platform. No test pins such a digest
+or a byte count of one of these files (the digests the tests compare are
+computed in the test, over text the test wrote itself), so none needs it; a
+test that does will. The built-in is different: it is embedded, and the
+digest of its bytes is recorded in kept customisations, so
+`resources/customisation/*.json` is `-text` in `.gitattributes`.
 
 The other small inputs are written in the test, and what each becomes is
 worked out beside it. The program itself has four tests, the cases of
@@ -2224,10 +2255,11 @@ and two survey code files, with a colour table in a `support` folder beside
 them. It is third-party material under its author's own licence and its two
 libraries carry a notice against copying, so it is in no clone: the folder
 is git-ignored, and the cache variable `KATANA_REFERENCE_CUSTOMISATION_DIR`
-names it (`docs/building.md`). Nothing committed needs it, and the test that
-converts it skips where the folder is absent or holds no file in the legacy
-formats - and FAILS where it holds some that are not the four, which a skip
-would hide
+names it (`docs/building.md`). The file made from it is another matter and is
+tracked ("Why the built-in is in the repository", above). Nothing committed
+needs the reference folder itself, and the test that converts it skips where
+the folder is absent or holds no file in the legacy formats - and FAILS where
+it holds some that are not the four, which a skip would hide
 (`AReferenceFolderIsSkippedOnlyWhenItHoldsNoLegacyFileAndRefusedWhenItHoldsTheWrongOnes`).
 
 It is converted - by the owner, on the machine that has it - with
@@ -2258,9 +2290,9 @@ those bytes, by which a customisation a user kept is told from another
 edition of the built-in (`CustomisationStart::keptFromAnotherBuiltIn`).
 Converted with another sentence the file is another edition, and every copy
 kept from this one is reported as made from another. They are Katana's own
-words and no part of the reference files, so a committed file may spell them,
-as it may not the two words below. Until 2026-10-07 the description stood
-here as `"<a sentence>"`, and the file could be made again only by reading
+words and no part of the reference files, so a committed test or document may
+spell them, as it may not the two words below. Until 2026-10-07 the
+description stood here as `"<a sentence>"`, and the file could be made again only by reading
 the sentence out of the file itself. Run on that day as it is spelt here,
 with nothing put in but the files and the two words, the command gave the
 compiled-in file byte for byte; with that placeholder for a description it
@@ -2297,12 +2329,14 @@ asks, in the model, the format and every lookup - for three symbols no rule
 of the reference survey code files places.
 
 The two words are the publisher's, which begins most group paths, and the
-vendor's, which begins a few; they are arguments so that no committed file
-spells them
-(`tests/archive12d/customisation/test_convert.cpp` finds them in the data, as
+vendor's, which begins a few; they are arguments so that no committed test,
+document or source spells them (the notice the converter copies in does, being
+the authors' own words; the committed file has had it removed;
+`tests/archive12d/customisation/test_convert.cpp` finds them in the data, as
 what stands before a group path's first blank and is no part of the path).
-The output folder is git-ignored too, and is where the build looks for the
-customisation to compile in.
+The output is tracked, and is where the build looks for the customisation to
+compile in: converting again changes the committed file, a new edition with a
+new digest, and is committed as such.
 
 What the conversion of 2026-10-06 gave, each figure also the census's:
 
@@ -2323,8 +2357,8 @@ What the conversion of 2026-10-06 gave, each figure also the census's:
 | warnings | 2: an `<item>` that names no code, and the inferred encoding |
 | leading words taken off | 29 definition names, 786 group paths, 1,029 rule groups, 8 rule references |
 | comments changed | 1 |
-| notice | 16 lines: the two libraries' blocks of 8, which differ |
-| the file | 1,541,462 bytes |
+| notice | 16 lines: the two libraries' blocks of 8, which differ (the committed file has had them removed by hand) |
+| the file | 1,541,462 bytes as written (the committed file, without the notice: 1,540,630) |
 
 Seven of these rows are what the decision above changed. In the other order
 they were: the three replaced the other way round, 474 / 318 listed as

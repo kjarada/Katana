@@ -142,8 +142,8 @@ they skip without them.
 What is Windows-only: `KATANA_DEPLOY_RUNTIME` (the Linux build tree runs
 from its run-time path). The `bundle` and `package` targets work on Linux
 too, since 2026-09-26 ("Bundling"). The customisation compiled in from
-`resources/customisation/` is third-party material kept out of the
-repository - the tests that need it skip without it, on every platform.
+`resources/customisation/` is a tracked file, so a build on any platform has
+it; the tests that need it skip only where a build's path names no file.
 
 ## Windows on ARM64
 
@@ -258,8 +258,8 @@ Every `KATANA_*` cache variable, with its default:
 | `KATANA_ENABLE_CPPCHECK` | `OFF` | cppcheck during compilation |
 | `KATANA_MODULE_FILTER` | empty | configure only the listed modules and their suites, e.g. `"katana_core;katana_math;katana_geometry"`; the configure fails, naming the module, when a listed module needs one that is not listed |
 | `KATANA_DEPLOY_RUNTIME` | `ON` | copy the runtime DLLs and the GDAL and PROJ data beside the programs ("The build tree runs on its own too") |
-| `KATANA_BUILTIN_CUSTOMISATION` | `resources/customisation/nsw.customisation.json`, git-ignored | the Katana customisation file compiled into `katana_cad` as the built-in; a build where the file is absent has none, which is every clone ("The built-in customisation and the reference folder"; `docs/customisation.md`, "The built-in") |
-| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | `OFF` | fail the configure when that file is absent, for a release that must not ship without a built-in |
+| `KATANA_BUILTIN_CUSTOMISATION` | `resources/customisation/nsw.customisation.json`, tracked | the Katana customisation file compiled into `katana_cad` as the built-in; a build where the path names no file has none ("The built-in customisation and the reference folder"; `docs/customisation.md`, "The built-in") |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | `OFF` | fail the configure when that file is absent: a guard for a release job against the tracked file having been deleted or a path being wrong |
 | `KATANA_REFERENCE_CUSTOMISATION_DIR` | the reference folder under `docs/`, git-ignored | where the reference customisation is kept in the legacy formats; read only by the converter and by the legacy readers' own tests, which skip when the folder is absent or holds no such file; the program reads none of it ("The built-in customisation and the reference folder") |
 | `KATANA_CCACHE` | `ON` | compile through ccache when it is installed and no `CMAKE_CXX_COMPILER_LAUNCHER` is given ("Build and test speed") |
 
@@ -384,38 +384,42 @@ the Katana customisation file the CMake variable
 `KATANA_BUILTIN_CUSTOMISATION` names, `resources/customisation/nsw.customisation.json`
 by default, embedded in `katana_cad` with `#embed`
 (`docs/customisation.md`, "The built-in", has where it comes from, why it is
-not in the repository and the environment variable that overrides it for one
-run). Where the file is absent the program has no built-in and draws plain
-lines until a customisation is loaded. Nothing is installed beside the
-program, and nothing is read from that folder at run time.
+in the repository and the environment variable that overrides it for one
+run). Where the file is absent - a path that names none; the file is tracked,
+so a checkout has it - the program has no built-in and draws plain lines until
+a customisation is loaded. Nothing is installed beside the program, and
+nothing is read from that folder at run time.
 
 Three things configure it, and none needs Python or a script:
 
 | | Says | Default |
 |---|---|---|
 | `KATANA_BUILTIN_CUSTOMISATION` | the file compiled in; it is picked up when it is put there after the configure (a `CONFIGURE_DEPENDS` glob over the path), and whether it is a file is asked of the file itself, so a checkout under a directory with `[` in its name still has it | `resources/customisation/nsw.customisation.json` |
-| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | make its absence a configure error | `OFF`; `ON` for a release job that must not ship drawing plain lines |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | make its absence a configure error | `OFF`; `ON` for a release job, to catch the tracked file having been deleted or a path being wrong before a program that draws plain lines ships |
 | `KATANA_REFERENCE_CUSTOMISATION_DIR` | where the reference customisation is kept in the legacy formats | the git-ignored folder under `docs/` |
 
-Both folders are git-ignored: the files are third-party material under their
-own licence. A checkout without them builds no built-in, and every test that
-reads them skips: no test of the WINDOW or of `katana_cli` depends on it (each
-says what customisation the program starts with, `docs/headless.md`, "The
-customisation a run starts with"), the cad suite's fixture is a small committed
-file, and the tests that need the real one - `BuiltInCensus.*`,
-`BuiltInRenames.*` against the compiled-in file, the legacy readers' reference
-tests and the converter's - say so and skip. A clone with NO data at all
-configures, builds and passes: it was built that way on 2026-10-07, with
+The built-in is tracked and the reference folder is not: its files are
+third-party material under their own licence, kept on disk and never committed
+(why the converted file may be, `docs/customisation.md`, "Why the built-in is
+in the repository"). A checkout has the built-in and not the reference files,
+so the tests that read the reference files - the legacy readers' reference
+tests and the converter's - say so and skip, and no test of the WINDOW or of
+`katana_cli` depends on either (each says what customisation the program
+starts with, `docs/headless.md`, "The customisation a run starts with"). The
+tests that need the compiled-in file, `BuiltInCensus.*` and `BuiltInRenames.*`
+against it, run in a checkout and skip where the path names no file. A build
+WITHOUT the file configures, builds and passes: it was built that way on
+2026-10-07, when the file was not tracked, with
 `-DKATANA_BUILTIN_CUSTOMISATION` naming a file that does not exist, and the cad
 suite gave 2,325 passed and 5 skipped (the five that need the reference
 customisation compiled in) and the app suite 124 passed
 (`docs/testing.md`, "The suites that read third-party data").
 
-A new worktree has none of the git-ignored folders. Copy them in before
-configuring, and never add them to git: `third_party/_cache` (without it the
-configure tries to download GoogleTest), `resources/customisation`, and the
-licensed reference files kept under `docs/` that the customisation was made
-from.
+A new worktree has the tracked built-in from its checkout and none of the
+git-ignored folders. Copy those in before configuring, and never add them to
+git: `third_party/_cache` (without it the configure tries to download
+GoogleTest) and the licensed reference files kept under `docs/` that the
+customisation was made from.
 
 ### The converter
 
@@ -452,8 +456,10 @@ cmake --preset release -DKATANA_REFERENCE_CUSTOMISATION_DIR=D:/Survey/Reference
 ```
 
 The reference customisation is converted with the four files in this order -
-the words are arguments so that no committed file spells them, and the file
-is found again at the next build:
+the words are arguments so that no committed test, document or source spells
+them (the notice the converter copies in does, being the authors' words; the
+committed file has had it removed), and the file is found again at the next
+build:
 
 ```sh
 build/release/bin/katana_customisation_convert --name NSW \
@@ -470,7 +476,7 @@ The name and the description are given word for word, unlike the rest: both
 are written into the file, so its bytes - and the digest of them, by which a
 customisation a user kept is told from another edition of the built-in - are
 this command's and no other's. They are Katana's own words and no part of the
-reference files, so a committed file may spell them.
+reference files, so a committed test or document may spell them.
 
 **The symbol library first and the linestyle library last, by decision**
 (2026-10-06). The order of the files is the load order, a customisation holds
@@ -485,9 +491,11 @@ customisation", has the whole of it, and the figures each order gives.
 `tools/reference_census.py` counts the four files in the order IT is given
 them, so give it the same one.
 
-The converted file sits in `resources/customisation/` and the legacy files are
-NOT kept there: they stay in the reference folder, which nothing globs beside
-the converted file. (Until the legacy readers' reference tests read the
+The converted file sits in `resources/customisation/`, tracked, and
+`.gitattributes` keeps its bytes as they are in every checkout (they are
+embedded, and their digest is recorded in the customisations users keep). The
+legacy files are NOT kept there: they stay in the reference folder, which
+nothing globs beside the converted file. (Until the legacy readers' reference tests read the
 reference folder instead of the one the old embedding compiled from, two of
 them handed every file of `resources/customisation/` to the legacy loader and
 would have failed on the converted one; they read the reference folder now.)

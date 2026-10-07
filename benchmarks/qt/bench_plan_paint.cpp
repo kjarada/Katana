@@ -66,7 +66,8 @@ Fixture& fixture()
     static std::unique_ptr<Fixture> made = [] {
         auto f = std::make_unique<Fixture>();
         // The linestyles and symbols the program was built with, when it was built with
-        // any: the customisation is not in the repository, so a clean checkout has none.
+        // any: the customisation is tracked, so a default build has them, but one whose
+        // KATANA_BUILTIN_CUSTOMISATION names no file has none.
         // The survey drawing then falls back to the standard shapes (survey_drawing.cpp),
         // which are a different, smaller set of strokes - so a run says which it measured
         // (the `libraryDefinitions` counter) and two runs are compared only when it is
@@ -134,8 +135,8 @@ struct View {
     }
 };
 
-// Which library the case measured, so a run on a clean checkout (0) is never
-// compared with one that had a customisation compiled in.
+// Which library the case measured, so a run of a build with no customisation
+// (0) is never compared with one that had a customisation compiled in.
 void setLibraryCounter(benchmark::State& state)
 {
     state.counters["libraryDefinitions"] = static_cast<double>(fixture().libraryDefinitions);

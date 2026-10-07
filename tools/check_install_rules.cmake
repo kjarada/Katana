@@ -7,10 +7,12 @@
 #    before the runtime DLLs are, and leaves a tree that does not start. A
 #    top-level file was deleted from the repository while a rule still
 #    installed it, and every bundle and package failed that way.
-# 2. Nothing is installed from the build's third-party inputs: the folders the
+# 2. Nothing is installed from the build's third-party inputs: the folder the
 #    built-in customisation is compiled from (resources/customisation) and the
-#    reference files under docs/. They are kept on the owner's machine and are
-#    not ours to hand on; a bundle is handed on.
+#    reference files under docs/. The built-in is tracked, but it is compiled
+#    INTO the programs and travels inside them, so no copy of the file is
+#    handed on beside them; the reference files are kept on the owner's
+#    machine and are not ours to hand on. A bundle is handed on.
 #
 # 3. The only programs installed are katana, katana_cli and katana_mcp. A
 #    program that is installed is one that is handed on, and the converter of

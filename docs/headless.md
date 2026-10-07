@@ -201,9 +201,10 @@ What Settings changes is KEPT only where `KATANA_CUSTOMISATION` names a file:
 it run four windows, one after another, on one such file in the test's own
 folder (`docs/desktop.md`, "Settings").
 
-**Every program test says what it starts with.** A build on the owner's
-machine has a customisation compiled in and a clean checkout has none, and a
-test that did not say would be two tests. Two parts, which share nothing:
+**Every program test says what it starts with.** A default build has the
+tracked customisation compiled in and a build whose
+`KATANA_BUILTIN_CUSTOMISATION` names no file has none, and a test that did not
+say would be two tests. Two parts, which share nothing:
 
 - **The scan**, at configure time (`tests/CMakeLists.txt`,
   `katana_say_what_every_program_test_starts_with`), gives every

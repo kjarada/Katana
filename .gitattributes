@@ -1,0 +1,8 @@
+# The built-in customisation is exact bytes. It is embedded in katana_cad with
+# #embed, and a customisation a user keeps records a digest of the bytes it was
+# made from (entity::customisationDigest), by which the program tells one
+# edition of the built-in from another. A checkout that rewrote its line ends
+# (core.autocrlf on Windows) would give a program with another digest than the
+# same commit built elsewhere, and every kept copy would be reported as made
+# from another edition.
+resources/customisation/*.json -text

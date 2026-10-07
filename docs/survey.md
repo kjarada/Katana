@@ -2256,8 +2256,8 @@ where the verb hands it its two words - "The import wizard", below):
    two records below. Rejected: asking anyway, which `cad` supports (the
    finish then does nothing and says `no-survey-codes`). It would store the
    job as one to finish and add two warnings to its report, so every import
-   into a drawing with no customisation - the program as a clean checkout
-   builds it - would answer `reduction_warnings` two higher and keep another
+   into a drawing with no customisation - the program built with no
+   built-in - would answer `reduction_warnings` two higher and keep another
    job text than the wizard's; and a re-adjustment codes only the points it
    draws for the first time, so a job stored that way would come out half
    coded once codes were loaded. A job imported with no codes loaded is a job

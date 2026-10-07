@@ -27,11 +27,12 @@ linestyles; the catalogue counts one more definition as a symbol, 472, by
 a signal other than the file's `symbols` list, below) and 1,624 survey code rules - which was made once from a real
 production customisation of a road authority, kept in two older formats. **That
 is third-party material under its own licence and is NOT part of this
-repository, and neither is the file made from it.** The converted file is kept,
-git-ignored, in `resources/customisation/`, and the build compiles it in
-(`docs/customisation.md`, "The built-in"; "The built-in, and the seam" below);
-a build without it has no built-in customisation, and every test that touches
-it skips, so the suite stays green without it.
+repository; the file made from it IS**, committed on the owner's decision of
+2026-10-08 (`docs/customisation.md`, "Why the built-in is in the repository").
+The converted file is tracked, in `resources/customisation/`, and the build
+compiles it in (`docs/customisation.md`, "The built-in"; "The built-in, and the
+seam" below); a build whose path names no file has no built-in customisation,
+and every test that touches it skips, so the suite stays green without it.
 
 The two older formats - the survey code file (`.mapfile`, XML) and the style
 library (`.4d`) - are NOT read by the program, in any front end. Only the
@@ -629,9 +630,10 @@ it is:
 
 One Katana customisation file is compiled into `katana_cad` with `#embed`
 (`src/katana_cad/customisation/builtin_customisation.cpp`), as the plot frame
-is. The file is NOT in the repository - it is third-party material,
-git-ignored - so a clean checkout and every CI build have none, and that is a
-state the program runs in rather than a fault:
+is. The file is in the repository - third-party material, tracked on the
+owner's decision of 2026-10-08 - so a clean checkout and every CI build have
+it; a build whose path names no file has none, and that is a state the program
+runs in rather than a fault:
 
 - `KATANA_BUILTIN_CUSTOMISATION` (a CMake FILEPATH,
   `resources/customisation/nsw.customisation.json` by default) names the file.
@@ -644,7 +646,8 @@ state the program runs in rather than a fault:
   one thing it is for: a file put there after the configure is picked up by
   the next build.
 - `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes its absence a configure
-  error, for a release job that must not ship drawing plain lines. The
+  error, to guard a release job against the tracked file having been deleted or
+  a path being wrong, which would ship a program that draws plain lines. The
   configure checks that the file is THERE; that it READS is a test's to say
   (`CustomisationHost.TheCompiledInCustomisationIsReadOrThereIsNoneAndNeverOneThatDidNotRead`),
   which fails a build whose compiled-in file is not a customisation.
@@ -666,7 +669,7 @@ What the variable's value MEANS is a function of its own,
 `builtInCustomisationFor(seam, compiledIn)`, so that the rule is tested
 against a stand-in for the compiled-in customisation: tested only through
 the environment, "whatever is compiled in" could not fail in a build that
-compiled nothing in, which is every clone and CI. The variable is read
+compiled nothing in, which is a build made without the file. The variable is read
 through `core::environmentVariable`, never `getenv`: on Windows that gives
 the bytes of the ANSI code page, in which a file named outside the code page
 is a file named with `?` and is not found (`docs/customisation.md`, "What
@@ -699,7 +702,7 @@ is the reference customisation, the figures that were counted by
 library defines - and keeps a word that says only whose the customisation was
 from the front of the group paths. It skips where nothing, or another
 customisation, is compiled in. Counts only: no name of the data is in a
-tracked file. That the file compiled in IS a fresh conversion of the reference
+tracked test or document. That the file compiled in IS a fresh conversion of the reference
 files by the documented command is not tested: it takes the reference files,
 which are on one machine.
 
@@ -1880,7 +1883,7 @@ and survey codes are **compiled into the binary**, as ONE Katana customisation
 file, and every session starts with them on any machine whose build had the
 file, with nothing configured ("The built-in, and the seam" above, and
 `docs/customisation.md`, "The built-in", which is where it comes from, the two
-variables and why it is not in the repository). A build without the file has
+variables and why it is in the repository). A build without the file has
 no built-in and says so, and Katana then draws every line as the plain
 continuous line.
 
@@ -1896,11 +1899,15 @@ disagree. (The older embedding generated a source from four files with a
 script, which made Python a hard requirement of every build; `#embed` needs
 none.)
 
-**Nothing generated and nothing derived from the data is committed.** The
-customisation is third-party material under its own licence and is not in this
-repository, so a checkout without the file builds a program with no built-in.
-The tests that need it skip, and `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes
-its absence a configure error for a release job that must not ship without it.
+**The converted file is committed; nothing else derived from the data is.** The
+customisation is third-party material under its own licence, and the owner
+decided on 2026-10-08 to commit the converted file (`docs/customisation.md`,
+"Why the built-in is in the repository"), so a checkout builds a program with
+the built-in. No source is generated from it and the reference files stay out.
+The tests that need it skip where a build's path names no file, and
+`KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes its absence a configure error,
+to guard a release job against the tracked file having been deleted or a path
+being wrong.
 
 **Swapping in another customisation.** Convert it, or write one, as a Katana
 customisation file and point the build at it:

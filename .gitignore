@@ -23,12 +23,12 @@ samples/*/backups/
 # Third-party reference material under its author's own licence, kept on disk
 # and never in the repository: the reference customisation in the legacy
 # formats (two style libraries and two survey code files, with their colour
-# table), which resources/customisation/ below is made from. The build reads
-# nothing here, and neither does the program. One suite does, through
-# KATANA_REFERENCE_CUSTOMISATION_DIR: the legacy readers' and writers' own
-# reference tests and the converter's test of what it makes of these files
-# (tests/archive12d), which skip where the folder is absent or holds no such
-# file.
+# table), which the tracked resources/customisation/nsw.customisation.json is
+# made from. The build reads nothing here, and neither does the program. One
+# suite does, through KATANA_REFERENCE_CUSTOMISATION_DIR: the legacy readers'
+# and writers' own reference tests and the converter's test of what it makes of
+# these files (tests/archive12d), which skip where the folder is absent or
+# holds no such file.
 docs/12d Refrence Files/
 
 # The TfNSW Utility Schema and Specification workbook (DMS-FT-493), under
@@ -37,18 +37,20 @@ docs/12d Refrence Files/
 # registered when it is not; tools/utility_schema_domains.py reads any copy.
 docs/TfNSW Reference Files/
 
-# The customisation compiled into the build: nsw.customisation.json, the one
-# file in the Katana customisation format that katana_customisation_convert
-# makes of the reference files above (docs/customisation.md, "The reference
-# customisation"), compiled in with #embed through
-# KATANA_BUILTIN_CUSTOMISATION. It is made from third-party material under its
-# own licence, so it is kept on disk and never in the repository; a checkout
-# without it builds a program with no built-in customisation.
+# Not ignored, on purpose: resources/customisation/nsw.customisation.json, the
+# customisation compiled into the build (KATANA_BUILTIN_CUSTOMISATION). It is
+# tracked, committed on the owner's decision of 2026-10-08, and it is the one
+# file derived from the reference files above that is:
+# katana_customisation_convert made it from them (docs/customisation.md, "The
+# reference customisation"), less the notice text the converter copies into its
+# `notice` member, which the owner removed. The reference files stay ignored.
+# .gitattributes keeps its bytes the
+# same in every checkout, since it is embedded with #embed and a customisation
+# kept from it records a digest of those bytes.
 #
-# Nothing else is read from this folder: the older embedding, which read four
+# Nothing else is read from that folder: the older embedding, which read four
 # legacy files from it, is gone (docs/building.md, "The built-in customisation
-# and the reference folder"). The legacy files are not kept here.
-resources/customisation/
+# and the reference folder"). The legacy files are not kept there.
 
 # Git worktrees created for parallel agents (CLAUDE.md section 8). Each is a
 # checkout of its own; tracking one would embed a repository in this one.

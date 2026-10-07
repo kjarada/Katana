@@ -63,7 +63,8 @@ not read, the built-in then standing in for it - is an error line,
 `Customisation: <the problem>`, once. A build with no built-in and no kept
 file installs nothing and says nothing: it draws plain lines until a
 customisation is loaded, which is a state the program runs in, not a fault
-(`docs/customisation.md`; a build from a clean checkout has none).
+(`docs/customisation.md`; a build whose `KATANA_BUILTIN_CUSTOMISATION` names no
+file has none, and a clean checkout has the tracked one).
 
 - **Where the kept file is**, in order:
   1. the file the environment variable `KATANA_CUSTOMISATION` names, whatever

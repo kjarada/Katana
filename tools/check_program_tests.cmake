@@ -8,8 +8,9 @@
 #         "-DWHAT=which kept customisation they start with"
 #         -P tools/check_program_tests.cmake
 #
-# A build may have a customisation compiled in and may have none (the owner's
-# has one; a clean checkout and every release build have nothing), and a test
+# A build may have a customisation compiled in and may have none (a default
+# build has the tracked NSW one; a build whose KATANA_BUILTIN_CUSTOMISATION
+# names no file has nothing), and a test
 # that left the choice to the build would be two tests. So a test whose
 # command names katana, katana_cli or katana_mcp must set VARIABLE
 # (cad/customisation_host.hpp, "The seam"), and this names every one that

@@ -17,8 +17,8 @@ namespace {
 // The built-in's bytes, embedded by the compiler (#embed). The file is named
 // by KATANA_BUILTIN_CUSTOMISATION_FILE and found through --embed-dir, both
 // given to THIS file alone by src/katana_cad/CMakeLists.txt, and only when the
-// file exists: a build from a clean checkout has none, and compiles the other
-// branch. The dependency file names the JSON, so editing it rebuilds this
+// file exists: a build whose path names no file has none, and compiles the
+// other branch. The dependency file names the JSON, so editing it rebuilds this
 // file. #embed is C++26; the pragma keeps a C++23 build (KATANA_CXX_STANDARD)
 // from failing -Werror on it.
 #if defined(KATANA_BUILTIN_CUSTOMISATION_FILE)

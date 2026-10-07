@@ -24,8 +24,8 @@ endif()
 # bench_customisation.cpp measures a generated customisation and, where the
 # build has one to compile in, that very file: the one KATANA_BUILTIN_CUSTOMISATION
 # names, or resources/customisation/nsw.customisation.json when nothing names
-# one. The file is git-ignored and on the owner's machine only, so most builds
-# have none and measure the generated one alone. Globbed with
+# one. The file is tracked, so a default build measures both, and one given no
+# file measures the generated one alone. Globbed with
 # CONFIGURE_DEPENDS so that a file converted after the configure is found by
 # the next build.
 set(_katana_builtin_customisation "${KATANA_BUILTIN_CUSTOMISATION}")

@@ -5,9 +5,10 @@
 // reference one - 792 definitions (471 of them symbols) holding 35,692
 // strokes, 17,020 moves, 17,222 draws, 104 arcs, 312 circles, 178 dots, 342
 // pens and 514 texts, with coordinates of three decimals as such files have,
-// and 1,624 rules over 632 keys in the reference mix of kinds. The reference
-// customisation itself is third-party material and is in no clone, and a
-// measurement has to be repeatable by anyone; the figures are those of
+// and 1,624 rules over 632 keys in the reference mix of kinds. The converted
+// reference customisation is tracked, but a build may be given another file or
+// none, and a new edition of it would move the figures, while a measurement
+// has to be repeatable by anyone; the figures are those of
 // tools/reference_census.py, given the files in the order the built-in is
 // converted in: the symbol library first and the linestyle library last, so
 // that the three names both define keep the linestyle the survey code rules
@@ -22,8 +23,9 @@
 // definition is almost nothing but numbers, about 71,000 of them.
 //
 // Where the build has a customisation to compile in (the file
-// KATANA_BUILTIN_CUSTOMISATION names, git-ignored and on the owner's machine
-// only), the same is measured on that very file, read from disk here.
+// KATANA_BUILTIN_CUSTOMISATION names, the tracked
+// resources/customisation/nsw.customisation.json by default), the same is
+// measured on that very file, read from disk here.
 
 #include <benchmark/benchmark.h>
 

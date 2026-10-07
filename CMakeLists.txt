@@ -68,7 +68,9 @@ set(KATANA_PUBLISHER "Jarada" CACHE STRING "The publisher named in the programs,
 # and two survey code files, with their colour table in a `support` folder
 # beside them. It is third-party material under its author's own licence, so
 # the folder is git-ignored - it is on the owner's machine and in no clone -
-# and nothing committed needs it. Only the converter of those formats
+# and nothing committed needs it. (The Katana-format file converted from it,
+# the built-in customisation, is a different thing and IS tracked:
+# src/katana_cad/CMakeLists.txt.) Only the converter of those formats
 # (src/katana_archive12d/legacy; docs/customisation.md, "Converting a
 # customisation from the legacy formats") is run on it, and only the tests of
 # the legacy readers and writers and of what the converter makes of it read
