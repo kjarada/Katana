@@ -17,6 +17,7 @@
 //     6883100), heights 10.0 to 12.5.
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -508,6 +509,36 @@ TEST_F(GisVerbs, InfoOfAnEntityIsTheInterpretersAndOfAFileTheExecutors)
     EXPECT_EQ(field(raster[0], "width"), "120");
     EXPECT_EQ(field(raster[0], "height"), "90");
     EXPECT_EQ(field(raster[0], "bounds"), "-5,-5,175,130");
+}
+
+// `katana <path>` opens a folder as a project and hands every other argument
+// to IMPORT, so a project folder mistyped arrives as a path with no extension
+// that is not there: it is said to be no such folder or file, and not "no
+// importer for ''". A file that IS there with no extension, and a path that is
+// not there with an extension nobody reads, keep the message every unknown
+// extension has.
+TEST_F(GisVerbs, APathWithNoExtensionThatIsNotThereIsNoSuchProjectDirectoryOrFile)
+{
+    const TempDir folder("mistyped");
+    const std::string missing = folder.file("no_such_project");
+    auto gone = run("IMPORT " + quoted(missing));
+    ASSERT_FALSE(gone.ok());
+    EXPECT_EQ(gone.error().code, ErrorCode::NotFound);
+    EXPECT_EQ(gone.error().message, "no such project directory or file: " + missing);
+
+    // A data file with no extension that exists: nothing reads it.
+    {
+        std::ofstream(folder.file("plain")) << "1,2,3\n";
+    }
+    auto present = run("IMPORT " + quoted(folder.file("plain")));
+    ASSERT_FALSE(present.ok());
+    EXPECT_EQ(present.error().code, ErrorCode::Unsupported);
+    EXPECT_EQ(present.error().message, "no importer for ''");
+
+    // An extension nobody reads, on a file that is not there, as ever.
+    auto unknown = run("IMPORT " + quoted(folder.file("notes.xyzzy")));
+    ASSERT_FALSE(unknown.ok());
+    EXPECT_EQ(unknown.error().message, "no importer for '.xyzzy'");
 }
 
 TEST_F(GisVerbs, ImportRefusesWhatItCannotRead)

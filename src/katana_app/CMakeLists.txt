@@ -116,9 +116,8 @@ if(KATANA_BUILD_TESTS)
     # session started with. By index: 0 KT* feature, 1 KX* feature with no
     # layer, 2 KT* a built-in symbol, "cross". It is a Katana customisation
     # file, written out by hand from the format's chapter of
-    # docs/customisation.md; until 2026-10-06 it was a survey code file of
-    # another program holding the same three rules, which no longer loads
-    # (that text is kept below, as the file a session refuses).
+    # docs/customisation.md. (The file a session refuses, a survey code file
+    # of another program, is further down.)
     set(_codes "${CMAKE_CURRENT_BINARY_DIR}/cli-codes.customisation.json")
     file(WRITE "${_codes}" [=[{
   "format": "katana-customisation",
@@ -318,9 +317,8 @@ if(KATANA_BUILD_TESTS)
 
     # A survey code file of another program is not a Katana customisation
     # file: refused in the reader's words, naming the file, with nothing
-    # loaded and the batch stopped there (so the point is never drawn). The
-    # text is the one this file's tests loaded their codes from until
-    # 2026-10-06; its element names are that format's own.
+    # loaded and the batch stopped there (so the point is never drawn). Its
+    # element names are that format's own.
     set(_legacy "${CMAKE_CURRENT_BINARY_DIR}/cli-legacy.mapfile")
     file(WRITE "${_legacy}" [=[<?xml version="1.0"?>
 <xml12d xmlns="http://www.12d.com/schema/xml12d-10.0">
@@ -341,7 +339,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_legacy}\"" -c "POINT 1,1")
     set_tests_properties(cli.a_survey_code_file_is_refused_as_not_a_katana_customisation_file
         PROPERTIES
-        PASS_REGULAR_EXPRESSION "error: ParseFailure: not a Katana customisation file \\[[^\r\n]*cli-legacy\\.mapfile"
+        PASS_REGULAR_EXPRESSION "error: ParseFailure: not a Katana customisation file; the older formats are converted with katana_customisation_convert \\[[^\r\n]*cli-legacy\\.mapfile"
         FAIL_REGULAR_EXPRESSION "point created|loaded file=")
 
     # CUSTOMISE EXPORT writes the session as ONE Katana customisation file,
@@ -589,9 +587,7 @@ if(KATANA_BUILD_TESTS)
 
     # HELP typed as a line is the session's whole help, as --help and
     # katana_help are: IFC and the window-only verbs are the session's, not
-    # the interpreter's, and were missing from it (CUSTOMISE was the
-    # session's too until 2026-10-06, and is the interpreter's block now). ?
-    # is HELP's alias.
+    # the interpreter's, and were missing from it. ? is HELP's alias.
     add_test(NAME cli.help_typed_as_a_line_is_the_whole_session_help
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "HELP" -c "?")
@@ -1807,8 +1803,7 @@ if(KATANA_BUILD_TESTS)
     # The customisation: one linestyle, "FIELD Kerb", no symbol, and three
     # rules - KB* a LINE on FIELD KERB in that linestyle, EB* a line, CTRL a
     # point code - so the session says 1 and 3 as it starts, each noun by its
-    # count: ONE definition is "1 linestyle or symbol". (The line said "1
-    # linestyles and symbols", and this expected it, until 2026-10-07.)
+    # count: ONE definition is "1 linestyle or symbol".
     #
     # The file, in the order its points are drawn (cli.survey_import_gnss_
     # field_file): CM1 keyed in with no code at 500000,6200000; then the four

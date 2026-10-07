@@ -38,6 +38,11 @@ using katana::testing::refusalOf;
 namespace {
 
 constexpr const char* kNotACustomisation = "not a Katana customisation file";
+// What a file that begins with '<' or "//" - another program's format - is told
+// beside that, with nothing of the JSON parser's account of the character.
+constexpr const char* kOlderFormat =
+    "not a Katana customisation file; the older formats are converted with "
+    "katana_customisation_convert";
 
 // What a refusal is checked against: the code, the entry and the member.
 struct Refused {
@@ -151,13 +156,15 @@ TEST(CustomisationRefusals, ASurveyCodeFileInXmlIsNotAKatanaCustomisationFile)
                             "<colour>blue</colour></item></map_data></map_file>\n";
     const Error plain = refusalOf(xml);
     EXPECT_EQ(plain.code, ErrorCode::ParseFailure);
-    EXPECT_EQ(plain.message, kNotACustomisation);
+    EXPECT_EQ(plain.message, kOlderFormat);
+    EXPECT_TRUE(plain.context.empty()) << "the parser's own sentence is not shown: " << plain.context;
 
     const auto utf16 = katana::core::encodeUtf16LittleEndian(xml);
     ASSERT_TRUE(utf16.ok());
     const Error wide = refusalOf(*utf16);
     EXPECT_EQ(wide.code, ErrorCode::ParseFailure);
-    EXPECT_EQ(wide.message, kNotACustomisation);
+    EXPECT_EQ(wide.message, kOlderFormat);
+    EXPECT_TRUE(wide.context.empty()) << wide.context;
 }
 
 TEST(CustomisationRefusals, AStyleLibraryInItsOwnTextIsNotAKatanaCustomisationFile)
@@ -170,7 +177,34 @@ TEST(CustomisationRefusals, AStyleLibraryInItsOwnTextIsNotAKatanaCustomisationFi
                                   "    draw 1.5 0\n"
                                   "}\n");
     EXPECT_EQ(error.code, ErrorCode::ParseFailure);
-    EXPECT_EQ(error.message, kNotACustomisation);
+    EXPECT_EQ(error.message, kOlderFormat);
+    EXPECT_TRUE(error.context.empty()) << error.context;
+}
+
+TEST(CustomisationRefusals, OnlyAFirstCharacterOfMarkupOrACommentSendsAFileToTheConverter)
+{
+    // After blanks and a byte order mark, as JSON allows blanks: the first
+    // character that is not one decides.
+    for (const char* text : {"  \n\t<map/>", "\xEF\xBB\xBF<?xml version=\"1.0\"?>", "\r\n// notice\n"}) {
+        const Error error = refusalOf(text);
+        EXPECT_EQ(error.message, kOlderFormat) << text;
+        EXPECT_TRUE(error.context.empty()) << text;
+    }
+    // A single slash is no comment, a '<' later in a file is not its first
+    // character, and a file of the older style libraries that begins with a
+    // word is not told about the converter: it is only not a customisation,
+    // with the parser's account beside it as ever.
+    for (const char* text : {"/ not a comment", "{ \"a\": < }", "worldstyle \"A\" { }"}) {
+        const Error error = refusalOf(text);
+        EXPECT_EQ(error.message, kNotACustomisation) << text;
+        EXPECT_FALSE(error.context.empty()) << text;
+    }
+    // A definition read on its own is not told of the converter either: its
+    // text is no file of another program.
+    const auto definition = katana::entity::definitionFromJson("<x/>", true);
+    ASSERT_FALSE(definition.ok());
+    EXPECT_EQ(definition.error().message.find("katana_customisation_convert"), std::string::npos)
+        << definition.error().describe();
 }
 
 // ---- encodings ------------------------------------------------------------------------------

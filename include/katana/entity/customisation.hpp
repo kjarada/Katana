@@ -166,10 +166,14 @@ struct CustomisationWriteOptions {
 // order mark, or UTF-16 (core::decodeText).
 //
 // ParseFailure "not a Katana customisation file" for text that is not JSON or
-// whose "format" is not kCustomisationFormat - a survey code file (.mapfile)
-// and a style library (.4d) get exactly that, and so do bytes that are
-// neither UTF-8 nor UTF-16 (no code page is guessed at), a byte order mark
-// over bytes that break it included. Unsupported for a "version" newer than
+// whose "format" is not kCustomisationFormat, and for bytes that are neither
+// UTF-8 nor UTF-16 (no code page is guessed at), a byte order mark over bytes
+// that break it included. Text that begins - after blanks - with '<' or "//",
+// which is how a survey code file (.mapfile) and a style library (.4d) begin,
+// is told so and where to take it, "...; the older formats are converted with
+// katana_customisation_convert", with none of the parser's account of the
+// character; the program knows those formats by those two characters and
+// nothing more. Unsupported for a "version" newer than
 // kCustomisationVersion. ParseFailure, naming the entry and the member
 // (`codes[57] "WM*": unknown member "linesytle"`), for a member the format
 // does not know, a member given twice, a required member missing, a value of

@@ -344,6 +344,7 @@ const char* toString(SurveyStyleOutcome outcome)
 CustomisationCoverage customisationCoverage(const Document& document)
 {
     CustomisationCoverage coverage;
+    coverage.definitionsLoaded = !document.styleLibrary().empty();
     std::set<std::string> undefined;
     std::set<std::string> notLinestyles;
     // forEach rather than all(): all() returns the whole style table by

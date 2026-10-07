@@ -1712,6 +1712,24 @@ class TreeBuilder {
         throw Refusal{ErrorCode::ParseFailure, std::string(notThis),
                       "the bytes are not UTF-8 text"};
     }
+    // A file of another program's format begins with '<' (markup) or "//" (a
+    // comment), neither of which JSON can begin with. Told apart by those two
+    // characters and nothing more - the readers of those formats are the
+    // converter's - so that the person is sent there and is not shown the
+    // parser's account of a character it did not expect.
+    if (kind == TextKind::File) {
+        std::string_view first = decoded->text;
+        while (!first.empty() && (first.front() == ' ' || first.front() == '\t' ||
+                                  first.front() == '\n' || first.front() == '\r')) {
+            first.remove_prefix(1);
+        }
+        if (!first.empty() && (first.front() == '<' || first.starts_with("//"))) {
+            throw Refusal{ErrorCode::ParseFailure,
+                          std::string(notThis) +
+                              "; the older formats are converted with katana_customisation_convert",
+                          {}};
+        }
+    }
     TreeBuilder builder(kind);
     if (!Json::sax_parse(decoded->text, &builder)) {
         if (builder.stoppedAtTooManyRules()) {

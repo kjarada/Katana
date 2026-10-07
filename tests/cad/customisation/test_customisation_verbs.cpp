@@ -328,6 +328,17 @@ struct Hosted : Bare {
         (void)katana::cad::startCustomisation(document, host);
     }
     fs::path backup() const { return fs::path(keptFile).concat(".bak"); }
+    fs::path bad() const { return fs::path(keptFile).concat(".bad"); }
+    // What the folder of the kept file holds, by name, in order.
+    std::vector<std::string> keptFolder() const
+    {
+        std::vector<std::string> names;
+        for (const auto& entry : fs::directory_iterator(keptFile.parent_path())) {
+            names.push_back(entry.path().filename().generic_string());
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    }
 };
 
 // A definition put into the session's library as an editor puts one: from no
@@ -350,10 +361,10 @@ using Sources = std::vector<katana::entity::CustomisationSourceNote>;
 const char* const kDefaultLinework =
     "linework linework.start=ST linework.end=END linework.close=CL linework.arcstart=BC "
     "linework.arcend=EC linework.join=JPN linework.rectangle=RECT";
+// What a session with definitions loaded and a drawing with no styles is told.
 const char* const kNoStyles =
-    "This drawing has no styles yet; import a drawing or survey that carries styles, or make "
-    "one in Format > Styles and Linetypes or with STYLE NEW, to see the customisation take "
-    "effect.";
+    "This drawing has no styles yet; the customisation's styles are made when survey data is "
+    "imported or when a rule draws.";
 
 } // namespace
 
@@ -373,12 +384,51 @@ TEST(CustomisationVerbs, AloneItReportsTheCountsThenRecordsThenTheCoverage)
                     "codes=2 rules=2 colours=1\n"
                     "source name=\"Small Built In\" definitions=yes rules=yes\n"
                     "automation auto.codes=on auto.linework=on\n") +
-        kDefaultLinework + "\n" + kNoStyles;
+        kDefaultLinework + "\n" + kNoStyles + "\n" + "Kept file: " + shown(session.keptFile) +
+        ", not written yet; CUSTOMISE KEEP writes it.";
     EXPECT_EQ(session.ok("CUSTOMISE"), expected);
     // The interpreter reads the verb as it reads every verb: in any case,
     // and by its other spelling.
     EXPECT_EQ(session.ok("customise"), expected);
     EXPECT_EQ(session.ok("CUSTOMIZE"), expected);
+}
+
+// `kept=yes` in the record says only that the session is what the next start
+// gives. With no kept file that is trivially so, and reads as a promise of a
+// file that is not there; the sentence at the end of the report says whether
+// there is one, and where.
+TEST(CustomisationVerbs, TheReportSaysPlainlyWhetherAKeptFileExistsAndWhere)
+{
+    // No kept file at all: the program was given none.
+    {
+        Hosted session("report-none", true, false);
+        session.start();
+        const std::string reply = session.ok("CUSTOMISE");
+        EXPECT_TRUE(contains(reply, " origin=builtIn kept=yes ")) << reply;
+        EXPECT_TRUE(reply.ends_with(
+            "Kept file: none. This session keeps no file, so each start gives the built-in "
+            "customisation (kept=yes then means only that nothing is waiting to be kept); the "
+            "environment variable KATANA_CUSTOMISATION names a file to keep one in."))
+            << reply;
+    }
+    // A kept file named and not there yet, then there once KEEP has written it.
+    {
+        Hosted session("report-kept");
+        session.start();
+        EXPECT_TRUE(session.ok("CUSTOMISE")
+                        .ends_with("Kept file: " + shown(session.keptFile) +
+                                   ", not written yet; CUSTOMISE KEEP writes it."));
+        session.ok("CUSTOMISE SET auto.codes=off");
+        session.ok("CUSTOMISE KEEP");
+        EXPECT_TRUE(session.ok("CUSTOMISE")
+                        .ends_with("Kept file: " + shown(session.keptFile) +
+                                   ", which the next start reads."));
+    }
+    // A session given no host says nothing of a kept file: it has no notion of one.
+    {
+        Bare session;
+        EXPECT_FALSE(contains(session.ok("CUSTOMISE"), "Kept file"));
+    }
 }
 
 TEST(CustomisationVerbs, WithNothingLoadedItSaysSoAndHowToLoad)
@@ -868,9 +918,17 @@ TEST(CustomisationVerbs, ALoadIsAllOrNothingAndEveryFileThatDoesNotReadIsNamed)
     // its style library was.
     const fs::path codes = session.scratch.write(
         "codes.mapfile", "<?xml version=\"1.0\"?>\n<map_file><map_data/></map_file>\n");
+    // It begins with '<', which JSON cannot, and is sent to the converter with
+    // none of the parser's account of the character.
     const katana::core::Error xml = session.refused("CUSTOMISE REPLACE " + typed(codes));
     EXPECT_EQ(xml.code, ErrorCode::ParseFailure);
-    EXPECT_EQ(xml.message, "not a Katana customisation file");
+    EXPECT_EQ(xml.message,
+              "not a Katana customisation file; the older formats are converted with "
+              "katana_customisation_convert");
+    // The file, and nothing of the parser's sentence.
+    EXPECT_TRUE(xml.context.ends_with("codes.mapfile")) << xml.context;
+    EXPECT_FALSE(contains(xml.context, "syntax")) << xml.context;
+    EXPECT_FALSE(contains(xml.context, "parse")) << xml.context;
 
     EXPECT_TRUE(session.document.customisation() == before);
     EXPECT_EQ(session.document.customisationGeneration(), generation);
@@ -1544,7 +1602,7 @@ TEST(CustomisationVerbs, KeepIsRefusedWhenTheKeptFileChangedOnDiskSinceTheSessio
     EXPECT_EQ(contentsOf(session.backup()), others);
 }
 
-TEST(CustomisationVerbs, KeepIsRefusedOverAFileThatAppearedDoesNotReadOrIsNewer)
+TEST(CustomisationVerbs, KeepIsRefusedOverAFileThatAppearedAndOverOneThatCannotBeReadAtAll)
 {
     // It was not there when the session began, and is now.
     {
@@ -1556,38 +1614,6 @@ TEST(CustomisationVerbs, KeepIsRefusedOverAFileThatAppearedDoesNotReadOrIsNewer)
         const katana::core::Error error = session.refused("CUSTOMISE KEEP");
         EXPECT_TRUE(contains(error.message, "changed on disk")) << error.message;
         EXPECT_EQ(contentsOf(session.keptFile), kSite);
-    }
-    // It was there, and is not a customisation: its owner may mean to mend it.
-    {
-        Hosted session("keep-unreadable");
-        fs::create_directories(session.keptFile.parent_path());
-        std::ofstream(session.keptFile, std::ios::binary) << "{ not json";
-        session.start();
-        EXPECT_EQ(session.state().origin, CustomisationOrigin::BuiltIn)
-            << "the built-in stands in for a kept file that does not read";
-        session.ok("CUSTOMISE SET auto.codes=off");
-        const katana::core::Error error = session.refused("CUSTOMISE KEEP");
-        EXPECT_EQ(error.code, ErrorCode::InvalidState);
-        EXPECT_TRUE(contains(error.message, "does not read as a Katana customisation"))
-            << error.message;
-        EXPECT_EQ(contentsOf(session.keptFile), "{ not json");
-    }
-    // It was written by a newer Katana, and holds what this one cannot write
-    // back.
-    {
-        Hosted session("keep-newer");
-        const std::string newer =
-            R"({"format": "katana-customisation", "version": 2, "name": "Later"})";
-        fs::create_directories(session.keptFile.parent_path());
-        std::ofstream(session.keptFile, std::ios::binary) << newer;
-        session.start();
-        session.ok("CUSTOMISE SET auto.codes=off");
-        const katana::core::Error error = session.refused("CUSTOMISE KEEP");
-        EXPECT_EQ(error.code, ErrorCode::InvalidState);
-        EXPECT_TRUE(contains(error.message, "was written by a newer Katana")) << error.message;
-        EXPECT_EQ(contentsOf(session.keptFile), newer);
-        // And REVERT says why it cannot read it.
-        EXPECT_EQ(session.refused("CUSTOMISE REVERT").code, ErrorCode::Unsupported);
     }
     // Something is there that cannot be read at all - here a folder of the
     // kept file's own name. It is not written over unseen either.
@@ -1604,6 +1630,230 @@ TEST(CustomisationVerbs, KeepIsRefusedOverAFileThatAppearedDoesNotReadOrIsNewer)
         EXPECT_TRUE(fs::is_directory(session.keptFile));
         EXPECT_FALSE(session.state().kept);
     }
+}
+
+// A kept file that was read at the start and is not a customisation - empty,
+// damaged, or written by a newer Katana - made every later KEEP refuse, and the
+// window had no way to move it: an edit in Settings kept nothing, for good,
+// while the record said `kept=yes`. It is set aside whole as `.bad` and the
+// session is written.
+TEST(CustomisationVerbs, KeepSetsAKeptFileThatDoesNotReadAsideAsBadAndWritesTheSession)
+{
+    struct Case {
+        const char* name;
+        std::string bytes;
+    };
+    const Case cases[] = {
+        {"damaged", "{ not json"},
+        {"empty", ""},
+        {"newer", R"({"format": "katana-customisation", "version": 2, "name": "Later"})"},
+    };
+    for (const Case& each : cases) {
+        SCOPED_TRACE(each.name);
+        Hosted session(std::string("keep-bad-") + each.name);
+        fs::create_directories(session.keptFile.parent_path());
+        std::ofstream(session.keptFile, std::ios::binary) << each.bytes;
+        session.start();
+        EXPECT_EQ(session.state().origin, CustomisationOrigin::BuiltIn)
+            << "the built-in stands in for a kept file that does not read";
+        EXPECT_FALSE(session.state().startProblems.empty());
+        if (std::string(each.name) == "newer") {
+            // REVERT still says why it cannot read it.
+            EXPECT_EQ(session.refused("CUSTOMISE REVERT").code, ErrorCode::Unsupported);
+        }
+        session.ok("CUSTOMISE SET auto.codes=off");
+
+        const ReplyRecord kept = record(session.ok("CUSTOMISE KEEP"), "kept");
+        EXPECT_EQ(field(kept, "file"), shown(session.keptFile));
+        EXPECT_EQ(field(kept, "written"), "yes");
+        EXPECT_EQ(field(kept, "backup"), "none");
+        EXPECT_EQ(field(kept, "set_aside"), shown(session.bad()));
+        // The file as it was, whole, beside; no backup, which is of a customisation.
+        EXPECT_EQ(contentsOf(session.bad()), each.bytes);
+        EXPECT_FALSE(fs::exists(session.backup()));
+        // What is there now is the session, and the folder holds nothing else.
+        EXPECT_TRUE(parsed(contentsOf(session.keptFile)) == session.document.customisation());
+        EXPECT_TRUE(session.state().kept);
+        EXPECT_EQ(session.keptFolder(),
+                  (std::vector<std::string>{"customisation.json", "customisation.json.bad"}));
+
+        // The next start is good: it reads the kept file, and says nothing is wrong.
+        Document next;
+        const auto start = katana::cad::startCustomisation(next, session.host);
+        EXPECT_EQ(start.installed, CustomisationOrigin::Kept);
+        EXPECT_TRUE(start.problems.empty());
+        EXPECT_FALSE(next.customisationState().automation.codesOnSurveyImport);
+    }
+}
+
+TEST(CustomisationVerbs, AFileSetAsideAsBadReplacesAnEarlierOneOfThatName)
+{
+    Hosted session("keep-bad-twice");
+    fs::create_directories(session.keptFile.parent_path());
+    std::ofstream(session.keptFile, std::ios::binary) << "the newer damage";
+    std::ofstream(session.bad(), std::ios::binary) << "the earlier damage";
+    session.start();
+    session.ok("CUSTOMISE SET auto.codes=off");
+    session.ok("CUSTOMISE KEEP");
+    EXPECT_EQ(contentsOf(session.bad()), "the newer damage");
+}
+
+TEST(CustomisationVerbs, KeepingTheBuiltInOverAKeptFileThatDoesNotReadSetsItAsideAsBadToo)
+{
+    // The session IS the built-in (the start fell back to it), so nothing is
+    // written; the kept file that did not read goes aside, and the next start
+    // gives the built-in and has no problem to report.
+    Hosted session("retire-bad");
+    fs::create_directories(session.keptFile.parent_path());
+    std::ofstream(session.keptFile, std::ios::binary) << "{ not json";
+    session.start();
+    ASSERT_EQ(session.state().origin, CustomisationOrigin::BuiltIn);
+    const ReplyRecord kept = record(session.ok("CUSTOMISE KEEP"), "kept");
+    EXPECT_EQ(field(kept, "written"), "no");
+    EXPECT_EQ(field(kept, "reason"), "the-session-is-the-built-in");
+    EXPECT_EQ(field(kept, "backup"), "none");
+    EXPECT_EQ(field(kept, "set_aside"), shown(session.bad()));
+    EXPECT_FALSE(fs::exists(session.keptFile));
+    EXPECT_EQ(contentsOf(session.bad()), "{ not json");
+    Document next;
+    const auto start = katana::cad::startCustomisation(next, session.host);
+    EXPECT_EQ(start.installed, CustomisationOrigin::BuiltIn);
+    EXPECT_TRUE(start.problems.empty());
+}
+
+// The backup is written from the bytes KEEP read and judged, not copied from
+// the file, which carries the file's attributes: a read-only kept file made a
+// read-only `.bak`, and the next KEEP could not replace it - refused, for good,
+// with "could not be kept beside it".
+TEST(CustomisationVerbs, TheBackupIsWrittenFromWhatWasReadSoAReadOnlyKeptFileLeavesNoReadOnlyBackup)
+{
+    Hosted session("keep-read-only");
+    session.start();
+    session.ok("CUSTOMISE SET auto.codes=off");
+    session.ok("CUSTOMISE KEEP");
+    const std::string first = contentsOf(session.keptFile);
+
+    fs::permissions(session.keptFile,
+                    fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read,
+                    fs::perm_options::replace);
+    session.ok("CUSTOMISE SET linework.start=S");
+    // Where a read-only file cannot be replaced the KEEP is refused and the
+    // kept file stands; where it can, it is taken. Neither is the point.
+    const auto attempt = session.interpreter.run("CUSTOMISE KEEP");
+    if (fs::exists(session.backup())) {
+        EXPECT_EQ(contentsOf(session.backup()), first);
+        const fs::perms mode = fs::status(session.backup()).permissions();
+        EXPECT_NE(mode & fs::perms::owner_write, fs::perms::none)
+            << "a backup written fresh is not read-only because the kept file was";
+    }
+    fs::permissions(session.keptFile, fs::perms::owner_write, fs::perm_options::add);
+    session.ok("CUSTOMISE SET linework.end=E");
+    const ReplyRecord again = record(session.ok("CUSTOMISE KEEP"), "kept");
+    EXPECT_EQ(field(again, "written"), "yes");
+    EXPECT_TRUE(session.state().kept);
+    (void)attempt;
+}
+
+// The temporary a write goes through is named for this process and is never
+// `<file>.tmp`, which is a name a person may have used: it was written, then
+// renamed away - and so a file of that name was consumed. Nothing is left beside.
+TEST(CustomisationVerbs, AWriteNeverConsumesAFileNamedLikeItsOldTemporaryAndLeavesNoneBeside)
+{
+    Hosted session("tmp-name");
+    session.start();
+    session.ok("CUSTOMISE SET auto.codes=off");
+    fs::create_directories(session.keptFile.parent_path());
+    const fs::path mine = fs::path(session.keptFile).concat(".tmp");
+    std::ofstream(mine, std::ios::binary) << "my own file";
+    session.ok("CUSTOMISE KEEP");
+    EXPECT_EQ(contentsOf(mine), "my own file");
+    session.ok("CUSTOMISE SET linework.start=S");
+    session.ok("CUSTOMISE KEEP");
+    EXPECT_EQ(contentsOf(mine), "my own file");
+    EXPECT_EQ(session.keptFolder(), (std::vector<std::string>{"customisation.json",
+                                                              "customisation.json.bak",
+                                                              "customisation.json.tmp"}));
+
+    // The same for an export, to a name with such a neighbour.
+    const fs::path out = session.scratch.root / "out.customisation.json";
+    const fs::path neighbour = fs::path(out).concat(".tmp");
+    std::ofstream(neighbour, std::ios::binary) << "also mine";
+    session.ok("CUSTOMISE EXPORT " + typed(out));
+    EXPECT_EQ(contentsOf(neighbour), "also mine");
+    EXPECT_TRUE(fs::exists(out));
+}
+
+// Retiring the kept file (the session IS the built-in) moves it over the
+// earlier backup, which the rename replaces: the earlier backup is not removed
+// first, so a rename that then fails leaves both files where they were.
+TEST(CustomisationVerbs, RetiringTheKeptFileReplacesAnEarlierBackupAndALostRaceLeavesBothFilesBe)
+{
+    {
+        Hosted session("retire-bak");
+        session.start();
+        session.ok("CUSTOMISE SET auto.codes=off");
+        session.ok("CUSTOMISE KEEP");
+        const std::string kept = contentsOf(session.keptFile);
+        session.ok("CUSTOMISE RESET");
+        std::ofstream(session.backup(), std::ios::binary) << "an earlier backup";
+        const ReplyRecord reply = record(session.ok("CUSTOMISE KEEP"), "kept");
+        EXPECT_EQ(field(reply, "written"), "no");
+        EXPECT_EQ(contentsOf(session.backup()), kept);
+        EXPECT_FALSE(fs::exists(session.keptFile));
+    }
+    // The backup's place taken by a folder with something in it: the kept file
+    // cannot be moved there. It is refused, and the kept file, the folder and
+    // what is in it are as they were.
+    {
+        Hosted session("retire-blocked");
+        session.start();
+        session.ok("CUSTOMISE SET auto.codes=off");
+        session.ok("CUSTOMISE KEEP");
+        const std::string kept = contentsOf(session.keptFile);
+        session.ok("CUSTOMISE RESET");
+        fs::create_directories(session.backup());
+        std::ofstream(session.backup() / "inside", std::ios::binary) << "still here";
+        const katana::core::Error error = session.refused("CUSTOMISE KEEP");
+        EXPECT_EQ(error.code, ErrorCode::FileExportFailure);
+        EXPECT_EQ(error.message, "CUSTOMISE KEEP: the kept customisation could not be set aside");
+        EXPECT_EQ(contentsOf(session.keptFile), kept);
+        EXPECT_EQ(contentsOf(session.backup() / "inside"), "still here");
+        EXPECT_FALSE(session.state().kept);
+    }
+}
+
+// What a load reports of the names the rules ask for that nothing defines
+// includes the built-in's own, after every load of anything. They say so, so
+// that a front end can show them once, as a count.
+TEST(CustomisationVerbs, NamesTheBuiltInItselfLeavesUndefinedSayTheyAreTheBuiltInsInALoadsReply)
+{
+    const std::string ghostly = R"({
+  "format": "katana-customisation", "version": 1, "name": "Ghostly",
+  "codes": [
+    {"key": "GH*", "sets": "feature", "layer": "GHOSTS", "linestyle": "GHOST Line"}
+  ]
+})";
+    Hosted session("ghost", false, true);
+    session.host.builtIn = builtInFrom(ghostly);
+    session.start();
+    // Site's GT* asks for SITE Gate, which nothing defines; the built-in's own
+    // GH* asks for GHOST Line, which nothing defines either: 2 names, one the
+    // built-in's.
+    const std::string reply =
+        session.ok("CUSTOMISE " + typed(session.scratch.write("site.json", kSite)));
+    EXPECT_TRUE(contains(reply, "undefined names=2 in_built_in=1\n")) << reply;
+    EXPECT_TRUE(contains(reply, "undefined name=\"GHOST Line\" in_built_in=yes\n")) << reply;
+    EXPECT_TRUE(contains(reply, "undefined name=\"SITE Gate\"\n")) << reply;
+    EXPECT_FALSE(contains(reply, "\"SITE Gate\" in_built_in")) << reply;
+
+    // A built-in with nothing undefined adds no word to the reply at all
+    // (what every other test here reads).
+    Hosted plain("ghost-none");
+    plain.start();
+    const std::string other =
+        plain.ok("CUSTOMISE " + typed(plain.scratch.write("site.json", kSite)));
+    EXPECT_FALSE(contains(other, "in_built_in")) << other;
+    EXPECT_TRUE(contains(other, "undefined names=1\n")) << other;
 }
 
 TEST(CustomisationVerbs, AWriteThatFailsIsRefusedAndLeavesWhatWasThere)
