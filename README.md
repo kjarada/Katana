@@ -419,8 +419,8 @@ knowledge: build and packaging work, the window's usability, tests, and
 documents.
 
 Questions and proposals go in an issue: Issues are enabled on the repository,
-and Discussions are not. There is no `LICENSE` file yet, so read
-[Licence](#licence) before you spend a lot of time on a large change.
+and Discussions are not. Contributions are accepted under the project's
+[Licence](#licence), with a sign-off on each commit.
 
 **Build it and run the tests.** [Quick start](#quick-start) has the build and
 [Try it](#try-it) the commands to run; `docs/building.md` has the toolchains,
@@ -474,22 +474,48 @@ carry a `Co-Authored-By` trailer; please do the same.
 
 ## Licence
 
-There is no `LICENSE` file in this repository. The licence has not been chosen
-yet; until one is added, all rights are reserved by the owner. What that means
-for contributions is the owner's decision too, so if it matters to you, ask in
-an issue before you start on something large.
+Katana is free software, licensed under **GPL-3.0-or-later** (the GNU General
+Public License, version 3 or any later version) with additional terms about
+credit and honesty, under section 7 of that licence. It is the same family of
+licence as Linux, which uses an earlier version, `GPL-2.0-only`; Katana uses
+version 3 because the CGAL code it is built on is version 3 or later. Anyone may
+use it for any purpose, commercial use included. A copy of it, or a work based
+on it, that is passed on must stay under the same licence, with its source, and
+must keep the copyright and licence notices of what it took from Katana. A work
+that contains any part of Katana and shows legal notices (an About dialog) must
+include this line in them:
 
-One file has a licence question of its own.
-`resources/customisation/nsw.customisation.json`, the customisation compiled
-into a default build, was converted from style and survey-code libraries that
-came under someone else's licence. The owner decided on 2026-10-08 to commit
-it. Nothing in the repository records a permission from the libraries' owner,
-and none is claimed here. Anyone who redistributes a build, or a copy of the
-repository, should read the libraries' notice first; it is kept with the
-original library files, so ask the owner (`docs/customisation.md`, "Why the
-built-in is in the repository"). It is the one exception to the rule that
-third-party reference data stays out of the repository, and it is not a
-precedent: do not add another.
+> Katana, copyright (c) 2026 Jarada, https://github.com/kjarada/Katana
+
+Using Katana, and the drawings and data made with it, needs no attribution.
+Contributions are accepted under the same licence, with a sign-off on each
+commit (`git commit -s`; [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+| File | Holds |
+|---|---|
+| `LICENSE` | the licence text |
+| `ADDITIONAL_TERMS.md` | the additional terms, and the notice for source files |
+| `LICENSING.md` | the licence in plain words, what it does not cover, what is still to do, how to contribute |
+| `THIRD_PARTY_NOTICES.md` | the libraries Katana is built with and their licences |
+
+Not everything in the repository is covered, and one file stops a release:
+
+- `resources/customisation/nsw.customisation.json`, the customisation compiled
+  into a default build, was converted from style and survey-code libraries that
+  came under someone else's licence. The owner decided on 2026-10-08 to commit
+  it. Nothing in the repository records a permission from the libraries' owner,
+  and none is claimed. The GPL wants a whole program licensed under it, so a
+  build that contains this file cannot be passed on under the GPL until the
+  libraries' owner agrees; a build without it can
+  (`LICENSING.md`, "What the licence does not cover"). It is the one exception
+  to the rule that third-party reference data stays out of the repository, and
+  it is not a precedent: do not add another.
+- `samples/`, especially `samples/Survey_File`, and some test fixtures: where
+  they came from is not recorded, and one file is a software vendor's format
+  documentation. `LICENSING.md` says what is known about each.
+
+No lawyer has reviewed this licence yet, and the repository is not public yet,
+so the address in the line above does not work until it is.
 
 ---
 
@@ -751,34 +777,3 @@ tag it builds and tests them only.
 
 `docs/index.md` lists every document: what each covers and when to update
 it.
-
----
-
-## Licence
-
-Katana is free software, licensed under **GPL-3.0-or-later** (the GNU General
-Public License, version 3 or any later version) with additional attribution
-terms under section 7 of that licence. It is the same family of licence as
-Linux, which uses an earlier version, `GPL-2.0-only`; Katana uses version 3
-because of the libraries it is built on. Anyone may use it for any purpose,
-commercial use included. A copy of it, or a work based on it, that is passed on
-must stay under the same licence, with its source.
-
-A work that includes or is based on Katana's code must carry this line, in its
-documentation and, if it has one, in its About dialog:
-
-> Based on Katana by Jarada, https://github.com/kjarada/Katana
-
-Using Katana, and the drawings and data made with it, needs no attribution.
-
-| File | Holds |
-|---|---|
-| `LICENSE` | the licence text |
-| `ADDITIONAL_TERMS.md` | the attribution terms |
-| `LICENSING.md` | the licence in plain words, what it does not cover, how to contribute |
-| `THIRD_PARTY_NOTICES.md` | the libraries Katana is built with and their licences |
-
-Two things in the repository are not covered by the licence: the built-in
-customisation (`resources/customisation/nsw.customisation.json`), converted
-from third-party files, and the example data in `samples/`. `LICENSING.md` says
-what is known about each.

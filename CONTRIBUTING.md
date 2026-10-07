@@ -5,7 +5,9 @@ Humans and AI agents are both welcome. This page is the README's
 full contract, and where the two differ, `CLAUDE.md` wins. `docs/index.md` says
 which document covers which part of the code.
 
-Licence: see the [README](README.md#licence). There is no `LICENSE` file yet.
+Licence: GPL-3.0-or-later with additional terms about credit (`LICENSE`,
+`ADDITIONAL_TERMS.md`; see the [README](README.md#licence) and `LICENSING.md`).
+You contribute under it and keep your copyright.
 
 ## Your first hour
 
@@ -41,7 +43,8 @@ not.
       survey code files or schemas that came under someone else's licence. Test
       fixtures use invented names. One tracked file is an exception, the
       built-in customisation `resources/customisation/nsw.customisation.json`,
-      kept on the owner's decision of 2026-10-08 with no permission recorded
+      kept on the owner's decision of 2026-10-08 with no permission recorded,
+      which is why a build that contains it cannot be passed on under the GPL
       (README, [Licence](README.md#licence)). It is not a precedent.
 - [ ] Do not use the names that `CLAUDE.md` section 9 lists (the "Names" rule)
       in new identifiers, UI text, docs or commit messages.
@@ -157,7 +160,13 @@ not.
 
 - [ ] Stage files by path and read `git diff --cached` before you commit. Never
       `git add -A` blindly.
+- [ ] Sign off every commit (`git commit -s`). The `Signed-off-by:` line is
+      the Developer Certificate of Origin, version 1.1
+      (<https://developercertificate.org/>): you wrote the change, or have the
+      right to submit it under the project's licence. Never submit code copied
+      from an incompatible licence, or files that belong to someone else.
 - [ ] A commit made with an agent's help carries a `Co-Authored-By` trailer.
+      The person who submits it still signs it off.
 - [ ] Agents never push, merge a pull request or delete a remote branch unless
       the owner asks.
 

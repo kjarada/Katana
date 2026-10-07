@@ -41,44 +41,63 @@ the tables.
 |---|---|---|---|
 | CGAL, 2D Triangulations package | 6.2 | GPL-3.0-or-later (or a commercial licence from GeometryFactory, which Katana does not hold) | **Decisive.** `src/katana_terrain/cdt_backend.cpp` includes it; CGAL is header-only, so it is compiled into `katana_terrain` and so into all three programs. The programs as a whole must be offered under GPL version 3 or later, with source. |
 | CGAL, other packages used (kernel, spatial sorting, number types, STL extensions) | 6.2 | LGPL-3.0-or-later (or commercial) | Compatible with GPL-3.0-or-later. Keep the notices. |
-| Eigen (`Eigen/Dense` only) | 5.0.1 (the Linux and macOS toolchain pins 3.4) | MPL-2.0; its licence folder also holds Apache-2.0, BSD and MINPACK texts for some parts | Keep the notices. No LGPL file is reached through `Eigen/Dense` (searched in 5.0.1). |
+| Eigen (`Eigen/Dense` only) | 5.0.1 (the Linux and macOS toolchain pins 3.4) | MPL-2.0; its licence folder also holds Apache-2.0, BSD and MINPACK texts for some parts | Keep the notices. MPL-2.0 section 3.2(a) also asks, when an executable that contains Eigen is passed on, that recipients be told how to obtain Eigen's source (<https://gitlab.com/libeigen/eigen>): the written offer of source has to name it. No LGPL file is reached through `Eigen/Dense` (searched in 5.0.1). |
 | nlohmann/json | 3.12.0 | MIT | Keep the copyright and permission notice. |
 | Boost headers (through CGAL), and the serialization DLL | 1.92.0 | BSL-1.0 | A notice is needed only with source; none for object code. |
 
-CGAL, in detail (verified). The 653 CGAL headers that `cdt_backend.cpp`
-includes, directly and through each other, carry these `SPDX-License-Identifier`
-lines: 601 `LGPL-3.0-or-later OR LicenseRef-Commercial`, 29 `LGPL-3.0-or-later`, 22
-`GPL-3.0-or-later OR LicenseRef-Commercial`, 1 `BSL-1.0`. The 22 are the 2D
-Triangulations package (`Constrained_Delaunay_triangulation_2.h`,
-`Constrained_triangulation_plus_2.h`, `Triangulation_2.h`, the triangulation data
-structure, vertex and face bases). CGAL's own package overview says "License:
-GPL" for that package and "License: LGPL" for the kernel and number types
+CGAL, in detail (verified, the count made twice: `g++ -M` on `cdt_backend.cpp`
+with the build's flags, then reading each header's `SPDX-License-Identifier`
+line). With the build's `-DCGAL_USE_GMPXX=1`, the 653 CGAL headers that the file
+includes, directly and through each other, carry: 601 `LGPL-3.0-or-later OR
+LicenseRef-Commercial`, 29 `LGPL-3.0-or-later`, 22 `GPL-3.0-or-later OR
+LicenseRef-Commercial`, 1 `BSL-1.0`. Without that define the same walk reaches
+648 (596 of the first kind); the 22 are the same either way. The 22 are the 2D
+Triangulations package and its data structure package, TDS_2 (20 headers:
+`Triangulation_2.h`, `Constrained_Delaunay_triangulation_2.h`,
+`Constrained_triangulation_plus_2.h`, `Triangulation_data_structure_2.h`,
+vertex and face bases, and the rest of the two packages), and two helper
+headers of the BGL package under `CGAL/boost/graph/internal/`
+(`graph_traits_2D_TDS_helper.h`, `graph_traits_2D_triangulation_helper.h`),
+which carry the GPL identifier although that package is otherwise LGPL. CGAL's
+own package files at tag v6.2 (`Triangulation_2/package_info/Triangulation_2/license.txt`
+and the one for `TDS_2`) say "GPL (v3 or later)", and those for the spatial
+sorting, kernel, number types, STL extensions, property map and BGL packages
+say "LGPL (v3 or later)". CGAL's package overview says "License: GPL" for the
+first and "License: LGPL" for the kernel and number types
 (<https://doc.cgal.org/latest/Manual/packages.html>); its licence header
 `CGAL/license/Triangulation_2.h` says the package is used "under the terms of the
 GPLv3+" unless a commercial licence is held. Source and licence texts:
 <https://github.com/CGAL/cgal>, `LICENSE.GPL` and `LICENSE.LGPL`; also in
 `share/licenses/cgal`.
 
-## 2. Shared libraries beside the programs (direct dependencies)
+## 2. Shared libraries beside the programs
 
 These are DLLs in `bin/` next to the executables. A DLL can be replaced by the
 user with a modified build, which is what the LGPL asks for (the project's
 reasoning for DLLs and not static linking is in `docs/building.md`).
 
-| Component | Version | Licence | Link | What it asks of Katana |
+The "Imported by" column was read from the import tables of the programs and
+DLLs of a Windows release build (2026-10-08). The three programs import
+`libgdal`, `libgmp`, `libpdalcpp`, `libproj`, `libsqlite3` and the GCC runtime,
+and `katana.exe` also imports Qt6Core, Qt6Gui, Qt6PrintSupport and Qt6Widgets.
+The others are reached only through those, and "through" says which. A
+library Katana only reaches through another is still shipped, and its licence
+is still passed on.
+
+| Component | Version | Licence | Imported by | What it asks of Katana |
 |---|---|---|---|---|
-| Qt 6: Core, Gui, Widgets, Network, PrintSupport, with the platform, style, image-format and TLS plugins (`qwindows`, `qoffscreen`, `qmodernwindowsstyle`, `qgif`, `qico`, `qjpeg`, `qschannelbackend`, others) | 6.11.2 | The headers read (QtCore, QtGui, QtWidgets, QtNetwork, QtPrintSupport and the private RHI header) say `LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`; Katana uses them under LGPL-3.0-only | DLL | LGPL-3.0 section 4: give prominent notice that Qt is used and covered by the LGPL; accompany the program with the GPL and LGPL texts; where the program displays copyright notices while it runs (the About dialog), include Qt's copyright notice among them with a pointer to those texts; link through a shared-library mechanism, which the DLLs beside the program are. Katana also uses Qt's private GUI headers (`Qt6::GuiPrivate`, in the GPU renderer): the same licence, tied to one Qt version. |
-| GDAL | 3.13.2 | MIT (recorded; the licence file collects the licences of GDAL's bundled parts) | DLL | Keep the notice. |
-| PDAL | 2.10.2 | BSD-3-Clause (its licence file collects the licences of its bundled parts, among them Apache-2.0) | DLL | Keep the notice. |
-| PROJ | 9.8.1 | MIT | DLL | Keep the notice. |
-| GEOS (through GDAL) | 3.15.0 | LGPL-2.1-or-later (recorded; `COPYING` holds the LGPL 2.1 text, "or later" was not checked) | DLL | Allow replacing the DLL; give the licence text and source. |
-| GMP | 6.3.0 | LGPL-3.0-or-later or GPL-2.0-or-later, at the recipient's choice (`gmp.h`) | DLL | As Qt: LGPL notice, texts, replaceable. |
-| MPFR | 4.2.2 | LGPL-3.0-or-later (`mpfr.h`) | DLL | As Qt. |
-| libcurl | 8.22.0 | the curl licence (MSYS2 records "MIT") | DLL | Keep the notice. |
-| OpenSSL (libcrypto, libssl) | 3.6.5 | Apache-2.0 | DLL | Keep the licence and NOTICE. Compatible with GPL version 3, not with version 2. |
-| SQLite | 3.53.4 | public domain | DLL | None. |
-| zlib | 1.3.2 | Zlib | DLL | Keep the notice in source. |
-| GCC runtime (libstdc++, libgcc, libgomp, libgfortran, libquadmath) and libwinpthread | 16.2.0 | GPL-3.0-or-later WITH GCC-exception-3.1 (libquadmath LGPL-2.1-or-later; libwinpthread MIT and BSD-3-Clause-Clear) (recorded) | DLL | The GCC Runtime Library Exception lets the object code be conveyed under another licence. |
+| Qt 6: Core, Gui, Widgets, PrintSupport, with the platform, style, image-format and TLS plugins (`qwindows`, `qoffscreen`, `qmodernwindowsstyle`, `qgif`, `qico`, `qjpeg`, `qschannelbackend`, others) | 6.11.2 | The headers read (QtCore, QtGui, QtWidgets, QtNetwork, QtPrintSupport and the private RHI header; the Qt6Network DLL is shipped, but no Katana source or binary uses it and no DLL in `bin/` imports it, so `windeployqt` is presumed to copy it for a plugin) say `LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`; Katana uses them under LGPL-3.0-only | `katana.exe` (the other two programs import no Qt library) | LGPL-3.0 section 4: give prominent notice that Qt is used and covered by the LGPL; accompany the program with the GPL and LGPL texts; where the program displays copyright notices while it runs (the About dialog), include Qt's copyright notice among them with a pointer to those texts; link through a shared-library mechanism, which the DLLs beside the program are. Katana also uses Qt's private GUI headers (`Qt6::GuiPrivate`, in the GPU renderer): the same licence, tied to one Qt version. |
+| GDAL | 3.13.2 | MIT (recorded; the licence file collects the licences of GDAL's bundled parts) | all three programs | Keep the notice. |
+| PDAL | 2.10.2 | BSD-3-Clause (its licence file collects the licences of its bundled parts, among them Apache-2.0) | all three programs | Keep the notice. |
+| PROJ | 9.8.1 | MIT | all three programs | Keep the notice. |
+| GEOS (through GDAL) | 3.15.0 | LGPL-2.1-or-later (recorded; `COPYING` holds the LGPL 2.1 text, "or later" was not checked) | through GDAL (also librttopo, libspatialite) | Allow replacing the DLL; give the licence text and source. |
+| GMP | 6.3.0 | LGPL-3.0-or-later or GPL-2.0-or-later, at the recipient's choice (`gmp.h`) | all three programs (the number types CGAL uses) | As Qt: LGPL notice, texts, replaceable. |
+| MPFR | 4.2.2 | LGPL-3.0-or-later (`mpfr.h`) | through libSFCGAL, which GDAL imports | As Qt. |
+| libcurl | 8.22.0 | the curl licence (MSYS2 records "MIT") | through GDAL, PDAL, PROJ and others | Keep the notice. |
+| OpenSSL (libcrypto, libssl) | 3.6.5 | Apache-2.0 | through libcurl, GDAL, PDAL and others | Keep the licence text (Apache-2.0 section 4). OpenSSL has no NOTICE file (none at its GitHub `master` or `openssl-3.6`, and none in the MSYS2 package), so section 4(d) has nothing to pass on. Compatible with GPL version 3, not with version 2 (<https://www.gnu.org/licenses/license-list.html#apache2>). |
+| SQLite | 3.53.4 | public domain | all three programs | None. |
+| zlib | 1.3.2 | Zlib | through Qt, GDAL and many others | Keep the notice in source. |
+| GCC runtime (libstdc++, libgcc, libgomp, libgfortran, libquadmath) and libwinpthread | 16.2.0 | GPL-3.0-or-later WITH GCC-exception-3.1 (libquadmath LGPL-2.1-or-later; libwinpthread MIT and BSD-3-Clause-Clear) (recorded) | all three programs (libstdc++, libgcc, libwinpthread); the other runtime libraries through GDAL and others | The GCC Runtime Library Exception lets the object code be conveyed under another licence. |
 
 Each of these is also in the table in section 3, with the version and licence
 as MSYS2 records them.
@@ -138,7 +157,7 @@ header means that header was read.
 | highway | 1.4.0-3 | Apache-2.0 | 1 | <https://github.com/google/highway> |  |
 | icu | 78.3-4 | ICU | 3 | <https://icu.unicode.org/home/> |  |
 | imath | 3.2.3-3 | BSD-3-Clause | 1 | <https://www.openexr.com/> |  |
-| jbigkit | 2.1-6 | GPL-2.0 | 1 | <https://www.cl.cam.ac.uk/~mgk25/jbigkit/> | VERSION UNVERIFIED. MSYS2 records GPL-2.0, Debian's copyright file records GPL-2+ (or later), jbig.h does not say. As version 2 only it could not be combined with GPL version 3. Owner to confirm. |
+| jbigkit | 2.1-6 | GPL-2.0 | 1 | <https://www.cl.cam.ac.uk/~mgk25/jbigkit/> | MSYS2 records "GPL-2.0", which does not say "or later". The source header of `libjbig/jbig.c` in JBIG-KIT 2.1 (the version `jbig.h` of the package names) reads "either version 2 of the License, or (at your option) any later version", in Debian's copy of 2.1-6.1 and in a GitHub mirror, and Debian's copyright file says GPL-2+. So GPL-2.0-or-later, which fits GPL-3.0-or-later. The MSYS2 source archive itself was not opened. |
 | json-c | 0.19-2 | MIT | 1 | <https://github.com/json-c/json-c> |  |
 | kvazaar | 2.3.2-1 | BSD-3-Clause | 1 | <https://ultravideo.fi/kvazaar.html> |  |
 | lcms2 | 2.19.1-1 | MIT AND GPL-3.0-or-later | 1 | <https://www.littlecms.com/color-engine/> |  |
@@ -220,10 +239,11 @@ What the table shows. Most are permissive (MIT, BSD, Zlib, Apache-2.0, ISC and
 similar). A smaller group is LGPL (GEOS, glib, libheif, libde265, libmariadb,
 gettext's libintl, libiconv, graphite2, libunistring, the GCC runtime), shipped
 as DLLs. A few are GPL, all "version 2 or later" where a header was read
-(poppler, librttopo, x264, x265): they are loaded into the same process through
-GDAL, which is consistent with Katana being GPL-3.0-or-later and would not be
-with GPL-2.0-only. One, `jbigkit`, is marked unverified. `libSFCGAL.dll`
-depends on CGAL.
+(poppler, librttopo, x264, x265) and `jbigkit` (its source header): they are
+loaded into the same process through GDAL, and "version 2 or later" can be
+passed on under version 3, so they fit Katana being GPL-3.0-or-later. They
+would fit GPL-2.0-only too: it is CGAL's version-3 code, not these, that rules
+version 2 out. `libSFCGAL.dll` depends on CGAL and on MPFR.
 
 ## 4. Data shipped beside the programs
 
@@ -237,8 +257,11 @@ depends on CGAL.
 Katana's own resources (`resources/`: the icons, the plot frame, the online
 source catalogue) are part of Katana. The one exception is the built-in
 customisation, `resources/customisation/nsw.customisation.json`, which is
-compiled into the programs and is **not** covered by the project licence: see
-`LICENSING.md`.
+compiled into every program and is **not** covered by the project licence. The
+GPL (section 5(c)) wants the whole work licensed under it, so a build that
+contains this file cannot be passed on under the GPL until its authors agree;
+a build without it can: see `LICENSING.md`, "What the licence does not
+cover".
 
 ## 5. Used to build or test, never shipped
 
@@ -269,8 +292,8 @@ it to the package.
 * The versions and licences in section 3 are MSYS2's records, not read from each
   source. The headers of x264, x265, poppler, librttopo, libheif, GMP, MPFR and
   Qt were read, as the notes say.
-* `jbigkit` (libjbig, loaded through libtiff and GDAL): whether it is GPL
-  version 2 only or "or later" is not stated by its header (see the table).
+* `jbigkit`: read in the 2.1 sources of Debian and a mirror, not in the MSYS2
+  archive (see the table).
 * The EPSG registry terms behind `proj.db`, and which licence covers the
   certificate bundle file.
 * Everything in section 6.
@@ -279,4 +302,5 @@ it to the package.
   machine.
 * Whether the packages carry the licence texts, the notices and the written offer
   of source that sections 1 and 2 call for. They do not yet: `LICENSE` is the only
-  file the install rules copy. This is for packaging to do.
+  file the install rules copy. This is for packaging to do; `LICENSING.md`,
+  "What is still to do", lists it.

@@ -2,7 +2,7 @@
 
 Katana is free software. It is licensed under the GNU General Public License
 version 3 or, at your option, any later version (SPDX `GPL-3.0-or-later`), with
-one short additional term about attribution. Copyright (c) 2026 Jarada.
+additional terms about credit and honesty. Copyright (c) 2026 Jarada.
 This page says what that means in plain words and what the licence does not
 cover. It is a guide, not legal advice and not part of the licence: the binding
 texts are `LICENSE` and `ADDITIONAL_TERMS.md`.
@@ -10,7 +10,7 @@ texts are `LICENSE` and `ADDITIONAL_TERMS.md`.
 | File | What it holds |
 |---|---|
 | `LICENSE` | the GNU General Public License, version 3, unmodified, as the Free Software Foundation publishes it |
-| `ADDITIONAL_TERMS.md` | the attribution term, added under section 7 of that licence, and the notice for source files |
+| `ADDITIONAL_TERMS.md` | the additional terms, added under section 7 of that licence, and the notice for source files |
 | `THIRD_PARTY_NOTICES.md` | the libraries Katana is built with and ships with, and their licences |
 
 ## The licence in a paragraph
@@ -25,53 +25,89 @@ nothing of you, and Katana claims no rights in the drawings and data you make
 with it (where it copies a piece of its own built-in material into a file you
 make, that piece keeps the licence it came with).
 
-## The attribution term, in plain words
+## The additional terms, in plain words
 
 The GPL's section 7 lets a copyright holder add a few kinds of term. Katana
 adds terms of those kinds only, all about credit and honesty
 (`ADDITIONAL_TERMS.md` has the wording):
 
-1. Keep the notice "Copyright (c) 2026 Jarada" and the licence notices on every
-   copy, changed or not.
-2. If your work includes or is based on Katana's code, say "Based on Katana by
-   Jarada, https://github.com/kjarada/Katana" in its documentation, in its About
-   dialog if it has a user interface (the GPL calls this the program's
-   "Appropriate Legal Notices"), and in its startup banner if it prints one.
-3. Mark a changed version as changed, and do not present it as the original
+1. **Keep the notices.** Every file or document you take from Katana keeps its
+   copyright and licence notices. If your work contains any part of Katana and
+   shows Appropriate Legal Notices (the GPL's name for the About-box feature:
+   copyright, no warranty, the licence and how to read it), put this line in
+   them: "Katana, copyright (c) 2026 Jarada, https://github.com/kjarada/Katana".
+2. **Mark a changed version as changed**, and do not present it as the original
    Katana.
-4. Do not use the names Katana or Jarada to suggest that Jarada endorses your
-   work.
+3. **Do not use the name Jarada** to suggest that Jarada endorses or promotes
+   your work, without written permission. No trademark rights in the name
+   "Katana" are granted.
+4. Merely using Katana is not covered by any of this.
 
-Merely using Katana is not covered by any of this.
+### What the GPL does not let this ask for
+
+The owner asked that anyone who uses Katana's code or passes it on must credit
+the author. The GPL allows less than that, and the terms stop where it stops.
+Section 7(b) lets a copyright holder require that specified notices be
+preserved **in the material they belong to, or in the Appropriate Legal Notices
+that a work containing it displays**. It does not let the holder require a new
+sentence ("Based on Katana by ...") in a derivative's own documentation or
+startup banner: that is a "further restriction", which any recipient may remove
+(section 7, closing paragraphs; section 10), and the Free Software Foundation's
+FAQ says so of citation requirements
+(<https://www.gnu.org/licenses/gpl-faq.html#RequireCitation>). So:
+
+* What the terms secure: the credit travels with every file and document taken
+  from Katana, and appears in the About box of any work that contains Katana's
+  code and has one. A fork that is renamed and sold still carries it there.
+* What they cannot secure: a credit line in a derivative's documentation, or a
+  derivative's command-line banner. Jarada can ask for it as a courtesy ("Based
+  on Katana by Jarada, https://github.com/kjarada/Katana"); the licence does
+  not require it.
+* Anything stronger is a different licence model, not a different wording: the
+  programs include CGAL's GPL code, so a requirement the GPL forbids would stop
+  them being passed on at all, unless the owner bought CGAL's commercial licence
+  (which would end the obligation to be open). Whether to go there is the
+  owner's decision, with a lawyer.
 
 ### Three examples
 
 * **A fork, renamed and sold as a product.** The seller keeps the copyright and
-  licence notices, shows "Based on Katana by Jarada ..." in the About box and
-  the documentation, marks the product as modified, does not call it Katana or
-  suggest that Jarada backs it, and gives every buyer the full source under the
-  GPL. Selling it is allowed.
+  licence notices in every file it took, shows "Katana, copyright (c) 2026
+  Jarada, ..." among the legal notices of its About box, marks the product as
+  modified, does not call it Katana or suggest that Jarada backs it, and gives
+  every buyer the full source under the GPL. Selling it is allowed.
 * **A company using Katana internally to produce drawings.** Nothing is
   required: no attribution on the drawings, nothing to publish. Copies passed
   between colleagues at work are not redistribution.
 * **A library extracted from Katana and used in another program.** That program
-  is now a work based on Katana's code: it must itself be offered under
-  GPL-3.0-or-later with its source, say "Based on Katana by Jarada ..." in its
-  documentation and in its About box if it has one, and keep the copyright
-  notices in the files it took.
+  is now a work containing Katana's code: it must itself be offered under
+  GPL-3.0-or-later with its source, keep the copyright notices in the files it
+  took, and, if it has an About box, show the line above in it.
 
 ## Why version 3, and not the Linux kernel's version 2
 
-Katana is built on CGAL's 2D triangulation code, which is GPL-3.0-or-later, and
-ships with Apache-2.0 libraries (OpenSSL 3 and others); neither can be combined
-with the kernel's `GPL-2.0-only`, while both fit version 3. Section 7, which
-allows the attribution term, exists only in version 3. (`THIRD_PARTY_NOTICES.md` has the
-audit; the kernel's licence is the same family, an earlier version.)
+The kernel's licence is `GPL-2.0-only`. Katana cannot use it, for one reason
+that is enough: CGAL's 2D Triangulations package is licensed
+`GPL-3.0-or-later` (or commercially, and Katana holds no commercial licence).
+One translation unit, `src/katana_terrain/cdt_backend.cpp`, includes it, and it
+is compiled into all three programs. Code that is "version 3 or later" cannot
+be combined into a work that is "version 2 only". Section 7, which allows the
+additional terms, also exists only in version 3, and the programs ship with
+Apache-2.0 libraries (OpenSSL 3 and others), which the Free Software
+Foundation lists as compatible with version 3 and not with version 2.
+`THIRD_PARTY_NOTICES.md` has the audit.
+
+"Or later" is a separate choice, not forced by any library: `GPL-3.0-only`
+would also work with every library audited. "Or later" lets the project follow
+a future version, and also lets a future version's section 7 differ from
+today's, which could affect these terms. The kernel says "only". The owner
+decides.
 
 ## What the licence does not cover
 
 The project licence applies to what the owner has the right to license. These
-are in the repository or its packages and are **not** covered by it:
+are in the repository or its packages and are **not** covered by it, or are not
+known to be:
 
 1. **`resources/customisation/nsw.customisation.json`**, the built-in
    customisation (linestyles, symbols and survey codes). It was converted from
@@ -79,13 +115,22 @@ are in the repository or its packages and are **not** covered by it:
    copied or used without their authors' authorisation. The owner decided to
    include the converted file and removed that notice from it, but cannot grant
    rights over material that belongs to someone else. No permission from the
-   authors is recorded in this repository, and none is claimed. The file is
-   compiled into the programs. Anyone who cannot rely on it can leave it out:
-   build with `-DKATANA_BUILTIN_CUSTOMISATION=<another file>`
-   (`docs/building.md`).
-2. **`samples/`**, installed in every package. Where each file came from is not
-   recorded in this repository, so no licence is granted for them here. What
-   can be verified:
+   authors is recorded in this repository, and none is claimed.
+   **This blocks a public release.**
+   * The file is compiled into `katana_cad`, so into every program, and the
+     release workflow passes nothing to leave it out.
+   * The GPL (section 5(c)) requires the whole work, as passed on, to be
+     licensed under it. A program with this file inside cannot be passed on
+     under the GPL while its authors have not agreed.
+   * Making the repository public also publishes the file.
+   * Either the authors' written permission, on terms the GPL accepts, or a
+     release built without the file is needed. A configure option whose path
+     names no file makes a program with no built-in
+     (`-DKATANA_BUILTIN_CUSTOMISATION=<a path with no file>`;
+     `src/katana_cad/CMakeLists.txt`, `docs/building.md`).
+2. **`samples/`**, installed in every package (`cmake/KatanaPackaging.cmake`).
+   Where each file came from is not recorded in this repository, so no licence
+   is granted for them here. What can be verified:
 
    | Folder | What the history and the files show |
    |---|---|
@@ -93,15 +138,67 @@ are in the repository or its packages and are **not** covered by it:
    | `gis` | four small files: parcels, a terrain grid, a point cloud; the point cloud's header names PDAL 2.9.3 as its writer, 2026-09-20; the source of the data is not recorded |
    | `ifc` | two text files added with the IFC export (2026-09-25): a scenario script and classification rules |
    | `utilities` | four small files added with the utility tools (2026-09-25 and 26); one names its columns as a published government schema does (names only) |
-   | `Survey_File` | six large files added on 2026-10-08: field-book and data-collector files from survey instruments, and one text file that describes a survey software's file format in its vendor's words. Who made the data, who owns it and whether it may be published is not recorded here |
+   | `Survey_File` | six large files added on 2026-10-08: three `.fld` field files, one data-collector `.sdr` file and one raw instrument `.txt` file, with coordinates that look like a real site's, and **one text file that is a survey software vendor's documentation of its file format** (its title begins "Structure of the"), in the vendor's words. Who made the data, who owns it and whether it may be published is not recorded; the vendor's document is very probably not the owner's to license. `docs/survey.md` says of the project's own fixtures: "No proprietary sample files are used". |
 
-3. **`third_party/`**, which is not committed: the build downloads GoogleTest and
-   Google Benchmark into `third_party/_cache`. They are used for tests only, are
-   not shipped, and keep their own licences, as does every library in
+   `Survey_File` should leave the repository and the packages, or its owners'
+   permission should be recorded, before the repository is made public.
+3. **`tests/`**, which is not installed but will be published with the
+   repository. `docs/survey.md` says the survey fixtures were constructed from
+   specifications, and `docs/dxf.md` that the two DXF drawings were written by
+   hand. For the rest the origin is not recorded: the archive-format fixtures
+   in `tests/archive12d/data/` (one carries a comment that it is hand-written;
+   it names a viewer, not Katana), the files in `tests/geo/data/`, and the
+   two instrument files in `tests/qt_widgets/survey/data/`.
+4. **`resources/` and `docs/images/`.** The icons (`katana.ico`, `katana.png`,
+   `icon_sheet.png`) are rendered by the project's own tool
+   (`katana_make_icons`, `docs/desktop.md`). The plot frame was, by its commit
+   message (`bbb26aac`), measured from the owner's own application. The pictures in `docs/images/` are screenshots
+   of Katana on sample data. The origin of `resources/screenshot.png` is not
+   recorded.
+5. **`third_party/`**, which is not committed: the build downloads GoogleTest
+   and Google Benchmark into `third_party/_cache`. They are used for tests
+   only, are not shipped, and keep their own licences, as does every library in
    `THIRD_PARTY_NOTICES.md`.
-4. **The utility schema workbook**, a government agency's document that the
+6. **The utility schema workbook**, a government agency's document that the
    utility tools can read. It is never in the repository; its own terms limit
    who may use it, and each user brings their own copy.
+
+## What is still to do
+
+None of this is in the code yet, because it is for the people who own the
+window, the packaging and the release workflow. Until it is done the terms are
+open to challenge: section 7 asks for the notice in the source files, and term 1
+asks a work to preserve what Katana's own About box shows, which does not yet
+show it.
+
+* **The About dialog** shows the Appropriate Legal Notices: the copyright
+  line, that there is no warranty, that the work may be passed on under the
+  GPL and where to read it, the line in term 1, and Qt's copyright with a
+  pointer to the LGPL (LGPL-3.0 section 4).
+* **`katana_cli`** prints a short notice at start-up or has a command that
+  prints it. **`katana_mcp`** shows it on stderr or as a resource, never on
+  stdout, which is the protocol.
+* **Every source file** gets the notice in `ADDITIONAL_TERMS.md`. A script,
+  `tools/add_licence_notice.py`, adds it; run it once on the merged tree, so
+  that it does not conflict with work in progress.
+* **Packages** install `LICENSE`, `ADDITIONAL_TERMS.md`, `LICENSING.md` and
+  `THIRD_PARTY_NOTICES.md` (only `LICENSE` is installed now) and the licence
+  text of each bundled library. The Windows installer shows the licence. A
+  written offer of source names each GPL and LGPL library it ships (poppler,
+  librttopo, x264, x265, GEOS, GMP, MPFR, libheif and the others in
+  `THIRD_PARTY_NOTICES.md`) with the exact URL of its source, and Eigen's
+  (MPL-2.0 section 3.2 asks for the way to its source). The LGPL libraries stay
+  replaceable DLLs.
+* **The third-party table** is generated per platform: the Linux, macOS and
+  Windows ARM64 packages were not audited.
+* **`src/katana_qt/katana.rc.in`** says "Copyright (C) Jarada" with no year;
+  the notice is "Copyright (c) 2026 Jarada".
+* **The release workflow** leaves out the built-in customisation and
+  `samples/Survey_File` until their rights are settled (above).
+* **`https://github.com/kjarada/Katana`**, the address in the notice, returned
+  "not found" on 2026-10-08, because the repository is not public yet. The line
+  points nowhere until it is. A way to ask for written permission (term 3)
+  needs a contact there.
 
 ## Contributing
 
@@ -111,7 +208,8 @@ are in the repository or its packages and are **not** covered by it:
 * **Sign off every commit** (`git commit -s`), which adds a `Signed-off-by:`
   line. That is the Developer Certificate of Origin, version 1.1
   (<https://developercertificate.org/>): you wrote the change or have the right
-  to submit it under the project's licence. The Linux kernel uses the same.
+  to submit it under the project's licence. The Linux kernel uses the same
+  (<https://docs.kernel.org/process/submitting-patches.html>).
 * **Why not a CLA.** A contributor licence agreement or copyright assignment
   would let the owner relicense contributions later, even as closed software.
   That is more than an open project needs from each contributor, and the
@@ -130,5 +228,6 @@ are in the repository or its packages and are **not** covered by it:
   jurisdictions, and so is what that means for licensing it. The owner should
   take legal advice.
 * No lawyer has reviewed how this licence and the additional terms are used, or
-  this page. Who exactly "Jarada" is, as a legal person, is for the owner to
+  this page. Who exactly "Jarada" is, as a legal person, and whether
+  contributors' copyright should be named in the notice, are for the owner to
   confirm.
