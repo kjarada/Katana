@@ -139,9 +139,8 @@ std::vector<ReferenceEntry> referenceEntries(const QString& help)
 QString windowHelpText()
 {
     // In the interpreter's layout, so the typed HELP reads as one text.
-    // CUSTOMISE had a block here while the window loaded customisation files
-    // itself; it is the interpreter's verb now, and the interpreter's help -
-    // which the typed HELP prints first - has it.
+    // CUSTOMISE is the interpreter's verb, and the interpreter's help - which
+    // the typed HELP prints first - has it, so it has no block here.
     return R"(Window    the verbs the desktop window's command line runs itself, beside the
           interpreter's. IMPORT, EXPORT, INFO <file>, REFS and COPC are katana_cli's
           too, and UTILITY is the interpreter's, run here through the utilities

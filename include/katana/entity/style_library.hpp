@@ -135,7 +135,7 @@ struct LineStyle {
     // style library (.4d) was read. Empty for a definition made in code or in
     // a session. A browser groups and filters by it and a project records it.
     // It says nothing of which KIND a definition is - `symbol` below does, and
-    // the catalogue and the lint read that (they once asked this name).
+    // the catalogue and the lint read that.
     std::string source{};
     // Its customisation LISTS it as a symbol: in the Katana customisation
     // format, the definition sits in the "symbols" array rather than in
@@ -143,8 +143,8 @@ struct LineStyle {
     // `atVertices` cannot stand in for it: most symbols the reference survey
     // codes place are not `mode vertex`.
     //
-    // It is a field of its own and NOT derived from `source`, which is how it
-    // used to be told (a file name containing "symbol"). One customisation
+    // It is a field of its own and NOT derived from `source`, which a file-name
+    // rule would read (a file name containing "symbol"). One customisation
     // holds both kinds under ONE name, so where a definition came from no
     // longer says which kind it is - a customisation called "Symbols and
     // lines" would make everything a symbol, and one called "NSW" nothing.

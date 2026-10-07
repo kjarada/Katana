@@ -978,9 +978,7 @@ void SurveyImportWizard::showFinishChoice()
                     : " The points are drawn on the layer above and nothing else is done.";
     } else {
         // What loads survey codes is a Katana customisation file: Settings'
-        // Import, or the line that runs. It said Format > Load Customisation
-        // and "a survey code file" until 2026-10-07, after that menu item had
-        // gone and that kind of file had stopped loading.
+        // Import, or the line that runs.
         note += " A Katana customisation file brings survey codes: load one in File > Settings > "
                 "Import, or type CUSTOMISE <file> on the command line.";
     }

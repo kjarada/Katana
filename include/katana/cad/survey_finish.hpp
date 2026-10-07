@@ -3,10 +3,10 @@
 // Field to finish in ONE step: a survey import that also codes what it drew
 // and strings it.
 //
-// Importing a coded field file used to be three steps a person had to know
-// about - import, Apply Survey Codes, Process Linework - each its own undo
-// step, the second replacing the selection and the third reachable from one
-// dialog only. `withSurveyFinish` makes them one command: it OWNS the command
+// Importing a coded field file is three steps - import, Apply Survey Codes,
+// Process Linework - which as separate commands would each be an undo step, the
+// second replacing the selection and the third reachable from one dialog only.
+// `withSurveyFinish` makes them one command: it OWNS the command
 // that draws the points, runs it, and then
 //
 //   1. codes the points that command created (applySurveyCodes);

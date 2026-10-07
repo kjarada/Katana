@@ -31,14 +31,11 @@
 // control codes are the customisation's, the Document's, and the tab shows
 // them as they are and follows them as they change.
 //
-// Until 2026-10-07 the two tabs took the selection or everything, executed
-// commands of their own, and kept a copy of the control codes that only the
-// window's own bookkeeping tied to the customisation. What went with that:
-// three boxes that switched parts of the coding off (create layers, create
-// styles, set attributes) and "keep the points a line replaces", none of
-// which a line can say - CODE always does what the rules say, and LINEWORK
-// never removes a point (linework_verbs.hpp) - and a second, direct path kept
-// for them would have been the two code paths this is here to end.
+// The tabs have no boxes that switch parts of the coding off (create layers,
+// create styles, set attributes) or keep the points a line replaces, because
+// no line can say them: CODE always does what the rules say, and LINEWORK never
+// removes a point (linework_verbs.hpp), and a second, direct path kept for
+// them would be two code paths for one job.
 //
 // EDITING HAPPENS IN A BUFFER (decision D1). The survey map is session data on
 // the Document, not undoable, so edits go to a copy of document->surveyMap()

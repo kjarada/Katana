@@ -470,6 +470,14 @@ content), `McpServer.FormatsReturnsStructuredDrivers`,
 `qt_the_formats_dialog_shows_the_formats_line_it_runs_headless` and
 `qt_import_of_a_zip_opens_the_one_dataset_inside_headless`.
 
+**A mistyped project folder** reaches IMPORT as a path with no extension that
+is not there, since `katana <path>` opens a folder as a project and hands every
+other argument to IMPORT. It is refused as what it is, `no such project
+directory or file: <path>` (`NotFound`), and not as `no importer for ''`. A file
+with no extension that IS there keeps `no importer for ''`, and so does an
+extension nobody reads on a file that is not there
+(`GisVerbs.APathWithNoExtensionThatIsNotThereIsNoSuchProjectDirectoryOrFile`).
+
 **Not done.** `INFO` (`src/katana_interop/dataset_info.cpp`) still checks
 that a file exists before GDAL looks, so it refuses a `/vsi` path that
 IMPORT opens. A zipped shapefile EXPORT writes holds `katana.shp`, the

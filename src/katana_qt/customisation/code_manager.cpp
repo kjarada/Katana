@@ -688,7 +688,7 @@ katana::core::Status SurveyCodeManagerDialog::exportCodes(const std::filesystem:
     //
     // What the verb writes is the DRAWING'S rules, so unapplied edits are not
     // in it: it is refused for them rather than write rules the person is not
-    // looking at. (It once wrote the buffer, which no line can name.)
+    // looking at: no line can name the buffer.
     const katana::cad::Document* doc = document();
     if (doc == nullptr) {
         return makeError(ErrorCode::InvalidState, "the drawing this manager edits is closed");

@@ -3877,10 +3877,6 @@ QString countOf(std::size_t count, const char* one, const char* many)
 //      refused, naming the variable.
 // The file need not exist: nothing is kept until a KEEP writes it, and the
 // folder is made then. This is called after setHeadless for rule 3.
-//
-// The window once looked for style libraries and survey code files beside the
-// executable when nothing was compiled in - a third state, decided at run
-// time by what happened to lie in a folder - and that is gone.
 void MainWindow::loadDefaultCustomisation()
 {
     cad::CustomisationHost host;

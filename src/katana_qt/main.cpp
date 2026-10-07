@@ -549,8 +549,7 @@ bool customise(katana::qt::MainWindow& window, const QStringList& files)
 // (customise, below): merged into what the session started with, all or
 // nothing, and answered in the verb's own records. A refused line fails a run
 // that only writes or runs a script batch, as a refused --command does there.
-// The style libraries and survey code files of another program, which this
-// switch once took, are not read.
+// The style libraries and survey code files of another program are not read.
 //
 // --style-manager opens the styles and linetypes manager before the
 // screenshot and grabs THAT window instead of the main one, so the dialog -

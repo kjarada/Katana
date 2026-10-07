@@ -47,7 +47,7 @@ DefinitionKind classify(const LineStyle& definition, const SymbolEvidence& evide
     kind.namedBySurveyRule = evidence.ruleSymbols.contains(definition.name);
     kind.namedByStyle = evidence.styleSymbols.contains(definition.name);
     // What the definition's own customisation says of it. Not its source's
-    // name, which was once the sign: one customisation holds both kinds.
+    // name: one customisation holds both kinds.
     kind.listedAsSymbol = definition.symbol;
     kind.symbol =
         kind.atVertices || kind.namedBySurveyRule || kind.namedByStyle || kind.listedAsSymbol;

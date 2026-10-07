@@ -23,13 +23,10 @@
 // Each manager's action carries its dialog's object name as its data, which
 // is how the headless --dialog switch finds the dialog an action opened.
 //
-// There was a third section, Customisation Files, with the window's Load
-// Customisation and Replace Loaded Customisation: file dialogs over the style
-// libraries and survey code files of another program, which Katana no longer
-// reads. A customisation file is loaded by the CUSTOMISE line - typed, in a
-// script, or with --customise - which is the interpreter's
-// (cad/customisation_verbs.hpp), and from File > Settings, which this object
-// makes (below); no item of Format or Survey stands for it.
+// There is no Customisation Files section: a customisation file is loaded by
+// the CUSTOMISE line - typed, in a script, or with --customise - which is the
+// interpreter's (cad/customisation_verbs.hpp), and from File > Settings, which
+// this object makes (below); no item of Format or Survey stands for it.
 //
 // The workbench owns what the managers share: the picture cache
 // (DefinitionThumbnails) and the one CustomisationContext they are built
@@ -54,11 +51,10 @@
 // and drives it without a window. Nothing of it is in Format or on its
 // toolbar.
 //
-// The linework control codes are NOT among what it owns. It kept a copy of
-// them for the code manager's Linework tab, and followed the customisation's
-// (the Document's customisationState().linework) into it as they changed;
-// the tab now reads the Document and sets them with CUSTOMISE SET
-// linework.*, so the copy, its follower and the watcher that drove it went.
+// The linework control codes are NOT among what it owns: they are the
+// customisation's (the Document's customisationState().linework), and the code
+// manager's Linework tab reads the Document and sets them with CUSTOMISE SET
+// linework.*.
 
 #include <functional>
 #include <memory>

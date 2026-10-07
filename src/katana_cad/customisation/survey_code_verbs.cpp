@@ -56,8 +56,7 @@ std::string reply(std::string text)
     return text;
 }
 
-// The remedy names the file that DOES load: "use CUSTOMISE <file>" once meant
-// a survey code file, and sent people to load a kind of file that is gone.
+// The remedy names the one kind of file that loads: a Katana customisation.
 katana::core::Status requireMap(const Document& document)
 {
     if (document.surveyMap().empty()) {

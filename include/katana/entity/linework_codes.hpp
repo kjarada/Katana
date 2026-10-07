@@ -7,8 +7,7 @@
 // processing in the cad layer (cad/linework.hpp); how it is SPELLED is here,
 // because a spelling is part of a customisation - a survey team writes "ST" or
 // "S" as its field book does - and a customisation is read and written in this
-// layer, below cad (entity/customisation.hpp). The type lived in cad until the
-// Katana customisation format gave it a file to be kept in; cad still names it
+// layer, below cad (entity/customisation.hpp); cad names it
 // `cad::LineworkCodes`.
 
 #include <span>

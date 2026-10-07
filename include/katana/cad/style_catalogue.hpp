@@ -19,10 +19,10 @@
 //   symbols the reference survey codes use are not `mode vertex`, which is
 //   why atVertices alone cannot decide.
 //
-//   The fourth reason was once the NAME of the file a definition was read
-//   from ("symbol" anywhere in it). One customisation now holds both kinds
-//   under one name, so where a definition came from no longer says which it
-//   is, and each definition says so itself.
+//   The fourth reason is what the definition's own customisation says of it
+//   (LineStyle::symbol), not the NAME of the file it was read from: one
+//   customisation holds both kinds under one name, so where a definition came
+//   from cannot say which it is.
 //
 //   A picker never relies on its list being complete: keepCurrent puts the
 //   value being edited back, marked, when the list lacks it. That - not a

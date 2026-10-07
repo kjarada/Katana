@@ -2582,10 +2582,13 @@ Not done:
   the Document, as the code manager's Apply is. On the command line a
   definition is made or changed by writing it in a customisation file and
   loading that; an agent has no shorter way.
-- **An interactive session has no kept file of its own yet.** An editor's
-  commit keeps a kept session kept only where the session has a kept file,
-  and until File > Settings gives each user one that is a session started
-  with `KATANA_CUSTOMISATION` set.
+- **A session with no kept file keeps nothing.** An editor's commit keeps a
+  kept session kept only where the session has a kept file. An interactive
+  window has one - `customisation.json` in the per-user place, or the file
+  `KATANA_CUSTOMISATION` names (`MainWindow::loadDefaultCustomisation`;
+  `docs/customisation.md`, "Settings and the kept customisation") - and a
+  headless run has none unless that variable is set; there Keep is refused
+  by name, and `CUSTOMISE` says `Kept file: none.`
 - **A user of a definition is still worded two ways**, by the verb and by
   the editor's own list (`docs/customisation.md`, "The verbs: not done"),
   though no longer both under one refusal.
@@ -2752,7 +2755,7 @@ Each now reaches the same code on every front end
   resolve a colour name through the Document - the customisation's own
   table, then the standard names - and no front end hands the interpreter
   a lookup of its own any more: the window had only the standard names to
-  give, which the Document knows, and `CommandInterpreter::setColourLookup`
+  give, which the Document knows, and the interpreter's colour-lookup setter
   went with its last caller. (`CODE LIST`
   and `CODE CHECK` were `MAPFILE LIST` and `MAPFILE CHECK` until 2026-10-06.)
   Survey > Apply Survey Codes runs `CODE SELECTION` or `CODE DRAWING` ("The
@@ -3549,7 +3552,7 @@ today, Customisation (`settingsCustomisation`); a second is one more
 | When survey data comes in | `settingsAutoCodes`, `settingsAutoLinework` | `CUSTOMISE SET auto.codes=on` or `off`, `CUSTOMISE SET auto.linework=on` or `off`, when the box is toggled |
 | Linework control codes | `settingsLinework`, `settingsEditLinework` | the seven spellings, read-only, each under the word its editor labels it with (`Start: ST, End: END, Close: CL, Begin curve: BC, ...`; `(off)` for a control switched off), and a button that opens that editor, the Survey Code Manager at its Linework tab |
 | Editors | `settingsOpenCodes`, `settingsOpenSymbols` | open the Survey Code Manager and the Symbol Library |
-| Status | `settingsStatus`, `settingsClose` | each line run, as the command log echoes it (`> CUSTOMISE RESET`), then what it answered: the reply, or `Refused:` and the verb's own words, in the error colour |
+| Status | `settingsStatus`, `settingsClose` | each line run, as the command log echoes it (`> CUSTOMISE RESET`), then what it answered: the reply, or `Refused:` and the verb's own words, in the error colour. The names a load reports as undefined that the built-in ITSELF leaves undefined (`undefined name=... in_built_in=yes`) are not listed after every load of anything: they are said once, as a count - `3 names undefined (as in the built-in)`, or `3 names undefined, 2 of them as in the built-in` with the load's own named below (`TheNamesTheBuiltInItselfLeavesUndefinedAreShownAsACountAndTheRestByName`). A file of another program's format is refused in the verb's words, `not a Katana customisation file; the older formats are converted with katana_customisation_convert`, with none of the JSON parser's sentence |
 
 **Every button that changes anything builds a line** and hands it to the one
 executor ("One executor: the command runner"), so it is echoed in the command

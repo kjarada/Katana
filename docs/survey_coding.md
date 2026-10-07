@@ -997,8 +997,7 @@ scope word is the whole drawing, and how a line's first word is read.
 each field it names the FIRST rule, most specific first, that says anything
 about it - the rule `lookup` takes it from - and the later matching rules that
 set it to something else and lost (`CodeFieldSource::overruled`): most often
-the second of two loaded mapfiles disagreeing, and the built-in pair disagree
-about `hide` for 190 keys. It says what each linestyle and symbol name
+a more general key's rule (`W*` under `WM*`), or a later rule of the same key. It says what each linestyle and symbol name
 resolves to, what the colour name's RGB is (or that it has none, which leaves
 an entity's colour alone), which attributes accumulate and which are
 deferred (`$PipeDiameter`), how the code matched (D5) and any near miss by
