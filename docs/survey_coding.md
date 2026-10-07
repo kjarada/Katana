@@ -1458,12 +1458,11 @@ spelled alike. The spellings are part of a customisation and the session's
 are the Document's (`Document::customisationState().linework`: what a
 customisation file says and `CUSTOMISE SET linework.*` sets). The `LINEWORK`
 verb and a survey import read them there, and so does the Survey Code
-Manager's Linework tab, through the Format workbench, which follows them as
-they change (`CustomisationWorkbench::followLineworkCodes`,
-`docs/desktop.md`, "The Format menu"). The tab's own Use These Codes still
-changes the workbench's copy alone (`CustomisationWorkbench::lineworkCodes`):
-such codes last until the customisation's next change of them, and are not
-what `CUSTOMISE KEEP` writes.
+Manager's Linework tab, which shows them, follows them as they change, and
+sets them with that same line (its Use These Codes; `docs/desktop.md`,
+"Survey Code Manager"). There is one home for them: the window kept a copy
+for the tab until 2026-10-07, and codes typed there reached neither a
+`CUSTOMISE` reply nor `CUSTOMISE KEEP`.
 
 **Curves are chorded.** `Polyline2` has no arc segment, and giving it one is a
 schema change deferred under D6. So each consecutive three curve points
@@ -1492,6 +1491,9 @@ went into are deleted in the same command - the line now stands for them -
 and nothing else is: a point in no line always stays, and so does a point
 only a `JPN` join reached (a tree or an uncoded control point joined to is
 not replaced by the join line). `pointsRemoved` counts only what was deleted.
+No front end turns it off any more: the `LINEWORK` verb never removes a point
+(below), and the Survey Code Manager's box for it went when its Linework tab
+came to run that verb's line.
 
 **`skipLinesAlreadyDrawn`.** Off by default. On, a line planned now that the
 drawing already holds is not drawn a second time: a polyline carrying the
@@ -1516,8 +1518,9 @@ code it carries. `coding.createLayers` governs every layer here, as in
 `processLinework`; `import.createLayers` is not read.
 
 Process Linework is the `LINEWORK` verb ("`LINEWORK` on the command line",
-below) and the Survey Code Manager's Linework tab, previewed before it runs,
-against the drawing's map. Draw Survey Features has no command, menu item or
+below), and in the window the Survey Code Manager's Linework tab, whose
+Execute runs that verb's line and whose Preview is the verb's own plan
+(`cad::planLinework`), against the drawing's map. Draw Survey Features has no command, menu item or
 dialog of its own: it runs inside an import that asks for linework (next
 section).
 
@@ -1726,8 +1729,11 @@ session's control codes are not job data.
 Not done:
 
 - `SURVEY IMPORT` sets the options (`docs/survey.md`, "SURVEY IMPORT codes
-  and strings what it draws"); the import wizard does not yet, and still
-  draws points only. The Survey Jobs dialog passes
+  and strings what it draws"), and since 2026-10-07 so does the import
+  wizard, from its two boxes and through the same function
+  (`docs/survey.md`, "The import wizard"): for a field file the job's own
+  finish, for a point list `withSurveyFinish` round the points' command with
+  no strings of the file's own. The Survey Jobs dialog passes
   `cad::surveyImportFinish(document).options` as
   `SurveyJobReadjustment::finish` since 2026-10-07: it passed nothing, so a
   point a re-adjustment drew for the first time was styled without a colour
@@ -1752,22 +1758,25 @@ Not done:
 - A named line record whose code IS its end points' code numbers those ends
   as its own string, so the rest of that code's points are strung without
   them.
-- The Survey Code Manager's Linework tab, which calls `processLinework`
-  itself, draws a finished job's lines a second time over its points. The
-  `LINEWORK` verb leaves those points out (next section); the tab does until
-  it runs the verb's line.
+
+(The Survey Code Manager's Linework tab called `processLinework` itself until
+2026-10-07, and so drew a finished job's lines a second time over its
+points. It runs the `LINEWORK` line now, which leaves those points out - next
+section.)
 
 ### `LINEWORK` on the command line
 
 ```
-LINEWORK [<scope>] [WHERE k=v ...] [ORDER number|entity] [PREVIEW]
+LINEWORK [<scope>] [WHERE k=v ...] [PROPERTY <name>] [ORDER number|entity]
+         [CHORD <length>] [PREVIEW]
 ```
 
 `processLinework` as a verb of the shared interpreter
 (`include/katana/cad/linework_verbs.hpp`, `runLineworkVerb`), so the window's
 command line, `katana_cli`, `katana_mcp` and an agent all have it; `HELP
 LINEWORK` is its reference. Until 2026-10-06 the one way to string points was
-a tab of a dialog. What it decides:
+a tab of a dialog, which since 2026-10-07 builds this line and runs it
+(`docs/desktop.md`, "Survey Code Manager"). What it decides:
 
 - **The scope is the shared one, and comes first** (`docs/cad.md`, "Scope and
   filter"). With no scope word it is the selection when anything is selected
@@ -1794,10 +1803,38 @@ a tab of a dialog. What it decides:
   (`LineworkVerb.WithNoRuleForACodeOnlyItsPointsThatCarryAControlCodeAreJoined`).
 - **It never removes a point.** `keepPoints` is not offered: a point taken
   out from under a survey job reads to its next re-adjustment as deleted by
-  hand. The tab keeps its box.
+  hand. The tab had a box for it while it ran `processLinework` itself; the
+  box went when the tab came to run this line, rather than keep that second
+  path for one option.
 - **`ORDER number|entity`**: by point number (the default; a point with none
   has no place and is reported) or as drawn, which for an import is the
   order the file listed the shots.
+- **`PROPERTY <name>`** (2026-10-07) names the property the codes are read
+  from, as `CODE`'s `PROPERTY` does; without it the property is found
+  (`codePropertyCandidates`). Points coded under a name of the drawing's own
+  (GIS data keeps its feature codes under whatever its source called them)
+  could be coded by `CODE PROPERTY <name>` and then strung by nothing from a
+  line. The lines drawn carry the code under that same property, so `CODE`
+  finds the rule for a line that it finds for its points. `PROPERTY ""` is
+  refused: an empty name left to mean "find it" would read a line that names
+  a property as one that names none.
+- **`CHORD <length>`** (2026-10-07) is `LineworkOptions::chordTolerance`: how
+  far, in the drawing's units, the straight segments drawn for a curve may
+  stray from it, 0.005 unless said. It is refused by name unless it is a
+  finite number greater than 0, here rather than by `processLinework`, whose
+  refusal names an option of a struct and not a word of the line.
+  Both words came with the Linework tab: it had a control for each while it
+  ran `processLinework` itself, and a control the line could not say would
+  have had to go. A property is what `CODE` already takes, and a chord length
+  is geometry that no survey code holds; the tab's other option, keep-points
+  off, the verb refuses on purpose (above).
+- **The plan is a function of its own** (`cad::planLinework`: what the scope
+  took and the three words in, the points left to their job and
+  `processLinework`'s whole result out), which the verb runs and the Linework
+  tab's Preview calls. The tab shows more than the reply does - every point
+  in no line, every note - so it cannot preview by reading a reply, and a
+  preview that read the rules of this section a second time would come to
+  show something Execute does not do.
 - **`PREVIEW`** plans and reports. A run that draws nothing is no undo step;
   one that draws is exactly one.
 - **Points their survey job has already strung are left out, and counted**
@@ -1878,8 +1915,17 @@ strung again - once), a job with unreadable options and one a newer Katana
 wrote, a line already drawn (the second run, a string that gained a point,
 and what makes a line the same line, case by case), a drawing with no survey
 codes, a control code with and without a rule, points with no code, the cap
-of 50, and the help. `cli.linework_strings_points_by_their_control_codes_as_one_undo_step`
-runs it twice through `katana_cli`.
+of 50, and the help; `PROPERTY` over three shots coded under a name the
+verb does not look for (no line found, one line named, and the line carrying
+its code there), `CHORD` over the half circle `test_linework.cpp` works by
+hand (51 vertices unsaid, 7 at 0.35), their refusals; and `LineworkPlan`, four
+cases of `cad::planLinework` on its own - the plan in full with nothing
+changed, an empty list planning nothing rather than every point, what is left
+out and said, and the three words. `cli.linework_strings_points_by_their_control_codes_as_one_undo_step`
+runs it twice through `katana_cli`; `cli.linework_property_reads_the_codes_a_drawing_keeps_under_its_own_name`
+and `cli.linework_chord_sets_how_finely_a_curve_is_drawn` run `PROPERTY` and
+`CHORD` there, the second over the same half circle (51 vertices unsaid, 7 at
+0.35, length 31.0583).
 
 Not done:
 
@@ -1900,9 +1946,7 @@ Not done:
   code is left out, not joined.
 - The note that a string has no rule to style it is counted also when its
   line was found already drawn.
-- The Survey menu has no Process Linework item and the Linework tab does not
-  run this line yet; nor does `katana_mcp`'s command tool name the verb in
-  its description (the line itself reaches it, and `katana_help` lists it).
+- The Survey menu has no Process Linework item.
 - The reply counts the notes by kind and does not list them; the tab's
   preview still does. It does not say which layers and styles its lines
   created, as `SURVEY IMPORT`'s `linework` record now does.
@@ -1920,8 +1964,8 @@ above, so the dialog decides nothing the CLI would say differently:
 | Code Table (`codeTableTab`) | `cad::codeTable`, `explainCode` | a key per row with what it resolves to (layer, colour, line or point, linestyle, symbol, surface, attributes), filtered; a code typed in `testCode` or a selected key explained field by field - the value, the rule that set it, the rules that lost - with previews of its linestyle and symbol; double-click an explained field for the rule that set it; a rule form by section, with Add, Update, Duplicate, Delete, Up and Down (earlier wins more ties) |
 | Codes in Drawing (`codesInDrawingTab`) | `cad::codeCensus` | every distinct code the drawing carries, classed matched, fallback only or unmatched against the BUFFER, so a rule being written shows against the drawing's codes before Apply; select the entities carrying one; start a new rule for an unmatched code keyed by `cad::suggestedKey` |
 | Issues (`codeIssuesTab`) | `cad::lintSurveyMap` | the lint of the buffer |
-| Apply Codes (`applyCodesTab`) | `cad::applySurveyCodes` | its report as a preview, for the selection or everything, then Execute as one undo step |
-| Linework (`lineworkTab`) | `cad::processLinework` | the session's control codes (above) and the options, previewed, then executed as one undo step |
+| Apply Codes (`applyCodesTab`) | the `CODE` line; `cad::applySurveyCodes` for its preview | the shared "Apply to" and filter controls and the code property; a preview, row by code, of what the line would do; Execute runs the line shown, one undo step |
+| Linework (`lineworkTab`) | the `LINEWORK` line; `cad::planLinework` for its preview; `CUSTOMISE SET linework.*` | the customisation's control codes (above), shown and set; the shared scope and filter, the code property, the order and the chord length; a preview of every line, every point in none and every note; Execute runs the line shown, one undo step |
 
 **Edits go to a BUFFER** (D1). The map is session data, not undoable, so the
 form's buttons change a copy of the drawing's map through `SurveyMap`'s own
@@ -1934,10 +1978,13 @@ a load, a Replace - is taken up at once while the buffer is unedited; with
 edits pending the buffer is kept, the log says so, and the edits are measured
 against the map the drawing has NOW, so undoing them all makes the buffer
 clean again. Apply Codes and Linework run against the DRAWING's map, because
-`applySurveyCodes` reads the Document and cannot be handed a buffer; while the
+the verbs read the Document and cannot be handed a buffer; while the
 buffer has unapplied edits both tabs say so (`applyDirtyNote`,
-`lineworkDirtyNote`), and Execute plans again when the drawing, the library or
-the map moved since the preview, rather than apply yesterday's answer.
+`lineworkDirtyNote`). Their Execute is a verb line through the window's
+executor, planned when it runs, so what is run is never a plan the preview
+made against an earlier state of the drawing (`docs/desktop.md`, "Survey Code
+Manager", has the two tabs: the lines, the shared scope, the controls that
+went and the two the `LINEWORK` verb gained words for).
 
 **Import Codes...** (`importCodes`) reads a Katana customisation file
 (`docs/customisation.md`; `cad::readCustomisationFile`) and merges ITS RULES

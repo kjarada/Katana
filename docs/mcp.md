@@ -174,13 +174,15 @@ run answers `coded none reason=<word>` or `linework none reason=<word>` -
 `off`, `no-survey-codes`, `no-codes-in-file`, `no-rule-matches` or
 `no-points` - and none of them fails the line (`docs/survey.md`, "SURVEY
 IMPORT codes and strings what it draws"). Points already in the drawing are
-strung by `LINEWORK [<scope>] [WHERE k=v ...] [ORDER number|entity]
-[PREVIEW]`, a verb of the shared interpreter that answers in records as well
-and leaves out, counted, the points their survey job has strung and the lines
-the drawing already holds (`docs/survey_coding.md`, "`LINEWORK` on the
-command line"; `HELP LINEWORK`). The command tool's description names the
-two words and `LINEWORK` with its grammar, so an agent finds them from the
-tool list alone (`McpServer.TheCommandToolNamesTheSurveyFieldFileVerbs`).
+strung by `LINEWORK [<scope>] [WHERE k=v ...] [PROPERTY <name>] [ORDER
+number|entity] [CHORD <length>] [PREVIEW]`, a verb of the shared interpreter
+that answers in records as well and leaves out, counted, the points their
+survey job has strung and the lines the drawing already holds
+(`docs/survey_coding.md`, "`LINEWORK` on the command line"; `HELP LINEWORK`).
+The command tool's description names the two words and `LINEWORK` with its
+grammar - `PROPERTY` and `CHORD` among it, since the verb took them on
+2026-10-07 - so an agent finds them from the tool list alone
+(`McpServer.TheCommandToolNamesTheSurveyFieldFileVerbs`).
 
 The annotation styles are read and changed through `katana_run_commands`
 with the verbs the window's managers send (`docs/annotation.md`): `DIMSTYLE

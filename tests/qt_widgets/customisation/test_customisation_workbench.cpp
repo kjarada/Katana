@@ -95,23 +95,15 @@ struct Bench {
             window.setCentralWidget(views);
             window.resize(800, 600);
             interpreter.setViewHost([this] { return &views->verbHost(); });
-            views->setCommandRunner([this](const QString& line) {
-                ran << line;
-                const auto reply = interpreter.run(line.toStdString());
-                katana::qt::VerbOutcome outcome;
-                outcome.ok = reply.ok();
-                if (reply.ok()) {
-                    outcome.reply = QString::fromStdString(*reply);
-                } else {
-                    outcome.error = QString::fromStdString(reply.error().describe());
-                }
-                return outcome;
-            });
+            views->setCommandRunner([this](const QString& line) { return execute(line); });
         }
         layers->setObjectName("formatLayers");
         CustomisationServices services;
         services.document = &document;
         services.views = views;
+        // The same executor for the managers' lines, as the window hands
+        // them the one it has (CustomisationServices::run).
+        services.run = [this](const QString& line) { return execute(line); };
         services.makeAction = [this](katana::qt::Icon icon, const QString& text, const QString&,
                                      const QKeySequence&, const QString& name) {
             auto* action = new QAction(katana::qt::icon(icon), text, &window);
@@ -129,6 +121,22 @@ struct Bench {
         auto* found = window.findChild<QAction*>(name);
         EXPECT_NE(found, nullptr) << name;
         return *found;
+    }
+
+    // The executor: the line recorded, then run, and what it replied or was
+    // refused with handed back.
+    katana::qt::VerbOutcome execute(const QString& line)
+    {
+        ran << line;
+        const auto reply = interpreter.run(line.toStdString());
+        katana::qt::VerbOutcome outcome;
+        outcome.ok = reply.ok();
+        if (reply.ok()) {
+            outcome.reply = QString::fromStdString(*reply);
+        } else {
+            outcome.error = QString::fromStdString(reply.error().describe());
+        }
+        return outcome;
     }
 
     // The three fixtures in one CUSTOMISE line, each path quoted (a checkout
@@ -313,28 +321,39 @@ TEST(CustomisationWorkbench,
     // In the order observed: the points were typed, and carry no number.
     order->setCurrentIndex(1);
 
+    // The summary begins with what the scope took - the drawing's 4 points.
     EXPECT_EQ(start->text(), "ST");
     preview->click();
-    EXPECT_EQ(summary->text(), "Preview only: 1 lines from 4 points; 0 points not placed; 1 "
-                               "notes. Execute builds them as one undoable step.");
+    EXPECT_EQ(summary->text(), "4 matched. Preview only: 1 lines from 4 points; 0 points not "
+                               "placed; 1 notes. Execute builds them as one undoable step.");
 
     const auto set = bench.interpreter.run("CUSTOMISE SET linework.start=GO");
     ASSERT_TRUE(set.ok()) << set.error().describe();
     katana::qt::test::processEvents();
 
+    // The tab reads the Document: there is no copy of the codes in the
+    // window to ask (this asked the manager's and the workbench's accessors,
+    // which went with the copy), and nothing is said in the log for a change
+    // somebody else's line made - that line was answered where it ran. (The
+    // window's follower pressed the tab's own button, which logged "Linework
+    // control codes set for this session.")
     EXPECT_EQ(start->text(), "GO") << "the tab shows the customisation's code";
-    EXPECT_EQ(codes->lineworkCodes().start, "GO");
-    EXPECT_EQ(bench.bench->lineworkCodes().start, "GO");
-    ASSERT_FALSE(bench.log.empty());
-    EXPECT_EQ(bench.log.back(), "Linework control codes set for this session.");
-    // Execute with no Preview pressed since: what is built is planned with
-    // the codes the tab now shows, not the plan made with ST.
+    for (const QString& line : bench.log) {
+        EXPECT_FALSE(line.contains("control codes set")) << line.toStdString();
+    }
+    EXPECT_TRUE(bench.ran.isEmpty()) << "a preview runs no line";
+    // Execute with no Preview pressed since: it is the LINEWORK line, which
+    // strings with the codes the customisation has now, not the plan made
+    // with ST.
     execute->click();
+    EXPECT_EQ(bench.ran, QStringList{"LINEWORK DRAWING ORDER entity"});
     EXPECT_EQ(bench.document.model().entities.size(), 6u) << "the 4 points and 2 lines";
     EXPECT_EQ(bench.document.lastCreatedEntities().size(), 2u);
+    // In the verb's own first record: the 4 points looked at, 2 lines, and
+    // GO no longer a token nothing knows.
     EXPECT_EQ(summary->text(),
-              "Preview only: 2 lines from 4 points; 0 points not placed; 0 notes. Execute builds "
-              "them as one undoable step. Executed as one undoable step.");
+              "Executed as one undoable step: 2 lines drawn. linework scope=drawing matched=4 "
+              "considered=4 lines=2 unplaced=0 notes=0");
 }
 
 TEST(CustomisationWorkbench, ACodeManagerOpenedLaterIsBuiltOnTheCustomisationsLineworkCodes)
@@ -351,28 +370,32 @@ TEST(CustomisationWorkbench, ACodeManagerOpenedLaterIsBuiltOnTheCustomisationsLi
     ASSERT_FALSE(start == nullptr || end == nullptr || use == nullptr);
     EXPECT_EQ(start->text(), "BEGIN");
     EXPECT_EQ(end->text(), "STOP");
-    EXPECT_EQ(codes->lineworkCodes().start, "BEGIN");
-    EXPECT_EQ(codes->lineworkCodes().close, "CL") << "a code the line did not name is as it was";
+    auto* close = named<QLineEdit>(codes, "lineworkClose");
+    ASSERT_NE(close, nullptr);
+    EXPECT_EQ(close->text(), "CL") << "a code the line did not name is as it was";
 
-    // The tab's own Use These Codes sets the window's copy alone: the
-    // customisation still says BEGIN. (That button running CUSTOMISE SET is
-    // the code manager's own change to make.)
+    // The tab's own Use These Codes sets the CUSTOMISATION's code, by the
+    // line a person would type. (It set a copy the window kept, and the
+    // customisation went on saying BEGIN: this pinned that, as the thing the
+    // code manager was still to change.)
     start->setText("MINE");
+    EXPECT_EQ(bench.document.customisationState().linework.start, "BEGIN") << "typed is not set";
     use->click();
-    ASSERT_EQ(codes->lineworkCodes().start, "MINE");
-    EXPECT_EQ(bench.document.customisationState().linework.start, "BEGIN");
-    // A change of the customisation that is not of its control codes leaves
-    // what the tab was given ...
+    EXPECT_EQ(bench.ran, QStringList{"CUSTOMISE SET linework.start=MINE"});
+    EXPECT_EQ(bench.document.customisationState().linework.start, "MINE");
+    EXPECT_EQ(bench.document.customisationState().linework.end, "STOP");
+    // What is typed and not yet used stays through a change of the
+    // customisation that is not of its control codes ...
+    start->setText("DRAFT");
     const auto other = bench.interpreter.run("CUSTOMISE SET auto.codes=off");
     ASSERT_TRUE(other.ok()) << other.error().describe();
     katana::qt::test::processEvents();
-    EXPECT_EQ(codes->lineworkCodes().start, "MINE");
-    EXPECT_EQ(start->text(), "MINE");
+    EXPECT_EQ(start->text(), "DRAFT");
+    EXPECT_EQ(bench.document.customisationState().linework.start, "MINE");
     // ... and a change of them takes over.
     const auto changed = bench.interpreter.run("CUSTOMISE SET linework.start=GO");
     ASSERT_TRUE(changed.ok()) << changed.error().describe();
     katana::qt::test::processEvents();
-    EXPECT_EQ(codes->lineworkCodes().start, "GO");
     EXPECT_EQ(start->text(), "GO");
     EXPECT_EQ(end->text(), "STOP");
 }
@@ -533,6 +556,63 @@ TEST(CustomisationWorkbench, AHeadlessCloseWithUnappliedCodeEditsIsRefusedAndSai
 
     codes->revert();
     EXPECT_TRUE(bench.bench->confirmClose()) << "reverted: nothing left to lose";
+}
+
+TEST(CustomisationWorkbench, TheCodeManagerOfAWindowWithViewsNamesAViewOnItsTwoActionLines)
+{
+    // The workbench hands the workspace's views to the manager when it opens
+    // it (showCodeManager), so the View scope of the Apply Codes and Linework
+    // tabs lists the open views and its line names one by its id: "CODE VIEW
+    // <id> EXTENTS" with the whole view, and without EXTENTS - the words for
+    // "only what is on screen" - once that box is ticked. Execute hands the
+    // same line to the window's executor. A window with no views, as the
+    // other tests here are, offers the whole drawing and no line names it.
+    Bench bench(true);
+    katana::qt::test::paint(bench.window);
+    ASSERT_NE(bench.views->activePlanView(), nullptr);
+    const katana::cad::ViewId id = bench.views->activePlanView()->state().id;
+    must(bench.document, katana::commands::createPoint(katana::geometry::Point2(0.0, 0.0), {}));
+
+    bench.action("formatSurveyCodes").trigger();
+    katana::qt::SurveyCodeManagerDialog* codes = bench.bench->codeManager();
+    ASSERT_NE(codes, nullptr);
+
+    for (const char* prefix : {"apply", "linework"}) {
+        const std::string name = prefix;
+        const QString verb = name == "apply" ? "CODE" : "LINEWORK";
+        const QString shown = name == "apply" ? "applyCommand" : "lineworkCommand";
+        named<QAbstractButton>(codes, (name + "ScopeView").c_str())->click();
+        auto* views = named<QComboBox>(codes, (name + "View").c_str());
+        ASSERT_GE(views->count(), 1) << prefix;
+        views->setCurrentIndex(views->findText(QString("Plan 1 (VIEW %1)").arg(id)));
+        ASSERT_GE(views->currentIndex(), 0) << prefix;
+        EXPECT_EQ(named<QLineEdit>(codes, shown.toStdString().c_str())->text(),
+                  QString("%1 VIEW %2 EXTENTS").arg(verb).arg(id))
+            << prefix;
+        named<QAbstractButton>(codes, (name + "OnScreen").c_str())->click();
+        EXPECT_EQ(named<QLineEdit>(codes, shown.toStdString().c_str())->text(),
+                  QString("%1 VIEW %2").arg(verb).arg(id))
+            << prefix;
+    }
+
+    bench.ran.clear();
+    named<QAbstractButton>(codes, "applyExecute")->click();
+    ASSERT_EQ(bench.ran.size(), 1);
+    EXPECT_EQ(bench.ran.front(), QString("CODE VIEW %1").arg(id));
+    bench.ran.clear();
+    named<QAbstractButton>(codes, "lineworkExecute")->click();
+    ASSERT_EQ(bench.ran.size(), 1);
+    EXPECT_EQ(bench.ran.front(), QString("LINEWORK VIEW %1").arg(id));
+
+    Bench without;
+    without.action("formatSurveyCodes").trigger();
+    named<QAbstractButton>(without.bench->codeManager(), "applyScopeView")->click();
+    auto* none = named<QComboBox>(without.bench->codeManager(), "applyView");
+    ASSERT_EQ(none->count(), 1);
+    EXPECT_EQ(none->itemText(0), "Whole drawing view");
+    // ... which no line can name: Execute is refused before anything is run.
+    named<QAbstractButton>(without.bench->codeManager(), "applyExecute")->click();
+    EXPECT_TRUE(without.ran.isEmpty());
 }
 
 TEST(CustomisationWorkbench, AnInteractiveCloseAsksOverTheCodeManagerAndCancelKeepsItsEdits)

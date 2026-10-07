@@ -47,23 +47,36 @@
 //                 advanced ones folded - and Preview, which runs the reduction
 //                 (on a pool thread for a large file) and shows its report
 //                 inline (reduction_report_view.hpp).
-//   6 Options     the layer, a layer per code, applying the loaded
-//                 customisation's survey codes after the import (the window's
-//                 own Apply Survey Codes action, on the imported points), and
-//                 what to do with ids the drawing already has
-//                 (cad::ExistingPointPolicy). Its note says what loads the
-//                 codes: the CUSTOMISE line, of a Katana customisation file.
+//   6 Options     the layer, a layer per code, what to do with ids the
+//                 drawing already has (cad::ExistingPointPolicy), and the
+//                 FINISH: whether the imported points are coded by the
+//                 session's survey codes and whether they are joined into
+//                 lines. The two boxes start as the drawing's customisation
+//                 has them switched (its automation, both on until something
+//                 says otherwise), once for each file read, and are enabled
+//                 only while the session has survey codes; the note under
+//                 them says what Import will then do. A layer per code is
+//                 disabled while the codes are applied: the codes choose the
+//                 layers, and both together leave an empty layer per code.
 //   7 Report      records read, every warning as a sentence, the error that
-//                 blocks the import or the points and layers it will create;
-//                 for an instrument file the reduction report as well.
-//                 Import makes ONE undoable command - cad::importSurveyPoints
-//                 for a delimited file, cad::ImportSurveyJobCommand for an
-//                 instrument file - frames the views and logs a summary.
+//                 blocks the import or the points and layers it will create,
+//                 and what is asked of the survey codes; for an instrument
+//                 file the reduction report as well. Import makes ONE
+//                 undoable command of the points, their codes and their
+//                 lines - cad::importSurveyPoints inside cad::withSurveyFinish
+//                 for a delimited file, cad::ImportSurveyJobCommand with its
+//                 own finish for an instrument file - frames the views and
+//                 logs a summary and then what the finish did (the points
+//                 coded, the codes with no rule, the lines drawn, what is in
+//                 no line and why: cad::describe of the command's finish
+//                 report), which the report pane holds as well.
 //
 // Nothing survey-specific is computed here: the pages gather text and hand it
 // to surveyio (detection, proposal, reading, templates), survey (the
 // reduction) and cad (the policy, the transformation, the commands, the
-// report).
+// report). What the finish is - whether, with which colours and control codes
+// - is cad::surveyImportFinish's, the one function SURVEY IMPORT asks too, so
+// the wizard's import and the line's cannot come to differ.
 //
 // The object names below are an interface: the headless --survey-dialog
 // switch in main.cpp fills fields and presses buttons by them.
@@ -72,12 +85,14 @@
 //           delimiter headerLines comment quoting confirmOrder | unit declared
 //           target | the reduction options (reduction_options_widget.hpp:
 //           method, atmospheric, controlPick, advanced, ...) | layer
-//           layerPerCode existing applyCodes
+//           layerPerCode existing applyCodes drawLinework (the last two are
+//           set as the customisation has them each time the Options step is
+//           reached for a newly read file: fill them there, not before)
 //   shown   step candidates formatRecord proposal columnRoles preview
-//           parseError | content contentSummary | systemSummary |
+//           parseError | content contentSummary | systemSummary | finishNote |
 //           previewReport (and previewReportSections, previewReportBrowser,
-//           previewReportSummary) | optionsNote | report importReport (and its
-//           Sections, Browser, Summary) | task taskStatus | message
+//           previewReportSummary) | report importReport (and its Sections,
+//           Browser, Summary) | task taskStatus | message
 //   buttons browse | saveTemplate deleteTemplate | addControl removeControl
 //           advanced previewReduction | cancelTask | back next import close
 
@@ -99,7 +114,6 @@
 #include "katana/surveyio/detect.hpp"
 #include "katana/surveyio/format.hpp"
 
-class QAction;
 class QCheckBox;
 class QComboBox;
 class QHBoxLayout;
@@ -115,7 +129,8 @@ class QTreeWidget;
 
 namespace katana::cad {
 class Document;
-}
+struct SurveyFinishReport;
+} // namespace katana::cad
 
 namespace katana::qt {
 
@@ -144,12 +159,14 @@ struct SurveyContent {
 // offered without editing this, and the patterns no descriptor states.
 [[nodiscard]] QString surveyFileFilter();
 
+// What the wizard is given. It needs nothing of the window to code what it
+// imports: the codes and the lines are part of its one command. (It was handed
+// the window's Apply Survey Codes action once, and triggered it on the points
+// it had just drawn - selected for the purpose - as a second undo step.)
 struct SurveyImportContext {
     katana::cad::Document* document = nullptr;
     ViewWorkspace* views = nullptr;
     std::function<void(const QString& text, bool isError)> log;
-    // The window's Apply Survey Codes action; null when it has none.
-    QAction* applySurveyCodes = nullptr;
 };
 
 class SurveyImportWizard final : public QDialog {
@@ -207,8 +224,20 @@ class SurveyImportWizard final : public QDialog {
     // list is rewritten, and the preview follows on the event loop.
     void rolesChanged(int column);
     [[nodiscard]] katana::core::Status parseAndTransform();
+    // The Options step is reached: the two finish boxes are enabled as the
+    // session has survey codes or not and, for a file read since they were
+    // last set (or when survey codes have arrived or gone since), set as the
+    // drawing's customisation has them switched. Going back and forth over
+    // one file keeps what the person ticked.
+    void prepareFinishChoice();
+    // A finish box changed: the layer-per-code box and the note follow.
+    void showFinishChoice();
     void prepareReport();
     void importNow();
+    // After an import: what the finish did, as cad::describe says it, in the
+    // log and at the end of the report pane. Nothing for a null report or one
+    // of an import that asked for neither step.
+    void reportFinish(const katana::cad::SurveyFinishReport* report);
 
     // The instrument path.
     // Reads the file with its reader - on a pool thread when it is large -
@@ -267,6 +296,8 @@ class SurveyImportWizard final : public QDialog {
     QCheckBox* layerPerCode_ = nullptr;
     QComboBox* existing_ = nullptr;
     QCheckBox* applyCodes_ = nullptr;
+    QCheckBox* drawLinework_ = nullptr;
+    QLabel* finishNote_ = nullptr;
     // content
     QLabel* contentSummary_ = nullptr;
     QTreeWidget* content_ = nullptr;
@@ -304,6 +335,10 @@ class SurveyImportWizard final : public QDialog {
     SurveyContent contentCounts_;
     std::uint64_t readGeneration_ = 0;   // bumped by every read
     std::uint64_t optionsGeneration_ = 0; // the read the options were set up for
+    // The read the finish boxes were last set for from the customisation, and
+    // whether the session had survey codes then (prepareFinishChoice).
+    std::uint64_t finishGeneration_ = 0;
+    bool finishWithCodes_ = false;
     // The last successful preview and what it was made from.
     std::shared_ptr<const katana::survey::ReductionOutcome> outcome_;
     katana::survey::ReductionSettings outcomeSettings_{};

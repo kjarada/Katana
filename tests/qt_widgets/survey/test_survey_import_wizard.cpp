@@ -5,6 +5,15 @@
 // refused on the Format step with what to export instead, an import with an
 // adjustment is one undo step that leaves a survey job, and a large file is
 // read off the GUI thread, which keeps answering.
+//
+// And the FINISH: with survey codes loaded the import codes its points and
+// strings them inside its one command. The codes are the hand-written fixture
+// tests/data/field_codes/test_field_codes.customisation.json, read by hand:
+//   KB*   a LINE on FIELD KERB, linestyle "FIELD Kerb", colour "field kerb"
+//   EB*   a LINE on FIELD EDGE, a plain line, colour "blue"
+//   CTRL  a POINT on FIELD CONTROL, a plain line, colour "red"
+// and no rule for anything else (it has no "*" rule). A style is named after
+// its linestyle (cad/survey_coding.hpp), so a kerb's style is "FIELD Kerb".
 
 #include <gtest/gtest.h>
 
@@ -15,6 +24,7 @@
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -25,14 +35,19 @@
 #include <filesystem>
 #include <format>
 #include <map>
+#include <ostream>
 #include <string>
+#include <variant>
 #include <vector>
 
+#include "customisation/fixture_customisation.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/survey_job.hpp"
 #include "katana/cad/survey_points.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
+#include "katana/entity/entity.hpp"
 #include "katana/survey/reduction_settings.hpp"
 #include "katana/surveyio/reader.hpp"
 #include "survey/survey_import_wizard.hpp"
@@ -353,27 +368,6 @@ TEST(SurveyImportWizard, AnOpcodeFieldFileIsImportedAsAJobWithItsDefaults)
     EXPECT_TRUE(session.document.surveyJobs().empty());
 }
 
-TEST(SurveyImportWizard, TheOptionsStepSaysHowSurveyCodesAreLoadedByTheLineThatLoadsThem)
-{
-    // The note under the Options step's boxes says what "Apply survey codes"
-    // needs. It sent people to Format > Load Customisation and called what
-    // that loaded "a survey code file": the menu item is gone and that kind of
-    // file no longer loads. What loads survey codes is the CUSTOMISE line, of
-    // a Katana customisation file - the words CODE itself refuses with when
-    // none are loaded (cad/survey_code_verbs.hpp, requireMap).
-    Session session;
-    const auto* note = child<QLabel>(*session.wizard, "optionsNote");
-    ASSERT_NE(note, nullptr);
-    const QString text = note->text();
-    EXPECT_TRUE(text.contains("CUSTOMISE <file>")) << text.toStdString();
-    EXPECT_TRUE(text.contains("Katana customisation file")) << text.toStdString();
-    EXPECT_FALSE(text.contains("Load Customisation")) << text.toStdString();
-    EXPECT_FALSE(text.contains("survey code file")) << text.toStdString();
-    EXPECT_FALSE(text.contains("Format >")) << text.toStdString();
-    // Shown as it is written: "<file>" is not markup for the label to read.
-    EXPECT_EQ(note->textFormat(), Qt::PlainText);
-}
-
 TEST(SurveyImportWizard, ADelimitedCoordinateFileStillTakesItsSixSteps)
 {
     Session session;
@@ -611,4 +605,479 @@ TEST(SurveyImportWizard, ItsPreviewRefusesToHoldAPointTheDrawingHasAtTwoPlaces)
                                  "Z 100.0000, so which one to hold is not known"))
         << message.toStdString();
     EXPECT_TRUE(session.document.surveyJobs().empty());
+}
+
+// ---- the finish: the survey codes and the linework ---------------------------------------
+
+namespace {
+
+using katana::entity::Entity;
+using katana::geometry::Point2;
+using katana::geometry::Polyline2;
+
+// The fixture of field codes (at the top of this file), loaded into the
+// session as a person's customisation is. It has a folder of its own, beside
+// the three of tests/data/customisation that the window's checks load whole.
+void installFieldCodes(Document& document)
+{
+    const std::filesystem::path file =
+        katana::qt::test::customisationFixtureDirectory().parent_path() / "field_codes" /
+        "test_field_codes.customisation.json";
+    const auto bytes = katana::core::readFileBytes(file);
+    ASSERT_TRUE(bytes.ok()) << (bytes.ok() ? std::string() : bytes.error().describe());
+    katana::qt::test::installCustomisations(document,
+                                            {katana::qt::test::customisationFromText(*bytes)});
+    ASSERT_EQ(document.surveyMap().size(), 3U);
+}
+
+// Everything of a drawing a survey import may change.
+struct Drawing {
+    std::vector<Entity> entities;
+    std::vector<katana::entity::Layer> layers;
+    std::vector<katana::entity::Style> styles;
+
+    friend bool operator==(const Drawing&, const Drawing&) = default;
+};
+
+Drawing drawingOf(const Document& document)
+{
+    Drawing drawing;
+    document.model().entities.forEach(
+        [&](const Entity& entity) { drawing.entities.push_back(entity); });
+    drawing.layers = document.model().layers.all();
+    drawing.styles = document.model().styles.all();
+    return drawing;
+}
+
+// What a failed comparison prints: enough to see what is left over.
+void PrintTo(const Drawing& drawing, std::ostream* out)
+{
+    *out << drawing.entities.size() << " entities; layers:";
+    for (const auto& layer : drawing.layers) {
+        *out << " [" << layer.name << ']';
+    }
+    *out << " styles:";
+    for (const auto& style : drawing.styles) {
+        *out << " [" << style.name << ']';
+    }
+}
+
+std::string textOf(const Entity& entity, const std::string& key)
+{
+    const auto found = entity.properties.find(key);
+    if (found == entity.properties.end()) {
+        return "<absent>";
+    }
+    const auto* text = std::get_if<std::string>(&found->second);
+    return text != nullptr ? *text : "<not text>";
+}
+
+const Entity* pointNumbered(const Document& document, const std::string& number)
+{
+    const Entity* found = nullptr;
+    document.model().entities.forEach([&](const Entity& entity) {
+        if (std::holds_alternative<katana::entity::PointGeometry>(entity.geometry) &&
+            textOf(entity, "point") == number) {
+            found = &entity;
+        }
+    });
+    return found;
+}
+
+std::vector<const Entity*> linesDrawn(const Document& document)
+{
+    std::vector<const Entity*> lines;
+    document.model().entities.forEach([&](const Entity& entity) {
+        if (std::holds_alternative<Polyline2>(entity.geometry)) {
+            lines.push_back(&entity);
+        }
+    });
+    return lines;
+}
+
+// The RTK job tests/surveyio/data/fld/gnss.fld through the wizard, from its
+// File step to the Options step: File, Format (identified), Content, System,
+// Reduction and adjustment.
+void driveToOptions(Session& session, const std::string& file)
+{
+    session.openAndRead(file);
+    QWidget& w = *session.wizard;
+    click(w, "next"); // System
+    click(w, "next"); // Reduction and adjustment
+    click(w, "next"); // Options
+    ASSERT_TRUE(session.step().contains("Options")) << session.step().toStdString();
+}
+
+// A point list in a folder of the test's, read as delimited points with its
+// header naming the columns, and driven to the Options step in metres.
+void drivePointListToOptions(Session& session, const QString& path)
+{
+    QWidget& w = *session.wizard;
+    child<QLineEdit>(w, "file")->setText(path);
+    click(w, "next"); // Format
+    choose(w, "format", "Delimited text points (CSV, TXT)");
+    click(w, "next"); // Columns and delimiter
+    click(w, "next"); // Units and coordinate system
+    choose(w, "unit", "metres");
+    click(w, "next"); // Options
+    ASSERT_TRUE(session.step().contains("Options")) << session.step().toStdString();
+}
+
+} // namespace
+
+// The equivalence above, WITH survey codes: the fixture of field codes loaded
+// into both drawings, and the RTK job gnss.fld, whose positions the file
+// states (worked beside cli.survey_import_gnss_field_file and
+// tests/app/test_survey_verbs.cpp):
+//   CM1   entered, no code            E 500000  N 6200000
+//   R001  KB, string 1                E 500010  N 6200020
+//   R002  KB, string 1                E 500020  N 6200020
+//   R003  KB, string 1                E 500020  N 6200030
+//   20    closes the string KB 1
+//   R004  KB, string 1, begun again   E 500040  N 6200040  (alone: no line)
+// Both boxes start ticked - the customisation's two switches are on until
+// something turns one off - so the wizard asks what the line asks when it
+// says nothing: the five points, the four KB ones on FIELD KERB in the style
+// FIELD Kerb, and the file's one closed string through R001, R002 and R003.
+// The same job, the same entities, layers and styles, bit for bit.
+TEST(SurveyImportWizard, WithSurveyCodesLoadedItsImportIsStillTheSurveyImportLines)
+{
+    const std::string file = fixture("fld/gnss.fld");
+
+    Session session;
+    installFieldCodes(session.document);
+    driveToOptions(session, file);
+    QWidget& w = *session.wizard;
+    EXPECT_TRUE(child<QCheckBox>(w, "applyCodes")->isChecked());
+    EXPECT_TRUE(child<QCheckBox>(w, "drawLinework")->isChecked());
+    // A layer at the top of the tree, as the line below names it.
+    child<QLineEdit>(w, "layer")->setText("fieldwork");
+    click(w, "next"); // Report
+    ASSERT_TRUE(session.step().contains("Report")) << session.step().toStdString();
+    click(w, "import");
+    ASSERT_EQ(session.document.surveyJobs().size(), 1U);
+
+    Document byLine;
+    installFieldCodes(byLine);
+    const auto reply =
+        katana::app::runSurveyLine(byLine, "SURVEY IMPORT \"" + file + "\" LAYER fieldwork");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    ASSERT_EQ(byLine.surveyJobs().size(), 1U);
+
+    // The import worked by hand above, and not merely two equal drawings.
+    const Document& drawn = session.document;
+    EXPECT_EQ(drawn.model().entities.size(), 6U) << "five points and the one line";
+    for (const char* number : {"R001", "R002", "R003", "R004"}) {
+        const Entity* point = pointNumbered(drawn, number);
+        ASSERT_NE(point, nullptr) << number;
+        EXPECT_EQ(point->layer, "FIELD KERB") << number;
+        EXPECT_EQ(point->style, "FIELD Kerb") << number;
+    }
+    const Entity* uncoded = pointNumbered(drawn, "CM1");
+    ASSERT_NE(uncoded, nullptr);
+    EXPECT_EQ(uncoded->layer, "fieldwork");
+    EXPECT_EQ(uncoded->style, "");
+    const std::vector<const Entity*> lines = linesDrawn(drawn);
+    ASSERT_EQ(lines.size(), 1U);
+    const Polyline2& kerb = std::get<Polyline2>(lines.front()->geometry);
+    EXPECT_TRUE(kerb.closed) << "the file closed the string";
+    EXPECT_EQ(kerb.vertices, (std::vector<Point2>{Point2(500010, 6200020), Point2(500020, 6200020),
+                                                  Point2(500020, 6200030)}));
+    EXPECT_EQ(lines.front()->layer, "FIELD KERB");
+    EXPECT_EQ(lines.front()->style, "FIELD Kerb");
+
+    // ... and the line's, to the last property of the last entity.
+    const katana::cad::SurveyJob wizard = timeless(session.document.surveyJobs().front());
+    const katana::cad::SurveyJob line = timeless(byLine.surveyJobs().front());
+    EXPECT_EQ(wizard.importOptions, line.importOptions);
+    EXPECT_EQ(wizard.reportText, line.reportText);
+    EXPECT_TRUE(wizard == line);
+    EXPECT_EQ(drawingOf(session.document), drawingOf(byLine));
+    // The job remembers what it was asked, for its next re-adjustment.
+    const auto stored = katana::cad::readSurveyJobOptions(wizard.importOptions, wizard.id);
+    ASSERT_TRUE(stored.ok()) << stored.error().describe();
+    EXPECT_TRUE(stored->applyCodes);
+    EXPECT_TRUE(stored->drawLinework);
+}
+
+// The whole of it is ONE undo step, and the selection is left alone: it was
+// two steps - the import, then Apply Survey Codes on the points just drawn,
+// selected for the purpose - and no lines at all.
+TEST(SurveyImportWizard, AFieldFilesImportWithItsCodesAndLinesIsOneUndoStep)
+{
+    Session session;
+    installFieldCodes(session.document);
+    Document& document = session.document;
+    const Drawing before = drawingOf(document);
+    const std::size_t steps = document.history().undoCount();
+
+    driveToOptions(session, fixture("fld/gnss.fld"));
+    QWidget& w = *session.wizard;
+    child<QLineEdit>(w, "layer")->setText("fieldwork");
+    click(w, "next"); // Report
+    // Before the import the report says what is asked of the survey codes.
+    const QString asked = child<QPlainTextEdit>(w, "report")->toPlainText();
+    EXPECT_TRUE(asked.contains("Survey codes: applied to the imported points.")) << asked.toStdString();
+    EXPECT_TRUE(asked.contains("Linework: the imported points are joined into lines"))
+        << asked.toStdString();
+    click(w, "import");
+
+    EXPECT_EQ(document.history().undoCount(), steps + 1);
+    EXPECT_EQ(document.model().entities.size(), 6U);
+    EXPECT_TRUE(document.selection().empty()) << "nothing is selected to code it";
+    // What the finish did, in cad::describe's sentences, by hand: five points
+    // drawn, the four KB ones carry a code and all four have a rule (KB*),
+    // one layer (FIELD KERB) and one style (FIELD Kerb) made; one line drawn;
+    // the second KB 1, of one point, in no line; and CM1, with no code.
+    const QString did = child<QPlainTextEdit>(w, "report")->toPlainText();
+    for (const char* sentence :
+         {"Survey codes were applied to the 5 point(s) drawn: 4 carry a code and 4 of those have "
+          "a rule; 1 layer(s) and 1 style(s) were created.",
+          "Linework: 1 line(s) drawn.", "1 string(s) of the file are in no line",
+          "1 point(s) are in no line (no code: 1)."}) {
+        EXPECT_TRUE(did.contains(sentence)) << sentence << "\n" << did.toStdString();
+        EXPECT_TRUE(session.logged(sentence)) << sentence;
+    }
+
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_EQ(drawingOf(document), before);
+    EXPECT_TRUE(document.surveyJobs().empty());
+    EXPECT_EQ(document.history().undoCount(), steps);
+}
+
+// A point list is coded and strung by its codes in its one command too. Five
+// points, written here:
+//   1, 2, 3  KB1   (500010,6200020) (500020,6200020) (500020,6200030)
+//   4        CTRL  (500000,6200000)
+//   5        ZZ    (500050,6200050)
+// By the fixture: KB1 is answered by KB* - FIELD KERB, the style FIELD Kerb,
+// a line, so 1, 2 and 3 in point order are one open line; CTRL is a point on
+// FIELD CONTROL and in no line because it is a point code; ZZ has no rule,
+// so point 5 stays on the import's layer, unstyled, in no line, and is named.
+// A layer per field code is ticked as well, and is not used while the codes
+// are applied: no layer is made beneath the import's.
+TEST(SurveyImportWizard, APointListsImportWithItsCodesAndLinesIsOneUndoStep)
+{
+    QTemporaryDir folder;
+    ASSERT_TRUE(folder.isValid());
+    const QString path = folder.filePath("kerb.csv");
+    {
+        QFile file(path);
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        file.write("Point,Northing,Easting,Elevation,Code\n"
+                   "1,6200020.000,500010.000,12.500,KB1\n"
+                   "2,6200020.000,500020.000,12.600,KB1\n"
+                   "3,6200030.000,500020.000,12.700,KB1\n"
+                   "4,6200000.000,500000.000,10.000,CTRL\n"
+                   "5,6200050.000,500050.000,11.000,ZZ\n");
+    }
+
+    Session session;
+    installFieldCodes(session.document);
+    Document& document = session.document;
+    const Drawing before = drawingOf(document);
+    const std::size_t steps = document.history().undoCount();
+
+    drivePointListToOptions(session, path);
+    QWidget& w = *session.wizard;
+    child<QLineEdit>(w, "layer")->setText("fieldwork");
+    auto* codes = child<QCheckBox>(w, "applyCodes");
+    auto* perCode = child<QCheckBox>(w, "layerPerCode");
+    ASSERT_TRUE(codes->isChecked());
+    codes->setChecked(false);
+    ASSERT_TRUE(perCode->isEnabled());
+    perCode->setChecked(true);
+    codes->setChecked(true);
+    EXPECT_FALSE(perCode->isEnabled());
+    EXPECT_TRUE(perCode->isChecked()) << "the tick is kept for when the codes are off again";
+    click(w, "next"); // Report
+    click(w, "import");
+
+    EXPECT_EQ(document.history().undoCount(), steps + 1);
+    EXPECT_TRUE(document.selection().empty());
+    EXPECT_EQ(document.model().entities.size(), 6U) << "five points and the one line";
+    for (const char* number : {"1", "2", "3"}) {
+        const Entity* point = pointNumbered(document, number);
+        ASSERT_NE(point, nullptr) << number;
+        EXPECT_EQ(point->layer, "FIELD KERB") << number;
+        EXPECT_EQ(point->style, "FIELD Kerb") << number;
+    }
+    const Entity* mark = pointNumbered(document, "4");
+    ASSERT_NE(mark, nullptr);
+    EXPECT_EQ(mark->layer, "FIELD CONTROL");
+    const Entity* stray = pointNumbered(document, "5");
+    ASSERT_NE(stray, nullptr);
+    EXPECT_EQ(stray->layer, "fieldwork");
+    EXPECT_EQ(stray->style, "");
+    const std::vector<const Entity*> lines = linesDrawn(document);
+    ASSERT_EQ(lines.size(), 1U);
+    const Polyline2& kerb = std::get<Polyline2>(lines.front()->geometry);
+    EXPECT_FALSE(kerb.closed);
+    EXPECT_EQ(kerb.vertices, (std::vector<Point2>{Point2(500010, 6200020), Point2(500020, 6200020),
+                                                  Point2(500020, 6200030)}));
+    EXPECT_EQ(lines.front()->layer, "FIELD KERB");
+    EXPECT_EQ(lines.front()->style, "FIELD Kerb");
+    // No layer per code: only the import's own and the two the rules name.
+    for (const char* layer : {"fieldwork/KB1", "fieldwork/CTRL", "fieldwork/ZZ"}) {
+        EXPECT_FALSE(document.model().layers.contains(layer)) << layer;
+    }
+    for (const char* layer : {"fieldwork", "FIELD KERB", "FIELD CONTROL"}) {
+        EXPECT_TRUE(document.model().layers.contains(layer)) << layer;
+    }
+
+    // Said in the log and at the end of the report pane.
+    const QString did = child<QPlainTextEdit>(w, "report")->toPlainText();
+    for (const char* sentence :
+         {"5 carry a code and 4 of those have a rule", "No rule for the code(s): ZZ.",
+          "Linework: 1 line(s) drawn.", "2 point(s) are in no line"}) {
+        EXPECT_TRUE(did.contains(sentence)) << sentence << "\n" << did.toStdString();
+        EXPECT_TRUE(session.logged(sentence)) << sentence;
+    }
+    EXPECT_TRUE(session.logged("Imported 5 point(s) from kerb.csv, drawn on fieldwork and then "
+                               "finished by the survey codes as follows"));
+
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_EQ(drawingOf(document), before);
+    EXPECT_EQ(document.history().undoCount(), steps);
+}
+
+TEST(SurveyImportWizard, TheOptionsStepSaysHowSurveyCodesAreLoadedByTheLineThatLoadsThem)
+{
+    // The note under the Options step's boxes says what Import will do, and
+    // with no survey codes loaded what brings some. It sent people to Format >
+    // Load Customisation and called what that loaded "a survey code file": the
+    // menu item is gone and that kind of file no longer loads. What loads
+    // survey codes is the CUSTOMISE line, of a Katana customisation file - the
+    // words CODE itself refuses with when none are loaded
+    // (cad/survey_code_verbs.hpp, requireMap).
+    Session session;
+    driveToOptions(session, fixture("fld/gnss.fld"));
+    const auto* note = child<QLabel>(*session.wizard, "finishNote");
+    ASSERT_NE(note, nullptr);
+    const QString text = note->text();
+    EXPECT_TRUE(text.contains("the CUSTOMISE line")) << text.toStdString();
+    EXPECT_TRUE(text.contains("Katana customisation file")) << text.toStdString();
+    EXPECT_FALSE(text.contains("Load Customisation")) << text.toStdString();
+    EXPECT_FALSE(text.contains("survey code file")) << text.toStdString();
+    EXPECT_FALSE(text.contains("Format >")) << text.toStdString();
+}
+
+// The two boxes are the customisation's two switches when the Options step is
+// first reached for a file, and the person's from then on; and a layer per
+// field code is offered only while the codes are not applied, with the reason.
+TEST(SurveyImportWizard, TheFinishBoxesStartAsTheCustomisationHasThemAndALayerPerCodeGivesWayToTheCodes)
+{
+    Session session;
+    installFieldCodes(session.document);
+    // Codes off, linework on: as CUSTOMISE SET auto.codes=off leaves them.
+    katana::entity::CustomisationAutomation automation;
+    automation.codesOnSurveyImport = false;
+    automation.lineworkOnSurveyImport = true;
+    session.document.setAutomation(automation);
+
+    driveToOptions(session, fixture("fld/gnss.fld"));
+    QWidget& w = *session.wizard;
+    auto* codes = child<QCheckBox>(w, "applyCodes");
+    auto* linework = child<QCheckBox>(w, "drawLinework");
+    auto* perCode = child<QCheckBox>(w, "layerPerCode");
+    auto* note = child<QLabel>(w, "finishNote");
+    ASSERT_FALSE(codes == nullptr || linework == nullptr || perCode == nullptr || note == nullptr);
+    EXPECT_TRUE(codes->isEnabled());
+    EXPECT_TRUE(linework->isEnabled());
+    EXPECT_FALSE(codes->isChecked());
+    EXPECT_TRUE(linework->isChecked());
+    EXPECT_TRUE(perCode->isEnabled()) << "the codes are not applied";
+    EXPECT_TRUE(note->text().contains("Survey codes: not applied.")) << note->text().toStdString();
+    EXPECT_TRUE(note->text().contains("Linework: the imported points are joined into lines"))
+        << note->text().toStdString();
+    EXPECT_FALSE(note->text().contains("Load Customisation")) << "no such menu item exists";
+
+    // Ticked: the codes choose the layers, so a layer per code is not offered,
+    // and its tip says why.
+    codes->setChecked(true);
+    EXPECT_FALSE(perCode->isEnabled());
+    EXPECT_TRUE(perCode->toolTip().contains("the codes choose each point's layer"))
+        << perCode->toolTip().toStdString();
+    EXPECT_TRUE(note->text().contains("Survey codes: applied to the imported points."))
+        << note->text().toStdString();
+
+    // Back and forth over the same file keeps what the person ticked: the
+    // customisation's switch still says off.
+    click(w, "back");
+    click(w, "next");
+    ASSERT_TRUE(session.step().contains("Options")) << session.step().toStdString();
+    EXPECT_TRUE(codes->isChecked());
+
+    // Unticked again, a layer per code is offered again.
+    codes->setChecked(false);
+    EXPECT_TRUE(perCode->isEnabled());
+    EXPECT_FALSE(perCode->toolTip().contains("the codes choose each point's layer"));
+
+    // Imported so - codes off, linework on - the job is kept as one that was
+    // strung and not coded: its points stay on the import's layer, unstyled,
+    // and the file's closed string is drawn on its rule's layer.
+    child<QLineEdit>(w, "layer")->setText("fieldwork");
+    click(w, "next"); // Report
+    click(w, "import");
+    ASSERT_EQ(session.document.surveyJobs().size(), 1U);
+    const katana::cad::SurveyJob& job = session.document.surveyJobs().front();
+    const auto stored = katana::cad::readSurveyJobOptions(job.importOptions, job.id);
+    ASSERT_TRUE(stored.ok()) << stored.error().describe();
+    EXPECT_FALSE(stored->applyCodes);
+    EXPECT_TRUE(stored->drawLinework);
+    const Entity* shot = pointNumbered(session.document, "R001");
+    ASSERT_NE(shot, nullptr);
+    EXPECT_EQ(shot->layer, "fieldwork");
+    EXPECT_EQ(shot->style, "");
+    const std::vector<const Entity*> lines = linesDrawn(session.document);
+    ASSERT_EQ(lines.size(), 1U);
+    EXPECT_EQ(lines.front()->layer, "FIELD KERB");
+}
+
+// With no survey codes there is nothing to apply or to string by: both boxes
+// are disabled and unticked, the note says why in today's words, a layer per
+// code is offered as it always was, and the import is the plain one - which
+// every test above this section runs.
+TEST(SurveyImportWizard, WithNoSurveyCodesTheFinishBoxesAreDisabledAndTheNoteSaysWhy)
+{
+    Session session;
+    driveToOptions(session, fixture("fld/gnss.fld"));
+    QWidget& w = *session.wizard;
+    auto* codes = child<QCheckBox>(w, "applyCodes");
+    auto* linework = child<QCheckBox>(w, "drawLinework");
+    auto* note = child<QLabel>(w, "finishNote");
+    ASSERT_FALSE(codes == nullptr || linework == nullptr || note == nullptr);
+    EXPECT_FALSE(codes->isEnabled());
+    EXPECT_FALSE(linework->isEnabled());
+    EXPECT_FALSE(codes->isChecked());
+    EXPECT_FALSE(linework->isChecked());
+    EXPECT_TRUE(child<QCheckBox>(w, "layerPerCode")->isEnabled());
+    EXPECT_TRUE(note->text().contains("Survey codes: the session has none")) << note->text().toStdString();
+    EXPECT_FALSE(note->text().contains("Load Customisation"));
+    EXPECT_FALSE(note->text().contains("survey code file"));
+
+    child<QLineEdit>(w, "layer")->setText("fieldwork");
+    click(w, "next"); // Report
+    click(w, "import");
+    // The five points on the import's layer and nothing else; a job that was
+    // asked for neither step.
+    EXPECT_EQ(session.document.model().entities.size(), 5U);
+    EXPECT_TRUE(linesDrawn(session.document).empty());
+    ASSERT_EQ(session.document.surveyJobs().size(), 1U);
+    const katana::cad::SurveyJob& job = session.document.surveyJobs().front();
+    const auto stored = katana::cad::readSurveyJobOptions(job.importOptions, job.id);
+    ASSERT_TRUE(stored.ok()) << stored.error().describe();
+    EXPECT_FALSE(stored->applyCodes);
+    EXPECT_FALSE(stored->drawLinework);
+
+    // Survey codes loaded since, and another file read: the boxes are offered
+    // and start as the customisation has them switched - both on.
+    installFieldCodes(session.document);
+    session.wizard->show();
+    driveToOptions(session, fixture("fld/gnss.fld"));
+    EXPECT_TRUE(codes->isEnabled());
+    EXPECT_TRUE(codes->isChecked());
+    EXPECT_TRUE(linework->isEnabled());
+    EXPECT_TRUE(linework->isChecked());
+    EXPECT_FALSE(child<QCheckBox>(w, "layerPerCode")->isEnabled());
 }

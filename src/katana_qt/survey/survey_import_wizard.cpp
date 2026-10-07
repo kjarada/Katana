@@ -1,6 +1,5 @@
 #include "survey/survey_import_wizard.hpp"
 
-#include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
@@ -36,6 +35,8 @@
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/linework_verbs.hpp"
+#include "katana/cad/survey_finish.hpp"
 #include "katana/cad/survey_job.hpp"
 #include "katana/cad/survey_points.hpp"
 #include "katana/core/text.hpp"
@@ -220,6 +221,65 @@ QTreeWidgetItem* contentChild(QTreeWidgetItem* parent, const QString& what, cons
 // Warnings listed one by one on the Content step; the rest are counted. A
 // damaged file can have hundreds of thousands, and the list is for reading.
 constexpr std::size_t kListedWarnings = 1'000;
+
+// ---- the finish: the survey codes and the linework ---------------------------------------
+
+// What a finish box asks: ticked, and enabled - a box is disabled while the
+// session has no survey codes, and a disabled box asks nothing however it
+// came to be ticked.
+bool asked(const QCheckBox& box)
+{
+    return box.isEnabled() && box.isChecked();
+}
+
+// What Import asks of the survey codes, as the two boxes stand and the
+// drawing is NOW: cad::surveyImportFinish, the function SURVEY IMPORT asks,
+// which hands on nothing at all while no survey codes are loaded.
+cad::SurveyImportFinish finishAsked(const cad::Document& document, const QCheckBox& codes,
+                                    const QCheckBox& linework)
+{
+    return cad::surveyImportFinish(document, asked(codes), asked(linework));
+}
+
+// How the points are drawn. A layer per field code only while the codes are
+// NOT applied: applied, they move each coded point to its rule's layer, and
+// the layer made for its code beneath `layer` would be left empty.
+cad::SurveyImportOptions drawingOptions(const QLineEdit& layer, const QCheckBox& layerPerCode,
+                                        const cad::SurveyImportFinish& finish)
+{
+    cad::SurveyImportOptions options;
+    options.layer = layer.text().trimmed().toStdString();
+    options.layerPerCode = layerPerCode.isChecked() && !finish.options.codes;
+    return options;
+}
+
+// What the import will ask of the survey codes, for the Report step and the
+// note under the two boxes: two sentences, or one when there are no codes to
+// ask anything of. `numbered` is a field file's path, whose reader may hand
+// over strings the file numbered itself; a point list has none.
+QStringList finishPlan(const cad::SurveyImportFinish& finish, bool numbered)
+{
+    if (!finish.surveyCodesLoaded) {
+        return {"Survey codes: the session has none, so the points are drawn as the file has "
+                "them and no line is drawn."};
+    }
+    QStringList plan;
+    plan << (finish.options.codes
+                 ? "Survey codes: applied to the imported points. Each goes on the layer and "
+                   "takes the style its code's rule gives it; a code with no rule is left as "
+                   "imported and named."
+                 : "Survey codes: not applied.");
+    if (!finish.options.linework) {
+        plan << "Linework: not drawn.";
+    } else if (numbered) {
+        plan << "Linework: the imported points are joined into lines where a rule makes their "
+                "code a line - the strings the file numbered itself, then the rest by code.";
+    } else {
+        plan << "Linework: the imported points are joined into lines, by code, where a rule "
+                "makes their code a line.";
+    }
+    return plan;
+}
 
 } // namespace
 
@@ -743,23 +803,21 @@ QWidget* SurveyImportWizard::buildOptionsPage()
     applyCodes_ = new QCheckBox("Apply survey codes to the imported points", page);
     applyCodes_->setObjectName("applyCodes");
     form->addRow("", applyCodes_);
+    drawLinework_ = new QCheckBox("Draw linework through the imported points", page);
+    drawLinework_->setObjectName("drawLinework");
+    form->addRow("", drawLinework_);
     layout->addLayout(form);
-    // What loads survey codes is the CUSTOMISE line, of a Katana customisation
-    // file - the words CODE refuses with when none are loaded. This note sent
-    // people to Format > Load Customisation for "a survey code file" after
-    // that menu item had gone and that kind of file had stopped loading.
-    QLabel* note = mutedLabel(
-        "Refusing is the default: an import of ids the drawing already has is more often the "
-        "wrong file than a wanted update. Survey codes need a loaded customisation that has "
-        "some - CUSTOMISE <file> on the command line loads a Katana customisation file - and "
-        "are applied to the imported points only, as their own undoable step.",
-        page);
-    note->setObjectName("optionsNote");
-    // Plain text, said rather than left to the label's guess: what stands in
-    // angle brackets in this note is a word of a command line, never markup.
-    note->setTextFormat(Qt::PlainText);
-    layout->addWidget(note);
+    // What the two boxes will do, as they stand (showFinishChoice).
+    finishNote_ = mutedLabel({}, page);
+    finishNote_->setObjectName("finishNote");
+    layout->addWidget(finishNote_);
+    layout->addWidget(mutedLabel(
+        "Refusing is the default for ids the drawing already has: such an import is more often "
+        "the wrong file than a wanted update.",
+        page));
     layout->addStretch(1);
+    connect(applyCodes_, &QCheckBox::toggled, this, [this] { showFinishChoice(); });
+    connect(drawLinework_, &QCheckBox::toggled, this, [this] { showFinishChoice(); });
     return page;
 }
 
@@ -859,14 +917,65 @@ void SurveyImportWizard::goTo(int page)
     next_->setDefault(page < ReportPage);
     import_->setDefault(page == ReportPage);
     if (page == OptionsPage) {
-        const bool mapfile = context_.applySurveyCodes != nullptr &&
-                             !context_.document->surveyMap().empty();
-        applyCodes_->setEnabled(mapfile);
-        if (!mapfile) {
-            applyCodes_->setChecked(false);
-        }
+        prepareFinishChoice();
     }
     message_->clear();
+}
+
+void SurveyImportWizard::prepareFinishChoice()
+{
+    const cad::Document& document = *context_.document;
+    const bool codes = !document.surveyMap().empty();
+    // Enabled first: the boxes' own signals lead to showFinishChoice, which
+    // reads whether each is enabled.
+    applyCodes_->setEnabled(codes);
+    drawLinework_->setEnabled(codes);
+    if (finishGeneration_ != readGeneration_ || finishWithCodes_ != codes) {
+        // As the customisation has them switched, which is what SURVEY IMPORT
+        // does with a file when its line says nothing; and neither while
+        // there are no survey codes to apply or to string by.
+        const auto& automation = document.customisationState().automation;
+        applyCodes_->setChecked(codes && automation.codesOnSurveyImport);
+        drawLinework_->setChecked(codes && automation.lineworkOnSurveyImport);
+        finishGeneration_ = readGeneration_;
+        finishWithCodes_ = codes;
+    }
+    showFinishChoice();
+}
+
+void SurveyImportWizard::showFinishChoice()
+{
+    const cad::SurveyImportFinish finish =
+        finishAsked(*context_.document, *applyCodes_, *drawLinework_);
+    const QString none = finish.surveyCodesLoaded
+                             ? QString()
+                             : QString(" Not offered: the session has no survey codes.");
+    applyCodes_->setToolTip("Each imported point goes on the layer and takes the style the "
+                            "session's survey codes give its code." +
+                            none);
+    drawLinework_->setToolTip("The imported points are joined into lines where a survey code "
+                              "rule makes their code a line." +
+                              none);
+    // The codes choose the layers: a layer per field code as well would be
+    // made for every code and then left empty, its points moved to the layer
+    // their rule names. The tick is kept, for when the codes are switched off
+    // again; drawingOptions is what reads whether it counts.
+    layerPerCode_->setEnabled(!finish.options.codes);
+    layerPerCode_->setToolTip(
+        finish.options.codes
+            ? "Not used while survey codes are applied: the codes choose each point's layer, and "
+              "a layer per field code as well would be left empty"
+            : "Each code's points go on a layer of their own beneath the layer above");
+    QString note = finishPlan(finish, readerPath_).join(' ');
+    if (finish.surveyCodesLoaded) {
+        note += finish.options.any()
+                    ? " It is all one command: one Undo takes back the points with their codes "
+                      "and their lines."
+                    : " The points are drawn on the layer above and nothing else is done.";
+    } else {
+        note += " A Katana customisation file brings survey codes (the CUSTOMISE line).";
+    }
+    finishNote_->setText(note);
 }
 
 void SurveyImportWizard::advance()
@@ -1371,9 +1480,9 @@ Status SurveyImportWizard::parseAndTransform()
 
 void SurveyImportWizard::prepareReport()
 {
-    cad::SurveyImportOptions options;
-    options.layer = layer_->text().trimmed().toStdString();
-    options.layerPerCode = layerPerCode_->isChecked();
+    const cad::SurveyImportFinish finish =
+        finishAsked(*context_.document, *applyCodes_, *drawLinework_);
+    const cad::SurveyImportOptions options = drawingOptions(*layer_, *layerPerCode_, finish);
     const auto policy = policies()[static_cast<std::size_t>(std::max(0, existing_->currentIndex()))];
 
     cad::SurveyImportSummary summary;
@@ -1403,7 +1512,32 @@ void SurveyImportWizard::prepareReport()
             text += "Nothing to import.\n";
         }
     }
-    report_->setPlainText(qs(text));
+    // What is asked of the survey codes: the points planned above are coded
+    // and strung when the command runs, not before - the finish plans against
+    // points that are in the drawing - so what it DID follows the import.
+    QString shown = qs(text);
+    if (!blocked_) {
+        shown += finishPlan(finish, false).join('\n') + '\n';
+    }
+    report_->setPlainText(shown);
+}
+
+void SurveyImportWizard::reportFinish(const cad::SurveyFinishReport* report)
+{
+    if (report == nullptr) {
+        return;
+    }
+    QStringList sentences;
+    for (const std::string& sentence : cad::describe(*report)) {
+        sentences << qs(sentence);
+    }
+    if (sentences.isEmpty()) {
+        return; // neither step was asked for: the report said so before the import
+    }
+    for (const QString& sentence : sentences) {
+        context_.log(sentence, false);
+    }
+    report_->appendPlainText("Imported:\n" + sentences.join('\n'));
 }
 
 void SurveyImportWizard::importNow()
@@ -1415,14 +1549,15 @@ void SurveyImportWizard::importNow()
     if (!project_) {
         return;
     }
-    cad::SurveyImportOptions options;
-    options.layer = layer_->text().trimmed().toStdString();
-    options.layerPerCode = layerPerCode_->isChecked();
+    cad::Document& document = *context_.document;
+    // Asked again rather than kept from the report, with the command below:
+    // the dialog is not modal, and the drawing - its survey codes among it -
+    // may have changed since the report was written.
+    const cad::SurveyImportFinish finish = finishAsked(document, *applyCodes_, *drawLinework_);
+    const cad::SurveyImportOptions options = drawingOptions(*layer_, *layerPerCode_, finish);
     const auto policy = policies()[static_cast<std::size_t>(std::max(0, existing_->currentIndex()))];
-    // Built again rather than kept from the report: the dialog is not modal,
-    // and the drawing may have changed since the report was written.
     cad::SurveyPointImportReport report;
-    auto command = cad::importSurveyPoints(*context_.document, *project_, options, policy, &report);
+    auto command = cad::importSurveyPoints(document, *project_, options, policy, &report);
     if (!command) {
         showError(command.error());
         return;
@@ -1431,27 +1566,31 @@ void SurveyImportWizard::importNow()
         showError(katana::core::Error{ErrorCode::InvalidState, "nothing to import", {}});
         return;
     }
-    cad::Document& document = *context_.document;
-    if (const auto status = document.execute(std::move(*command)); !status) {
+    // ONE command: the points, then - planned as it runs, against the points
+    // it has just drawn - their codes and their lines. A point list strings
+    // nothing itself (the empty project), so its points are joined by their
+    // codes alone. With neither step asked for it is the points' own command.
+    auto finished = std::make_shared<cad::SurveyFinishReport>();
+    auto whole = cad::withSurveyFinish(document, std::move(*command), {}, options,
+                                       finish.options, finished);
+    if (const auto status = document.execute(std::move(whole)); !status) {
         showError(status.error());
         return;
     }
-    const std::vector<katana::entity::EntityId> created = document.lastCreatedEntities();
     context_.log(report_->toPlainText().trimmed(), false);
-    context_.log(QString("Imported %1 point(s) from %2 on %3: one command - Undo removes it.")
+    // "on <layer>" is where the points were drawn; coded, they have since
+    // gone to the layers their rules name, which the sentences after say.
+    context_.log((finished->codesRan() || finished->lineworkRan()
+                      ? QString("Imported %1 point(s) from %2, drawn on %3 and then finished by "
+                                "the survey codes as follows: one command - Undo removes it all.")
+                      : QString("Imported %1 point(s) from %2 on %3: one command - Undo removes "
+                                "it."))
                      .arg(report.import.points)
                      .arg(qs(fileName_), qs(options.layer)),
                  false);
+    reportFinish(finished.get());
     if (context_.views != nullptr) {
         context_.views->zoomExtentsAll();
-    }
-    // The window's own action, on the imported points alone: it acts on the
-    // selection when there is one.
-    if (applyCodes_->isChecked() && applyCodes_->isEnabled() &&
-        context_.applySurveyCodes != nullptr) {
-        document.selection().set(created);
-        document.notifySelectionChanged();
-        context_.applySurveyCodes->trigger();
     }
     // Done, as a wizard's Finish is: the report is in the log, and the next
     // Import Survey Points starts at the first page with the fields kept.
@@ -1799,11 +1938,15 @@ void SurveyImportWizard::prepareReaderReport()
                 .arg(outcome_->points.size())
                 .arg(rejectedObservations(report))
                 .arg(report.warnings.size());
+    const cad::SurveyImportFinish finish =
+        finishAsked(*context_.document, *applyCodes_, *drawLinework_);
+    const cad::SurveyImportOptions options = drawingOptions(*layer_, *layerPerCode_, finish);
     text += QString("Layer: %1%2\n")
-                .arg(layer_->text().trimmed(),
-                     layerPerCode_->isChecked() ? ", a layer per code beneath it" : "");
+                .arg(qs(options.layer),
+                     options.layerPerCode ? ", a layer per code beneath it" : "");
     text += QString("Ids the drawing already has: %1\n")
                 .arg(existing_->currentText());
+    text += finishPlan(finish, true).join('\n') + '\n';
     text += "Import keeps the file as a survey job: Survey > Survey Jobs adjusts it again.\n";
     report_->setPlainText(text);
     importReport_->setVisible(true);
@@ -1826,9 +1969,14 @@ void SurveyImportWizard::importJob()
         showError(context.error());
         return;
     }
-    cad::SurveyImportOptions options;
-    options.layer = layer_->text().trimmed().toStdString();
-    options.layerPerCode = layerPerCode_->isChecked();
+    // What the job is asked beyond its points, as the boxes stand and the
+    // drawing is now: the job's own finish (cad::surveyImportFinish, which
+    // SURVEY IMPORT hands its job too), so the codes and the lines are part
+    // of the one command and are kept with the job - a re-adjustment treats
+    // it as it was imported, and Remove Job takes its lines with its points.
+    const cad::SurveyImportFinish finish =
+        finishAsked(*context_.document, *applyCodes_, *drawLinework_);
+    const cad::SurveyImportOptions options = drawingOptions(*layer_, *layerPerCode_, finish);
     const auto policy =
         policies()[static_cast<std::size_t>(std::max(0, existing_->currentIndex()))];
 
@@ -1850,6 +1998,7 @@ void SurveyImportWizard::importJob()
     request.context = std::move(*context);
     request.importOptions = options;
     request.existingPoints = policy;
+    request.finish = finish.options;
     // The reduction the preview ran on a pool thread, not a second one here.
     auto reduce = precomputedReduction(
         {outcome_, outcomeSettings_, {}, outcomeDrawingPoints_});
@@ -1862,7 +2011,6 @@ void SurveyImportWizard::importJob()
         showError(status.error());
         return;
     }
-    const std::vector<katana::entity::EntityId> created = document.lastCreatedEntities();
     const survey::ReductionReport* report = job->report();
     const auto descriptor = surveyio::formatRegistry().find(read.formatId);
     const QString summary =
@@ -1878,14 +2026,10 @@ void SurveyImportWizard::importJob()
             .arg(report != nullptr ? rejectedObservations(*report) : 0)
             .arg(read.warnings.size() + (report != nullptr ? report->warnings.size() : 0));
     context_.log(summary, false);
+    // What the job's finish did; nullptr for a job that asked for neither.
+    reportFinish(job->finishReport());
     if (context_.views != nullptr) {
         context_.views->zoomExtentsAll();
-    }
-    if (applyCodes_->isChecked() && applyCodes_->isEnabled() &&
-        context_.applySurveyCodes != nullptr && !created.empty()) {
-        document.selection().set(created);
-        document.notifySelectionChanged();
-        context_.applySurveyCodes->trigger();
     }
     blocked_ = true;
     goTo(FilePage);

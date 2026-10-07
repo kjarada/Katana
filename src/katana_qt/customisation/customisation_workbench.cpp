@@ -4,10 +4,8 @@
 #include <utility>
 
 #include <QAction>
-#include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QStringList>
 #include <QToolBar>
 #include <QWidget>
@@ -16,7 +14,6 @@
 #include "customisation/customisation_context.hpp"
 #include "customisation/definition_editor.hpp"
 #include "customisation/definition_thumbnails.hpp"
-#include "customisation/document_watcher.hpp"
 #include "customisation/global_modify_dialog.hpp"
 #include "customisation/symbol_library.hpp"
 #include "katana/cad/document.hpp"
@@ -120,64 +117,19 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
     menu.addAction(purgeAction_);
 
     toolBar.addActions({stylesAction_, symbolsAction_, codesAction_, globalModifyAction_});
-
-    if (services_.document != nullptr) {
-        // What the session has now - the defaults, in a window whose
-        // customisation is installed after it is built - and then every
-        // change: the start-up install, a load, CUSTOMISE SET, RESET, REVERT.
-        // The watcher delivers on any notification, whichever part it names.
-        followedLinework_ = services_.document->customisationState().linework;
-        lineworkCodes_ = followedLinework_;
-        watcher_ = std::make_unique<DocumentWatcher>(
-            *services_.document, [this](const DocumentChanges&) { followLineworkCodes(); });
-    }
 }
 
 CustomisationWorkbench::~CustomisationWorkbench()
 {
     // Here, not left to the window's children: the dialogs paint from the
-    // cache and read the linework codes this object owns, which go as soon
-    // as this body ends - and the Document goes after that. The editor
-    // first: the managers ask for it through this object.
+    // cache this object owns, which goes as soon as this body ends - and the
+    // Document goes after that. The editor first: the managers ask for it
+    // through this object.
     delete definitions_.data();
     delete globalModify_.data();
     delete codes_.data();
     delete symbols_.data();
     delete styles_.data();
-}
-
-void CustomisationWorkbench::followLineworkCodes()
-{
-    if (services_.document == nullptr || (watcher_ != nullptr && !watcher_->documentAlive())) {
-        return;
-    }
-    const katana::cad::LineworkCodes& now = services_.document->customisationState().linework;
-    if (now == followedLinework_) {
-        return;
-    }
-    followedLinework_ = now;
-    lineworkCodes_ = now;
-    if (codes_.isNull()) {
-        return;
-    }
-    // The tab that is already built: its fields by the object names the
-    // headless driver fills them by - "linework" and the control's own word,
-    // lineworkStart to lineworkRectangle - and then its own button, as a
-    // person taking the codes into use would. Setting the copy above is not
-    // enough for a tab that exists: it would go on showing the old codes,
-    // and Execute would build a plan it had made with them. (The tab is to
-    // read the Document itself, and its button to run CUSTOMISE SET; this
-    // goes with the copy then.)
-    for (const katana::entity::LineworkCodeMember& code : katana::entity::lineworkCodeMembers()) {
-        QString name = QString::fromUtf8(code.name.data(), static_cast<qsizetype>(code.name.size()));
-        name[0] = name[0].toUpper();
-        if (auto* field = codes_->findChild<QLineEdit*>("linework" + name)) {
-            field->setText(QString::fromStdString(now.*code.spelling));
-        }
-    }
-    if (auto* use = codes_->findChild<QPushButton*>(QStringLiteral("lineworkCodesUse"))) {
-        use->click();
-    }
 }
 
 StyleManagerDialog* CustomisationWorkbench::styleManager() const { return styles_.data(); }
@@ -213,7 +165,6 @@ CustomisationContext CustomisationWorkbench::context()
     context.selectAndShow = [this](const std::vector<katana::entity::EntityId>& ids) {
         selectAndShow(ids);
     };
-    context.lineworkCodes = &lineworkCodes_;
     context.run = services_.run;
     context.editDefinition = [this](DefinitionEdit what, const std::string& name) {
         editDefinition(what, name);
@@ -299,11 +250,14 @@ SymbolLibraryDialog& CustomisationWorkbench::showSymbolLibrary()
 SurveyCodeManagerDialog& CustomisationWorkbench::showCodeManager()
 {
     if (codes_.isNull()) {
-        // Before it reads them: a line typed in this very turn may have
-        // changed the codes, and the watcher has not delivered yet.
-        followLineworkCodes();
         codes_ = new SurveyCodeManagerDialog(context(), &window_);
         codes_->setModal(false);
+        if (services_.views != nullptr) {
+            // The View scope of its Apply Codes and Linework tabs, as Global
+            // Modify's: read afresh each time (scopeFilterViews).
+            ViewWorkspace* views = services_.views;
+            codes_->views = [views] { return scopeFilterViews(views->viewSet()); };
+        }
         // Opened on the first rule, explained and in the form, as the other
         // managers open on their first row - not on an empty explanation.
         if (!codes_->buffer().rules().empty()) {
