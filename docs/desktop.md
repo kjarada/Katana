@@ -1625,7 +1625,12 @@ Customisation and Replace Loaded Customisation (`loadCustomisation`,
 `replaceCustomisation`), each a file dialog over the style libraries and
 survey code files of another program. Katana no longer reads those files, and
 the two items went with them rather than be kept as doors to a format that
-is gone. Until File > Settings exists, a Katana customisation file
+is gone - and, on 2026-10-07, what was left of them: the two members of
+`CustomisationServices` that carried the actions, which only a widget test
+still assigned, and the Survey Code Manager's tip, which said "the loaded
+survey code files" and says "the survey codes of the session's customisation"
+(`GeneralTexts.NoFormatMenuItemOrToolbarButtonNamesAnotherProgramInItsTextOrTips`
+holds the menu to both). Until File > Settings exists, a Katana customisation file
 (`docs/customisation.md`) is loaded in the window by
 
 - the typed line `CUSTOMISE <file>...` (merge) or `CUSTOMISE REPLACE
@@ -1735,11 +1740,6 @@ Not done:
   change. The button is to run `CUSTOMISE SET linework.*` and the tab to read
   the Document, after which the copy - and the workbench's filling of the
   tab's fields by their object names - goes.
-- `CustomisationServices` still has the two members that carried the Load
-  and Replace actions. Nothing reads or sets them in the window; they stay
-  only while a widget test of the managers' texts still assigns them.
-- The tip of Survey Code Manager still calls the codes "the loaded survey
-  code files", which was true while the manager imported such files.
 
 ### Styles and Linetypes
 
@@ -2308,6 +2308,21 @@ have none.
     (`CustomisationWorkbench.AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAndItStaysKept`,
     `ASessionThatWasNotTheKeptOneIsNotKeptByAnEditorsCommit`,
     `WithNoKeptFileAnEditorsCommitRunsNoLineAndLogsNoRefusal`).
+  - *The window's half is two lines* - `MainWindow::buildFormatActions` hands
+    the workbench the predicate, and `loadDefaultCustomisation` sets what it
+    answers from the host's kept-file path - and the three tests above cannot
+    see either: they supply the predicate themselves. Found in review
+    (2026-10-07): with either line deleted every test passed, while the real
+    window kept nothing. Two headless checks hold them, each saving a new
+    symbol in the editor of a window whose built-in is the symbol fixture. With
+    `KATANA_CUSTOMISATION` naming a file the `kept` record comes before the
+    editor's own line and the session is `origin=edited kept=yes`; with the
+    variable unset no line is run - neither a `kept` record nor `KEEP`'s
+    refusal - and the session is `kept=no`
+    (`qt_a_save_in_the_definition_editor_keeps_a_kept_session_in_its_kept_file_headless`,
+    `qt_a_save_in_the_definition_editor_runs_no_keep_where_the_window_has_no_kept_file_headless`).
+    Both lines change when File > Settings gives an interactive session a
+    per-user kept file.
 
 **One definition at a time.** Opening another while the form has edits that
 are not saved is REFUSED and said, in the message area and the log

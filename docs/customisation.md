@@ -1255,7 +1255,16 @@ that is the client's log, since the protocol has standard output to itself:
 ```
 Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, built in
 Customisation: Site, 800 linestyles and symbols and 1630 survey code rules, kept
+Customisation: One, 1 linestyle or symbol and 1 survey code rule, kept
 ```
+
+Each noun goes by its count, as the window's start-up line does (`1 definition
+(1 symbol) and 1 survey code rule`): the line gave every count the plural
+until 2026-10-07, so a customisation of one definition had "1 linestyles and
+symbols". One definition is a linestyle OR a symbol, and the line does not say
+which (`Session.TheStartUpLineCountsOneDefinitionAndOneRuleInTheSingular`).
+The two front ends still word the line differently, each in its own
+(`cad::CustomisationStart` is "for the front end to say in its own words").
 
 Nothing is printed when nothing was installed. What went wrong goes to
 standard error, a line each as `error: <what>` - a built-in that does not
@@ -1346,9 +1355,10 @@ went with it and is an unknown command now. Their replies are unchanged.
 
 **Colours.** The verbs resolve a colour name through the Document
 (`cad::resolveColour`: the customisation's own table, then the standard
-names). A front end once passed more names with
+names) and through nothing else. A front end once passed more names with
 `CommandInterpreter::setColourLookup`; none does, and the setter is gone
-(2026-10-07).
+(2026-10-07) - and with it the parameter `runSurveyCodeVerb` took for those
+names, which only two tests still reached.
 
 ### The verbs: decisions, and what was rejected
 
@@ -1550,11 +1560,6 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 - **`PREVIEW` needs the scope form.** `CODE feature_code` takes the whole
   rest of the line as the property; a preview of it is `CODE PROPERTY
   feature_code PREVIEW`.
-- **`runSurveyCodeVerb` still takes a colour lookup of a caller's own**,
-  asked after the Document for a name it does not know. No program passes
-  one - `CommandInterpreter::setColourLookup`, through which a front end did,
-  is gone - so the parameter is reached by its two tests alone, and goes
-  when someone next changes that function's signature.
 
 ## Converting a customisation from the legacy formats
 

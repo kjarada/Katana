@@ -1,0 +1,74 @@
+{
+  "kind": "ctestInfo",
+  "version": {"major": 1, "minor": 0},
+  "backtraceGraph": {"commands": [], "files": [], "nodes": []},
+  "tests": [
+    {
+      "name": "window_that_unsets_it",
+      "command": ["/b/bin/cmake", "-DAPP=/b/bin/katana", "-DDRIVE=>LIST|?commandLog", "-P", "/s/tools/check_screenshot.cmake"],
+      "properties": [
+        {"name": "ENVIRONMENT_MODIFICATION", "value": ["PATH=path_list_prepend:/b/runtime", "QT_QPA_PLATFORM=set:offscreen", "KATANA_BUILTIN_CUSTOMISATION=set:none", "KATANA_CUSTOMISATION=unset:"]},
+        {"name": "TIMEOUT", "value": 180.0}
+      ]
+    },
+    {
+      "name": "window_with_a_kept_file_of_its_own",
+      "command": ["/b/bin/cmake", "-DAPP=/b/bin/katana", "-DDRIVE=>CUSTOMISE KEEP", "-P", "/s/tools/check_screenshot.cmake"],
+      "properties": [
+        {"name": "ENVIRONMENT_MODIFICATION", "value": ["PATH=path_list_prepend:/b/runtime", "QT_QPA_PLATFORM=set:offscreen", "KATANA_CUSTOMISATION=set:/b/tests/kept/customisation.json"]},
+        {"name": "TIMEOUT", "value": 180.0}
+      ]
+    },
+    {
+      "name": "window_left_to_the_callers_shell",
+      "command": ["/b/bin/cmake", "-DAPP=/b/bin/katana", "-DEXPECT=a [b]; c", "-P", "/s/tools/check_screenshot.cmake"],
+      "properties": [
+        {"name": "ENVIRONMENT_MODIFICATION", "value": ["PATH=path_list_prepend:/b/runtime", "QT_QPA_PLATFORM=set:offscreen", "KATANA_BUILTIN_CUSTOMISATION=set:none"]},
+        {"name": "TIMEOUT", "value": 180.0}
+      ]
+    },
+    {
+      "name": "cli_that_unsets_it_on_its_own_line",
+      "command": ["/b/bin/cmake", "-E", "env", "--unset=KATANA_CUSTOMISATION", "KATANA_BUILTIN_CUSTOMISATION=none", "/b/bin/katana_cli", "-c", "CUSTOMISE"]
+    },
+    {
+      "name": "cli_with_a_kept_file_on_its_own_line",
+      "command": ["/b/bin/cmake", "-E", "env", "KATANA_BUILTIN_CUSTOMISATION=none", "KATANA_CUSTOMISATION=/b/tests/kept.customisation.json", "/b/bin/katana_cli", "-c", "CUSTOMISE KEEP"]
+    },
+    {
+      "name": "cli_left_to_the_callers_shell",
+      "command": ["/b/bin/katana_cli", "-c", "LIST"],
+      "properties": [
+        {"name": "ENVIRONMENT", "value": ["KATANA_BUILTIN_CUSTOMISATION=none"]}
+      ]
+    },
+    {
+      "name": "cli_whose_modification_gives_the_callers_back",
+      "command": ["/b/bin/katana_cli", "-c", "LIST"],
+      "properties": [
+        {"name": "ENVIRONMENT_MODIFICATION", "value": ["KATANA_CUSTOMISATION=unset:", "KATANA_CUSTOMISATION=reset:"]}
+      ]
+    },
+    {
+      "name": "mcp_with_an_empty_one",
+      "command": ["/b/bin/katana_mcp"],
+      "properties": [
+        {"name": "ENVIRONMENT", "value": ["KATANA_CUSTOMISATION="]}
+      ]
+    },
+    {
+      "name": "mcp_left_to_the_callers_shell",
+      "command": ["/b/bin/katana_mcp"]
+    },
+    {
+      "name": "a_unit_suite",
+      "command": ["/b/bin/tests/katana_core_tests", "--gtest_filter=Suite.Case"]
+    },
+    {
+      "name": "a_test_whose_executable_was_not_built",
+      "properties": [
+        {"name": "ENVIRONMENT", "value": ["KATANA_BUILTIN_CUSTOMISATION=none"]}
+      ]
+    }
+  ]
+}

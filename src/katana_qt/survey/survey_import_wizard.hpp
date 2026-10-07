@@ -47,10 +47,12 @@
 //                 advanced ones folded - and Preview, which runs the reduction
 //                 (on a pool thread for a large file) and shows its report
 //                 inline (reduction_report_view.hpp).
-//   6 Options     the layer, a layer per code, applying the loaded survey code
-//                 file's codes after the import (the window's own Apply
-//                 Survey Codes action, on the imported points), and what to do
-//                 with ids the drawing already has (cad::ExistingPointPolicy).
+//   6 Options     the layer, a layer per code, applying the loaded
+//                 customisation's survey codes after the import (the window's
+//                 own Apply Survey Codes action, on the imported points), and
+//                 what to do with ids the drawing already has
+//                 (cad::ExistingPointPolicy). Its note says what loads the
+//                 codes: the CUSTOMISE line, of a Katana customisation file.
 //   7 Report      records read, every warning as a sentence, the error that
 //                 blocks the import or the points and layers it will create;
 //                 for an instrument file the reduction report as well.
@@ -74,8 +76,8 @@
 //   shown   step candidates formatRecord proposal columnRoles preview
 //           parseError | content contentSummary | systemSummary |
 //           previewReport (and previewReportSections, previewReportBrowser,
-//           previewReportSummary) | report importReport (and its Sections,
-//           Browser, Summary) | task taskStatus | message
+//           previewReportSummary) | optionsNote | report importReport (and its
+//           Sections, Browser, Summary) | task taskStatus | message
 //   buttons browse | saveTemplate deleteTemplate | addControl removeControl
 //           advanced previewReduction | cancelTask | back next import close
 

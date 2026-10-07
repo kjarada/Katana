@@ -744,12 +744,21 @@ QWidget* SurveyImportWizard::buildOptionsPage()
     applyCodes_->setObjectName("applyCodes");
     form->addRow("", applyCodes_);
     layout->addLayout(form);
-    layout->addWidget(mutedLabel(
+    // What loads survey codes is the CUSTOMISE line, of a Katana customisation
+    // file - the words CODE refuses with when none are loaded. This note sent
+    // people to Format > Load Customisation for "a survey code file" after
+    // that menu item had gone and that kind of file had stopped loading.
+    QLabel* note = mutedLabel(
         "Refusing is the default: an import of ids the drawing already has is more often the "
-        "wrong file than a wanted update. Survey codes need a loaded survey code file (Format > "
-        "Load Customisation) and are applied to the imported points only, as their own undoable "
-        "step.",
-        page));
+        "wrong file than a wanted update. Survey codes need a loaded customisation that has "
+        "some - CUSTOMISE <file> on the command line loads a Katana customisation file - and "
+        "are applied to the imported points only, as their own undoable step.",
+        page);
+    note->setObjectName("optionsNote");
+    // Plain text, said rather than left to the label's guess: what stands in
+    // angle brackets in this note is a word of a command line, never markup.
+    note->setTextFormat(Qt::PlainText);
+    layout->addWidget(note);
     layout->addStretch(1);
     return page;
 }
