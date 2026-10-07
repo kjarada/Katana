@@ -98,6 +98,9 @@ namespace {
 struct LibraryFixture {
     Document document;
     DefinitionThumbnails thumbnails;
+    // The window's executor, over the same Document: the dialog hands its
+    // import and export lines to it (CustomisationContext::run).
+    katana::qt::test::InterpreterRunner executor{document};
     CustomisationContext context;
     std::vector<std::pair<QString, bool>> logged;
 
@@ -110,6 +113,7 @@ struct LibraryFixture {
         katana::qt::test::installCustomisationFixtures(document, fixtures);
         context.document = &document;
         context.thumbnails = &thumbnails;
+        context.run = executor.runner();
         context.log = [this](const QString& message, bool isError) {
             logged.emplace_back(message, isError);
         };
@@ -537,10 +541,18 @@ TEST(SymbolLibrary, ImportingMergesTheFilesDefinitionsIntoTheLibraryAndLogsWhatI
 
     ASSERT_TRUE(dialog.importDefinitionsFile(customisationFixtureFile("test_symbols")));
 
-    // The load is named by its customisation.
-    EXPECT_TRUE(fixture.loggedExactly(QStringLiteral(
-        "Merged test_symbols into the library: 3 added (TEST Survey Mark, TEST U Turn, "
-        "TEST Valve), 1 replaced (TEST Tree)")));
+    // The dialog handed the executor the line CUSTOMISE DEFINITIONS and the
+    // file, and the verb said what it did: 3 added (Survey Mark, U Turn and
+    // Valve) and 1 replaced (Tree), the load named by its customisation.
+    ASSERT_EQ(fixture.executor.ran.size(), 1);
+    EXPECT_EQ(fixture.executor.ran.front(),
+              QStringLiteral("CUSTOMISE DEFINITIONS ") +
+                  katana::qt::test::quotedFile(customisationFixtureFile("test_symbols")));
+    EXPECT_TRUE(fixture.executor.lastReply.contains(
+        QStringLiteral("loaded file=")));
+    EXPECT_TRUE(fixture.executor.lastReply.contains(
+        QStringLiteral("name=test_symbols definitions_added=3 definitions_replaced=1 ")))
+        << fixture.executor.lastReply.toStdString();
     EXPECT_EQ(fixture.document.styleLibrary().size(), 7u);
     EXPECT_TRUE(fixture.document.styleLibrary().contains("TEST Dashed Kerb"));
     // What came in says where it came from, the tree that was replaced
@@ -611,21 +623,19 @@ TEST(SymbolLibrary, ImportTakesAFilesDefinitionsAndColoursAndLeavesItsRulesAndSe
     EXPECT_EQ(library.find("TEST Extra Mark")->source, "extra");
     EXPECT_EQ(fixture.document.customisationState().colours.find("sui test purple"),
               std::optional(katana::entity::Color{128, 0, 128, 255}));
-    EXPECT_TRUE(fixture.loggedExactly(
-        QStringLiteral("Merged extra into the library: 1 added (TEST Extra Mark), 0 replaced")));
-    EXPECT_TRUE(fixture.loggedExactly(
-        QStringLiteral("Merged extra into the colours: 1 added (sui test purple), 0 replaced")));
+    // One definition and one colour, each added and none replaced.
+    EXPECT_TRUE(fixture.executor.lastReply.contains(
+        QStringLiteral("name=extra definitions_added=1 definitions_replaced=0 codes_added=0 "
+                       "codes_replaced=0 colours_added=1 colours_replaced=0 ")))
+        << fixture.executor.lastReply.toStdString();
 
-    // Left alone: its rule, and its spelling of Start. The log says so.
+    // Left alone: its rule, and its spelling of Start. The reply says so, as
+    // a record: one rule, linework codes, no automation.
     EXPECT_EQ(fixture.document.surveyMap().size(), 11u);
     EXPECT_EQ(fixture.document.customisationState().linework.start, "ST");
-    EXPECT_TRUE(std::ranges::any_of(fixture.logged, [](const auto& line) {
-        return !line.second &&
-               line.first.contains(QStringLiteral(
-                   "Not imported from katana_test_symbol_library_extra.customisation.json, as "
-                   "the symbol library takes definitions and colours: survey code rules (1), "
-                   "the linework codes."));
-    }));
+    EXPECT_TRUE(fixture.executor.lastReply.contains(
+        QStringLiteral("left rules=1 linework=yes automation=no")))
+        << fixture.executor.lastReply.toStdString();
     // The session's record of what went into it: "extra" brought
     // definitions, and no rules.
     const auto& sources = fixture.document.customisationState().sources;
@@ -671,18 +681,20 @@ TEST(SymbolLibrary, ImportCallsTheCommitHookBeforeTheInstallAndWhatItHandsBackAf
     };
     SymbolLibraryDialog dialog(fixture.context);
 
-    // What is not a commit does not trouble the hook: a file that is not
-    // there, and one that reads and holds nothing a symbol library takes -
-    // the fixture of survey codes, which has rules and no definition or
-    // colour.
+    // What is not a commit is asked of the hook all the same (the line is
+    // run between the two calls, as the definition editor's Delete does) but
+    // is never followed by what it hands back: a file that is not there, and
+    // one that reads and holds nothing a symbol library takes - the fixture
+    // of survey codes, which has rules and no definition or colour.
     EXPECT_FALSE(dialog.importDefinitionsFile(scratchFile("no-such.customisation.json")));
     EXPECT_FALSE(dialog.importDefinitionsFile(customisationFixtureFile("test_survey")));
-    EXPECT_EQ(begun, 0);
+    EXPECT_EQ(begun, 2);
+    EXPECT_EQ(finished, 0);
     EXPECT_TRUE(fixture.document.customisationState().kept);
 
     const std::uint64_t before = fixture.document.libraryGeneration();
     ASSERT_TRUE(dialog.importDefinitionsFile(customisationFixtureFile("test_symbols")));
-    EXPECT_EQ(begun, 1);
+    EXPECT_EQ(begun, 3);
     EXPECT_EQ(finished, 1);
     EXPECT_EQ(libraryAtBegin, before) << "asked before the library was touched";
     EXPECT_TRUE(keptAtBegin) << "and so while the session still said it was kept";
@@ -739,9 +751,11 @@ TEST(SymbolLibrary, ImportingDefinitionsLeavesOutASourceThatBroughtOnlyRules)
 )";
     }
     DefinitionThumbnails thumbnails;
+    katana::qt::test::InterpreterRunner executor(document);
     CustomisationContext context;
     context.document = &document;
     context.thumbnails = &thumbnails;
+    context.run = executor.runner();
     context.log = [](const QString&, bool) {};
     {
         SymbolLibraryDialog dialog(context);
@@ -793,15 +807,15 @@ TEST(SymbolLibrary, ImportRefusesAFileThatIsNotAKatanaCustomisationAndOneWithNot
         << fixture.logged.front().first.toStdString();
 
     // A customisation of survey codes alone: nothing a symbol library takes,
-    // and its 11 rules are said to have been left.
+    // and the refusal says where its rules are loaded instead.
     fixture.logged.clear();
     EXPECT_FALSE(dialog.importDefinitionsFile(customisationFixtureFile("test_survey")));
-    ASSERT_EQ(fixture.logged.size(), 2u);
-    EXPECT_EQ(fixture.logged[0].first,
-              QStringLiteral("test_survey.customisation.json holds no definitions or colours "
-                             "to import"));
-    EXPECT_TRUE(fixture.logged[1].first.contains(QStringLiteral("survey code rules (11)")))
-        << fixture.logged[1].first.toStdString();
+    ASSERT_EQ(fixture.logged.size(), 1u);
+    EXPECT_TRUE(fixture.logged[0].second);
+    EXPECT_TRUE(fixture.logged[0].first.contains(
+        QStringLiteral("the file holds no definitions or colours to load, so nothing was "
+                       "loaded; its survey code rules are loaded by CUSTOMISE <file>")))
+        << fixture.logged[0].first.toStdString();
 
     EXPECT_EQ(fixture.document.styleLibrary().size(), 7u);
     EXPECT_EQ(fixture.document.surveyMap().size(), 11u);
@@ -950,9 +964,11 @@ TEST(SymbolLibrary, AnExportCarriesTheSessionsNoticeAndTheSourcesThatBroughtDefi
     ASSERT_EQ(document.customisationState().sources.size(), 4u);
     ASSERT_TRUE(document.customisation().basedOn.has_value());
     DefinitionThumbnails thumbnails;
+    katana::qt::test::InterpreterRunner executor(document);
     CustomisationContext context;
     context.document = &document;
     context.thumbnails = &thumbnails;
+    context.run = executor.runner();
     context.log = [](const QString&, bool) {};
     SymbolLibraryDialog dialog(context);
     QListView* grid = child<QListView>(dialog, "symbolGrid");
@@ -1002,9 +1018,11 @@ TEST(SymbolLibrary, AnExportCarriesTheSessionsNoticeAndTheSourcesThatBroughtDefi
     {
         Document colleague;
         DefinitionThumbnails theirThumbnails;
+        katana::qt::test::InterpreterRunner theirExecutor(colleague);
         CustomisationContext theirs;
         theirs.document = &colleague;
         theirs.thumbnails = &theirThumbnails;
+        theirs.run = theirExecutor.runner();
         theirs.log = [](const QString&, bool) {};
         SymbolLibraryDialog library(theirs);
         ASSERT_TRUE(library.importDefinitionsFile(path));

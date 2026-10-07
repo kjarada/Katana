@@ -91,4 +91,29 @@ Customisation customisationPart(Customisation session,
     return part;
 }
 
+DefinitionsOfFile definitionsOfFile(Customisation file)
+{
+    DefinitionsOfFile result;
+    result.rulesLeft = file.map.size();
+    result.lineworkLeft = file.linework.has_value();
+    result.automationLeft = file.automation.has_value();
+    file.map = {};
+    file.linework.reset();
+    file.automation.reset();
+    const bool withColours = !file.colours.empty();
+    std::vector<katana::entity::CustomisationSourceNote> standing;
+    standing.reserve(file.sources.size());
+    for (katana::entity::CustomisationSourceNote& source : file.sources) {
+        const bool neither = !source.definitions && !source.rules;
+        if (!source.definitions && !(neither && withColours)) {
+            continue;
+        }
+        source.rules = false;
+        standing.push_back(std::move(source));
+    }
+    file.sources = std::move(standing);
+    result.taken = std::move(file);
+    return result;
+}
+
 } // namespace katana::cad

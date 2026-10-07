@@ -30,6 +30,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "command_word.hpp"
 #include "customisation/code_manager_support.hpp"
 #include "customisation/definition_thumbnails.hpp"
 #include "customisation/document_watcher.hpp"
@@ -39,7 +40,6 @@
 #include "katana/cad/code_edit.hpp"
 #include "katana/cad/colour_lookup.hpp"
 #include "katana/cad/customisation_host.hpp"
-#include "katana/cad/customisation_part.hpp"
 #include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/customisation.hpp"
@@ -677,30 +677,47 @@ katana::core::Status SurveyCodeManagerDialog::importCodes(const std::filesystem:
 
 katana::core::Status SurveyCodeManagerDialog::exportCodes(const std::filesystem::path& path) const
 {
-    // The session's customisation with the rules being edited in the place
-    // of its own, cut down to its codes by the one rule a part is written by
-    // (cad::customisationPart, which CUSTOMISE EXPORT ... CODES cuts by too):
-    // the session's name and its author's notice, the sources that brought
-    // it rules, and the colours these rules name - not its definitions, and
-    // nothing of its control codes or switches, which a file of codes for a
-    // colleague must not reset. With the drawing closed there is no session
-    // to say any of that, and the rules go under the file's own name.
+    // The line CUSTOMISE EXPORT <file> CODES: the session's customisation cut
+    // down to its codes by the one rule a part is written by
+    // (cad::customisationPart) - the session's name and its author's notice,
+    // the sources that brought it rules, and the colours these rules name; not
+    // its definitions, and nothing of its control codes or switches, which a
+    // file of codes for a colleague must not reset. The file is written by the
+    // verb's one writer (beside it, then renamed), so a write that fails leaves
+    // what was there, and the line is in the command history.
+    //
+    // What the verb writes is the DRAWING'S rules, so unapplied edits are not
+    // in it: it is refused for them rather than write rules the person is not
+    // looking at. (It once wrote the buffer, which no line can name.)
     const katana::cad::Document* doc = document();
-    katana::entity::Customisation session =
-        doc != nullptr ? doc->customisation() : katana::entity::Customisation{};
-    session.name = exportedCustomisationName(doc, path);
-    session.map = buffer_;
-    katana::entity::CustomisationWriteOptions options;
-    options.linestyles = false;
-    options.symbols = false;
-    const katana::entity::Customisation codes =
-        katana::cad::customisationPart(std::move(session), options);
-    const auto written = katana::entity::customisationToJson(codes, options);
-    if (!written) {
-        return written.error();
+    if (doc == nullptr) {
+        return makeError(ErrorCode::InvalidState, "the drawing this manager edits is closed");
     }
-    if (auto status = writeFileBytes(path, *written); !status) {
-        return status;
+    if (dirty()) {
+        return makeError(ErrorCode::InvalidState,
+                         "the rules being edited are not on the drawing, and Export Codes writes "
+                         "the drawing's rules (CUSTOMISE EXPORT ... CODES): Apply or Revert the "
+                         "edits first");
+    }
+    const auto file = customisationFileWord(path);
+    if (!file) {
+        return file.error();
+    }
+    QString line = QStringLiteral("CUSTOMISE EXPORT ") + *file + QStringLiteral(" CODES");
+    if (doc->customisationState().name.empty()) {
+        // A session nothing was loaded into has no name, and a file must have
+        // one: the file's own.
+        const auto name = commandWord(text(exportedCustomisationName(doc, path)),
+                                      tr("the customisation's name"));
+        if (!name) {
+            return name.error();
+        }
+        line += QStringLiteral(" NAME ") + *name;
+    }
+    VerbOutcome outcome;
+    QString said;
+    if (!runLine(line, outcome, said)) {
+        return makeError(ErrorCode::FileExportFailure, text(said), katana::core::pathToUtf8(path));
     }
     log(tr("Exported %1 rules to %2.").arg(buffer_.size()).arg(fileName(path)));
     return {};

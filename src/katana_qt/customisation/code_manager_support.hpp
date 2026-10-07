@@ -4,9 +4,9 @@
 // symbol name a rule gives stands against the loaded library, a colour
 // swatch, and the colour-name field. The last section is shared with the
 // symbol library too, since both managers read and write Katana customisation
-// files: the filter their file dialogs offer, which of a file's sources an
-// import of its definitions takes, the name a customisation written from a
-// session goes under, and the writing of a file.
+// files, through CUSTOMISE lines: the filter their file dialogs offer, the name
+// a customisation written from a session goes under, and a file as a word of
+// such a line.
 
 #include <filesystem>
 #include <optional>
@@ -82,35 +82,28 @@ void setColourField(QComboBox* box, const std::string& name);
                                                     const std::filesystem::path& file);
 
 // What a manager WRITES of a session is not here: Export Codes and Export
-// Selected cut the session down by cad::customisationPart
-// (katana/cad/customisation_part.hpp), the one rule CUSTOMISE EXPORT writes a
-// part by too.
+// Selected hand the line CUSTOMISE EXPORT to the window's executor, which cuts
+// the session down by cad::customisationPart and writes the file by one
+// writer (temp + rename); the Symbol Library's Import Definitions hands it
+// CUSTOMISE DEFINITIONS (cad::definitionsOfFile says what that takes).
 
-// Of `sources` - the list a FILE gives of what went into it - those an
-// import of the file's DEFINITIONS hands the merge, each as what it brought
-// to them:
-//
-//   it brought definitions        kept, and said to have brought those
-//                                 ALONE: its rules are not taken
-//   it brought rules alone        dropped, its notice with it: nothing of it
-//                                 is taken
-//   it brought neither (a table   kept only `withColours`, when the import
-//   of colours)                   takes colours it may have brought
-//
-// A source left listed with nothing of it taken passes for LOADED -
-// Document::installCustomisation takes every listed name off what the open
-// project is missing - so a project's warning that a customisation is missing
-// would go away with not one of its rules in the session.
-//
-// It goes by what the file SAYS each source brought - the import takes every
-// definition of the file - where a part being WRITTEN goes by where each
-// written definition came from (cad::customisationPart).
-[[nodiscard]] std::vector<katana::entity::CustomisationSourceNote>
-sourcesOfImportedDefinitions(std::vector<katana::entity::CustomisationSourceNote> sources,
-                             bool withColours);
+// `path` as one word of a CUSTOMISE line, in quotes and with '/'. A name with
+// no directory is given one ("./keep"): the family reads a line's whole FIRST
+// word as a keyword, quotes or none - the tokenizer takes them off - so a file
+// called `keep` would run KEEP, and EXPORT refuses a file called as one of its
+// own words. Every bare name is, so that no list of the family's words is kept
+// in a dialog to go stale. What no line can carry - a double quote, a line
+// break: the tokenizer's quoted words have no escape - is refused by the one
+// rule every dialog writes a word by (command_word.hpp).
+[[nodiscard]] katana::core::Result<QString> customisationFileWord(const QString& path);
+[[nodiscard]] katana::core::Result<QString>
+customisationFileWord(const std::filesystem::path& path);
 
-// `bytes` as the whole of the file at `path`. FileExportFailure, with the
-// path beside it, when it cannot be opened or written.
+// `bytes` as the whole of the file at `path`, for a file that is NOT a
+// customisation (the code list's CSV): a customisation file is written by
+// CUSTOMISE EXPORT, which writes beside the file and renames, so that a write
+// that fails part way leaves what was there. FileExportFailure, with the path
+// beside it, when it cannot be opened or written.
 [[nodiscard]] katana::core::Status writeFileBytes(const std::filesystem::path& path,
                                                   std::string_view bytes);
 

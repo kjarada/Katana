@@ -70,4 +70,34 @@ namespace katana::cad {
 customisationPart(katana::entity::Customisation session,
                   const katana::entity::CustomisationWriteOptions& written);
 
+// What a load of DEFINITIONS alone (CUSTOMISE DEFINITIONS, which the Symbol
+// Library's Import Definitions runs) takes of a file: its definitions and its
+// colours. Its survey code rules are the Survey Code Manager's to review; its
+// control codes and switches are settings of whoever wrote the file.
+struct DefinitionsOfFile {
+    katana::entity::Customisation taken{};
+    // What was left out, counted for the reply: the rules, and whether the
+    // file said anything of the linework codes or the automation.
+    std::size_t rulesLeft = 0;
+    bool lineworkLeft = false;
+    bool automationLeft = false;
+};
+
+// `file` without its rules, linework codes and automation - and without the
+// sources that brought it only rules. A source it lists becomes one of the
+// session's, by name, and is taken off what the open project is missing
+// (Document::installCustomisation): one left in with its rules flag cleared
+// would pass for loaded with none of its rules here.
+//
+//   a source that brought definitions     kept, and said to have brought those
+//                                         ALONE: its rules are not taken
+//   one that brought rules alone          dropped, its notice with it
+//   one that brought neither (a table     kept only when the file has colours,
+//   of colours)                           which the load takes
+//
+// It goes by what the file SAYS each source brought - the load takes every
+// definition of the file - where a part being WRITTEN goes by where each
+// written definition came from (customisationPart).
+[[nodiscard]] DefinitionsOfFile definitionsOfFile(katana::entity::Customisation file);
+
 } // namespace katana::cad

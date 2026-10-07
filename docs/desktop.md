@@ -1752,12 +1752,13 @@ the window by
   the interpreter's verb: typed, or run by a script or the Run Script dialog;
 - `katana --customise <file>...` at start-up.
 
-The managers' own Import buttons read a Katana customisation file too, each
-its own part of one: the Survey Code Manager's Import Codes... its rules into
-the manager's buffer, the Symbol Library's Import Definitions... its
-definitions and colours into the session ("Symbol Library" and "Survey Code
-Manager", below). Neither is the whole of a file, and neither runs the
-`CUSTOMISE` line.
+The managers' own Import and Export buttons work on a Katana customisation file
+too, each on its own part of one: the Symbol Library's Import Definitions...
+runs `CUSTOMISE DEFINITIONS "<file>"` and its Export Selected... and the
+Survey Code Manager's Export Codes... run `CUSTOMISE EXPORT`, so each is in the
+command history and the file is written by the verb's one writer; the Survey
+Code Manager's Import Codes... merges a file's rules into its buffer, for
+review before Apply ("Symbol Library" and "Survey Code Manager", below).
 
 Rejected: an item in Format that opened a file dialog on `CUSTOMISE "<file>"`.
 Settings' Import is that, with a path field a headless run can fill and the
@@ -2016,36 +2017,36 @@ signal; each that changes the drawing is ONE undo step through
 | Set on Style | the chosen style's symbol (an inline style picker; `updateStyleIfChanged`) |
 | Select Points Using | the points wearing a style that names it, selected and framed |
 | Replace in Styles | `cad::replaceSymbolInStyles`: every style naming the current symbol names the one in the inline `NamePicker`; refused while that is empty |
-| Import Definitions... (`importDefinitions`) | a Katana customisation file's DEFINITIONS and its colours, MERGED into the session's (D1: never a Replace from here), with what it added and replaced in the log |
-| Export Selected... (`exportSelected`) | the selected library definitions as a Katana customisation file, with the session's notice, the sources they came from and the colours their pens name |
+| Import Definitions... (`importDefinitions`) | runs `CUSTOMISE DEFINITIONS "<file>"`: a Katana customisation file's DEFINITIONS and its colours, MERGED into the session's (D1: never a Replace from here); the executor logs the verb's reply, which counts what it added and replaced and what it left |
+| Export Selected... (`exportSelected`) | runs `CUSTOMISE EXPORT "<file>" NAME <name> ONLY <the selected names>`: the selected library definitions as a Katana customisation file, with the session's notice, the sources they came from and the colours their pens name |
 | New Symbol..., Edit Definition..., Duplicate Definition..., Delete Definition (`symbolNew`, `symbolEdit`, `symbolDuplicate`, `symbolDelete`; along the bottom, since they change the library and not the drawing) | ask the definition editor ("The definition editor", below) for a new symbol, or for the current symbol's definition; the last three need a symbol the library defines, not a built-in shape or a name nothing defines. The buttons do nothing themselves |
 
 **Import and Export are Katana customisation files** (`docs/customisation.md`;
 the file dialogs offer "Katana customisation (*.customisation.json *.json)").
 They were style library files of another program's format until 2026-10-06.
 
-- **Import** reads the file with `cad::readCustomisationFile`, hands its
-  definitions and colours to `cad::mergeCustomisation` over
-  `Document::customisation`, and installs the result with
-  `Document::installCustomisation` - the path every load takes, so the
-  session's record of what went into it gains the file's customisation as a
-  source of definitions. The log names the load by its customisation: "Merged
-  test_symbols into the library: 3 added (...), 1 replaced (TEST Tree)", and
-  the same for "the colours" when it brought any. What it does NOT take is
-  said in the log with its count: the file's survey code rules, its linework
-  codes and its automation switches. *Rejected: taking the rules too*, which
-  is what the button did when a file held one kind. A customisation holds
-  everything, and rules loaded from a symbol browser would go round the
-  Survey Code Manager's buffer, where a person reviews rules before Apply -
-  and silently under any edits that buffer holds. A whole customisation is
-  loaded by the `CUSTOMISE` line or in File > Settings > Import.
+- **Import** hands the window's executor the line `CUSTOMISE DEFINITIONS
+  "<file>"` (`docs/customisation.md`, "The verbs"), so it is the path every
+  load takes - the same read, merge and install - and the session's record of
+  what went into it gains the file's customisation as a source of
+  definitions. The verb's reply is the log: `loaded file=... name=test_symbols
+  definitions_added=3 definitions_replaced=1 ...`, and what it does NOT take
+  is counted in `left rules=<n> linework=yes|no automation=yes|no`: the
+  file's survey code rules, its linework codes and its automation switches. A
+  file that holds neither a definition nor a colour is refused, and the log
+  says so as an error. *Rejected: taking the rules too*, which is what the
+  button did when a file held one kind. A customisation holds everything, and
+  rules loaded from a symbol browser would go round the Survey Code Manager's
+  buffer, where a person reviews rules before Apply - and silently under any
+  edits that buffer holds. A whole customisation is loaded by the `CUSTOMISE`
+  line or in File > Settings > Import. A dialog given no executor says it
+  cannot run the line and does not merge by itself.
 
   A file that LISTS its sources - every customisation a session writes does -
   brings them as the session's sources, and of those the import hands on only
   the ones that brought the file definitions, each as a source of definitions
   alone, and a table of colours when the file has colours
-  (`sourcesOfImportedDefinitions`,
-  `src/katana_qt/customisation/code_manager_support.hpp`). A source that
+  (`cad::definitionsOfFile`, `include/katana/cad/customisation_part.hpp`). A source that
   brought the file nothing but rules is left out. *Rejected: keeping it with
   its `rules` flag cleared*, which is what the import first did. Every source
   a load lists is taken off the names the open project is missing
@@ -2054,8 +2055,11 @@ They were style library files of another program's format until 2026-10-06.
   import of definitions from a file that merely listed B, with not one of B's
   rules in the session
   (`ImportingDefinitionsLeavesOutASourceThatBroughtOnlyRules`).
-- **Export** writes the session's customisation CUT DOWN to the selected
-  definitions (`cad::customisationPart`,
+- **Export** runs `CUSTOMISE EXPORT "<file>" NAME <the session's name, or the
+  file's own while it has none> ONLY <the selected names>`, which writes the
+  session's customisation CUT DOWN to the selected definitions through the
+  verb's one writer (a file beside the target, then a rename, so that a write
+  that fails leaves the file that was there) (`cad::customisationPart`,
   `include/katana/cad/customisation_part.hpp`; then
   `entity::customisationToJson` with the same
   `CustomisationWriteOptions::only`), under the session's name - or, while
@@ -2134,16 +2138,13 @@ ground only, though the preview switches; the dialog reloads whole (two
 250,000-entity drawing; a project's record
 is of NAMES, so importing the definitions of a customisation that brought
 both kinds clears a warning that it is missing although its rules are still
-not here (only a source that brought rules alone is left out); and Import and
-Export do the work themselves rather than running a `CUSTOMISE` line. The
-verb cuts a part down by the same function, so Export Selected writes what
-`CUSTOMISE EXPORT ... ONLY` writes, and since 2026-10-07 the window hands
-every `CUSTOMISE` line to the interpreter, so the button COULD run that line;
-making it do so is left with File > Settings, whose Import and Export are
-the same two lines.
+not here (only a source that brought rules alone is left out). Import and
+Export run the lines `CUSTOMISE DEFINITIONS` and `CUSTOMISE EXPORT ... ONLY`,
+which cut a part down by the one function, so Export Selected writes what the
+verb writes.
 
 An import into a session that was the kept one is kept again: Import
-Definitions calls the commit hook round its install - before it, and what
+Definitions calls the commit hook round its line - before it, and what
 the hook hands back after one that was taken
 (`ImportCallsTheCommitHookBeforeTheInstallAndWhatItHandsBackAfterOneThatWasTaken`)
 - and the workbench answers the hook with the `CUSTOMISE KEEP` line ("The
@@ -2187,6 +2188,17 @@ filter"):
   and does not do the work some other way. Afterwards the tab shows the
   verb's own answer: the reply in `applyReport`, and in `lineworkSummary`
   how many lines the reply's first record says were drawn.
+- **Codes in Drawing has the same controls, prefix `census`**
+  (`censusScopeDrawing`, `censusFilterLayer` ...), and builds `CODE CENSUS
+  <scope> [WHERE ...] [PROPERTY p]` (`censusCommand`), which Run Line
+  (`censusRun`) hands to the executor. The table is counted here, over what
+  the scope takes (`cad::codeCensus` with the ids `cad::matchEntities` gave),
+  and not read from the line's reply, because it is classed against the rules
+  being EDITED and the verb reads the drawing's; the summary begins with what
+  the scope took ("3 entities matched the scope; ..."), Select Entities With
+  Code acts among those it took, and a scope that cannot be read (no layer
+  ticked) leaves the table empty with the reason in the summary
+  (`TheCensusTabCountsWhatItsScopeTakesAndBuildsTheCodeCensusLineItSays`).
 - **Preview is a plan made in the manager**, read-only and unlogged, because
   it shows more than a reply does: a row a code with its layer and style,
   every point in no line with its reason, every note. It is planned by what
@@ -2240,14 +2252,20 @@ be the metre).
 Import Codes... (`importCodes`) and Export Codes... (`exportCodes`) read and
 write Katana customisation files, as the Symbol Library does: Import merges a
 file's RULES into the buffer for review and leaves everything else in it
-alone, and Export writes the buffer as a customisation of survey codes alone,
-cut out of the session by the rule the Symbol Library's Export is cut by
+alone, and Export runs `CUSTOMISE EXPORT <file> CODES`, which writes the
+DRAWING's rules (so it is refused while the buffer has unapplied edits: Apply
+or Revert them first, since no line can name a buffer) as a customisation of
+survey codes alone, cut out of the session by the rule the Symbol Library's Export is cut by
 ("Symbol Library", above; `cad::customisationPart`, which is what
 `CUSTOMISE EXPORT <file> CODES` writes by): the session's name and notice,
 the sources that brought it rules, the notice of each source left out, the
 colours the rules name, and none of its settings. Apply calls the commit
 hook round its `setSurveyMap`, as the definition editor's Save does
-(`ApplyCallsTheCommitHookBeforeTheMapIsSetAndWhatItHandsBackAfter`).
+(`ApplyCallsTheCommitHookBeforeTheMapIsSetAndWhatItHandsBackAfter`). Apply is
+not a line, and is not undone: it puts the edited buffer on the session, which
+is session data (D1), and a line for it would write the buffer to a file in
+order to merge it back (`docs/customisation.md`, "The verbs", "Two window
+paths are not lines").
 Every colour the manager shows or applies - the swatches of the Code Table,
 the three colour fields of the rule form, the explanation, the lint, Apply
 Codes and Linework - is resolved by the Document (`cad::resolveColour`): the

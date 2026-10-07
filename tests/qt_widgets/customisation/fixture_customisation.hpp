@@ -34,6 +34,11 @@
 #include <utility>
 #include <vector>
 
+#include <QString>
+#include <QStringList>
+
+#include "command_runner.hpp"
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/customisation_merge.hpp"
 #include "katana/cad/customisation_state.hpp"
 #include "katana/cad/document.hpp"
@@ -89,6 +94,44 @@ inline void installCustomisations(katana::cad::Document& document,
         std::move(merged.merged), katana::cad::CustomisationOrigin::Loaded);
     ASSERT_TRUE(installed.ok()) << (installed.ok() ? std::string()
                                                    : installed.error().describe());
+}
+
+// The window's one executor as a dialog is handed it (CustomisationContext::
+// run): each line is recorded as it is handed over, run by an interpreter on
+// the same Document - which is what the window's executor does with it - and
+// what it replied, or was refused with, handed back. So a test sees the exact
+// line a button built AND what the verb then did.
+class InterpreterRunner {
+  public:
+    explicit InterpreterRunner(katana::cad::Document& document) : interpreter(document) {}
+
+    [[nodiscard]] katana::qt::CommandRunner runner()
+    {
+        return [this](const QString& line) {
+            ran << line;
+            const auto reply = interpreter.run(line.toStdString());
+            katana::qt::VerbOutcome outcome;
+            outcome.ok = reply.ok();
+            if (reply.ok()) {
+                outcome.reply = QString::fromStdString(*reply);
+            } else {
+                outcome.error = QString::fromStdString(reply.error().describe());
+            }
+            lastReply = outcome.ok ? outcome.reply : outcome.error;
+            return outcome;
+        };
+    }
+
+    katana::cad::CommandInterpreter interpreter;
+    QStringList ran{};
+    QString lastReply{};
+};
+
+// `file` as the word a dialog writes it by in a line: in quotes, with '/'.
+inline QString quotedFile(const std::filesystem::path& file)
+{
+    return QLatin1Char('"') + QString::fromStdU16String(file.generic_u16string()) +
+           QLatin1Char('"');
 }
 
 // Loads the named fixtures into `document`, in the order given.

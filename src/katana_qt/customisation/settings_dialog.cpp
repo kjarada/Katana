@@ -242,18 +242,8 @@ QString typedPath(const QString& typed)
 }
 
 // The file a person named, as one word of a CUSTOMISE line: as typedPath
-// reads it, and always in quotes, as the family's lines are documented
-// (cad::removeDefinitionLine). What no line can carry - a double quote, a
-// line break: the tokenizer's quoted words have no escape - is refused by the
-// one rule every dialog writes a word by (command_word.hpp) rather than cut
-// short at the quote.
-//
-// A name with no directory is given one ("./keep"). The family reads a line's
-// whole FIRST word as a keyword, quotes or none - the tokenizer takes them
-// off - so a file called `keep` would run KEEP, and EXPORT refuses a file
-// called as one of its own words; a file so called is given with its
-// directory (cad/customisation_verbs.hpp). Every bare name is, so that no
-// list of the family's words is kept in a dialog to go stale.
+// reads it, then as every dialog that names a file in a line writes it
+// (customisationFileWord).
 katana::core::Result<QString> fileWord(const QString& typed)
 {
     const QString path = typedPath(typed);
@@ -262,11 +252,7 @@ katana::core::Result<QString> fileWord(const QString& typed)
                                        "no file is named: type its path, or choose it with "
                                        "Browse");
     }
-    if (const auto word = commandWord(path, QStringLiteral("the file's path")); !word) {
-        return word.error();
-    }
-    const bool bare = !path.contains(QLatin1Char('/')) && !path.contains(QLatin1Char(':'));
-    return QLatin1Char('"') + (bare ? QStringLiteral("./") : QString()) + path + QLatin1Char('"');
+    return customisationFileWord(path);
 }
 
 // A line and what it answered, as the status shows them: the line as the

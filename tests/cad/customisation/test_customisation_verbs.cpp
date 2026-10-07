@@ -28,6 +28,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -667,6 +668,127 @@ TEST(CustomisationVerbs, ReplaceTakesThePlaceOfEachKindAndSaysWhatIsGone)
 
     EXPECT_EQ(session.refused("CUSTOMISE REPLACE").message,
               "usage: CUSTOMISE [REPLACE] <file> [<file>...]");
+}
+
+// A file that holds a little of everything, for what DEFINITIONS takes and
+// what it leaves: one symbol, one colour, one rule, a spelling of Start, a
+// switch, and two sources - Mixed, which brought the definition, and Rulers,
+// which brought rules alone.
+const std::string kMixed = R"({
+  "format": "katana-customisation", "version": 1, "name": "Mixed",
+  "sources": [
+    {"name": "Mixed", "definitions": true, "notice": ["Mixed: free to use."]},
+    {"name": "Rulers", "rules": true, "notice": ["Rulers: not for the symbol library."]}
+  ],
+  "colours": {"sui mix": "#102030"},
+  "linework": {"start": "S"},
+  "automation": {"codesOnSurveyImport": false},
+  "symbols": [
+    {"name": "MIX Dot", "atVertices": true, "strokes": [["circle", 1]]}
+  ],
+  "codes": [
+    {"key": "MX*", "sets": "feature", "layer": "MIX"}
+  ]
+})";
+
+TEST(CustomisationVerbs, DefinitionsMergesTheDefinitionsAndColoursAndLeavesTheRulesAlone)
+{
+    Hosted session("definitions");
+    session.start();
+    const fs::path site = session.scratch.write("site.json", kSite);
+    const std::string reply = session.ok("CUSTOMISE DEFINITIONS " + typed(site));
+
+    // Site's two symbols: SITE Tree is new and TEST Peg takes the place of
+    // the built-in's. Its three rules are not taken: the built-in's two are
+    // as they were (FE* still lays FENCES), and the reply counts the three
+    // left, as one record that says what else it held none of.
+    const ReplyRecord loaded = record(reply, "loaded");
+    EXPECT_EQ(field(loaded, "name"), "Site");
+    EXPECT_EQ(field(loaded, "definitions_added"), "1");
+    EXPECT_EQ(field(loaded, "definitions_replaced"), "1");
+    EXPECT_EQ(field(loaded, "codes_added"), "0");
+    EXPECT_EQ(field(loaded, "codes_replaced"), "0");
+    const ReplyRecord left = record(reply, "left");
+    EXPECT_EQ(field(left, "rules"), "3");
+    EXPECT_EQ(field(left, "linework"), "no");
+    EXPECT_EQ(field(left, "automation"), "no");
+    EXPECT_TRUE(reply.ends_with("customisation name=\"Small Built In\" origin=loaded kept=no "
+                                "definitions=3 codes=2 rules=2 colours=1"))
+        << reply;
+    EXPECT_EQ(session.document.surveyMap().rules()[0].model, "FENCES");
+    EXPECT_FALSE(session.state().kept);
+}
+
+TEST(CustomisationVerbs, DefinitionsTakesTheColoursAndNotTheControlCodesTheSwitchesOrARulesOnlySource)
+{
+    Hosted session("definitions-mixed");
+    session.start();
+    const std::string reply =
+        session.ok("CUSTOMISE DEFINITIONS " + typed(session.scratch.write("mixed.json", kMixed)));
+
+    const ReplyRecord loaded = record(reply, "loaded");
+    EXPECT_EQ(field(loaded, "definitions_added"), "1");   // MIX Dot
+    EXPECT_EQ(field(loaded, "colours_added"), "1");       // sui mix
+    EXPECT_EQ(field(loaded, "codes_added"), "0");
+    // What it held and was left: the one rule, the spelling of Start and the
+    // switch.
+    const ReplyRecord left = record(reply, "left");
+    EXPECT_EQ(field(left, "rules"), "1");
+    EXPECT_EQ(field(left, "linework"), "yes");
+    EXPECT_EQ(field(left, "automation"), "yes");
+
+    EXPECT_EQ(session.document.styleLibrary().size(), 3u);
+    EXPECT_EQ(session.state().colours.size(), 2u) << "sui gas and sui mix";
+    EXPECT_EQ(session.state().linework.start, "ST");
+    EXPECT_TRUE(session.state().automation.codesOnSurveyImport);
+    EXPECT_EQ(session.document.surveyMap().size(), 2u);
+    // Mixed is a source of the session, as one that brought definitions
+    // alone and with its notice; Rulers brought rules only, and none was
+    // taken, so it is none of the session's.
+    const auto& sources = session.state().sources;
+    const auto mixed = std::find_if(sources.begin(), sources.end(),
+                                    [](const auto& each) { return each.name == "Mixed"; });
+    ASSERT_NE(mixed, sources.end());
+    EXPECT_TRUE(mixed->definitions);
+    EXPECT_FALSE(mixed->rules);
+    EXPECT_EQ(mixed->notice, std::vector<std::string>{"Mixed: free to use."});
+    EXPECT_TRUE(std::none_of(sources.begin(), sources.end(),
+                             [](const auto& each) { return each.name == "Rulers"; }));
+}
+
+TEST(CustomisationVerbs, DefinitionsOfAFileWithNoDefinitionOrColourIsRefusedAndChangesNothing)
+{
+    Hosted session("definitions-none");
+    session.start();
+    // A file of rules alone: nothing to take, and the refusal says where its
+    // rules are loaded.
+    const std::string rulesOnly = R"({
+  "format": "katana-customisation", "version": 1, "name": "Rules Only",
+  "codes": [{"key": "RU*", "sets": "feature", "layer": "RULES"}]
+})";
+    const katana::core::Error error = session.refused(
+        "CUSTOMISE DEFINITIONS " + typed(session.scratch.write("rules.json", rulesOnly)));
+    EXPECT_EQ(error.code, ErrorCode::NotFound);
+    EXPECT_EQ(error.message,
+              "CUSTOMISE DEFINITIONS: the file holds no definitions or colours to load, so "
+              "nothing was loaded; its survey code rules are loaded by CUSTOMISE <file>");
+    EXPECT_TRUE(session.state().kept) << "a refused line changes nothing";
+    EXPECT_EQ(session.document.surveyMap().size(), 2u);
+
+    // A file that is not one, and a file that is not there, are refused as
+    // any load is.
+    EXPECT_TRUE(contains(session.refused("CUSTOMISE DEFINITIONS " +
+                                         typed(session.scratch.write("old.txt", kLegacyLibrary)))
+                             .message,
+                         "not a Katana customisation file"));
+    EXPECT_EQ(session.refused("CUSTOMISE DEFINITIONS " +
+                              typed(session.scratch.root / "absent.json"))
+                  .code,
+              ErrorCode::NotFound);
+    // With no file there is a usage, in its own words.
+    EXPECT_EQ(session.refused("CUSTOMISE DEFINITIONS").message,
+              "usage: CUSTOMISE DEFINITIONS <file> [<file>...]");
+    EXPECT_TRUE(session.state().kept);
 }
 
 TEST(CustomisationVerbs, AFileNamedTwiceIsReadOnceAndSaid)
@@ -1974,7 +2096,8 @@ TEST(CustomisationVerbs, TheHelpNamesEveryWordAndHelpCustomiseSaysEveryReply)
     // (the cli and MCP help tests) passes on this block alone once the
     // session's goes.
     EXPECT_TRUE(contains(help, "Customise CUSTOMISE [REPLACE] <file> [<file>...]"));
-    for (const char* word : {"CUSTOMISE JSON", "CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] "
+    for (const char* word : {"CUSTOMISE JSON", "CUSTOMISE DEFINITIONS <file> [<file>...]",
+                             "CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] "
                                                "[SYMBOLS]",
                              "CUSTOMISE RESET", "KEEP", "REVERT", "CUSTOMISE REMOVE name... [FORCE]",
                              "REMOVE CODE key...", "CUSTOMISE SET auto.codes=on|off",
@@ -1989,6 +2112,7 @@ TEST(CustomisationVerbs, TheHelpNamesEveryWordAndHelpCustomiseSaysEveryReply)
     for (const char* reply : {"customisation name=", "source name=", "automation auto.codes=",
                               "linework linework.start=", "missing", "loaded file=",
                               "removed definitions=", "undefined names=", "exported file=",
+                              "left rules= linework=yes|no automation=yes|no",
                               "reset name=", "kept file=", "written=no "
                                                           "reason=the-session-is-the-built-in",
                               "reverted file=", "removed definition=", "removed code=",
