@@ -1,7 +1,7 @@
 #pragma once
 
-// GIS > Export Vector Data (File > Export Vector...; docs/interop.md, "Export
-// options"): the window onto EXPORT, built on the GIS dialog frame
+// Export Drawing's dialog (File > Export > Export Drawing...; docs/interop.md,
+// "Export options"): the window onto EXPORT, built on the GIS dialog frame
 // (geo/gis_tool_dialog.hpp). What is written is the shared "Apply to" and
 // "Only those that match" controls (CLAUDE.md section 1.1); the rest are
 // EXPORT's words. The dialog writes nothing itself: Run hands the EXPORT line
@@ -65,7 +65,7 @@ struct VectorExportForm {
 class VectorExportDialog final : public GisToolDialog {
   public:
     explicit VectorExportDialog(GisDialogContext context, QWidget* parent = nullptr);
-    // The file to write, as File > Export Vector's file dialog chose it.
+    // The file to write, as File > Export > Export Drawing's file dialog chose it.
     void setFile(const QString& file);
     [[nodiscard]] VectorExportForm form() const;
     [[nodiscard]] katana::core::Result<QString> command() const override;

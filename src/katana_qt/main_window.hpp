@@ -163,6 +163,13 @@ class MainWindow final : public QMainWindow {
     // RESET, KEEP and REVERT need. Once, by main(), after setHeadless and
     // before anything is opened.
     //
+    // The kept file is the one the environment variable KATANA_CUSTOMISATION
+    // names; with it unset, an INTERACTIVE session keeps its own in the
+    // per-user place, <AppConfigLocation>/customisation.json, and a HEADLESS
+    // one keeps none - it must be the same run on every machine, so it reads
+    // and writes no per-user place (as it keeps no window layout). That is
+    // why this comes after setHeadless.
+    //
     // Loading a customisation FILE is not the window's own any more: it is
     // the interpreter's CUSTOMISE line (cad/customisation_verbs.hpp), typed,
     // run by a script, or made by main() for --customise and run through
@@ -223,9 +230,9 @@ class MainWindow final : public QMainWindow {
     // line run through the one executor, as if typed. The menu's import and
     // a headless --import-options whose Run was pressed share it.
     void finishImport(const QDialog& dialog);
-    // File > Export Vector's dialog (VectorExportDialog, one per window) for
-    // `path`, shown, with the scope set as the menu sets it: what File >
-    // Export Vector opens once its file dialog has answered. For
+    // File > Export > Export Drawing's dialog (VectorExportDialog, one per
+    // window) for `path`, shown, with the scope set as the menu sets it: what
+    // that item opens once its file dialog has answered. For
     // --export-options, since a headless run opens no file dialog.
     QDialog* showExportOptions(const QString& path);
     // Triggers the menu item whose object name is `name`, exactly as a click
@@ -303,12 +310,29 @@ class MainWindow final : public QMainWindow {
   private:
     void buildActions();
     // The GIS menu and toolbar: GDAL vector and raster, PDAL point clouds.
-    // `exportAction` is File's Export Vector, shared so the two menus cannot
+    // `exportAction` is File's Export Drawing, shared so the two menus cannot
     // drift.
     void buildGisActions(QMenu& gisMenu, QAction* exportAction);
     // The Survey menu and toolbar; the workbench fills both (PLAN.MD 45).
-    // `codeAction` is Apply Survey Codes, which the window makes.
-    void buildSurveyActions(QMenu& surveyMenu, QAction* codeAction);
+    // `codeAction` is Apply Survey Codes and `lineworkAction` Process
+    // Linework, which the window makes: each runs a line through its executor.
+    void buildSurveyActions(QMenu& surveyMenu, QAction* codeAction, QAction* lineworkAction);
+    // One part of a menu that is filled BY NAME: a section's title - empty
+    // for items that lead the menu under no title - and the object names of
+    // its items, in order.
+    struct MenuPart {
+        const char* section;
+        std::vector<const char*> items;
+    };
+    // Fills `menu` with actions the window ALREADY HAS, each found by its
+    // object name: how File > Import and File > Export show the Survey and
+    // GIS menus' own items - the same QAction objects, so an item is one
+    // thing wherever it is shown - without File having to be built after
+    // those menus, or the workbenches that make the items having to know of
+    // File. A name no action carries is left out and noted (menuProblems_),
+    // to be logged as an error once the log exists: a renamed item must not
+    // quietly drop out of a menu.
+    void fillMenuByName(QMenu& menu, const std::vector<MenuPart>& parts);
     // The Format menu and toolbar; the customisation workbench fills both.
     void buildFormatActions(QMenu& formatMenu, QAction* layersAction);
     // Draw, Modify and Annotate, menus and toolbars, generated from the tool
@@ -442,6 +466,11 @@ class MainWindow final : public QMainWindow {
     // undone as the typed line is. It called cad::applySurveyCodes itself
     // once, a second path with words and omissions of its own.
     void applySurveyCodes();
+    // Survey > Process Linework: the line LINEWORK SELECTION when something
+    // is selected, else LINEWORK DRAWING, through runVerbLine, as Apply
+    // Survey Codes runs CODE. The verb says the same with no scope word; the
+    // item says it, so the log shows which the click meant.
+    void surveyLinework();
     // After an open: says which customisations the project records that are
     // not loaded (the Document works out which, and its save writes the
     // record). A warning; the project opens all the same.
@@ -536,7 +565,8 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] bool confirmDiscard();
     // In a headless session, logs that no file dialog opens and names `verb`,
     // the line that does the same without one, and returns true: what File >
-    // Open, Save As, Import and Export Vector do there.
+    // Open, Save As, Import Any File and Export Drawing do there, and the GIS
+    // menu's three imports and Dataset Information.
     bool refuseFileDialog(const QString& verb);
     void newDocument();
     void openDocument();
@@ -753,10 +783,19 @@ class MainWindow final : public QMainWindow {
     bool refreshingStyles_ = false;     // ditto, for the current-style choice
     bool refreshPending_ = false;       // a refreshAll() is queued on the event loop
     bool headless_ = false;
-    // This session's host names a kept customisation file (set where the
-    // host is made, loadDefaultCustomisation): whether an editor's own commit
-    // is followed by CUSTOMISE KEEP (CustomisationServices::hasKeptFile).
-    bool keptCustomisationFile_ = false;
+    // What this session's host offers (set where the host is made,
+    // loadDefaultCustomisation), for the Format workbench: the kept
+    // customisation file - empty when the session keeps none - which decides
+    // whether an editor's own commit is followed by CUSTOMISE KEEP
+    // (CustomisationServices::hasKeptFile) and is shown in File > Settings;
+    // and whether there is a built-in customisation, which Settings' Reset
+    // to Built-in needs.
+    std::filesystem::path keptCustomisationFile_;
+    bool hasBuiltInCustomisation_ = false;
+    // What fillMenuByName could not find, a sentence each: collected while
+    // the menus are built, which is before the log exists, and logged by the
+    // constructor.
+    QStringList menuProblems_;
     int historyCursor_ = 0;         // position while browsing command history
     int errorsLogged_ = 0;          // logMessage's errors so far, for runCommand
     // What runVerbLine's line has logged so far, while it runs: logMessage

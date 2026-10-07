@@ -1,4 +1,4 @@
-// GIS > Export Vector Data (gis_export_dialog.hpp).
+// File > Export > Export Drawing's dialog (gis_export_dialog.hpp).
 
 #include "gis_export_dialog.hpp"
 
@@ -124,7 +124,7 @@ Result<QString> vectorExportLine(const VectorExportForm& form)
 }
 
 VectorExportDialog::VectorExportDialog(GisDialogContext context, QWidget* parent)
-    : GisToolDialog("vectorExport", "Export Vector Data", std::move(context), parent)
+    : GisToolDialog("vectorExport", "Export Drawing", std::move(context), parent)
 {
     file_ = addField("vectorExportFile", "File:", "the file to write, e.g. site.gpkg",
                      "Its extension picks the format: .gpkg, .geojson, .shp, .kml, .dxf, .12da ...");

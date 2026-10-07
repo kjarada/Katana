@@ -1,4 +1,4 @@
-// GIS > Export Vector Data (src/katana_qt/gis_export_dialog.hpp): its fields
+// Export Drawing's dialog (src/katana_qt/gis_export_dialog.hpp): its fields
 // make the EXPORT line a person would type - the shared scope first, then
 // EXPORT's options - and Run and Preview hand that line to the window's
 // executor. The verb itself is tested in tests/geo/test_export_options.cpp.
@@ -102,6 +102,8 @@ TEST(VectorExportDialog, TheFieldsBuildExactlyTheTypedLineAndRunHandsItOver)
     };
     VectorExportDialog dialog(std::move(context));
     EXPECT_EQ(dialog.objectName(), "vectorExportDialog");
+    // File > Export calls its item "Export Drawing...", and the window it opens says the same.
+    EXPECT_EQ(dialog.windowTitle(), "Export Drawing");
     dialog.setFile("C:/out/site.gpkg");
     // The whole drawing is where an export starts.
     EXPECT_EQ(child<QLineEdit>(dialog, "vectorExportCommand")->text(),

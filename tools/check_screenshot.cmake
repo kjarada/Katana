@@ -187,7 +187,7 @@ if(DEFINED DRIVE)
         elseif(_sigil STREQUAL "!")
             list(APPEND extra --press "${_rest}")
         elseif(_sigil STREQUAL "^")
-            # File > Export Vector's dialog for that file, in its turn: the
+            # File > Export > Export Drawing's dialog for that file, in its turn: the
             # menu's file dialog is not opened headless.
             list(APPEND extra --export-options "${_rest}")
         elseif(_sigil STREQUAL "~")

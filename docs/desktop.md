@@ -13,10 +13,11 @@ The window (`MainWindow`) is a `QMainWindow` around a workspace of views, with d
 Reference Data panels. Its menu bar reads in the order a CAD user reads it -
 File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
 (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
-`helpMenu`). File keeps to files: the managers of what a customisation brings
-are in Format and in Survey > Survey Coding, and a customisation FILE is
-loaded by the `CUSTOMISE` line, which has no menu item yet ("The Format
-menu", below). The
+`helpMenu`). File is the drawing as a file, what comes into it and goes out
+of it - every import and every export, under two submenus - and the
+program's Settings ("The File menu", below); the managers of what a
+customisation brings are in Format and in Survey > Survey Coding ("The Format
+menu"). The
 status bar shows a view's running readout, how many entities are selected of
 how many, the current layer, the active snap and the cursor coordinates.
 
@@ -64,14 +65,28 @@ file installs nothing and says nothing: it draws plain lines until a
 customisation is loaded, which is a state the program runs in, not a fault
 (`docs/customisation.md`; a build from a clean checkout has none).
 
-- **The kept file is named only by the environment variable
-  `KATANA_CUSTOMISATION`, for now.** A headless run must be the same on every
-  machine, so it reads no per-user place (`docs/headless.md`, "The
-  customisation a run starts with"); with the variable unset there is no kept
-  file, and `CUSTOMISE KEEP` and `REVERT` are refused naming it. Not done: an
-  interactive session has no per-user place either yet - that comes with
-  File > Settings - so a person who wants their customisation kept between
-  sessions sets the variable.
+- **Where the kept file is**, in order:
+  1. the file the environment variable `KATANA_CUSTOMISATION` names, whatever
+     kind of session this is;
+  2. else, in an INTERACTIVE session, `customisation.json` in the per-user
+     place Qt gives the application (`QStandardPaths::AppConfigLocation`,
+     where the online sources a person adds are kept too:
+     `OnlineDataWorkbench::userCataloguePath`);
+  3. else none: a HEADLESS run with the variable unset. It must be the same
+     run on every machine, so it reads and writes no per-user place - as it
+     keeps no window layout (`docs/headless.md`, "The customisation a run
+     starts with") - and `CUSTOMISE KEEP` and `REVERT` are then refused,
+     naming the variable.
+
+  That is why `loadDefaultCustomisation` is called after
+  `MainWindow::setHeadless`. The file need not exist: nothing is kept until a
+  `KEEP` writes it, and the folder is made then. The variable is read with
+  `core::environmentVariable`, as the session of `katana_cli` reads it (wide
+  on Windows, UTF-8 out) and never with `getenv`, so a kept file in a folder
+  whose name is outside the code page is still found. File > Settings shows
+  the path, or that the session keeps none ("Settings", below). *Rejected:
+  the per-user place in a headless run too.* Every fixture test would then
+  start with whatever the machine's user last kept.
 - **`--customise FILE...`** then runs `CUSTOMISE "<file>" ...` through the
   window's one executor (`main.cpp`, `customise`): merged into what the
   session started with, as the typed line would. A typed, scripted or
@@ -98,7 +113,9 @@ starts a window on a fixture named through the seam, replaces its
 definitions, resets, and is refused a `KEEP`;
 `qt_a_customisation_is_kept_headless` and
 `qt_a_kept_customisation_is_what_the_next_window_starts_with_headless` keep
-one in one process and start with it in the next.
+one in one process and start with it in the next. The per-user place itself
+has no test: a headless run never has one, and a test that wrote a real
+user's folder would be the thing rule 3 is there to prevent.
 
 **Where the window was.** Until 2026-09-26 every session opened a 1360 x 860
 window, whatever the screen: on a 1366 x 768 laptop it ran off the bottom,
@@ -146,6 +163,101 @@ click on an entity edits it (both below, "The plan view's shortcut menu").
 While a tool runs, Enter, Space and a right-click are the tool's Enter, a
 double click is two clicks for it, and Esc ends the tool first. What a tool
 does with each is `docs/tools.md`, "The tool host".
+
+### The File menu: every import and export in two submenus
+
+```
+File                                                      fileMenu
+  Drawing            New                                  fileNew
+                     Open Project...                      fileOpen
+                     Save                                 fileSave
+                     Save As...                           fileSaveAs
+  Import and Export  Import >                             fileImportMenu
+                       Import Any File...    Ctrl+I         fileImport
+                       Import IFC...                        fileImportIfc
+                       Survey  Import Survey Points...      surveyImport
+                       GIS     Import Vector Data...        importVectorData
+                               Import Raster...             importRaster
+                               Import Point Cloud...        importPointCloud
+                               Online Data...               onlineData
+                     Export >                             fileExportMenu
+                       Export Drawing...     Ctrl+Shift+E   fileExportVector
+                       Export IFC...                        fileExportIfc
+                       Export View as Image...              fileExportViewImage
+                       Survey  Export Survey Points...      surveyExport
+                       GIS     Export Surface as DEM...     exportSurfaceDem
+                               Export Point Cloud...        exportPointCloud
+  Scripts            Run Script...                        fileRunScript
+                     Recent Scripts >                     fileRecentScripts
+  Plot               Plot to PDF...                       filePlot
+                     Sheets...                            fileSheets
+                     Plot Sheets to PDF...                filePlotSheets
+  Project            Project Coordinate System...         fileProjectCrs
+                     Drawing Summary...                   fileDrawingSummary
+  ---                Settings...                          fileSettings -> settingsDialog
+                     Quit                                 fileQuit
+```
+
+Importing was offered in three menus - File (two items), GIS (four) and
+Survey (one) - and exporting in three, and the place a person looks for "how
+do I get this file in" is File. Every import is now under File > Import and
+every export under File > Export: File's own first, then Survey's and GIS's
+under their names. The Survey and GIS menus still show their own, as before;
+File had seventeen top-level items and has fifteen.
+
+- **The items are the same `QAction` objects** the Survey and GIS menus show,
+  so an item has one text, one tip, one icon and one enabled state wherever
+  it is shown, and `--trigger importRaster` finds one thing. They are put in
+  BY OBJECT NAME at the end of `MainWindow::buildActions`
+  (`MainWindow::fillMenuByName`): File is built first, and the Survey and GIS
+  items are made later by their workbenches, which need know nothing of File.
+  A name no action carries is left out and logged as an error once the log
+  exists - `File > Import: no menu item is named <name>, so it is left out of
+  this menu.` - because a renamed item must not quietly drop out of a menu.
+  *Rejected: proxy actions* - a second action in File whose trigger runs the
+  first. They pass the letter check with texts of their own, and that is the
+  trouble: two texts, two tips and two enabled states to drift apart, and two
+  names for a test to find one command by.
+- **Three texts changed, and no object name.** A submenu is its own letter
+  space (`--check-shortcuts`, "Every key reaches one thing"), and a shared
+  action brings its letter into every menu that shows it. So `fileImport` is
+  "Import Any File..." (A: I is the submenu's letter in File, and Import
+  Survey Points' inside it) and `fileExportIfc` underlines F (E is Export
+  Survey Points'). `fileExportVector` is "Export Drawing...": it writes DXF,
+  archives and IFC as well as the GIS vector formats, which "Export Vector"
+  did not say, and its tip says what it takes. Tests, scripts and
+  `--trigger` find an item by its object name, which is why none moved.
+- **No toolbar changed**, so `kLayoutVersion` stays 1 and a saved layout
+  still fits: File's toolbar keeps New, Open, Save, Import Any File, Export
+  Drawing, Plot and Sheets.
+- **Settings is above Quit.** The action is the Format workbench's, which
+  owns the dialog ("Settings", below), and is put in when the menus are
+  finished; its role is `QAction::PreferencesRole`, so macOS moves it into
+  the application menu, where that platform keeps it.
+- **Every item that asks for a file is refused in a headless run**, naming
+  the line that does the same. The GIS menu's three imports and Dataset
+  Information were not: reached by name they opened a file dialog nobody
+  could close, and the run waited until its timeout. They now answer as
+  File's own items do (`MainWindow::refuseFileDialog`), each naming the words
+  of `IMPORT` that are its kind of data's, and `INFO <file>`
+  (`qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless`).
+
+`qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless`
+reads the three menus whole, item by item in this order, with Survey's last
+section; `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` and
+`qt_every_menu_item_has_an_icon_and_a_status_tip_headless` hold the letters
+and the two submenus' own icons and tips.
+
+Not done:
+
+- A menu's headless report (`?fileImportMenu`) lists items, not the section
+  titles between them; that Survey and GIS head their groups is seen in a
+  screenshot (`%fileImportMenu`) and nowhere asserted.
+- The missing-name error has no test of its own: in the real window every
+  name exists. A name misspelled by hand logs the error and fails the test
+  above.
+- The Reference Data panel's Import button and the imports inside dialogs
+  (the code manager's, the symbol library's) are where they were.
 
 ## The plan view's shortcut menu
 
@@ -1615,11 +1727,12 @@ verb lines they build through the one executor below.
 
 The Format toolbar carries Layers, the three managers and Global Modify. Survey > Survey
 Coding shows the same code manager - the same `QAction` object
-(`SurveyServices::codeManager`), so two menus cannot drift apart - and the
+(`SurveyServices::codeManager`), so two menus cannot drift apart - then the
 window's Apply Survey Codes (`applySurveyCodes`), which is also on the Survey
-toolbar.
+toolbar, and Process Linework (`surveyLinework`): the codes' editor, and the
+two things done with them, in the order they are done.
 
-**Loading a customisation file has no menu item.** Format had a section
+**A customisation file is loaded in File > Settings.** Format had a section
 Customisation Files, and Survey > Survey Coding the same two items: Load
 Customisation and Replace Loaded Customisation (`loadCustomisation`,
 `replaceCustomisation`), each a file dialog over the style libraries and
@@ -1630,12 +1743,13 @@ is gone - and, on 2026-10-07, what was left of them: the two members of
 still assigned, and the Survey Code Manager's tip, which said "the loaded
 survey code files" and says "the survey codes of the session's customisation"
 (`GeneralTexts.NoFormatMenuItemOrToolbarButtonNamesAnotherProgramInItsTextOrTips`
-holds the menu to both). Until File > Settings exists, a Katana customisation file
-(`docs/customisation.md`) is loaded in the window by
+holds the menu to both). A Katana customisation file (`docs/customisation.md`) is loaded in
+the window by
 
-- the typed line `CUSTOMISE <file>...` (merge) or `CUSTOMISE REPLACE
-  <file>...`, the interpreter's verb, which a script and the Run Script
-  dialog run too;
+- File > Settings, Import - a path field, Browse, and Replace instead of
+  merging beside it ("Settings", below) - which runs
+- the line `CUSTOMISE <file>...` (merge) or `CUSTOMISE REPLACE <file>...`,
+  the interpreter's verb: typed, or run by a script or the Run Script dialog;
 - `katana --customise <file>...` at start-up.
 
 The managers' own Import buttons read a Katana customisation file too, each
@@ -1645,10 +1759,10 @@ definitions and colours into the session ("Symbol Library" and "Survey Code
 Manager", below). Neither is the whole of a file, and neither runs the
 `CUSTOMISE` line.
 
-Rejected: one item that opened a file dialog on `CUSTOMISE "<file>"`. It is
-what Settings' Import will be, with a path field a headless run can fill and
-the Replace choice beside it; a lone item here would be moved again within
-the same piece of work, and its object name pinned by tests in between.
+Rejected: an item in Format that opened a file dialog on `CUSTOMISE "<file>"`.
+Settings' Import is that, with a path field a headless run can fill and the
+Replace choice beside it; and the customisation as a whole - load a file,
+write one, reset, keep - is not one of Format's tables.
 
 **Apply Survey Codes is the `CODE` line.** `MainWindow::applySurveyCodes` runs
 `CODE SELECTION` when something is selected, else `CODE DRAWING`, through the
@@ -1668,6 +1782,18 @@ step, with the points it had just drawn selected for it. It no longer does:
 its import codes and strings its own points inside its one command
 (`docs/survey.md`, "The import wizard").
 
+**Process Linework is the `LINEWORK` line.** `MainWindow::surveyLinework` runs
+`LINEWORK SELECTION` when something is selected, else `LINEWORK DRAWING`, the
+same way and for the same reasons: echoed, one undo step, and answered in the
+verb's records - what the scope took, each line strung, each reason a point
+is in none (`docs/survey_coding.md`). Joining coded points into lines was one
+tab of the Survey Code Manager and nothing else, so the second half of
+coding a survey had no menu item at all. The verb with no scope word makes
+the same choice itself; the item writes the word, so that the echoed line
+says which this click meant
+(`qt_process_linework_runs_the_linework_line_on_the_selection_or_the_drawing_headless`).
+It is in the menu and not on the Survey toolbar, which is as it was.
+
 **`CustomisationWorkbench`** (`src/katana_qt/customisation/customisation_workbench.*`)
 is built like the Survey workbench: `MainWindow::buildFormatActions` makes the
 menu and the toolbar and hands them over with `CustomisationServices` - the
@@ -1679,7 +1805,10 @@ drives it (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
 It owns what the managers share: the picture cache (`DefinitionThumbnails`)
 and the one `CustomisationContext` each manager is built from. It owns the definition
 editor as well ("The definition editor", below), which has no menu item: a
-manager asks for it through the context.
+manager asks for it through the context. And it makes File > Settings' action
+and owns that dialog ("Settings", below): the window tells it what its host
+offers - whether there is a built-in customisation, and the kept file
+(`CustomisationServices::hasBuiltIn`, `keptFile`, `hasKeptFile`).
 
 - **The linework control codes are not the workbench's.** They are the
   customisation's - the Document's (`customisationState().linework`: what a
@@ -1729,6 +1858,11 @@ manager asks for it through the context.
 
 What a load does - a merge, or a Replace that is asked for - is
 `docs/customisation.md`, "The verbs".
+
+Not done:
+
+- Process Linework has no button on the Survey toolbar, where Apply Survey
+  Codes has one.
 
 ### Styles and Linetypes
 
@@ -3067,7 +3201,8 @@ packages each extend one of them.
 
 IFC 4.3 both ways (`docs/ifc.md`) has two entries of its own in File,
 `fileImportIfc` ("Import IFC...") and `fileExportIfc` ("Export IFC..."), beside
-Import and Export Vector rather than inside them: what an IFC exchange chooses
+Import Any File and Export Drawing in File's two submenus ("The File menu",
+above) rather than inside those two: what an IFC exchange chooses
 - which of the drawing's objects go, an AS 5488 utility schedule and the
 delivery schema it was written to, a project's classification rules - has no
 place in the generic dialogs. Each opens a dialog (`IfcImportDialog`,
@@ -3127,7 +3262,7 @@ typed `IMPORT`, `EXPORT` and `INFO` are split by the shared grammar before the
 window's generic one takes the rest of the line as a path, the GIS imports'
 "All files" and GIS > Dataset Information describe it
 (`MainWindow::describeIfcFile`, `INFO`'s reply), and `--import-options` builds
-the import dialog. Choosing IFC in Export Vector's file dialog opens the
+the import dialog. Choosing IFC in Export Drawing's file dialog opens the
 export dialog with the file filled. The Command Reference lists the window's
 own verbs after the interpreter's.
 
@@ -3343,6 +3478,262 @@ non-modal dialog the window keeps (`MainWindow::showAlignmentManager`,
 `runVerbLine`, the PI and PVI grids buffers applied by one line each. The
 decisions are in `docs/cad.md`, "The Alignment Manager". The Terrain menu
 opens with it, in an Alignments section, and the toolbar with its button.
+
+## Settings
+
+What the session's customisation IS, and the few things that are done to it
+whole, in one non-modal dialog (`SettingsDialog`, `settingsDialog`,
+`src/katana_qt/customisation/settings_dialog.hpp`). The lines it runs are the
+`CUSTOMISE` family's (`docs/customisation.md`, "The verbs"), and what "kept"
+means is in "Settings and the kept customisation" there; this is the dialog.
+
+**File > Settings** (`fileSettings`, "Settings...", above Quit: "The File
+menu", above). The action and the dialog are the Format workbench's
+(`CustomisationWorkbench::showSettings`): the dialog is made the first time
+it is asked for and kept, non-modal, and deleted with the workbench before
+the Document - as the managers are, and for their reasons. The workbench
+hands it a `SettingsContext`:
+
+- the Document, the window's one executor, the log and whether the session
+  is headless, as the window gave them to the workbench;
+- whether the Survey Code Manager holds unapplied edits, which only the
+  workbench knows, asked at each press - a manager not made yet holds none;
+- callbacks that open the code manager, the code manager at its Linework tab
+  (`CustomisationWorkbench::showLinework`: the tab is brought forward by the
+  object names `codeManagerTabs` and `lineworkTab`, as a person reaches it,
+  and a tab that cannot be found is said in the log) and the Symbol Library;
+- what the session's host offers: whether there is a built-in customisation,
+  and the kept file's path as text (`CustomisationServices::hasBuiltIn`,
+  `keptFile`; "How the window starts" says where the file is). They are read
+  once, when the dialog is first opened - a host does not change while a
+  session runs.
+
+Every member has an empty default, and a button whose callback is empty is
+disabled, so a widget test builds the dialog on its own
+(`tests/qt_widgets/customisation/test_settings_dialog.cpp`) and through the
+workbench (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
+The action's data names the dialog, which is how `--dialog fileSettings`
+finds it in a headless run.
+
+A page list (`settingsPages`) beside a stack (`settingsStack`). One page
+today, Customisation (`settingsCustomisation`); a second is one more
+`addPage`.
+
+| Part | Object names | What it shows or runs |
+|---|---|---|
+| What is active | `settingsActiveName`, `settingsActiveOrigin`, `settingsActiveDefinitions`, `settingsActiveSymbols`, `settingsActiveRules`, `settingsActiveKept`, `settingsActiveProblems` | the name; the origin in plain words (None, Built in, Kept by you, Loaded this session, Edited this session); how many definitions, how many of them symbols, and the rules over how many codes; "Kept" or "Not kept" with the kept file's path, or that the session has none; what the START of the session found, in the error colour, hidden when it found nothing |
+| The notice | `settingsShowNotice`, `settingsNotice` | the author's notice, read-only and hidden until asked for: the customisation's own, then each source's under `From <name>:`. The toggle is hidden while there is none |
+| Import | `settingsImportPath`, `settingsImportBrowse`, `settingsImportReplace`, `settingsImport` | `CUSTOMISE "<file>"`, or with Replace instead of merging ticked `CUSTOMISE REPLACE "<file>"` |
+| Export | `settingsExportPath`, `settingsExportBrowse`, `settingsExport` | `CUSTOMISE EXPORT "<file>"` |
+| Built-in and kept | `settingsReset`, `settingsKeep`, `settingsRevert` | `CUSTOMISE RESET`, `CUSTOMISE KEEP`, `CUSTOMISE REVERT` |
+| When survey data comes in | `settingsAutoCodes`, `settingsAutoLinework` | `CUSTOMISE SET auto.codes=on` or `off`, `CUSTOMISE SET auto.linework=on` or `off`, when the box is toggled |
+| Linework control codes | `settingsLinework`, `settingsEditLinework` | the seven spellings, read-only, each under the word its editor labels it with (`Start: ST, End: END, Close: CL, Begin curve: BC, ...`; `(off)` for a control switched off), and a button that opens that editor, the Survey Code Manager at its Linework tab |
+| Editors | `settingsOpenCodes`, `settingsOpenSymbols` | open the Survey Code Manager and the Symbol Library |
+| Status | `settingsStatus`, `settingsClose` | each line run, as the command log echoes it (`> CUSTOMISE RESET`), then what it answered: the reply, or `Refused:` and the verb's own words, in the error colour |
+
+**Every button that changes anything builds a line** and hands it to the one
+executor ("One executor: the command runner"), so it is echoed in the command
+log and a refusal is the verb's. There is no Apply: a control runs its line
+when it is pressed, a box when it is toggled - `toggled`, not `clicked`, so
+that a box the headless driver fills (`settingsAutoCodes=off`) runs its line
+as a click does.
+
+**The page shows what the Document says**, never what a button hoped for. It
+is read again from the Document's change notification, through a
+`DocumentWatcher`, when one of three counters has moved:
+`Document::customisationGeneration`, `Document::libraryGeneration` and
+`Document::surveyMapGeneration`. The first alone is not enough - an editor's
+second commit in a session already marked edited moves only the library's or
+the map's, and the counts would stand still
+(`TheLabelsFollowTheDocument`). A box whose line was refused, or that nothing
+ran, goes back to what the Document has, since no notification comes to say
+that nothing changed; reading the boxes from the Document runs no line
+(`RefreshingFromADocumentChangeRunsNothing`).
+
+**What the start found stays on the page.** A kept file that did not read,
+a built-in that did not parse, a kept customisation made from another
+built-in than this program has: the window says each once, at start-up, in a
+log that has scrolled away by the time a person opens Settings to ask why
+their own customisation is not the one loaded. The Document keeps them
+(`CustomisationState::startProblems`, `keptFromAnotherBuiltIn`), and the row
+`settingsActiveProblems` shows the sentences as `cad::startCustomisation`
+wrote them, one a line, then - for the second - the window's own start-up
+sentence with Reset to Built-in where that names `CUSTOMISE RESET`. They are
+of the start: a load or a reset since does not take them off the page
+(`WhatTheStartOfTheSessionFoundIsShownAndTheRowIsHiddenWhenItFoundNothing`,
+`AKeptFileThatDidNotReadWhenTheSessionStartedIsSaidOnThePage`).
+
+**What is edited in Settings is kept.** A session that was kept before
+Import, Reset to Built-in or a toggled box, and is not kept after it, is kept
+again: the dialog runs `CUSTOMISE KEEP` behind its own line, and the status
+shows both lines and both answers. Only when the host has a kept file, only
+when the first line was carried out, and never behind Export, Keep or Revert
+to Kept. Whether to keep is asked of the Document after the line, not
+inferred from the line: one that was refused, or a reset that left the
+session the kept one, is followed by nothing. A load typed on the command
+line or run by a script is not followed either, and the page then says "Not
+kept" beside an enabled Keep
+(`WithTheVerbItselfAnEditOfAKeptSessionIsWrittenToTheKeptFile` runs it with
+the verbs themselves and reads the kept file back).
+
+**A reset that is kept sets the kept file aside.** Reset to Built-in on a kept
+session is followed by `CUSTOMISE KEEP` like any other edit made here, and
+`KEEP` writes no copy of the built-in: it renames the kept file to
+`<kept file>.bak` (`docs/customisation.md`, "The host: RESET, KEEP and
+REVERT"). Nothing is then kept, so Revert to Kept is refused in the verb's
+words - "no customisation is kept" - and is NOT the way back. An earlier
+revision of this section said it was. The way back is the file that was set
+aside:
+
+- **in Settings, Import it with Replace instead of merging ticked.** Its
+  definitions take the place of the whole library and its rules of all the
+  codes, each kind it holds, and its control codes and switches are set as it
+  says them; the session being the kept one, the import is kept, in a kept
+  file written anew
+  (`AfterAResetOfAKeptSessionRevertHasNoneToReadAndTheFileSetAsideIsTheWayBack`).
+  A kind the file does not hold stays the built-in's, and so does a colour
+  name it does not give;
+- **or, outside the program, give the file its own name back** and press
+  Revert to Kept, which reads it exactly as it was
+  (`TheFileSetAsideGivenItsOwnNameBackIsReadByRevertAsItWas`).
+
+Only until the next `KEEP` that finds a kept file, because ONE earlier file
+is kept. The first edit made in Settings after the reset writes a new kept
+file and leaves the `.bak`; the second sets that new file aside in the
+`.bak`'s place, and the customisation the reset put away is then in neither
+file (`TheFileAResetSetAsideLastsOnlyUntilTheSecondEditKeptAfterIt`).
+
+No question is asked before the press, so the button says it first. On a kept
+session whose host has a kept file, Reset to Built-in's tip names the `.bak`,
+says that Revert to Kept will have none to read, and gives the way back
+(`ResetSaysBeforeItIsPressedThatAKeptSessionsFileIsSetAside`). Keep's tip
+says the same of a session that is the built-in and not kept - what a reset
+typed on the command line leaves - where a press writes nothing and sets the
+kept file aside
+(`KeepOfASessionThatIsTheBuiltInWritesNothingAndSetsTheKeptFileAside`). A
+reset that is NOT kept - typed, or made here on a session that was not the
+kept one - leaves the kept file where it is, and Revert to Kept then does go
+back (`ARevertOfASessionThatWasResetAndNotKeptReadsTheKeptFileAgain`).
+
+**Refused in the dialog**, with the reason in the status and the log, and
+nothing run:
+
+- **Import, Reset to Built-in and Revert to Kept while the Survey Code
+  Manager holds unapplied edits**, in the words the window refuses to close
+  over them with (`CustomisationWorkbench::confirmClose`). The manager keeps
+  its buffer when the drawing's rules change under it, and its Apply then
+  installs that buffer whole: the load would be undone without a word. Revert
+  to Kept is held to it with the other two because it loads rules the same
+  way.
+- **A file no line can carry** - a double quote or a line break in its path:
+  the tokenizer's quoted words have no escape, and the rule is the one every
+  dialog writes a word by (`src/katana_qt/command_word.hpp`) - and no file at
+  all.
+- **Browse in a headless session**, which opens no file dialog and names the
+  line to type and the field to fill. Browse is the only thing here that
+  opens one; it offers the filter the two managers offer
+  (`customisationFileFilter`), opens where the path in the field points, and
+  only fills the field. Export's gives a name that does not end `.json`, in
+  any letter case, the ending `.customisation.json`, so that the file is one
+  Import's own filter shows
+  (`ExportsBrowseFillsTheFieldAndEndsANameWithNoJsonEndingAsACustomisationFile`).
+
+Reset to Built-in is disabled, with a tip saying why, when the host has no
+built-in; Keep and Revert to Kept when it has no kept file; Keep also while
+the session is already kept. No button is a default, Enter in a field presses
+nothing, and no path through the dialog opens a modal box.
+
+**A path is written in quotes, with `/`, and a bare name with its directory**
+(`keep` becomes `"./keep"`). The family reads a line's whole first word as a
+keyword once the tokenizer has taken the quotes off, so a file called `keep`
+would run `KEEP`, and `EXPORT` refuses a file called as one of its own words;
+a file so called is given with its directory (`docs/customisation.md`, "The
+verbs"). Every name with no directory in it is, so the dialog keeps no list
+of the family's words to go stale
+(`TheLinesItBuildsAreReadByTheVerbItself`).
+
+**A path pasted in its quotes is the path inside them.** A file manager
+copies a path with double quotes round it (`"C:\data\site codes.json"`), and
+they are no part of the file's name: ONE pair round the WHOLE path is taken
+off, with the blanks beside it, before the path is read - by Import, by
+Export and by Browse alike. Left on, the path was refused for holding a
+double quote. A quote anywhere else is still refused, and quotes round
+nothing name no file (`APathPastedInItsQuotesIsReadAsThePathItIs`).
+
+Decisions, and what was rejected:
+
+- *Rejected: an Apply button.* The code manager already has one, and a
+  second commit step here would be a second buffer that a load could silently
+  be undone from. Each control is one line, run at once.
+- *Rejected: writing every change to the kept file as it is made.* A line
+  typed to try a customisation would then rewrite the user's own for good
+  (`docs/customisation.md`, "`KEEP` is said, not implied"). Settings keeps
+  only what Settings changed, and only a session that was the kept one.
+- *Rejected: editing the linework control codes here too.* They have one
+  editor, the Survey Code Manager's Linework tab; a second set of seven
+  fields would be a second place for them to differ.
+- *Rejected: naming the linework controls as a file does* (`arcStart=BC`).
+  Those are the words `CUSTOMISE SET` and the format read, written for a
+  script. The page says Start, End, Close, Begin curve, End curve, Join to
+  point and Rectangle - the labels of the one editor its button opens - so
+  that a control has one name in the window. The words are ONE list,
+  `kLineworkControlLabels` in
+  `src/katana_qt/customisation/linework_labels.hpp`, keyed by the format's
+  names and checked against `entity::lineworkCodeMembers`
+  (`TheOneListOfLineworkLabelsNamesEveryControlInTheOrderTheFormatListsThem`).
+- *Decided: a reset made in Settings is kept.* Resetting in Settings means
+  the built-in is what the next session starts with, so the reset is followed
+  by `KEEP` like every other edit made here, and the kept file is set aside
+  as `.bak` ("A reset that is kept sets the kept file aside", above).
+  Rejected: leaving the kept file to stand. The page would say "Not kept",
+  and the next start would bring back, without a word, what the person had
+  just reset away from.
+- *Rejected: a label for the status.* A load answers with several records
+  and a refusal may list every reason; a label grows with its text and would
+  push the page about. It is a read-only box of four lines, and the headless
+  driver's `?settingsStatus` prints a box's text as it is, where it reads a
+  label's as markup and would drop the `<file>` of a refusal that names a
+  line.
+- *Rejected: asking before Reset or before Export writes over a file.* A
+  question is a modal box, which a headless run cannot answer.
+  `CUSTOMISE EXPORT` says `replaced=yes` in its answer, and what a reset of a
+  kept session costs is said on the button before it is pressed ("A reset
+  that is kept sets the kept file aside", above).
+
+**In the real window.** Headless, with the fixtures of
+`tests/data/customisation`:
+`qt_settings_imports_sets_and_exports_by_the_customise_lines_headless` opens
+it by its action (non-modal), imports a file by its path field, unticks a
+box and reads the switch back in `CUSTOMISE JSON`, and exports;
+`qt_what_settings_exported_loads_again_with_the_same_counts_headless` reads
+that file in another window. Four more run one after another on one kept
+file that `KATANA_CUSTOMISATION` names:
+`qt_an_import_made_in_settings_is_kept_headless` (the file appears),
+`qt_what_settings_kept_is_what_the_next_window_starts_with_headless`,
+`qt_a_reset_made_in_settings_retires_the_kept_file_and_revert_has_none_to_read_headless`
+and
+`qt_after_a_reset_made_in_settings_the_next_window_starts_with_the_built_in_headless`,
+which loads the `.bak` and finds what the first kept.
+
+Not done:
+
+- **ONE earlier file is kept.** A reset made in Settings sets the kept file
+  aside one `.bak` deep, and the second edit kept after it is the end of what
+  was there. Keeping more than one earlier file would be `CUSTOMISE KEEP`'s
+  to do (`src/katana_cad/customisation/customisation_verbs.cpp`).
+- **The Linework tab still writes its seven labels out itself**
+  (`src/katana_qt/customisation/code_manager_tabs.cpp`), where it is to
+  label its fields from the one list (`lineworkControlLabel`). Until it does,
+  `TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem` reads the tab's
+  labels against what Settings shows and fails when either moves alone.
+- **The host's two facts are read when the dialog is first opened**, not at
+  each press: right while a host cannot change in a running session.
+- **Revert to Kept is enabled whenever the host has a kept file**, whether or
+  not the file is there: `CUSTOMISE REVERT` refuses in its own words when
+  nothing is kept. Disabling it would mean the dialog reading the disk, which
+  nothing notifies it of.
+- **Export writes the whole session.** The parts (`CODES`, `ONLY`) are the
+  two managers' export buttons.
 
 ## The rules a dialog or panel follows
 

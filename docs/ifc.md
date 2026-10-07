@@ -20,9 +20,9 @@ IFC 4.3 made for survey elements and which claims no more than is known.
 
 ## Using it
 
-In the window, File > Import IFC and File > Export IFC (below, "In the
-window"); a .ifc also goes through File > Import, a path given to the window
-and Export Vector's IFC filter. On either command line - `katana_cli`, and so
+In the window, Import IFC and Export IFC, in File's Import and Export
+submenus (below, "In the window"); a .ifc also goes through Import Any File,
+a path given to the window and Export Drawing's IFC filter. On either command line - `katana_cli`, and so
 `katana_mcp`, and the window's own - the verbs, which are also all the
 dialogs do (each writes its line and runs it):
 

@@ -20,7 +20,10 @@
 //   Traverse and Levelling  Traverse..., Level Book...
 //   Coordinates             Coordinate Converter...
 //   Survey Coding           the Format menu's Survey Code Manager, and the
-//                           window's Apply Survey Codes (the CODE line)
+//                           window's Apply Survey Codes (the CODE line) and
+//                           Process Linework (the LINEWORK line): the codes'
+//                           editor, then the two things done with them, in
+//                           the order they are done
 // Each action's object name (surveyImport, surveyJobs, surveyExport,
 // surveyPointManager,
 // surveyPointReport, surveyInverse, surveyForward, surveyArea,
@@ -81,6 +84,11 @@ struct SurveyServices {
     // Survey Coding and on the toolbar. May be null (a test). (The import
     // wizard no longer triggers it: its import codes its own points.)
     QAction* applySurveyCodes = nullptr;
+    // The window's Process Linework (surveyLinework), which runs the LINEWORK
+    // line the same way: on the selection, or on the drawing when nothing is
+    // selected. Shown under Survey Coding, after Apply Survey Codes - coded
+    // points are what it strings. May be null (a test).
+    QAction* surveyLinework = nullptr;
     // The Format menu's Survey Code Manager (CustomisationWorkbench), shown
     // under Survey Coding as well: where a surveyor looks for the code
     // library. The same object again.

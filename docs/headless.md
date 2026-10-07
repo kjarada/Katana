@@ -179,11 +179,27 @@ through their session's `startCustomisation`.)
 | Variable | What it says |
 |---|---|
 | `KATANA_BUILTIN_CUSTOMISATION` | the seam (`include/katana/cad/customisation_host.hpp`): unset, the built-in is the customisation compiled into the program, when the build has one; `none`, there is no built-in for this run; a path, THAT Katana customisation file is the built-in. One that does not read is said, and the run has no built-in - never the compiled-in one in its place |
-| `KATANA_CUSTOMISATION` | the kept customisation file: what `CUSTOMISE KEEP` writes and the next start reads in the place of the built-in. Unset, a headless run has none, and `KEEP` and `REVERT` are refused naming the variable. It is the ONLY way a headless run reads or writes one: it looks in no per-user place, so that it is the same run on every machine |
+| `KATANA_CUSTOMISATION` | the kept customisation file: what `CUSTOMISE KEEP` writes and the next start reads in the place of the built-in. Unset, a headless run has none, and `KEEP` and `REVERT` are refused naming the variable. It is the ONLY way a headless run reads or writes one: it looks in no per-user place, so that it is the same run on every machine. (An interactive window with the variable unset keeps its own in the per-user place: `docs/desktop.md`, "How the window starts") |
 
 The start-up line says what was installed, on stderr with the rest of the
 log: `Customisation: <name>, N definitions (M symbols) and K survey code
 rules, built in.` or `..., kept.` A run with nothing to install says nothing.
+
+**File > Settings in a headless run.** The dialog is opened by its action and
+driven by its fields, as any dialog is: `@fileSettings` (it opens non-modal,
+so the run goes on), then
+`settingsImportPath=<file>|!settingsImport|?settingsStatus` to load a file -
+Browse opens no file dialog and says to fill the field -
+`settingsExportPath=<file>|!settingsExport` to write the session,
+`settingsAutoCodes=off` to untick a box, which runs its `CUSTOMISE SET` line
+as a click does, and `!settingsReset`, `!settingsKeep`, `!settingsRevert`.
+Each press echoes nothing on stderr but what its line answers; the status box
+(`?settingsStatus`) holds the line and the answer together
+(`qt_settings_imports_sets_and_exports_by_the_customise_lines_headless`).
+What Settings changes is KEPT only where `KATANA_CUSTOMISATION` names a file:
+`qt_an_import_made_in_settings_is_kept_headless` and the three tests after
+it run four windows, one after another, on one such file in the test's own
+folder (`docs/desktop.md`, "Settings").
 
 **Every program test says what it starts with.** A build on the owner's
 machine has a customisation compiled in and a clean checkout has none, and a
@@ -269,7 +285,7 @@ every action, field, button and tab gets one. In a test they are one
 
 | Switch | `-DDRIVE` step | What it does |
 |---|---|---|
-| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`, `dimensionStyleManagerDialog`; Annotate > Edit Text carries `textEditDialog`; File > Project Coordinate System carries `projectCrsDialog`; the Annotate menu's `annotateLeaders`, `annotateLeadersForSelection` and `annotateArrangeLeaders` all carry `leaderManagerDialog`; the seven Subsurface Utilities items all carry `utilityDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
+| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`, `dimensionStyleManagerDialog`; Annotate > Edit Text carries `textEditDialog`; File > Project Coordinate System carries `projectCrsDialog`; the Annotate menu's `annotateLeaders`, `annotateLeadersForSelection` and `annotateArrangeLeaders` all carry `leaderManagerDialog`; the seven Subsurface Utilities items all carry `utilityDialog`; File > Settings carries `settingsDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
 | `--survey-dock ACTION` | `#ACTION` | shows the dock that action shows and makes it the target; at the end its status line is printed |
 | `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers. A popup a step opened - a window of its own, shown - is a panel too: a view bar's Layers popup, whose box is the view's ghost switch (`%View2\|!ViewLayersButton\|%ViewLayersPopup\|!ViewLayersShowSelection`, `qt_the_layers_popups_box_turns_a_views_ghosts_off_headless`); it could not be reached before |
 | `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does. A disabled field is refused, as `--press` refuses a disabled button: a person cannot type into it and the line does not read it (`qt_fill_of_a_disabled_field_is_refused_headless`) |
@@ -277,9 +293,9 @@ every action, field, button and tab gets one. In a test they are one
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
 | `--run-line TEXT` | `<TEXT` | runs TEXT through the window's one executor, as a dialog runs the line it built (`MainWindow::runVerbLine`, `desktop.md`, "One executor: the command runner"): never a running tool's answer; prints `--run-line TEXT: ok=yes` or `ok=no`, then a `  reply: ` or `  error: ` line for each line it logged - what the dialog gets back. Without `--screenshot` it runs with the `--command` lines, and a refused one fails a run that writes |
-| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text (without its markup; as written when the label's text is plain, so a word in angle brackets that it shows is reported: every label was read as markup until 2026-10-07, and `CUSTOMISE <file>` lost its `<file>` in the report while the screen had it, `qt_the_import_wizards_options_note_names_the_customise_line_headless`), a field's, a list's rows, a button's accessible name and, when it can be checked, whether it is (`%View2\|?ViewLinkButton` prints `ViewLinkButton: Linked, checked`, `qt_linked_plan_views_zoom_together_headless`) - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`). A plan view is `PlanView<id>`, as its dock is `View<id>`: painted afresh, it prints what it drew - `PlanView2: drawn=1 ghosts=1 grips=0`, the entities, the selection's ghosts on layers it hides, and the grips it offers - which a screenshot shows only to a person (`qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless`). A 3D or elevation view is `RenderView<id>`, as its dock is `View<id>`: painted afresh, it prints how many of its pixels are not its background and where its camera is, by the keys a view's record uses - `RenderView2: painted=27324 target=85.375,68.69...,31.85... distance=483.19... azimuth=-135 elevation=35.26... projection=perspective` - which a screenshot shows only to a person |
+| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text (without its markup; as written when the label's text is plain, so a word in angle brackets that it shows is reported: every label was read as markup until 2026-10-07, and `CUSTOMISE <file>` lost its `<file>` in the report while the screen had it, `qt_the_import_wizards_options_note_names_the_customise_line_headless`), a field's, a list's rows, a button's accessible name and, when it can be checked, whether it is (`%View2\|?ViewLinkButton` prints `ViewLinkButton: Linked, checked`, `qt_linked_plan_views_zoom_together_headless`) - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it - its OWN items: a submenu is one item, by its title, and is asked by its own object name (`?fileImportMenu`, `?fileExportMenu`, the two of File; `qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless`), and the section titles between items are not listed; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`). A plan view is `PlanView<id>`, as its dock is `View<id>`: painted afresh, it prints what it drew - `PlanView2: drawn=1 ghosts=1 grips=0`, the entities, the selection's ghosts on layers it hides, and the grips it offers - which a screenshot shows only to a person (`qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless`). A 3D or elevation view is `RenderView<id>`, as its dock is `View<id>`: painted afresh, it prints how many of its pixels are not its background and where its camera is, by the keys a view's record uses - `RenderView2: painted=27324 target=85.375,68.69...,31.85... distance=483.19... azimuth=-135 elevation=35.26... projection=perspective` - which a screenshot shows only to a person |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
-| `--export-options FILE` | `^FILE` | opens File > Export Vector's dialog for FILE, in its turn, and makes it the target - what the menu opens once its file dialog has answered, which a headless run never opens. A step rather than a switch, so the `--command` lines before it have made the drawing whose layers and scope it offers (`qt_vector_export_dialog_writes_what_its_filter_takes_headless`) |
+| `--export-options FILE` | `^FILE` | opens the dialog of File > Export > Export Drawing for FILE, in its turn, and makes it the target - what the menu opens once its file dialog has answered, which a headless run never opens. A step rather than a switch, so the `--command` lines before it have made the drawing whose layers and scope it offers (`qt_vector_export_dialog_writes_what_its_filter_takes_headless`) |
 | `--wheel "NAME X,Y N"` | `~NAME X,Y N` | turns the mouse wheel N notches - positive away from the person, which zooms in; negative, out - over widget NAME at X,Y in its logical pixels, NAME found as `--report` finds one. Each notch is a wheel event of its own, sent to the widget under that point (a 3D view's GPU child, where it has one) with the event loop run after it, as a person's wheel reaches the view; so a 3D view's zoom is driven in the real window, `~RenderView2 160,330 10|?RenderView2` (`qt_the_3d_views_wheel_keeps_zooming_into_the_ground_under_the_cursor_headless`). A step that is not three words, no such widget, a point outside it or no notches ends the run |
 | `--hover X,Y` | `~X,Y` (a `~` then a widget name is the wheel's) | moves the pointer to model point X,Y in the plan view Enter goes to (the one running a tool, else the active one), as a real mouse move: a tool's preview follows it. Prints the pointer record (below) |
 | `--click X,Y[,shift\|,ctrl]` | `+X,Y[,shift\|,ctrl]` | the same, then a left press and release there with the key held: a tool's pick or point, or with no tool a grip picked up (plain) or made hot (`,shift`) as a person's click does. Prints the record as the view shows it after the click |
@@ -464,14 +480,20 @@ A modal box in a headless run is a hang until the test's timeout. So
   answered: a scripted `QUIT` with unapplied code edits, or `NEW` after an
   edit, fails, and the script can Apply or Revert, `SAVE` or `UNDO` first
   (`desktop.md`, "Failure modes");
-- File > Open, Save As (and Save of a drawing with no project), Import and
-  Export Vector open no file dialog and name the line that does the same -
-  `OPEN <directory>`, `SAVE <directory>`,
+- File > Open, Save As (and Save of a drawing with no project), Import Any
+  File and Export Drawing open no file dialog and name the line that does the
+  same - `OPEN <directory>`, `SAVE <directory>`,
   `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT <file>` - since
   `--trigger` reaches them by their object names
   (`MainWindow::refuseFileDialog`,
   `qt_the_file_items_name_their_verbs_in_a_headless_run_headless`); Export of
-  an empty drawing says so in the log, not in a box. Format > Load
+  an empty drawing says so in the log, not in a box. The GIS menu's Import
+  Vector Data, Import Raster, Import Point Cloud and Dataset Information ask
+  for a file first as well, and were not guarded until 2026-10-07: each now
+  names `IMPORT <file>` with its own kind's words, or `INFO <file>`
+  (`qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless`),
+  and its dialog is still reached with `--import-options` or
+  `--dataset-info`. Format > Load
   Customisation and Replace Loaded Customisation were two more: they are no
   menu items any more, and a `--trigger` of either fails the run as the name
   of no menu item (`qt_load_customisation_is_no_menu_item_headless`,

@@ -569,7 +569,7 @@ bool customise(katana::qt::MainWindow& window, const QStringList& files)
 // does: the description GDAL or PDAL gives of the file is read and painted.
 // With steps, either is the target the steps start on, so --fill, --press
 // and --report reach its fields by name. --export-options FILE is a step: it
-// opens File > Export Vector's dialog for FILE in its turn, after the
+// opens File > Export > Export Drawing's dialog for FILE in its turn, after the
 // commands before it made the drawing, and makes it the target - a headless
 // run cannot reach it through the menu, which opens no file dialog.
 //
