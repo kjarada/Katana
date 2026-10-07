@@ -31,7 +31,7 @@ TEST(ColourNames, AFoldedNameIsLowerCaseTrimmedAndReadsUnderscoreAndHyphenAsABla
     EXPECT_EQ(foldColourName("  Dark Green\t"), "dark green");
     EXPECT_EQ(foldColourName("dark_green"), "dark green");
     EXPECT_EQ(foldColourName("Dark-Green"), "dark green");
-    EXPECT_EQ(foldColourName("SUI Water_Potable"), "sui water potable");
+    EXPECT_EQ(foldColourName("SUI Test_Water"), "sui test water");
     EXPECT_EQ(foldColourName(""), "");
     EXPECT_EQ(foldColourName("   "), "");
     // Only ASCII letters change case: a name in another script is left as it
@@ -89,7 +89,7 @@ TEST(ColourNames, FoldingAFoldedNameChangesNothing)
          {"red", "RED", "  Dark Green\t", "dark_green", "Dark-Green", "red_", "_red", "-red-",
           " _ Dark_Green - ", "gray", "Dark_Gray_", "-gray-", "sui dark-gray", "grayish",
           "gray blue", "dark  red", "dark__red", "_", " -_- ", "", "GR\xC3\x9CN", "a_-_b",
-          "\tsui_water potable\n"}) {
+          "\tsui_test water\n"}) {
         const std::string once = foldColourName(name);
         EXPECT_EQ(foldColourName(once), once) << '"' << name << '"';
         changed += once != name ? 1 : 0;
@@ -184,7 +184,7 @@ TEST(ColourNames, AStandardNameIsFoundHoweverItIsSpelledAndNoOtherNameIs)
     EXPECT_EQ(standardColour(" Dark_Green "), standardColour("dark green"));
     EXPECT_EQ(standardColour("Light-Gray"), standardColour("light grey"));
     EXPECT_EQ(standardColour("gray"), (Color{128, 128, 128, 255}));
-    for (const char* name : {"", "pen 025", "sui water potable", "off yellow", "dark", "reddish",
+    for (const char* name : {"", "pen 025", "sui test water", "off lime", "dark", "reddish",
                              "dark  red", "darkred"}) {
         EXPECT_FALSE(standardColour(name).has_value()) << '"' << name << '"';
     }
@@ -214,21 +214,21 @@ TEST(ColourTable, ANameIsFoundByItsFoldAndKeptAsItWasWritten)
 {
     ColourTable table;
     EXPECT_TRUE(table.empty());
-    ASSERT_TRUE(table.add("SUI Electricity", Color{255, 127, 0, 255}).ok());
+    ASSERT_TRUE(table.add("sui ember", Color{255, 127, 0, 255}).ok());
     ASSERT_TRUE(table.add("sui_gas", Color{255, 255, 0, 128}).ok());
     EXPECT_EQ(table.size(), 2u);
 
-    EXPECT_EQ(table.find("sui electricity"), (Color{255, 127, 0, 255}));
-    EXPECT_EQ(table.find(" Sui-Electricity "), (Color{255, 127, 0, 255}));
+    EXPECT_EQ(table.find("sui ember"), (Color{255, 127, 0, 255}));
+    EXPECT_EQ(table.find(" Sui-Ember "), (Color{255, 127, 0, 255}));
     EXPECT_EQ(table.find("SUI GAS"), (Color{255, 255, 0, 128})) << "opacity and all";
     EXPECT_FALSE(table.find("sui water").has_value());
     EXPECT_FALSE(table.find("").has_value());
 
-    // In the order of the folds - "sui electricity" before "sui gas" - with
+    // In the order of the folds - "sui ember" before "sui gas" - with
     // each name as its author wrote it.
     const std::vector<ColourTable::Entry> entries = table.entries();
     ASSERT_EQ(entries.size(), 2u);
-    EXPECT_EQ(entries[0].name, "SUI Electricity");
+    EXPECT_EQ(entries[0].name, "sui ember");
     EXPECT_EQ(entries[1].name, "sui_gas");
     EXPECT_EQ(entries[1].colour, (Color{255, 255, 0, 128}));
 }
@@ -330,9 +330,9 @@ TEST(ColourTable, TwoTablesAreEqualWhenTheyHoldTheSameNamesAsWrittenAndTheSameCo
 TEST(ColourNames, ANameIsResolvedFromTheTableThenFromTheStandardNames)
 {
     ColourTable table;
-    ASSERT_TRUE(table.add("sui electricity", Color{255, 127, 0, 255}).ok());
+    ASSERT_TRUE(table.add("sui ember", Color{255, 127, 0, 255}).ok());
 
-    EXPECT_EQ(resolveColour(table, "SUI Electricity"), (Color{255, 127, 0, 255}));
+    EXPECT_EQ(resolveColour(table, "sui ember"), (Color{255, 127, 0, 255}));
     EXPECT_EQ(resolveColour(table, "Dark_Green"), (Color{0, 100, 0, 255}));
     EXPECT_FALSE(resolveColour(table, "pen 035").has_value())
         << "a name neither knows leaves the colour alone";
@@ -340,5 +340,5 @@ TEST(ColourNames, ANameIsResolvedFromTheTableThenFromTheStandardNames)
 
     // With no table at all, the standard names are still there.
     EXPECT_EQ(resolveColour(ColourTable{}, "red"), (Color{255, 0, 0, 255}));
-    EXPECT_FALSE(resolveColour(ColourTable{}, "sui electricity").has_value());
+    EXPECT_FALSE(resolveColour(ColourTable{}, "sui ember").has_value());
 }

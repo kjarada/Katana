@@ -315,7 +315,7 @@ TEST(SurveyFinishStringNames, ACodeIsLookedUpWithItsStringNumberAndFallsBackToTh
 {
     katana::entity::SurveyMap map = fieldMap();
     SurveyRule pit;
-    pit.key = "PABB"; // exact: one string per code
+    pit.key = "ZPBB"; // exact: one string per code
     pit.model = "SURVEY PITS";
     add(map, pit);
 
@@ -324,9 +324,9 @@ TEST(SurveyFinishStringNames, ACodeIsLookedUpWithItsStringNumberAndFallsBackToTh
     // "KJ" + "01" and "KJ" + "02" are two names, both answered by "KJ*".
     EXPECT_EQ(katana::cad::surveyLookupName(map, "KJ", "01"), "KJ01");
     EXPECT_EQ(katana::cad::surveyLookupName(map, "KJ", "02"), "KJ02");
-    // "PABB3" is not the exact key "PABB", and nothing but "*" answers it:
+    // "ZPBB3" is not the exact key "ZPBB", and nothing but "*" answers it:
     // the code alone, which the exact key does answer.
-    EXPECT_EQ(katana::cad::surveyLookupName(map, "PABB", "3"), "PABB");
+    EXPECT_EQ(katana::cad::surveyLookupName(map, "ZPBB", "3"), "ZPBB");
     // "B7": "B1*" does not answer it and nothing answers "B", so it is
     // reported as the code it is, once, not once per string.
     EXPECT_EQ(katana::cad::surveyLookupName(map, "B", "7"), "B");
@@ -337,13 +337,13 @@ TEST(SurveyFinishStringNames, ACodeIsLookedUpWithItsStringNumberAndFallsBackToTh
 
 // "Numbering a string never loses a rule the code had" where another rule
 // DOES answer the numbered name: a rule for a whole family of codes ("PA*")
-// answers "PABB3", and answers PABB itself less well than PABB's own exact
+// answers "ZPBB3", and answers ZPBB itself less well than ZPBB's own exact
 // rule does.
 TEST(SurveyFinishStringNames, ANumberedStringKeepsItsCodesExactRuleOverABroaderRuleForTheName)
 {
     katana::entity::SurveyMap map;
     SurveyRule pit;
-    pit.key = "PABB"; // exact: this code, one string
+    pit.key = "ZPBB"; // exact: this code, one string
     pit.model = "SURVEY PITS";
     add(map, pit);
     SurveyRule family;
@@ -351,16 +351,16 @@ TEST(SurveyFinishStringNames, ANumberedStringKeepsItsCodesExactRuleOverABroaderR
     family.model = "SURVEY PAVEMENT";
     add(map, family);
 
-    // The family rule is all that answers "PABB3", and it is broader than the
-    // code: PABB's exact rule is the more specific, so the code is looked up.
-    EXPECT_EQ(katana::cad::surveyLookupName(map, "PABB", "3"), "PABB");
+    // The family rule is all that answers "ZPBB3", and it is broader than the
+    // code: ZPBB's exact rule is the more specific, so the code is looked up.
+    EXPECT_EQ(katana::cad::surveyLookupName(map, "ZPBB", "3"), "ZPBB");
     // A code of the family with no exact rule keeps its name, as before.
     EXPECT_EQ(katana::cad::surveyLookupName(map, "PAVE", "3"), "PAVE3");
 
     // And so the point is coded by its own rule, on its own layer.
     Document document;
     document.setSurveyMap(map);
-    const EntityId numbered = addPoint(document, Point2(0.0, 0.0), "PABB", "1", "3");
+    const EntityId numbered = addPoint(document, Point2(0.0, 0.0), "ZPBB", "1", "3");
     auto planned = katana::cad::applySurveyCodes(document, {});
     ASSERT_TRUE(planned.ok()) << planned.error().describe();
     ASSERT_NE(*planned, nullptr);
@@ -371,11 +371,11 @@ TEST(SurveyFinishStringNames, ANumberedStringKeepsItsCodesExactRuleOverABroaderR
     // written for the numbered names of that code, beside the exact key for
     // the unnumbered one: there the name is looked up.
     SurveyRule strings;
-    strings.key = "PABB*";
+    strings.key = "ZPBB*";
     strings.model = "SURVEY PIT STRINGS";
     add(map, strings);
-    EXPECT_EQ(katana::cad::surveyLookupName(map, "PABB", "3"), "PABB3");
-    EXPECT_EQ(katana::cad::surveyLookupName(map, "PABB", ""), "PABB");
+    EXPECT_EQ(katana::cad::surveyLookupName(map, "ZPBB", "3"), "ZPBB3");
+    EXPECT_EQ(katana::cad::surveyLookupName(map, "ZPBB", ""), "ZPBB");
 }
 
 TEST(SurveyFinishStringNames, APointIsCodedByItsCodeFollowedByItsStringNumber)

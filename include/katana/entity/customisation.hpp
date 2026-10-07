@@ -9,10 +9,10 @@
 // value and one file of Katana's own:
 //
 //   {"format": "katana-customisation", "version": 1, "name": "NSW",
-//    "colours": {"sui electricity": "#FF7F00"},
-//    "linestyles": [{"name": "WATR Main", "strokes": [["move", 0, 0], ...]}],
+//    "colours": {"sui test power": "#FF7F00"},
+//    "linestyles": [{"name": "TEST Water Main", "strokes": [["move", 0, 0], ...]}],
 //    "symbols": [...],
-//    "codes": [{"key": "WM*", "sets": "feature", "layer": "SURVEY SERVICES"}]}
+//    "codes": [{"key": "WM*", "sets": "feature", "layer": "TEST SERVICES"}]}
 //
 // docs/customisation.md is the format's specification: every member, why the
 // reader is strict, what may never change without a new version, and the

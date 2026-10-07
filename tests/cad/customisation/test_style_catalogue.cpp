@@ -37,9 +37,9 @@ LineStyle definition(const char* name, bool atVertices, const char* source,
 
 // The drawing and customisation every test here reads.
 //
-//   library   WATR Main           listed a linestyle, not vertex -> linestyle
-//             CULT Bollard        listed a symbol, `mode vertex` -> symbol
-//             SEWR Manhole Cover  listed a symbol, NOT vertex    -> both (D3: the listing)
+//   library   TEST Water Main           listed a linestyle, not vertex -> linestyle
+//             TEST Bollard        listed a symbol, `mode vertex` -> symbol
+//             TEST Manhole Cover  listed a symbol, NOT vertex    -> both (D3: the listing)
 //             TREE Palm           other file, not vertex, named
 //                                 by style Palm's symbol        -> both (D3: a style)
 //             ELEC Pole           other file, not vertex, named
@@ -59,9 +59,9 @@ struct Catalogue : ::testing::Test {
     {
         katana::entity::StyleLibrary library;
         for (LineStyle style : {
-                 definition("WATR Main", false, "linestyles_test.4d", "Services/WATR"),
-                 definition("CULT Bollard", true, "symbols_test.4d", "Culture", true),
-                 definition("SEWR Manhole Cover", false, "SYMBOLS_Test.4d", "Services/SEWR",
+                 definition("TEST Water Main", false, "linestyles_test.4d", "Services/WATR"),
+                 definition("TEST Bollard", true, "symbols_test.4d", "Culture", true),
+                 definition("TEST Manhole Cover", false, "SYMBOLS_Test.4d", "Services/SEWR",
                             true),
                  definition("TREE Palm", false, "extra.4d"),
                  definition("ELEC Pole", false, "extra.4d"),
@@ -130,7 +130,7 @@ struct Catalogue : ::testing::Test {
 
 TEST_F(Catalogue, ADefinitionIsASymbolForAnyOfTheFourReasonsAndALinestyleWhenNotAtVertices)
 {
-    const DefinitionKind bollard = classifyDefinition(document, "CULT Bollard");
+    const DefinitionKind bollard = classifyDefinition(document, "TEST Bollard");
     EXPECT_TRUE(bollard.symbol);
     EXPECT_FALSE(bollard.linestyle) << "`mode vertex` is never a line pattern (D8)";
     EXPECT_TRUE(bollard.atVertices);
@@ -140,7 +140,7 @@ TEST_F(Catalogue, ADefinitionIsASymbolForAnyOfTheFourReasonsAndALinestyleWhenNot
     // once the NAME of its source that said so, "symbol" in any case; the
     // definition says it itself now, so the expectation stands and the cause
     // is new.)
-    const DefinitionKind manhole = classifyDefinition(document, "SEWR Manhole Cover");
+    const DefinitionKind manhole = classifyDefinition(document, "TEST Manhole Cover");
     EXPECT_EQ(manhole, (DefinitionKind{.linestyle = true,
                                        .symbol = true,
                                        .atVertices = false,
@@ -156,7 +156,7 @@ TEST_F(Catalogue, ADefinitionIsASymbolForAnyOfTheFourReasonsAndALinestyleWhenNot
     EXPECT_TRUE(pole.symbol && pole.namedBySurveyRule);
     EXPECT_FALSE(pole.namedByStyle);
 
-    const DefinitionKind watr = classifyDefinition(document, "WATR Main");
+    const DefinitionKind watr = classifyDefinition(document, "TEST Water Main");
     EXPECT_TRUE(watr.linestyle);
     EXPECT_FALSE(watr.symbol);
 
@@ -196,14 +196,15 @@ TEST_F(Catalogue, ADefinitionIsListedAsASymbolByItsCustomisationAndNotByTheNameO
 
 TEST_F(Catalogue, TheLinetypePickerOffersByLayerFirstThenEveryLinestyleSortedWithCaseFolded)
 {
-    // Non-vertex library definitions: WATR Main, SEWR Manhole Cover, TREE
+    // Non-vertex library definitions: TEST Water Main, TEST Manhole Cover, TREE
     // Palm, ELEC Pole, fence. Model linetypes: continuous, dash, fence (the
     // collision, listed once as the library's). Folded order: continuous,
-    // dash, elec pole, fence, sewr manhole cover, tree palm, watr main.
+    // dash, elec pole, fence, test manhole cover, test water main, tree palm
+    // ("e" < "r": TEST before TREE).
     const std::vector<CatalogueEntry> choices = linetypeChoices(document);
     EXPECT_EQ(names(choices),
               (std::vector<std::string>{"ByLayer", "continuous", "dash", "ELEC Pole", "fence",
-                                        "SEWR Manhole Cover", "TREE Palm", "WATR Main"}));
+                                        "TEST Manhole Cover", "TEST Water Main", "TREE Palm"}));
     EXPECT_EQ(choices.front().source, DefinitionSource::BuiltIn);
     EXPECT_EQ(choices.front().users.styles, std::vector<std::string>{"Palm"})
         << "the styles that inherit their layer's linetype";
@@ -212,7 +213,7 @@ TEST_F(Catalogue, TheLinetypePickerOffersByLayerFirstThenEveryLinestyleSortedWit
     ASSERT_NE(fence, nullptr);
     EXPECT_EQ(fence->source, DefinitionSource::Library) << "the library's definition draws (D2)";
     EXPECT_TRUE(fence->collision);
-    const CatalogueEntry* watr = find(choices, "WATR Main");
+    const CatalogueEntry* watr = find(choices, "TEST Water Main");
     ASSERT_NE(watr, nullptr);
     EXPECT_EQ(watr->sourceFile, "linestyles_test.4d");
     EXPECT_EQ(watr->group, "Services/WATR");
@@ -229,29 +230,31 @@ TEST_F(Catalogue, TheLinetypePickerOffersByLayerFirstThenEveryLinestyleSortedWit
 TEST_F(Catalogue, TheSymbolPickerOffersEveryD3SymbolAndTheBuiltInsALibraryDoesNotHide)
 {
     const std::vector<CatalogueEntry> choices = symbolChoices(document);
-    // Library symbols: CULT Bollard, SEWR Manhole Cover, TREE Palm, ELEC
+    // Library symbols: TEST Bollard, TEST Manhole Cover, TREE Palm, ELEC
     // Pole, circle (5). Built-ins: 16, less "circle", which the library
-    // defines and so draws: 15. Neither WATR Main nor fence.
+    // defines and so draws: 15. Neither TEST Water Main nor fence.
     EXPECT_EQ(choices.size(), 20u);
-    EXPECT_EQ(find(choices, "WATR Main"), nullptr);
+    EXPECT_EQ(find(choices, "TEST Water Main"), nullptr);
     EXPECT_EQ(find(choices, "fence"), nullptr);
-    ASSERT_NE(find(choices, "SEWR Manhole Cover"), nullptr)
+    ASSERT_NE(find(choices, "TEST Manhole Cover"), nullptr)
         << "a NON-vertex definition listed as a symbol is a symbol";
     ASSERT_NE(find(choices, "TREE Palm"), nullptr);
     EXPECT_EQ(find(choices, "TREE Palm")->users.styles, std::vector<std::string>{"Palm"});
     EXPECT_EQ(find(choices, "circle")->source, DefinitionSource::Library);
     EXPECT_EQ(find(choices, "cross")->source, DefinitionSource::BuiltIn);
     EXPECT_EQ(find(choices, "cross")->users.styles, std::vector<std::string>{"Cross"});
-    EXPECT_TRUE(find(choices, "CULT Bollard")->atVertices);
+    EXPECT_TRUE(find(choices, "TEST Bollard")->atVertices);
 
-    // Sorted with case folded: "arrow" (built-in) before "CULT Bollard"
-    // before "dot" before "ELEC Pole".
+    // Sorted with case folded: "arrow" (built-in) before "dot" before "ELEC
+    // Pole" before "TEST Bollard" - an upper-case name among lower-case ones is
+    // placed by its letters, so "ELEC Pole" falls between "dot" and "TEST
+    // Bollard" ("d" < "e" < "t"), where byte order would put both ahead of them.
     const auto position = [&](std::string_view name) {
         return std::ranges::find(choices, name, &CatalogueEntry::name) - choices.begin();
     };
-    EXPECT_LT(position("arrow"), position("CULT Bollard"));
-    EXPECT_LT(position("CULT Bollard"), position("dot"));
+    EXPECT_LT(position("arrow"), position("dot"));
     EXPECT_LT(position("dot"), position("ELEC Pole"));
+    EXPECT_LT(position("ELEC Pole"), position("TEST Bollard"));
 }
 
 TEST_F(Catalogue, APickerKeepsTheCurrentValueItCannotOfferMarkedRatherThanDroppingIt)
@@ -274,15 +277,15 @@ TEST_F(Catalogue, APickerKeepsTheCurrentValueItCannotOfferMarkedRatherThanDroppi
 TEST_F(Catalogue, ASearchFoldsCaseOverNameGroupAndSourceFile)
 {
     const std::vector<CatalogueEntry> symbols = symbolChoices(document);
-    // "manhole" (built-in) and "SEWR Manhole Cover", by name.
+    // "manhole" (built-in) and "TEST Manhole Cover", by name.
     EXPECT_EQ(names(filterChoices(symbols, "MANHOLE")),
-              (std::vector<std::string>{"manhole", "SEWR Manhole Cover"}));
+              (std::vector<std::string>{"manhole", "TEST Manhole Cover"}));
     // Both symbol-file definitions, by their file.
     EXPECT_EQ(names(filterChoices(symbols, "symbols_test")),
-              (std::vector<std::string>{"CULT Bollard", "SEWR Manhole Cover"}));
+              (std::vector<std::string>{"TEST Bollard", "TEST Manhole Cover"}));
     // By group.
     EXPECT_EQ(names(filterChoices(linetypeChoices(document), "services/w")),
-              std::vector<std::string>{"WATR Main"});
+              std::vector<std::string>{"TEST Water Main"});
     EXPECT_EQ(filterChoices(symbols, "").size(), symbols.size());
 }
 
@@ -320,29 +323,29 @@ TEST_F(Catalogue, EachNamesStatusIsWhatTheViewportDrawsForIt)
     for (const char* plain : {"", "ByLayer", "CONTINUOUS", "0", "1"}) {
         EXPECT_EQ(linetypeStatus(document, plain), NameStatus::Plain) << plain;
     }
-    EXPECT_EQ(linetypeStatus(document, "WATR Main"), NameStatus::Library);
+    EXPECT_EQ(linetypeStatus(document, "TEST Water Main"), NameStatus::Library);
     EXPECT_EQ(linetypeStatus(document, "dash"), NameStatus::Katana) << "a model linetype";
     EXPECT_EQ(linetypeStatus(document, "fence"), NameStatus::Library)
         << "a collision: the library's linestyle is what draws (D2)";
     // `mode vertex` only: resolveLinetype gives Solid, and the linetype
     // picker (linetypeChoices, which the NamePicker lists) does not offer it.
-    EXPECT_EQ(linetypeStatus(document, "CULT Bollard"), NameStatus::NotALinestyle);
-    EXPECT_EQ(find(linetypeChoices(document), "CULT Bollard"), nullptr);
+    EXPECT_EQ(linetypeStatus(document, "TEST Bollard"), NameStatus::NotALinestyle);
+    EXPECT_EQ(find(linetypeChoices(document), "TEST Bollard"), nullptr);
     EXPECT_EQ(linetypeStatus(document, "NOPE"), NameStatus::Undefined);
     // A style's own symbol as its linetype draws plain (D8), whatever kind
     // of definition the name is, and even when nothing defines it.
-    EXPECT_EQ(linetypeStatus(document, "CULT Bollard", "CULT Bollard"), NameStatus::OwnSymbol);
-    EXPECT_EQ(linetypeStatus(document, "SEWR Manhole Cover", "SEWR Manhole Cover"),
+    EXPECT_EQ(linetypeStatus(document, "TEST Bollard", "TEST Bollard"), NameStatus::OwnSymbol);
+    EXPECT_EQ(linetypeStatus(document, "TEST Manhole Cover", "TEST Manhole Cover"),
               NameStatus::OwnSymbol);
     EXPECT_EQ(linetypeStatus(document, "NOPE", "NOPE"), NameStatus::OwnSymbol);
     // ... but only its OWN symbol.
-    EXPECT_EQ(linetypeStatus(document, "CULT Bollard", "TREE Palm"), NameStatus::NotALinestyle);
+    EXPECT_EQ(linetypeStatus(document, "TEST Bollard", "TREE Palm"), NameStatus::NotALinestyle);
 
     // Symbols: any library definition, `mode vertex` or not (D3); else a
     // built-in shape; "circle" is defined, and the library's wins.
     EXPECT_EQ(symbolStatus(document, ""), NameStatus::Plain);
-    EXPECT_EQ(symbolStatus(document, "CULT Bollard"), NameStatus::Library);
-    EXPECT_EQ(symbolStatus(document, "WATR Main"), NameStatus::Library);
+    EXPECT_EQ(symbolStatus(document, "TEST Bollard"), NameStatus::Library);
+    EXPECT_EQ(symbolStatus(document, "TEST Water Main"), NameStatus::Library);
     EXPECT_EQ(symbolStatus(document, "circle"), NameStatus::Library);
     EXPECT_EQ(symbolStatus(document, "cross"), NameStatus::Katana);
     EXPECT_EQ(symbolStatus(document, "NOPE Symbol"), NameStatus::Undefined);
@@ -351,28 +354,28 @@ TEST_F(Catalogue, EachNamesStatusIsWhatTheViewportDrawsForIt)
 
 TEST_F(Catalogue, ALinetypeNamingOnlyAVertexSymbolIsMissingAsNotALinestyle)
 {
-    // CULT Bollard is `mode vertex`: a symbol, never a line pattern. A layer
+    // TEST Bollard is `mode vertex`: a symbol, never a line pattern. A layer
     // and a style that give it as their LINETYPE draw solid, and the
     // NamePicker marks it "(not defined)", so missingNames says so too -
     // with why. "circle" is the same, and a built-in shape besides: as a
     // linetype that makes it no less solid.
     katana::entity::Layer posts;
     posts.name = "posts";
-    posts.linetype = "CULT Bollard";
+    posts.linetype = "TEST Bollard";
     must(katana::commands::createLayer(posts));
-    must(katana::commands::createStyle(style("Bollard Line", "CULT Bollard", "")));
+    must(katana::commands::createStyle(style("Bollard Line", "TEST Bollard", "")));
     must(katana::commands::createStyle(style("Ring Line", "circle", "")));
 
     const std::vector<MissingName> missing = missingNames(document);
-    // Linetypes ascending: CULT Bollard, MISSING Layer Linestyle, NOPE
-    // Linestyle, circle ("C" < "M" < "N" < "c", by byte). Then the symbol.
+    // Linetypes ascending: MISSING Layer Linestyle, NOPE Linestyle, TEST
+    // Bollard, circle ("M" < "N" < "T" < "c", by byte). Then the symbol.
     ASSERT_EQ(missing.size(), 5u);
-    EXPECT_EQ(missing[0].name, "CULT Bollard");
-    EXPECT_EQ(missing[0].role, NameRole::Linetype);
-    EXPECT_EQ(missing[0].status, NameStatus::NotALinestyle);
-    EXPECT_EQ(missing[0].users.layers, std::vector<std::string>{"posts"});
-    EXPECT_EQ(missing[0].users.styles, std::vector<std::string>{"Bollard Line"});
-    EXPECT_EQ(missing[0].fallback, "continuous") << "what the viewport draws: solid";
+    EXPECT_EQ(missing[2].name, "TEST Bollard");
+    EXPECT_EQ(missing[2].role, NameRole::Linetype);
+    EXPECT_EQ(missing[2].status, NameStatus::NotALinestyle);
+    EXPECT_EQ(missing[2].users.layers, std::vector<std::string>{"posts"});
+    EXPECT_EQ(missing[2].users.styles, std::vector<std::string>{"Bollard Line"});
+    EXPECT_EQ(missing[2].fallback, "continuous") << "what the viewport draws: solid";
     EXPECT_EQ(missing[3].name, "circle");
     EXPECT_EQ(missing[3].status, NameStatus::NotALinestyle);
     EXPECT_EQ(missing[3].users.styles, std::vector<std::string>{"Ring Line"});
@@ -386,9 +389,9 @@ TEST_F(Catalogue, AStyleWhoseLinetypeIsItsOwnSymbolIsTheImportersPatternAndNotMi
     // symbol all the symbol's name. resolveLinePattern draws the line plain
     // and the symbol at every vertex (D8), so neither name is missing -
     // for a `mode vertex` symbol and for one that is not.
-    must(katana::commands::createStyle(style("CULT Bollard", "CULT Bollard", "CULT Bollard")));
+    must(katana::commands::createStyle(style("TEST Bollard", "TEST Bollard", "TEST Bollard")));
     must(katana::commands::createStyle(
-        style("SEWR Manhole Cover", "SEWR Manhole Cover", "SEWR Manhole Cover")));
+        style("TEST Manhole Cover", "TEST Manhole Cover", "TEST Manhole Cover")));
     // An undefined symbol in the same pattern is missing once, as a SYMBOL:
     // its linetype still draws plain.
     must(katana::commands::createStyle(style("NOPE Post", "NOPE Post", "NOPE Post")));
@@ -405,7 +408,7 @@ TEST_F(Catalogue, AStyleWhoseLinetypeIsItsOwnSymbolIsTheImportersPatternAndNotMi
 
 TEST_F(Catalogue, WhenALayerAlsoNamesAStylesOwnSymbolOnlyTheLayersLinesAreCounted)
 {
-    // Style "CULT Bollard" is the importer's pattern; layer "fences" gives
+    // Style "TEST Bollard" is the importer's pattern; layer "fences" gives
     // the same name as a plain linetype, which draws solid. Entities, in id
     // order: a on fences wearing the style, b on fences with no style, c on
     // layer 0 wearing the style. tableUsage counts all three against the
@@ -413,19 +416,19 @@ TEST_F(Catalogue, WhenALayerAlsoNamesAStylesOwnSymbolOnlyTheLayersLinesAreCounte
     // symbol, so the missing name's lines are b alone.
     katana::entity::Layer fences;
     fences.name = "fences";
-    fences.linetype = "CULT Bollard";
+    fences.linetype = "TEST Bollard";
     must(katana::commands::createLayer(fences));
-    must(katana::commands::createStyle(style("CULT Bollard", "CULT Bollard", "CULT Bollard")));
+    must(katana::commands::createStyle(style("TEST Bollard", "TEST Bollard", "TEST Bollard")));
     using katana::geometry::Point2;
-    must(katana::commands::createLine(Point2(0, 0), Point2(1, 0), {"fences", "CULT Bollard"}));
+    must(katana::commands::createLine(Point2(0, 0), Point2(1, 0), {"fences", "TEST Bollard"}));
     must(katana::commands::createLine(Point2(0, 1), Point2(1, 1), {"fences", ""}));
-    must(katana::commands::createLine(Point2(0, 2), Point2(1, 2), {"0", "CULT Bollard"}));
+    must(katana::commands::createLine(Point2(0, 2), Point2(1, 2), {"0", "TEST Bollard"}));
     const std::vector<katana::entity::EntityId> ids = document.model().entities.ids();
     ASSERT_EQ(ids.size(), 3u);
 
     const std::vector<MissingName> missing = missingNames(document);
     const auto bollard =
-        std::ranges::find(missing, std::string("CULT Bollard"), &MissingName::name);
+        std::ranges::find(missing, std::string("TEST Bollard"), &MissingName::name);
     ASSERT_NE(bollard, missing.end());
     EXPECT_EQ(bollard->status, NameStatus::NotALinestyle);
     EXPECT_EQ(bollard->users.layers, std::vector<std::string>{"fences"});
