@@ -290,10 +290,13 @@ customisation's own table, then the standard names of
 `include/katana/entity/colour_names.hpp`). The standard names were once a
 table cad could not see, so each front end passed it with
 `CommandInterpreter::setColourLookup`. No front end passes one any more, and
-the setter went with the last that did (2026-10-07): the interpreter hands
-`runSurveyCodeVerb` no lookup, and the parameter that function still has for
-a caller's own names is reached only by its tests
-(`SurveyCodeVerbs.AColourNameNothingKnowsIsLeftAloneAndACallersOwnIsAskedLast`).
+the setter went with the last that did (2026-10-07). So did the parameter
+`runSurveyCodeVerb` took for a caller's own names, asked after the Document:
+only its tests reached it, and a second way to resolve a colour that no
+program uses is one more thing to keep true. The verb asks the Document and
+nobody else
+(`SurveyCodeVerbs.AColourNameNothingKnowsIsLeftAloneRatherThanGuessedAt`,
+`SurveyCodeVerbs.AColourTheCustomisationNamesItselfIsResolvedFromItsOwnTable`).
 
 `CUSTOMISE` is the interpreter's too (`runCustomisationVerb`,
 `include/katana/cad/customisation_verbs.hpp`): the report, `JSON`, a load

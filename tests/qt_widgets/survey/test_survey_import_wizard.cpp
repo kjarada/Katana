@@ -353,6 +353,27 @@ TEST(SurveyImportWizard, AnOpcodeFieldFileIsImportedAsAJobWithItsDefaults)
     EXPECT_TRUE(session.document.surveyJobs().empty());
 }
 
+TEST(SurveyImportWizard, TheOptionsStepSaysHowSurveyCodesAreLoadedByTheLineThatLoadsThem)
+{
+    // The note under the Options step's boxes says what "Apply survey codes"
+    // needs. It sent people to Format > Load Customisation and called what
+    // that loaded "a survey code file": the menu item is gone and that kind of
+    // file no longer loads. What loads survey codes is the CUSTOMISE line, of
+    // a Katana customisation file - the words CODE itself refuses with when
+    // none are loaded (cad/survey_code_verbs.hpp, requireMap).
+    Session session;
+    const auto* note = child<QLabel>(*session.wizard, "optionsNote");
+    ASSERT_NE(note, nullptr);
+    const QString text = note->text();
+    EXPECT_TRUE(text.contains("CUSTOMISE <file>")) << text.toStdString();
+    EXPECT_TRUE(text.contains("Katana customisation file")) << text.toStdString();
+    EXPECT_FALSE(text.contains("Load Customisation")) << text.toStdString();
+    EXPECT_FALSE(text.contains("survey code file")) << text.toStdString();
+    EXPECT_FALSE(text.contains("Format >")) << text.toStdString();
+    // Shown as it is written: "<file>" is not markup for the label to read.
+    EXPECT_EQ(note->textFormat(), Qt::PlainText);
+}
+
 TEST(SurveyImportWizard, ADelimitedCoordinateFileStillTakesItsSixSteps)
 {
     Session session;

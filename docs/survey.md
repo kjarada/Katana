@@ -2970,7 +2970,15 @@ with:
 - **One command.** Import makes one undoable command
   (`cad::importSurveyPoints`), frames the views and logs the report; step 5
   can apply the loaded survey codes afterwards with the window's own Apply
-  Survey Codes action. After Import the wizard hides and goes back to step 1
+  Survey Codes action. The note under that step's boxes (`optionsNote`) says
+  what loads them - `CUSTOMISE <file>`, of a Katana customisation file, the
+  words `CODE` refuses with when none are loaded. It named Format > Load
+  Customisation and "a survey code file" until 2026-10-07, after the menu
+  item had gone and that kind of file had stopped loading
+  (`SurveyImportWizard.TheOptionsStepSaysHowSurveyCodesAreLoadedByTheLineThatLoadsThem`;
+  in the real window,
+  `qt_the_import_wizards_options_note_names_the_customise_line_headless`).
+  After Import the wizard hides and goes back to step 1
   with its fields kept, as a wizard's Finish does.
 
 Saved layout templates live in the user's settings (`survey/templates`), and

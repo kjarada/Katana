@@ -88,9 +88,11 @@ QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
 // --report NAME: what the widget NAME in the current target shows, on
 // stderr as "NAME: text", so a test can see what a dialog SAYS - an
 // explanation, a count - and not only that it painted. A label's text
-// without its markup, a field's or a text box's text, a list's or a tree's
-// rows (their columns joined by " | ", the rows by " ; "; a tree's depth
-// first, down the rows it shows open). A NAME that is no
+// without its markup (as written, for a label whose text is plain: what
+// stands in angle brackets there is shown, so it is reported), a field's or
+// a text box's text, a list's or a tree's rows (their columns joined by
+// " | ", the rows by " ; "; a tree's depth first, down the rows it shows
+// open). A NAME that is no
 // widget there may be one of the window's actions - a menu item or a tool -
 // reported as its text and whether it is checked, so a test can see which
 // tool the menus and toolbars show running. One of the window's menus
@@ -140,7 +142,14 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
         }
         text = QString(menu->title()).remove('&') + ": " + items.join(" ; ");
     } else if (const auto* label = qobject_cast<const QLabel*>(widget)) {
-        text = QTextDocumentFragment::fromHtml(label->text()).toPlainText();
+        // Without its markup - unless the label was told its text is plain
+        // (Qt::PlainText: a refusal's words, a file's, a usage line). It then
+        // shows the text as written, and is reported as written: read as
+        // markup, "CUSTOMISE <file> loads ..." was reported with the <file>
+        // gone while the screen had it.
+        text = label->textFormat() == Qt::PlainText
+                   ? label->text()
+                   : QTextDocumentFragment::fromHtml(label->text()).toPlainText();
     } else if (const auto* line = qobject_cast<const QLineEdit*>(widget)) {
         text = line->text();
     } else if (const auto* box = qobject_cast<const QPlainTextEdit*>(widget)) {

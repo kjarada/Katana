@@ -398,11 +398,14 @@ need it, and it needs no third-party library, so it costs `archive12d` nothing
 of the property that lets it build with `-DKATANA_BUILD_IO=OFF`.
 
 Loading the real customisation from the command line, as `katana_cli` did it
-until 2026-10-06. (Its `CUSTOMISE` is the interpreter's now and reads a Katana
-customisation file - `docs/customisation.md`, "The verbs" - so these four
-files are refused there as not one; the window's own `CUSTOMISE` still loads
-them, through this reader, with the same per-file lines.) Each long list of
-names is cut short here:
+until 2026-10-06. (`CUSTOMISE` is the interpreter's now, in `katana_cli`,
+`katana_mcp` and the window alike, and reads a Katana customisation file -
+`docs/customisation.md`, "The verbs" - so these four files are refused
+everywhere as not one, and no program calls this reader any more: the
+window's own `CUSTOMISE`, the last to load them through it, is gone too
+("The desktop window no longer loads these files", below). What follows is a
+record of what the reader makes of the four files, kept while the reader
+is.) Each long list of names is cut short here:
 
 ```
 R=resources/customisation
@@ -862,10 +865,14 @@ still be narrow bytes that are not UTF-8, and a `std::filesystem::path` built
 straight from those throws at the first of them - out of a function that
 promises to report and never throw.
 
-The older embedding (`tools/embed_customisation.py`, four files) and
-`archive12d::builtinCustomisation()` are still what the window calls, and
-stay until it is moved; the session of `katana_cli` and `katana_mcp` asks
-`builtInCustomisation()` and no longer reads the four files.
+Every front end asks `builtInCustomisation()` for its host - the session of
+`katana_cli` and `katana_mcp`, and since 2026-10-07 the window
+(`MainWindow::loadDefaultCustomisation`) - and none reads the four older
+files. The older embedding (`tools/embed_customisation.py`, four files) and
+`archive12d::builtinCustomisation()` have no program caller left: the archive
+module's own tests and one benchmark (`benchmarks/qt/bench_plan_paint.cpp`)
+still read them, and they stay until the readers of the older files are
+split off.
 
 ### What a session starts with
 
@@ -2048,22 +2055,32 @@ manager's Diagnostics and the symbol library show it ("The Format menu" in
 
 ## The customisation is part of the program
 
+**This section and the next describe the OLDER embedding** - four files, read
+by `katana_archive12d` - which no program starts from any more. Since
+2026-10-07 every front end starts through `cad::startCustomisation` over ONE
+Katana customisation file compiled into `katana_cad` ("The built-in, and the
+seam", above), and that is where "compiled in, with nothing configured" is
+true today. The text stays, with the embedding it describes, until the
+readers of the older files are split off.
+
 Not a file to load, not a setting to point somewhere: the linestyles, symbols
 and survey codes are **compiled into the binary**. Every drawing has them the
 moment it is opened, on any machine, with nothing configured.
 
 `tools/embed_customisation.py` runs at build time and turns each customisation
 file into a byte array in a generated source; `archive12d::builtinCustomisation`
-parses them once, lazily, and keeps the result. The front ends seed the
-Document from it at startup.
+parses them once, lazily, and keeps the result. The front ends seeded the
+Document from it at startup, until each moved to its host.
 
 A built-in file that cannot be read costs ONLY ITSELF:
 `readEachCustomisationFile` names it in `Customisation::errors` and keeps what
 the files before and after it brought, where one damaged file used to leave
 every drawing on plain lines without a word (audit A12-06). A person loading
 files still gets `readCustomisation`, which fails whole so they can be told.
-Both front ends LOG `builtinCustomisation().errors` and `.warnings` once at
-start-up, so A12-06 is fixed ("Loading a customisation" above).
+Both front ends LOGGED `builtinCustomisation().errors` and `.warnings` once at
+start-up, which is how A12-06 was fixed; what a start says now is
+`cad::CustomisationStart::problems`, in each front end's own lines ("Loading
+a customisation" above, "The built-in's faults are said").
 
 Two decisions worth recording:
 

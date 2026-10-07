@@ -1,8 +1,11 @@
-# Every test that runs one of the programs says which built-in customisation
-# the program starts with.
+# Every test that runs one of the programs says which customisation the
+# program starts with: its built-in one, and its kept one.
 #
 #   cmake -DCTEST=<ctest> -DBUILD=<build tree> [-DCONFIGURATION=<name>]
 #         -DPROGRAM_LIST=<file> -DVARIABLE=KATANA_BUILTIN_CUSTOMISATION
+#         -P tools/check_program_tests.cmake
+#   cmake ... -DVARIABLE=KATANA_CUSTOMISATION -DUNSET_SAYS=ON
+#         "-DWHAT=which kept customisation they start with"
 #         -P tools/check_program_tests.cmake
 #
 # A build may have a customisation compiled in and may have none (the owner's
@@ -11,6 +14,13 @@
 # command names katana, katana_cli or katana_mcp must set VARIABLE
 # (cad/customisation_host.hpp, "The seam"), and this names every one that
 # does not, and fails.
+#
+# The same goes for the file a customisation is kept in, which the programs
+# read from KATANA_CUSTOMISATION: a person who keeps one sets that variable in
+# their shell, and a test that did not say would start with their file. That
+# variable is asked about with -DUNSET_SAYS=ON, since for it "there is none"
+# is said by UNSETTING it - where an unset built-in variable says nothing: it
+# leaves the choice to the build.
 #
 # It is run at TEST time, over the listing ctest itself gives of what it will
 # run (`ctest --show-only=json-v1`): every directory's tests, whenever each
@@ -26,7 +36,17 @@
 #   its command line          VARIABLE=<value> or VARIABLE=set:<value>, as
 #                             `cmake -E env [--modify]` takes them
 # An empty value, `unset:` and `reset:` do not say: they leave the program
-# with whatever its build compiled in.
+# with whatever its build compiled in. So does `--unset=VARIABLE` on a
+# `cmake -E env` line, which is `unset:` written there.
+#
+# With -DUNSET_SAYS=ON the variable is one whose ABSENCE is a state the
+# program is the same in on every machine (no kept file), so taking it away
+# says as much as giving it a value:
+#   ENVIRONMENT               VARIABLE=<value>, or VARIABLE= with none
+#   ENVIRONMENT_MODIFICATION  VARIABLE=set:<value>, set: with none, or unset:
+#   its command line          any of those, or --unset=VARIABLE
+# `reset:` still does not say: it gives the variable back as the caller has
+# it. Nor does a test that never names it, which is the test this is for.
 #
 # What it cannot see: a program that a test starts from inside a script or an
 # executable without naming it on the command line. There is none today.
@@ -38,11 +58,24 @@
 #   -DLISTING=<file>        a listing read from a file in the place of ctest's:
 #                           how the check is itself checked, on a listing with
 #                           tests in it that it must name
+#   -DUNSET_SAYS=ON         VARIABLE is said by being unset too (above)
+#   -DWHAT=<words>          what a test that names VARIABLE says, for the
+#                           report's one line: "which built-in customisation
+#                           they start with" unless given
 
 cmake_minimum_required(VERSION 3.24)
 
 if(NOT DEFINED VARIABLE OR VARIABLE STREQUAL "")
     message(FATAL_ERROR "check_program_tests.cmake needs -DVARIABLE")
+endif()
+if(NOT DEFINED WHAT OR WHAT STREQUAL "")
+    set(WHAT "which built-in customisation they start with")
+endif()
+# A plain TRUE or FALSE from here on, whatever word it was given as.
+if(UNSET_SAYS)
+    set(UNSET_SAYS TRUE)
+else()
+    set(UNSET_SAYS FALSE)
 endif()
 
 set(_programs "")
@@ -140,11 +173,20 @@ function(katana_names_program argument program out)
     endwhile()
 endfunction()
 
-# What an entry `VARIABLE=...` says: TRUE when it gives the variable a value.
-# `plain` is how ENVIRONMENT writes one (VARIABLE=value), `modification` how
-# ENVIRONMENT_MODIFICATION does (VARIABLE=set:value).
+# What an entry about VARIABLE says: TRUE when it settles what the program is
+# given, FALSE when it leaves that to the build or to the caller, and nothing
+# when it is not about the variable at all. `plain` is how ENVIRONMENT writes
+# one (VARIABLE=value), `modification` how ENVIRONMENT_MODIFICATION does
+# (VARIABLE=set:value). A command line may hold either - both are then TRUE -
+# and `cmake -E env`'s own --unset=VARIABLE, which is `unset:` written there:
+# read as that, so that a line which takes the variable away is not passed
+# over while a property that set it goes on being believed.
 function(katana_entry_says entry plain modification out)
     set(${out} "" PARENT_SCOPE) # not about the variable at all
+    if(plain AND modification AND "${entry}" STREQUAL "--unset=${VARIABLE}")
+        set(${out} "${UNSET_SAYS}" PARENT_SCOPE)
+        return()
+    endif()
     string(LENGTH "${VARIABLE}=" _length)
     string(FIND "${entry}" "${VARIABLE}=" _at)
     if(NOT _at EQUAL 0)
@@ -154,7 +196,13 @@ function(katana_entry_says entry plain modification out)
     set(_says FALSE)
     if(modification AND _value MATCHES "^set:.")
         set(_says TRUE)
-    elseif(plain AND NOT _value STREQUAL "" AND NOT _value MATCHES "^(set|unset|reset):")
+    elseif(modification AND UNSET_SAYS AND _value MATCHES "^(set|unset):")
+        # Emptied or taken away: the program is given none, on every machine.
+        set(_says TRUE)
+    elseif(plain AND NOT _value MATCHES "^(set|unset|reset):"
+           AND (UNSET_SAYS OR NOT _value STREQUAL ""))
+        # A plain value. An empty one gives the program none, which says
+        # something only of a variable whose absence does.
         set(_says TRUE)
     endif()
     set(${out} "${_says}" PARENT_SCOPE)
@@ -283,8 +331,14 @@ else()
     set(_named "none")
 endif()
 message(STATUS
-    "Of ${_count} tests that run a program, those that do not say which built-in customisation they start with: ${_named}.")
-if(_bare)
+    "Of ${_count} tests that run a program, those that do not say ${WHAT}: ${_named}.")
+if(_bare AND UNSET_SAYS)
+    message(FATAL_ERROR
+        "Give each of them ${VARIABLE} in its ENVIRONMENT_MODIFICATION - `unset:` to "
+        "start with none, whatever the shell that runs the suite has set, or `set:<file>` "
+        "for a file of the test's own (docs/headless.md, \"The customisation a run starts "
+        "with\").")
+elseif(_bare)
     message(FATAL_ERROR
         "Give each of them ${VARIABLE} in its ENVIRONMENT_MODIFICATION - `set:none` to "
         "start with nothing, or `set:<file>` for a fixture (docs/headless.md, "
