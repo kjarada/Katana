@@ -751,3 +751,34 @@ tag it builds and tests them only.
 
 `docs/index.md` lists every document: what each covers and when to update
 it.
+
+---
+
+## Licence
+
+Katana is free software, licensed under **GPL-3.0-or-later** (the GNU General
+Public License, version 3 or any later version) with additional attribution
+terms under section 7 of that licence. It is the same family of licence as
+Linux, which uses an earlier version, `GPL-2.0-only`; Katana uses version 3
+because of the libraries it is built on. Anyone may use it for any purpose,
+commercial use included. A copy of it, or a work based on it, that is passed on
+must stay under the same licence, with its source.
+
+A work that includes or is based on Katana's code must carry this line, in its
+documentation and, if it has one, in its About dialog:
+
+> Based on Katana by Jarada, https://github.com/kjarada/Katana
+
+Using Katana, and the drawings and data made with it, needs no attribution.
+
+| File | Holds |
+|---|---|
+| `LICENSE` | the licence text |
+| `ADDITIONAL_TERMS.md` | the attribution terms |
+| `LICENSING.md` | the licence in plain words, what it does not cover, how to contribute |
+| `THIRD_PARTY_NOTICES.md` | the libraries Katana is built with and their licences |
+
+Two things in the repository are not covered by the licence: the built-in
+customisation (`resources/customisation/nsw.customisation.json`), converted
+from third-party files, and the example data in `samples/`. `LICENSING.md` says
+what is known about each.

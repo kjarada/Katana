@@ -6,3 +6,8 @@
 # same commit built elsewhere, and every kept copy would be reported as made
 # from another edition.
 resources/customisation/*.json -text
+
+# The licence text is exact bytes, as the Free Software Foundation publishes it.
+# A checkout that rewrote its line ends (core.autocrlf on Windows) would no
+# longer hold the unmodified text, so it is not converted.
+LICENSE -text
