@@ -31,7 +31,10 @@ What it writes under --out (it replaces install/ and release/, and leaves keys/ 
     downgrade-version               a validly signed 0.9.0 with a sequence ABOVE release/v2's
 
 The sequences are fixed (a real build's UTC seconds, chosen here), so the files do not change from run to
-run on one machine. Python's zlib decides the compressed bytes, so another zlib (zlib-ng or zlib) makes a
+run on one machine. They also fix `published` and `expires` (180 days later): release/v1 expires on
+2027-03-20 and release/v2 on 2027-04-16. `expires` is advisory ("the information is old", never a
+refusal, manifest.hpp), but a test that reads the REAL clock and treats it as a state would start to
+fail on those dates: a test of anything that looks at `expires` injects its own clock. Python's zlib decides the compressed bytes, so another zlib (zlib-ng or zlib) makes a
 different zip and so different offsets: the committed files are the reference and the tests compare a
 regeneration with them by meaning, not by byte.
 """

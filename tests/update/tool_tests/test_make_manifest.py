@@ -7,7 +7,9 @@ header parsed with struct, hand-worked dates, the RFC 8032 vectors, and the open
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime
+import io
 import json
 import os
 import re
@@ -15,6 +17,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from support import (
     FIXTURES,
@@ -448,6 +451,18 @@ class Signing(Produced):
         signature = base64.b64decode((out / "Katana-update-win64.json.sig").read_text().split()[2])
         self.assertTrue(openssl_verify(public, (out / "Katana-update-win64.json").read_bytes(), signature))
 
+    def test_a_keys_file_that_does_not_exist_is_an_error_and_not_a_way_past_every_key_check(self) -> None:
+        throwaway = self.write_pem("throwaway.pem", THROWAWAY_SEED)
+        missing = self.tmp / "no-such-keys.cmake"
+        for extra in ((), ("--test-key",)):
+            with self.subTest(extra=extra):
+                out = self.tmp / ("out" + "".join(extra))
+                key = self.rfc_pem(1) if extra else throwaway
+                done = self.sign(key, out, *extra, "--keys-cmake", missing)
+                self.assert_tool_failed(done, "does not exist", "no-such-keys.cmake")
+                self.assertFalse(out.exists())
+        self.assertFalse(missing.exists())
+
     def test_a_key_that_openssl_cannot_read_is_refused_without_writing_anything(self) -> None:
         bad = self.tmp / "bad.pem"
         bad.write_text("this is not a key\n")
@@ -471,6 +486,229 @@ class Signing(Produced):
             self.assertNotIn(b"PRIVATE", path.read_bytes())
             self.assertNotIn(bytes.fromhex(RFC_SEED[1]), path.read_bytes())
         self.assertNotIn("PRIVATE", done.stdout + done.stderr)
+
+
+class TheClassRules(ToolTest):
+    """classify, the execute bit and file_entry, by the rules the producer's module docstring states.
+
+    The execute bit exists only on a POSIX file system, so it is exercised here through the functions (the
+    Linux manifests are 2 of the 4 payload targets and no Windows run can make a file with the bit)."""
+
+    PROGRAMS = ("katana", "katana_cli", "katana_mcp", "katana_updater")
+
+    def test_the_class_of_a_file_follows_seed_then_lib_then_program_then_data(self) -> None:
+        seeds = ["etc/katana/*.ini", "bin/seeded.*"]
+        cases = [
+            # (path, has the execute bit, class)
+            ("bin/katana", False, "program"),            # a Linux program: named, no extension, no bit needed
+            ("bin/KATANA_CLI", False, "program"),        # a name, whatever the case
+            ("bin/katana_mcp.exe", False, "program"),    # an .exe in bin/
+            ("bin/render-helper", True, "program"),      # not named, but it has the execute bit
+            ("bin/render-helper", False, "data"),        # neither named nor executable
+            ("bin/run.sh", True, "program"),
+            ("share/katana/katana", False, "data"),      # named like a program, but not in bin/
+            ("share/katana/tool.exe", False, "data"),    # an .exe outside bin/
+            ("bin/libfoo.so", True, "lib"),              # a library is a library even with the bit
+            ("bin/libfoo.so.1.2", False, "lib"),
+            ("share/plugins/a.dylib", False, "lib"),
+            ("bin/qt.pyd", False, "lib"),
+            ("bin/LIBX.DLL", False, "lib"),
+            ("lib/readme.txt", False, "lib"),            # anything under lib/
+            ("etc/katana/user.ini", False, "seed"),
+            ("etc/katana/user.cfg", False, "data"),      # not matched by a seed pattern
+            ("bin/seeded.exe", False, "seed"),           # a seed pattern beats the program rule
+            ("share/katana/readme.txt", False, "data"),
+        ]
+        for path, executable, expected in cases:
+            with self.subTest(path=path, executable=executable):
+                self.assertEqual(producer.classify(path, executable, self.PROGRAMS, seeds), expected)
+
+    def test_a_program_name_given_replaces_the_defaults(self) -> None:
+        self.assertEqual(producer.classify("bin/tool", False, ("tool",), []), "program")
+        self.assertEqual(producer.classify("bin/katana", False, ("tool",), []), "data")
+
+    def test_the_execute_bit_counts_only_on_a_posix_file_system(self) -> None:
+        self.assertTrue(producer.execute_bit(0o100755, posix=True))
+        self.assertTrue(producer.execute_bit(0o100744, posix=True))   # the owner's bit alone
+        self.assertTrue(producer.execute_bit(0o100001, posix=True))   # any of the three
+        self.assertFalse(producer.execute_bit(0o100644, posix=True))
+        self.assertFalse(producer.execute_bit(0o100755, posix=False))  # Windows reports 0o666 or 0o777 for anything
+
+    def test_a_scan_reads_the_bit_and_the_manifest_entry_carries_exec_for_it(self) -> None:
+        root = make_tree(self.tmp / "tree", {"bin/run-me": b"#!/bin/sh\n", "share/katana/notes.txt": b"n\n", "bin/katana": b"k"})
+        real_lstat = os.lstat
+
+        def with_the_bit(path, *args, **kwargs):
+            info = real_lstat(path, *args, **kwargs)
+            if os.fspath(path).replace("\\", "/").endswith("bin/run-me"):
+                return os.stat_result((stat_mode_regular_755, *tuple(info)[1:]))
+            return info
+
+        stat_mode_regular_755 = 0o100755
+        with mock.patch.object(os, "lstat", with_the_bit):
+            posix_scan = producer.scan_tree(root, posix=True)
+            other_scan = producer.scan_tree(root, posix=False)
+        self.assertEqual({f.path: f.executable for f in posix_scan.files},
+                         {"bin/katana": False, "bin/run-me": True, "share/katana/notes.txt": False})
+        self.assertEqual({f.executable for f in other_scan.files}, {False})
+        files = {f.path: f for f in producer.prepare_files(posix_scan, self.PROGRAMS, [])}
+        self.assertEqual(files["bin/run-me"].file_class, "program")   # the bit makes it one
+        self.assertEqual(files["bin/katana"].file_class, "program")   # a program is executable by definition
+        self.assertTrue(files["bin/katana"].executable)
+        self.assertEqual(files["share/katana/notes.txt"].file_class, "data")
+        place = producer.Placement(offset=100, csize=7, size=11, sha256="ab" * 32)
+        self.assertEqual(producer.file_entry(files["bin/run-me"], place),
+                         {"class": "program", "csize": 7, "exec": True, "offset": 100, "path": "bin/run-me",
+                          "sha256": "ab" * 32, "size": 11})
+        self.assertNotIn("exec", producer.file_entry(files["share/katana/notes.txt"], place))
+
+
+class TheOptions(Produced):
+    def test_repo_tag_applier_channel_and_program_reach_the_manifest(self) -> None:
+        tree = self.build({"bin/katana": b"not a program once --program replaces the defaults\n",
+                           "bin/tool": b"a program because --program says so\n", "share/a.txt": b"a\n"})
+        out = self.tmp / "out"
+        done = self.produce(tree, out, "--repo", "octo/cat", "--tag", "release-0.9.0", "--applier", "3",
+                            "--channel", "beta", "--program", "tool")
+        self.assert_tool_ok(done)
+        manifest = json.loads((out / "Katana-update-win64.json").read_bytes())
+        self.assertEqual(manifest["notes_url"], "https://github.com/octo/cat/releases/tag/release-0.9.0")
+        self.assertEqual(manifest["tag"], "release-0.9.0")
+        self.assertEqual(manifest["applier"], 3)
+        self.assertEqual(manifest["channel"], "beta")
+        self.assertEqual({f["path"]: f["class"] for f in manifest["files"]},
+                         {"bin/katana": "data", "bin/tool": "program", "share/a.txt": "data"})
+
+    def test_values_the_manifest_could_not_carry_are_refused_and_nothing_is_written(self) -> None:
+        for option, value in (("--tag", "v 1"), ("--tag", "v1/2"), ("--repo", "nope"), ("--repo", "a/b/c"),
+                              ("--applier", "0"), ("--channel", "Beta"), ("--channel", "")):
+            with self.subTest(option=option, value=value):
+                out = self.tmp / "refused"
+                done = self.produce(self.build(), out, option, value)
+                self.assertNotEqual(done.returncode, 0, done.stdout)
+                self.assertFalse(out.exists())
+
+
+class TheFailures(Produced):
+    """What happens when the tree or the disk misbehaves. These call the producer in this process, because the
+    failure is made with a patched os function."""
+
+    def run_main(self, *arguments: object):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = producer.main([str(a) for a in arguments])
+        return code, err.getvalue()
+
+    def test_a_folder_that_cannot_be_read_is_refused_not_left_out(self) -> None:
+        tree = self.build({"bin/katana.exe": b"k", "share/katana/a.txt": b"a", "share/locked/b.txt": b"b"})
+        real_scandir = os.scandir
+
+        def scandir(path=".", *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "locked":
+                raise PermissionError(13, "Permission denied", os.fspath(path))
+            return real_scandir(path, *args, **kwargs)
+
+        with mock.patch.object(os, "scandir", scandir):
+            scan = producer.scan_tree(tree)
+            self.assertEqual([f.path for f in scan.files], ["bin/katana.exe", "share/katana/a.txt"])
+            self.assertEqual(len(scan.problems), 1, scan.problems)
+            self.assertIn("share/locked", scan.problems[0])
+            self.assertIn("cannot be read", scan.problems[0])
+            out = self.tmp / "out"
+            code, message = self.run_main("--tree", tree, "--out", out, "--version", "0.9.0", "--target", "win64",
+                                          "--sequence", "1790000000")
+        self.assertEqual(code, 1)
+        self.assertIn("share/locked", message)
+        self.assertIn("nothing was written", message)
+        self.assertFalse(out.exists())
+
+    def test_a_file_that_cannot_be_inspected_is_refused_not_left_out(self) -> None:
+        tree = self.build({"bin/katana.exe": b"k", "share/katana/a.txt": b"a"})
+        real_lstat = os.lstat
+
+        def lstat(path, *args, **kwargs):
+            if os.fspath(path).replace("\\", "/").endswith("share/katana/a.txt"):
+                raise PermissionError(13, "Permission denied", os.fspath(path))
+            return real_lstat(path, *args, **kwargs)
+
+        with mock.patch.object(os, "lstat", lstat):
+            scan = producer.scan_tree(tree)
+        self.assertEqual([f.path for f in scan.files], ["bin/katana.exe"])
+        self.assertEqual(len(scan.problems), 1, scan.problems)
+        self.assertIn("share/katana/a.txt", scan.problems[0])
+
+    def test_a_file_that_changes_size_while_it_is_read_is_refused(self) -> None:
+        member = producer.TreeFile("bin/a.dll", b"abc", 5, False, "lib")   # said to be 5 bytes, is 3
+        with self.assertRaises(producer.ToolError) as raised:
+            producer.write_update_zip(self.tmp / "z.zip", [member])
+        self.assertIn("changed while it was being read", str(raised.exception))
+
+    def test_a_locked_output_is_an_error_message_not_a_traceback(self) -> None:
+        out = self.tmp / "out"
+        real_replace = os.replace
+
+        def replace(source, target, *args, **kwargs):
+            if os.fspath(target).endswith(".json"):
+                raise PermissionError(13, "The process cannot access the file", os.fspath(target))
+            return real_replace(source, target, *args, **kwargs)
+
+        with mock.patch.object(os, "replace", replace):
+            code, message = self.run_main("--tree", self.build(), "--out", out, "--version", "0.9.0",
+                                          "--target", "win64", "--sequence", "1790000000", "--seed", "etc/katana/*.ini")
+        self.assertEqual(code, 1)
+        self.assertTrue(message.startswith("error:"), message)
+        self.assertNotIn("Traceback", message)
+        self.assertEqual([p.name for p in out.iterdir()], ["Katana-0.9.0-win64.update.zip"], "no work folder is left behind")
+
+    @needs_openssl
+    def test_a_failure_between_the_outputs_never_leaves_a_new_manifest_beside_an_old_signature(self) -> None:
+        out = self.tmp / "out"
+        key = self.rfc_pem(1)
+        arguments = ["--out", out, "--version", "0.9.0", "--target", "win64", "--sequence", "1790000000",
+                     "--seed", "etc/katana/*.ini", "--key", key, "--test-key"]
+        code, message = self.run_main("--tree", self.build(), *arguments)
+        self.assertEqual(code, 0, message)
+        old_manifest = (out / "Katana-update-win64.json").read_bytes()
+        changed = dict(TREE)
+        changed["share/katana/readme.txt"] = b"a different readme\n"
+        real_replace = os.replace
+
+        def replace(source, target, *args, **kwargs):
+            if os.fspath(target).endswith(".json"):   # the manifest cannot be replaced (a lock, say)
+                raise PermissionError(13, "locked", os.fspath(target))
+            return real_replace(source, target, *args, **kwargs)
+
+        with mock.patch.object(os, "replace", replace):
+            code, message = self.run_main("--tree", self.build(changed, "tree2"), *arguments)
+        self.assertEqual(code, 1, message)
+        # The old manifest is still the old one, and the signature that went with it is not left to be
+        # mistaken for one of the new zip's: a manifest with no .sig is refused by every consumer.
+        self.assertEqual((out / "Katana-update-win64.json").read_bytes(), old_manifest)
+        self.assertFalse((out / "Katana-update-win64.json.sig").exists())
+
+    def test_a_name_the_console_cannot_show_still_reaches_it(self) -> None:
+        tree = self.build({"bin/katana.exe": b"k", "notes-é.txt": b"n"})
+        done = self.produce(tree, self.tmp / "out", "--exclude", "notes-*", env={"PYTHONIOENCODING": "ascii"})
+        self.assert_tool_ok(done)
+        self.assertIn("excluded notes-\\xe9.txt", done.stdout)
+        self.assertNotIn("Traceback", done.stderr)
+
+
+class TheStrictRules(ToolTest):
+    def test_a_file_cannot_also_be_the_folder_of_another_even_when_case_differs(self) -> None:
+        for paths in (["bin/a", "bin/a/b"], ["bin/a", "bin/A/b"], ["bin/a", "bin/a/b/c/d"], ["BIN/x/y", "bin/x"]):
+            with self.subTest(paths=paths):
+                found = producer.set_violations(paths, [1] * len(paths))
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("also listed as a file", found[0])
+        for paths in (["bin/a", "bin/ab/b"], ["bin/a.dll", "bin/a.dll.d/x"], ["bin/a/b", "bin/a/c"], ["bin/a", "lib/a/b"]):
+            with self.subTest(paths=paths):
+                self.assertEqual(producer.set_violations(paths, [1] * len(paths)), [])
+
+    def test_a_source_date_epoch_in_other_scripts_digits_is_not_a_number(self) -> None:
+        with self.assertRaises(producer.ToolError):
+            producer.resolve_sequence(None, {"SOURCE_DATE_EPOCH": "١٧٩٠٠٠٠٠٠٠"})
+        self.assertEqual(producer.resolve_sequence(None, {"SOURCE_DATE_EPOCH": "1790000000"}), 1790000000)
 
 
 class FixtureTrees(Produced):

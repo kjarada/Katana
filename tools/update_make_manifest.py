@@ -13,6 +13,13 @@ macos-arm64) it reads the unpacked install tree (the folder that holds bin/ and 
                                                 signature over the manifest's exact bytes, made with the
                                                 openssl command line (pkeyutl -sign -rawin)
 
+The class of a file, first rule that fits: seed, if it matches a --seed pattern (written only if absent,
+so user edits survive); lib, if it is a .dll .so .so.N .dylib or .pyd file or lies under lib/; program,
+if it lies under bin/ and is an .exe, or has an execute bit (POSIX), or is named like a --program (the
+extension, if .exe, left off; case does not matter); data, everything else. Programs are committed
+last by the helper. The execute bit is read only on a POSIX file system, and "exec": true is written for
+every program and every file that has the bit.
+
 `offset` and `csize` of each file locate its raw deflate data inside the zip, so the engine can fetch one
 file by an HTTP Range request without reading the zip's directory. `--notify-only` (required for
 macos-arm64, whose bundle cannot be patched file by file) writes a manifest with no files and no
@@ -24,14 +31,21 @@ written. The rules: relative, '/', first component one of bin share etc lib; pri
 '..', '.', empty component, ':', backslash or any of * ? " < > |; no component ending in '.' or ' '; no
 Windows device name (CON PRN AUX NUL COM1-9 LPT1-9, with or without an extension); no 8.3 form
 ('~' and a digit); no updater record (install.json, installed.json, installed.manifest.json(.sig)) and
-no '.update' component; no two paths equal after case folding; at most 10,000 files and 2 GiB. The one
-file the producer leaves out by itself is share/katana/install.json, which the CPack install writes
-and the updater owns. A symbolic link or a file that is not a regular file is refused: the manifest has
-no way to say it.
+no '.update' component; no two paths equal after case folding; no file that is also the folder of
+another (bin/a and bin/A/b, case folded); at most 10,000 files and 2 GiB. The one file the producer
+leaves out by itself is share/katana/install.json, which the CPack install writes and the updater
+owns. A symbolic link, a file that is not a regular file, and a file or folder that cannot be read are
+refused: the manifest has no way to say them, and leaving them out would make every installed copy
+delete them.
 
 The sequence is UTC epoch seconds: --sequence, else SOURCE_DATE_EPOCH, else now. `published` is that
 instant and `expires` is 180 days later, so the same inputs make the same bytes (the zip too, for one
-zlib). Give every target of a release the same sequence.
+zlib). Give every target of a release the same sequence (tools/update_verify_release.py fails a release
+whose manifests differ in sequence, version or tag): one --sequence, or one SOURCE_DATE_EPOCH, for the
+whole loop over the targets.
+
+--key signs, and only with a key the tree pins: --keys-cmake (default cmake/KatanaUpdateKeys.cmake) must
+exist and hold real keys, never the placeholders, and never a published test key (tests pass --test-key).
 
 Exit status: 0 made, 1 refused or failed (nothing written), 2 a usage error.
 """
@@ -171,6 +185,15 @@ def set_violations(paths: list[str], sizes: list[int]) -> list[str]:
             found.append(f"'{path}' and '{seen[folded]}' are the same name once case is folded")
         else:
             seen[folded] = path
+    # A name cannot be a file and also the folder of another file (bin/a and bin/A/b): no Windows
+    # volume can hold both, so an install that applies this set fails half way.
+    for path in paths:
+        parts = path.lower().split("/")
+        for depth in range(1, len(parts)):
+            parent = "/".join(parts[:depth])
+            if parent in seen:
+                found.append(f"'{path}' is inside '{seen[parent]}', which is also listed as a file (case folded)")
+                break
     if len(paths) > MAX_FILES:
         found.append(f"{len(paths)} files; at most {MAX_FILES} are allowed")
     if sum(sizes) > MAX_INSTALL_BYTES:
@@ -198,13 +221,30 @@ class Scan:
     problems: list[str] = field(default_factory=list)
 
 
-def scan_tree(root: Path, excludes: Iterable[str] = ()) -> Scan:
-    """Walk `root`, collecting the regular files and every problem found on the way."""
+def execute_bit(mode: int, posix: bool = os.name != "nt") -> bool:
+    """Whether a file's mode has an execute bit that means something: only on a POSIX file system."""
+    return posix and bool(mode & 0o111)
+
+
+def scan_tree(root: Path, excludes: Iterable[str] = (), posix: bool = os.name != "nt") -> Scan:
+    """Walk `root`, collecting the regular files and every problem found on the way.
+
+    A folder or file that cannot be read is a problem, never a silent omission: a manifest that left
+    its files out would make every installed copy delete them on the next update."""
     if not root.is_dir():
         raise ToolError(f"{root} is not a directory")
     excludes = list(excludes)
     result = Scan()
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+
+    def unreadable(error: OSError) -> None:
+        name = getattr(error, "filename", None)
+        try:
+            shown = os.path.relpath(name, root).replace(os.sep, "/") if name else str(root)
+        except ValueError:
+            shown = str(name)
+        result.problems.append(f"{shown}: cannot be read ({error.strerror or error})")
+
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False, onerror=unreadable):
         dirnames.sort()
         for name in dirnames:
             full = os.path.join(dirpath, name)
@@ -214,7 +254,11 @@ def scan_tree(root: Path, excludes: Iterable[str] = ()) -> Scan:
         for name in sorted(filenames):
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, root).replace(os.sep, "/")
-            info = os.lstat(full)
+            try:
+                info = os.lstat(full)
+            except OSError as error:
+                unreadable(error)
+                continue
             if stat.S_ISLNK(info.st_mode):
                 result.problems.append(f"{rel}: a symbolic link (a manifest cannot say one)")
             elif not stat.S_ISREG(info.st_mode):
@@ -224,8 +268,7 @@ def scan_tree(root: Path, excludes: Iterable[str] = ()) -> Scan:
             elif any(fnmatch.fnmatchcase(rel, pattern) for pattern in excludes):
                 result.excluded.append(rel)
             else:
-                executable = os.name != "nt" and bool(info.st_mode & 0o111)
-                result.files.append(TreeFile(rel, Path(full), info.st_size, executable))
+                result.files.append(TreeFile(rel, Path(full), info.st_size, execute_bit(info.st_mode, posix)))
     return result
 
 
@@ -432,7 +475,7 @@ def resolve_sequence(explicit: Optional[int], environ: Mapping[str, str]) -> int
         value = explicit
     elif environ.get("SOURCE_DATE_EPOCH", "") != "":
         text = environ["SOURCE_DATE_EPOCH"]
-        if not text.isdigit():
+        if not re.fullmatch(r"[0-9]+", text):
             raise ToolError(f"SOURCE_DATE_EPOCH is '{text}', not a number of seconds")
         value = int(text)
     else:
@@ -495,6 +538,14 @@ def sign_file(openssl: str, private_pem: Path, message: Path) -> bytes:
     return signature
 
 
+def sign_bytes(openssl: str, private_pem: Path, message: bytes) -> bytes:
+    """Ed25519 over exactly `message`: the bytes a caller has read and judged, not a path that may change."""
+    with tempfile.TemporaryDirectory() as scratch:
+        copy = Path(scratch) / "message"
+        copy.write_bytes(message)
+        return sign_file(openssl, private_pem, copy)
+
+
 def verify_file(openssl: str, public_key: bytes, message: Path, signature: bytes) -> bool:
     with tempfile.TemporaryDirectory() as scratch:
         pem = Path(scratch) / "public.pem"
@@ -516,10 +567,11 @@ class PinnedKeys:
     spare: str
 
 
-def read_pinned_keys(path: Path) -> Optional[PinnedKeys]:
-    """The keys cmake/KatanaUpdateKeys.cmake pins; None when there is no such file."""
-    if not path.exists():
-        return None
+def read_pinned_keys(path: Path) -> PinnedKeys:
+    """The keys cmake/KatanaUpdateKeys.cmake pins. A file that is not there is an error: a mistyped
+    path must not switch every key guard off."""
+    if not path.is_file():
+        raise ToolError(f"{path} does not exist, so the keys the tree pins cannot be checked (--keys-cmake)")
     text = path.read_text(encoding="utf-8")
     flag = re.search(r"set\(KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS\s+(ON|OFF)\)", text)
     active = re.search(r'set\(KATANA_UPDATE_KEY_ACTIVE\s+"([0-9a-f]{64})"\)', text)
@@ -545,7 +597,7 @@ def check_signing_key(public_key: bytes, *, test_key: bool, keys_cmake: Optional
             f"this is the published test key {TEST_PUBLIC_KEYS[pub_hex]}: anyone can sign with it, so a "
             "release is never signed with it (tests pass --test-key)"
         )
-    if pinned is None:
+    if pinned is None:  # only a caller that passes no file at all; the command line always has one
         return
     if pinned.placeholders:
         raise ToolError(
@@ -660,14 +712,17 @@ def produce(
                 raise ToolError("openssl made a signature that does not verify under the key's own public half")
             sig_path = work / sig_final.name
             sig_path.write_bytes(signature_line(public_key, signature).encode("ascii"))
-        # Everything is made; only now does anything appear in `out`.
-        os.replace(manifest_path, manifest_final)
+        # Everything is made; only now does anything appear in `out`. The order is the one in which a
+        # failure half way (a lock on a file, a power cut) leaves something that fails closed: the zip
+        # first (the old manifest then names a zip that does not match), the old signature next (a
+        # manifest without a .sig is refused by every consumer), the manifest, and the signature last.
         if zip_path is not None:
             os.replace(zip_path, zip_final)
+        if sig_final.exists():
+            sig_final.unlink()  # a signature of the manifest this replaces must not outlive it
+        os.replace(manifest_path, manifest_final)
         if sig_path is not None:
             os.replace(sig_path, sig_final)
-        elif sig_final.exists():
-            sig_final.unlink()  # a signature of the manifest this replaces must not outlive it
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return Produced(manifest, manifest_final, zip_final if not notify_only else None,
@@ -708,8 +763,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _survive_any_console() -> None:
+    """A file name the rules refuse is non-ASCII by definition, and the message that names it must reach
+    a console whose code page cannot show it (cp1252 on Windows) instead of dying in the print."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    _survive_any_console()
     try:
         made = produce(
             tree=args.tree, out=args.out, version=args.version, target=args.target, tag=args.tag, repo=args.repo,
@@ -723,7 +789,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         for problem in refusal.problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
-    except ToolError as error:
+    except (ToolError, OSError) as error:  # OSError: a locked output, an unreadable file
         print(f"error: {error}", file=sys.stderr)
         return 1
     manifest = made.manifest

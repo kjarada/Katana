@@ -12,9 +12,13 @@ import ast
 import base64
 import hashlib
 import os
+import json
 import shlex
 import shutil
 import stat
+import subprocess
+import sys
+import threading
 import unittest
 import zipfile
 from pathlib import Path
@@ -135,6 +139,90 @@ class Signing(ToolTest):
         ])
         self.assertIn("NOT run by this tool", done.stdout)
         self.assertFalse(self.ran.exists(), "the fake gh ran: " + (self.ran.read_text() if self.ran.exists() else ""))
+
+    def test_without_a_draft_folder_the_tool_prints_the_exact_download_command_and_runs_nothing(self) -> None:
+        done = run_tool("update_release_sign.py", "--repo", "kjarada/Katana", "--tag", "v0.10.0", "--key", self.key,
+                        "--test-key", cwd=self.tmp, env=self.environment)
+        self.assert_tool_failed(done, "not downloaded yet", "release-v0.10.0")
+        commands = [shlex.split(line.strip()) for line in done.stdout.splitlines() if line.strip().startswith("gh ")]
+        self.assertEqual(commands, [[
+            "gh", "release", "download", "v0.10.0", "--repo", "kjarada/Katana", "--dir", "release-v0.10.0",
+            "--pattern", "Katana-update-*.json", "--pattern", "Katana-*.update.zip",
+        ]])
+        self.assertFalse(self.ran.exists(), "the fake gh ran")
+        self.assertFalse((self.tmp / "release-v0.10.0").exists(), "the tool must not create the folder itself")
+
+    def test_the_designs_command_without_dir_signs_the_downloaded_draft_in_release_tag(self) -> None:
+        folder = self.tmp / "release-v0.10.0"
+        shutil.copytree(self.draft, folder)
+        done = run_tool("update_release_sign.py", "--repo", "kjarada/Katana", "--tag", "v0.10.0", "--key", self.key,
+                        "--test-key", "--previous", self.previous, stdin="0.10.0\n", cwd=self.tmp, env=self.environment)
+        self.assert_tool_ok(done)
+        self.assertEqual((folder / SIG).read_text(encoding="ascii"), (FIXTURES / "release" / "v2" / SIG).read_text(encoding="ascii"))
+        self.assertFalse(self.ran.exists(), "the fake gh ran")
+
+    def test_a_folder_that_holds_no_manifest_gets_the_same_download_command(self) -> None:
+        (self.tmp / "empty-draft").mkdir()
+        done = self.sign("--test-key", draft=self.tmp / "empty-draft")
+        self.assert_tool_failed(done, "not downloaded yet", "empty-draft")
+
+    def start(self, *extra: object) -> subprocess.Popen:
+        process = subprocess.Popen(
+            [sys.executable, "-B", str(TOOLS / "update_release_sign.py"), "--dir", str(self.draft), "--tag", "v0.10.0",
+             "--key", str(self.key), "--previous", str(self.previous), "--test-key", *map(str, extra)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env={**os.environ, **self.environment, "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        watchdog = threading.Timer(120, process.kill)
+        watchdog.start()
+        self.addCleanup(watchdog.cancel)
+        self.addCleanup(process.kill)
+        return process
+
+    def wait_for_the_prompt(self, process: subprocess.Popen) -> None:
+        seen = b""
+        while b"Type the version" not in seen:
+            chunk = process.stdout.read1(4096)
+            if not chunk:
+                self.fail("the tool ended before it asked: " + seen.decode("utf-8", "replace"))
+            seen += chunk
+
+    def test_a_file_that_changes_while_the_owner_reads_the_report_is_refused_and_nothing_is_signed(self) -> None:
+        for name in (MANIFEST, "Katana-0.10.0-win64.update.zip"):
+            with self.subTest(changed=name):
+                process = self.start()
+                self.wait_for_the_prompt(process)
+                target = self.draft / name
+                data = bytearray(target.read_bytes())
+                data[len(data) // 2] ^= 0x01     # the draft is edited after it was checked, before the answer
+                target.write_bytes(bytes(data))
+                out, err = process.communicate(b"0.10.0\n", timeout=120)
+                self.assertEqual(process.returncode, 1, out.decode() + err.decode())
+                self.assertIn(f"{name} changed after it was checked", out.decode())
+                self.assertIn("nothing was signed", out.decode())
+                self.assert_nothing_signed()
+                shutil.copyfile(FIXTURES / "release" / "v2" / name, target)   # the next case starts from the fixture
+
+    def test_the_signature_is_over_the_bytes_that_were_checked_and_shown(self) -> None:
+        process = self.start()
+        self.wait_for_the_prompt(process)
+        out, err = process.communicate(b"0.10.0\n", timeout=120)
+        self.assertEqual(process.returncode, 0, out.decode() + err.decode())
+        signature = base64.b64decode((self.draft / SIG).read_text().split()[2])
+        self.assertTrue(openssl_verify(RFC_PUBLIC[1], (FIXTURES / "release" / "v2" / MANIFEST).read_bytes(), signature))
+
+    def test_a_path_the_console_cannot_show_does_not_hide_the_refusal(self) -> None:
+        manifest = json.loads((self.draft / MANIFEST).read_bytes())
+        name = "".join(chr(code) for code in (0x65E5, 0x672C))
+        manifest["files"][0]["path"] = "bin/" + name + ".dll"
+        (self.draft / MANIFEST).write_bytes(producer.encode_manifest(manifest))
+        done = run_tool("update_release_sign.py", "--dir", self.draft, "--tag", "v0.10.0", "--key", self.key,
+                        "--test-key", stdin="0.10.0\n", env={**self.environment, "PYTHONIOENCODING": "ascii"})
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("%su%04x" % (chr(92), ord(name[0])), done.stdout)
+        self.assertIn("nothing was signed", done.stdout)
+        self.assertNotIn("Traceback", done.stderr)
+        self.assert_nothing_signed()
 
     def test_the_tool_itself_imports_no_way_to_start_a_program(self) -> None:
         tree = ast.parse((TOOLS / "update_release_sign.py").read_text(encoding="utf-8"))

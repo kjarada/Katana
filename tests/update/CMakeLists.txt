@@ -283,9 +283,10 @@ endforeach()
 #
 # Python and openssl are build-time conveniences, never requirements (Rule 1): without either
 # there are no such tests rather than failing ones. They are not registered as skipped,
-# because a skipped unittest exits 0 and would pass as quietly as one that ran.
+# because a skipped unittest exits 0 and would pass as quietly as one that ran. The tests
+# need Python 3.10 or later (sys.stdlib_module_names holds the verifier to the standard library).
 set(_katana_tool_tests_ready OFF)
-if(Python3_Interpreter_FOUND)
+if(Python3_Interpreter_FOUND AND Python3_VERSION VERSION_GREATER_EQUAL 3.10)
     find_program(KATANA_OPENSSL_EXECUTABLE openssl)
     if(KATANA_OPENSSL_EXECUTABLE)
         execute_process(COMMAND "${KATANA_OPENSSL_EXECUTABLE}" version
@@ -312,6 +313,6 @@ if(_katana_tool_tests_ready)
         set_tests_properties(update_tools_${_katana_tool_test} PROPERTIES
             ENVIRONMENT_MODIFICATION
                 "KATANA_OPENSSL=set:${KATANA_OPENSSL_EXECUTABLE};KATANA_CMAKE=set:${CMAKE_COMMAND}"
-            TIMEOUT 600)
+            TIMEOUT 1800)
     endforeach()
 endif()

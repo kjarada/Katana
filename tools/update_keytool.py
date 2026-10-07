@@ -25,8 +25,12 @@ Until step 2 the file holds PLACEHOLDER keys that no private key matches, and KA
 
 `pub` refuses: a PEM openssl cannot read or that is not an Ed25519 private key; the same key twice
 (a spare that is the active key is no way to recover from losing it); a published RFC 8032 test key
-(anyone can sign with it; --allow-test-keys exists for the tool's own tests on a scratch copy); a target
-that is a .pem or holds a private key; a target without the two marker lines.
+(anyone can sign with it; --allow-test-keys exists for the tool's own tests, on a scratch copy given
+with --cmake, never on the tree's own file); a target that is a .pem or holds a private key; a target
+without the two marker lines; and a replacement of BOTH keys the file already pins (--replace-both
+overrides): every installed copy trusts only those two, so a rotation keeps one of them -- ship a build
+that pins a new spare beside the active key, or, if the active key leaked, a build that pins the old
+spare as the active one beside a new spare -- or those copies can never update again.
 """
 
 from __future__ import annotations
@@ -70,11 +74,26 @@ def rewrite_keys_block(text: str, active_hex: str, spare_hex: str) -> str:
     return text[: starts[0].end()] + newline + block + newline + text[ends[0].start():]
 
 
+_PIN_FLAG = re.compile(r"set\(KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS\s+(ON|OFF)\)")
+_PIN_KEY = re.compile(r'set\(KATANA_UPDATE_KEY_(?:ACTIVE|SPARE)\s+"([0-9a-f]{64})"\)')
+
+
+def pinned_now(text: str) -> set[str]:
+    """The keys the file pins as real ones; empty while it holds placeholders (or no settings at all)."""
+    flag = _PIN_FLAG.search(text)
+    if flag is None or flag.group(1) == "ON":
+        return set()
+    return set(_PIN_KEY.findall(text))
+
+
 def pin_keys(active_pem: Path, spare_pem: Path, cmake_file: Path, *, allow_test_keys: bool = False,
-             openssl: Optional[str] = None) -> tuple[str, str]:
+             replace_both: bool = False, openssl: Optional[str] = None) -> tuple[str, str]:
     """Pin the public halves of two private keys in `cmake_file`; return their key ids."""
     if cmake_file.suffix.lower() == ".pem":
         raise ToolError(f"{cmake_file} is a .pem file: this tool writes only cmake/KatanaUpdateKeys.cmake")
+    if allow_test_keys and cmake_file.resolve() == DEFAULT_KEYS_CMAKE.resolve():
+        raise ToolError("--allow-test-keys writes published keys that anyone can sign with, so it never writes the "
+                        "tree's own cmake/KatanaUpdateKeys.cmake: give --cmake a scratch copy")
     original = cmake_file.read_bytes().decode("utf-8")
     if "PRIVATE KEY" in original:
         raise ToolError(f"{cmake_file} holds a private key: this is not the keys file")
@@ -86,6 +105,13 @@ def pin_keys(active_pem: Path, spare_pem: Path, cmake_file: Path, *, allow_test_
     for name, key in (("active", active), ("spare", spare)):
         if key.hex() in TEST_PUBLIC_KEYS and not allow_test_keys:
             raise ToolError(f"the {name} key is the published test key {TEST_PUBLIC_KEYS[key.hex()]}: anyone can sign with it")
+    before = pinned_now(original)
+    if before and not (before & {active.hex(), spare.hex()}) and not replace_both:
+        raise ToolError(
+            f"the file pins {' and '.join(sorted(k[:16] for k in before))}, and neither is among the new keys: every "
+            "installed copy trusts only those two, so replacing both strands them all (they could never update "
+            "again). Keep one of them, or pass --replace-both if no copy was ever released with them"
+        )
     updated = rewrite_keys_block(original, active.hex(), spare.hex())
     if "PRIVATE" in updated and "PRIVATE" not in original:
         raise ToolError("internal error: the new text would hold a private key")
@@ -93,6 +119,8 @@ def pin_keys(active_pem: Path, spare_pem: Path, cmake_file: Path, *, allow_test_
     try:
         with os.fdopen(handle, "wb") as out:
             out.write(updated.encode("utf-8"))
+            out.flush()
+            os.fsync(out.fileno())
         os.replace(scratch, cmake_file)
     except BaseException:
         if os.path.exists(scratch):
@@ -114,12 +142,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     pub.add_argument("active", type=Path, help="the active private key (update-signing.pem): CI signs with it")
     pub.add_argument("spare", type=Path, help="the spare private key (update-spare.pem): kept offline")
     pub.add_argument("--cmake", type=Path, default=DEFAULT_KEYS_CMAKE, help="the file to rewrite (default cmake/KatanaUpdateKeys.cmake)")
-    pub.add_argument("--allow-test-keys", action="store_true", help="accept a published RFC 8032 test key (the tool's own tests, on a scratch copy only)")
+    pub.add_argument("--allow-test-keys", action="store_true", help="accept a published RFC 8032 test key (the tool's own tests, on a scratch copy given with --cmake only)")
+    pub.add_argument("--replace-both", action="store_true", help="allow replacing BOTH keys the file pins (strands every installed copy that trusts them)")
     pub.add_argument("--openssl", help="the openssl executable (default: KATANA_OPENSSL, else PATH)")
     args = parser.parse_args(argv)
     try:
         active_id, spare_id = pin_keys(args.active, args.spare, args.cmake,
-                                       allow_test_keys=args.allow_test_keys, openssl=args.openssl)
+                                       allow_test_keys=args.allow_test_keys,
+                                       replace_both=args.replace_both, openssl=args.openssl)
     except (ToolError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

@@ -10,14 +10,16 @@ import list to that).
 
 For every Katana-update-<token>.json in the directory:
   - the signature file is one line `ed25519 <keyid> <base64>`, the key id names a trusted key, and the
-    signature is a valid Ed25519 signature of the manifest's exact bytes (openssl pkeyutl -verify -rawin);
+    signature is a valid Ed25519 signature of the manifest's exact bytes (openssl pkeyutl -verify -rawin),
+    the very bytes that are then parsed: the file is read once;
   - the manifest is UTF-8 with LF only, keys sorted at every level, no duplicate key; it has the members of
     manifest.hpp with the right types; product katana, schema 1, channel stable, a MAJOR.MINOR[.PATCH[.BUILD]]
     version, tag v<version>, a known target equal to the file name's, expires 180 days after published;
   - every path passes the rules of paths.hpp, files are sorted by path, unique, no two equal once case is
-    folded, at most 10,000 files and 2 GiB;
+    folded, no file that is also the folder of another (case folded), at most 10,000 files and 2 GiB;
   - the update zip named by `payload` exists, has the size the manifest says, passes zipfile's CRC test, holds
-    exactly the manifest's files (each deflated, fixed timestamps, in the order program, lib, data, seed);
+    exactly the manifest's files (each deflated, fixed timestamps; their data laid out, by offset, in the
+    order program, lib, data, seed);
   - for each file: the member read through zipfile hashes to `sha256` and has `size`; `csize` is the zip's
     compressed size and at least 2; `offset` is where the raw deflate data starts, and inflating exactly
     those bytes alone gives the same hash; no two ranges overlap and none leaves the zip;
@@ -74,7 +76,9 @@ KNOWN_MEMBERS = {
 KNOWN_FILE_MEMBERS = {"class", "csize", "exec", "offset", "path", "sha256", "size"}
 
 _DEVICE = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])$", re.IGNORECASE)
-_TIME = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+# [0-9], never \d: in a str pattern \d also matches the digits of other scripts, which version.hpp refuses.
+_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+_VERSION = re.compile(r"[0-9]{1,9}(\.[0-9]{1,9}){1,3}")
 
 
 class UsageError(Exception):
@@ -121,7 +125,7 @@ def path_problems(path: object) -> list[str]:
             problems.append(f"component '{p}' ends in a dot or space")
         if _DEVICE.match(p.split(".", 1)[0]):
             problems.append(f"component '{p}' is a device name")
-        if re.search(r"~\d", p):
+        if re.search(r"~[0-9]", p):
             problems.append(f"component '{p}' is in 8.3 form")
         if p.lower() == ".update":
             problems.append("has a .update component")
@@ -169,6 +173,8 @@ def _is_int(value: object) -> bool:
 
 
 def version_key(text: str) -> tuple:
+    if not _VERSION.fullmatch(text):
+        raise ValueError(f"version {text!r} is not MAJOR.MINOR[.PATCH[.BUILD]] of ASCII digits")
     parts = [int(p) for p in text.split(".")]
     return tuple(parts + [0] * (4 - len(parts)))
 
@@ -187,6 +193,8 @@ def parse_signature_line(text: str) -> tuple[str, bytes]:
 
 
 def trust_from_cmake(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        raise UsageError(f"{path} does not exist: the keys to trust cannot be read (--keys-cmake)")
     text = path.read_text(encoding="utf-8")
     flag = re.search(r"set\(KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS\s+(ON|OFF)\)", text)
     keys = {
@@ -213,7 +221,12 @@ def find_openssl(explicit: Optional[str]) -> str:
     return found
 
 
-def openssl_verifies(openssl: str, public_key_hex: str, message: Path, signature: bytes) -> bool:
+def openssl_verifies(openssl: str, public_key_hex: str, message: bytes, signature: bytes) -> bool:
+    """Whether `signature` is a valid Ed25519 signature of exactly `message`, by the openssl command line.
+
+    The message is the bytes the caller read and goes to openssl as a scratch copy of those bytes, so
+    that what is checked, what is parsed and what is judged are one and the same, whatever happens to
+    the file on disk meanwhile."""
     der = SPKI_PREFIX + bytes.fromhex(public_key_hex)
     pem = "-----BEGIN PUBLIC KEY-----\n" + base64.encodebytes(der).decode("ascii") + "-----END PUBLIC KEY-----\n"
     with tempfile.TemporaryDirectory() as scratch:
@@ -221,9 +234,11 @@ def openssl_verifies(openssl: str, public_key_hex: str, message: Path, signature
         key_file.write_bytes(pem.encode("ascii"))
         sig_file = Path(scratch, "sig.bin")
         sig_file.write_bytes(signature)
+        message_file = Path(scratch, "message")
+        message_file.write_bytes(message)
         done = subprocess.run(
             [openssl, "pkeyutl", "-verify", "-pubin", "-inkey", str(key_file), "-rawin",
-             "-in", str(message), "-sigfile", str(sig_file)],
+             "-in", str(message_file), "-sigfile", str(sig_file)],
             capture_output=True, check=False,
         )
     return done.returncode == 0
@@ -233,7 +248,7 @@ def openssl_verifies(openssl: str, public_key_hex: str, message: Path, signature
 
 
 def _check_time(report: Report, where: str, name: str, value: object) -> Optional[datetime.datetime]:
-    if not isinstance(value, str) or not _TIME.match(value):
+    if not isinstance(value, str) or not _TIME.fullmatch(value):
         report.error(where, f"{name} is not a UTC time like 2026-10-20T08:00:00Z")
         return None
     try:
@@ -263,7 +278,7 @@ def check_manifest_fields(report: Report, where: str, token: str, m: dict) -> bo
         report.error(where, "applier is not an integer of 1 or more")
     if m["target"] != token:
         report.error(where, f"target is {m['target']!r} but the file name says {token}")
-    if not isinstance(m["version"], str) or not re.fullmatch(r"\d{1,9}(\.\d{1,9}){1,3}", m["version"]):
+    if not isinstance(m["version"], str) or not _VERSION.fullmatch(m["version"]):
         report.error(where, f"version is {m['version']!r}, not MAJOR.MINOR[.PATCH[.BUILD]] of digits")
     elif m["tag"] != "v" + m["version"]:
         report.error(where, f"tag is {m['tag']!r}, not 'v{m['version']}'")
@@ -348,6 +363,13 @@ def check_file_entries(report: Report, where: str, m: dict) -> bool:
         if path.lower() in folded:
             report.error(where, f"{path!r} and {folded[path.lower()]!r} are one name once case is folded")
         folded[path.lower()] = path
+    for path in string_paths:
+        parts = path.lower().split("/")
+        for depth in range(1, len(parts)):
+            parent = "/".join(parts[:depth])
+            if parent in folded:
+                report.error(where, f"{path!r} is inside {folded[parent]!r}, which is also listed as a file (case folded)")
+                break
     if len(files) > MAX_FILES:
         report.error(where, f"{len(files)} files; at most {MAX_FILES}")
     total = sum(e["size"] for e in files if isinstance(e, dict) and _is_int(e.get("size")))
@@ -396,10 +418,13 @@ def check_payload(report: Report, where: str, directory: Path, m: dict) -> None:
                 report.error(where, f"{info.filename}: timestamp {info.date_time} is not the fixed 1980-01-01 00:00:00")
             if info.filename.endswith("/"):
                 report.error(where, f"{info.filename}: a directory entry")
-        # The class order: program, lib, data, seed, so that the executables are adjacent.
-        ranks = [CLASSES.index(wanted[n]["class"]) for n in names if n in wanted and wanted[n]["class"] in CLASSES]
+        # The class order: program, lib, data, seed, so that the executables are adjacent. What matters is
+        # where the data sits, which is the offset (a Range request merges neighbours by it), so the
+        # order is read from the offsets, not from the order of the zip's directory.
+        by_offset = sorted((e for e in m["files"] if e["class"] in CLASSES), key=lambda e: e["offset"])
+        ranks = [CLASSES.index(e["class"]) for e in by_offset]
         if ranks != sorted(ranks):
-            report.error(where, f"{payload['name']} is not ordered program, lib, data, seed")
+            report.error(where, f"{payload['name']} is not ordered program, lib, data, seed (by offset)")
         ranges = []
         for entry in m["files"]:
             path = entry["path"]
@@ -492,7 +517,7 @@ def verify_release(
                     candidates = [k for k in trust if k.startswith(key_id)]
                     if not candidates:
                         report.error(sig_path.name, f"signed by key {key_id}, which is not a trusted key")
-                    elif openssl_verifies(checker, candidates[0], manifest_path, signature):
+                    elif openssl_verifies(checker, candidates[0], data, signature):
                         report.notes.append(f"{where}: signature verified by key {key_id} ({trust[candidates[0]]})")
                     else:
                         report.error(sig_path.name, f"is not a valid Ed25519 signature of {where} under key {key_id}")
@@ -522,7 +547,9 @@ def check_release_consistency(report: Report, targets: Optional[list[str]]) -> N
         values = {str(m[field_name]) for m in manifests.values()}
         if len(values) > 1:
             report.error("release", f"the manifests disagree on {field_name}: {sorted(values)}")
-    if targets is not None:
+    if targets is None:
+        report.notes.append("the set of targets is not checked (--targets was not given)")
+    else:
         missing = sorted(set(targets) - set(manifests))
         extra = sorted(set(manifests) - set(targets))
         if missing:
@@ -568,6 +595,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--targets", help="comma-separated tokens the release must hold, exactly")
     parser.add_argument("--openssl", help="the openssl executable (default: KATANA_OPENSSL, else PATH)")
     args = parser.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):  # a path with non-ASCII letters must not kill the report
+        try:
+            stream.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
     try:
         trust: Optional[dict[str, str]] = None
         if args.keys_cmake:

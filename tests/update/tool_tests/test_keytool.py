@@ -7,9 +7,14 @@ the file's own validator, run as a script, must accept what the tool wrote.
 
 from __future__ import annotations
 
+import contextlib
+import io
+import os
+import re
 import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from support import (
     CMAKE,
@@ -24,11 +29,33 @@ from support import (
     run_tool,
 )
 
+import update_keytool as keytool  # noqa: E402  (support puts tools/ on sys.path)
+
 REAL_FILE = REPO / "cmake" / "KatanaUpdateKeys.cmake"
 PLACEHOLDER_FIXTURE = REPO / "tests" / "update" / "key_fixtures" / "placeholders.cmake"
 START = "# >>> keys"
 END = "# <<< keys"
 _REAL_FILE_AT_START = REAL_FILE.read_bytes()
+
+
+# What the file held when it was made: 32 bytes each that spell "PLACEHOLDER-..." and no key.
+PLACEHOLDER_ACTIVE = "504c414345484f4c4445522d4143544956452d4e4f542d412d4b45592d30302d"
+PLACEHOLDER_SPARE = "504c414345484f4c4445522d53504152452d4e4f542d412d4b45592d2d30302d"
+
+
+def with_placeholders(data: bytes) -> bytes:
+    """`data` with only the block between the marker lines replaced by the placeholder settings."""
+    text = data.decode("utf-8")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    block = newline.join([
+        "set(KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS ON)",
+        f'set(KATANA_UPDATE_KEY_ACTIVE "{PLACEHOLDER_ACTIVE}")',
+        f'set(KATANA_UPDATE_KEY_SPARE "{PLACEHOLDER_SPARE}")',
+    ])
+    start = re.search(r"^# >>> keys[^\r\n]*", text, re.MULTILINE)
+    end = re.search(r"^# <<< keys", text, re.MULTILINE)
+    assert start and end
+    return (text[: start.end()] + newline + block + newline + text[end.start():]).encode("utf-8")
 
 
 def tearDownModule() -> None:
@@ -40,7 +67,9 @@ def tearDownModule() -> None:
 class Pinning(ToolTest):
     def setUp(self) -> None:
         super().setUp()
-        self.original = REAL_FILE.read_bytes()
+        # The real file with its keys block put back to the placeholders it started with, whatever it holds now:
+        # once the owner has pinned real keys these tests must still start from "nothing pinned".
+        self.original = with_placeholders(REAL_FILE.read_bytes())
         self.scratch = self.tmp / "KatanaUpdateKeys.cmake"
         self.scratch.write_bytes(self.original)
         self.active = self.rfc_pem(1)
@@ -150,6 +179,74 @@ class Pinning(ToolTest):
         result = self.scratch.read_bytes()
         self.assertNotIn(b"\n", result.replace(b"\r\n", b""), "every line end must still be CRLF")
         self.assertIn(f'set(KATANA_UPDATE_KEY_ACTIVE "{RFC_PUBLIC[1]}")\r\n'.encode(), result)
+
+    def test_published_test_keys_are_never_written_to_the_trees_own_keys_file(self) -> None:
+        # Without --cmake the target is the tree's own file; with it spelled out, the same. The scratch copy
+        # stands in for that file here, so that a regression in the guard cannot damage the real one.
+        for target in ([], ["--cmake", str(self.scratch)]):
+            with self.subTest(target=target):
+                out, err = io.StringIO(), io.StringIO()
+                with mock.patch.object(keytool, "DEFAULT_KEYS_CMAKE", self.scratch), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = keytool.main(["pub", str(self.active), str(self.spare), "--allow-test-keys", *target])
+                self.assertEqual(code, 1, out.getvalue())
+                self.assertIn("never writes", err.getvalue())
+                self.assertIn("scratch copy", err.getvalue())
+                self.assertEqual(self.scratch.read_bytes(), self.original)
+
+    def pinned(self) -> tuple[str, str]:
+        """(active, spare) as the scratch file holds them now, read with a regular expression of the test's own."""
+        text = self.scratch.read_text(encoding="utf-8")
+        return (re.search(r'KATANA_UPDATE_KEY_ACTIVE "([0-9a-f]{64})"', text).group(1),
+                re.search(r'KATANA_UPDATE_KEY_SPARE "([0-9a-f]{64})"', text).group(1))
+
+    def test_replacing_both_pinned_keys_strands_every_installed_copy_and_is_refused_unless_forced(self) -> None:
+        self.assert_tool_ok(self.pub("--allow-test-keys"))             # RFC 1 active, RFC 2 spare: pinned for real
+        self.assertEqual(self.pinned(), (RFC_PUBLIC[1], RFC_PUBLIC[2]))
+        first = self.write_pem("first.pem", THROWAWAY_SEED)
+        second = self.write_pem("second.pem", "07" * 32)
+        before = self.scratch.read_bytes()
+        done = self.pub("--allow-test-keys", active=first, spare=second)
+        self.assert_tool_failed(done, "neither is among the new keys", "--replace-both")
+        self.assertEqual(self.scratch.read_bytes(), before)
+        self.assert_tool_ok(self.pub("--allow-test-keys", "--replace-both", active=first, spare=second))
+        self.assertNotIn(RFC_PUBLIC[1], self.scratch.read_text(encoding="utf-8"))
+
+    def test_a_rotation_that_keeps_one_pinned_key_is_allowed(self) -> None:
+        self.assert_tool_ok(self.pub("--allow-test-keys"))
+        new = self.write_pem("new.pem", THROWAWAY_SEED)
+        new_public = subprocess.run([OPENSSL, "pkey", "-in", str(new), "-pubout", "-outform", "DER"],
+                                    capture_output=True, check=True).stdout[-32:].hex()
+        # The same pair again.
+        self.assert_tool_ok(self.pub("--allow-test-keys"))
+        self.assertEqual(self.pinned(), (RFC_PUBLIC[1], RFC_PUBLIC[2]))
+        # A new spare beside the active key.
+        self.assert_tool_ok(self.pub("--allow-test-keys", spare=new))
+        self.assertEqual(self.pinned(), (RFC_PUBLIC[1], new_public))
+        # The active key leaked: the old spare is the active one and the new key is the spare.
+        self.assert_tool_ok(self.pub("--allow-test-keys", active=self.write_pem("kept.pem", THROWAWAY_SEED), spare=self.rfc_pem(1)))
+        self.assertEqual(self.pinned(), (new_public, RFC_PUBLIC[1]))
+
+    def test_the_placeholders_pin_nothing_so_the_first_pair_is_never_a_replacement(self) -> None:
+        self.assertIn("set(KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS ON)", self.scratch.read_text(encoding="utf-8"))
+        self.assert_tool_ok(self.pub("--allow-test-keys"))
+
+    def test_the_file_is_flushed_to_disk_before_it_replaces_the_old_one(self) -> None:
+        calls = []
+        real_fsync = os.fsync
+        real_replace = os.replace
+
+        def fsync(descriptor):
+            calls.append("fsync")
+            return real_fsync(descriptor)
+
+        def replace(source, target, *args, **kwargs):
+            calls.append("replace")
+            return real_replace(source, target, *args, **kwargs)
+
+        with mock.patch.object(os, "fsync", fsync), mock.patch.object(os, "replace", replace):
+            keytool.pin_keys(self.active, self.spare, self.scratch, allow_test_keys=True, openssl=OPENSSL)
+        self.assertEqual(calls, ["fsync", "replace"])
 
     def test_it_writes_nothing_but_the_keys_file_and_never_a_private_key(self) -> None:
         folder = self.scratch.parent

@@ -3,28 +3,36 @@
 
 The workflow with `sign=offline` builds a draft release that has the manifests and the update zips but
 no `.sig`. The owner downloads them, runs this tool on the machine that holds the private key, and
-uploads the signatures. This tool never runs `gh` and never uploads: the commands it prints are for the
-owner to read and run. Nothing is signed until every step has passed:
+uploads the signatures. This tool NEVER runs `gh` (it does not even import a way to start a program):
+every `gh` command it shows is for the owner to read and run. So the flow is three steps with this
+tool in the middle, and the same tool command is run twice:
 
-  0. Fetch the draft's assets yourself (this tool does not):
-         gh release download vX.Y.Z --repo kjarada/Katana --dir release-vX.Y.Z \\
-             --pattern 'Katana-update-*.json' --pattern 'Katana-*.update.zip'
-     and, to see what changed, the release before it:
+    python tools/update_release_sign.py --repo kjarada/Katana --tag vX.Y.Z --key update-signing.pem
+
+The first run finds no downloaded draft (the folder release-<tag>, or --dir), prints the exact
+`gh release download` command and stops. Run that command, then run the tool command again, unchanged.
+Nothing is signed until every step has passed:
+
+  0. The draft's assets are in the folder (the printed `gh release download` fetched them). To see what
+     changed, also fetch the release before it and give --previous:
          gh release download vPREV --repo kjarada/Katana --dir release-vPREV --pattern 'Katana-update-*.json'
+     (Whether `gh` finds a DRAFT by its tag is one of the first-release checks of docs/update.md.)
   1. Recheck every asset with tools/update_verify_release.py's code, which re-derives every hash from the
      zip members and the signed byte ranges (the producer's own word is not taken).
   2. Show what changed against --previous: per target, the files added, removed and changed, and the bytes an
      installed copy of the previous release would download.
   3. Check the key: it must be one the tree pins (cmake/KatanaUpdateKeys.cmake), because an installed copy
      rejects anything else, and it must not be a published test key.
-  4. Make you TYPE the version. A mistyped or empty answer, or end of input, signs nothing.
-  5. Sign each manifest (openssl pkeyutl -sign -rawin) into `<manifest>.sig`, then verify the signatures
-     with the openssl command line against the pinned keys and recheck the directory. On any failure the
-     signatures this run wrote are removed.
+  4. Make you TYPE the version. A mistyped or empty answer, or end of input, signs nothing. Every
+     manifest and zip is hashed before step 1 and again after the answer: a file that changed while you
+     read the report is refused, so what is signed is exactly what was checked and shown.
+  5. Sign each manifest (openssl pkeyutl -sign -rawin) into `<manifest>.sig`, from the very bytes that
+     were checked, then verify the signatures with the openssl command line against the pinned keys and
+     recheck the directory. On any failure the signatures this run wrote are removed.
   6. Print the exact `gh release upload` and `gh release edit` commands. They are NOT executed.
 
-    python tools/update_release_sign.py --dir release-vX.Y.Z --tag vX.Y.Z --repo kjarada/Katana \\
-        --key update-signing.pem --previous release-vPREV
+The full form: --repo kjarada/Katana --tag vX.Y.Z --key update-signing.pem --previous release-vPREV
+[--dir release-vX.Y.Z]
 
 --report-only stops after step 3. --test-key (tests) requires a published RFC 8032 test key and trusts
 TEST 1 and TEST 2, as the engine's tests do; without it such a key is refused.
@@ -35,9 +43,10 @@ Exit status: 0 signed (or --report-only passed), 1 refused or aborted, 2 a usage
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shlex
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -50,11 +59,12 @@ from update_make_manifest import (
     find_openssl,
     key_id,
     public_key_of,
-    sign_file,
+    sign_bytes,
     signature_line,
 )
 
 LIST_LIMIT = 12
+CHUNK = 1 << 20
 
 
 @dataclass
@@ -123,6 +133,40 @@ def describe_changes(report: verifier.Report, previous: Optional[Path]) -> list[
     return lines
 
 
+@dataclass
+class Snapshot:
+    """What the directory held when it was read: a SHA-256 per release file, and the manifests' bytes."""
+
+    digests: dict[str, str] = field(default_factory=dict)
+    manifests: dict[str, bytes] = field(default_factory=dict)
+
+
+def take_snapshot(directory: Path) -> Snapshot:
+    """Hash every Katana-* file of the directory (manifests, zips, signatures); keep the manifests' bytes."""
+    snapshot = Snapshot()
+    for path in sorted(directory.iterdir()):
+        if not path.name.startswith("Katana-") or not path.is_file():
+            continue
+        if path.name.startswith("Katana-update-") and path.name.endswith(".json"):
+            data = path.read_bytes()
+            snapshot.manifests[path.name] = data
+            snapshot.digests[path.name] = hashlib.sha256(data).hexdigest()
+            continue
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            while chunk := handle.read(CHUNK):
+                digest.update(chunk)
+        snapshot.digests[path.name] = digest.hexdigest()
+    return snapshot
+
+
+def gh_download_commands(directory: Path, tag: str, repo: str) -> list[str]:
+    return [
+        f"gh release download {shlex.quote(tag)} --repo {shlex.quote(repo)} --dir {shlex.quote(directory.as_posix())} "
+        "--pattern 'Katana-update-*.json' --pattern 'Katana-*.update.zip'",
+    ]
+
+
 def gh_commands(directory: Path, tag: str, repo: str, signatures: list[Path]) -> list[str]:
     files = " ".join(shlex.quote(s.resolve().as_posix()) for s in signatures)
     return [
@@ -132,18 +176,23 @@ def gh_commands(directory: Path, tag: str, repo: str, signatures: list[Path]) ->
 
 
 def run(args: argparse.Namespace) -> int:
-    directory: Path = args.dir
-    if not directory.is_dir():
+    directory: Path = args.dir if args.dir is not None else Path(f"release-{args.tag}")
+    if directory.exists() and not directory.is_dir():
         raise ToolError(f"{directory} is not a directory")
-    manifests = sorted(directory.glob("Katana-update-*.json"))
+    manifests = sorted(directory.glob("Katana-update-*.json")) if directory.is_dir() else []
     if not manifests:
-        raise ToolError(f"{directory} holds no Katana-update-<token>.json")
+        print(f"{directory} holds no Katana-update-<token>.json: the draft's assets are not downloaded yet.")
+        print("This tool does not run gh. Run this command yourself, then run the same tool command again:")
+        for command in gh_download_commands(directory, args.tag, args.repo):
+            print(f"  {command}")
+        return 1
     already = [m.name + ".sig" for m in manifests if (directory / (m.name + ".sig")).exists()]
     if already:
         raise ToolError("already signed, so not signed again: " + ", ".join(already))
 
     print(f"Offline signing of {args.tag} ({args.repo}) from {directory}")
     print("Step 1: recomputing every hash from the update zips")
+    reviewed = take_snapshot(directory)
     report = verifier.verify_release(directory, allow_unsigned=True, previous=args.previous)
     for warning in report.warnings:
         print(f"  warning: {warning}")
@@ -185,13 +234,19 @@ def run(args: argparse.Namespace) -> int:
         print(f"Refused: {answer.strip()!r} is not {version!r}; nothing was signed.")
         return 1
 
+    after = take_snapshot(directory)
+    if after.digests != reviewed.digests:
+        names = sorted(n for n in set(reviewed.digests) | set(after.digests) if reviewed.digests.get(n) != after.digests.get(n))
+        print(f"Refused: {', '.join(names)} changed after it was checked; nothing was signed.")
+        return 1
+
     print("Step 5: signing")
     written: list[Path] = []
     try:
         for manifest in manifests:
             if manifest.name[len("Katana-update-"):-len(".json")] not in report.manifests:
                 continue
-            signature = sign_file(openssl, args.key, manifest)
+            signature = sign_bytes(openssl, args.key, reviewed.manifests[manifest.name])
             target = manifest.with_name(manifest.name + ".sig")
             target.write_bytes(signature_line(public_key, signature).encode("ascii"))
             written.append(target)
@@ -220,7 +275,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         epilog=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--dir", type=Path, required=True, help="the downloaded draft's assets: manifests and update zips")
+    parser.add_argument("--dir", type=Path, help="the downloaded draft's assets: manifests and update zips (default release-<tag>)")
     parser.add_argument("--tag", required=True, help="the release tag, vX.Y.Z")
     parser.add_argument("--repo", default=DEFAULT_REPO, help=f"owner/name, for the printed commands (default {DEFAULT_REPO})")
     parser.add_argument("--key", type=Path, required=True, help="the private key PEM (update-signing.pem or the spare)")
@@ -230,6 +285,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--keys-cmake", type=Path, default=DEFAULT_KEYS_CMAKE, help="the file that pins the production keys")
     parser.add_argument("--openssl", help="the openssl executable (default: KATANA_OPENSSL, else PATH)")
     args = parser.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):  # a path with non-ASCII letters must not kill the report
+        try:
+            stream.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
     try:
         return run(args)
     except (ToolError, verifier.UsageError, OSError) as error:

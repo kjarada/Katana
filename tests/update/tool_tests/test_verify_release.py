@@ -18,6 +18,7 @@ import unittest
 import zipfile
 from pathlib import Path
 from typing import Callable
+from unittest import mock
 
 from support import (
     OPENSSL,
@@ -110,6 +111,16 @@ class TheBaseline(Checked):
         self.assertIn("signature verified by key d75a980182b10ab7", done.stdout)
         self.assertIn("win64: Katana 0.9.0, sequence 1790000000, 8 files", done.stdout)
         self.assertIn("verified 1 manifest(s)", done.stdout)
+
+    def test_the_report_says_when_the_set_of_targets_was_not_checked(self) -> None:
+        self.assertIn("the set of targets is not checked", self.verify().stdout)
+        done = self.verify("--targets", "win64")
+        self.assert_tool_ok(done)
+        self.assertNotIn("not checked", done.stdout.replace("not checked (no trusted keys given)", ""))
+
+    def test_a_keys_file_that_does_not_exist_is_a_usage_error(self) -> None:
+        done = self.verify(trust=("--keys-cmake", self.tmp / "no-such-keys.cmake"))
+        self.assert_tool_failed(done, "does not exist", code=2)
 
     def test_with_no_trusted_key_and_no_allowance_for_unsigned_it_refuses_to_start(self) -> None:
         done = run_tool("update_verify_release.py", self.release)
@@ -206,6 +217,38 @@ class TheSignature(Checked):
         self.sig_path().write_bytes((line + "\n").encode("ascii"))
         self.assert_tool_failed(self.verify(), "not a valid Ed25519 signature")
 
+    def test_the_signature_is_checked_over_the_bytes_that_were_read_and_not_over_the_path(self) -> None:
+        path = self.release / MANIFEST
+        original = path.read_bytes()
+        seen, parsed = [], []
+        real_verify, real_parse = verifier.openssl_verifies, verifier.parse_manifest_bytes
+
+        def swap_the_file_then_check(openssl, key, message, signature):
+            seen.append(message)
+            path.write_bytes(b"something else, put there after the read")  # a swap between read and check
+            return real_verify(openssl, key, message, signature)
+
+        def note_what_is_parsed(data):
+            parsed.append(data)
+            return real_parse(data)
+
+        with mock.patch.object(verifier, "openssl_verifies", swap_the_file_then_check), \
+                mock.patch.object(verifier, "parse_manifest_bytes", note_what_is_parsed):
+            report = verifier.verify_release(self.release, trust={RFC_PUBLIC[1]: "test"}, openssl=OPENSSL)
+        self.assertEqual(seen, [original])
+        self.assertEqual(len(parsed), 1)
+        self.assertIs(seen[0], parsed[0], "the signature is checked over the very bytes that are parsed: one read")
+        self.assertTrue(report.ok, report.errors)
+
+    def test_openssl_verifies_a_message_given_as_bytes_against_the_rfc_vector(self) -> None:
+        # RFC 8032 section 7.1, TEST 2: the message 0x72 and its signature, public key of TEST 2.
+        message = bytes.fromhex("72")
+        signature = bytes.fromhex("92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da"
+                                  "085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00")
+        self.assertTrue(verifier.openssl_verifies(OPENSSL, RFC_PUBLIC[2], message, signature))
+        self.assertFalse(verifier.openssl_verifies(OPENSSL, RFC_PUBLIC[2], b"s", signature))
+        self.assertFalse(verifier.openssl_verifies(OPENSSL, RFC_PUBLIC[1], message, signature))
+
     def test_one_flipped_bit_of_the_manifest_breaks_the_signature(self) -> None:
         data = bytearray((self.release / MANIFEST).read_bytes())
         data[10] ^= 0x01
@@ -270,7 +313,8 @@ class TheManifestFields(Checked):
         self.broken(lambda m: m.update(tag="v9.9.9"), "tag is")
 
     def test_versions_that_the_workflow_cannot_write_are_refused(self) -> None:
-        for version in ("1", "1.2.3.4.5", "1.0-beta", "1..2", "x.y"):
+        # The last is "1.2" in Arabic-Indic digits: a str pattern's \d matches it, version.hpp does not.
+        for version in ("1", "1.2.3.4.5", "1.0-beta", "1..2", "x.y", "١.٢"):
             with self.subTest(version=version):
                 self.rewrite(lambda m, v=version: m.update(version=v, tag="v" + v))
                 self.assert_tool_failed(self.verify("--allow-unsigned", trust=()), "version is")
@@ -279,6 +323,7 @@ class TheManifestFields(Checked):
         self.broken(lambda m: m.update(expires=m["published"]), "published plus 180 days")
         self.broken(lambda m: m.update(published="yesterday"), "published is not a UTC time")
         self.broken(lambda m: m.update(published="2026-13-45T00:00:00Z"), "not a real date")
+        self.broken(lambda m: m.update(published="٢٠٢٦-09-21T14:13:20Z"), "published is not a UTC time")
 
     def test_a_sequence_that_is_not_a_positive_integer_is_refused(self) -> None:
         for value in ("5", 0, -3, 1.5, True):
@@ -372,7 +417,40 @@ class TheFiles(Checked):
             m["files"].insert(0, clone)
         self.broken(add, "case is folded")
 
-    def test_bad_digests_and_flags_are_named(self) -> None:
+    def test_a_name_that_is_a_file_and_the_folder_of_another_is_named_even_when_case_differs(self) -> None:
+        for parent_spelling in ("bin/katana.exe", "bin/Katana.EXE"):
+            with self.subTest(folder=parent_spelling):
+                shutil.copyfile(self.baseline / MANIFEST, self.release / MANIFEST)
+
+                def add(m: dict, spelling: str = parent_spelling) -> None:
+                    inner = dict(m["files"][1])
+                    inner["path"] = spelling + "/inner.dll"
+                    m["files"].insert(1, inner)
+
+                self.broken(add, "is also listed as a file", "inner.dll")
+
+    def test_a_zip_whose_data_is_laid_out_out_of_class_order_is_named_by_offset(self) -> None:
+        # Written here, from the producer's pieces, in the WRONG physical order: seed, data, lib, program.
+        tree = make_tree(self.tmp / "tree", TREE)
+        scan = producer.scan_tree(tree)
+        files = producer.prepare_files(scan, producer.DEFAULT_PROGRAMS, ["etc/katana/*.ini"])
+        backwards = sorted(files, key=lambda f: (-producer.CLASS_ORDER.index(f.file_class), f.path))
+        directory = self.tmp / "backwards"
+        directory.mkdir()
+        zip_path = directory / ZIP
+        placements = producer.write_update_zip(zip_path, backwards)
+        manifest = producer.build_manifest(
+            version="0.9.0", tag="v0.9.0", target="win64", repo=producer.DEFAULT_REPO, channel="stable",
+            sequence=1790000000, applier=1, files=[producer.file_entry(f, placements[f.path]) for f in files],
+            payload={"codec": "deflate", "name": ZIP, "size": zip_path.stat().st_size}, notify_only=False,
+        )
+        (directory / MANIFEST).write_bytes(producer.encode_manifest(manifest))
+        done = self.verify("--allow-unsigned", directory=directory, trust=())
+        self.assert_tool_failed(done, "not ordered program, lib, data, seed (by offset)")
+        # Everything else about that release is right: only the order is named.
+        self.assertEqual(len([line for line in done.stdout.splitlines() if line.startswith("ERROR")]), 1, done.stdout)
+
+    def test_bad_digits_and_flags_are_named(self) -> None:
         self.broken(lambda m: self.first(m).update(sha256="A" * 64), "sha256 is not 64 lower-case hex")
         self.rewrite(lambda m: self.first(m).update(exec="yes"))
         self.assert_tool_failed(self.verify("--allow-unsigned", trust=()), "exec is not a boolean")
@@ -469,6 +547,19 @@ class TheReleaseAsAWhole(ToolTest):
                     self.assert_tool_ok(done)
                 else:
                     self.assert_tool_failed(done, "is not above the previous release")
+
+
+class TheConsole(Checked):
+    def test_a_path_the_console_cannot_show_is_still_reported_and_the_exit_status_stays_one(self) -> None:
+        name = "".join(chr(code) for code in (0x65E5, 0x672C))  # two Japanese letters
+        self.rewrite(lambda m: m["files"][0].update(path="bin/" + name + ".dll"))
+        # A console whose code page is ASCII: the report must not die in the print.
+        done = run_tool("update_verify_release.py", self.release, "--allow-unsigned", env={"PYTHONIOENCODING": "ascii"})
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        shown = "".join("%su%04x" % (chr(92), ord(c)) for c in name)  # backslashreplace writes a backslash, u, 4 hex digits
+        self.assertIn(shown, done.stdout)
+        self.assertIn("FAILED", done.stdout)
+        self.assertNotIn("Traceback", done.stderr)
 
 
 class Independence(ToolTest):
