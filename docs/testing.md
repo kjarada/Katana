@@ -31,6 +31,7 @@ about the configuration that ships.
 | the whole window, headless | `add_test` in `tests/CMakeLists.txt` | `qt_<what it shows>_headless` | `tools/check_screenshot.cmake`, `tools/check_plot.cmake` |
 | end-to-end command line | `add_test` in `src/katana_app/CMakeLists.txt` | `cli.<what it shows>` | `katana_cli` run as a process |
 | the layering rules | `tests/CMakeLists.txt` | `layering` | `tools/check_layering.cmake` |
+| what the programs link and install | `tests/CMakeLists.txt` | `the_programs_link_none_of_the_legacy_customisation_readers`, `packaging_installs_only_present_first_party_files` | the link closure walked at configure time; `tools/check_install_rules.cmake` ("What the programs hold", below) |
 | the documents' references | `tests/CMakeLists.txt` | `docs` | `tools/check_docs.py` ("The docs test", below) |
 
 `ctest -N` gives the current count of each; this document does not, because a
@@ -218,8 +219,44 @@ and the one of `tests/data/field_codes/`, which the survey import's tests load;
 script that draws it and a few GIS files. The owner's large real archives are
 kept outside the repository and used for measuring and looking, never
 committed and never needed by a test. A test that reads the git-ignored
-customisation must pass without it (`docs/building.md`, "The customisation
-folder").
+customisation must pass without it (`docs/building.md`, "The built-in
+customisation and the reference folder").
+
+**The suites that read third-party data** are three: the legacy readers' and
+writers' reference tests and the converter's (`tests/archive12d`), which read
+the reference folder `KATANA_REFERENCE_CUSTOMISATION_DIR` names, and
+`BuiltInCensus.*` and the compiled-in half of `BuiltInRenames.*`
+(`tests/cad/customisation`), which read the customisation compiled in. Each
+skips, saying why, where its data is absent - the reference folder is on the
+owner's machine and in no clone, and no clone has a built-in unless it is given
+the file - and none is ever changed to match what the program gave: the
+census's figures are counted by `tools/customisation_census.py` and
+`tools/reference_census.py`, which use none of the program's code, and no
+tracked file holds a name from the data, only counts. A clone with neither was
+built and run (`-DKATANA_BUILTIN_CUSTOMISATION` naming a file that does not
+exist; the cad and app suites): it configures, builds and passes.
+
+**What the programs hold** is proved twice, and each proof is itself proved on
+a fixture, since a check that cannot see a violation passes as quietly as one
+that finds none (`tests/CMakeLists.txt`):
+
+- the link closure. `the_programs_link_none_of_the_legacy_customisation_readers`
+  walks, at configure time, every library `katana`, `katana_cli` and
+  `katana_mcp` link, however deep and however linked, and fails if
+  `katana_legacy_customisation` - the readers of the older customisation
+  formats - is among them; it also fails if the walk did not reach
+  `katana_core`, which would be a walk that found nothing because it saw
+  nothing. `the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there`
+  runs the same walk over two fixture targets (never built): one that links the
+  library PRIVATELY, through a static library and an interface library, and
+  must be reported, and one that links only the archive module and must not.
+- the install rules. `tools/check_install_rules.cmake` reads the install
+  scripts CMake wrote (the top one and those it includes) and fails on any
+  program but `katana`, `katana_cli` and `katana_mcp`, and on a build that
+  installs no program at all. `packaging_check_on_fixture_*` run it on three
+  install scripts written at configure time: the three programs (passes), those
+  and the converter installed from a directory below (must name the converter),
+  and none (must say there is nothing to check).
 
 **No test needs the network.** The online import's tests answer every request
 from fixtures (`tests/interop/data/online/`) through

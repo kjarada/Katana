@@ -17,11 +17,12 @@ Seven rules shape the design. Code comments cite them by number ("Rule 4"),
 so the numbers are fixed: a rule may be reworded here, never renumbered.
 
 **Rule 1 - C++ owns the application.** All core functionality is C++. Python
-is never a run-time dependency of the application: it is used at BUILD time
-to embed the customisation (`tools/embed_customisation.py`; without Python
-the table is empty and Katana draws plain lines) and by developer tools
+is never a run-time dependency of the application, and not a build dependency
+either: the built-in customisation is compiled in with `#embed`, so a build
+without Python is the same build. It is used by developer tools and checks
 (`tools/compare_benchmarks.py`, `tools/audit_register.py`,
-`tools/check_docs.py`).
+`tools/check_docs.py`, `tools/customisation_census.py`), which are not
+registered where it is absent.
 
 **Rule 2 - Nothing changes the model except a validated command.** No front
 end - the window, `katana_cli`, a script, and the AI layer when it comes -
@@ -154,7 +155,9 @@ Dependencies run one way, lowest first:
 core → math → geometry → { terrain, render, entity } → commands → storage → cad → app → qt
               geodesy, survey              beside geometry (they see core and math)
               surveyio                     survey + geometry; seen only by app and qt
-              archive12d                   terrain + entity; seen by interop, app, qt
+              archive12d                   terrain + entity; seen by interop, app, qt (the .12da archive only:
+                                           the older customisation formats' readers are src/katana_archive12d/legacy,
+                                           a library no program links)
               gis, pointcloud → interop    the GDAL/PDAL adapters (katana_io) and import/export
 ```
 
@@ -169,10 +172,15 @@ else. Two rules are checked there and run as the `layering` test:
 
 1. **One-way dependencies.** `geometry` cannot include `survey`, `cad` or `qt`.
    The check reads every `#include "katana/<layer>/..."` and compares it against
-   the declared allow-list for the file's own layer. Its pattern matches layer
-   names of letters and underscores only, so an include of
-   `katana/archive12d/...` is not checked at all: `cad` including the archive
-   reader would pass today (audit BLD-03, BLD-11). No `cad` file does.
+   the declared allow-list for the file's own layer. The pattern allows digits
+   in a layer's name, so `katana/archive12d/...` IS checked (audit BLD-03,
+   BLD-11; it was not, and `cad` including the archive reader would have
+   passed): `layering_catches_a_cad_file_including_archive12d` runs the check
+   on a tree that does it. Private headers are not spelled `katana/<layer>/`,
+   so the older customisation formats' headers, which are private to
+   `src/katana_archive12d/legacy/`, are held to their library by a different
+   check - the link closure and the install rules of the three programs
+   (`docs/testing.md`).
 2. **No third-party types in public headers** (Rule 4). Eigen, CGAL, PROJ,
    SQLite, GDAL, PDAL, Qt, Vulkan and nlohmann may appear only in `src/`, never
    under `include/`. Each is wrapped by a Katana-owned interface -

@@ -10,7 +10,7 @@
 //
 // A rule is keyed by a code pattern which is either EXACT ("PABB") or a
 // PREFIX ("WM*"). The two mapfiles of the reference customisation hold 1,624
-// rules over 1,364 distinct keys between them, and not one uses a wildcard
+// rules over 632 distinct keys between them, and not one uses a wildcard
 // anywhere but at the end - so a key of any other shape is refused rather
 // than matched approximately.
 //

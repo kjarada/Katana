@@ -1,37 +1,51 @@
-# Survey coding: survey code files, linestyles and symbols
+# Survey coding: survey codes, linestyles and symbols
 
 `PLAN.MD` 20.3 (the plan has since been removed; its section numbers survive
 here as history). How a surveyor's field code becomes a drawing, and the
 decisions of 2026-09-23 (D1-D9, tabled in `docs/cad.md`) that govern it.
 
-A surveyor shoots a point and types a code: `WM01`. That code is not a label -
-it is an instruction. A customisation turns it into a water main: on layer
-`SURVEY SERVICES` (the rule's `model` field), coloured `sui water potable`,
-joined into a line rather than left as a point, drawn with the `WATR Main`
-linestyle. Other codes get a symbol instead: `AC*` puts a `CULT Bollard` at each point.
+A surveyor shoots a point and types a code. That code is not a label - it is
+an instruction. A customisation turns it into a feature: the layer it goes on
+(a rule's `layer`), its colour, whether it is joined into a line or left a
+point, the linestyle it is drawn with, or the symbol put at each point, and
+the attributes it carries. A code such as `FE01` can mean a fence: layer
+`FENCES`, joined into a line, drawn with the `TEST Fence` linestyle.
 
-Three files do that, and they are useless apart:
+A customisation is ONE value, `entity::Customisation`, and ONE file in the
+Katana customisation format (JSON; `docs/customisation.md` has the format and
+the verbs). It holds three kinds of thing, which are useless apart:
 
-| File | What it says |
+| Part | What it says |
 |---|---|
-| a **survey code file** (`.mapfile`, XML; "mapfile" below where the format is meant) | what each code becomes: layer (its `model`), colour, linestyle, weight, whether it is a line or a point, which symbol, what attributes |
-| a **linestyle library** (`.4d`) | what each linestyle is drawn with |
-| a **symbol library** (`.4d`) | what each symbol is drawn with |
+| **survey code rules** (`codes`) | what each code becomes: layer, colour, linestyle, weight, whether it is a line or a point, which symbol, what attributes |
+| **linestyle definitions** (`linestyles`) | what each linestyle is drawn with |
+| **symbol definitions** (`symbols`) | what each symbol is drawn with |
 
-The work was built against a real production customisation from a road
-authority - 728 survey code rules, 322 linestyles, 474 symbols, and a second
-survey code file of 900 more rules. **It is third-party material under its own
-licence and is NOT part of this repository.** It is kept, under general file
-names, in the git-ignored `resources/customisation/`, which the build compiles
-in ("Where the built-in customisation comes from" below); every test that
-touches it skips when it is absent, so the suite stays green without it.
+Katana reads that one format. The program is built with a customisation of
+its own, the NSW customisation - 792 definitions (471 symbols and 321
+linestyles) and 1,624 survey code rules - which was made once from a real
+production customisation of a road authority, kept in two older formats. **That
+is third-party material under its own licence and is NOT part of this
+repository, and neither is the file made from it.** The converted file is kept,
+git-ignored, in `resources/customisation/`, and the build compiles it in
+(`docs/customisation.md`, "The built-in"; "The built-in, and the seam" below);
+a build without it has no built-in customisation, and every test that touches
+it skips, so the suite stays green without it.
+
+The two older formats - the survey code file (`.mapfile`, XML) and the style
+library (`.4d`) - are NOT read by the program, in any front end. Only the
+converter, `katana_customisation_convert`, reads them, once, to make a Katana
+customisation file. What stays true about those formats - their grammar,
+their sections, what was measured of the real files - is in "The legacy
+formats the converter reads", the last chapter of this document. The rest is
+about customisations as the program holds them.
 
 ## A symbol is a linestyle
 
 This is the fact the whole design rests on, and it is not a simplification:
-the file format's manual says it where it describes vertex symbols - "There can be the
+the older file format's manual says it where it describes vertex symbols - "There can be the
 same symbol (**defined as a linestyle**) for every vertex". The two `.4d`
-files have one grammar, one reader and one type. What separates a symbol from
+libraries have one grammar, one reader and one type. What separates a symbol from
 a linestyle is a single line in the definition, `mode vertex`: put the strokes
 at each vertex of a string rather than running them along it.
 
@@ -43,7 +57,7 @@ one thing".
 **`mode vertex` is not what makes a symbol, and this file used to say it
 was.** It is one signal among four. Measured with a script outside Katana,
 with the symbol library read last as it then was (under the table of the
-two libraries, in the first "What the reader takes" below, is what the other
+two libraries, in "What the style library reader takes", is what the other
 order gives):
 157 of the 792 definitions say `mode vertex` (156 of them in the symbol
 library, one in the linestyle library), while the symbol library alone holds
@@ -77,63 +91,12 @@ window's log "792 definitions (472 symbols)", and Settings' Symbols row, countin
 `cad::symbolChoices` offers. They used to count `mode vertex` alone - "157 of
 them symbols" - which is not what a symbol is.
 
-## The grammar, measured rather than assumed
-
-```
-<kind> "NAME" {                 kind = paperstyle | worldstyle | twoptstyle
-  group "Survey/WATR"           a folder path, the tree a browser shows
-  mode vertex                   a symbol: strokes go at each vertex
-  length 2.5                    the period of the pattern along a line
-  factor 5                      a scale on every coordinate
-  xorigin 0   yorigin 0
-  xorigin1/yorigin1             twoptstyle: the first anchor
-  xorigin2/yorigin2             twoptstyle: the second
-  stretch_mode 2  cycle_mode 2  twoptstyle: kept, not yet acted on
-  colour "pen 035"              the pen for what follows; "view_colour"
-                                means the entity's own colour
-  move X Y                      pen up
-  draw X Y                      pen down
-  arc RADIUS START END          degrees, about the CURRENT point
-  circle RADIUS                 about the current point
-  dot RADIUS
-  text "T" ANGLE HEIGHT "justify" "font" WIDTH a b c
-}
-```
-
-`arc`, `circle`, `dot` and `text` carry no point of their own - they are drawn
-about wherever the pen is. Forgetting that put every circle at the origin in
-the first version of `LineStyle::bounds`, which is why it is said twice here
-and in the code.
-
-**A radius is a length.** The reference libraries write 45 arcs with a
-NEGATIVE radius (U-turn and speed-zone markings). The sign does not choose a
-side: drawn with the signed radius every one of them came out turned half a
-turn about its centre, and `flattenDefinition` now takes `|r|` for arcs and
-circles alike. The regression test, on a U-turn, puts the arc's end at
-y = -0.4735 by hand where the signed radius gave +0.4925.
-
-The three kinds differ in what a coordinate MEANS:
-
-- `worldstyle` - model units. The mark stays the same size on the ground and
-  grows on the page as you zoom in. A 6 m road marking is 6 m wide.
-- `paperstyle` - millimetres on the plot. The mark stays the same size on the
-  page whatever the scale. A 1.5 mm tick prints 1.5 mm.
-- `twoptstyle` - stretched between two anchors, so the definition fits the
-  span it is drawn across: a gate, a doorway.
-
-**The last three numbers of a `text` command are not interpreted.** All 907
-uses have 0 in the first; the other two take values like -0.3 and 0.035, and
-no documentation available here names them. They are kept so that what was
-read can be written back. Guessing that they are an offset would move the
-text, and text that is subtly in the wrong place is worse than text that is
-plainly unstyled.
-
 ## Where the pieces live, and why
 
 | Piece | Layer | Why there |
 |---|---|---|
-| `entity::LineStyle`, `entity::StyleLibrary` | `entity` | three layers need them and cannot all see each other: `commands` applies a code, `cad` draws a definition, `archive12d` reads the file |
-| `archive12d::readStyleLibrary` | `archive12d` | it already owns the archive reader's encoding detection, its lexer and its colour names |
+| `entity::LineStyle`, `entity::StyleLibrary`, `entity::Customisation` and its reader and writer | `entity` | the layers need them and cannot all see each other: `commands` applies a code, `cad` draws a definition and keeps the session's customisation, `app` and the window run the verbs |
+| the readers and writers of the older formats | `archive12d`, `legacy/` | they share the archive reader's encoding detection and lexer, so they are that module's directory - but a library of their own, `katana_legacy_customisation`, which only the converter and their tests link ("The legacy formats the converter reads") |
 
 **A library is not part of a Model and is not saved inside a project.** That
 is how a survey customisation works - the libraries are shared site-wide by every
@@ -141,7 +104,7 @@ project, named by a project rather than copied into it. The alternative, a
 table in the Model beside Layer and Linetype, was rejected for two reasons:
 one production customisation alone is 792 definitions and 35,000 strokes,
 which would be written into every project file that used one of them; and two
-projects would then be able to disagree about what "WATR Main" looks like.
+projects would then be able to disagree about what "TEST Water Main" looks like.
 
 `StyleLibrary` is `NamedTable`, the same container as every other table of
 named things, rather than a new one.
@@ -169,80 +132,9 @@ reports a key the code would have met but for its case or surrounding blanks
 (`NearMissKind`) - the only way "wm01" getting nothing from the rule for
 `WM*` is ever explained, since matching itself is byte for byte.
 
-## What the reader takes
-
-Read against the real customisation, with the counts checked by a script that
-uses none of Katana's code:
-
-| | definitions | commands |
-|---|---|---|
-| the linestyle library | 322 blocks (238 paperstyle, 47 twoptstyle, 37 worldstyle), 321 kept - one name is defined twice | 10,969 `move`, 10,770 `draw` |
-| the symbol library | 474 blocks (473 worldstyle, 1 twoptstyle) | 6,076 `move`, 6,547 `draw` |
-| both, loaded as one customisation | 792 definitions in 71 groups, 157 of them `mode vertex` (not the number of symbols - see "A symbol is a linestyle") | |
-
-**No warnings.** Every keyword in 1.2 MB of production data is one the reader
-knows. A keyword it did not know would be counted and named rather than
-skipped quietly, which is the same promise `readArchive` makes.
-
-Three names appear in both files, and a fourth twice in the linestyle library
-(by a count outside Katana, `tools/reference_census.py`: four blocks replaced,
-three across the files and one within one). So "already exists" is the normal
-case and the later file wins - a customisation is loaded in layers. "Loaded
-as one" above is in the order this reader was always given the two, the
-linestyle library first, so the three names are the symbol library's there
-and 157 counts them so. The NSW customisation that is compiled in is
-converted with the libraries the other way round, by decision, and holds 155
-at vertices, 471 listed as symbols and 321 not (`docs/customisation.md`,
-"The reference customisation", has the decision and both sets of figures).
-
-## The three files link up
-
-Checked with a script, outside Katana:
-
-| Reference | Resolves exactly | Missing |
-|---|---|---|
-| 177 distinct `<linestyle>` values | 175 | `0` and `1`, the names of the plain continuous line |
-| 195 distinct symbol `<style>` values | 193 | two symbols a standard library supplies, which is not one of these files |
-
-So a customisation is not necessarily self-contained, and an unresolved name
-has to be reported rather than treated as a fault in the file.
-
-## The mapfile is written in sections, and the section is the meaning
-
-This is the thing that is easy to get wrong, and the first version of the
-reader did get it wrong. `<map_file>` does not hold one list of rules. It
-holds up to ten SECTIONS, and which section a rule is in is what says what the
-rule is about:
-
-| Section | What its rules say | `survey_codes.mapfile` | `survey_codes_names.mapfile` |
-|---|---|---|---|
-| `map_data` | model, colour, breakline, linestyle, weight, group | 457 | 573 |
-| `vertex_symbol_data` (and `_v9`) | the symbol at each vertex, and `hide` | 200 | 201 |
-| `vertex_textstyle_data` | how the code's text is drawn | 7 | 7 |
-| `pipe_data` | the string drawn as a pipe, and its attributes | 16 | - |
-| `vertex_pipe_data` | the same per vertex | 16 | - |
-| `segment_pipe_data` | the same per segment | 16 | - |
-| `string_attribute_data` | attributes on the string | 12 | - |
-| `vertex_attribute_data` | attributes on each vertex | 1 | - |
-| `tinable_data` | whether the code is used in a surface | - | 119 |
-
-Reading only `<map_data>` takes 457 of `survey_codes.mapfile`'s 725 rules and
-quietly loses every symbol - which is exactly what the first version did, and
-exactly what the test against the real file caught. The element name inside a
-rule is not enough either: `<map_attributes>` means attributes on the STRING
-inside `string_attribute_data` and attributes on each VERTEX inside
-`vertex_attribute_data`. That is why `SurveyRule` records the section it came
-from.
-
-`survey_codes_names.mapfile` is a second survey code file, and it came with
-the `.4d` extension a linestyle library also uses; it is kept under a name
-that says what it is, but that is not what makes it one. What makes a file a
-survey code file is that it contains a `<map_file>` element, not what it is
-called, so a `.4d` file holding one is still read as one.
-
 ## How a code resolves
 
-A key is either exact (`PABB`) or a prefix (`WM*`). Measured over both
+A key is either exact (`ZPBB`) or a prefix (`WM*`). Measured over both
 mapfiles: 632 distinct keys in 1,624 rules (the CLI's own count below; this
 said 1,364 until the audit of 2026-09-23), and **not one** uses a wildcard
 anywhere but at the end. A key of any other shape is refused rather than matched
@@ -299,16 +191,6 @@ cached keys on `cad::Document::surveyMapGeneration()`, never on a
 one per prefix length of the code - where it used to test every rule: 1,624
 rules against 20,000 points was 32 million key comparisons.
 
-## What the reader takes
-
-| | rules | warnings |
-|---|---|---|
-| `survey_codes.mapfile` | 725 over 465 distinct keys | none |
-| `survey_codes_names.mapfile` | 899 | one, and it is right: an `<item>` holding only a `<group>`, which names no code and so could never apply |
-
-An unknown section is named with how many rules went unread; an unknown field
-inside a rule is named and the rest of the rule is kept.
-
 ## From a definition to geometry
 
 `cad::styleDrawing` turns a definition into polylines and texts in model
@@ -360,7 +242,7 @@ that can reach it, each where it falls on the WHOLE line; `docs/cad.md`
 `Style::symbol` used to be validated against sixteen built-in names. The
 reference symbol library alone names 473 symbols and **not one** of them is
 among the sixteen, so that check made the mapfile unusable: a style saying
-`CULT Bollard` was refused by the model.
+`TEST Bollard` was refused by the model.
 
 It is now a name resolved when it is drawn, exactly as `Style::linetype`
 already was - which also makes the two consistent, where before one was a
@@ -384,159 +266,62 @@ style draws").
 An editor of either works on a copy - a buffer the dialog owns - and commits
 it whole with `setStyleLibrary` or `setSurveyMap` (Apply; Revert throws the
 buffer away). Each bumps `libraryGeneration()` or `surveyMapGeneration()` and
-notifies the listeners, and an edit is kept by EXPORTING it to a file - see
-"Writing it back" below - not by saving the project. The Survey Code Manager
-is that editor for the map ("The Survey Code Manager" below). The definition
-editor is that editor for the library, one definition at a time
-(`docs/desktop.md`, "The definition editor"): its form is the buffer, and Save
-installs a copy of the library with that one definition added or replaced.
-Otherwise the symbol library loads into the library (merged) and exports from
-it, and the style manager edits the drawing's styles and linetypes, which are
-commands like any other.
+notifies the listeners, and an edit is kept by `CUSTOMISE KEEP`, which writes
+the session to the user's own customisation file (`docs/customisation.md`,
+"The verbs"), or by `CUSTOMISE EXPORT`, which writes it wherever it is told -
+not by saving the project, which records only the customisations' NAMES
+("What the project records" below). The Survey Code Manager is that editor
+for the map ("The Survey Code Manager" below). The definition editor is that
+editor for the library, one definition at a time (`docs/desktop.md`, "The
+definition editor"): its form is the buffer, and Save installs a copy of the
+library with that one definition added or replaced. Otherwise the symbol
+library loads into the library (merged) and exports from it, and the style
+manager edits the drawing's styles and linetypes, which are commands like any
+other.
 
 ## Loading a customisation
 
-`archive12d::readCustomisation` takes a list of files and works out what each
-one is BY LOOKING INSIDE IT. That is not fastidiousness: of the four files
-this was built against, two are survey code files and two are style
-libraries - and as delivered THREE of the four ended in `.4d`, so that
-extension was two different formats in one folder and a loader that went by
-the name would read half the customisation as the wrong thing. Kept in
-`resources/customisation/`, the second survey code file ends in `.mapfile`;
-the loader still asks each file what it is.
+`CUSTOMISE <file>...` reads each file as a Katana customisation
+(`entity::customisationFromJson`; `docs/customisation.md`, "The verbs") and
+merges it into the session by the rule of "The merge" below; `CUSTOMISE
+REPLACE` replaces what each kind it brings. Every front end runs that one
+verb - the window's command line, `katana_cli` and `katana_mcp` alike. A file
+that is not a Katana customisation is refused as not one, and so are a survey
+code file and a style library: `CUSTOMISE` does not guess at the older formats,
+and nothing in the program reads them. To use a customisation kept in them,
+convert it once with `katana_customisation_convert` ("Converting a
+customisation from the legacy formats", `docs/customisation.md`) and load what
+it writes.
 
-It lives beside the readers rather than in a front end because both front ends
-need it, and it needs no third-party library, so it costs `archive12d` nothing
-of the property that lets it build with `-DKATANA_BUILD_IO=OFF`.
+Every definition carries the NAME of the customisation it came from
+(`LineStyle::source`) - never a path, so a library carries no trace of whose
+disk it was loaded from. A browser groups and filters by it, and a project
+records it ("What the project records"). It was also one of D3's four signals
+that a definition is a symbol - "symbol" anywhere in the name of the file it
+was read from - until each definition came to say so itself
+(`LineStyle::symbol`): one customisation holds both kinds under one name, so
+where a definition came from no longer says which it is. The readers of the
+older files, which do read one kind a file, still set the flag by that
+file-name rule, which is what the converter needs.
 
-Loading the real customisation from the command line, as `katana_cli` did it
-until 2026-10-06. (`CUSTOMISE` is the interpreter's now, in `katana_cli`,
-`katana_mcp` and the window alike, and reads a Katana customisation file -
-`docs/customisation.md`, "The verbs" - so these four files are refused
-everywhere as not one, and no program calls this reader any more: the
-window's own `CUSTOMISE`, the last to load them through it, is gone too
-("The desktop window no longer loads these files", below). What follows is a
-record of what the reader makes of the four files, kept while the reader
-is.) Each long list of names is cut short here:
-
-```
-R=resources/customisation
-katana_cli -c "CUSTOMISE REPLACE $R/linestyles.4d $R/survey_codes.mapfile $R/survey_codes_names.mapfile $R/symbols.4d" -c CUSTOMISE
-warning: the built-in customisation: survey_codes_names.mapfile: an <item> of <map_data> has no <key> and was skipped
-Customisation: 792 linestyles and symbols and 1624 survey code rules, built in
-  warning: survey_codes_names.mapfile: an <item> of <map_data> has no <key> and was skipped
-  linestyles.4d: style library, 0 added, 318 replaced: "BARR Bollard", ... and 310 more
-  survey_codes.mapfile: survey code file, 0 added, 680 replaced (codes, once for each section): "1*", ... and 672 more
-  survey_codes_names.mapfile: survey code file, 0 added, 899 replaced (codes, once for each section): "1*", ... and 891 more
-  symbols.4d: style library, 0 added, 474 replaced: "Accepted For Construction", ... and 466 more
-Loaded now: 792 definitions, 1624 survey code rules
-  3 names the survey codes ask for that no loaded library defines: (the three names, one per line, in a real run)
-This drawing has no styles yet; import a drawing or survey that carries styles, or make one in Format > Styles and Linetypes or with STYLE NEW, to see the customisation take effect.
-792 linestyle and symbol definitions in 71 groups: 472 offered as symbols, 637 as linestyles (one definition can be both)
-1624 survey code rules over 632 distinct codes
-This drawing has no styles yet; import a drawing or survey that carries styles, or make one in Format > Styles and Linetypes or with STYLE NEW, to see the customisation take effect.
-```
-
-(Run on 2026-09-24 by `katana_cli` built from the merged branches, with the
-reference customisation compiled in from `resources/customisation/` - which is
-why every file only REPLACES what the built-in already holds, and why the
-built-in's one warning is said at start-up. The files load in the order they
-are named, here their name order, as the built-in's do. A file's line counts
-the definitions it brought, or for a survey code file its codes once for each
-section they appear in, and names the first eight.
-The plain lines `0` and `1` and the built-in symbol names are not listed as
-missing: they draw without a library.)
-
-The desktop window no longer loads these files (2026-10-06). It had **Format >
-Load Customisation...** and **Format > Replace Loaded Customisation...** -
-the same two actions on Survey > Survey Coding - a `CUSTOMISE [REPLACE]
-<file>...` of its own and `katana --customise <file>...`, each writing this
-report into the command log. The two menu items are gone, and the window's
-`CUSTOMISE` and `--customise` are the interpreter's verb over Katana
-customisation files (`docs/customisation.md`, "The verbs"; `docs/desktop.md`,
-"The Format menu"): a style library or a survey code file given to them is
-refused as not a Katana customisation file.
-
-Every definition read is stamped with the NAME of the file it came from
-(`LineStyle::source`, from `archive12d::sourceFileName`) - never the path, so
-a library carries no trace of whose disk it was loaded from. A browser groups
-and filters by it. It was also one of D3's four signals that a definition is a
-symbol - "symbol" anywhere in the file's name - until each definition came to
-say so itself (`LineStyle::symbol`): one customisation holds both kinds under
-one name, so where a definition came from no longer says which it is. This
-reader, which does read one kind a file, sets the flag by that file-name rule.
-
-### A load goes ON TOP of what is loaded (decision D1)
-
-Katana starts with the customisation compiled into it, so a person loading
-their own symbol file wants their symbols ADDED, not the other 792 definitions
-and 1,624 rules thrown away - which is what every load used to do, by
-installing the load's library and map over the current ones, empty halves
-included (audit QT-21). `archive12d::mergeCustomisation(currentLibrary,
-currentMap, loaded, LoadMode)` is the rule:
-
-- **`LoadMode::Merge`, the default.** What the load brings takes precedence,
-  and nothing else is lost. A definition replaces the current one of its name
-  (later wins, as between the files of one load). The rules a load gives a key
-  in one section replace the current rules of that key in THAT section, every
-  other rule is kept, and all of the key's loaded rules go in at the key's
-  first current rule - ahead of every current rule of that key that stays. The
-  reason is the fields two sections can fill (a comment; an attribute of one
-  name from `pipe_data` and `string_attribute_data`, or from
-  `vertex_pipe_data` and `vertex_attribute_data`): earlier wins a field, so a
-  loaded group appended at the end lost to the current rule of the sibling
-  section, and the load did not win after all.
-- **`LoadMode::Replace`.** What the load brings is ALL there is - of each kind
-  it brought. `removedDefinitions` and `removedKeys` say what went with it.
-- **Either way**, a load that brought no definitions leaves the library as it
-  was, and one that brought no rules leaves the map: an empty table is never
-  installed by a load that did not bring one. `FileMerge` reports, per file,
-  the definitions or keys it added and those it replaced.
-
-**Both front ends loaded through it** (audit QT-21, fixed), each with a loader
-of its own - the window's behind Format > Load and Replace, its typed
-`CUSTOMISE` and `--customise`; `katana_cli`'s `runCustomise` - until
-2026-10-07, when the second of them went. `CUSTOMISE` is the interpreter's
-verb in every front end now, which merges Katana customisation files by the
-same rule on the one customisation type (`cad::mergeCustomisation`, "The
-merge" below) and replies in records; no program reaches this function any
-more, and it stays with the readers of the older files until they leave.
-A loader read the files, called `mergeCustomisation` with the library and map
-loaded and what the files brought, installed both results (a kind the load
-did not bring came back as it was, so a symbol file alone kept the map) and
-printed its `files`, one line each: the definitions or codes it added and
-replaced. A Replace also said what went (`removedDefinitions`,
-`removedKeys`), and a definition or rule that could not be installed was an
-error line of its own. The load then named what the mapfile asked for that no
-loaded library defined, judged against everything loaded, since a mapfile may
-name what an earlier load defined. There REPLACE was a replace only as the
-unquoted first word, in any case - a quoted path that began with "replace"
-was a path; in the interpreter's family, which sees a line's words with their
-quotes already removed, a keyword is the whole first word, so a quoted path
-with a blank in it is still a path and a file called exactly `replace` is
-written `./replace`.
-
-**A file named twice in one load is read once**, in both front ends
+**A file named twice in one load is read once**
 (`cad::distinctCustomisationFiles`): read twice, every rule of it would sit in
 the map twice, since both copies are the load's and the merge keeps them all.
 Each later naming is said - a `repeated file=<file>` record of the
-interpreter's `CUSTOMISE`, which every front end runs (the two loaders said
-"... is named twice in this load; it is read once"). Two namings are one file
-when their absolute, lexically normal paths
-are equal or `std::filesystem::equivalent` says so; a pair it cannot tell
-apart is read twice, which doubles rules but never drops a file.
+interpreter's `CUSTOMISE`. Two namings are one file when their absolute,
+lexically normal paths are equal or `std::filesystem::equivalent` says so; a
+pair it cannot tell apart is read twice, which doubles rules but never drops a
+file. In the interpreter's family a keyword is the whole first word, so a
+quoted path that begins with "replace" is a path, and a file called exactly
+`replace` is written `./replace`.
 
-**The built-in's faults are said** (audit A12-06, fixed). Each front end
-logged `builtinCustomisation()`'s errors and warnings once as it started - the
-second survey code file, `survey_codes_names.mapfile`, has one `map_data` item
-with no key, so every start said so - and then what it installed. Neither
-starts from those four files any more: both start through
-`cad::startCustomisation`, over a built-in that is one Katana customisation
-file, and say what was installed and what went wrong in lines of their own.
-The window's names the customisation and says built in or kept, and a problem
-is `Customisation: <problem>` (`docs/desktop.md`, "How the window starts");
-the session of `katana_cli` and `katana_mcp` says both in its own two lines
-(`docs/customisation.md`, "What katana_cli and katana_mcp start with").
+**The built-in's faults are said** (audit A12-06, fixed). Both front ends start
+through `cad::startCustomisation` over a built-in that is one Katana
+customisation file, and say what was installed and what went wrong in lines of
+their own. The window's names the customisation and says built in or kept, and
+a problem is `Customisation: <problem>` (`docs/desktop.md`, "How the window
+starts"); the session of `katana_cli` and `katana_mcp` says both in its own two
+lines (`docs/customisation.md`, "What katana_cli and katana_mcp start with").
 
 ### What the project records
 
@@ -635,10 +420,21 @@ a project recording the earlier names opens without a warning wherever the
 built-in is installed. The table the front ends used before answered each
 first name with one of the four general file names, and while one of them
 still used it a project recording the four first names opened there with a
-warning of four missing files. Still open: in a build that has the four files
-compiled in, `tests/archive12d/test_builtin_renames.cpp` fails (it expects
-four renames naming the four files; there are eight, naming the built-in),
-and is retired with the reader it tests.
+warning of four missing files. The tables are held to the built-in by
+`BuiltInRenames.*` (`tests/cad/customisation/test_builtin_renames.cpp`): the
+eight file renames answer with the built-in's NAME - against a small fixture
+handed over as a host hands one over, always, and against the compiled-in
+customisation where there is one - and every one of the 29 definition renames
+is defined by the compiled-in customisation under the name it has now.
+
+**Why the earlier names stay.** They are answers to PROJECT records, not to
+anything a customisation kept: a project saved by an earlier build carries the
+names it recorded, wherever it is opened, and the tables are what lets it open
+without a warning nobody could clear. Nothing in the program wrote the earlier
+names after 2026-09-24 and nothing reads them from a kept customisation (the
+kept file is new and holds a customisation's own name), but the projects
+themselves are the owner's and are not rewritten, so the tables are kept with
+their tests.
 
 Two more things the front ends do differently since the Document took the
 record over, both meant: `NEW` clears the names the last open found missing
@@ -877,47 +673,32 @@ still be narrow bytes that are not UTF-8, and a `std::filesystem::path` built
 straight from those throws at the first of them - out of a function that
 promises to report and never throw.
 
-The older embedding (`tools/embed_customisation.py`, four files) and
-`archive12d::builtinCustomisation()` are no longer what a front end calls.
-The session of `katana_cli` and `katana_mcp` and the desktop window
-(`MainWindow::loadDefaultCustomisation`) each ask
-`builtInCustomisation()` and read none of the four files (2026-10-07); the
-two stay, reached by their own tests and one benchmark
-(`benchmarks/qt/bench_plan_paint.cpp`), until the work that takes the older
-formats out of the product.
+The embedding the program used before - four legacy files turned into a byte
+array by a build script and read at start-up by `katana_archive12d` - is gone,
+with the script, the generated source and the cache variable that named the
+folder. Nothing in `katana`, `katana_cli` or `katana_mcp` links the readers of
+the older formats, and two checks say so: the test
+`the_programs_link_none_of_the_legacy_customisation_readers` walks the link
+closure of the three programs at configure time, and the install rules
+(`tools/check_install_rules.cmake`) allow those three programs and no other.
+Each is proved on a fixture, the first on a library two targets down linked
+PRIVATELY and the second on an install script that installs the converter.
+`benchmarks/qt/bench_plan_paint.cpp` takes the compiled-in customisation's
+library when there is one and otherwise measures with the standard shapes.
 
-Until the front ends moved, a build that HAD the built-in did not show it:
-on 2026-10-06, with the NSW customisation compiled in (792 definitions,
-1,624 rules), `katana_cli -c CUSTOMISE` answered "No customisation is
-loaded." and `STATUS` "0 linestyles and symbols, 0 survey code rules", and
-`CUSTOMISE <the Katana customisation file>` was refused as neither a survey
-code file nor a library. Built with them moved, on 2026-10-07, the same line
-begins `Customisation: NSW, 792 linestyles and symbols and 1624 survey code
-rules, built in` and its record says `origin=builtIn`. On both days every
-test of the suite that had also been run in a checkout without the file -
-6,950 of them, and then 7,200 - gave the result it gave there.
-
-*Not done: no test holds the file that is COMPILED IN to its census.* That it
-reads is tested (above), and what a conversion of the reference files gives
-is tested (`TheReferenceCustomisationConvertsToTheFiguresOfItsCensus`,
-`docs/customisation.md`); nothing ties the two, so a file converted in
-another order of the libraries, or by an earlier converter, would be compiled
-in unnoticed. It was checked by hand when the order of the libraries was
-decided: the file was byte for byte a fresh conversion by the documented
-command (`docs/customisation.md`, "The reference customisation" - its order,
-and its name and description, which are part of the bytes: the command run
-as that document spells it gave the file on 2026-10-07, and with another
-description did not), `tools/customisation_census.py --against` the census
-of that order found no figure different, and `katana`, `katana_cli` and
-`katana_mcp` each held those bytes whole. It was checked again through the
-running program on 2026-10-07: `CUSTOMISE EXPORT` of a `katana_cli` session
-started from the built-in wrote a file whose definitions, rules, colours,
-name, description and notice are the converted file's own, value for value
-(it adds the four members a session has and that file does not: `sources`,
-`linework`, `automation` and `basedOn`), and
-`tools/customisation_census.py` gave the same 22 figures for both. A test of
-it would convert the reference files and compare the result with
-`compiledInCustomisation()`, and skip where either is absent.
+The file that is COMPILED IN is held to its census: `BuiltInCensus.*`
+(`tests/cad/customisation/test_builtin_census.cpp`) gives, when the built-in
+is the reference customisation, the figures that were counted by
+`tools/customisation_census.py` over the compiled-in file and by
+`tools/reference_census.py` over the four legacy files it was converted from -
+792 definitions (471 symbols and 321 linestyles), 155 at vertices, 71 groups,
+35,692 strokes, 1,624 rules in 632 distinct keys, 7 colours and 5 names no
+library defines - and keeps a word that says only whose the customisation was
+from the front of the group paths. It skips where nothing, or another
+customisation, is compiled in. Counts only: no name of the data is in a
+tracked file. That the file compiled in IS a fresh conversion of the reference
+files by the documented command is not tested: it takes the reference files,
+which are on one machine.
 
 ### What a session starts with
 
@@ -975,70 +756,6 @@ at each call, so it follows a table installed later. **A caller that passes no
 lookup still gets no colours** - it is offered, not applied behind anyone's
 back, and `ColourLookup.SurveyCodingGivenNoLookupStillLeavesColoursAloneWhateverTheDocumentKnows`
 holds that.
-
-## Writing it back
-
-Under D1 an edited library or map is kept by writing it to a file, so the two
-readers now have inverses in `archive12d`, each tested as one: read what was
-written and get back what was given (`tests/archive12d/customisation/`).
-
-**`writeStyleLibrary(library, StyleLibraryWriteOptions)`** gives `.4d` text,
-UTF-8, in name order, one command per line as the reference libraries are written. Every field is
-written - the three kinds, `mode vertex`, group, length, factor, origins,
-anchors, stretch and cycle mode, pens, every stroke, and a text's three
-numbers kept but not understood - so `readStyleLibrary(writeStyleLibrary(l),
-name)` is `l` when `l` came from a file of that name. Two things a file
-cannot hold, because the file's own NAME says them and the reader sets both
-again from the name it is given: `LineStyle::source`, and `LineStyle::symbol`
-(whether that name holds "symbol"). Read back under no name, a definition
-differs from what was written in those two and in nothing else. `names` picks the
-definitions to write, and a name the library lacks fails the write rather than
-leaving a file the person believes holds it; `comments` become the `//` head
-where a published library carries its licence.
-
-**`writeMapFile(map, MapFileWriteOptions)`** gives the mapfile XML as UTF-8
-text; the reference files are UTF-16LE with a byte order mark, which
-`core::encodeUtf16LittleEndian` makes of it, and the reader takes either.
-Sections go in the reference files' order (`map_data`, `vertex_symbol_data`, `tinable_data`,
-`vertex_textstyle_data`, the three pipe sections, the two attribute
-sections), and within a section the rules keep their order. The subtle part
-is the rule this file's "How a code resolves" rests on: among rules of ONE
-key, the earlier wins every field more than one section fills. A map made by
-loading two mapfiles, or by merging a load into the current map, can have a
-key whose rules are not in that section order, and regrouping them would
-change what the code resolves to. So a rule is never written ahead of an
-earlier rule of its own key: where that order would put it there, the
-sections are written again, in the same order, for the rules that must
-follow, and the reader reads a repeated section in turn. Rules of different
-keys may be regrouped, which no code can tell. A map in that order comes back
-rule for rule with each section written once; exporting the compiled-in pair
-of mapfiles gives one extra `map_data` and one extra `vertex_symbol_data`.
-Whether other programs read a section that appears twice is not known here.
-**Rejected:** refusing to write such a map and naming the key - merged maps
-are normal, and under D1 export is the only way map edits are kept.
-
-What a rule does not say is written as NO element, never as `0`: an empty
-`<rotation/>` and a rotation of 0 read the same, but a size of 0 and no size
-do not mean the same thing to a person reading the file. The writer fails,
-naming the rule, rather than write a file that would not read back as the
-map: a field the rule's section cannot carry, a pipe with nothing but
-`active`, an attribute with no name or of a type other than text and integer,
-a value with surrounding blanks (XML text is trimmed on reading) or holding a
-character XML 1.0 cannot carry. One loss the writer cannot help:
-`SurveySymbol` and `SurveyTextStyle` keep size, rotation and offset as plain
-doubles where 0 means absent, so an explicit `<rotation>0</rotation>` goes
-out as no element; telling them apart needs `std::optional` in the model.
-
-**Where the writers are reached.** No longer from the window: since
-2026-10-06 the Survey Code Manager's Export Codes... and the symbol library's
-Export Selected... write Katana customisation files
-(`entity::customisationToJson`; "The Survey Code Manager" below and
-`docs/desktop.md`, "Symbol Library"), and these two writers are reached only
-by their own tests. Export Code List CSV... still writes `cad::codeListCsv`
-(RFC 4180, UTF-8 with no byte order mark, so Excel may misread a name that is
-not ASCII). `katana_cli` writes neither of those files: its `CUSTOMISE EXPORT`
-writes the session as one Katana customisation file (`docs/customisation.md`,
-"The verbs").
 
 ## Drawing it
 
@@ -1114,7 +831,7 @@ because the 12da import was never connected to them:
 | What the import did | Why nothing drew |
 |---|---|
 | set `Style::name` to the archive's linestyle name but left `Style::linetype` as `"continuous"` | the name reached nowhere a renderer looks |
-| stored `builtInSymbolFor(name)` instead of the name - "SEWR Manhole Cover" became "manhole" | the 473 symbols in a loaded library could never be matched |
+| stored `builtInSymbolFor(name)` instead of the name - "TEST Manhole Cover" became "manhole" | the 473 symbols in a loaded library could never be matched |
 | put a survey code nowhere called "code" - a 12da carries it as the string NAME | `CODE` found nothing to apply |
 
 All three are fixed: the import keeps the REAL names the archive gives, the guess at a
@@ -1179,7 +896,7 @@ Decisions worth recording:
      not know has no RGB, so any style with no colour of its own draws it -
      the 12da import's `0` included - but one described by ANOTHER such name
      of the map is left to that name's codes: otherwise a code coded in a
-     later pass took a neighbour's style (WR* onto WM*'s `WATR Main`) where a
+     later pass took a neighbour's style (WR* onto WM*'s `TEST Water Main`) where a
      fresh drawing gives it its own. That set of names comes from the map's
      rules, not from the entities coded, so the choice does not depend on
      what was selected;
@@ -1232,12 +949,12 @@ katana_cli
 scope=drawing matched=1
 1 entity carries a code in "code": 1 matched, 0 fallback-only (only the bare * rule answers), 0 with no rule
 1 entity changed
-Layers created: SURVEY SERVICES
-Styles created: WATR Main
+Layers created: TEST SERVICES
+Styles created: TEST Water Main
 By code:
-  WM01: 1 entity, prefix, matched; layer 0 -> SURVEY SERVICES; style WATR Main (created); set DepthLocation, Depth Location; 1 changed
+  WM01: 1 entity, prefix, matched; layer 0 -> TEST SERVICES; style TEST Water Main (created); set DepthLocation, Depth Location; 1 changed
 Applied as one command. UNDO puts it all back.
-1  Point  layer=SURVEY SERVICES  at 0,0
+1  Point  layer=TEST SERVICES  at 0,0
 ```
 
 (With the compiled-in customisation, so no CUSTOMISE is needed. The first
@@ -1528,7 +1245,7 @@ section).
 
 **A point is coded by its string name.** `applySurveyCodes` looks a POINT up
 by the string name of its field code, its linework controls left out
-(`parseFieldCode`): `PABB ST` is coded as `PABB`, and reported under `PABB`,
+(`parseFieldCode`): `ZPBB ST` is coded as `ZPBB`, and reported under `ZPBB`,
 so the styling a point gets and the line it joins agree. It used to read the
 whole field, which left an exact-key point with a control token unmatched.
 Any other entity's code is still looked up whole.
@@ -1570,13 +1287,13 @@ string)`:
 
 The name is tried first and THE CODE ALONE SECOND, when no rule more specific
 than the bare `*` answers the name. Rejected: the name only. An exact key
-(`PABB`) does not match `PABB3`, so numbering a string would lose a rule the
+(`ZPBB`) does not match `PABB3`, so numbering a string would lose a rule the
 code had the day before, and a code nobody wrote a rule for would be reported
 once per string instead of once. The code is also what is looked up when the
 name's best rule is a prefix shorter than the code - `PA*`, a rule for a
 family of codes - and the code has an exact key: the family rule answers
-`PABB3`, and would otherwise have coded a numbered `PABB` string in place of
-`PABB`'s own rule. A prefix as long as the code or longer (`KJ*` for `KJ`,
+`PABB3`, and would otherwise have coded a numbered `ZPBB` string in place of
+`ZPBB`'s own rule. A prefix as long as the code or longer (`KJ*` for `KJ`,
 `B1*` for `B`) was written for the numbered names, and the name is looked up.
 An entity with no `string` property is read exactly as it was before the
 property existed.
@@ -2029,7 +1746,7 @@ reasons):
   dropped with its source, by a rule of the managers' own;
 - the colours of the session's customisation that the rules NAME - a rule's
   colour, its symbol's and its text's, the three places the lint looks - so
-  that a code coloured "sui water potable" is that colour where the file
+  that a code coloured "sui test water" is that colour where the file
   goes; the table of colours is then a source of the file too;
 - NOT the session's definitions, and nothing of its linework codes or its
   automation switches: a file of codes for a colleague must not reset their
@@ -2109,12 +1826,12 @@ type.
 customisation loaded, a customisation that does not define what this drawing
 names, a style whose linetype names a symbol, or a drawing whose styles are
 the plain continuous line's names `0` and `1`. Loading one now reports which. A drawing with
-one style whose linetype is `CULT Bollard`, a `mode vertex` symbol, gives
+one style whose linetype is `TEST Bollard`, a `mode vertex` symbol, gives
 (`katana_cli`, `IMPORT` of such a 12da and then `CUSTOMISE`, 2026-09-24):
 
 ```
 0 of this drawing's 1 styles are drawn with a loaded definition (1 name one; the rest are plain lines)
-  1 name is loaded as an `at vertices` symbol, not a linestyle, so a linetype naming it draws solid: "CULT Bollard"
+  1 name is loaded as an `at vertices` symbol, not a linestyle, so a linetype naming it draws solid: "TEST Bollard"
 ```
 
 `cad::customisationCoverage` is the one place that counts it, and it counts by
@@ -2150,114 +1867,261 @@ manager's Diagnostics and the symbol library show it ("The Format menu" in
 
 ## The customisation is part of the program
 
-**This section and the next describe the OLDER embedding** - four files, read
-by `katana_archive12d` - which no program starts from any more. Since
-2026-10-07 every front end starts through `cad::startCustomisation` over ONE
-Katana customisation file compiled into `katana_cad` ("The built-in, and the
-seam", above), and that is where "compiled in, with nothing configured" is
-true today. The text stays, with the embedding it describes, until the
-readers of the older files are split off.
-
 Not a file to load, not a setting to point somewhere: the linestyles, symbols
-and survey codes are **compiled into the binary**. Every drawing has them the
-moment it is opened, on any machine, with nothing configured.
-
-`tools/embed_customisation.py` runs at build time and turns each customisation
-file into a byte array in a generated source; `archive12d::builtinCustomisation`
-parses them once, lazily, and keeps the result. The front ends seeded the
-Document from it at startup, until each moved to its host.
-
-A built-in file that cannot be read costs ONLY ITSELF:
-`readEachCustomisationFile` names it in `Customisation::errors` and keeps what
-the files before and after it brought, where one damaged file used to leave
-every drawing on plain lines without a word (audit A12-06). A person loading
-files still gets `readCustomisation`, which fails whole so they can be told.
-Both front ends LOGGED `builtinCustomisation().errors` and `.warnings` once at
-start-up, which is how A12-06 was fixed; what a start says now is
-`cad::CustomisationStart::problems`, in each front end's own lines ("Loading
-a customisation" above, "The built-in's faults are said").
+and survey codes are **compiled into the binary**, as ONE Katana customisation
+file, and every session starts with them on any machine whose build had the
+file, with nothing configured ("The built-in, and the seam" above, and
+`docs/customisation.md`, "The built-in", which is where it comes from, the two
+variables and why it is not in the repository). A build without the file has
+no built-in and says so, and Katana then draws every line as the plain
+continuous line.
 
 Two decisions worth recording:
 
 **The BYTES are embedded, not generated C++ structures.** Generating the 792
 definitions and 35,000 strokes as brace-initialised structs would skip the
 parse, but it is a multi-megabyte translation unit that costs more to compile
-than the parse costs to run - measured at **21 ms in Release** for the whole
-customisation, once per session, and that figure includes reading four files
-from disk, which the built-in does not do. It also means one reader: a
-built-in customisation and a loaded one go through exactly the same parser,
-so there is no second way for the two to disagree.
+than the parse costs to run. The file is embedded as it is (`#embed`) and
+parsed once, at first use, by the one reader every Katana customisation goes
+through, so there is no second way for a built-in and a loaded one to
+disagree. (The older embedding generated a source from four files with a
+script, which made Python a hard requirement of every build; `#embed` needs
+none.)
 
-**The generated source is never committed.** The customisation is third-party
-material under its own licence and is not in this repository, so a checkout
-without it generates an EMPTY table and Katana draws every line as the plain
-continuous line.
+**Nothing generated and nothing derived from the data is committed.** The
+customisation is third-party material under its own licence and is not in this
+repository, so a checkout without the file builds a program with no built-in.
+The tests that need it skip, and `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes
+its absence a configure error for a release job that must not ship without it.
 
-### Where the built-in customisation comes from
-
-`tools/embed_customisation.py` reads the directory `KATANA_CUSTOMISATION_DIR`
-names - a CMake cache variable, `resources/customisation/` in the source tree
-by default (`src/katana_archive12d/CMakeLists.txt`). That folder is
-**git-ignored**: its files stay on the disk they were put on and are never
-committed. The reference customisation is kept there under general names:
-
-| File | What it is |
-|---|---|
-| `linestyles.4d` | the linestyle library |
-| `survey_codes.mapfile` | the survey code file |
-| `survey_codes_names.mapfile` | the second survey code file, read after the first |
-| `symbols.4d` | the symbol library |
-
-**The load order is the files' name order**, which is the order the script
-embeds them and `builtinCustomisation` reads them, and it is what the table
-above lists. It matters twice. Between the two libraries the LATER file wins
-a definition both give, so `symbols.4d` wins the three names it shares with
-`linestyles.4d` (three, not the four this said: the fourth replacement is a
-name the linestyle library gives twice). That is this older embedding's
-order and no longer the built-in's: the Katana customisation compiled in
-(`KATANA_BUILTIN_CUSTOMISATION`, "The built-in, and the seam" above) is
-converted with the linestyle library LAST, because the survey code rules
-draw lines with two of those three names and place none as a symbol
-(`docs/customisation.md`, "The reference customisation"). Between the two
-survey code files the EARLIER rule wins a field both give (rules of equal
-specificity keep the order they were read, "How a code resolves"), so
-`survey_codes.mapfile` has to sort ahead of `survey_codes_names.mapfile`, and
-it does, because `.` sorts before `_`. A file the script does not recognise
-as a style library or a survey code file, by looking inside it, is left out.
-
-The tests read the same folder (`KATANA_CUSTOMISATION_FILES` in
-`tests/archive12d`), and every
-test of it skips when it is empty or absent. (`qt_customisation_headless` read
-it too, through `-DCUSTOMISE_DIR`; it loads the committed Katana-format
-fixtures of `tests/data/customisation` now, on every machine.)
-`Customisation.TheBuiltInCustomisationIsFourGenerallyNamedFilesInLoadOrder`
-holds the four names and their order, and
-`Customisation.NoWordBeginsTheGroupPathOfMostBuiltInDefinitions` keeps a
-word that says only whose the customisation was from the front of the group
-paths.
-
-**Swapping in another customisation.** Either put its files in
-`resources/customisation/` in place of these, or point the build at a
-directory kept elsewhere without moving it:
+**Swapping in another customisation.** Convert it, or write one, as a Katana
+customisation file and point the build at it:
 
 ```
-cmake -S . -B build/release -DKATANA_CUSTOMISATION_DIR=D:/Survey/Customisation
+cmake -S . -B build/release -DKATANA_BUILTIN_CUSTOMISATION=D:/Survey/site.customisation.json
 cmake --build build/release
 ```
 
-Re-run CMake either way before rebuilding: the file list is a configure-time
-glob, so a plain rebuild does not see a new or renamed file. Name the files
-so that their name order is the load order you want. The tests that read the
-folder were measured against the reference customisation - its counts, its
-four names, the 29 renames above - so with another one they report the
-differences rather than skip; `KATANA_CUSTOMISATION_DIR` set to an empty
-directory builds none, and those tests skip.
+or, without rebuilding, hand a run the file as its built-in with the
+environment variable of the same name (the seam), or load it on top of the
+built-in: `CUSTOMISE <file>...` merges, `CUSTOMISE REPLACE <file>...` takes the
+place of each kind it brings, and `CUSTOMISE KEEP` makes the result the one a
+user starts with. That is how a site tries a new customisation without
+reissuing the application.
 
-Without rebuilding, `CUSTOMISE <file>...` goes on top of what is built in -
-its definitions and codes take the place of the same ones, everything else
-is kept - and `CUSTOMISE REPLACE <file>...` takes the place of each kind it
-brings. That is how a site tries a new library without reissuing the
-application. (The window's two menu items for this, Format > Load
-Customisation and Replace Loaded Customisation, are gone; in the window the
-line takes Katana customisation files, `docs/desktop.md`, "The Format
-menu".)
+## The legacy formats the converter reads
+
+Two older file formats hold a customisation as it was first delivered: the
+**style library** (`.4d`), of which there are two, one of linestyles and one of
+symbols, and the **survey code file** (`.mapfile`, XML), of which there are
+two, the second a list of names. The program does not read them. They are read
+by the readers in `src/katana_archive12d/legacy/` - a library of their own,
+`katana_legacy_customisation`, built beside the `.12da` archive module whose
+lexer and text utilities they share - which only `katana_customisation_convert`
+and the legacy readers' own tests link. This chapter is what stays true about
+the two formats: the grammar, the sections and what was measured of the real
+files. How a conversion is made, and what it gives, is
+`docs/customisation.md` ("Converting a customisation from the legacy
+formats").
+
+The two kinds of file are told apart BY LOOKING INSIDE THEM
+(`customisationKind`), never by name: of the four files this was built
+against, two are survey code files and two are style libraries, and as
+delivered THREE of the four ended in `.4d`, so that extension was two
+different formats in one folder, and a reader that went by the name would
+read half the customisation as the wrong thing. A text holding `<map_file` is
+a survey code file; one holding `worldstyle`, `paperstyle` or `twoptstyle` is
+a style library; anything else is refused. The reader loads a list of files
+whole or not at all (`readCustomisation` fails at the first it cannot read and
+names it), later libraries win a definition and earlier survey code files win
+a field, and every definition read is stamped with the NAME of its file
+(`LineStyle::source`) and, by that name, flagged as a symbol when it holds
+"symbol" (`LineStyle::symbol`).
+
+### The grammar of a style library, measured rather than assumed
+
+```
+<kind> "NAME" {                 kind = paperstyle | worldstyle | twoptstyle
+  group "Test/Water"            a folder path, the tree a browser shows
+  mode vertex                   a symbol: strokes go at each vertex
+  length 2.5                    the period of the pattern along a line
+  factor 5                      a scale on every coordinate
+  xorigin 0   yorigin 0
+  xorigin1/yorigin1             twoptstyle: the first anchor
+  xorigin2/yorigin2             twoptstyle: the second
+  stretch_mode 2  cycle_mode 2  twoptstyle: kept, not yet acted on
+  colour "pen 035"              the pen for what follows; "view_colour"
+                                means the entity's own colour
+  move X Y                      pen up
+  draw X Y                      pen down
+  arc RADIUS START END          degrees, about the CURRENT point
+  circle RADIUS                 about the current point
+  dot RADIUS
+  text "T" ANGLE HEIGHT "justify" "font" WIDTH a b c
+}
+```
+
+`arc`, `circle`, `dot` and `text` carry no point of their own - they are drawn
+about wherever the pen is. Forgetting that put every circle at the origin in
+the first version of `LineStyle::bounds`, which is why it is said twice here
+and in the code.
+
+**A radius is a length.** The reference libraries write 45 arcs with a
+NEGATIVE radius (U-turn and speed-zone markings). The sign does not choose a
+side: drawn with the signed radius every one of them came out turned half a
+turn about its centre, and `flattenDefinition` now takes `|r|` for arcs and
+circles alike. The regression test, on a U-turn, puts the arc's end at
+y = -0.4735 by hand where the signed radius gave +0.4925.
+
+The three kinds differ in what a coordinate MEANS:
+
+- `worldstyle` - model units. The mark stays the same size on the ground and
+  grows on the page as you zoom in. A 6 m road marking is 6 m wide.
+- `paperstyle` - millimetres on the plot. The mark stays the same size on the
+  page whatever the scale. A 1.5 mm tick prints 1.5 mm.
+- `twoptstyle` - stretched between two anchors, so the definition fits the
+  span it is drawn across: a gate, a doorway.
+
+**The last three numbers of a `text` command are not interpreted.** All 907
+uses have 0 in the first; the other two take values like -0.3 and 0.035, and
+no documentation available here names them. They are kept so that what was
+read can be written back. Guessing that they are an offset would move the
+text, and text that is subtly in the wrong place is worse than text that is
+plainly unstyled.
+
+### What the style library reader takes
+
+Read against the real customisation, with the counts checked by a script that
+uses none of Katana's code:
+
+| | definitions | commands |
+|---|---|---|
+| the linestyle library | 322 blocks (238 paperstyle, 47 twoptstyle, 37 worldstyle), 321 kept - one name is defined twice | 10,969 `move`, 10,770 `draw` |
+| the symbol library | 474 blocks (473 worldstyle, 1 twoptstyle) | 6,076 `move`, 6,547 `draw` |
+| both, loaded as one customisation | 792 definitions in 71 groups, 157 of them `mode vertex` (not the number of symbols - see "A symbol is a linestyle") | |
+
+**No warnings.** Every keyword in 1.2 MB of production data is one the reader
+knows. A keyword it did not know would be counted and named rather than
+skipped quietly, which is the same promise `readArchive` makes.
+
+Three names appear in both files, and a fourth twice in the linestyle library
+(by a count outside Katana, `tools/reference_census.py`: four blocks replaced,
+three across the files and one within one). So "already exists" is the normal
+case and the later file wins - a customisation is loaded in layers. "Loaded
+as one" above is in the order this reader was always given the two, the
+linestyle library first, so the three names are the symbol library's there
+and 157 counts them so. The NSW customisation that is compiled in is
+converted with the libraries the other way round, by decision, and holds 155
+at vertices, 471 listed as symbols and 321 not (`docs/customisation.md`,
+"The reference customisation", has the decision and both sets of figures).
+
+### The three files link up
+
+Checked with a script, outside Katana:
+
+| Reference | Resolves exactly | Missing |
+|---|---|---|
+| 177 distinct `<linestyle>` values | 175 | `0` and `1`, the names of the plain continuous line |
+| 195 distinct symbol `<style>` values | 193 | two symbols a standard library supplies, which is not one of these files |
+
+So a customisation is not necessarily self-contained, and an unresolved name
+has to be reported rather than treated as a fault in the file.
+
+### The survey code file is written in sections, and the section is the meaning
+
+This is the thing that is easy to get wrong, and the first version of the
+reader did get it wrong. `<map_file>` does not hold one list of rules. It
+holds up to ten SECTIONS, and which section a rule is in is what says what the
+rule is about:
+
+| Section | What its rules say | `survey_codes.mapfile` | `survey_codes_names.mapfile` |
+|---|---|---|---|
+| `map_data` | model, colour, breakline, linestyle, weight, group | 457 | 573 |
+| `vertex_symbol_data` (and `_v9`) | the symbol at each vertex, and `hide` | 200 | 201 |
+| `vertex_textstyle_data` | how the code's text is drawn | 7 | 7 |
+| `pipe_data` | the string drawn as a pipe, and its attributes | 16 | - |
+| `vertex_pipe_data` | the same per vertex | 16 | - |
+| `segment_pipe_data` | the same per segment | 16 | - |
+| `string_attribute_data` | attributes on the string | 12 | - |
+| `vertex_attribute_data` | attributes on each vertex | 1 | - |
+| `tinable_data` | whether the code is used in a surface | - | 119 |
+
+Reading only `<map_data>` takes 457 of `survey_codes.mapfile`'s 725 rules and
+quietly loses every symbol - which is exactly what the first version did, and
+exactly what the test against the real file caught. The element name inside a
+rule is not enough either: `<map_attributes>` means attributes on the STRING
+inside `string_attribute_data` and attributes on each VERTEX inside
+`vertex_attribute_data`. That is why `SurveyRule` records the section it came
+from.
+
+`survey_codes_names.mapfile` is a second survey code file, and it came with
+the `.4d` extension a linestyle library also uses; it is kept under a name
+that says what it is, but that is not what makes it one. What makes a file a
+survey code file is that it contains a `<map_file>` element, not what it is
+called, so a `.4d` file holding one is still read as one.
+
+### What the survey code reader takes
+
+| | rules | warnings |
+|---|---|---|
+| `survey_codes.mapfile` | 725 over 465 distinct keys | none |
+| `survey_codes_names.mapfile` | 899 | one, and it is right: an `<item>` holding only a `<group>`, which names no code and so could never apply |
+
+An unknown section is named with how many rules went unread; an unknown field
+inside a rule is named and the rest of the rule is kept.
+
+### Writing the older formats
+
+The two readers have inverses, each tested as one: read what was written and
+get back what was given (`tests/archive12d/customisation/`). They were the
+way an edited library or map was kept, under D1; they are reached now only by
+those tests and by the converter's own, since the Survey Code Manager and the
+symbol library write Katana customisation files (`entity::customisationToJson`)
+and `katana_cli` writes the session as one (`CUSTOMISE EXPORT`).
+
+**`writeStyleLibrary(library, StyleLibraryWriteOptions)`** gives `.4d` text,
+UTF-8, in name order, one command per line as the reference libraries are written. Every field is
+written - the three kinds, `mode vertex`, group, length, factor, origins,
+anchors, stretch and cycle mode, pens, every stroke, and a text's three
+numbers kept but not understood - so `readStyleLibrary(writeStyleLibrary(l),
+name)` is `l` when `l` came from a file of that name. Two things a file
+cannot hold, because the file's own NAME says them and the reader sets both
+again from the name it is given: `LineStyle::source`, and `LineStyle::symbol`
+(whether that name holds "symbol"). Read back under no name, a definition
+differs from what was written in those two and in nothing else. `names` picks the
+definitions to write, and a name the library lacks fails the write rather than
+leaving a file the person believes holds it; `comments` become the `//` head
+where a published library carries its licence.
+
+**`writeMapFile(map, MapFileWriteOptions)`** gives the mapfile XML as UTF-8
+text; the reference files are UTF-16LE with a byte order mark, which
+`core::encodeUtf16LittleEndian` makes of it, and the reader takes either.
+Sections go in the reference files' order (`map_data`, `vertex_symbol_data`, `tinable_data`,
+`vertex_textstyle_data`, the three pipe sections, the two attribute
+sections), and within a section the rules keep their order. The subtle part
+is the rule this file's "How a code resolves" rests on: among rules of ONE
+key, the earlier wins every field more than one section fills. A map made by
+loading two mapfiles, or by merging a load into the current map, can have a
+key whose rules are not in that section order, and regrouping them would
+change what the code resolves to. So a rule is never written ahead of an
+earlier rule of its own key: where that order would put it there, the
+sections are written again, in the same order, for the rules that must
+follow, and the reader reads a repeated section in turn. Rules of different
+keys may be regrouped, which no code can tell. A map in that order comes back
+rule for rule with each section written once; exporting the compiled-in pair
+of mapfiles gives one extra `map_data` and one extra `vertex_symbol_data`.
+Whether other programs read a section that appears twice is not known here.
+**Rejected:** refusing to write such a map and naming the key - merged maps
+are normal, and under D1 export is the only way map edits are kept.
+
+What a rule does not say is written as NO element, never as `0`: an empty
+`<rotation/>` and a rotation of 0 read the same, but a size of 0 and no size
+do not mean the same thing to a person reading the file. The writer fails,
+naming the rule, rather than write a file that would not read back as the
+map: a field the rule's section cannot carry, a pipe with nothing but
+`active`, an attribute with no name or of a type other than text and integer,
+a value with surrounding blanks (XML text is trimmed on reading) or holding a
+character XML 1.0 cannot carry. One loss the writer cannot help:
+`SurveySymbol` and `SurveyTextStyle` keep size, rotation and offset as plain
+doubles where 0 means absent, so an explicit `<rotation>0</rotation>` goes
+out as no element; telling them apart needs `std::optional` in the model.

@@ -1514,11 +1514,18 @@ than the zip (`UT5527 Appin Rd V5.12daz` holds `Appin Rd V5.12da`). So the
 importer does not predict the member's name; it takes the one member that is
 a `.12da`, and refuses an archive with two rather than guess.
 
-The same module holds the CUSTOMISATION - the `.4d` linestyle and symbol
-libraries and the survey code file (`.mapfile`): their readers, their writers (`writeStyleLibrary`,
-`writeMapFile`), the loader that tells them apart by content, and
-`mergeCustomisation`, which loads one on top of another. None of that is the
-archive format, and it is recorded in `docs/survey_coding.md`.
+The same directory holds the readers of the older CUSTOMISATION formats - the
+`.4d` linestyle and symbol libraries and the survey code file (`.mapfile`),
+their writers and the loader that tells them apart by content - under
+`src/katana_archive12d/legacy/`, as a library of its own,
+`katana_legacy_customisation`, which only the converter and its tests link.
+None of that is the archive format, and none of it is in the product:
+`katana_archive12d` (what `katana_interop`, `katana_app` and `katana_qt` link)
+holds the archive only, and a test fails if the legacy library gets into
+`katana`, `katana_cli` or `katana_mcp`. The merge that loads one customisation
+on top of another is `cad::mergeCustomisation`, over the Katana format. What
+the older formats hold is recorded in `docs/survey_coding.md`, "The legacy
+formats the converter reads".
 
 ### Three layers: text, archive, domain
 
