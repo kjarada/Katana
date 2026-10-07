@@ -14,12 +14,15 @@
 #
 #   Katana/
 #     bin/katana.exe, katana_cli.exe,    the programs
-#         katana_mcp.exe
+#         katana_mcp.exe, katana_updater.exe   (the updater: the helper that swaps
+#                                           the files; not on macOS, see below)
 #     bin/*.dll                          Qt, GDAL, PDAL, PROJ, the C++ runtime
 #     bin/platforms, styles, ...         Qt plugins, where Qt looks for them
 #     share/proj, share/gdal             proj.db and the GDAL support files
 #     etc/ssl/certs/ca-bundle.crt        what libcurl checks https:// against
 #     share/katana/samples               a project to open
+#     share/katana/install.json          CPack's package only: says this is a release and
+#                                        names its target (see "install.json" below)
 #
 # bin/ beside share/ is not arbitrary: PROJ looks for its database at
 # <directory of the PROJ DLL>/../share/proj, so this layout is found without
@@ -55,6 +58,16 @@ foreach(_katana_program katana_cli katana_mcp)
         install(TARGETS ${_katana_program} RUNTIME DESTINATION ${KATANA_INSTALL_BINDIR})
     endif()
 endforeach()
+# The fourth program: the helper that swaps the install's files while Katana is
+# not running and puts them back if anything goes wrong (docs/update.md). Static,
+# linked to the update library and katana_core only, so it imports nothing but the
+# operating system's DLLs, and never run from bin/: the engine copies it out first.
+# Not on macOS, where updating is check-and-notify only (a file edited inside
+# Katana.app breaks its seal): a helper that could not be used would only be one
+# more thing signed and notarised.
+if(TARGET katana_updater AND NOT APPLE)
+    install(TARGETS katana_updater RUNTIME DESTINATION ${KATANA_INSTALL_BINDIR})
+endif()
 
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
     DESTINATION "${KATANA_INSTALL_DATADIR}/katana/samples"
@@ -78,11 +91,13 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
 # packaging_installs_only_present_first_party_files
 # (tools/check_install_rules.cmake) fails if one ever does.
 #
-# The programs installed are the three above, by name, and no others: the
+# The programs installed are the four above, by name, and no others: the
 # converter of the older customisation formats is built beside them and
-# carries the readers of those formats, which the product does not. The same
-# check fails on a fourth program, and a test of the link closure
-# (tests/CMakeLists.txt) fails if one of the three links them.
+# carries the readers of those formats, which the product does not, and the
+# two executables the update tests build with a test key (katana_updater_test,
+# katana_update_e2e) must never ship. The same check fails on a fifth program,
+# and a test of the link closure (tests/CMakeLists.txt) fails if one of the four
+# links the readers.
 
 # Only files that exist. An install rule naming a missing file is not skipped:
 # `cmake --install` stops at it, after the programs are copied and before the
@@ -196,7 +211,7 @@ option(KATANA_DEPLOY_RUNTIME
 # find, cleared first so that a file removed from the install rules does not
 # linger in an old bundle.
 set(_katana_bundle_targets "")
-foreach(_target katana katana_cli)
+foreach(_target katana katana_cli katana_updater)
     if(TARGET ${_target})
         list(APPEND _katana_bundle_targets ${_target})
     endif()
@@ -241,18 +256,25 @@ set(CPACK_PACKAGE_EXECUTABLES "katana" "Katana")
 # archive and the installer is signed; and the installer itself afterwards.
 # Each does nothing unless a certificate is named in the environment
 # (cmake/KatanaSign.cmake, docs/release.md "Signing").
-set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
+# The install record first, so what is signed already holds it (see "install.json" below).
+set(CPACK_PRE_BUILD_SCRIPTS
+    "${CMAKE_BINARY_DIR}/KatanaInstallRecord.cmake;${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
 set(CPACK_POST_BUILD_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
 set(CPACK_KATANA_PUBLISHER "${KATANA_PUBLISHER}")
 set(CPACK_KATANA_OBJDUMP "${CMAKE_OBJDUMP}")
 set(CPACK_KATANA_APP_BUNDLE "${KATANA_APP_BUNDLE}")
+# The target token: the last part of a package's name (Katana-<version>-<token>.zip), the
+# `target` of share/katana/install.json, and the name of the update feed's manifest
+# (Katana-update-<token>.json). One place, so a package and its update cannot disagree
+# about what they are.
 if(WIN32)
     # win64 is x86-64, as it has been since the first package; ARM64 says so.
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
-        set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-win-arm64")
+        set(KATANA_UPDATE_TARGET "win-arm64")
     else()
-        set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-win64")
+        set(KATANA_UPDATE_TARGET "win64")
     endif()
+    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-${KATANA_UPDATE_TARGET}")
     # A ZIP always; an installer when NSIS is there to build one. NSIS is not
     # a dependency of the project, so its absence is not an error - install it
     # with `pacman -S mingw-w64-ucrt-x86_64-nsis` and reconfigure. MSYS2 has
@@ -279,7 +301,8 @@ if(WIN32)
         endif()
     endif()
 elseif(APPLE)
-    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-macos-${CMAKE_SYSTEM_PROCESSOR}")
+    set(KATANA_UPDATE_TARGET "macos-${CMAKE_SYSTEM_PROCESSOR}")
+    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-${KATANA_UPDATE_TARGET}")
     if(KATANA_APP_BUNDLE)
         # A disk image holding Katana.app beside a link to /Applications, the
         # drag-to-install a Mac user expects (CPack's DragNDrop adds the link).
@@ -290,7 +313,39 @@ elseif(APPLE)
         set(CPACK_GENERATOR "TGZ")
     endif()
 else()
-    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-linux-${CMAKE_SYSTEM_PROCESSOR}")
+    set(KATANA_UPDATE_TARGET "linux-${CMAKE_SYSTEM_PROCESSOR}")
+    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-${KATANA_UPDATE_TARGET}")
     set(CPACK_GENERATOR "TGZ")
 endif()
+
+# --- install.json ---------------------------------------------------------------------
+#
+# share/katana/install.json, {"schema":1,"target":"<token>"}, is what makes an install a
+# RELEASE: without it a tree is a development tree, the update engine refuses to apply
+# anything to it and no automatic check runs. So it is written ONLY into the tree CPack
+# stages for a package - by the script below, which CPack runs before it signs (a file
+# added after the signature would break a macOS bundle's seal) - and NEVER by an install
+# rule. `cmake --install`, the `bundle` target and build/<preset>/bin are development
+# trees and stay without it: an update there would replace a developer's build with a
+# release. tools/check_install_rules.cmake asserts both halves (no install rule names
+# the file; CPackConfig.cmake runs this script before the signing script) and the
+# tests of that check prove it on fixtures.
+#
+# The target is the token above and not the machine's: Windows on ARM running the x64 zip
+# is win64 and must be updated with the x64 files. The script is written here, at
+# configure time, because the token and the data directory are known only here.
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/KatanaInstallRecord.cmake" @ONLY CONTENT [==[
+# Written by cmake/KatanaPackaging.cmake; run by CPack on the staged tree, before the
+# signing script. Not part of any install rule: see "install.json" there.
+if(NOT CPACK_TEMPORARY_INSTALL_DIRECTORY)
+    message(FATAL_ERROR "KatanaInstallRecord.cmake is a CPack script: it runs on the tree CPack stages")
+endif()
+set(_directory "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/@KATANA_INSTALL_DATADIR@/katana")
+file(MAKE_DIRECTORY "${_directory}")
+# No trailing newline: file(WRITE) writes a line break as CRLF on Windows and LF elsewhere,
+# and nothing is gained by the file differing between the packages.
+file(WRITE "${_directory}/install.json" "{\"schema\":1,\"target\":\"@KATANA_UPDATE_TARGET@\"}")
+message(STATUS "Katana install record: @KATANA_UPDATE_TARGET@")
+]==])
+
 include(CPack)

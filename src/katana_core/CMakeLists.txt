@@ -3,6 +3,7 @@ add_library(katana_core STATIC
     library_data.cpp
     log.cpp
     path_text.cpp
+    sha256.cpp
     task_pool.cpp
     text.cpp
     text_encoding.cpp

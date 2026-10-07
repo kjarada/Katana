@@ -197,7 +197,9 @@ Never delete or disable a failing test to make a suite green.
   (`-DDRIVE` steps; see `docs/headless.md`).
 - Fonts differ between Windows and Linux, so assert ink against a baseline,
   never an absolute pixel count.
-- Tests that reach the network run only with `KATANA_ONLINE_TESTS=1`.
+- Tests that reach any host other than the loopback address run only with
+  `KATANA_ONLINE_TESTS=1`. A test may start its own server on `127.0.0.1`
+  (port 0), with proxies disabled.
 
 ## 5. Performance
 
@@ -372,6 +374,8 @@ core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> 
   and Qt stay behind `src/`.
 - **`katana_app` is the headless session** that `katana_cli` and `katana_mcp`
   share. The desktop window drives the same `CommandInterpreter`.
+- **Auto-update** is the `update` layer (core only, seen by `app` and `qt`) and
+  a fourth program, `katana_updater`; see `docs/update.md`.
 - **Text and units have one home each:** `core/text_encoding.hpp`,
   `core/text.hpp` (locale-independent; never `std::isspace` or `strtod` on
   file text) and `math/unit_ratio.hpp`. A real becomes text through

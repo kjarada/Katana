@@ -1,0 +1,14 @@
+
+katana_updater.exe:     file format pei-x86-64
+
+The Import Tables (interpreted .idata section contents)
+
+	DLL Name: ADVAPI32.dll
+	DLL Name: CRYPT32.dll
+	DLL Name: KERNEL32.dll
+	DLL Name: api-ms-win-crt-convert-l1-1-0.dll
+	DLL Name: api-ms-win-crt-heap-l1-1-0.dll
+	DLL Name: api-ms-win-crt-runtime-l1-1-0.dll
+	DLL Name: api-ms-win-crt-stdio-l1-1-0.dll
+	DLL Name: USER32.dll
+	DLL Name: WS2_32.dll

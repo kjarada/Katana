@@ -156,6 +156,14 @@ target_sources(katana_qt_ui PRIVATE ${_katana_geo_ui})
 file(GLOB _katana_drawing_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.hpp")
 target_sources(katana_qt_ui PRIVATE ${_katana_drawing_ui})
+# Help > Check for Updates' dialog (docs/update.md): named, not listed, because
+# the task that writes it adds the files without editing this list. It builds
+# UPDATE verb lines and hands them to the window's executor, like every dialog,
+# so it needs no MainWindow and is linked here, where the widget tests see it.
+# Its workbench, which needs the window, is added to `katana` below.
+file(GLOB _katana_update_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/update_dialog.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/update_dialog.hpp")
+target_sources(katana_qt_ui PRIVATE ${_katana_update_ui})
 # katana_app: the session's verbs above katana_cad that the window runs too -
 # the geoprocessing executor above all (src/katana_app/geo), so the window
 # never has a second implementation of a verb katana_cli has. PUBLIC, so that
@@ -163,6 +171,10 @@ target_sources(katana_qt_ui PRIVATE ${_katana_drawing_ui})
 target_link_libraries(katana_qt_ui PUBLIC katana_cad katana_interop katana_dxf katana_ifc katana_render
                                           katana_app katana_archive12d katana_survey katana_surveyio
                                           katana_geodesy
+                                          # main() calls update::recover first and launchApply last;
+                                          # PUBLIC with the rest, so every program that links these
+                                          # objects links the engine.
+                                          katana_update
                                           Qt6::Widgets Qt6::PrintSupport)
 
 # The target is `katana` and the file is katana.exe: this IS the product, and
@@ -193,6 +205,12 @@ add_executable(katana WIN32
 )
 katana_target_defaults(katana)
 target_link_libraries(katana PRIVATE katana_qt_ui)
+# The update workbench: the jobs and the close-and-apply flow of Help > Check for
+# Updates (update_workbench.*, docs/update.md). It needs MainWindow, so it is the
+# window's and not katana_qt_ui's; named for the reason update_dialog is.
+file(GLOB _katana_update_workbench CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/update_workbench.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/update_workbench.hpp")
+target_sources(katana PRIVATE ${_katana_update_workbench})
 # One place a version is written: project(Katana VERSION ...). The About box
 # reads it from here and the Windows resource below from the same variable.
 target_compile_definitions(katana PRIVATE KATANA_VERSION="${PROJECT_VERSION}")

@@ -14,7 +14,14 @@ add_library(katana_app STATIC
 katana_target_defaults(katana_app)
 target_include_directories(katana_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(katana_app PUBLIC katana_cad PRIVATE katana_archive12d katana_dxf katana_ifc
-                                                         katana_survey katana_surveyio)
+                                                         katana_survey katana_surveyio katana_update)
+# The UPDATE verbs and the adapter that hands the update engine the project's one
+# HTTP stack (update_verbs.*, update_transport.*; docs/update.md): globbed, so the
+# tasks that write them add files without editing this list. katana_update is
+# linked above; the engine takes its transport as a parameter and never sees curl.
+file(GLOB _katana_app_update CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/update_*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/update_*.hpp")
+target_sources(katana_app PRIVATE ${_katana_app_update})
 # The version an exported file names as the program that wrote it.
 set_source_files_properties(ifc_verbs.cpp PROPERTIES
     COMPILE_DEFINITIONS "KATANA_VERSION=\"${PROJECT_VERSION}\"")
@@ -1187,6 +1194,17 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
     file(GLOB _katana_geo_cli_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/cli/*.cmake")
     foreach(_geo_cli_test IN LISTS _katana_geo_cli_tests)
         include("${_geo_cli_test}")
+    endforeach()
+endif()
+
+# The UPDATE verbs' cli.* tests (docs/update.md), one file per area in
+# update_*.cmake beside this one, so the task that writes the verbs adds them
+# without editing this file. Included here, where katana_cli and the test
+# variables are.
+if(KATANA_BUILD_TESTS)
+    file(GLOB _katana_update_cli_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/update_*.cmake")
+    foreach(_update_cli_test IN LISTS _katana_update_cli_tests)
+        include("${_update_cli_test}")
     endforeach()
 endif()
 

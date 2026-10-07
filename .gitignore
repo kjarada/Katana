@@ -61,3 +61,10 @@ docs/TfNSW Reference Files/
 # was committed by accident and held approximate statistics the DEM does not
 # have (audit IO-13). Katana no longer asks GDAL to write them.
 samples/**/*.aux.xml
+
+# The update system's signing keys (docs/update.md): the private halves never enter the
+# repository. The public halves are data and ARE committed (cmake/KatanaUpdateKeys.cmake).
+# The test key of tests/update is RFC 8032's published vector and is kept as hex, never
+# as a .pem (tests/update/test_key.hpp).
+*.pem
+update-signing*

@@ -119,6 +119,14 @@ include(KatanaSanitizers)
 include(KatanaStaticAnalysis)
 include(KatanaThirdParty)
 
+# The update system's pinned public keys (cmake/KatanaUpdateKeys.cmake). They are
+# PLACEHOLDERS until the owner runs the key steps in docs/update.md, and a build
+# with them can neither verify nor receive an update. ON makes this configure FAIL
+# while they are placeholders: release.yml turns it on, so a release can never ship
+# with them. OFF (the default) leaves development and CI test builds alone.
+option(KATANA_REQUIRE_UPDATE_KEYS "Refuse to configure while the update keys are placeholders" OFF)
+include(KatanaUpdateKeys)
+
 # Directory holding the toolchain runtime DLLs (MinGW). Tests need it on PATH.
 get_filename_component(KATANA_RUNTIME_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
 
@@ -135,6 +143,11 @@ endif()
 # ---------------------------------------------------------------------------
 set(KATANA_MODULES
     katana_core
+    # The auto-update engine, of layer `update` (core only), and the fourth
+    # program, the helper that swaps the files (docs/update.md). Both sit beside
+    # core: katana_app and katana_qt link the library, nothing links them back.
+    katana_update
+    katana_updater
     katana_math
     katana_geometry
     katana_entity

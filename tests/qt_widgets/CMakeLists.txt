@@ -24,6 +24,9 @@ file(GLOB _qt_plotting_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plot
 file(GLOB _qt_annotation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp")
 file(GLOB _qt_geo_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cpp")
 file(GLOB _qt_drawing_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/drawing/*.cpp")
+# Help > Check for Updates' dialog (test_update_dialog.cpp, docs/update.md): named, so the
+# task that writes it adds the file without editing this list.
+file(GLOB _qt_update_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test_update_dialog.cpp")
 add_executable(katana_qt_widget_tests
     main.cpp
     test_view_focus.cpp
@@ -73,6 +76,7 @@ add_executable(katana_qt_widget_tests
     ${_qt_annotation_tests}
     ${_qt_geo_tests}
     ${_qt_drawing_tests}
+    ${_qt_update_tests}
 )
 target_include_directories(katana_qt_widget_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 # katana_qt_ui brings the window's objects and, PUBLIC, everything they link

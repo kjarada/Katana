@@ -2,6 +2,9 @@
 # (src/katana_app, docs/mcp.md). The command line's verbs themselves are pinned
 # end to end by the cli.* tests in src/katana_app/CMakeLists.txt.
 find_package(nlohmann_json CONFIG REQUIRED)
+# The UPDATE verbs' tests (test_update_verbs.cpp, docs/update.md): named, not
+# listed, so the task that writes them adds the file without editing this list.
+file(GLOB _app_update_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test_update_verbs.cpp")
 katana_add_test_suite(app
     LIBS katana_app nlohmann_json::nlohmann_json
     SOURCES
@@ -9,6 +12,7 @@ katana_add_test_suite(app
         test_session.cpp
         # SURVEY IMPORT's SETTINGS and SET, read on the document they leave.
         test_survey_verbs.cpp
+        ${_app_update_tests}
 )
 # The sample GIS data an import is tried on; the survey fixtures, the
 # import wizard's network among them; the three Katana customisation files a

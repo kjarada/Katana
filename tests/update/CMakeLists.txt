@@ -1,0 +1,176 @@
+# The update engine's tests (src/katana_update, docs/update.md), the two executables
+# the end-to-end tests drive, and the checks of the build's own promises about the
+# update system: the pinned keys and the helper's imports.
+#
+# The suite is ONE target, katana_update_tests, so that each task adds a file and no
+# list: every source below exists as a placeholder (a skipped case) or as the real thing
+# the task replaces it with.
+
+katana_add_test_suite(update
+    LIBS katana_update
+    SOURCES
+        # What the skeleton promises (T1): the version reaches the library, the test keys,
+        # the seams a fake can implement.
+        test_skeleton.cpp
+        # The test trust root (RFC 8032 vectors 1 and 2). In three executables, never installed.
+        test_key.cpp
+        # T4: versions, the manifest, the path rules.
+        test_version.cpp
+        test_manifest.cpp
+        test_paths.cpp
+        # T5: Ed25519, the trust gate.
+        test_signature.cpp
+        test_trust.cpp
+        # T6: the planner, inflate, the range merger, the records.
+        test_plan.cpp
+        test_inflate.cpp
+        test_ranges.cpp
+        test_state.cpp
+        # T7: the journal, the swap, recovery, the three crash loops.
+        test_journal.cpp
+        test_apply.cpp
+        test_recover.cpp
+        test_fault_loops.cpp
+        # T13: the credential stores.
+        test_credential.cpp
+        # T8: the feed, check, stage and preflight.
+        test_feed.cpp
+        test_check.cpp
+        test_stage.cpp
+)
+target_compile_definitions(katana_update_tests PRIVATE
+    # The version the project declares, to hold the library's KATANA_VERSION to.
+    KATANA_EXPECTED_VERSION="${PROJECT_VERSION}"
+    # The release trees, manifests and signed fixtures of tools/update_make_manifest.py (T3).
+    KATANA_UPDATE_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+
+# ---- the two executables the end-to-end tests drive (tests/update/update_e2e.py) -----------
+#
+# Neither is installed (tools/check_install_rules.cmake refuses them by name), and each
+# exists because the production programs cannot be given another trust root: the engine and
+# the helper take their keys as a PARAMETER, and only these pass a test key.
+#
+#   katana_update_e2e   the engine from a command line: check, plan, stage, preflight, launch
+#                       (e2e_main.cpp, T12)
+#   katana_updater_test the helper's own main.cpp, the same source, compiled with
+#                       KATANA_UPDATER_TEST_BUILD: the test key instead of the pinned ones, and
+#                       --die-at N (a FaultFs). The same link options, so what the tests run
+#                       is what ships, less the keys.
+add_executable(katana_update_e2e e2e_main.cpp test_key.cpp)
+katana_target_defaults(katana_update_e2e)
+target_link_libraries(katana_update_e2e PRIVATE katana_update katana_core)
+set_target_properties(katana_update_e2e PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
+
+get_property(_katana_updater_main GLOBAL PROPERTY KATANA_UPDATER_MAIN)
+get_property(_katana_updater_link_options GLOBAL PROPERTY KATANA_UPDATER_LINK_OPTIONS)
+if(_katana_updater_main)
+    add_executable(katana_updater_test "${_katana_updater_main}" test_key.cpp)
+    katana_target_defaults(katana_updater_test)
+    target_compile_definitions(katana_updater_test PRIVATE KATANA_UPDATER_TEST_BUILD=1)
+    target_link_libraries(katana_updater_test PRIVATE katana_update katana_core)
+    target_link_options(katana_updater_test PRIVATE ${_katana_updater_link_options})
+    set_target_properties(katana_updater_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
+endif()
+
+# ---- the pinned keys (cmake/KatanaUpdateKeys.cmake) ----------------------------------
+#
+# The module is the configure's own check run as a script, so the refusals are proved on
+# fixtures: keys that are not the ones in the tree. A check that cannot see a violation
+# passes as quietly as one that finds none.
+#
+# CMake wraps a message that has no leading blank at 80 columns, at any space, so a
+# phrase a test looks for can be broken across two lines. The same phrase, with a run of
+# spaces and line breaks wherever it has one space.
+function(katana_phrase out text)
+    string(REPLACE " " "[ \r\n]+" _phrase "${text}")
+    set(${out} "${_phrase}" PARENT_SCOPE)
+endfunction()
+set(_katana_keys_script "${PROJECT_SOURCE_DIR}/cmake/KatanaUpdateKeys.cmake")
+function(katana_add_update_keys_test name require fixture)
+    set(_command ${CMAKE_COMMAND} -DKATANA_REQUIRE_UPDATE_KEYS=${require})
+    if(fixture)
+        list(APPEND _command "-DKATANA_UPDATE_KEYS_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/key_fixtures/${fixture}.cmake")
+    endif()
+    add_test(NAME update_keys_${name} COMMAND ${_command} -P "${_katana_keys_script}")
+endfunction()
+# The file in the tree is well formed, whatever it holds (OFF: placeholders are allowed here).
+katana_add_update_keys_test(file_in_the_tree_is_well_formed OFF "")
+set_tests_properties(update_keys_file_in_the_tree_is_well_formed PROPERTIES
+    PASS_REGULAR_EXPRESSION "Update keys: (PLACEHOLDERS|pinned)"
+    FAIL_REGULAR_EXPRESSION "CMake Error")
+# OFF, the default, lets the placeholders through and says loudly that they are there.
+katana_add_update_keys_test(placeholders_are_allowed_when_not_required OFF placeholders)
+set_tests_properties(update_keys_placeholders_are_allowed_when_not_required PROPERTIES
+    PASS_REGULAR_EXPRESSION "Update keys: PLACEHOLDERS - this build can neither verify nor receive an update"
+    FAIL_REGULAR_EXPRESSION "CMake Error")
+# ON refuses them: this is what stops a release from shipping with keys nobody holds.
+katana_add_update_keys_test(required_refuses_the_placeholders ON placeholders)
+katana_phrase(_phrase "KATANA_REQUIRE_UPDATE_KEYS is ON, but cmake/KatanaUpdateKeys.cmake still holds the PLACEHOLDER update keys")
+set_tests_properties(update_keys_required_refuses_the_placeholders PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_phrase}")
+# ... and ON accepts two real-looking keys: the refusal is about the placeholders, not about ON.
+katana_add_update_keys_test(required_accepts_real_looking_keys ON real_looking)
+set_tests_properties(update_keys_required_accepts_real_looking_keys PROPERTIES
+    PASS_REGULAR_EXPRESSION "Update keys: pinned, active 97fcb0a317920f5d, spare 393a4825f86253ba"
+    FAIL_REGULAR_EXPRESSION "CMake Error")
+katana_add_update_keys_test(refuses_a_key_one_digit_short OFF malformed)
+katana_phrase(_phrase "KATANA_UPDATE_KEY_ACTIVE must be 64 lower-case hexadecimal digits")
+set_tests_properties(update_keys_refuses_a_key_one_digit_short PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_phrase}")
+katana_add_update_keys_test(refuses_a_spare_that_is_the_active_key OFF one_key_twice)
+katana_phrase(_phrase "the spare key must be a different key from the active key")
+set_tests_properties(update_keys_refuses_a_spare_that_is_the_active_key PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_phrase}")
+katana_add_update_keys_test(refuses_a_flag_that_says_real_over_placeholder_bytes ON
+    flag_says_real_over_placeholder_bytes)
+katana_phrase(_phrase "says the keys are real, but they spell PLACEHOLDER")
+set_tests_properties(update_keys_refuses_a_flag_that_says_real_over_placeholder_bytes PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_phrase}")
+katana_add_update_keys_test(refuses_a_flag_that_says_placeholder_over_real_keys OFF
+    flag_says_placeholder_over_real_keys)
+katana_phrase(_phrase "says the keys are placeholders, but they do not spell PLACEHOLDER")
+set_tests_properties(update_keys_refuses_a_flag_that_says_placeholder_over_real_keys PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_phrase}")
+
+# ---- the helper's imports (tests/update/check_updater_imports.cmake) -----------------------
+#
+# The check, on a listing of a static program and on one that imports the GCC runtime,
+# which it must name; and on the two real programs where objdump can read them. PE only.
+add_test(NAME updater_import_check_accepts_a_static_listing
+    COMMAND ${CMAKE_COMMAND}
+            "-DLISTING=${CMAKE_CURRENT_SOURCE_DIR}/import_fixtures/static.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_updater_imports.cmake")
+set_tests_properties(updater_import_check_accepts_a_static_listing PROPERTIES
+    PASS_REGULAR_EXPRESSION "The helper imports 9 DLLs, all of them the operating system's"
+    FAIL_REGULAR_EXPRESSION "CMake Error")
+add_test(NAME updater_import_check_names_the_gcc_runtime
+    COMMAND ${CMAKE_COMMAND}
+            "-DLISTING=${CMAKE_CURRENT_SOURCE_DIR}/import_fixtures/gcc_runtime.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_updater_imports.cmake")
+katana_phrase(_phrase "not the operating system's: libgcc_s_seh-1[.]dll, libstdc[+][+]-6[.]dll, libwinpthread-1[.]dll")
+set_tests_properties(updater_import_check_names_the_gcc_runtime PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_phrase}")
+if(WIN32 AND CMAKE_OBJDUMP)
+    foreach(_program IN ITEMS katana_updater katana_updater_test)
+        if(TARGET ${_program})
+            add_test(NAME ${_program}_imports_only_os_dlls
+                COMMAND ${CMAKE_COMMAND} "-DOBJDUMP=${CMAKE_OBJDUMP}" "-DPROGRAM=$<TARGET_FILE:${_program}>"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_updater_imports.cmake")
+            set_tests_properties(${_program}_imports_only_os_dlls PROPERTIES
+                PASS_REGULAR_EXPRESSION "all of them the operating system's"
+                FAIL_REGULAR_EXPRESSION "CMake Error")
+        endif()
+    endforeach()
+endif()
+
+# ---- the end-to-end tests, and the loopback fake feed (T12) --------------------------------
+#
+# update_e2e.py drives tools/update_fake_feed.py (stdlib http.server, port 0, proxies off)
+# and the two executables above; CLAUDE.md, section 4, says a test may start its own server
+# on 127.0.0.1. Registered by e2e.cmake, beside this file, so that task adds them without
+# editing this one (it needs Python, which is optional: Python3_Interpreter_FOUND).
+file(GLOB _katana_update_e2e_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/e2e*.cmake")
+foreach(_katana_update_e2e_test IN LISTS _katana_update_e2e_tests)
+    include("${_katana_update_e2e_test}")
+endforeach()
