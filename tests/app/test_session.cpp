@@ -192,10 +192,39 @@ TEST(Session, AKeptCustomisationMadeFromAnotherBuiltInStartsAndSaysSoOnStderr)
     Session session("katana_cli");
     const std::string out = testing::internal::GetCapturedStdout();
     const std::string err = testing::internal::GetCapturedStderr();
-    EXPECT_EQ(out, "Customisation: Mine, 0 linestyles and symbols and 1 survey code rules, kept\n");
+    // ONE rule, so the noun is in the singular: the line said "1 survey code
+    // rules", and this expected it, until 2026-10-07.
+    EXPECT_EQ(out, "Customisation: Mine, 0 linestyles and symbols and 1 survey code rule, kept\n");
     EXPECT_EQ(err, "warning: the kept customisation was made from another built-in customisation "
                    "than this program has; CUSTOMISE RESET gives this program's\n");
     EXPECT_EQ(session.document().customisationState().name, "Mine");
+}
+
+TEST(Session, TheStartUpLineCountsOneDefinitionAndOneRuleInTheSingular)
+{
+    // The kept file written here holds ONE symbol and ONE rule, and there is
+    // no built-in for the run. The line gave every count the plural - "1
+    // linestyles and symbols and 1 survey code rules" - where the window says
+    // "1 definition (1 symbol) and 1 survey code rule" of the same start. One
+    // definition is a linestyle OR a symbol; the line does not say which.
+    const ScratchDirectory scratch("kept-one-of-each");
+    const std::string kept = scratch.file(
+        "kept.customisation.json",
+        R"({"format": "katana-customisation", "version": 1, "name": "One",
+ "symbols": [{"name": "ONE Mark", "atVertices": true, "strokes": [["move", 0, 0], ["circle", 0.5]]}],
+ "codes": [{"key": "MK*", "sets": "symbol", "symbol": {"name": "ONE Mark"}}]})");
+    // `file` gives the path quoted for a line; the variable takes it bare.
+    const std::string bare = kept.substr(1, kept.size() - 2);
+    const StartEnvironment environment("none", bare.c_str());
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    Session session("katana_cli");
+    const std::string out = testing::internal::GetCapturedStdout();
+    const std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(out, "Customisation: One, 1 linestyle or symbol and 1 survey code rule, kept\n");
+    EXPECT_EQ(err, "");
+    EXPECT_EQ(session.document().styleLibrary().size(), 1U);
+    EXPECT_EQ(session.document().surveyMap().size(), 1U);
 }
 
 TEST(Session, AStartUpProblemIsSaidOnStderrAndTheSessionStartsAllTheSame)

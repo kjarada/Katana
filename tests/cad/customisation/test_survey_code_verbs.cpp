@@ -72,29 +72,6 @@ SurveyMap testCodes()
     return map;
 }
 
-// A colour name of a caller's own, which neither a customisation nor the
-// standard names know: "site orange" is #FF8800.
-std::optional<Color> siteOrange(std::string_view name)
-{
-    if (name == "site orange") {
-        return Color::fromHex("#FF8800").valueOr(Color{});
-    }
-    return std::nullopt;
-}
-
-// CODE EXPLAIN <code> with a caller's own colour names: the verb's function
-// itself (runSurveyCodeVerb, which takes the words after the verb). The
-// interpreter hands it none - the setter a front end once passed its table
-// through went with the last that called it - so this is the one way in.
-std::string explainedWith(Document& document, const std::string& code,
-                          const katana::cad::ColourLookup& colourOf)
-{
-    const auto reply = katana::cad::runSurveyCodeVerb(document, {"EXPLAIN", code}, colourOf, {});
-    EXPECT_TRUE(reply.ok()) << code << "\n  -> "
-                            << (reply.ok() ? std::string{} : reply.error().describe());
-    return reply.ok() ? *reply : std::string{};
-}
-
 struct Session {
     Document document;
     CommandInterpreter interpreter{document};
@@ -230,11 +207,12 @@ TEST(SurveyCodeVerbs, CodeAppliesTheLoadedCodesAsOneUndoStep)
     EXPECT_FALSE(session.document.model().styles.contains("cross"));
 }
 
-TEST(SurveyCodeVerbs, AColourNameNothingKnowsIsLeftAloneAndACallersOwnIsAskedLast)
+TEST(SurveyCodeVerbs, AColourNameNothingKnowsIsLeftAloneRatherThanGuessedAt)
 {
-    // Three names: "red" is standard; "pen 025" is a plot pen, which nothing
-    // resolves (docs/customisation.md, "Colour names"); "site orange" is known
-    // to a caller's lookup alone.
+    // Two names: "red" is standard; "pen 025" is a plot pen, which nothing
+    // resolves (docs/customisation.md, "Colour names"). The verb asks the
+    // Document and nobody else - it took a lookup of a caller's own, asked
+    // last, until 2026-10-07, and this test had a half that passed one.
     SurveyMap map;
     const auto feature = [&map](const char* key, const char* layer, const char* colour) {
         SurveyRule rule;
@@ -246,25 +224,12 @@ TEST(SurveyCodeVerbs, AColourNameNothingKnowsIsLeftAloneAndACallersOwnIsAskedLas
     };
     feature("RD*", "REDS", "red");
     feature("PN*", "PENS", "pen 025");
-    feature("SO*", "ORANGES", "site orange");
 
     Session session(false);
     session.document.setSurveyMap(map);
-    // Through the interpreter, which passes no lookup: the standard name
-    // resolves, the other two are left alone rather than guessed at.
+    // The standard name resolves; the other is left alone.
     EXPECT_TRUE(contains(session.ok("CODE EXPLAIN RD1"), "colour \"red\": #FF0000"));
     EXPECT_TRUE(contains(session.ok("CODE EXPLAIN PN1"),
-                         "colour \"pen 025\": unknown name, so the entity keeps its own"));
-    EXPECT_TRUE(contains(session.ok("CODE EXPLAIN SO1"),
-                         "colour \"site orange\": unknown name, so the entity keeps its own"));
-
-    // A caller's lookup answers what the Document does not, and nothing
-    // else: it knows no "red", and red is still red.
-    EXPECT_TRUE(contains(explainedWith(session.document, "SO1", siteOrange),
-                         "colour \"site orange\": #FF8800"));
-    EXPECT_TRUE(
-        contains(explainedWith(session.document, "RD1", siteOrange), "colour \"red\": #FF0000"));
-    EXPECT_TRUE(contains(explainedWith(session.document, "PN1", siteOrange),
                          "colour \"pen 025\": unknown name, so the entity keeps its own"));
 
     // And a coded entity whose colour nothing knows gets a style with none.
@@ -280,10 +245,12 @@ TEST(SurveyCodeVerbs, AColourNameNothingKnowsIsLeftAloneAndACallersOwnIsAskedLas
     EXPECT_TRUE(found) << "the style made for the code keeps the colour's name";
 }
 
-TEST(SurveyCodeVerbs, TheCustomisationsOwnColourTableWinsOverACallers)
+TEST(SurveyCodeVerbs, AColourTheCustomisationNamesItselfIsResolvedFromItsOwnTable)
 {
-    // The session's table says "site orange" is #112233; a caller's lookup
-    // says #FF8800. The customisation's own table is asked first.
+    // "site orange" is no standard name. Until the session's own table says
+    // what it is, it is a name nothing knows; once the table says #112233 the
+    // verb says so too - it asks the Document at each line, so it follows a
+    // table installed since.
     katana::entity::ColourTable colours;
     ASSERT_TRUE(colours.add("site orange", Color::fromHex("#112233").valueOr(Color{})).ok());
     SurveyMap map;
@@ -295,9 +262,10 @@ TEST(SurveyCodeVerbs, TheCustomisationsOwnColourTableWinsOverACallers)
 
     Session session(false);
     session.document.setSurveyMap(map);
+    EXPECT_TRUE(contains(session.ok("CODE EXPLAIN SO1"),
+                         "colour \"site orange\": unknown name, so the entity keeps its own"));
     session.document.setColourTable(colours);
-    EXPECT_TRUE(contains(explainedWith(session.document, "SO1", siteOrange),
-                         "colour \"site orange\": #112233"));
+    EXPECT_TRUE(contains(session.ok("CODE EXPLAIN SO1"), "colour \"site orange\": #112233"));
 }
 
 TEST(SurveyCodeVerbs, ExplainCensusAndListAnswerWithTheManagersWords)
