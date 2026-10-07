@@ -192,6 +192,53 @@ TEST(StyleDrawing, AColourCommandSetsThePenForWhatFollowsAndViewColourMeansTheEn
     EXPECT_EQ(drawing.strokes[1].pen, "") << "view_colour is the entity's own colour";
 }
 
+// A definition read from a file sweeps no arc more than two turns, but one made
+// in code is not held to that, and the chords an arc is drawn with follow its
+// sweep: two billion degrees was twenty million points for one arc, and a sweep
+// past what an int holds of chords an undefined cast.
+TEST(StyleDrawing, AnArcOfAHugeSweepIsDrawnAsTwoTurnsAndNeverAskedForMillionsOfPoints)
+{
+    // Chords are 24 to a turn: two turns, 48, and one more point than chords.
+    for (const double end : {2.0e9, -2.0e9, 721.0, 1.0e300}) {
+        Stroke arc;
+        arc.op = StrokeOp::Arc;
+        arc.radius = 1.0;
+        arc.startAngle = 0.0;
+        arc.endAngle = end;
+        LineStyle style = definition({arc});
+        style.atVertices = true;
+        const StyleDrawing drawing = katana::cad::symbolDrawing(style, Point2(0, 0));
+        ASSERT_EQ(drawing.strokes.size(), 1u) << end;
+        EXPECT_EQ(drawing.strokes[0].path.vertices.size(), 49u) << end;
+    }
+    // Exactly two turns is already that many, and a quarter turn is 6 chords.
+    Stroke quarter;
+    quarter.op = StrokeOp::Arc;
+    quarter.radius = 1.0;
+    quarter.endAngle = 90.0;
+    LineStyle style = definition({quarter});
+    style.atVertices = true;
+    EXPECT_EQ(katana::cad::symbolDrawing(style, Point2(0, 0)).strokes[0].path.vertices.size(), 7u);
+}
+
+TEST(StyleDrawing, AnArcWhoseAnglesAreNotNumbersDrawsNothingAndDoesNotCrash)
+{
+    for (const double bad : {std::numeric_limits<double>::infinity(),
+                             -std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::quiet_NaN()}) {
+        Stroke arc;
+        arc.op = StrokeOp::Arc;
+        arc.radius = 1.0;
+        arc.endAngle = bad;
+        LineStyle style = definition({arc});
+        style.atVertices = true;
+        const StyleDrawing drawing = katana::cad::symbolDrawing(style, Point2(0, 0));
+        for (const auto& stroke : drawing.strokes) {
+            EXPECT_TRUE(stroke.path.vertices.empty()) << bad;
+        }
+    }
+}
+
 TEST(StyleDrawing, ACircleAnArcAndADotAreDrawnAboutTheCurrentPoint)
 {
     Stroke circle;

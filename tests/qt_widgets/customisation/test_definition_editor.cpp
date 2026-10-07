@@ -478,7 +478,7 @@ TEST(DefinitionEditor, AnUntouchedFormDescribesExactlyTheDefinitionItWasOpenedOn
     awkward.units = StyleUnits::World;
     awkward.length = 0.1 + 0.2;
     awkward.factor = 1.0 / 3.0;
-    awkward.origin = {1e-7, -2.5e20};
+    awkward.origin = {1e-7, -2.5e8}; // within the format's bound of 1e9 in size
     awkward.anchor1 = {0.25, 0.5};
     awkward.anchor2 = {-4.0, 8.0};
     awkward.stretchMode = 2;

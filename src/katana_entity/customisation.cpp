@@ -161,9 +161,20 @@ struct Refusal {
 // line or the quoting escaped the way JSON escapes it. Bytes that are not
 // UTF-8 are shown as U+FFFD rather than thrown on, because this is also how a
 // refusal names the very text it refuses.
+//
+// Cut short past kLongestQuoted bytes: a refusal names the entry it is about,
+// and an entry's name may be as long as the file is (a name over the bound is
+// refused, but is named in that refusal too, and in every other about it).
 [[nodiscard]] std::string inQuotes(std::string_view text)
 {
-    return Json(std::string(text)).dump(-1, ' ', false, Json::error_handler_t::replace);
+    constexpr std::size_t kLongestQuoted = 240;
+    const bool cut = text.size() > kLongestQuoted;
+    std::string quoted = Json(std::string(cut ? text.substr(0, kLongestQuoted) : text))
+                             .dump(-1, ' ', false, Json::error_handler_t::replace);
+    if (cut) {
+        quoted.insert(quoted.size() - 1, "...");
+    }
+    return quoted;
 }
 
 // ---- what the tree holds that JSON cannot say -------------------------------------
@@ -203,6 +214,33 @@ struct Refusal {
 constexpr std::string_view kTooLarge = "has a number too large to hold";
 constexpr std::string_view kTooSmall =
     "has a number too small to hold: it is not zero, and would be read as 0";
+
+// The format's bounds (customisation.hpp), in the words a refusal says them in.
+static_assert(kCustomisationMostMagnitude == 1.0e9 && kCustomisationMostSweepDegrees == 720.0 &&
+                  kCustomisationMostStrokes == 100000 && kCustomisationMostTextBytes == 1000 &&
+                  kCustomisationMostRules == 1000000,
+              "the refusals below say these numbers");
+constexpr std::string_view kBeyondMagnitude =
+    "larger than 1000000000 in size, the most any number of a customisation holds";
+constexpr std::string_view kTooLong =
+    "longer than 1000 bytes, the most a name or text of a customisation holds";
+constexpr std::string_view kSweepsTooFar =
+    "sweeps more than 720 degrees (two turns), the most an arc holds";
+constexpr std::string_view kTooManyStrokes =
+    "a definition holds at most 100000 strokes, and this is one more";
+constexpr std::string_view kTooManyRules =
+    "\"codes\" holds more than 1000000 rules, the most a customisation holds";
+
+// A NaN is not within it, and is no number the file can hold either.
+[[nodiscard]] bool withinMagnitude(double value)
+{
+    return std::abs(value) <= kCustomisationMostMagnitude;
+}
+
+[[nodiscard]] bool withinSweep(double startAngle, double endAngle)
+{
+    return std::abs(endAngle - startAngle) <= kCustomisationMostSweepDegrees;
+}
 
 // Whether a number's text, which the JSON library read as zero, says some
 // other number: a digit that is not 0 before any exponent. ("0e-400" and
@@ -449,6 +487,10 @@ class Out {
             refuse(ErrorCode::InvalidArgument, place(),
                    subject() + " is not valid UTF-8, and a customisation file is UTF-8 text");
         }
+        if (value.size() > kCustomisationMostTextBytes) {
+            refuse(ErrorCode::InvalidArgument, place(),
+                   subject() + " is " + std::string(kTooLong));
+        }
         text_ += Json(std::string(value)).dump();
     }
 
@@ -458,6 +500,10 @@ class Out {
             refuse(ErrorCode::InvalidArgument, place(),
                    subject() + " is not a finite number (an infinity or NaN), which the "
                                "format cannot hold");
+        }
+        if (!withinMagnitude(value)) {
+            refuse(ErrorCode::InvalidArgument, place(),
+                   subject() + " is " + std::string(kBeyondMagnitude));
         }
         // The shortest text that reads back as the same double is "-0" for
         // negative zero - which a JSON reader takes for the INTEGER 0, losing
@@ -602,6 +648,11 @@ void writeLines(Out& out, const std::vector<std::string>& lines)
 void checkStrokes(const LineStyle& definition, std::string_view where)
 {
     static const Stroke d;
+    if (definition.strokes.size() > kCustomisationMostStrokes) {
+        refuse(ErrorCode::InvalidArgument, where,
+               "the definition holds " + counted(definition.strokes.size(), "stroke", "strokes") +
+                   ", and a definition holds at most 100000");
+    }
     std::size_t texts = 0;
     for (std::size_t i = 0; i < definition.strokes.size(); ++i) {
         const Stroke& stroke = definition.strokes[i];
@@ -631,6 +682,9 @@ void checkStrokes(const LineStyle& definition, std::string_view where)
             refuse(ErrorCode::InvalidArgument, here(),
                    "this " + std::string(kind->word) + " stroke carries " + std::string(stray) +
                        ", which it does not use and the format cannot hold");
+        }
+        if (stroke.op == StrokeOp::Arc && !withinSweep(stroke.startAngle, stroke.endAngle)) {
+            refuse(ErrorCode::InvalidArgument, here(), "this arc " + std::string(kSweepsTooFar));
         }
         if (stroke.op == StrokeOp::Text) {
             if (stroke.text != texts) {
@@ -1141,6 +1195,10 @@ struct Parsed {
     // Set when the reading stopped at such a number: `root` is then only
     // what the text held BEFORE it.
     std::optional<TooLarge> tooLarge{};
+    // Set when the reading stopped at the rule past the most a file holds
+    // (kCustomisationMostRules): `root` is then only what the text held before
+    // it, as above.
+    bool tooManyRules = false;
 };
 
 // Which text is being read: it decides where a list of strokes can be.
@@ -1225,11 +1283,13 @@ class TreeBuilder {
     // Whether it failed at a number too large to hold, and how far into the
     // text that number ends.
     [[nodiscard]] bool stoppedAtANumber() const { return tooLarge_.has_value(); }
+    // Whether it stopped at one rule too many.
+    [[nodiscard]] bool stoppedAtTooManyRules() const { return tooManyRules_; }
     [[nodiscard]] std::size_t stoppedAt() const { return stoppedAt_; }
     [[nodiscard]] Parsed take()
     {
         return Parsed{std::move(root_), std::move(duplicate_), std::move(strokes_),
-                      std::move(tooLarge_)};
+                      std::move(tooLarge_), tooManyRules_};
     }
 
   private:
@@ -1383,6 +1443,12 @@ class TreeBuilder {
             open_.push_back(Frame{Role::Strokes, nullptr, false, false, {}, 0});
             return true;
         }
+        if (object && isRuleOfAFile() && ++rules_ > kCustomisationMostRules) {
+            // Stops the parse here: the rules past the bound are never held,
+            // so a file of millions costs no more than the bound does.
+            tooManyRules_ = true;
+            return false;
+        }
         Json* node = place(object ? Json::object() : Json::array());
         open_.push_back(Frame{Role::Tree, node, object, false, {}, 0});
         return true;
@@ -1404,6 +1470,13 @@ class TreeBuilder {
             }
         }
         return true;
+    }
+
+    // An object that is an entry of a file's "codes" list: a rule.
+    [[nodiscard]] bool isRuleOfAFile() const
+    {
+        return kind_ == TextKind::File && open_.size() == 2 && open_[0].object &&
+               open_[0].key == "codes" && !open_[1].object;
     }
 
     // In a file, the "strokes" of an entry of "linestyles" or "symbols"; in a
@@ -1460,6 +1533,10 @@ class TreeBuilder {
         StrokesRead& read = strokes_.back();
         if (read.problem) {
             return; // nothing after the first problem is kept
+        }
+        if (read.strokes.size() >= kCustomisationMostStrokes) {
+            problem(std::string(kTooManyStrokes), {});
+            return;
         }
         if (values_.empty() ||
             (values_[0].kind != StrokeValue::Kind::Word && !values_[0].written.is_string())) {
@@ -1530,6 +1607,22 @@ class TreeBuilder {
                 }
                 return;
             }
+            for (std::size_t i = 1; i < values_.size(); ++i) {
+                if (!withinMagnitude(values_[i].number)) {
+                    std::string what = inQuotes(kind.word);
+                    what += " has a number ";
+                    what += kBeyondMagnitude;
+                    problem(std::move(what), shownStroke());
+                    return;
+                }
+            }
+            if (kind.op == StrokeOp::Arc && !withinSweep(values_[2].number, values_[3].number)) {
+                std::string what = inQuotes(kind.word);
+                what += ' ';
+                what += kSweepsTooFar;
+                problem(std::move(what), shownStroke());
+                return;
+            }
             if (kind.op == StrokeOp::Move || kind.op == StrokeOp::Draw) {
                 stroke.point = Point2(values_[1].number, values_[2].number);
             } else {
@@ -1543,6 +1636,14 @@ class TreeBuilder {
         case StrokeOp::Pen:
             if (!values_[1].written.is_string()) {
                 refused(", as text in double quotes");
+                return;
+            }
+            if (values_[1].written.get_ref<const std::string&>().size() >
+                kCustomisationMostTextBytes) {
+                std::string what = inQuotes(kind.word);
+                what += " is ";
+                what += kTooLong;
+                problem(std::move(what), shownStroke());
                 return;
             }
             stroke.pen = values_[1].written.get<std::string>();
@@ -1567,6 +1668,8 @@ class TreeBuilder {
     std::optional<Duplicate> duplicate_{};
     std::optional<TooLarge> tooLarge_{};
     std::size_t stoppedAt_ = 0; // bytes of the text read when it stopped
+    std::size_t rules_ = 0;     // the objects of the file's "codes" list so far
+    bool tooManyRules_ = false;
     std::string reason_{};
 };
 
@@ -1611,6 +1714,9 @@ class TreeBuilder {
     }
     TreeBuilder builder(kind);
     if (!Json::sax_parse(decoded->text, &builder)) {
+        if (builder.stoppedAtTooManyRules()) {
+            return builder.take();
+        }
         if (builder.stoppedAtANumber()) {
             const std::string at = lineAndColumn(decoded->text, builder.stoppedAt());
             Parsed text = builder.take();
@@ -1745,7 +1851,11 @@ class Members {
         if (!value.is_string()) {
             wrong(name, "must be text, in double quotes", value);
         }
-        return value.get<std::string>();
+        const std::string& text = value.get_ref<const std::string&>();
+        if (text.size() > kCustomisationMostTextBytes) {
+            wrong(name, "is " + std::string(kTooLong), value);
+        }
+        return text;
     }
 
     [[nodiscard]] std::string text(std::string_view name, const std::string& fallback = {})
@@ -1770,6 +1880,9 @@ class Members {
         }
         if (!value->is_number()) {
             wrong(name, "must be a number", *value);
+        }
+        if (!withinMagnitude(value->get<double>())) {
+            wrong(name, "is " + std::string(kBeyondMagnitude), *value);
         }
         return value->get<double>();
     }
@@ -1884,6 +1997,10 @@ class Members {
         refuse(ErrorCode::ParseFailure, where,
                inQuotes(member) + " must be a point, written [x, y]", shown(json));
     }
+    if (!withinMagnitude(json[0].get<double>()) || !withinMagnitude(json[1].get<double>())) {
+        refuse(ErrorCode::ParseFailure, where, inQuotes(member) + " is " + std::string(kBeyondMagnitude),
+               shown(json));
+    }
     return Point2(json[0].get<double>(), json[1].get<double>());
 }
 
@@ -1903,6 +2020,11 @@ class Members {
     for (const Json& line : json) {
         if (!line.is_string()) {
             bad();
+        }
+        if (line.get_ref<const std::string&>().size() > kCustomisationMostTextBytes) {
+            refuse(ErrorCode::ParseFailure, where,
+                   inQuotes(member) + " holds a line that is " + std::string(kTooLong),
+                   shown(line));
         }
         lines.push_back(line.get<std::string>());
     }
@@ -1941,6 +2063,9 @@ class Members {
         }
         for (std::size_t i = 0; i < text.unnamed.size(); ++i) {
             text.unnamed[i] = (*extra)[i].get<double>();
+            if (!withinMagnitude(text.unnamed[i])) {
+                members.wrong("extra", "has a number " + std::string(kBeyondMagnitude), *extra);
+            }
         }
     }
     members.finish();
@@ -2304,6 +2429,10 @@ void requireCustomisation(const Json& root)
                    shown(*colours));
         }
         for (auto item = colours->begin(); item != colours->end(); ++item) {
+            if (item.key().size() > kCustomisationMostTextBytes) {
+                refuse(ErrorCode::ParseFailure, "colours",
+                       "a colour's name is " + std::string(kTooLong), shown(Json(item.key())));
+            }
             const std::string where = "colours " + inQuotes(item.key());
             if (!item->is_string()) {
                 refuse(ErrorCode::ParseFailure, where,
@@ -2446,6 +2575,13 @@ Result<Customisation> customisationFromJson(std::string_view text)
             refuseTooLargeInFile(file);
         }
         requireCustomisation(file.root);
+        if (file.tooManyRules) {
+            // What the text said before the rule that was one too many: its
+            // "format" and "version" came first in any file Katana wrote, and
+            // are asked as for any other, so a file of another kind or a newer
+            // one is told that.
+            refuse(ErrorCode::ParseFailure, kTopLevel, kTooManyRules);
+        }
         refuseDuplicate(file, {});
         return readCustomisation(file);
     });

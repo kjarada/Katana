@@ -739,14 +739,15 @@ TEST(CustomisationFormat, NumbersAreTheShortestTextThatReadsBackAndNeverPadded)
     LineStyle definition;
     definition.name = "N";
     definition.source = "N";
-    definition.strokes = {moveTo(0.1, 100), drawTo(0.00001, 1e21), drawTo(12345678.125, -2.5),
+    definition.strokes = {moveTo(0.1, 100), drawTo(0.00001, 1e9), drawTo(12345678.125, -2.5),
                           arc(1.0 / 3.0, 0, 360)};
     add(customisation, definition);
     const std::string text = writeCustomisation(customisation);
-    // 0.00001 and 1e21 in the form with an exponent, which is the shorter;
-    // a third is the 16 digits it takes to say which double it is.
+    // 0.00001 and 1e9 - the largest number the format holds - in the form with
+    // an exponent, which is the shorter ("1e+09" is 5 characters, "1000000000"
+    // 10); a third is the 16 digits it takes to say which double it is.
     EXPECT_NE(text.find("[\"move\", 0.1, 100]"), std::string::npos) << text;
-    EXPECT_NE(text.find("[\"draw\", 1e-05, 1e+21]"), std::string::npos) << text;
+    EXPECT_NE(text.find("[\"draw\", 1e-05, 1e+09]"), std::string::npos) << text;
     EXPECT_NE(text.find("[\"draw\", 12345678.125, -2.5]"), std::string::npos) << text;
     EXPECT_NE(text.find("[\"arc\", 0.3333333333333333, 0, 360]"), std::string::npos) << text;
 }
@@ -1149,7 +1150,7 @@ TEST(CustomisationFormat, NegativeZeroSurvivesWhereverANumberIs)
 // classes it claims to reach are counted and each count is asserted, because
 // a generator that never made a subnormal would pass this without having
 // tried one.
-TEST(CustomisationFormat, EveryFiniteDoubleComesBackBitForBit)
+TEST(CustomisationFormat, EveryFiniteDoubleWithinTheBoundComesBackBitForBit)
 {
     // The cases a text form is most likely to get wrong, named.
     std::vector<double> values = {
@@ -1160,16 +1161,11 @@ TEST(CustomisationFormat, EveryFiniteDoubleComesBackBitForBit)
         5e-324,                             // the smallest subnormal
         2.2250738585072009e-308,            // the largest subnormal
         2.2250738585072014e-308,            // the smallest normal
-        std::numeric_limits<double>::max(), // 1.7976931348623157e308
-        -std::numeric_limits<double>::max(),
-        9007199254740992.0,      // 2^53: the last gap of one
-        9007199254740994.0,      // 2^53 + 2
-        9223372036854775808.0,   // 2^63: one past a signed 64-bit integer
-        18446744073709551616.0,  // 2^64: one past an unsigned one
-        123456789012345680000.0, // written in full, 21 digits
-        1e21,
-        1e22,
-        1e23,
+        1e9,                                // the largest the format holds
+        -1e9,
+        999999999.9999999, // the double just below it
+        536870912.0,       // 2^29: the last power of two within it
+        123456789.0,       // written in full, 9 digits
         0.000001,
         12345678.125,
         -0.47350000000000003,
@@ -1185,7 +1181,11 @@ TEST(CustomisationFormat, EveryFiniteDoubleComesBackBitForBit)
     };
     while (values.size() < 4000) {
         const double value = std::bit_cast<double>(next());
-        if (std::isfinite(value)) {
+        // Only what the format holds (customisation.hpp): a number larger in
+        // size than a billion is refused, and is tried in test_customisation_
+        // bounds.cpp. About half of all bit patterns are within it, so the run
+        // reaches as many cases as it did.
+        if (std::isfinite(value) && std::abs(value) <= 1.0e9) {
             values.push_back(value);
         }
     }
@@ -1293,8 +1293,8 @@ TEST(CustomisationFormat, EveryFiniteDoubleComesBackBitForBit)
 
     std::size_t negative = 0;
     std::size_t subnormal = 0;
-    std::size_t beyondInteger = 0; // at or above 2^64: no integer type holds it
-    std::size_t tiny = 0;          // below 1e-5: written with a negative exponent
+    std::size_t atLeastOne = 0; // 1 or more: digits before the point
+    std::size_t tiny = 0;       // below 1e-5: written with a negative exponent
     for (std::size_t i = 0; i < values.size(); ++i) {
         const Stroke& stroke = read->strokes[i / 2];
         const double back = i % 2 == 0 ? stroke.point.x : stroke.point.y;
@@ -1302,15 +1302,17 @@ TEST(CustomisationFormat, EveryFiniteDoubleComesBackBitForBit)
             << "a stroke, value " << i << ": wrote " << values[i] << ", read " << back;
         negative += std::signbit(values[i]) ? 1 : 0;
         subnormal += std::fpclassify(values[i]) == FP_SUBNORMAL ? 1 : 0;
-        beyondInteger += std::abs(values[i]) >= 18446744073709551616.0 ? 1 : 0;
+        atLeastOne += std::abs(values[i]) >= 1.0 ? 1 : 0;
         tiny += values[i] != 0.0 && std::abs(values[i]) < 1e-5 ? 1 : 0;
     }
-    // By hand: half of all bit patterns are negative, and half have an
-    // exponent above 2^64 or below 1e-5 each, give or take; 50 subnormals
+    // By hand: half of all bit patterns are negative. Of the patterns within a
+    // billion in size, the exponent field is 0 to 1052 of its 2047 values: 1006
+    // of those 1053 are below 1e-5 and 30 are 1 or more (a bit under 3 in 100,
+    // about 110 of the 4,000), and the named values add some; 50 subnormals
     // were added outright, and two more are named above.
     EXPECT_GT(negative, 1500u);
     EXPECT_GE(subnormal, 52u);
-    EXPECT_GT(beyondInteger, 1000u);
+    EXPECT_GT(atLeastOne, 20u);
     EXPECT_GT(tiny, 1000u);
     EXPECT_NE(text.find("e+"), std::string::npos) << "no number was written with an exponent";
     EXPECT_NE(text.find("e-"), std::string::npos);
