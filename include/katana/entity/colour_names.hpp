@@ -3,7 +3,7 @@
 // Colour NAMES, and the colours they mean.
 //
 // A survey code rule, the symbol it gives and a pen inside a linestyle
-// definition all NAME their colour - "red", "dark grey", "sui water potable" -
+// definition all NAME their colour - "red", "dark grey", "sui test water" -
 // and so does every string of a .12da archive. Two things turn a name into a
 // colour: the standard names, which mean the same in every drawing, and a
 // customisation's own table for the names only it uses.
@@ -52,7 +52,7 @@ namespace katana::entity {
 // export writes for a colour that never had a name.
 [[nodiscard]] std::string nearestStandardColour(const Color& colour);
 
-// A customisation's own colour names: "sui electricity" is #FF7F00. A value
+// A customisation's own colour names: "sui test power" is #FF7F00. A value
 // type, compared whole.
 class ColourTable {
   public:

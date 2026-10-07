@@ -1402,22 +1402,22 @@ TEST(CadInterpreter, AStyleCanNameASymbolFromTheLoadedLibraryButNotOneFromNowher
     // symbols, so the sixteen built-in names stopped being the whole set.
     Session session;
     session.ok("STYLE NEW s");
-    EXPECT_EQ(session.fails("STYLE SET s symbol CULT Bollard"), ErrorCode::NotFound)
+    EXPECT_EQ(session.fails("STYLE SET s symbol TEST Bollard"), ErrorCode::NotFound)
         << "no library is loaded yet";
 
     katana::entity::StyleLibrary library;
     katana::entity::LineStyle bollard;
-    bollard.name = "CULT Bollard";
+    bollard.name = "TEST Bollard";
     bollard.atVertices = true;
     bollard.strokes.push_back({katana::entity::StrokeOp::Move, katana::geometry::Point2(0, 0)});
     ASSERT_TRUE(library.add(bollard).ok());
     session.document.setStyleLibrary(std::move(library));
 
-    session.ok("STYLE SET s symbol CULT Bollard");
+    session.ok("STYLE SET s symbol TEST Bollard");
     const katana::entity::Style* style = session.document.model().styles.find("s");
     ASSERT_NE(style, nullptr);
-    EXPECT_EQ(style->symbol, "CULT Bollard") << "the whole name, spaces and all";
-    EXPECT_NE(session.document.definitionFor("CULT Bollard"), nullptr);
+    EXPECT_EQ(style->symbol, "TEST Bollard") << "the whole name, spaces and all";
+    EXPECT_NE(session.document.definitionFor("TEST Bollard"), nullptr);
     EXPECT_EQ(session.document.definitionFor("nothing"), nullptr);
 
     // A built-in still works with no library at all.
@@ -1568,9 +1568,9 @@ void loadManagerLibrary(Document& document)
             {katana::entity::StrokeOp::Draw, katana::geometry::Point2(1.0, 0.0)});
         ASSERT_TRUE(library.add(style).ok());
     };
-    add("WATR Main", false, "linestyles_test.4d", false);
-    add("CULT Bollard", true, "symbols_test.4d", true);
-    add("SEWR Manhole Cover", false, "symbols_test.4d", true);
+    add("TEST Water Main", false, "linestyles_test.4d", false);
+    add("TEST Bollard", true, "symbols_test.4d", true);
+    add("TEST Manhole Cover", false, "symbols_test.4d", true);
     document.setStyleLibrary(std::move(library));
 }
 
@@ -1583,19 +1583,19 @@ TEST(CadInterpreter, AStyleOrLayerLinetypeMayNameALibraryLinestyleAndAStyleMaySa
     Session session;
     loadManagerLibrary(session.document);
     session.ok("STYLE NEW s");
-    session.ok("STYLE SET s linetype WATR Main");
-    EXPECT_EQ(session.document.model().styles.find("s")->linetype, "WATR Main")
+    session.ok("STYLE SET s linetype TEST Water Main");
+    EXPECT_EQ(session.document.model().styles.find("s")->linetype, "TEST Water Main")
         << "the rest of the line, unquoted, as SYMBOL takes it";
     session.ok("STYLE SET s linetype bylayer");
     EXPECT_EQ(session.document.model().styles.find("s")->linetype, "ByLayer")
         << "any case, stored in the one spelling";
-    EXPECT_EQ(session.fails("STYLE SET s linetype CULT Bollard"), ErrorCode::InvalidArgument)
+    EXPECT_EQ(session.fails("STYLE SET s linetype TEST Bollard"), ErrorCode::InvalidArgument)
         << "a vertex symbol is never a line pattern; the reply says to give it as the symbol";
     EXPECT_EQ(session.fails("STYLE SET s linetype nosuch"), ErrorCode::NotFound);
 
     session.ok("LAYER NEW services");
-    session.ok("LAYER LTYPE services WATR Main");
-    EXPECT_EQ(session.document.model().layers.find("services")->linetype, "WATR Main");
+    session.ok("LAYER LTYPE services TEST Water Main");
+    EXPECT_EQ(session.document.model().layers.find("services")->linetype, "TEST Water Main");
     EXPECT_EQ(session.fails("LAYER LTYPE services ByLayer"), ErrorCode::InvalidArgument)
         << "a layer is what ByLayer inherits from";
     EXPECT_EQ(session.fails("LAYER LTYPE services nosuch"), ErrorCode::NotFound);
@@ -1609,14 +1609,14 @@ TEST(CadInterpreter, StyleSymbolsListsTheCataloguesSymbolsAndFiltersThem)
     // The built-ins, the vertex symbol, and the non-vertex one listed as a
     // symbol; not the linestyle.
     EXPECT_NE(all.find("  manhole  (built-in)"), std::string::npos) << all;
-    EXPECT_NE(all.find("  CULT Bollard  (library)"), std::string::npos) << all;
-    EXPECT_NE(all.find("  SEWR Manhole Cover  (library)"), std::string::npos) << all;
-    EXPECT_EQ(all.find("WATR Main"), std::string::npos) << all;
+    EXPECT_NE(all.find("  TEST Bollard  (library)"), std::string::npos) << all;
+    EXPECT_NE(all.find("  TEST Manhole Cover  (library)"), std::string::npos) << all;
+    EXPECT_EQ(all.find("TEST Water Main"), std::string::npos) << all;
 
-    // Filtered, case folded: "manhole" and "SEWR Manhole Cover", in that
-    // order (folded, "manhole" < "sewr manhole cover").
+    // Filtered, case folded: "manhole" and "TEST Manhole Cover", in that
+    // order (folded, "manhole" < "test manhole cover").
     EXPECT_EQ(session.ok("STYLE SYMBOLS MANHOLE"),
-              "  manhole  (built-in)\n  SEWR Manhole Cover  (library)");
+              "  manhole  (built-in)\n  TEST Manhole Cover  (library)");
     EXPECT_EQ(session.ok("STYLE SYMBOLS zzz"), "no symbol matches");
 }
 

@@ -91,7 +91,7 @@ constexpr int kSwatchPixels = 14;
 // names only this session knows, which is why they come first - then the
 // standard ones. Both from the tables that resolve them, so the field offers
 // exactly what is drawn and keeps no copy of either. A person may still type
-// any other name: a rule's "sui water potable" is kept as written whether or
+// any other name: a rule's "sui test water" is kept as written whether or
 // not this session defines it.
 void listColours(QComboBox* box, const katana::cad::Document* document)
 {

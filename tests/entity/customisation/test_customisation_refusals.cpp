@@ -147,7 +147,7 @@ TEST(CustomisationRefusals, ASurveyCodeFileInXmlIsNotAKatanaCustomisationFile)
 {
     const std::string xml = "<?xml version=\"1.0\"?>\n"
                             "<map_file><version>11.0</version>\n"
-                            "<map_data><item><key>WM*</key><model>SURVEY SERVICES</model>"
+                            "<map_data><item><key>WM*</key><model>TEST SERVICES</model>"
                             "<colour>blue</colour></item></map_data></map_file>\n";
     const Error plain = refusalOf(xml);
     EXPECT_EQ(plain.code, ErrorCode::ParseFailure);
@@ -163,8 +163,8 @@ TEST(CustomisationRefusals, ASurveyCodeFileInXmlIsNotAKatanaCustomisationFile)
 TEST(CustomisationRefusals, AStyleLibraryInItsOwnTextIsNotAKatanaCustomisationFile)
 {
     const Error error = refusalOf("// a linestyle library\n"
-                                  "worldstyle \"WATR Main\" {\n"
-                                  "    group \"Survey/WATR\"\n"
+                                  "worldstyle \"TEST Water Main\" {\n"
+                                  "    group \"Test/Water\"\n"
                                   "    length 2.5\n"
                                   "    move 0 0\n"
                                   "    draw 1.5 0\n"
@@ -393,7 +393,7 @@ TEST(CustomisationRefusals, AnUnknownMemberIsRefusedAtEveryLevelNamingTheEntry)
         {R"("symbols": [{"name": "V", "strokes": [["move", 0, 0], ["text", {"hieght": 1}]]}])",
          R"(symbols[0] "V" strokes[1])", "hieght"},
         {R"("codes": [{"key": "A", "sets": "feature"},
-                      {"key": "WM*", "sets": "feature", "linesytle": "WATR Main"}])",
+                      {"key": "WM*", "sets": "feature", "linesytle": "TEST Water Main"}])",
          R"(codes[1] "WM*")", "linesytle"},
         {R"("codes": [{"key": "AC*", "sets": "symbol", "symbol": {"name": "P", "scale": 2}}])",
          R"(codes[0] "AC*" symbol)", "scale"},
@@ -429,7 +429,7 @@ TEST(CustomisationRefusals, AMemberOfTheOlderFormatsIsUnknownHere)
     // "model" is what a survey code file calls a rule's layer; the format's
     // word is "layer", and the old one is not quietly taken for it.
     const Error error = refusalOf(customisationWith(
-        R"("codes": [{"key": "WM*", "sets": "feature", "model": "SURVEY SERVICES"}])"));
+        R"("codes": [{"key": "WM*", "sets": "feature", "model": "TEST SERVICES"}])"));
     EXPECT_EQ(error.code, ErrorCode::ParseFailure);
     EXPECT_EQ(error.message, R"(codes[0] "WM*": unknown member "model")");
     // The refusal lists what the entry may hold, so the right word is at hand.

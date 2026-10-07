@@ -266,7 +266,7 @@ TEST(CustomisationHost, AFileThatIsNotThereOrIsNoCustomisationIsRefusedNamingThe
     // then which entry.
     const fs::path typo = scratch.write(
         "typo.json", R"({"format": "katana-customisation", "version": 1, "name": "T",
- "codes": [{"key": "WM*", "sets": "feature", "linesytle": "WATR Main"}]})");
+ "codes": [{"key": "WM*", "sets": "feature", "linesytle": "TEST Water Main"}]})");
     const auto strict = katana::cad::readCustomisationFile(typo);
     ASSERT_FALSE(strict.ok());
     EXPECT_EQ(strict.error().code, ErrorCode::ParseFailure);

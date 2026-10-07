@@ -105,7 +105,7 @@ inline constexpr std::string_view kSurveyStringProperty = "string";
 // The name first, because that is what the keys are written for: code "B" in
 // string "12" is "B12", which "B1*" answers and "B" never could. The code
 // alone second, so that numbering a string never LOSES a rule the code had -
-// an exact key "PABB" still answers PABB in string 3, whose name "PABB3" it
+// an exact key "PTBB" still answers PTBB in string 3, whose name "PABB3" it
 // does not match - and so that a code nobody wrote a rule for is reported
 // once, as itself, rather than once per string. For the same reason the code
 // is also the answer when the name's best rule is a prefix SHORTER than the

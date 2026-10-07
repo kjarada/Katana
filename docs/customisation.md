@@ -7,11 +7,10 @@ those IS and how a code is applied. This document is about the customisation
 as one thing: the value that holds one and the file that keeps it.
 
 Its first chapter, below, is the file format; its second, "The verbs", the
-commands that load, write, keep and edit a customisation; and its last is the
-converter that makes such a file from the older formats. The chapters on the
-customisation built into the program and on Settings are added by the work
-that builds them; until then `docs/survey_coding.md` describes what the
-program does today.
+commands that load, write, keep and edit a customisation; then "Settings and
+the kept customisation"; "The built-in", the customisation compiled into the
+program; and last the converter that makes such a file from the older
+formats.
 
 ## The format
 
@@ -56,10 +55,10 @@ and an attribute every code gets:
   "version": 1,
   "name": "Site",
   "colours": {
-    "sui water potable": "#0070FF"
+    "sui test water": "#0070FF"
   },
   "linestyles": [
-    {"name": "WATR Main", "group": "Survey/WATR", "units": "paper", "length": 12, "strokes": [
+    {"name": "TEST Water Main", "group": "Test/Water", "units": "paper", "length": 12, "strokes": [
       ["move", 0, 0],
       ["draw", 8, 0],
       ["move", 10, -0.75],
@@ -67,14 +66,14 @@ and an attribute every code gets:
     ]}
   ],
   "symbols": [
-    {"name": "CULT Bollard", "group": "Survey/CULT", "units": "paper", "strokes": [
+    {"name": "TEST Bollard", "group": "Test/Bollards", "units": "paper", "strokes": [
       ["circle", 0.75],
       ["dot", 0]
     ]}
   ],
   "codes": [
-    {"key": "WM*", "sets": "feature", "layer": "SURVEY SERVICES", "colour": "sui water potable", "draw": "line", "linestyle": "WATR Main"},
-    {"key": "AC*", "sets": "symbol", "symbol": {"name": "CULT Bollard"}},
+    {"key": "WM*", "sets": "feature", "layer": "TEST SERVICES", "colour": "sui test water", "draw": "line", "linestyle": "TEST Water Main"},
+    {"key": "AC*", "sets": "symbol", "symbol": {"name": "TEST Bollard"}},
     {"key": "*", "sets": "attributes", "attributes": [{"type": "text", "name": "Surveyed by"}]}
   ]
 }
@@ -276,7 +275,7 @@ with them was taken from:
 | `mode vertex`, of a definition | `at vertices` | drawn at each vertex of a string, not along it: `atVertices` |
 | `a vertex symbol`, where a text says what a name is | an `at vertices` symbol | the same definition, named as a thing |
 
-So `CODE EXPLAIN` answers `layer: SURVEY SERVICES  <- rule #0 WM* (feature)`,
+So `CODE EXPLAIN` answers `layer: TEST SERVICES  <- rule #0 WM* (feature)`,
 the lint's kind is `no layer` and its message `a feature rule with no layer`,
 the code list's last column is headed `surface`, and a symbol is `defined, at
 vertices` - in the reply and in the Survey Code Manager's explanation alike.
@@ -316,7 +315,7 @@ thing is then not what a person may type.
 **The older files keep their own words, with their own code.** A survey code
 file is still read and written with `<map_data>` and a style library with
 `worldstyle`; those words are in a table beside that reader and writer
-(`src/katana_archive12d/customisation_words.hpp`), in both directions. The
+(`src/katana_archive12d/legacy/customisation_words.hpp`), in both directions. The
 three functions that held them in the entity layer for the files' sake - the
 parse of a section's element, and a definition's kind word both ways - are
 gone from it: their only callers were those readers and writers.
@@ -377,7 +376,7 @@ holds for which of two unknown members is the one named.
 **Why strict.** A customisation is edited by hand, and the two mistakes a
 lenient reader hides are the two a person makes:
 
-- A misspelt member. Skipped, `"linesytle": "WATR Main"` is a rule that
+- A misspelt member. Skipped, `"linesytle": "TEST Water Main"` is a rule that
   silently draws no linestyle. Worse, the program writes a customisation back
   - a copy kept for the user, an export - and the member it skipped is not in
   what it writes: the typo, and with it the intent, is gone.
@@ -674,7 +673,7 @@ as well as the archive's own, and two functions of one signature make that
 call ambiguous in any file that sees both headers; one function found twice
 does not.
 
-**A customisation's own table**, `colours`: `"sui electricity": "#FF7F00"`. A
+**A customisation's own table**, `colours`: `"sui test power": "#FF7F00"`. A
 colour is `#RRGGBB`, or `#RRGGBBAA` with an opacity, in either case of digit;
 it is written in upper case. `entity::ColourTable` refuses
 
@@ -1701,13 +1700,96 @@ Not done:
   to Kept): the same lines typed are still run, and the manager's log says
   the rules changed under it.
 
+## The built-in
+
+The customisation a program starts with is COMPILED INTO it: one Katana
+customisation file, embedded in `katana_cad` with `#embed`
+(`src/katana_cad/customisation/builtin_customisation.cpp`), as the plot frame
+is, and parsed once at first use by `cad::compiledInCustomisation()`. Nothing
+is found, loaded or configured at run time, nothing is installed beside the
+program, and no program reads a file of another program's format. Every front
+end hands it over as the host's built-in, and `startCustomisation` installs it
+unless the user has kept a customisation of their own ("What katana_cli and
+katana_mcp start with"; `docs/desktop.md`, "How the window starts").
+
+### Where it comes from
+
+Two CMake variables and one environment variable say what it is:
+
+| | What it is | Default |
+|---|---|---|
+| `KATANA_BUILTIN_CUSTOMISATION` (CMake, FILEPATH) | the Katana customisation file compiled in. Present at configure time it is embedded; absent, the program has NO built-in - a state it runs in, not a fault. Whether it is there is asked of the file, not of a glob, so a checkout under a directory with `[` in its name still has it; a `CONFIGURE_DEPENDS` glob over the path remains, so a file put there after the configure is found by the next build | `resources/customisation/nsw.customisation.json`, git-ignored |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` (CMake, option) | its absence is a configure error, for a release job that must not ship drawing plain lines | `OFF` |
+| `KATANA_REFERENCE_CUSTOMISATION_DIR` (CMake, PATH) | where the reference customisation is kept in the legacy formats. It is NOT what is compiled in: the converter reads it and the legacy readers' own tests do, and the program never does | the git-ignored reference folder under `docs/` |
+
+The file is made once, by the owner, on the machine that has the reference
+files, with `katana_customisation_convert` ("The reference customisation",
+below, has the command), and kept where `KATANA_BUILTIN_CUSTOMISATION` finds
+it. Both folders are git-ignored; `docs/building.md`, "The built-in
+customisation and the reference folder", has how a build is pointed at another.
+There is no script: the build needs nothing but the compiler, where the
+embedding this replaced ran Python over a folder of four files on every build.
+
+### The seam
+
+The environment variable `KATANA_BUILTIN_CUSTOMISATION` (the same name, read by
+the program and not by CMake) says what "the built-in" is for ONE run, whatever
+was compiled in: unset or empty, the compiled-in one; `none`, no built-in; a
+file name, that Katana customisation file IS the built-in. It is read in one
+place, `cad::builtInCustomisation()`, which is what a front end asks for its
+host - never `compiledInCustomisation()`, which ignores it. A file the seam
+names that does not read gives NO built-in and the reason, never the
+compiled-in one in its place, which would pass a test that named a fixture and
+was given something else. It exists so that a test of a program is the same
+test on a machine whose build has the built-in and on one whose build has not:
+the suite gives every program test `none` unless it names a committed fixture
+(`docs/headless.md`, "The customisation a run starts with"; the deferred scan
+of `tests/CMakeLists.txt` and `tools/check_program_tests.cmake`).
+
+### Why it is not in the repository
+
+It is made from third-party material under its author's own licence, and the
+two libraries it comes from carry a notice against copying or use without
+authorisation, so neither those files nor the file made from them is
+committed, installed or generated into the tree: `.gitignore` says so, and the
+install check refuses an install from `resources/customisation` or `docs`. The
+notice is carried INSIDE the converted file (`notice`), shown to whoever uses
+it. A checkout therefore builds a program with no built-in, and that is the
+normal case - every CI build and every clone - not a fault: it draws plain
+lines, says so, and every test that needs the data skips. How the file reaches
+a RELEASE build is the owner's decision and is not made here: until it is, a
+release is built without it unless the job is given the file, and
+`KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes the job fail rather than ship
+without one. *Rejected: committing the converted file* (the licence says no,
+and a file in the repository cannot be taken back); *rejected: generating it
+at build time from the reference files* (the reference files would then be an
+input of every build, and Python a requirement of it).
+
+### What holds the product to it
+
+- `BuiltInCensus.*` (`tests/cad/customisation/test_builtin_census.cpp`): when
+  the compiled-in customisation is named "NSW", it holds the census figures -
+  792 definitions (471 symbols and 321 linestyles), 155 at vertices, 71 groups,
+  35,692 strokes, 1,624 rules in 632 distinct keys, 7 colours, 5 names no
+  library defines - counted by `tools/customisation_census.py` over the file
+  and by `tools/reference_census.py` over the four files it was converted from.
+  No name of the data is in a tracked file: counts only.
+- `BuiltInRenames.*` (`test_builtin_renames.cpp`): the names a project saved
+  before the built-in was one customisation recorded are answered by its name,
+  against a committed fixture and against the compiled-in file.
+- No program holds the readers of the older formats: the test
+  `the_programs_link_none_of_the_legacy_customisation_readers` walks the link
+  closure of `katana`, `katana_cli` and `katana_mcp`, and the install check
+  allows those three programs and no other (`docs/testing.md`, "What the
+  programs hold"). Each is proved on a fixture.
+
 ## Converting a customisation from the legacy formats
 
 The Katana customisation format is the ONE format a customisation is read
-in. Since 2026-10-07 no front end reads the older ones: `CUSTOMISE` refuses a
-survey code file or a style library as `not a Katana customisation file`
-("The verbs", above), and their readers stay, for this converter and their
-own tests, until the work that takes them out of the product. A customisation
+in. No front end reads the older ones: `CUSTOMISE` refuses a survey code file
+or a style library as `not a Katana customisation file` ("The verbs", above),
+and their readers are in the converter's library, which no program links (see
+"The built-in", below, for how that is held). A customisation
 kept in the older formats - style libraries (`.4d`) and survey code files
 (`.mapfile`) - is turned into the Katana format once, by a developer, with
 `katana_customisation_convert`:
@@ -1724,10 +1806,12 @@ everything else, so that it cannot rot unseen, but it is never installed
 (`cmake/KatanaPackaging.cmake` installs three programs by name) and none of
 `katana`, `katana_cli` and `katana_mcp` links it: what it does is a static
 library of its own, `katana_legacy_customisation`
-(`src/katana_archive12d/legacy/convert.hpp`, `convert.cpp`), which only the
-program (`convert_main.cpp`, beside them) and the archive module's tests
-link. The library publishes that one directory, so the two include
-`convert.hpp` and the module's private headers stay private. The program reads
+(`src/katana_archive12d/legacy/convert.hpp`, `convert.cpp`, and the readers and
+writers of the older formats beside them), which only the program
+(`convert_main.cpp`) and the archive module's tests link. The library publishes
+that one directory, so the tests include `convert.hpp`, `style_library.hpp`
+and the others by their bare names, and the archive module's own private
+headers (its lexer and text utilities, which the readers share) stay private. The program reads
 its command line and nothing more, so everything below is tested as functions
 (`tests/archive12d/customisation/test_convert.cpp`):
 
@@ -1740,8 +1824,7 @@ std::string              toText(const ConvertReport& report);
 The first takes files as bytes, the second by path - it reads them, converts
 and writes `-o` - and a `Conversion` is the `entity::Customisation`, its text
 as `entity::customisationToJson` writes it, and a report. The readers of the
-older formats are still in `katana_archive12d`, which the library links; they
-are to move into that directory when they leave the product. One of them
+older formats are in that directory and library; one of them
 gained one thing to say for the converter: `StyleLibraryRead::
 replacedDefinitions`, each definition a library replaced AS IT WAS, where the
 reader used to give a count and nothing else.

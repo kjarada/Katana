@@ -275,7 +275,7 @@ std::string surveyLookupName(const katana::entity::SurveyMap& map, std::string_v
     }
     // The best rule for the name. An exact key, or a prefix as long as the
     // code or longer ("KJ*" for KJ, "B1*" for B), was written for the
-    // numbered names of this code. A SHORTER prefix ("PA*" for PABB) is a
+    // numbered names of this code. A SHORTER prefix ("PA*" for PTBB) is a
     // rule for a family of codes: it answers the code itself too, and less
     // well than an exact key the code has of its own - which the number must
     // not take the code away from.

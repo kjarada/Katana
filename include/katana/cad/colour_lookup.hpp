@@ -6,7 +6,7 @@
 // name their colour. ONE resolver answers for a Document: its customisation's
 // own table, then the standard names (entity::resolveColour). The standard
 // names were once a table cad could not see, so each front end handed cad a
-// function of its own - and a customisation's names ("sui water potable")
+// function of its own - and a customisation's names ("sui test water")
 // resolved nowhere at all.
 
 #include <functional>

@@ -414,7 +414,7 @@ Customisation fieldCompleteCustomisation()
     add(customisation,
         ruleWithEveryField("LP*", SurveySection::StringAttribute, SurveyBreakline::Line, 0));
     add(customisation,
-        ruleWithEveryField("PNAL", SurveySection::VertexAttribute, SurveyBreakline::Line, 1));
+        ruleWithEveryField("ZPNL", SurveySection::VertexAttribute, SurveyBreakline::Line, 1));
     add(customisation, ruleWithEveryField("TN*", SurveySection::Tinable, SurveyBreakline::Line, 2));
 
     // Optionals that are present and say nothing: not the same as absent.
@@ -667,10 +667,10 @@ TEST(CustomisationFormat, TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted)
   "version": 1,
   "name": "Site",
   "colours": {
-    "sui water potable": "#0070FF"
+    "sui test water": "#0070FF"
   },
   "linestyles": [
-    {"name": "WATR Main", "group": "Survey/WATR", "units": "paper", "length": 12, "strokes": [
+    {"name": "TEST Water Main", "group": "Test/Water", "units": "paper", "length": 12, "strokes": [
       ["move", 0, 0],
       ["draw", 8, 0],
       ["move", 10, -0.75],
@@ -678,14 +678,14 @@ TEST(CustomisationFormat, TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted)
     ]}
   ],
   "symbols": [
-    {"name": "CULT Bollard", "group": "Survey/CULT", "units": "paper", "strokes": [
+    {"name": "TEST Bollard", "group": "Test/Bollards", "units": "paper", "strokes": [
       ["circle", 0.75],
       ["dot", 0]
     ]}
   ],
   "codes": [
-    {"key": "WM*", "sets": "feature", "layer": "SURVEY SERVICES", "colour": "sui water potable", "draw": "line", "linestyle": "WATR Main"},
-    {"key": "AC*", "sets": "symbol", "symbol": {"name": "CULT Bollard"}},
+    {"key": "WM*", "sets": "feature", "layer": "TEST SERVICES", "colour": "sui test water", "draw": "line", "linestyle": "TEST Water Main"},
+    {"key": "AC*", "sets": "symbol", "symbol": {"name": "TEST Bollard"}},
     {"key": "*", "sets": "attributes", "attributes": [{"type": "text", "name": "Surveyed by"}]}
   ]
 }
@@ -695,25 +695,25 @@ TEST(CustomisationFormat, TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted)
 
     // What the example says, in the model's terms.
     EXPECT_EQ(read.name, "Site");
-    EXPECT_EQ(read.colours.find("SUI Water Potable"), (Color{0x00, 0x70, 0xFF, 255}));
-    ASSERT_NE(read.library.find("WATR Main"), nullptr);
-    EXPECT_FALSE(read.library.find("WATR Main")->symbol);
-    EXPECT_EQ(read.library.find("WATR Main")->units, StyleUnits::Paper);
-    EXPECT_EQ(read.library.find("WATR Main")->length, 12.0);
-    ASSERT_EQ(read.library.find("WATR Main")->texts.size(), 1u);
-    EXPECT_EQ(read.library.find("WATR Main")->texts[0].text, "W");
-    ASSERT_NE(read.library.find("CULT Bollard"), nullptr);
-    EXPECT_TRUE(read.library.find("CULT Bollard")->symbol);
+    EXPECT_EQ(read.colours.find("sui test water"), (Color{0x00, 0x70, 0xFF, 255}));
+    ASSERT_NE(read.library.find("TEST Water Main"), nullptr);
+    EXPECT_FALSE(read.library.find("TEST Water Main")->symbol);
+    EXPECT_EQ(read.library.find("TEST Water Main")->units, StyleUnits::Paper);
+    EXPECT_EQ(read.library.find("TEST Water Main")->length, 12.0);
+    ASSERT_EQ(read.library.find("TEST Water Main")->texts.size(), 1u);
+    EXPECT_EQ(read.library.find("TEST Water Main")->texts[0].text, "W");
+    ASSERT_NE(read.library.find("TEST Bollard"), nullptr);
+    EXPECT_TRUE(read.library.find("TEST Bollard")->symbol);
     // A water main: WM01 goes on its layer, as a line, in its linestyle; and
     // the `*` rule's attribute reaches it too.
     const auto waterMain = read.map.lookup("WM01");
-    EXPECT_EQ(waterMain.resolved.model, "SURVEY SERVICES");
+    EXPECT_EQ(waterMain.resolved.model, "TEST SERVICES");
     EXPECT_EQ(waterMain.resolved.breakline, SurveyBreakline::Line);
-    EXPECT_EQ(waterMain.resolved.linestyle, "WATR Main");
+    EXPECT_EQ(waterMain.resolved.linestyle, "TEST Water Main");
     ASSERT_EQ(waterMain.resolved.attributes.size(), 1u);
     EXPECT_EQ(waterMain.resolved.attributes[0].name, "Surveyed by");
     ASSERT_TRUE(read.map.lookup("AC3").resolved.symbol.has_value());
-    EXPECT_EQ(read.map.lookup("AC3").resolved.symbol->style, "CULT Bollard");
+    EXPECT_EQ(read.map.lookup("AC3").resolved.symbol->style, "TEST Bollard");
 }
 
 TEST(CustomisationFormat, TextIsEscapedAsJsonAndNothingElseIs)

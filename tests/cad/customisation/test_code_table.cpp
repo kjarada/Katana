@@ -63,7 +63,7 @@ SurveyRule vertexSymbol(std::string key, std::string style, double size, std::st
 //   3  2*   feature: another, cyan
 //   4  WM*  feature: a real linestyle, a colour Katana does not know
 //   5  WM*  attributes: an attribute naming another ($)
-//   6  PABB feature: an exact key, a linestyle no library here defines
+//   6  PTBB feature: an exact key, a linestyle no library here defines
 //   7  *    attributes: every code gets it
 //   8-11 *  pipe: the reference files carry sixteen of these in each
 //           pipe section, identical but for the DepthLocation they give
@@ -74,10 +74,10 @@ SurveyMap referenceShapes()
     bollard.group = "SURVEY - CULT";
     bollard.comment = "[AC*] Bollard";
     EXPECT_TRUE(map.add(bollard).ok());
-    EXPECT_TRUE(map.add(vertexSymbol("AC*", "CULT Bollard", 1.5)).ok());
-    EXPECT_TRUE(map.add(mapData("1*", "SURVEY TEXT", "yellow", "0")).ok());
-    EXPECT_TRUE(map.add(mapData("2*", "SURVEY TEXT", "cyan", "0")).ok());
-    SurveyRule main = mapData("WM*", "SURVEY SERVICES", "sui water potable", "WATR Main");
+    EXPECT_TRUE(map.add(vertexSymbol("AC*", "TEST Bollard", 1.5)).ok());
+    EXPECT_TRUE(map.add(mapData("1*", "SURVEY LABELS", "yellow", "0")).ok());
+    EXPECT_TRUE(map.add(mapData("2*", "SURVEY LABELS", "cyan", "0")).ok());
+    SurveyRule main = mapData("WM*", "SURVEY PIPEWORK", "sui test water", "TEST Water Main");
     main.breakline = katana::entity::SurveyBreakline::Line;
     main.group = "SURVEY - WATR";
     main.comment = "[WM*] Main";
@@ -88,7 +88,7 @@ SurveyMap referenceShapes()
     diameter.attributes = {{"text", "Diameter", "$PipeDiameter"}};
     EXPECT_TRUE(map.add(diameter).ok());
     EXPECT_TRUE(
-        map.add(mapData("PABB", "SURVEY DETAIL", "Green", "TOPO Timber or Scrub Scattered")).ok());
+        map.add(mapData("PTBB", "SURVEY DETAIL", "Green", "TEST Scrub Scattered")).ok());
     SurveyRule zone;
     zone.key = "*";
     zone.section = SurveySection::StringAttribute;
@@ -122,11 +122,11 @@ LineStyle definition(std::string name, bool atVertices, std::string source, bool
 katana::entity::StyleLibrary library()
 {
     katana::entity::StyleLibrary library;
-    for (LineStyle style : {definition("CULT Bollard", true, "symbols_test.4d", true),
-                            definition("WATR Main", false, "linestyles_test.4d"),
+    for (LineStyle style : {definition("TEST Bollard", true, "symbols_test.4d", true),
+                            definition("TEST Water Main", false, "linestyles_test.4d"),
                             // Not `mode vertex`, but listed as a symbol: a
                             // symbol all the same (decision D3).
-                            definition("SEWR Manhole Cover", false, "symbols_test.4d", true),
+                            definition("TEST Manhole Cover", false, "symbols_test.4d", true),
                             // Made in a session: it names no customisation,
                             // and nothing lists it as a symbol.
                             definition("MYST Thing", false, "")}) {
@@ -135,7 +135,7 @@ katana::entity::StyleLibrary library()
     return library;
 }
 
-// A colour table of the test's own; "sui water potable" is unknown to it, as
+// A colour table of the test's own; "sui test water" is unknown to it, as
 // it is to Katana.
 std::optional<Color> testColour(std::string_view name)
 {
@@ -198,7 +198,7 @@ TEST(ExplainCode, EachFieldNamesTheRuleItCameFromMostSpecificFirst)
         {"linestyle", "0", 0, SurveySection::Map},
         {"group", "SURVEY - CULT", 0, SurveySection::Map},
         {"comment", "[AC*] Bollard", 0, SurveySection::Map},
-        {"symbol", "CULT Bollard, size 1.5", 1, SurveySection::VertexSymbol},
+        {"symbol", "TEST Bollard, size 1.5", 1, SurveySection::VertexSymbol},
         {"pipe", "diameter $PipeDiameter, Obvert", 8, SurveySection::Pipe},
     };
     for (std::size_t i = 0; i < expected.size(); ++i) {
@@ -211,7 +211,7 @@ TEST(ExplainCode, EachFieldNamesTheRuleItCameFromMostSpecificFirst)
 
     EXPECT_TRUE(why.linestyle.plain) << "\"0\" is the plain continuous line";
     EXPECT_FALSE(why.linestyle.defined);
-    EXPECT_EQ(why.symbol.name, "CULT Bollard");
+    EXPECT_EQ(why.symbol.name, "TEST Bollard");
     EXPECT_TRUE(why.symbol.defined);
     EXPECT_TRUE(why.symbol.vertexMode);
     ASSERT_TRUE(why.colour.rgb.has_value());
@@ -234,11 +234,11 @@ TEST(ExplainCode, ALinestyleIsResolvedAColourUnknownByNameAndADollarValueIsDefer
     const SurveyMap map = referenceShapes();
     const CodeExplanation why = explain(map, "WM01");
     EXPECT_EQ(why.rules, (std::vector<std::size_t>{4, 5, 7, 8, 9, 10, 11}));
-    EXPECT_EQ(why.linestyle.name, "WATR Main");
+    EXPECT_EQ(why.linestyle.name, "TEST Water Main");
     EXPECT_FALSE(why.linestyle.plain);
     EXPECT_TRUE(why.linestyle.defined);
     EXPECT_FALSE(why.linestyle.vertexMode);
-    EXPECT_EQ(why.colour.name, "sui water potable");
+    EXPECT_EQ(why.colour.name, "sui test water");
     EXPECT_FALSE(why.colour.rgb.has_value()) << "an unknown name, not a guessed colour";
     ASSERT_EQ(why.attributes.size(), 3u);
     EXPECT_EQ(why.attributes[0].attribute.name, "Diameter");
@@ -269,7 +269,7 @@ TEST(ExplainCode, TwoTextCodesOnLinestyleZeroDifferOnlyInColour)
 TEST(ExplainCode, AnExactKeyIsExactAndACodeOnlyTheStarAnswersIsFallbackOnly)
 {
     const SurveyMap map = referenceShapes();
-    const CodeExplanation exact = explain(map, "PABB");
+    const CodeExplanation exact = explain(map, "PTBB");
     EXPECT_EQ(exact.kind, SurveyMatchKind::Exact);
     EXPECT_TRUE(exact.matched);
     EXPECT_FALSE(exact.linestyle.defined) << "no library here defines it";
@@ -303,9 +303,9 @@ TEST(ExplainCode, AKeyMissedOnlyByCaseOrByBlanksIsNamedAsANearMiss)
     EXPECT_EQ(padded.nearMisses[0].key, "WM*");
     EXPECT_EQ(padded.nearMisses[0].kind, NearMissKind::Whitespace);
 
-    const CodeExplanation exact = explain(map, "Pabb");
+    const CodeExplanation exact = explain(map, "Ptbb");
     ASSERT_EQ(exact.nearMisses.size(), 1u);
-    EXPECT_EQ(exact.nearMisses[0].key, "PABB");
+    EXPECT_EQ(exact.nearMisses[0].key, "PTBB");
     EXPECT_EQ(exact.nearMisses[0].kind, NearMissKind::Case);
 }
 
@@ -328,7 +328,7 @@ TEST(ExplainCode, ALaterRuleSayingSomethingElseIsShownAsOverruled)
     // prefix can disagree with a longer one. A later rule saying the SAME is
     // not shown: nothing was decided against it.
     SurveyMap map;
-    SurveyRule shown = vertexSymbol("AC*", "CULT Bollard", 1.5);
+    SurveyRule shown = vertexSymbol("AC*", "TEST Bollard", 1.5);
     shown.hide = false;
     SurveyRule hidden = shown;
     hidden.hide = true;
@@ -346,8 +346,8 @@ TEST(ExplainCode, ALaterRuleSayingSomethingElseIsShownAsOverruled)
               "    overruled: red  <- rule #2 A* (feature)\n"
               "  hide: no  <- rule #0 AC* (symbol)\n"
               "    overruled: yes  <- rule #1 AC* (symbol)\n"
-              "  symbol: CULT Bollard, size 1.5  <- rule #0 AC* (symbol)\n"
-              "  symbol \"CULT Bollard\": defined, at vertices\n"
+              "  symbol: TEST Bollard, size 1.5  <- rule #0 AC* (symbol)\n"
+              "  symbol \"TEST Bollard\": defined, at vertices\n"
               "  colour \"white\": #FFFFFF\n");
 }
 
@@ -377,10 +377,10 @@ TEST(CodeTable, HasOneRowPerDistinctKeyInKeyOrderWithItsRulesAndSections)
     // Combined as a code the key catches: its own rules, then `*`.
     EXPECT_EQ(bollard.combined.model, "SURVEY DETAIL");
     ASSERT_TRUE(bollard.combined.symbol.has_value());
-    EXPECT_EQ(bollard.combined.symbol->style, "CULT Bollard");
+    EXPECT_EQ(bollard.combined.symbol->style, "TEST Bollard");
     EXPECT_TRUE(bollard.combined.pipe.has_value()) << "the `*` pipe row reaches it too";
 
-    EXPECT_EQ(rows[4].key, "PABB");
+    EXPECT_EQ(rows[4].key, "PTBB");
     EXPECT_EQ(rows[4].kind, SurveyMatchKind::Exact);
     EXPECT_EQ(rows[5].key, "WM*");
     EXPECT_EQ(rows[5].rules, (std::vector<std::size_t>{4, 5}));
@@ -399,12 +399,12 @@ TEST(CodeTable, AFilterFoldsCaseAndSearchesKeyCommentGroupModelColourLinestyleAn
         return keys;
     };
     EXPECT_EQ(keysMatching("bollard"), (std::vector<std::string>{"AC*"}));
-    EXPECT_EQ(keysMatching("survey text"), (std::vector<std::string>{"1*", "2*"}));
+    EXPECT_EQ(keysMatching("survey labels"), (std::vector<std::string>{"1*", "2*"}));
     // Every row but `*`, which has no model, group or comment of its own.
-    EXPECT_EQ(keysMatching("SURVEY"), (std::vector<std::string>{"1*", "2*", "AC*", "PABB", "WM*"}));
-    EXPECT_EQ(keysMatching("pabb"), (std::vector<std::string>{"PABB"}));
+    EXPECT_EQ(keysMatching("SURVEY"), (std::vector<std::string>{"1*", "2*", "AC*", "PTBB", "WM*"}));
+    EXPECT_EQ(keysMatching("ptbb"), (std::vector<std::string>{"PTBB"}));
     EXPECT_EQ(keysMatching("cyan"), (std::vector<std::string>{"2*"}));
-    EXPECT_EQ(keysMatching("watr main"), (std::vector<std::string>{"WM*"}));
+    EXPECT_EQ(keysMatching("test water main"), (std::vector<std::string>{"WM*"}));
     EXPECT_EQ(keysMatching("").size(), 6u);
 }
 
@@ -427,7 +427,7 @@ TEST(CodeCensus, CountsEachDistinctCodeAndClassesItAgainstTheMap)
     // "101" < "AC01" < "ZZ99".
     EXPECT_EQ(census.codes[0].code, "101");
     EXPECT_EQ(census.codes[0].entities, 1u);
-    EXPECT_EQ(census.codes[0].model, "SURVEY TEXT");
+    EXPECT_EQ(census.codes[0].model, "SURVEY LABELS");
     EXPECT_EQ(census.codes[1].code, "AC01");
     EXPECT_EQ(census.codes[1].entities, 2u);
     EXPECT_EQ(census.codes[1].kind, SurveyMatchKind::Prefix);
@@ -437,7 +437,7 @@ TEST(CodeCensus, CountsEachDistinctCodeAndClassesItAgainstTheMap)
     EXPECT_FALSE(census.codes[2].matched);
 
     const std::string expected = "4 entities carry a code in \"code\", 3 distinct codes\n"
-                                 "  101: 1, prefix, matched, layer SURVEY TEXT\n"
+                                 "  101: 1, prefix, matched, layer SURVEY LABELS\n"
                                  "  AC01: 2, prefix, matched, layer SURVEY DETAIL\n"
                                  "  ZZ99: 1, fallback only, not matched\n";
     EXPECT_EQ(katana::cad::formatCodeCensus(census), expected);
@@ -455,7 +455,7 @@ TEST(CodeCensus, FindsCodesAnImportLeftInMetadata)
     EXPECT_EQ(census.property, "12d.name");
     ASSERT_EQ(census.codes.size(), 1u);
     EXPECT_EQ(census.codes[0].code, "WM01");
-    EXPECT_EQ(census.codes[0].model, "SURVEY SERVICES");
+    EXPECT_EQ(census.codes[0].model, "SURVEY PIPEWORK");
 }
 
 // ---- what is wrong with a map -----------------------------------------------------
@@ -483,7 +483,7 @@ TEST(LintSurveyMap, FindsTheUnknownColourTheMissingLinestyleAndTheStarPipeRowsTh
     const auto issues =
         katana::cad::lintSurveyMap(referenceShapes(), library(), testColour, builtIn);
     // By hand, rule by rule: 0-3 are clean (linestyle "0" is plain, the
-    // bollard is defined). 4: "sui water potable" is not in the colour table.
+    // bollard is defined). 4: "sui test water" is not in the colour table.
     // 5 adds an attribute rule 4 does not give. 6: no library defines "TOPO
     // Timber or Scrub Scattered". 7 is the first `*`; 8 is the first to give
     // a pipe. 9, 10, 11 give a pipe and a DepthLocation, both of which 8
@@ -510,9 +510,9 @@ TEST(LintSurveyMap, JudgesSymbolsAndLinestylesByWhatTheDefinitionIs)
     noModel.key = "XX*";
     noModel.colour = "red";
     ASSERT_TRUE(map.add(noModel).ok());                                                     // 0
-    ASSERT_TRUE(map.add(mapData("BL*", "SURVEY DETAIL", "", "CULT Bollard")).ok());         // 1
-    ASSERT_TRUE(map.add(vertexSymbol("WV*", "WATR Main", 1.0)).ok());                       // 2
-    ASSERT_TRUE(map.add(vertexSymbol("SV*", "SEWR Manhole Cover", 1.0)).ok());              // 3
+    ASSERT_TRUE(map.add(mapData("BL*", "SURVEY DETAIL", "", "TEST Bollard")).ok());         // 1
+    ASSERT_TRUE(map.add(vertexSymbol("WV*", "TEST Water Main", 1.0)).ok());                       // 2
+    ASSERT_TRUE(map.add(vertexSymbol("SV*", "TEST Manhole Cover", 1.0)).ok());              // 3
     ASSERT_TRUE(map.add(vertexSymbol("CR*", "cross", 1.0)).ok());                           // 4
     ASSERT_TRUE(map.add(vertexSymbol("NS*", "NOPE Symbol", 1.0, "not a colour")).ok());     // 5
     ASSERT_TRUE(map.add(mapData("CL*", "SURVEY DETAIL", "", "Continuous")).ok());           // 6
@@ -549,7 +549,7 @@ TEST(LintSurveyMap, JudgesSymbolsAndLinestylesByWhatTheDefinitionIs)
     // It says where the definition is listed so, when the definition says
     // where it is from; one made in a session names no customisation.
     EXPECT_EQ(issues[2].message,
-              "symbol \"WATR Main\" is a linestyle from \"linestyles_test.4d\", not a symbol");
+              "symbol \"TEST Water Main\" is a linestyle from \"linestyles_test.4d\", not a symbol");
     EXPECT_EQ(issues[7].message, "symbol \"MYST Thing\" is a linestyle, not a symbol");
 
     // With no built-in test, "cross" is unresolved too; with no colour table
@@ -736,11 +736,11 @@ TEST(LintSurveyMap, ASymbolRuleThatAlsoNamesALayerIsWarnedOfOnceNamingEachStrayF
     // and a colour as well. A lookup applies both, so it is no error - but a
     // load that replaces this key's symbol rules takes the layer with them.
     SurveyMap map;
-    SurveyRule rule = vertexSymbol("BL*", "CULT Bollard", 1.5);
+    SurveyRule rule = vertexSymbol("BL*", "TEST Bollard", 1.5);
     rule.model = "SURVEY DETAIL";
     rule.colour = "white";
     ASSERT_TRUE(map.add(rule).ok());
-    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY SERVICES", "white", "WATR Main")).ok());
+    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY PIPEWORK", "white", "TEST Water Main")).ok());
 
     const auto issues = katana::cad::lintSurveyMap(map, library(), testColour, builtIn);
     const std::vector<std::pair<std::size_t, LintKind>> expected = {
@@ -781,13 +781,13 @@ TEST(LintSurveyRule, CatchesAKeyWithBlanksAndAModelThatCannotBeALayerBeforeTheMa
 TEST(LintSurveyMap, IsPrintedAsOneTextWithTheCounts)
 {
     SurveyMap map;
-    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY SERVICES", "sui water potable", "WATR Main")).ok());
+    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY PIPEWORK", "sui test water", "TEST Water Main")).ok());
     ASSERT_TRUE(map.add(mapData("AC*", "SURVEY DETAIL", "white", "0")).ok());
     const auto issues = katana::cad::lintSurveyMap(map, library(), testColour, builtIn);
     EXPECT_EQ(katana::cad::formatLint(issues, map.size()),
               "2 rules checked: 0 errors, 1 warning\n"
               "  by kind: 1 unknown colour\n"
-              "  rule #0 WM* (feature): warning, unknown colour: colour \"sui water potable\" "
+              "  rule #0 WM* (feature): warning, unknown colour: colour \"sui test water\" "
               "is not a colour name Katana knows, so the entity keeps its own\n");
     EXPECT_EQ(katana::cad::formatLint({}, 3), "3 rules checked: no problems found\n");
 }
@@ -797,7 +797,7 @@ TEST(LintSurveyMap, IsPrintedAsOneTextWithTheCounts)
 TEST(FormatCodingReport, SaysWhatHappenedOverallAndCodeByCode)
 {
     SurveyMap map;
-    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY SERVICES", "", "WATR Main")).ok());
+    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY PIPEWORK", "", "TEST Water Main")).ok());
     Document document;
     document.setSurveyMap(std::move(map));
     addCodedPoint(document, Point2(0, 0), "WM01");
@@ -809,28 +809,28 @@ TEST(FormatCodingReport, SaysWhatHappenedOverallAndCodeByCode)
     ASSERT_TRUE(command.ok());
     // By hand: three coded, the two WM01 matched by WM*, ZZ99 by nothing (no
     // `*` here). Both WM01 points move from layer "0" and get the new style;
-    // no library is loaded, so WATR Main is missing.
+    // no library is loaded, so TEST Water Main is missing.
     EXPECT_EQ(katana::cad::formatCodingReport(report),
               "3 entities carry a code in \"code\": 2 matched, 0 fallback-only (only the bare * "
               "rule answers), 1 with no rule\n"
               "2 entities changed\n"
-              "Layers created: SURVEY SERVICES\n"
-              "Styles created: WATR Main\n"
+              "Layers created: SURVEY PIPEWORK\n"
+              "Styles created: TEST Water Main\n"
               "Codes with no rule: ZZ99\n"
-              "Named but in no loaded library: WATR Main\n"
+              "Named but in no loaded library: TEST Water Main\n"
               "By code:\n"
-              "  WM01: 2 entities, prefix, matched; layer 0 -> SURVEY SERVICES; style WATR Main "
+              "  WM01: 2 entities, prefix, matched; layer 0 -> SURVEY PIPEWORK; style TEST Water Main "
               "(created); 2 changed\n"
               "  ZZ99: 1 entity, none, not matched; 0 changed\n");
 }
 
 TEST(FormatCodingReport, AnEntityThatKeptItsLayerIsNotShownMovingInItsCodesRow)
 {
-    // createLayers off and no SURVEY SERVICES layer: the WM01 point stays on
+    // createLayers off and no SURVEY PIPEWORK layer: the WM01 point stays on
     // "0" (audit CAD-18 keeps its style changing). Its row used to read
-    // "layer 0 -> SURVEY SERVICES" all the same.
+    // "layer 0 -> SURVEY PIPEWORK" all the same.
     SurveyMap map;
-    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY SERVICES", "", "WATR Main")).ok());
+    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY PIPEWORK", "", "TEST Water Main")).ok());
     Document document;
     document.setSurveyMap(std::move(map));
     const EntityId id = addCodedPoint(document, Point2(0, 0), "WM01");
@@ -844,18 +844,18 @@ TEST(FormatCodingReport, AnEntityThatKeptItsLayerIsNotShownMovingInItsCodesRow)
     ASSERT_TRUE(document.execute(std::move(*command)).ok());
     ASSERT_EQ(document.model().entities.find(id)->layer, "0") << "the premise: it did not move";
     // By hand: one coded, matched by WM*. It changes (its style), keeps
-    // layer "0" because SURVEY SERVICES does not exist, and no layer is
-    // created; the new style WATR Main is in no loaded library.
+    // layer "0" because SURVEY PIPEWORK does not exist, and no layer is
+    // created; the new style TEST Water Main is in no loaded library.
     EXPECT_EQ(katana::cad::formatCodingReport(report),
               "1 entity carries a code in \"code\": 1 matched, 0 fallback-only (only the bare * "
               "rule answers), 0 with no rule\n"
               "1 entity changed\n"
-              "Styles created: WATR Main\n"
+              "Styles created: TEST Water Main\n"
               "1 entity kept their layer: it does not exist and layers are not being created\n"
-              "Named but in no loaded library: WATR Main\n"
+              "Named but in no loaded library: TEST Water Main\n"
               "By code:\n"
-              "  WM01: 1 entity, prefix, matched; layer 0 kept: SURVEY SERVICES does not exist "
-              "and layers are not being created; style WATR Main (created); 1 changed\n");
+              "  WM01: 1 entity, prefix, matched; layer 0 kept: SURVEY PIPEWORK does not exist "
+              "and layers are not being created; style TEST Water Main (created); 1 changed\n");
 }
 
 TEST(FormatCoverage, NamesBuiltInShapesApartFromMissingNames)
@@ -887,25 +887,25 @@ TEST(FormatCoverage, ADrawingWithNoStylesIsToldTheWaysToGetOneWithoutBeingSentTo
 
 TEST(FormatCoverage, AVertexSymbolGivenAsALinetypeIsSaidToBeASymbolNotInNoLoadedLibrary)
 {
-    // The reviewer's case: an archive's `style "CULT Bollard"` on a line, where the
-    // loaded library defines CULT Bollard, but as a `mode vertex` symbol. The
+    // The reviewer's case: an archive's `style "TEST Bollard"` on a line, where the
+    // loaded library defines TEST Bollard, but as a `mode vertex` symbol. The
     // line draws solid (D2), and the fix is to pick a linestyle - so saying
     // the name is "in no loaded library" sent people looking for a library
     // that is already loaded.
     //
-    //   library  CULT Bollard  `mode vertex`  (the fixture's library())
-    //            WATR Main     a linestyle
-    //   styles   super  linetype CULT Bollard -> not a linestyle: drawn solid
-    //            pipe   linetype PABB Pipe    -> defined nowhere
-    //            water  linetype WATR Main    -> the library draws it
+    //   library  TEST Bollard  `mode vertex`  (the fixture's library())
+    //            TEST Water Main     a linestyle
+    //   styles   super  linetype TEST Bollard -> not a linestyle: drawn solid
+    //            pipe   linetype PTBB Pipe    -> defined nowhere
+    //            water  linetype TEST Water Main    -> the library draws it
     //
     // By hand: 3 styles; all three name a definition; water alone resolves
     // (1); none built in. One line each for the two reasons, in name order.
     Document document;
     document.setStyleLibrary(library());
-    for (const auto& [name, linetype] : {std::pair{"super", "CULT Bollard"},
-                                         std::pair{"pipe", "PABB Pipe"},
-                                         std::pair{"water", "WATR Main"}}) {
+    for (const auto& [name, linetype] : {std::pair{"super", "TEST Bollard"},
+                                         std::pair{"pipe", "PTBB Pipe"},
+                                         std::pair{"water", "TEST Water Main"}}) {
         katana::entity::Style style;
         style.name = name;
         style.linetype = linetype;
@@ -914,7 +914,7 @@ TEST(FormatCoverage, AVertexSymbolGivenAsALinetypeIsSaidToBeASymbolNotInNoLoaded
     EXPECT_EQ(katana::cad::formatCoverage(katana::cad::customisationCoverage(document)),
               "1 of this drawing's 3 styles are drawn with a loaded definition (3 name one; the "
               "rest are plain lines)\n"
-              "  1 name is in no loaded library: \"PABB Pipe\"\n"
+              "  1 name is in no loaded library: \"PTBB Pipe\"\n"
               "  1 name is loaded as an `at vertices` symbol, not a linestyle, so a linetype "
-              "naming it draws solid: \"CULT Bollard\"\n");
+              "naming it draws solid: \"TEST Bollard\"\n");
 }
