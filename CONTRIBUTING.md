@@ -5,7 +5,31 @@ Humans and AI agents are both welcome. This page is the README's
 full contract, and where the two differ, `CLAUDE.md` wins. `docs/index.md` says
 which document covers which part of the code.
 
-Licence: see the [README](README.md#licence).
+Licence: see the [README](README.md#licence). There is no `LICENSE` file yet.
+
+## Your first hour
+
+1. **Build once.** [README, Quick start](README.md#quick-start) has the
+   packages and the commands. The first build is the slow part (about 19
+   minutes on a 24-thread machine, measured on 2026-09-29), so to build only
+   the modules you will touch, add a `KATANA_MODULE_FILTER` to the configure
+   line; the README shows the exact option and what it costs
+   (`docs/building.md`, "Options").
+2. **Run something.** [README, Try it](README.md#try-it) runs a command line, a
+   screenshot and the tests. `ctest --test-dir build/release -R <name>` runs the
+   tests whose names match.
+3. **Pick a task.** [README, Where to start](README.md#where-to-start) lists
+   five that were real on 2026-10-08, from one line of code to a large gap. To
+   find more, read the "Not done" list at the end of the document for the area
+   you care about (`docs/index.md` says which document that is). No survey
+   knowledge is needed for the build, packaging, window usability, tests or
+   documents.
+4. **Change it the way the checklists below say**, and open a pull request
+   against `main`. A small change can go straight to a pull request; for
+   anything large, open an issue first so the design is agreed.
+
+Questions go in an issue. Issues are enabled on the repository; Discussions are
+not.
 
 ## Before you start
 
@@ -15,13 +39,18 @@ Licence: see the [README](README.md#licence).
       the work is done.
 - [ ] Do not add third-party reference data to the repository: style libraries,
       survey code files or schemas that came under someone else's licence. Test
-      fixtures use invented names.
+      fixtures use invented names. One tracked file is an exception, the
+      built-in customisation `resources/customisation/nsw.customisation.json`,
+      kept on the owner's decision of 2026-10-08 with no permission recorded
+      (README, [Licence](README.md#licence)). It is not a precedent.
 - [ ] Do not use the names that `CLAUDE.md` section 9 lists (the "Names" rule)
       in new identifiers, UI text, docs or commit messages.
 
 ## Build
 
-- [ ] Toolchains, presets and options: `docs/building.md`. In short:
+- [ ] The packages you need are in the README's
+      [Quick start](README.md#quick-start). Toolchains, presets and options:
+      `docs/building.md`. In short:
 
   ```sh
   cmake --preset release                       # build/release
@@ -77,7 +106,10 @@ Licence: see the [README](README.md#licence).
     structured data.
 - [ ] Any tool that reads or changes drawing data takes the shared scope
       (selection, view, layers, drawing, area) and filter. Do not write a second
-      scope parser; extend `cad::matchEntities`.
+      scope parser; extend `cad::matchEntities`. This is the rule: `MODIFY`,
+      `CODE`, `LINEWORK` and the `UTILITY` verbs take it today, and older verbs
+      such as `ERASE` and `SELECT` do not yet (`docs/cad.md`, "Scope and
+      filter").
 - [ ] Edits go through one door: an undoable command, never code in a widget.
       One user edit is one undo step.
 - [ ] Replies are `key=value` records, one per line. Failures are
