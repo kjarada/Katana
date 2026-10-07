@@ -2,7 +2,8 @@
 // the menu and toolbar it fills, the three managers it opens - non-modal, one
 // of each, kept between uses and deleted before the Document - the context it
 // builds them from, and Purge Unused. Driven through its QActions, as a click
-// on the menu drives it.
+// on the menu drives it. And File > Settings, whose action and one dialog are
+// the workbench's too (the last section).
 //
 // The customisation the managers open on is the three hand-written fixtures of
 // tests/data/customisation, loaded by the CUSTOMISE line as a person loads
@@ -29,7 +30,10 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QDir>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -37,6 +41,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QToolBar>
@@ -46,6 +51,7 @@
 #include "customisation/customisation_context.hpp"
 #include "customisation/customisation_workbench.hpp"
 #include "customisation/definition_editor.hpp"
+#include "customisation/settings_dialog.hpp"
 #include "customisation/symbol_library.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/customisation_host.hpp"
@@ -654,6 +660,13 @@ struct KeptBench {
             return outcome;
         };
         services.hasKeptFile = [withKeptFile] { return withKeptFile; };
+        // The host's two facts as the window tells them: the built-in this
+        // session started from, and the kept file's path as text, with '/'.
+        services.hasBuiltIn = [] { return true; };
+        services.keptFile = [this, withKeptFile] {
+            return withKeptFile ? folder.path() + QStringLiteral("/customisation.json")
+                                : QString();
+        };
         bench = std::make_unique<CustomisationWorkbench>(window, std::move(services), *menu, *bar);
     }
 
@@ -774,4 +787,170 @@ TEST(CustomisationWorkbench, WithNoKeptFileAnEditorsCommitRunsNoLineAndLogsNoRef
     for (const QString& line : bench.log) {
         EXPECT_FALSE(line.contains(QStringLiteral("KEEP"))) << line.toStdString();
     }
+}
+
+// ---- File > Settings: the workbench's action and its one dialog ---------------------------
+//
+// The item is File's, but the action and the dialog are made and kept here
+// (customisation_workbench.hpp), so that Settings is given what only the
+// workbench knows - whether the Survey Code Manager holds unapplied edits, and
+// how to open the editors - beside what the window tells it: the executor,
+// the log and its host's built-in and kept file.
+
+TEST(CustomisationWorkbench, TheSettingsActionIsFilesItemAndOpensTheOneNonModalDialogItNames)
+{
+    Bench bench;
+    QAction& action = bench.action("fileSettings");
+    EXPECT_EQ(bench.bench->settingsAction(), &action);
+    EXPECT_EQ(action.text(), "Settin&gs...");
+    // What macOS moves into the application menu.
+    EXPECT_EQ(action.menuRole(), QAction::PreferencesRole);
+    // How the headless --dialog finds what the item opened.
+    EXPECT_EQ(action.data().toString(), "settingsDialog");
+    EXPECT_FALSE(action.icon().isNull());
+    // File's item: the workbench puts it in neither Format nor its toolbar.
+    EXPECT_FALSE(bench.menu->actions().contains(&action));
+    EXPECT_FALSE(bench.bar->actions().contains(&action));
+    EXPECT_EQ(bench.bench->settings(), nullptr) << "made the first time it is asked for";
+
+    action.trigger();
+    auto* dialog = bench.window.findChild<QDialog*>(action.data().toString());
+    ASSERT_NE(dialog, nullptr);
+    EXPECT_EQ(dialog, static_cast<QDialog*>(bench.bench->settings()));
+    EXPECT_TRUE(dialog->isVisible());
+    EXPECT_FALSE(dialog->isModal()) << "beside the drawing, not over it";
+
+    dialog->close();
+    EXPECT_FALSE(dialog->isVisible());
+    action.trigger();
+    EXPECT_EQ(bench.window.findChildren<QDialog*>("settingsDialog").size(), 1) << "one, kept";
+    EXPECT_TRUE(dialog->isVisible()) << "the same one, shown again";
+
+    // It holds the Document, so it goes with the workbench, which the window
+    // destroys before the Document.
+    const QPointer<QDialog> kept(dialog);
+    bench.bench.reset();
+    EXPECT_TRUE(kept.isNull());
+}
+
+TEST(CustomisationWorkbench, SettingsIsToldWhenTheCodeManagerHoldsUnappliedEditsAndRefusesToLoad)
+{
+    // By hand. The session starts as the built-in, test_symbols: no rule. One
+    // rule added in the Survey Code Manager and not applied is in its buffer
+    // alone. A file imported in Settings then would be undone by that
+    // buffer's Apply, so Import is refused in the dialog's own words and NO
+    // line is run; reverted, the same press runs the line, and the fixture's
+    // 11 rules are on the drawing.
+    KeptBench bench(false);
+    katana::qt::SettingsDialog& settings = bench.bench->showSettings();
+    const QString file =
+        QDir::fromNativeSeparators(QString::fromStdU16String(
+            (kFixture / "test_survey.customisation.json").u16string()));
+    auto* path = named<QLineEdit>(&settings, "settingsImportPath");
+    auto* import = named<QPushButton>(&settings, "settingsImport");
+    auto* status = named<QPlainTextEdit>(&settings, "settingsStatus");
+    ASSERT_FALSE(path == nullptr || import == nullptr || status == nullptr);
+    path->setText(file);
+
+    // The manager made AFTER the dialog: what is asked is asked at the press.
+    katana::qt::SurveyCodeManagerDialog& codes = bench.bench->showCodeManager();
+    katana::entity::SurveyRule rule;
+    rule.key = "KQ*";
+    rule.model = "KEPT";
+    ASSERT_TRUE(codes.addRule(rule).ok());
+    ASSERT_TRUE(codes.dirty());
+
+    import->click();
+    const QString refusal =
+        "Import was not run: the Survey Code Manager has rule edits that are not on the "
+        "drawing, and its Apply would then put the rules it holds back over what Import "
+        "brought. Apply or Revert them first.";
+    EXPECT_EQ(status->toPlainText(), refusal);
+    EXPECT_TRUE(bench.ran.isEmpty()) << bench.ran.join(" | ").toStdString();
+    ASSERT_FALSE(bench.log.empty());
+    EXPECT_EQ(bench.log.back(), refusal) << "said in the window's log too";
+    EXPECT_EQ(bench.document.surveyMap().size(), 0u);
+
+    codes.revert();
+    ASSERT_FALSE(codes.dirty());
+    import->click();
+    EXPECT_EQ(bench.ran, QStringList{"CUSTOMISE \"" + file + "\""});
+    EXPECT_EQ(bench.document.surveyMap().size(), 11u);
+}
+
+TEST(CustomisationWorkbench, SettingsOpensTheEditorsAndTheCodeManagerAtItsLineworkTab)
+{
+    Bench bench;
+    bench.loadFixture();
+    katana::qt::SettingsDialog& settings = bench.bench->showSettings();
+    ASSERT_EQ(bench.bench->codeManager(), nullptr);
+    ASSERT_EQ(bench.bench->symbolLibrary(), nullptr);
+
+    // Edit Linework Codes: the manager, made, shown, and on the tab that is
+    // the control codes' one editor - its last, where it opens on its first.
+    named<QPushButton>(&settings, "settingsEditLinework")->click();
+    katana::qt::SurveyCodeManagerDialog* codes = bench.bench->codeManager();
+    ASSERT_NE(codes, nullptr);
+    EXPECT_TRUE(codes->isVisible());
+    auto* tabs = named<QTabWidget>(codes, "codeManagerTabs");
+    ASSERT_NE(tabs, nullptr);
+    ASSERT_NE(tabs->currentWidget(), nullptr);
+    EXPECT_EQ(tabs->currentWidget()->objectName(), "lineworkTab");
+    EXPECT_NE(tabs->currentIndex(), 0);
+
+    // Survey Codes shows the same manager as it was left - here put back on
+    // its first tab - and does not move it.
+    tabs->setCurrentIndex(0);
+    codes->hide();
+    named<QPushButton>(&settings, "settingsOpenCodes")->click();
+    EXPECT_EQ(bench.bench->codeManager(), codes);
+    EXPECT_TRUE(codes->isVisible());
+    EXPECT_EQ(tabs->currentIndex(), 0);
+
+    named<QPushButton>(&settings, "settingsOpenSymbols")->click();
+    ASSERT_NE(bench.bench->symbolLibrary(), nullptr);
+    EXPECT_TRUE(bench.bench->symbolLibrary()->isVisible());
+    // Nothing was said of a tab that could not be found.
+    for (const QString& line : bench.log) {
+        EXPECT_FALSE(line.contains("Linework tab")) << line.toStdString();
+    }
+}
+
+TEST(CustomisationWorkbench, SettingsShowsAndUsesWhatTheWindowsHostOffers)
+{
+    // A window that tells of no host (the first bench): no built-in to reset
+    // to and no kept file, and the page says so in the dialog's words.
+    {
+        Bench bench;
+        katana::qt::SettingsDialog& settings = bench.bench->showSettings();
+        EXPECT_FALSE(named<QPushButton>(&settings, "settingsReset")->isEnabled());
+        EXPECT_FALSE(named<QPushButton>(&settings, "settingsKeep")->isEnabled());
+        EXPECT_FALSE(named<QPushButton>(&settings, "settingsRevert")->isEnabled());
+        EXPECT_EQ(named<QLabel>(&settings, "settingsActiveKept")->text(),
+                  "Not kept: the next start does not give this customisation.\nThis session "
+                  "has no kept file; the environment variable KATANA_CUSTOMISATION names one.");
+    }
+    // One whose host has a built-in and a kept file. The session is the
+    // built-in as started, which is kept, so Keep has nothing to do yet.
+    KeptBench bench(true);
+    katana::qt::SettingsDialog& settings = bench.bench->showSettings();
+    EXPECT_TRUE(named<QPushButton>(&settings, "settingsReset")->isEnabled());
+    EXPECT_FALSE(named<QPushButton>(&settings, "settingsKeep")->isEnabled());
+    EXPECT_TRUE(named<QPushButton>(&settings, "settingsRevert")->isEnabled());
+    EXPECT_EQ(named<QLabel>(&settings, "settingsActiveKept")->text(),
+              "Kept: the next start gives this customisation.\nKept file: " +
+                  bench.folder.path() + "/customisation.json");
+
+    // An edit made in Settings goes through the window's executor, and - the
+    // session having been the kept one, with a kept file - is followed by the
+    // KEEP line there too: two lines, in that order, and the file is written.
+    ASSERT_FALSE(std::filesystem::exists(bench.keptFile));
+    auto* codes = named<QCheckBox>(&settings, "settingsAutoCodes");
+    ASSERT_NE(codes, nullptr);
+    ASSERT_TRUE(codes->isChecked()) << "on by default";
+    codes->click();
+    EXPECT_EQ(bench.ran, (QStringList{"CUSTOMISE SET auto.codes=off", "CUSTOMISE KEEP"}));
+    EXPECT_FALSE(bench.document.customisationState().automation.codesOnSurveyImport);
+    EXPECT_TRUE(bench.document.customisationState().kept);
+    EXPECT_TRUE(std::filesystem::exists(bench.keptFile));
 }

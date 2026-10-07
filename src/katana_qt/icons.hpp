@@ -231,6 +231,13 @@ enum class Icon {
     ZoomIn,
     ZoomOut,
     ZoomSelection,
+    // File > Settings: three sliders, each track neutral and its knob the
+    // accent - what is set. Not a gear: at a menu's 16 px its teeth close up
+    // into a ring, and a ring is already a survey mark here.
+    Settings,
+    // Survey > Process Linework: three surveyed marks, and in the accent the
+    // line the run strings through them.
+    SurveyLinework,
 };
 
 // Every value of Icon, in declaration order, for the contact sheet and for

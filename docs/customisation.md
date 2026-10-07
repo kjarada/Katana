@@ -847,13 +847,14 @@ survives being read and written.
 
 ### Not done
 
-- **No menu item reads or writes the whole of one yet.** The verbs that read
-  and write one are in the interpreter ("The verbs", below), and every front
-  end runs them: `katana_cli` and `katana_mcp`, and the desktop window's
-  typed `CUSTOMISE` and `--customise` (2026-10-07). The Symbol Library and
-  the Survey Code Manager read and write their own part of one from their
-  buttons (`docs/desktop.md`). Settings, with a per-user place for the kept
-  file, comes with the work that follows.
+- **A part of one is written only from a manager's button or a typed line.**
+  The verbs that read and write one are in the interpreter ("The verbs",
+  below), and every front end runs them: `katana_cli` and `katana_mcp`, and
+  the desktop window's typed `CUSTOMISE`, `--customise` and File > Settings,
+  whose Import and Export read and write the WHOLE of one ("Settings and the
+  kept customisation", below). The Symbol Library and the Survey Code
+  Manager read and write their own part from their buttons
+  (`docs/desktop.md`); Settings has no control for `CODES` or `ONLY`.
 - **`-0` reads as 0.** Negative zero written without a fraction is an integer
   to the JSON library. The writer never writes it so; a person might.
 - **Some of a rule's members are still shown by another word.** `CODE
@@ -1558,14 +1559,50 @@ Document says whether the session is that one
 was last kept, false from the first change after either - an editor's
 commit, a `SET`, a load.
 
-Where the file is belongs to the front end, which hands its path to the
-interpreter in the host (`cad::CustomisationHost`). A front end that keeps
-none - every test's, and a headless run that names none - has `KEEP` and
-`REVERT` refused by name, and the refusal names the environment variable a
-front end reads the path from (`cad::kKeptCustomisationVariable`). Which
-per-user place an interactive window uses is the window's to say and is not
-in this tree; the Settings dialog is told the path as text
-(`SettingsContext::keptFile`) and shows it.
+**Where the file is** belongs to the front end, which hands its path to the
+interpreter in the host (`cad::CustomisationHost`):
+
+| Session | Its kept file |
+|---|---|
+| any, with the environment variable `KATANA_CUSTOMISATION` set | the file the variable names |
+| the window, interactive, the variable unset | `customisation.json` in the per-user place Qt gives the application (`QStandardPaths::AppConfigLocation`) |
+| the window headless, `katana_cli` and `katana_mcp`, the variable unset | none |
+
+The window's rule is `MainWindow::loadDefaultCustomisation`
+(`docs/desktop.md`, "How the window starts"); the session's is in "What
+katana_cli and katana_mcp start with", above. A run that must be the same on
+every machine reads no per-user place, which is why only the interactive
+window has one. A front end that keeps none - every test's, and a headless
+run that names none - has `KEEP` and `REVERT` refused by name, and the
+refusal names the variable (`cad::kKeptCustomisationVariable`). File >
+Settings shows the path (`SettingsContext::keptFile`), or says that the
+session keeps none.
+
+**When it is written.** By `CUSTOMISE KEEP` and by nothing else: not at
+start-up, not on exit, not by a load. The file need not exist - a session
+that started from the built-in and was never edited leaves none - and the
+folder is made by the first write. `KEEP` is run
+
+- by a person: typed, or Keep in Settings;
+- by Settings, behind an Import, a Reset to Built-in or a toggled box made
+  on a session that was the kept one (below);
+- by an editor's own commit on such a session - the Survey Code Manager's
+  Apply, the Symbol Library's Import Definitions, the definition editor's
+  Save and Delete - through the hook the window's workbench answers
+  (`CustomisationContext::beginCommit`: asked before the commit, because the
+  commit is what makes the session "not kept", and run after it). With no
+  kept file, or on a session that was not the kept one, nothing is run
+  (`AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAndItStaysKept`,
+  `ASessionThatWasNotTheKeptOneIsNotKeptByAnEditorsCommit`,
+  `WithNoKeptFileAnEditorsCommitRunsNoLineAndLogsNoRefusal`).
+
+**How to reset.** Reset to Built-in in Settings: `CUSTOMISE RESET`, kept as
+every edit made there is, which sets the kept file aside as
+`<kept file>.bak` so that the next start gives the built-in (below, and the
+way back). Typed, `CUSTOMISE RESET` then `CUSTOMISE KEEP` do the same; a
+`RESET` alone lasts the session. With the program closed, deleting or
+renaming the kept file is a reset too: a start that finds no kept file gives
+the built-in.
 
 **Settings** (`src/katana_qt/customisation/settings_dialog.hpp`;
 `docs/desktop.md`, "Settings") is where a person sees all of this and does
@@ -1632,17 +1669,19 @@ answer.
 Export, Keep and Revert to Kept are never followed: an export changes
 nothing, and `REVERT` leaves the session as the kept file has it.
 
+*Decided (2026-10-07): a reset made in Settings is kept.* Resetting in
+Settings means the built-in is what the next session starts with. Not kept,
+the file would stand, the page would say "Not kept", and the next start
+would bring back what the person had just reset away from
+(`qt_a_reset_made_in_settings_retires_the_kept_file_and_revert_has_none_to_read_headless`,
+and the window after it, which starts with the built-in and finds what was
+kept in the `.bak`).
+
 Not done:
 
-- **Whether a reset made in Settings should be kept at all** is the owner's
-  to decide: kept, it sets the kept file aside, one `.bak` deep; not kept,
-  the file would stand and `REVERT` would go back to it (`docs/desktop.md`,
-  "Settings", "Not done").
-- **The two managers and the definition editor do not keep their commits
-  yet.** They call a hook round each commit
-  (`CustomisationContext::beginCommit`) that nothing answers in this tree, so
-  an Apply in the Survey Code Manager leaves a kept session not kept, and
-  Settings says so.
+- **ONE earlier file is kept**: a reset sets the kept file aside one `.bak`
+  deep, and the second edit kept after it writes over that
+  (`docs/desktop.md`, "Settings", "Not done").
 - **Nothing is locked while the Survey Code Manager holds unapplied edits
   except the three buttons in Settings** (Import, Reset to Built-in, Revert
   to Kept): the same lines typed are still run, and the manager's log says
