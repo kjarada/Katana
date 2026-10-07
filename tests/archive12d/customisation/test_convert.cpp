@@ -1884,17 +1884,25 @@ TEST(CustomisationConvert, TheReferenceCustomisationConvertsToTheFiguresOfItsCen
     EXPECT_EQ(strokes[StrokeOp::Text], 514u);
     EXPECT_EQ(report.strokes, 17020u + 17222u + 104u + 312u + 178u + 342u + 514u);
 
-    // A code, end to end: through the rules, to a definition. WM01 is a line
-    // (the census's `WM01`: a layer, a colour, breakline Line and a linestyle),
-    // and its linestyle is a definition of the customisation that is not
-    // listed as a symbol. The names are the data's and are not spelled here.
+    // A code, end to end: through the rules, to a definition. This one is a
+    // line: a layer, a colour, breakline Line and a linestyle, and that
+    // linestyle is a definition that is not listed as a symbol. The names are
+    // the data's and are not spelled here; what is pinned is what the survey
+    // code file and the style library say about it, read off them by hand: the
+    // layer path is fifteen characters, and the linestyle is five strokes - a
+    // move, a draw, a move, a text and a move.
     const auto water = nsw.map.lookup("WM01");
-    EXPECT_FALSE(water.resolved.model.empty());
+    EXPECT_EQ(water.resolved.model.size(), 15u);
     EXPECT_EQ(water.resolved.breakline, SurveyBreakline::Line);
     const LineStyle* main = nsw.library.find(water.resolved.linestyle);
     ASSERT_NE(main, nullptr);
     EXPECT_FALSE(main->symbol);
-    EXPECT_FALSE(main->strokes.empty());
+    ASSERT_EQ(main->strokes.size(), 5u);
+    EXPECT_EQ(main->strokes[0].op, StrokeOp::Move);
+    EXPECT_EQ(main->strokes[1].op, StrokeOp::Draw);
+    EXPECT_EQ(main->strokes[2].op, StrokeOp::Move);
+    EXPECT_EQ(main->strokes[3].op, StrokeOp::Text);
+    EXPECT_EQ(main->strokes[4].op, StrokeOp::Move);
     // And a code that gets a symbol, defined at vertices.
     const auto bollard = nsw.map.lookup("AC01");
     ASSERT_TRUE(bollard.resolved.symbol.has_value());

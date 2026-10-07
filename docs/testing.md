@@ -245,8 +245,13 @@ that finds none (`tests/CMakeLists.txt`):
   `katana_mcp` link, however deep and however linked, and fails if
   `katana_legacy_customisation` - the readers of the older customisation
   formats - is among them; it also fails if the walk did not reach
-  `katana_core`, which would be a walk that found nothing because it saw
-  nothing. `the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there`
+  `katana_core` or if one of the three is not a target, which would be a walk
+  that found nothing because it saw nothing. It also fails if any target
+  other than the library and the converter compiles a source file of the
+  readers (`src/katana_archive12d/legacy/*.cpp`) directly, which a walk of
+  library names cannot see. `the_closure_check_refuses_a_program_that_is_not_a_target`
+  and `the_closure_check_finds_a_legacy_source_compiled_directly_and_only_that`
+  prove those two on fixtures. `the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there`
   runs the same walk over two fixture targets (never built): one that links the
   library PRIVATELY, through a static library and an interface library, and
   must be reported, and one that links only the archive module and must not.

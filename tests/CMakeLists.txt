@@ -88,12 +88,16 @@ endfunction()
 
 # The programs of `programs` whose closure holds `forbidden`, as
 # "<program> (<library>)" entries, and the ones whose walk did not reach
-# katana_core - a walk that found nothing because it saw nothing.
+# katana_core or that are not targets at all - a walk that found nothing
+# because it saw nothing.
 function(katana_programs_holding programs forbidden holding blind)
     set(_holding "")
     set(_blind "")
     foreach(_program IN LISTS programs)
         if(NOT TARGET ${_program})
+            # A program that is not there walked nothing, and a check that
+            # walked nothing passes: say so rather than skip it.
+            list(APPEND _blind "${_program} (not a target)")
             continue()
         endif()
         katana_link_closure(${_program} _closure)
@@ -110,6 +114,52 @@ function(katana_programs_holding programs forbidden holding blind)
     set(${blind} "${_blind}" PARENT_SCOPE)
 endfunction()
 
+# Every target below `directory`, however deep.
+function(katana_all_targets directory out)
+    set(_targets "")
+    get_property(_here DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+    list(APPEND _targets ${_here})
+    get_property(_subdirectories DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(_subdirectory IN LISTS _subdirectories)
+        katana_all_targets("${_subdirectory}" _below)
+        list(APPEND _targets ${_below})
+    endforeach()
+    set(${out} "${_targets}" PARENT_SCOPE)
+endfunction()
+
+# The targets of `targets`, other than those named in `allowed`, that compile a
+# source file of the older customisation readers (src/katana_archive12d/legacy)
+# directly: the link walk sees a library by its name, so a program that listed
+# the .cpp files among its own sources would bypass it.
+function(katana_targets_compiling_legacy_sources targets allowed out)
+    set(_found "")
+    foreach(_target IN LISTS targets)
+        if(_target IN_LIST allowed)
+            continue()
+        endif()
+        get_target_property(_type ${_target} TYPE)
+        if(_type STREQUAL "INTERFACE_LIBRARY")
+            continue()
+        endif()
+        get_target_property(_sources ${_target} SOURCES)
+        get_target_property(_directory ${_target} SOURCE_DIR)
+        if(NOT _sources)
+            continue()
+        endif()
+        foreach(_source IN LISTS _sources)
+            if(_source MATCHES "^[$]<")
+                continue()
+            endif()
+            cmake_path(ABSOLUTE_PATH _source BASE_DIRECTORY "${_directory}" NORMALIZE OUTPUT_VARIABLE _full)
+            if(_full MATCHES "/src/katana_archive12d/legacy/[^/]*[.]cpp$")
+                list(APPEND _found "${_target}")
+                break()
+            endif()
+        endforeach()
+    endforeach()
+    set(${out} "${_found}" PARENT_SCOPE)
+endfunction()
+
 function(katana_register_link_closure_checks)
     if(NOT TARGET katana_legacy_customisation)
         return()
@@ -123,12 +173,20 @@ function(katana_register_link_closure_checks)
             set(${_list}_text "none")
         endif()
     endforeach()
+    katana_all_targets("${PROJECT_SOURCE_DIR}" _all_targets)
+    katana_targets_compiling_legacy_sources("${_all_targets}"
+        "katana_legacy_customisation;katana_customisation_convert" _compiling)
+    if(_compiling)
+        string(JOIN ", " _compiling_text ${_compiling})
+    else()
+        set(_compiling_text "none")
+    endif()
     add_test(NAME the_programs_link_none_of_the_legacy_customisation_readers
         COMMAND ${CMAKE_COMMAND} -E echo
-            "Programs whose link closure holds the legacy customisation readers: ${_holding_text}. Programs whose walk did not reach katana_core: ${_blind_text}.")
+            "Programs whose link closure holds the legacy customisation readers: ${_holding_text}. Programs whose walk did not reach katana_core or are absent: ${_blind_text}. Other targets compiling a legacy source: ${_compiling_text}.")
     set_tests_properties(the_programs_link_none_of_the_legacy_customisation_readers PROPERTIES
         PASS_REGULAR_EXPRESSION
-            "readers: none[.] Programs whose walk did not reach katana_core: none[.]")
+            "readers: none[.] Programs whose walk did not reach katana_core or are absent: none[.] Other targets compiling a legacy source: none[.]")
 
     # The check on a closure that holds one, and on one that does not. The
     # library under test is linked two targets down and PRIVATELY, which is
@@ -147,12 +205,36 @@ function(katana_register_link_closure_checks)
     katana_programs_holding("katana_link_closure_fixture_outer;katana_link_closure_fixture_clean"
         "${_forbidden}" _fixture_holding _fixture_blind)
     string(JOIN ", " _fixture_text ${_fixture_holding})
+    # The scan for a legacy source compiled directly, on a target that lists one
+    # (never built) and on one that does not; and the absent program, on a name
+    # that is no target.
+    add_library(katana_link_closure_fixture_direct STATIC EXCLUDE_FROM_ALL
+        "${PROJECT_SOURCE_DIR}/src/katana_archive12d/legacy/map_file.cpp")
+    katana_targets_compiling_legacy_sources(
+        "katana_link_closure_fixture_direct;katana_link_closure_fixture_middle;katana_link_closure_fixture_clean"
+        "" _fixture_direct)
+    string(JOIN ", " _fixture_direct_text ${_fixture_direct})
+    katana_programs_holding("katana_link_closure_fixture_no_such_program" "${_forbidden}"
+        _absent_holding _absent_blind)
+    string(JOIN ", " _absent_text ${_absent_blind})
     add_test(NAME the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there
         COMMAND ${CMAKE_COMMAND} -E echo
             "Fixture programs whose link closure holds the legacy customisation readers: ${_fixture_text}.")
     set_tests_properties(the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there
         PROPERTIES PASS_REGULAR_EXPRESSION
             "readers: katana_link_closure_fixture_outer [(]katana_legacy_customisation[)][.]")
+    add_test(NAME the_closure_check_finds_a_legacy_source_compiled_directly_and_only_that
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "Fixture targets compiling a legacy source: ${_fixture_direct_text}.")
+    set_tests_properties(the_closure_check_finds_a_legacy_source_compiled_directly_and_only_that
+        PROPERTIES PASS_REGULAR_EXPRESSION
+            "source: katana_link_closure_fixture_direct[.]")
+    add_test(NAME the_closure_check_refuses_a_program_that_is_not_a_target
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "Fixture programs not walked: ${_absent_text}.")
+    set_tests_properties(the_closure_check_refuses_a_program_that_is_not_a_target
+        PROPERTIES PASS_REGULAR_EXPRESSION
+            "walked: katana_link_closure_fixture_no_such_program [(]not a target[)][.]")
 endfunction()
 cmake_language(DEFER CALL katana_register_link_closure_checks)
 

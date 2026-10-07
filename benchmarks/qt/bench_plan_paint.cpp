@@ -56,6 +56,8 @@ struct Fixture {
     katana::cad::Document document;
     katana::bench::SurveyDrawingSummary summary;
     std::filesystem::path project;
+    // Definitions in the library the drawing was made with: 0 is the standard shapes.
+    std::size_t libraryDefinitions = 0;
     bool ok = false;
 };
 
@@ -72,6 +74,7 @@ Fixture& fixture()
         const katana::cad::BuiltInCustomisation& builtIn = katana::cad::compiledInCustomisation();
         if (builtIn.customisation) {
             f->document.setStyleLibrary(builtIn.customisation->library);
+            f->libraryDefinitions = builtIn.customisation->library.size();
         }
         auto built = katana::bench::buildSurveyDrawing(f->document);
         if (!built) {
@@ -131,8 +134,16 @@ struct View {
     }
 };
 
+// Which library the case measured, so a run on a clean checkout (0) is never
+// compared with one that had a customisation compiled in.
+void setLibraryCounter(benchmark::State& state)
+{
+    state.counters["libraryDefinitions"] = static_cast<double>(fixture().libraryDefinitions);
+}
+
 void setCounters(benchmark::State& state, const katana::qt::ViewportWidget& widget)
 {
+    setLibraryCounter(state);
     state.counters["entitiesDrawn"] = static_cast<double>(widget.lastDrawnEntityCount());
     state.counters["entities"] = static_cast<double>(fixture().summary.entities);
 }
@@ -433,6 +444,7 @@ void BM_PlanPainter(benchmark::State& state, double zoom, Point2 centreFraction,
         painter.fillRect(image.rect(), QColor(0x1e, 0x23, 0x29));
         stats = katana::qt::paintPlan(painter, source, frame, options, cache);
     }
+    setLibraryCounter(state);
     state.counters["entitiesDrawn"] = static_cast<double>(stats.entitiesDrawn);
     state.counters["stamps"] = static_cast<double>(stats.symbolsStamped);
     state.counters["sprites"] = static_cast<double>(stats.spritesDrawn);
@@ -517,6 +529,7 @@ void BM_PlanPainterGhosts(benchmark::State& state, double zoom, bool ghosts)
         painter.fillRect(image.rect(), QColor(0x1e, 0x23, 0x29));
         stats = katana::qt::paintPlan(painter, source, frame, options, cache);
     }
+    setLibraryCounter(state);
     state.counters["entitiesDrawn"] = static_cast<double>(stats.entitiesDrawn);
     state.counters["ghosts"] = static_cast<double>(stats.ghostsDrawn);
     state.counters["selected"] = static_cast<double>(everything.size());

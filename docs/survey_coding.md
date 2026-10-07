@@ -23,7 +23,8 @@ the verbs). It holds three kinds of thing, which are useless apart:
 
 Katana reads that one format. The program is built with a customisation of
 its own, the NSW customisation - 792 definitions (471 symbols and 321
-linestyles) and 1,624 survey code rules - which was made once from a real
+linestyles; the catalogue counts one more definition as a symbol, 472, by
+a signal other than the file's `symbols` list, below) and 1,624 survey code rules - which was made once from a real
 production customisation of a road authority, kept in two older formats. **That
 is third-party material under its own licence and is NOT part of this
 repository, and neither is the file made from it.** The converted file is kept,
@@ -75,7 +76,7 @@ is that a definition is offered as a SYMBOL when any of these holds:
   customisation file it sits in the `symbols` list (`docs/customisation.md`).
   Until 2026-10-06 this fourth signal was the NAME of the file it was read
   from, having "symbol" in it, in any case - the way symbol libraries are
-  named (the built-in one is `symbols.4d`), which is why every definition
+  named (the one built in until 2026-10-06 was `symbols.4d`), which is why every definition
   carries `LineStyle::source`, the NAME of its file (never a path). One
   customisation holds both kinds under one name, so a name can no longer say
   which. The style library reader, which does read one kind a file, sets the
@@ -589,9 +590,11 @@ name; hence the set.
 (`include/katana/cad/customisation_merge.hpp`) is the rule of "A load goes ON
 TOP of what is loaded" above, unchanged, over `entity::Customisation`: the
 session and one or more loaded customisations in, what to install and a
-report out. The twelve tests it came with were moved with it and keep their
-expectations (`tests/cad/customisation/test_customisation_merge.cpp`); the
-older merge stays where it is until the front ends leave it.
+report out. It is the only merge there is: the older one, over the style library
+and the map as two things (`archive12d::mergeCustomisation`), is gone with the
+front ends that used it. The twelve tests that came with that one were moved
+here and keep their expectations
+(`tests/cad/customisation/test_customisation_merge.cpp`).
 
 What one customisation holds beyond definitions and rules is merged by what
 it is:
@@ -937,7 +940,7 @@ Decisions worth recording:
   then the standard names, which are the entity layer's since 2026-10-06), and
   no front end passes names of its own any more
   (`CommandInterpreter::setColourLookup` is gone; `docs/customisation.md`,
-  "Colour names" and "The verbs"). A name nothing knows - a plot pen, `pen 025` - still leaves
+  "Colour names" and "The verbs"). A name nothing knows - a plot pen, `pen 902` - still leaves
   the colour alone.
 
 From the command line, the whole chain:
@@ -1038,18 +1041,21 @@ editor's form before it commits. `CODE CHECK` fails the command when any
 error is found, so a script stops: the refusal's first line counts the errors
 and the lint follows it, as `UTILITY CHECK` carries its check
 (`codeCheckReply`, tested on hand-made issues because no map can hold such
-a rule today). On the compiled-in pair of mapfiles, run
-on 2026-09-24:
+a rule today). On the compiled-in customisation, run on 2026-10-07:
 
 ```
-1624 rules checked: 0 errors, 944 warnings
-  by kind: 1 unresolved linestyle, 4 unresolved symbol, 3 linestyle is a symbol,
-  233 unknown colour, 446 duplicate rule, 257 shadowed rule
+1624 rules checked: 0 errors, 721 warnings
+  by kind: 1 unresolved linestyle, 4 unresolved symbol, 1 linestyle is a symbol,
+  12 unknown colour, 446 duplicate rule, 257 shadowed rule
 ```
 
-The 233 are the reference files' `sui ...`, `pen NNN` and `off yellow` names, which
-`archive12d::standardColour` does not know; such a code leaves the colour
-unset and, since D4, reuses any colourless style that draws alike. Each
+The 12 are `pen NNN` plot-pen names that neither the customisation's colour
+table nor the standard names know; such a code leaves the colour unset and,
+since D4, reuses any colourless style that draws alike. (The first run of this
+check, on 2026-09-24, before the converter filled the colour table, counted 233,
+and 3 linestyles that are symbols.) The two duplicate and shadowed figures
+are properties of the two survey code files the customisation was converted
+from, and survive the conversion. Each
 survey code file checked alone has NO duplicates, and
 `survey_codes_names.mapfile` no shadowed rule; `survey_codes.mapfile` alone
 has 44 shadowed rules, which are its `*` pipe rows -
@@ -1950,7 +1956,7 @@ a field, and every definition read is stamped with the NAME of its file
   xorigin1/yorigin1             twoptstyle: the first anchor
   xorigin2/yorigin2             twoptstyle: the second
   stretch_mode 2  cycle_mode 2  twoptstyle: kept, not yet acted on
-  colour "pen 035"              the pen for what follows; "view_colour"
+  colour "pen 901"              the pen for what follows; "view_colour"
                                 means the entity's own colour
   move X Y                      pen up
   draw X Y                      pen down
@@ -2108,11 +2114,11 @@ earlier rule of its own key: where that order would put it there, the
 sections are written again, in the same order, for the rules that must
 follow, and the reader reads a repeated section in turn. Rules of different
 keys may be regrouped, which no code can tell. A map in that order comes back
-rule for rule with each section written once; exporting the compiled-in pair
-of mapfiles gives one extra `map_data` and one extra `vertex_symbol_data`.
+rule for rule with each section written once; writing a map made by loading
+two mapfiles gives one extra `map_data` and one extra `vertex_symbol_data`.
 Whether other programs read a section that appears twice is not known here.
 **Rejected:** refusing to write such a map and naming the key - merged maps
-are normal, and under D1 export is the only way map edits are kept.
+were normal under D1, when export was the only way map edits were kept.
 
 What a rule does not say is written as NO element, never as `0`: an empty
 `<rotation/>` and a rotation of 0 read the same, but a size of 0 and no size
