@@ -25,9 +25,10 @@ document is the reasons.
 2. **To use another customisation, load its file in File > Settings > Import.**
    It is merged onto the built-in automatically - a definition of a name takes
    the place of the one of that name, a code's rules take the place of that
-   code's - and nothing else changes. Replace is the checkbox beside Import:
-   with it ticked the file's definitions become the whole library and its
-   rules the whole of the codes, for each kind the file brings.
+   code's - and nothing else changes. "Replace instead of merging" is the
+   checkbox beside Import: with it ticked the file's definitions become the
+   whole library and its rules the whole of the codes, for each kind the file
+   brings.
 3. **To change it, edit it in Settings.** Survey Codes... opens the Survey
    Code Manager and Symbol Library... the Symbol Library, where a definition or
    a rule is made, changed or removed. An edit of a session that was kept is
@@ -37,8 +38,8 @@ document is the reasons.
    "Apply survey codes to the imported points" and "Draw linework through the
    imported points" ticked: the points come in coded and strung by the
    customisation, and one Undo removes all of it.
-5. **For points already drawn, use Survey > Survey Coding > Apply Survey Codes
-   and Process Linework.** Each works on the selection, or on the whole drawing
+5. **For points already drawn, use Survey > Apply Survey Codes and Survey >
+   Process Linework.** Each works on the selection, or on the whole drawing
    when nothing is selected, and is one Undo.
 
 The same through a command line: `CUSTOMISE "<file>"`, `CODE` and `LINEWORK`
@@ -485,7 +486,8 @@ it. Malformed JSON gets the same message with the line and column beside it.
 A file of another program's format that BEGINS with `<` (markup) or `//` (a
 comment) - what a survey code file (`.mapfile`) and a style library (`.4d`)
 begin with - gets `not a Katana customisation file; the older formats are
-converted with katana_customisation_convert`, with none of the JSON parser's
+converted with katana_customisation_convert (a developer's tool, not
+installed; see docs/customisation.md)`, with none of the JSON parser's
 account of the character beside it. The program tells them by those two
 characters, after any blanks and a byte order mark, and holds no other mark of
 those formats: their readers are the converter's ("Converting a customisation

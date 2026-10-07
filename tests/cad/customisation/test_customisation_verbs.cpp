@@ -431,6 +431,34 @@ TEST(CustomisationVerbs, TheReportSaysPlainlyWhetherAKeptFileExistsAndWhere)
     }
 }
 
+// A kept file that is there and does not read is not one "the next start reads":
+// the start falls back to the built-in, so the sentence says so, and that KEEP
+// is what sets it aside.
+TEST(CustomisationVerbs, TheReportDoesNotSayTheNextStartReadsAKeptFileThatDoesNotRead)
+{
+    for (const char* bytes : {"{ not json", ""}) {
+        SCOPED_TRACE(bytes);
+        Hosted session("report-bad");
+        fs::create_directories(session.keptFile.parent_path());
+        std::ofstream(session.keptFile, std::ios::binary) << bytes;
+        session.start();
+        const std::string reply = session.ok("CUSTOMISE");
+        EXPECT_TRUE(reply.ends_with("Kept file: " + shown(session.keptFile) +
+                                    ", which is not a customisation that reads, so the next "
+                                    "start does not use it; CUSTOMISE KEEP sets it aside as "
+                                    ".bad."))
+            << reply;
+        EXPECT_FALSE(contains(reply, "which the next start reads")) << reply;
+    }
+    // A folder of the kept file's name cannot be read at all, and KEEP does not move it.
+    Hosted folder("report-folder");
+    fs::create_directories(folder.keptFile);
+    folder.start();
+    EXPECT_TRUE(folder.ok("CUSTOMISE")
+                    .ends_with("Kept file: " + shown(folder.keptFile) +
+                               ", which cannot be read, so the next start does not use it."));
+}
+
 TEST(CustomisationVerbs, WithNothingLoadedItSaysSoAndHowToLoad)
 {
     Bare session;
@@ -924,7 +952,8 @@ TEST(CustomisationVerbs, ALoadIsAllOrNothingAndEveryFileThatDoesNotReadIsNamed)
     EXPECT_EQ(xml.code, ErrorCode::ParseFailure);
     EXPECT_EQ(xml.message,
               "not a Katana customisation file; the older formats are converted with "
-              "katana_customisation_convert");
+              "katana_customisation_convert (a developer's tool, not installed; see "
+              "docs/customisation.md)");
     // The file, and nothing of the parser's sentence.
     EXPECT_TRUE(xml.context.ends_with("codes.mapfile")) << xml.context;
     EXPECT_FALSE(contains(xml.context, "syntax")) << xml.context;
@@ -1755,8 +1784,8 @@ TEST(CustomisationVerbs, TheBackupIsWrittenFromWhatWasReadSoAReadOnlyKeptFileLea
 }
 
 // The temporary a write goes through is named for this process and is never
-// `<file>.tmp`, which is a name a person may have used: it was written, then
-// renamed away - and so a file of that name was consumed. Nothing is left beside.
+// `<file>.tmp`, which is a name a person may have used and a write must leave
+// as it found it. Nothing is left beside.
 TEST(CustomisationVerbs, AWriteNeverConsumesAFileNamedLikeItsOldTemporaryAndLeavesNoneBeside)
 {
     Hosted session("tmp-name");

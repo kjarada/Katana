@@ -339,7 +339,7 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_legacy}\"" -c "POINT 1,1")
     set_tests_properties(cli.a_survey_code_file_is_refused_as_not_a_katana_customisation_file
         PROPERTIES
-        PASS_REGULAR_EXPRESSION "error: ParseFailure: not a Katana customisation file; the older formats are converted with katana_customisation_convert \\[[^\r\n]*cli-legacy\\.mapfile"
+        PASS_REGULAR_EXPRESSION "error: ParseFailure: not a Katana customisation file; the older formats are converted with katana_customisation_convert \\(a developer's tool, not installed; see docs/customisation.md\\) \\[[^\r\n]*cli-legacy\\.mapfile"
         FAIL_REGULAR_EXPRESSION "point created|loaded file=")
 
     # CUSTOMISE EXPORT writes the session as ONE Katana customisation file,

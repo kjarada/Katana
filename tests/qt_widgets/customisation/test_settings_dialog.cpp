@@ -499,9 +499,9 @@ TEST(SettingsDialog, TheNamesTheBuiltInItselfLeavesUndefinedAreShownAsACountAndT
         return VerbOutcome{true,
                            QStringLiteral("loaded file=\"C:/x.json\" name=X definitions_added=0\n"
                                           "undefined names=3 in_built_in=2\n"
-                                          "undefined name=\"Circle Single\" in_built_in=yes\n"
+                                          "undefined name=\"TEST Undefined A\" in_built_in=yes\n"
                                           "undefined name=\"MINE Gate\"\n"
-                                          "undefined name=SBEND in_built_in=yes\n"
+                                          "undefined name=TEST Undefined B in_built_in=yes\n"
                                           "customisation name=X origin=loaded kept=no"),
                            {}};
     };
@@ -516,8 +516,8 @@ TEST(SettingsDialog, TheNamesTheBuiltInItselfLeavesUndefinedAreShownAsACountAndT
         << shownStatus.toStdString();
     EXPECT_TRUE(shownStatus.contains(QStringLiteral("undefined name=\"MINE Gate\"\n")))
         << shownStatus.toStdString();
-    EXPECT_FALSE(shownStatus.contains(QStringLiteral("Circle Single"))) << shownStatus.toStdString();
-    EXPECT_FALSE(shownStatus.contains(QStringLiteral("SBEND"))) << shownStatus.toStdString();
+    EXPECT_FALSE(shownStatus.contains(QStringLiteral("TEST Undefined A"))) << shownStatus.toStdString();
+    EXPECT_FALSE(shownStatus.contains(QStringLiteral("TEST Undefined B"))) << shownStatus.toStdString();
     EXPECT_FALSE(shownStatus.contains(QStringLiteral("in_built_in"))) << shownStatus.toStdString();
     EXPECT_TRUE(shownStatus.startsWith(QStringLiteral("> CUSTOMISE \"C:/x.json\"\n")))
         << shownStatus.toStdString();
