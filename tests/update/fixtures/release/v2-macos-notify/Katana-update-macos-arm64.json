@@ -1,0 +1,15 @@
+{
+"applier":1,
+"channel":"stable",
+"expires":"2027-04-16T08:40:00Z",
+"files":[],
+"notes_url":"https://github.com/kjarada/Katana/releases/tag/v0.10.0",
+"notify_only":true,
+"product":"katana",
+"published":"2026-10-18T08:40:00Z",
+"schema":1,
+"sequence":1792312800,
+"tag":"v0.10.0",
+"target":"macos-arm64",
+"version":"0.10.0"
+}
