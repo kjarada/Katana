@@ -966,6 +966,7 @@ had come to differ, are gone, and the older files they read no longer load.
 | `CUSTOMISE JSON` | the same as one JSON object (`cad::customisationJson`) |
 | `CUSTOMISE <file>...` | merges Katana customisation files into the session |
 | `CUSTOMISE REPLACE <file>...` | loads them in the place of each KIND they bring |
+| `CUSTOMISE DEFINITIONS <file>...` | merges only the files' definitions and colours: what the Symbol Library's Import Definitions runs |
 | `CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>] [ONLY <definition>...]` | writes the session, or a part of it |
 | `CUSTOMISE RESET` | the program's built-in customisation in the place of the session's |
 | `CUSTOMISE KEEP` | writes the session to the kept file, which the next start reads |
@@ -990,6 +991,26 @@ library of another program is `not a Katana customisation file`. A file
 named twice is read once, and the reply says so. What Merge and Replace each
 do to definitions, rules, colours, the settings and the sources is the
 merge's to say (`include/katana/cad/customisation_merge.hpp`).
+
+**`DEFINITIONS` is a merge that takes the definitions and the colours of the
+files and nothing else.** The files' survey code rules, linework codes and
+automation switches are left, and the reply counts them (`left rules=<n>
+linework=yes|no automation=yes|no`, only when something was left). The sources
+a file lists come in as the session's only when they brought it definitions
+(each as a source of definitions alone), or, brought neither kind, when the
+file has colours: one that brought rules alone is dropped with its notice,
+because a source a load lists is taken off what the open project is missing
+(`Document::installCustomisation`), and one left in with its rules flag
+cleared would pass for loaded with none of its rules here. A file that holds
+neither a definition nor a colour is refused (`NotFound`, saying where its
+rules are loaded), and nothing is loaded. What it takes of a file is
+`cad::definitionsOfFile` (`include/katana/cad/customisation_part.hpp`).
+*Rejected: the Symbol Library running `CUSTOMISE <file>` and taking the rules
+too*, which is what the button did when a file held one kind: rules loaded from
+a symbol browser would go round the Survey Code Manager's buffer, where a
+person reviews them before Apply. *Rejected: the dialog merging by itself*,
+which it did, and which put an import in no command history and out of reach
+of `katana_cli`.
 
 **An export** writes the whole session, or a part. A kind word chooses among
 the three kinds (`CODES`, `LINESTYLES`, `SYMBOLS`): those said, alone. `ONLY`
@@ -1021,10 +1042,14 @@ installed - is refused until `NAME` gives one.
 **A part** - anything a kind word or `ONLY` chose - is a fragment for
 someone else's session, or for this one later. What it holds is ONE rule,
 `cad::customisationPart` (`include/katana/cad/customisation_part.hpp`), which
-the window's two export buttons write by too - the Survey Code Manager's
-Export Codes is `CODES` of the rules being edited, and the Symbol Library's
-Export Selected is `ONLY` the selected symbols (`docs/desktop.md`) - so the
-same symbols are the same file whichever wrote them:
+the window's two export buttons run as lines - the Survey Code Manager's
+Export Codes is `CUSTOMISE EXPORT <file> CODES` (of the drawing's rules: with
+edits not yet applied it is refused, since no line can name the manager's
+buffer), and the Symbol Library's Export Selected is `CUSTOMISE EXPORT <file>
+NAME <name> ONLY <the selected names>` (`docs/desktop.md`) - so the same
+symbols are the same file whichever wrote them, by ONE writer (a temporary
+file beside it, then a rename: a write that fails leaves the file that was
+there):
 
 - It is written without the linework codes, the automation and `basedOn`.
   Merged in, it must not reset anyone's control codes, and it is not a copy
@@ -1071,6 +1096,23 @@ read before any is set, and the codes are judged by `entity::validate`, so
 one refused item sets none of them. A key is given once in a line: given
 twice it is refused, where the later value once won and the reply said both.
 
+**Two window paths are not lines, and say so.** The Survey Code Manager's
+Apply and the definition editor's Save put an edited BUFFER on the session
+(`Document::setSurveyMap`, `Document::installCustomisation`). A line for
+either would be a larger design than the verb family has: the family's one
+door for an edit is a fragment merged by name (`CUSTOMISE <file>`), so a line
+for Apply would write the buffer to a temporary file in order to read it
+back, and a line for Save would need a grammar for the nineteen members of a
+rule and the strokes of a definition. Both therefore go through the commit
+hook (`CustomisationContext::beginCommit`), which keeps a kept session kept,
+and are NOT in the command history. Nor are they undone: the style library,
+the survey map and the rest of the customisation are session data, which
+`UNDO` does not touch (`docs/cad.md`, D1). What takes an edit back is Revert
+(before Apply), `CUSTOMISE REVERT` or a Replace of the `.bak` of the kept
+file, or Reset to Built-in. The Symbol Library's Import Definitions and both
+exports ARE lines (`CUSTOMISE DEFINITIONS`, `CUSTOMISE EXPORT`), and the
+Survey Code Manager's Import Codes merges into the buffer, for review.
+
 ### The replies
 
 Every reply is records, one a line: a leading word, then `key=value` fields
@@ -1093,6 +1135,7 @@ CUSTOMISE                 the two count lines, then
                           then the coverage lines
 CUSTOMISE [REPLACE] f...  repeated file=<f>                                       a file named twice
                           loaded file=<f> name=<n> definitions_added=<n> definitions_replaced=<n> codes_added=<n> codes_replaced=<n> colours_added=<n> colours_replaced=<n> linework=yes|no automation=yes|no
+                          left rules=<n> linework=yes|no automation=yes|no        DEFINITIONS, when it left any of them
                           removed definitions=<n> codes=<n>                       REPLACE, when it removed any
                           removed definition=<name>   removed code=<key>          up to 20 of each
                           undefined names=<n>                                     names the rules ask for that nothing defines
@@ -1432,9 +1475,8 @@ right, and the one rule is the two halves:
   built-in at a start as a copy made from another edition
   (`docs/survey_coding.md`, "What a session starts with").
 
-What is NOT this rule's: Import Definitions in the Symbol Library decides
-which of a FILE's sources it takes (`sourcesOfImportedDefinitions`,
-`src/katana_qt/customisation/code_manager_support.hpp`). It goes by what the
+What is NOT this rule's: which of a FILE's sources `CUSTOMISE DEFINITIONS`
+takes (`cad::definitionsOfFile`, in the same header). It goes by what the
 file says each source brought, and takes every colour the file has.
 
 **`PREVIEW` is a word of a census too, and does nothing there.** *Rejected:

@@ -12,6 +12,7 @@
 #include <QPixmap>
 #include <QSignalBlocker>
 
+#include "command_word.hpp"
 #include "customisation/code_manager.hpp"
 #include "katana/cad/colour_lookup.hpp"
 #include "katana/cad/document.hpp"
@@ -171,21 +172,18 @@ std::string exportedCustomisationName(const katana::cad::Document* document,
                                                                 : std::string("customisation");
 }
 
-std::vector<katana::entity::CustomisationSourceNote>
-sourcesOfImportedDefinitions(std::vector<katana::entity::CustomisationSourceNote> sources,
-                             bool withColours)
+katana::core::Result<QString> customisationFileWord(const QString& path)
 {
-    std::vector<katana::entity::CustomisationSourceNote> standing;
-    standing.reserve(sources.size());
-    for (katana::entity::CustomisationSourceNote& source : sources) {
-        const bool neither = !source.definitions && !source.rules;
-        if (!source.definitions && !(neither && withColours)) {
-            continue;
-        }
-        source.rules = false;
-        standing.push_back(std::move(source));
+    if (const auto word = commandWord(path, QStringLiteral("the file's path")); !word) {
+        return word.error();
     }
-    return standing;
+    const bool bare = !path.contains(QLatin1Char('/')) && !path.contains(QLatin1Char(':'));
+    return QLatin1Char('"') + (bare ? QStringLiteral("./") : QString()) + path + QLatin1Char('"');
+}
+
+katana::core::Result<QString> customisationFileWord(const std::filesystem::path& path)
+{
+    return customisationFileWord(QString::fromStdU16String(path.generic_u16string()));
 }
 
 katana::core::Status writeFileBytes(const std::filesystem::path& path, std::string_view bytes)

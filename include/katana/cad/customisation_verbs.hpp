@@ -11,6 +11,7 @@
 //   CUSTOMISE JSON                       the same as one JSON object
 //   CUSTOMISE <file>...                  merge Katana customisation files in
 //   CUSTOMISE REPLACE <file>...          in the place of each kind they bring
+//   CUSTOMISE DEFINITIONS <file>...      merge their definitions and colours alone
 //   CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>]
 //                                        [ONLY <definition>...]
 //   CUSTOMISE RESET                      the host's built-in customisation

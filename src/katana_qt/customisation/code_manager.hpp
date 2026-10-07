@@ -9,17 +9,19 @@
 // CLI would say differently:
 //   Code Table        cad::codeTable, grouped, with cad::explainCode for the
 //                     selected key or a typed code, and the rule form
-//   Codes in Drawing  cad::codeCensus, classed against the buffer
+//   Codes in Drawing  cad::codeCensus over what the tab's scope takes, classed
+//                     against the buffer, and the CODE CENSUS line it stands for
 //   Issues            cad::lintSurveyMap on the buffer
 //   Apply Codes       the CODE line, previewed by cad::applySurveyCodes
 //   Linework          the LINEWORK line, previewed by cad::planLinework, and
 //                     the customisation's control codes (CUSTOMISE SET)
 //
-// THE TWO ACTION TABS RUN LINES. Each has the "Apply to" and "Only those that
-// match" controls every tool on drawing data has (scope_filter_widget.hpp,
-// CLAUDE.md section 1.1), and its Execute builds the line a person would type
-// - CODE <scope> [PROPERTY p], LINEWORK <scope> [PROPERTY p] [ORDER entity]
-// [CHORD x] - and hands it to the window's executor (CustomisationContext::
+// THE THREE TABS ON DRAWING DATA RUN LINES. Each has the "Apply to" and "Only
+// those that match" controls every tool on drawing data has
+// (scope_filter_widget.hpp, CLAUDE.md section 1.1), and its Execute builds the
+// line a person would type - CODE <scope> [PROPERTY p], LINEWORK <scope>
+// [PROPERTY p] [ORDER entity] [CHORD x], and for Codes in Drawing CODE CENSUS
+// <scope> [PROPERTY p] - and hands it to the window's executor (CustomisationContext::
 // run): echoed, kept in the history, one undo step, answered in the verb's
 // words. The line is shown as the controls change (applyCommand,
 // lineworkCommand). Preview stays a plan made here, read-only and unlogged,
@@ -155,14 +157,17 @@ class SurveyCodeManagerDialog : public QDialog {
     [[nodiscard]] katana::core::Status
     importCodes(const std::filesystem::path& path,
                 katana::cad::LoadMode mode = katana::cad::LoadMode::Merge);
-    // The buffer as a Katana customisation file of survey codes alone: its
-    // rules in their order, under the session's name
-    // (exportedCustomisationName) and with what of the session belongs with
-    // them (cad::customisationPart, the one rule CUSTOMISE EXPORT ... CODES
-    // writes a part by too) - its description and its author's notice, the
-    // sources that brought it rules, each with its notice, the notice of
-    // every source left out, and the colours the rules name. Not its
-    // definitions, and not its linework codes or automation switches.
+    // Runs CUSTOMISE EXPORT <file> CODES through the window's executor: the
+    // drawing's rules as a Katana customisation file of survey codes alone, in
+    // their order, under the session's name (the file's own for a session with
+    // none) and with what of the session belongs with them
+    // (cad::customisationPart, the one rule a part is written by) - its
+    // description and its author's notice, the sources that brought it rules,
+    // each with its notice, the notice of every source left out, and the
+    // colours the rules name. Not its definitions, and not its linework codes
+    // or automation switches. The verb writes what the DRAWING has, so a
+    // buffer with unapplied edits is refused (Apply or Revert first) rather
+    // than exported as something no line can name.
     [[nodiscard]] katana::core::Status exportCodes(const std::filesystem::path& path) const;
     // The buffer's code list (cad::codeListCsv), UTF-8.
     [[nodiscard]] katana::core::Status exportCodeList(const std::filesystem::path& path) const;
@@ -244,6 +249,10 @@ class SurveyCodeManagerDialog : public QDialog {
     // names the control that cannot be said on a line.
     [[nodiscard]] katana::core::Result<QString> codesLine() const;
     [[nodiscard]] katana::core::Result<QString> lineworkLine() const;
+    // The census tab's line, CODE CENSUS <scope> [PROPERTY p]: what its Run
+    // hands to the executor, and what the table is counted by.
+    [[nodiscard]] katana::core::Result<QString> censusLine() const;
+    void runCensusLine();
     // CUSTOMISE SET with the control codes typed that are not the
     // customisation's already; an empty line when all seven are.
     [[nodiscard]] katana::core::Result<QString> lineworkCodesLine() const;
@@ -298,6 +307,11 @@ class SurveyCodeManagerDialog : public QDialog {
     };
     std::vector<CensusRow> census_{};
     std::string censusFoundProperty_{};
+    // What the census tab's scope took at the last count, and why it took
+    // nothing when its controls could not be read (no layer ticked, a view
+    // that closed): the table is of exactly these entities.
+    std::vector<katana::entity::EntityId> censusIds_{};
+    QString censusProblem_{};
     std::vector<katana::cad::LintIssue> issues_{};
 
     // widgets (owned by Qt's parent chain)
@@ -356,6 +370,8 @@ class SurveyCodeManagerDialog : public QDialog {
     QPushButton* ruleUp_ = nullptr;
     QPushButton* ruleDown_ = nullptr;
     // codes in drawing
+    ScopeFilterWidget* censusScope_ = nullptr;
+    QLineEdit* censusCommand_ = nullptr;
     QComboBox* censusPropertyBox_ = nullptr;
     FilterBar* censusFilter_ = nullptr;
     QTreeWidget* censusTree_ = nullptr;

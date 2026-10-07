@@ -51,6 +51,7 @@
 #include "customisation/customisation_context.hpp"
 #include "customisation/customisation_workbench.hpp"
 #include "customisation/definition_editor.hpp"
+#include "customisation/fixture_customisation.hpp"
 #include "customisation/settings_dialog.hpp"
 #include "customisation/symbol_library.hpp"
 #include "katana/cad/command_interpreter.hpp"
@@ -755,6 +756,14 @@ struct KeptBench {
         return static_cast<int>(ran.count(QStringLiteral("CUSTOMISE KEEP")));
     }
 
+    // The line the Symbol Library's Import Definitions runs for the fixture of
+    // three linestyles: the verb, and the file in quotes with '/'.
+    [[nodiscard]] static QString importLine()
+    {
+        return QStringLiteral("CUSTOMISE DEFINITIONS ") +
+               katana::qt::test::quotedFile(kFixture / "test_linestyles.customisation.json");
+    }
+
     // The three commits an editor makes, in turn: the Survey Code Manager's
     // Apply of one new rule, the Symbol Library's Import Definitions of the
     // fixture's three linestyles, and the definition editor's Save of a new
@@ -796,7 +805,7 @@ TEST(CustomisationWorkbench, AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAnd
     int commits = 0;
     bench.commitThroughEachEditor([&](const char* which) {
         ++commits;
-        // ONE line more after each commit, and it is the last line run.
+        // ONE KEEP line more after each commit, and it is the last line run.
         EXPECT_EQ(bench.keepLines(), commits) << which;
         ASSERT_FALSE(bench.ran.isEmpty()) << which;
         EXPECT_EQ(bench.ran.last(), QStringLiteral("CUSTOMISE KEEP")) << which;
@@ -806,9 +815,10 @@ TEST(CustomisationWorkbench, AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAnd
         EXPECT_TRUE(std::filesystem::exists(bench.keptFile)) << which;
     });
     ASSERT_EQ(commits, 3);
-    // Only the three: the manager's Apply, the import and the Save are not
-    // lines themselves.
-    EXPECT_EQ(bench.ran, (QStringList{QStringLiteral("CUSTOMISE KEEP"),
+    // The manager's Apply and the Save are not lines themselves; the import
+    // is one - the Symbol Library hands its file to CUSTOMISE DEFINITIONS - and
+    // is kept like the others, after it.
+    EXPECT_EQ(bench.ran, (QStringList{QStringLiteral("CUSTOMISE KEEP"), KeptBench::importLine(),
                                       QStringLiteral("CUSTOMISE KEEP"),
                                       QStringLiteral("CUSTOMISE KEEP")}));
 
@@ -816,9 +826,9 @@ TEST(CustomisationWorkbench, AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAnd
     katana::qt::DefinitionEditorDialog* editor = bench.bench->definitionEditor();
     ASSERT_NE(editor, nullptr);
     ASSERT_TRUE(editor->remove(false)) << "nothing names TEST Post";
-    ASSERT_EQ(bench.ran.size(), 5);
-    EXPECT_EQ(bench.ran[3], QStringLiteral("CUSTOMISE REMOVE \"TEST Post\""));
-    EXPECT_EQ(bench.ran[4], QStringLiteral("CUSTOMISE KEEP"));
+    ASSERT_EQ(bench.ran.size(), 6);
+    EXPECT_EQ(bench.ran[4], QStringLiteral("CUSTOMISE REMOVE \"TEST Post\""));
+    EXPECT_EQ(bench.ran[5], QStringLiteral("CUSTOMISE KEEP"));
 
     // What the next start reads is what the editors left: by hand, the
     // built-in's 4 symbols and the 3 imported linestyles (the new symbol was
@@ -845,10 +855,12 @@ TEST(CustomisationWorkbench, ASessionThatWasNotTheKeptOneIsNotKeptByAnEditorsCom
     int commits = 0;
     bench.commitThroughEachEditor([&](const char* which) {
         ++commits;
-        EXPECT_TRUE(bench.ran.isEmpty()) << which << " ran " << bench.ran.join(" | ").toStdString();
+        // The import is a line; no KEEP follows it or any other commit.
+        EXPECT_EQ(bench.keepLines(), 0) << which << " ran " << bench.ran.join(" | ").toStdString();
         EXPECT_FALSE(bench.document.customisationState().kept) << which;
     });
     EXPECT_EQ(commits, 3);
+    EXPECT_EQ(bench.ran, QStringList{KeptBench::importLine()});
     EXPECT_FALSE(std::filesystem::exists(bench.keptFile));
 }
 
@@ -861,9 +873,10 @@ TEST(CustomisationWorkbench, WithNoKeptFileAnEditorsCommitRunsNoLineAndLogsNoRef
     int commits = 0;
     bench.commitThroughEachEditor([&](const char* which) {
         ++commits;
-        EXPECT_TRUE(bench.ran.isEmpty()) << which << " ran " << bench.ran.join(" | ").toStdString();
+        EXPECT_EQ(bench.keepLines(), 0) << which << " ran " << bench.ran.join(" | ").toStdString();
     });
     EXPECT_EQ(commits, 3);
+    EXPECT_EQ(bench.ran, QStringList{KeptBench::importLine()});
     for (const QString& line : bench.log) {
         EXPECT_FALSE(line.contains(QStringLiteral("KEEP"))) << line.toStdString();
     }

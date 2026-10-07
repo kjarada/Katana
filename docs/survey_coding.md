@@ -1686,7 +1686,7 @@ above, so the dialog decides nothing the CLI would say differently:
 | Tab | Over | Shows and does |
 |---|---|---|
 | Code Table (`codeTableTab`) | `cad::codeTable`, `explainCode` | a key per row with what it resolves to (layer, colour, line or point, linestyle, symbol, surface, attributes), filtered; a code typed in `testCode` or a selected key explained field by field - the value, the rule that set it, the rules that lost - with previews of its linestyle and symbol; double-click an explained field for the rule that set it; a rule form by section, with Add, Update, Duplicate, Delete, Up and Down (earlier wins more ties) |
-| Codes in Drawing (`codesInDrawingTab`) | `cad::codeCensus` | every distinct code the drawing carries, classed matched, fallback only or unmatched against the BUFFER, so a rule being written shows against the drawing's codes before Apply; select the entities carrying one; start a new rule for an unmatched code keyed by `cad::suggestedKey` |
+| Codes in Drawing (`codesInDrawingTab`) | `cad::codeCensus`; the `CODE CENSUS` line | the shared "Apply to" and filter controls and the code property; every distinct code in what they take, classed matched, fallback only or unmatched against the BUFFER, so a rule being written shows against the drawing's codes before Apply; the line the controls say (`CODE CENSUS <scope> [WHERE ...] [PROPERTY p]`) and Run Line, which hands it to the executor; select the entities carrying one, among those the scope took; start a new rule for an unmatched code keyed by `cad::suggestedKey` |
 | Issues (`codeIssuesTab`) | `cad::lintSurveyMap` | the lint of the buffer |
 | Apply Codes (`applyCodesTab`) | the `CODE` line; `cad::applySurveyCodes` for its preview | the shared "Apply to" and filter controls and the code property; a preview, row by code, of what the line would do; Execute runs the line shown, one undo step |
 | Linework (`lineworkTab`) | the `LINEWORK` line; `cad::planLinework` for its preview; `CUSTOMISE SET linework.*` | the customisation's control codes (above), shown and set; the shared scope and filter, the code property, the order and the chord length; a preview of every line, every point in none and every note; Execute runs the line shown, one undo step |
@@ -1728,11 +1728,14 @@ no rules, and a file that is not a Katana customisation (one of the older
 formats is told "not a Katana customisation file"), are refused and the
 buffer is as it was.
 
-**Export Codes...** (`exportCodes`) writes the buffer as a Katana
-customisation of survey codes alone, under the session's name - or, while the
-session has none, the file's own name without `.customisation.json`. The file
-is the session's customisation with the buffer's rules in the place of its
-own, cut down to its codes by the ONE rule a part of a customisation is
+**Export Codes...** (`exportCodes`) runs `CUSTOMISE EXPORT <file> CODES`,
+which writes the drawing's rules as a Katana customisation of survey codes
+alone, under the session's name - or, while the session has none, the file's
+own name without `.customisation.json`. The verb writes what the DRAWING has,
+so the button is refused while the buffer has unapplied edits (Apply or Revert
+first): no line can name a buffer. It once wrote the buffer itself, by a path
+of its own that truncated the file in place. The file
+is the session's customisation cut down to its codes by the ONE rule a part of a customisation is
 written by - both managers' exports and `CUSTOMISE EXPORT <file> CODES`
 (`cad::customisationPart`, `include/katana/cad/customisation_part.hpp`;
 `docs/desktop.md`, "Symbol Library", has the table, and

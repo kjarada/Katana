@@ -130,25 +130,24 @@ class SymbolLibraryDialog : public QDialog {
     // Refused (and logged) for an empty `replacement`: taking a symbol off
     // its styles is not a replacement.
     bool replaceInStyles(const std::string& replacement);
-    // Reads a Katana customisation file and MERGES its definitions and its
-    // colours into the session's customisation (cad::mergeCustomisation,
-    // then Document::installCustomisation, as every load is). The survey
-    // code rules, linework codes and automation switches the file also holds
-    // are not taken - the Survey Code Manager imports rules - and the log
-    // says how many were left; a source the file lists that brought it
-    // nothing but rules is not made a source of the session either
-    // (sourcesOfImportedDefinitions, code_manager_support.hpp). The commit
-    // hook is called round the install (CustomisationContext::beginCommit):
-    // before it, and what it hands back after one that was taken. False,
-    // with the reason in
-    // the log and the session as it was, for a file that does not read (one
-    // in another format is "not a Katana customisation file") or holds
-    // neither.
+    // Runs the line CUSTOMISE DEFINITIONS <file> through the window's
+    // executor (CustomisationContext::run): a Katana customisation file's
+    // definitions and colours are MERGED into the session's customisation, as
+    // every load is. The survey code rules, linework codes and automation
+    // switches the file also holds are not taken - the Survey Code Manager
+    // imports rules - and the reply says how many were left (cad::
+    // definitionsOfFile). The commit hook is called round the line
+    // (CustomisationContext::beginCommit): before it, and what it hands back
+    // after a load that was taken. False, with the reason in the log and the
+    // session as it was, for a file that does not read (one in another format
+    // is "not a Katana customisation file"), one that holds neither a
+    // definition nor a colour, or a dialog given no command line.
     bool importDefinitionsFile(const std::filesystem::path& path);
-    // Writes the selected library definitions to a Katana customisation file
+    // Runs CUSTOMISE EXPORT <file> NAME <name> ONLY <the selected names> to
+    // write the selected library definitions to a Katana customisation file
     // under the session's name (exportedCustomisationName), with what of the
-    // session belongs with them (cad::customisationPart, the one rule
-    // CUSTOMISE EXPORT ... ONLY writes a part by too): its description and
+    // session belongs with them (cad::customisationPart, the one rule a part
+    // is written by): its description and
     // its author's notice, the sources the selected definitions came from,
     // each with its notice, the notice of every source left out, and the
     // colours the selected pens name, so that the file draws elsewhere as it

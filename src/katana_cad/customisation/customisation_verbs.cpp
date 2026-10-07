@@ -36,6 +36,7 @@ using Words = std::vector<std::string>;
 namespace {
 
 constexpr const char* kLoadUsage = "CUSTOMISE [REPLACE] <file> [<file>...]";
+constexpr const char* kDefinitionsUsage = "CUSTOMISE DEFINITIONS <file> [<file>...]";
 constexpr const char* kExportUsage = "CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] "
                                      "[NAME <name>] [ONLY <definition>...]";
 constexpr const char* kRemoveUsage =
@@ -195,10 +196,13 @@ std::string trimmedReply(std::string text)
 
 // ---- loading ------------------------------------------------------------------------------
 
-Result<std::string> load(Document& document, const Words& files, LoadMode mode)
+// `definitionsOnly`: the files' definitions and colours alone are loaded
+// (definitionsOfFile), as the Symbol Library's Import Definitions loads them.
+Result<std::string> load(Document& document, const Words& files, LoadMode mode,
+                         bool definitionsOnly = false)
 {
     if (files.empty()) {
-        return usage(kLoadUsage);
+        return usage(definitionsOnly ? kDefinitionsUsage : kLoadUsage);
     }
     std::vector<fs::path> named;
     named.reserve(files.size());
@@ -234,6 +238,30 @@ Result<std::string> load(Document& document, const Words& files, LoadMode mode)
         return makeError(unread.front().code, std::move(message));
     }
 
+    std::size_t rulesLeft = 0;
+    bool lineworkLeft = false;
+    bool automationLeft = false;
+    if (definitionsOnly) {
+        bool anything = false;
+        for (Customisation& file : loaded) {
+            DefinitionsOfFile taken = definitionsOfFile(std::move(file));
+            rulesLeft += taken.rulesLeft;
+            lineworkLeft = lineworkLeft || taken.lineworkLeft;
+            automationLeft = automationLeft || taken.automationLeft;
+            anything = anything || !taken.taken.library.empty() || !taken.taken.colours.empty();
+            file = std::move(taken.taken);
+        }
+        if (!anything) {
+            return makeError(ErrorCode::NotFound,
+                             "CUSTOMISE DEFINITIONS: the " +
+                                 std::string(once.files.size() == 1 ? "file holds" : "files hold") +
+                                 " no definitions or colours to load, so nothing was loaded" +
+                                 (rulesLeft != 0 ? "; its survey code rules are loaded by "
+                                                   "CUSTOMISE <file>"
+                                                 : std::string{}));
+        }
+    }
+
     CustomisationMerge merge = mergeCustomisation(document.customisation(), loaded, mode);
     if (!merge.ok()) {
         std::string message = "nothing was loaded, for " + number(merge.problems.size()) +
@@ -266,6 +294,10 @@ Result<std::string> load(Document& document, const Words& files, LoadMode mode)
                  " colours_replaced=" + number(one.replacedColours.size()) +
                  " linework=" + yesNo(one.linework) + " automation=" + yesNo(one.automation) +
                  "\n";
+    }
+    if (rulesLeft != 0 || lineworkLeft || automationLeft) {
+        reply += "left rules=" + number(rulesLeft) + " linework=" + yesNo(lineworkLeft) +
+                 " automation=" + yesNo(automationLeft) + "\n";
     }
     if (!merge.removedDefinitions.empty() || !merge.removedKeys.empty()) {
         reply += "removed definitions=" + number(merge.removedDefinitions.size()) +
@@ -843,6 +875,9 @@ Result<std::string> runCustomisationVerb(Document& document, const std::vector<s
     if (is(word, "REPLACE")) {
         return load(document, rest, LoadMode::Replace);
     }
+    if (is(word, "DEFINITIONS")) {
+        return load(document, rest, LoadMode::Merge, true);
+    }
     if (is(word, "EXPORT")) {
         return exportTo(document, rest);
     }
@@ -894,6 +929,11 @@ Load      CUSTOMISE <file> [<file>...]   merge the files into what is loaded: a 
           one a file  |  removed definitions= codes= (REPLACE)  |  undefined names= (what the
           rules ask for and nothing defines), each with up to 20 of the names  |  the
           customisation record
+          CUSTOMISE DEFINITIONS <file> [<file>...]   merge only the definitions and the colours
+          of the files (what the Symbol Library's Import Definitions loads): the rules, the
+          linework codes and the automation they hold are left, and the reply says so:
+          left rules= linework=yes|no automation=yes|no. Refused when they hold neither
+          a definition nor a colour
 Export    CUSTOMISE EXPORT <file> [CODES] [LINESTYLES] [SYMBOLS] [NAME <name>]
           [ONLY <definition>...]   write the session; with a kind word, those kinds alone;
           ONLY, those definitions, of either kind unless LINESTYLES or SYMBOLS says which

@@ -23,14 +23,13 @@
 #include <QVBoxLayout>
 
 #include "code_manager_support.hpp"
+#include "command_word.hpp"
 #include "definition_thumbnails.hpp"
 #include "document_watcher.hpp"
 #include "filter_bar.hpp"
 #include "format.hpp"
 #include "icons.hpp"
 #include "katana/cad/customisation_host.hpp"
-#include "katana/cad/customisation_merge.hpp"
-#include "katana/cad/customisation_part.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/symbol_assign.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -1122,112 +1121,43 @@ bool SymbolLibraryDialog::importDefinitionsFile(const std::filesystem::path& pat
         return false;
     }
     const QString file = pathText(path);
-    auto read = katana::cad::readCustomisationFile(path);
-    if (!read) {
-        log(QStringLiteral("Could not import %1: %2").arg(file, describe(read.error())), true);
+    const auto word = customisationFileWord(path);
+    if (!word) {
+        log(QStringLiteral("Could not import %1: %2").arg(file, describe(word.error())), true);
         return false;
     }
-    // What a symbol library takes from a customisation: its definitions and
-    // its colours. Its survey code rules are the Survey Code Manager's to
-    // import, into a buffer a person reviews; its control codes and switches
-    // are settings of whoever wrote the file. So the load handed to the merge
-    // is the file without those.
-    katana::entity::Customisation taken = std::move(read.value().customisation);
-    QStringList left;
-    if (!taken.map.empty()) {
-        left << QStringLiteral("survey code rules (%1)").arg(grouped(taken.map.size()));
-    }
-    if (taken.linework) {
-        left << QStringLiteral("the linework codes");
-    }
-    if (taken.automation) {
-        left << QStringLiteral("the automation switches");
-    }
-    taken.map = {};
-    taken.linework.reset();
-    taken.automation.reset();
-    // And without the sources that brought the file only rules. A source it
-    // lists becomes one of the session's, by name, and is taken off what the
-    // open project is missing: one left in with its rules flag cleared would
-    // pass for loaded, with none of its rules here
-    // (sourcesOfImportedDefinitions).
-    taken.sources =
-        sourcesOfImportedDefinitions(std::move(taken.sources), !taken.colours.empty());
-    const QString leftAlone =
-        left.isEmpty()
-            ? QString()
-            : QStringLiteral("Not imported from %1, as the symbol library takes definitions and "
-                             "colours: %2. Import Codes in the Survey Code Manager takes survey "
-                             "code rules; the line CUSTOMISE <file> loads a whole customisation.")
-                  .arg(file, left.join(QStringLiteral(", ")));
-    if (taken.library.empty() && taken.colours.empty()) {
-        log(QStringLiteral("%1 holds no definitions or colours to import").arg(file), false);
-        if (!leftAlone.isEmpty()) {
-            log(leftAlone, false);
-        }
+    if (!context_.run) {
+        log(QStringLiteral("Nothing here can run CUSTOMISE DEFINITIONS: the library was given no "
+                           "command line."),
+            true);
         return false;
     }
-    // Decision D1: a load MERGES. Replacing the session's library from a
-    // symbol browser would throw away every definition the drawing uses
-    // that this file does not happen to hold.
-    katana::cad::CustomisationMerge merged = katana::cad::mergeCustomisation(
-        document_->customisation(), std::span<const katana::entity::Customisation>(&taken, 1),
-        katana::cad::LoadMode::Merge);
-    if (!merged.ok()) {
-        for (const std::string& problem : merged.problems) {
-            log(QStringLiteral("Could not import %1: %2").arg(file, text(problem)), true);
-        }
-        return false;
-    }
+    // A load MERGES (decision D1): replacing the session's library from a
+    // symbol browser would throw away every definition the drawing uses that
+    // this file does not happen to hold. The verb takes the file's definitions
+    // and colours and leaves its rules to the Survey Code Manager, its control
+    // codes and switches to whoever wrote the file, and says how many it left.
+    //
     // Round the commit, the hook every editor of the customisation calls
-    // (CustomisationContext::beginCommit; the definition editor's Save is
-    // the model): before the install, which leaves the session "not kept",
-    // and what it hands back after an install that was TAKEN - never after
-    // one that was refused, when nothing changed and there is nothing to
-    // keep. Called only now that the file has read and merged: a file that
-    // does not is no commit at all.
+    // (CustomisationContext::beginCommit; the definition editor's Delete is
+    // the model): before the line, which leaves the session "not kept", and
+    // what it hands back after a load that was TAKEN - never after one that
+    // was refused, when nothing changed and there is nothing to keep.
     const std::function<void()> committed =
         context_.beginCommit ? context_.beginCommit() : std::function<void()>();
-    // The install judges the session's own parts, which the merge did not:
-    // heeded, and nothing is said to have been merged unless it was.
-    if (const auto installed = document_->installCustomisation(
-            std::move(merged.merged), katana::cad::CustomisationOrigin::Loaded);
-        !installed) {
-        log(QStringLiteral("Could not import %1: %2").arg(file, describe(installed.error())),
+    const VerbOutcome outcome = context_.run(QStringLiteral("CUSTOMISE DEFINITIONS ") + *word);
+    if (!alive()) {
+        return false;
+    }
+    if (!outcome.ok) {
+        log(QStringLiteral("Could not import %1: %2")
+                .arg(file, outcome.error.isEmpty() ? QStringLiteral("the command was refused.")
+                                                   : outcome.error),
             true);
         return false;
     }
     if (committed) {
         committed();
-    }
-    const auto mergedLine = [](const std::string& name, const QString& into,
-                               const std::vector<std::string>& added,
-                               const std::vector<std::string>& replaced) {
-        QString line = QStringLiteral("Merged %1 into the %2: %3 added")
-                           .arg(text(name), into, grouped(added.size()));
-        if (!added.empty()) {
-            line += QStringLiteral(" (%1)").arg(listOf(added));
-        }
-        line += QStringLiteral(", %1 replaced").arg(grouped(replaced.size()));
-        if (!replaced.empty()) {
-            line += QStringLiteral(" (%1)").arg(listOf(replaced));
-        }
-        return line;
-    };
-    for (const katana::cad::CustomisationLoad& load : merged.loads) {
-        if (load.definitions) {
-            log(mergedLine(load.name, QStringLiteral("library"), load.addedDefinitions,
-                           load.replacedDefinitions),
-                false);
-        }
-        if (!load.addedColours.empty() || !load.replacedColours.empty()) {
-            log(mergedLine(load.name, QStringLiteral("colours"), load.addedColours,
-                           load.replacedColours),
-                false);
-        }
-    }
-    if (!leftAlone.isEmpty()) {
-        log(leftAlone, false);
     }
     return true;
 }
@@ -1250,29 +1180,55 @@ bool SymbolLibraryDialog::exportSelectedTo(const std::filesystem::path& path)
         log(QStringLiteral("Export: select one or more library symbols in the grid first"), true);
         return false;
     }
-    // The session's customisation cut down to the selected definitions by
-    // the one rule a part is written by (cad::customisationPart, which
-    // CUSTOMISE EXPORT ... ONLY cuts by too): the session's name and its
+    // The line CUSTOMISE EXPORT <file> NAME <session's name> ONLY <names>: the
+    // session cut down to the selected definitions by the one rule a part is
+    // written by (cad::customisationPart) - the session's name and its
     // author's notice, the sources the selected definitions came from, and
     // the colours the selected pens name - without which a pen of "sui water
     // potable" would draw in the entity's colour wherever the file went. Not
     // the session's rules, control codes or switches: a file of two symbols
-    // for a colleague must not reset theirs.
-    katana::entity::Customisation session = document_->customisation();
-    session.name = exportedCustomisationName(document_, path);
-    katana::entity::CustomisationWriteOptions options;
-    options.codes = false;
-    options.only = names;
-    const katana::entity::Customisation selected =
-        katana::cad::customisationPart(std::move(session), options);
-    const auto written = katana::entity::customisationToJson(selected, options);
-    if (!written) {
-        log(QStringLiteral("Export to %1: %2").arg(pathText(path), describe(written.error())),
+    // for a colleague must not reset theirs. The name is always given, so that
+    // a session nothing was loaded into is written under the file's own.
+    const auto word = customisationFileWord(path);
+    if (!word) {
+        log(QStringLiteral("Export to %1: %2").arg(pathText(path), describe(word.error())), true);
+        return false;
+    }
+    const std::string session = exportedCustomisationName(document_, path);
+    const auto sessionWord = commandWord(text(session), QStringLiteral("the customisation's name"));
+    if (!sessionWord) {
+        log(QStringLiteral("Export to %1: %2").arg(pathText(path), describe(sessionWord.error())),
             true);
         return false;
     }
-    if (const auto status = writeFileBytes(path, written.value()); !status) {
-        log(QStringLiteral("Export: could not write %1").arg(pathText(path)), true);
+    QString line = QStringLiteral("CUSTOMISE EXPORT ") + *word + QStringLiteral(" NAME ") +
+                   *sessionWord + QStringLiteral(" ONLY");
+    for (const std::string& name : names) {
+        const auto each = commandWord(text(name), QStringLiteral("a definition's name"));
+        if (!each) {
+            log(QStringLiteral("Export: no command line can name %1 - %2")
+                    .arg(inQuotes(name), text(each.error().message)),
+                true);
+            return false;
+        }
+        line += QLatin1Char(' ') + *each;
+    }
+    if (!context_.run) {
+        log(QStringLiteral("Nothing here can run CUSTOMISE EXPORT: the library was given no "
+                           "command line."),
+            true);
+        return false;
+    }
+    const VerbOutcome outcome = context_.run(line);
+    if (!alive()) {
+        return false;
+    }
+    if (!outcome.ok) {
+        log(QStringLiteral("Export to %1: %2")
+                .arg(pathText(path), outcome.error.isEmpty()
+                                         ? QStringLiteral("the command was refused.")
+                                         : outcome.error),
+            true);
         return false;
     }
     log(QStringLiteral("Exported %1 to %2: %3")

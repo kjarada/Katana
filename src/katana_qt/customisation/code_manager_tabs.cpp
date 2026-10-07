@@ -110,43 +110,112 @@ void resizeColumns(QTreeWidget* tree)
 
 } // namespace
 
+// ---- what the three tabs on drawing data share ---------------------------------------------
+
+namespace {
+
+// A read-only field showing the line a tab's Execute runs, as the utilities
+// dialog shows its own: what is run is never a surprise, and it can be copied
+// to a script or handed to an agent.
+QLineEdit* commandField(QWidget* parent, const char* name)
+{
+    auto* field = new QLineEdit(parent);
+    field->setObjectName(QString::fromLatin1(name));
+    field->setReadOnly(true);
+    field->setFont(katana::qt::theme::monospaceFont());
+    field->setToolTip(QObject::tr("The line Execute hands to the command line - typed there, or "
+                                  "given to a script or an agent, it does the same"));
+    return field;
+}
+
+// The scope and filter controls are taller than a tab on a small screen, so
+// they scroll in a pane of their own beside what the tab reports.
+QScrollArea* scrolled(ScopeFilterWidget* scope, QWidget* parent)
+{
+    auto* area = new QScrollArea(parent);
+    area->setWidgetResizable(true);
+    area->setFrameShape(QFrame::NoFrame);
+    area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    area->setWidget(scope);
+    return area;
+}
+
+// The line in its field, or - where the controls cannot be said on a line -
+// why not, as the field's placeholder.
+void showLine(QLineEdit* field, const katana::core::Result<QString>& line)
+{
+    field->setText(line ? *line : QString());
+    field->setPlaceholderText(line ? QString()
+                                   : QObject::tr("nothing to run yet: %1")
+                                         .arg(text(line.error().describe())));
+}
+
+// The chord length the Linework tab starts on, in millimetres: the one
+// processLinework itself starts on (LineworkOptions, 0.005 of a drawing in
+// metres), so the tab adds CHORD to its line only for a length a person set.
+[[nodiscard]] double defaultChordMillimetres()
+{
+    return katana::cad::LineworkOptions{}.chordTolerance * 1000.0;
+}
+
+} // namespace
+
 // ---- codes in drawing ------------------------------------------------------------------
 
 QWidget* SurveyCodeManagerDialog::buildCensusTab()
 {
     auto* page = new QWidget(this);
     page->setObjectName(QStringLiteral("codesInDrawingTab"));
-    auto* layout = new QVBoxLayout(page);
+    auto* columns = new QHBoxLayout(page);
+
+    // The shared "Apply to" and "Only those that match" controls: the census
+    // counts the codes of what they take, as CODE CENSUS <scope> does.
+    censusScope_ = makeScope("census", page);
+    censusScope_->onChanged = [this] { refreshCensus(); };
+    columns->addWidget(scrolled(censusScope_, page), 2);
+
+    auto* right = new QWidget(page);
+    auto* layout = new QVBoxLayout(right);
+    layout->setContentsMargins(0, 0, 0, 0);
+    columns->addWidget(right, 3);
 
     auto* top = new QHBoxLayout;
-    top->addWidget(new QLabel(tr("Code property"), page));
-    censusPropertyBox_ = propertyChooser(page, "censusProperty");
+    top->addWidget(new QLabel(tr("Code property"), right));
+    censusPropertyBox_ = propertyChooser(right, "censusProperty");
     top->addWidget(censusPropertyBox_, 1);
     censusFilter_ = new FilterBar({tr("All"), tr("Matched"), tr("Fallback only"), tr("Unmatched")},
-                                  page);
+                                  right);
     censusFilter_->setObjectName(QStringLiteral("censusFilter"));
     censusFilter_->setPlaceholderText(tr("Search codes and layers"));
     top->addWidget(censusFilter_, 2);
     layout->addLayout(top);
 
-    censusTree_ = reportTree(page, "censusTable",
+    censusTree_ = reportTree(right, "censusTable",
                              {tr("Code"), tr("Entities"), tr("Class"), tr("Layer")});
     layout->addWidget(censusTree_, 1);
-    censusSummary_ = new QLabel(page);
+    censusSummary_ = new QLabel(right);
     censusSummary_->setObjectName(QStringLiteral("censusSummary"));
     censusSummary_->setWordWrap(true);
     layout->addWidget(censusSummary_);
 
+    censusCommand_ = commandField(right, "censusCommand");
+    layout->addWidget(censusCommand_);
+
     auto* buttons = new QHBoxLayout;
-    auto* select = new QPushButton(tr("Select Entities With Code"), page);
+    auto* select = new QPushButton(tr("Select Entities With Code"), right);
     select->setObjectName(QStringLiteral("censusSelect"));
-    auto* newRule = new QPushButton(tr("New Rule From Code"), page);
+    auto* newRule = new QPushButton(tr("New Rule From Code"), right);
     newRule->setObjectName(QStringLiteral("censusNewRule"));
-    auto* refresh = new QPushButton(tr("Count Again"), page);
+    auto* run = new QPushButton(tr("Run Line"), right);
+    run->setObjectName(QStringLiteral("censusRun"));
+    run->setToolTip(tr("Hand the line above to the command line: it answers with the same "
+                       "census, counted against the drawing's own survey map"));
+    auto* refresh = new QPushButton(tr("Count Again"), right);
     refresh->setObjectName(QStringLiteral("censusRefresh"));
     buttons->addWidget(select);
     buttons->addWidget(newRule);
     buttons->addStretch(1);
+    buttons->addWidget(run);
     buttons->addWidget(refresh);
     layout->addLayout(buttons);
 
@@ -164,6 +233,7 @@ QWidget* SurveyCodeManagerDialog::buildCensusTab()
         newRuleFromCode(code);
     });
     connect(refresh, &QPushButton::clicked, this, [this] { refreshCensus(); });
+    connect(run, &QPushButton::clicked, this, [this] { runCensusLine(); });
     // A double-click shows what the code gets, as Test a Code would.
     connect(censusTree_, &QTreeWidget::itemDoubleClicked, this,
             [this](QTreeWidgetItem* item, int) {
@@ -181,18 +251,72 @@ std::string SurveyCodeManagerDialog::censusProperty() const
     return std::string(katana::core::trimmed(text(censusPropertyBox_->currentText())));
 }
 
+katana::core::Result<QString> SurveyCodeManagerDialog::censusLine() const
+{
+    auto scope = censusScope_->verbWords();
+    if (!scope) {
+        return scope.error();
+    }
+    QString line = QStringLiteral("CODE CENSUS ") + *scope;
+    const QString property = censusPropertyBox_->currentText().trimmed();
+    if (!property.isEmpty()) {
+        auto word = commandWord(property, tr("Code property"));
+        if (!word) {
+            return word.error();
+        }
+        line += QStringLiteral(" PROPERTY ") + *word;
+    }
+    return line;
+}
+
 void SurveyCodeManagerDialog::refreshCensus()
 {
     census_.clear();
+    censusIds_.clear();
+    censusProblem_.clear();
     const katana::cad::Document* doc = document();
-    if (doc != nullptr) {
-        const katana::cad::CodeCensus census = katana::cad::codeCensus(*doc, censusProperty());
-        censusFoundProperty_ = census.property;
-        for (const katana::cad::CodeCensusRow& row : census.codes) {
-            census_.push_back(CensusRow{row.code, row.entities, row.kind, row.matched, row.model});
+    if (censusScope_ != nullptr && censusCommand_ != nullptr) {
+        showLine(censusCommand_, censusLine());
+    }
+    if (doc != nullptr && censusScope_ != nullptr) {
+        // Counted here, not read from the verb's reply: the table is classed
+        // against the rules being EDITED, which the verb (it reads the
+        // drawing's map) cannot be asked. What it counts and what the scope
+        // takes are the verb's own (cad::codeCensus over cad::matchEntities).
+        const auto taken = scopeTakes(*censusScope_);
+        if (!taken) {
+            censusProblem_ = text(taken.error().describe());
+        } else {
+            censusIds_ = *taken;
+            const katana::cad::CodeCensus census =
+                katana::cad::codeCensus(*doc, censusIds_, censusProperty());
+            censusFoundProperty_ = census.property;
+            for (const katana::cad::CodeCensusRow& row : census.codes) {
+                census_.push_back(
+                    CensusRow{row.code, row.entities, row.kind, row.matched, row.model});
+            }
         }
     }
     filterCensus();
+}
+
+void SurveyCodeManagerDialog::runCensusLine()
+{
+    if (document() == nullptr) {
+        return;
+    }
+    const auto line = censusLine();
+    if (!line) {
+        log(text(line.error().describe()), true);
+        return;
+    }
+    VerbOutcome outcome;
+    QString said;
+    if (!runLine(*line, outcome, said) && !context_.run) {
+        // A refused line is in the log already, where the executor ran it;
+        // only a manager with no executor has yet to say so.
+        log(said, true);
+    }
 }
 
 void SurveyCodeManagerDialog::filterCensus()
@@ -252,9 +376,14 @@ void SurveyCodeManagerDialog::filterCensus()
         censusTree_->setCurrentItem(keep);
     }
     resizeColumns(censusTree_);
+    if (!censusProblem_.isEmpty()) {
+        censusSummary_->setText(censusProblem_);
+        return;
+    }
     censusSummary_->setText(
-        tr("%1 entities carry a code under \"%2\": %3 distinct codes - %4 matched, %5 fallback "
-           "only, %6 unmatched by the rules being edited.")
+        tr("%1 entities matched the scope; %2 carry a code under \"%3\": %4 distinct codes - %5 "
+           "matched, %6 fallback only, %7 unmatched by the rules being edited.")
+            .arg(censusIds_.size())
             .arg(entities)
             .arg(text(censusFoundProperty_))
             .arg(census_.size())
@@ -277,13 +406,16 @@ void SurveyCodeManagerDialog::selectEntitiesWithCode()
         log(tr("Choose a code in the list first."), true);
         return;
     }
+    // Among what the scope took, which is what the count above is of.
     std::vector<katana::entity::EntityId> ids;
-    doc->model().entities.forEach([&](const katana::entity::Entity& entity) {
-        const std::string* carried = katana::cad::surveyCodeOf(entity, censusFoundProperty_);
+    for (const katana::entity::EntityId id : censusIds_) {
+        const katana::entity::Entity* entity = doc->model().entities.find(id);
+        const std::string* carried =
+            entity != nullptr ? katana::cad::surveyCodeOf(*entity, censusFoundProperty_) : nullptr;
         if (carried != nullptr && *carried == code) {
-            ids.push_back(entity.id);
+            ids.push_back(id);
         }
-    });
+    }
     if (context_.selectAndShow) {
         context_.selectAndShow(ids);
     } else {
@@ -381,56 +513,6 @@ void SurveyCodeManagerDialog::rebuildIssues()
     }
 }
 
-// ---- the two action tabs: what they share ------------------------------------------------
-
-namespace {
-
-// A read-only field showing the line a tab's Execute runs, as the utilities
-// dialog shows its own: what is run is never a surprise, and it can be copied
-// to a script or handed to an agent.
-QLineEdit* commandField(QWidget* parent, const char* name)
-{
-    auto* field = new QLineEdit(parent);
-    field->setObjectName(QString::fromLatin1(name));
-    field->setReadOnly(true);
-    field->setFont(katana::qt::theme::monospaceFont());
-    field->setToolTip(QObject::tr("The line Execute hands to the command line - typed there, or "
-                                  "given to a script or an agent, it does the same"));
-    return field;
-}
-
-// The scope and filter controls are taller than a tab on a small screen, so
-// they scroll in a pane of their own beside what the tab reports.
-QScrollArea* scrolled(ScopeFilterWidget* scope, QWidget* parent)
-{
-    auto* area = new QScrollArea(parent);
-    area->setWidgetResizable(true);
-    area->setFrameShape(QFrame::NoFrame);
-    area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    area->setWidget(scope);
-    return area;
-}
-
-// The line in its field, or - where the controls cannot be said on a line -
-// why not, as the field's placeholder.
-void showLine(QLineEdit* field, const katana::core::Result<QString>& line)
-{
-    field->setText(line ? *line : QString());
-    field->setPlaceholderText(line ? QString()
-                                   : QObject::tr("nothing to run yet: %1")
-                                         .arg(text(line.error().describe())));
-}
-
-// The chord length the Linework tab starts on, in millimetres: the one
-// processLinework itself starts on (LineworkOptions, 0.005 of a drawing in
-// metres), so the tab adds CHORD to its line only for a length a person set.
-[[nodiscard]] double defaultChordMillimetres()
-{
-    return katana::cad::LineworkOptions{}.chordTolerance * 1000.0;
-}
-
-} // namespace
-
 ScopeFilterWidget* SurveyCodeManagerDialog::makeScope(const char* prefix, QWidget* parent)
 {
     auto* scope = new ScopeFilterWidget(QString::fromLatin1(prefix), parent);
@@ -447,7 +529,7 @@ ScopeFilterWidget* SurveyCodeManagerDialog::makeScope(const char* prefix, QWidge
 void SurveyCodeManagerDialog::reloadScopes()
 {
     const katana::cad::Document* doc = document();
-    for (ScopeFilterWidget* scope : {applyScope_, lineworkScope_}) {
+    for (ScopeFilterWidget* scope : {censusScope_, applyScope_, lineworkScope_}) {
         if (scope == nullptr) {
             continue;
         }

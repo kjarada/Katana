@@ -742,6 +742,93 @@ TEST(SurveyCodeManager, TheCensusClassesTheDrawingsCodesAndMakesARuleForAnUnmatc
     EXPECT_EQ(census->topLevelItem(1)->text(2), QStringLiteral("matched"));
 }
 
+// The Codes in Drawing tab has the shared scope and filter controls
+// (CLAUDE.md section 1.1) and builds the line CODE CENSUS <scope> [WHERE ...]
+// [PROPERTY p] from them, as the other two tabs build theirs. The table is the
+// census of exactly what the controls take.
+TEST(SurveyCodeManager, TheCensusTabCountsWhatItsScopeTakesAndBuildsTheCodeCensusLineItSays)
+{
+    ManagerFixture f;
+    addPoint(f.document, 0.0, "WM01", "1");
+    addPoint(f.document, 5.0, "WM01", "2");
+    const EntityId stray = addPoint(f.document, 9.0, "ZZ9", "3");
+    SurveyCodeManagerDialog dialog(f.context);
+    auto* census = child<QTreeWidget>(dialog, "censusTable");
+    auto* line = child<QLineEdit>(dialog, "censusCommand");
+    auto* summary = child<QLabel>(dialog, "censusSummary");
+    ASSERT_FALSE(census == nullptr || line == nullptr || summary == nullptr);
+
+    // The whole drawing to begin with: three entities, two distinct codes.
+    EXPECT_TRUE(child<QRadioButton>(dialog, "censusScopeDrawing")->isChecked());
+    EXPECT_EQ(line->text(), QStringLiteral("CODE CENSUS DRAWING"));
+    EXPECT_EQ(census->topLevelItemCount(), 2);
+    EXPECT_TRUE(summary->text().startsWith(QStringLiteral(
+        "3 entities matched the scope; 3 carry a code under \"code\": 2 distinct codes")))
+        << summary->text().toStdString();
+
+    // The selection, with the stray point in it: the table is of that point
+    // alone, and Select Entities With Code acts among what the scope took.
+    child<QRadioButton>(dialog, "censusScopeSelection")->setChecked(true);
+    EXPECT_EQ(line->text(), QStringLiteral("CODE CENSUS SELECTION"));
+    EXPECT_EQ(census->topLevelItemCount(), 0) << "nothing is selected yet";
+    f.document.selection().set({stray});
+    f.document.notifySelectionChanged();
+    child<QPushButton>(dialog, "censusRefresh")->click();
+    ASSERT_EQ(census->topLevelItemCount(), 1);
+    EXPECT_EQ(census->topLevelItem(0)->text(0), QStringLiteral("ZZ9"));
+    EXPECT_EQ(census->topLevelItem(0)->text(1), QStringLiteral("1"));
+    EXPECT_TRUE(summary->text().startsWith(QStringLiteral(
+        "1 entities matched the scope; 1 carry a code under \"code\": 1 distinct codes")))
+        << summary->text().toStdString();
+
+    // The filter is the scope's WHERE, before the verb's own words; a filter
+    // that takes nothing is a census of nothing, and said.
+    child<QRadioButton>(dialog, "censusScopeDrawing")->setChecked(true);
+    child<QLineEdit>(dialog, "censusFilterLayer")->setText(QStringLiteral("nothing/*"));
+    EXPECT_EQ(line->text(), QStringLiteral("CODE CENSUS DRAWING WHERE LAYER=nothing/*"));
+    EXPECT_EQ(census->topLevelItemCount(), 0);
+    EXPECT_TRUE(summary->text().startsWith(QStringLiteral("0 entities matched the scope")))
+        << summary->text().toStdString();
+    child<QLineEdit>(dialog, "censusFilterLayer")->clear();
+    EXPECT_EQ(census->topLevelItemCount(), 2);
+
+    // The property is the line's PROPERTY, a name with a blank one quoted word.
+    auto* property = child<QComboBox>(dialog, "censusProperty");
+    property->setEditText(QStringLiteral("Field Code"));
+    EXPECT_EQ(line->text(), QStringLiteral("CODE CENSUS DRAWING PROPERTY \"Field Code\""));
+    property->setEditText(QString());
+
+    // Run Line hands exactly that line to the executor.
+    f.ran.clear();
+    child<QPushButton>(dialog, "censusRun")->click();
+    EXPECT_EQ(f.ran, QStringList{QStringLiteral("CODE CENSUS DRAWING")});
+
+    // No layer ticked says nothing a line can: the line is empty, the table is
+    // empty with the reason in the summary, and Run runs nothing.
+    child<QRadioButton>(dialog, "censusScopeLayers")->setChecked(true);
+    EXPECT_TRUE(line->text().isEmpty());
+    EXPECT_TRUE(line->placeholderText().contains(QStringLiteral("tick at least one layer")))
+        << line->placeholderText().toStdString();
+    EXPECT_EQ(census->topLevelItemCount(), 0);
+    EXPECT_TRUE(summary->text().contains(QStringLiteral("tick at least one layer")))
+        << summary->text().toStdString();
+    f.ran.clear();
+    child<QPushButton>(dialog, "censusRun")->click();
+    EXPECT_TRUE(f.ran.isEmpty());
+}
+
+TEST(SurveyCodeManager, TheCensusTabWithNoExecutorSaysItCannotRunItsLine)
+{
+    ManagerFixture f;
+    addPoint(f.document, 0.0, "WM01", "1");
+    f.context.run = {};
+    SurveyCodeManagerDialog dialog(f.context);
+    child<QPushButton>(dialog, "censusRun")->click();
+    EXPECT_TRUE(f.loggedContaining(QStringLiteral("cannot run \"CODE CENSUS DRAWING\"")));
+    // The table is still the census of the drawing: counting is not the line's.
+    EXPECT_EQ(child<QTreeWidget>(dialog, "censusTable")->topLevelItemCount(), 1);
+}
+
 TEST(SurveyCodeManager, LineworkPreviewChangesNothingAndExecuteIsOneUndoStep)
 {
     ManagerFixture f;
@@ -1034,8 +1121,14 @@ TEST(SurveyCodeManager, ExportedCodesAreAKatanaCustomisationOfTheRulesAloneThatR
     ManagerFixture f;
     SurveyCodeManagerDialog dialog(f.context);
     editWaterMainLayer(dialog, QStringLiteral("TEST WATER"));
+    // The export is the line CUSTOMISE EXPORT, which writes the drawing's
+    // rules: the edit is applied first.
+    ASSERT_TRUE(dialog.apply().ok());
     const std::filesystem::path path = scratchFile("exported.customisation.json");
     ASSERT_TRUE(dialog.exportCodes(path).ok());
+    ASSERT_FALSE(f.ran.isEmpty());
+    EXPECT_EQ(f.ran.last(), QStringLiteral("CUSTOMISE EXPORT ") +
+                                katana::qt::test::quotedFile(path) + QStringLiteral(" CODES"));
 
     const std::string bytes = readBytes(path);
     // How a Katana customisation file begins and ends (docs/customisation.md,
@@ -1143,8 +1236,10 @@ TEST(SurveyCodeManager, ExportedCodesCarryTheSessionsNoticeItsRuleSourcesAndTheC
     ASSERT_EQ(document.customisationState().sources.size(), 4u);
     ASSERT_EQ(document.customisationState().colours.size(), 2u);
     ASSERT_TRUE(document.customisation().basedOn.has_value());
+    katana::qt::test::InterpreterRunner executor(document);
     CustomisationContext context;
     context.document = &document;
+    context.run = executor.runner();
     context.log = [](const QString&, bool) {};
     SurveyCodeManagerDialog dialog(context);
     ASSERT_EQ(dialog.buffer().size(), 2u);
@@ -1192,6 +1287,7 @@ TEST(SurveyCodeManager, ExportedCodesCarryTheSessionsNoticeItsRuleSourcesAndTheC
     // the marks' (was: "does not travel with it" - the managers' own rule,
     // which the one rule replaced: no export drops an author's notice).
     ASSERT_TRUE(dialog.removeRule(0).ok());
+    ASSERT_TRUE(dialog.apply().ok());
     ASSERT_TRUE(dialog.exportCodes(path).ok());
     auto read = katana::entity::customisationFromJson(readBytes(path));
     ASSERT_TRUE(read.ok()) << read.error().describe();
@@ -1235,6 +1331,7 @@ TEST(SurveyCodeManager, ExportedCodesCarryTheColoursARulesSymbolAndTextNameToo)
     lettered.section = katana::entity::SurveySection::VertexTextStyle;
     lettered.textStyle = katana::entity::SurveyTextStyle{.colour = "sui test lime"};
     ASSERT_TRUE(dialog.addRule(lettered).ok());
+    ASSERT_TRUE(dialog.apply().ok());
 
     const std::filesystem::path path = scratchFile("coloured.customisation.json");
     ASSERT_TRUE(dialog.exportCodes(path).ok());
@@ -1267,6 +1364,7 @@ TEST(SurveyCodeManager, ExportedCodesKeepTheirOrderWhereSectionsInterleave)
     ASSERT_EQ(dialog.buffer().rules()[2].section, katana::entity::SurveySection::VertexSymbol);
     ASSERT_EQ(dialog.buffer().rules()[2].key, "AC*");
     ASSERT_EQ(dialog.buffer().rules()[3].section, katana::entity::SurveySection::Map);
+    ASSERT_TRUE(dialog.apply().ok());
     const std::filesystem::path path = scratchFile("interleaved.customisation.json");
     ASSERT_TRUE(dialog.exportCodes(path).ok());
 
@@ -1303,16 +1401,91 @@ TEST(SurveyCodeManager, ASessionWithNoNameExportsItsCodesUnderTheFilesOwnName)
     ASSERT_TRUE(map.add(rule).ok());
     document.setSurveyMap(map);
     ASSERT_EQ(document.customisationState().name, "");
+    katana::qt::test::InterpreterRunner executor(document);
     CustomisationContext context;
     context.document = &document;
+    context.run = executor.runner();
     context.log = [](const QString&, bool) {};
     SurveyCodeManagerDialog dialog(context);
     const std::filesystem::path path = scratchFile("site codes.customisation.json");
     ASSERT_TRUE(dialog.exportCodes(path).ok());
+    // The session has no name, so the line gives the file's own.
+    ASSERT_EQ(executor.ran.size(), 1);
+    EXPECT_EQ(executor.ran.front(),
+              QStringLiteral("CUSTOMISE EXPORT ") + katana::qt::test::quotedFile(path) +
+                  QStringLiteral(" CODES NAME \"site codes\""));
     auto read = katana::entity::customisationFromJson(readBytes(path));
     ASSERT_TRUE(read.ok()) << read.error().describe();
     EXPECT_EQ(read->name, "site codes");
     EXPECT_TRUE(read->map == map);
+}
+
+TEST(SurveyCodeManager, ExportingRulesThatAreNotOnTheDrawingIsRefusedAndWritesNothing)
+{
+    // The line CUSTOMISE EXPORT writes the drawing's rules, and no line can
+    // name the buffer: with an edit not applied the export says to Apply or
+    // Revert, runs no line, and leaves a file that was there as it was.
+    ManagerFixture f;
+    SurveyCodeManagerDialog dialog(f.context);
+    editWaterMainLayer(dialog, QStringLiteral("TEST WATER"));
+    ASSERT_TRUE(dialog.dirty());
+    const std::filesystem::path path = scratchFile("unapplied.customisation.json");
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "the file that was there";
+    }
+    f.ran.clear();
+    const katana::core::Status status = dialog.exportCodes(path);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, katana::core::ErrorCode::InvalidState);
+    EXPECT_TRUE(status.error().message.find("Apply or Revert the edits first") !=
+                std::string::npos)
+        << status.error().message;
+    EXPECT_TRUE(f.ran.isEmpty());
+    EXPECT_EQ(readBytes(path), "the file that was there");
+
+    // Reverted, the buffer is the drawing's again and the export goes.
+    dialog.revert();
+    ASSERT_FALSE(dialog.dirty());
+    ASSERT_TRUE(dialog.exportCodes(path).ok());
+    EXPECT_NE(readBytes(path), "the file that was there");
+}
+
+TEST(SurveyCodeManager, AnExportThatCannotBeWrittenIsRefusedByTheVerbAndLeavesNothingBeside)
+{
+    // One writer, the verb's: it writes beside the file and renames, so a
+    // name that is a folder is refused with the folder standing and nothing
+    // left. The refusal is the verb's own words, with the path.
+    ManagerFixture f;
+    SurveyCodeManagerDialog dialog(f.context);
+    const std::filesystem::path folder = scratchFile("a_folder_not_a_file");
+    std::filesystem::remove_all(folder);
+    std::filesystem::create_directories(folder);
+    const katana::core::Status status = dialog.exportCodes(folder);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, katana::core::ErrorCode::FileExportFailure);
+    EXPECT_TRUE(std::filesystem::is_directory(folder));
+    std::size_t beside = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(folder.parent_path())) {
+        beside += entry.path().filename().string().find("a_folder_not_a_file") == 0 ? 1 : 0;
+    }
+    EXPECT_EQ(beside, 1u) << "only the folder itself";
+    std::filesystem::remove_all(folder);
+}
+
+TEST(SurveyCodeManager, ExportingWithNoCommandLineSaysSoAndDoesNotWriteTheFileItself)
+{
+    ManagerFixture f;
+    f.context.run = {};
+    SurveyCodeManagerDialog dialog(f.context);
+    const std::filesystem::path path = scratchFile("no_runner.customisation.json");
+    std::filesystem::remove(path);
+    const katana::core::Status status = dialog.exportCodes(path);
+    ASSERT_FALSE(status.ok());
+    EXPECT_TRUE(status.error().message.find("without the window's command line") !=
+                std::string::npos)
+        << status.error().message;
+    EXPECT_FALSE(std::filesystem::exists(path));
 }
 
 TEST(SurveyCodeManager, TheCodeListExportIsTheBuffersCsv)
